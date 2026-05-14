@@ -8,6 +8,7 @@ Prospect:
 - company: {{ company }}
 - role/title context: {{ summary }}
 - country: {{ country }}
+- company homepage summary: {{ homepage_summary }}
 
 Constraints:
 - Reference their role and company specifically.

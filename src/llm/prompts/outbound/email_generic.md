@@ -9,6 +9,7 @@ Prospect:
 - domain: {{domain}}
 - country: {{country}}
 - one-liner about them: {{summary}}
+- company homepage summary: {{homepage_summary}}
 
 Constraints:
 - 120 words or less.

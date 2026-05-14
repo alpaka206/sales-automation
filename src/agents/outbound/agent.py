@@ -13,6 +13,7 @@ from ...db.models import Contact, Conversation, Message, Prospect
 from ...db.session import SessionLocal
 from ...llm.client import LLMClient
 from ...llm.prompts import PROMPTS_DIR
+from .enrichment import enrich_prospect
 from .source_registry import get_source
 from .sources.base import ProspectCandidate
 from .._notify import notify_approval
@@ -81,7 +82,8 @@ class OutboundAgent:
             )
             return "skipped_lowscore"
 
-        draft = self._draft_email(candidate, icp)
+        enrichment = enrich_prospect(candidate, self.llm)
+        draft = self._draft_email(candidate, icp, enrichment)
         prospect = self._persist_prospect(
             session, candidate, norm_email,
             status="drafted", icp_score=icp.score, icp_rationale=icp.rationale,
@@ -126,7 +128,12 @@ class OutboundAgent:
             schema=ICPScoreResult,
         )
 
-    def _draft_email(self, candidate: ProspectCandidate, icp: ICPScoreResult) -> DraftEmailResult:
+    def _draft_email(
+        self,
+        candidate: ProspectCandidate,
+        icp: ICPScoreResult,
+        enrichment: dict | None = None,
+    ) -> DraftEmailResult:
         prompt_name = f"outbound/email_{candidate.source}"
         prompt_path = PROMPTS_DIR / f"{prompt_name.replace('.', '/')}.md"
         if not prompt_path.exists():
@@ -140,6 +147,7 @@ class OutboundAgent:
                 "domain": candidate.domain or "",
                 "country": candidate.country or "",
                 "summary": candidate.extra.get("notes", ""),
+                "homepage_summary": (enrichment or {}).get("homepage_summary", ""),
                 "language": icp.language_guess,
             },
             schema=DraftEmailResult,

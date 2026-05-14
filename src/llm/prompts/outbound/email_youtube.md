@@ -8,6 +8,7 @@ Prospect:
 - subscribers: {{ summary }}
 - country: {{ country }}
 - domain: {{ domain }}
+- company homepage summary: {{ homepage_summary }}
 
 Constraints:
 - Reference their YouTube channel specifically.
