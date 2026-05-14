@@ -12,6 +12,7 @@ import os
 import subprocess
 
 from ...common.config import settings
+from ..pricing import LLMResult, estimate_tokens
 
 logger = logging.getLogger(__name__)
 
@@ -20,8 +21,8 @@ class ClaudeCLIError(RuntimeError):
     pass
 
 
-def call_claude_cli(prompt: str, timeout: int = 180) -> str:
-    """Run `claude -p ...` and return stdout."""
+def call_claude_cli(prompt: str, timeout: int = 180) -> LLMResult:
+    """Run `claude -p ...` and return LLMResult with estimated tokens."""
     cmd = [settings.CLAUDE_CLI_PATH, "-p", prompt, "--output-format", "text"]
     logger.debug("claude_cli call, prompt_len=%d", len(prompt))
     try:
@@ -42,4 +43,10 @@ def call_claude_cli(prompt: str, timeout: int = 180) -> str:
 
     if res.returncode != 0:
         raise ClaudeCLIError(f"claude CLI exited {res.returncode}. stderr={res.stderr[:500]}")
-    return res.stdout.strip()
+    text = res.stdout.strip()
+    return LLMResult(
+        text=text,
+        input_tokens=estimate_tokens(prompt),
+        output_tokens=estimate_tokens(text),
+        model="claude-cli",
+    )

@@ -18,6 +18,7 @@ from pydantic import BaseModel, ValidationError
 from ..common.config import settings
 from ..db.models import Event
 from ..db.session import SessionLocal
+from .pricing import log_usage
 from .prompts import load_prompt
 from .providers.anthropic_api import call_anthropic
 from .providers.claude_cli import call_claude_cli
@@ -71,18 +72,19 @@ class LLMClient:
 
     def _dispatch(self, prompt: str, max_tokens: int) -> str:
         if self.provider == "claude_cli":
-            result = call_claude_cli(prompt)
+            llm_result = call_claude_cli(prompt)
         elif self.provider == "anthropic_api":
             if not settings.ANTHROPIC_API_KEY:
                 raise LLMError("LLM_PROVIDER=anthropic_api but ANTHROPIC_API_KEY is empty.")
-            result = call_anthropic(prompt, max_tokens=max_tokens)
+            llm_result = call_anthropic(prompt, max_tokens=max_tokens)
         elif self.provider == "ollama":
-            result = call_ollama(prompt)
+            llm_result = call_ollama(prompt)
         else:
             raise LLMError(f"unknown LLM_PROVIDER: {self.provider}")
 
-        self._log_event(prompt, result)
-        return result
+        log_usage(llm_result, self.provider)
+        self._log_event(prompt, llm_result.text)
+        return llm_result.text
 
     def _log_event(self, prompt: str, result: str) -> None:
         try:

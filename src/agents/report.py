@@ -17,6 +17,7 @@ from ..integrations import slack, teams
 from ..integrations.slack import SlackNotConfigured
 from ..integrations.teams import TeamsNotConfigured
 from ..llm.client import LLMClient
+from ..llm.pricing import format_cost, get_usage_since
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +41,7 @@ class ReportAgent:
 
             stats = self._gather_stats(session, since)
             narrative = self._generate_narrative(stats, period)
-            report = self._format_report(stats, narrative, period)
+            report = self._format_report(stats, narrative, period, since)
             self._save_report(report, kind)
             self._distribute(report, kind)
             return report
@@ -116,7 +117,7 @@ class ReportAgent:
                 f"{stats['replied']} replies, {stats['prospects']} new prospects."
             )
 
-    def _format_report(self, stats: dict, narrative: str, period: str) -> str:
+    def _format_report(self, stats: dict, narrative: str, period: str, since: datetime | None = None) -> str:
         now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
         lines = [
             f"# {period} Report",
@@ -139,6 +140,29 @@ class ReportAgent:
                 lines.append(f"- {status}: {count}")
             lines.append("")
 
+        llm_section = self._llm_cost_summary(since)
+        if llm_section:
+            lines.append(llm_section)
+
+        return "\n".join(lines)
+
+    def _llm_cost_summary(self, since: datetime | None) -> str:
+        """Build the LLM Usage section from usage records."""
+        if since is None:
+            since = datetime.now(timezone.utc) - timedelta(days=1)
+        usage = get_usage_since(since)
+        if usage["calls"] == 0:
+            return ""
+        lines = [
+            "## LLM Usage",
+            f"- API calls: **{usage['calls']}**",
+            f"- Input tokens: **{usage['total_input']:,}**",
+            f"- Output tokens: **{usage['total_output']:,}**",
+            f"- Estimated cost: **{format_cost(usage['total_cost'])}**",
+        ]
+        for model, counts in sorted(usage["models"].items()):
+            lines.append(f"  - {model}: {counts['input']:,} in / {counts['output']:,} out")
+        lines.append("")
         return "\n".join(lines)
 
     def _save_report(self, report: str, kind: str) -> None:
