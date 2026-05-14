@@ -9,13 +9,16 @@ from src.common.config import Settings
 
 
 def test_defaults() -> None:
-    s = Settings()
+    # `.env` 로딩과 OS 환경 변수 영향을 차단하여 모델 기본값만 검증.
+    with patch.dict(os.environ, {}, clear=True):
+        s = Settings(_env_file=None)
     assert s.LLM_PROVIDER == "claude_cli"
     assert s.EMAIL_PROVIDER == "hubspot"
     assert s.WHATSAPP_ENABLED is False
     assert s.AUTO_SEND_THRESHOLD == 1.01
     assert s.OUTBOUND_COOLDOWN_DAYS == 90
     assert s.APP_PORT == 8000
+    assert s.INTERNAL_API_TOKEN == ""
 
 
 def test_bool_from_env() -> None:

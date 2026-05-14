@@ -35,6 +35,11 @@ async def request_id_middleware(request: Request, call_next):
 async def auth_middleware(request: Request, call_next):
     if request.url.path in ("/healthz", "/docs", "/openapi.json"):
         return await call_next(request)
+    if not settings.INTERNAL_API_TOKEN:
+        return JSONResponse(
+            status_code=503,
+            content={"detail": "INTERNAL_API_TOKEN is not configured; refusing requests."},
+        )
     token = request.headers.get("X-Internal-Token", "")
     if token != settings.INTERNAL_API_TOKEN:
         return JSONResponse(status_code=401, content={"detail": "invalid or missing token"})

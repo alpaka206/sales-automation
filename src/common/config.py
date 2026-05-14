@@ -75,7 +75,8 @@ class Settings(BaseSettings):
     LOG_LEVEL: str = "INFO"
     TIMEZONE: str = "Asia/Seoul"
 
-    INTERNAL_API_TOKEN: str = Field(default="dev-only-token-change-me")
+    # 빈 문자열이면 auth 미들웨어가 모든 요청을 거부합니다(보안). 운영 전 반드시 강한 토큰 설정.
+    INTERNAL_API_TOKEN: str = Field(default="")
 
 
 @lru_cache
