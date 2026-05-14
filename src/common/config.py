@@ -57,6 +57,9 @@ class Settings(BaseSettings):
     # ----- Sources -----
     YOUTUBE_API_KEY: str = ""
     LINKEDIN_ENABLED: bool = False
+    LINKEDIN_SCRAPING_ENABLED: bool = False
+    LINKEDIN_SESSION_COOKIE: str = ""
+    LINKEDIN_API_TOKEN: str = ""
 
     # ----- Behavior knobs -----
     AUTO_SEND_THRESHOLD: float = 1.01  # >1.0 => never auto-send
