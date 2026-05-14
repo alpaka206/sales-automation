@@ -16,6 +16,8 @@ from typing import TypeVar
 from pydantic import BaseModel, ValidationError
 
 from ..common.config import settings
+from ..db.models import Event
+from ..db.session import SessionLocal
 from .prompts import load_prompt
 from .providers.anthropic_api import call_anthropic
 from .providers.claude_cli import call_claude_cli
@@ -69,14 +71,36 @@ class LLMClient:
 
     def _dispatch(self, prompt: str, max_tokens: int) -> str:
         if self.provider == "claude_cli":
-            return call_claude_cli(prompt)
-        if self.provider == "anthropic_api":
+            result = call_claude_cli(prompt)
+        elif self.provider == "anthropic_api":
             if not settings.ANTHROPIC_API_KEY:
                 raise LLMError("LLM_PROVIDER=anthropic_api but ANTHROPIC_API_KEY is empty.")
-            return call_anthropic(prompt, max_tokens=max_tokens)
-        if self.provider == "ollama":
-            return call_ollama(prompt)
-        raise LLMError(f"unknown LLM_PROVIDER: {self.provider}")
+            result = call_anthropic(prompt, max_tokens=max_tokens)
+        elif self.provider == "ollama":
+            result = call_ollama(prompt)
+        else:
+            raise LLMError(f"unknown LLM_PROVIDER: {self.provider}")
+
+        self._log_event(prompt, result)
+        return result
+
+    def _log_event(self, prompt: str, result: str) -> None:
+        try:
+            session = SessionLocal()
+            session.add(
+                Event(
+                    kind="llm_call",
+                    payload={
+                        "provider": self.provider,
+                        "prompt_len": len(prompt),
+                        "result_len": len(result),
+                    },
+                )
+            )
+            session.commit()
+            session.close()
+        except Exception:
+            logger.debug("Failed to log LLM event to DB, continuing.", exc_info=True)
 
     # convenience for tests
     @staticmethod
