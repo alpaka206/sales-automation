@@ -1,0 +1,1 @@
+"""Sales automation CLI package."""
