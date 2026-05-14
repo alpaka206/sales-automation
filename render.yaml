@@ -1,0 +1,23 @@
+services:
+  - type: web
+    name: sales-automation
+    runtime: docker
+    plan: free
+    healthCheckPath: /health
+    envVars:
+      - key: LLM_PROVIDER
+        value: anthropic_api
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: HUBSPOT_PRIVATE_APP_TOKEN
+        sync: false
+      - key: SLACK_BOT_TOKEN
+        sync: false
+      - key: SLACK_APPROVAL_CHANNEL_ID
+        sync: false
+      - key: INTERNAL_API_TOKEN
+        generateValue: true
+      - key: LOG_LEVEL
+        value: WARNING
+      - key: DATABASE_URL
+        value: sqlite:///./data/app.db

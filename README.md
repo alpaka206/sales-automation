@@ -75,6 +75,23 @@ API 키 없이도 동작합니다. `LLM_PROVIDER=claude_cli` (기본값)이면 `
 | `data/` | 로컬 SQLite 파일 (gitignored) |
 | `logs/` | ralph 히스토리 + 앱 로그 (gitignored) |
 
+## 배포 (Deployment)
+
+로컬 개발 외에 서버에 배포할 수 있습니다. 자세한 무료 호스팅 옵션은 `plan/07_free_hosting_guide.md` 참고.
+
+```bash
+# Docker 빌드
+docker build -t sales-automation .
+docker run --env-file .env -p 8000:8000 sales-automation
+```
+
+PaaS별 설정 파일:
+- **Render**: `render.yaml` — Render Blueprint으로 바로 배포
+- **Fly.io**: `deploy/fly.toml` — `fly launch` 후 사용
+- **Railway**: `deploy/railway.json` — Railway 프로젝트에 연결
+
+프로덕션 환경변수는 `.env.production.example` 참고.
+
 ## ralph_loop 멈추기
 
 `Ctrl+C` 한 번이면 현재 iteration 끝나고 다음 iteration 진입 전에 멈춥니다. 다시 시작하면 마지막 상태에서 이어집니다.
