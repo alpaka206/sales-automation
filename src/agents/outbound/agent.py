@@ -15,6 +15,7 @@ from ...llm.client import LLMClient
 from ...llm.prompts import PROMPTS_DIR
 from .source_registry import get_source
 from .sources.base import ProspectCandidate
+from .._notify import notify_approval
 
 logger = logging.getLogger(__name__)
 
@@ -85,7 +86,20 @@ class OutboundAgent:
             session, candidate, norm_email,
             status="drafted", icp_score=icp.score, icp_rationale=icp.rationale,
         )
-        self._persist_message(session, prospect, candidate, draft, icp.score)
+        msg = self._persist_message(session, prospect, candidate, draft, icp.score)
+
+        try:
+            notify_approval(
+                message_id=msg.id,
+                subject=draft.subject,
+                body_snippet=draft.body,
+                score=icp.score,
+                category="outbound_opening",
+                channel="email",
+            )
+        except Exception:
+            logger.warning("Approval notification failed for message %d.", msg.id, exc_info=True)
+
         return "drafted"
 
     def _is_dup(self, session, norm_email: str) -> bool:

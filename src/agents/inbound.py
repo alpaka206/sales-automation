@@ -13,6 +13,7 @@ from ..db.models import Contact, Conversation, Message
 from ..db.session import SessionLocal
 from ..integrations.hubspot import HubSpotClient, HubSpotNotConfigured
 from ..llm.client import LLMClient
+from ._notify import notify_approval
 
 logger = logging.getLogger(__name__)
 
@@ -89,6 +90,18 @@ class InboundAgent:
         channel = self._pick_channel(contact_info)
         draft = self._draft_reply(contact_info, classification, score)
         message_id = self._persist(contact_info, classification, score, channel, draft)
+
+        try:
+            notify_approval(
+                message_id=message_id,
+                subject=draft.subject,
+                body_snippet=draft.body,
+                score=score,
+                category=classification.category,
+                channel=channel,
+            )
+        except Exception:
+            logger.warning("Approval notification failed for message %d.", message_id, exc_info=True)
 
         logger.info(
             "Inbound processed: contact=%s category=%s score=%d msg_id=%d",
