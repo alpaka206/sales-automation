@@ -15,7 +15,12 @@ from ..pricing import LLMResult
 logger = logging.getLogger(__name__)
 
 
-def call_anthropic(prompt: str, max_tokens: int = 2000) -> LLMResult:
+def call_anthropic(
+    prompt: str,
+    max_tokens: int = 2000,
+    system: str | None = None,
+) -> LLMResult:
+    """Call Anthropic Messages API with optional cached system message."""
     try:
         import anthropic  # type: ignore[import-not-found]
     except ImportError as e:  # pragma: no cover
@@ -25,16 +30,32 @@ def call_anthropic(prompt: str, max_tokens: int = 2000) -> LLMResult:
         ) from e
 
     client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
-    msg = client.messages.create(
-        model=settings.ANTHROPIC_MODEL,
-        max_tokens=max_tokens,
-        messages=[{"role": "user", "content": prompt}],
-    )
+
+    kwargs: dict = {
+        "model": settings.ANTHROPIC_MODEL,
+        "max_tokens": max_tokens,
+        "messages": [{"role": "user", "content": prompt}],
+    }
+
+    if system:
+        kwargs["system"] = [
+            {
+                "type": "text",
+                "text": system,
+                "cache_control": {"type": "ephemeral"},
+            }
+        ]
+
+    msg = client.messages.create(**kwargs)
     parts = [block.text for block in msg.content if getattr(block, "type", "") == "text"]
     text = "\n".join(parts).strip()
+
+    usage = msg.usage
     return LLMResult(
         text=text,
-        input_tokens=msg.usage.input_tokens,
-        output_tokens=msg.usage.output_tokens,
+        input_tokens=usage.input_tokens,
+        output_tokens=usage.output_tokens,
         model=settings.ANTHROPIC_MODEL,
+        cache_read_input_tokens=getattr(usage, "cache_read_input_tokens", 0) or 0,
+        cache_creation_input_tokens=getattr(usage, "cache_creation_input_tokens", 0) or 0,
     )

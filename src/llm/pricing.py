@@ -33,6 +33,8 @@ class LLMResult:
     input_tokens: int
     output_tokens: int
     model: str
+    cache_read_input_tokens: int = 0
+    cache_creation_input_tokens: int = 0
 
 
 def estimate_tokens(text: str) -> int:

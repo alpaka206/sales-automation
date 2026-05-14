@@ -21,7 +21,7 @@ _PLACEHOLDER = re.compile(r"\{\{\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\}\}")
 
 
 @lru_cache
-def _company_rules_block() -> str:
+def get_company_rules() -> str:
     """Concatenate every *.md in company_rules/ in filename order."""
     if not COMPANY_RULES_DIR.exists():
         return ""
@@ -33,7 +33,7 @@ def _company_rules_block() -> str:
     return "## Company rules (must follow)\n\n" + "\n\n".join(parts)
 
 
-def load_prompt(name: str, variables: dict[str, object] | None = None) -> str:
+def load_prompt(name: str, variables: dict[str, object] | None = None, *, include_rules: bool = True) -> str:
     """
     Load a prompt by dotted/slashed name (e.g. 'inbound/draft_reply' or 'inbound.draft_reply').
 
@@ -54,7 +54,9 @@ def load_prompt(name: str, variables: dict[str, object] | None = None) -> str:
 
         raw = _PLACEHOLDER.sub(_sub, raw)
 
-    rules = _company_rules_block()
+    if not include_rules:
+        return raw
+    rules = get_company_rules()
     if rules:
         return f"{rules}\n\n---\n\n{raw}"
     return raw
