@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from typing import TypeVar
 
 from pydantic import BaseModel, ValidationError
@@ -21,7 +22,7 @@ from ..db.session import SessionLocal
 from .pricing import log_usage
 from .prompts import load_prompt
 from .providers.anthropic_api import call_anthropic
-from .providers.claude_cli import call_claude_cli
+from .providers.claude_cli import ClaudeCLIError, call_claude_cli
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +31,24 @@ T = TypeVar("T", bound=BaseModel)
 
 class LLMError(RuntimeError):
     """Raised when the LLM cannot be reached or returns unrecoverable output."""
+
+
+def _is_transient(exc: Exception) -> bool:
+    """Return True if the error is transient and worth a single retry."""
+    if isinstance(exc, ClaudeCLIError):
+        return "not found" not in str(exc).lower()
+
+    status = getattr(exc, "status_code", None)
+    if status is None:
+        resp = getattr(exc, "response", None)
+        status = getattr(resp, "status_code", None)
+    if status is not None:
+        return status >= 500
+
+    if "timeout" in type(exc).__name__.lower():
+        return True
+
+    return False
 
 
 class LLMClient:
@@ -70,6 +89,16 @@ class LLMClient:
     # ------------- internals -------------
 
     def _dispatch(self, prompt: str, max_tokens: int) -> str:
+        try:
+            return self._dispatch_once(prompt, max_tokens)
+        except Exception as first_err:
+            if not _is_transient(first_err):
+                raise
+            logger.warning("Transient LLM error, retrying in 2s: %s", first_err)
+            time.sleep(2)
+            return self._dispatch_once(prompt, max_tokens)
+
+    def _dispatch_once(self, prompt: str, max_tokens: int) -> str:
         if self.provider == "claude_cli":
             llm_result = call_claude_cli(prompt)
         elif self.provider == "anthropic_api":
