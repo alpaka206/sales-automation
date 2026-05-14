@@ -80,3 +80,22 @@ def post_approval_card(
             logger.error("Slack API error: %s", data.get("error"))
 
     logger.info("Posted approval card for message %d to Slack.", message_id)
+
+
+def post_message(channel: str, text: str) -> None:
+    """Post a plain mrkdwn text message to a Slack channel."""
+    if not settings.SLACK_BOT_TOKEN:
+        raise SlackNotConfigured("SLACK_BOT_TOKEN not set.")
+
+    with httpx.Client(timeout=10) as client:
+        r = client.post(
+            "https://slack.com/api/chat.postMessage",
+            headers={"Authorization": f"Bearer {settings.SLACK_BOT_TOKEN}"},
+            json={"channel": channel, "text": text},
+        )
+        r.raise_for_status()
+        data = r.json()
+        if not data.get("ok"):
+            logger.error("Slack API error: %s", data.get("error"))
+
+    logger.info("Posted message to Slack channel %s.", channel)

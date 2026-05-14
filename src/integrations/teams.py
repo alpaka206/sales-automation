@@ -50,3 +50,22 @@ def post_approval_card(
         r.raise_for_status()
 
     logger.info("Posted approval card for message %d to Teams.", message_id)
+
+
+def post_message(text: str) -> None:
+    """Post a plain text message to Teams via incoming webhook."""
+    if not settings.TEAMS_WEBHOOK_URL:
+        raise TeamsNotConfigured("TEAMS_WEBHOOK_URL not set.")
+
+    card = {
+        "@type": "MessageCard",
+        "@context": "http://schema.org/extensions",
+        "summary": "Report",
+        "text": text,
+    }
+
+    with httpx.Client(timeout=10) as client:
+        r = client.post(settings.TEAMS_WEBHOOK_URL, json=card)
+        r.raise_for_status()
+
+    logger.info("Posted message to Teams.")

@@ -53,6 +53,10 @@ class Settings(BaseSettings):
     SLACK_APPROVAL_CHANNEL_ID: str = ""
     TEAMS_WEBHOOK_URL: str = ""
 
+    # ----- Reports -----
+    REPORT_SLACK_CHANNEL_ID: str = ""
+    REPORT_EMAIL_TO: str = ""
+
     # ----- Sources -----
     YOUTUBE_API_KEY: str = ""
     LINKEDIN_ENABLED: bool = False
