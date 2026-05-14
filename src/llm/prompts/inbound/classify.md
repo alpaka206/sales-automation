@@ -14,6 +14,8 @@ Most recent inbound message (verbatim):
 {{last_message}}
 """
 
+{{enrichment_context}}
+
 Return strict JSON only:
 {
   "category": "purchase_inquiry" | "partnership" | "pricing_question" | "support" | "recruiting" | "spam" | "other",

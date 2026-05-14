@@ -18,6 +18,7 @@ from src.agents.inbound import (
 )
 from src.db.base import Base
 from src.db.models import Contact, Conversation, Message
+from src.integrations.hubspot import ContactDTO, EngagementDTO, DealDTO
 
 
 @pytest.fixture(autouse=True)
@@ -136,3 +137,47 @@ def test_inbound_channel_selection() -> None:
 
     assert agent._pick_channel({"email": "a@b.com"}) == "email"
     assert agent._pick_channel({}) == "none"
+
+
+def test_inbound_enriched_from_hubspot(db_session) -> None:
+    session, engine = db_session
+    llm = _mock_llm()
+
+    mock_hs = MagicMock()
+    mock_hs.get_contact_sync.return_value = ContactDTO(
+        id="hs-999",
+        email="enriched@acme.co.kr",
+        firstname="Kim",
+        lastname="Enriched",
+        company="Acme Enriched",
+        phone="+8210-1234",
+        country="korea",
+        lifecyclestage="opportunity",
+    )
+    mock_hs.get_recent_emails_sync.return_value = [
+        EngagementDTO(id="e1", type="email", subject="Previous email", body="We discussed pricing."),
+    ]
+    mock_hs.get_associated_deals_sync.return_value = [
+        DealDTO(id="d1", name="Acme Deal", stage="negotiation", amount="50000"),
+    ]
+
+    with patch("src.agents.inbound.SessionLocal", return_value=session):
+        agent = InboundAgent(llm=llm, hubspot=mock_hs)
+        result = agent.handle({
+            "object_id": "hs-999",
+            "occurred_at": "2026-05-14T12:00:00Z",
+            "email": "orig@acme.co.kr",
+            "full_name": "Orig Name",
+            "last_message": "We want to proceed.",
+        })
+
+    assert result is not None
+
+    classify_call = llm.complete.call_args_list[0]
+    classify_vars = classify_call[0][1]
+    assert classify_vars["contact_name"] == "Kim Enriched"
+    assert "Previous email" in classify_vars["enrichment_context"]
+    assert "Acme Deal" in classify_vars["enrichment_context"]
+
+    contacts = session.query(Contact).all()
+    assert contacts[0].normalized_email == "enriched@acme.co.kr"

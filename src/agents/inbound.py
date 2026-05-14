@@ -62,6 +62,16 @@ def _base_score(email: str | None, country: str | None) -> int:
     return max(0, min(100, score))
 
 
+def _build_enrichment_context(contact_info: dict) -> str:
+    """Build optional context block from HubSpot-enriched data."""
+    parts: list[str] = []
+    if contact_info.get("recent_emails"):
+        parts.append(f"Recent email history with this contact:\n{contact_info['recent_emails']}")
+    if contact_info.get("deal_summary"):
+        parts.append(f"Associated deals:\n{contact_info['deal_summary']}")
+    return "\n\n".join(parts)
+
+
 class InboundAgent:
     """Handles inbound HubSpot events end-to-end."""
 
@@ -119,7 +129,7 @@ class InboundAgent:
         }
 
     def _fetch_contact(self, event: dict) -> dict[str, Any]:
-        return {
+        info: dict[str, Any] = {
             "object_id": event.get("object_id", ""),
             "email": event.get("email", ""),
             "full_name": event.get("full_name", "Unknown"),
@@ -129,7 +139,53 @@ class InboundAgent:
             "last_message": event.get("last_message", ""),
             "whatsapp_opt_in": event.get("whatsapp_opt_in", False),
             "phone": event.get("phone"),
+            "recent_emails": "",
+            "deal_summary": "",
         }
+
+        if not self.hubspot:
+            return info
+
+        contact_id = info["object_id"]
+        if not contact_id:
+            return info
+
+        try:
+            hs_contact = self.hubspot.get_contact_sync(contact_id)
+            full_name = " ".join(filter(None, [hs_contact.firstname, hs_contact.lastname]))
+            if full_name:
+                info["full_name"] = full_name
+            info["email"] = hs_contact.email or info["email"]
+            info["company"] = hs_contact.company or info["company"]
+            info["country"] = hs_contact.country or info["country"]
+            info["phone"] = hs_contact.phone or info["phone"]
+            info["lifecycle_stage"] = hs_contact.lifecyclestage or info["lifecycle_stage"]
+        except Exception:
+            logger.warning("HubSpot contact fetch failed, using event payload.", exc_info=True)
+
+        try:
+            emails = self.hubspot.get_recent_emails_sync(contact_id, limit=5)
+            if emails:
+                snippets = []
+                for e in emails:
+                    subj = e.subject or "(no subject)"
+                    body = (e.body or "")[:200]
+                    snippets.append(f"- {subj}: {body}")
+                info["recent_emails"] = "\n".join(snippets)
+        except Exception:
+            logger.warning("HubSpot email history fetch failed.", exc_info=True)
+
+        try:
+            deals = self.hubspot.get_associated_deals_sync(contact_id)
+            if deals:
+                parts = []
+                for d in deals:
+                    parts.append(f"- {d.name or 'Unnamed'} (stage: {d.stage or 'unknown'}, amount: {d.amount or 'N/A'})")
+                info["deal_summary"] = "\n".join(parts)
+        except Exception:
+            logger.warning("HubSpot deals fetch failed.", exc_info=True)
+
+        return info
 
     def _classify(self, contact_info: dict) -> ClassifyResult:
         return self.llm.complete(
@@ -140,6 +196,7 @@ class InboundAgent:
                 "country": contact_info["country"],
                 "lifecycle_stage": contact_info["lifecycle_stage"],
                 "last_message": contact_info["last_message"],
+                "enrichment_context": _build_enrichment_context(contact_info),
             },
             schema=ClassifyResult,
         )
@@ -191,6 +248,7 @@ class InboundAgent:
                 "score": str(score),
                 "language": "ko" if contact_info.get("country", "").lower() in _TARGET_COUNTRIES else "en",
                 "last_message": contact_info["last_message"],
+                "enrichment_context": _build_enrichment_context(contact_info),
             },
             schema=DraftResult,
         )

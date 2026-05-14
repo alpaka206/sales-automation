@@ -14,6 +14,8 @@ Most recent inbound (verbatim):
 {{last_message}}
 """
 
+{{enrichment_context}}
+
 Constraints:
 - Match the language of the inbound message unless the company rules say otherwise.
 - Be concise. No more than 5 short paragraphs.

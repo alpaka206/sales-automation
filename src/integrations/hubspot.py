@@ -29,6 +29,8 @@ class ContactDTO(BaseModel):
     firstname: str | None = None
     lastname: str | None = None
     company: str | None = None
+    phone: str | None = None
+    country: str | None = None
     lifecyclestage: str | None = None
 
 
@@ -38,6 +40,13 @@ class EngagementDTO(BaseModel):
     subject: str | None = None
     body: str | None = None
     timestamp: datetime | None = None
+
+
+class DealDTO(BaseModel):
+    id: str
+    name: str | None = None
+    stage: str | None = None
+    amount: str | None = None
 
 
 def _require_token() -> str:
@@ -167,3 +176,95 @@ class HubSpotClient:
     ) -> str:
         """Send an email via HubSpot single-send and log engagement. Returns engagement ID."""
         return await self.create_email_engagement(contact_id, subject, body)
+
+    # ------ Sync helpers (for use in synchronous agent code) ------
+
+    def get_contact_sync(self, id_or_email: str) -> ContactDTO:
+        """Synchronous version of get_contact."""
+        if "@" in id_or_email:
+            url = f"{BASE_URL}/crm/v3/objects/contacts/{id_or_email}"
+            params = {"idProperty": "email"}
+        else:
+            url = f"{BASE_URL}/crm/v3/objects/contacts/{id_or_email}"
+            params = {}
+
+        with httpx.Client(headers={"Authorization": f"Bearer {self.token}"}, timeout=30.0) as client:
+            r = client.get(url, params=params)
+        if r.status_code == 404:
+            raise HubSpotAPIError(f"Contact not found: {id_or_email}")
+        r.raise_for_status()
+        data = r.json()
+        props = data.get("properties", {})
+        return ContactDTO(
+            id=str(data["id"]),
+            email=props.get("email"),
+            firstname=props.get("firstname"),
+            lastname=props.get("lastname"),
+            company=props.get("company"),
+            phone=props.get("phone"),
+            country=props.get("country"),
+            lifecyclestage=props.get("lifecyclestage"),
+        )
+
+    def get_recent_emails_sync(self, contact_id: str, limit: int = 5) -> list[EngagementDTO]:
+        """Fetch recent email engagements with content for a contact (sync)."""
+        headers = {"Authorization": f"Bearer {self.token}"}
+        with httpx.Client(headers=headers, timeout=30.0) as client:
+            r = client.get(
+                f"{BASE_URL}/crm/v3/objects/contacts/{contact_id}/associations/emails",
+                params={"limit": limit},
+            )
+            r.raise_for_status()
+            assoc_results = r.json().get("results", [])
+
+            engagements: list[EngagementDTO] = []
+            for item in assoc_results:
+                email_id = str(item.get("id", ""))
+                if not email_id:
+                    continue
+                er = client.get(
+                    f"{BASE_URL}/crm/v3/objects/emails/{email_id}",
+                    params={"properties": "hs_email_subject,hs_email_text,hs_timestamp"},
+                )
+                if er.status_code != 200:
+                    continue
+                ep = er.json().get("properties", {})
+                engagements.append(EngagementDTO(
+                    id=email_id,
+                    type="email",
+                    subject=ep.get("hs_email_subject"),
+                    body=ep.get("hs_email_text"),
+                    timestamp=datetime.fromisoformat(ep["hs_timestamp"]) if ep.get("hs_timestamp") else None,
+                ))
+        return engagements
+
+    def get_associated_deals_sync(self, contact_id: str) -> list[DealDTO]:
+        """Fetch deals associated with a contact (sync)."""
+        headers = {"Authorization": f"Bearer {self.token}"}
+        with httpx.Client(headers=headers, timeout=30.0) as client:
+            r = client.get(
+                f"{BASE_URL}/crm/v3/objects/contacts/{contact_id}/associations/deals",
+                params={"limit": 10},
+            )
+            r.raise_for_status()
+            assoc_results = r.json().get("results", [])
+
+            deals: list[DealDTO] = []
+            for item in assoc_results:
+                deal_id = str(item.get("id", ""))
+                if not deal_id:
+                    continue
+                dr = client.get(
+                    f"{BASE_URL}/crm/v3/objects/deals/{deal_id}",
+                    params={"properties": "dealname,dealstage,amount"},
+                )
+                if dr.status_code != 200:
+                    continue
+                dp = dr.json().get("properties", {})
+                deals.append(DealDTO(
+                    id=deal_id,
+                    name=dp.get("dealname"),
+                    stage=dp.get("dealstage"),
+                    amount=dp.get("amount"),
+                ))
+        return deals
