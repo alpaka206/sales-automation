@@ -1,0 +1,29 @@
+{
+  "name": "03 Reply Check",
+  "nodes": [
+    {
+      "parameters": { "rule": { "interval": [{ "field": "cronExpression", "expression": "0 * * * *" }] } },
+      "name": "Hourly",
+      "type": "n8n-nodes-base.cron",
+      "typeVersion": 1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.BE_BASE_URL }}/run/reply_check",
+        "method": "POST",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [{ "name": "X-Internal-Token", "value": "={{ $env.INTERNAL_API_TOKEN }}" }]
+        }
+      },
+      "name": "Call Reply Check",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [500, 300]
+    }
+  ],
+  "connections": {
+    "Hourly": { "main": [[{ "node": "Call Reply Check", "type": "main", "index": 0 }]] }
+  }
+}

@@ -1,0 +1,42 @@
+{
+  "name": "04 Approval Card",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "approval-card",
+        "responseMode": "responseNode"
+      },
+      "name": "BE Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "channel": "={{ $json.slack_channel || $env.SLACK_APPROVAL_CHANNEL_ID }}",
+        "text": "Approval needed for message #{{ $json.message_id }}",
+        "blocksUi": {
+          "blocksValues": []
+        },
+        "otherOptions": {}
+      },
+      "name": "Slack Approval",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 1,
+      "position": [500, 300],
+      "credentials": { "slackApi": { "id": "REPLACE_ME", "name": "Slack" } }
+    },
+    {
+      "parameters": { "respondWith": "json", "responseBody": "={\"ok\": true}" },
+      "name": "Respond",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [750, 300]
+    }
+  ],
+  "connections": {
+    "BE Webhook": { "main": [[{ "node": "Slack Approval", "type": "main", "index": 0 }]] },
+    "Slack Approval": { "main": [[{ "node": "Respond", "type": "main", "index": 0 }]] }
+  }
+}

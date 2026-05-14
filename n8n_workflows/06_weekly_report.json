@@ -1,0 +1,29 @@
+{
+  "name": "06 Weekly Report",
+  "nodes": [
+    {
+      "parameters": { "rule": { "interval": [{ "field": "cronExpression", "expression": "0 9 * * 6" }] } },
+      "name": "Saturday 09:00",
+      "type": "n8n-nodes-base.cron",
+      "typeVersion": 1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.BE_BASE_URL }}/run/report?kind=weekly",
+        "method": "POST",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [{ "name": "X-Internal-Token", "value": "={{ $env.INTERNAL_API_TOKEN }}" }]
+        }
+      },
+      "name": "Generate Weekly Report",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [500, 300]
+    }
+  ],
+  "connections": {
+    "Saturday 09:00": { "main": [[{ "node": "Generate Weekly Report", "type": "main", "index": 0 }]] }
+  }
+}
