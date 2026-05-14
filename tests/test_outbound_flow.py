@@ -112,3 +112,42 @@ def test_outbound_flow_three_candidates(db_session, db_session_factory) -> None:
     assert len(messages) == 1
     assert messages[0].status == "pending_approval"
     assert messages[0].subject == "Hi"
+
+
+def test_manual_csv_uses_source_specific_prompt(db_session) -> None:
+    """Verify the outbound agent picks email_manual_csv prompt, not generic."""
+    candidates = [
+        ProspectCandidate(
+            name="CSV Lead",
+            email="csv@target.kr",
+            company="Target Co",
+            domain="target.kr",
+            country="korea",
+            source="manual_csv",
+            extra={"notes": "Spoke at PyCon Korea 2025"},
+        ),
+    ]
+
+    llm = MagicMock()
+    captured_prompts: list[str] = []
+
+    def llm_side_effect(prompt_name, variables=None, schema=None, **kw):
+        captured_prompts.append(prompt_name)
+        if "icp_score" in prompt_name:
+            return ICPScoreResult(score=80, rationale="Good fit", language_guess="ko")
+        if "email" in prompt_name:
+            return DraftEmailResult(subject="Hi CSV", body="Personalized.", language="ko")
+        return "ok"
+
+    llm.complete = MagicMock(side_effect=llm_side_effect)
+    source = _stub_source(candidates)
+
+    with (
+        patch("src.agents.outbound.agent.SessionLocal", return_value=db_session),
+        patch("src.agents.outbound.agent.get_source", return_value=source),
+    ):
+        agent = OutboundAgent(llm=llm)
+        agent.run("manual_csv")
+
+    email_prompts = [p for p in captured_prompts if "email" in p]
+    assert email_prompts == ["outbound/email_manual_csv"]
