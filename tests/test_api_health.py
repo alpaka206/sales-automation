@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from unittest.mock import patch
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -40,7 +42,8 @@ def test_protected_route_accepts_valid_token(client: TestClient) -> None:
     assert r.json()["status"] == "started"
 
 
-def test_webhook_inbound(client: TestClient) -> None:
+@patch("src.agents.inbound.InboundAgent.handle", return_value={"message_id": 1})
+def test_webhook_inbound(mock_handle, client: TestClient) -> None:
     r = client.post(
         "/webhook/hubspot/inbound",
         json={"event_type": "contact.creation", "object_id": "123"},
