@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-import pytest
 
 from src.agents.inbound import ClassifyResult, DraftResult, InboundAgent, ScoreAdjustResult
 from src.agents.approval import approve

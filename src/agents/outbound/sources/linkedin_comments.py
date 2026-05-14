@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 import re
-from datetime import date
 
 from ....common.config import settings
 from .base import ProspectCandidate, SourceFilters, apply_common_filters

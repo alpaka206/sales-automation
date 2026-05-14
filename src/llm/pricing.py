@@ -6,7 +6,7 @@ import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
-from sqlalchemy import func, text
+from sqlalchemy import func
 
 logger = logging.getLogger(__name__)
 

@@ -5,7 +5,6 @@ from __future__ import annotations
 import subprocess
 from unittest.mock import MagicMock, patch
 
-import pytest
 
 from src.common.healthcheck import (
     CheckResult,
@@ -13,8 +12,6 @@ from src.common.healthcheck import (
     _check_claude_cli,
     _check_db,
     _check_disk_space,
-    _check_hubspot,
-    _check_smtp,
     _check_anthropic_api,
     run_healthchecks,
 )
