@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-import json
 import logging
-import os
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from datetime import datetime, timezone
+
+from sqlalchemy import func, text
 
 logger = logging.getLogger(__name__)
 
@@ -21,8 +21,6 @@ PRICING: dict[str, dict[str, float]] = {
     "claude-3-haiku-20240307": {"input": 0.25, "output": 1.25},
     "llama3.1:8b": {"input": 0.0, "output": 0.0},
 }
-
-USAGE_FILE = os.path.join("data", "llm_usage.jsonl")
 
 
 @dataclass
@@ -56,47 +54,63 @@ def format_cost(amount: float) -> str:
 
 
 def log_usage(result: LLMResult, provider: str) -> None:
-    """Append one usage record to the JSONL file."""
+    """Write usage record to llm_usage table."""
     try:
-        os.makedirs(os.path.dirname(USAGE_FILE), exist_ok=True)
-        record = {
-            "ts": datetime.now(timezone.utc).isoformat(),
-            "provider": provider,
-            **asdict(result),
-        }
-        del record["text"]
-        with open(USAGE_FILE, "a", encoding="utf-8") as f:
-            f.write(json.dumps(record) + "\n")
+        from ..db.models import LLMUsage
+        from ..db.session import SessionLocal
+
+        cost = estimate_cost(result.model, result.input_tokens, result.output_tokens)
+        session = SessionLocal()
+        session.add(
+            LLMUsage(
+                provider=provider,
+                model=result.model,
+                input_tokens=result.input_tokens,
+                output_tokens=result.output_tokens,
+                cache_read_input_tokens=result.cache_read_input_tokens,
+                cache_creation_input_tokens=result.cache_creation_input_tokens,
+                estimated_cost=cost,
+            )
+        )
+        session.commit()
+        session.close()
     except Exception:
         logger.debug("Failed to log LLM usage.", exc_info=True)
 
 
 def get_usage_since(since: datetime) -> dict:
-    """Aggregate usage records from the JSONL file since a given time."""
-    totals: dict[str, dict[str, int]] = {}
-    if not os.path.exists(USAGE_FILE):
-        return {"models": {}, "total_input": 0, "total_output": 0, "total_cost": 0.0, "calls": 0}
-
-    calls = 0
+    """Aggregate usage from the llm_usage table since a given time."""
+    empty = {"models": {}, "total_input": 0, "total_output": 0, "total_cost": 0.0, "calls": 0}
     try:
-        with open(USAGE_FILE, encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                rec = json.loads(line)
-                ts = datetime.fromisoformat(rec["ts"])
-                threshold = since if since.tzinfo else since.replace(tzinfo=timezone.utc)
-                if ts < threshold:
-                    continue
-                model = rec.get("model", "unknown")
-                if model not in totals:
-                    totals[model] = {"input": 0, "output": 0}
-                totals[model]["input"] += rec.get("input_tokens", 0)
-                totals[model]["output"] += rec.get("output_tokens", 0)
-                calls += 1
+        from ..db.models import LLMUsage
+        from ..db.session import SessionLocal
+
+        threshold = since if since.tzinfo else since.replace(tzinfo=timezone.utc)
+        session = SessionLocal()
+        rows = (
+            session.query(
+                LLMUsage.model,
+                func.sum(LLMUsage.input_tokens).label("inp"),
+                func.sum(LLMUsage.output_tokens).label("out"),
+                func.count(LLMUsage.id).label("cnt"),
+            )
+            .filter(LLMUsage.created_at >= threshold)
+            .group_by(LLMUsage.model)
+            .all()
+        )
+        session.close()
     except Exception:
-        logger.debug("Failed to read LLM usage file.", exc_info=True)
+        logger.debug("Failed to read LLM usage from DB.", exc_info=True)
+        return empty
+
+    if not rows:
+        return empty
+
+    totals: dict[str, dict[str, int]] = {}
+    calls = 0
+    for model, inp, out, cnt in rows:
+        totals[model] = {"input": inp, "output": out}
+        calls += cnt
 
     total_input = sum(v["input"] for v in totals.values())
     total_output = sum(v["output"] for v in totals.values())

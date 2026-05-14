@@ -2,9 +2,6 @@
 
 from __future__ import annotations
 
-import json
-import os
-import tempfile
 from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
@@ -52,44 +49,50 @@ def test_format_cost_zero() -> None:
     assert format_cost(0.0) == "$0.0000"
 
 
-def test_log_and_get_usage() -> None:
-    with tempfile.TemporaryDirectory() as tmp:
-        usage_file = os.path.join(tmp, "usage.jsonl")
-        with patch("src.llm.pricing.USAGE_FILE", usage_file):
-            now = datetime.now(timezone.utc)
-            result = LLMResult(text="hi", input_tokens=100, output_tokens=50, model="claude-sonnet-4-6")
-            log_usage(result, "anthropic_api")
-            log_usage(result, "anthropic_api")
+def test_log_and_get_usage(db_session_factory) -> None:
+    with patch("src.db.session.SessionLocal", db_session_factory):
+        now = datetime.now(timezone.utc)
+        result = LLMResult(text="hi", input_tokens=100, output_tokens=50, model="claude-sonnet-4-6")
+        log_usage(result, "anthropic_api")
+        log_usage(result, "anthropic_api")
 
-            usage = get_usage_since(now - timedelta(seconds=10))
+        usage = get_usage_since(now - timedelta(seconds=10))
 
-        assert usage["calls"] == 2
-        assert usage["total_input"] == 200
-        assert usage["total_output"] == 100
-        assert usage["total_cost"] > 0
-        assert "claude-sonnet-4-6" in usage["models"]
+    assert usage["calls"] == 2
+    assert usage["total_input"] == 200
+    assert usage["total_output"] == 100
+    assert usage["total_cost"] > 0
+    assert "claude-sonnet-4-6" in usage["models"]
 
 
-def test_get_usage_since_filters_old() -> None:
-    with tempfile.TemporaryDirectory() as tmp:
-        usage_file = os.path.join(tmp, "usage.jsonl")
-        old_ts = (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat()
-        new_ts = datetime.now(timezone.utc).isoformat()
+def test_get_usage_since_filters_old(db_session_factory) -> None:
+    from src.db.models import LLMUsage
 
-        with open(usage_file, "w", encoding="utf-8") as f:
-            f.write(json.dumps({"ts": old_ts, "provider": "x", "input_tokens": 100, "output_tokens": 50, "model": "m"}) + "\n")
-            f.write(json.dumps({"ts": new_ts, "provider": "x", "input_tokens": 200, "output_tokens": 80, "model": "m"}) + "\n")
+    session = db_session_factory()
+    old = datetime.now(timezone.utc) - timedelta(hours=2)
+    recent = datetime.now(timezone.utc)
 
-        with patch("src.llm.pricing.USAGE_FILE", usage_file):
-            usage = get_usage_since(datetime.now(timezone.utc) - timedelta(hours=1))
+    session.add(LLMUsage(
+        provider="x", model="m", input_tokens=100, output_tokens=50,
+        estimated_cost=0.0, created_at=old,
+    ))
+    session.add(LLMUsage(
+        provider="x", model="m", input_tokens=200, output_tokens=80,
+        estimated_cost=0.0, created_at=recent,
+    ))
+    session.commit()
+    session.close()
 
-        assert usage["calls"] == 1
-        assert usage["total_input"] == 200
-        assert usage["total_output"] == 80
+    with patch("src.db.session.SessionLocal", db_session_factory):
+        usage = get_usage_since(datetime.now(timezone.utc) - timedelta(hours=1))
+
+    assert usage["calls"] == 1
+    assert usage["total_input"] == 200
+    assert usage["total_output"] == 80
 
 
-def test_get_usage_since_no_file() -> None:
-    with patch("src.llm.pricing.USAGE_FILE", "/nonexistent/path.jsonl"):
+def test_get_usage_since_empty_db(db_session_factory) -> None:
+    with patch("src.db.session.SessionLocal", db_session_factory):
         usage = get_usage_since(datetime.now(timezone.utc) - timedelta(days=1))
 
     assert usage["calls"] == 0
@@ -102,3 +105,5 @@ def test_llm_result_dataclass() -> None:
     assert r.input_tokens == 10
     assert r.output_tokens == 5
     assert r.model == "test"
+    assert r.cache_read_input_tokens == 0
+    assert r.cache_creation_input_tokens == 0

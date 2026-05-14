@@ -9,6 +9,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from src.db.base import Base
+from src.db import models as _models  # noqa: F401 — register all models with Base
 
 
 @pytest.fixture()
