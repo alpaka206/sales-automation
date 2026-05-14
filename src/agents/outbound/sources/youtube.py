@@ -6,7 +6,7 @@ import logging
 import re
 
 from ....integrations.youtube import YouTubeClient, YouTubeNotConfigured
-from .base import ProspectCandidate
+from .base import ProspectCandidate, SourceFilters, apply_common_filters
 
 logger = logging.getLogger(__name__)
 
@@ -36,13 +36,15 @@ class YouTubeSource:
             return []
 
         filters = filters or {}
-        query = filters.get("query", "")
+        sf = SourceFilters(**{k: v for k, v in filters.items() if k in SourceFilters.model_fields})
+
+        query = filters.get("query", "") or sf.extra.get("query", "")
         if not query:
             raise ValueError("YouTube source requires 'query' filter.")
 
         region = filters.get("region_code", "KR")
         max_results = filters.get("max_results", 25)
-        min_subs = filters.get("min_subscribers", 0)
+        min_subs = sf.min_audience or filters.get("min_subscribers", 0)
 
         search_results = self.client.search_channels(query, region, max_results)
 
@@ -74,6 +76,8 @@ class YouTubeSource:
                     company=title,
                     domain=None,
                     country=country,
+                    role="youtube_channel",
+                    audience_size=sub_count,
                     source="youtube",
                     source_ref=channel_id,
                     extra={
@@ -83,5 +87,6 @@ class YouTubeSource:
                 )
             )
 
+        prospects = apply_common_filters(prospects, sf)
         logger.info("YouTube: found %d prospects for query '%s'.", len(prospects), query)
         return prospects

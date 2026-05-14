@@ -13,10 +13,10 @@ from src.agents.outbound.source_registry import get_source
 def csv_file(tmp_path: Path) -> Path:
     p = tmp_path / "linkedin_export.csv"
     p.write_text(
-        "Full Name,Email,Company,Title,Location\n"
-        "Kim Director,kim@bigco.kr,BigCo,Marketing Director,Seoul\n"
-        "Jane CTO,jane@startup.io,Startup Inc,CTO,Singapore\n"
-        ",,,,\n",
+        "Full Name,Email,Company,Title,Location,Domain,Followers\n"
+        "Kim Director,kim@bigco.kr,BigCo,Marketing Director,Seoul,bigco.kr,5000\n"
+        "Jane CTO,jane@startup.io,Startup Inc,CTO,Singapore,startup.io,200\n"
+        ",,,,,,\n",
         encoding="utf-8",
     )
     return p
@@ -32,9 +32,12 @@ def test_linkedin_csv_parse(csv_file: Path) -> None:
     assert results[0].source == "linkedin_csv"
     assert results[0].extra["title"] == "Marketing Director"
     assert results[0].country == "Seoul"
+    assert results[0].role == "Marketing Director"
+    assert results[0].audience_size == 5000
 
     assert results[1].name == "Jane CTO"
     assert results[1].company == "Startup Inc"
+    assert results[1].audience_size == 200
 
 
 def test_linkedin_csv_missing_file() -> None:
@@ -46,3 +49,43 @@ def test_linkedin_csv_missing_file() -> None:
 def test_registry_returns_linkedin_csv() -> None:
     source = get_source("linkedin_csv")
     assert source.name == "linkedin_csv"
+
+
+def test_filter_domains_allow(csv_file: Path) -> None:
+    source = LinkedInCSVSource()
+    results = source.discover({
+        "path": str(csv_file),
+        "domains_allow": ["bigco.kr"],
+    })
+    assert len(results) == 1
+    assert results[0].name == "Kim Director"
+
+
+def test_filter_domains_block(csv_file: Path) -> None:
+    source = LinkedInCSVSource()
+    results = source.discover({
+        "path": str(csv_file),
+        "domains_block": ["startup.io"],
+    })
+    assert len(results) == 1
+    assert results[0].name == "Kim Director"
+
+
+def test_filter_countries(csv_file: Path) -> None:
+    source = LinkedInCSVSource()
+    results = source.discover({
+        "path": str(csv_file),
+        "countries": ["singapore"],
+    })
+    assert len(results) == 1
+    assert results[0].name == "Jane CTO"
+
+
+def test_filter_min_audience(csv_file: Path) -> None:
+    source = LinkedInCSVSource()
+    results = source.discover({
+        "path": str(csv_file),
+        "min_audience": 1000,
+    })
+    assert len(results) == 1
+    assert results[0].name == "Kim Director"

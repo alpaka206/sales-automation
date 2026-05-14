@@ -6,7 +6,7 @@ import csv
 import logging
 from pathlib import Path
 
-from .base import ProspectCandidate
+from .base import ProspectCandidate, SourceFilters, apply_common_filters
 
 logger = logging.getLogger(__name__)
 
@@ -17,6 +17,7 @@ DEFAULT_COLUMN_MAP = {
     "domain": ["Website", "Domain", "domain"],
     "country": ["Location", "Country", "country"],
     "title": ["Title", "Job Title", "title"],
+    "followers": ["Followers", "followers", "Follower Count"],
 }
 
 
@@ -26,6 +27,14 @@ def _find_column(headers: list[str], aliases: list[str]) -> str | None:
         if alias.lower() in lower_headers:
             return lower_headers[alias.lower()]
     return None
+
+
+def _parse_int(value: str) -> int | None:
+    """Parse a string to int, returning None on failure."""
+    try:
+        return int(value.strip().replace(",", ""))
+    except (ValueError, AttributeError):
+        return None
 
 
 class LinkedInCSVSource:
@@ -40,6 +49,7 @@ class LinkedInCSVSource:
         if not path.exists():
             raise FileNotFoundError(f"CSV file not found: {path}")
 
+        sf = SourceFilters(**{k: v for k, v in filters.items() if k in SourceFilters.model_fields})
         column_map = filters.get("column_map", DEFAULT_COLUMN_MAP)
 
         prospects: list[ProspectCandidate] = []
@@ -53,6 +63,7 @@ class LinkedInCSVSource:
             col_domain = _find_column(headers, column_map.get("domain", []))
             col_country = _find_column(headers, column_map.get("country", []))
             col_title = _find_column(headers, column_map.get("title", []))
+            col_followers = _find_column(headers, column_map.get("followers", []))
 
             for row in reader:
                 name = row.get(col_name, "").strip() if col_name else ""
@@ -61,6 +72,7 @@ class LinkedInCSVSource:
 
                 email = row.get(col_email, "").strip() or None if col_email else None
                 title = row.get(col_title, "").strip() if col_title else ""
+                followers = _parse_int(row.get(col_followers, "")) if col_followers else None
 
                 prospects.append(
                     ProspectCandidate(
@@ -69,11 +81,14 @@ class LinkedInCSVSource:
                         company=row.get(col_company, "").strip() or None if col_company else None,
                         domain=row.get(col_domain, "").strip() or None if col_domain else None,
                         country=row.get(col_country, "").strip() or None if col_country else None,
+                        role=title or None,
+                        audience_size=followers,
                         source="linkedin_csv",
                         source_ref=str(path),
                         extra={"title": title},
                     )
                 )
 
+        prospects = apply_common_filters(prospects, sf)
         logger.info("LinkedInCSV: loaded %d prospects from %s", len(prospects), path)
         return prospects
