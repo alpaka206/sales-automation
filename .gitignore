@@ -1,0 +1,55 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Virtual envs
+.venv/
+venv/
+env/
+ENV/
+
+# Secrets
+.env
+.env.local
+*.pem
+*.key
+
+# Data / logs (local only)
+data/
+!data/.gitkeep
+logs/
+!logs/.gitkeep
+*.log
+*.sqlite
+*.sqlite3
+*.db
+
+# Editors
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# OS
+Thumbs.db
+desktop.ini
+
+# Node (for n8n local install if user picks that)
+node_modules/
+
+# Ralph loop scratch
+BLOCKER.md
+.ralph_lock
