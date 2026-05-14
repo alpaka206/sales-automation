@@ -93,8 +93,10 @@ def run_outbound(body: OutboundRunBody) -> dict:
 
 @app.post("/run/reply_check")
 def run_reply_check() -> dict:
-    logger.info("reply_check triggered (placeholder)")
-    return {"status": "started"}
+    from ..agents.reply_check import run
+
+    stats = run()
+    return {"status": "ok", **stats}
 
 
 @app.post("/run/report")

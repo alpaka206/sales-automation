@@ -39,7 +39,7 @@ def test_protected_route_accepts_valid_token(client: TestClient) -> None:
         headers={"X-Internal-Token": settings.INTERNAL_API_TOKEN},
     )
     assert r.status_code == 200
-    assert r.json()["status"] == "started"
+    assert r.json()["status"] == "ok"
 
 
 @patch("src.agents.inbound.InboundAgent.handle", return_value={"message_id": 1})
