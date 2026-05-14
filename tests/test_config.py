@@ -36,5 +36,5 @@ def test_int_from_env() -> None:
 
 def test_literal_validation() -> None:
     s = Settings()
-    assert s.LLM_PROVIDER in ("claude_cli", "anthropic_api", "ollama")
+    assert s.LLM_PROVIDER in ("claude_cli", "anthropic_api")
     assert s.APPROVAL_CHANNEL in ("slack", "teams", "none")

@@ -48,11 +48,6 @@ def _call_claude_cli(prompt: str) -> str:
 - Use `claude-sonnet-4-6` by default.
 - If `schema` is given and the SDK version supports tool-use response shaping, use it; otherwise fall back to "return JSON" + parse.
 
-### `ollama`
-
-- POST to `${OLLAMA_HOST}/api/generate` with `model`, `prompt`, `format: "json"` when schema given.
-- Lower-quality fallback — acceptable for scoring, not great for drafting.
-
 ## Failure handling
 
 - One automatic retry on transient errors (timeout, 5xx, JSON parse fail).
@@ -62,7 +57,7 @@ def _call_claude_cli(prompt: str) -> str:
 ## Cost tracking
 
 - For `anthropic_api`: capture `input_tokens` and `output_tokens` from response, multiply by hardcoded rate table in `src/llm/pricing.py`, store on the event.
-- For `claude_cli` and `ollama`: tokens unknown, record `tokens=null`.
+- For `claude_cli`: tokens unknown, record `tokens=null`.
 
 ## Testing
 

@@ -35,8 +35,6 @@ def doctor() -> int:
     elif settings.LLM_PROVIDER == "anthropic_api":
         has_key = bool(settings.ANTHROPIC_API_KEY)
         results.append(("PASS" if has_key else "FAIL", "Anthropic API Key", "set" if has_key else "ANTHROPIC_API_KEY empty"))
-    elif settings.LLM_PROVIDER == "ollama":
-        results.append(("PASS", "Ollama", f"configured at {settings.OLLAMA_HOST}"))
 
     hs_token = bool(settings.HUBSPOT_PRIVATE_APP_TOKEN)
     results.append(("PASS" if hs_token else "WARN", "HubSpot Token", "set" if hs_token else "not set (optional)"))

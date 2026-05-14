@@ -22,7 +22,6 @@ from .pricing import log_usage
 from .prompts import load_prompt
 from .providers.anthropic_api import call_anthropic
 from .providers.claude_cli import call_claude_cli
-from .providers.ollama import call_ollama
 
 logger = logging.getLogger(__name__)
 
@@ -77,8 +76,6 @@ class LLMClient:
             if not settings.ANTHROPIC_API_KEY:
                 raise LLMError("LLM_PROVIDER=anthropic_api but ANTHROPIC_API_KEY is empty.")
             llm_result = call_anthropic(prompt, max_tokens=max_tokens)
-        elif self.provider == "ollama":
-            llm_result = call_ollama(prompt)
         else:
             raise LLMError(f"unknown LLM_PROVIDER: {self.provider}")
 

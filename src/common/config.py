@@ -18,14 +18,11 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", case_sensitive=False, extra="ignore")
 
     # ----- LLM -----
-    LLM_PROVIDER: Literal["claude_cli", "anthropic_api", "ollama"] = "claude_cli"
+    LLM_PROVIDER: Literal["claude_cli", "anthropic_api"] = "claude_cli"
     CLAUDE_CLI_PATH: str = "claude"
 
     ANTHROPIC_API_KEY: str = ""
     ANTHROPIC_MODEL: str = "claude-sonnet-4-6"
-
-    OLLAMA_HOST: str = "http://localhost:11434"
-    OLLAMA_MODEL: str = "llama3.1:8b"
 
     # ----- HubSpot -----
     HUBSPOT_PRIVATE_APP_TOKEN: str = ""

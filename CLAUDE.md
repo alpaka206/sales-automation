@@ -71,7 +71,6 @@ Provider selection by env var `LLM_PROVIDER`:
 
 - `claude_cli` (default): shells out to `claude -p "<prompt>" --output-format json`
 - `anthropic_api`: uses `anthropic` SDK with `ANTHROPIC_API_KEY`
-- `ollama`: local Ollama HTTP API at `OLLAMA_HOST`
 
 All prompts live as `.md` files in `src/llm/prompts/`. They are loaded by name, not hardcoded as strings.
 
