@@ -53,12 +53,11 @@ def test_webhook_inbound(mock_handle, client: TestClient) -> None:
     assert r.json()["status"] == "accepted"
 
 
-def test_approve_message(client: TestClient) -> None:
+def test_approve_nonexistent_message_returns_400(client: TestClient) -> None:
     r = client.post(
         "/approve/42",
         json={"approver": "slack:U001", "action": "approve"},
         headers={"X-Internal-Token": settings.INTERNAL_API_TOKEN},
     )
-    assert r.status_code == 200
-    assert r.json()["action"] == "approve"
-    assert r.json()["message_id"] == 42
+    assert r.status_code == 400
+    assert "not found" in r.json()["detail"].lower()

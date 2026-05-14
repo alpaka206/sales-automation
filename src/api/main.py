@@ -6,10 +6,11 @@ import logging
 import uuid
 from typing import Literal
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
+from ..agents.approval import ApprovalError, approve, mark_sent, reject
 from ..common.config import settings
 from ..common.logging import setup_logging
 
@@ -106,11 +107,45 @@ def run_report(kind: str = "daily") -> dict:
 
 
 @app.post("/approve/{message_id}")
-def approve_message(message_id: int, body: ApprovalBody) -> dict:
+async def approve_message(message_id: int, body: ApprovalBody) -> dict:
+    """Process approve/edit/reject for a pending message, then send and log."""
     logger.info(
         "Approval for message %d: %s by %s",
         message_id,
         body.action,
         body.approver,
     )
-    return {"status": "ok", "message_id": message_id, "action": body.action}
+
+    try:
+        if body.action in ("approve", "edit"):
+            msg = approve(message_id, body.approver, body.edited_body)
+        else:
+            msg = reject(message_id, body.approver, body.reason)
+            return {"status": msg.status, "message_id": msg.id}
+    except ApprovalError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    try:
+        from ..integrations.senders import send
+
+        await send(msg)
+        mark_sent(message_id)
+    except Exception:
+        logger.exception("Send failed for message %d", message_id)
+        raise HTTPException(status_code=500, detail="Send failed")
+
+    try:
+        from ..integrations.hubspot import HubSpotClient
+
+        hs = HubSpotClient()
+        engagement_id = await hs.create_email_engagement(
+            contact_id=str(msg.conversation.contact_id),
+            subject=msg.subject or "",
+            body=msg.body,
+        )
+        await hs.close()
+        logger.info("Logged HubSpot engagement %s for message %d", engagement_id, message_id)
+    except Exception:
+        logger.warning("HubSpot engagement logging failed for message %d", message_id, exc_info=True)
+
+    return {"status": "sent", "message_id": msg.id}
