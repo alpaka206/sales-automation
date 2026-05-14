@@ -5,24 +5,11 @@ from __future__ import annotations
 from unittest.mock import MagicMock, patch
 
 import pytest
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
 
 from src.agents.inbound import ClassifyResult, DraftResult, InboundAgent, ScoreAdjustResult
 from src.agents.approval import approve
 from src.agents.report import ReportAgent
-from src.db.base import Base
 from src.db.models import Message
-
-
-@pytest.fixture()
-def db():
-    engine = create_engine("sqlite:///:memory:")
-    Base.metadata.create_all(engine)
-    Session = sessionmaker(bind=engine, expire_on_commit=False)
-    session = Session()
-    yield session, Session
-    session.close()
 
 
 def _stub_llm():
@@ -47,12 +34,11 @@ def _stub_llm():
     return llm
 
 
-def test_full_pipeline(db) -> None:
-    session, Session = db
+def test_full_pipeline(db_session, db_session_factory) -> None:
     llm = _stub_llm()
 
     agent = InboundAgent(llm=llm, hubspot=None)
-    with patch("src.agents.inbound.SessionLocal", return_value=session):
+    with patch("src.agents.inbound.SessionLocal", return_value=db_session):
         result = agent.handle({
             "object_id": "e2e-001",
             "occurred_at": "2026-05-14T12:00:00Z",
@@ -67,7 +53,7 @@ def test_full_pipeline(db) -> None:
     assert result["category"] == "purchase_inquiry"
     msg_id = result["message_id"]
 
-    verify = Session()
+    verify = db_session_factory()
     msg = verify.get(Message, msg_id)
     assert msg.status == "pending_approval"
 
@@ -75,7 +61,7 @@ def test_full_pipeline(db) -> None:
         approved = approve(msg_id, approver="slack:e2e-user")
     assert approved.status == "approved"
 
-    report_session = Session()
+    report_session = db_session_factory()
     with (
         patch("src.agents.report.SessionLocal", return_value=report_session),
         patch.object(ReportAgent, "_save_report"),

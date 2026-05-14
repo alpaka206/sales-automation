@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import pytest
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
 from unittest.mock import patch, MagicMock
 
 from src.agents.inbound import (
@@ -16,7 +14,6 @@ from src.agents.inbound import (
     _normalize_email,
     _processed,
 )
-from src.db.base import Base
 from src.db.models import Contact, Conversation, Message
 from src.integrations.hubspot import ContactDTO, EngagementDTO, DealDTO
 
@@ -26,16 +23,6 @@ def _clear_dedup():
     _processed.clear()
     yield
     _processed.clear()
-
-
-@pytest.fixture()
-def db_session():
-    engine = create_engine("sqlite:///:memory:")
-    Base.metadata.create_all(engine)
-    Session = sessionmaker(bind=engine)
-    session = Session()
-    yield session, engine
-    session.close()
 
 
 def _mock_llm():
@@ -75,10 +62,9 @@ def test_base_score_personal() -> None:
 
 
 def test_inbound_handle_creates_db_rows(db_session) -> None:
-    session, engine = db_session
     llm = _mock_llm()
 
-    with patch("src.agents.inbound.SessionLocal", return_value=session):
+    with patch("src.agents.inbound.SessionLocal", return_value=db_session):
         agent = InboundAgent(llm=llm, hubspot=None)
         result = agent.handle({
             "object_id": "hs-123",
@@ -95,23 +81,22 @@ def test_inbound_handle_creates_db_rows(db_session) -> None:
     assert result["channel"] == "email"
     assert result["score"] > 0
 
-    contacts = session.query(Contact).all()
+    contacts = db_session.query(Contact).all()
     assert len(contacts) == 1
     assert contacts[0].normalized_email == "buyer@acme.co.kr"
 
-    messages = session.query(Message).all()
+    messages = db_session.query(Message).all()
     assert len(messages) == 1
     assert messages[0].status == "pending_approval"
     assert messages[0].direction == "outbound"
     assert messages[0].subject == "Re: Inquiry"
 
-    conversations = session.query(Conversation).all()
+    conversations = db_session.query(Conversation).all()
     assert len(conversations) == 1
     assert conversations[0].topic == "purchase_inquiry"
 
 
 def test_inbound_dedup(db_session) -> None:
-    session, engine = db_session
     llm = _mock_llm()
 
     event = {
@@ -122,14 +107,14 @@ def test_inbound_dedup(db_session) -> None:
         "last_message": "Hello",
     }
 
-    with patch("src.agents.inbound.SessionLocal", return_value=session):
+    with patch("src.agents.inbound.SessionLocal", return_value=db_session):
         agent = InboundAgent(llm=llm, hubspot=None)
         r1 = agent.handle(event)
         r2 = agent.handle(event)
 
     assert r1 is not None
     assert r2 is None
-    assert session.query(Message).count() == 1
+    assert db_session.query(Message).count() == 1
 
 
 def test_inbound_channel_selection() -> None:
@@ -140,7 +125,6 @@ def test_inbound_channel_selection() -> None:
 
 
 def test_inbound_enriched_from_hubspot(db_session) -> None:
-    session, engine = db_session
     llm = _mock_llm()
 
     mock_hs = MagicMock()
@@ -161,7 +145,7 @@ def test_inbound_enriched_from_hubspot(db_session) -> None:
         DealDTO(id="d1", name="Acme Deal", stage="negotiation", amount="50000"),
     ]
 
-    with patch("src.agents.inbound.SessionLocal", return_value=session):
+    with patch("src.agents.inbound.SessionLocal", return_value=db_session):
         agent = InboundAgent(llm=llm, hubspot=mock_hs)
         result = agent.handle({
             "object_id": "hs-999",
@@ -179,5 +163,5 @@ def test_inbound_enriched_from_hubspot(db_session) -> None:
     assert "Previous email" in classify_vars["enrichment_context"]
     assert "Acme Deal" in classify_vars["enrichment_context"]
 
-    contacts = session.query(Contact).all()
+    contacts = db_session.query(Contact).all()
     assert contacts[0].normalized_email == "enriched@acme.co.kr"

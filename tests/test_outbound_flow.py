@@ -6,8 +6,6 @@ from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
 
 import pytest
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
 
 from src.agents.outbound.agent import (
     DraftEmailResult,
@@ -15,18 +13,7 @@ from src.agents.outbound.agent import (
     OutboundAgent,
 )
 from src.agents.outbound.sources.base import ProspectCandidate
-from src.db.base import Base
 from src.db.models import Message, Prospect
-
-
-@pytest.fixture()
-def db_session():
-    engine = create_engine("sqlite:///:memory:")
-    Base.metadata.create_all(engine)
-    Session = sessionmaker(bind=engine, expire_on_commit=False)
-    session = Session()
-    yield session, Session
-    session.close()
 
 
 def _stub_source(candidates: list[ProspectCandidate]):
@@ -57,9 +44,7 @@ def _mock_llm():
     return llm
 
 
-def test_outbound_flow_three_candidates(db_session) -> None:
-    session, Session = db_session
-
+def test_outbound_flow_three_candidates(db_session, db_session_factory) -> None:
     existing = Prospect(
         source="manual_csv",
         normalized_email="dup@acme.com",
@@ -67,8 +52,8 @@ def test_outbound_flow_three_candidates(db_session) -> None:
         status="drafted",
         last_contacted_at=datetime.now(timezone.utc),
     )
-    session.add(existing)
-    session.commit()
+    db_session.add(existing)
+    db_session.commit()
 
     candidates = [
         ProspectCandidate(
@@ -103,7 +88,7 @@ def test_outbound_flow_three_candidates(db_session) -> None:
     source = _stub_source(candidates)
 
     with (
-        patch("src.agents.outbound.agent.SessionLocal", return_value=session),
+        patch("src.agents.outbound.agent.SessionLocal", return_value=db_session),
         patch("src.agents.outbound.agent.get_source", return_value=source),
     ):
         agent = OutboundAgent(llm=llm)
@@ -113,7 +98,7 @@ def test_outbound_flow_three_candidates(db_session) -> None:
     assert stats["skipped_lowscore"] == 1
     assert stats["drafted"] == 1
 
-    verify = Session()
+    verify = db_session_factory()
     all_prospects = verify.query(Prospect).all()
     new_prospects = [p for p in all_prospects if p.id != existing.id]
     assert len(new_prospects) == 3

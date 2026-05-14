@@ -6,24 +6,16 @@ from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 
 import pytest
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
 
 from src.agents.reply_check import FollowupDraft, run
-from src.db.base import Base
 from src.db.models import Contact, Conversation, Message, Prospect
 
 
 @pytest.fixture()
-def db_setup():
-    engine = create_engine("sqlite:///:memory:")
-    Base.metadata.create_all(engine)
-    Session = sessionmaker(bind=engine)
-    session = Session()
-
+def db_setup(db_session, db_session_factory):
     contact = Contact(normalized_email="test@co.kr", full_name="Test User", company="TestCo")
-    session.add(contact)
-    session.flush()
+    db_session.add(contact)
+    db_session.flush()
 
     prospect = Prospect(
         source="manual_csv",
@@ -33,8 +25,8 @@ def db_setup():
         contact_id=contact.id,
         follow_up_count=0,
     )
-    session.add(prospect)
-    session.flush()
+    db_session.add(prospect)
+    db_session.flush()
 
     conv = Conversation(
         contact_id=contact.id,
@@ -42,11 +34,10 @@ def db_setup():
         topic="outbound_opening",
         stage="initial",
     )
-    session.add(conv)
-    session.flush()
+    db_session.add(conv)
+    db_session.flush()
 
-    yield session, Session, contact, conv, prospect
-    session.close()
+    yield db_session, db_session_factory, contact, conv, prospect
 
 
 def _mock_llm():

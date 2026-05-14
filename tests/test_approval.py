@@ -5,28 +5,20 @@ from __future__ import annotations
 from unittest.mock import patch
 
 import pytest
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
 
 from src.agents.approval import approve, reject, mark_sent, ApprovalError
-from src.db.base import Base
 from src.db.models import Approval, Contact, Conversation, Message
 
 
 @pytest.fixture()
-def db_with_message():
-    engine = create_engine("sqlite:///:memory:")
-    Base.metadata.create_all(engine)
-    Session = sessionmaker(bind=engine)
-    session = Session()
-
+def db_with_message(db_session, db_session_factory):
     contact = Contact(normalized_email="a@b.com", full_name="Test")
-    session.add(contact)
-    session.flush()
+    db_session.add(contact)
+    db_session.flush()
 
     conv = Conversation(contact_id=contact.id)
-    session.add(conv)
-    session.flush()
+    db_session.add(conv)
+    db_session.flush()
 
     msg = Message(
         conversation_id=conv.id,
@@ -34,11 +26,10 @@ def db_with_message():
         body="Draft body",
         status="pending_approval",
     )
-    session.add(msg)
-    session.commit()
+    db_session.add(msg)
+    db_session.commit()
 
-    yield session, Session, msg.id
-    session.close()
+    yield db_session, db_session_factory, msg.id
 
 
 def test_approve_flips_status(db_with_message) -> None:

@@ -6,54 +6,45 @@ from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
 
 import pytest
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
 
 from src.agents.report import ReportAgent
-from src.db.base import Base
 from src.db.models import Contact, Conversation, Message, Prospect
 
 
 @pytest.fixture()
-def seeded_db():
-    engine = create_engine("sqlite:///:memory:")
-    Base.metadata.create_all(engine)
-    Session = sessionmaker(bind=engine)
-    session = Session()
-
+def seeded_db(db_session):
     contact = Contact(normalized_email="a@b.com", full_name="A B")
-    session.add(contact)
-    session.flush()
+    db_session.add(contact)
+    db_session.flush()
 
     conv = Conversation(contact_id=contact.id)
-    session.add(conv)
-    session.flush()
+    db_session.add(conv)
+    db_session.flush()
 
-    session.add(Message(
+    db_session.add(Message(
         conversation_id=conv.id, direction="outbound", body="Hi",
         status="sent", sent_at=datetime.now(timezone.utc), replied=False,
     ))
-    session.add(Message(
+    db_session.add(Message(
         conversation_id=conv.id, direction="outbound", body="Follow",
         status="pending_approval", replied=False,
     ))
-    session.add(Message(
+    db_session.add(Message(
         conversation_id=conv.id, direction="inbound", body="Reply",
         status="received", replied=True,
     ))
 
-    session.add(Prospect(
+    db_session.add(Prospect(
         source="manual_csv", full_name="P1", status="drafted",
         created_at=datetime.now(timezone.utc),
     ))
-    session.add(Prospect(
+    db_session.add(Prospect(
         source="manual_csv", full_name="P2", status="skipped_lowscore",
         created_at=datetime.now(timezone.utc),
     ))
 
-    session.commit()
-    yield session
-    session.close()
+    db_session.commit()
+    return db_session
 
 
 def test_daily_report(seeded_db) -> None:
