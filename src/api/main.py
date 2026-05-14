@@ -54,6 +54,15 @@ def healthz() -> dict[str, bool]:
     return {"ok": True}
 
 
+@app.post("/internal/healthcheck")
+def internal_healthcheck() -> dict:
+    """Run live connectivity checks and return the report."""
+    from ..common.healthcheck import run_healthchecks
+
+    report = run_healthchecks()
+    return report.model_dump()
+
+
 # ---------- Request models ----------
 
 

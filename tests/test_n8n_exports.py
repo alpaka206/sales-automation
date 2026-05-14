@@ -16,6 +16,7 @@ EXPECTED_WORKFLOWS = [
     "04_approval_card.json",
     "05_daily_report.json",
     "06_weekly_report.json",
+    "07_healthcheck.json",
 ]
 
 
@@ -38,7 +39,7 @@ def test_workflow_has_name(filename: str) -> None:
     assert "name" in data
 
 
-def test_all_six_workflows_exist() -> None:
+def test_all_workflows_exist() -> None:
     for f in EXPECTED_WORKFLOWS:
         assert (N8N_DIR / f).exists(), f"Missing workflow: {f}"
 

@@ -67,15 +67,36 @@ def doctor() -> int:
         return 0
 
 
+def healthcheck() -> int:
+    """Run live connectivity checks. Returns 0 if all PASS, 1 on any FAIL."""
+    from src.common.healthcheck import run_healthchecks
+
+    report = run_healthchecks()
+
+    icons = {"PASS": "[OK]", "WARN": "[!!]", "FAIL": "[XX]"}
+
+    print("\n  Sales Automation - Health Check\n")
+    for c in report.checks:
+        icon = icons.get(c.status, "[??]")
+        latency = f" ({c.latency_ms}ms)" if c.latency_ms else ""
+        print(f"  {icon} {c.name:25s} {c.detail}{latency}")
+
+    print(f"\n  Overall: {report.overall_status}\n")
+    return 1 if report.overall_status == "FAIL" else 0
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(prog="sales", description="Sales automation CLI tools")
     sub = parser.add_subparsers(dest="command")
 
     sub.add_parser("doctor", help="Run pre-flight checklist")
+    sub.add_parser("healthcheck", help="Run live connectivity checks")
 
     args = parser.parse_args()
     if args.command == "doctor":
         sys.exit(doctor())
+    elif args.command == "healthcheck":
+        sys.exit(healthcheck())
     else:
         parser.print_help()
 
