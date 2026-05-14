@@ -47,9 +47,11 @@ def load_prompt(name: str, variables: dict[str, object] | None = None) -> str:
 
     raw = path.read_text(encoding="utf-8")
     if variables:
+
         def _sub(match: re.Match[str]) -> str:
             key = match.group(1)
             return str(variables[key]) if key in variables else match.group(0)
+
         raw = _PLACEHOLDER.sub(_sub, raw)
 
     rules = _company_rules_block()

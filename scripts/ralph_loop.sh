@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Ralph Loop — runs claude on PROMPT.md repeatedly until stopped.
+# Ralph Loop - feeds PROMPT.md to claude on every iteration.
 # Stop: Ctrl+C between iterations, or `touch .ralph_stop` at repo root.
 
 set -uo pipefail
@@ -8,7 +8,7 @@ cd "$(dirname "$0")/.."
 
 ITER=0
 SLEEP_BETWEEN="${SLEEP_BETWEEN:-10}"
-MAX_ITER="${MAX_ITER:-0}"  # 0 = forever
+MAX_ITER="${MAX_ITER:-0}"   # 0 = forever
 
 mkdir -p logs
 
@@ -25,14 +25,10 @@ while :; do
     break
   fi
 
-  claude -p "@PROMPT.md" --dangerously-skip-permissions --output-format text \
-    >> logs/ralph_stdout.log 2>> logs/ralph_stderr.log || true
-
-  if [[ "$MAX_ITER" -ne 0 && "$ITER" -ge "$MAX_ITER" ]]; then
-    echo "Reached MAX_ITER=$MAX_ITER. Exiting."
-    break
-  fi
-
-  echo "Sleeping ${SLEEP_BETWEEN}s before next iteration..."
-  sleep "$SLEEP_BETWEEN"
-done
+  # Pipe PROMPT.md into claude as stdin. Do NOT redirect stdin to /dev/null —
+  # the claude CLI exits immediately on a non-TTY empty stdin.
+  cat PROMPT.md | claude -p --dangerously-skip-permissions --output-format text \
+    >> logs/ralph_stdout.log 2>> logs/ralph_stderr.log
+  RC=$?
+  if [[ "$RC" -ne 0 ]]; then
+    echo "[iter #$ITER] claude exited with code $

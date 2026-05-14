@@ -41,7 +41,5 @@ def call_claude_cli(prompt: str, timeout: int = 180) -> str:
         raise ClaudeCLIError(f"claude CLI timed out after {timeout}s") from e
 
     if res.returncode != 0:
-        raise ClaudeCLIError(
-            f"claude CLI exited {res.returncode}. stderr={res.stderr[:500]}"
-        )
+        raise ClaudeCLIError(f"claude CLI exited {res.returncode}. stderr={res.stderr[:500]}")
     return res.stdout.strip()
