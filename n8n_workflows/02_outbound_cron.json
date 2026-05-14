@@ -22,12 +22,16 @@
             { "name": "source", "value": "manual_csv" },
             { "name": "filters", "value": "{}" }
           ]
-        }
+        },
+        "options": {}
       },
       "name": "Run Outbound manual_csv",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 3,
-      "position": [500, 200]
+      "position": [500, 200],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
     },
     {
       "parameters": {
@@ -43,12 +47,35 @@
             { "name": "source", "value": "youtube" },
             { "name": "filters", "value": "{\"query\": \"SaaS Korea\"}" }
           ]
-        }
+        },
+        "options": {}
       },
       "name": "Run Outbound youtube",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 3,
-      "position": [500, 400]
+      "position": [500, 400],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {},
+      "name": "Error Trigger",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [250, 600]
+    },
+    {
+      "parameters": {
+        "channel": "={{ $env.SLACK_ERROR_CHANNEL_ID || $env.SLACK_APPROVAL_CHANNEL_ID }}",
+        "text": "[02 Outbound Cron] 오류 발생: {{ $json.execution.error.message }}",
+        "otherOptions": {}
+      },
+      "name": "Slack Error Alert",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 1,
+      "position": [500, 600],
+      "credentials": { "slackApi": { "id": "REPLACE_ME", "name": "Slack" } }
     }
   ],
   "connections": {
@@ -59,6 +86,7 @@
           { "node": "Run Outbound youtube", "type": "main", "index": 0 }
         ]
       ]
-    }
+    },
+    "Error Trigger": { "main": [[{ "node": "Slack Error Alert", "type": "main", "index": 0 }]] }
   }
 }

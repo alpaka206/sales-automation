@@ -41,3 +41,39 @@ def test_workflow_has_name(filename: str) -> None:
 def test_all_six_workflows_exist() -> None:
     for f in EXPECTED_WORKFLOWS:
         assert (N8N_DIR / f).exists(), f"Missing workflow: {f}"
+
+
+def _load(filename: str) -> dict:
+    return json.loads((N8N_DIR / filename).read_text(encoding="utf-8"))
+
+
+def _http_nodes(data: dict) -> list[dict]:
+    return [n for n in data["nodes"] if n["type"] == "n8n-nodes-base.httpRequest"]
+
+
+@pytest.mark.parametrize("filename", EXPECTED_WORKFLOWS)
+def test_http_nodes_have_retry_config(filename: str) -> None:
+    data = _load(filename)
+    for node in _http_nodes(data):
+        assert node.get("retryOnFail") is True, (
+            f"{filename} / {node['name']}: missing retryOnFail=true"
+        )
+        assert node.get("maxTries", 0) >= 3, (
+            f"{filename} / {node['name']}: maxTries should be >= 3"
+        )
+
+
+CORE_WORKFLOWS = [
+    "01_inbound_webhook.json",
+    "02_outbound_cron.json",
+    "03_reply_check.json",
+]
+
+
+@pytest.mark.parametrize("filename", CORE_WORKFLOWS)
+def test_core_workflows_have_error_trigger(filename: str) -> None:
+    data = _load(filename)
+    error_triggers = [n for n in data["nodes"] if n["type"] == "n8n-nodes-base.errorTrigger"]
+    assert len(error_triggers) >= 1, f"{filename}: missing errorTrigger node"
+    slack_alerts = [n for n in data["nodes"] if "Slack Error" in n.get("name", "")]
+    assert len(slack_alerts) >= 1, f"{filename}: missing Slack Error Alert node"

@@ -33,14 +33,15 @@
             { "name": "occurred_at", "value": "={{ $json.occurred_at }}" }
           ]
         },
-        "options": {
-          "retry": { "maxTries": 3, "waitBetweenTries": 5000 }
-        }
+        "options": {}
       },
       "name": "Call BE Inbound",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 3,
-      "position": [500, 300]
+      "position": [500, 300],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
     },
     {
       "parameters": { "respondWith": "json", "responseBody": "={{ $json }}" },
@@ -48,10 +49,30 @@
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1,
       "position": [750, 300]
+    },
+    {
+      "parameters": {},
+      "name": "Error Trigger",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [250, 550]
+    },
+    {
+      "parameters": {
+        "channel": "={{ $env.SLACK_ERROR_CHANNEL_ID || $env.SLACK_APPROVAL_CHANNEL_ID }}",
+        "text": "[01 Inbound Webhook] 오류 발생: {{ $json.execution.error.message }}",
+        "otherOptions": {}
+      },
+      "name": "Slack Error Alert",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 1,
+      "position": [500, 550],
+      "credentials": { "slackApi": { "id": "REPLACE_ME", "name": "Slack" } }
     }
   ],
   "connections": {
     "HubSpot Webhook": { "main": [[{ "node": "Call BE Inbound", "type": "main", "index": 0 }]] },
-    "Call BE Inbound": { "main": [[{ "node": "Respond", "type": "main", "index": 0 }]] }
+    "Call BE Inbound": { "main": [[{ "node": "Respond", "type": "main", "index": 0 }]] },
+    "Error Trigger": { "main": [[{ "node": "Slack Error Alert", "type": "main", "index": 0 }]] }
   }
 }

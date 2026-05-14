@@ -15,15 +15,39 @@
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [{ "name": "X-Internal-Token", "value": "={{ $env.INTERNAL_API_TOKEN }}" }]
-        }
+        },
+        "options": {}
       },
       "name": "Call Reply Check",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 3,
-      "position": [500, 300]
+      "position": [500, 300],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {},
+      "name": "Error Trigger",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [250, 550]
+    },
+    {
+      "parameters": {
+        "channel": "={{ $env.SLACK_ERROR_CHANNEL_ID || $env.SLACK_APPROVAL_CHANNEL_ID }}",
+        "text": "[03 Reply Check] 오류 발생: {{ $json.execution.error.message }}",
+        "otherOptions": {}
+      },
+      "name": "Slack Error Alert",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 1,
+      "position": [500, 550],
+      "credentials": { "slackApi": { "id": "REPLACE_ME", "name": "Slack" } }
     }
   ],
   "connections": {
-    "Hourly": { "main": [[{ "node": "Call Reply Check", "type": "main", "index": 0 }]] }
+    "Hourly": { "main": [[{ "node": "Call Reply Check", "type": "main", "index": 0 }]] },
+    "Error Trigger": { "main": [[{ "node": "Slack Error Alert", "type": "main", "index": 0 }]] }
   }
 }
