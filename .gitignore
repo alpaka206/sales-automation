@@ -53,3 +53,6 @@ node_modules/
 # Ralph loop scratch
 BLOCKER.md
 .ralph_lock
+
+# HubSpot config file
+hubspot.config.yml

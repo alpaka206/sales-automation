@@ -103,8 +103,13 @@ async def test_list_contact_engagements(client: HubSpotClient) -> None:
 
 
 def test_no_token_raises() -> None:
-    with pytest.raises(HubSpotNotConfigured):
-        HubSpotClient(token="")
+    from unittest.mock import patch
+
+    # Mock settings so the test is independent of whatever the dev's .env contains.
+    with patch("src.integrations.hubspot.settings") as mock_settings:
+        mock_settings.HUBSPOT_PRIVATE_APP_TOKEN = ""
+        with pytest.raises(HubSpotNotConfigured):
+            HubSpotClient(token="")
 
 
 def test_no_token_from_settings_raises() -> None:
