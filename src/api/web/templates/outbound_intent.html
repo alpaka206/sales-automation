@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block title %}인텐트 #{{ intent.id }} — Sales Automation{% endblock %}
+{% block content %}
+
+<div class="mb-6">
+  <a href="/outbound/new" class="text-sm text-blue-600 hover:underline">&larr; 아웃바운드 발굴</a>
+</div>
+
+<div class="bg-white rounded-lg shadow-sm border p-6 max-w-2xl">
+  <h1 class="text-lg font-bold text-gray-800 mb-4">인텐트 #{{ intent.id }}</h1>
+
+  <dl class="space-y-3 text-sm">
+    <div class="flex justify-between">
+      <dt class="text-gray-500">검색어</dt>
+      <dd class="text-gray-800">{{ intent.user_query }}</dd>
+    </div>
+    <div class="flex justify-between">
+      <dt class="text-gray-500">라우팅 소스</dt>
+      <dd class="text-gray-800">{{ intent.routed_source }}</dd>
+    </div>
+    <div class="flex justify-between">
+      <dt class="text-gray-500">필터</dt>
+      <dd class="text-gray-800">{{ intent.routed_filters }}</dd>
+    </div>
+    <div class="flex justify-between">
+      <dt class="text-gray-500">신뢰도</dt>
+      <dd class="text-gray-800">{{ "%.0f"|format(intent.confidence * 100) }}%</dd>
+    </div>
+    <div class="flex justify-between">
+      <dt class="text-gray-500">상태</dt>
+      <dd>
+        <span class="inline-block px-2 py-0.5 rounded text-xs font-medium
+          {% if intent.status == 'dispatched' %}bg-green-100 text-green-700
+          {% elif intent.status == 'pending_user_input' %}bg-yellow-100 text-yellow-700
+          {% elif intent.status == 'failed' %}bg-red-100 text-red-700
+          {% else %}bg-gray-100 text-gray-700{% endif %}">
+          {{ intent.status }}
+        </span>
+      </dd>
+    </div>
+    <div class="flex justify-between">
+      <dt class="text-gray-500">생성</dt>
+      <dd class="text-gray-800">{{ intent.created_at.strftime('%Y-%m-%d %H:%M') }}</dd>
+    </div>
+  </dl>
+
+  {% if intent.status == 'dispatched' %}
+  <div class="mt-6">
+    <a href="/prospects?source={{ intent.routed_source }}" class="text-blue-600 text-sm hover:underline">결과 프로스펙트 보기 &rarr;</a>
+  </div>
+  {% endif %}
+</div>
+
+{% endblock %}

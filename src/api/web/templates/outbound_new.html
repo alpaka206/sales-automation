@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}아웃바운드 발굴 — Sales Automation{% endblock %}
+{% block content %}
+
+<div class="max-w-2xl">
+  <h1 class="text-xl font-bold text-gray-800 mb-2">아웃바운드 발굴</h1>
+  <p class="text-sm text-gray-500 mb-6">자연어로 발굴 대상을 설명하세요. AI가 적절한 소스를 선택하고 프로스펙트를 찾습니다.</p>
+
+  <div class="bg-white rounded-lg shadow-sm border p-6">
+    <form id="intent-form">
+      <div class="mb-4">
+        <label class="block text-xs text-gray-500 mb-1">검색 내용</label>
+        <textarea name="query" rows="3"
+                  class="w-full border rounded px-3 py-2 text-sm"
+                  placeholder="예: SaaS 스타트업 마케팅 담당자, 유튜브에서 CRM 관련 영상 올리는 채널 운영자"></textarea>
+      </div>
+
+      <button type="button"
+              hx-post="/outbound/run-intent" hx-include="#intent-form"
+              hx-target="#result" hx-swap="innerHTML"
+              hx-indicator="#spinner"
+              class="bg-blue-600 text-white px-4 py-2 rounded text-sm hover:bg-blue-700">
+        발굴 시작
+      </button>
+      <span id="spinner" class="htmx-indicator ml-2 text-sm text-gray-400">처리 중...</span>
+    </form>
+
+    <div id="result" class="mt-4"></div>
+  </div>
+
+  <div class="mt-6">
+    <a href="/prospects" class="text-sm text-blue-600 hover:underline">프로스펙트 목록 보기 &rarr;</a>
+  </div>
+</div>
+
+{% endblock %}
