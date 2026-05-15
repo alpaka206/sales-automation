@@ -56,6 +56,11 @@ class Settings(BaseSettings):
     REPORT_SLACK_CHANNEL_ID: str = ""
     REPORT_EMAIL_TO: str = ""
 
+    # ----- Gmail IMAP (reply detection for SMTP-sent mail) -----
+    GMAIL_IMAP_USERNAME: str = ""
+    GMAIL_IMAP_PASSWORD: str = ""
+    GMAIL_IMAP_FOLDER: str = "INBOX"
+
     # ----- Sources -----
     YOUTUBE_API_KEY: str = ""
     GOOGLE_CSE_API_KEY: str = ""

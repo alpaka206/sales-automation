@@ -10,6 +10,7 @@ from pydantic import BaseModel
 from ..common.config import settings
 from ..db.models import Conversation, Message, Prospect
 from ..db.session import SessionLocal
+from ..integrations.gmail_imap import IMAPClient, IMAPNotConfigured
 from ..llm.client import LLMClient
 from ._notify import notify_approval
 from .outbound.status import ProspectStatus, transition, InvalidStatusTransition
@@ -68,7 +69,7 @@ def run(llm: LLMClient | None = None) -> dict:
 
 
 def _check_reply(session, msg: Message, conv: Conversation) -> bool:
-    """Check if we received a reply. Returns True if reply detected."""
+    """Check if we received a reply via DB records or IMAP."""
     incoming = (
         session.query(Message)
         .filter(
@@ -80,17 +81,78 @@ def _check_reply(session, msg: Message, conv: Conversation) -> bool:
     )
 
     if incoming:
-        msg.replied = True
-        conv.last_incoming_at = incoming.created_at
-        conv.stage = "replied"
-        if conv.prospect_id:
-            try:
-                transition(session, conv.prospect_id, ProspectStatus.REPLIED, reason="reply_detected")
-            except (InvalidStatusTransition, ValueError):
-                pass
-        return True
+        return _mark_replied(session, msg, conv, incoming.created_at)
+
+    if msg.smtp_message_id and settings.EMAIL_PROVIDER == "smtp":
+        if _check_imap_reply(session, msg, conv):
+            return True
 
     return False
+
+
+def _check_imap_reply(session, msg: Message, conv: Conversation) -> bool:
+    """Check Gmail IMAP for replies to a specific outbound message."""
+    try:
+        client = IMAPClient()
+    except IMAPNotConfigured:
+        return False
+
+    if not msg.sent_at:
+        return False
+
+    replies = client.fetch_replies(since_dt=_as_utc(msg.sent_at))
+
+    for reply in replies:
+        if _matches_reply(msg, reply):
+            incoming = Message(
+                conversation_id=conv.id,
+                direction="inbound",
+                channel="email",
+                from_address=reply["from_addr"],
+                to_address=settings.SMTP_FROM_EMAIL,
+                subject=reply["subject"],
+                body=reply["body_snippet"],
+                in_reply_to=reply.get("in_reply_to", ""),
+                status="received",
+            )
+            session.add(incoming)
+            session.flush()
+            return _mark_replied(session, msg, conv, incoming.created_at)
+
+    return False
+
+
+def _matches_reply(outbound: Message, imap_msg: dict) -> bool:
+    """Check if an IMAP message is a reply to our outbound message."""
+    if outbound.smtp_message_id:
+        in_reply_to = imap_msg.get("in_reply_to", "")
+        if outbound.smtp_message_id in in_reply_to:
+            return True
+        references = imap_msg.get("references", "")
+        if outbound.smtp_message_id in references:
+            return True
+
+    if outbound.to_address and imap_msg.get("from_addr"):
+        if outbound.to_address.lower() == imap_msg["from_addr"].lower():
+            received_at = imap_msg.get("received_at")
+            if received_at and outbound.sent_at:
+                if received_at > _as_utc(outbound.sent_at):
+                    return True
+
+    return False
+
+
+def _mark_replied(session, msg: Message, conv: Conversation, reply_time: datetime) -> bool:
+    """Mark a message as replied and update conversation state."""
+    msg.replied = True
+    conv.last_incoming_at = reply_time
+    conv.stage = "replied"
+    if conv.prospect_id:
+        try:
+            transition(session, conv.prospect_id, ProspectStatus.REPLIED, reason="reply_detected")
+        except (InvalidStatusTransition, ValueError):
+            pass
+    return True
 
 
 def _should_followup(session, msg: Message, conv: Conversation) -> bool:

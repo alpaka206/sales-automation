@@ -7,10 +7,16 @@ from sqlalchemy import Engine, text
 
 def up(engine: Engine) -> None:
     """Create the outbound_intents table."""
+    dialect = engine.dialect.name
+    if dialect == "sqlite":
+        pk = "INTEGER PRIMARY KEY AUTOINCREMENT"
+    else:
+        pk = "SERIAL PRIMARY KEY"
+
     with engine.begin() as conn:
-        conn.execute(text("""
+        conn.execute(text(f"""
             CREATE TABLE IF NOT EXISTS outbound_intents (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                id {pk},
                 user_query TEXT NOT NULL,
                 routed_source TEXT NOT NULL,
                 routed_filters JSON,

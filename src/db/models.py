@@ -102,6 +102,8 @@ class Message(Base):
     approved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     sent_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     replied: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    smtp_message_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    in_reply_to: Mapped[str | None] = mapped_column(String, nullable=True)
     hubspot_engagement_id: Mapped[str | None] = mapped_column(String, nullable=True)
     scheduled_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     whatsapp_attempted: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
