@@ -170,6 +170,20 @@ class KnowledgeDocument(Base):
     )
 
 
+class OutboundIntent(Base):
+    """Stores natural-language queries routed to outbound sources."""
+
+    __tablename__ = "outbound_intents"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_query: Mapped[str] = mapped_column(Text, nullable=False)
+    routed_source: Mapped[str] = mapped_column(String, nullable=False)
+    routed_filters: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    confidence: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    status: Mapped[str] = mapped_column(String, nullable=False, default="pending_user_input")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+
+
 class LLMUsage(Base):
     __tablename__ = "llm_usage"
 

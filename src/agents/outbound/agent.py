@@ -47,6 +47,12 @@ class OutboundAgent:
     def __init__(self, llm: LLMClient | None = None) -> None:
         self.llm = llm or LLMClient()
 
+    def run_from_natural_query(self, user_query: str) -> dict:
+        """Route a natural-language query to a source and run (or park for user input)."""
+        from .dispatcher import dispatch_natural_query
+
+        return dispatch_natural_query(self.llm, user_query)
+
     def run(self, source: str, filters: dict | None = None) -> dict:
         """Run the outbound pipeline. Returns summary stats."""
         src = get_source(source)
