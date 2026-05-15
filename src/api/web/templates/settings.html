@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+{% block title %}설정 — Sales Automation{% endblock %}
+{% block content %}
+
+{% if not claude_cli_ok %}
+<div class="bg-red-600 text-white px-4 py-3 rounded-lg mb-6 text-sm font-medium">
+  Claude CLI 로그인이 만료되었거나 설치되지 않았습니다. 터미널에서 <code class="bg-red-700 px-1 rounded">claude /login</code> 을 실행하세요.
+</div>
+{% endif %}
+
+<h1 class="text-xl font-bold text-gray-800 mb-6">설정</h1>
+
+<div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+  {# Health checks #}
+  <div class="bg-white rounded-lg shadow-sm border p-5">
+    <div class="flex items-center justify-between mb-4">
+      <h2 class="text-sm font-semibold text-gray-600">시스템 상태</h2>
+      <button type="button"
+              hx-post="/settings/refresh-healthcheck"
+              hx-target="#hc-body" hx-swap="innerHTML"
+              class="text-xs text-blue-600 hover:underline">새로고침</button>
+    </div>
+    <div class="mb-2">
+      <span class="text-xs font-medium px-2 py-0.5 rounded
+        {% if overall_status == 'PASS' %}bg-green-100 text-green-700
+        {% elif overall_status == 'WARN' %}bg-yellow-100 text-yellow-700
+        {% else %}bg-red-100 text-red-700{% endif %}">
+        {{ overall_status }}
+      </span>
+    </div>
+    <table class="w-full text-sm">
+      <thead>
+        <tr class="text-left text-xs text-gray-500 border-b">
+          <th class="px-4 py-2">항목</th>
+          <th class="px-4 py-2">상태</th>
+          <th class="px-4 py-2">상세</th>
+          <th class="px-4 py-2">지연</th>
+        </tr>
+      </thead>
+      <tbody id="hc-body">
+        {% for c in checks %}
+        <tr class="border-b">
+          <td class="px-4 py-2 text-sm">{{ c.name }}</td>
+          <td class="px-4 py-2">
+            <span class="text-xs font-medium px-2 py-0.5 rounded
+              {% if c.status == 'PASS' %}bg-green-100 text-green-700
+              {% elif c.status == 'WARN' %}bg-yellow-100 text-yellow-700
+              {% else %}bg-red-100 text-red-700{% endif %}">
+              {{ c.status }}
+            </span>
+          </td>
+          <td class="px-4 py-2 text-xs text-gray-500">{{ c.detail }}</td>
+          <td class="px-4 py-2 text-xs text-gray-400">{{ c.latency_ms }}ms</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  {# LLM usage #}
+  <div class="bg-white rounded-lg shadow-sm border p-5">
+    <h2 class="text-sm font-semibold text-gray-600 mb-4">LLM 사용량</h2>
+    <div class="grid grid-cols-2 gap-4">
+      <div>
+        <div class="text-2xl font-bold text-gray-800">{{ today_llm }}</div>
+        <div class="text-xs text-gray-500 mt-1">오늘 호출</div>
+      </div>
+      <div>
+        <div class="text-2xl font-bold text-gray-800">{{ week_llm }}</div>
+        <div class="text-xs text-gray-500 mt-1">이번 주 호출</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+{# Environment variables #}
+<div class="bg-white rounded-lg shadow-sm border p-5 mt-6">
+  <h2 class="text-sm font-semibold text-gray-600 mb-4">환경변수</h2>
+  <div class="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-1">
+    {% for ev in env_vars %}
+    <div class="flex justify-between text-sm py-1 border-b border-gray-50">
+      <span class="text-gray-600 font-mono text-xs">{{ ev.name }}</span>
+      <span class="text-gray-400 font-mono text-xs">{{ ev.value }}</span>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+
+{% endblock %}
