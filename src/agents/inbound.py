@@ -13,6 +13,7 @@ from ..db.models import Contact, Conversation, Message
 from ..db.session import SessionLocal
 from ..integrations.hubspot import HubSpotClient, HubSpotNotConfigured
 from ..llm.client import LLMClient
+from ..llm.knowledge import load_relevant_docs
 from ._notify import notify_approval
 
 logger = logging.getLogger(__name__)
@@ -249,6 +250,7 @@ class InboundAgent:
                 "language": "ko" if contact_info.get("country", "").lower() in _TARGET_COUNTRIES else "en",
                 "last_message": contact_info["last_message"],
                 "enrichment_context": _build_enrichment_context(contact_info),
+                "knowledge_docs": load_relevant_docs(classification.category),
             },
             schema=DraftResult,
         )

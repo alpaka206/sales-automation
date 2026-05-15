@@ -16,6 +16,7 @@ from src.agents.inbound import (
 )
 from src.db.models import Contact, Conversation, Message
 from src.integrations.hubspot import ContactDTO, EngagementDTO, DealDTO
+from src.llm import knowledge
 
 
 @pytest.fixture(autouse=True)
@@ -23,6 +24,17 @@ def _clear_dedup():
     _processed.clear()
     yield
     _processed.clear()
+
+
+@pytest.fixture(autouse=True)
+def _isolated_knowledge_base(tmp_path, monkeypatch):
+    """Keep tests independent from the repo's knowledge_base/ contents."""
+    empty = tmp_path / "kb_empty"
+    empty.mkdir()
+    monkeypatch.setattr(knowledge, "KNOWLEDGE_DIR", empty)
+    knowledge.reset_cache()
+    yield empty
+    knowledge.reset_cache()
 
 
 def _mock_llm():
@@ -165,3 +177,74 @@ def test_inbound_enriched_from_hubspot(db_session) -> None:
 
     contacts = db_session.query(Contact).all()
     assert contacts[0].normalized_email == "enriched@acme.co.kr"
+
+
+def test_inbound_passes_knowledge_docs_to_draft(db_session, tmp_path, monkeypatch) -> None:
+    """When classification matches a knowledge_base doc, its body must reach the draft prompt."""
+    kb = tmp_path / "kb_with_doc"
+    kb.mkdir()
+    (kb / "pricing.md").write_text(
+        "---\ntitle: Plans\ncategories: [purchase_inquiry]\n---\n\nStarter plan starts at 99k KRW.\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(knowledge, "KNOWLEDGE_DIR", kb)
+    knowledge.reset_cache()
+
+    llm = _mock_llm()
+    with patch("src.agents.inbound.SessionLocal", return_value=db_session):
+        agent = InboundAgent(llm=llm, hubspot=None)
+        agent.handle({
+            "object_id": "hs-kb-1",
+            "occurred_at": "2026-05-14T13:00:00Z",
+            "email": "kb@acme.co.kr",
+            "full_name": "KB Tester",
+            "last_message": "What plans do you offer?",
+        })
+
+    draft_call = next(
+        c for c in llm.complete.call_args_list if "draft_reply" in c[0][0]
+    )
+    draft_vars = draft_call[0][1]
+    assert "knowledge_docs" in draft_vars
+    assert "Plans" in draft_vars["knowledge_docs"]
+    assert "Starter plan starts at 99k KRW." in draft_vars["knowledge_docs"]
+
+
+def test_inbound_omits_knowledge_for_spam(db_session, tmp_path, monkeypatch) -> None:
+    """Spam classification must not pull any knowledge docs into the draft prompt."""
+    kb = tmp_path / "kb_spam"
+    kb.mkdir()
+    (kb / "general.md").write_text(
+        "---\ncategories: [all]\n---\n\nAlways-on company info.\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(knowledge, "KNOWLEDGE_DIR", kb)
+    knowledge.reset_cache()
+
+    llm = MagicMock()
+
+    def side_effect(prompt_name, variables=None, schema=None, **kw):
+        if "classify" in prompt_name:
+            return ClassifyResult(category="spam", reasoning="Junk")
+        if "score_adjust" in prompt_name:
+            return ScoreAdjustResult(adjustment=-50, reasoning="spam")
+        if "draft_reply" in prompt_name:
+            return DraftResult(subject="", body="", language="en")
+        return "ok"
+
+    llm.complete = MagicMock(side_effect=side_effect)
+
+    with patch("src.agents.inbound.SessionLocal", return_value=db_session):
+        agent = InboundAgent(llm=llm, hubspot=None)
+        agent.handle({
+            "object_id": "hs-spam-1",
+            "occurred_at": "2026-05-14T14:00:00Z",
+            "email": "spam@example.com",
+            "full_name": "Spammer",
+            "last_message": "BUY VIAGRA CHEAP",
+        })
+
+    draft_call = next(
+        c for c in llm.complete.call_args_list if "draft_reply" in c[0][0]
+    )
+    assert draft_call[0][1]["knowledge_docs"] == ""

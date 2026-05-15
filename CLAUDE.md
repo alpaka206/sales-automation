@@ -41,6 +41,7 @@ sales-automation/
 ├── todo/                  # ordered list of fine-grained tasks to do next
 ├── done/                  # finished todos (kept for history)
 ├── company_rules/         # business / brand / tone rules (markdown)
+├── knowledge_base/        # product facts (pricing, policies, FAQ) — selected by category
 ├── src/
 │   ├── api/               # FastAPI app and routes
 │   ├── agents/            # inbound / outbound / report orchestration
@@ -120,4 +121,5 @@ This project must run end-to-end on a developer laptop with no paid services. Cl
 - New prospect source (e.g. Crunchbase) → `src/integrations/<source>.py` + `src/agents/outbound/source_registry.py` entry.
 - New prompt → `src/llm/prompts/<area>/<name>.md` + reference in code with `load_prompt("<area>/<name>")`.
 - New rule that affects message tone → `company_rules/<n>_<topic>.md`, then the prompt template includes it automatically.
+- New factual reference doc (pricing, policy, FAQ, product info) → `knowledge_base/<name>.md` with frontmatter `categories: [<inbound categories>]` or `[all]`. The inbound agent loads matching docs into the `draft_reply` prompt via `src/llm/knowledge.py:load_relevant_docs`.
 - New DB field → SQLAlchemy model in `src/db/models.py`, migration in `src/db/migrations/`.
