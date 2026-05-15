@@ -84,7 +84,9 @@ class Settings(BaseSettings):
     # ----- Behavior knobs -----
     AUTO_SEND_THRESHOLD: float = 1.01  # >1.0 => never auto-send
     OUTBOUND_COOLDOWN_DAYS: int = 90
-    FOLLOWUP_AFTER_DAYS: int = 4
+    FOLLOWUP_AFTER_DAYS: int = 7
+    FOLLOWUP_AUTO_SEND: bool = False
+    MAX_FOLLOWUPS_PER_PROSPECT: int = 2
     ICP_THRESHOLD: int = 50
     DAILY_REPORT_HOUR: int = 18
     WEEKLY_REPORT_DOW: int = 5  # 0=Mon, 5=Sat

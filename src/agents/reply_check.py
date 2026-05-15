@@ -166,7 +166,7 @@ def _should_followup(session, msg: Message, conv: Conversation) -> bool:
 
     prospect = session.get(Prospect, conv.prospect_id) if conv.prospect_id else None
     followup_count = prospect.follow_up_count if prospect else 0
-    return followup_count < 2
+    return followup_count < settings.MAX_FOLLOWUPS_PER_PROSPECT
 
 
 def _draft_followup(session, original: Message, conv: Conversation, llm: LLMClient) -> None:
@@ -195,6 +195,8 @@ def _draft_followup(session, original: Message, conv: Conversation, llm: LLMClie
         schema=FollowupDraft,
     )
 
+    status = "approved" if settings.FOLLOWUP_AUTO_SEND else "pending_approval"
+
     followup = Message(
         conversation_id=conv.id,
         direction="outbound",
@@ -203,7 +205,7 @@ def _draft_followup(session, original: Message, conv: Conversation, llm: LLMClie
         subject=draft.subject,
         body=draft.body,
         language=draft.language,
-        status="pending_approval",
+        status=status,
         draft_provider=settings.LLM_PROVIDER,
     )
     session.add(followup)
