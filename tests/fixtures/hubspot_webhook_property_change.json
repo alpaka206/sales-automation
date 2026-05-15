@@ -1,0 +1,15 @@
+[
+  {
+    "eventId": 200,
+    "subscriptionId": 12346,
+    "portalId": 62515,
+    "appId": 54321,
+    "occurredAt": 1684000001000,
+    "subscriptionType": "contact.propertyChange",
+    "attemptNumber": 0,
+    "objectId": 902,
+    "propertyName": "lifecyclestage",
+    "propertyValue": "salesqualifiedlead",
+    "changeSource": "CRM"
+  }
+]

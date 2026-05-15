@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import logging
+import time
 import uuid
 from typing import Literal
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from ..agents.approval import ApprovalError, approve, mark_sent, reject
 from ..common.config import settings
@@ -33,8 +36,14 @@ async def request_id_middleware(request: Request, call_next):
 
 @app.middleware("http")
 async def auth_middleware(request: Request, call_next):
-    if request.url.path in ("/healthz", "/docs", "/openapi.json"):
+    skip_paths = ("/healthz", "/docs", "/openapi.json")
+    if request.url.path in skip_paths:
         return await call_next(request)
+
+    # HubSpot webhook uses its own signature verification inside the route handler
+    if request.url.path == "/webhook/hubspot/inbound" and settings.HUBSPOT_WEBHOOK_SECRET:
+        return await call_next(request)
+
     if not settings.INTERNAL_API_TOKEN:
         return JSONResponse(
             status_code=503,
@@ -66,7 +75,20 @@ def internal_healthcheck() -> dict:
 # ---------- Request models ----------
 
 
+class HubSpotWebhookEvent(BaseModel):
+    """Single event from a HubSpot webhook payload."""
+
+    subscriptionType: str
+    objectId: int
+    occurredAt: int | None = None
+    eventId: int | None = None
+    propertyName: str | None = None
+    propertyValue: str | None = None
+
+
 class InboundWebhookBody(BaseModel):
+    """Legacy internal format — kept for backward compatibility."""
+
     event_type: str
     object_id: str
     occurred_at: str | None = None
@@ -87,13 +109,109 @@ class ApprovalBody(BaseModel):
 # ---------- Agent routes ----------
 
 
+_HUBSPOT_SUBSCRIPTION_MAP: dict[str, str] = {
+    "contact.creation": "contact.creation",
+}
+
+_SIGNATURE_MAX_AGE_SECONDS = 300
+
+
+def _verify_hubspot_signature(request_method: str, request_uri: str, body: bytes, headers: dict[str, str]) -> None:
+    """Verify HubSpot v3 webhook signature. Raises HTTPException(401) on failure."""
+    secret = settings.HUBSPOT_WEBHOOK_SECRET
+    if not secret:
+        return
+
+    signature = headers.get("x-hubspot-signature-v3", "")
+    timestamp = headers.get("x-hubspot-request-timestamp", "")
+
+    if not signature or not timestamp:
+        raise HTTPException(status_code=401, detail="missing HubSpot signature headers")
+
+    try:
+        ts = int(timestamp)
+    except ValueError:
+        raise HTTPException(status_code=401, detail="invalid timestamp")
+
+    if abs(time.time() * 1000 - ts) > _SIGNATURE_MAX_AGE_SECONDS * 1000:
+        raise HTTPException(status_code=401, detail="request timestamp too old")
+
+    # HubSpot v3: HMAC-SHA256(secret, requestMethod + requestUri + requestBody + timestamp)
+    message = f"{request_method}{request_uri}{body.decode('utf-8')}{timestamp}"
+    expected = hmac.new(secret.encode(), message.encode(), hashlib.sha256).hexdigest()
+
+    if not hmac.compare_digest(expected, signature):
+        raise HTTPException(status_code=401, detail="invalid signature")
+
+
+def _map_hubspot_event(event: HubSpotWebhookEvent) -> str | None:
+    """Map HubSpot subscriptionType to internal event_type. Returns None for ignored types."""
+    sub = event.subscriptionType
+    if sub == "contact.propertyChange" and event.propertyName == "lifecyclestage":
+        return "lifecycle_change"
+    return _HUBSPOT_SUBSCRIPTION_MAP.get(sub)
+
+
 @app.post("/webhook/hubspot/inbound")
-def webhook_hubspot_inbound(body: InboundWebhookBody) -> dict:
+async def webhook_hubspot_inbound(request: Request) -> dict:
+    """Accept HubSpot webhook payload (array or single object) and process each event."""
+    raw_body = await request.body()
+    headers = {k.lower(): v for k, v in request.headers.items()}
+
+    _verify_hubspot_signature(
+        request_method="POST",
+        request_uri=str(request.url),
+        body=raw_body,
+        headers=headers,
+    )
+
+    import json
+
+    try:
+        payload = json.loads(raw_body)
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="invalid JSON")
+
+    # Accept both single object and array
+    if isinstance(payload, dict):
+        events_raw = [payload]
+    elif isinstance(payload, list):
+        events_raw = payload
+    else:
+        raise HTTPException(status_code=400, detail="expected object or array")
+
+    # Detect format: HubSpot native (has subscriptionType) vs legacy internal (has event_type)
     from ..agents.inbound import InboundAgent
 
     agent = InboundAgent()
-    agent.handle(body.model_dump())
-    return {"status": "accepted"}
+    results = []
+
+    for item in events_raw:
+        try:
+            if "subscriptionType" in item:
+                event = HubSpotWebhookEvent(**item)
+                event_type = _map_hubspot_event(event)
+                if event_type is None:
+                    logger.info("Ignoring HubSpot event: %s", event.subscriptionType)
+                    results.append({"objectId": event.objectId, "status": "ignored"})
+                    continue
+
+                internal = {
+                    "event_type": event_type,
+                    "object_id": str(event.objectId),
+                    "occurred_at": str(event.occurredAt) if event.occurredAt else None,
+                }
+            else:
+                body = InboundWebhookBody(**item)
+                internal = body.model_dump()
+
+            result = agent.handle(internal)
+            results.append({"object_id": internal["object_id"], "status": "processed", **(result or {})})
+        except Exception:
+            logger.exception("Error processing webhook event: %s", item)
+            results.append({"object_id": item.get("objectId", item.get("object_id")), "status": "error"})
+
+    return {"status": "accepted", "results": results}
 
 
 @app.post("/run/outbound")

@@ -28,6 +28,7 @@ class Settings(BaseSettings):
     HUBSPOT_PRIVATE_APP_TOKEN: str = ""
     HUBSPOT_INBOUND_PIPELINE_ID: str = ""
     HUBSPOT_OWNER_ID: str = ""
+    HUBSPOT_WEBHOOK_SECRET: str = ""
 
     # ----- Email -----
     EMAIL_PROVIDER: Literal["hubspot", "smtp"] = "hubspot"

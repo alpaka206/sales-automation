@@ -51,6 +51,7 @@ def test_webhook_inbound(mock_handle, client: TestClient) -> None:
     )
     assert r.status_code == 200
     assert r.json()["status"] == "accepted"
+    mock_handle.assert_called_once()
 
 
 def test_approve_nonexistent_message_returns_400(client: TestClient) -> None:

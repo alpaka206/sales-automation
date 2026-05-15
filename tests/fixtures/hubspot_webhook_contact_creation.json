@@ -1,0 +1,14 @@
+[
+  {
+    "eventId": 100,
+    "subscriptionId": 12345,
+    "portalId": 62515,
+    "appId": 54321,
+    "occurredAt": 1684000000000,
+    "subscriptionType": "contact.creation",
+    "attemptNumber": 0,
+    "objectId": 901,
+    "changeSource": "CRM",
+    "changeFlag": "NEW"
+  }
+]
