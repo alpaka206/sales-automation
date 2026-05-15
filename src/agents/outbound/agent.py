@@ -14,6 +14,7 @@ from ...db.models import Contact, Conversation, Message, Prospect
 from ...db.session import SessionLocal
 from ...llm.client import LLMClient
 from ...llm.prompts import PROMPTS_DIR
+from ..scheduler import compute_next_send_time
 from .enrichment import enrich_prospect
 from .source_registry import get_source
 from .sources.base import ProspectCandidate
@@ -221,6 +222,9 @@ class OutboundAgent:
         session.add(conv)
         session.flush()
 
+        country = candidate.country or "default"
+        scheduled_at = compute_next_send_time(country)
+
         msg = Message(
             conversation_id=conv.id,
             direction="outbound",
@@ -232,6 +236,7 @@ class OutboundAgent:
             status="pending_approval",
             score_snapshot=score,
             draft_provider=settings.LLM_PROVIDER,
+            scheduled_at=scheduled_at,
         )
         session.add(msg)
         session.flush()
