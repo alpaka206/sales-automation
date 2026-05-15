@@ -57,7 +57,7 @@ async def request_id_middleware(request: Request, call_next):
 
 
 _API_SKIP_PATHS = ("/healthz", "/docs", "/openapi.json")
-_WEB_UI_PREFIXES = ("/", "/messages", "/knowledge", "/outbound", "/settings")
+_WEB_UI_PREFIXES = ("/", "/messages", "/knowledge", "/outbound", "/settings", "/icp-rules")
 _LOCALHOST_HOSTS = ("127.0.0.1", "::1", "localhost")
 
 

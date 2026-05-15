@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}ICP 룰 — Sales Automation{% endblock %}
+{% block content %}
+
+<div class="mb-6">
+  <h1 class="text-xl font-bold text-gray-800">ICP 점수 룰 (소스별)</h1>
+  <p class="text-sm text-gray-500 mt-1">각 소스별로 ICP 점수 산정 기준을 편집할 수 있습니다.</p>
+</div>
+
+<div class="bg-white rounded-lg shadow-sm border">
+  <table class="w-full text-sm">
+    <thead>
+      <tr class="text-left text-xs text-gray-500 border-b">
+        <th class="px-5 py-3">소스</th>
+        <th class="px-5 py-3">상태</th>
+        <th class="px-5 py-3">수정일</th>
+        <th class="px-5 py-3"></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for rule in rules %}
+      <tr class="border-b hover:bg-gray-50">
+        <td class="px-5 py-3 font-medium text-gray-800">{{ rule.source }}</td>
+        <td class="px-5 py-3">
+          {% if rule.criteria_md %}
+          <span class="inline-block px-2 py-0.5 rounded text-xs font-medium
+            {% if rule.enabled %}bg-green-100 text-green-700{% else %}bg-gray-100 text-gray-500{% endif %}">
+            {% if rule.enabled %}활성{% else %}비활성{% endif %}
+          </span>
+          {% else %}
+          <span class="text-xs text-gray-400">미설정</span>
+          {% endif %}
+        </td>
+        <td class="px-5 py-3 text-gray-400">
+          {% if rule.updated_at %}{{ rule.updated_at.strftime('%m/%d %H:%M') }}{% else %}-{% endif %}
+        </td>
+        <td class="px-5 py-3">
+          <a href="/icp-rules/{{ rule.source }}/edit" class="text-blue-600 text-xs hover:underline">편집</a>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% endblock %}

@@ -3,6 +3,11 @@ output: json
 ---
 Score this prospect against our ICP. Company rules above describe our ICP and constraints.
 
+{% if source_criteria %}
+## Source-specific scoring criteria ({{source}})
+{{source_criteria}}
+{% endif %}
+
 Prospect:
 - name: {{full_name}}
 - company: {{company}}

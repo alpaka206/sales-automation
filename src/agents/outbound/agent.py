@@ -123,7 +123,20 @@ class OutboundAgent:
         )
         return existing is not None
 
+    def _load_icp_criteria(self, source: str) -> str:
+        """Load per-source ICP criteria from DB, empty string if none or table missing."""
+        from ...db.models import ICPRule
+        from ...db.session import SessionLocal
+
+        try:
+            with SessionLocal() as session:
+                rule = session.query(ICPRule).filter_by(source=source, enabled=True).first()
+                return rule.criteria_md if rule else ""
+        except Exception:
+            return ""
+
     def _score_icp(self, candidate: ProspectCandidate) -> ICPScoreResult:
+        extra_criteria = self._load_icp_criteria(candidate.source)
         return self.llm.complete(
             "outbound/icp_score",
             {
@@ -133,6 +146,7 @@ class OutboundAgent:
                 "country": candidate.country or "",
                 "source": candidate.source,
                 "extra": str(candidate.extra),
+                "source_criteria": extra_criteria,
             },
             schema=ICPScoreResult,
         )
