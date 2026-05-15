@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import time
 from typing import TypeVar
 
@@ -31,6 +32,15 @@ T = TypeVar("T", bound=BaseModel)
 
 class LLMError(RuntimeError):
     """Raised when the LLM cannot be reached or returns unrecoverable output."""
+
+
+_FENCE_RE = re.compile(r"^\s*```(?:json|JSON)?\s*\n?(.*?)\n?```\s*$", re.DOTALL)
+
+
+def _strip_code_fences(text: str) -> str:
+    """Remove a ```json ... ``` wrapper if the model added one despite instructions."""
+    m = _FENCE_RE.match(text)
+    return m.group(1).strip() if m else text.strip()
 
 
 def _is_transient(exc: Exception) -> bool:
@@ -75,17 +85,17 @@ class LLMClient:
             return text
 
         try:
-            return schema.model_validate_json(text)
+            return schema.model_validate_json(_strip_code_fences(text))
         except ValidationError as first_err:
             logger.warning("LLM JSON parse failed once, retrying. err=%s", first_err)
             retry_prompt = (
                 prompt
                 + "\n\nYour previous response was not valid JSON matching the schema."
-                + " Return ONLY valid JSON this time."
+                + " Return ONLY valid JSON this time. NO markdown fences, NO prose around it."
             )
             text = self._dispatch(retry_prompt, max_tokens=max_tokens, system=system)
             try:
-                return schema.model_validate_json(text)
+                return schema.model_validate_json(_strip_code_fences(text))
             except ValidationError as second_err:
                 raise LLMError(f"LLM returned invalid JSON twice: {second_err}") from second_err
 

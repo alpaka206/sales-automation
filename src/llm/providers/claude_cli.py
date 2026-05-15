@@ -26,12 +26,17 @@ def call_claude_cli(prompt: str, timeout: int = 180) -> LLMResult:
     cmd = [settings.CLAUDE_CLI_PATH, "-p", prompt, "--output-format", "text"]
     logger.debug("claude_cli call, prompt_len=%d", len(prompt))
     try:
+        # Force UTF-8 on stdout/stderr. On Windows, subprocess defaults to the
+        # console codepage (cp949 on Korean locales) which crashes when Claude
+        # outputs Korean / non-ASCII characters.
         res = subprocess.run(
             cmd,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=timeout,
-            env={**os.environ, "CLAUDE_DISABLE_TELEMETRY": "1"},
+            env={**os.environ, "CLAUDE_DISABLE_TELEMETRY": "1", "PYTHONIOENCODING": "utf-8"},
         )
     except FileNotFoundError as e:
         raise ClaudeCLIError(
