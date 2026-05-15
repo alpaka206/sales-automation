@@ -152,8 +152,23 @@ def _check_hubspot() -> CheckResult:
         return CheckResult(name="hubspot_token", status="FAIL", detail=str(e)[:200], latency_ms=ms)
 
 
+_SMTP_PROVIDER_MAP = {
+    "smtp.gmail.com": "Gmail",
+    "smtp-mail.outlook.com": "Outlook",
+    "smtp-relay.brevo.com": "Brevo",
+    "smtp.sendgrid.net": "SendGrid",
+}
+
+
+def _smtp_provider_label() -> str:
+    """Return a human-readable SMTP provider name based on SMTP_HOST."""
+    host = (settings.SMTP_HOST or "").lower().strip()
+    return _SMTP_PROVIDER_MAP.get(host, host or "unknown")
+
+
 def _check_smtp() -> CheckResult:
     """Open and close SMTP connection to verify credentials."""
+    provider = _smtp_provider_label()
     start = time.monotonic()
     try:
         import smtplib
@@ -164,10 +179,10 @@ def _check_smtp() -> CheckResult:
             server.login(settings.SMTP_USERNAME, settings.SMTP_PASSWORD)
         server.quit()
         ms = int((time.monotonic() - start) * 1000)
-        return CheckResult(name="smtp_login", status="PASS", detail="OK", latency_ms=ms)
+        return CheckResult(name="smtp_login", status="PASS", detail=f"Using {provider} SMTP", latency_ms=ms)
     except Exception as e:
         ms = int((time.monotonic() - start) * 1000)
-        return CheckResult(name="smtp_login", status="FAIL", detail=str(e)[:200], latency_ms=ms)
+        return CheckResult(name="smtp_login", status="FAIL", detail=f"[{provider}] {str(e)[:180]}", latency_ms=ms)
 
 
 def _check_disk_space() -> CheckResult:
