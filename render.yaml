@@ -1,23 +1,71 @@
+# Render Blueprint — defines the FastAPI Web Service.
+#
+# Free tier notes:
+# - Free Web Service spins down after 15 minutes of inactivity. First request
+#   after sleep takes ~30 seconds. HubSpot webhook retries handle this fine.
+# - The free instance has 512 MB RAM, which is plenty.
+# - SQLite WILL NOT survive deploys here — set DATABASE_URL to a managed
+#   Postgres (Supabase / Neon) before pushing live data.
+#
+# Usage:
+# 1. Push this repo to GitHub.
+# 2. Render dashboard → New → Blueprint → connect your GitHub repo → pick `main`.
+# 3. Fill the env vars marked `sync: false` in the dashboard.
+# 4. First deploy runs the build (installs deps + applies migrations).
+
 services:
   - type: web
     name: sales-automation
-    runtime: docker
+    runtime: python
     plan: free
-    healthCheckPath: /health
+    branch: main
+    healthCheckPath: /healthz
+    autoDeploy: true
+    buildCommand: |
+      pip install --upgrade pip
+      pip install -r requirements.txt -r requirements-postgres.txt
+      python scripts/init_db.py
+    startCommand: uvicorn src.api.main:app --host 0.0.0.0 --port $PORT
     envVars:
-      - key: LLM_PROVIDER
-        value: anthropic_api
-      - key: ANTHROPIC_API_KEY
+      - key: PYTHON_VERSION
+        value: 3.11.9
+
+      # ----- Required: set these manually in the Render dashboard -----
+      - key: DATABASE_URL              # Supabase / Neon Postgres URI
         sync: false
       - key: HUBSPOT_PRIVATE_APP_TOKEN
+        sync: false
+      - key: ANTHROPIC_API_KEY
         sync: false
       - key: SLACK_BOT_TOKEN
         sync: false
       - key: SLACK_APPROVAL_CHANNEL_ID
         sync: false
+
+      # ----- Auto-generated on first deploy -----
       - key: INTERNAL_API_TOKEN
         generateValue: true
+
+      # ----- Sensible defaults (override in dashboard if needed) -----
+      - key: LLM_PROVIDER
+        value: anthropic_api          # Render can't run the `claude` CLI; use the API in cloud
+      - key: ANTHROPIC_MODEL
+        value: claude-sonnet-4-6
+      - key: EMAIL_PROVIDER
+        value: hubspot
+      - key: APPROVAL_CHANNEL
+        value: slack
+      - key: AUTO_SEND_THRESHOLD
+        value: "1.01"
+      - key: OUTBOUND_COOLDOWN_DAYS
+        value: "90"
+      - key: FOLLOWUP_AFTER_DAYS
+        value: "4"
+      - key: ICP_THRESHOLD
+        value: "50"
+      - key: TIMEZONE
+        value: Asia/Seoul
       - key: LOG_LEVEL
-        value: WARNING
-      - key: DATABASE_URL
-        value: sqlite:///./data/app.db
+        value: INFO
+      - key: APP_HOST
+        value: 0.0.0.0
