@@ -86,12 +86,27 @@ echo.
 echo --- 사전점검 ---
 python -m src.cli doctor
 
+REM --- cloudflared 확인 ---
+where cloudflared >nul 2>&1
+if errorlevel 1 (
+    echo.
+    echo [안내] cloudflared 가 설치되어 있지 않습니다.
+    echo        HubSpot 웹훅을 로컬에서 받으려면 cloudflared 터널이 필요합니다.
+    echo.
+    echo        설치: winget install Cloudflare.cloudflared
+    echo        설치 후 scripts\tunnel.bat 또는 scripts\run_with_tunnel.bat 을 사용하세요.
+) else (
+    for /f "tokens=*" %%v in ('cloudflared --version 2^>^&1') do echo [확인] %%v
+)
+
 echo.
 echo ========================================================
 echo   설정 완료!
 echo.
 echo   다음 단계: scripts\run.bat 을 실행하세요.
 echo   (FastAPI 서버가 http://127.0.0.1:8000 에서 시작됩니다)
+echo.
+echo   외부 접근이 필요하면: scripts\run_with_tunnel.bat
 echo ========================================================
 echo.
 pause
