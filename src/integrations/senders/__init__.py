@@ -85,7 +85,7 @@ async def send(message: Message) -> None:
                 session.commit()
         return
 
-    if message.to_address and message.direction == "outgoing":
+    if message.to_address and message.direction == "outbound":
         message.body = append_footer(message.body, message.to_address, message.language)
 
     # Email send — failure raises, propagating to caller

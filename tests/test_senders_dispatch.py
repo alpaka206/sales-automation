@@ -13,7 +13,7 @@ def _make_message(**overrides) -> MagicMock:
     msg = MagicMock()
     msg.id = overrides.get("id", 1)
     msg.channel = overrides.get("channel", "email")
-    msg.direction = overrides.get("direction", "outgoing")
+    msg.direction = overrides.get("direction", "outbound")
     msg.to_address = overrides.get("to_address", "to@example.com")
     msg.subject = overrides.get("subject", "Test")
     msg.body = overrides.get("body", "Hello")
