@@ -85,18 +85,98 @@ def healthcheck() -> int:
     return 1 if report.overall_status == "FAIL" else 0
 
 
+_INIT_FIELDS = [
+    ("HUBSPOT_PRIVATE_APP_TOKEN", "HubSpot Private App 토큰 (HubSpot > 설정 > 통합 > 비공개 앱)", ""),
+    ("EMAIL_PROVIDER", "이메일 발송 방식 (hubspot 또는 smtp)", "hubspot"),
+    ("SMTP_USERNAME", "SMTP 사용자명 (Gmail 주소, smtp 선택 시)", ""),
+    ("SMTP_PASSWORD", "SMTP 비밀번호 (Gmail 앱 비밀번호)", ""),
+    ("SMTP_FROM_EMAIL", "발신 이메일 주소", ""),
+    ("APPROVAL_CHANNEL", "승인 채널 (slack / teams / none)", "slack"),
+    ("SLACK_BOT_TOKEN", "Slack Bot 토큰 (xoxb-..., Slack 선택 시)", ""),
+    ("SLACK_APPROVAL_CHANNEL_ID", "Slack 승인 채널 ID (C01234...)", ""),
+    ("YOUTUBE_API_KEY", "YouTube Data API 키 (YouTube 소스 사용 시)", ""),
+]
+
+
+def init(force: bool = False) -> int:
+    """Interactive .env setup wizard."""
+    import secrets
+
+    env_path = os.path.join(os.getcwd(), ".env")
+    example_path = os.path.join(os.getcwd(), ".env.example")
+
+    if os.path.exists(env_path) and not force:
+        print("  .env 파일이 이미 존재합니다. 덮어쓰려면 --force 옵션을 사용하세요.")
+        return 0
+
+    print("\n  Sales Automation - 초기 설정\n")
+    print("  필수 항목만 입력합니다. 선택 항목은 Enter 로 건너뛰세요.\n")
+
+    values: dict[str, str] = {}
+
+    for key, desc, default in _INIT_FIELDS:
+        prompt = f"  {key}\n    {desc}"
+        if default:
+            prompt += f" [기본값: {default}]"
+        prompt += "\n    > "
+        val = input(prompt).strip()
+        values[key] = val or default
+
+    values["INTERNAL_API_TOKEN"] = secrets.token_urlsafe(32)
+    print(f"\n  INTERNAL_API_TOKEN 자동 생성: {values['INTERNAL_API_TOKEN'][:8]}...")
+
+    # Claude CLI check
+    print()
+    try:
+        res = subprocess.run(["claude", "--version"], capture_output=True, text=True, timeout=3)
+        if res.returncode == 0:
+            print(f"  [OK] Claude CLI 감지됨: {res.stdout.strip()}")
+        else:
+            print("  [!!] Claude CLI 응답 오류. 'claude /login' 실행 필요.")
+    except FileNotFoundError:
+        print("  [!!] Claude CLI 미설치.")
+        print("       https://docs.anthropic.com/claude-code 에서 설치 후 'claude /login' 실행하세요.")
+
+    # Write .env from example template
+    if os.path.exists(example_path):
+        with open(example_path, "r", encoding="utf-8") as f:
+            template = f.read()
+        for key, val in values.items():
+            import re
+            template = re.sub(
+                rf"^{key}=.*$",
+                f"{key}={val}",
+                template,
+                flags=re.MULTILINE,
+            )
+        with open(env_path, "w", encoding="utf-8") as f:
+            f.write(template)
+    else:
+        with open(env_path, "w", encoding="utf-8") as f:
+            for key, val in values.items():
+                f.write(f"{key}={val}\n")
+
+    print(f"\n  .env 파일 생성 완료: {env_path}")
+    print("  필요시 .env 를 직접 편집해 추가 설정을 입력하세요.\n")
+    return 0
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(prog="sales", description="Sales automation CLI tools")
     sub = parser.add_subparsers(dest="command")
 
     sub.add_parser("doctor", help="Run pre-flight checklist")
     sub.add_parser("healthcheck", help="Run live connectivity checks")
+    init_parser = sub.add_parser("init", help="Interactive .env setup wizard")
+    init_parser.add_argument("--force", action="store_true", help="Overwrite existing .env")
 
     args = parser.parse_args()
     if args.command == "doctor":
         sys.exit(doctor())
     elif args.command == "healthcheck":
         sys.exit(healthcheck())
+    elif args.command == "init":
+        sys.exit(init(force=args.force))
     else:
         parser.print_help()
 
