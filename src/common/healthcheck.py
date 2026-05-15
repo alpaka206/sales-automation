@@ -94,15 +94,15 @@ def _check_claude_cli() -> CheckResult:
         combined = (res.stdout + res.stderr).lower()
         if res.returncode != 0:
             if "not authenticated" in combined or "401" in combined:
-                return CheckResult(name="claude_cli_token", status="FAIL", detail="Token expired or not authenticated", latency_ms=ms)
-            return CheckResult(name="claude_cli_token", status="FAIL", detail=f"Exit code {res.returncode}", latency_ms=ms)
-        return CheckResult(name="claude_cli_token", status="PASS", detail="OK", latency_ms=ms)
+                return CheckResult(name="Claude CLI 로그인 상태", status="FAIL", detail="Token expired or not authenticated", latency_ms=ms)
+            return CheckResult(name="Claude CLI 로그인 상태", status="FAIL", detail=f"Exit code {res.returncode}", latency_ms=ms)
+        return CheckResult(name="Claude CLI 로그인 상태", status="PASS", detail="OK", latency_ms=ms)
     except FileNotFoundError:
         ms = int((time.monotonic() - start) * 1000)
-        return CheckResult(name="claude_cli_token", status="FAIL", detail="claude CLI not found on PATH", latency_ms=ms)
+        return CheckResult(name="Claude CLI 로그인 상태", status="FAIL", detail="claude CLI not found on PATH", latency_ms=ms)
     except subprocess.TimeoutExpired:
         ms = int((time.monotonic() - start) * 1000)
-        return CheckResult(name="claude_cli_token", status="FAIL", detail="Timed out after 10s", latency_ms=ms)
+        return CheckResult(name="Claude CLI 로그인 상태", status="FAIL", detail="Timed out after 10s", latency_ms=ms)
 
 
 def _check_anthropic_api() -> CheckResult:

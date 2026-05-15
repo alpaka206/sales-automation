@@ -26,7 +26,7 @@ def _mock_settings_context():
     return {
         "checks": [
             {"name": "Database", "status": "PASS", "detail": "ok", "latency_ms": 5},
-            {"name": "Claude CLI", "status": "FAIL", "detail": "not found", "latency_ms": 0},
+            {"name": "Claude CLI 로그인 상태", "status": "FAIL", "detail": "not found", "latency_ms": 0},
         ],
         "overall_status": "FAIL",
         "env_vars": [

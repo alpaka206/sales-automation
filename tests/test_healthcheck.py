@@ -104,7 +104,7 @@ def test_run_healthchecks_returns_report(db_session_factory) -> None:
     assert len(report.checks) >= 2
     names = [c.name for c in report.checks]
     assert "db_connectivity" in names
-    assert "claude_cli_token" in names
+    assert "Claude CLI 로그인 상태" in names
     assert report.overall_status in ("PASS", "WARN", "FAIL")
 
 

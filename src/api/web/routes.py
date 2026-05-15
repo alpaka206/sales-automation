@@ -620,7 +620,7 @@ def _settings_context() -> dict:
         today_llm = 0
         week_llm = 0
 
-    claude_cli_ok = any(c.name == "Claude CLI" and c.status == "PASS" for c in report.checks)
+    claude_cli_ok = any(c.name == "Claude CLI 로그인 상태" and c.status == "PASS" for c in report.checks)
 
     return {
         "checks": [c.model_dump() for c in report.checks],

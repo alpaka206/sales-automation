@@ -48,7 +48,7 @@ def test_healthcheck_endpoint_with_failures(mock_hc, client: TestClient) -> None
         overall="FAIL",
         checks=[
             CheckResult(name="db_connectivity", status="PASS", detail="OK"),
-            CheckResult(name="claude_cli_token", status="FAIL", detail="Token expired"),
+            CheckResult(name="Claude CLI 로그인 상태", status="FAIL", detail="Token expired"),
         ],
     )
     r = client.post(
@@ -60,4 +60,4 @@ def test_healthcheck_endpoint_with_failures(mock_hc, client: TestClient) -> None
     assert data["overall_status"] == "FAIL"
     failed = [c for c in data["checks"] if c["status"] == "FAIL"]
     assert len(failed) == 1
-    assert failed[0]["name"] == "claude_cli_token"
+    assert failed[0]["name"] == "Claude CLI 로그인 상태"

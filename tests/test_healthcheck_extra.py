@@ -260,7 +260,7 @@ def test_run_healthchecks_anthropic_provider(db_session_factory) -> None:
 
     names = [c.name for c in report.checks]
     assert "anthropic_api_key" in names
-    assert "claude_cli_token" not in names
+    assert "Claude CLI 로그인 상태" not in names
 
 
 @patch("smtplib.SMTP")
