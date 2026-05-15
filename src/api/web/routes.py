@@ -14,7 +14,7 @@ from sqlalchemy.orm import joinedload
 from ...agents.approval import ApprovalError, approve, reject
 from ...common.config import settings
 from ...db.models import (
-    Contact, Conversation, ICPRule, KnowledgeDocument,
+    Conversation, ICPRule, KnowledgeDocument,
     LLMUsage, Message, OutboundIntent, Prospect,
 )
 from ...db.session import SessionLocal

@@ -12,7 +12,6 @@ from src.api.main import app
 from src.common.config import settings
 from src.db.models import Event
 from src.db.session import SessionLocal
-from src.integrations.hubspot import ContactDTO
 
 
 @pytest.fixture()

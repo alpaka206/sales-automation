@@ -150,14 +150,14 @@ def test_persist_message_sets_scheduled_at() -> None:
 
     with (
         patch("src.agents.outbound.agent.compute_next_send_time", return_value=scheduled_time),
-        patch("src.agents.outbound.agent.SessionLocal") as mock_session_cls,
+        patch("src.agents.outbound.agent.SessionLocal"),
     ):
         mock_session = MagicMock()
         mock_session.query.return_value.filter_by.return_value.first.return_value = None
         mock_prospect = MagicMock()
         mock_prospect.id = 1
 
-        msg = agent._persist_message(
+        agent._persist_message(
             mock_session, mock_prospect, candidate, mock_draft, score=75
         )
 

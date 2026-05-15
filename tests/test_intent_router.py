@@ -8,7 +8,6 @@ import pytest
 
 from src.agents.outbound.dispatcher import (
     IntentRouterResult,
-    LOW_CONFIDENCE_THRESHOLD,
     dispatch_natural_query,
     route_intent,
 )

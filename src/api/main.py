@@ -13,7 +13,7 @@ from typing import Literal
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 from ..agents.approval import ApprovalError, approve, mark_sent, reject
 from ..common.config import settings

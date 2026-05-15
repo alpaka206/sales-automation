@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 import httpx
-import pytest
 import respx
 
 from src.integrations.email_discovery import (

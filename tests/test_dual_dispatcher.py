@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
 from src.db.models import Contact, Conversation, Message
 from src.db.session import SessionLocal
 from src.integrations.senders import send
-from src.integrations.senders.whatsapp import WhatsAppDisabled, WhatsAppSendError
+from src.integrations.senders.whatsapp import WhatsAppSendError
 
 
 def _create_test_message(phone: str = "+821012345678") -> int:

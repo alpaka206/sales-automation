@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-import asyncio
 import importlib
 from datetime import datetime, timedelta, timezone
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock
 
 import pytest
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from src.db.base import Base

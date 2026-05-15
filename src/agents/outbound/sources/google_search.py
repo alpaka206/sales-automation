@@ -6,7 +6,6 @@ import logging
 from urllib.parse import urlparse
 
 from ....integrations.email_discovery import (
-    discover_emails_from_url,
     extract_emails_from_html,
 )
 from ....integrations.google_search import GoogleSearchClient, GoogleSearchNotConfigured

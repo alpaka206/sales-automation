@@ -12,7 +12,6 @@ from src.integrations.gmail_imap import (
     IMAPClient,
     IMAPNotConfigured,
     _decode_subject,
-    _extract_body_snippet,
     _extract_email_addr,
     _parse_date,
 )

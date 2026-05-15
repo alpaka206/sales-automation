@@ -12,7 +12,6 @@ from typing import Any, Generator
 
 from pydantic import BaseModel
 
-from ..common.config import settings
 from ..llm.providers.claude_cli import call_claude_cli
 
 logger = logging.getLogger(__name__)
