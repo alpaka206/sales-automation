@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from .sources.base import BaseSource
+from .sources.google_search import GoogleSearchSource
 from .sources.linkedin_comments import LinkedInCommentsSource
 from .sources.linkedin_csv import LinkedInCSVSource
 from .sources.manual_csv import ManualCSVSource
@@ -13,6 +14,7 @@ _SOURCES: dict[str, BaseSource] = {
     "youtube": YouTubeSource(),
     "linkedin_csv": LinkedInCSVSource(),
     "linkedin_comments": LinkedInCommentsSource(),
+    "google_search": GoogleSearchSource(),
 }
 
 

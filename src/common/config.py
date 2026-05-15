@@ -58,6 +58,8 @@ class Settings(BaseSettings):
 
     # ----- Sources -----
     YOUTUBE_API_KEY: str = ""
+    GOOGLE_CSE_API_KEY: str = ""
+    GOOGLE_CSE_ID: str = ""
     LINKEDIN_ENABLED: bool = False
     LINKEDIN_SCRAPING_ENABLED: bool = False
     LINKEDIN_SESSION_COOKIE: str = ""
