@@ -137,6 +137,23 @@ class Event(Base):
     __table_args__ = (Index("ix_events_kind", "kind"),)
 
 
+class KnowledgeDocument(Base):
+    """Stores knowledge base documents for web UI editing and LLM prompt context."""
+
+    __tablename__ = "knowledge_documents"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    title: Mapped[str] = mapped_column(String, nullable=False)
+    slug: Mapped[str] = mapped_column(String, unique=True, nullable=False)
+    categories: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    scope: Mapped[str] = mapped_column(String, nullable=False, default="both")
+    body: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=_utcnow, onupdate=_utcnow, nullable=False
+    )
+
+
 class LLMUsage(Base):
     __tablename__ = "llm_usage"
 
