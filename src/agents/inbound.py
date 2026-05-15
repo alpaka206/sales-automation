@@ -145,6 +145,7 @@ class InboundAgent:
         }
 
         if not self.hubspot:
+            info["inbound_source"] = "event_payload" if info["last_message"] else "none"
             return info
 
         contact_id = info["object_id"]
@@ -163,6 +164,46 @@ class InboundAgent:
             info["lifecycle_stage"] = hs_contact.lifecyclestage or info["lifecycle_stage"]
         except Exception:
             logger.warning("HubSpot contact fetch failed, using event payload.", exc_info=True)
+
+        # Fetch actual message body: form submission → inbound email → note → event payload
+        if not info["last_message"] and self.hubspot:
+            inbound_source = None
+            body = None
+            try:
+                body = self.hubspot.get_latest_form_submission(contact_id)
+                if body:
+                    inbound_source = "form_submission"
+            except Exception:
+                logger.debug("Form submission fetch failed for %s", contact_id)
+
+            if not body:
+                try:
+                    body = self.hubspot.get_latest_inbound_email(contact_id)
+                    if body:
+                        inbound_source = "inbound_email"
+                except Exception:
+                    logger.debug("Inbound email fetch failed for %s", contact_id)
+
+            if not body:
+                try:
+                    body = self.hubspot.get_latest_note(contact_id)
+                    if body:
+                        inbound_source = "note"
+                except Exception:
+                    logger.debug("Note fetch failed for %s", contact_id)
+
+            if body:
+                info["last_message"] = body
+                info["inbound_source"] = inbound_source
+                logger.info("Inbound message from %s for contact %s", inbound_source, contact_id)
+            else:
+                info["inbound_source"] = "event_payload"
+                if not info["last_message"]:
+                    logger.warning("No message body found for contact %s", contact_id)
+        elif info["last_message"]:
+            info["inbound_source"] = "event_payload"
+        else:
+            info["inbound_source"] = "none"
 
         try:
             emails = self.hubspot.get_recent_emails_sync(contact_id, limit=5)

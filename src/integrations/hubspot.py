@@ -279,6 +279,73 @@ class HubSpotClient:
                 ))
         return engagements
 
+    def get_latest_form_submission(self, contact_id: str) -> str | None:
+        """Fetch the most recent form submission text for a contact."""
+        headers = {"Authorization": f"Bearer {self.token}"}
+        with httpx.Client(headers=headers, timeout=30.0) as client:
+            r = client.get(
+                f"{BASE_URL}/crm/v3/objects/contacts/{contact_id}",
+                params={"properties": "hs_latest_source_data_2,hs_latest_source"},
+            )
+            if r.status_code != 200:
+                return None
+            props = r.json().get("properties", {})
+            if props.get("hs_latest_source") != "FORM_SUBMISSION":
+                return None
+            # hs_latest_source_data_2 holds the form submission message
+            return props.get("hs_latest_source_data_2") or None
+
+    def get_latest_inbound_email(self, contact_id: str) -> str | None:
+        """Fetch body of the most recent inbound email for a contact."""
+        headers = {"Authorization": f"Bearer {self.token}"}
+        with httpx.Client(headers=headers, timeout=30.0) as client:
+            r = client.get(
+                f"{BASE_URL}/crm/v3/objects/contacts/{contact_id}/associations/emails",
+                params={"limit": 5},
+            )
+            if r.status_code != 200:
+                return None
+            assoc_results = r.json().get("results", [])
+
+            for item in assoc_results:
+                email_id = str(item.get("id", ""))
+                if not email_id:
+                    continue
+                er = client.get(
+                    f"{BASE_URL}/crm/v3/objects/emails/{email_id}",
+                    params={"properties": "hs_email_direction,hs_email_text,hs_email_subject"},
+                )
+                if er.status_code != 200:
+                    continue
+                ep = er.json().get("properties", {})
+                if ep.get("hs_email_direction") == "INCOMING_EMAIL":
+                    return ep.get("hs_email_text") or ep.get("hs_email_subject") or None
+        return None
+
+    def get_latest_note(self, contact_id: str) -> str | None:
+        """Fetch body of the most recent note associated with a contact."""
+        headers = {"Authorization": f"Bearer {self.token}"}
+        with httpx.Client(headers=headers, timeout=30.0) as client:
+            r = client.get(
+                f"{BASE_URL}/crm/v3/objects/contacts/{contact_id}/associations/notes",
+                params={"limit": 1},
+            )
+            if r.status_code != 200:
+                return None
+            assoc_results = r.json().get("results", [])
+            if not assoc_results:
+                return None
+            note_id = str(assoc_results[0].get("id", ""))
+            if not note_id:
+                return None
+            nr = client.get(
+                f"{BASE_URL}/crm/v3/objects/notes/{note_id}",
+                params={"properties": "hs_note_body"},
+            )
+            if nr.status_code != 200:
+                return None
+            return nr.json().get("properties", {}).get("hs_note_body") or None
+
     def get_associated_deals_sync(self, contact_id: str) -> list[DealDTO]:
         """Fetch deals associated with a contact (sync)."""
         headers = {"Authorization": f"Bearer {self.token}"}
