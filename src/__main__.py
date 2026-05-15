@@ -30,12 +30,13 @@ def main() -> None:
 
     import uvicorn
 
-    from .common.config import settings
+    from src.api.main import app
+    from src.common.config import settings
 
     print(f"[Sales Automation] 서버 시작: http://{settings.APP_HOST}:{settings.APP_PORT}")
     print("[Sales Automation] 종료하려면 Ctrl+C 를 누르세요.")
     uvicorn.run(
-        "src.api.main:app",
+        app,
         host=settings.APP_HOST,
         port=settings.APP_PORT,
         log_level=settings.LOG_LEVEL.lower(),
