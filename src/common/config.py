@@ -60,6 +60,7 @@ class Settings(BaseSettings):
     YOUTUBE_API_KEY: str = ""
     GOOGLE_CSE_API_KEY: str = ""
     GOOGLE_CSE_ID: str = ""
+    JOB_BOARD_SITES: str = "saramin.co.kr,jobkorea.co.kr"
     LINKEDIN_ENABLED: bool = False
     LINKEDIN_SCRAPING_ENABLED: bool = False
     LINKEDIN_SESSION_COOKIE: str = ""
