@@ -12,6 +12,14 @@ cd /d "%~dp0\.."
 
 if not exist logs mkdir logs
 
+REM ============================================================
+REM 컴퓨터 깨어있음 모드 — Ralph 가 도는 동안 sleep/화면꺼짐 방지.
+REM 이 프로세스가 종료되면 자동 해제됨. 별도 창에서 keep_awake.bat
+REM 을 따로 띄울 필요 없음.
+REM ============================================================
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$sig = '[DllImport(\"kernel32.dll\")] public static extern uint SetThreadExecutionState(uint flags);'; $t = Add-Type -MemberDefinition $sig -Name P -Namespace W -PassThru; $null = $t::SetThreadExecutionState([uint32]'0x80000003')" 2>nul
+echo [keep-awake] 시스템 깨어있음 모드 활성화됨 (sleep/화면보호기 차단).
+
 set ITER=0
 if "%SLEEP_BETWEEN%"=="" set SLEEP_BETWEEN=10
 if "%MAX_ITER%"=="" set MAX_ITER=0
