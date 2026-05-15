@@ -44,6 +44,7 @@ class Settings(BaseSettings):
     WHATSAPP_ENABLED: bool = False
     WHATSAPP_PHONE_NUMBER_ID: str = ""
     WHATSAPP_ACCESS_TOKEN: str = ""
+    WHATSAPP_TEMPLATE_NAME: str = "sales_reply_intro"
 
     # ----- Approval -----
     APPROVAL_CHANNEL: Literal["slack", "teams", "none"] = "slack"
