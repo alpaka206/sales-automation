@@ -3,47 +3,27 @@
 from __future__ import annotations
 
 import logging
-import re
 from urllib.parse import urlparse
 
-import httpx
-
+from ....integrations.email_discovery import (
+    discover_emails_from_url,
+    extract_emails_from_html,
+)
 from ....integrations.google_search import GoogleSearchClient, GoogleSearchNotConfigured
 from .base import ProspectCandidate, SourceFilters, apply_common_filters
 
 logger = logging.getLogger(__name__)
 
-_EMAIL_RE = re.compile(r"[\w.+-]+@[\w-]+\.[\w.-]+")
-_NOISE_EMAILS = {
-    "example.com",
-    "example.org",
-    "example.net",
-    "sentry.io",
-    "w3.org",
-    "schema.org",
-    "googleapis.com",
-    "google.com",
-    "gstatic.com",
-}
-
 
 def _extract_emails_from_text(text: str) -> list[str]:
-    """Extract unique emails from text, filtering out obvious noise."""
-    found: list[str] = []
-    seen: set[str] = set()
-    for match in _EMAIL_RE.finditer(text):
-        email = match.group(0).lower()
-        domain = email.rsplit("@", 1)[1]
-        if domain in _NOISE_EMAILS:
-            continue
-        if email not in seen:
-            seen.add(email)
-            found.append(email)
-    return found
+    """Extract emails from text via shared module."""
+    return extract_emails_from_html(f"<p>{text}</p>")
 
 
 def _fetch_page_text(url: str, timeout: int = 10) -> str:
     """Fetch a page and return stripped visible text (max 5000 chars)."""
+    import httpx
+
     try:
         with httpx.Client(timeout=timeout, follow_redirects=True) as client:
             r = client.get(url, headers={"User-Agent": "Mozilla/5.0 (compatible; SalesBot/1.0)"})

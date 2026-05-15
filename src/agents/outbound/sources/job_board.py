@@ -6,9 +6,10 @@ import logging
 import re
 from urllib.parse import urlparse
 
+from ....integrations.email_discovery import extract_emails_from_html
 from ....integrations.google_search import GoogleSearchClient, GoogleSearchNotConfigured
 from .base import ProspectCandidate, SourceFilters, apply_common_filters
-from .google_search import _extract_emails_from_text, _fetch_page_text
+from .google_search import _fetch_page_text
 
 logger = logging.getLogger(__name__)
 
@@ -112,7 +113,7 @@ class JobBoardSource:
                 company = _extract_company_from_title(title)
 
                 page_text = _fetch_page_text(link)
-                emails = _extract_emails_from_text(page_text) if page_text else []
+                emails = extract_emails_from_html(page_text) if page_text else []
                 company_domain = _extract_domain_from_text(page_text) if page_text else None
 
                 source_site = urlparse(link).hostname or site
