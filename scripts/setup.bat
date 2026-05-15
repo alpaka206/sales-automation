@@ -26,6 +26,25 @@ if errorlevel 1 (
 for /f "tokens=2 delims= " %%v in ('python --version 2^>^&1') do set PY_VER=%%v
 echo [확인] Python %PY_VER% 감지됨
 
+REM --- 버전 3.11 이상 검증 ---
+for /f "tokens=1,2 delims=." %%a in ("%PY_VER%") do (
+    set PY_MAJOR=%%a
+    set PY_MINOR=%%b
+)
+if %PY_MAJOR% LSS 3 goto :py_too_old
+if %PY_MAJOR% EQU 3 if %PY_MINOR% LSS 11 goto :py_too_old
+goto :py_ok
+:py_too_old
+echo.
+echo [오류] Python 3.11 이상이 필요합니다. 현재 버전: %PY_VER%
+echo.
+echo   다음 페이지에서 Python 3.11 이상을 설치하세요:
+echo   https://www.python.org/downloads/
+echo.
+pause
+exit /b 1
+:py_ok
+
 REM --- venv 생성 또는 기존 사용 ---
 if exist .venv (
     echo [확인] .venv 디렉토리가 이미 존재합니다. 기존 환경을 사용합니다.
