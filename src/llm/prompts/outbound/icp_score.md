@@ -16,5 +16,5 @@ Return strict JSON only:
   "score": <integer 0-100>,
   "rationale": "<one or two sentences>",
   "risks": ["<short risk>", ...],
-  "language_guess": "ko" | "en"
+  "language_guess": "<ISO 639-1 two-letter code: ko, en, ja, es, pt, zh, de, fr, etc.>"
 }

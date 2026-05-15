@@ -9,6 +9,7 @@ from datetime import datetime, timedelta, timezone
 from pydantic import BaseModel
 
 from ...common.config import settings
+from ...common.language import guess_language
 from ...db.models import Contact, Conversation, Message, Prospect
 from ...db.session import SessionLocal
 from ...llm.client import LLMClient
@@ -155,7 +156,7 @@ class OutboundAgent:
                 "country": candidate.country or "",
                 "summary": candidate.extra.get("notes", ""),
                 "homepage_summary": (enrichment or {}).get("homepage_summary", ""),
-                "language": icp.language_guess,
+                "language": guess_language(candidate.country, icp.language_guess),
             },
             schema=DraftEmailResult,
         )
