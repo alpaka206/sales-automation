@@ -25,8 +25,3 @@ def get_source(name: str) -> BaseSource:
     if name not in _SOURCES:
         raise KeyError(f"Unknown source: {name}. Available: {list(_SOURCES.keys())}")
     return _SOURCES[name]
-
-
-def register_source(source: BaseSource) -> None:
-    """Register a new source at runtime."""
-    _SOURCES[source.name] = source
