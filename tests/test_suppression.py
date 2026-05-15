@@ -44,10 +44,10 @@ def test_verify_unsub_token():
 
 def test_append_footer_ko():
     from src.integrations.compliance import append_footer
-    result = append_footer("본문입니다.", "test@example.com", "ko")
+    result = append_footer("본문입니다.", "user@company.kr", "ko", country_code="KR")
     assert "수신 거부" in result
     assert "unsubscribe" in result
-    assert "test@example.com" in result
+    assert "user@company.kr" in result
 
 
 def test_append_footer_en():

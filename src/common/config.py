@@ -100,6 +100,13 @@ class Settings(BaseSettings):
     LOG_LEVEL: str = "INFO"
     TIMEZONE: str = "Asia/Seoul"
 
+    # ----- Company info (compliance footer) -----
+    COMPANY_NAME: str = "perso"
+    COMPANY_REGISTRATION_NUMBER: str = ""
+    COMPANY_ADDRESS: str = ""
+    COMPANY_PRIVACY_POLICY_URL: str = ""
+    KOREA_AD_PREFIX_ENABLED: bool = False
+
     # 빈 문자열이면 auth 미들웨어가 모든 요청을 거부합니다(보안). 운영 전 반드시 강한 토큰 설정.
     INTERNAL_API_TOKEN: str = Field(default="")
 
