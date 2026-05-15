@@ -95,10 +95,26 @@ single todo:
   in Korean.
 - `scripts/run.bat` must exist and start the FastAPI server with the
   venv activated.
-- `docs/` directory must contain `사용법.md` (how to use), `설정.md`
-  (configuration reference), `문제해결.md` (troubleshooting).
+- `docs/` directory must contain `사용법.md`, `설정.md`, `문제해결.md`,
+  `배포.md`, `테스트.md`.
 - All n8n workflow JSONs under `n8n_workflows/` must have a one-line
   Korean comment at the top of the README describing what they do.
+
+### Check 3.5 — Phase-specific quality (post-Phase 4+)
+
+After the outbound + web UI + packaging phases land, also check:
+
+- Web UI: localhost:8000 의 `/`, `/messages`, `/knowledge`,
+  `/outbound/new`, `/settings` 페이지 모두 200 응답하는지 (간단한
+  smoke test 추가).
+- 발송 워커: BE 띄운 상태에서 `approved` 메시지가 1분 안에 처리되는지.
+- 컴플라이언스: 모든 outbound 메시지 body 끝에 unsubscribe 링크 +
+  발신자 정보 footer 있는지 (회귀 테스트).
+- 단일 실행 파일: `dist/sales-automation.exe` 존재 + 50MB 이하 +
+  실행 시 healthz 응답.
+- claude CLI 상태: 헬스체크에 "Claude CLI 로그인 상태" 항목 있는지.
+
+각 항목이 빠지면 별도 todo 로 추가.
 
 ### Check 4 — Final certification
 

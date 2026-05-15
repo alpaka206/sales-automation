@@ -486,7 +486,67 @@ Gmail SMTP 로 콜드 메일을 대량 보내면 곧 차단됨. 옵션:
 | LLM 환각 (잘못된 회사 정보 인용) | 🟡 받는 사람 거부감 | 발송 전 사람 검토 (이미 정책) |
 | 같은 회사에 burst 발송 | 🟡 받는 회사 메일 필터가 도메인 차단 | 시간 간격 + 일일 회사당 한도 |
 
-### F-3. 비용
+### F-3. SMTP 제공자 비교 (2026-05-15 기준)
+
+현재 코드 (`src/integrations/senders/smtp.py`) 는 **provider-agnostic** — `SMTP_HOST` / `SMTP_PORT` / `SMTP_USERNAME` / `SMTP_PASSWORD` 만 바꾸면 어디든 동작합니다. 코드 수정 없이 .env 갈아끼우는 것만으로 다음 제공자 사용 가능:
+
+| 제공자 | 무료 한도 | SMTP 호스트 | 비고 |
+|---|---|---|---|
+| **Gmail (개인)** | 500/일 (신규 100/일) | `smtp.gmail.com:587` | App Password 필요. 콜드메일에 100건 초과 시 정지 위험 |
+| **Outlook / Hotmail** | ~300/일, 30/분 | `smtp-mail.outlook.com:587` | App Password (account.live.com → 보안 → 앱 비밀번호). 콜드메일 정책 더 엄격 |
+| **Yahoo Mail** | 500/일 | `smtp.mail.yahoo.com:587` | App Password 필요 |
+| **Zoho Mail** | 200/일 (개인 무료) | `smtp.zoho.com:587` | 비즈니스 SMTP 는 유료 |
+| **Brevo (구 Sendinblue)** | **300/일 영구 무료** ⭐ | `smtp-relay.brevo.com:587` | 콜드메일에 가장 관대. 무료 티어에서도 SPF/DKIM 자동 |
+| **Resend** | 3,000/월 (≈100/일) | `smtp.resend.com:465` | 개발자 친화적. React Email 통합 좋음 |
+| **SendGrid** | 100/일 영구 무료 | `smtp.sendgrid.net:587` | 신뢰도 높음. Twilio 산하 |
+| **Mailgun** | 1,000/월 (3개월 후) | `smtp.mailgun.org:587` | 첫 3개월 5,000/월 무료. 그 후 1,000 |
+| **Amazon SES** | EC2 에서만 200/일 무료 | `email-smtp.<region>.amazonaws.com:587` | 외부에선 $0.10/1000 (사실상 매우 저렴) |
+
+**추천 (무료 콜드메일)**: **Brevo 300/일** 가 가장 관대. 회사 도메인 (perso.co) verify 하면 SPF/DKIM 자동 처리 → deliverability 좋음.
+
+**환경 변수 예시** (.env 만 바꾸면 됨):
+```env
+# Outlook 사용
+SMTP_HOST=smtp-mail.outlook.com
+SMTP_PORT=587
+SMTP_USERNAME=devrel.365@outlook.com
+SMTP_PASSWORD=<app password>
+SMTP_FROM_EMAIL=devrel.365@outlook.com
+
+# Brevo 사용 (월 300/일 무료)
+SMTP_HOST=smtp-relay.brevo.com
+SMTP_PORT=587
+SMTP_USERNAME=<Brevo 가입 후 받은 SMTP key>
+SMTP_PASSWORD=<Brevo SMTP API key>
+SMTP_FROM_EMAIL=sales@perso.co  # Brevo 에서 verify 한 도메인
+```
+
+코드는 한 줄도 안 바꿔도 됨.
+
+### F-4. 이메일 발굴 전략 (사용자 명세 반영)
+
+사용자가 명시한 두 가지 방식:
+
+**(가) LinkedIn 프로필 페이지 들어가서 이메일 확인**
+- `linkedin_comments` 소스가 댓글 단 사람 이름·프로필 URL 까지 가져옴
+- **추가 단계**: 각 프로필 URL 을 browser-use (또는 자체 Playwright+claude) 로 방문 → "Contact info" 영역 → email 있으면 추출
+- LinkedIn 의 이메일 공개는 상호 연결된 사람만 보임. 1차 연결 안 된 사람은 안 보일 수 있음
+- 1차 연결이라도 이메일 노출 안 한 사람이 대다수 (~70%)
+- **결과**: 발견되면 raw email 채움, 못 찾으면 별도 큐 (manual 발굴 필요)
+
+**(나) Google 검색 결과 페이지 → 랜딩 페이지 footer / 문의하기 페이지 이메일 추출**
+- Google Custom Search 또는 browser-use 로 검색 결과 URL 리스트
+- 각 URL 방문 → HTML 받아옴 → 정규식 `[\w.+-]+@[\w-]+\.[\w.-]+` 추출
+- footer / "contact" / "문의" / "about" 페이지 우선순위 부여 (link text 분석)
+- 일반화: `_extract_emails_from_html(html)` 함수 + `_score_page_relevance(url, html)` 함수
+
+**구현 위치**:
+- `src/integrations/email_discovery.py` (신규) — LinkedIn / 일반 페이지에서 이메일 추출 공통 모듈
+- 각 소스의 `discover()` 끝에 email_discovery 호출
+
+작업량: 4시간 (LinkedIn + 페이지 footer 각각 2시간).
+
+### F-5. 비용
 
 | 항목 | 월 비용 (MVP 수준) |
 |---|---|
