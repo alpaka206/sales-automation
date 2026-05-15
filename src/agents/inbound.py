@@ -97,6 +97,13 @@ class InboundAgent:
 
         contact_info = self._fetch_contact(event)
         classification = self._classify(contact_info)
+
+        if self.hubspot and contact_info.get("object_id"):
+            try:
+                self.hubspot.update_inbound_status_sync(contact_info["object_id"], "analyzed")
+            except Exception:
+                logger.warning("Failed to set inbound_status=analyzed for %s", contact_info["object_id"], exc_info=True)
+
         score = self._score(contact_info, classification.category)
         channel = self._pick_channel(contact_info)
         draft = self._draft_reply(contact_info, classification, score)

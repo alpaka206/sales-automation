@@ -112,6 +112,19 @@ class HubSpotClient:
         )
         r.raise_for_status()
 
+    async def update_inbound_status(self, contact_id: str, status: str) -> None:
+        """Update the inbound_status custom property on a contact."""
+        try:
+            await self.update_contact(contact_id, {"inbound_status": status})
+            logger.info("Updated inbound_status=%s for contact %s", status, contact_id)
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code == 400:
+                logger.warning(
+                    "inbound_status property may not exist in HubSpot. "
+                    "Create it in Settings → Objects → Contacts → Properties."
+                )
+            raise
+
     async def list_contact_engagements(
         self,
         contact_id: str,
@@ -219,6 +232,22 @@ class HubSpotClient:
                 lifecyclestage=props.get("lifecyclestage"),
             ))
         return contacts
+
+    def update_inbound_status_sync(self, contact_id: str, status: str) -> None:
+        """Synchronous version of update_inbound_status."""
+        headers = {"Authorization": f"Bearer {self.token}"}
+        with httpx.Client(headers=headers, timeout=30.0) as client:
+            r = client.patch(
+                f"{BASE_URL}/crm/v3/objects/contacts/{contact_id}",
+                json={"properties": {"inbound_status": status}},
+            )
+        if r.status_code == 400:
+            logger.warning(
+                "inbound_status property may not exist in HubSpot. "
+                "Create it in Settings → Objects → Contacts → Properties."
+            )
+        r.raise_for_status()
+        logger.info("Updated inbound_status=%s for contact %s", status, contact_id)
 
     def get_contact_sync(self, id_or_email: str) -> ContactDTO:
         """Synchronous version of get_contact."""
