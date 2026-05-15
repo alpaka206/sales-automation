@@ -137,6 +137,19 @@ class Event(Base):
     __table_args__ = (Index("ix_events_kind", "kind"),)
 
 
+class CountrySendWindow(Base):
+    """Per-country optimal sending time windows for outbound scheduling."""
+
+    __tablename__ = "country_send_windows"
+
+    country_code: Mapped[str] = mapped_column(String, primary_key=True)
+    country_name: Mapped[str] = mapped_column(String, nullable=False)
+    timezone: Mapped[str] = mapped_column(String, nullable=False)
+    hours_start: Mapped[int] = mapped_column(Integer, nullable=False)
+    hours_end: Mapped[int] = mapped_column(Integer, nullable=False)
+    avoid_days_of_week: Mapped[list | None] = mapped_column(JSON, nullable=True)
+
+
 class KnowledgeDocument(Base):
     """Stores knowledge base documents for web UI editing and LLM prompt context."""
 
