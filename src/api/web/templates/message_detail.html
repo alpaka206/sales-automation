@@ -1,0 +1,182 @@
+{% extends "base.html" %}
+{% block title %}메시지 #{{ msg.id }} — Sales Automation{% endblock %}
+{% block content %}
+
+<div class="mb-6">
+  <a href="/" class="text-sm text-blue-600 hover:underline">&larr; 대시보드</a>
+</div>
+
+<div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+  {# Main: message body #}
+  <div class="lg:col-span-2 space-y-4">
+    <div class="bg-white rounded-lg shadow-sm border p-6">
+      <div class="flex items-center justify-between mb-4">
+        <h1 class="text-lg font-bold text-gray-800">메시지 #{{ msg.id }}</h1>
+        <span class="inline-block px-2 py-0.5 rounded text-xs font-medium
+          {% if msg.status == 'sent' %}bg-green-100 text-green-700
+          {% elif msg.status == 'pending_approval' %}bg-yellow-100 text-yellow-700
+          {% elif msg.status == 'approved' %}bg-blue-100 text-blue-700
+          {% elif msg.status == 'rejected' %}bg-red-100 text-red-700
+          {% elif msg.status == 'replied' %}bg-purple-100 text-purple-700
+          {% else %}bg-gray-100 text-gray-700{% endif %}">
+          {{ msg.status }}
+        </span>
+      </div>
+
+      <form id="msg-form">
+        <div class="mb-4">
+          <label class="block text-xs text-gray-500 mb-1">제목</label>
+          <input name="subject" value="{{ msg.subject }}"
+                 class="w-full border rounded px-3 py-2 text-sm {% if msg.status != 'pending_approval' %}bg-gray-50{% endif %}"
+                 {% if msg.status != 'pending_approval' %}readonly{% endif %}>
+        </div>
+        <div class="mb-4">
+          <label class="block text-xs text-gray-500 mb-1">본문</label>
+          <textarea name="body" rows="14"
+                    class="w-full border rounded px-3 py-2 text-sm font-mono leading-relaxed {% if msg.status != 'pending_approval' %}bg-gray-50{% endif %}"
+                    {% if msg.status != 'pending_approval' %}readonly{% endif %}>{{ msg.body }}</textarea>
+        </div>
+
+        {% if msg.status == 'pending_approval' %}
+        <div class="flex gap-3">
+          <button type="button"
+                  hx-post="/messages/{{ msg.id }}/send" hx-include="#msg-form"
+                  hx-target="#action-result" hx-swap="innerHTML"
+                  class="bg-green-600 text-white px-4 py-2 rounded text-sm hover:bg-green-700">
+            보내기
+          </button>
+          <button type="button"
+                  hx-post="/messages/{{ msg.id }}/edit" hx-include="#msg-form"
+                  hx-target="#action-result" hx-swap="innerHTML"
+                  class="bg-blue-600 text-white px-4 py-2 rounded text-sm hover:bg-blue-700">
+            저장
+          </button>
+          <button type="button" onclick="document.getElementById('reject-form').classList.toggle('hidden')"
+                  class="bg-gray-200 text-gray-700 px-4 py-2 rounded text-sm hover:bg-gray-300">
+            거절
+          </button>
+        </div>
+        {% endif %}
+      </form>
+
+      {% if msg.status == 'pending_approval' %}
+      <div id="reject-form" class="hidden mt-4 border-t pt-4">
+        <label class="block text-xs text-gray-500 mb-1">거절 사유</label>
+        <form>
+          <textarea name="reason" rows="2" class="w-full border rounded px-3 py-2 text-sm mb-2"
+                    placeholder="거절 사유를 입력하세요"></textarea>
+          <button type="button"
+                  hx-post="/messages/{{ msg.id }}/reject" hx-include="closest form"
+                  hx-target="#action-result" hx-swap="innerHTML"
+                  class="bg-red-600 text-white px-3 py-1.5 rounded text-sm hover:bg-red-700">
+            거절 확정
+          </button>
+        </form>
+      </div>
+      {% endif %}
+
+      <div id="action-result" class="mt-4"></div>
+    </div>
+  </div>
+
+  {# Sidebar: metadata #}
+  <div class="space-y-4">
+    <div class="bg-white rounded-lg shadow-sm border p-5">
+      <h2 class="text-sm font-semibold text-gray-600 mb-3">메시지 정보</h2>
+      <dl class="space-y-2 text-sm">
+        <div class="flex justify-between">
+          <dt class="text-gray-500">분류</dt>
+          <dd class="text-gray-800">{{ msg.category }}</dd>
+        </div>
+        <div class="flex justify-between">
+          <dt class="text-gray-500">채널</dt>
+          <dd class="text-gray-800">{{ msg.channel }}</dd>
+        </div>
+        <div class="flex justify-between">
+          <dt class="text-gray-500">방향</dt>
+          <dd class="text-gray-800">{{ msg.direction }}</dd>
+        </div>
+        <div class="flex justify-between">
+          <dt class="text-gray-500">언어</dt>
+          <dd class="text-gray-800">{{ msg.language }}</dd>
+        </div>
+        {% if msg.score_snapshot is not none %}
+        <div class="flex justify-between">
+          <dt class="text-gray-500">점수</dt>
+          <dd class="text-gray-800">{{ msg.score_snapshot }}</dd>
+        </div>
+        {% endif %}
+        <div class="flex justify-between">
+          <dt class="text-gray-500">수신자</dt>
+          <dd class="text-gray-800 truncate max-w-[160px]">{{ msg.to_address or '-' }}</dd>
+        </div>
+        <div class="flex justify-between">
+          <dt class="text-gray-500">생성</dt>
+          <dd class="text-gray-800">{{ msg.created_at.strftime('%Y-%m-%d %H:%M') }}</dd>
+        </div>
+        {% if msg.sent_at %}
+        <div class="flex justify-between">
+          <dt class="text-gray-500">발송</dt>
+          <dd class="text-gray-800">{{ msg.sent_at.strftime('%Y-%m-%d %H:%M') }}</dd>
+        </div>
+        {% endif %}
+      </dl>
+    </div>
+
+    {% if contact %}
+    <div class="bg-white rounded-lg shadow-sm border p-5">
+      <h2 class="text-sm font-semibold text-gray-600 mb-3">연락처</h2>
+      <dl class="space-y-2 text-sm">
+        <div class="flex justify-between">
+          <dt class="text-gray-500">이름</dt>
+          <dd class="text-gray-800">{{ contact.name }}</dd>
+        </div>
+        {% if contact.email %}
+        <div class="flex justify-between">
+          <dt class="text-gray-500">이메일</dt>
+          <dd class="text-gray-800 truncate max-w-[160px]">{{ contact.email }}</dd>
+        </div>
+        {% endif %}
+        {% if contact.company %}
+        <div class="flex justify-between">
+          <dt class="text-gray-500">회사</dt>
+          <dd class="text-gray-800">{{ contact.company }}</dd>
+        </div>
+        {% endif %}
+      </dl>
+    </div>
+    {% endif %}
+
+    {% if prospect %}
+    <div class="bg-white rounded-lg shadow-sm border p-5">
+      <h2 class="text-sm font-semibold text-gray-600 mb-3">프로스펙트</h2>
+      <dl class="space-y-2 text-sm">
+        <div class="flex justify-between">
+          <dt class="text-gray-500">이름</dt>
+          <dd class="text-gray-800">{{ prospect.name }}</dd>
+        </div>
+        {% if prospect.email %}
+        <div class="flex justify-between">
+          <dt class="text-gray-500">이메일</dt>
+          <dd class="text-gray-800 truncate max-w-[160px]">{{ prospect.email }}</dd>
+        </div>
+        {% endif %}
+        {% if prospect.company %}
+        <div class="flex justify-between">
+          <dt class="text-gray-500">회사</dt>
+          <dd class="text-gray-800">{{ prospect.company }}</dd>
+        </div>
+        {% endif %}
+        {% if prospect.icp_score is not none %}
+        <div class="flex justify-between">
+          <dt class="text-gray-500">ICP 점수</dt>
+          <dd class="text-gray-800">{{ prospect.icp_score }}</dd>
+        </div>
+        {% endif %}
+      </dl>
+    </div>
+    {% endif %}
+  </div>
+</div>
+
+{% endblock %}
