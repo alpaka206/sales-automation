@@ -237,6 +237,33 @@ def test_message_edit_saves(pending_msg, _use_test_db):
     session.close()
 
 
+def _mock_messages_list_context(status="", channel=""):
+    return {
+        "messages": [
+            {
+                "id": 1,
+                "status": "sent",
+                "category": "pricing_question",
+                "subject": "가격 문의",
+                "channel": "email",
+                "direction": "outgoing",
+                "to_address": "buyer@example.com",
+                "created_at": datetime(2026, 1, 1, 12, 0),
+            }
+        ],
+        "filter_status": status,
+        "filter_channel": channel,
+    }
+
+
+@patch("src.api.web.routes._messages_list_context", _mock_messages_list_context)
+def test_messages_list_returns_200():
+    r = _client().get("/messages")
+    assert r.status_code == 200
+    assert "메시지" in r.text
+    assert "가격 문의" in r.text
+
+
 def test_message_edit_blocked_after_approve(pending_msg):
     _client().post(f"/messages/{pending_msg}/send", data={"body": "", "subject": ""})
     r = _client().post(f"/messages/{pending_msg}/edit", data={"body": "x", "subject": ""})

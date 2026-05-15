@@ -143,6 +143,45 @@ def _message_detail_context(message_id: int) -> dict:
         }
 
 
+def _messages_list_context(status: str = "", channel: str = "") -> dict:
+    """Query DB for paginated message list."""
+    q = (
+        select(Message, Conversation.topic)
+        .join(Conversation, Message.conversation_id == Conversation.id)
+        .order_by(Message.created_at.desc())
+    )
+    if status:
+        q = q.where(Message.status == status)
+    if channel:
+        q = q.where(Message.channel == channel)
+    q = q.limit(100)
+    with SessionLocal() as session:
+        rows = session.execute(q).all()
+        messages = [
+            {
+                "id": msg.id,
+                "status": msg.status,
+                "category": topic or "-",
+                "subject": msg.subject or "(제목 없음)",
+                "channel": msg.channel,
+                "direction": msg.direction,
+                "to_address": msg.to_address or "-",
+                "created_at": msg.created_at,
+            }
+            for msg, topic in rows
+        ]
+    return {"messages": messages, "filter_status": status, "filter_channel": channel}
+
+
+@router.get("/messages")
+async def messages_list(request: Request):
+    """Message list page — all messages with optional status/channel filters."""
+    status = request.query_params.get("status", "")
+    channel = request.query_params.get("channel", "")
+    ctx = _messages_list_context(status=status, channel=channel)
+    return templates.TemplateResponse(request, "messages_list.html", ctx)
+
+
 @router.get("/messages/{message_id}")
 async def message_detail(request: Request, message_id: int):
     """Message detail page with editable body and send/reject actions."""

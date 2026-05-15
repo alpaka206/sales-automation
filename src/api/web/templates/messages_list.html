@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% block title %}메시지 — Sales Automation{% endblock %}
+{% block content %}
+
+<div class="flex items-center justify-between mb-6">
+  <h1 class="text-xl font-bold text-gray-800">메시지</h1>
+  <div class="flex gap-2 text-sm">
+    <select onchange="location.href='/messages?status='+this.value+'&channel={{ filter_channel }}'"
+            class="border rounded px-2 py-1 text-gray-600 bg-white">
+      <option value="">전체 상태</option>
+      {% for s in ['pending_approval','approved','sent','rejected','bounced','replied'] %}
+      <option value="{{ s }}" {% if filter_status == s %}selected{% endif %}>{{ s }}</option>
+      {% endfor %}
+    </select>
+    <select onchange="location.href='/messages?status={{ filter_status }}&channel='+this.value"
+            class="border rounded px-2 py-1 text-gray-600 bg-white">
+      <option value="">전체 채널</option>
+      {% for c in ['email','whatsapp'] %}
+      <option value="{{ c }}" {% if filter_channel == c %}selected{% endif %}>{{ c }}</option>
+      {% endfor %}
+    </select>
+  </div>
+</div>
+
+<div class="bg-white rounded-lg shadow-sm border">
+  <table class="w-full text-sm">
+    <thead>
+      <tr class="text-left text-xs text-gray-500 border-b">
+        <th class="px-5 py-3">상태</th>
+        <th class="px-5 py-3">분류</th>
+        <th class="px-5 py-3">제목</th>
+        <th class="px-5 py-3">채널</th>
+        <th class="px-5 py-3">방향</th>
+        <th class="px-5 py-3">수신자</th>
+        <th class="px-5 py-3">시간</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for msg in messages %}
+      <tr class="border-b hover:bg-gray-50 cursor-pointer" onclick="location.href='/messages/{{ msg.id }}'">
+        <td class="px-5 py-3">
+          <span class="inline-block px-2 py-0.5 rounded text-xs font-medium
+            {% if msg.status == 'sent' %}bg-green-100 text-green-700
+            {% elif msg.status == 'pending_approval' %}bg-yellow-100 text-yellow-700
+            {% elif msg.status == 'approved' %}bg-blue-100 text-blue-700
+            {% elif msg.status == 'rejected' %}bg-red-100 text-red-700
+            {% elif msg.status == 'replied' %}bg-purple-100 text-purple-700
+            {% else %}bg-gray-100 text-gray-700{% endif %}">
+            {{ msg.status }}
+          </span>
+        </td>
+        <td class="px-5 py-3 text-gray-600">{{ msg.category }}</td>
+        <td class="px-5 py-3 text-gray-800 max-w-xs truncate">{{ msg.subject }}</td>
+        <td class="px-5 py-3 text-gray-500">{{ msg.channel }}</td>
+        <td class="px-5 py-3 text-gray-500">{{ msg.direction }}</td>
+        <td class="px-5 py-3 text-gray-500 max-w-[160px] truncate">{{ msg.to_address }}</td>
+        <td class="px-5 py-3 text-gray-400">{{ msg.created_at.strftime('%m/%d %H:%M') }}</td>
+      </tr>
+      {% else %}
+      <tr>
+        <td colspan="7" class="px-5 py-8 text-center text-gray-400">메시지가 없습니다</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% endblock %}
