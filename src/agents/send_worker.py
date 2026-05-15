@@ -9,8 +9,9 @@ from collections import deque
 from datetime import datetime, timezone
 
 from ..common.config import settings
-from ..db.models import Message
+from ..db.models import Conversation, Message
 from ..db.session import SessionLocal
+from .outbound.status import ProspectStatus, transition, InvalidStatusTransition
 
 logger = logging.getLogger(__name__)
 
@@ -72,6 +73,14 @@ async def _send_one(message_id: int) -> bool:
             await send(msg)
             msg.status = "sent"
             msg.sent_at = datetime.now(timezone.utc)
+
+            conv = session.get(Conversation, msg.conversation_id)
+            if conv and conv.prospect_id:
+                try:
+                    transition(session, conv.prospect_id, ProspectStatus.SENT, reason="send_worker")
+                except (InvalidStatusTransition, ValueError):
+                    pass
+
             session.commit()
             _record_send()
             logger.info("Worker sent message %d.", message_id)

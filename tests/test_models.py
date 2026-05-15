@@ -45,7 +45,7 @@ def test_prospect_defaults(db_session: Session) -> None:
     db_session.commit()
     db_session.refresh(p)
 
-    assert p.status == "candidate"
+    assert p.status == "collected"
     assert p.follow_up_count == 0
 
 

@@ -105,7 +105,7 @@ def test_outbound_flow_three_candidates(db_session, db_session_factory) -> None:
     statuses = {p.full_name: p.status for p in new_prospects}
     assert statuses["Dup User"] == "skipped_dup"
     assert statuses["Low Score"] == "skipped_lowscore"
-    assert statuses["Good Lead"] == "drafted"
+    assert statuses["Good Lead"] == "analyzed"
 
     messages = verify.query(Message).all()
     assert len(messages) == 1

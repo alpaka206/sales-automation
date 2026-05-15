@@ -12,6 +12,7 @@ from ..db.models import Conversation, Message, Prospect
 from ..db.session import SessionLocal
 from ..llm.client import LLMClient
 from ._notify import notify_approval
+from .outbound.status import ProspectStatus, transition, InvalidStatusTransition
 
 logger = logging.getLogger(__name__)
 
@@ -82,6 +83,11 @@ def _check_reply(session, msg: Message, conv: Conversation) -> bool:
         msg.replied = True
         conv.last_incoming_at = incoming.created_at
         conv.stage = "replied"
+        if conv.prospect_id:
+            try:
+                transition(session, conv.prospect_id, ProspectStatus.REPLIED, reason="reply_detected")
+            except (InvalidStatusTransition, ValueError):
+                pass
         return True
 
     return False

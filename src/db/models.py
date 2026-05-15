@@ -50,7 +50,7 @@ class Prospect(Base):
     country: Mapped[str | None] = mapped_column(String, nullable=True)
     icp_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
     icp_rationale: Mapped[str | None] = mapped_column(Text, nullable=True)
-    status: Mapped[str] = mapped_column(String, nullable=False, default="candidate")
+    status: Mapped[str] = mapped_column(String, nullable=False, default="collected")
     contact_id: Mapped[int | None] = mapped_column(
         Integer, ForeignKey("contacts.id"), nullable=True
     )

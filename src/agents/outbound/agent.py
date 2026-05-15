@@ -16,6 +16,7 @@ from ...llm.prompts import PROMPTS_DIR
 from .enrichment import enrich_prospect
 from .source_registry import get_source
 from .sources.base import ProspectCandidate
+from .status import ProspectStatus
 from .._notify import notify_approval
 
 logger = logging.getLogger(__name__)
@@ -70,7 +71,7 @@ class OutboundAgent:
         norm_email = _normalize_email(candidate.email) if candidate.email else None
 
         if norm_email and self._is_dup(session, norm_email):
-            self._persist_prospect(session, candidate, norm_email, status="skipped_dup")
+            self._persist_prospect(session, candidate, norm_email, status=ProspectStatus.SKIPPED_DUP)
             return "skipped_dup"
 
         icp = self._score_icp(candidate)
@@ -78,7 +79,7 @@ class OutboundAgent:
         if icp.score < settings.ICP_THRESHOLD:
             self._persist_prospect(
                 session, candidate, norm_email,
-                status="skipped_lowscore", icp_score=icp.score, icp_rationale=icp.rationale,
+                status=ProspectStatus.SKIPPED_LOWSCORE, icp_score=icp.score, icp_rationale=icp.rationale,
             )
             return "skipped_lowscore"
 
@@ -86,7 +87,7 @@ class OutboundAgent:
         draft = self._draft_email(candidate, icp, enrichment)
         prospect = self._persist_prospect(
             session, candidate, norm_email,
-            status="drafted", icp_score=icp.score, icp_rationale=icp.rationale,
+            status=ProspectStatus.ANALYZED, icp_score=icp.score, icp_rationale=icp.rationale,
         )
         msg = self._persist_message(session, prospect, candidate, draft, icp.score)
 
@@ -158,7 +159,7 @@ class OutboundAgent:
         session,
         candidate: ProspectCandidate,
         norm_email: str | None,
-        status: str,
+        status: ProspectStatus,
         icp_score: int | None = None,
         icp_rationale: str | None = None,
     ) -> Prospect:
@@ -173,7 +174,7 @@ class OutboundAgent:
             country=candidate.country,
             icp_score=icp_score,
             icp_rationale=icp_rationale,
-            status=status,
+            status=status.value,
         )
         session.add(prospect)
         session.flush()
