@@ -29,8 +29,14 @@ async def lifespan(app: FastAPI):
     if settings.INBOUND_POLL_ENABLED:
         from ..agents.inbound_poller import run_poller
 
-        task = asyncio.create_task(run_poller())
+        asyncio.create_task(run_poller())
         logger.info("Inbound poller background task started.")
+
+    if settings.SEND_WORKER_ENABLED:
+        from ..agents.send_worker import run_send_worker
+
+        asyncio.create_task(run_send_worker())
+        logger.info("Send worker background task started.")
     yield
 
 
@@ -272,6 +278,21 @@ async def approve_message(message_id: int, body: ApprovalBody) -> dict:
             return {"status": msg.status, "message_id": msg.id}
     except ApprovalError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+
+    from datetime import datetime, timezone as tz
+
+    if msg.scheduled_at is None:
+        from ..db.models import Message
+        from ..db.session import SessionLocal as _SL
+
+        with _SL() as _sess:
+            _m = _sess.get(Message, message_id)
+            if _m:
+                _m.scheduled_at = datetime.now(tz.utc)
+                _sess.commit()
+
+    if settings.SEND_WORKER_ENABLED:
+        return {"status": "approved", "message_id": msg.id, "scheduled_at": str(msg.scheduled_at)}
 
     try:
         from ..integrations.senders import send

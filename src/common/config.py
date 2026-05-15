@@ -67,6 +67,9 @@ class Settings(BaseSettings):
     INBOUND_POLL_ENABLED: bool = False
     INBOUND_POLL_INTERVAL_SECONDS: int = 600
 
+    # ----- Send worker -----
+    SEND_WORKER_ENABLED: bool = False
+
     # ----- Behavior knobs -----
     AUTO_SEND_THRESHOLD: float = 1.01  # >1.0 => never auto-send
     OUTBOUND_COOLDOWN_DAYS: int = 90

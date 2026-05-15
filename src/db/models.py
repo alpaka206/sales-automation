@@ -103,10 +103,13 @@ class Message(Base):
     sent_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     replied: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     hubspot_engagement_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    scheduled_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     whatsapp_attempted: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     whatsapp_sent: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     whatsapp_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+
+    __table_args__ = (Index("ix_messages_status_scheduled", "status", "scheduled_at"),)
 
     conversation: Mapped[Conversation] = relationship(back_populates="messages")
     approvals: Mapped[list[Approval]] = relationship(back_populates="message")
