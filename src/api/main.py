@@ -18,6 +18,7 @@ from pydantic import BaseModel, Field
 from ..agents.approval import ApprovalError, approve, mark_sent, reject
 from ..common.config import settings
 from ..common.logging import setup_logging
+from .web.routes import router as web_router
 
 setup_logging()
 logger = logging.getLogger(__name__)
@@ -41,6 +42,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Sales Automation", version="0.1.0", lifespan=lifespan)
+app.include_router(web_router)
 
 
 # ---------- Middleware ----------
@@ -54,15 +56,42 @@ async def request_id_middleware(request: Request, call_next):
     return response
 
 
+_API_SKIP_PATHS = ("/healthz", "/docs", "/openapi.json")
+_WEB_UI_PREFIXES = ("/", "/messages", "/knowledge", "/outbound", "/settings")
+_LOCALHOST_HOSTS = ("127.0.0.1", "::1", "localhost")
+
+
+def _is_web_ui_path(path: str) -> bool:
+    """Return True for browser-facing web UI routes (not /api, /webhook, etc.)."""
+    if path == "/":
+        return True
+    return any(path.startswith(p) for p in _WEB_UI_PREFIXES if p != "/")
+
+
+def _is_localhost(request: Request) -> bool:
+    """Return True when the request originates from localhost."""
+    if settings.APP_HOST in _LOCALHOST_HOSTS:
+        return True
+    client = request.client
+    if client is None:
+        return False
+    return client.host in _LOCALHOST_HOSTS
+
+
 @app.middleware("http")
 async def auth_middleware(request: Request, call_next):
-    skip_paths = ("/healthz", "/docs", "/openapi.json")
-    if request.url.path in skip_paths:
+    if request.url.path in _API_SKIP_PATHS:
         return await call_next(request)
 
     # HubSpot webhook uses its own signature verification inside the route handler
     if request.url.path == "/webhook/hubspot/inbound" and settings.HUBSPOT_WEBHOOK_SECRET:
         return await call_next(request)
+
+    # Web UI routes are allowed from localhost without API token
+    if _is_web_ui_path(request.url.path):
+        if _is_localhost(request):
+            return await call_next(request)
+        return JSONResponse(status_code=403, content={"detail": "web UI is localhost-only"})
 
     if not settings.INTERNAL_API_TOKEN:
         return JSONResponse(
