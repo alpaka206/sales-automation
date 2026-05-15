@@ -7,7 +7,8 @@ import json
 import logging
 import random
 import re
-from typing import Any
+from contextlib import contextmanager
+from typing import Any, Generator
 
 from pydantic import BaseModel
 
@@ -44,6 +45,31 @@ def _clean_html(raw_html: str, max_chars: int = 30000) -> str:
     )
     html = re.sub(r"\s+", " ", html)
     return html[:max_chars]
+
+
+@contextmanager
+def create_browser_context(
+    cookies: list[dict] | None = None,
+) -> Generator[Any, None, None]:
+    """Context manager providing a Playwright browser context for interactive scraping."""
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError as e:
+        raise RuntimeError(
+            "playwright is not installed. Run `pip install playwright && playwright install chromium`."
+        ) from e
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        context = browser.new_context(
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+        )
+        if cookies:
+            context.add_cookies(cookies)
+        try:
+            yield context
+        finally:
+            browser.close()
 
 
 def fetch_and_extract_sync(

@@ -1,50 +1,52 @@
-"""Outbound prospect enrichment — fetches and summarizes company homepage."""
+"""Outbound prospect enrichment — fetches and summarizes company homepage via AI browser."""
 
 from __future__ import annotations
 
 import logging
-import re
 
-import httpx
-
+from ...integrations.ai_browser import fetch_and_extract_sync
 from ...llm.client import LLMClient
 from .sources.base import ProspectCandidate
 
 logger = logging.getLogger(__name__)
 
-MAX_TEXT_CHARS = 3000
-FETCH_TIMEOUT = 5.0
 
+class _EnrichmentResult:
+    """Container for enrichment extraction."""
 
-def _strip_html(html: str) -> str:
-    """Extract visible text from HTML."""
-    text = re.sub(r"<script[^>]*>.*?</script>", "", html, flags=re.DOTALL | re.IGNORECASE)
-    text = re.sub(r"<style[^>]*>.*?</style>", "", text, flags=re.DOTALL | re.IGNORECASE)
-    text = re.sub(r"<[^>]+>", " ", text)
-    text = re.sub(r"\s+", " ", text).strip()
-    return text[:MAX_TEXT_CHARS]
+    def __init__(self, summary: str, contact_emails: list[str] | None = None):
+        self.summary = summary
+        self.contact_emails = contact_emails or []
 
 
 def enrich_prospect(candidate: ProspectCandidate, llm: LLMClient) -> dict:
-    """Fetch company homepage and summarize it. Returns empty dict on failure."""
+    """Fetch company homepage and summarize it via AI browser. Returns empty dict on failure."""
     if not candidate.domain:
         return {}
 
     try:
         url = f"https://{candidate.domain}"
-        with httpx.Client(timeout=FETCH_TIMEOUT, follow_redirects=True) as cx:
-            resp = cx.get(url, headers={"Accept": "text/html"})
-            resp.raise_for_status()
+        result = fetch_and_extract_sync(
+            url,
+            extraction_prompt=(
+                "이 회사 홈페이지를 분석해서 다음 정보를 추출해주세요:\n"
+                "1. 회사가 뭘 하는지 2문장 이내 요약\n"
+                "2. 페이지에서 발견되는 contact 이메일 목록\n\n"
+                "Return JSON: {\"summary\": \"...\", \"contact_emails\": [\"...\"]}"
+            ),
+            max_html_chars=15000,
+        )
 
-        visible_text = _strip_html(resp.text)
-        if len(visible_text) < 50:
+        if result is None:
             return {}
 
-        summary = llm.complete(
-            "outbound/enrich_homepage",
-            {"domain": candidate.domain, "homepage_text": visible_text},
-        )
-        return {"homepage_summary": summary, "enrichment_source": "homepage"}
+        if isinstance(result, str):
+            summary = result.strip()
+            if len(summary) < 10:
+                return {}
+            return {"homepage_summary": summary, "enrichment_source": "ai_browser"}
+
+        return {}
 
     except Exception:
         logger.debug("Enrichment failed for domain %s, continuing.", candidate.domain, exc_info=True)

@@ -6,6 +6,7 @@ import logging
 import re
 
 from ....common.config import settings
+from ....integrations.ai_browser import create_browser_context
 from ....integrations.linkedin_profile import MAX_EMAIL_LOOKUPS_PER_RUN, fetch_profile_email
 from .base import ProspectCandidate, SourceFilters, apply_common_filters
 
@@ -95,13 +96,6 @@ class LinkedInCommentsSource:
 
     def _discover_playwright(self, post_urls: list[str], max_per_post: int) -> list[ProspectCandidate]:
         """Scrape commenters via Playwright browser automation."""
-        try:
-            from playwright.sync_api import sync_playwright
-        except ImportError as e:
-            raise RuntimeError(
-                "playwright is not installed. Run `pip install playwright && playwright install chromium`."
-            ) from e
-
         if not settings.LINKEDIN_SESSION_COOKIE:
             raise ValueError(
                 "LINKEDIN_SESSION_COOKIE is required for Playwright scraping. "
@@ -110,24 +104,18 @@ class LinkedInCommentsSource:
 
         prospects: list[ProspectCandidate] = []
 
-        with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True)
-            context = browser.new_context()
-            context.add_cookies([{
-                "name": "li_at",
-                "value": settings.LINKEDIN_SESSION_COOKIE,
-                "domain": ".linkedin.com",
-                "path": "/",
-            }])
-
+        with create_browser_context(cookies=[{
+            "name": "li_at",
+            "value": settings.LINKEDIN_SESSION_COOKIE,
+            "domain": ".linkedin.com",
+            "path": "/",
+        }]) as context:
             for url in post_urls:
                 try:
                     page_prospects = _scrape_post_comments(context, url, max_per_post)
                     prospects.extend(page_prospects)
                 except Exception:
                     logger.warning("Playwright scrape failed for %s, skipping.", url, exc_info=True)
-
-            browser.close()
 
         return prospects
 

@@ -1,9 +1,11 @@
-"""LinkedIn profile email extraction via Playwright."""
+"""LinkedIn profile email extraction via AI browser harness."""
 
 from __future__ import annotations
 
 import logging
 import re
+
+from .ai_browser import create_browser_context
 
 logger = logging.getLogger(__name__)
 
@@ -22,24 +24,16 @@ def fetch_profile_email(
         return _extract_email_from_profile(context, profile_url)
 
     try:
-        from playwright.sync_api import sync_playwright
-    except ImportError:
-        logger.warning("playwright not installed, skipping email lookup.")
-        return None
-
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
-        ctx = browser.new_context()
-        ctx.add_cookies([{
+        with create_browser_context(cookies=[{
             "name": "li_at",
             "value": session_cookie,
             "domain": ".linkedin.com",
             "path": "/",
-        }])
-        try:
+        }]) as ctx:
             return _extract_email_from_profile(ctx, profile_url)
-        finally:
-            browser.close()
+    except RuntimeError:
+        logger.warning("playwright not installed, skipping email lookup.")
+        return None
 
 
 def _extract_email_from_profile(context, profile_url: str) -> str | None:
