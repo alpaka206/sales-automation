@@ -10,9 +10,6 @@ import respx
 
 from src.integrations.hubspot import (
     BASE_URL,
-    ContactDTO,
-    DealDTO,
-    EngagementDTO,
     HubSpotAPIError,
     HubSpotClient,
 )

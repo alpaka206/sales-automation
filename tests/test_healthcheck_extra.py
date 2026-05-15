@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import smtplib
 import sys
 from types import ModuleType
 from unittest.mock import MagicMock, patch
