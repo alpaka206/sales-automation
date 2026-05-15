@@ -62,6 +62,10 @@ class Settings(BaseSettings):
     LINKEDIN_SESSION_COOKIE: str = ""
     LINKEDIN_API_TOKEN: str = ""
 
+    # ----- Inbound poller -----
+    INBOUND_POLL_ENABLED: bool = False
+    INBOUND_POLL_INTERVAL_SECONDS: int = 600
+
     # ----- Behavior knobs -----
     AUTO_SEND_THRESHOLD: float = 1.01  # >1.0 => never auto-send
     OUTBOUND_COOLDOWN_DAYS: int = 90

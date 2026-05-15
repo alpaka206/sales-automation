@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import hmac
 import logging
 import time
 import uuid
+from contextlib import asynccontextmanager
 from typing import Literal
 
 from fastapi import FastAPI, HTTPException, Request
@@ -20,7 +22,19 @@ from ..common.logging import setup_logging
 setup_logging()
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="Sales Automation", version="0.1.0")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Start background workers on startup."""
+    if settings.INBOUND_POLL_ENABLED:
+        from ..agents.inbound_poller import run_poller
+
+        task = asyncio.create_task(run_poller())
+        logger.info("Inbound poller background task started.")
+    yield
+
+
+app = FastAPI(title="Sales Automation", version="0.1.0", lifespan=lifespan)
 
 
 # ---------- Middleware ----------
