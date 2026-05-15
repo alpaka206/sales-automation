@@ -49,6 +49,9 @@ def run_healthchecks() -> HealthReport:
 
     checks.append(_check_disk_space())
 
+    if settings.SEND_WORKER_ENABLED:
+        checks.append(_check_send_quota())
+
     statuses = {c.status for c in checks}
     if "FAIL" in statuses:
         overall = "FAIL"
@@ -183,6 +186,21 @@ def _check_smtp() -> CheckResult:
     except Exception as e:
         ms = int((time.monotonic() - start) * 1000)
         return CheckResult(name="smtp_login", status="FAIL", detail=f"[{provider}] {str(e)[:180]}", latency_ms=ms)
+
+
+def _check_send_quota() -> CheckResult:
+    """Report daily send count vs limit."""
+    try:
+        from ..agents.send_worker import get_daily_count
+
+        count = get_daily_count()
+        limit = settings.DAILY_SEND_LIMIT
+        detail = f"{count}/{limit} sent today"
+        if limit > 0 and count >= limit:
+            return CheckResult(name="send_quota", status="WARN", detail=detail)
+        return CheckResult(name="send_quota", status="PASS", detail=detail)
+    except Exception as e:
+        return CheckResult(name="send_quota", status="WARN", detail=str(e)[:200])
 
 
 def _check_disk_space() -> CheckResult:

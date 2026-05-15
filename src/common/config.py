@@ -69,6 +69,9 @@ class Settings(BaseSettings):
 
     # ----- Send worker -----
     SEND_WORKER_ENABLED: bool = False
+    SEND_RATE_PER_MINUTE: int = 5
+    DAILY_SEND_LIMIT: int = 100
+    SEND_JITTER_SECONDS: int = 15
 
     # ----- Behavior knobs -----
     AUTO_SEND_THRESHOLD: float = 1.01  # >1.0 => never auto-send
