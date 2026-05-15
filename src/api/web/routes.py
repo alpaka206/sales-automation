@@ -13,8 +13,9 @@ from sqlalchemy.orm import joinedload
 
 from ...agents.approval import ApprovalError, approve, reject
 from ...common.config import settings
-from ...db.models import Contact, Conversation, Message, Prospect
+from ...db.models import Contact, Conversation, KnowledgeDocument, Message, Prospect
 from ...db.session import SessionLocal
+from ...llm.knowledge import reset_cache as _reset_kb_cache
 
 _TEMPLATE_DIR = Path(__file__).parent / "templates"
 
@@ -199,4 +200,147 @@ async def message_edit(message_id: int, body: str = Form(""), subject: str = For
         session.commit()
     return HTMLResponse(
         '<div class="text-blue-600 text-sm font-medium">저장 완료</div>'
+    )
+
+
+# ---------- Knowledge base CRUD ----------
+
+
+def _slugify(title: str) -> str:
+    """Simple slug from Korean/English title."""
+    import re
+    slug = title.lower().strip().replace(" ", "-")
+    slug = re.sub(r"[^a-z0-9가-힣\-]", "", slug)
+    return slug or "untitled"
+
+
+@router.get("/knowledge")
+async def knowledge_list(request: Request):
+    """List all knowledge base documents."""
+    with SessionLocal() as session:
+        docs = (
+            session.query(KnowledgeDocument)
+            .order_by(KnowledgeDocument.updated_at.desc())
+            .all()
+        )
+        items = [
+            {
+                "id": d.id,
+                "title": d.title,
+                "slug": d.slug,
+                "categories": d.categories or [],
+                "scope": d.scope,
+                "updated_at": d.updated_at,
+            }
+            for d in docs
+        ]
+    return templates.TemplateResponse(request, "knowledge_list.html", {"docs": items})
+
+
+@router.get("/knowledge/new")
+async def knowledge_new(request: Request):
+    """Form to create a new knowledge document."""
+    return templates.TemplateResponse(request, "knowledge_form.html", {
+        "doc": None, "mode": "create",
+    })
+
+
+@router.get("/knowledge/{doc_id}")
+async def knowledge_edit(request: Request, doc_id: int):
+    """Edit form for an existing knowledge document."""
+    with SessionLocal() as session:
+        doc = session.get(KnowledgeDocument, doc_id)
+        if not doc:
+            raise HTTPException(status_code=404, detail="문서를 찾을 수 없습니다")
+        item = {
+            "id": doc.id,
+            "title": doc.title,
+            "slug": doc.slug,
+            "categories": ",".join(doc.categories) if doc.categories else "",
+            "scope": doc.scope,
+            "body": doc.body,
+        }
+    return templates.TemplateResponse(request, "knowledge_form.html", {
+        "doc": item, "mode": "edit",
+    })
+
+
+@router.post("/knowledge")
+async def knowledge_create(
+    title: str = Form(""),
+    categories: str = Form(""),
+    scope: str = Form("both"),
+    body: str = Form(""),
+):
+    """Create a new knowledge document."""
+    if not title.strip() or not body.strip():
+        return HTMLResponse(
+            '<div class="text-red-600 text-sm">제목과 본문은 필수입니다</div>',
+            status_code=400,
+        )
+    cats = [c.strip() for c in categories.split(",") if c.strip()] or None
+    slug = _slugify(title.strip())
+    with SessionLocal() as session:
+        existing = session.query(KnowledgeDocument).filter_by(slug=slug).first()
+        if existing:
+            slug = f"{slug}-{existing.id + 1}"
+        doc = KnowledgeDocument(
+            title=title.strip(), slug=slug, categories=cats,
+            scope=scope, body=body.strip(),
+        )
+        session.add(doc)
+        session.commit()
+    _reset_kb_cache()
+    return HTMLResponse(
+        '<div class="text-green-600 text-sm font-medium">문서 생성 완료</div>'
+        '<script>setTimeout(()=>location.href="/knowledge",500)</script>'
+    )
+
+
+@router.put("/knowledge/{doc_id}")
+async def knowledge_update(
+    doc_id: int,
+    title: str = Form(""),
+    categories: str = Form(""),
+    scope: str = Form("both"),
+    body: str = Form(""),
+):
+    """Update an existing knowledge document."""
+    cats = [c.strip() for c in categories.split(",") if c.strip()] or None
+    with SessionLocal() as session:
+        doc = session.get(KnowledgeDocument, doc_id)
+        if not doc:
+            return HTMLResponse(
+                '<div class="text-red-600 text-sm">문서를 찾을 수 없습니다</div>',
+                status_code=404,
+            )
+        if title.strip():
+            doc.title = title.strip()
+        doc.categories = cats
+        doc.scope = scope
+        if body.strip():
+            doc.body = body.strip()
+        session.commit()
+    _reset_kb_cache()
+    return HTMLResponse(
+        '<div class="text-green-600 text-sm font-medium">저장 완료</div>'
+    )
+
+
+@router.delete("/knowledge/{doc_id}")
+async def knowledge_delete(doc_id: int):
+    """Delete a knowledge document."""
+    with SessionLocal() as session:
+        doc = session.get(KnowledgeDocument, doc_id)
+        if not doc:
+            return HTMLResponse(
+                '<div class="text-red-600 text-sm">문서를 찾을 수 없습니다</div>',
+                status_code=404,
+            )
+        session.delete(doc)
+        session.commit()
+    _reset_kb_cache()
+    return HTMLResponse(
+        '<div class="text-orange-600 text-sm font-medium">삭제 완료</div>'
+        '<script>setTimeout(()=>location.href="/knowledge",500)</script>'
     )

@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block title %}{% if mode == 'edit' %}문서 편집{% else %}새 문서{% endif %} — Sales Automation{% endblock %}
+{% block content %}
+
+<div class="mb-6">
+  <a href="/knowledge" class="text-sm text-blue-600 hover:underline">&larr; 지식베이스</a>
+</div>
+
+<div class="bg-white rounded-lg shadow-sm border p-6 max-w-3xl">
+  <h1 class="text-lg font-bold text-gray-800 mb-6">
+    {% if mode == 'edit' %}문서 편집{% else %}새 문서 작성{% endif %}
+  </h1>
+
+  <form id="kb-form">
+    <div class="mb-4">
+      <label class="block text-xs text-gray-500 mb-1">제목</label>
+      <input name="title" value="{{ doc.title if doc else '' }}"
+             class="w-full border rounded px-3 py-2 text-sm" required>
+    </div>
+
+    <div class="grid grid-cols-2 gap-4 mb-4">
+      <div>
+        <label class="block text-xs text-gray-500 mb-1">분류 (쉼표 구분)</label>
+        <input name="categories" value="{{ doc.categories if doc else '' }}"
+               placeholder="pricing, faq, policy, all"
+               class="w-full border rounded px-3 py-2 text-sm">
+      </div>
+      <div>
+        <label class="block text-xs text-gray-500 mb-1">범위</label>
+        <select name="scope" class="w-full border rounded px-3 py-2 text-sm">
+          <option value="both" {% if doc and doc.scope == 'both' %}selected{% endif %}>both</option>
+          <option value="inbound" {% if doc and doc.scope == 'inbound' %}selected{% endif %}>inbound</option>
+          <option value="outbound" {% if doc and doc.scope == 'outbound' %}selected{% endif %}>outbound</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="mb-4">
+      <label class="block text-xs text-gray-500 mb-1">본문 (Markdown)</label>
+      <textarea name="body" rows="16"
+                class="w-full border rounded px-3 py-2 text-sm font-mono leading-relaxed"
+                required>{{ doc.body if doc else '' }}</textarea>
+    </div>
+
+    <div class="flex gap-3 items-center">
+      {% if mode == 'edit' %}
+      <button type="button"
+              hx-put="/knowledge/{{ doc.id }}" hx-include="#kb-form"
+              hx-target="#action-result" hx-swap="innerHTML"
+              class="bg-blue-600 text-white px-4 py-2 rounded text-sm hover:bg-blue-700">
+        저장
+      </button>
+      <button type="button"
+              hx-delete="/knowledge/{{ doc.id }}" hx-confirm="정말 삭제하시겠습니까?"
+              hx-target="#action-result" hx-swap="innerHTML"
+              class="bg-red-100 text-red-700 px-4 py-2 rounded text-sm hover:bg-red-200">
+        삭제
+      </button>
+      {% else %}
+      <button type="button"
+              hx-post="/knowledge" hx-include="#kb-form"
+              hx-target="#action-result" hx-swap="innerHTML"
+              class="bg-green-600 text-white px-4 py-2 rounded text-sm hover:bg-green-700">
+        생성
+      </button>
+      {% endif %}
+    </div>
+  </form>
+
+  <div id="action-result" class="mt-4"></div>
+</div>
+
+{% endblock %}
