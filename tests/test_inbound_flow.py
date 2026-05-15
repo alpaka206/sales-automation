@@ -15,6 +15,7 @@ from src.agents.inbound import (
     _processed,
 )
 from src.db.models import Contact, Conversation, Message
+from src.db.models import KnowledgeDocument
 from src.integrations.hubspot import ContactDTO, EngagementDTO, DealDTO
 from src.llm import knowledge
 
@@ -27,13 +28,12 @@ def _clear_dedup():
 
 
 @pytest.fixture(autouse=True)
-def _isolated_knowledge_base(tmp_path, monkeypatch):
-    """Keep tests independent from the repo's knowledge_base/ contents."""
-    empty = tmp_path / "kb_empty"
-    empty.mkdir()
-    monkeypatch.setattr(knowledge, "KNOWLEDGE_DIR", empty)
+def _isolated_knowledge_db(db_session, monkeypatch):
+    """Point knowledge loader at the test DB session so it starts empty."""
+    factory = lambda: db_session  # noqa: E731
+    monkeypatch.setattr(knowledge, "SessionLocal", factory)
     knowledge.reset_cache()
-    yield empty
+    yield db_session
     knowledge.reset_cache()
 
 
@@ -179,16 +179,18 @@ def test_inbound_enriched_from_hubspot(db_session) -> None:
     assert contacts[0].normalized_email == "enriched@acme.co.kr"
 
 
-def test_inbound_passes_knowledge_docs_to_draft(db_session, tmp_path, monkeypatch) -> None:
+def test_inbound_passes_knowledge_docs_to_draft(db_session) -> None:
     """When classification matches a knowledge_base doc, its body must reach the draft prompt."""
-    kb = tmp_path / "kb_with_doc"
-    kb.mkdir()
-    (kb / "pricing.md").write_text(
-        "---\ntitle: Plans\ncategories: [purchase_inquiry]\n---\n\nStarter plan starts at 99k KRW.\n",
-        encoding="utf-8",
-    )
-    monkeypatch.setattr(knowledge, "KNOWLEDGE_DIR", kb)
     knowledge.reset_cache()
+    doc = KnowledgeDocument(
+        title="Plans",
+        slug="plans",
+        categories=["purchase_inquiry"],
+        scope="both",
+        body="Starter plan starts at 99k KRW.",
+    )
+    db_session.add(doc)
+    db_session.commit()
 
     llm = _mock_llm()
     with patch("src.agents.inbound.SessionLocal", return_value=db_session):
@@ -210,16 +212,18 @@ def test_inbound_passes_knowledge_docs_to_draft(db_session, tmp_path, monkeypatc
     assert "Starter plan starts at 99k KRW." in draft_vars["knowledge_docs"]
 
 
-def test_inbound_omits_knowledge_for_spam(db_session, tmp_path, monkeypatch) -> None:
+def test_inbound_omits_knowledge_for_spam(db_session) -> None:
     """Spam classification must not pull any knowledge docs into the draft prompt."""
-    kb = tmp_path / "kb_spam"
-    kb.mkdir()
-    (kb / "general.md").write_text(
-        "---\ncategories: [all]\n---\n\nAlways-on company info.\n",
-        encoding="utf-8",
-    )
-    monkeypatch.setattr(knowledge, "KNOWLEDGE_DIR", kb)
     knowledge.reset_cache()
+    doc = KnowledgeDocument(
+        title="General",
+        slug="general",
+        categories=["all"],
+        scope="both",
+        body="Always-on company info.",
+    )
+    db_session.add(doc)
+    db_session.commit()
 
     llm = MagicMock()
 
