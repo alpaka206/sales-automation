@@ -41,7 +41,7 @@ async def _try_whatsapp_template(message: Message) -> None:
                 if c and c.whatsapp_opt_in:
                     phone = getattr(c, "phone", None)
         except Exception:
-            pass
+            logger.warning("Failed to look up WhatsApp phone for contact %d", message.conversation.contact_id, exc_info=True)
 
     if not phone:
         return

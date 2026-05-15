@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -19,6 +20,8 @@ from ...db.models import (
 )
 from ...db.session import SessionLocal
 from ...llm.knowledge import reset_cache as _reset_kb_cache
+
+logger = logging.getLogger(__name__)
 
 _TEMPLATE_DIR = Path(__file__).parent / "templates"
 
@@ -570,7 +573,7 @@ async def prospects_bulk_approve(request: Request):
                     approve(msg.id, approver="web_ui_bulk")
                     approved_count += 1
                 except Exception:
-                    pass
+                    logger.warning("Failed to approve message %d in bulk", msg.id, exc_info=True)
     return HTMLResponse(
         f'<div class="text-green-600 text-sm font-medium">{approved_count}건 승인 완료</div>'
     )
