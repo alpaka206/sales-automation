@@ -73,6 +73,21 @@ async def send(message: Message) -> None:
         await send_whatsapp(message)
         return
 
+    from ..compliance import append_footer, is_suppressed
+
+    if message.to_address and is_suppressed(message.to_address):
+        logger.info("Message %d suppressed — %s is on the suppression list.", message.id, message.to_address)
+        from ...db.session import SessionLocal
+        with SessionLocal() as session:
+            msg = session.get(Message, message.id)
+            if msg:
+                msg.status = "suppressed"
+                session.commit()
+        return
+
+    if message.to_address and message.direction == "outgoing":
+        message.body = append_footer(message.body, message.to_address, message.language)
+
     # Email send — failure raises, propagating to caller
     if settings.EMAIL_PROVIDER == "smtp":
         send_smtp(message)

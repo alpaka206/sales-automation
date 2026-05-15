@@ -201,6 +201,16 @@ class ICPRule(Base):
     )
 
 
+class EmailSuppression(Base):
+    """Tracks unsubscribed/bounced/complaint emails to prevent re-sending."""
+
+    __tablename__ = "email_suppression"
+
+    email: Mapped[str] = mapped_column(String, primary_key=True)
+    reason: Mapped[str] = mapped_column(String, nullable=False, default="unsubscribe")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+
+
 class LLMUsage(Base):
     __tablename__ = "llm_usage"
 
