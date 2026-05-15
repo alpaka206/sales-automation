@@ -6,6 +6,7 @@ import logging
 import re
 
 from ....common.config import settings
+from ....integrations.linkedin_profile import MAX_EMAIL_LOOKUPS_PER_RUN, fetch_profile_email
 from .base import ProspectCandidate, SourceFilters, apply_common_filters
 
 logger = logging.getLogger(__name__)
@@ -40,9 +41,35 @@ class LinkedInCommentsSource:
         else:
             prospects = self._discover_playwright(post_urls, max_per_post)
 
+        if settings.LINKEDIN_SESSION_COOKIE:
+            self._enrich_emails(prospects)
+
         prospects = apply_common_filters(prospects, sf)
         logger.info("LinkedInComments: found %d commenters from %d posts.", len(prospects), len(post_urls))
         return prospects
+
+    def _enrich_emails(self, prospects: list[ProspectCandidate]) -> None:
+        """Try to fetch emails from LinkedIn profiles for prospects that lack one."""
+        candidates = [p for p in prospects if not p.email and p.extra.get("profile_url")]
+        if not candidates:
+            return
+
+        lookups = min(len(candidates), MAX_EMAIL_LOOKUPS_PER_RUN)
+        found = 0
+
+        for prospect in candidates[:lookups]:
+            profile_url = prospect.extra["profile_url"]
+            try:
+                email = fetch_profile_email(profile_url, settings.LINKEDIN_SESSION_COOKIE)
+                if email:
+                    prospect.email = email
+                    found += 1
+            except Exception:
+                logger.debug("Email lookup failed for %s.", profile_url, exc_info=True)
+
+        logger.info(
+            "LinkedInComments: %d/%d email lookups returned email.", found, lookups
+        )
 
     def _discover_api(self, post_urls: list[str], max_per_post: int) -> list[ProspectCandidate]:
         """Fetch commenters via official LinkedIn API (partner-tier)."""
