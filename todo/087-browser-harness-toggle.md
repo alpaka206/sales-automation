@@ -1,5 +1,14 @@
 # 087 — browser-harness 백엔드 토글 추가 (Playwright 와 양립)
 
+> ⚠️ **BLOCKED**: 아키텍처 의사결정 대기 중.
+> `docs/2026-05-17_아키텍처_의사결정_요청.md` 참고.
+> - A (클라우드) 채택 시 → 이 todo **폐기** (서버에선 browser-harness 무의미)
+> - B (노트북) / C (mini PC) 채택 시 → 이 todo 진행
+>
+> 의사결정 전엔 Ralph Loop 가 이 todo 처리하지 않도록 본 BLOCKED 표시를 보고
+> 다음 todo 로 넘어가게 함. (현재 todo/ 에 다른 항목 없으므로 ralph 는
+> polish 모드 진입.)
+
 ## Why
 
 사용자 원 명세에서 "browser harness 라이브러리로 크롤링 하도록" 명시했는데
