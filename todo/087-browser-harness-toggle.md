@@ -1,0 +1,62 @@
+# 087 — browser-harness 백엔드 토글 추가 (Playwright 와 양립)
+
+## Why
+
+사용자 원 명세에서 "browser harness 라이브러리로 크롤링 하도록" 명시했는데
+Ralph 가 Playwright + claude CLI 직접 결합으로 구현. 명세 위반. 두 백엔드
+모두 지원하도록 환경변수로 토글 추가.
+
+browser-harness (`github.com/browser-use/browser-harness`):
+- CDP 로 사용자의 실제 Chrome 에 연결 (headless X)
+- Claude Code CLI 의 SKILL 시스템에 등록 (`~/.claude/CLAUDE.md` 에 한 줄)
+- LLM API 키 불필요, claude CLI 가 brain
+- Self-healing (실행 중 helper 코드 자동 작성)
+- 사용자가 Chrome 켜고 로그인된 상태여야 함
+
+## What to do
+
+1. `.env.example` 에 `BROWSER_BACKEND=playwright` 추가 (값: `playwright` |
+   `browser_harness`).
+2. `src/integrations/ai_browser.py` 의 `fetch_and_extract_sync` 를 백엔드
+   디스패처로 변경. `BROWSER_BACKEND=browser_harness` 면 새 함수
+   `_fetch_via_harness(url, instruction)` 호출.
+3. `src/integrations/browser_harness_adapter.py` 신규:
+   - subprocess 로 `browser-harness <<'PY' ... PY` 호출
+   - 또는 browser-harness 가 Python API 제공 시 import 해서 사용
+   - 반환: 추출된 텍스트 또는 schema 객체
+4. `docs/배포.md` 에 "browser-harness 설치" 섹션 추가:
+   - `git clone https://github.com/browser-use/browser-harness`
+   - `uv tool install -e .`
+   - `~/.claude/CLAUDE.md` 에 `@<path>/SKILL.md` 추가
+   - Chrome 에서 remote debugging 활성화 안내
+5. linkedin_comments, linkedin_profile, google_search, job_board 의
+   browser 호출이 토글을 그대로 따르는지 확인 (이미 ai_browser 통해서
+   호출하므로 자동 적용되어야 함).
+6. 단위 테스트: 토글 값에 따라 분기되는지만 검증 (mock subprocess).
+
+## Acceptance criteria
+
+- `BROWSER_BACKEND=playwright` (기본) 일 때 기존 동작 유지.
+- `BROWSER_BACKEND=browser_harness` 일 때 subprocess 로 browser-harness
+  호출 (또는 import).
+- 토글 변경에 코드 수정 불필요 (.env 만 바꾸면 동작 전환).
+- `docs/배포.md` 의 browser-harness 설치 가이드가 비개발자도 따라할 수
+  있게 명시적.
+
+## Verify
+
+```powershell
+# 1. Playwright 백엔드 (기본)
+.venv\Scripts\python.exe -m pytest tests/test_ai_browser.py -q
+
+# 2. browser-harness 백엔드 (토글)
+$env:BROWSER_BACKEND="browser_harness"
+.venv\Scripts\python.exe -m pytest tests/test_ai_browser_harness.py -q
+```
+
+## Risks
+
+- browser-harness 는 사용자 Chrome 의존 — 운영 PC 가 항상 Chrome 켜져
+  있어야 함. 무인 24/7 운영은 어려움.
+- LinkedIn anti-bot 회피에는 훨씬 안전. 대신 PC 가 sleep 들어가면 멈춤
+  (이미 `scripts/disable_all_locks.bat` 로 해결).
