@@ -97,8 +97,6 @@ single todo:
   venv activated.
 - `docs/` directory must contain `사용법.md`, `설정.md`, `문제해결.md`,
   `배포.md`, `테스트.md`.
-- All n8n workflow JSONs under `n8n_workflows/` must have a one-line
-  Korean comment at the top of the README describing what they do.
 
 ### Check 3.5 — Phase-specific quality (post-Phase 4+)
 

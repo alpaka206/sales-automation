@@ -43,7 +43,7 @@ AI가 작성한 이메일은 **Slack 또는 Teams**에서 승인/수정/거절�
 - **서버 실행**: `scripts\run.bat` 더블클릭
 - **메시지 승인**: Slack/Teams에 카드가 도착하면 Approve/Reject 클릭
 - **리포트 확인**: 매일 18시, 매주 토요일 09시에 Slack/이메일로 발송
-- **아웃바운드 리드 추가**: CSV 파일을 준비하고 n8n 워크플로 또는 API 호출로 실행
+- **아웃바운드 리드 추가**: 웹 UI 의 `/outbound/new` 에서 자연어 입력 또는 CSV 업로드
 - **문제 해결**: [docs/문제해결.md](docs/문제해결.md) 참고
 
 ---
@@ -53,9 +53,9 @@ AI가 작성한 이메일은 **Slack 또는 Teams**에서 승인/수정/거절�
 ### 아키텍처
 
 ```
-HubSpot (CRM)  →  n8n (이벤트/스케줄)  →  FastAPI BE  →  LLM (Claude)
+HubSpot (CRM)  →  FastAPI BE (인바운드 폴러 + 발송 워커 내장)  →  LLM (Claude CLI)
                                             ↓
-                              SQLite DB + Slack/Teams 승인 + 발송
+                       SQLite/Postgres DB + 웹 UI 승인 + 발송 (HubSpot/SMTP/WhatsApp)
 ```
 
 ### 개발 환경 설정
@@ -97,9 +97,9 @@ bash scripts/ralph_loop.sh   # git-bash / WSL
 | `todo/` | 다음에 할 작업들 (번호순) |
 | `done/` | 완료된 작업 (히스토리) |
 | `company_rules/` | 회사 규칙 (톤, 시그니처, 금지어) |
-| `src/` | 소스코드 |
-| `n8n_workflows/` | n8n 워크플로 JSON |
+| `src/` | 소스코드 (FastAPI BE + 웹 UI + 백그라운드 워커) |
 | `scripts/` | 배치 스크립트, 초기화 |
+| `knowledge_base/` | 회사 안내 문서 (.md) — 인바운드 답장 자동 참고 |
 | `tests/` | pytest 테스트 |
 | `data/` | SQLite DB (gitignored) |
 | `logs/` | 앱 로그 (gitignored) |

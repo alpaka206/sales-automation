@@ -8,7 +8,7 @@ A sales automation system with three agents:
 2. **Outbound Agent** — discovers prospects from configurable sources (YouTube, LinkedIn, manual CSV), runs source-specific prompts, dedupes against the DB, sends opening emails, and waits for replies.
 3. **Report Agent** — aggregates the activity of the two agents above into daily and weekly reports.
 
-This is **not** a "fully autonomous AI agent" — it is a **workflow automation system** where an LLM handles judgment-heavy steps (classification, scoring, drafting) and n8n / Python code handles deterministic steps (triggering, sending, recording, follow-ups).
+This is **not** a "fully autonomous AI agent" — it is a **workflow automation system** where an LLM handles judgment-heavy steps (classification, scoring, drafting) and Python code (including in-process background workers) handles deterministic steps (triggering, sending, recording, follow-ups).
 
 ## High-level architecture
 
@@ -16,7 +16,7 @@ This is **not** a "fully autonomous AI agent" — it is a **workflow automation 
 HubSpot (CRM, source of truth)
        │
        ▼
-n8n  (event triggers, schedules, branching, retries)
+Background workers in FastAPI (inbound_poller, send_worker, reply_check)
        │           ▲
        ▼           │ approve/reject
    FastAPI BE  ───►  Slack / Teams
@@ -49,7 +49,6 @@ sales-automation/
 │   ├── integrations/      # hubspot, youtube, linkedin, slack, smtp, whatsapp
 │   ├── db/                # SQLAlchemy models, migrations, repositories
 │   └── common/            # logging, config, prompt loading, helpers
-├── n8n_workflows/         # exported n8n workflow JSON (commit these)
 ├── scripts/               # ralph_loop, init_db, dev helpers
 ├── tests/                 # pytest tests
 ├── data/                  # local SQLite file lives here (gitignored)
@@ -93,7 +92,7 @@ Stub interface only for now. Real WhatsApp Cloud API integration is parked behin
 No outbound message goes out without approval **in the first iteration of the product**. Approval flow:
 
 1. Agent drafts message → stores in `messages` table with status `pending_approval`.
-2. n8n posts a Slack/Teams card with Approve / Edit / Reject buttons.
+2. BE posts a Slack/Teams card with Approve / Edit / Reject buttons (and exposes the same actions in the web UI at `/messages/{id}`).
 3. Approval webhook hits FastAPI `/approve/{message_id}` → status flips to `approved` → sender goes.
 
 `AUTO_SEND_THRESHOLD` env var lets us later auto-send when LLM confidence is above a threshold (default: never, `1.01`).
@@ -104,7 +103,7 @@ A prospect is identified by **normalized email** (lowercased, plus-stripped) as 
 
 ## Reply detection
 
-For follow-ups: store `last_outgoing_message_at` per conversation. A poll job (n8n cron) checks the HubSpot inbox for emails received after that timestamp from the same address. If found → mark `replied=true`, do NOT send follow-up. If not found after N days (`FOLLOWUP_AFTER_DAYS`, default 4) → draft follow-up.
+For follow-ups: store `last_outgoing_message_at` per conversation. The in-process reply_check job (callable via `/run/reply_check` or scheduled OS-side) checks the HubSpot inbox / Gmail IMAP for replies. If found → mark `replied=true`, do NOT send follow-up. If not found after N days (`FOLLOWUP_AFTER_DAYS`, default 7) → draft follow-up.
 
 ## Free / local stack
 

@@ -1,4 +1,4 @@
-"""FastAPI entrypoint with routes for agents and n8n integration."""
+"""FastAPI entrypoint — HubSpot webhook, approval, agent run endpoints, web UI."""
 
 from __future__ import annotations
 
