@@ -328,11 +328,17 @@ class InboundAgent:
                     country=contact_info.get("country"),
                     lifecycle_stage=contact_info.get("lifecycle_stage"),
                     score=score,
+                    phone=contact_info.get("phone") or None,
+                    whatsapp_opt_in=bool(contact_info.get("whatsapp_opt_in")),
                 )
                 session.add(contact)
                 session.flush()
             else:
                 contact.score = score
+                if contact_info.get("phone"):
+                    contact.phone = contact_info["phone"]
+                if contact_info.get("whatsapp_opt_in"):
+                    contact.whatsapp_opt_in = True
 
             conv = (
                 session.query(Conversation).filter_by(contact_id=contact.id).first()
@@ -346,12 +352,13 @@ class InboundAgent:
                 session.add(conv)
                 session.flush()
 
+            to_addr = contact_info.get("phone") if channel == "whatsapp" else (email or None)
             msg = Message(
                 conversation_id=conv.id,
                 direction="outbound",
                 channel=channel,
                 from_address=settings.SMTP_FROM_EMAIL or None,
-                to_address=email or None,
+                to_address=to_addr,
                 subject=draft.subject,
                 body=draft.body,
                 language=draft.language,

@@ -13,12 +13,18 @@ from src.integrations.senders.whatsapp import WhatsAppSendError
 
 
 def _create_test_message(phone: str = "+821012345678") -> int:
-    """Create a test message in DB and return its ID."""
+    """Create a test message in DB and return its ID.
+
+    Email is stored on message.to_address (the primary channel); phone lives
+    on the Contact row and the dispatcher reads it from there for the
+    WhatsApp piggyback.
+    """
     with SessionLocal() as session:
         contact = Contact(
             normalized_email="dual-test@example.com",
             email="dual-test@example.com",
             full_name="Dual Test",
+            phone=phone,
             whatsapp_opt_in=True,
         )
         session.add(contact)
@@ -32,7 +38,7 @@ def _create_test_message(phone: str = "+821012345678") -> int:
             conversation_id=conv.id,
             direction="outgoing",
             channel="email",
-            to_address=phone,
+            to_address="dual-test@example.com",
             subject="Test",
             body="Test body",
         )

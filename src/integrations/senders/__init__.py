@@ -29,19 +29,28 @@ def _record_whatsapp_result(message_id: int, attempted: bool, sent: bool, error:
 
 
 async def _try_whatsapp_template(message: Message) -> None:
-    """Attempt a WhatsApp template send alongside email, recording result in DB."""
-    phone = message.to_address
-    if not phone:
-        from ...db.session import SessionLocal
-        from ...db.models import Contact
+    """Attempt a WhatsApp template send alongside email, recording result in DB.
 
-        try:
-            with SessionLocal() as session:
-                c = session.get(Contact, message.conversation.contact_id)
-                if c and c.whatsapp_opt_in:
-                    phone = getattr(c, "phone", None)
-        except Exception:
-            logger.warning("Failed to look up WhatsApp phone for contact %d", message.conversation.contact_id, exc_info=True)
+    Always fetches the phone from the Contact record — never reuses the email
+    in message.to_address. WhatsApp Cloud API has no native "does this number
+    have WhatsApp?" lookup, so we send the template and let the API return
+    error 131009 if the number is not on WhatsApp (handled in whatsapp.py).
+    """
+    from ...db.session import SessionLocal
+    from ...db.models import Contact
+
+    phone: str | None = None
+    try:
+        with SessionLocal() as session:
+            c = session.get(Contact, message.conversation.contact_id)
+            if c and c.whatsapp_opt_in:
+                phone = getattr(c, "phone", None)
+    except Exception:
+        logger.warning(
+            "Failed to look up WhatsApp phone for contact %d",
+            message.conversation.contact_id,
+            exc_info=True,
+        )
 
     if not phone:
         return

@@ -27,6 +27,7 @@ class Contact(Base):
     country: Mapped[str | None] = mapped_column(String, nullable=True)
     lifecycle_stage: Mapped[str | None] = mapped_column(String, nullable=True)
     score: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    phone: Mapped[str | None] = mapped_column(String, nullable=True)
     whatsapp_opt_in: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(

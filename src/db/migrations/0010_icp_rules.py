@@ -16,15 +16,20 @@ def up(engine: Engine) -> None:
         logger.info("icp_rules table already exists, skipping.")
         return
 
+    is_sqlite = engine.dialect.name == "sqlite"
+    pk_clause = "INTEGER PRIMARY KEY AUTOINCREMENT" if is_sqlite else "INTEGER PRIMARY KEY GENERATED ALWAYS AS IDENTITY"
+    bool_true = "1" if is_sqlite else "TRUE"
+    ts_default = "(datetime('now'))" if is_sqlite else "now()"
+
     with engine.begin() as conn:
-        conn.execute(text("""
+        conn.execute(text(f"""
             CREATE TABLE icp_rules (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                id {pk_clause},
                 source VARCHAR NOT NULL UNIQUE,
                 criteria_md TEXT NOT NULL DEFAULT '',
-                enabled BOOLEAN NOT NULL DEFAULT 1,
-                created_at DATETIME NOT NULL DEFAULT (datetime('now')),
-                updated_at DATETIME NOT NULL DEFAULT (datetime('now'))
+                enabled BOOLEAN NOT NULL DEFAULT {bool_true},
+                created_at TIMESTAMP NOT NULL DEFAULT {ts_default},
+                updated_at TIMESTAMP NOT NULL DEFAULT {ts_default}
             )
         """))
         logger.info("Created icp_rules table.")
