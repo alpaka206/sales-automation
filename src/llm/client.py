@@ -35,12 +35,54 @@ class LLMError(RuntimeError):
 
 
 _FENCE_RE = re.compile(r"^\s*```(?:json|JSON)?\s*\n?(.*?)\n?```\s*$", re.DOTALL)
+_FENCE_OPEN_RE = re.compile(r"```(?:json|JSON)?\s*\n?")
 
 
 def _strip_code_fences(text: str) -> str:
-    """Remove a ```json ... ``` wrapper if the model added one despite instructions."""
+    """Best-effort JSON extraction from LLM output.
+
+    Handles three observed patterns from claude_cli:
+      1. Strict fence: ```json\\n{...}\\n```
+      2. Fence + trailing prose: ```json\\n{...}\\n```\\n\\nWant me to investigate?
+      3. Raw JSON object preceded or followed by prose ("Here's the JSON: {...}")
+
+    Falls back to the original text (caller's parse error message is preserved).
+    """
+    # 1. Strict full-wrap (fastest, cleanest)
     m = _FENCE_RE.match(text)
-    return m.group(1).strip() if m else text.strip()
+    if m:
+        return m.group(1).strip()
+
+    # 2/3. Find the first balanced top-level JSON object. We scan from the first
+    # `{` and track brace depth, ignoring braces inside string literals.
+    cleaned = _FENCE_OPEN_RE.sub("", text)
+    start = cleaned.find("{")
+    if start == -1:
+        return text.strip()
+
+    depth = 0
+    in_string = False
+    escape = False
+    for i in range(start, len(cleaned)):
+        ch = cleaned[i]
+        if escape:
+            escape = False
+            continue
+        if ch == "\\" and in_string:
+            escape = True
+            continue
+        if ch == '"':
+            in_string = not in_string
+            continue
+        if in_string:
+            continue
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                return cleaned[start:i + 1].strip()
+    return text.strip()
 
 
 def _is_transient(exc: Exception) -> bool:

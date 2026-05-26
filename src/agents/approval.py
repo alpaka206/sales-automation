@@ -8,7 +8,7 @@ import logging
 from datetime import datetime, timezone
 
 from ..common.config import settings
-from ..db.models import Approval, Message
+from ..db.models import Approval, Conversation, Message
 from ..db.session import SessionLocal
 
 logger = logging.getLogger(__name__)
@@ -110,13 +110,38 @@ def reject(message_id: int, approver: str, reason: str | None = None) -> Message
 
 
 def mark_sent(message_id: int) -> None:
-    """Mark a message as sent after successful delivery."""
+    """Mark a message as sent after successful delivery, and move the linked HubSpot
+    ticket forward in its pipeline (if configured).
+    """
     session = SessionLocal()
+    ticket_id: str | None = None
     try:
         msg = session.get(Message, message_id)
         if msg:
             msg.status = "sent"
             msg.sent_at = datetime.now(timezone.utc)
+            conv = session.get(Conversation, msg.conversation_id) if msg.conversation_id else None
+            ticket_id = conv.hubspot_ticket_id if conv else None
             session.commit()
     finally:
         session.close()
+
+    target_stage = settings.HUBSPOT_TICKET_STAGE_AFTER_SEND
+    if ticket_id and target_stage:
+        try:
+            from ..integrations.hubspot import HubSpotClient, HubSpotNotConfigured
+
+            hs = HubSpotClient()
+            hs.update_ticket_stage_sync(ticket_id, target_stage)
+            logger.info(
+                "Moved ticket %s to pipeline stage %s after sending message %d.",
+                ticket_id, target_stage, message_id,
+            )
+        except HubSpotNotConfigured:
+            logger.warning("HubSpot not configured; cannot move ticket stage.")
+        except Exception:
+            logger.exception(
+                "Failed to move ticket %s to stage %s after send (message %d). "
+                "Send succeeded; only HubSpot stage update failed.",
+                ticket_id, target_stage, message_id,
+            )

@@ -9,9 +9,38 @@
 <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
   {# Main: message body #}
   <div class="lg:col-span-2 space-y-4">
+
+    {% if inbound_messages %}
+    <div class="bg-blue-50 border-l-4 border-blue-400 rounded-r-lg shadow-sm p-5">
+      <h2 class="text-sm font-semibold text-blue-800 mb-3 flex items-center gap-2">
+        <span>📨 고객 문의 원문</span>
+        <span class="text-xs font-normal text-blue-600">({{ inbound_messages|length }}건)</span>
+      </h2>
+      <div class="space-y-3">
+        {% for im in inbound_messages %}
+        <div class="bg-white/70 rounded p-3 border border-blue-200">
+          <div class="flex items-center justify-between text-xs text-gray-500 mb-2">
+            <span>
+              {% if im.from_address %}<span class="font-mono">{{ im.from_address }}</span>{% else %}(보낸이 미상){% endif %}
+              <span class="ml-2 text-gray-400">· {{ im.channel }}</span>
+            </span>
+            <span>{{ im.created_at.strftime('%Y-%m-%d %H:%M') }}</span>
+          </div>
+          {% if im.subject %}
+          <div class="text-sm font-semibold text-gray-800 mb-2">{{ im.subject }}</div>
+          {% endif %}
+          <div class="text-sm text-gray-800 whitespace-pre-wrap leading-relaxed">{{ im.body }}</div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+
     <div class="bg-white rounded-lg shadow-sm border p-6">
       <div class="flex items-center justify-between mb-4">
-        <h1 class="text-lg font-bold text-gray-800">메시지 #{{ msg.id }}</h1>
+        <h1 class="text-lg font-bold text-gray-800">
+          {% if inbound_messages %}회신 초안 — 메시지 #{{ msg.id }}{% else %}메시지 #{{ msg.id }}{% endif %}
+        </h1>
         <span class="inline-block px-2 py-0.5 rounded text-xs font-medium
           {% if msg.status == 'sent' %}bg-green-100 text-green-700
           {% elif msg.status == 'pending_approval' %}bg-yellow-100 text-yellow-700

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import re
+from datetime import datetime, timezone
 from typing import Any
 
 from pydantic import BaseModel
@@ -96,6 +97,40 @@ class InboundAgent:
         _processed.add(dedup_key)
 
         contact_info = self._fetch_contact(event)
+
+        if not (contact_info.get("last_message") or "").strip():
+            logger.info(
+                "Inbound skipped — no message body for contact %s (lifecycle=%s). "
+                "Will retry once a form/email/note attaches.",
+                contact_info.get("object_id", "?"),
+                contact_info.get("lifecycle_stage", "?"),
+            )
+            return {
+                "message_id": None,
+                "status": "skipped_no_body",
+                "object_id": contact_info.get("object_id"),
+            }
+
+        # If a draft is already waiting for human action in the same thread, skip
+        # the whole pipeline. Stops HubSpot webhook retries / repeated property
+        # changes from piling up duplicate drafts before the operator has acted on
+        # the first one. After approve/reject, the next webhook will produce a new
+        # draft normally.
+        existing = self._existing_pending_draft_id(contact_info)
+        if existing is not None:
+            logger.info(
+                "Inbound skipped — pending draft msg %d already awaiting action "
+                "in the same thread (contact=%s ticket=%s).",
+                existing,
+                contact_info.get("object_id", "?"),
+                contact_info.get("ticket_id") or "-",
+            )
+            return {
+                "message_id": existing,
+                "status": "skipped_existing_pending",
+                "object_id": contact_info.get("object_id"),
+            }
+
         classification = self._classify(contact_info)
 
         if self.hubspot and contact_info.get("object_id"):
@@ -136,6 +171,63 @@ class InboundAgent:
             "channel": channel,
         }
 
+    def _existing_pending_draft_id(self, contact_info: dict) -> int | None:
+        """Return the id of an outbound pending_approval Message in the same thread.
+
+        Thread key: ticket_id if present, otherwise the contact (looked up by
+        normalized email, falling back to hubspot_contact_id).
+        """
+        ticket_id = contact_info.get("ticket_id")
+        session = SessionLocal()
+        try:
+            conv_id: int | None = None
+            if ticket_id:
+                conv = (
+                    session.query(Conversation)
+                    .filter_by(hubspot_ticket_id=ticket_id)
+                    .first()
+                )
+                conv_id = conv.id if conv else None
+            else:
+                email = contact_info.get("email", "")
+                norm = _normalize_email(email) if email else ""
+                contact = (
+                    session.query(Contact).filter_by(normalized_email=norm).first()
+                    if norm
+                    else None
+                )
+                if not contact and contact_info.get("object_id"):
+                    contact = (
+                        session.query(Contact)
+                        .filter_by(hubspot_contact_id=str(contact_info["object_id"]))
+                        .first()
+                    )
+                if contact:
+                    # Match contact-keyed conv only (mirror the fix in _persist).
+                    conv = (
+                        session.query(Conversation)
+                        .filter_by(contact_id=contact.id, hubspot_ticket_id=None)
+                        .first()
+                    )
+                    conv_id = conv.id if conv else None
+
+            if conv_id is None:
+                return None
+
+            existing = (
+                session.query(Message)
+                .filter_by(
+                    conversation_id=conv_id,
+                    direction="outbound",
+                    status="pending_approval",
+                )
+                .order_by(Message.created_at.desc())
+                .first()
+            )
+            return existing.id if existing else None
+        finally:
+            session.close()
+
     def _fetch_contact(self, event: dict) -> dict[str, Any]:
         info: dict[str, Any] = {
             "object_id": event.get("object_id", ""),
@@ -147,6 +239,7 @@ class InboundAgent:
             "last_message": event.get("last_message", ""),
             "whatsapp_opt_in": event.get("whatsapp_opt_in", False),
             "phone": event.get("phone"),
+            "ticket_id": event.get("ticket_id"),
             "recent_emails": "",
             "deal_summary": "",
         }
@@ -171,6 +264,21 @@ class InboundAgent:
             info["lifecycle_stage"] = hs_contact.lifecyclestage or info["lifecycle_stage"]
         except Exception:
             logger.warning("HubSpot contact fetch failed, using event payload.", exc_info=True)
+
+        # Ticket events carry the inbound body directly (subject + content). When
+        # present, we trust the ticket over the form/email/note fallbacks because
+        # that's the explicit source the operator created in HubSpot.
+        ticket_id = info.get("ticket_id")
+        if ticket_id and self.hubspot and not info["last_message"]:
+            try:
+                ticket = self.hubspot.get_ticket_sync(ticket_id)
+                parts = [p for p in (ticket.subject, ticket.content) if p]
+                if parts:
+                    info["last_message"] = "\n\n".join(parts)
+                    info["inbound_source"] = "ticket"
+                    logger.info("Inbound message from ticket %s for contact %s", ticket_id, contact_id)
+            except Exception:
+                logger.warning("HubSpot ticket fetch failed for %s", ticket_id, exc_info=True)
 
         # Fetch actual message body: form submission → inbound email → note → event payload
         if not info["last_message"] and self.hubspot:
@@ -340,16 +448,64 @@ class InboundAgent:
                 if contact_info.get("whatsapp_opt_in"):
                     contact.whatsapp_opt_in = True
 
-            conv = (
-                session.query(Conversation).filter_by(contact_id=contact.id).first()
-            )
-            if not conv:
-                conv = Conversation(
-                    contact_id=contact.id,
-                    topic=classification.category,
-                    stage="initial",
+            # Ticket-based inbound: one ticket = one inquiry = one conversation.
+            # The same contact opening multiple tickets gets multiple separate
+            # threads (separate draft, separate approval) — that matches the
+            # operator's mental model where each ticket is its own work item.
+            # Legacy non-ticket inbounds (form/email/note) still collapse to one
+            # conversation per contact, since there's no per-inquiry key.
+            ticket_id = contact_info.get("ticket_id")
+            if ticket_id:
+                conv = (
+                    session.query(Conversation)
+                    .filter_by(hubspot_ticket_id=ticket_id)
+                    .first()
                 )
-                session.add(conv)
+                if not conv:
+                    conv = Conversation(
+                        contact_id=contact.id,
+                        topic=classification.category,
+                        stage="initial",
+                        hubspot_ticket_id=ticket_id,
+                    )
+                    session.add(conv)
+                    session.flush()
+            else:
+                # Only match contact-keyed conversations (those without a ticket).
+                # Otherwise a non-ticket event (e.g. a stale lifecyclestage retry)
+                # would land inside a ticket conv that happens to share the contact.
+                conv = (
+                    session.query(Conversation)
+                    .filter_by(contact_id=contact.id, hubspot_ticket_id=None)
+                    .first()
+                )
+                if not conv:
+                    conv = Conversation(
+                        contact_id=contact.id,
+                        topic=classification.category,
+                        stage="initial",
+                    )
+                    session.add(conv)
+                    session.flush()
+
+            # Persist the inbound body so the approval UI can show what we're replying to.
+            # HubSpot is authoritative but rate-limited and the source row (note/form) can
+            # disappear, so we snapshot it locally.
+            inbound_body = (contact_info.get("last_message") or "").strip()
+            if inbound_body:
+                inbound_msg = Message(
+                    conversation_id=conv.id,
+                    direction="inbound",
+                    channel=channel,
+                    from_address=email or None,
+                    to_address=settings.SMTP_FROM_EMAIL or None,
+                    subject=None,
+                    body=inbound_body,
+                    language=draft.language,
+                    status="received",
+                )
+                session.add(inbound_msg)
+                conv.last_incoming_at = datetime.now(timezone.utc)
                 session.flush()
 
             to_addr = contact_info.get("phone") if channel == "whatsapp" else (email or None)

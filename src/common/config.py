@@ -29,6 +29,10 @@ class Settings(BaseSettings):
     HUBSPOT_INBOUND_PIPELINE_ID: str = ""
     HUBSPOT_OWNER_ID: str = ""
     HUBSPOT_WEBHOOK_SECRET: str = ""
+    # After SMTP send completes, move the linked HubSpot ticket to this pipeline stage
+    # id (e.g. "문의 대기"). Empty = don't touch stage. Find the id in
+    # HubSpot Settings → Objects → Tickets → Pipelines (click a stage → copy id).
+    HUBSPOT_TICKET_STAGE_AFTER_SEND: str = ""
 
     # ----- Email -----
     EMAIL_PROVIDER: Literal["hubspot", "smtp"] = "hubspot"
@@ -74,6 +78,10 @@ class Settings(BaseSettings):
     # ----- Inbound poller -----
     INBOUND_POLL_ENABLED: bool = False
     INBOUND_POLL_INTERVAL_SECONDS: int = 600
+    # When true, the inbound poller also searches HubSpot Tickets created since
+    # the last tick (backup for ticket webhooks). Keep off unless ticket-based
+    # inbound is in active use — extra HubSpot API calls otherwise.
+    INBOUND_POLL_TICKETS: bool = False
 
     # ----- Send worker -----
     SEND_WORKER_ENABLED: bool = False

@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import html as _html
 import logging
 import random
+import re
 from datetime import datetime
 
 import httpx
@@ -15,6 +17,28 @@ from ..common.config import settings
 logger = logging.getLogger(__name__)
 
 BASE_URL = "https://api.hubapi.com"
+
+# HubSpot stores rich-text fields (notes, emails sometimes) as HTML. We want plain
+# text so the LLM prompts and the approval UI stay clean. Keep paragraph breaks but
+# drop every tag and decode entities. Good enough for the simple markup HubSpot emits;
+# if HubSpot ever sends pathological markup we can swap in BeautifulSoup.
+_BR_RE = re.compile(r"<\s*br\s*/?\s*>", flags=re.IGNORECASE)
+_BLOCK_END_RE = re.compile(r"</\s*(p|div|li|h[1-6])\s*>", flags=re.IGNORECASE)
+_TAG_RE = re.compile(r"<[^>]+>")
+_MULTI_SPACE_RE = re.compile(r"[ \t]+")
+_MULTI_NEWLINE_RE = re.compile(r"\n{3,}")
+
+
+def _html_to_text(s: str | None) -> str | None:
+    if not s:
+        return s
+    s = _BR_RE.sub("\n", s)
+    s = _BLOCK_END_RE.sub("\n", s)
+    s = _TAG_RE.sub("", s)
+    s = _html.unescape(s)
+    s = _MULTI_SPACE_RE.sub(" ", s)
+    s = _MULTI_NEWLINE_RE.sub("\n\n", s)
+    return s.strip() or None
 
 # HubSpot REST returns 429 when over the per-second cap (default 100/10s). 5xx are
 # also transient. We retry both with full-jitter exponential backoff.
@@ -101,6 +125,17 @@ class DealDTO(BaseModel):
     name: str | None = None
     stage: str | None = None
     amount: str | None = None
+
+
+class TicketDTO(BaseModel):
+    id: str
+    subject: str | None = None
+    content: str | None = None
+    pipeline_stage: str | None = None
+    priority: str | None = None
+    source_type: str | None = None
+    created_at: datetime | None = None
+    primary_contact_id: str | None = None
 
 
 def _require_token() -> str:
@@ -380,7 +415,7 @@ class HubSpotClient:
             if props.get("hs_latest_source") != "FORM_SUBMISSION":
                 return None
             # hs_latest_source_data_2 holds the form submission message
-            return props.get("hs_latest_source_data_2") or None
+            return _html_to_text(props.get("hs_latest_source_data_2") or None)
 
     def get_latest_inbound_email(self, contact_id: str) -> str | None:
         """Fetch body of the most recent inbound email for a contact."""
@@ -406,7 +441,7 @@ class HubSpotClient:
                     continue
                 ep = er.json().get("properties", {})
                 if ep.get("hs_email_direction") == "INCOMING_EMAIL":
-                    return ep.get("hs_email_text") or ep.get("hs_email_subject") or None
+                    return _html_to_text(ep.get("hs_email_text") or ep.get("hs_email_subject") or None)
         return None
 
     def get_latest_note(self, contact_id: str) -> str | None:
@@ -431,7 +466,7 @@ class HubSpotClient:
             )
             if nr.status_code != 200:
                 return None
-            return nr.json().get("properties", {}).get("hs_note_body") or None
+            return _html_to_text(nr.json().get("properties", {}).get("hs_note_body") or None)
 
     def get_associated_deals_sync(self, contact_id: str) -> list[DealDTO]:
         """Fetch deals associated with a contact (sync)."""
@@ -463,3 +498,91 @@ class HubSpotClient:
                     amount=dp.get("amount"),
                 ))
         return deals
+
+    # ------ Ticket API (inbound ticket workflow) ------
+
+    _TICKET_PROPERTIES = (
+        "subject,content,hs_pipeline_stage,hs_ticket_priority,source_type,createdate"
+    )
+
+    def _ticket_from_api(self, item: dict, primary_contact_id: str | None = None) -> TicketDTO:
+        props = item.get("properties", {})
+        created_raw = props.get("createdate")
+        created_at = None
+        if created_raw:
+            try:
+                created_at = datetime.fromisoformat(created_raw.replace("Z", "+00:00"))
+            except ValueError:
+                created_at = None
+        return TicketDTO(
+            id=str(item["id"]),
+            subject=props.get("subject"),
+            content=_html_to_text(props.get("content")),
+            pipeline_stage=props.get("hs_pipeline_stage"),
+            priority=props.get("hs_ticket_priority"),
+            source_type=props.get("source_type"),
+            created_at=created_at,
+            primary_contact_id=primary_contact_id,
+        )
+
+    def get_ticket_sync(self, ticket_id: str) -> TicketDTO:
+        headers = {"Authorization": f"Bearer {self.token}"}
+        with httpx.Client(headers=headers, timeout=30.0) as client:
+            r = client.get(
+                f"{BASE_URL}/crm/v3/objects/tickets/{ticket_id}",
+                params={"properties": self._TICKET_PROPERTIES},
+            )
+        r.raise_for_status()
+        return self._ticket_from_api(r.json())
+
+    def get_ticket_primary_contact_sync(self, ticket_id: str) -> str | None:
+        """First associated contact id, or None if the ticket has no contact."""
+        headers = {"Authorization": f"Bearer {self.token}"}
+        with httpx.Client(headers=headers, timeout=30.0) as client:
+            r = client.get(
+                f"{BASE_URL}/crm/v3/objects/tickets/{ticket_id}/associations/contacts",
+                params={"limit": 1},
+            )
+        if r.status_code != 200:
+            return None
+        results = r.json().get("results", [])
+        if not results:
+            return None
+        return str(results[0].get("id") or "") or None
+
+    def update_ticket_stage_sync(self, ticket_id: str, stage_id: str) -> None:
+        """Move a ticket to a different pipeline stage. Raises on HTTP error."""
+        headers = {"Authorization": f"Bearer {self.token}"}
+        with httpx.Client(headers=headers, timeout=30.0) as client:
+            r = client.patch(
+                f"{BASE_URL}/crm/v3/objects/tickets/{ticket_id}",
+                json={"properties": {"hs_pipeline_stage": stage_id}},
+            )
+        r.raise_for_status()
+
+    def search_tickets_sync(
+        self,
+        created_after: datetime,
+        pipeline_stage: str | None = None,
+        limit: int = 100,
+    ) -> list[TicketDTO]:
+        """Tickets created after a given timestamp. Same shape as search_contacts_sync."""
+        headers = {"Authorization": f"Bearer {self.token}"}
+        ts_ms = str(int(created_after.timestamp() * 1000))
+        filters: list[dict] = [
+            {"propertyName": "createdate", "operator": "GT", "value": ts_ms},
+        ]
+        if pipeline_stage:
+            filters.append(
+                {"propertyName": "hs_pipeline_stage", "operator": "EQ", "value": pipeline_stage}
+            )
+        body = {
+            "filterGroups": [{"filters": filters}],
+            "sorts": [{"propertyName": "createdate", "direction": "ASCENDING"}],
+            "properties": self._TICKET_PROPERTIES.split(","),
+            "limit": limit,
+        }
+        with httpx.Client(headers=headers, timeout=30.0) as client:
+            r = client.post(f"{BASE_URL}/crm/v3/objects/tickets/search", json=body)
+        r.raise_for_status()
+        return [self._ticket_from_api(item) for item in r.json().get("results", [])]

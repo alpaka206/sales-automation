@@ -34,10 +34,14 @@ _TRACKED_STATUSES = ("pending_approval", "approved", "sent", "bounced", "replied
 def _dashboard_context() -> dict:
     """Query DB for dashboard data."""
     with SessionLocal() as session:
+        # Mirror /messages — show outbound drafts/sent only. Inbound rows are kept
+        # for the detail-page reply context but listing them here duplicates the
+        # inbound-body box that already appears on each message detail.
         recent = (
             session.execute(
                 select(Message, Conversation.topic)
                 .join(Conversation, Message.conversation_id == Conversation.id)
+                .where(Message.direction == "outbound")
                 .order_by(Message.created_at.desc())
                 .limit(20)
             )
@@ -113,7 +117,32 @@ def _message_detail_context(message_id: int) -> dict:
         contact = conv.contact if conv else None
         prospect = conv.prospect if conv else None
 
+        # Pull the inbound messages from the same conversation so the approver can see
+        # what they're replying to. Newest first, capped at 5 — UI shows them above the draft.
+        inbound_rows = []
+        if conv:
+            inbound_rows = session.execute(
+                select(Message)
+                .where(
+                    Message.conversation_id == conv.id,
+                    Message.direction == "inbound",
+                )
+                .order_by(Message.created_at.desc())
+                .limit(5)
+            ).scalars().all()
+
         return {
+            "inbound_messages": [
+                {
+                    "id": im.id,
+                    "body": im.body,
+                    "subject": im.subject,
+                    "from_address": im.from_address,
+                    "channel": im.channel,
+                    "created_at": im.created_at,
+                }
+                for im in inbound_rows
+            ],
             "msg": {
                 "id": msg.id,
                 "status": msg.status,
@@ -147,10 +176,16 @@ def _message_detail_context(message_id: int) -> dict:
 
 
 def _messages_list_context(status: str = "", channel: str = "") -> dict:
-    """Query DB for paginated message list."""
+    """Query DB for paginated message list.
+
+    The list is the approval queue — outbound drafts and sent replies only. Inbound
+    rows are persisted (so the detail page can show "what we're replying to") but
+    rendering them here would duplicate the box at the top of the detail page.
+    """
     q = (
         select(Message, Conversation.topic)
         .join(Conversation, Message.conversation_id == Conversation.id)
+        .where(Message.direction == "outbound")
         .order_by(Message.created_at.desc())
     )
     if status:
