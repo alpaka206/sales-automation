@@ -26,19 +26,46 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Start background workers on startup."""
+    """Start background workers on startup, signal graceful shutdown on exit.
+
+    Atomic claim in send_worker makes the loop safe under multiple processes,
+    but each FastAPI worker still spins its own task — when running under
+    `uvicorn --workers N` you'll get N concurrent workers competing for the
+    same DB rows. Set DISABLE_BACKGROUND_WORKERS=true on N-1 of them, or run
+    a single worker with `gunicorn --workers 1` + separate process for sends.
+    """
+    tasks: list[asyncio.Task] = []
+
     if settings.INBOUND_POLL_ENABLED:
         from ..agents.inbound_poller import run_poller
 
-        asyncio.create_task(run_poller())
+        tasks.append(asyncio.create_task(run_poller(), name="inbound_poller"))
         logger.info("Inbound poller background task started.")
 
     if settings.SEND_WORKER_ENABLED:
         from ..agents.send_worker import run_send_worker
 
-        asyncio.create_task(run_send_worker())
+        tasks.append(asyncio.create_task(run_send_worker(), name="send_worker"))
         logger.info("Send worker background task started.")
-    yield
+
+    try:
+        yield
+    finally:
+        try:
+            from ..agents.send_worker import request_shutdown as _send_shutdown
+
+            _send_shutdown()
+        except Exception:
+            logger.exception("Send worker shutdown signal failed.")
+
+        for t in tasks:
+            t.cancel()
+        for t in tasks:
+            try:
+                await asyncio.wait_for(t, timeout=10)
+            except (asyncio.CancelledError, asyncio.TimeoutError, Exception):
+                pass
+        logger.info("Background tasks stopped.")
 
 
 app = FastAPI(title="Sales Automation", version="0.1.0", lifespan=lifespan)
@@ -68,14 +95,35 @@ def _is_web_ui_path(path: str) -> bool:
     return any(path.startswith(p) for p in _WEB_UI_PREFIXES if p != "/")
 
 
+def _trusted_proxies() -> set[str]:
+    return {p.strip() for p in (settings.TRUSTED_PROXIES or "").split(",") if p.strip()}
+
+
+def _client_ip(request: Request) -> str | None:
+    """Return the real client IP. X-Forwarded-For is only honored when the immediate
+    peer is on TRUSTED_PROXIES — otherwise the header is attacker-controlled."""
+    peer = request.client.host if request.client else None
+    fwd = request.headers.get("x-forwarded-for", "")
+    if fwd and peer and peer in _trusted_proxies():
+        return fwd.split(",")[0].strip() or peer
+    return peer
+
+
 def _is_localhost(request: Request) -> bool:
-    """Return True when the request originates from localhost."""
+    """Return True when the request originates from localhost.
+
+    Trust model:
+      1. If APP_HOST is bound to a loopback address, the OS already guarantees
+         no external traffic can reach this process — every request is local.
+      2. Otherwise, we inspect the real peer IP. We do NOT honor
+         X-Forwarded-For unless the immediate peer is on TRUSTED_PROXIES.
+         A naive `X-Forwarded-For` trust would let any external client spoof
+         the header and bypass the localhost-only gate.
+    """
     if settings.APP_HOST in _LOCALHOST_HOSTS:
         return True
-    client = request.client
-    if client is None:
-        return False
-    return client.host in _LOCALHOST_HOSTS
+    ip = _client_ip(request)
+    return ip in _LOCALHOST_HOSTS
 
 
 @app.middleware("http")
@@ -83,8 +131,10 @@ async def auth_middleware(request: Request, call_next):
     if request.url.path in _API_SKIP_PATHS:
         return await call_next(request)
 
-    # HubSpot webhook uses its own signature verification inside the route handler
-    if request.url.path == "/webhook/hubspot/inbound" and settings.HUBSPOT_WEBHOOK_SECRET:
+    # HubSpot webhook signature is verified inside the route handler — the middleware
+    # must let the request through so the route can run the verifier. The fail-closed
+    # behavior (reject unsigned requests) is enforced inside _verify_hubspot_signature.
+    if request.url.path == "/webhook/hubspot/inbound":
         return await call_next(request)
 
     # Web UI routes are allowed from localhost without API token
@@ -99,7 +149,7 @@ async def auth_middleware(request: Request, call_next):
             content={"detail": "INTERNAL_API_TOKEN is not configured; refusing requests."},
         )
     token = request.headers.get("X-Internal-Token", "")
-    if token != settings.INTERNAL_API_TOKEN:
+    if not hmac.compare_digest(token, settings.INTERNAL_API_TOKEN):
         return JSONResponse(status_code=401, content={"detail": "invalid or missing token"})
     return await call_next(request)
 
@@ -153,6 +203,8 @@ class ApprovalBody(BaseModel):
     action: Literal["approve", "edit", "reject"]
     edited_body: str | None = None
     reason: str | None = None
+    # HMAC token bound to message_id; required unless APPROVAL_REQUIRE_TOKEN=false.
+    token: str | None = None
 
 
 # ---------- Agent routes ----------
@@ -162,13 +214,21 @@ _HUBSPOT_SUBSCRIPTION_MAP: dict[str, str] = {
     "contact.creation": "contact.creation",
 }
 
-_SIGNATURE_MAX_AGE_SECONDS = 300
-
-
 def _verify_hubspot_signature(request_method: str, request_uri: str, body: bytes, headers: dict[str, str]) -> None:
-    """Verify HubSpot v3 webhook signature. Raises HTTPException(401) on failure."""
+    """Verify HubSpot v3 webhook signature. Raises HTTPException(401) on failure.
+
+    Fail-closed: if HUBSPOT_WEBHOOK_REQUIRE_SIGNATURE is true (default) and either
+    the secret is unset or the signature is missing/invalid, the request is rejected.
+    """
     secret = settings.HUBSPOT_WEBHOOK_SECRET
+    require = settings.HUBSPOT_WEBHOOK_REQUIRE_SIGNATURE
+
     if not secret:
+        if require:
+            raise HTTPException(
+                status_code=503,
+                detail="HUBSPOT_WEBHOOK_SECRET is not configured — refusing unsigned webhook.",
+            )
         return
 
     signature = headers.get("x-hubspot-signature-v3", "")
@@ -182,7 +242,8 @@ def _verify_hubspot_signature(request_method: str, request_uri: str, body: bytes
     except ValueError:
         raise HTTPException(status_code=401, detail="invalid timestamp")
 
-    if abs(time.time() * 1000 - ts) > _SIGNATURE_MAX_AGE_SECONDS * 1000:
+    max_age_ms = settings.HUBSPOT_SIGNATURE_MAX_AGE_SECONDS * 1000
+    if abs(time.time() * 1000 - ts) > max_age_ms:
         raise HTTPException(status_code=401, detail="request timestamp too old")
 
     # HubSpot v3: HMAC-SHA256(secret, requestMethod + requestUri + requestBody + timestamp)
@@ -290,14 +351,28 @@ def run_report(kind: str = "daily") -> dict:
 
 
 @app.post("/approve/{message_id}")
-async def approve_message(message_id: int, body: ApprovalBody) -> dict:
-    """Process approve/edit/reject for a pending message, then send and log."""
+async def approve_message(message_id: int, body: ApprovalBody, request: Request) -> dict:
+    """Process approve/edit/reject for a pending message, then send and log.
+
+    Authorization model:
+      - The auth middleware already gates this route behind INTERNAL_API_TOKEN
+        (X-Internal-Token header) for any non-localhost caller.
+      - In addition, when APPROVAL_REQUIRE_TOKEN=true, the body must include a
+        per-message HMAC token. This prevents a leaked X-Internal-Token from
+        being replayed against arbitrary message IDs (IDOR guard).
+    """
     logger.info(
         "Approval for message %d: %s by %s",
         message_id,
         body.action,
         body.approver,
     )
+
+    if settings.APPROVAL_REQUIRE_TOKEN:
+        from ..agents.approval import verify_approval_token
+
+        if not verify_approval_token(message_id, body.token or ""):
+            raise HTTPException(status_code=403, detail="invalid or missing approval token")
 
     try:
         if body.action in ("approve", "edit"):

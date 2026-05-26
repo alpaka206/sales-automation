@@ -79,7 +79,10 @@ class OutboundAgent:
         norm_email = _normalize_email(candidate.email) if candidate.email else None
 
         if norm_email and self._is_dup(session, norm_email):
-            self._persist_prospect(session, candidate, norm_email, status=ProspectStatus.SKIPPED_DUP)
+            # Skip-dup row is an audit trail. Storing the email here would collide
+            # with the existing prospect (normalized_email is UNIQUE). Set to None —
+            # the source_ref + full_name + company still identify the candidate.
+            self._persist_prospect(session, candidate, None, status=ProspectStatus.SKIPPED_DUP)
             return "skipped_dup"
 
         icp = self._score_icp(candidate)

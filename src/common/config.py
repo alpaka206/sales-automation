@@ -110,6 +110,18 @@ class Settings(BaseSettings):
     # 빈 문자열이면 auth 미들웨어가 모든 요청을 거부합니다(보안). 운영 전 반드시 강한 토큰 설정.
     INTERNAL_API_TOKEN: str = Field(default="")
 
+    # ----- Webhook / approval security -----
+    # When true, HubSpot inbound webhook requires a verified v3 signature.
+    # Set to false ONLY for local development against unsigned mock payloads.
+    HUBSPOT_WEBHOOK_REQUIRE_SIGNATURE: bool = True
+    HUBSPOT_SIGNATURE_MAX_AGE_SECONDS: int = 60
+    # Per-message HMAC token (signed with INTERNAL_API_TOKEN) protects /approve/{id} from IDOR.
+    APPROVAL_REQUIRE_TOKEN: bool = True
+    # Comma-separated CIDR or IPs whose X-Forwarded-For we trust.
+    TRUSTED_PROXIES: str = ""
+    # External base URL used in unsubscribe / approval links (overrides APP_HOST:APP_PORT in prod).
+    PUBLIC_BASE_URL: str = ""
+
 
 @lru_cache
 def get_settings() -> Settings:

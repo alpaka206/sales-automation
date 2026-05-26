@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import logging
 from datetime import datetime, timezone
 
+from ..common.config import settings
 from ..db.models import Approval, Message
 from ..db.session import SessionLocal
 
@@ -13,6 +16,33 @@ logger = logging.getLogger(__name__)
 
 class ApprovalError(RuntimeError):
     pass
+
+
+def make_approval_token(message_id: int) -> str:
+    """Generate an HMAC-SHA256 token binding a message_id to the install secret.
+
+    The token is short (16 bytes hex = 32 chars) and stable for the lifetime of the
+    message — we don't need rotation since approve() rejects non-pending messages.
+    """
+    secret = settings.INTERNAL_API_TOKEN
+    if not secret:
+        # No secret configured → no token to verify against. Caller must enforce
+        # APPROVAL_REQUIRE_TOKEN=False explicitly or set INTERNAL_API_TOKEN.
+        raise ApprovalError("INTERNAL_API_TOKEN is not set; cannot mint approval tokens.")
+    payload = f"approval:{int(message_id)}".encode()
+    digest = hmac.new(secret.encode(), payload, hashlib.sha256).digest()
+    return digest.hex()[:32]
+
+
+def verify_approval_token(message_id: int, token: str) -> bool:
+    """Constant-time HMAC compare. Returns False on any mismatch or missing secret."""
+    if not settings.INTERNAL_API_TOKEN or not token:
+        return False
+    try:
+        expected = make_approval_token(message_id)
+    except ApprovalError:
+        return False
+    return hmac.compare_digest(expected, token)
 
 
 def approve(message_id: int, approver: str, edited_body: str | None = None) -> Message:

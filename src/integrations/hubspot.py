@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import random
 from datetime import datetime
 
 import httpx
@@ -13,6 +15,58 @@ from ..common.config import settings
 logger = logging.getLogger(__name__)
 
 BASE_URL = "https://api.hubapi.com"
+
+# HubSpot REST returns 429 when over the per-second cap (default 100/10s). 5xx are
+# also transient. We retry both with full-jitter exponential backoff.
+_RETRY_STATUS = {429, 500, 502, 503, 504}
+_MAX_RETRIES = 4
+
+
+async def _request_with_retries(
+    client: httpx.AsyncClient,
+    method: str,
+    url: str,
+    **kwargs,
+) -> httpx.Response:
+    """Send a request, retrying on 429/5xx with exponential backoff.
+
+    Honors HubSpot's `Retry-After` header when present. Other status codes pass
+    through (the caller decides whether to raise_for_status)."""
+    delay = 1.0
+    for attempt in range(_MAX_RETRIES + 1):
+        try:
+            response = await client.request(method, url, **kwargs)
+        except (httpx.ReadTimeout, httpx.ConnectTimeout, httpx.ConnectError) as exc:
+            if attempt == _MAX_RETRIES:
+                raise
+            logger.warning("HubSpot %s %s transport error (attempt %d): %s", method, url, attempt + 1, exc)
+            await asyncio.sleep(delay + random.uniform(0, 0.5))
+            delay = min(delay * 2, 30)
+            continue
+
+        if response.status_code not in _RETRY_STATUS:
+            return response
+        if attempt == _MAX_RETRIES:
+            return response
+
+        # Prefer Retry-After when the server gives us a hint.
+        retry_after = response.headers.get("retry-after")
+        if retry_after:
+            try:
+                wait = float(retry_after)
+            except ValueError:
+                wait = delay
+        else:
+            wait = delay
+        wait += random.uniform(0, 0.5)
+        logger.warning(
+            "HubSpot %s %s returned %d (attempt %d), retrying in %.1fs",
+            method, url, response.status_code, attempt + 1, wait,
+        )
+        await asyncio.sleep(wait)
+        delay = min(delay * 2, 30)
+
+    return response  # type: ignore[return-value]
 
 
 class HubSpotNotConfigured(RuntimeError):
@@ -78,9 +132,13 @@ class HubSpotClient:
         if self._client and not self._client.is_closed:
             await self._client.aclose()
 
+    async def _retry(self, method: str, url: str, **kw) -> httpx.Response:
+        """Internal helper — `await http.request(...)` with retry/backoff."""
+        http = await self._http()
+        return await _request_with_retries(http, method, url, **kw)
+
     async def get_contact(self, id_or_email: str) -> ContactDTO:
         """Fetch a contact by ID or email."""
-        http = await self._http()
         if "@" in id_or_email:
             url = f"/crm/v3/objects/contacts/{id_or_email}"
             params = {"idProperty": "email"}
@@ -88,7 +146,7 @@ class HubSpotClient:
             url = f"/crm/v3/objects/contacts/{id_or_email}"
             params = {}
 
-        r = await http.get(url, params=params)
+        r = await self._retry("GET", url, params=params)
         if r.status_code == 404:
             raise HubSpotAPIError(f"Contact not found: {id_or_email}")
         r.raise_for_status()
@@ -105,8 +163,8 @@ class HubSpotClient:
 
     async def update_contact(self, contact_id: str, properties: dict) -> None:
         """Update a contact's properties."""
-        http = await self._http()
-        r = await http.patch(
+        r = await self._retry(
+            "PATCH",
             f"/crm/v3/objects/contacts/{contact_id}",
             json={"properties": properties},
         )

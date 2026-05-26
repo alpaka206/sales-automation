@@ -194,6 +194,13 @@ async def message_detail(request: Request, message_id: int):
     return templates.TemplateResponse(request, "message_detail.html", ctx)
 
 
+def _esc(text: str) -> str:
+    """Minimal HTML escape for status fragments rendered into hx-swap responses."""
+    import html
+
+    return html.escape(text or "", quote=True)
+
+
 @router.post("/messages/{message_id}/send")
 async def message_send(message_id: int, body: str = Form(""), subject: str = Form("")):
     """Approve (and optionally edit) a message for sending."""
@@ -202,7 +209,7 @@ async def message_send(message_id: int, body: str = Form(""), subject: str = For
         approve(message_id, approver="web_ui", edited_body=edited)
     except ApprovalError as exc:
         return HTMLResponse(
-            f'<div class="text-red-600 text-sm">{exc}</div>', status_code=400
+            f'<div class="text-red-600 text-sm">{_esc(str(exc))}</div>', status_code=400
         )
     return HTMLResponse(
         '<div class="text-green-600 text-sm font-medium">승인 완료 — 발송 대기 중</div>'
@@ -216,16 +223,31 @@ async def message_reject(message_id: int, reason: str = Form("")):
         reject(message_id, approver="web_ui", reason=reason.strip() or None)
     except ApprovalError as exc:
         return HTMLResponse(
-            f'<div class="text-red-600 text-sm">{exc}</div>', status_code=400
+            f'<div class="text-red-600 text-sm">{_esc(str(exc))}</div>', status_code=400
         )
     return HTMLResponse(
         '<div class="text-orange-600 text-sm font-medium">거절 처리 완료</div>'
     )
 
 
+# Maximum bytes accepted for a single edit — prevents accidental/malicious DoS via huge POST.
+_MAX_EDIT_BODY_BYTES = 100_000
+_MAX_EDIT_SUBJECT_LEN = 300
+
+
 @router.post("/messages/{message_id}/edit")
 async def message_edit(message_id: int, body: str = Form(""), subject: str = Form("")):
     """Save edits to a pending message without sending."""
+    if len(body.encode("utf-8")) > _MAX_EDIT_BODY_BYTES:
+        return HTMLResponse(
+            '<div class="text-red-600 text-sm">본문이 너무 깁니다 (100KB 초과)</div>',
+            status_code=413,
+        )
+    if len(subject) > _MAX_EDIT_SUBJECT_LEN:
+        return HTMLResponse(
+            '<div class="text-red-600 text-sm">제목이 너무 깁니다 (300자 초과)</div>',
+            status_code=413,
+        )
     with SessionLocal() as session:
         msg = session.get(Message, message_id)
         if not msg:
@@ -235,7 +257,7 @@ async def message_edit(message_id: int, body: str = Form(""), subject: str = For
             )
         if msg.status != "pending_approval":
             return HTMLResponse(
-                f'<div class="text-red-600 text-sm">편집 불가 (현재 상태: {msg.status})</div>',
+                f'<div class="text-red-600 text-sm">편집 불가 (현재 상태: {_esc(msg.status)})</div>',
                 status_code=400,
             )
         if body.strip():

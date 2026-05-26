@@ -52,46 +52,87 @@ def _create_message(session: Session, status: str, scheduled_at: datetime | None
     return msg.id
 
 
-def test_pick_ready_ids_approved_past(_db: Session) -> None:
-    """Messages approved and scheduled in the past should be picked."""
+def test_claim_ready_id_approved_past(_db: Session) -> None:
+    """Messages approved and scheduled in the past should be claimable."""
     past = datetime.now(timezone.utc) - timedelta(minutes=5)
     mid = _create_message(_db, "approved", past)
 
-    ids = send_worker._pick_ready_ids()
-    assert mid in ids
+    claimed = send_worker._claim_ready_id()
+    assert claimed == mid
 
 
-def test_pick_ready_ids_approved_no_scheduled(_db: Session) -> None:
-    """Approved messages with no scheduled_at should be picked (immediate)."""
+def test_claim_ready_id_approved_no_scheduled(_db: Session) -> None:
+    """Approved messages with no scheduled_at should be claimable (immediate)."""
     mid = _create_message(_db, "approved", None)
 
-    ids = send_worker._pick_ready_ids()
-    assert mid in ids
+    claimed = send_worker._claim_ready_id()
+    assert claimed == mid
 
 
-def test_pick_ready_ids_future_not_picked(_db: Session) -> None:
-    """Messages scheduled in the future should NOT be picked."""
+def test_claim_ready_id_future_not_picked(_db: Session) -> None:
+    """Messages scheduled in the future should NOT be claimed."""
     future = datetime.now(timezone.utc) + timedelta(hours=2)
-    mid = _create_message(_db, "approved", future)
+    _create_message(_db, "approved", future)
 
-    ids = send_worker._pick_ready_ids()
-    assert mid not in ids
+    claimed = send_worker._claim_ready_id()
+    assert claimed is None
 
 
-def test_pick_ready_ids_pending_not_picked(_db: Session) -> None:
-    """Messages still pending_approval should NOT be picked."""
+def test_claim_ready_id_pending_not_picked(_db: Session) -> None:
+    """Messages still pending_approval should NOT be claimed."""
     past = datetime.now(timezone.utc) - timedelta(minutes=5)
-    mid = _create_message(_db, "pending_approval", past)
+    _create_message(_db, "pending_approval", past)
 
-    ids = send_worker._pick_ready_ids()
-    assert mid not in ids
+    claimed = send_worker._claim_ready_id()
+    assert claimed is None
+
+
+def test_claim_ready_id_marks_with_worker_token(_db: Session) -> None:
+    """After claim, the row's status is set to the per-process worker token."""
+    mid = _create_message(_db, "approved", None)
+
+    send_worker._claim_ready_id()
+
+    _db.expire_all()
+    msg = _db.get(Message, mid)
+    assert msg.status == send_worker._WORKER_ID
+    assert msg.status.startswith("sending:")
+
+
+def test_claim_is_atomic_under_concurrent_workers(_db: Session, monkeypatch) -> None:
+    """Two worker IDs racing on the same row — only one should win the claim."""
+    mid = _create_message(_db, "approved", None)
+
+    original = send_worker._WORKER_ID
+    monkeypatch.setattr(send_worker, "_WORKER_ID", "sending:worker-A")
+    a = send_worker._claim_ready_id()
+
+    monkeypatch.setattr(send_worker, "_WORKER_ID", "sending:worker-B")
+    b = send_worker._claim_ready_id()
+
+    monkeypatch.setattr(send_worker, "_WORKER_ID", original)
+
+    assert a == mid
+    assert b is None  # Loser sees no claimable rows.
+
+
+def test_reclaim_stuck_sending(_db: Session) -> None:
+    """Rows stuck in `sending:*` are reset to approved on worker start."""
+    mid = _create_message(_db, "sending:dead-worker", None)
+
+    n = send_worker._reclaim_stuck_sending()
+    assert n == 1
+
+    _db.expire_all()
+    msg = _db.get(Message, mid)
+    assert msg.status == "approved"
 
 
 @pytest.mark.asyncio
 async def test_send_one_success(_db: Session, monkeypatch) -> None:
-    """Successful send transitions status to 'sent'."""
-    past = datetime.now(timezone.utc) - timedelta(minutes=1)
-    mid = _create_message(_db, "approved", past)
+    """Successful send transitions status from claimed → sent."""
+    mid = _create_message(_db, "approved", None)
+    send_worker._claim_ready_id()  # Move it to _WORKER_ID first.
 
     mock_send = AsyncMock()
     monkeypatch.setattr("src.integrations.senders.send", mock_send)
@@ -108,8 +149,8 @@ async def test_send_one_success(_db: Session, monkeypatch) -> None:
 @pytest.mark.asyncio
 async def test_send_one_failure(_db: Session, monkeypatch) -> None:
     """Failed send transitions status to 'send_failed'."""
-    past = datetime.now(timezone.utc) - timedelta(minutes=1)
-    mid = _create_message(_db, "approved", past)
+    mid = _create_message(_db, "approved", None)
+    send_worker._claim_ready_id()
 
     mock_send = AsyncMock(side_effect=RuntimeError("SMTP down"))
     monkeypatch.setattr("src.integrations.senders.send", mock_send)
@@ -119,6 +160,19 @@ async def test_send_one_failure(_db: Session, monkeypatch) -> None:
     _db.expire_all()
     msg = _db.get(Message, mid)
     assert msg.status == "send_failed"
+
+
+@pytest.mark.asyncio
+async def test_send_one_refuses_unclaimed(_db: Session, monkeypatch) -> None:
+    """_send_one must refuse a row that this worker hasn't claimed."""
+    mid = _create_message(_db, "approved", None)  # NOT claimed.
+    mock_send = AsyncMock()
+    monkeypatch.setattr("src.integrations.senders.send", mock_send)
+
+    result = await send_worker._send_one(mid)
+
+    assert result is False
+    mock_send.assert_not_awaited()
 
 
 def test_migration_adds_column() -> None:

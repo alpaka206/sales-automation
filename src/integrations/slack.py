@@ -15,6 +15,19 @@ class SlackNotConfigured(RuntimeError):
     pass
 
 
+def _approval_url(message_id: int) -> str:
+    """Build the operator-facing approval URL for the local web UI."""
+    base = settings.PUBLIC_BASE_URL.rstrip("/") if settings.PUBLIC_BASE_URL else f"http://{settings.APP_HOST}:{settings.APP_PORT}"
+    return f"{base}/messages/{int(message_id)}"
+
+
+def _escape_mrkdwn(text: str) -> str:
+    """Escape user content to prevent Slack mrkdwn injection."""
+    if not text:
+        return ""
+    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
 def post_approval_card(
     message_id: int,
     subject: str,
@@ -23,9 +36,20 @@ def post_approval_card(
     category: str,
     channel_type: str,
 ) -> None:
-    """Post an approval card to the configured Slack channel."""
+    """Post an approval card to the configured Slack channel.
+
+    Note: this card is informational — the action buttons are removed because the app
+    does not run a Slack Interactivity endpoint with signing-secret verification. The
+    operator approves via the web UI link in the card (localhost-trusted) or via the
+    /approve API with a per-message HMAC token.
+    """
     if not settings.SLACK_BOT_TOKEN or not settings.SLACK_APPROVAL_CHANNEL_ID:
         raise SlackNotConfigured("SLACK_BOT_TOKEN or SLACK_APPROVAL_CHANNEL_ID not set.")
+
+    url = _approval_url(message_id)
+    subj_safe = _escape_mrkdwn(subject)
+    body_safe = _escape_mrkdwn(body_snippet[:500])
+    cat_safe = _escape_mrkdwn(category)
 
     blocks = [
         {
@@ -35,32 +59,19 @@ def post_approval_card(
         {
             "type": "section",
             "fields": [
-                {"type": "mrkdwn", "text": f"*Category:* {category}"},
+                {"type": "mrkdwn", "text": f"*Category:* {cat_safe}"},
                 {"type": "mrkdwn", "text": f"*Score:* {score or 'N/A'}"},
                 {"type": "mrkdwn", "text": f"*Channel:* {channel_type}"},
-                {"type": "mrkdwn", "text": f"*Subject:* {subject}"},
+                {"type": "mrkdwn", "text": f"*Subject:* {subj_safe}"},
             ],
         },
         {
             "type": "section",
-            "text": {"type": "mrkdwn", "text": f"```{body_snippet[:500]}```"},
+            "text": {"type": "mrkdwn", "text": f"```{body_safe}```"},
         },
         {
-            "type": "actions",
-            "elements": [
-                {
-                    "type": "button",
-                    "text": {"type": "plain_text", "text": "Approve"},
-                    "style": "primary",
-                    "action_id": f"approve_{message_id}",
-                },
-                {
-                    "type": "button",
-                    "text": {"type": "plain_text", "text": "Reject"},
-                    "style": "danger",
-                    "action_id": f"reject_{message_id}",
-                },
-            ],
+            "type": "section",
+            "text": {"type": "mrkdwn", "text": f"<{url}|Open in web UI to approve →>"},
         },
     ]
 

@@ -18,6 +18,10 @@ class IMAPNotConfigured(RuntimeError):
     pass
 
 
+class IMAPAuthError(RuntimeError):
+    """Bad credentials, expired app password — operator action required."""
+
+
 class IMAPClient:
     """Reads Gmail inbox via IMAP to detect replies to outbound messages."""
 

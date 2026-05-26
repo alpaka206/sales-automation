@@ -44,7 +44,9 @@ class Prospect(Base):
     source: Mapped[str] = mapped_column(String, nullable=False)
     source_ref: Mapped[str | None] = mapped_column(String, nullable=True)
     email: Mapped[str | None] = mapped_column(String, nullable=True)
-    normalized_email: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
+    normalized_email: Mapped[str | None] = mapped_column(
+        String, nullable=True, index=True, unique=True
+    )
     full_name: Mapped[str] = mapped_column(String, nullable=False)
     company: Mapped[str | None] = mapped_column(String, nullable=True)
     domain: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
@@ -53,11 +55,15 @@ class Prospect(Base):
     icp_rationale: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[str] = mapped_column(String, nullable=False, default="collected")
     contact_id: Mapped[int | None] = mapped_column(
-        Integer, ForeignKey("contacts.id"), nullable=True
+        Integer, ForeignKey("contacts.id", ondelete="SET NULL"), nullable=True
     )
     last_contacted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     follow_up_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+
+    __table_args__ = (
+        Index("ix_prospects_domain_fullname", "domain", "full_name"),
+    )
 
     conversations: Mapped[list[Conversation]] = relationship(back_populates="prospect")
 
@@ -66,9 +72,11 @@ class Conversation(Base):
     __tablename__ = "conversations"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    contact_id: Mapped[int] = mapped_column(Integer, ForeignKey("contacts.id"), nullable=False)
+    contact_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("contacts.id", ondelete="CASCADE"), nullable=False
+    )
     prospect_id: Mapped[int | None] = mapped_column(
-        Integer, ForeignKey("prospects.id"), nullable=True
+        Integer, ForeignKey("prospects.id", ondelete="SET NULL"), nullable=True
     )
     topic: Mapped[str | None] = mapped_column(String, nullable=True)
     stage: Mapped[str] = mapped_column(String, nullable=False, default="initial")
@@ -86,7 +94,7 @@ class Message(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     conversation_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("conversations.id"), nullable=False
+        Integer, ForeignKey("conversations.id", ondelete="CASCADE"), nullable=False
     )
     direction: Mapped[str] = mapped_column(String, nullable=False)
     channel: Mapped[str] = mapped_column(String, nullable=False, default="email")
@@ -122,7 +130,9 @@ class Approval(Base):
     __tablename__ = "approvals"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    message_id: Mapped[int] = mapped_column(Integer, ForeignKey("messages.id"), nullable=False)
+    message_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("messages.id", ondelete="CASCADE"), nullable=False
+    )
     approver: Mapped[str] = mapped_column(String, nullable=False)
     action: Mapped[str] = mapped_column(String, nullable=False)
     diff: Mapped[str | None] = mapped_column(Text, nullable=True)
