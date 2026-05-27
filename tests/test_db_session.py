@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
 from sqlalchemy import create_engine, event, text
 
 from src.db.session import _normalize_url, _sqlite_pragmas
