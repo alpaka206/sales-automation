@@ -587,28 +587,31 @@ async def approve_message(message_id: int, body: ApprovalBody, request: Request)
         logger.warning("HubSpot engagement logging failed for message %d", message_id, exc_info=True)
         hs = None
 
-    try:
-        if hs is None:
-            from ..integrations.hubspot import HubSpotClient
-
-            hs = HubSpotClient()
-        await hs.update_inbound_status(contact_id, "meeting_link_sent")
-    except Exception:
-        logger.warning("inbound_status update failed for contact %s", contact_id, exc_info=True)
+    if settings.HUBSPOT_UPDATE_CONTACT_INBOUND_STATUS:
         try:
-            from ..db.models import Event
-            from ..db.session import SessionLocal
+            if hs is None:
+                from ..integrations.hubspot import HubSpotClient
 
-            with SessionLocal() as session:
-                session.add(Event(
-                    kind="hubspot_status_update_failed",
-                    payload={"contact_id": contact_id, "target_status": "meeting_link_sent"},
-                ))
-                session.commit()
+                hs = HubSpotClient()
+            await hs.update_inbound_status(contact_id, "meeting_link_sent")
         except Exception:
-            logger.exception("Failed to queue status update retry")
-    finally:
-        if hs:
-            await hs.close()
+            logger.warning("inbound_status update failed for contact %s", contact_id, exc_info=True)
+            try:
+                from ..db.models import Event
+                from ..db.session import SessionLocal
+
+                with SessionLocal() as session:
+                    session.add(Event(
+                        kind="hubspot_status_update_failed",
+                        payload={"contact_id": contact_id, "target_status": "meeting_link_sent"},
+                    ))
+                    session.commit()
+            except Exception:
+                logger.exception("Failed to queue status update retry")
+        finally:
+            if hs:
+                await hs.close()
+    elif hs:
+        await hs.close()
 
     return {"status": "sent", "message_id": msg.id}

@@ -33,6 +33,12 @@ class Settings(BaseSettings):
     # id (e.g. "문의 대기"). Empty = don't touch stage. Find the id in
     # HubSpot Settings → Objects → Tickets → Pipelines (click a stage → copy id).
     HUBSPOT_TICKET_STAGE_AFTER_SEND: str = ""
+    # Set to true ONLY if the HubSpot account has a custom `inbound_status`
+    # text property on contacts. We write "analyzed" / "meeting_link_sent" to
+    # it for operator visibility, but the value is never read back, and the
+    # ticket pipeline_stage covers the same role in the new workflow. Default
+    # off — keeping it on without the property logs a 400 every webhook.
+    HUBSPOT_UPDATE_CONTACT_INBOUND_STATUS: bool = False
 
     # ----- Email -----
     EMAIL_PROVIDER: Literal["hubspot", "smtp"] = "hubspot"

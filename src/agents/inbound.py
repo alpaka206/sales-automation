@@ -133,7 +133,11 @@ class InboundAgent:
 
         classification = self._classify(contact_info)
 
-        if self.hubspot and contact_info.get("object_id"):
+        if (
+            settings.HUBSPOT_UPDATE_CONTACT_INBOUND_STATUS
+            and self.hubspot
+            and contact_info.get("object_id")
+        ):
             try:
                 self.hubspot.update_inbound_status_sync(contact_info["object_id"], "analyzed")
             except Exception:
