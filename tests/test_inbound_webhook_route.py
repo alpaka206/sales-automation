@@ -31,11 +31,21 @@ def _load_fixture(name: str) -> list[dict]:
     return json.loads((FIXTURES / name).read_text())
 
 
+@pytest.fixture(autouse=True)
+def _disable_webhook_signature():
+    with patch.object(settings, "HUBSPOT_WEBHOOK_SECRET", ""), \
+         patch.object(settings, "HUBSPOT_WEBHOOK_REQUIRE_SIGNATURE", False):
+        yield
+
+
 def _sign_request(secret: str, body: bytes, url: str, ts_ms: int | None = None) -> dict[str, str]:
     """Generate HubSpot v3 signature headers."""
+    import base64
     ts_ms = ts_ms or int(time.time() * 1000)
     message = f"POST{url}{body.decode('utf-8')}{ts_ms}"
-    sig = hmac_mod.new(secret.encode(), message.encode(), hashlib.sha256).hexdigest()
+    sig = base64.b64encode(
+        hmac_mod.new(secret.encode(), message.encode(), hashlib.sha256).digest()
+    ).decode()
     return {
         "X-HubSpot-Signature-v3": sig,
         "X-HubSpot-Request-Timestamp": str(ts_ms),
@@ -213,10 +223,11 @@ def test_valid_signature_accepted(mock_handle, client: TestClient) -> None:
     secret = "test-webhook-secret-123"
     payload = [{"subscriptionType": "contact.creation", "objectId": 600, "occurredAt": 1684000030000}]
     body = json.dumps(payload).encode()
-    url = "http://testserver/webhook/hubspot/inbound"
+    url = "https://testserver/webhook/hubspot/inbound"
     sig_headers = _sign_request(secret, body, url)
 
-    with patch.object(settings, "HUBSPOT_WEBHOOK_SECRET", secret):
+    with patch.object(settings, "HUBSPOT_WEBHOOK_SECRET", secret), \
+         patch.object(settings, "HUBSPOT_WEBHOOK_REQUIRE_SIGNATURE", True):
         r = client.post(
             "/webhook/hubspot/inbound",
             content=body,
@@ -231,7 +242,8 @@ def test_invalid_signature_rejected(client: TestClient) -> None:
     body = json.dumps(payload).encode()
     ts = str(int(time.time() * 1000))
 
-    with patch.object(settings, "HUBSPOT_WEBHOOK_SECRET", secret):
+    with patch.object(settings, "HUBSPOT_WEBHOOK_SECRET", secret), \
+         patch.object(settings, "HUBSPOT_WEBHOOK_REQUIRE_SIGNATURE", True):
         r = client.post(
             "/webhook/hubspot/inbound",
             content=body,
@@ -248,7 +260,8 @@ def test_missing_signature_headers_rejected(client: TestClient) -> None:
     secret = "test-webhook-secret-789"
     payload = [{"subscriptionType": "contact.creation", "objectId": 602}]
 
-    with patch.object(settings, "HUBSPOT_WEBHOOK_SECRET", secret):
+    with patch.object(settings, "HUBSPOT_WEBHOOK_SECRET", secret), \
+         patch.object(settings, "HUBSPOT_WEBHOOK_REQUIRE_SIGNATURE", True):
         r = client.post(
             "/webhook/hubspot/inbound",
             json=payload,
@@ -261,11 +274,12 @@ def test_expired_timestamp_rejected(client: TestClient) -> None:
     secret = "test-webhook-secret-exp"
     payload = [{"subscriptionType": "contact.creation", "objectId": 603}]
     body = json.dumps(payload).encode()
-    url = "http://testserver/webhook/hubspot/inbound"
+    url = "https://testserver/webhook/hubspot/inbound"
     old_ts = int(time.time() * 1000) - 400_000  # 400 seconds ago > 300s max
     sig_headers = _sign_request(secret, body, url, ts_ms=old_ts)
 
-    with patch.object(settings, "HUBSPOT_WEBHOOK_SECRET", secret):
+    with patch.object(settings, "HUBSPOT_WEBHOOK_SECRET", secret), \
+         patch.object(settings, "HUBSPOT_WEBHOOK_REQUIRE_SIGNATURE", True):
         r = client.post(
             "/webhook/hubspot/inbound",
             content=body,

@@ -14,6 +14,13 @@ from src.common.config import settings
 TOKEN_HEADER = {"X-Internal-Token": settings.INTERNAL_API_TOKEN}
 
 
+@pytest.fixture(autouse=True)
+def _disable_approval_token_and_send_worker():
+    with patch.object(settings, "APPROVAL_REQUIRE_TOKEN", False), \
+         patch.object(settings, "SEND_WORKER_ENABLED", False):
+        yield
+
+
 def _make_message(
     id: int = 1,
     status: str = "approved",
