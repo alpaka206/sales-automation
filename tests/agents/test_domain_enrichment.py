@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -94,7 +94,7 @@ class TestCacheHit:
 
         llm = _make_llm()
         with patch("src.agents.domain_enrichment.fetch_homepage_meta") as mock_fetch:
-            result = analyze_domain("cached2.com", llm=llm)
+            _ = analyze_domain("cached2.com", llm=llm)
 
         mock_fetch.assert_not_called()
         llm.complete.assert_not_called()

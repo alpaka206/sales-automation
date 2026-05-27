@@ -46,5 +46,5 @@ def is_personal_domain(domain: str) -> bool:
 
 
 def is_role_address(local_part: str) -> bool:
-    """Return True if the local part is a generic role address (info@, sales@, etc.)."""
+    """Return True if the local part is a generic role address (info@, sales@, etc.). Used by inbound contact scoring."""
     return local_part.lower().strip() in _ROLE_PREFIXES

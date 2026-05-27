@@ -121,6 +121,7 @@ def is_suppressed(email: str) -> bool:
         with SessionLocal() as session:
             return session.get(EmailSuppression, email.lower().strip()) is not None
     except Exception:
+        logger.warning("suppression check failed for %s", email, exc_info=True)
         return False
 
 

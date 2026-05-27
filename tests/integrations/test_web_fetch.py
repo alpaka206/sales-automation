@@ -4,10 +4,7 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from src.integrations.web_fetch import (
-    HomepageMeta,
     _extract_meta,
     _is_ssrf_target,
     fetch_homepage_meta,
