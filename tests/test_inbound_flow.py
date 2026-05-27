@@ -98,10 +98,14 @@ def test_inbound_handle_creates_db_rows(db_session) -> None:
     assert contacts[0].normalized_email == "buyer@acme.co.kr"
 
     messages = db_session.query(Message).all()
-    assert len(messages) == 1
-    assert messages[0].status == "pending_approval"
-    assert messages[0].direction == "outbound"
-    assert messages[0].subject == "Re: Inquiry"
+    assert len(messages) == 2
+    inbound_msg = [m for m in messages if m.direction == "inbound"]
+    outbound_msg = [m for m in messages if m.direction == "outbound"]
+    assert len(inbound_msg) == 1
+    assert inbound_msg[0].status == "received"
+    assert len(outbound_msg) == 1
+    assert outbound_msg[0].status == "pending_approval"
+    assert outbound_msg[0].subject == "Re: Inquiry"
 
     conversations = db_session.query(Conversation).all()
     assert len(conversations) == 1
@@ -126,7 +130,7 @@ def test_inbound_dedup(db_session) -> None:
 
     assert r1 is not None
     assert r2 is None
-    assert db_session.query(Message).count() == 1
+    assert db_session.query(Message).filter_by(direction="outbound").count() == 1
 
 
 def test_inbound_channel_selection() -> None:

@@ -121,6 +121,12 @@ class Settings(BaseSettings):
     COMPANY_PRIVACY_POLICY_URL: str = ""
     KOREA_AD_PREFIX_ENABLED: bool = False
 
+    # ----- Domain enrichment -----
+    INBOUND_DOMAIN_ENRICHMENT_ENABLED: bool = True
+    INBOUND_DOMAIN_HOMEPAGE_FETCH: bool = True
+    INBOUND_DOMAIN_FETCH_TIMEOUT_SECONDS: float = 5.0
+    INBOUND_DOMAIN_REANALYZE_DAYS: int = 90
+
     # 빈 문자열이면 auth 미들웨어가 모든 요청을 거부합니다(보안). 운영 전 반드시 강한 토큰 설정.
     INTERNAL_API_TOKEN: str = Field(default="")
 

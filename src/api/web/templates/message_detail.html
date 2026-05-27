@@ -176,6 +176,69 @@
     </div>
     {% endif %}
 
+    {% if domain_profile %}
+    <div class="bg-white rounded-lg shadow-sm border p-5">
+      <h2 class="text-sm font-semibold text-gray-600 mb-3">도메인 프로파일</h2>
+      <dl class="space-y-2 text-sm">
+        <div class="flex justify-between">
+          <dt class="text-gray-500">도메인</dt>
+          <dd class="text-gray-800 font-mono">{{ domain_profile.domain }}</dd>
+        </div>
+        {% if domain_profile.company_name %}
+        <div class="flex justify-between">
+          <dt class="text-gray-500">회사명</dt>
+          <dd class="text-gray-800">{{ domain_profile.company_name }}</dd>
+        </div>
+        {% endif %}
+        {% if domain_profile.industry %}
+        <div class="flex justify-between">
+          <dt class="text-gray-500">산업</dt>
+          <dd class="text-gray-800">{{ domain_profile.industry }}</dd>
+        </div>
+        {% endif %}
+        {% if domain_profile.services %}
+        <div>
+          <dt class="text-gray-500 mb-1">서비스</dt>
+          <dd class="text-gray-800 text-xs">{{ domain_profile.services }}</dd>
+        </div>
+        {% endif %}
+        {% if domain_profile.target_market %}
+        <div class="flex justify-between">
+          <dt class="text-gray-500">타겟 시장</dt>
+          <dd class="text-gray-800">{{ domain_profile.target_market }}</dd>
+        </div>
+        {% endif %}
+        {% if domain_profile.size_hint %}
+        <div class="flex justify-between">
+          <dt class="text-gray-500">규모</dt>
+          <dd class="text-gray-800">{{ domain_profile.size_hint }}</dd>
+        </div>
+        {% endif %}
+        <div class="flex justify-between">
+          <dt class="text-gray-500">신뢰도</dt>
+          <dd>
+            <span class="text-xs font-medium px-2 py-0.5 rounded
+              {% if domain_profile.confidence == 'high' %}bg-green-100 text-green-700
+              {% elif domain_profile.confidence == 'medium' %}bg-yellow-100 text-yellow-700
+              {% else %}bg-gray-100 text-gray-700{% endif %}">
+              {{ domain_profile.confidence }}
+            </span>
+          </dd>
+        </div>
+        <div class="flex justify-between">
+          <dt class="text-gray-500">소스</dt>
+          <dd class="text-gray-800 text-xs">{{ domain_profile.source }}</dd>
+        </div>
+        {% if domain_profile.analyzed_at %}
+        <div class="flex justify-between">
+          <dt class="text-gray-500">분석일</dt>
+          <dd class="text-gray-800">{{ domain_profile.analyzed_at.strftime('%Y-%m-%d') }}</dd>
+        </div>
+        {% endif %}
+      </dl>
+    </div>
+    {% endif %}
+
     {% if prospect %}
     <div class="bg-white rounded-lg shadow-sm border p-5">
       <h2 class="text-sm font-semibold text-gray-600 mb-3">프로스펙트</h2>

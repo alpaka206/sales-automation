@@ -15,7 +15,7 @@ from sqlalchemy.orm import joinedload
 from ...agents.approval import ApprovalError, approve, reject
 from ...common.config import settings
 from ...db.models import (
-    Conversation, ICPRule, KnowledgeDocument,
+    Contact, Conversation, DomainProfile, ICPRule, KnowledgeDocument,
     LLMUsage, Message, OutboundIntent, Prospect,
 )
 from ...db.session import SessionLocal
@@ -131,6 +131,22 @@ def _message_detail_context(message_id: int) -> dict:
                 .limit(5)
             ).scalars().all()
 
+        domain_profile_data = None
+        if contact and contact.domain:
+            dp = session.get(DomainProfile, contact.domain)
+            if dp:
+                domain_profile_data = {
+                    "domain": dp.domain,
+                    "company_name": dp.company_name,
+                    "industry": dp.industry,
+                    "services": dp.services,
+                    "target_market": dp.target_market,
+                    "size_hint": dp.size_hint,
+                    "confidence": dp.confidence,
+                    "source": dp.source,
+                    "analyzed_at": dp.analyzed_at,
+                }
+
         return {
             "inbound_messages": [
                 {
@@ -172,6 +188,7 @@ def _message_detail_context(message_id: int) -> dict:
                 "company": prospect.company,
                 "icp_score": prospect.icp_score,
             } if prospect else None,
+            "domain_profile": domain_profile_data,
         }
 
 

@@ -10,6 +10,7 @@ from typing import Any
 from pydantic import BaseModel
 
 from ..common.config import settings
+from ..common.domains import is_personal_domain
 from ..db.models import Contact, Conversation, Message
 from ..db.session import SessionLocal
 from ..integrations.hubspot import HubSpotClient, HubSpotNotConfigured
@@ -51,16 +52,20 @@ def _domain_from_email(email: str) -> str:
     return email.lower().split("@")[-1]
 
 
-def _base_score(email: str | None, country: str | None) -> int:
+def _base_score(email: str | None, country: str | None, domain_profile: dict | None = None) -> int:
     score = 50
     if email:
         dom = _domain_from_email(email)
-        if dom in _PERSONAL_DOMAINS:
+        if dom in _PERSONAL_DOMAINS or is_personal_domain(dom):
             score -= 10
         else:
             score += 15
     if country and country.lower() in _TARGET_COUNTRIES:
         score += 15
+    if domain_profile:
+        size = domain_profile.get("size_hint", "")
+        if size in ("midmarket", "enterprise"):
+            score += 5
     return max(0, min(100, score))
 
 
@@ -71,6 +76,22 @@ def _build_enrichment_context(contact_info: dict) -> str:
         parts.append(f"Recent email history with this contact:\n{contact_info['recent_emails']}")
     if contact_info.get("deal_summary"):
         parts.append(f"Associated deals:\n{contact_info['deal_summary']}")
+
+    dp = contact_info.get("domain_profile")
+    if dp:
+        lines = [
+            "Sender's domain profile (auto-analyzed):",
+            f"- domain: {dp.get('domain', '')}",
+            f"- inferred company: {dp.get('company_name', 'unknown')} (confidence: {dp.get('confidence', 'low')})",
+            f"- industry: {dp.get('industry', 'unknown')}",
+            f"- services: {dp.get('services', 'unknown')}",
+            f"- target market: {dp.get('target_market', 'unknown')}",
+            f"- size hint: {dp.get('size_hint', 'unknown')}",
+        ]
+        if dp.get("notes"):
+            lines.append(f"- notes: {dp['notes']}")
+        parts.append("\n".join(lines))
+
     return "\n\n".join(parts)
 
 
@@ -346,6 +367,31 @@ class InboundAgent:
         except Exception:
             logger.warning("HubSpot deals fetch failed.", exc_info=True)
 
+        info["domain_profile"] = None
+        email = info.get("email", "")
+        if email and settings.INBOUND_DOMAIN_ENRICHMENT_ENABLED:
+            dom = _domain_from_email(email)
+            if not is_personal_domain(dom):
+                try:
+                    from .domain_enrichment import analyze_domain
+
+                    profile = analyze_domain(
+                        dom, llm=self.llm, hint_company=info.get("company")
+                    )
+                    if profile is not None:
+                        info["domain_profile"] = {
+                            "domain": profile.domain,
+                            "company_name": profile.company_name,
+                            "industry": profile.industry,
+                            "services": profile.services,
+                            "target_market": profile.target_market,
+                            "size_hint": profile.size_hint,
+                            "confidence": profile.confidence,
+                            "notes": profile.notes,
+                        }
+                except Exception:
+                    logger.warning("Domain enrichment failed for %s", dom, exc_info=True)
+
         return info
 
     def _classify(self, contact_info: dict) -> ClassifyResult:
@@ -363,7 +409,11 @@ class InboundAgent:
         )
 
     def _score(self, contact_info: dict, category: str) -> int:
-        base = _base_score(contact_info.get("email"), contact_info.get("country"))
+        base = _base_score(
+            contact_info.get("email"),
+            contact_info.get("country"),
+            contact_info.get("domain_profile"),
+        )
         try:
             adj = self.llm.complete(
                 "inbound/score_adjust",

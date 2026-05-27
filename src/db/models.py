@@ -223,6 +223,29 @@ class EmailSuppression(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
 
 
+class DomainProfile(Base):
+    """Cached company profile analyzed from an email domain."""
+
+    __tablename__ = "domain_profiles"
+
+    domain: Mapped[str] = mapped_column(String(255), primary_key=True)
+    company_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    industry: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    services: Mapped[str | None] = mapped_column(Text, nullable=True)
+    target_market: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    size_hint: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    confidence: Mapped[str] = mapped_column(String(16), nullable=False)
+    source: Mapped[str] = mapped_column(String(32), nullable=False)
+    homepage_title: Mapped[str | None] = mapped_column(Text, nullable=True)
+    homepage_description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    homepage_fetch_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    analyzed_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=_utcnow, onupdate=_utcnow
+    )
+
+
 class LLMUsage(Base):
     __tablename__ = "llm_usage"
 
