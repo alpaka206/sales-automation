@@ -32,17 +32,20 @@ engine = create_engine(
 )
 
 
+def _sqlite_pragmas(dbapi_conn, _connection_record):
+    """Set performance and safety PRAGMAs for SQLite connections."""
+    cur = dbapi_conn.cursor()
+    try:
+        cur.execute("PRAGMA journal_mode=WAL")
+        cur.execute("PRAGMA foreign_keys=ON")
+        cur.execute("PRAGMA synchronous=NORMAL")
+        cur.execute("PRAGMA busy_timeout=5000")
+    finally:
+        cur.close()
+
+
 if _is_sqlite:
-    @event.listens_for(engine, "connect")
-    def _sqlite_pragmas(dbapi_conn, _connection_record):
-        cur = dbapi_conn.cursor()
-        try:
-            cur.execute("PRAGMA journal_mode=WAL")
-            cur.execute("PRAGMA foreign_keys=ON")
-            cur.execute("PRAGMA synchronous=NORMAL")
-            cur.execute("PRAGMA busy_timeout=5000")
-        finally:
-            cur.close()
+    event.listens_for(engine, "connect")(_sqlite_pragmas)
 
 
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True)

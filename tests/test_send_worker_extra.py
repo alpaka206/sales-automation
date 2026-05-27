@@ -96,3 +96,169 @@ async def test_send_one_skips_non_approved() -> None:
         result = await send_worker._send_one(msg_id)
 
     assert result is False
+
+
+# ---------- request_shutdown ----------
+
+
+def test_request_shutdown():
+    """request_shutdown sets the global _shutdown flag."""
+    send_worker._shutdown = False
+    send_worker.request_shutdown()
+    assert send_worker._shutdown is True
+    send_worker._shutdown = False
+
+
+# ---------- SMTP error handling ----------
+
+
+@pytest.mark.asyncio
+async def test_send_one_permanent_error() -> None:
+    """SMTPPermanentError fails immediately without retry."""
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from unittest.mock import AsyncMock
+
+    from src.db.base import Base
+    from src.db.models import Contact, Conversation, Message
+    from src.integrations.senders.smtp import SMTPPermanentError
+
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine, expire_on_commit=False)
+
+    session = factory()
+    contact = Contact(normalized_email="perm@test.com", full_name="Perm")
+    session.add(contact)
+    session.flush()
+    conv = Conversation(contact_id=contact.id)
+    session.add(conv)
+    session.flush()
+    msg = Message(
+        conversation_id=conv.id,
+        direction="outbound",
+        body="Hello",
+        status="approved",
+    )
+    session.add(msg)
+    session.commit()
+    msg_id = msg.id
+    session.close()
+
+    with patch.object(send_worker, "SessionLocal", factory):
+        send_worker._claim_ready_id()
+        mock_send = AsyncMock(side_effect=SMTPPermanentError("550 user not found"))
+        with patch("src.integrations.senders.send", mock_send):
+            result = await send_worker._send_one(msg_id)
+
+    assert result is False
+    mock_send.assert_awaited_once()
+    s = factory()
+    m = s.get(Message, msg_id)
+    assert m.status == "send_failed"
+    s.close()
+
+
+@pytest.mark.asyncio
+async def test_send_one_transient_error_retries() -> None:
+    """SMTPTransientError retries up to SEND_TRANSIENT_MAX_RETRIES times."""
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from unittest.mock import AsyncMock
+
+    from src.db.base import Base
+    from src.db.models import Contact, Conversation, Message
+    from src.integrations.senders.smtp import SMTPTransientError
+
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine, expire_on_commit=False)
+
+    session = factory()
+    contact = Contact(normalized_email="trans@test.com", full_name="Trans")
+    session.add(contact)
+    session.flush()
+    conv = Conversation(contact_id=contact.id)
+    session.add(conv)
+    session.flush()
+    msg = Message(
+        conversation_id=conv.id,
+        direction="outbound",
+        body="Hello",
+        status="approved",
+    )
+    session.add(msg)
+    session.commit()
+    msg_id = msg.id
+    session.close()
+
+    with patch.object(send_worker, "SessionLocal", factory):
+        send_worker._claim_ready_id()
+        mock_send = AsyncMock(side_effect=SMTPTransientError("421 try later"))
+        with patch("src.integrations.senders.send", mock_send):
+            result = await send_worker._send_one(msg_id)
+
+    assert result is False
+    assert mock_send.await_count == send_worker.SEND_TRANSIENT_MAX_RETRIES
+    s = factory()
+    m = s.get(Message, msg_id)
+    assert m.status == "send_failed"
+    s.close()
+
+
+# ---------- Prospect status transition ----------
+
+
+@pytest.mark.asyncio
+async def test_send_one_transitions_prospect_status() -> None:
+    """After sending, prospect status transitions to SENT."""
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from unittest.mock import AsyncMock
+
+    from src.db.base import Base
+    from src.db.models import Contact, Conversation, Message, Prospect
+
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine, expire_on_commit=False)
+
+    session = factory()
+    contact = Contact(normalized_email="prospect@test.com", full_name="P")
+    session.add(contact)
+    session.flush()
+    prospect = Prospect(
+        source="test",
+        full_name="P",
+        normalized_email="prospect@test.com",
+        status="analyzed",
+    )
+    session.add(prospect)
+    session.flush()
+    conv = Conversation(contact_id=contact.id, prospect_id=prospect.id)
+    session.add(conv)
+    session.flush()
+    msg = Message(
+        conversation_id=conv.id,
+        direction="outbound",
+        body="Hello",
+        status="approved",
+    )
+    session.add(msg)
+    session.commit()
+    msg_id = msg.id
+    session.close()
+
+    with patch.object(send_worker, "SessionLocal", factory):
+        send_worker._claim_ready_id()
+        mock_send = AsyncMock()
+        with patch("src.integrations.senders.send", mock_send):
+            result = await send_worker._send_one(msg_id)
+
+    assert result is True
+    s = factory()
+    m = s.get(Message, msg_id)
+    assert m.status == "sent"
+    p = s.get(Prospect, prospect.id)
+    assert p.status == "sent"
+    s.close()
