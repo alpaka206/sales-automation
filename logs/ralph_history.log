@@ -1,0 +1,67 @@
+2026-05-14 · #001 · Bootstrap Python project — pyproject.toml installed, ruff+black pass, pytest collects 1 test
+2026-05-14 · planning · Created todos 018-022: approval endpoint, approval notifications, reply-check wiring, report distribution, HubSpot contact fetch
+2026-05-14 · #018 · Wired approval endpoint: approve/edit/reject → send → HubSpot log
+2026-05-14 · #019 · Wired notify_approval helper (Slack→Teams→log fallback) into inbound and outbound agents after draft persistence
+2026-05-14 · #020 · Wired /run/reply_check to reply_check.run(), added notify_approval to follow-up drafts
+2026-05-14 · #021 · Report distribution: Slack post_message, Teams post_message, SMTP email; best-effort delivery
+2026-05-14 · #022 · Inbound agent enriches contact from HubSpot (sync): full profile, recent emails, associated deals
+2026-05-14 · #023 · LLM cost tracking: pricing.py with per-call JSONL logging, provider LLMResult returns, report cost summary section
+2026-05-15 · #028 · manual_csv 소스 전용 이메일 프롬프트 추가 및 테스트 작성
+2026-05-15 · #029 · LLM 일시적 오류 자동 재시도(타임아웃·5xx) 구현
+2026-05-15 · #030 · n8n 워크플로 재시도 설정 및 오류 알림 추가
+2026-05-15 · #031 · Anthropic API 프롬프트 캐싱 적용
+2026-05-15 · #032 · LLM 사용량 DB 테이블 마이그레이션 및 JSONL→DB 전환
+2026-05-15 · #033 · 아웃바운드 소스 통합 필터(SourceFilters) 도입
+2026-05-15 · #034 · LinkedIn 경쟁사 게시물 댓글 스크래핑 소스 추가
+2026-05-15 · #035 · 헬스체크 시스템(CLI·API·n8n) 구현
+2026-05-15 · #036 · Windows 비개발자용 batch 스크립트 추가
+2026-05-15 · #037 · 비개발자용 한글 README + docs/ 가이드 3종 작성
+2026-05-15 · #038 · 최종 폴리시 완료 — 데드 코드 정리, RALPH_DONE 발행
+2026-05-15 · #039 · cloudflared 터널 스크립트(tunnel.bat, run_with_tunnel.bat) + 배포 문서 안내 + setup.bat 설치 체크 추가
+2026-05-15 · #040 · HubSpot 실페이로드 매핑 + v3 서명 검증 + 배열/단일 입력 모두 지원, 테스트 15건 추가
+2026-05-15 · #041 · 인바운드 폴링 워커 (10분 주기 HubSpot 신규 contact 검색 + 중복 방지 + 테스트 8건)
+2026-05-15 · #042 · 인바운드 메일 본문 fetch 강화 (폼→이메일→노트 우선순위) + HubSpot 메서드 3개 + 테스트 8건
+2026-05-15 · #043 · HubSpot inbound_status 속성 자동 갱신 (analyzed → meeting_link_sent) + retry 큐 + 테스트 5건
+2026-05-15 · #044 · WhatsApp Cloud API 풀 구현 + 이메일 병행 발송 + 설정 가이드 + 테스트 8건
+2026-05-15 · #045 · 이중 발송 디스패처 + WhatsApp 추적 DB 컬럼 3개 + migration 0003 + 테스트 5건
+2026-05-15 · #046 · knowledge_documents 테이블 마이그레이션 + import 스크립트 구현 (7 tests)
+2026-05-15 · #047 · knowledge.py 로더 DB 기반 전환 (파일 스캔 제거, scope 필터 추가)
+2026-05-15 · #048 · SMTP 멀티 제공자 안내 (.env.example, 설정.md, healthcheck 식별)
+2026-05-15 · #049 · country_send_windows 테이블 18개국 seed + compute_next_send_time 스케줄러
+2026-05-15 · #050 · 발송 큐 워커 (scheduled_at 기반 deferred send, 8 tests)
+2026-05-15 · #051 · SMTP rate limit (분당 5건) + 일일 한도 (100건) + jitter (15초)
+2026-05-15 · #052 · Prospect 상태 파이프라인 enum + 전이 로직 구현 (10종 상태, 전이 matrix, 자동 전이 연동)
+2026-05-15 · #053 · 자연어 입력 → 소스 디스패처 (intent router) 구현 완료
+2026-05-15 · #054 · Google Custom Search 소스 추가 — CSE API 클라이언트, 페이지 이메일 추출, 카테고리별 프롬프트, 테스트 12건
+2026-05-15 · #055 · 채용 페이지 소스 추가 — 사람인/잡코리아 CSE 경유 검색, 회사명 추출, 테스트 8건
+2026-05-15 · #056 · LinkedIn 프로필 이메일 추출 — Playwright Contact info 모달, comments 소스 연동, 테스트 8건
+2026-05-15 · #057 · 공통 이메일 추출 모듈 — obfuscation 패턴, contact 링크 follow, 도메인 우선, 테스트 11건
+2026-05-15 · #058 · AI 브라우저 하네스 — Playwright+CLI 결합, 동기/비동기 API, httpx 폴백, 테스트 11건
+2026-05-15 · #059 · AI 브라우저 통합 — enrichment/linkedin 소스가 ai_browser 경유, Playwright import 통일
+2026-05-15 · #060 · 다국어 메일 프롬프트 — ISO 639-1 코드, 국가→언어 매핑, 모든 프롬프트 enforcement, 테스트 11건
+2026-05-15 · #061 · 국가별 발송 시간 — _persist_message 에 scheduled_at 자동 계산, 테스트 6건
+2026-05-15 · #062 · Gmail IMAP 답장 감지 — IMAP 클라이언트, Message-ID 부여, header+fallback 매칭, 테스트 12건
+2026-05-15 · #063 · 1주 팔로업 큐 — 7일 임계, AUTO_SEND 플래그, MAX_FOLLOWUPS 설정, 테스트 5건
+2026-05-15 · #064 · 웹 UI 인프라 구축 (Jinja2 + HTMX + Tailwind CDN, localhost 전용 인증 우회)
+2026-05-15 · #065 · 대시보드 구현 (메시지 목록, 상태 카운트, 발송 현황, 분류별 통계, HTMX 자동 갱신)
+2026-05-15 · #066 · 메시지 상세 페이지 (본문 편집, 발송/거절/저장 HTMX 액션, contact/prospect 표시)
+2026-05-15 · #067 · 지식베이스 CRUD 웹 UI (목록/생성/편집/삭제, KB 캐시 무효화)
+2026-05-15 · #068 · ICP 룰 편집 UI + DB 모델 + 소스별 프롬프트 주입
+2026-05-15 · #069 · 아웃바운드 자연어 입력 폼 + 프로스펙트 목록 + 일괄 승인
+2026-05-15 · #070 · 설정 페이지 (헬스체크, Claude CLI 상태, 환경변수 마스킹, LLM 사용량)
+2026-05-15 · #071 · PyInstaller build.spec + build_windows.bat + src/__main__.py 엔트리포인트
+2026-05-15 · #072 · CLI init 서브커맨드 (.env 자동 생성 마법사, Claude CLI 감지)
+2026-05-15 · #073 · 컴플라이언스: unsubscribe 링크, 메일 footer, suppression 테이블
+2026-05-15 · #074 · GDPR/CAN-SPAM/정통망법 국가별 컴플라이언스 footer + 광고 접두어
+2026-05-15 · #075 · ruff 린트 오류 27개 정리 (F401 미사용 import, F841 미사용 변수)
+2026-05-15 · #076 · integrations 레이어 7개 모듈 테스트 커버리지 70% 이상 달성 (총 93%)
+2026-05-15 · #078 · db/migrate.py 테스트 커버리지 100% 달성 (8 tests, _ensure_tracker·_applied·run_migrations 전체 경로)
+2026-05-15 · #079 · setup.bat Python 3.11+ 버전 검증 로직 추가
+2026-05-15 · #080 · n8n_workflows/README.md 한국어 설명 컬럼 추가
+2026-05-15 · #081 · /messages 목록 페이지 + smoke test 추가
+2026-05-15 · #082 · outbound 메시지 footer 미적용 버그 수정 + 회귀 테스트 추가
+2026-05-15 · #083 · 헬스체크 Claude CLI 항목명 한국어 라벨로 변경
+2026-05-15 · #084 · PyInstaller exe 빌드 정상화 + healthz 200 응답 확인
+2026-05-15 · #085 · 코드 품질 정리: 미사용 import 제거, except pass → logger.warning 전환 (3건)
+2026-05-15 · #086 · 미사용 register_source() 함수 제거 (dead code 정리)
+2026-05-27 · #089 · 인바운드 이메일 도메인 → 회사·서비스 자동 분석 (domain_profiles 테이블 + SSRF 가드 홈페이지 fetch + LLM 분석 + 캐시 + InboundAgent 통합 + UI 카드)
