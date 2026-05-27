@@ -65,3 +65,4 @@
 2026-05-15 · #085 · 코드 품질 정리: 미사용 import 제거, except pass → logger.warning 전환 (3건)
 2026-05-15 · #086 · 미사용 register_source() 함수 제거 (dead code 정리)
 2026-05-27 · #089 · 인바운드 이메일 도메인 → 회사·서비스 자동 분석 (domain_profiles 테이블 + SSRF 가드 홈페이지 fetch + LLM 분석 + 캐시 + InboundAgent 통합 + UI 카드)
+2026-05-27 · #090 · 코드 품질 정리: 미사용 import/변수 제거, 예외 삼킴 로깅 추가
