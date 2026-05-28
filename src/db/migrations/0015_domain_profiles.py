@@ -29,8 +29,8 @@ def up(engine: Engine) -> None:
                         homepage_description TEXT,
                         homepage_fetch_status VARCHAR(32),
                         notes TEXT,
-                        analyzed_at DATETIME NOT NULL,
-                        updated_at DATETIME NOT NULL
+                        analyzed_at TIMESTAMP NOT NULL,
+                        updated_at TIMESTAMP NOT NULL
                     )
                     """
                 )

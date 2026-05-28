@@ -65,3 +65,9 @@ def run_migrations() -> list[str]:
         logger.info("Migration %s applied.", name)
 
     return applied_now
+
+
+if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
+    applied = run_migrations()
+    print(f"Applied {len(applied)} migration(s): {applied}" if applied else "No pending migrations.")
