@@ -32,7 +32,6 @@ Background workers in FastAPI (inbound_poller, send_worker, reply_check)
 
 ```
 sales-automation/
-├── PROMPT.md              # Ralph Loop master prompt — entrypoint for the loop
 ├── CLAUDE.md              # this file
 ├── README.md              # human onboarding doc
 ├── .env.example           # required environment variables
@@ -45,14 +44,14 @@ sales-automation/
 ├── src/
 │   ├── api/               # FastAPI app and routes
 │   ├── agents/            # inbound / outbound / report orchestration
-│   ├── llm/               # LLM client abstraction (CLI subprocess + API)
+│   ├── llm/               # LLM client abstraction (Gemini / Anthropic API + CLI)
 │   ├── integrations/      # hubspot, youtube, linkedin, slack, smtp, whatsapp
 │   ├── db/                # SQLAlchemy models, migrations, repositories
 │   └── common/            # logging, config, prompt loading, helpers
-├── scripts/               # ralph_loop, init_db, dev helpers
+├── scripts/               # init_db, dev helpers
 ├── tests/                 # pytest tests
 ├── data/                  # local SQLite file lives here (gitignored)
-└── logs/                  # ralph_history.log, app logs (gitignored)
+└── logs/                  # app logs (gitignored)
 ```
 
 ## Conventions
@@ -69,8 +68,9 @@ The LLM client lives in `src/llm/client.py` and exposes a single `complete(promp
 
 Provider selection by env var `LLM_PROVIDER`:
 
-- `claude_cli` (default): shells out to `claude -p "<prompt>" --output-format json`
+- `gemini_api` (default): uses the `google-genai` SDK with `GEMINI_API_KEY` and `GEMINI_MODEL`
 - `anthropic_api`: uses `anthropic` SDK with `ANTHROPIC_API_KEY`
+- `claude_cli`: shells out to `claude -p "<prompt>" --output-format text` (no API key; for local dev on a logged-in machine)
 
 All prompts live as `.md` files in `src/llm/prompts/`. They are loaded by name, not hardcoded as strings.
 

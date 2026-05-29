@@ -1,10 +1,10 @@
-# 038 — 최종 폴리시: 데드 코드 정리 + 커버리지 확인 + RALPH_DONE 발행
+# 038 — 최종 폴리시: 데드 코드 정리 + 커버리지 확인 + 완료 인증
 
 ## Why
 
 todo 028-037을 모두 완료한 뒤, 시스템 전체를 한 번 점검하고 사용자가
-실제 사용 가능한 상태인지를 확인합니다. 통과하면 `RALPH_DONE.md`를
-만들어 ralph loop을 종료시킵니다.
+실제 사용 가능한 상태인지를 확인합니다. 통과하면 완료 보고 문서를
+만들어 폴리시를 종료합니다.
 
 ## What to do
 
@@ -31,7 +31,7 @@ todo 028-037을 모두 완료한 뒤, 시스템 전체를 한 번 점검하고 �
      `python -c "import json; [json.load(open(p)) for p in
      glob.glob('n8n_workflows/*.json')]"` 등으로 확인.
 
-5. **최종 인증서 발행** — `RALPH_DONE.md` 작성:
+5. **최종 인증서 발행** — 완료 보고 문서 작성:
    ```markdown
    # 폴리시 완료 — Sales Automation
 
@@ -46,18 +46,14 @@ todo 028-037을 모두 완료한 뒤, 시스템 전체를 한 번 점검하고 �
    - 운영자: docs/사용법.md, docs/문제해결.md
    ```
 
-6. 커밋: `chore: 폴리시 완료 — 폐쇄 루프 종료 (#038)`.
-
-7. `.ralph_stop` 파일을 repo root에 만들어 다음 iteration이
-   ralph_loop.bat를 즉시 종료하도록 함.
+6. 커밋: `chore: 폴리시 완료 (#038)`.
 
 ## Acceptance criteria
 
 - `pytest -q` 통과.
 - `ruff check src tests` 0건.
 - `python -m src.cli doctor` 모두 PASS/WARN (FAIL 없음).
-- `RALPH_DONE.md` 존재.
-- `.ralph_stop` 존재.
+- 완료 보고 문서 존재.
 - 커밋 메시지는 한국어.
 
 ## Verify
@@ -66,6 +62,4 @@ todo 028-037을 모두 완료한 뒤, 시스템 전체를 한 번 점검하고 �
 pytest -q
 ruff check src tests
 python -m src.cli doctor
-type RALPH_DONE.md
-dir .ralph_stop
 ```

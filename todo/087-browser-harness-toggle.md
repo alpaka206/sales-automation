@@ -5,14 +5,12 @@
 > - A (클라우드) 채택 시 → 이 todo **폐기** (서버에선 browser-harness 무의미)
 > - B (노트북) / C (mini PC) 채택 시 → 이 todo 진행
 >
-> 의사결정 전엔 Ralph Loop 가 이 todo 처리하지 않도록 본 BLOCKED 표시를 보고
-> 다음 todo 로 넘어가게 함. (현재 todo/ 에 다른 항목 없으므로 ralph 는
-> polish 모드 진입.)
+> 의사결정 전까지는 이 todo를 처리하지 말 것.
 
 ## Why
 
 사용자 원 명세에서 "browser harness 라이브러리로 크롤링 하도록" 명시했는데
-Ralph 가 Playwright + claude CLI 직접 결합으로 구현. 명세 위반. 두 백엔드
+현재 Playwright + claude CLI 직접 결합으로 구현됨. 명세 위반. 두 백엔드
 모두 지원하도록 환경변수로 토글 추가.
 
 browser-harness (`github.com/browser-use/browser-harness`):
@@ -68,4 +66,4 @@ $env:BROWSER_BACKEND="browser_harness"
 - browser-harness 는 사용자 Chrome 의존 — 운영 PC 가 항상 Chrome 켜져
   있어야 함. 무인 24/7 운영은 어려움.
 - LinkedIn anti-bot 회피에는 훨씬 안전. 대신 PC 가 sleep 들어가면 멈춤
-  (이미 `scripts/disable_all_locks.bat` 로 해결).
+  (무인 운영 시 OS 전원 설정에서 절전을 꺼야 함).

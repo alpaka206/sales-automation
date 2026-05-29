@@ -29,11 +29,7 @@
      또는 `python -m src.cli serve` (이미 존재한다면 그것 사용).
    - 사용자가 Ctrl+C로 종료할 때까지 유지.
 
-3. `scripts/start_ralph.bat` 작성 (기존 `ralph_loop.bat`를 비개발자
-   친화적으로 감싸는 얇은 래퍼):
-   - 활성화 → `scripts\ralph_loop.bat` 호출.
-
-4. 모든 batch 파일은 `chcp 65001 > nul` 한 줄을 맨 위에 두어
+3. 모든 batch 파일은 `chcp 65001 > nul` 한 줄을 맨 위에 두어
    콘솔 출력이 한글 깨지지 않도록 함.
 
 ## Acceptance criteria

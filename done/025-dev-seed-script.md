@@ -19,7 +19,7 @@ inbound/outbound pipeline just to see data in the DB or test reports.
 2. Make it idempotent: skip inserts if the DB already has rows, or add a
    `--force` flag to truncate-then-seed.
 
-3. Add a `seed` command to `scripts/ralph_loop.bat` or document in README.
+3. Add a `seed` command or document it in README.
 
 ## Acceptance criteria
 

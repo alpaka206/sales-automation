@@ -6,7 +6,7 @@ The system has many fragile external dependencies — the Claude CLI
 session can expire, HubSpot tokens get rotated, SMTP credentials get
 revoked, the Anthropic API key can be wrong, etc. Today these failures
 only surface when someone notices a missing approval card or reads
-`logs/ralph_stderr.log`. We want a periodic health-check that catches
+the server log. We want a periodic health-check that catches
 these silently-broken states and pings Slack/Teams when something is
 wrong.
 
@@ -49,7 +49,7 @@ wrong.
      report as JSON.
 
 5. Alert format: one card per failed check with the check name,
-   detail, and a link to `logs/ralph_stderr.log` location. De-dupe by
+   detail, and a link to the server log location. De-dupe by
    maintaining a small `data/healthcheck_state.json` so the same
    failure does not page every 15 min — only on state transitions
    (PASS→FAIL, FAIL→PASS).

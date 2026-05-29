@@ -2,7 +2,7 @@
 Claude Code CLI adapter — works without an API key.
 
 Shells out to `claude -p "<prompt>"`. Assumes the user is already logged in
-on this machine (the same one that runs ralph_loop).
+on this machine. Intended for local development only — not for server use.
 """
 
 from __future__ import annotations

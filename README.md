@@ -21,6 +21,7 @@ AI가 작성한 이메일은 **Slack 또는 Teams**에서 승인/수정/거절�
   - `HUBSPOT_PRIVATE_APP_TOKEN` — HubSpot 인바운드/아웃바운드용
   - `SLACK_BOT_TOKEN` + `SLACK_APPROVAL_CHANNEL_ID` — 승인 알림용
   - 또는 `TEAMS_WEBHOOK_URL` — Teams 사용 시
+  - `GEMINI_API_KEY` — LLM 호출용 (기본 프로바이더, aistudio.google.com 무료 키)
   - 기타 선택: Gmail App Password, YouTube API Key, Anthropic API Key
 
 각 자격 증명 발급 방법은 [docs/설정.md](docs/설정.md)를 참고하세요.
@@ -53,7 +54,7 @@ AI가 작성한 이메일은 **Slack 또는 Teams**에서 승인/수정/거절�
 ### 아키텍처
 
 ```
-HubSpot (CRM)  →  FastAPI BE (인바운드 폴러 + 발송 워커 내장)  →  LLM (Claude CLI)
+HubSpot (CRM)  →  FastAPI BE (인바운드 폴러 + 발송 워커 내장)  →  LLM (Gemini API)
                                             ↓
                        SQLite/Postgres DB + 웹 UI 승인 + 발송 (HubSpot/SMTP/WhatsApp)
 ```
@@ -76,19 +77,6 @@ pytest tests/test_xxx.py -v  # 개별 파일
 ruff check src tests         # 린트
 ```
 
-### Ralph Loop (자동 개발)
-
-이 프로젝트는 **Claude Code + ralph_loop**로 자동 개발됩니다.
-- `PROMPT.md` — Claude의 매 iteration 마스터 프롬프트
-- `todo/` — 다음에 할 작업 (번호 순서대로)
-- `done/` — 완료된 작업 (히스토리)
-- `company_rules/` — 회사 내부 규칙 (톤, 금지어, 시그니처)
-
-```bash
-scripts\ralph_loop.bat       # Windows
-bash scripts/ralph_loop.sh   # git-bash / WSL
-```
-
 ### 폴더 가이드
 
 | 폴더 | 용도 |
@@ -107,7 +95,7 @@ bash scripts/ralph_loop.sh   # git-bash / WSL
 
 ### LLM 호출 방식
 
-API 키 없이도 동작합니다. `LLM_PROVIDER=claude_cli` (기본값)이면 `claude -p "..."` 를 subprocess로 호출합니다. API 키가 있으면 `.env`에 `ANTHROPIC_API_KEY=` 채우고 `LLM_PROVIDER=anthropic_api`로 변경.
+기본 프로바이더는 **Gemini API** (`LLM_PROVIDER=gemini_api`)입니다. `.env`에 `GEMINI_API_KEY=` 를 채우면 됩니다 ([aistudio.google.com](https://aistudio.google.com/apikey) 무료 키 발급). API 키 없이 개발용으로 쓰려면 `LLM_PROVIDER=claude_cli`로 바꿔 로그인된 `claude` CLI를 subprocess로 호출하거나, `LLM_PROVIDER=anthropic_api` + `ANTHROPIC_API_KEY=` 로 Anthropic API를 쓸 수 있습니다.
 
 ### 배포
 

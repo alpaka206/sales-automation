@@ -35,7 +35,23 @@ def _mock_settings_context():
         ],
         "today_llm": 12,
         "week_llm": 45,
-        "claude_cli_ok": False,
+        "llm_provider": "claude_cli",
+        "llm_ok": False,
+    }
+
+
+def _mock_settings_context_gemini():
+    return {
+        "checks": [
+            {"name": "Database", "status": "PASS", "detail": "ok", "latency_ms": 5},
+            {"name": "gemini_api_key", "status": "FAIL", "detail": "GEMINI_API_KEY is empty", "latency_ms": 0},
+        ],
+        "overall_status": "FAIL",
+        "env_vars": [],
+        "today_llm": 0,
+        "week_llm": 0,
+        "llm_provider": "gemini_api",
+        "llm_ok": False,
     }
 
 
@@ -69,6 +85,12 @@ def test_settings_shows_claude_cli_warning():
     r = _client().get("/settings")
     assert "Claude CLI" in r.text
     assert "claude /login" in r.text
+
+
+@patch("src.api.web.routes._settings_context", _mock_settings_context_gemini)
+def test_settings_shows_gemini_warning():
+    r = _client().get("/settings")
+    assert "GEMINI_API_KEY" in r.text
 
 
 @patch("src.api.web.routes._settings_context", _mock_settings_context)

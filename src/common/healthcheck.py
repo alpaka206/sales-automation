@@ -36,7 +36,9 @@ def run_healthchecks() -> HealthReport:
 
     checks.append(_check_db())
 
-    if settings.LLM_PROVIDER == "claude_cli":
+    if settings.LLM_PROVIDER == "gemini_api":
+        checks.append(_check_gemini_api())
+    elif settings.LLM_PROVIDER == "claude_cli":
         checks.append(_check_claude_cli())
     elif settings.LLM_PROVIDER == "anthropic_api":
         checks.append(_check_anthropic_api())
@@ -103,6 +105,34 @@ def _check_claude_cli() -> CheckResult:
     except subprocess.TimeoutExpired:
         ms = int((time.monotonic() - start) * 1000)
         return CheckResult(name="Claude CLI 로그인 상태", status="FAIL", detail="Timed out after 10s", latency_ms=ms)
+
+
+def _check_gemini_api() -> CheckResult:
+    """Issue a minimal generation to verify the Gemini API key."""
+    start = time.monotonic()
+    if not settings.GEMINI_API_KEY:
+        return CheckResult(name="gemini_api_key", status="FAIL", detail="GEMINI_API_KEY is empty", latency_ms=0)
+    try:
+        from google import genai
+        from google.genai import types
+
+        client = genai.Client(api_key=settings.GEMINI_API_KEY)
+        client.models.generate_content(
+            model=settings.GEMINI_MODEL,
+            contents="ping",
+            config=types.GenerateContentConfig(max_output_tokens=1),
+        )
+        ms = int((time.monotonic() - start) * 1000)
+        return CheckResult(name="gemini_api_key", status="PASS", detail="OK", latency_ms=ms)
+    except Exception as e:
+        ms = int((time.monotonic() - start) * 1000)
+        err = str(e).lower()
+        status_code = getattr(e, "code", None) or getattr(e, "status_code", None)
+        if status_code in (401, 403) or "api key" in err or "permission" in err:
+            return CheckResult(name="gemini_api_key", status="FAIL", detail="Invalid API key", latency_ms=ms)
+        if status_code == 429 or "429" in err or "quota" in err:
+            return CheckResult(name="gemini_api_key", status="WARN", detail="Rate limited / quota (429)", latency_ms=ms)
+        return CheckResult(name="gemini_api_key", status="FAIL", detail=str(e)[:200], latency_ms=ms)
 
 
 def _check_anthropic_api() -> CheckResult:

@@ -18,8 +18,11 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", case_sensitive=False, extra="ignore")
 
     # ----- LLM -----
-    LLM_PROVIDER: Literal["claude_cli", "anthropic_api"] = "claude_cli"
+    LLM_PROVIDER: Literal["gemini_api", "anthropic_api", "claude_cli"] = "gemini_api"
     CLAUDE_CLI_PATH: str = "claude"
+
+    GEMINI_API_KEY: str = ""
+    GEMINI_MODEL: str = "gemini-2.5-flash"
 
     ANTHROPIC_API_KEY: str = ""
     ANTHROPIC_MODEL: str = "claude-sonnet-4-6"

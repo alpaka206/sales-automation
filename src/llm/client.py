@@ -24,6 +24,7 @@ from .pricing import log_usage
 from .prompts import get_company_rules, load_prompt
 from .providers.anthropic_api import call_anthropic
 from .providers.claude_cli import ClaudeCLIError, call_claude_cli
+from .providers.gemini_api import call_gemini
 
 logger = logging.getLogger(__name__)
 
@@ -94,8 +95,11 @@ def _is_transient(exc: Exception) -> bool:
     if status is None:
         resp = getattr(exc, "response", None)
         status = getattr(resp, "status_code", None)
-    if status is not None:
-        return status >= 500
+    if status is None:
+        # google-genai APIError exposes the HTTP status as `.code`.
+        status = getattr(exc, "code", None)
+    if isinstance(status, int):
+        return status == 429 or status >= 500
 
     if "timeout" in type(exc).__name__.lower():
         return True
@@ -114,7 +118,7 @@ class LLMClient:
         schema: type[T] | None = None,
         max_tokens: int = 2000,
     ) -> str | T:
-        use_split = self.provider == "anthropic_api"
+        use_split = self.provider in ("anthropic_api", "gemini_api")
         system = get_company_rules() if use_split else None
         prompt = load_prompt(prompt_name, variables, include_rules=not use_split)
 
@@ -154,7 +158,11 @@ class LLMClient:
             return self._dispatch_once(prompt, max_tokens, system=system)
 
     def _dispatch_once(self, prompt: str, max_tokens: int, system: str | None = None) -> str:
-        if self.provider == "claude_cli":
+        if self.provider == "gemini_api":
+            if not settings.GEMINI_API_KEY:
+                raise LLMError("LLM_PROVIDER=gemini_api but GEMINI_API_KEY is empty.")
+            llm_result = call_gemini(prompt, max_tokens=max_tokens, system=system)
+        elif self.provider == "claude_cli":
             llm_result = call_claude_cli(prompt)
         elif self.provider == "anthropic_api":
             if not settings.ANTHROPIC_API_KEY:

@@ -69,7 +69,7 @@ Reply check job (cron):
 - SQLite locally; DATABASE_URL swap for Postgres later
 - httpx (async) for HubSpot/YouTube
 - n8n for scheduling, webhooks, branching, approval cards, retries
-- ralph_loop + claude CLI for development
+- Gemini API (google-genai SDK) as the default LLM provider
 
 ## What we do NOT use
 

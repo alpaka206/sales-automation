@@ -697,7 +697,9 @@ def _settings_context() -> dict:
         today_llm = 0
         week_llm = 0
 
-    claude_cli_ok = any(c.name == "Claude CLI 로그인 상태" and c.status == "PASS" for c in report.checks)
+    _llm_check_names = {"gemini_api_key", "Claude CLI 로그인 상태", "anthropic_api_key"}
+    _llm_checks = [c for c in report.checks if c.name in _llm_check_names]
+    llm_ok = all(c.status != "FAIL" for c in _llm_checks) if _llm_checks else True
 
     return {
         "checks": [c.model_dump() for c in report.checks],
@@ -705,7 +707,8 @@ def _settings_context() -> dict:
         "env_vars": env_vars,
         "today_llm": today_llm,
         "week_llm": week_llm,
-        "claude_cli_ok": claude_cli_ok,
+        "llm_provider": settings.LLM_PROVIDER,
+        "llm_ok": llm_ok,
     }
 
 

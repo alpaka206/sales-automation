@@ -2,9 +2,15 @@
 {% block title %}설정 — Sales Automation{% endblock %}
 {% block content %}
 
-{% if not claude_cli_ok %}
+{% if not llm_ok %}
 <div class="bg-red-600 text-white px-4 py-3 rounded-lg mb-6 text-sm font-medium">
+  {% if llm_provider == "gemini_api" %}
+  Gemini API 키가 없거나 잘못되었습니다. <code class="bg-red-700 px-1 rounded">.env</code> 의 <code class="bg-red-700 px-1 rounded">GEMINI_API_KEY</code> 를 확인하세요 (무료 키: aistudio.google.com/apikey).
+  {% elif llm_provider == "anthropic_api" %}
+  Anthropic API 키가 없거나 잘못되었습니다. <code class="bg-red-700 px-1 rounded">.env</code> 의 <code class="bg-red-700 px-1 rounded">ANTHROPIC_API_KEY</code> 를 확인하세요.
+  {% else %}
   Claude CLI 로그인이 만료되었거나 설치되지 않았습니다. 터미널에서 <code class="bg-red-700 px-1 rounded">claude /login</code> 을 실행하세요.
+  {% endif %}
 </div>
 {% endif %}
 
