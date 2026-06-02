@@ -168,7 +168,13 @@ class CountrySendWindow(Base):
 
 
 class KnowledgeDocument(Base):
-    """Stores knowledge base documents for web UI editing and LLM prompt context."""
+    """Stores knowledge base documents for web UI editing and LLM prompt context.
+
+    ``summary`` and ``tags`` feed the LLM document router (knowledge.py) so the
+    model can pick the right docs from a compact index without reading every
+    body. ``author``/``version``/``status`` give operators provenance, and every
+    edit snapshots the prior state into ``knowledge_document_revisions``.
+    """
 
     __tablename__ = "knowledge_documents"
 
@@ -176,12 +182,45 @@ class KnowledgeDocument(Base):
     title: Mapped[str] = mapped_column(String, nullable=False)
     slug: Mapped[str] = mapped_column(String, unique=True, nullable=False)
     categories: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    tags: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     scope: Mapped[str] = mapped_column(String, nullable=False, default="both")
     body: Mapped[str] = mapped_column(Text, nullable=False)
+    author: Mapped[str | None] = mapped_column(String, nullable=True)
+    status: Mapped[str] = mapped_column(String, nullable=False, default="active")
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=_utcnow, onupdate=_utcnow, nullable=False
     )
+
+
+class KnowledgeDocumentRevision(Base):
+    """Append-only history of knowledge document edits.
+
+    A new row is written *before* each update with the document's prior content,
+    so the full change history survives even if the live document is later
+    edited or deleted. ``document_id`` is kept as a plain int (no hard FK) so
+    revisions outlive their source document.
+    """
+
+    __tablename__ = "knowledge_document_revisions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    document_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    slug: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    title: Mapped[str] = mapped_column(String, nullable=False)
+    categories: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    tags: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    scope: Mapped[str] = mapped_column(String, nullable=False, default="both")
+    body: Mapped[str] = mapped_column(Text, nullable=False)
+    author: Mapped[str | None] = mapped_column(String, nullable=True)
+    status: Mapped[str] = mapped_column(String, nullable=False, default="active")
+    change_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    edited_by: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
 
 
 class OutboundIntent(Base):

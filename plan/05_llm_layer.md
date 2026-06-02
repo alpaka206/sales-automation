@@ -2,7 +2,7 @@
 
 ## Goal
 
-A single entry point — `complete()` — that all agents call. Provider is decided by `LLM_PROVIDER` env var. Prompts are markdown files, not Python string literals. JSON outputs are validated against pydantic schemas.
+A single entry point — `complete()` — that all agents call. The only provider is Gemini on Vertex AI. Prompts are markdown files, not Python string literals. JSON outputs are validated against pydantic schemas.
 
 ## Public API
 
@@ -25,28 +25,29 @@ class LLMClient:
 - Auto-prepended once at the top: the concatenated contents of `company_rules/*.md` in filename order.
 - The prompt file may include a `---` front-matter block with `output: json` to signal JSON expected.
 
-## Providers
-
-### `claude_cli` (default, no API key needed)
+## Provider — Gemini on Vertex AI (`src/llm/providers/gemini_vertex.py`)
 
 ```python
-def _call_claude_cli(prompt: str) -> str:
-    res = subprocess.run(
-        ["claude", "-p", prompt, "--output-format", "text"],
-        capture_output=True, text=True, timeout=120,
-        env={**os.environ, "CLAUDE_DISABLE_TELEMETRY": "1"},
-    )
-    return res.stdout
+from google import genai
+from google.oauth2 import service_account
+
+creds = service_account.Credentials.from_service_account_info(
+    json.loads(settings.GOOGLE_CREDENTIALS_JSON),
+    scopes=["https://www.googleapis.com/auth/cloud-platform"],
+)
+client = genai.Client(
+    vertexai=True,
+    project=settings.GOOGLE_CLOUD_PROJECT or creds.project_id,
+    location=settings.GOOGLE_CLOUD_LOCATION,
+    credentials=creds,
+)
+resp = client.models.generate_content(model=settings.GEMINI_MODEL, contents=prompt, config=...)
 ```
 
-- Streaming is not required for our use case (replies < 1k tokens).
-- For JSON-shaped output: append explicit instructions to return only valid JSON, then try `json.loads`. On failure: retry once with stronger reminder.
-
-### `anthropic_api`
-
-- Standard `anthropic.Anthropic().messages.create(...)`.
-- Use `claude-sonnet-4-6` by default.
-- If `schema` is given and the SDK version supports tool-use response shaping, use it; otherwise fall back to "return JSON" + parse.
+- Authentication is a **service-account JSON** in `GOOGLE_CREDENTIALS_JSON` — no API key.
+- `company_rules` go in as the `system_instruction`; the rendered prompt is the user content.
+- Streaming is not required (replies < 1k tokens).
+- For JSON-shaped output: append explicit instructions to return only valid JSON, then validate against the schema. On failure: retry once with a stronger reminder.
 
 ## Failure handling
 
@@ -56,8 +57,7 @@ def _call_claude_cli(prompt: str) -> str:
 
 ## Cost tracking
 
-- For `anthropic_api`: capture `input_tokens` and `output_tokens` from response, multiply by hardcoded rate table in `src/llm/pricing.py`, store on the event.
-- For `claude_cli`: tokens unknown, record `tokens=null`.
+- Capture `prompt_token_count` / `candidates_token_count` from the response's `usage_metadata`, multiply by the hardcoded rate table in `src/llm/pricing.py`, and store on the usage record.
 
 ## Testing
 
@@ -65,8 +65,7 @@ def _call_claude_cli(prompt: str) -> str:
   - Prompt rendering with placeholders
   - company_rules concatenation
   - JSON schema validation (happy path + malformed retry)
-  - Provider selection via env var
-  - Subprocess call uses `claude -p` with correct args (mock `subprocess.run`)
+  - Gemini Vertex call builds the client from `GOOGLE_CREDENTIALS_JSON` and calls `generate_content` (mock the `google-genai` client)
 
 ## Sample prompt file
 

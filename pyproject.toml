@@ -14,12 +14,12 @@ dependencies = [
     "python-dotenv>=1.0",
     "jinja2>=3.1",
     "python-multipart>=0.0.7",
+    "google-genai>=0.3",
+    "google-api-python-client>=2.100",
+    "google-auth>=2.30",
 ]
 
 [project.optional-dependencies]
-# Default LLM provider. Install with: pip install .[gemini]
-gemini = ["google-genai>=0.3"]
-anthropic = ["anthropic>=0.39"]
 # Install with: pip install .[postgres]  — required when DATABASE_URL is postgres://
 postgres = ["psycopg2-binary>=2.9"]
 dev = [

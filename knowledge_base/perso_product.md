@@ -1,6 +1,13 @@
 ---
 title: PERSO AI 제품 개요
 categories: [all]
+tags: [제품개요, 기능, 더빙, 보이스, 아바타, PERSO]
+summary: PERSO AI 제품군 전반 개요 — 핵심 기능, 사용 사례, 차별점. 모든 문의에서 기본 컨텍스트로 활용.
+scope: both
+author: PERSO Sales
+status: active
+created_at: 2026-06-02
+updated_at: 2026-06-02
 ---
 
 # PERSO AI 제품군

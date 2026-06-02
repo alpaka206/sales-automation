@@ -21,8 +21,8 @@ AI가 작성한 이메일은 **Slack 또는 Teams**에서 승인/수정/거절�
   - `HUBSPOT_PRIVATE_APP_TOKEN` — HubSpot 인바운드/아웃바운드용
   - `SLACK_BOT_TOKEN` + `SLACK_APPROVAL_CHANNEL_ID` — 승인 알림용
   - 또는 `TEAMS_WEBHOOK_URL` — Teams 사용 시
-  - `GEMINI_API_KEY` — LLM 호출용 (기본 프로바이더, aistudio.google.com 무료 키)
-  - 기타 선택: Gmail App Password, YouTube API Key, Anthropic API Key
+  - `GOOGLE_CREDENTIALS_JSON` — LLM 호출용 Vertex AI 서비스 계정 JSON (필수)
+  - 기타 선택: Gmail App Password, YouTube API Key
 
 각 자격 증명 발급 방법은 [docs/설정.md](docs/설정.md)를 참고하세요.
 
@@ -54,7 +54,7 @@ AI가 작성한 이메일은 **Slack 또는 Teams**에서 승인/수정/거절�
 ### 아키텍처
 
 ```
-HubSpot (CRM)  →  FastAPI BE (인바운드 폴러 + 발송 워커 내장)  →  LLM (Gemini API)
+HubSpot (CRM)  →  FastAPI BE (인바운드 폴러 + 발송 워커 내장)  →  LLM (Gemini / Vertex AI)
                                             ↓
                        SQLite/Postgres DB + 웹 UI 승인 + 발송 (HubSpot/SMTP/WhatsApp)
 ```
@@ -95,7 +95,7 @@ ruff check src tests         # 린트
 
 ### LLM 호출 방식
 
-기본 프로바이더는 **Gemini API** (`LLM_PROVIDER=gemini_api`)입니다. `.env`에 `GEMINI_API_KEY=` 를 채우면 됩니다 ([aistudio.google.com](https://aistudio.google.com/apikey) 무료 키 발급). API 키 없이 개발용으로 쓰려면 `LLM_PROVIDER=claude_cli`로 바꿔 로그인된 `claude` CLI를 subprocess로 호출하거나, `LLM_PROVIDER=anthropic_api` + `ANTHROPIC_API_KEY=` 로 Anthropic API를 쓸 수 있습니다.
+LLM은 **Gemini (Vertex AI)** 단독입니다. API 키가 아니라 **서비스 계정 JSON**으로 인증합니다 — `.env`의 `GOOGLE_CREDENTIALS_JSON`에 서비스 계정 JSON 전체를 넣고, `GOOGLE_CLOUD_PROJECT`(비우면 JSON의 project_id 사용)와 `GOOGLE_CLOUD_LOCATION`(예: `global`), `GEMINI_MODEL`(기본 `gemini-2.5-flash`)을 설정하면 됩니다.
 
 ### 배포
 

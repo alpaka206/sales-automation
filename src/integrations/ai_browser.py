@@ -1,4 +1,4 @@
-"""AI browser harness — Playwright + Claude CLI for structured page extraction."""
+"""AI browser harness — Playwright + Gemini (Vertex AI) for structured page extraction."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from typing import Any, Generator
 
 from pydantic import BaseModel
 
-from ..llm.providers.claude_cli import call_claude_cli
+from ..llm.providers.gemini_vertex import call_gemini
 
 logger = logging.getLogger(__name__)
 
@@ -78,7 +78,7 @@ def fetch_and_extract_sync(
     cookies: list[dict] | None = None,
     max_html_chars: int = 30000,
 ) -> Any:
-    """Synchronous version: fetch URL with Playwright, extract with Claude CLI."""
+    """Synchronous version: fetch URL with Playwright, extract with Gemini."""
     try:
         from playwright.sync_api import sync_playwright
     except ImportError:
@@ -184,7 +184,7 @@ def _extract_with_llm(
     schema: type[BaseModel] | None,
     max_html_chars: int,
 ) -> Any:
-    """Send cleaned HTML to Claude CLI with the extraction prompt."""
+    """Send cleaned HTML to Gemini with the extraction prompt."""
     cleaned = _clean_html(html, max_html_chars)
 
     prompt = (
@@ -202,10 +202,10 @@ def _extract_with_llm(
         )
 
     try:
-        result = call_claude_cli(prompt, timeout=120)
+        result = call_gemini(prompt, max_tokens=4000)
         text = result.text
     except Exception:
-        logger.warning("Claude CLI extraction failed for %s.", url, exc_info=True)
+        logger.warning("Gemini extraction failed for %s.", url, exc_info=True)
         return None
 
     if schema is not None:

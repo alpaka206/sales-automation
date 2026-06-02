@@ -475,7 +475,7 @@ async def webhook_hubspot_inbound(request: Request) -> dict:
                 body = InboundWebhookBody(**item)
                 internal = body.model_dump()
 
-            # agent.handle is sync and shells out to the claude CLI 3x (classify,
+            # agent.handle is sync and calls the Gemini API 3x (classify,
             # score_adjust, draft_reply). On the asyncio loop that would block every
             # other request — including /healthz and /messages — for the duration.
             # to_thread offloads it so the loop stays responsive.

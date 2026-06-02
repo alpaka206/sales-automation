@@ -1,6 +1,13 @@
 ---
 title: PERSO AI 엔터프라이즈 도입 프로세스
 categories: [purchase_inquiry, partnership]
+tags: [엔터프라이즈, 도입프로세스, 계약, 스페이스, 온보딩, 영업미팅]
+summary: 엔터프라이즈 도입 4단계(컨택→계약→결제→백오피스 세팅)와 스페이스·크레딧 구성 방식.
+scope: both
+author: PERSO Sales
+status: active
+created_at: 2026-06-02
+updated_at: 2026-06-02
 ---
 
 # 엔터프라이즈 도입 프로세스 (운영자 참고용)

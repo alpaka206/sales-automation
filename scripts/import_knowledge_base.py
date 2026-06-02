@@ -54,6 +54,15 @@ def _slug_from_filename(name: str) -> str:
     return Path(name).stem.lower().replace(" ", "-")
 
 
+def _as_list(value: object) -> list[str]:
+    """Coerce a frontmatter value (list | scalar | None) to list[str]."""
+    if isinstance(value, list):
+        return [str(v) for v in value]
+    if isinstance(value, str) and value:
+        return [value]
+    return []
+
+
 def main() -> None:
     """Read knowledge_base/*.md and upsert into knowledge_documents."""
     if not KNOWLEDGE_DIR.exists():
@@ -66,7 +75,8 @@ def main() -> None:
     session = SessionLocal()
     try:
         for path in md_files:
-            if path.name.lower() in SKIP_FILES:
+            # Skip the README and any template/scratch file (leading underscore).
+            if path.name.lower() in SKIP_FILES or path.name.startswith("_"):
                 logger.info("Skipping %s", path.name)
                 continue
 
@@ -75,19 +85,22 @@ def main() -> None:
 
             title = str(meta.get("title") or path.stem)
             slug = _slug_from_filename(path.name)
-
-            categories_raw = meta.get("categories")
-            if isinstance(categories_raw, list):
-                categories = [str(c) for c in categories_raw]
-            elif isinstance(categories_raw, str) and categories_raw:
-                categories = [categories_raw]
-            else:
-                categories = []
+            categories = _as_list(meta.get("categories"))
+            tags = _as_list(meta.get("tags"))
+            summary = str(meta.get("summary") or "") or None
+            author = str(meta.get("author") or "") or None
+            scope = str(meta.get("scope") or "both") or "both"
+            status = str(meta.get("status") or "active") or "active"
 
             existing = session.query(KnowledgeDocument).filter_by(slug=slug).first()
             if existing:
                 existing.title = title
                 existing.categories = categories
+                existing.tags = tags
+                existing.summary = summary
+                existing.author = author
+                existing.scope = scope
+                existing.status = status
                 existing.body = body.strip()
                 logger.info("Updated existing doc: %s", slug)
             else:
@@ -95,7 +108,11 @@ def main() -> None:
                     title=title,
                     slug=slug,
                     categories=categories,
-                    scope="both",
+                    tags=tags,
+                    summary=summary,
+                    author=author,
+                    scope=scope,
+                    status=status,
                     body=body.strip(),
                 )
                 session.add(doc)

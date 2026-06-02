@@ -72,7 +72,7 @@ def test_message_and_approval_chain(db_session: Session) -> None:
 
 
 def test_event_insert(db_session: Session) -> None:
-    e = Event(kind="llm_call", payload={"model": "claude", "tokens": 100})
+    e = Event(kind="llm_call", payload={"model": "gemini", "tokens": 100})
     db_session.add(e)
     db_session.commit()
     db_session.refresh(e)

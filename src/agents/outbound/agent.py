@@ -177,6 +177,7 @@ class OutboundAgent:
                 "language": guess_language(candidate.country, icp.language_guess),
             },
             schema=DraftEmailResult,
+            tier="pro",
         )
 
     def _persist_prospect(

@@ -1,4 +1,4 @@
-"""Tests for AI browser harness with mocked Playwright and Claude CLI."""
+"""Tests for AI browser harness with mocked Playwright and Gemini."""
 
 from __future__ import annotations
 
@@ -63,10 +63,10 @@ def test_extract_with_llm_text_output() -> None:
         text="Acme Corp is an AI solutions company in Seoul.",
         input_tokens=100,
         output_tokens=20,
-        model="claude-cli",
+        model="gemini-2.5-flash",
     )
 
-    with patch("src.integrations.ai_browser.call_claude_cli", return_value=mock_result):
+    with patch("src.integrations.ai_browser.call_gemini", return_value=mock_result):
         result = _extract_with_llm(
             html, "https://acmecorp.kr", "Summarize this company in one sentence.", None, 30000
         )
@@ -80,11 +80,11 @@ def test_extract_with_llm_schema_output() -> None:
         text=response_json,
         input_tokens=100,
         output_tokens=30,
-        model="claude-cli",
+        model="gemini-2.5-flash",
     )
 
     html = _load_fixture("company_page.html")
-    with patch("src.integrations.ai_browser.call_claude_cli", return_value=mock_result):
+    with patch("src.integrations.ai_browser.call_gemini", return_value=mock_result):
         result = _extract_with_llm(
             html,
             "https://acmecorp.kr",
@@ -103,10 +103,10 @@ def test_extract_with_llm_invalid_json_returns_none() -> None:
         text="This is not JSON at all",
         input_tokens=100,
         output_tokens=10,
-        model="claude-cli",
+        model="gemini-2.5-flash",
     )
 
-    with patch("src.integrations.ai_browser.call_claude_cli", return_value=mock_result):
+    with patch("src.integrations.ai_browser.call_gemini", return_value=mock_result):
         result = _extract_with_llm(
             "<p>test</p>",
             "https://test.com",
@@ -120,7 +120,7 @@ def test_extract_with_llm_invalid_json_returns_none() -> None:
 
 def test_extract_with_llm_cli_failure_returns_none() -> None:
     with patch(
-        "src.integrations.ai_browser.call_claude_cli",
+        "src.integrations.ai_browser.call_gemini",
         side_effect=RuntimeError("CLI not found"),
     ):
         result = _extract_with_llm(
@@ -135,7 +135,7 @@ def test_fetch_and_extract_sync_httpx_fallback() -> None:
     import respx
 
     mock_result = LLMResult(
-        text="Extracted data", input_tokens=50, output_tokens=10, model="claude-cli"
+        text="Extracted data", input_tokens=50, output_tokens=10, model="gemini-2.5-flash"
     )
 
     with respx.mock:
@@ -147,7 +147,7 @@ def test_fetch_and_extract_sync_httpx_fallback() -> None:
             )
         )
 
-        with patch("src.integrations.ai_browser.call_claude_cli", return_value=mock_result):
+        with patch("src.integrations.ai_browser.call_gemini", return_value=mock_result):
             result = fetch_and_extract_sync(
                 "https://test.com/page",
                 "Summarize this page.",
@@ -161,7 +161,7 @@ def test_fetch_and_extract_async() -> None:
     import respx
 
     mock_result = LLMResult(
-        text="Async result", input_tokens=50, output_tokens=10, model="claude-cli"
+        text="Async result", input_tokens=50, output_tokens=10, model="gemini-2.5-flash"
     )
 
     with respx.mock:
@@ -173,7 +173,7 @@ def test_fetch_and_extract_async() -> None:
             )
         )
 
-        with patch("src.integrations.ai_browser.call_claude_cli", return_value=mock_result):
+        with patch("src.integrations.ai_browser.call_gemini", return_value=mock_result):
             result = asyncio.run(
                 fetch_and_extract("https://async.test/", "Summarize.")
             )
@@ -186,7 +186,7 @@ def test_fetch_and_extract_batch_async() -> None:
     import respx
 
     mock_result = LLMResult(
-        text="Batch result", input_tokens=50, output_tokens=10, model="claude-cli"
+        text="Batch result", input_tokens=50, output_tokens=10, model="gemini-2.5-flash"
     )
 
     with respx.mock:
@@ -199,7 +199,7 @@ def test_fetch_and_extract_batch_async() -> None:
                 )
             )
 
-        with patch("src.integrations.ai_browser.call_claude_cli", return_value=mock_result):
+        with patch("src.integrations.ai_browser.call_gemini", return_value=mock_result):
             tasks = [{"url": f"https://batch{i}.test/"} for i in range(3)]
             results = asyncio.run(
                 fetch_and_extract_batch(tasks, "Extract info.")

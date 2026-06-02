@@ -10,32 +10,31 @@
 ## Why
 
 사용자 원 명세에서 "browser harness 라이브러리로 크롤링 하도록" 명시했는데
-현재 Playwright + claude CLI 직접 결합으로 구현됨. 명세 위반. 두 백엔드
+현재 Playwright + Gemini(Vertex) 직접 결합으로 구현됨. 두 백엔드
 모두 지원하도록 환경변수로 토글 추가.
 
-browser-harness (`github.com/browser-use/browser-harness`):
-- CDP 로 사용자의 실제 Chrome 에 연결 (headless X)
-- Claude Code CLI 의 SKILL 시스템에 등록 (`~/.claude/CLAUDE.md` 에 한 줄)
-- LLM API 키 불필요, claude CLI 가 brain
-- Self-healing (실행 중 helper 코드 자동 작성)
-- 사용자가 Chrome 켜고 로그인된 상태여야 함
+browser-use (`github.com/browser-use/browser-use`):
+- Playwright 기반 AI 드리븐 브라우저 에이전트 (자연어 액션)
+- Gemini 네이티브 지원: `ChatGoogle(model="gemini-2.5-flash", vertexai=True)`
+  → Vertex 서비스 계정(GOOGLE_CREDENTIALS_JSON)로 인증, 별도 API 키 불필요
+- Self-healing (실행 중 액션 재시도/적응)
+- 헤드리스 가능 (서버 운영에 적합)
 
 ## What to do
 
 1. `.env.example` 에 `BROWSER_BACKEND=playwright` 추가 (값: `playwright` |
-   `browser_harness`).
+   `browser_use`).
 2. `src/integrations/ai_browser.py` 의 `fetch_and_extract_sync` 를 백엔드
-   디스패처로 변경. `BROWSER_BACKEND=browser_harness` 면 새 함수
-   `_fetch_via_harness(url, instruction)` 호출.
-3. `src/integrations/browser_harness_adapter.py` 신규:
-   - subprocess 로 `browser-harness <<'PY' ... PY` 호출
-   - 또는 browser-harness 가 Python API 제공 시 import 해서 사용
+   디스패처로 변경. `BROWSER_BACKEND=browser_use` 면 새 함수
+   `_fetch_via_browser_use(url, instruction)` 호출.
+3. `src/integrations/browser_use_adapter.py` 신규:
+   - `from browser_use import Agent, ChatGoogle`
+   - `ChatGoogle(model=settings.GEMINI_MODEL, vertexai=True)` 로 LLM 구성
+     (Vertex 인증은 GOOGLE_CREDENTIALS_JSON 재사용)
    - 반환: 추출된 텍스트 또는 schema 객체
-4. `docs/배포.md` 에 "browser-harness 설치" 섹션 추가:
-   - `git clone https://github.com/browser-use/browser-harness`
-   - `uv tool install -e .`
-   - `~/.claude/CLAUDE.md` 에 `@<path>/SKILL.md` 추가
-   - Chrome 에서 remote debugging 활성화 안내
+4. `docs/배포.md` 에 "browser-use 설치" 섹션 추가:
+   - `pip install browser-use && playwright install chromium`
+   - Vertex 자격 증명(GOOGLE_CREDENTIALS_JSON)이 설정돼 있으면 그대로 사용
 5. linkedin_comments, linkedin_profile, google_search, job_board 의
    browser 호출이 토글을 그대로 따르는지 확인 (이미 ai_browser 통해서
    호출하므로 자동 적용되어야 함).
@@ -44,10 +43,10 @@ browser-harness (`github.com/browser-use/browser-harness`):
 ## Acceptance criteria
 
 - `BROWSER_BACKEND=playwright` (기본) 일 때 기존 동작 유지.
-- `BROWSER_BACKEND=browser_harness` 일 때 subprocess 로 browser-harness
-  호출 (또는 import).
+- `BROWSER_BACKEND=browser_use` 일 때 browser-use + ChatGoogle(vertexai=True)
+  로 추출.
 - 토글 변경에 코드 수정 불필요 (.env 만 바꾸면 동작 전환).
-- `docs/배포.md` 의 browser-harness 설치 가이드가 비개발자도 따라할 수
+- `docs/배포.md` 의 browser-use 설치 가이드가 비개발자도 따라할 수
   있게 명시적.
 
 ## Verify
@@ -56,9 +55,9 @@ browser-harness (`github.com/browser-use/browser-harness`):
 # 1. Playwright 백엔드 (기본)
 .venv\Scripts\python.exe -m pytest tests/test_ai_browser.py -q
 
-# 2. browser-harness 백엔드 (토글)
-$env:BROWSER_BACKEND="browser_harness"
-.venv\Scripts\python.exe -m pytest tests/test_ai_browser_harness.py -q
+# 2. browser-use 백엔드 (토글)
+$env:BROWSER_BACKEND="browser_use"
+.venv\Scripts\python.exe -m pytest tests/test_browser_use_adapter.py -q
 ```
 
 ## Risks

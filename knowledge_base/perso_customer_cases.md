@@ -1,6 +1,13 @@
 ---
 title: PERSO AI 주요 도입 케이스
 categories: [purchase_inquiry, partnership]
+tags: [도입사례, 레퍼런스, 고객, 성공사례, 산업별]
+summary: 산업별 주요 도입 사례와 성과 — 신뢰 형성·영업 레퍼런스로 인용.
+scope: both
+author: PERSO Sales
+status: active
+created_at: 2026-06-02
+updated_at: 2026-06-02
 ---
 
 # 주요 도입 케이스 (영업 참고용)

@@ -1,6 +1,13 @@
 ---
 title: PERSO AI Business Plan (신규 셀프서브 B2B)
 categories: [pricing_question, purchase_inquiry]
+tags: [Business Plan, B2B, 셀프서브, 크레딧, 가격, 단건결제]
+summary: 신규 셀프서브 B2B Business Plan — 100분 $200 단위, 12개월 유효, Stripe 자율 결제. 외부 답장엔 아직 적극 안내 X.
+scope: both
+author: PERSO Sales
+status: active
+created_at: 2026-06-02
+updated_at: 2026-06-02
 ---
 
 # Business Plan — 셀프서브 B2B (출시 준비 중)

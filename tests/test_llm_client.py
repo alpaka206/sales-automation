@@ -1,111 +1,114 @@
-"""Tests for LLM client — mocks subprocess.run for claude_cli provider."""
+"""Tests for LLM client — mocks the Gemini (Vertex) provider call."""
 
 from __future__ import annotations
 
-import subprocess
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 from pydantic import BaseModel
 
+from src.common.config import settings
 from src.llm.client import LLMClient, LLMError, _is_transient
-from src.llm.providers.claude_cli import ClaudeCLIError
+from src.llm.pricing import LLMResult
 
 
 @pytest.fixture()
-def cli_client() -> LLMClient:
-    return LLMClient(provider="claude_cli")
+def client() -> LLMClient:
+    return LLMClient()
 
 
 class _TestSchema(BaseModel):
     greeting: str
 
 
-def _fake_subprocess(stdout: str = "Hello world", returncode: int = 0):
-    result = MagicMock(spec=subprocess.CompletedProcess)
-    result.stdout = stdout
-    result.stderr = ""
-    result.returncode = returncode
-    return result
+def _result(text: str) -> LLMResult:
+    return LLMResult(text=text, input_tokens=10, output_tokens=5, model="gemini-2.5-flash")
 
 
 @patch("src.llm.client.LLMClient._log_event")
-@patch("src.llm.providers.claude_cli.subprocess.run")
-def test_complete_text(mock_run, mock_log, cli_client: LLMClient) -> None:
-    mock_run.return_value = _fake_subprocess("Hello world")
-    result = cli_client.complete("test/hello", {"name": "Alice"})
+@patch("src.llm.client.call_gemini")
+def test_complete_text(mock_gemini, mock_log, client: LLMClient) -> None:
+    mock_gemini.return_value = _result("Hello world")
+    result = client.complete("test/hello", {"name": "Alice"})
     assert result == "Hello world"
-
-    args = mock_run.call_args
-    cmd = args[0][0]
-    assert cmd[0].endswith("claude") or cmd[0] == "claude"
-    assert "-p" in cmd
-    assert "--output-format" in cmd
-    assert "text" in cmd
+    # company rules are passed as the system instruction, not inlined in the prompt
+    assert mock_gemini.call_args.kwargs["system"]
 
 
 @patch("src.llm.client.LLMClient._log_event")
-@patch("src.llm.providers.claude_cli.subprocess.run")
-def test_complete_with_schema(mock_run, mock_log, cli_client: LLMClient) -> None:
-    mock_run.return_value = _fake_subprocess('{"greeting": "hi"}')
-    result = cli_client.complete("test/hello", {"name": "Bob"}, schema=_TestSchema)
+@patch("src.llm.client.call_gemini")
+def test_complete_with_schema(mock_gemini, mock_log, client: LLMClient) -> None:
+    mock_gemini.return_value = _result('{"greeting": "hi"}')
+    result = client.complete("test/hello", {"name": "Bob"}, schema=_TestSchema)
     assert isinstance(result, _TestSchema)
     assert result.greeting == "hi"
 
 
 @patch("src.llm.client.LLMClient._log_event")
-@patch("src.llm.providers.claude_cli.subprocess.run")
-def test_schema_retry_on_bad_json(mock_run, mock_log, cli_client: LLMClient) -> None:
-    mock_run.side_effect = [
-        _fake_subprocess("not json"),
-        _fake_subprocess('{"greeting": "fixed"}'),
-    ]
-    result = cli_client.complete("test/hello", {"name": "C"}, schema=_TestSchema)
+@patch("src.llm.client.call_gemini")
+def test_schema_retry_on_bad_json(mock_gemini, mock_log, client: LLMClient) -> None:
+    mock_gemini.side_effect = [_result("not json"), _result('{"greeting": "fixed"}')]
+    result = client.complete("test/hello", {"name": "C"}, schema=_TestSchema)
     assert result.greeting == "fixed"
-    assert mock_run.call_count == 2
+    assert mock_gemini.call_count == 2
 
 
 @patch("src.llm.client.LLMClient._log_event")
-@patch("src.llm.providers.claude_cli.subprocess.run")
-def test_schema_fails_twice_raises(mock_run, mock_log, cli_client: LLMClient) -> None:
-    mock_run.return_value = _fake_subprocess("not json at all")
+@patch("src.llm.client.call_gemini")
+def test_schema_fails_twice_raises(mock_gemini, mock_log, client: LLMClient) -> None:
+    mock_gemini.return_value = _result("not json at all")
     with pytest.raises(LLMError, match="invalid JSON twice"):
-        cli_client.complete("test/hello", {"name": "D"}, schema=_TestSchema)
-
-
-def test_unknown_provider_raises() -> None:
-    client = LLMClient(provider="nonexistent")
-    with pytest.raises(LLMError, match="unknown LLM_PROVIDER"):
-        client.complete("test/hello", {"name": "E"})
+        client.complete("test/hello", {"name": "D"}, schema=_TestSchema)
 
 
 @patch("src.llm.client.LLMClient._log_event")
-@patch("src.llm.providers.claude_cli.subprocess.run")
-def test_prompt_includes_company_rules(mock_run, mock_log, cli_client: LLMClient) -> None:
-    mock_run.return_value = _fake_subprocess("ok")
-    cli_client.complete("test/hello", {"name": "F"})
-    prompt_sent = mock_run.call_args[0][0][2]
-    assert "Company rules" in prompt_sent
+@patch("src.llm.client.call_gemini")
+def test_prompt_includes_company_rules(mock_gemini, mock_log, client: LLMClient) -> None:
+    mock_gemini.return_value = _result("ok")
+    client.complete("test/hello", {"name": "F"})
+    system_sent = mock_gemini.call_args.kwargs["system"]
+    assert isinstance(system_sent, str) and system_sent.strip()
+
+
+# ---- hybrid model tier tests ----
+
+
+@patch("src.llm.client.LLMClient._log_event")
+@patch("src.llm.client.call_gemini")
+def test_default_tier_uses_flash_model(mock_gemini, mock_log, client: LLMClient) -> None:
+    mock_gemini.return_value = _result("ok")
+    client.complete("test/hello", {"name": "X"})
+    assert mock_gemini.call_args.kwargs["model"] == settings.GEMINI_MODEL
+
+
+@patch("src.llm.client.LLMClient._log_event")
+@patch("src.llm.client.call_gemini")
+def test_pro_tier_uses_pro_model(mock_gemini, mock_log, client: LLMClient) -> None:
+    mock_gemini.return_value = _result("ok")
+    client.complete("test/hello", {"name": "Y"}, tier="pro")
+    assert mock_gemini.call_args.kwargs["model"] == settings.GEMINI_MODEL_PRO
+
+
+@patch("src.llm.client.LLMClient._log_event")
+@patch("src.llm.client.call_gemini")
+def test_unknown_tier_falls_back_to_flash(mock_gemini, mock_log, client: LLMClient) -> None:
+    mock_gemini.return_value = _result("ok")
+    client.complete("test/hello", {"name": "Z"}, tier="nonsense")
+    assert mock_gemini.call_args.kwargs["model"] == settings.GEMINI_MODEL
 
 
 # ---- transient retry tests ----
 
 
-def test_is_transient_cli_timeout() -> None:
-    assert _is_transient(ClaudeCLIError("claude CLI timed out after 180s")) is True
-
-
-def test_is_transient_cli_nonzero_exit() -> None:
-    assert _is_transient(ClaudeCLIError("claude CLI exited 1. stderr=...")) is True
-
-
-def test_is_transient_cli_not_found() -> None:
-    assert _is_transient(ClaudeCLIError("'claude' CLI not found on PATH")) is False
-
-
 def test_is_transient_5xx() -> None:
     err = Exception("server error")
     err.status_code = 500
+    assert _is_transient(err) is True
+
+
+def test_is_transient_429_via_code() -> None:
+    err = Exception("rate limited")
+    err.code = 429
     assert _is_transient(err) is True
 
 
@@ -115,52 +118,54 @@ def test_is_transient_4xx() -> None:
     assert _is_transient(err) is False
 
 
+def test_is_transient_timeout_by_name() -> None:
+    class ReadTimeout(Exception):
+        pass
+
+    assert _is_transient(ReadTimeout("deadline exceeded")) is True
+
+
 def test_is_transient_unknown() -> None:
     assert _is_transient(ValueError("something else")) is False
 
 
 @patch("src.llm.client.time.sleep")
 @patch("src.llm.client.LLMClient._log_event")
-@patch("src.llm.providers.claude_cli.subprocess.run")
-def test_transient_cli_error_retried_and_recovered(
-    mock_run, mock_log, mock_sleep, cli_client: LLMClient,
+@patch("src.llm.client.call_gemini")
+def test_transient_error_retried_and_recovered(
+    mock_gemini, mock_log, mock_sleep, client: LLMClient,
 ) -> None:
-    mock_run.side_effect = [
-        subprocess.TimeoutExpired(cmd="claude", timeout=180),
-        _fake_subprocess("recovered output"),
-    ]
-    result = cli_client.complete("test/hello", {"name": "G"})
+    transient = Exception("temporary 503")
+    transient.code = 503
+    mock_gemini.side_effect = [transient, _result("recovered output")]
+    result = client.complete("test/hello", {"name": "G"})
     assert result == "recovered output"
-    assert mock_run.call_count == 2
+    assert mock_gemini.call_count == 2
     mock_sleep.assert_called_once_with(2)
 
 
 @patch("src.llm.client.time.sleep")
 @patch("src.llm.client.LLMClient._log_event")
-@patch("src.llm.providers.claude_cli.subprocess.run")
-def test_transient_cli_error_both_fail_raises(
-    mock_run, mock_log, mock_sleep, cli_client: LLMClient,
+@patch("src.llm.client.call_gemini")
+def test_transient_error_both_fail_raises(
+    mock_gemini, mock_log, mock_sleep, client: LLMClient,
 ) -> None:
-    mock_run.side_effect = subprocess.TimeoutExpired(cmd="claude", timeout=180)
-    with pytest.raises(ClaudeCLIError, match="timed out"):
-        cli_client.complete("test/hello", {"name": "H"})
-    assert mock_run.call_count == 2
-
-
-def test_permanent_error_not_retried() -> None:
-    client = LLMClient(provider="nonexistent")
-    with pytest.raises(LLMError, match="unknown LLM_PROVIDER"):
-        client.complete("test/hello", {"name": "I"})
+    transient = Exception("temporary 503")
+    transient.code = 503
+    mock_gemini.side_effect = transient
+    with pytest.raises(Exception, match="503"):
+        client.complete("test/hello", {"name": "H"})
+    assert mock_gemini.call_count == 2
 
 
 @patch("src.llm.client.time.sleep")
 @patch("src.llm.client.LLMClient._log_event")
-@patch("src.llm.providers.claude_cli.subprocess.run")
-def test_permanent_cli_not_found_not_retried(
-    mock_run, mock_log, mock_sleep, cli_client: LLMClient,
+@patch("src.llm.client.call_gemini")
+def test_permanent_error_not_retried(
+    mock_gemini, mock_log, mock_sleep, client: LLMClient,
 ) -> None:
-    mock_run.side_effect = FileNotFoundError("No such file: claude")
-    with pytest.raises(ClaudeCLIError, match="not found"):
-        cli_client.complete("test/hello", {"name": "J"})
-    assert mock_run.call_count == 1
+    mock_gemini.side_effect = ValueError("permanent config error")
+    with pytest.raises(ValueError, match="permanent"):
+        client.complete("test/hello", {"name": "I"})
+    assert mock_gemini.call_count == 1
     mock_sleep.assert_not_called()

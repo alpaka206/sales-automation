@@ -21,7 +21,7 @@ Background workers in FastAPI (inbound_poller, send_worker, reply_check)
        ▼           │ approve/reject
    FastAPI BE  ───►  Slack / Teams
        │
-       ├──► LLM layer (Claude CLI subprocess OR Anthropic API)
+       ├──► LLM layer (Gemini on Vertex AI)
        │
        ├──► SQLite DB  (prospects, messages, conversations, follow-ups)
        │
@@ -44,7 +44,7 @@ sales-automation/
 ├── src/
 │   ├── api/               # FastAPI app and routes
 │   ├── agents/            # inbound / outbound / report orchestration
-│   ├── llm/               # LLM client abstraction (Gemini / Anthropic API + CLI)
+│   ├── llm/               # LLM client (Gemini on Vertex AI)
 │   ├── integrations/      # hubspot, youtube, linkedin, slack, smtp, whatsapp
 │   ├── db/                # SQLAlchemy models, migrations, repositories
 │   └── common/            # logging, config, prompt loading, helpers
@@ -64,15 +64,15 @@ sales-automation/
 
 ## LLM access
 
-The LLM client lives in `src/llm/client.py` and exposes a single `complete(prompt: str, schema: type[BaseModel] | None = None) -> str | BaseModel` function.
+The LLM client lives in `src/llm/client.py` and exposes a single `complete(prompt_name, variables=None, schema=None, tier="flash"|"pro") -> str | BaseModel` function.
 
-Provider selection by env var `LLM_PROVIDER`:
+The only provider is **Gemini on Vertex AI** (`src/llm/providers/gemini_vertex.py`), via the `google-genai` SDK. Authentication uses a service-account JSON in `GOOGLE_CREDENTIALS_JSON` (no API key); the project comes from `GOOGLE_CLOUD_PROJECT` or the JSON's `project_id`, region from `GOOGLE_CLOUD_LOCATION`.
 
-- `gemini_api` (default): uses the `google-genai` SDK with `GEMINI_API_KEY` and `GEMINI_MODEL`
-- `anthropic_api`: uses `anthropic` SDK with `ANTHROPIC_API_KEY`
-- `claude_cli`: shells out to `claude -p "<prompt>" --output-format text` (no API key; for local dev on a logged-in machine)
+**Hybrid model tiers:** `tier="flash"` (default) uses `GEMINI_MODEL` (`gemini-2.5-flash`) for light judgment — classification, scoring, doc routing, enrichment. `tier="pro"` uses `GEMINI_MODEL_PRO` (`gemini-2.5-pro`) for customer-facing drafting — inbound replies, outbound opening emails, follow-ups.
 
 All prompts live as `.md` files in `src/llm/prompts/`. They are loaded by name, not hardcoded as strings.
+
+**Knowledge selection:** the inbound agent picks knowledge docs with an LLM router — `src/llm/knowledge.py:select_relevant_docs` builds a compact index (title + summary + tags) of `active` docs and asks the flash model which are relevant to the actual inquiry, falling back to deterministic `categories` matching (`load_relevant_docs`) on any failure.
 
 ## Email sending
 
@@ -120,5 +120,5 @@ This project must run end-to-end on a developer laptop with no paid services. Cl
 - New prospect source (e.g. Crunchbase) → `src/integrations/<source>.py` + `src/agents/outbound/source_registry.py` entry.
 - New prompt → `src/llm/prompts/<area>/<name>.md` + reference in code with `load_prompt("<area>/<name>")`.
 - New rule that affects message tone → `company_rules/<n>_<topic>.md`, then the prompt template includes it automatically.
-- New factual reference doc (pricing, policy, FAQ, product info) → `knowledge_base/<name>.md` with frontmatter `categories: [<inbound categories>]` or `[all]`. The inbound agent loads matching docs into the `draft_reply` prompt via `src/llm/knowledge.py:load_relevant_docs`.
-- New DB field → SQLAlchemy model in `src/db/models.py`, migration in `src/db/migrations/`.
+- New factual reference doc (pricing, policy, FAQ, product info) → copy `knowledge_base/_TEMPLATE.md` to `knowledge_base/<name>.md`, fill the frontmatter (`categories`, `summary`, `tags`, `status: active`, ...), then `python scripts/import_knowledge_base.py`. The inbound agent's LLM router (`select_relevant_docs`) reads `summary`+`tags` to pick docs; edits made via the web UI (`/knowledge`) snapshot history into `knowledge_document_revisions`.
+- New DB field → SQLAlchemy model in `src/db/models.py`, migration in `src/db/migrations/` (additive `ALTER TABLE ... ADD COLUMN`, SQLite+Postgres compatible). After adding, run `python scripts/init_db.py` against the Supabase Postgres too — local SQLite tests won't catch a missing-column error there.

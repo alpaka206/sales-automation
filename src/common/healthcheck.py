@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 import shutil
-import subprocess
 import time
 
 from pydantic import BaseModel
@@ -36,12 +35,7 @@ def run_healthchecks() -> HealthReport:
 
     checks.append(_check_db())
 
-    if settings.LLM_PROVIDER == "gemini_api":
-        checks.append(_check_gemini_api())
-    elif settings.LLM_PROVIDER == "claude_cli":
-        checks.append(_check_claude_cli())
-    elif settings.LLM_PROVIDER == "anthropic_api":
-        checks.append(_check_anthropic_api())
+    checks.append(_check_gemini())
 
     if settings.HUBSPOT_PRIVATE_APP_TOKEN:
         checks.append(_check_hubspot())
@@ -82,84 +76,26 @@ def _check_db() -> CheckResult:
         return CheckResult(name="db_connectivity", status="FAIL", detail=str(e)[:200], latency_ms=ms)
 
 
-def _check_claude_cli() -> CheckResult:
-    """Run a quick claude ping to verify the CLI session is valid."""
+def _check_gemini() -> CheckResult:
+    """Issue a minimal generation to verify Gemini (Vertex AI) credentials."""
     start = time.monotonic()
+    if not settings.GOOGLE_CREDENTIALS_JSON.strip():
+        return CheckResult(name="Gemini (Vertex)", status="FAIL", detail="GOOGLE_CREDENTIALS_JSON is empty", latency_ms=0)
     try:
-        res = subprocess.run(
-            [settings.CLAUDE_CLI_PATH, "-p", "ping", "--output-format", "text"],
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-        ms = int((time.monotonic() - start) * 1000)
-        combined = (res.stdout + res.stderr).lower()
-        if res.returncode != 0:
-            if "not authenticated" in combined or "401" in combined:
-                return CheckResult(name="Claude CLI 로그인 상태", status="FAIL", detail="Token expired or not authenticated", latency_ms=ms)
-            return CheckResult(name="Claude CLI 로그인 상태", status="FAIL", detail=f"Exit code {res.returncode}", latency_ms=ms)
-        return CheckResult(name="Claude CLI 로그인 상태", status="PASS", detail="OK", latency_ms=ms)
-    except FileNotFoundError:
-        ms = int((time.monotonic() - start) * 1000)
-        return CheckResult(name="Claude CLI 로그인 상태", status="FAIL", detail="claude CLI not found on PATH", latency_ms=ms)
-    except subprocess.TimeoutExpired:
-        ms = int((time.monotonic() - start) * 1000)
-        return CheckResult(name="Claude CLI 로그인 상태", status="FAIL", detail="Timed out after 10s", latency_ms=ms)
+        from ..llm.providers.gemini_vertex import call_gemini
 
-
-def _check_gemini_api() -> CheckResult:
-    """Issue a minimal generation to verify the Gemini API key."""
-    start = time.monotonic()
-    if not settings.GEMINI_API_KEY:
-        return CheckResult(name="gemini_api_key", status="FAIL", detail="GEMINI_API_KEY is empty", latency_ms=0)
-    try:
-        from google import genai
-        from google.genai import types
-
-        client = genai.Client(api_key=settings.GEMINI_API_KEY)
-        client.models.generate_content(
-            model=settings.GEMINI_MODEL,
-            contents="ping",
-            config=types.GenerateContentConfig(max_output_tokens=1),
-        )
+        call_gemini("ping", max_tokens=1)
         ms = int((time.monotonic() - start) * 1000)
-        return CheckResult(name="gemini_api_key", status="PASS", detail="OK", latency_ms=ms)
+        return CheckResult(name="Gemini (Vertex)", status="PASS", detail="OK", latency_ms=ms)
     except Exception as e:
         ms = int((time.monotonic() - start) * 1000)
         err = str(e).lower()
         status_code = getattr(e, "code", None) or getattr(e, "status_code", None)
-        if status_code in (401, 403) or "api key" in err or "permission" in err:
-            return CheckResult(name="gemini_api_key", status="FAIL", detail="Invalid API key", latency_ms=ms)
+        if status_code in (401, 403) or "permission" in err or "credential" in err:
+            return CheckResult(name="Gemini (Vertex)", status="FAIL", detail="Invalid credentials / permission denied", latency_ms=ms)
         if status_code == 429 or "429" in err or "quota" in err:
-            return CheckResult(name="gemini_api_key", status="WARN", detail="Rate limited / quota (429)", latency_ms=ms)
-        return CheckResult(name="gemini_api_key", status="FAIL", detail=str(e)[:200], latency_ms=ms)
-
-
-def _check_anthropic_api() -> CheckResult:
-    """Issue a minimal completion to verify the Anthropic API key."""
-    start = time.monotonic()
-    if not settings.ANTHROPIC_API_KEY:
-        return CheckResult(name="anthropic_api_key", status="FAIL", detail="ANTHROPIC_API_KEY is empty", latency_ms=0)
-    try:
-        import anthropic
-
-        client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
-        client.messages.create(
-            model=settings.ANTHROPIC_MODEL,
-            max_tokens=1,
-            messages=[{"role": "user", "content": "ping"}],
-        )
-        ms = int((time.monotonic() - start) * 1000)
-        return CheckResult(name="anthropic_api_key", status="PASS", detail="OK", latency_ms=ms)
-    except Exception as e:
-        ms = int((time.monotonic() - start) * 1000)
-        err = str(e).lower()
-        status_code = getattr(e, "status_code", None)
-        if status_code == 401 or "401" in err:
-            return CheckResult(name="anthropic_api_key", status="FAIL", detail="Invalid API key (401)", latency_ms=ms)
-        if status_code == 429 or "429" in err:
-            return CheckResult(name="anthropic_api_key", status="WARN", detail="Rate limited (429)", latency_ms=ms)
-        return CheckResult(name="anthropic_api_key", status="FAIL", detail=str(e)[:200], latency_ms=ms)
+            return CheckResult(name="Gemini (Vertex)", status="WARN", detail="Rate limited / quota (429)", latency_ms=ms)
+        return CheckResult(name="Gemini (Vertex)", status="FAIL", detail=str(e)[:200], latency_ms=ms)
 
 
 def _check_hubspot() -> CheckResult:

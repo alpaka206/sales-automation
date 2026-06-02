@@ -1,37 +1,16 @@
-"""Additional healthcheck tests — SMTP, HubSpot, send quota, anthropic API, overall status."""
+"""Additional healthcheck tests — SMTP, HubSpot, send quota, Gemini, overall status."""
 
 from __future__ import annotations
 
-import sys
-from types import ModuleType
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from src.common.healthcheck import (
-    _check_anthropic_api,
     _check_hubspot,
     _check_send_quota,
     _check_smtp,
     _smtp_provider_label,
     run_healthchecks,
 )
-
-
-@pytest.fixture(autouse=True)
-def _ensure_anthropic():
-    """Inject a fake anthropic module if it's not installed."""
-    had_it = "anthropic" in sys.modules
-    old_mod = sys.modules.get("anthropic")
-    if not had_it:
-        mod = ModuleType("anthropic")
-        mod.Anthropic = MagicMock()
-        sys.modules["anthropic"] = mod
-    yield
-    if not had_it:
-        sys.modules.pop("anthropic", None)
-    else:
-        sys.modules["anthropic"] = old_mod
 
 
 # ---------- _smtp_provider_label ----------
@@ -152,66 +131,6 @@ def test_check_hubspot_connection_error() -> None:
     assert result.status == "FAIL"
 
 
-# ---------- _check_anthropic_api with mock SDK ----------
-
-
-def test_check_anthropic_api_pass() -> None:
-    mock_client = MagicMock()
-    mock_usage = MagicMock()
-    mock_usage.input_tokens = 1
-    mock_usage.output_tokens = 1
-    mock_response = MagicMock(usage=mock_usage)
-    mock_client.messages.create.return_value = mock_response
-
-    fake_anthropic = sys.modules["anthropic"]
-    fake_anthropic.Anthropic = MagicMock(return_value=mock_client)
-
-    with patch("src.common.healthcheck.settings") as s:
-        s.ANTHROPIC_API_KEY = "sk-test"
-        s.ANTHROPIC_MODEL = "claude-sonnet-4-6"
-        result = _check_anthropic_api()
-
-    assert result.status == "PASS"
-
-
-def test_check_anthropic_api_401() -> None:
-    exc = Exception("Authentication error")
-    exc.status_code = 401
-
-    mock_client = MagicMock()
-    mock_client.messages.create.side_effect = exc
-
-    fake_anthropic = sys.modules["anthropic"]
-    fake_anthropic.Anthropic = MagicMock(return_value=mock_client)
-
-    with patch("src.common.healthcheck.settings") as s:
-        s.ANTHROPIC_API_KEY = "sk-bad"
-        s.ANTHROPIC_MODEL = "claude-sonnet-4-6"
-        result = _check_anthropic_api()
-
-    assert result.status == "FAIL"
-    assert "401" in result.detail
-
-
-def test_check_anthropic_api_429() -> None:
-    exc = Exception("Rate limited")
-    exc.status_code = 429
-
-    mock_client = MagicMock()
-    mock_client.messages.create.side_effect = exc
-
-    fake_anthropic = sys.modules["anthropic"]
-    fake_anthropic.Anthropic = MagicMock(return_value=mock_client)
-
-    with patch("src.common.healthcheck.settings") as s:
-        s.ANTHROPIC_API_KEY = "sk-key"
-        s.ANTHROPIC_MODEL = "claude-sonnet-4-6"
-        result = _check_anthropic_api()
-
-    assert result.status == "WARN"
-    assert "429" in result.detail
-
-
 # ---------- _check_send_quota ----------
 
 
@@ -236,22 +155,14 @@ def test_check_send_quota_limit_hit() -> None:
     assert result.status == "WARN"
 
 
-# ---------- run_healthchecks with various providers ----------
+# ---------- run_healthchecks ----------
 
 
-def test_run_healthchecks_anthropic_provider(db_session_factory) -> None:
-    mock_client = MagicMock()
-    mock_usage = MagicMock(input_tokens=1, output_tokens=1)
-    mock_client.messages.create.return_value = MagicMock(usage=mock_usage)
-
-    fake_anthropic = sys.modules["anthropic"]
-    fake_anthropic.Anthropic = MagicMock(return_value=mock_client)
-
+def test_run_healthchecks_includes_gemini(db_session_factory) -> None:
     with patch("src.common.healthcheck.settings") as s, \
-         patch("src.db.session.SessionLocal", db_session_factory):
-        s.LLM_PROVIDER = "anthropic_api"
-        s.ANTHROPIC_API_KEY = "sk-test"
-        s.ANTHROPIC_MODEL = "claude-sonnet-4-6"
+         patch("src.db.session.SessionLocal", db_session_factory), \
+         patch("src.llm.providers.gemini_vertex.call_gemini"):
+        s.GOOGLE_CREDENTIALS_JSON = '{"project_id": "p"}'
         s.HUBSPOT_PRIVATE_APP_TOKEN = ""
         s.EMAIL_PROVIDER = "hubspot"
         s.SEND_WORKER_ENABLED = False
@@ -259,8 +170,7 @@ def test_run_healthchecks_anthropic_provider(db_session_factory) -> None:
         report = run_healthchecks()
 
     names = [c.name for c in report.checks]
-    assert "anthropic_api_key" in names
-    assert "Claude CLI 로그인 상태" not in names
+    assert "Gemini (Vertex)" in names
 
 
 @patch("smtplib.SMTP")
@@ -269,9 +179,8 @@ def test_run_healthchecks_with_smtp(mock_smtp, db_session_factory) -> None:
 
     with patch("src.common.healthcheck.settings") as s, \
          patch("src.db.session.SessionLocal", db_session_factory), \
-         patch("src.common.healthcheck.subprocess.run") as mock_run:
-        s.LLM_PROVIDER = "claude_cli"
-        s.CLAUDE_CLI_PATH = "claude"
+         patch("src.llm.providers.gemini_vertex.call_gemini"):
+        s.GOOGLE_CREDENTIALS_JSON = '{"project_id": "p"}'
         s.HUBSPOT_PRIVATE_APP_TOKEN = ""
         s.EMAIL_PROVIDER = "smtp"
         s.SMTP_HOST = "smtp.gmail.com"
@@ -280,7 +189,6 @@ def test_run_healthchecks_with_smtp(mock_smtp, db_session_factory) -> None:
         s.SMTP_PASSWORD = ""
         s.SEND_WORKER_ENABLED = False
 
-        mock_run.return_value = MagicMock(returncode=0, stdout="ok", stderr="")
         report = run_healthchecks()
 
     names = [c.name for c in report.checks]
@@ -290,16 +198,14 @@ def test_run_healthchecks_with_smtp(mock_smtp, db_session_factory) -> None:
 def test_run_healthchecks_with_send_worker(db_session_factory) -> None:
     with patch("src.common.healthcheck.settings") as s, \
          patch("src.db.session.SessionLocal", db_session_factory), \
-         patch("src.common.healthcheck.subprocess.run") as mock_run, \
+         patch("src.llm.providers.gemini_vertex.call_gemini"), \
          patch("src.agents.send_worker.get_daily_count", return_value=0):
-        s.LLM_PROVIDER = "claude_cli"
-        s.CLAUDE_CLI_PATH = "claude"
+        s.GOOGLE_CREDENTIALS_JSON = '{"project_id": "p"}'
         s.HUBSPOT_PRIVATE_APP_TOKEN = ""
         s.EMAIL_PROVIDER = "hubspot"
         s.SEND_WORKER_ENABLED = True
         s.DAILY_SEND_LIMIT = 100
 
-        mock_run.return_value = MagicMock(returncode=0, stdout="ok", stderr="")
         report = run_healthchecks()
 
     names = [c.name for c in report.checks]
@@ -310,15 +216,13 @@ def test_run_healthchecks_overall_warn(db_session_factory) -> None:
     with patch("src.common.healthcheck.settings") as s, \
          patch("src.db.session.SessionLocal", db_session_factory), \
          patch("src.common.healthcheck.shutil.disk_usage") as mock_du, \
-         patch("src.common.healthcheck.subprocess.run") as mock_run:
-        s.LLM_PROVIDER = "claude_cli"
-        s.CLAUDE_CLI_PATH = "claude"
+         patch("src.llm.providers.gemini_vertex.call_gemini"):
+        s.GOOGLE_CREDENTIALS_JSON = '{"project_id": "p"}'
         s.HUBSPOT_PRIVATE_APP_TOKEN = ""
         s.EMAIL_PROVIDER = "hubspot"
         s.SEND_WORKER_ENABLED = False
 
         mock_du.return_value = MagicMock(free=100 * 1024 * 1024)
-        mock_run.return_value = MagicMock(returncode=0, stdout="ok", stderr="")
         report = run_healthchecks()
 
     assert report.overall_status == "WARN"

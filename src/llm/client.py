@@ -1,5 +1,5 @@
 """
-Single entry point for LLM calls. Dispatch by `LLM_PROVIDER`.
+Single entry point for LLM calls. The only provider is Gemini on Vertex AI.
 
 Usage:
     client = LLMClient()
@@ -22,9 +22,7 @@ from ..db.models import Event
 from ..db.session import SessionLocal
 from .pricing import log_usage
 from .prompts import get_company_rules, load_prompt
-from .providers.anthropic_api import call_anthropic
-from .providers.claude_cli import ClaudeCLIError, call_claude_cli
-from .providers.gemini_api import call_gemini
+from .providers.gemini_vertex import call_gemini
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +40,7 @@ _FENCE_OPEN_RE = re.compile(r"```(?:json|JSON)?\s*\n?")
 def _strip_code_fences(text: str) -> str:
     """Best-effort JSON extraction from LLM output.
 
-    Handles three observed patterns from claude_cli:
+    Handles three observed patterns from the LLM:
       1. Strict fence: ```json\\n{...}\\n```
       2. Fence + trailing prose: ```json\\n{...}\\n```\\n\\nWant me to investigate?
       3. Raw JSON object preceded or followed by prose ("Here's the JSON: {...}")
@@ -88,9 +86,6 @@ def _strip_code_fences(text: str) -> str:
 
 def _is_transient(exc: Exception) -> bool:
     """Return True if the error is transient and worth a single retry."""
-    if isinstance(exc, ClaudeCLIError):
-        return "not found" not in str(exc).lower()
-
     status = getattr(exc, "status_code", None)
     if status is None:
         resp = getattr(exc, "response", None)
@@ -117,15 +112,22 @@ class LLMClient:
         variables: dict[str, object] | None = None,
         schema: type[T] | None = None,
         max_tokens: int = 2000,
+        tier: str = "flash",
     ) -> str | T:
-        use_split = self.provider in ("anthropic_api", "gemini_api")
-        system = get_company_rules() if use_split else None
-        prompt = load_prompt(prompt_name, variables, include_rules=not use_split)
+        """Render a prompt and call Gemini.
+
+        ``tier`` selects the model: ``"flash"`` (fast/cheap, the default for
+        classification/scoring/routing) or ``"pro"`` (high quality, used for
+        customer-facing drafting). Unknown tiers fall back to flash.
+        """
+        model = settings.gemini_model_for.get(tier, settings.GEMINI_MODEL)
+        system = get_company_rules()
+        prompt = load_prompt(prompt_name, variables, include_rules=False)
 
         if schema is not None:
             prompt += "\n\nReturn ONLY valid JSON. Do not wrap in markdown code fences."
 
-        text = self._dispatch(prompt, max_tokens=max_tokens, system=system)
+        text = self._dispatch(prompt, max_tokens=max_tokens, system=system, model=model)
 
         if schema is None:
             return text
@@ -139,7 +141,7 @@ class LLMClient:
                 + "\n\nYour previous response was not valid JSON matching the schema."
                 + " Return ONLY valid JSON this time. NO markdown fences, NO prose around it."
             )
-            text = self._dispatch(retry_prompt, max_tokens=max_tokens, system=system)
+            text = self._dispatch(retry_prompt, max_tokens=max_tokens, system=system, model=model)
             try:
                 return schema.model_validate_json(_strip_code_fences(text))
             except ValidationError as second_err:
@@ -147,29 +149,22 @@ class LLMClient:
 
     # ------------- internals -------------
 
-    def _dispatch(self, prompt: str, max_tokens: int, system: str | None = None) -> str:
+    def _dispatch(
+        self, prompt: str, max_tokens: int, system: str | None = None, model: str | None = None
+    ) -> str:
         try:
-            return self._dispatch_once(prompt, max_tokens, system=system)
+            return self._dispatch_once(prompt, max_tokens, system=system, model=model)
         except Exception as first_err:
             if not _is_transient(first_err):
                 raise
             logger.warning("Transient LLM error, retrying in 2s: %s", first_err)
             time.sleep(2)
-            return self._dispatch_once(prompt, max_tokens, system=system)
+            return self._dispatch_once(prompt, max_tokens, system=system, model=model)
 
-    def _dispatch_once(self, prompt: str, max_tokens: int, system: str | None = None) -> str:
-        if self.provider == "gemini_api":
-            if not settings.GEMINI_API_KEY:
-                raise LLMError("LLM_PROVIDER=gemini_api but GEMINI_API_KEY is empty.")
-            llm_result = call_gemini(prompt, max_tokens=max_tokens, system=system)
-        elif self.provider == "claude_cli":
-            llm_result = call_claude_cli(prompt)
-        elif self.provider == "anthropic_api":
-            if not settings.ANTHROPIC_API_KEY:
-                raise LLMError("LLM_PROVIDER=anthropic_api but ANTHROPIC_API_KEY is empty.")
-            llm_result = call_anthropic(prompt, max_tokens=max_tokens, system=system)
-        else:
-            raise LLMError(f"unknown LLM_PROVIDER: {self.provider}")
+    def _dispatch_once(
+        self, prompt: str, max_tokens: int, system: str | None = None, model: str | None = None
+    ) -> str:
+        llm_result = call_gemini(prompt, max_tokens=max_tokens, system=system, model=model)
 
         log_usage(llm_result, self.provider)
         self._log_event(prompt, llm_result.text)

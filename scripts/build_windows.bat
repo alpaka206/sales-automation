@@ -38,5 +38,5 @@ echo   2. .env.example 을 .env 로 복사 후 설정
 echo   3. sales-automation.exe 실행
 echo   4. 브라우저에서 http://localhost:8000 접속
 echo.
-echo 주의: Claude CLI 는 별도 설치 필요 (https://docs.anthropic.com/claude-code)
+echo 주의: LLM 은 Vertex AI 서비스 계정 JSON 필요 (.env 의 GOOGLE_CREDENTIALS_JSON)
 pause

@@ -85,7 +85,7 @@ if exist .env (
     echo.
     echo   ★ 중요: .env 파일을 열어서 필요한 값을 채워 주세요.
     echo     - INTERNAL_API_TOKEN: 반드시 강한 랜덤 값 설정
-    echo     - LLM_PROVIDER: claude_cli 또는 anthropic_api
+    echo     - GOOGLE_CREDENTIALS_JSON: Vertex AI 서비스 계정 JSON (LLM 용)
     echo     - 기타 API 키: 사용할 서비스에 맞게 입력
     echo.
 )

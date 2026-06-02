@@ -26,7 +26,7 @@ a = Analysis(
         "uvicorn.lifespan.on",
         "sqlalchemy.dialects.sqlite",
         "sqlalchemy.dialects.postgresql",
-        "anthropic",
+        "google.genai",
         "jinja2",
         "multipart",
     ],

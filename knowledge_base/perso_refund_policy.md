@@ -1,6 +1,13 @@
 ---
 title: PERSO AI 환불 정책
 categories: [support, other, pricing_question]
+tags: [환불, 정책, 결제취소, 크레딧, 청약철회]
+summary: 환불 가능 조건·기간·절차와 크레딧/구독 결제별 처리 기준.
+scope: both
+author: PERSO Sales
+status: active
+created_at: 2026-06-02
+updated_at: 2026-06-02
 ---
 
 # 환불 정책

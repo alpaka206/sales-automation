@@ -17,15 +17,25 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", case_sensitive=False, extra="ignore")
 
-    # ----- LLM -----
-    LLM_PROVIDER: Literal["gemini_api", "anthropic_api", "claude_cli"] = "gemini_api"
-    CLAUDE_CLI_PATH: str = "claude"
-
-    GEMINI_API_KEY: str = ""
+    # ----- LLM (Gemini on Vertex AI — the only provider) -----
+    # Hybrid model tiers:
+    #   GEMINI_MODEL      → fast/cheap "flash" tier for light judgment
+    #                       (classification, scoring, doc routing, enrichment).
+    #   GEMINI_MODEL_PRO  → high-quality "pro" tier for customer-facing drafting
+    #                       (inbound reply drafts, outbound opening emails).
+    # Code picks the tier per call via LLMClient.complete(..., tier="flash"|"pro").
     GEMINI_MODEL: str = "gemini-2.5-flash"
+    GEMINI_MODEL_PRO: str = "gemini-2.5-pro"
+    # Service-account JSON (full contents as a string). No API key is used.
+    GOOGLE_CREDENTIALS_JSON: str = ""
+    # Project falls back to the JSON's project_id when left empty.
+    GOOGLE_CLOUD_PROJECT: str = ""
+    GOOGLE_CLOUD_LOCATION: str = "global"
 
-    ANTHROPIC_API_KEY: str = ""
-    ANTHROPIC_MODEL: str = "claude-sonnet-4-6"
+    @property
+    def gemini_model_for(self) -> dict[str, str]:
+        """Map of tier name → resolved model id. Use settings.gemini_model_for[tier]."""
+        return {"flash": self.GEMINI_MODEL, "pro": self.GEMINI_MODEL_PRO}
 
     # ----- HubSpot -----
     HUBSPOT_PRIVATE_APP_TOKEN: str = ""
@@ -124,6 +134,16 @@ class Settings(BaseSettings):
     COMPANY_PRIVACY_POLICY_URL: str = ""
     KOREA_AD_PREFIX_ENABLED: bool = False
 
+    # ----- Google Sheets (inbound mirror) -----
+    # Optional: append every processed inbound inquiry as a row to a Google
+    # Sheet for at-a-glance tracking. Uses a SEPARATE Google credential from
+    # Vertex AI — a dedicated service-account JSON whose client email must be
+    # granted edit access to the target spreadsheet (share the sheet with it).
+    GSHEETS_ENABLED: bool = False
+    GOOGLE_SHEETS_CREDENTIALS_JSON: str = ""
+    GOOGLE_SHEETS_SPREADSHEET_ID: str = ""
+    GOOGLE_SHEETS_INBOUND_TAB: str = "Inbound"
+
     # ----- Domain enrichment -----
     INBOUND_DOMAIN_ENRICHMENT_ENABLED: bool = True
     INBOUND_DOMAIN_HOMEPAGE_FETCH: bool = True
@@ -144,6 +164,11 @@ class Settings(BaseSettings):
     TRUSTED_PROXIES: str = ""
     # External base URL used in unsubscribe / approval links (overrides APP_HOST:APP_PORT in prod).
     PUBLIC_BASE_URL: str = ""
+
+    @property
+    def LLM_PROVIDER(self) -> str:
+        """The only LLM provider. Used as the draft/usage label. Not env-configurable."""
+        return "gemini_vertex"
 
 
 @lru_cache

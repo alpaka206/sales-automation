@@ -9,6 +9,26 @@ from sqlalchemy.orm import sessionmaker
 from src.db.base import Base
 from src.db.models import KnowledgeDocument
 from src.llm import knowledge
+from src.llm.knowledge import SelectDocsResult
+
+
+class _FakeLLM:
+    """Stub LLM whose router call returns a fixed set of slugs."""
+
+    def __init__(self, slugs: list[str]) -> None:
+        self.slugs = slugs
+        self.calls: list[dict] = []
+
+    def complete(self, prompt_name, variables=None, schema=None, tier="flash", **kwargs):
+        self.calls.append({"prompt": prompt_name, "variables": variables, "tier": tier})
+        return SelectDocsResult(slugs=self.slugs, reasoning="stub")
+
+
+class _BoomLLM:
+    """Stub LLM whose router call raises, to exercise the fallback path."""
+
+    def complete(self, *args, **kwargs):
+        raise RuntimeError("router down")
 
 
 @pytest.fixture(autouse=True)
@@ -169,3 +189,70 @@ def test_scope_default_is_inbound(_db_backed_knowledge) -> None:
         scope="outbound",
     )
     assert knowledge.load_relevant_docs("purchase_inquiry") == ""
+
+
+def test_archived_docs_excluded_from_category_match(_db_backed_knowledge) -> None:
+    _insert(
+        _db_backed_knowledge,
+        title="Archived Pricing",
+        slug="archived",
+        categories=["pricing_question"],
+        body="old body",
+        status="archived",
+    )
+    assert knowledge.load_relevant_docs("pricing_question") == ""
+
+
+# ---- LLM document router ----
+
+
+def test_router_selects_only_returned_slugs(_db_backed_knowledge) -> None:
+    _insert(_db_backed_knowledge, title="Pricing", slug="pricing",
+            categories=["pricing_question"], body="pricing body", summary="prices")
+    _insert(_db_backed_knowledge, title="Refund", slug="refund",
+            categories=["support"], body="refund body", summary="refunds")
+    llm = _FakeLLM(slugs=["refund"])
+    out = knowledge.select_relevant_docs("환불 되나요?", "support", llm=llm)
+    assert "Refund" in out
+    assert "Pricing" not in out
+    # router runs on the cheap flash tier
+    assert llm.calls and llm.calls[0]["tier"] == "flash"
+
+
+def test_router_none_llm_falls_back_to_category(_db_backed_knowledge) -> None:
+    _insert(_db_backed_knowledge, title="Pricing", slug="pricing",
+            categories=["pricing_question"], body="pricing body")
+    out = knowledge.select_relevant_docs("price?", "pricing_question", llm=None)
+    assert "Pricing" in out
+
+
+def test_router_empty_selection_falls_back_to_category(_db_backed_knowledge) -> None:
+    _insert(_db_backed_knowledge, title="Pricing", slug="pricing",
+            categories=["pricing_question"], body="pricing body")
+    llm = _FakeLLM(slugs=[])  # selects nothing
+    out = knowledge.select_relevant_docs("price?", "pricing_question", llm=llm)
+    assert "Pricing" in out  # fell back to category match
+
+
+def test_router_error_falls_back_to_category(_db_backed_knowledge) -> None:
+    _insert(_db_backed_knowledge, title="Pricing", slug="pricing",
+            categories=["pricing_question"], body="pricing body")
+    out = knowledge.select_relevant_docs("price?", "pricing_question", llm=_BoomLLM())
+    assert "Pricing" in out
+
+
+def test_router_spam_returns_empty(_db_backed_knowledge) -> None:
+    _insert(_db_backed_knowledge, title="X", slug="x", categories=["all"], body="b")
+    assert knowledge.select_relevant_docs("buy viagra", "spam", llm=_FakeLLM(["x"])) == ""
+
+
+def test_router_ignores_archived_candidates(_db_backed_knowledge) -> None:
+    _insert(_db_backed_knowledge, title="Live", slug="live",
+            categories=["pricing_question"], body="live body", status="active")
+    _insert(_db_backed_knowledge, title="Old", slug="old",
+            categories=["pricing_question"], body="old body", status="archived")
+    # Even if the model names the archived slug, it isn't a candidate.
+    llm = _FakeLLM(slugs=["old", "live"])
+    out = knowledge.select_relevant_docs("price?", "pricing_question", llm=llm)
+    assert "Live" in out
+    assert "Old" not in out

@@ -16,7 +16,7 @@ from ...agents.approval import ApprovalError, approve, reject
 from ...common.config import settings
 from ...db.models import (
     Conversation, DomainProfile, ICPRule, KnowledgeDocument,
-    LLMUsage, Message, OutboundIntent, Prospect,
+    KnowledgeDocumentRevision, LLMUsage, Message, OutboundIntent, Prospect,
 )
 from ...db.session import SessionLocal
 from ...llm.knowledge import reset_cache as _reset_kb_cache
@@ -333,6 +333,33 @@ def _slugify(title: str) -> str:
     return slug or "untitled"
 
 
+def _parse_csv(value: str) -> list[str] | None:
+    """'a, b ,c' → ['a','b','c']; empty → None."""
+    items = [v.strip() for v in (value or "").split(",") if v.strip()]
+    return items or None
+
+
+def _snapshot_revision(session, doc: KnowledgeDocument, change_note: str, edited_by: str) -> None:
+    """Append the document's CURRENT state to the revision history."""
+    session.add(
+        KnowledgeDocumentRevision(
+            document_id=doc.id,
+            slug=doc.slug,
+            version=doc.version or 1,
+            title=doc.title,
+            categories=doc.categories,
+            tags=doc.tags,
+            summary=doc.summary,
+            scope=doc.scope,
+            body=doc.body,
+            author=doc.author,
+            status=doc.status or "active",
+            change_note=change_note,
+            edited_by=edited_by,
+        )
+    )
+
+
 @router.get("/knowledge")
 async def knowledge_list(request: Request):
     """List all knowledge base documents."""
@@ -349,6 +376,8 @@ async def knowledge_list(request: Request):
                 "slug": d.slug,
                 "categories": d.categories or [],
                 "scope": d.scope,
+                "status": d.status or "active",
+                "version": d.version or 1,
                 "updated_at": d.updated_at,
             }
             for d in docs
@@ -376,7 +405,12 @@ async def knowledge_edit(request: Request, doc_id: int):
             "title": doc.title,
             "slug": doc.slug,
             "categories": ",".join(doc.categories) if doc.categories else "",
+            "tags": ",".join(doc.tags) if doc.tags else "",
+            "summary": doc.summary or "",
             "scope": doc.scope,
+            "author": doc.author or "",
+            "status": doc.status or "active",
+            "version": doc.version or 1,
             "body": doc.body,
         }
     return templates.TemplateResponse(request, "knowledge_form.html", {
@@ -388,26 +422,39 @@ async def knowledge_edit(request: Request, doc_id: int):
 async def knowledge_create(
     title: str = Form(""),
     categories: str = Form(""),
+    tags: str = Form(""),
+    summary: str = Form(""),
     scope: str = Form("both"),
+    author: str = Form(""),
+    status: str = Form("active"),
     body: str = Form(""),
 ):
-    """Create a new knowledge document."""
+    """Create a new knowledge document and record its first revision."""
     if not title.strip() or not body.strip():
         return HTMLResponse(
             '<div class="text-red-600 text-sm">제목과 본문은 필수입니다</div>',
             status_code=400,
         )
-    cats = [c.strip() for c in categories.split(",") if c.strip()] or None
     slug = _slugify(title.strip())
     with SessionLocal() as session:
         existing = session.query(KnowledgeDocument).filter_by(slug=slug).first()
         if existing:
             slug = f"{slug}-{existing.id + 1}"
         doc = KnowledgeDocument(
-            title=title.strip(), slug=slug, categories=cats,
-            scope=scope, body=body.strip(),
+            title=title.strip(),
+            slug=slug,
+            categories=_parse_csv(categories),
+            tags=_parse_csv(tags),
+            summary=summary.strip() or None,
+            scope=scope,
+            author=author.strip() or None,
+            status=status.strip() or "active",
+            version=1,
+            body=body.strip(),
         )
         session.add(doc)
+        session.flush()
+        _snapshot_revision(session, doc, change_note="created", edited_by=author.strip() or "web")
         session.commit()
     _reset_kb_cache()
     return HTMLResponse(
@@ -421,11 +468,15 @@ async def knowledge_update(
     doc_id: int,
     title: str = Form(""),
     categories: str = Form(""),
+    tags: str = Form(""),
+    summary: str = Form(""),
     scope: str = Form("both"),
+    author: str = Form(""),
+    status: str = Form("active"),
     body: str = Form(""),
+    change_note: str = Form(""),
 ):
-    """Update an existing knowledge document."""
-    cats = [c.strip() for c in categories.split(",") if c.strip()] or None
+    """Update a knowledge document, snapshotting the prior state into history."""
     with SessionLocal() as session:
         doc = session.get(KnowledgeDocument, doc_id)
         if not doc:
@@ -433,22 +484,36 @@ async def knowledge_update(
                 '<div class="text-red-600 text-sm">문서를 찾을 수 없습니다</div>',
                 status_code=404,
             )
+        # Snapshot the current (pre-edit) state, then bump version and apply.
+        _snapshot_revision(
+            session,
+            doc,
+            change_note=change_note.strip() or "edited",
+            edited_by=author.strip() or "web",
+        )
         if title.strip():
             doc.title = title.strip()
-        doc.categories = cats
+        doc.categories = _parse_csv(categories)
+        doc.tags = _parse_csv(tags)
+        doc.summary = summary.strip() or None
         doc.scope = scope
+        if author.strip():
+            doc.author = author.strip()
+        doc.status = status.strip() or "active"
+        doc.version = (doc.version or 1) + 1
         if body.strip():
             doc.body = body.strip()
         session.commit()
+        new_version = doc.version
     _reset_kb_cache()
     return HTMLResponse(
-        '<div class="text-green-600 text-sm font-medium">저장 완료</div>'
+        f'<div class="text-green-600 text-sm font-medium">저장 완료 (v{new_version})</div>'
     )
 
 
 @router.delete("/knowledge/{doc_id}")
 async def knowledge_delete(doc_id: int):
-    """Delete a knowledge document."""
+    """Delete a knowledge document (keeps its revision history)."""
     with SessionLocal() as session:
         doc = session.get(KnowledgeDocument, doc_id)
         if not doc:
@@ -456,12 +521,47 @@ async def knowledge_delete(doc_id: int):
                 '<div class="text-red-600 text-sm">문서를 찾을 수 없습니다</div>',
                 status_code=404,
             )
+        _snapshot_revision(session, doc, change_note="deleted", edited_by="web")
         session.delete(doc)
         session.commit()
     _reset_kb_cache()
     return HTMLResponse(
         '<div class="text-orange-600 text-sm font-medium">삭제 완료</div>'
         '<script>setTimeout(()=>location.href="/knowledge",500)</script>'
+    )
+
+
+@router.get("/knowledge/{doc_id}/history")
+async def knowledge_history(request: Request, doc_id: int):
+    """Show the revision history for a knowledge document."""
+    with SessionLocal() as session:
+        doc = session.get(KnowledgeDocument, doc_id)
+        revs = (
+            session.query(KnowledgeDocumentRevision)
+            .filter_by(document_id=doc_id)
+            .order_by(KnowledgeDocumentRevision.created_at.desc())
+            .all()
+        )
+        current = (
+            {"id": doc.id, "title": doc.title, "version": doc.version or 1}
+            if doc
+            else {"id": doc_id, "title": "(삭제됨)", "version": "-"}
+        )
+        items = [
+            {
+                "version": r.version,
+                "title": r.title,
+                "change_note": r.change_note or "",
+                "edited_by": r.edited_by or "",
+                "status": r.status,
+                "summary": r.summary or "",
+                "body": r.body,
+                "created_at": r.created_at,
+            }
+            for r in revs
+        ]
+    return templates.TemplateResponse(
+        request, "knowledge_history.html", {"doc": current, "revisions": items}
     )
 
 
@@ -697,8 +797,7 @@ def _settings_context() -> dict:
         today_llm = 0
         week_llm = 0
 
-    _llm_check_names = {"gemini_api_key", "Claude CLI 로그인 상태", "anthropic_api_key"}
-    _llm_checks = [c for c in report.checks if c.name in _llm_check_names]
+    _llm_checks = [c for c in report.checks if c.name == "Gemini (Vertex)"]
     llm_ok = all(c.status != "FAIL" for c in _llm_checks) if _llm_checks else True
 
     return {

@@ -193,6 +193,7 @@ def _draft_followup(session, original: Message, conv: Conversation, llm: LLMClie
             "language": original.language or "ko",
         },
         schema=FollowupDraft,
+        tier="pro",
     )
 
     status = "approved" if settings.FOLLOWUP_AUTO_SEND else "pending_approval"

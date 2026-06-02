@@ -13,18 +13,11 @@ logger = logging.getLogger(__name__)
 CHARS_PER_TOKEN = 4
 
 PRICING: dict[str, dict[str, float]] = {
-    "claude-sonnet-4-6": {"input": 3.00, "output": 15.00},
-    "claude-sonnet-4-5-20250514": {"input": 3.00, "output": 15.00},
-    "claude-haiku-4-5-20251001": {"input": 0.80, "output": 4.00},
-    "claude-opus-4-6": {"input": 15.00, "output": 75.00},
-    "claude-3-5-sonnet-20241022": {"input": 3.00, "output": 15.00},
-    "claude-3-haiku-20240307": {"input": 0.25, "output": 1.25},
     "gemini-2.5-flash": {"input": 0.30, "output": 2.50},
     "gemini-2.5-pro": {"input": 1.25, "output": 10.00},
     "gemini-2.0-flash": {"input": 0.10, "output": 0.40},
     "gemini-1.5-flash": {"input": 0.075, "output": 0.30},
     "gemini-1.5-pro": {"input": 1.25, "output": 5.00},
-    "llama3.1:8b": {"input": 0.0, "output": 0.0},
 }
 
 
@@ -47,7 +40,7 @@ def estimate_tokens(text: str) -> int:
 
 def estimate_cost(model: str, input_tokens: int, output_tokens: int) -> float:
     """Return estimated cost in USD."""
-    rates = PRICING.get(model, {"input": 3.00, "output": 15.00})
+    rates = PRICING.get(model, {"input": 0.30, "output": 2.50})
     return (input_tokens * rates["input"] + output_tokens * rates["output"]) / 1_000_000
 
 

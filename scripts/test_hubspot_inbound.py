@@ -15,7 +15,7 @@ HubSpot 실연결 end-to-end 테스트.
     .venv\\Scripts\\python.exe scripts\\test_hubspot_inbound.py --keep
     .venv\\Scripts\\python.exe scripts\\test_hubspot_inbound.py --message "월 사용료가 얼마인가요?"
 
-스크립트는 LLM(claude_cli 또는 anthropic_api)을 실제로 호출하므로 LLM 설정이
+스크립트는 LLM(Gemini on Vertex AI)을 실제로 호출하므로 LLM 설정이
 완료되어 있어야 합니다. 호출이 부담스러우면 `--dry-llm` 으로 모킹할 수 있습니다.
 """
 

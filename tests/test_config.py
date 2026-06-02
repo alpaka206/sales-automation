@@ -12,7 +12,7 @@ def test_defaults() -> None:
     # `.env` 로딩과 OS 환경 변수 영향을 차단하여 모델 기본값만 검증.
     with patch.dict(os.environ, {}, clear=True):
         s = Settings(_env_file=None)
-    assert s.LLM_PROVIDER == "gemini_api"
+    assert s.LLM_PROVIDER == "gemini_vertex"
     assert s.GEMINI_MODEL == "gemini-2.5-flash"
     assert s.EMAIL_PROVIDER == "hubspot"
     assert s.WHATSAPP_ENABLED is False
@@ -40,5 +40,5 @@ def test_int_from_env() -> None:
 
 def test_literal_validation() -> None:
     s = Settings()
-    assert s.LLM_PROVIDER in ("gemini_api", "anthropic_api", "claude_cli")
+    assert s.LLM_PROVIDER == "gemini_vertex"
     assert s.APPROVAL_CHANNEL in ("slack", "teams", "none")

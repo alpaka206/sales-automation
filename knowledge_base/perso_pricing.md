@@ -1,6 +1,13 @@
 ---
 title: PERSO AI 요금제
 categories: [pricing_question, purchase_inquiry]
+tags: [요금제, 가격, 플랜, Stripe, 엔터프라이즈, 셀프서브, 크레딧]
+summary: 셀프서브(Starter/Creator/PRO)·Business·Enterprise 요금 구조와 가격 문의 시 미팅 제안으로 연결하는 응대 어조.
+scope: both
+author: PERSO Sales
+status: active
+created_at: 2026-06-02
+updated_at: 2026-06-02
 ---
 
 # 요금제 (운영자·LLM 참고용 — 메일에 그대로 명시 금지)

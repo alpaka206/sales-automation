@@ -15,7 +15,7 @@ from ..db.models import Contact, Conversation, Message
 from ..db.session import SessionLocal
 from ..integrations.hubspot import HubSpotClient, HubSpotNotConfigured
 from ..llm.client import LLMClient
-from ..llm.knowledge import load_relevant_docs
+from ..llm.knowledge import select_relevant_docs
 from ._notify import notify_approval
 
 logger = logging.getLogger(__name__)
@@ -181,6 +181,8 @@ class InboundAgent:
         except Exception:
             logger.warning("Approval notification failed for message %d.", message_id, exc_info=True)
 
+        self._mirror_to_sheet(contact_info, classification, score, channel, draft, message_id)
+
         logger.info(
             "Inbound processed: contact=%s category=%s score=%d msg_id=%d",
             contact_info.get("email", "unknown"),
@@ -195,6 +197,40 @@ class InboundAgent:
             "score": score,
             "channel": channel,
         }
+
+    def _mirror_to_sheet(
+        self,
+        contact_info: dict,
+        classification: ClassifyResult,
+        score: int,
+        channel: str,
+        draft: DraftResult,
+        message_id: int,
+    ) -> None:
+        """Best-effort append of this inquiry to the Google Sheet mirror."""
+        try:
+            from ..integrations.google_sheets import record_inbound
+
+            excerpt = (contact_info.get("last_message") or "").strip().replace("\n", " ")
+            record_inbound(
+                {
+                    "processed_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                    "message_id": message_id,
+                    "status": "pending_approval",
+                    "category": classification.category,
+                    "score": score,
+                    "channel": channel,
+                    "full_name": contact_info.get("full_name", ""),
+                    "email": contact_info.get("email", ""),
+                    "company": contact_info.get("company", ""),
+                    "country": contact_info.get("country", ""),
+                    "subject": draft.subject,
+                    "summary": classification.reasoning,
+                    "inbound_excerpt": excerpt[:300],
+                }
+            )
+        except Exception:
+            logger.debug("Sheet mirror skipped/failed for msg %d.", message_id, exc_info=True)
 
     def _existing_pending_draft_id(self, contact_info: dict) -> int | None:
         """Return the id of an outbound pending_approval Message in the same thread.
@@ -449,6 +485,12 @@ class InboundAgent:
         classification: ClassifyResult,
         score: int,
     ) -> DraftResult:
+        knowledge_docs = select_relevant_docs(
+            inquiry=contact_info["last_message"],
+            category=classification.category,
+            scope="inbound",
+            llm=self.llm,
+        )
         return self.llm.complete(
             "inbound/draft_reply",
             {
@@ -460,9 +502,10 @@ class InboundAgent:
                 "language": "ko" if contact_info.get("country", "").lower() in _TARGET_COUNTRIES else "en",
                 "last_message": contact_info["last_message"],
                 "enrichment_context": _build_enrichment_context(contact_info),
-                "knowledge_docs": load_relevant_docs(classification.category),
+                "knowledge_docs": knowledge_docs,
             },
             schema=DraftResult,
+            tier="pro",
         )
 
     def _persist(

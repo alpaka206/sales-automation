@@ -35,11 +35,21 @@ services:
         sync: false
       - key: HUBSPOT_PRIVATE_APP_TOKEN
         sync: false
-      - key: ANTHROPIC_API_KEY
+      - key: GOOGLE_CREDENTIALS_JSON   # Vertex AI service-account JSON (full contents)
+        sync: false
+      - key: GOOGLE_CLOUD_PROJECT      # optional; falls back to JSON project_id
         sync: false
       - key: SLACK_BOT_TOKEN
         sync: false
       - key: SLACK_APPROVAL_CHANNEL_ID
+        sync: false
+
+      # ----- Optional: Google Sheets mirror (separate service account) -----
+      - key: GSHEETS_ENABLED           # set "true" to enable, then fill the two below
+        sync: false
+      - key: GOOGLE_SHEETS_CREDENTIALS_JSON
+        sync: false
+      - key: GOOGLE_SHEETS_SPREADSHEET_ID
         sync: false
 
       # ----- Auto-generated on first deploy -----
@@ -47,10 +57,14 @@ services:
         generateValue: true
 
       # ----- Sensible defaults (override in dashboard if needed) -----
-      - key: LLM_PROVIDER
-        value: anthropic_api          # Render can't run the `claude` CLI; use the API in cloud
-      - key: ANTHROPIC_MODEL
-        value: claude-sonnet-4-6
+      - key: GEMINI_MODEL
+        value: gemini-2.5-flash
+      - key: GEMINI_MODEL_PRO
+        value: gemini-2.5-pro
+      - key: GOOGLE_CLOUD_LOCATION
+        value: global
+      - key: GOOGLE_SHEETS_INBOUND_TAB
+        value: Inbound
       - key: EMAIL_PROVIDER
         value: hubspot
       - key: APPROVAL_CHANNEL

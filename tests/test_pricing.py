@@ -21,20 +21,15 @@ def test_estimate_tokens_basic() -> None:
 
 
 def test_estimate_cost_known_model() -> None:
-    cost = estimate_cost("claude-sonnet-4-6", input_tokens=1000, output_tokens=500)
-    expected = (1000 * 3.00 + 500 * 15.00) / 1_000_000
+    cost = estimate_cost("gemini-2.5-flash", input_tokens=1000, output_tokens=500)
+    expected = (1000 * 0.30 + 500 * 2.50) / 1_000_000
     assert abs(cost - expected) < 1e-9
 
 
 def test_estimate_cost_unknown_model_uses_default() -> None:
     cost = estimate_cost("some-future-model", input_tokens=1000, output_tokens=500)
-    expected = (1000 * 3.00 + 500 * 15.00) / 1_000_000
+    expected = (1000 * 0.30 + 500 * 2.50) / 1_000_000
     assert abs(cost - expected) < 1e-9
-
-
-def test_estimate_cost_free_model() -> None:
-    cost = estimate_cost("llama3.1:8b", input_tokens=10000, output_tokens=5000)
-    assert cost == 0.0
 
 
 def test_format_cost_small() -> None:
@@ -52,9 +47,9 @@ def test_format_cost_zero() -> None:
 def test_log_and_get_usage(db_session_factory) -> None:
     with patch("src.db.session.SessionLocal", db_session_factory):
         now = datetime.now(timezone.utc)
-        result = LLMResult(text="hi", input_tokens=100, output_tokens=50, model="claude-sonnet-4-6")
-        log_usage(result, "anthropic_api")
-        log_usage(result, "anthropic_api")
+        result = LLMResult(text="hi", input_tokens=100, output_tokens=50, model="gemini-2.5-flash")
+        log_usage(result, "gemini_vertex")
+        log_usage(result, "gemini_vertex")
 
         usage = get_usage_since(now - timedelta(seconds=10))
 
@@ -62,7 +57,7 @@ def test_log_and_get_usage(db_session_factory) -> None:
     assert usage["total_input"] == 200
     assert usage["total_output"] == 100
     assert usage["total_cost"] > 0
-    assert "claude-sonnet-4-6" in usage["models"]
+    assert "gemini-2.5-flash" in usage["models"]
 
 
 def test_get_usage_since_filters_old(db_session_factory) -> None:

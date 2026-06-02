@@ -1,6 +1,13 @@
 ---
 title: 2026년 요금제 (예시)
 categories: [pricing_question, purchase_inquiry]
+tags: [예시, 요금제, 템플릿]
+summary: 요금제 문서 작성 예시 — 실제 값으로 교체용. archived 상태라 LLM 라우터엔 노출되지 않음.
+scope: both
+author: system
+status: archived
+created_at: 2026-06-02
+updated_at: 2026-06-02
 ---
 
 # 요금제 개요 (예시 — 실제 값으로 교체하세요)

@@ -69,7 +69,7 @@ A row may be linked to a `contacts` row once a reply comes back (foreign key `co
 | status | str | "pending_approval" / "approved" / "sent" / "rejected" / "bounced" / "received" |
 | score_snapshot | int nullable | |
 | prompt_variant | str nullable | for A/B |
-| draft_provider | str | "claude_cli" / "anthropic_api" |
+| draft_provider | str | "gemini_vertex" |
 | approved_by | str nullable | slack user id of approver |
 | approved_at | datetime nullable | |
 | sent_at | datetime nullable | |

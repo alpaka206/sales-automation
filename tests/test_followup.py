@@ -77,7 +77,7 @@ def test_followup_after_7_days(db_setup) -> None:
         mock_settings.FOLLOWUP_AFTER_DAYS = 7
         mock_settings.FOLLOWUP_AUTO_SEND = False
         mock_settings.MAX_FOLLOWUPS_PER_PROSPECT = 2
-        mock_settings.LLM_PROVIDER = "claude_cli"
+        mock_settings.LLM_PROVIDER = "gemini_vertex"
         mock_settings.EMAIL_PROVIDER = "hubspot"
         stats = run(llm=_mock_llm())
 
@@ -108,7 +108,7 @@ def test_no_followup_before_7_days(db_setup) -> None:
         mock_settings.FOLLOWUP_AFTER_DAYS = 7
         mock_settings.FOLLOWUP_AUTO_SEND = False
         mock_settings.MAX_FOLLOWUPS_PER_PROSPECT = 2
-        mock_settings.LLM_PROVIDER = "claude_cli"
+        mock_settings.LLM_PROVIDER = "gemini_vertex"
         mock_settings.EMAIL_PROVIDER = "hubspot"
         stats = run(llm=_mock_llm())
 
@@ -140,7 +140,7 @@ def test_followup_auto_send_true(db_setup) -> None:
         mock_settings.FOLLOWUP_AFTER_DAYS = 7
         mock_settings.FOLLOWUP_AUTO_SEND = True
         mock_settings.MAX_FOLLOWUPS_PER_PROSPECT = 2
-        mock_settings.LLM_PROVIDER = "claude_cli"
+        mock_settings.LLM_PROVIDER = "gemini_vertex"
         mock_settings.EMAIL_PROVIDER = "hubspot"
         stats = run(llm=_mock_llm())
 
@@ -172,7 +172,7 @@ def test_max_followups_reached(db_setup) -> None:
         mock_settings.FOLLOWUP_AFTER_DAYS = 7
         mock_settings.FOLLOWUP_AUTO_SEND = False
         mock_settings.MAX_FOLLOWUPS_PER_PROSPECT = 2
-        mock_settings.LLM_PROVIDER = "claude_cli"
+        mock_settings.LLM_PROVIDER = "gemini_vertex"
         mock_settings.EMAIL_PROVIDER = "hubspot"
         stats = run(llm=_mock_llm())
 
@@ -200,7 +200,7 @@ def test_replied_message_no_followup(db_setup) -> None:
         mock_settings.FOLLOWUP_AFTER_DAYS = 7
         mock_settings.FOLLOWUP_AUTO_SEND = False
         mock_settings.MAX_FOLLOWUPS_PER_PROSPECT = 2
-        mock_settings.LLM_PROVIDER = "claude_cli"
+        mock_settings.LLM_PROVIDER = "gemini_vertex"
         mock_settings.EMAIL_PROVIDER = "hubspot"
         stats = run(llm=_mock_llm())
 

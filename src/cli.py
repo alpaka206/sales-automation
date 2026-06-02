@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import os
-import subprocess
 import sys
 
 
@@ -20,24 +19,8 @@ def doctor() -> int:
     db_exists = os.path.exists("data/app.db")
     results.append(("PASS" if db_exists else "FAIL", "Database", "data/app.db found" if db_exists else "run: python scripts/init_db.py"))
 
-    if settings.LLM_PROVIDER == "gemini_api":
-        has_key = bool(settings.GEMINI_API_KEY)
-        results.append(("PASS" if has_key else "FAIL", "Gemini API Key", "set" if has_key else "GEMINI_API_KEY empty"))
-    elif settings.LLM_PROVIDER == "claude_cli":
-        try:
-            res = subprocess.run(
-                [settings.CLAUDE_CLI_PATH, "--version"],
-                capture_output=True, text=True, timeout=3,
-            )
-            ok = res.returncode == 0
-            results.append(("PASS" if ok else "FAIL", "Claude CLI", res.stdout.strip() if ok else f"exit code {res.returncode}"))
-        except FileNotFoundError:
-            results.append(("FAIL", "Claude CLI", f"'{settings.CLAUDE_CLI_PATH}' not found on PATH"))
-        except subprocess.TimeoutExpired:
-            results.append(("WARN", "Claude CLI", "timed out"))
-    elif settings.LLM_PROVIDER == "anthropic_api":
-        has_key = bool(settings.ANTHROPIC_API_KEY)
-        results.append(("PASS" if has_key else "FAIL", "Anthropic API Key", "set" if has_key else "ANTHROPIC_API_KEY empty"))
+    has_creds = bool(settings.GOOGLE_CREDENTIALS_JSON.strip())
+    results.append(("PASS" if has_creds else "FAIL", "Gemini (Vertex)", "credentials set" if has_creds else "GOOGLE_CREDENTIALS_JSON empty"))
 
     hs_token = bool(settings.HUBSPOT_PRIVATE_APP_TOKEN)
     results.append(("PASS" if hs_token else "WARN", "HubSpot Token", "set" if hs_token else "not set (optional)"))
@@ -89,7 +72,6 @@ def healthcheck() -> int:
 
 
 _INIT_FIELDS = [
-    ("GEMINI_API_KEY", "Gemini API 키 (https://aistudio.google.com/apikey 무료 발급)", ""),
     ("HUBSPOT_PRIVATE_APP_TOKEN", "HubSpot Private App 토큰 (HubSpot > 설정 > 통합 > 비공개 앱)", ""),
     ("EMAIL_PROVIDER", "이메일 발송 방식 (hubspot 또는 smtp)", "hubspot"),
     ("SMTP_USERNAME", "SMTP 사용자명 (Gmail 주소, smtp 선택 시)", ""),
@@ -129,14 +111,12 @@ def init(force: bool = False) -> int:
     values["INTERNAL_API_TOKEN"] = secrets.token_urlsafe(32)
     print(f"\n  INTERNAL_API_TOKEN 자동 생성: {values['INTERNAL_API_TOKEN'][:8]}...")
 
-    # LLM provider reminder (Gemini is the default)
+    # LLM provider reminder (Gemini on Vertex AI)
     print()
-    if values.get("GEMINI_API_KEY"):
-        print("  [OK] Gemini API 키 입력됨 (LLM_PROVIDER=gemini_api).")
-    else:
-        print("  [!!] Gemini API 키가 비어 있습니다.")
-        print("       https://aistudio.google.com/apikey 에서 무료 키를 발급받아 .env 의 GEMINI_API_KEY 에 넣으세요.")
-        print("       (또는 .env 에서 LLM_PROVIDER 를 anthropic_api / claude_cli 로 변경 가능)")
+    print("  [안내] LLM 은 Gemini (Vertex AI) 를 사용합니다. .env 에 직접 입력하세요:")
+    print("       - GOOGLE_CREDENTIALS_JSON : 서비스 계정 JSON 전체 내용")
+    print("       - GOOGLE_CLOUD_PROJECT    : (비우면 JSON 의 project_id 사용)")
+    print("       - GOOGLE_CLOUD_LOCATION   : 예) global, us-central1")
 
     # Write .env from example template
     if os.path.exists(example_path):

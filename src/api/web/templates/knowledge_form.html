@@ -18,13 +18,29 @@
              class="w-full border rounded px-3 py-2 text-sm" required>
     </div>
 
+    <div class="mb-4">
+      <label class="block text-xs text-gray-500 mb-1">요약 (LLM 라우터가 이 한 줄로 관련성 판단)</label>
+      <input name="summary" value="{{ doc.summary if doc else '' }}"
+             placeholder="이 문서가 어떤 문의에 도움이 되는지 한 줄로"
+             class="w-full border rounded px-3 py-2 text-sm">
+    </div>
+
     <div class="grid grid-cols-2 gap-4 mb-4">
       <div>
         <label class="block text-xs text-gray-500 mb-1">분류 (쉼표 구분)</label>
         <input name="categories" value="{{ doc.categories if doc else '' }}"
-               placeholder="pricing, faq, policy, all"
+               placeholder="pricing_question, purchase_inquiry, all"
                class="w-full border rounded px-3 py-2 text-sm">
       </div>
+      <div>
+        <label class="block text-xs text-gray-500 mb-1">태그 (쉼표 구분)</label>
+        <input name="tags" value="{{ doc.tags if doc else '' }}"
+               placeholder="요금제, 환불, 엔터프라이즈"
+               class="w-full border rounded px-3 py-2 text-sm">
+      </div>
+    </div>
+
+    <div class="grid grid-cols-3 gap-4 mb-4">
       <div>
         <label class="block text-xs text-gray-500 mb-1">범위</label>
         <select name="scope" class="w-full border rounded px-3 py-2 text-sm">
@@ -33,7 +49,29 @@
           <option value="outbound" {% if doc and doc.scope == 'outbound' %}selected{% endif %}>outbound</option>
         </select>
       </div>
+      <div>
+        <label class="block text-xs text-gray-500 mb-1">상태 (active만 LLM 노출)</label>
+        <select name="status" class="w-full border rounded px-3 py-2 text-sm">
+          <option value="active" {% if not doc or doc.status == 'active' %}selected{% endif %}>active</option>
+          <option value="draft" {% if doc and doc.status == 'draft' %}selected{% endif %}>draft</option>
+          <option value="archived" {% if doc and doc.status == 'archived' %}selected{% endif %}>archived</option>
+        </select>
+      </div>
+      <div>
+        <label class="block text-xs text-gray-500 mb-1">작성자</label>
+        <input name="author" value="{{ doc.author if doc else '' }}"
+               class="w-full border rounded px-3 py-2 text-sm">
+      </div>
     </div>
+
+    {% if mode == 'edit' %}
+    <div class="mb-4">
+      <label class="block text-xs text-gray-500 mb-1">변경 메모 (이력에 기록, 선택)</label>
+      <input name="change_note" value=""
+             placeholder="예: 환불 기간 7일→14일로 수정"
+             class="w-full border rounded px-3 py-2 text-sm">
+    </div>
+    {% endif %}
 
     <div class="mb-4">
       <label class="block text-xs text-gray-500 mb-1">본문 (Markdown)</label>
@@ -56,6 +94,8 @@
               class="bg-red-100 text-red-700 px-4 py-2 rounded text-sm hover:bg-red-200">
         삭제
       </button>
+      <a href="/knowledge/{{ doc.id }}/history"
+         class="ml-auto text-sm text-gray-500 hover:underline">수정 이력 (v{{ doc.version }})</a>
       {% else %}
       <button type="button"
               hx-post="/knowledge" hx-include="#kb-form"
