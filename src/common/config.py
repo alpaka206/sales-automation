@@ -70,10 +70,9 @@ class Settings(BaseSettings):
     WHATSAPP_TEMPLATE_NAME: str = "sales_reply_intro"
 
     # ----- Approval -----
-    APPROVAL_CHANNEL: Literal["slack", "teams", "none"] = "slack"
+    APPROVAL_CHANNEL: Literal["slack", "none"] = "slack"
     SLACK_BOT_TOKEN: str = ""
     SLACK_APPROVAL_CHANNEL_ID: str = ""
-    TEAMS_WEBHOOK_URL: str = ""
 
     # ----- Reports -----
     REPORT_SLACK_CHANNEL_ID: str = ""

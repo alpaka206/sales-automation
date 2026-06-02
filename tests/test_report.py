@@ -105,9 +105,8 @@ def test_report_llm_fallback(seeded_db) -> None:
 
 
 @patch("src.agents.report.smtplib")
-@patch("src.agents.report.teams")
 @patch("src.agents.report.slack")
-def test_distribute_calls_all_channels(mock_slack, mock_teams, mock_smtp, seeded_db) -> None:
+def test_distribute_calls_all_channels(mock_slack, mock_smtp, seeded_db) -> None:
     session = seeded_db
 
     llm = MagicMock()
@@ -120,7 +119,6 @@ def test_distribute_calls_all_channels(mock_slack, mock_teams, mock_smtp, seeded
     ):
         mock_settings.REPORT_SLACK_CHANNEL_ID = "C-REPORT"
         mock_settings.SLACK_APPROVAL_CHANNEL_ID = ""
-        mock_settings.TEAMS_WEBHOOK_URL = "https://teams.example.com"
         mock_settings.REPORT_EMAIL_TO = "boss@co.com,team@co.com"
         mock_settings.SMTP_USERNAME = "user"
         mock_settings.SMTP_PASSWORD = "pass"
@@ -135,17 +133,14 @@ def test_distribute_calls_all_channels(mock_slack, mock_teams, mock_smtp, seeded
     mock_slack.post_message.assert_called_once()
     assert mock_slack.post_message.call_args[0][0] == "C-REPORT"
 
-    mock_teams.post_message.assert_called_once()
     mock_smtp.SMTP.assert_called_once()
 
 
-@patch("src.agents.report.teams")
 @patch("src.agents.report.slack")
-def test_distribute_survives_all_failures(mock_slack, mock_teams, seeded_db) -> None:
+def test_distribute_survives_all_failures(mock_slack, seeded_db) -> None:
     session = seeded_db
 
     mock_slack.post_message.side_effect = RuntimeError("slack down")
-    mock_teams.post_message.side_effect = RuntimeError("teams down")
 
     llm = MagicMock()
     llm.complete.return_value = "Narrative."
@@ -157,7 +152,6 @@ def test_distribute_survives_all_failures(mock_slack, mock_teams, seeded_db) -> 
     ):
         mock_settings.REPORT_SLACK_CHANNEL_ID = "C-REPORT"
         mock_settings.SLACK_APPROVAL_CHANNEL_ID = ""
-        mock_settings.TEAMS_WEBHOOK_URL = "https://teams.example.com"
         mock_settings.REPORT_EMAIL_TO = ""
 
         agent = ReportAgent(llm=llm)

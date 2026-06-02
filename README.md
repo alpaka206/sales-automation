@@ -10,7 +10,7 @@
 2. **아웃바운드 에이전트** — YouTube, LinkedIn, CSV 파일에서 잠재 고객을 찾아 첫 이메일 초안을 작성합니다.
 3. **리포트 에이전트** — 위 두 에이전트의 활동을 일간/주간 리포트로 정리합니다.
 
-AI가 작성한 이메일은 **Slack 또는 Teams**에서 승인/수정/거절할 수 있으며, 승인 전에는 절대 발송되지 않습니다.
+AI가 작성한 이메일은 **Slack** 또는 웹 UI에서 승인/수정/거절할 수 있으며, 승인 전에는 절대 발송되지 않습니다.
 
 ### 사전 준비물
 
@@ -19,8 +19,7 @@ AI가 작성한 이메일은 **Slack 또는 Teams**에서 승인/수정/거절�
 - **자격 증명** (.env 파일에 입력):
   - `INTERNAL_API_TOKEN` — 내부 API 보안 토큰 (필수, 랜덤 문자열)
   - `HUBSPOT_PRIVATE_APP_TOKEN` — HubSpot 인바운드/아웃바운드용
-  - `SLACK_BOT_TOKEN` + `SLACK_APPROVAL_CHANNEL_ID` — 승인 알림용
-  - 또는 `TEAMS_WEBHOOK_URL` — Teams 사용 시
+  - `SLACK_BOT_TOKEN` + `SLACK_APPROVAL_CHANNEL_ID` — 승인 알림용 (선택; 없으면 웹 UI로 승인)
   - `GOOGLE_CREDENTIALS_JSON` — LLM 호출용 Vertex AI 서비스 계정 JSON (필수)
   - 기타 선택: Gmail App Password, YouTube API Key
 
@@ -42,7 +41,7 @@ AI가 작성한 이메일은 **Slack 또는 Teams**에서 승인/수정/거절�
 ### 일상 사용
 
 - **서버 실행**: `scripts\run.bat` 더블클릭
-- **메시지 승인**: Slack/Teams에 카드가 도착하면 Approve/Reject 클릭
+- **메시지 승인**: Slack에 카드가 도착하면(또는 웹 UI에서) Approve/Reject 클릭
 - **리포트 확인**: 매일 18시, 매주 토요일 09시에 Slack/이메일로 발송
 - **아웃바운드 리드 추가**: 웹 UI 의 `/outbound/new` 에서 자연어 입력 또는 CSV 업로드
 - **문제 해결**: [docs/문제해결.md](docs/문제해결.md) 참고

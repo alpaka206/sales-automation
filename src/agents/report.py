@@ -13,9 +13,8 @@ from sqlalchemy import func
 from ..common.config import settings
 from ..db.models import Message, Prospect
 from ..db.session import SessionLocal
-from ..integrations import slack, teams
+from ..integrations import slack
 from ..integrations.slack import SlackNotConfigured
-from ..integrations.teams import TeamsNotConfigured
 from ..llm.client import LLMClient
 from ..llm.pricing import format_cost, get_usage_since
 
@@ -175,7 +174,7 @@ class ReportAgent:
         logger.info("Report saved to %s", path)
 
     def _distribute(self, report: str, kind: str) -> None:
-        """Best-effort delivery to Slack, Teams, and email."""
+        """Best-effort delivery to Slack and email."""
         channel = settings.REPORT_SLACK_CHANNEL_ID or settings.SLACK_APPROVAL_CHANNEL_ID
         if channel:
             try:
@@ -184,13 +183,6 @@ class ReportAgent:
                 logger.debug("Slack not configured for report distribution.")
             except Exception:
                 logger.warning("Failed to post report to Slack.", exc_info=True)
-
-        try:
-            teams.post_message(report)
-        except TeamsNotConfigured:
-            logger.debug("Teams not configured for report distribution.")
-        except Exception:
-            logger.warning("Failed to post report to Teams.", exc_info=True)
 
         if settings.REPORT_EMAIL_TO:
             self._email_report(report, kind)

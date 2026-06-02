@@ -19,7 +19,7 @@ HubSpot (CRM, source of truth)
 Background workers in FastAPI (inbound_poller, send_worker, reply_check)
        │           ▲
        ▼           │ approve/reject
-   FastAPI BE  ───►  Slack / Teams
+   FastAPI BE  ───►  Slack / Web UI
        │
        ├──► LLM layer (Gemini on Vertex AI)
        │
@@ -92,7 +92,7 @@ Stub interface only for now. Real WhatsApp Cloud API integration is parked behin
 No outbound message goes out without approval **in the first iteration of the product**. Approval flow:
 
 1. Agent drafts message → stores in `messages` table with status `pending_approval`.
-2. BE posts a Slack/Teams card with Approve / Edit / Reject buttons (and exposes the same actions in the web UI at `/messages/{id}`).
+2. BE posts a Slack card with the draft and a link to approve (and exposes Approve / Edit / Reject in the web UI at `/messages/{id}`).
 3. Approval webhook hits FastAPI `/approve/{message_id}` → status flips to `approved` → sender goes.
 
 `AUTO_SEND_THRESHOLD` env var lets us later auto-send when LLM confidence is above a threshold (default: never, `1.01`).

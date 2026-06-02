@@ -77,7 +77,7 @@ _INIT_FIELDS = [
     ("SMTP_USERNAME", "SMTP 사용자명 (Gmail 주소, smtp 선택 시)", ""),
     ("SMTP_PASSWORD", "SMTP 비밀번호 (Gmail 앱 비밀번호)", ""),
     ("SMTP_FROM_EMAIL", "발신 이메일 주소", ""),
-    ("APPROVAL_CHANNEL", "승인 채널 (slack / teams / none)", "slack"),
+    ("APPROVAL_CHANNEL", "승인 채널 (slack / none)", "slack"),
     ("SLACK_BOT_TOKEN", "Slack Bot 토큰 (xoxb-..., Slack 선택 시)", ""),
     ("SLACK_APPROVAL_CHANNEL_ID", "Slack 승인 채널 ID (C01234...)", ""),
     ("YOUTUBE_API_KEY", "YouTube Data API 키 (YouTube 소스 사용 시)", ""),
