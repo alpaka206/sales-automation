@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 import re
-from datetime import datetime, timedelta, timezone
 
 from pydantic import BaseModel
 
@@ -117,14 +116,27 @@ class OutboundAgent:
         return "drafted"
 
     def _is_dup(self, session, norm_email: str) -> bool:
-        cutoff = datetime.now(timezone.utc) - timedelta(days=settings.OUTBOUND_COOLDOWN_DAYS)
-        existing = (
-            session.query(Prospect)
-            .filter_by(normalized_email=norm_email)
-            .filter(Prospect.last_contacted_at > cutoff)
+        """True if this email already exists anywhere we track.
+
+        Existence-based: any prior prospect (regardless of status or last contact
+        date) OR any known contact counts as a duplicate, so an email already in
+        the DB is never re-targeted. This is what "skip emails already in the DB"
+        requires; the 90-day cooldown re-engage was intentionally dropped.
+        """
+        in_prospects = (
+            session.query(Prospect.id)
+            .filter(Prospect.normalized_email == norm_email)
             .first()
+            is not None
         )
-        return existing is not None
+        if in_prospects:
+            return True
+        return (
+            session.query(Contact.id)
+            .filter(Contact.normalized_email == norm_email)
+            .first()
+            is not None
+        )
 
     def _load_icp_criteria(self, source: str) -> str:
         """Load per-source ICP criteria from DB, empty string if none or table missing."""
@@ -189,6 +201,31 @@ class OutboundAgent:
         icp_score: int | None = None,
         icp_rationale: str | None = None,
     ) -> Prospect:
+        # Upsert-safe: normalized_email is UNIQUE. With existence-based dedup we
+        # normally don't reach here for a known email, but guard against
+        # same-batch duplicate candidates / races so a re-run never crashes on
+        # the UNIQUE constraint.
+        existing = (
+            session.query(Prospect).filter_by(normalized_email=norm_email).first()
+            if norm_email
+            else None
+        )
+        if existing:
+            existing.source = candidate.source
+            existing.source_ref = candidate.source_ref
+            existing.email = candidate.email
+            existing.full_name = candidate.name
+            existing.company = candidate.company
+            existing.domain = candidate.domain
+            existing.country = candidate.country
+            if icp_score is not None:
+                existing.icp_score = icp_score
+            if icp_rationale is not None:
+                existing.icp_rationale = icp_rationale
+            existing.status = status.value
+            session.flush()
+            return existing
+
         prospect = Prospect(
             source=candidate.source,
             source_ref=candidate.source_ref,

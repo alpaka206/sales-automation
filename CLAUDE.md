@@ -99,7 +99,7 @@ No outbound message goes out without approval **in the first iteration of the pr
 
 ## Dedup rule (Outbound)
 
-A prospect is identified by **normalized email** (lowercased, plus-stripped) as primary key. Secondary: `(domain, full_name)`. The outbound agent must check `prospects` table before drafting; if a row exists with `last_contacted_at` within `OUTBOUND_COOLDOWN_DAYS` (default 90), skip.
+A prospect is identified by **normalized email** (lowercased, plus-stripped). The outbound agent dedups **before drafting** (in `OutboundAgent._is_dup`): if the normalized email already exists in **`prospects` (any status) OR `contacts`**, the candidate is skipped (recorded as a `skipped_dup` audit row). This is **existence-based** — an email already in the DB is never re-targeted, regardless of `last_contacted_at` (the old 90-day cooldown re-engage was removed). `_persist_prospect` is upsert-safe so re-runs never hit the UNIQUE constraint. `OUTBOUND_COOLDOWN_DAYS` is retained in config but no longer gates dedup.
 
 ## Reply detection
 
