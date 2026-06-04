@@ -10,9 +10,9 @@ import re
 from datetime import datetime
 
 import httpx
-from pydantic import BaseModel
 
 from ..common.config import settings
+from .hubspot_models import ContactDTO, DealDTO, EngagementDTO, TicketDTO
 
 logger = logging.getLogger(__name__)
 
@@ -99,43 +99,6 @@ class HubSpotNotConfigured(RuntimeError):
 
 class HubSpotAPIError(RuntimeError):
     pass
-
-
-class ContactDTO(BaseModel):
-    id: str
-    email: str | None = None
-    firstname: str | None = None
-    lastname: str | None = None
-    company: str | None = None
-    phone: str | None = None
-    country: str | None = None
-    lifecyclestage: str | None = None
-
-
-class EngagementDTO(BaseModel):
-    id: str
-    type: str
-    subject: str | None = None
-    body: str | None = None
-    timestamp: datetime | None = None
-
-
-class DealDTO(BaseModel):
-    id: str
-    name: str | None = None
-    stage: str | None = None
-    amount: str | None = None
-
-
-class TicketDTO(BaseModel):
-    id: str
-    subject: str | None = None
-    content: str | None = None
-    pipeline_stage: str | None = None
-    priority: str | None = None
-    source_type: str | None = None
-    created_at: datetime | None = None
-    primary_contact_id: str | None = None
 
 
 def _require_token() -> str:
