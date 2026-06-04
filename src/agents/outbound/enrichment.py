@@ -11,14 +11,6 @@ from .sources.base import ProspectCandidate
 logger = logging.getLogger(__name__)
 
 
-class _EnrichmentResult:
-    """Container for enrichment extraction."""
-
-    def __init__(self, summary: str, contact_emails: list[str] | None = None):
-        self.summary = summary
-        self.contact_emails = contact_emails or []
-
-
 def enrich_prospect(candidate: ProspectCandidate, llm: LLMClient) -> dict:
     """Fetch company homepage and summarize it via AI browser. Returns empty dict on failure."""
     if not candidate.domain:

@@ -7,7 +7,7 @@ import html as _html
 import logging
 import random
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 
 import httpx
 
@@ -215,7 +215,7 @@ class HubSpotClient:
     ) -> str:
         """Log an email engagement on the contact's timeline. Returns engagement ID."""
         http = await self._http()
-        ts = int((sent_at or datetime.utcnow()).timestamp() * 1000)
+        ts = int((sent_at or datetime.now(timezone.utc)).timestamp() * 1000)
         payload = {
             "properties": {
                 "hs_timestamp": str(ts),

@@ -11,6 +11,7 @@ missing SDK surfaces as a clear runtime error rather than an import crash.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 
@@ -21,13 +22,23 @@ logger = logging.getLogger(__name__)
 
 _SCOPES = ["https://www.googleapis.com/auth/cloud-platform"]
 
+# Cache built Vertex clients so we don't re-parse credentials and rebuild the
+# genai.Client (a real auth/HTTP-session setup) on every single LLM call. Keyed
+# on (project, location, creds-hash). Only successful builds are cached.
+_client_cache: dict[tuple[str, str, str], object] = {}
+
 
 class GeminiVertexError(RuntimeError):
     """Raised when Vertex credentials/config are missing or invalid."""
 
 
+def _reset_client_cache() -> None:
+    """Clear the cached Vertex client(s). Used by tests that inject a fake SDK."""
+    _client_cache.clear()
+
+
 def _build_client():
-    """Create a google-genai Vertex client from the service-account JSON env var."""
+    """Create (or reuse a cached) google-genai Vertex client from the service-account JSON."""
     try:
         from google import genai
         from google.oauth2 import service_account
@@ -46,19 +57,27 @@ def _build_client():
     except json.JSONDecodeError as e:
         raise GeminiVertexError(f"GOOGLE_CREDENTIALS_JSON is not valid JSON: {e}") from e
 
-    credentials = service_account.Credentials.from_service_account_info(info, scopes=_SCOPES)
     project = settings.GOOGLE_CLOUD_PROJECT or info.get("project_id")
     if not project:
         raise GeminiVertexError(
             "No GCP project — set GOOGLE_CLOUD_PROJECT or include project_id in the JSON."
         )
+    location = settings.GOOGLE_CLOUD_LOCATION
 
-    return genai.Client(
+    cache_key = (project, location, hashlib.sha256(raw.encode()).hexdigest())
+    cached = _client_cache.get(cache_key)
+    if cached is not None:
+        return cached
+
+    credentials = service_account.Credentials.from_service_account_info(info, scopes=_SCOPES)
+    client = genai.Client(
         vertexai=True,
         project=project,
-        location=settings.GOOGLE_CLOUD_LOCATION,
+        location=location,
         credentials=credentials,
     )
+    _client_cache[cache_key] = client
+    return client
 
 
 def call_gemini(

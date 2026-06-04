@@ -98,8 +98,14 @@ def build_footer(language: str, to_email: str, country_code: str | None = None) 
 
 
 def append_footer(body: str, to_email: str, language: str = "ko", country_code: str | None = None) -> str:
-    """Append compliance footer with unsubscribe link to the message body."""
+    """Append compliance footer with unsubscribe link to the message body.
+
+    Idempotent: if the body already ends with this exact footer (e.g. a send
+    that's being retried after a transient failure), it is not appended twice.
+    """
     footer = build_footer(language, to_email, country_code)
+    if body.rstrip().endswith(footer.strip()):
+        return body
     return body + footer
 
 

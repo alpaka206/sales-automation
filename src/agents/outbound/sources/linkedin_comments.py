@@ -12,8 +12,6 @@ from .base import ProspectCandidate, SourceFilters, apply_common_filters
 
 logger = logging.getLogger(__name__)
 
-LAST_VERIFIED_AT = "2026-05-15"
-
 
 class LinkedInCommentsSource:
     """Discovers prospects from commenters on LinkedIn posts."""

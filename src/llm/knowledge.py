@@ -93,8 +93,15 @@ def _load_from_db(category: str, scope: str) -> str:
 
 
 def reset_cache() -> None:
-    """Invalidate the query cache. Used by tests and by the BE on reload."""
+    """Invalidate cached knowledge-doc queries AND the company-rules prompt cache.
+
+    Used by tests and by the web UI after a knowledge edit, so an operator who
+    also edited company_rules/*.md doesn't keep seeing stale rules until restart.
+    """
     _load_from_db.cache_clear()
+    from .prompts import get_company_rules
+
+    get_company_rules.cache_clear()
 
 
 def load_relevant_docs(category: str, scope: str = "inbound") -> str:

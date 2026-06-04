@@ -8,7 +8,11 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from src.llm.providers.gemini_vertex import GeminiVertexError, call_gemini
+from src.llm.providers.gemini_vertex import (
+    GeminiVertexError,
+    _reset_client_cache,
+    call_gemini,
+)
 
 _CREDS_JSON = '{"type": "service_account", "project_id": "json-proj"}'
 
@@ -55,7 +59,11 @@ def fake_google():
         "google.oauth2": oauth2_mod,
         "google.oauth2.service_account": sa_mod,
     })
+    # The provider caches built clients; clear it so each test gets a fresh build
+    # against this test's freshly-injected fake SDK.
+    _reset_client_cache()
     yield genai_mod
+    _reset_client_cache()
     for k, v in saved.items():
         if v is None:
             sys.modules.pop(k, None)

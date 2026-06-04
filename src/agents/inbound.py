@@ -26,7 +26,11 @@ from .inbound_scoring import (  # noqa: F401 — re-exported for callers/tests
 
 logger = logging.getLogger(__name__)
 
+# In-memory short-window dedup for webhook retries. Bounded so a long-running
+# process can't leak memory; the authoritative dedup is DB-backed
+# (_existing_pending_draft_id), so evicting old keys here is harmless.
 _processed: set[str] = set()
+_PROCESSED_CAP = 10_000
 
 
 class ClassifyResult(BaseModel):
@@ -66,6 +70,8 @@ class InboundAgent:
         if dedup_key in _processed:
             logger.info("Skipping duplicate event: %s", dedup_key)
             return None
+        if len(_processed) >= _PROCESSED_CAP:
+            _processed.clear()
         _processed.add(dedup_key)
 
         contact_info = self._fetch_contact(event)

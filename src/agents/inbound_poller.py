@@ -42,12 +42,15 @@ def _save_poll_marker(poll_at: datetime) -> None:
 
 def _is_already_processed(contact_id: str) -> bool:
     """Check if this contact was already handled by webhook or prior poll."""
+    return contact_id in _processed_contact_ids()
+
+
+def _processed_contact_ids() -> set[str]:
+    """All already-processed contact ids. Loaded once per poll so the poll loop is
+    O(candidates) instead of O(candidates × all-ever-processed)."""
     with SessionLocal() as session:
         rows = session.query(Event).filter(Event.kind == PROCESSED_KIND).all()
-        for r in rows:
-            if r.payload and r.payload.get("contact_id") == contact_id:
-                return True
-    return False
+    return {r.payload["contact_id"] for r in rows if r.payload and r.payload.get("contact_id")}
 
 
 def _mark_processed(contact_id: str) -> None:
@@ -77,12 +80,14 @@ def _save_ticket_poll_marker(poll_at: datetime) -> None:
 
 
 def _is_ticket_already_processed(ticket_id: str) -> bool:
+    return ticket_id in _processed_ticket_ids()
+
+
+def _processed_ticket_ids() -> set[str]:
+    """All already-processed ticket ids. Loaded once per ticket poll."""
     with SessionLocal() as session:
         rows = session.query(Event).filter(Event.kind == TICKET_PROCESSED_KIND).all()
-        for r in rows:
-            if r.payload and r.payload.get("ticket_id") == ticket_id:
-                return True
-    return False
+    return {r.payload["ticket_id"] for r in rows if r.payload and r.payload.get("ticket_id")}
 
 
 def _mark_ticket_processed(ticket_id: str) -> None:
@@ -110,9 +115,10 @@ def poll_tickets_once() -> int:
         logger.exception("HubSpot ticket search failed during poll")
         return 0
 
+    seen_tickets = _processed_ticket_ids()
     processed = 0
     for ticket in tickets:
-        if _is_ticket_already_processed(ticket.id):
+        if ticket.id in seen_tickets:
             logger.debug("Skipping already-processed ticket %s", ticket.id)
             continue
 
@@ -168,9 +174,10 @@ def poll_once() -> int:
         logger.exception("HubSpot search failed during poll")
         return 0
 
+    seen_contacts = _processed_contact_ids()
     processed = 0
     for contact in contacts:
-        if _is_already_processed(contact.id):
+        if contact.id in seen_contacts:
             logger.debug("Skipping already-processed contact %s", contact.id)
             continue
 

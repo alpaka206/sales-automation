@@ -13,9 +13,6 @@ from ...llm.client import LLMClient
 
 logger = logging.getLogger(__name__)
 
-KNOWN_SOURCES = ("youtube", "linkedin_comments", "linkedin_csv",
-                 "google_search", "job_board", "manual_csv")
-
 
 class IntentRouterResult(BaseModel):
     """LLM output for intent routing."""

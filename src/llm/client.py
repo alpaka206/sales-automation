@@ -9,7 +9,6 @@ Usage:
 
 from __future__ import annotations
 
-import json
 import logging
 import re
 import time
@@ -172,28 +171,17 @@ class LLMClient:
 
     def _log_event(self, prompt: str, result: str) -> None:
         try:
-            session = SessionLocal()
-            session.add(
-                Event(
-                    kind="llm_call",
-                    payload={
-                        "provider": self.provider,
-                        "prompt_len": len(prompt),
-                        "result_len": len(result),
-                    },
+            with SessionLocal() as session:
+                session.add(
+                    Event(
+                        kind="llm_call",
+                        payload={
+                            "provider": self.provider,
+                            "prompt_len": len(prompt),
+                            "result_len": len(result),
+                        },
+                    )
                 )
-            )
-            session.commit()
-            session.close()
+                session.commit()
         except Exception:
             logger.debug("Failed to log LLM event to DB, continuing.", exc_info=True)
-
-    # convenience for tests
-    @staticmethod
-    def _safe_json_loads(text: str) -> dict | list:
-        text = text.strip()
-        if text.startswith("```"):
-            text = text.strip("`")
-            if text.lower().startswith("json"):
-                text = text[4:].lstrip()
-        return json.loads(text)
