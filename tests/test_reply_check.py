@@ -8,6 +8,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from src.agents.reply_check import FollowupDraft, run
+from src.common.config import settings
 from src.db.models import Contact, Conversation, Message, Prospect
 
 
@@ -52,7 +53,9 @@ def _mock_llm():
     return llm
 
 
-def test_no_followup_within_window(db_setup) -> None:
+def test_no_followup_within_window(db_setup, monkeypatch) -> None:
+    # Pin the window so the test is deterministic regardless of .env.
+    monkeypatch.setattr(settings, "FOLLOWUP_AFTER_DAYS", 4)
     session, Session, contact, conv, prospect = db_setup
 
     msg = Message(
@@ -73,7 +76,9 @@ def test_no_followup_within_window(db_setup) -> None:
     assert stats["followup_drafted"] == 0
 
 
-def test_followup_drafted_past_window(db_setup) -> None:
+def test_followup_drafted_past_window(db_setup, monkeypatch) -> None:
+    # Pin the window (5-day-old message must be past it) regardless of .env.
+    monkeypatch.setattr(settings, "FOLLOWUP_AFTER_DAYS", 4)
     session, Session, contact, conv, prospect = db_setup
 
     msg = Message(

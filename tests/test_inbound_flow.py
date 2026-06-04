@@ -140,7 +140,13 @@ def test_inbound_channel_selection() -> None:
     assert agent._pick_channel({}) == "none"
 
 
-def test_inbound_enriched_from_hubspot(db_session) -> None:
+def test_inbound_enriched_from_hubspot(db_session, monkeypatch) -> None:
+    # This test asserts on the *classify* call (call_args_list[0]) and on
+    # email/deal enrichment — not domain enrichment. Disable domain enrichment so
+    # it doesn't fire an earlier LLM call (which would shift call_args_list).
+    from src.common.config import settings
+
+    monkeypatch.setattr(settings, "INBOUND_DOMAIN_ENRICHMENT_ENABLED", False)
     llm = _mock_llm()
 
     mock_hs = MagicMock()
