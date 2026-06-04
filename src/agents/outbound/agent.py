@@ -42,6 +42,13 @@ def _normalize_email(email: str) -> str:
     return f"{local}@{domain}"
 
 
+# Per-candidate outcome labels — also the keys of the run() stats dict, so they
+# live in one place to avoid init/return drift.
+_DUP = "skipped_dup"
+_LOWSCORE = "skipped_lowscore"
+_DRAFTED = "drafted"
+
+
 class OutboundAgent:
     """Discovers prospects from a source, dedup, score, draft, persist."""
 
@@ -60,16 +67,13 @@ class OutboundAgent:
         candidates = src.discover(filters)
         logger.info("Outbound: %d candidates from source '%s'", len(candidates), source)
 
-        stats = {"total": len(candidates), "skipped_dup": 0, "skipped_lowscore": 0, "drafted": 0}
+        stats = {"total": len(candidates), _DUP: 0, _LOWSCORE: 0, _DRAFTED: 0}
 
-        session = SessionLocal()
-        try:
+        with SessionLocal() as session:
             for c in candidates:
                 result = self._process_candidate(session, c)
                 stats[result] = stats.get(result, 0) + 1
             session.commit()
-        finally:
-            session.close()
 
         logger.info("Outbound complete: %s", stats)
         return stats
@@ -82,7 +86,7 @@ class OutboundAgent:
             # with the existing prospect (normalized_email is UNIQUE). Set to None —
             # the source_ref + full_name + company still identify the candidate.
             self._persist_prospect(session, candidate, None, status=ProspectStatus.SKIPPED_DUP)
-            return "skipped_dup"
+            return _DUP
 
         icp = self._score_icp(candidate)
 
@@ -91,7 +95,7 @@ class OutboundAgent:
                 session, candidate, norm_email,
                 status=ProspectStatus.SKIPPED_LOWSCORE, icp_score=icp.score, icp_rationale=icp.rationale,
             )
-            return "skipped_lowscore"
+            return _LOWSCORE
 
         enrichment = enrich_prospect(candidate, self.llm)
         draft = self._draft_email(candidate, icp, enrichment)
@@ -100,20 +104,23 @@ class OutboundAgent:
             status=ProspectStatus.ANALYZED, icp_score=icp.score, icp_rationale=icp.rationale,
         )
         msg = self._persist_message(session, prospect, candidate, draft, icp.score)
+        self._notify_draft(msg.id, draft, icp.score)
+        return _DRAFTED
 
+    @staticmethod
+    def _notify_draft(message_id: int, draft: DraftEmailResult, score: int) -> None:
+        """Best-effort approval notification for a drafted outbound message."""
         try:
             notify_approval(
-                message_id=msg.id,
+                message_id=message_id,
                 subject=draft.subject,
                 body_snippet=draft.body,
-                score=icp.score,
+                score=score,
                 category="outbound_opening",
                 channel="email",
             )
         except Exception:
-            logger.warning("Approval notification failed for message %d.", msg.id, exc_info=True)
-
-        return "drafted"
+            logger.warning("Approval notification failed for message %d.", message_id, exc_info=True)
 
     def _is_dup(self, session, norm_email: str) -> bool:
         """True if this email already exists anywhere we track.

@@ -113,9 +113,8 @@ def mark_sent(message_id: int) -> None:
     """Mark a message as sent after successful delivery, and move the linked HubSpot
     ticket forward in its pipeline (if configured).
     """
-    session = SessionLocal()
     ticket_id: str | None = None
-    try:
+    with SessionLocal() as session:
         msg = session.get(Message, message_id)
         if msg:
             msg.status = "sent"
@@ -123,25 +122,8 @@ def mark_sent(message_id: int) -> None:
             conv = session.get(Conversation, msg.conversation_id) if msg.conversation_id else None
             ticket_id = conv.hubspot_ticket_id if conv else None
             session.commit()
-    finally:
-        session.close()
 
-    target_stage = settings.HUBSPOT_TICKET_STAGE_AFTER_SEND
-    if ticket_id and target_stage:
-        try:
-            from ..integrations.hubspot import HubSpotClient, HubSpotNotConfigured
+    if ticket_id:
+        from ..integrations.hubspot import move_ticket_stage_after_send
 
-            hs = HubSpotClient()
-            hs.update_ticket_stage_sync(ticket_id, target_stage)
-            logger.info(
-                "Moved ticket %s to pipeline stage %s after sending message %d.",
-                ticket_id, target_stage, message_id,
-            )
-        except HubSpotNotConfigured:
-            logger.warning("HubSpot not configured; cannot move ticket stage.")
-        except Exception:
-            logger.exception(
-                "Failed to move ticket %s to stage %s after send (message %d). "
-                "Send succeeded; only HubSpot stage update failed.",
-                ticket_id, target_stage, message_id,
-            )
+        move_ticket_stage_after_send(ticket_id)

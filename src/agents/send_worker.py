@@ -71,6 +71,37 @@ def get_daily_count() -> int:
 SEND_TRANSIENT_MAX_RETRIES = 3
 
 
+async def _post_send_bookkeeping(session, msg, conv, message_id: int) -> None:
+    """Best-effort HubSpot side effects after a successful send. Never raises —
+    the email already went out, so failures here must not reverse it."""
+    from ..integrations.hubspot import HubSpotClient, move_ticket_stage_after_send
+
+    ticket_id = conv.hubspot_ticket_id if conv else None
+    if ticket_id:
+        await asyncio.to_thread(move_ticket_stage_after_send, ticket_id)
+
+    hubspot_contact_id = None
+    if conv and conv.contact_id:
+        contact = session.get(Contact, conv.contact_id)
+        hubspot_contact_id = contact.hubspot_contact_id if contact else None
+    if hubspot_contact_id:
+        try:
+            await HubSpotClient().create_email_engagement(
+                contact_id=hubspot_contact_id,
+                subject=msg.subject or "",
+                body=msg.body or "",
+            )
+            logger.info(
+                "Logged HubSpot engagement for contact %s (msg %d).",
+                hubspot_contact_id, message_id,
+            )
+        except Exception:
+            logger.exception(
+                "HubSpot engagement log failed (contact=%s, msg=%d). Send succeeded.",
+                hubspot_contact_id, message_id,
+            )
+
+
 async def _send_one(message_id: int) -> bool:
     """Send a single message that this worker has already claimed (status == _WORKER_ID).
 
@@ -106,51 +137,7 @@ async def _send_one(message_id: int) -> bool:
                 session.commit()
                 _record_send()
 
-                # Post-send HubSpot bookkeeping. Wrapped — the email already went out,
-                # so HubSpot failures must not reverse the send or fail the worker.
-                hubspot_contact_id: str | None = None
-                ticket_id: str | None = conv.hubspot_ticket_id if conv else None
-                if conv and conv.contact_id:
-                    _c = session.get(Contact, conv.contact_id)
-                    hubspot_contact_id = _c.hubspot_contact_id if _c else None
-
-                target_stage = settings.HUBSPOT_TICKET_STAGE_AFTER_SEND
-                if ticket_id and target_stage:
-                    try:
-                        from ..integrations.hubspot import HubSpotClient
-                        hs = HubSpotClient()
-                        await asyncio.to_thread(
-                            hs.update_ticket_stage_sync, ticket_id, target_stage
-                        )
-                        logger.info(
-                            "Moved ticket %s → stage %s after sending message %d.",
-                            ticket_id, target_stage, message_id,
-                        )
-                    except Exception:
-                        logger.exception(
-                            "Ticket stage update failed (ticket=%s, msg=%d). Send succeeded.",
-                            ticket_id, message_id,
-                        )
-
-                if hubspot_contact_id:
-                    try:
-                        from ..integrations.hubspot import HubSpotClient
-                        hs = HubSpotClient()
-                        await hs.create_email_engagement(
-                            contact_id=hubspot_contact_id,
-                            subject=msg.subject or "",
-                            body=msg.body or "",
-                        )
-                        logger.info(
-                            "Logged HubSpot engagement for contact %s (msg %d).",
-                            hubspot_contact_id, message_id,
-                        )
-                    except Exception:
-                        logger.exception(
-                            "HubSpot engagement log failed (contact=%s, msg=%d). Send succeeded.",
-                            hubspot_contact_id, message_id,
-                        )
-
+                await _post_send_bookkeeping(session, msg, conv, message_id)
                 logger.info("Worker sent message %d.", message_id)
                 return True
             except SMTPPermanentError as exc:

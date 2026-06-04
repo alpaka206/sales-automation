@@ -549,3 +549,22 @@ class HubSpotClient:
             r = client.post(f"{BASE_URL}/crm/v3/objects/tickets/search", json=body)
         r.raise_for_status()
         return [self._ticket_from_api(item) for item in r.json().get("results", [])]
+
+
+def move_ticket_stage_after_send(ticket_id: str | None) -> None:
+    """Best-effort: move a ticket to settings.HUBSPOT_TICKET_STAGE_AFTER_SEND.
+
+    Shared by the approval endpoint (mark_sent) and the send worker so the
+    post-send ticket-stage transition lives in one place. Never raises — the
+    email already went out, so a HubSpot failure here must not reverse the send.
+    """
+    target = settings.HUBSPOT_TICKET_STAGE_AFTER_SEND
+    if not ticket_id or not target:
+        return
+    try:
+        HubSpotClient().update_ticket_stage_sync(ticket_id, target)
+        logger.info("Moved ticket %s → stage %s after send.", ticket_id, target)
+    except HubSpotNotConfigured:
+        logger.warning("HubSpot not configured; cannot move ticket %s stage.", ticket_id)
+    except Exception:
+        logger.exception("Ticket stage update failed (ticket=%s). Send succeeded.", ticket_id)
