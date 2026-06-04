@@ -127,6 +127,28 @@ def _is_localhost(request: Request) -> bool:
     return ip in _LOCALHOST_HOSTS
 
 
+def _check_web_ui_basic_auth(request: Request) -> bool:
+    """Validate HTTP Basic Auth against WEB_UI_USERNAME / WEB_UI_PASSWORD.
+
+    Returns False when no password is configured (so callers fall back to the
+    localhost-only gate).
+    """
+    pw = settings.WEB_UI_PASSWORD
+    if not pw:
+        return False
+    header = request.headers.get("authorization", "")
+    if not header.startswith("Basic "):
+        return False
+    try:
+        decoded = base64.b64decode(header[6:].strip()).decode("utf-8")
+    except Exception:
+        return False
+    user, sep, passwd = decoded.partition(":")
+    if not sep:
+        return False
+    return hmac.compare_digest(user, settings.WEB_UI_USERNAME) and hmac.compare_digest(passwd, pw)
+
+
 @app.middleware("http")
 async def auth_middleware(request: Request, call_next):
     if request.url.path in _API_SKIP_PATHS:
@@ -138,10 +160,23 @@ async def auth_middleware(request: Request, call_next):
     if request.url.path == "/webhook/hubspot/inbound":
         return await call_next(request)
 
-    # Web UI routes are allowed from localhost without API token
+    # Web UI routes are allowed from localhost without API token.
     if _is_web_ui_path(request.url.path):
+        # /unsubscribe is recipient-facing and carries its own signed token — public.
+        if request.url.path.startswith("/unsubscribe"):
+            return await call_next(request)
         if _is_localhost(request):
             return await call_next(request)
+        # Public deploy: gate the (otherwise unauthenticated) web UI behind HTTP
+        # Basic Auth when WEB_UI_PASSWORD is set; otherwise stay localhost-only.
+        if settings.WEB_UI_PASSWORD:
+            if _check_web_ui_basic_auth(request):
+                return await call_next(request)
+            return JSONResponse(
+                status_code=401,
+                content={"detail": "web UI login required"},
+                headers={"WWW-Authenticate": 'Basic realm="Sales Automation"'},
+            )
         return JSONResponse(status_code=403, content={"detail": "web UI is localhost-only"})
 
     if not settings.INTERNAL_API_TOKEN:

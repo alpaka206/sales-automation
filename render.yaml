@@ -47,6 +47,8 @@ services:
         sync: false
       - key: PUBLIC_BASE_URL           # set to the Render URL after 1st deploy (Slack approval links)
         sync: false
+      - key: WEB_UI_PASSWORD           # REQUIRED for public deploy — web UI login (HTTP Basic Auth)
+        sync: false
 
       # ----- Optional: Google Sheets mirror (separate service account) -----
       - key: GSHEETS_ENABLED           # set "true" to enable, then fill the two below
@@ -73,6 +75,8 @@ services:
         value: hubspot
       - key: APPROVAL_CHANNEL
         value: slack
+      - key: WEB_UI_USERNAME
+        value: admin
       # Free tier: no always-on workers. Approve sends inline; webhooks drive inbound.
       - key: SEND_WORKER_ENABLED
         value: "false"

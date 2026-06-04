@@ -164,6 +164,14 @@ class Settings(BaseSettings):
     # External base URL used in unsubscribe / approval links (overrides APP_HOST:APP_PORT in prod).
     PUBLIC_BASE_URL: str = ""
 
+    # ----- Web UI access (public deploy) -----
+    # The web UI (approve/edit/reject, knowledge editing) has no per-action auth and
+    # is localhost-only by default. To use it on a public deployment (e.g. Render),
+    # set WEB_UI_PASSWORD — the UI then requires HTTP Basic Auth from any origin.
+    # Leave empty to keep the localhost-only gate (local development).
+    WEB_UI_USERNAME: str = "admin"
+    WEB_UI_PASSWORD: str = ""
+
     @property
     def LLM_PROVIDER(self) -> str:
         """The only LLM provider. Used as the draft/usage label. Not env-configurable."""
