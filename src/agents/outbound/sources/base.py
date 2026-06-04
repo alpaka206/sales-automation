@@ -32,6 +32,18 @@ class ProspectCandidate(BaseModel):
     extra: dict = {}
 
 
+def parse_filters(filters: dict | None) -> tuple[dict, "SourceFilters"]:
+    """Normalize a raw filters dict and build a SourceFilters from its known keys.
+
+    Returns ``(raw_filters, source_filters)`` — sources read source-specific keys
+    (query/path/...) off the raw dict and pass ``source_filters`` to
+    ``apply_common_filters``.
+    """
+    filters = filters or {}
+    known = {k: v for k, v in filters.items() if k in SourceFilters.model_fields}
+    return filters, SourceFilters(**known)
+
+
 def _email_domain(email: str | None) -> str | None:
     """Extract lowercased domain from an email address."""
     if not email or "@" not in email:

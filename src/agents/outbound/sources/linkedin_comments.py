@@ -8,7 +8,7 @@ import re
 from ....common.config import settings
 from ....integrations.ai_browser import create_browser_context
 from ....integrations.linkedin_profile import MAX_EMAIL_LOOKUPS_PER_RUN, fetch_profile_email
-from .base import ProspectCandidate, SourceFilters, apply_common_filters
+from .base import ProspectCandidate, parse_filters, apply_common_filters
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +33,7 @@ class LinkedInCommentsSource:
             raise ValueError("linkedin_comments source requires 'post_urls' filter.")
 
         max_per_post = filters.get("max_per_post", 50)
-        sf = SourceFilters(**{k: v for k, v in filters.items() if k in SourceFilters.model_fields})
+        _, sf = parse_filters(filters)
 
         if settings.LINKEDIN_API_TOKEN:
             prospects = self._discover_api(post_urls, max_per_post)

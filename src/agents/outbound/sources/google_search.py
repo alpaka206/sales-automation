@@ -9,7 +9,7 @@ from ....integrations.email_discovery import (
     extract_emails_from_html,
 )
 from ....integrations.google_search import GoogleSearchClient, GoogleSearchNotConfigured
-from .base import ProspectCandidate, SourceFilters, apply_common_filters
+from .base import ProspectCandidate, parse_filters, apply_common_filters
 
 logger = logging.getLogger(__name__)
 
@@ -73,7 +73,7 @@ class GoogleSearchSource:
             return []
 
         filters = filters or {}
-        sf = SourceFilters(**{k: v for k, v in filters.items() if k in SourceFilters.model_fields})
+        _, sf = parse_filters(filters)
 
         query = filters.get("query", "") or sf.extra.get("query", "")
         if not query:

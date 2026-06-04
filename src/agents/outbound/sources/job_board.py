@@ -8,7 +8,7 @@ from urllib.parse import urlparse
 
 from ....integrations.email_discovery import extract_emails_from_html
 from ....integrations.google_search import GoogleSearchClient, GoogleSearchNotConfigured
-from .base import ProspectCandidate, SourceFilters, apply_common_filters
+from .base import ProspectCandidate, parse_filters, apply_common_filters
 from .google_search import _fetch_page_text
 
 logger = logging.getLogger(__name__)
@@ -81,7 +81,7 @@ class JobBoardSource:
             return []
 
         filters = filters or {}
-        sf = SourceFilters(**{k: v for k, v in filters.items() if k in SourceFilters.model_fields})
+        _, sf = parse_filters(filters)
 
         keyword = filters.get("keyword", "") or filters.get("query", "")
         if not keyword:

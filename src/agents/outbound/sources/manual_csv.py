@@ -6,7 +6,7 @@ import csv
 import logging
 from pathlib import Path
 
-from .base import ProspectCandidate, SourceFilters, apply_common_filters
+from .base import ProspectCandidate, parse_filters, apply_common_filters
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +23,7 @@ class ManualCSVSource:
         if not path.exists():
             raise FileNotFoundError(f"CSV file not found: {path}")
 
-        sf = SourceFilters(**{k: v for k, v in filters.items() if k in SourceFilters.model_fields})
+        _, sf = parse_filters(filters)
 
         prospects: list[ProspectCandidate] = []
         with open(path, encoding="utf-8-sig", newline="") as f:
