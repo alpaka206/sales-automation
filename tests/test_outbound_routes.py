@@ -25,7 +25,7 @@ def ob_db():
     )
     Base.metadata.create_all(engine)
     factory = sessionmaker(bind=engine, autoflush=False, autocommit=False)
-    with patch("src.api.web.routes.SessionLocal", factory), \
+    with patch("src.api.web.routes.outbound.SessionLocal", factory), \
          patch("src.agents.approval.SessionLocal", factory):
         yield factory
 

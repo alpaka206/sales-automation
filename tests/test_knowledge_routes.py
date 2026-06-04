@@ -26,8 +26,8 @@ def kb_db():
     )
     Base.metadata.create_all(engine)
     factory = sessionmaker(bind=engine, autoflush=False, autocommit=False)
-    with patch("src.api.web.routes.SessionLocal", factory), \
-         patch("src.api.web.routes._reset_kb_cache", lambda: None):
+    with patch("src.api.web.routes.knowledge.SessionLocal", factory), \
+         patch("src.api.web.routes.knowledge._reset_kb_cache", lambda: None):
         yield factory
 
 

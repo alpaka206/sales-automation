@@ -44,34 +44,34 @@ def _client() -> TestClient:
     return TestClient(app)
 
 
-@patch("src.api.web.routes._settings_context", _mock_settings_context)
+@patch("src.api.web.routes.settings_page._settings_context", _mock_settings_context)
 def test_settings_page_returns_200():
     r = _client().get("/settings")
     assert r.status_code == 200
     assert "설정" in r.text
 
 
-@patch("src.api.web.routes._settings_context", _mock_settings_context)
+@patch("src.api.web.routes.settings_page._settings_context", _mock_settings_context)
 def test_settings_shows_env_vars_masked():
     r = _client().get("/settings")
     assert "HUBSPOT_PRIVATE_APP_TOKEN" in r.text
     assert "pat-***" in r.text
 
 
-@patch("src.api.web.routes._settings_context", _mock_settings_context)
+@patch("src.api.web.routes.settings_page._settings_context", _mock_settings_context)
 def test_settings_shows_healthcheck():
     r = _client().get("/settings")
     assert "Database" in r.text
     assert "PASS" in r.text
 
 
-@patch("src.api.web.routes._settings_context", _mock_settings_context)
+@patch("src.api.web.routes.settings_page._settings_context", _mock_settings_context)
 def test_settings_shows_gemini_warning():
     r = _client().get("/settings")
     assert "GOOGLE_CREDENTIALS_JSON" in r.text
 
 
-@patch("src.api.web.routes._settings_context", _mock_settings_context)
+@patch("src.api.web.routes.settings_page._settings_context", _mock_settings_context)
 def test_settings_shows_llm_usage():
     r = _client().get("/settings")
     assert "12" in r.text

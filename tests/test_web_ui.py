@@ -77,58 +77,58 @@ def _mock_detail_context(message_id):
     return {}
 
 
-@patch("src.api.web.routes._dashboard_context", _mock_dashboard_context)
+@patch("src.api.web.routes.dashboard._dashboard_context", _mock_dashboard_context)
 def test_dashboard_returns_200():
     r = _client().get("/")
     assert r.status_code == 200
     assert "Sales Automation" in r.text
 
 
-@patch("src.api.web.routes._dashboard_context", _mock_dashboard_context)
+@patch("src.api.web.routes.dashboard._dashboard_context", _mock_dashboard_context)
 def test_dashboard_has_tailwind_cdn():
     r = _client().get("/")
     assert "cdn.tailwindcss.com" in r.text
 
 
-@patch("src.api.web.routes._dashboard_context", _mock_dashboard_context)
+@patch("src.api.web.routes.dashboard._dashboard_context", _mock_dashboard_context)
 def test_dashboard_has_htmx():
     r = _client().get("/")
     assert "htmx.org" in r.text
 
 
-@patch("src.api.web.routes._dashboard_context", _mock_dashboard_context)
+@patch("src.api.web.routes.dashboard._dashboard_context", _mock_dashboard_context)
 def test_dashboard_has_korean_font():
     r = _client().get("/")
     assert "Noto+Sans+KR" in r.text or "Noto Sans KR" in r.text
 
 
-@patch("src.api.web.routes._dashboard_context", _mock_dashboard_context)
+@patch("src.api.web.routes.dashboard._dashboard_context", _mock_dashboard_context)
 def test_dashboard_shows_status_counts():
     r = _client().get("/")
     assert "pending_approval" in r.text
     assert "sent" in r.text
 
 
-@patch("src.api.web.routes._dashboard_context", _mock_dashboard_context)
+@patch("src.api.web.routes.dashboard._dashboard_context", _mock_dashboard_context)
 def test_dashboard_shows_recent_messages():
     r = _client().get("/")
     assert "가격 문의" in r.text
 
 
-@patch("src.api.web.routes._dashboard_context", _mock_dashboard_context)
+@patch("src.api.web.routes.dashboard._dashboard_context", _mock_dashboard_context)
 def test_dashboard_shows_category_counts():
     r = _client().get("/")
     assert "pricing_question" in r.text
 
 
-@patch("src.api.web.routes._dashboard_context", _mock_dashboard_context)
+@patch("src.api.web.routes.dashboard._dashboard_context", _mock_dashboard_context)
 def test_dashboard_shows_daily_send_stats():
     r = _client().get("/")
     assert "오늘 발송" in r.text
     assert "100" in r.text
 
 
-@patch("src.api.web.routes._dashboard_context", _mock_dashboard_context)
+@patch("src.api.web.routes.dashboard._dashboard_context", _mock_dashboard_context)
 def test_dashboard_message_link():
     r = _client().get("/")
     assert "/messages/1" in r.text
@@ -137,7 +137,7 @@ def test_dashboard_message_link():
 # ---------- Message detail ----------
 
 
-@patch("src.api.web.routes._message_detail_context", _mock_detail_context)
+@patch("src.api.web.routes.messages._message_detail_context", _mock_detail_context)
 def test_message_detail_returns_200():
     r = _client().get("/messages/1")
     assert r.status_code == 200
@@ -146,13 +146,13 @@ def test_message_detail_returns_200():
     assert "Test User" in r.text
 
 
-@patch("src.api.web.routes._message_detail_context", _mock_detail_context)
+@patch("src.api.web.routes.messages._message_detail_context", _mock_detail_context)
 def test_message_detail_404_for_missing():
     r = _client().get("/messages/99999")
     assert r.status_code == 404
 
 
-@patch("src.api.web.routes._message_detail_context", _mock_detail_context)
+@patch("src.api.web.routes.messages._message_detail_context", _mock_detail_context)
 def test_message_detail_shows_send_button():
     r = _client().get("/messages/1")
     assert "보내기" in r.text
@@ -172,7 +172,7 @@ def _use_test_db():
     )
     Base.metadata.create_all(engine)
     factory = sessionmaker(bind=engine, autoflush=False, autocommit=False)
-    with patch("src.api.web.routes.SessionLocal", factory), \
+    with patch("src.api.web.routes.messages.SessionLocal", factory), \
          patch("src.agents.approval.SessionLocal", factory):
         yield factory
 
@@ -256,7 +256,7 @@ def _mock_messages_list_context(status="", channel=""):
     }
 
 
-@patch("src.api.web.routes._messages_list_context", _mock_messages_list_context)
+@patch("src.api.web.routes.messages._messages_list_context", _mock_messages_list_context)
 def test_messages_list_returns_200():
     r = _client().get("/messages")
     assert r.status_code == 200

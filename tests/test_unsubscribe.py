@@ -26,8 +26,9 @@ def unsub_db():
     )
     Base.metadata.create_all(engine)
     factory = sessionmaker(bind=engine, autoflush=False, autocommit=False)
-    with patch("src.db.session.SessionLocal", factory), \
-         patch("src.api.web.routes.SessionLocal", factory):
+    # The unsubscribe route persists via compliance.suppress_email, which uses
+    # src.db.session.SessionLocal — that one patch covers it.
+    with patch("src.db.session.SessionLocal", factory):
         yield factory
 
 
