@@ -336,14 +336,13 @@ def _map_hubspot_event(event: HubSpotWebhookEvent) -> str | None:
         if not (event.propertyValue or "").strip():
             return None
         return "lifecycle_change"
-    if sub == "ticket.propertyChange" and event.propertyName == "hs_pipeline_stage":
-        if not (event.propertyValue or "").strip():
-            return None
-        return "ticket_stage_change"
+    # ticket.propertyChange / hs_pipeline_stage is no longer subscribed — only
+    # ticket.creation drives inbound. Any stray ticket.propertyChange falls
+    # through to the map below and is ignored.
     return _HUBSPOT_SUBSCRIPTION_MAP.get(sub)
 
 
-_TICKET_EVENT_TYPES = {"ticket_created", "ticket_stage_change"}
+_TICKET_EVENT_TYPES = {"ticket_created"}
 
 
 def _public_request_uri(request: Request, headers: dict[str, str]) -> str:
