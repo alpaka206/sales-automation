@@ -77,6 +77,24 @@ def test_webhook_rejects_unsigned_when_required(client: TestClient, monkeypatch)
     assert "HUBSPOT_WEBHOOK_SECRET" in r.json()["detail"]
 
 
+def test_run_outbound_endpoint_imports_agent(client: TestClient) -> None:
+    """Regression: POST /run/outbound must be able to import OutboundAgent.
+
+    The `outbound/` package previously shadowed a dead `outbound.py`, so
+    `from ..agents.outbound import OutboundAgent` raised ImportError at runtime.
+    """
+    with patch("src.agents.outbound.OutboundAgent") as mock_agent:
+        mock_agent.return_value.run.return_value = {}
+        r = client.post(
+            "/run/outbound",
+            json={"source": "manual_csv", "filters": {}},
+            headers={"X-Internal-Token": settings.INTERNAL_API_TOKEN},
+        )
+    assert r.status_code == 200
+    assert r.json()["status"] == "started"
+    mock_agent.return_value.run.assert_called_once()
+
+
 def test_web_ui_localhost_allowed(client: TestClient, monkeypatch) -> None:
     """With APP_HOST bound to loopback, the web UI is treated as local → gate passes."""
     monkeypatch.setattr(settings, "APP_HOST", "127.0.0.1")
