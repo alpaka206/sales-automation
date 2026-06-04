@@ -251,7 +251,13 @@ class OutboundAgent:
         draft: DraftEmailResult,
         score: int,
     ) -> Message:
-        norm_email = _normalize_email(candidate.email) if candidate.email else "unknown"
+        # Without an email, key the contact per-prospect so distinct emailless
+        # prospects (common for YouTube/LinkedIn sources) don't all collapse onto
+        # one shared "unknown" contact. (Contact.normalized_email is non-unique.)
+        if candidate.email:
+            norm_email = _normalize_email(candidate.email)
+        else:
+            norm_email = f"unknown+{prospect.id}@local.invalid"
         contact = session.query(Contact).filter_by(normalized_email=norm_email).first()
         if not contact:
             contact = Contact(

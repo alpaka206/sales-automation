@@ -86,36 +86,35 @@ def _verify_hubspot_signature(
     ).decode()
 
     if not hmac.compare_digest(expected, signature):
-        # Dump everything needed for offline replay. Overwritten on each rejection so
-        # data/ doesn't fill up. This lets us re-run HMAC with secret variants.
-        try:
-            import json as _json
-            import os as _os
-            _os.makedirs("data", exist_ok=True)
-            dump_path = "data/last_rejected_webhook.json"
-            with open(dump_path, "w", encoding="utf-8") as f:
-                _json.dump(
-                    {
-                        "method": request_method,
-                        "uri": request_uri,
-                        "timestamp": timestamp,
-                        "body_len": len(body),
-                        "body_text": body.decode("utf-8", errors="replace"),
-                        "body_b64": base64.b64encode(body).decode(),
-                        "received_signature": signature,
-                        "expected_signature_with_current_secret": expected,
-                        "secret_len": len(secret),
-                        "secret_first4": secret[:4],
-                        "secret_last4": secret[-4:],
-                        "all_headers": dict(headers),
-                    },
-                    f,
-                    indent=2,
-                    ensure_ascii=False,
-                )
-            logger.warning("webhook reject: dumped to %s for offline replay.", dump_path)
-        except Exception:
-            logger.exception("webhook reject dump failed.")
+        # Optional offline-replay dump, gated behind WEBHOOK_DEBUG_DUMP (default off)
+        # since this writes the request body+headers to disk on an attacker-
+        # triggerable path. Secret material is never written.
+        if settings.WEBHOOK_DEBUG_DUMP:
+            try:
+                import json as _json
+                import os as _os
+                _os.makedirs("data", exist_ok=True)
+                dump_path = "data/last_rejected_webhook.json"
+                with open(dump_path, "w", encoding="utf-8") as f:
+                    _json.dump(
+                        {
+                            "method": request_method,
+                            "uri": request_uri,
+                            "timestamp": timestamp,
+                            "body_len": len(body),
+                            "body_text": body.decode("utf-8", errors="replace"),
+                            "body_b64": base64.b64encode(body).decode(),
+                            "received_signature": signature,
+                            "expected_signature_with_current_secret": expected,
+                            "all_headers": dict(headers),
+                        },
+                        f,
+                        indent=2,
+                        ensure_ascii=False,
+                    )
+                logger.warning("webhook reject: dumped to %s for offline replay.", dump_path)
+            except Exception:
+                logger.exception("webhook reject dump failed.")
 
         logger.warning(
             "webhook reject: signature mismatch. method=%s uri=%s body_len=%d ts=%s "

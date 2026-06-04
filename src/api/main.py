@@ -246,7 +246,20 @@ async def approve_message(message_id: int, body: ApprovalBody, request: Request)
         logger.exception("Send failed for message %d", message_id)
         raise HTTPException(status_code=500, detail="Send failed")
 
-    contact_id = str(msg.conversation.contact_id)
+    try:
+        contact_id = str(msg.conversation.contact_id)
+    except Exception:
+        # msg was returned by approve() whose session is now closed; accessing the
+        # lazy `conversation` relationship on a detached instance raises. Re-resolve
+        # the contact from a fresh session so a successfully-sent message still gets
+        # logged to the HubSpot timeline.
+        from ..db.models import Message as _MsgModel
+        from ..db.session import SessionLocal as _SLc
+
+        with _SLc() as _csess:
+            _cm = _csess.get(_MsgModel, message_id)
+            _conv = _cm.conversation if _cm else None
+            contact_id = str(_conv.contact_id) if _conv and _conv.contact_id else ""
 
     try:
         from ..integrations.hubspot import HubSpotClient

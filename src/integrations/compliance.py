@@ -13,9 +13,21 @@ logger = logging.getLogger(__name__)
 _EU_TLDS = {"de", "fr", "it", "es", "nl", "be", "at", "pl", "se", "dk", "fi", "ie", "pt", "cz", "ro", "hu", "bg", "hr", "sk", "si", "lt", "lv", "ee", "lu", "mt", "cy", "eu"}
 
 
+_warned_fallback_secret = False
+
+
 def generate_unsub_token(email: str) -> str:
     """HMAC-SHA256 token for unsubscribe link verification."""
-    secret = settings.INTERNAL_API_TOKEN or "fallback-secret"
+    secret = settings.INTERNAL_API_TOKEN
+    if not secret:
+        global _warned_fallback_secret
+        if not _warned_fallback_secret:
+            logger.warning(
+                "INTERNAL_API_TOKEN is unset — unsubscribe tokens use a known fallback "
+                "secret and are forgeable. Set INTERNAL_API_TOKEN in production."
+            )
+            _warned_fallback_secret = True
+        secret = "fallback-secret"
     return hmac.new(secret.encode(), email.lower().encode(), hashlib.sha256).hexdigest()[:32]
 
 

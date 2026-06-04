@@ -157,6 +157,11 @@ class Settings(BaseSettings):
     # Set to false ONLY for local development against unsigned mock payloads.
     HUBSPOT_WEBHOOK_REQUIRE_SIGNATURE: bool = True
     HUBSPOT_SIGNATURE_MAX_AGE_SECONDS: int = 60
+    # When true, dump rejected webhook payloads to data/last_rejected_webhook.json
+    # for offline signature debugging. Default OFF — the dump writes the request
+    # body+headers to disk on an attacker-triggerable path, so only enable while
+    # actively debugging. Secret material is never written regardless.
+    WEBHOOK_DEBUG_DUMP: bool = False
     # Per-message HMAC token (signed with INTERNAL_API_TOKEN) protects /approve/{id} from IDOR.
     APPROVAL_REQUIRE_TOKEN: bool = True
     # Comma-separated CIDR or IPs whose X-Forwarded-For we trust.
