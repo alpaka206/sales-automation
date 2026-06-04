@@ -35,6 +35,8 @@ services:
         sync: false
       - key: HUBSPOT_PRIVATE_APP_TOKEN
         sync: false
+      - key: HUBSPOT_WEBHOOK_SECRET    # HubSpot app client secret — required for webhook signature check
+        sync: false
       - key: GOOGLE_CREDENTIALS_JSON   # Vertex AI service-account JSON (full contents)
         sync: false
       - key: GOOGLE_CLOUD_PROJECT      # optional; falls back to JSON project_id
@@ -42,6 +44,8 @@ services:
       - key: SLACK_BOT_TOKEN
         sync: false
       - key: SLACK_APPROVAL_CHANNEL_ID
+        sync: false
+      - key: PUBLIC_BASE_URL           # set to the Render URL after 1st deploy (Slack approval links)
         sync: false
 
       # ----- Optional: Google Sheets mirror (separate service account) -----
@@ -69,6 +73,11 @@ services:
         value: hubspot
       - key: APPROVAL_CHANNEL
         value: slack
+      # Free tier: no always-on workers. Approve sends inline; webhooks drive inbound.
+      - key: SEND_WORKER_ENABLED
+        value: "false"
+      - key: INBOUND_POLL_ENABLED
+        value: "false"
       - key: AUTO_SEND_THRESHOLD
         value: "1.01"
       - key: OUTBOUND_COOLDOWN_DAYS
