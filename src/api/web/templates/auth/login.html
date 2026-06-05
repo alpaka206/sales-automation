@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>로그인 — PERSO Sales Console</title>
   <script>(function(){try{var t=localStorage.getItem("perso-theme");if(t==="dark"||t==="light")document.documentElement.setAttribute("data-theme",t);}catch(e){}})();</script>
+  <link rel="icon" type="image/png" href="/static/logo.png">
   <link rel="stylesheet" href="/static/tokens.css">
   <link rel="stylesheet" href="/static/console.css">
 </head>
@@ -13,7 +14,7 @@
               background:radial-gradient(1200px 600px at 100% -5%, var(--bg-grad-1), var(--bg-grad-2) 55%)">
     <div class="card" style="width:100%;max-width:400px;text-align:center;padding:32px">
       <div style="display:flex;align-items:center;justify-content:center;gap:11px;margin-bottom:20px">
-        <span class="brand__mark">{{ icon("bolt", 18) }}</span>
+        <img src="/static/logo.png" alt="PERSO" class="brand__logo">
         <span style="text-align:left">
           <span class="brand__name" style="display:block">PERSO Sales</span>
           <span class="brand__sub">Automation Console</span>

@@ -162,6 +162,16 @@ def healthz() -> dict[str, bool]:
     return {"ok": True}
 
 
+@app.get("/favicon.ico", include_in_schema=False)
+def favicon():
+    from fastapi.responses import FileResponse
+
+    logo = Path(__file__).parent / "web" / "static" / "logo.png"
+    if logo.exists():
+        return FileResponse(str(logo), media_type="image/png")
+    return Response(status_code=404)
+
+
 _FAVICON_SVG = (
     b'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">'
     b'<rect width="32" height="32" rx="6" fill="#10b981"/>'

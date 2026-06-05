@@ -43,6 +43,10 @@
   background: linear-gradient(135deg, var(--accent), color-mix(in srgb, var(--accent) 55%, #c084fc));
   display: grid; place-items: center; color: #fff; box-shadow: 0 4px 12px var(--accent-ring);
 }
+.brand__logo {
+  width: 34px; height: 34px; border-radius: 9px; flex-shrink: 0; display: block;
+  object-fit: cover; box-shadow: 0 4px 12px var(--accent-ring);
+}
 .brand__name { font-weight: 800; font-size: 14.5px; letter-spacing: -.02em; line-height: 1.1; }
 .brand__sub {
   font-size: 10.5px; color: var(--text-subtle); font-weight: 600;
