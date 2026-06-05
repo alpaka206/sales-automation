@@ -8,9 +8,13 @@ from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
 from sqlalchemy import func, select
 
+from fastapi import Form
+from fastapi.responses import Response
+
 from ....common.config import settings
-from ....db.models import LLMUsage
+from ....db.models import LLMUsage, User
 from ....db.session import SessionLocal
+from ..auth import is_admin, session_user
 from ._shared import esc, templates
 
 router = APIRouter(tags=["web"])
@@ -96,3 +100,67 @@ async def settings_refresh_healthcheck():
             f'<td class="td-subtle tnum">{c.latency_ms}ms</td></tr>'
         )
     return HTMLResponse(rows)
+
+
+# --------------------------------------------------------------------------- #
+# User access management (allowlist) — admin only, Google-OAuth mode
+# --------------------------------------------------------------------------- #
+def _forbidden() -> Response:
+    return Response(content="관리자만 접근할 수 있습니다.", status_code=403)
+
+
+@router.get("/settings/users")
+async def settings_users(request: Request):
+    """Allowlist management: approve/revoke who may use the console (admins only)."""
+    if not is_admin(request):
+        return _forbidden()
+    with SessionLocal() as session:
+        rows = (
+            session.query(User)
+            .order_by(User.approved.desc(), User.role.desc(), User.created_at.asc())
+            .all()
+        )
+        users = [
+            {
+                "email": u.email,
+                "name": u.name or "",
+                "role": u.role,
+                "approved": u.approved,
+                "last_login_at": u.last_login_at,
+            }
+            for u in rows
+        ]
+    me = session_user(request) or {}
+    return templates.TemplateResponse(
+        request, "settings_users.html",
+        {"users": users, "me_email": me.get("email", ""), "domain": settings.ALLOWED_EMAIL_DOMAIN},
+    )
+
+
+@router.post("/settings/users/{email}")
+async def settings_user_update(request: Request, email: str, action: str = Form("")):
+    """Approve / revoke / change role for a user. Admins can't lock themselves out."""
+    if not is_admin(request):
+        return _forbidden()
+    me = session_user(request) or {}
+    email = email.lower()
+    if email == (me.get("email") or "").lower() and action in ("revoke", "make_member"):
+        return HTMLResponse(
+            '<div class="banner banner--danger" style="padding:10px 12px">자기 자신의 권한은 해제할 수 없습니다</div>',
+            status_code=400,
+        )
+    with SessionLocal() as session:
+        u = session.get(User, email)
+        if u:
+            if action == "approve":
+                u.approved = True
+            elif action == "revoke":
+                u.approved = False
+            elif action == "make_admin":
+                u.role = "admin"
+                u.approved = True
+            elif action == "make_member":
+                u.role = "member"
+            session.commit()
+    # htmx: reload the page to reflect the change
+    return Response(status_code=204, headers={"HX-Redirect": "/settings/users"})

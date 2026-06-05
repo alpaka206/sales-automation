@@ -7,6 +7,8 @@ import re
 from fastapi import APIRouter, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse
 
+from ..auth import actor_name
+
 from ....db.models import KnowledgeDocument, KnowledgeDocumentRevision
 from ....db.session import SessionLocal
 from ....llm.knowledge import reset_cache as _reset_kb_cache
@@ -109,6 +111,7 @@ async def knowledge_edit(request: Request, doc_id: int):
 
 @router.post("/knowledge")
 async def knowledge_create(
+    request: Request,
     title: str = Form(""),
     categories: str = Form(""),
     tags: str = Form(""),
@@ -119,6 +122,8 @@ async def knowledge_create(
     body: str = Form(""),
 ):
     """Create a new knowledge document and record its first revision."""
+    # Attribute to the logged-in user (Google OAuth) when available, else the form/typed value.
+    author = actor_name(request, fallback=author.strip()) or "web"
     if not title.strip() or not body.strip():
         return HTMLResponse(
             '<div class="text-red-600 text-sm">제목과 본문은 필수입니다</div>',
@@ -155,6 +160,7 @@ async def knowledge_create(
 @router.put("/knowledge/{doc_id}")
 async def knowledge_update(
     doc_id: int,
+    request: Request,
     title: str = Form(""),
     categories: str = Form(""),
     tags: str = Form(""),
@@ -166,6 +172,7 @@ async def knowledge_update(
     change_note: str = Form(""),
 ):
     """Update a knowledge document, snapshotting the prior state into history."""
+    author = actor_name(request, fallback=author.strip()) or "web"
     with SessionLocal() as session:
         doc = session.get(KnowledgeDocument, doc_id)
         if not doc:
@@ -201,8 +208,9 @@ async def knowledge_update(
 
 
 @router.delete("/knowledge/{doc_id}")
-async def knowledge_delete(doc_id: int):
+async def knowledge_delete(doc_id: int, request: Request):
     """Delete a knowledge document (keeps its revision history)."""
+    editor = actor_name(request, fallback="web") or "web"
     with SessionLocal() as session:
         doc = session.get(KnowledgeDocument, doc_id)
         if not doc:
@@ -210,7 +218,7 @@ async def knowledge_delete(doc_id: int):
                 '<div class="text-red-600 text-sm">문서를 찾을 수 없습니다</div>',
                 status_code=404,
             )
-        _snapshot_revision(session, doc, change_note="deleted", edited_by="web")
+        _snapshot_revision(session, doc, change_note="deleted", edited_by=editor)
         session.delete(doc)
         session.commit()
     _reset_kb_cache()

@@ -32,13 +32,23 @@
     {{ _nav("/settings", "설정", "settings", _path.startswith("/settings"), flag=nav_health_warn) }}
   </nav>
 
+  {%- set _u = request.state.user if (request and request.state) else None -%}
   <div class="operator-card">
     <div class="operator-card__inner">
-      <span class="avatar">김규</span>
-      <span style="min-width:0">
-        <span class="operator-card__name" style="display:block">김규원</span>
-        <span class="operator-card__role" style="display:block">DevRel · Operator</span>
+      {% if _u %}
+      <span class="avatar">{{ (_u.name or _u.email)[:2] }}</span>
+      <span style="min-width:0;flex:1">
+        <span class="operator-card__name" style="display:block">{{ _u.name or _u.email }}</span>
+        <span class="operator-card__role" style="display:block">{{ _u.email }}{% if _u.role == 'admin' %} · 관리자{% endif %}</span>
       </span>
+      <a href="/auth/logout" class="icon-btn" title="로그아웃" style="width:30px;height:30px">{{ icon("reply", 15) }}</a>
+      {% else %}
+      <span class="avatar">운영</span>
+      <span style="min-width:0">
+        <span class="operator-card__name" style="display:block">운영자</span>
+        <span class="operator-card__role" style="display:block">로컬 / Basic</span>
+      </span>
+      {% endif %}
     </div>
   </div>
 </aside>

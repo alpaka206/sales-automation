@@ -47,8 +47,24 @@ services:
         sync: false
       - key: PUBLIC_BASE_URL           # set to the Render URL after 1st deploy (Slack approval links)
         sync: false
-      - key: WEB_UI_PASSWORD           # REQUIRED for public deploy — web UI login (HTTP Basic Auth)
+      - key: WEB_UI_PASSWORD           # web UI login (HTTP Basic Auth) — used when AUTH_MODE=basic
         sync: false
+
+      # ----- Web UI login: Google OAuth (optional; keep AUTH_MODE=basic until configured) -----
+      - key: AUTH_MODE                 # "basic" (default) or "google_oauth"
+        value: basic
+      - key: GOOGLE_OAUTH_CLIENT_ID    # Google Cloud OAuth 2.0 web client; redirect URI = <PUBLIC_BASE_URL>/auth/callback
+        sync: false
+      - key: GOOGLE_OAUTH_CLIENT_SECRET
+        sync: false
+      - key: ALLOWED_EMAIL_DOMAIN      # only verified Google accounts on this domain may sign in
+        value: estsoft.com
+      - key: WEB_UI_ADMIN_EMAILS       # comma-separated bootstrap admins (auto-approved)
+        sync: false
+      - key: WEB_UI_ALLOWED_EMAILS     # comma-separated pre-approved emails (no admin action needed)
+        sync: false
+      - key: SESSION_SECRET            # random long string; required when AUTH_MODE=google_oauth
+        generateValue: true
 
       # ----- Optional: Google Sheets mirror (separate service account) -----
       - key: GSHEETS_ENABLED           # set "true" to enable, then fill the two below

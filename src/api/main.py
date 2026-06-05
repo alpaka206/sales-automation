@@ -11,7 +11,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from ..agents.approval import ApprovalError, approve, mark_sent, reject
@@ -24,6 +24,7 @@ from .security import (
     is_localhost,
     is_web_ui_path,
 )
+from .web.auth import current_user, router as auth_router
 from .web.routes import router as web_router
 from .webhook import router as webhook_router
 
@@ -81,6 +82,7 @@ app.mount(
     StaticFiles(directory=str(Path(__file__).parent / "web" / "static")),
     name="static",
 )
+app.include_router(auth_router)
 app.include_router(web_router)
 app.include_router(webhook_router)
 
@@ -109,13 +111,28 @@ async def auth_middleware(request: Request, call_next):
 
     # Web UI routes are allowed from localhost without API token.
     if is_web_ui_path(request.url.path):
-        # /unsubscribe is recipient-facing and carries its own signed token — public.
-        if request.url.path.startswith("/unsubscribe"):
+        path = request.url.path
+        # Always-public web paths: unsubscribe (signed token), the auth flow itself,
+        # and static assets (needed to render the login page before sign-in).
+        if path.startswith("/unsubscribe") or path.startswith("/auth") or path.startswith("/static"):
+            request.state.user = current_user(request) if settings.AUTH_MODE == "google_oauth" else None
             return await call_next(request)
+
+        # Google OAuth mode: require a signed session (Google sign-in, domain + allowlist).
+        if settings.AUTH_MODE == "google_oauth":
+            user = current_user(request)
+            request.state.user = user
+            if user:
+                return await call_next(request)
+            accepts_html = "text/html" in request.headers.get("accept", "")
+            if request.method == "GET" and accepts_html:
+                return RedirectResponse("/auth/login", status_code=302)
+            return JSONResponse(status_code=401, content={"detail": "login required"})
+
+        # Basic mode (default): localhost, or HTTP Basic Auth when WEB_UI_PASSWORD is set.
+        request.state.user = None
         if is_localhost(request):
             return await call_next(request)
-        # Public deploy: gate the (otherwise unauthenticated) web UI behind HTTP
-        # Basic Auth when WEB_UI_PASSWORD is set; otherwise stay localhost-only.
         if settings.WEB_UI_PASSWORD:
             if check_web_ui_basic_auth(request):
                 return await call_next(request)

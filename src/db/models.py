@@ -297,3 +297,23 @@ class LLMUsage(Base):
     cache_creation_input_tokens: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     estimated_cost: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False, index=True)
+
+
+class User(Base):
+    """Operator who can access the web UI (Google OAuth, allowlisted).
+
+    Identity = verified Google email on ALLOWED_EMAIL_DOMAIN. ``approved`` is the
+    allowlist gate (bootstrap admins + WEB_UI_ALLOWED_EMAILS are auto-approved on first
+    login; others land here as approved=False until an admin approves them). ``name`` is
+    used to auto-attribute knowledge/ICP edits and message approvals.
+    """
+
+    __tablename__ = "users"
+
+    email: Mapped[str] = mapped_column(String(320), primary_key=True)
+    name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    picture: Mapped[str | None] = mapped_column(Text, nullable=True)
+    role: Mapped[str] = mapped_column(String(16), nullable=False, default="member")
+    approved: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+    last_login_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

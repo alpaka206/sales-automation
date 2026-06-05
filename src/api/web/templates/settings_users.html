@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% from "partials/icons.html" import icon %}
+{% block title %}사용자 관리 — PERSO Sales Console{% endblock %}
+{% block content %}
+
+<div style="margin-bottom:14px">
+  <a href="/settings" class="chip">{{ icon("chevron", 14) }} 설정</a>
+</div>
+
+<div class="page-header">
+  <div>
+    <h1 class="page-title">사용자 관리 · 접근 허용</h1>
+    <p class="page-sub"><strong>@{{ domain }}</strong> 구글 계정만 로그인 가능하며, 여기서 <strong>승인</strong>된 사용자만 콘솔을 사용할 수 있습니다.</p>
+  </div>
+</div>
+
+<div class="card card--flush">
+  <div class="table-wrap">
+    <table class="table">
+      <thead>
+        <tr><th>사용자</th><th>역할</th><th>상태</th><th>최근 로그인</th><th style="text-align:right">관리</th></tr>
+      </thead>
+      <tbody>
+        {% for u in users %}
+        <tr>
+          <td>
+            <div style="font-weight:600">{{ u.name or u.email.split('@')[0] }}{% if u.email == me_email %} <span class="t-subtle t-xs">(나)</span>{% endif %}</div>
+            <div class="t-xs t-subtle mono">{{ u.email }}</div>
+          </td>
+          <td>
+            {% if u.role == 'admin' %}<span class="pill pill--accent pill--sm"><span class="pill__dot"></span>관리자</span>
+            {% else %}<span class="tag">멤버</span>{% endif %}
+          </td>
+          <td>
+            {% if u.approved %}<span class="pill pill--ok pill--sm"><span class="pill__dot"></span>승인됨</span>
+            {% else %}<span class="pill pill--warn pill--sm"><span class="pill__dot"></span>대기</span>{% endif %}
+          </td>
+          <td class="td-subtle tnum">{{ u.last_login_at.strftime('%Y-%m-%d %H:%M') if u.last_login_at else '—' }}</td>
+          <td>
+            <div class="row" style="gap:6px;justify-content:flex-end">
+              {% if not u.approved %}
+              <button class="btn btn--ok btn--sm" hx-post="/settings/users/{{ u.email }}" hx-vals='{"action":"approve"}'>{{ icon("check", 14) }} 승인</button>
+              {% elif u.email != me_email %}
+              <button class="btn btn--ghost btn--sm" hx-post="/settings/users/{{ u.email }}" hx-vals='{"action":"revoke"}'>해제</button>
+              {% endif %}
+              {% if u.role != 'admin' %}
+              <button class="btn btn--subtle btn--sm" hx-post="/settings/users/{{ u.email }}" hx-vals='{"action":"make_admin"}'>관리자로</button>
+              {% elif u.email != me_email %}
+              <button class="btn btn--subtle btn--sm" hx-post="/settings/users/{{ u.email }}" hx-vals='{"action":"make_member"}'>멤버로</button>
+              {% endif %}
+            </div>
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="5">
+          <div class="empty"><div class="empty__icon">{{ icon("prospects", 24) }}</div><div class="empty__text">아직 로그인한 사용자가 없습니다</div></div>
+        </td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<p class="t-sm t-subtle" style="margin-top:14px">
+  부트스트랩 관리자는 <span class="mono">WEB_UI_ADMIN_EMAILS</span>, 사전 허용 이메일은 <span class="mono">WEB_UI_ALLOWED_EMAILS</span> 환경변수로도 지정할 수 있습니다.
+</p>
+
+{% endblock %}

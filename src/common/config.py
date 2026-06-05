@@ -177,6 +177,22 @@ class Settings(BaseSettings):
     WEB_UI_USERNAME: str = "admin"
     WEB_UI_PASSWORD: str = ""
 
+    # ----- Web UI auth mode -----
+    # "basic"  : localhost-only, or HTTP Basic Auth when WEB_UI_PASSWORD is set (default).
+    # "google_oauth" : Google sign-in restricted to ALLOWED_EMAIL_DOMAIN + an allowlist.
+    # Until the Google credentials below are set, keep "basic" so the deploy never locks out.
+    AUTH_MODE: str = "basic"
+    GOOGLE_OAUTH_CLIENT_ID: str = ""
+    GOOGLE_OAUTH_CLIENT_SECRET: str = ""
+    # Only verified emails on this domain may sign in (e.g. estsoft.com Google Workspace).
+    ALLOWED_EMAIL_DOMAIN: str = "estsoft.com"
+    # Bootstrap admins (comma-separated emails): auto-approved with role=admin on first login.
+    WEB_UI_ADMIN_EMAILS: str = ""
+    # Static allowlist (comma-separated emails) approved without an admin action.
+    WEB_UI_ALLOWED_EMAILS: str = ""
+    # HMAC key for signing the session cookie. REQUIRED when AUTH_MODE=google_oauth.
+    SESSION_SECRET: str = ""
+
     @property
     def LLM_PROVIDER(self) -> str:
         """The only LLM provider. Used as the draft/usage label. Not env-configurable."""

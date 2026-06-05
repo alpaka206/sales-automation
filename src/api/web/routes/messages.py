@@ -11,6 +11,7 @@ from ....agents.approval import ApprovalError, approve, reject
 from ....db.models import Conversation, DomainProfile, Message
 from ....db.session import SessionLocal
 from ....llm.translate import needs_korean, to_korean
+from ..auth import actor_name
 from ._shared import esc, templates
 
 router = APIRouter(tags=["web"])
@@ -207,11 +208,11 @@ async def message_detail(request: Request, message_id: int):
 
 
 @router.post("/messages/{message_id}/send")
-async def message_send(message_id: int, body: str = Form(""), subject: str = Form("")):
+async def message_send(request: Request, message_id: int, body: str = Form(""), subject: str = Form("")):
     """Approve (and optionally edit) a message for sending."""
     try:
         edited = body.strip() if body.strip() else None
-        approve(message_id, approver="web_ui", edited_body=edited)
+        approve(message_id, approver=actor_name(request, fallback="web_ui"), edited_body=edited)
     except ApprovalError as exc:
         return HTMLResponse(
             f'<div class="text-red-600 text-sm">{esc(str(exc))}</div>', status_code=400
@@ -222,10 +223,10 @@ async def message_send(message_id: int, body: str = Form(""), subject: str = For
 
 
 @router.post("/messages/{message_id}/reject")
-async def message_reject(message_id: int, reason: str = Form("")):
+async def message_reject(request: Request, message_id: int, reason: str = Form("")):
     """Reject a message with an optional reason."""
     try:
-        reject(message_id, approver="web_ui", reason=reason.strip() or None)
+        reject(message_id, approver=actor_name(request, fallback="web_ui"), reason=reason.strip() or None)
     except ApprovalError as exc:
         return HTMLResponse(
             f'<div class="text-red-600 text-sm">{esc(str(exc))}</div>', status_code=400

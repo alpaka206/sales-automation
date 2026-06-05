@@ -10,6 +10,9 @@
     <p class="page-sub">외부 연동·워커 헬스체크, 환경변수, LLM 사용량.</p>
   </div>
   <div class="row" style="gap:10px">
+    {% if request and request.state and request.state.user and request.state.user.role == 'admin' %}
+    <a href="/settings/users" class="btn btn--subtle">{{ icon("prospects", 15) }} 사용자 관리</a>
+    {% endif %}
     <span class="t-sm t-subtle">전체 상태</span>{{ status_pill(overall_status) }}
   </div>
 </div>

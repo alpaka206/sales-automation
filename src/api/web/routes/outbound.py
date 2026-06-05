@@ -11,6 +11,7 @@ from sqlalchemy import select
 from ....agents.approval import approve
 from ....db.models import Conversation, Message, OutboundIntent, Prospect
 from ....db.session import SessionLocal
+from ..auth import actor_name
 from ._shared import esc, templates
 
 logger = logging.getLogger(__name__)
@@ -181,7 +182,7 @@ async def prospects_bulk_approve(request: Request):
             )
             for msg in msgs:
                 try:
-                    approve(msg.id, approver="web_ui_bulk")
+                    approve(msg.id, approver=actor_name(request, fallback="web_ui_bulk"))
                     approved_count += 1
                 except Exception:
                     logger.warning("Failed to approve message %d in bulk", msg.id, exc_info=True)
