@@ -62,7 +62,8 @@ def test_settings_shows_env_vars_masked():
 def test_settings_shows_healthcheck():
     r = _client().get("/settings")
     assert "Database" in r.text
-    assert "PASS" in r.text
+    # Health status renders as a Korean status pill (PASS → 정상) rather than the raw enum.
+    assert "정상" in r.text
 
 
 @patch("src.api.web.routes.settings_page._settings_context", _mock_settings_context)

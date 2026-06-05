@@ -1,0 +1,87 @@
+{#
+  Shared UI macros — ported from design_handoff_sales_console/app/components.jsx
+  (STATUS/TONE single source of truth, StatusPill, ScoreMeter, SourceTag, CountryChip).
+  Import:  {% from "partials/ui.html" import status_pill, score_meter, source_tag, country_chip %}
+#}
+
+{# ---- STATUS → { ko, tone } single source of truth ---- #}
+{%- set STATUS = {
+  "pending_approval": ("승인 대기", "warn"),
+  "approved":         ("승인됨",   "info"),
+  "queued":           ("발송 대기", "info"),
+  "sent":             ("발송됨",   "accent"),
+  "replied":          ("응답",     "reply"),
+  "progress":         ("진행중",   "warn"),
+  "won":              ("Won",      "ok"),
+  "lost":             ("Lost",     "danger"),
+  "rejected":         ("거절",     "danger"),
+  "bounced":          ("반송",     "danger"),
+  "received":         ("수신",     "info"),
+  "collected":        ("가져옴",   "neutral"),
+  "analyzed":         ("분석됨",   "info"),
+  "skipped_lowscore": ("스킵·저점수", "neutralSubtle"),
+  "skipped_dup":      ("스킵·중복", "neutralSubtle"),
+  "dispatched":       ("발굴 완료", "ok"),
+  "pending_user_input": ("입력 필요", "warn"),
+  "failed":           ("실패",     "danger"),
+  "PASS":             ("정상",     "ok"),
+  "WARN":             ("주의",     "warn"),
+  "FAIL":             ("실패",     "danger")
+} -%}
+
+{%- macro status_pill(status, size="md") -%}
+  {%- set m = STATUS.get(status, (status, "neutral")) -%}
+  <span class="pill pill--{{ m[1] }}{% if size == 'sm' %} pill--sm{% endif %}">
+    <span class="pill__dot"></span>{{ m[0] }}
+  </span>
+{%- endmacro -%}
+
+{# ---- ICP score meter: >=70 high, >=50 mid, else low; None => none ---- #}
+{%- macro score_meter(score, show_bar=True, width=56) -%}
+  {%- if score is none -%}{%- set tier = "none" -%}
+  {%- elif score >= 70 -%}{%- set tier = "high" -%}
+  {%- elif score >= 50 -%}{%- set tier = "mid" -%}
+  {%- else -%}{%- set tier = "low" -%}{%- endif -%}
+  <span class="score score--{{ tier }}">
+    <span class="score__num">{{ "—" if score is none else score }}</span>
+    {%- if show_bar %}
+    <span class="score__bar" style="width:{{ width }}px">
+      <span class="score__fill" style="width:{{ 0 if score is none else score }}%"></span>
+    </span>{% endif %}
+  </span>
+{%- endmacro -%}
+
+{# ---- source meta (from data.js SOURCES); tolerant of unknown keys ---- #}
+{%- set SOURCES = {
+  "youtube":           ("유튜브",      "youtube",   "youtube"),
+  "linkedin_comments": ("링크드인 댓글", "linkedin",  "linkedin"),
+  "linkedin":          ("링크드인",    "linkedin",  "linkedin"),
+  "google_search":     ("구글 검색",   "google",    "google"),
+  "google":            ("구글",        "google",    "google"),
+  "job_board":         ("채용공고",     "briefcase", "jobs"),
+  "manual_csv":        ("CSV",         "upload",    "csv"),
+  "csv":               ("CSV",         "upload",    "csv"),
+  "manual":            ("수동",        "user",      "manual")
+} -%}
+{%- macro source_tag(source, with_label=True) -%}
+  {%- set s = SOURCES.get(source, (source, "dot", "manual")) -%}
+  {% from "partials/icons.html" import icon -%}
+  <span class="source-tag source-tag--{{ s[2] }}">
+    <span class="source-tag__icon">{{ icon(s[1], 14) }}</span>
+    {%- if with_label %}<span class="truncate">{{ s[0] }}</span>{% endif %}
+  </span>
+{%- endmacro -%}
+
+{# ---- country chip (flag from data.js COUNTRIES) ---- #}
+{%- set COUNTRIES = {
+  "KR": ("대한민국", "🇰🇷"), "JP": ("일본", "🇯🇵"), "SG": ("싱가포르", "🇸🇬"),
+  "ID": ("인도네시아", "🇮🇩"), "VN": ("베트남", "🇻🇳"), "TH": ("태국", "🇹🇭"),
+  "US": ("미국", "🇺🇸"), "GB": ("영국", "🇬🇧"), "DE": ("독일", "🇩🇪"), "FR": ("프랑스", "🇫🇷")
+} -%}
+{%- macro country_chip(code, with_name=True) -%}
+  {%- if not code -%}<span class="country-chip t-subtle">—</span>
+  {%- else -%}
+  {%- set c = COUNTRIES.get(code, (code, "🏳️")) -%}
+  <span class="country-chip"><span class="country-chip__flag">{{ c[1] }}</span>{% if with_name %}{{ c[0] }}{% endif %}</span>
+  {%- endif -%}
+{%- endmacro -%}

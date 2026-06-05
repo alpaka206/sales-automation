@@ -1,68 +1,72 @@
 {% extends "base.html" %}
-{% block title %}메시지 — Sales Automation{% endblock %}
+{% from "partials/icons.html" import icon %}
+{% from "partials/ui.html" import status_pill %}
+{% block title %}메시지 — PERSO Sales Console{% endblock %}
 {% block content %}
 
-<div class="flex items-center justify-between mb-6">
-  <h1 class="text-xl font-bold text-gray-800">메시지</h1>
-  <div class="flex gap-2 text-sm">
-    <select onchange="location.href='/messages?status='+this.value+'&channel={{ filter_channel }}'"
-            class="border rounded px-2 py-1 text-gray-600 bg-white">
-      <option value="">전체 상태</option>
-      {% for s in ['pending_approval','approved','sent','rejected','bounced','replied'] %}
-      <option value="{{ s }}" {% if filter_status == s %}selected{% endif %}>{{ s }}</option>
-      {% endfor %}
-    </select>
-    <select onchange="location.href='/messages?status={{ filter_status }}&channel='+this.value"
-            class="border rounded px-2 py-1 text-gray-600 bg-white">
-      <option value="">전체 채널</option>
-      {% for c in ['email','whatsapp'] %}
-      <option value="{{ c }}" {% if filter_channel == c %}selected{% endif %}>{{ c }}</option>
-      {% endfor %}
-    </select>
+{% set pending_n = messages | selectattr('status', 'equalto', 'pending_approval') | list | length %}
+<div class="page-header">
+  <div>
+    <h1 class="page-title">메시지</h1>
+    <p class="page-sub">아웃바운드 드래프트와 발송된 회신. 행을 클릭하면 승인 상세로 이동합니다.</p>
   </div>
+  {% if pending_n %}
+  <a href="/messages?status=pending_approval" class="pill pill--accent" style="text-decoration:none;height:32px;padding:0 14px">
+    <span class="pill__dot"></span>승인 대기 {{ pending_n }}건
+  </a>
+  {% endif %}
 </div>
 
-<div class="bg-white rounded-lg shadow-sm border">
-  <table class="w-full text-sm">
-    <thead>
-      <tr class="text-left text-xs text-gray-500 border-b">
-        <th class="px-5 py-3">상태</th>
-        <th class="px-5 py-3">분류</th>
-        <th class="px-5 py-3">제목</th>
-        <th class="px-5 py-3">채널</th>
-        <th class="px-5 py-3">방향</th>
-        <th class="px-5 py-3">수신자</th>
-        <th class="px-5 py-3">시간</th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for msg in messages %}
-      <tr class="border-b hover:bg-gray-50 cursor-pointer" onclick="location.href='/messages/{{ msg.id }}'">
-        <td class="px-5 py-3">
-          <span class="inline-block px-2 py-0.5 rounded text-xs font-medium
-            {% if msg.status == 'sent' %}bg-green-100 text-green-700
-            {% elif msg.status == 'pending_approval' %}bg-yellow-100 text-yellow-700
-            {% elif msg.status == 'approved' %}bg-blue-100 text-blue-700
-            {% elif msg.status == 'rejected' %}bg-red-100 text-red-700
-            {% elif msg.status == 'replied' %}bg-purple-100 text-purple-700
-            {% else %}bg-gray-100 text-gray-700{% endif %}">
-            {{ msg.status }}
-          </span>
-        </td>
-        <td class="px-5 py-3 text-gray-600">{{ msg.category }}</td>
-        <td class="px-5 py-3 text-gray-800 max-w-xs truncate">{{ msg.subject }}</td>
-        <td class="px-5 py-3 text-gray-500">{{ msg.channel }}</td>
-        <td class="px-5 py-3 text-gray-500">{{ msg.direction }}</td>
-        <td class="px-5 py-3 text-gray-500 max-w-[160px] truncate">{{ msg.to_address }}</td>
-        <td class="px-5 py-3 text-gray-400">{{ msg.created_at.strftime('%m/%d %H:%M') }}</td>
-      </tr>
-      {% else %}
-      <tr>
-        <td colspan="7" class="px-5 py-8 text-center text-gray-400">메시지가 없습니다</td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
+{# ---- filter chips + channel select ---- #}
+{% set chips = [('', '전체'), ('pending_approval','승인 대기'), ('approved','승인됨'), ('sent','발송됨'), ('replied','응답'), ('rejected','거절'), ('bounced','반송')] %}
+<div class="row-between wrap mb-gap" style="align-items:center">
+  <div class="chip-row">
+    {% for val, label in chips %}
+    <a class="chip{% if filter_status == val %} is-active{% endif %}" href="/messages?status={{ val }}&channel={{ filter_channel }}">{{ label }}</a>
+    {% endfor %}
+  </div>
+  <select class="select" style="width:auto;min-width:150px"
+          onchange="location.href='/messages?status={{ filter_status }}&channel='+this.value">
+    <option value="">전체 채널</option>
+    {% for c in ['email','whatsapp'] %}
+    <option value="{{ c }}" {% if filter_channel == c %}selected{% endif %}>{{ c }}</option>
+    {% endfor %}
+  </select>
+</div>
+
+<div class="card card--flush">
+  <div class="table-wrap">
+    <table class="table">
+      <thead>
+        <tr>
+          <th>상태</th><th>구분</th><th>제목</th><th>분류</th><th>채널</th><th>수신자</th><th>시간</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for msg in messages %}
+        <tr class="is-clickable" onclick="location.href='/messages/{{ msg.id }}'">
+          <td>{{ status_pill(msg.status, "sm") }}</td>
+          <td>
+            {% if msg.flow == 'inbound_reply' %}
+            <span class="source-tag" style="gap:6px;color:var(--info)">{{ icon("inbound", 15) }} 인바운드 회신</span>
+            {% else %}
+            <span class="source-tag" style="gap:6px;color:var(--accent)">{{ icon("outbound", 15) }} 아웃바운드</span>
+            {% endif %}
+          </td>
+          <td class="truncate" style="max-width:300px">{{ msg.subject }}</td>
+          <td class="td-muted">{{ msg.category }}</td>
+          <td class="td-muted">{{ msg.channel }}</td>
+          <td class="td-subtle truncate mono" style="max-width:180px">{{ msg.to_address }}</td>
+          <td class="td-subtle tnum">{{ msg.created_at.strftime('%m/%d %H:%M') }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="7">
+          <div class="empty"><div class="empty__icon">{{ icon("messages", 24) }}</div><div class="empty__text">메시지가 없습니다</div></div>
+        </td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
 </div>
 
 {% endblock %}

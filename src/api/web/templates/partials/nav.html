@@ -1,12 +1,44 @@
-<nav class="bg-white border-b border-gray-200 shadow-sm">
-  <div class="max-w-7xl mx-auto px-4 flex items-center justify-between h-14">
-    <a href="/" class="text-lg font-bold text-gray-800">Sales Automation</a>
-    <div class="flex items-center gap-6 text-sm text-gray-600">
-      <a href="/" class="hover:text-gray-900">대시보드</a>
-      <a href="/messages" class="hover:text-gray-900">메시지</a>
-      <a href="/knowledge" class="hover:text-gray-900">지식베이스</a>
-      <a href="/outbound/new" class="hover:text-gray-900">아웃바운드</a>
-      <a href="/settings" class="hover:text-gray-900">설정</a>
+{% from "partials/icons.html" import icon %}
+{%- set _path = request.url.path if request else "/" -%}
+{%- macro _nav(href, label, ic, active, badge=None, flag=False) -%}
+  <a href="{{ href }}" class="nav-item{% if active %} is-active{% endif %}">
+    {{ icon(ic, 18) }}
+    <span class="nav-item__label">{{ label }}</span>
+    {%- if badge %}<span class="nav-item__badge tnum">{{ badge }}</span>
+    {%- elif flag %}<span class="nav-item__flag"></span>{% endif %}
+  </a>
+{%- endmacro -%}
+<aside class="sidebar">
+  <div class="sidebar__brandwrap">
+    <a href="/" class="brand">
+      <span class="brand__mark">{{ icon("bolt", 18) }}</span>
+      <span>
+        <span class="brand__name" style="display:block">PERSO Sales</span>
+        <span class="brand__sub">Automation Console</span>
+      </span>
+    </a>
+  </div>
+
+  <nav class="sidebar__nav">
+    <div class="nav-group-label">운영</div>
+    {{ _nav("/", "대시보드", "dashboard", _path == "/", badge=nav_pending) }}
+    {{ _nav("/messages", "메시지", "messages", _path.startswith("/messages"), badge=nav_pending) }}
+    {{ _nav("/outbound/new", "아웃바운드", "outbound", _path.startswith("/outbound")) }}
+    {{ _nav("/prospects", "프로스펙트", "prospects", _path.startswith("/prospects")) }}
+
+    <div class="nav-group-label">설정</div>
+    {{ _nav("/icp-rules", "ICP 룰", "icp", _path.startswith("/icp-rules")) }}
+    {{ _nav("/knowledge", "지식베이스", "knowledge", _path.startswith("/knowledge")) }}
+    {{ _nav("/settings", "설정", "settings", _path.startswith("/settings"), flag=nav_health_warn) }}
+  </nav>
+
+  <div class="operator-card">
+    <div class="operator-card__inner">
+      <span class="avatar">김규</span>
+      <span style="min-width:0">
+        <span class="operator-card__name" style="display:block">김규원</span>
+        <span class="operator-card__role" style="display:block">DevRel · Operator</span>
+      </span>
     </div>
   </div>
-</nav>
+</aside>

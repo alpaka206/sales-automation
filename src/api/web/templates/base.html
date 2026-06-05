@@ -1,23 +1,63 @@
-<!DOCTYPE html>
-<html lang="ko">
+{% from "partials/icons.html" import icon %}<!DOCTYPE html>
+<html lang="ko" data-theme="light" data-density="comfortable">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>{% block title %}Sales Automation{% endblock %}</title>
-  <script src="https://cdn.tailwindcss.com"></script>
+  <title>{% block title %}PERSO Sales Console{% endblock %}</title>
+  {# Restore persisted theme before paint to avoid a flash of the wrong theme. #}
+  <script>
+    (function () {
+      try {
+        var t = localStorage.getItem("perso-theme");
+        if (t === "dark" || t === "light") document.documentElement.setAttribute("data-theme", t);
+      } catch (e) {}
+    })();
+  </script>
+  <link rel="stylesheet" href="/static/tokens.css">
+  <link rel="stylesheet" href="/static/console.css">
   <script src="https://unpkg.com/htmx.org@2.0.4"></script>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700&display=swap" rel="stylesheet">
-  <style>
-    body { font-family: 'Noto Sans KR', sans-serif; }
-  </style>
   {% block head %}{% endblock %}
 </head>
-<body class="bg-gray-50 text-gray-900 min-h-screen">
-  {% include "partials/nav.html" %}
-  <main class="max-w-7xl mx-auto px-4 py-8">
-    {% block content %}{% endblock %}
-  </main>
+<body>
+  <div class="app-shell">
+    {% include "partials/nav.html" %}
+
+    <div class="content">
+      <header class="topbar">
+        <button type="button" class="icon-btn" title="검색" aria-label="검색">{{ icon("search", 18) }}</button>
+        <button type="button" class="icon-btn" title="알림" aria-label="알림">{{ icon("bell", 18) }}</button>
+        <button type="button" class="icon-btn" id="theme-toggle" title="테마 전환" aria-label="테마 전환">
+          <span class="theme-toggle__sun">{{ icon("sun", 18) }}</span>
+          <span class="theme-toggle__moon" hidden>{{ icon("moon", 18) }}</span>
+        </button>
+      </header>
+
+      <main class="main">
+        {% block content %}{% endblock %}
+      </main>
+    </div>
+  </div>
+
+  <script>
+    (function () {
+      var btn = document.getElementById("theme-toggle");
+      if (!btn) return;
+      var sun = btn.querySelector(".theme-toggle__sun");
+      var moon = btn.querySelector(".theme-toggle__moon");
+      function sync() {
+        var dark = document.documentElement.getAttribute("data-theme") === "dark";
+        if (sun) sun.hidden = dark;
+        if (moon) moon.hidden = !dark;
+      }
+      btn.addEventListener("click", function () {
+        var dark = document.documentElement.getAttribute("data-theme") === "dark";
+        var next = dark ? "light" : "dark";
+        document.documentElement.setAttribute("data-theme", next);
+        try { localStorage.setItem("perso-theme", next); } catch (e) {}
+        sync();
+      });
+      sync();
+    })();
+  </script>
 </body>
 </html>

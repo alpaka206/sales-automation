@@ -45,26 +45,30 @@ def test_run_intent_empty_query(ob_db):
     assert r.status_code == 400
 
 
-def test_run_intent_dispatched(ob_db):
-    mock_dispatch = MagicMock(return_value={
-        "status": "dispatched",
-        "source": "youtube",
-        "stats": {"discovered": 5},
+def test_run_intent_queued(ob_db):
+    # The web route now ROUTES + QUEUES (route_and_enqueue); the local worker runs the crawl.
+    mock_enqueue = MagicMock(return_value={
+        "status": "queued",
+        "intent_id": 7,
+        "routed_source": "youtube",
+        "routed_filters": {},
+        "confidence": 0.8,
     })
-    with patch("src.agents.outbound.dispatcher.dispatch_natural_query", mock_dispatch), \
+    with patch("src.agents.outbound.dispatcher.route_and_enqueue", mock_enqueue), \
          patch("src.llm.client.LLMClient"):
         r = _client().post("/outbound/run-intent", data={"query": "SaaS 스타트업"})
     assert r.status_code == 200
-    assert "발굴 완료" in r.text
+    assert "대기열에 등록" in r.text
 
 
 def test_run_intent_rejected(ob_db):
-    mock_dispatch = MagicMock(return_value={
+    mock_enqueue = MagicMock(return_value={
         "status": "rejected",
+        "intent_id": 8,
         "confidence": 0.3,
         "rationale": "불명확한 요청",
     })
-    with patch("src.agents.outbound.dispatcher.dispatch_natural_query", mock_dispatch), \
+    with patch("src.agents.outbound.dispatcher.route_and_enqueue", mock_enqueue), \
          patch("src.llm.client.LLMClient"):
         r = _client().post("/outbound/run-intent", data={"query": "뭔가"})
     assert r.status_code == 200
@@ -92,14 +96,15 @@ def test_prospects_list_with_data(ob_db):
 
 
 def test_prospects_filter_by_source(ob_db):
+    # Distinctive names so the assertion can't collide with page chrome / JS identifiers.
     session = ob_db()
-    session.add(Prospect(source="youtube", full_name="A", normalized_email="a@t.com", status="analyzed"))
-    session.add(Prospect(source="google_search", full_name="B", normalized_email="b@t.com", status="analyzed"))
+    session.add(Prospect(source="youtube", full_name="YoutubePersonZeta", normalized_email="a@t.com", status="analyzed"))
+    session.add(Prospect(source="google_search", full_name="GooglePersonOmega", normalized_email="b@t.com", status="analyzed"))
     session.commit()
     session.close()
     r = _client().get("/prospects?source=youtube")
-    assert "A" in r.text
-    assert "B" not in r.text
+    assert "YoutubePersonZeta" in r.text
+    assert "GooglePersonOmega" not in r.text
 
 
 def test_bulk_approve_empty(ob_db):

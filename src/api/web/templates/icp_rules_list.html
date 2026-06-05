@@ -1,46 +1,73 @@
 {% extends "base.html" %}
-{% block title %}ICP 룰 — Sales Automation{% endblock %}
+{% from "partials/icons.html" import icon %}
+{% from "partials/ui.html" import source_tag %}
+{% block title %}ICP 룰 — PERSO Sales Console{% endblock %}
 {% block content %}
 
-<div class="mb-6">
-  <h1 class="text-xl font-bold text-gray-800">ICP 점수 룰 (소스별)</h1>
-  <p class="text-sm text-gray-500 mt-1">각 소스별로 ICP 점수 산정 기준을 편집할 수 있습니다.</p>
+<div class="page-header">
+  <div>
+    <h1 class="page-title">ICP 점수 룰</h1>
+    <p class="page-sub">소스별 채점 기준. 발굴된 프로스펙트의 ICP 점수 산정 시 프롬프트에 추가됩니다.</p>
+  </div>
 </div>
 
-<div class="bg-white rounded-lg shadow-sm border">
-  <table class="w-full text-sm">
-    <thead>
-      <tr class="text-left text-xs text-gray-500 border-b">
-        <th class="px-5 py-3">소스</th>
-        <th class="px-5 py-3">상태</th>
-        <th class="px-5 py-3">수정일</th>
-        <th class="px-5 py-3"></th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for rule in rules %}
-      <tr class="border-b hover:bg-gray-50">
-        <td class="px-5 py-3 font-medium text-gray-800">{{ rule.source }}</td>
-        <td class="px-5 py-3">
-          {% if rule.criteria_md %}
-          <span class="inline-block px-2 py-0.5 rounded text-xs font-medium
-            {% if rule.enabled %}bg-green-100 text-green-700{% else %}bg-gray-100 text-gray-500{% endif %}">
-            {% if rule.enabled %}활성{% else %}비활성{% endif %}
-          </span>
-          {% else %}
-          <span class="text-xs text-gray-400">미설정</span>
-          {% endif %}
-        </td>
-        <td class="px-5 py-3 text-gray-400">
-          {% if rule.updated_at %}{{ rule.updated_at.strftime('%m/%d %H:%M') }}{% else %}-{% endif %}
-        </td>
-        <td class="px-5 py-3">
-          <a href="/icp-rules/{{ rule.source }}/edit" class="text-blue-600 text-xs hover:underline">편집</a>
-        </td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
+<div class="split">
+  <div class="card card--flush">
+    <div class="table-wrap">
+      <table class="table">
+        <thead>
+          <tr><th>소스</th><th>상태</th><th>수정일</th><th></th></tr>
+        </thead>
+        <tbody>
+          {% for rule in rules %}
+          <tr class="is-clickable" onclick="location.href='/icp-rules/{{ rule.source }}/edit'">
+            <td>{{ source_tag(rule.source) }}</td>
+            <td>
+              {% if rule.criteria_md %}
+                {% if rule.enabled %}
+                <span class="pill pill--ok pill--sm"><span class="pill__dot"></span>활성</span>
+                {% else %}
+                <span class="pill pill--neutralSubtle pill--sm"><span class="pill__dot"></span>비활성</span>
+                {% endif %}
+              {% else %}
+              <span class="pill pill--neutralSubtle pill--sm"><span class="pill__dot"></span>미설정</span>
+              {% endif %}
+            </td>
+            <td class="td-subtle tnum">{% if rule.updated_at %}{{ rule.updated_at.strftime('%m/%d %H:%M') }}{% else %}—{% endif %}</td>
+            <td style="text-align:right"><span class="chip">편집 {{ icon("chevron", 13) }}</span></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="stack">
+    <div class="card">
+      <div class="section-label" style="margin-bottom:12px">공통 채점 기준</div>
+      <div class="info-stack" style="gap:12px">
+        <div class="row" style="gap:10px;align-items:flex-start">
+          <span class="pill pill--ok pill--sm"><span class="pill__dot"></span>70+</span>
+          <span class="t-sm t-muted">자동 발송 큐에 적재 (사람 승인 후 발송)</span>
+        </div>
+        <div class="row" style="gap:10px;align-items:flex-start">
+          <span class="pill pill--warn pill--sm"><span class="pill__dot"></span>50–69</span>
+          <span class="t-sm t-muted">검토 대상 — 운영자 확인 후 진행</span>
+        </div>
+        <div class="row" style="gap:10px;align-items:flex-start">
+          <span class="pill pill--neutralSubtle pill--sm"><span class="pill__dot"></span>50 미만</span>
+          <span class="t-sm t-muted">스킵 (skipped_lowscore)</span>
+        </div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="section-label" style="margin-bottom:10px">소스별 톤</div>
+      <div class="t-sm t-muted" style="line-height:1.6">
+        각 소스는 고유한 톤으로 채점·작성됩니다(유튜브=캐주얼, 링크드인=B2B 전문가, 구글=정중한 제안 등).
+        소스를 선택해 기준 Markdown을 편집하세요.
+      </div>
+    </div>
+  </div>
 </div>
 
 {% endblock %}

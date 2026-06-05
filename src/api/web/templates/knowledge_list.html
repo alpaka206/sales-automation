@@ -1,49 +1,47 @@
 {% extends "base.html" %}
-{% block title %}지식베이스 — Sales Automation{% endblock %}
+{% from "partials/icons.html" import icon %}
+{% block title %}지식베이스 — PERSO Sales Console{% endblock %}
 {% block content %}
 
-<div class="flex items-center justify-between mb-6">
-  <h1 class="text-xl font-bold text-gray-800">지식베이스</h1>
-  <a href="/knowledge/new" class="bg-blue-600 text-white px-4 py-2 rounded text-sm hover:bg-blue-700">새 문서</a>
+<div class="page-header">
+  <div>
+    <h1 class="page-title">지식베이스</h1>
+    <p class="page-sub">인바운드 답장 시 LLM이 <strong>컨텍스트로만</strong> 참고하는 문서(본문 인용 금지). active 상태만 노출됩니다.</p>
+  </div>
+  <a href="/knowledge/new" class="btn btn--primary">{{ icon("plus", 15) }} 새 문서</a>
 </div>
 
-<div class="bg-white rounded-lg shadow-sm border">
-  <table class="w-full text-sm">
-    <thead>
-      <tr class="text-left text-xs text-gray-500 border-b">
-        <th class="px-5 py-3">제목</th>
-        <th class="px-5 py-3">분류</th>
-        <th class="px-5 py-3">범위</th>
-        <th class="px-5 py-3">상태</th>
-        <th class="px-5 py-3">수정일</th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for doc in docs %}
-      <tr class="border-b hover:bg-gray-50 cursor-pointer" onclick="location.href='/knowledge/{{ doc.id }}'">
-        <td class="px-5 py-3 font-medium text-gray-800">{{ doc.title }}</td>
-        <td class="px-5 py-3 text-gray-500">
-          {% for cat in doc.categories %}
-          <span class="inline-block bg-gray-100 text-gray-600 rounded px-1.5 py-0.5 text-xs mr-1">{{ cat }}</span>
-          {% endfor %}
-        </td>
-        <td class="px-5 py-3 text-gray-500">{{ doc.scope }}</td>
-        <td class="px-5 py-3">
-          {% if doc.status == 'active' %}
-          <span class="inline-block bg-green-100 text-green-700 rounded px-1.5 py-0.5 text-xs">active</span>
-          {% else %}
-          <span class="inline-block bg-gray-100 text-gray-500 rounded px-1.5 py-0.5 text-xs">{{ doc.status }}</span>
-          {% endif %}
-        </td>
-        <td class="px-5 py-3 text-gray-400">{{ doc.updated_at.strftime('%m/%d %H:%M') }}</td>
-      </tr>
-      {% else %}
-      <tr>
-        <td colspan="5" class="px-5 py-8 text-center text-gray-400">문서가 없습니다</td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
+<div class="card card--flush">
+  <div class="table-wrap">
+    <table class="table">
+      <thead>
+        <tr><th>제목</th><th>분류</th><th>범위</th><th>상태</th><th>버전</th><th>수정일</th></tr>
+      </thead>
+      <tbody>
+        {% for doc in docs %}
+        <tr class="is-clickable" onclick="location.href='/knowledge/{{ doc.id }}'">
+          <td style="font-weight:600">{{ doc.title }}</td>
+          <td>
+            {% for cat in doc.categories %}<span class="tag" style="margin-right:4px">{{ cat }}</span>{% endfor %}
+            {% if not doc.categories %}<span class="t-subtle">—</span>{% endif %}
+          </td>
+          <td><span class="tag">{{ doc.scope }}</span></td>
+          <td>
+            {% if doc.status == 'active' %}<span class="pill pill--ok pill--sm"><span class="pill__dot"></span>active</span>
+            {% elif doc.status == 'draft' %}<span class="pill pill--warn pill--sm"><span class="pill__dot"></span>draft</span>
+            {% else %}<span class="pill pill--neutralSubtle pill--sm"><span class="pill__dot"></span>{{ doc.status }}</span>{% endif %}
+          </td>
+          <td class="td-subtle mono">v{{ doc.version }}</td>
+          <td class="td-subtle tnum">{{ doc.updated_at.strftime('%m/%d %H:%M') if doc.updated_at else '—' }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="6">
+          <div class="empty"><div class="empty__icon">{{ icon("knowledge", 24) }}</div><div class="empty__text">문서가 없습니다</div></div>
+        </td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
 </div>
 
 {% endblock %}

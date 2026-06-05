@@ -1,113 +1,89 @@
 {% extends "base.html" %}
-{% block title %}{% if mode == 'edit' %}문서 편집{% else %}새 문서{% endif %} — Sales Automation{% endblock %}
+{% from "partials/icons.html" import icon %}
+{% block title %}{% if mode == 'edit' %}문서 편집{% else %}새 문서{% endif %} — PERSO Sales Console{% endblock %}
 {% block content %}
 
-<div class="mb-6">
-  <a href="/knowledge" class="text-sm text-blue-600 hover:underline">&larr; 지식베이스</a>
+<div style="margin-bottom:14px">
+  <a href="/knowledge" class="chip">{{ icon("chevron", 14) }} 지식베이스</a>
 </div>
 
-<div class="bg-white rounded-lg shadow-sm border p-6 max-w-3xl">
-  <h1 class="text-lg font-bold text-gray-800 mb-6">
-    {% if mode == 'edit' %}문서 편집{% else %}새 문서 작성{% endif %}
-  </h1>
+<div class="page-header">
+  <div>
+    <h1 class="page-title">{% if mode == 'edit' %}문서 편집{% else %}새 문서 작성{% endif %}</h1>
+    <p class="page-sub">요약·태그는 LLM 라우터가 관련성 판단에 사용합니다. active 상태만 인바운드 답장에 노출됩니다.</p>
+  </div>
+  {% if mode == 'edit' %}
+  <a href="/knowledge/{{ doc.id }}/history" class="btn btn--subtle">{{ icon("history", 15) }} 수정 이력 (v{{ doc.version }})</a>
+  {% endif %}
+</div>
 
+<div class="card" style="max-width:860px">
   <form id="kb-form">
-    <div class="mb-4">
-      <label class="block text-xs text-gray-500 mb-1">제목</label>
-      <input name="title" value="{{ doc.title if doc else '' }}"
-             class="w-full border rounded px-3 py-2 text-sm" required>
-    </div>
+    <label class="field-label">제목</label>
+    <input class="input" name="title" value="{{ doc.title if doc else '' }}" required style="margin-bottom:14px">
 
-    <div class="mb-4">
-      <label class="block text-xs text-gray-500 mb-1">요약 (LLM 라우터가 이 한 줄로 관련성 판단)</label>
-      <input name="summary" value="{{ doc.summary if doc else '' }}"
-             placeholder="이 문서가 어떤 문의에 도움이 되는지 한 줄로"
-             class="w-full border rounded px-3 py-2 text-sm">
-    </div>
+    <label class="field-label">요약 <span class="t-subtle">(LLM 라우터가 이 한 줄로 관련성 판단)</span></label>
+    <input class="input" name="summary" value="{{ doc.summary if doc else '' }}"
+           placeholder="이 문서가 어떤 문의에 도움이 되는지 한 줄로" style="margin-bottom:14px">
 
-    <div class="grid grid-cols-2 gap-4 mb-4">
+    <div class="grid grid-2" style="margin-bottom:14px">
       <div>
-        <label class="block text-xs text-gray-500 mb-1">분류 (쉼표 구분)</label>
-        <input name="categories" value="{{ doc.categories if doc else '' }}"
-               placeholder="pricing_question, purchase_inquiry, all"
-               class="w-full border rounded px-3 py-2 text-sm">
+        <label class="field-label">분류 (쉼표 구분)</label>
+        <input class="input" name="categories" value="{{ doc.categories if doc else '' }}" placeholder="pricing_question, purchase_inquiry, all">
       </div>
       <div>
-        <label class="block text-xs text-gray-500 mb-1">태그 (쉼표 구분)</label>
-        <input name="tags" value="{{ doc.tags if doc else '' }}"
-               placeholder="요금제, 환불, 엔터프라이즈"
-               class="w-full border rounded px-3 py-2 text-sm">
+        <label class="field-label">태그 (쉼표 구분)</label>
+        <input class="input" name="tags" value="{{ doc.tags if doc else '' }}" placeholder="요금제, 환불, 엔터프라이즈">
       </div>
     </div>
 
-    <div class="grid grid-cols-3 gap-4 mb-4">
+    <div class="grid grid-3" style="margin-bottom:14px">
       <div>
-        <label class="block text-xs text-gray-500 mb-1">범위</label>
-        <select name="scope" class="w-full border rounded px-3 py-2 text-sm">
+        <label class="field-label">범위</label>
+        <select class="select" name="scope">
           <option value="both" {% if doc and doc.scope == 'both' %}selected{% endif %}>both</option>
           <option value="inbound" {% if doc and doc.scope == 'inbound' %}selected{% endif %}>inbound</option>
           <option value="outbound" {% if doc and doc.scope == 'outbound' %}selected{% endif %}>outbound</option>
         </select>
       </div>
       <div>
-        <label class="block text-xs text-gray-500 mb-1">상태 (active만 LLM 노출)</label>
-        <select name="status" class="w-full border rounded px-3 py-2 text-sm">
+        <label class="field-label">상태 <span class="t-subtle">(active만 노출)</span></label>
+        <select class="select" name="status">
           <option value="active" {% if not doc or doc.status == 'active' %}selected{% endif %}>active</option>
           <option value="draft" {% if doc and doc.status == 'draft' %}selected{% endif %}>draft</option>
           <option value="archived" {% if doc and doc.status == 'archived' %}selected{% endif %}>archived</option>
         </select>
       </div>
       <div>
-        <label class="block text-xs text-gray-500 mb-1">작성자</label>
-        <input name="author" value="{{ doc.author if doc else '' }}"
-               class="w-full border rounded px-3 py-2 text-sm">
+        <label class="field-label">작성자</label>
+        <input class="input" name="author" value="{{ doc.author if doc else '' }}">
       </div>
     </div>
 
     {% if mode == 'edit' %}
-    <div class="mb-4">
-      <label class="block text-xs text-gray-500 mb-1">변경 메모 (이력에 기록, 선택)</label>
-      <input name="change_note" value=""
-             placeholder="예: 환불 기간 7일→14일로 수정"
-             class="w-full border rounded px-3 py-2 text-sm">
-    </div>
+    <label class="field-label">변경 메모 <span class="t-subtle">(이력에 기록, 선택)</span></label>
+    <input class="input" name="change_note" value="" placeholder="예: 환불 기간 7일→14일로 수정" style="margin-bottom:14px">
     {% endif %}
 
-    <div class="mb-4">
-      <label class="block text-xs text-gray-500 mb-1">본문 (Markdown)</label>
-      <textarea name="body" rows="16"
-                class="w-full border rounded px-3 py-2 text-sm font-mono leading-relaxed"
-                required>{{ doc.body if doc else '' }}</textarea>
-    </div>
+    <label class="field-label">본문 (Markdown)</label>
+    <textarea class="draft-textarea" name="body" required>{{ doc.body if doc else '' }}</textarea>
 
-    <div class="flex gap-3 items-center">
+    <div class="action-bar">
       {% if mode == 'edit' %}
-      <button type="button"
+      <button type="button" class="btn btn--primary"
               hx-put="/knowledge/{{ doc.id }}" hx-include="#kb-form"
-              hx-target="#action-result" hx-swap="innerHTML"
-              class="bg-blue-600 text-white px-4 py-2 rounded text-sm hover:bg-blue-700">
-        저장
-      </button>
-      <button type="button"
+              hx-target="#action-result" hx-swap="innerHTML">{{ icon("check", 15) }} 저장</button>
+      <button type="button" class="btn btn--danger"
               hx-delete="/knowledge/{{ doc.id }}" hx-confirm="정말 삭제하시겠습니까?"
-              hx-target="#action-result" hx-swap="innerHTML"
-              class="bg-red-100 text-red-700 px-4 py-2 rounded text-sm hover:bg-red-200">
-        삭제
-      </button>
-      <a href="/knowledge/{{ doc.id }}/history"
-         class="ml-auto text-sm text-gray-500 hover:underline">수정 이력 (v{{ doc.version }})</a>
+              hx-target="#action-result" hx-swap="innerHTML">{{ icon("x", 15) }} 삭제</button>
       {% else %}
-      <button type="button"
+      <button type="button" class="btn btn--primary"
               hx-post="/knowledge" hx-include="#kb-form"
-              hx-target="#action-result" hx-swap="innerHTML"
-              class="bg-green-600 text-white px-4 py-2 rounded text-sm hover:bg-green-700">
-        생성
-      </button>
+              hx-target="#action-result" hx-swap="innerHTML">{{ icon("plus", 15) }} 생성</button>
       {% endif %}
     </div>
   </form>
-
-  <div id="action-result" class="mt-4"></div>
+  <div id="action-result" style="margin-top:14px"></div>
 </div>
 
 {% endblock %}

@@ -31,6 +31,7 @@ def _mock_dashboard_context():
                 "subject": "가격 문의",
                 "channel": "email",
                 "direction": "outgoing",
+                "flow": "inbound_reply",
                 "created_at": datetime(2026, 1, 1, 12, 0),
             }
         ],
@@ -50,11 +51,30 @@ def _mock_dashboard_context():
 def _mock_detail_context(message_id):
     if message_id == 1:
         return {
+            "thread": [
+                {
+                    "id": 1,
+                    "direction": "outbound",
+                    "status": "pending_approval",
+                    "subject": "가격 안내",
+                    "body": "안녕하세요, 가격 안내드립니다.",
+                    "body_ko": None,
+                    "channel": "email",
+                    "from_address": "sales@company.com",
+                    "to_address": "test@example.com",
+                    "created_at": datetime(2026, 1, 1, 12, 0),
+                    "sent_at": None,
+                    "is_current": True,
+                }
+            ],
+            "ticket": {"ticket_id": "T-1", "stage": "initial", "topic": "pricing_question"},
+            "inbound_messages": [],
             "msg": {
                 "id": 1,
                 "status": "pending_approval",
                 "subject": "가격 안내",
                 "body": "안녕하세요, 가격 안내드립니다.",
+                "body_ko": None,
                 "channel": "email",
                 "direction": "outgoing",
                 "language": "ko",
@@ -73,6 +93,7 @@ def _mock_detail_context(message_id):
                 "company": "TestCo",
             },
             "prospect": None,
+            "domain_profile": None,
         }
     return {}
 
@@ -81,13 +102,15 @@ def _mock_detail_context(message_id):
 def test_dashboard_returns_200():
     r = _client().get("/")
     assert r.status_code == 200
-    assert "Sales Automation" in r.text
+    assert "대시보드" in r.text
 
 
 @patch("src.api.web.routes.dashboard._dashboard_context", _mock_dashboard_context)
-def test_dashboard_has_tailwind_cdn():
+def test_dashboard_loads_design_css():
+    # The redesign replaced the Tailwind CDN with the PERSO design tokens/components CSS.
     r = _client().get("/")
-    assert "cdn.tailwindcss.com" in r.text
+    assert "/static/console.css" in r.text
+    assert "/static/tokens.css" in r.text
 
 
 @patch("src.api.web.routes.dashboard._dashboard_context", _mock_dashboard_context)
@@ -97,16 +120,18 @@ def test_dashboard_has_htmx():
 
 
 @patch("src.api.web.routes.dashboard._dashboard_context", _mock_dashboard_context)
-def test_dashboard_has_korean_font():
+def test_dashboard_loads_pretendard_tokens():
+    # Pretendard (Korean UI font) is loaded via tokens.css, which the page links.
     r = _client().get("/")
-    assert "Noto+Sans+KR" in r.text or "Noto Sans KR" in r.text
+    assert "/static/tokens.css" in r.text
 
 
 @patch("src.api.web.routes.dashboard._dashboard_context", _mock_dashboard_context)
 def test_dashboard_shows_status_counts():
+    # KPI cards surface the counts with Korean labels (status pills), not raw enum strings.
     r = _client().get("/")
-    assert "pending_approval" in r.text
-    assert "sent" in r.text
+    assert "승인 대기" in r.text
+    assert "발송됨" in r.text
 
 
 @patch("src.api.web.routes.dashboard._dashboard_context", _mock_dashboard_context)
@@ -155,7 +180,7 @@ def test_message_detail_404_for_missing():
 @patch("src.api.web.routes.messages._message_detail_context", _mock_detail_context)
 def test_message_detail_shows_send_button():
     r = _client().get("/messages/1")
-    assert "보내기" in r.text
+    assert "발송" in r.text  # "검토 완료 · 발송"
     assert "거절" in r.text
 
 

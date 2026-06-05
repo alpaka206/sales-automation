@@ -23,7 +23,7 @@ def _dashboard_context() -> dict:
         # inbound-body box that already appears on each message detail.
         recent = (
             session.execute(
-                select(Message, Conversation.topic)
+                select(Message, Conversation.topic, Conversation.prospect_id)
                 .join(Conversation, Message.conversation_id == Conversation.id)
                 .where(Message.direction == "outbound")
                 .order_by(Message.created_at.desc())
@@ -39,9 +39,13 @@ def _dashboard_context() -> dict:
                 "subject": msg.subject or "(제목 없음)",
                 "channel": msg.channel,
                 "direction": msg.direction,
+                # Product "flow" (not the DB direction): a reply to an inbound inquiry vs an
+                # outbound-discovery cold mail. Outbound conversations carry a prospect_id;
+                # inbound-reply conversations are contact-only.
+                "flow": "outbound" if prospect_id is not None else "inbound_reply",
                 "created_at": msg.created_at,
             }
-            for msg, topic in recent
+            for msg, topic, prospect_id in recent
         ]
 
         status_rows = session.execute(

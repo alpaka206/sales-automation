@@ -41,6 +41,7 @@ def _message_detail_context(message_id: int) -> dict:
         # Pull the inbound messages from the same conversation so the approver can see
         # what they're replying to. Newest first, capped at 5 — UI shows them above the draft.
         inbound_rows = []
+        thread_rows = []
         if conv:
             inbound_rows = session.execute(
                 select(Message)
@@ -50,6 +51,15 @@ def _message_detail_context(message_id: int) -> dict:
                 )
                 .order_by(Message.created_at.desc())
                 .limit(5)
+            ).scalars().all()
+
+            # Full ticket/conversation thread, oldest → newest. One ticket = one
+            # conversation (see agents/inbound.py), so this is the complete back-and-forth
+            # history for this ticket: every inbound inquiry and every outbound reply/follow-up.
+            thread_rows = session.execute(
+                select(Message)
+                .where(Message.conversation_id == conv.id)
+                .order_by(Message.created_at.asc(), Message.id.asc())
             ).scalars().all()
 
         domain_profile_data = None
@@ -81,6 +91,31 @@ def _message_detail_context(message_id: int) -> dict:
                 }
                 for im in inbound_rows
             ],
+            # Whole-ticket timeline: inquiries and replies interleaved in chronological
+            # order. The current message (being approved/viewed) is flagged so the
+            # template can render it as the editable reply card inline in the thread.
+            "thread": [
+                {
+                    "id": tm.id,
+                    "direction": tm.direction,
+                    "status": tm.status,
+                    "subject": tm.subject,
+                    "body": tm.body,
+                    "body_ko": to_korean(tm.body) if needs_korean(tm.body) else None,
+                    "channel": tm.channel,
+                    "from_address": tm.from_address,
+                    "to_address": tm.to_address,
+                    "created_at": tm.created_at,
+                    "sent_at": tm.sent_at,
+                    "is_current": tm.id == msg.id,
+                }
+                for tm in thread_rows
+            ],
+            "ticket": {
+                "ticket_id": conv.hubspot_ticket_id if conv else None,
+                "stage": conv.stage if conv else None,
+                "topic": conv.topic if conv else None,
+            },
             "msg": {
                 "id": msg.id,
                 "status": msg.status,
@@ -123,7 +158,7 @@ def _messages_list_context(status: str = "", channel: str = "") -> dict:
     rendering them here would duplicate the box at the top of the detail page.
     """
     q = (
-        select(Message, Conversation.topic)
+        select(Message, Conversation.topic, Conversation.prospect_id)
         .join(Conversation, Message.conversation_id == Conversation.id)
         .where(Message.direction == "outbound")
         .order_by(Message.created_at.desc())
@@ -143,10 +178,12 @@ def _messages_list_context(status: str = "", channel: str = "") -> dict:
                 "subject": msg.subject or "(제목 없음)",
                 "channel": msg.channel,
                 "direction": msg.direction,
+                # Product flow, not DB direction: reply to an inbound inquiry vs outbound cold mail.
+                "flow": "outbound" if prospect_id is not None else "inbound_reply",
                 "to_address": msg.to_address or "-",
                 "created_at": msg.created_at,
             }
-            for msg, topic in rows
+            for msg, topic, prospect_id in rows
         ]
     return {"messages": messages, "filter_status": status, "filter_channel": channel}
 

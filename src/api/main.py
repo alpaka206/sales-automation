@@ -8,8 +8,11 @@ import logging
 import uuid
 from contextlib import asynccontextmanager
 
+from pathlib import Path
+
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, Response
+from fastapi.staticfiles import StaticFiles
 
 from ..agents.approval import ApprovalError, approve, mark_sent, reject
 from ..common.config import settings
@@ -73,6 +76,11 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Sales Automation", version="0.1.0", lifespan=lifespan)
+app.mount(
+    "/static",
+    StaticFiles(directory=str(Path(__file__).parent / "web" / "static")),
+    name="static",
+)
 app.include_router(web_router)
 app.include_router(webhook_router)
 

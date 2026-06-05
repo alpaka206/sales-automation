@@ -11,7 +11,7 @@ from sqlalchemy import func, select
 from ....common.config import settings
 from ....db.models import LLMUsage
 from ....db.session import SessionLocal
-from ._shared import templates
+from ._shared import esc, templates
 
 router = APIRouter(tags=["web"])
 
@@ -82,14 +82,17 @@ async def settings_refresh_healthcheck():
     from ....common.healthcheck import run_healthchecks
 
     report = run_healthchecks()
+    # Pill tone mirrors STATUS/TONE in templates/partials/ui.html (PASS→ok, WARN→warn, FAIL→danger).
+    tone = {"PASS": "ok", "WARN": "warn", "FAIL": "danger"}
+    ko = {"PASS": "정상", "WARN": "주의", "FAIL": "실패"}
     rows = ""
     for c in report.checks:
-        color = {"PASS": "green", "WARN": "yellow", "FAIL": "red"}.get(c.status, "gray")
+        t = tone.get(c.status, "neutral")
+        label = ko.get(c.status, c.status)
         rows += (
-            f'<tr class="border-b"><td class="px-4 py-2 text-sm">{c.name}</td>'
-            f'<td class="px-4 py-2"><span class="text-xs font-medium text-{color}-700 '
-            f'bg-{color}-100 px-2 py-0.5 rounded">{c.status}</span></td>'
-            f'<td class="px-4 py-2 text-xs text-gray-500">{c.detail}</td>'
-            f'<td class="px-4 py-2 text-xs text-gray-400">{c.latency_ms}ms</td></tr>'
+            f'<tr><td style="font-weight:600">{esc(c.name)}</td>'
+            f'<td><span class="pill pill--{t} pill--sm"><span class="pill__dot"></span>{esc(label)}</span></td>'
+            f'<td class="td-subtle t-sm">{esc(c.detail)}</td>'
+            f'<td class="td-subtle tnum">{c.latency_ms}ms</td></tr>'
         )
     return HTMLResponse(rows)
