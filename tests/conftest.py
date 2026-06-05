@@ -17,6 +17,11 @@ import tempfile
 _TEST_DB_PATH = os.path.join(tempfile.gettempdir(), "sales_automation_test.db")
 os.environ.setdefault("DATABASE_URL", f"sqlite:///{_TEST_DB_PATH}")
 os.environ.setdefault("INTERNAL_API_TOKEN", "test-internal-token")
+# A dummy HubSpot token so HubSpotClient() constructs instead of raising
+# HubSpotNotConfigured. Tests that exercise HubSpot mock the actual HTTP methods;
+# this only satisfies the constructor's token check (matching local .env, where
+# the full suite passes — no test depends on the token being absent).
+os.environ.setdefault("HUBSPOT_PRIVATE_APP_TOKEN", "test-hubspot-token")
 
 from unittest.mock import MagicMock  # noqa: E402
 
