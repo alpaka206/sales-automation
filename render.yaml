@@ -51,8 +51,10 @@ services:
         sync: false
 
       # ----- Web UI login: Google OAuth (optional; keep AUTH_MODE=basic until configured) -----
-      - key: AUTH_MODE                 # "basic" (default) or "google_oauth"
-        value: basic
+      # Dashboard-managed so flipping to "google_oauth" there isn't reverted by the blueprint.
+      # Unset => defaults to "basic" in config (no lockout).
+      - key: AUTH_MODE                 # set "basic" or "google_oauth" in the Render dashboard
+        sync: false
       - key: GOOGLE_OAUTH_CLIENT_ID    # Google Cloud OAuth 2.0 web client; redirect URI = <PUBLIC_BASE_URL>/auth/callback
         sync: false
       - key: GOOGLE_OAUTH_CLIENT_SECRET
