@@ -10,6 +10,7 @@ from sqlalchemy.orm import joinedload
 from ....agents.approval import ApprovalError, approve, reject
 from ....db.models import Conversation, DomainProfile, Message
 from ....db.session import SessionLocal
+from ....llm.translate import needs_korean, to_korean
 from ._shared import esc, templates
 
 router = APIRouter(tags=["web"])
@@ -72,6 +73,7 @@ def _message_detail_context(message_id: int) -> dict:
                 {
                     "id": im.id,
                     "body": im.body,
+                    "body_ko": to_korean(im.body) if needs_korean(im.body) else None,
                     "subject": im.subject,
                     "from_address": im.from_address,
                     "channel": im.channel,
@@ -84,6 +86,7 @@ def _message_detail_context(message_id: int) -> dict:
                 "status": msg.status,
                 "subject": msg.subject or "",
                 "body": msg.body,
+                "body_ko": to_korean(msg.body) if needs_korean(msg.body) else None,
                 "channel": msg.channel,
                 "direction": msg.direction,
                 "language": msg.language,

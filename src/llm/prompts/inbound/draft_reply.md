@@ -7,7 +7,6 @@ Context:
 - contact: {{contact_name}} ({{company}}, {{country}})
 - category: {{category}}
 - score: {{score}}
-- language to reply in: {{language}}
 
 Most recent inbound (verbatim):
 """
@@ -19,7 +18,7 @@ Most recent inbound (verbatim):
 {{knowledge_docs}}
 
 Constraints:
-- Match the language of the inbound message unless the company rules say otherwise.
+- LANGUAGE (mandatory): Reply in the EXACT same language as the customer's inbound message above. Detect the language from the message text itself — NOT from the contact's country. If the inbound is in English, reply in English; if Japanese, reply in Japanese; if Korean, reply in Korean; and so on. Never switch languages.
 - Be concise. No more than 5 short paragraphs.
 - Do not quote prices, delivery dates, or contractual terms verbatim from the knowledge base. You may *acknowledge* that pricing/policy information is available and offer a meeting or follow-up email with specifics.
 - If the knowledge base contains a fact directly relevant to the question (e.g. plan tiers, refund policy, supported regions), reference it qualitatively — never invent facts that aren't in the knowledge base or the inbound message.
@@ -29,6 +28,6 @@ Return strict JSON only:
 {
   "subject": "<subject line, empty string for whatsapp>",
   "body": "<the reply, plain text, real line breaks>",
-  "language": "ko" | "en",
+  "language": "<ISO 639-1 code of the language you wrote the reply in, e.g. en, ko, ja, vi, th, zh>",
   "tone_notes": "<optional one-liner about tone choices you made>"
 }

@@ -456,13 +456,13 @@ class InboundAgent:
                 "country": contact_info["country"],
                 "category": classification.category,
                 "score": str(score),
-                "language": "ko" if contact_info.get("country", "").lower() in _TARGET_COUNTRIES else "en",
                 "last_message": contact_info["last_message"],
                 "enrichment_context": _build_enrichment_context(contact_info),
                 "knowledge_docs": knowledge_docs,
             },
             schema=DraftResult,
             tier="pro",
+            max_tokens=4000,
         )
 
     def _persist(
