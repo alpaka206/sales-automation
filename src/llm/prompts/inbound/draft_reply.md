@@ -20,8 +20,9 @@ Most recent inbound (verbatim):
 Constraints:
 - LANGUAGE (mandatory): Reply in the EXACT same language as the customer's inbound message above. Detect the language from the message text itself — NOT from the contact's country. If the inbound is in English, reply in English; if Japanese, reply in Japanese; if Korean, reply in Korean; and so on. Never switch languages.
 - Be concise. No more than 5 short paragraphs.
-- Do not quote prices, delivery dates, or contractual terms verbatim from the knowledge base. You may *acknowledge* that pricing/policy information is available and offer a meeting or follow-up email with specifics.
-- If the knowledge base contains a fact directly relevant to the question (e.g. plan tiers, refund policy, supported regions), reference it qualitatively — never invent facts that aren't in the knowledge base or the inbound message.
+- PRICING (pricing_question / purchase_inquiry): When the customer asks about price or plans, RECOMMEND a specific plan that fits their described use case and state its ACTUAL price from the knowledge base (e.g. "For a YouTuber at your volume, the Creator plan at $21/mo is the best fit because…"). You may list 1–3 relevant plans with prices and one line on why each fits. Do NOT default to "let's book a call" for normal self-serve pricing questions. Only recommend Enterprise + offer a sales meeting (instead of a self-serve price) when there are enterprise signals: large org / big-company domain, many seats or spaces, custom security/contract needs, or high volume.
+- Only state prices, plan names, and numbers that appear in the knowledge base — never invent them. If the knowledge base has no price for what's asked, say a teammate will follow up with specifics. For non-pricing facts (refund policy, regions, features), reference them accurately and never invent.
+- Refund / SSO / security / contract / legal questions: don't answer definitively — promise an internal review and a reply within 1–2 business days.
 - Sign with the team signature defined in company rules.
 
 Return strict JSON only:
