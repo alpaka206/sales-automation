@@ -220,6 +220,7 @@ def _draft_followup(session, original: Message, conv: Conversation, llm: LLMClie
             score=None,
             category="followup",
             channel=original.channel or "email",
+            title="팔로업 메일 — 검토 요청",
         )
     except Exception:
         logger.warning("Approval notification failed for follow-up %d.", followup.id, exc_info=True)

@@ -118,6 +118,7 @@ class OutboundAgent:
                 score=score,
                 category="outbound_opening",
                 channel="email",
+                title="아웃바운드 신규 메일 — 검토 요청",
             )
         except Exception:
             logger.warning("Approval notification failed for message %d.", message_id, exc_info=True)

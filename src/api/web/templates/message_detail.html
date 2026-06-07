@@ -5,6 +5,9 @@
 {% block content %}
 {% set is_pending = msg.status == 'pending_approval' %}
 {% set has_inbound = thread | selectattr('direction', 'equalto', 'inbound') | list | length > 0 %}
+{# Only offer the 원문↔한국어 toggle when something actually needs translating. A thread
+   that arrived in Korean has no body_ko on any bubble, so the button would do nothing. #}
+{% set has_translation = thread | selectattr('body_ko') | list | length > 0 %}
 
 <div style="margin-bottom:14px">
   <a href="/messages" class="chip">{{ icon("chevron", 14) }} 메시지 목록</a>
@@ -30,7 +33,9 @@
       <div style="margin-top:6px">{{ score_meter(msg.score_snapshot, show_bar=False) }}</div>
     </div>
     {% endif %}
+    {% if has_translation %}
     <button type="button" class="chip" id="ko-toggle" title="원문 ↔ 한국어 번역 전환">{{ icon("translate", 15) }} <span id="ko-toggle-label">번역으로 보기</span></button>
+    {% endif %}
   </div>
 </div>
 
