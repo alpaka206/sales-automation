@@ -85,12 +85,20 @@ def call_gemini(
     max_tokens: int = 2000,
     system: str | None = None,
     model: str | None = None,
+    thinking_budget: int | None = None,
 ) -> LLMResult:
     """Generate content via Gemini on Vertex AI and return an LLMResult.
 
     ``model`` selects the Gemini model id; defaults to the flash tier
     (``settings.GEMINI_MODEL``). Callers pass the pro-tier id for
     quality-critical drafting.
+
+    ``thinking_budget`` caps the "thinking" tokens of Gemini 2.5 models. This
+    matters because thinking tokens are drawn from the SAME ``max_output_tokens``
+    budget — left uncapped, a long internal reasoning trace can consume the whole
+    budget and truncate (or empty) the actual answer, which then fails JSON
+    parsing. Pass ``0`` to disable thinking (flash), a small int to bound it
+    (pro has a hard minimum of 128), or ``None`` to leave the model default.
     """
     from google.genai import types
 
@@ -100,6 +108,13 @@ def call_gemini(
         max_output_tokens=max_tokens,
         system_instruction=system or None,
     )
+    if thinking_budget is not None:
+        # Guard against SDK variants that don't expose ThinkingConfig — a missing
+        # cap is non-fatal, so degrade gracefully rather than crash the call.
+        try:
+            config.thinking_config = types.ThinkingConfig(thinking_budget=thinking_budget)
+        except Exception:  # pragma: no cover - depends on SDK version
+            logger.debug("ThinkingConfig unsupported by SDK; proceeding without a thinking cap.")
     resp = client.models.generate_content(
         model=model,
         contents=prompt,
