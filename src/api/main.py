@@ -172,20 +172,6 @@ def favicon():
     return Response(status_code=404)
 
 
-_FAVICON_SVG = (
-    b'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">'
-    b'<rect width="32" height="32" rx="6" fill="#10b981"/>'
-    b'<text x="16" y="22" font-size="20" text-anchor="middle" fill="white" '
-    b'font-family="-apple-system,Segoe UI,sans-serif" font-weight="700">S</text>'
-    b"</svg>"
-)
-
-
-@app.get("/favicon.ico")
-def favicon() -> Response:
-    return Response(content=_FAVICON_SVG, media_type="image/svg+xml")
-
-
 @app.post("/internal/healthcheck")
 def internal_healthcheck() -> dict:
     """Run live connectivity checks and return the report."""

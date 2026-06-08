@@ -134,6 +134,11 @@ class InboundAgent:
                 score=score,
                 category=classification.category,
                 channel=channel,
+                title="새 인바운드 문의 — 회신 검토 요청",
+                inquiry=contact_info.get("last_message"),
+                contact_name=contact_info.get("full_name"),
+                contact_company=contact_info.get("company"),
+                contact_email=contact_info.get("email"),
             )
         except Exception:
             logger.warning("Approval notification failed for message %d.", message_id, exc_info=True)

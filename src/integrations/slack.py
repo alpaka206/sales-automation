@@ -28,6 +28,16 @@ def _escape_mrkdwn(text: str) -> str:
     return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
+def _quote_mrkdwn(text: str, limit: int) -> str:
+    """Escape and render text as a Slack blockquote, truncated to ``limit`` chars."""
+    text = (text or "").strip()
+    if len(text) > limit:
+        text = text[:limit].rstrip() + " …"
+    safe = _escape_mrkdwn(text)
+    # Prefix every line with "> " so multi-line content stays inside the quote.
+    return "\n".join(f"> {line}" if line else ">" for line in safe.splitlines()) or "> —"
+
+
 def post_approval_card(
     message_id: int,
     subject: str,
@@ -35,45 +45,72 @@ def post_approval_card(
     score: int | None,
     category: str,
     channel_type: str,
+    *,
+    title: str | None = None,
+    inquiry: str | None = None,
+    contact_name: str | None = None,
+    contact_company: str | None = None,
+    contact_email: str | None = None,
 ) -> None:
-    """Post an approval card to the configured Slack channel.
+    """Post a Korean approval card to the configured Slack channel.
 
-    Note: this card is informational — the action buttons are removed because the app
+    The card answers "who / what did they ask / what will we send" at a glance and
+    links straight to the message screen for review:
+      - ``title``     : Korean header (e.g. "새 인바운드 문의 — 회신 검토 요청").
+      - ``inquiry``   : the customer's inbound message (omitted for outbound cold mail).
+      - ``contact_*`` : who the prospect/customer is.
+      - ``body_snippet`` : the drafted reply that will go out after approval.
+
+    Note: this card is informational — there are no action buttons because the app
     does not run a Slack Interactivity endpoint with signing-secret verification. The
-    operator approves via the web UI link in the card (localhost-trusted) or via the
-    /approve API with a per-message HMAC token.
+    operator approves via the web UI link (localhost-trusted) or the /approve API with
+    a per-message HMAC token.
     """
     if not settings.SLACK_BOT_TOKEN or not settings.SLACK_APPROVAL_CHANNEL_ID:
         raise SlackNotConfigured("SLACK_BOT_TOKEN or SLACK_APPROVAL_CHANNEL_ID not set.")
 
     url = _approval_url(message_id)
-    subj_safe = _escape_mrkdwn(subject)
-    body_safe = _escape_mrkdwn(body_snippet[:500])
+    header = title or "회신 검토 요청"
+
+    # 문의자 한 줄: 이름 (회사) — 비어 있는 항목은 자연스럽게 생략.
+    who_bits = [b for b in (contact_name, contact_company) if b]
+    who_line = _escape_mrkdwn(" · ".join(who_bits)) if who_bits else "—"
+    email_line = _escape_mrkdwn(contact_email) if contact_email else "—"
+    subj_safe = _escape_mrkdwn(subject) if subject else "—"
     cat_safe = _escape_mrkdwn(category)
 
-    blocks = [
-        {
-            "type": "header",
-            "text": {"type": "plain_text", "text": f"Approval #{message_id}"},
-        },
+    blocks: list[dict] = [
+        {"type": "header", "text": {"type": "plain_text", "text": f"📨 {header}"[:150]}},
         {
             "type": "section",
             "fields": [
-                {"type": "mrkdwn", "text": f"*Category:* {cat_safe}"},
-                {"type": "mrkdwn", "text": f"*Score:* {score or 'N/A'}"},
-                {"type": "mrkdwn", "text": f"*Channel:* {channel_type}"},
-                {"type": "mrkdwn", "text": f"*Subject:* {subj_safe}"},
+                {"type": "mrkdwn", "text": f"*문의자:* {who_line}"},
+                {"type": "mrkdwn", "text": f"*이메일:* {email_line}"},
+                {"type": "mrkdwn", "text": f"*분류:* {cat_safe}"},
+                {"type": "mrkdwn", "text": f"*점수:* {score if score is not None else 'N/A'}"},
             ],
         },
-        {
-            "type": "section",
-            "text": {"type": "mrkdwn", "text": f"```{body_safe}```"},
-        },
-        {
-            "type": "section",
-            "text": {"type": "mrkdwn", "text": f"<{url}|Open in web UI to approve →>"},
-        },
     ]
+
+    # 문의 내용 — 인바운드일 때만(아웃바운드 콜드메일은 받은 문의가 없음).
+    if inquiry and inquiry.strip():
+        blocks.append({
+            "type": "section",
+            "text": {"type": "mrkdwn", "text": f"*🗨️ 문의 내용*\n{_quote_mrkdwn(inquiry, 800)}"},
+        })
+
+    blocks.append({
+        "type": "section",
+        "text": {"type": "mrkdwn", "text": f"*✍️ 나갈 답변 초안* (제목: {subj_safe})"},
+    })
+    blocks.append({
+        "type": "section",
+        "text": {"type": "mrkdwn", "text": f"```{_escape_mrkdwn(body_snippet[:1500])}```"},
+    })
+    blocks.append({
+        "type": "section",
+        "text": {"type": "mrkdwn", "text": f"<{url}|🔗 메시지 화면에서 검토·승인하기 →>"},
+    })
 
     with httpx.Client(timeout=10) as client:
         r = client.post(
@@ -82,7 +119,8 @@ def post_approval_card(
             json={
                 "channel": settings.SLACK_APPROVAL_CHANNEL_ID,
                 "blocks": blocks,
-                "text": f"Approval needed for message #{message_id}",
+                # Fallback text for notifications/screen readers.
+                "text": f"{header} (메시지 #{message_id}) — {url}",
             },
         )
         r.raise_for_status()

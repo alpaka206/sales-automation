@@ -27,6 +27,13 @@ logger = logging.getLogger(__name__)
 
 T = TypeVar("T", bound=BaseModel)
 
+# Cap Gemini 2.5 "thinking" tokens per tier. Thinking is drawn from the same
+# max_output_tokens budget, so an uncapped reasoning trace can truncate the
+# answer and break JSON parsing. flash → 0 (off; fast/cheap, plenty for
+# classification/scoring/routing/drafting); pro → 128 (its hard minimum; keeps
+# light reasoning for customer-facing copy without starving the output).
+_THINKING_BUDGET_BY_TIER = {"flash": 0, "pro": 128}
+
 
 class LLMError(RuntimeError):
     """Raised when the LLM cannot be reached or returns unrecoverable output."""
@@ -120,13 +127,17 @@ class LLMClient:
         customer-facing drafting). Unknown tiers fall back to flash.
         """
         model = settings.gemini_model_for.get(tier, settings.GEMINI_MODEL)
+        thinking_budget = _THINKING_BUDGET_BY_TIER.get(tier, 0)
         system = get_company_rules()
         prompt = load_prompt(prompt_name, variables, include_rules=False)
 
         if schema is not None:
             prompt += "\n\nReturn ONLY valid JSON. Do not wrap in markdown code fences."
 
-        text = self._dispatch(prompt, max_tokens=max_tokens, system=system, model=model)
+        text = self._dispatch(
+            prompt, max_tokens=max_tokens, system=system, model=model,
+            thinking_budget=thinking_budget,
+        )
 
         if schema is None:
             return text
@@ -140,7 +151,10 @@ class LLMClient:
                 + "\n\nYour previous response was not valid JSON matching the schema."
                 + " Return ONLY valid JSON this time. NO markdown fences, NO prose around it."
             )
-            text = self._dispatch(retry_prompt, max_tokens=max_tokens, system=system, model=model)
+            text = self._dispatch(
+                retry_prompt, max_tokens=max_tokens, system=system, model=model,
+                thinking_budget=thinking_budget,
+            )
             try:
                 return schema.model_validate_json(_strip_code_fences(text))
             except ValidationError as second_err:
@@ -149,21 +163,30 @@ class LLMClient:
     # ------------- internals -------------
 
     def _dispatch(
-        self, prompt: str, max_tokens: int, system: str | None = None, model: str | None = None
+        self, prompt: str, max_tokens: int, system: str | None = None, model: str | None = None,
+        thinking_budget: int | None = None,
     ) -> str:
         try:
-            return self._dispatch_once(prompt, max_tokens, system=system, model=model)
+            return self._dispatch_once(
+                prompt, max_tokens, system=system, model=model, thinking_budget=thinking_budget
+            )
         except Exception as first_err:
             if not _is_transient(first_err):
                 raise
             logger.warning("Transient LLM error, retrying in 2s: %s", first_err)
             time.sleep(2)
-            return self._dispatch_once(prompt, max_tokens, system=system, model=model)
+            return self._dispatch_once(
+                prompt, max_tokens, system=system, model=model, thinking_budget=thinking_budget
+            )
 
     def _dispatch_once(
-        self, prompt: str, max_tokens: int, system: str | None = None, model: str | None = None
+        self, prompt: str, max_tokens: int, system: str | None = None, model: str | None = None,
+        thinking_budget: int | None = None,
     ) -> str:
-        llm_result = call_gemini(prompt, max_tokens=max_tokens, system=system, model=model)
+        llm_result = call_gemini(
+            prompt, max_tokens=max_tokens, system=system, model=model,
+            thinking_budget=thinking_budget,
+        )
 
         log_usage(llm_result, self.provider)
         self._log_event(prompt, llm_result.text)
