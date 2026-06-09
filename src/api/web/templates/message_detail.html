@@ -68,10 +68,10 @@
           </div>
           <form id="msg-form"{% if t.body_ko %} class="has-ko"{% endif %}>
             <div class="msg-orig">
-              <label class="field-label">제목</label>
-              <input class="input" name="subject" value="{{ msg.subject }}" style="margin-bottom:12px">
-              <label class="field-label">본문</label>
-              <textarea class="draft-textarea" name="body">{{ msg.body }}</textarea>
+              <label class="field-label" for="msg-subject">제목</label>
+              <input class="input" id="msg-subject" name="subject" value="{{ msg.subject }}" style="margin-bottom:12px">
+              <label class="field-label" for="msg-body">본문</label>
+              <textarea class="draft-textarea" id="msg-body" name="body">{{ msg.body }}</textarea>
             </div>
             {% if t.body_ko %}
             <div class="msg-ko">
@@ -80,7 +80,7 @@
             </div>
             {% endif %}
             <div class="action-bar">
-              <button type="button" class="btn btn--ok" onclick="openSendModal()">{{ icon("check", 15) }} 검토 완료 · 발송</button>
+              <button type="button" class="btn btn--ok" onclick="openSendModal()" aria-haspopup="dialog" aria-controls="send-modal">{{ icon("check", 15) }} 검토 완료 · 발송</button>
               <button type="button" class="btn btn--subtle"
                       hx-post="/messages/{{ msg.id }}/edit" hx-include="#msg-form"
                       hx-target="#action-result" hx-swap="innerHTML">{{ icon("edit", 15) }} 저장</button>
@@ -89,14 +89,14 @@
           </form>
           <div id="reject-form" hidden style="margin-top:14px;border-top:1px solid var(--border);padding-top:14px">
             <form>
-              <label class="field-label">거절 사유</label>
-              <textarea class="textarea" name="reason" rows="2" placeholder="거절 사유를 입력하세요" style="margin-bottom:10px"></textarea>
+              <label class="field-label" for="reject-reason">거절 사유</label>
+              <textarea class="textarea" id="reject-reason" name="reason" rows="2" placeholder="거절 사유를 입력하세요" style="margin-bottom:10px"></textarea>
               <button type="button" class="btn btn--danger btn--sm"
                       hx-post="/messages/{{ msg.id }}/reject" hx-include="closest form"
                       hx-target="#action-result" hx-swap="innerHTML">거절 확정</button>
             </form>
           </div>
-          <div id="action-result" style="margin-top:14px"></div>
+          <div id="action-result" role="status" aria-live="polite" style="margin-top:14px"></div>
         </div>
         {% else %}
         {# ----- read-only history bubble (inquiry or past reply) ----- #}
@@ -203,9 +203,9 @@
 {# ---------- send confirmation modal ---------- #}
 {% if is_pending %}
 <div class="modal-overlay" id="send-modal" onclick="if(event.target===this)closeSendModal()">
-  <div class="modal">
-    <div class="modal__title">발송하시겠습니까?</div>
-    <div class="modal__body">
+  <div class="modal" role="alertdialog" aria-modal="true" aria-labelledby="send-modal-title" aria-describedby="send-modal-body">
+    <h2 class="modal__title" id="send-modal-title">발송하시겠습니까?</h2>
+    <div class="modal__body" id="send-modal-body">
       승인 즉시 <strong>{{ msg.channel }}</strong>로 발송됩니다.
       {% if msg.to_address %}수신자: <span class="mono">{{ msg.to_address }}</span>.{% endif %}
       이메일은 SMTP, WhatsApp은 직접 발송되며 HubSpot 타임라인에 기록되고 상태가
@@ -226,9 +226,8 @@
 
 {% block head %}
 <script>
-  function openSendModal() { var m = document.getElementById("send-modal"); if (m) m.classList.add("is-open"); }
-  function closeSendModal() { var m = document.getElementById("send-modal"); if (m) m.classList.remove("is-open"); }
-  document.addEventListener("keydown", function (e) { if (e.key === "Escape") closeSendModal(); });
+  function openSendModal() { window.PERSO_modal.open("send-modal"); }
+  function closeSendModal() { window.PERSO_modal.close("send-modal"); }
   document.addEventListener("DOMContentLoaded", function () {
     var btn = document.getElementById("ko-toggle");
     if (!btn) return;

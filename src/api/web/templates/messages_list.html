@@ -25,7 +25,7 @@
     <a class="chip{% if filter_status == val %} is-active{% endif %}" href="/messages?status={{ val }}&channel={{ filter_channel }}">{{ label }}</a>
     {% endfor %}
   </div>
-  <select class="select" style="width:auto;min-width:150px"
+  <select class="select" aria-label="채널 필터" style="width:auto;min-width:150px"
           onchange="location.href='/messages?status={{ filter_status }}&channel='+this.value">
     <option value="">전체 채널</option>
     {% for c in ['email','whatsapp'] %}
@@ -39,7 +39,7 @@
     <table class="table">
       <thead>
         <tr>
-          <th>상태</th><th>구분</th><th>제목</th><th>분류</th><th>채널</th><th>수신자</th><th>시간</th>
+          <th scope="col">상태</th><th scope="col">구분</th><th scope="col">제목</th><th scope="col">분류</th><th scope="col">채널</th><th scope="col">수신자</th><th scope="col">시간</th>
         </tr>
       </thead>
       <tbody>

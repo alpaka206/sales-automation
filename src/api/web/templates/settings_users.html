@@ -18,9 +18,9 @@
   <div class="table-wrap">
     <table class="table">
       <thead>
-        <tr><th>사용자</th><th>역할</th><th>상태</th><th>최근 로그인</th><th style="text-align:right">관리</th></tr>
+        <tr><th scope="col">사용자</th><th scope="col">역할</th><th scope="col">상태</th><th scope="col">최근 로그인</th><th scope="col" style="text-align:right">관리</th></tr>
       </thead>
-      <tbody>
+      <tbody aria-live="polite">
         {% for u in users %}
         <tr>
           <td>
@@ -41,7 +41,7 @@
               {% if not u.approved %}
               <button class="btn btn--ok btn--sm" hx-post="/settings/users/{{ u.email }}" hx-vals='{"action":"approve"}'>{{ icon("check", 14) }} 승인</button>
               {% elif u.email != me_email %}
-              <button class="btn btn--ghost btn--sm" hx-post="/settings/users/{{ u.email }}" hx-vals='{"action":"revoke"}'>해제</button>
+              <button class="btn btn--ghost btn--sm" hx-post="/settings/users/{{ u.email }}" hx-vals='{"action":"revoke"}' hx-confirm="{{ u.email }} 의 접근 권한을 해제하시겠습니까?">해제</button>
               {% endif %}
               {% if u.role != 'admin' %}
               <button class="btn btn--subtle btn--sm" hx-post="/settings/users/{{ u.email }}" hx-vals='{"action":"make_admin"}'>관리자로</button>

@@ -46,8 +46,8 @@
     </div>
     <div class="table-wrap">
       <table class="table">
-        <thead><tr><th>항목</th><th>상태</th><th>상세</th><th>지연</th></tr></thead>
-        <tbody id="hc-body">
+        <thead><tr><th scope="col">항목</th><th scope="col">상태</th><th scope="col">상세</th><th scope="col">지연</th></tr></thead>
+        <tbody id="hc-body" aria-live="polite">
           {% for c in checks %}
           <tr>
             <td style="font-weight:600">{{ c.name }}</td>

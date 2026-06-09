@@ -19,8 +19,8 @@
 <div class="split">
   <div class="card">
     <form id="icp-form">
-      <label class="field-label">기준 (Markdown)</label>
-      <textarea class="draft-textarea" name="criteria_md"
+      <label class="field-label" for="icp-criteria">기준 (Markdown)</label>
+      <textarea class="draft-textarea" id="icp-criteria" name="criteria_md"
         placeholder="## 가점&#10;- +15: SaaS 기업&#10;&#10;## 감점&#10;- -10: 개인 이메일">{{ rule.criteria_md }}</textarea>
 
       <label class="row" style="gap:10px;margin-top:16px;cursor:pointer;font-size:13.5px">
@@ -34,7 +34,7 @@
                 hx-target="#action-result" hx-swap="innerHTML">{{ icon("check", 15) }} 저장</button>
       </div>
     </form>
-    <div id="action-result" style="margin-top:14px"></div>
+    <div id="action-result" role="status" aria-live="polite" style="margin-top:14px"></div>
   </div>
 
   <div class="card">

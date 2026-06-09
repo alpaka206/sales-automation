@@ -14,13 +14,13 @@
 
 {# ---- filters (GET) ---- #}
 <form method="get" action="/prospects" class="row wrap mb-gap" style="gap:10px">
-  <select name="source" class="select" style="width:auto;min-width:160px" onchange="this.form.submit()">
+  <select name="source" class="select" aria-label="소스 필터" style="width:auto;min-width:160px" onchange="this.form.submit()">
     <option value="">모든 소스</option>
     {% for s in ["youtube","linkedin_comments","google_search","job_board","manual_csv"] %}
     <option value="{{ s }}" {% if filter_source == s %}selected{% endif %}>{{ s }}</option>
     {% endfor %}
   </select>
-  <select name="status" class="select" style="width:auto;min-width:160px" onchange="this.form.submit()">
+  <select name="status" class="select" aria-label="상태 필터" style="width:auto;min-width:160px" onchange="this.form.submit()">
     <option value="">모든 상태</option>
     {% for s in ["collected","analyzed","queued","sent","replied","skipped_lowscore","skipped_dup","bounced"] %}
     <option value="{{ s }}" {% if filter_status == s %}selected{% endif %}>{{ s }}</option>
@@ -45,8 +45,8 @@
       <table class="table">
         <thead>
           <tr>
-            <th style="width:36px"><input type="checkbox" class="cb" id="cb-all" onclick="var on=this.checked;document.querySelectorAll('.p-cb:not(:disabled)').forEach(function(c){c.checked=on});window.__prospectBar&&window.__prospectBar()"></th>
-            <th>이름</th><th>회사 / 이메일</th><th>소스</th><th>ICP</th><th>상태</th><th>국가</th>
+            <th scope="col" style="width:36px"><input type="checkbox" class="cb" id="cb-all" aria-label="전체 선택" onclick="var on=this.checked;document.querySelectorAll('.p-cb:not(:disabled)').forEach(function(c){c.checked=on});window.__prospectBar&&window.__prospectBar()"></th>
+            <th scope="col">이름</th><th scope="col">회사 / 이메일</th><th scope="col">소스</th><th scope="col">ICP</th><th scope="col">상태</th><th scope="col">국가</th>
           </tr>
         </thead>
         <tbody>
@@ -54,6 +54,7 @@
           {% set eligible = p.status in ['collected','analyzed','queued'] %}
           <tr>
             <td><input type="checkbox" class="cb p-cb" name="prospect_id" value="{{ p.id }}"
+                       aria-label="{{ p.full_name or p.email }} 선택"
                        data-icp="{{ p.icp_score if p.icp_score is not none else '' }}"
                        {% if not eligible %}disabled title="발송 자격 없음 (현재 상태: {{ p.status }})"{% endif %}
                        onclick="window.__prospectBar&&window.__prospectBar()"></td>
@@ -80,15 +81,15 @@
   {# ---- floating bulk-approve bar ---- #}
   <div class="floating-bar" id="bulk-bar">
     <span class="floating-bar__summary"><span class="tnum" id="bulk-count">0</span>명 선택 · 최저 ICP <span class="tnum" id="bulk-min">—</span>점</span>
-    <button type="button" class="btn btn--ok" onclick="openBulkModal()">{{ icon("check", 15) }} 발송 승인</button>
+    <button type="button" class="btn btn--ok" onclick="openBulkModal()" aria-haspopup="dialog" aria-controls="bulk-modal">{{ icon("check", 15) }} 발송 승인</button>
   </div>
-  <div id="bulk-result" style="position:fixed;left:50%;bottom:84px;transform:translateX(-50%);z-index:60"></div>
+  <div id="bulk-result" role="status" aria-live="polite" style="position:fixed;left:50%;bottom:84px;transform:translateX(-50%);z-index:60"></div>
 </form>
 
 {# ---- bulk confirm modal ---- #}
 <div class="modal-overlay" id="bulk-modal" onclick="if(event.target===this)closeBulkModal()">
-  <div class="modal">
-    <div class="modal__title">일괄 발송 승인</div>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="bulk-modal-title">
+    <h2 class="modal__title" id="bulk-modal-title">일괄 발송 승인</h2>
     <div class="modal__body">
       <span class="tnum" id="bulk-modal-count" style="font-weight:800">0</span>명의 프로스펙트에 대해
       대기 중인 메시지를 승인합니다(선택분 최저 ICP <span class="tnum" id="bulk-modal-min">—</span>점).
@@ -110,13 +111,11 @@
 {% block head %}
 <script>
   function openBulkModal() {
-    var m = document.getElementById("bulk-modal");
     document.getElementById("bulk-modal-count").textContent = document.getElementById("bulk-count").textContent;
     document.getElementById("bulk-modal-min").textContent = document.getElementById("bulk-min").textContent;
-    m.classList.add("is-open");
+    window.PERSO_modal.open("bulk-modal");
   }
-  function closeBulkModal() { document.getElementById("bulk-modal").classList.remove("is-open"); }
-  document.addEventListener("keydown", function (e) { if (e.key === "Escape") closeBulkModal(); });
+  function closeBulkModal() { window.PERSO_modal.close("bulk-modal"); }
 
   window.__prospectBar = function () {
     var checked = Array.prototype.slice.call(document.querySelectorAll(".p-cb:checked"));

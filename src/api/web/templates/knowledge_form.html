@@ -19,54 +19,54 @@
 
 <div class="card" style="max-width:860px">
   <form id="kb-form">
-    <label class="field-label">제목</label>
-    <input class="input" name="title" value="{{ doc.title if doc else '' }}" required style="margin-bottom:14px">
+    <label class="field-label" for="kb-title">제목</label>
+    <input class="input" id="kb-title" name="title" value="{{ doc.title if doc else '' }}" required style="margin-bottom:14px">
 
-    <label class="field-label">요약 <span class="t-subtle">(LLM 라우터가 이 한 줄로 관련성 판단)</span></label>
-    <input class="input" name="summary" value="{{ doc.summary if doc else '' }}"
+    <label class="field-label" for="kb-summary">요약 <span class="t-subtle">(LLM 라우터가 이 한 줄로 관련성 판단)</span></label>
+    <input class="input" id="kb-summary" name="summary" value="{{ doc.summary if doc else '' }}"
            placeholder="이 문서가 어떤 문의에 도움이 되는지 한 줄로" style="margin-bottom:14px">
 
     <div class="grid grid-2" style="margin-bottom:14px">
       <div>
-        <label class="field-label">분류 (쉼표 구분)</label>
-        <input class="input" name="categories" value="{{ doc.categories if doc else '' }}" placeholder="pricing_question, purchase_inquiry, all">
+        <label class="field-label" for="kb-categories">분류 (쉼표 구분)</label>
+        <input class="input" id="kb-categories" name="categories" value="{{ doc.categories if doc else '' }}" placeholder="pricing_question, purchase_inquiry, all">
       </div>
       <div>
-        <label class="field-label">태그 (쉼표 구분)</label>
-        <input class="input" name="tags" value="{{ doc.tags if doc else '' }}" placeholder="요금제, 환불, 엔터프라이즈">
+        <label class="field-label" for="kb-tags">태그 (쉼표 구분)</label>
+        <input class="input" id="kb-tags" name="tags" value="{{ doc.tags if doc else '' }}" placeholder="요금제, 환불, 엔터프라이즈">
       </div>
     </div>
 
     <div class="grid grid-3" style="margin-bottom:14px">
       <div>
-        <label class="field-label">범위</label>
-        <select class="select" name="scope">
+        <label class="field-label" for="kb-scope">범위</label>
+        <select class="select" id="kb-scope" name="scope">
           <option value="both" {% if doc and doc.scope == 'both' %}selected{% endif %}>both</option>
           <option value="inbound" {% if doc and doc.scope == 'inbound' %}selected{% endif %}>inbound</option>
           <option value="outbound" {% if doc and doc.scope == 'outbound' %}selected{% endif %}>outbound</option>
         </select>
       </div>
       <div>
-        <label class="field-label">상태 <span class="t-subtle">(active만 노출)</span></label>
-        <select class="select" name="status">
+        <label class="field-label" for="kb-status">상태 <span class="t-subtle">(active만 노출)</span></label>
+        <select class="select" id="kb-status" name="status">
           <option value="active" {% if not doc or doc.status == 'active' %}selected{% endif %}>active</option>
           <option value="draft" {% if doc and doc.status == 'draft' %}selected{% endif %}>draft</option>
           <option value="archived" {% if doc and doc.status == 'archived' %}selected{% endif %}>archived</option>
         </select>
       </div>
       <div>
-        <label class="field-label">작성자</label>
-        <input class="input" name="author" value="{{ doc.author if doc else '' }}">
+        <label class="field-label" for="kb-author">작성자</label>
+        <input class="input" id="kb-author" name="author" value="{{ doc.author if doc else '' }}">
       </div>
     </div>
 
     {% if mode == 'edit' %}
-    <label class="field-label">변경 메모 <span class="t-subtle">(이력에 기록, 선택)</span></label>
-    <input class="input" name="change_note" value="" placeholder="예: 환불 기간 7일→14일로 수정" style="margin-bottom:14px">
+    <label class="field-label" for="kb-change-note">변경 메모 <span class="t-subtle">(이력에 기록, 선택)</span></label>
+    <input class="input" id="kb-change-note" name="change_note" value="" placeholder="예: 환불 기간 7일→14일로 수정" style="margin-bottom:14px">
     {% endif %}
 
-    <label class="field-label">본문 (Markdown)</label>
-    <textarea class="draft-textarea" name="body" required>{{ doc.body if doc else '' }}</textarea>
+    <label class="field-label" for="kb-body">본문 (Markdown)</label>
+    <textarea class="draft-textarea" id="kb-body" name="body" required>{{ doc.body if doc else '' }}</textarea>
 
     <div class="action-bar">
       {% if mode == 'edit' %}
@@ -83,7 +83,7 @@
       {% endif %}
     </div>
   </form>
-  <div id="action-result" style="margin-top:14px"></div>
+  <div id="action-result" role="status" aria-live="polite" style="margin-top:14px"></div>
 </div>
 
 {% endblock %}

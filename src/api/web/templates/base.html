@@ -17,9 +17,11 @@
   <link rel="stylesheet" href="/static/tokens.css">
   <link rel="stylesheet" href="/static/console.css">
   <script src="https://unpkg.com/htmx.org@2.0.4"></script>
+  <script src="/static/a11y.js" defer></script>
   {% block head %}{% endblock %}
 </head>
 <body>
+  <a href="#main" class="skip-link">본문으로 건너뛰기</a>
   <div class="app-shell">
     {% include "partials/nav.html" %}
 
@@ -33,7 +35,7 @@
         </button>
       </header>
 
-      <main class="main">
+      <main class="main" id="main" tabindex="-1">
         {% block content %}{% endblock %}
       </main>
     </div>

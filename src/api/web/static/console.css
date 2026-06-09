@@ -548,3 +548,61 @@ input[type="checkbox"].cb:checked::after {
 .t-sm { font-size: 12.5px; }
 .t-xs { font-size: 11.5px; }
 .truncate { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* ---------------------------------------------------------------
+   Accessibility (WCAG 2.1 AA)
+   --------------------------------------------------------------- */
+
+/* 2.4.7 Focus Visible — every interactive element gets a visible keyboard
+   focus ring. Mouse clicks don't trigger :focus-visible, so this is keyboard-only. */
+a:focus-visible,
+button:focus-visible,
+.btn:focus-visible,
+.chip:focus-visible,
+.nav-item:focus-visible,
+.icon-btn:focus-visible,
+summary:focus-visible,
+[role="button"]:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--r-xs);
+}
+.input:focus-visible,
+.select:focus-visible,
+.textarea:focus-visible,
+.draft-textarea:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+input[type="checkbox"].cb:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Screen-reader-only text (visually hidden but available to AT). */
+.sr-only {
+  position: absolute !important;
+  width: 1px; height: 1px;
+  padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0, 0, 0, 0);
+  white-space: nowrap; border: 0;
+}
+
+/* 2.4.1 Bypass Blocks — skip link, hidden until focused. */
+.skip-link {
+  position: fixed; top: 8px; left: 8px; z-index: 200;
+  transform: translateY(-200%);
+  padding: 10px 16px; border-radius: var(--r-sm);
+  background: var(--accent); color: var(--accent-fg);
+  font-size: 13px; font-weight: 700; text-decoration: none;
+  box-shadow: var(--shadow-pop);
+  transition: transform .15s ease;
+}
+.skip-link:focus { transform: translateY(0); outline: 2px solid var(--accent-fg); outline-offset: 2px; }
+
+/* Clickable table rows are keyboard-operable (role="button" + tabindex in markup). */
+tr.is-clickable { cursor: pointer; }
+
+/* Block background scroll while a modal is open (set on <body> by the modal helper). */
+body.modal-open { overflow: hidden; }

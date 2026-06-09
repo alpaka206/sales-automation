@@ -63,11 +63,11 @@
       </div>
       <a href="/messages" class="chip">전체 보기</a>
     </div>
-    <div id="msg-table" class="table-wrap" style="margin-top:12px">
+    <div id="msg-table" class="table-wrap" role="region" aria-label="최근 발신 메시지" aria-live="polite" style="margin-top:12px">
       <table class="table">
         <thead>
           <tr>
-            <th>상태</th><th>구분</th><th>제목</th><th>채널</th><th>시간</th>
+            <th scope="col">상태</th><th scope="col">구분</th><th scope="col">제목</th><th scope="col">채널</th><th scope="col">시간</th>
           </tr>
         </thead>
         <tbody>

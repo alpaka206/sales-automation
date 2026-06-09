@@ -32,7 +32,8 @@
         </div>
       </div>
       <form id="intent-form">
-        <textarea class="textarea" id="intent-query" name="query" rows="3"
+        <label class="field-label" for="intent-query">조사 요청 (자연어)</label>
+        <textarea class="textarea" id="intent-query" name="query" rows="3" required
           placeholder="예: SaaS 스타트업 마케팅 담당자, 유튜브에서 CRM 관련 영상을 올리는 채널 운영자"></textarea>
         <div class="chip-row" style="margin-top:12px">
           {% for key, label, ic, tone, example in sources %}
@@ -50,7 +51,7 @@
           </span>
         </div>
       </form>
-      <div id="result" style="margin-top:14px"></div>
+      <div id="result" role="status" aria-live="polite" style="margin-top:14px"></div>
     </div>
 
     {# ---- supported discovery sources ---- #}
@@ -58,7 +59,10 @@
       <div class="section-label mb-gap">발굴 소스</div>
       <div class="grid grid-2">
         {% for key, label, ic, tone, example in sources %}
-        <div class="card card--hover source-card" onclick="fillQuery('{{ example }}')">
+        <div class="card card--hover source-card" role="button" tabindex="0"
+             onclick="fillQuery('{{ example }}')"
+             onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();fillQuery('{{ example }}');}"
+             aria-label="{{ label }} 예시로 채우기">
           <div class="source-card__head">
             <span class="source-tag__icon source-tag--{{ {'youtube':'youtube','linkedin_comments':'linkedin','google_search':'google','job_board':'jobs','manual_csv':'csv'}[key] }}">{{ icon(ic, 16) }}</span>
             <span class="source-card__title">{{ label }}</span>
@@ -99,7 +103,7 @@
       <div class="section-label" style="margin-bottom:10px">국가별 발송</div>
       <div class="t-sm t-muted" style="line-height:1.6">
         승인된 메시지는 수신자 국가의 현지 적정 시간대(예: 오전 9–11시)에 맞춰 발송됩니다.
-        발송 시간 설정은 <a href="/settings" style="color:var(--accent);text-decoration:none">설정</a>에서 조정합니다.
+        발송 시간 설정은 <a href="/settings" style="color:var(--accent);text-decoration:underline">설정</a>에서 조정합니다.
       </div>
     </div>
   </div>
