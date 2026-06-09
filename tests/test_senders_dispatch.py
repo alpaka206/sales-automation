@@ -54,6 +54,7 @@ async def test_suppressed_address_skips_send(mock_session_cls, mock_footer, mock
     with patch("src.integrations.senders.settings") as s:
         s.EMAIL_PROVIDER = "smtp"
         s.WHATSAPP_ENABLED = False
+        s.SEND_OVERRIDE_EMAIL = ""
         await send(msg)
 
     mock_smtp.assert_not_called()
@@ -73,6 +74,7 @@ async def test_hubspot_provider_send(mock_footer, mock_suppressed, mock_smtp) ->
          patch("src.integrations.hubspot.HubSpotClient") as MockHSClient:
         s.EMAIL_PROVIDER = "hubspot"
         s.WHATSAPP_ENABLED = False
+        s.SEND_OVERRIDE_EMAIL = ""
         s.SMTP_FROM_EMAIL = "from@x.com"
 
         hs_instance = AsyncMock()
@@ -99,6 +101,7 @@ async def test_hubspot_not_configured_falls_back_to_smtp(mock_footer, mock_suppr
          patch("src.integrations.hubspot.HubSpotClient") as MockHSClient:
         s.EMAIL_PROVIDER = "hubspot"
         s.WHATSAPP_ENABLED = False
+        s.SEND_OVERRIDE_EMAIL = ""
         s.SMTP_FROM_EMAIL = "from@x.com"
 
         MockHSClient.side_effect = HubSpotNotConfigured("no token")
@@ -120,6 +123,7 @@ async def test_unknown_provider_raises(mock_footer, mock_suppressed) -> None:
     with patch("src.integrations.senders.settings") as s:
         s.EMAIL_PROVIDER = "carrier_pigeon"
         s.WHATSAPP_ENABLED = False
+        s.SEND_OVERRIDE_EMAIL = ""
 
         with pytest.raises(ValueError, match="Unknown EMAIL_PROVIDER"):
             await send(msg)

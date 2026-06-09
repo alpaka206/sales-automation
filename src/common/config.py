@@ -63,6 +63,15 @@ class Settings(BaseSettings):
     SMTP_FROM_NAME: str = "Sales Team"
     SMTP_FROM_EMAIL: str = ""
 
+    # ----- Test mode: redirect ALL real sends to one address -----
+    # When non-empty, every customer-facing email (inbound reply, outbound open,
+    # follow-up) is rerouted to this address and sent via SMTP — the HubSpot
+    # provider is bypassed so nothing lands on a real contact's timeline, and the
+    # WhatsApp piggyback is skipped so no real phone is messaged. The original
+    # intended recipient is preserved in the subject as "[TEST→original]".
+    # Requires SMTP_USERNAME/SMTP_PASSWORD. Leave EMPTY in production.
+    SEND_OVERRIDE_EMAIL: str = ""
+
     # ----- WhatsApp -----
     WHATSAPP_ENABLED: bool = False
     WHATSAPP_PHONE_NUMBER_ID: str = ""

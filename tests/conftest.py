@@ -22,6 +22,10 @@ os.environ.setdefault("INTERNAL_API_TOKEN", "test-internal-token")
 # this only satisfies the constructor's token check (matching local .env, where
 # the full suite passes — no test depends on the token being absent).
 os.environ.setdefault("HUBSPOT_PRIVATE_APP_TOKEN", "test-hubspot-token")
+# Keep the send-redirect test override OFF during tests so a developer's local
+# .env (SEND_OVERRIDE_EMAIL=...) can't leak in and silently reroute/force-SMTP
+# the dispatch tests. setdefault still lets CI opt in explicitly.
+os.environ.setdefault("SEND_OVERRIDE_EMAIL", "")
 
 from unittest.mock import MagicMock  # noqa: E402
 

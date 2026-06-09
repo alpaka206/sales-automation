@@ -78,11 +78,33 @@ async def send(message: Message) -> None:
     Email failure raises (caller handles). WhatsApp failure is logged but does not
     affect the email outcome.
     """
+    override = settings.SEND_OVERRIDE_EMAIL.strip()
+
     if message.channel == "whatsapp":
+        if override:
+            logger.info(
+                "TEST MODE (SEND_OVERRIDE_EMAIL set): skipping WhatsApp send for message %d.",
+                message.id,
+            )
+            return
         await send_whatsapp(message)
         return
 
     from ..compliance import append_footer, is_suppressed
+
+    # Test-mode redirect: reroute every customer-facing email to one address and
+    # force SMTP (HubSpot provider would send to the real contact_id instead).
+    if override:
+        original = message.to_address or "(none)"
+        message.to_address = override
+        if message.subject and not message.subject.startswith("[TEST"):
+            message.subject = f"[TEST→{original}] {message.subject}"
+        logger.info(
+            "TEST MODE: redirecting message %d from %s to %s (forcing SMTP).",
+            message.id,
+            original,
+            override,
+        )
 
     if message.to_address and is_suppressed(message.to_address):
         logger.info("Message %d suppressed — %s is on the suppression list.", message.id, message.to_address)
@@ -98,7 +120,7 @@ async def send(message: Message) -> None:
         message.body = append_footer(message.body, message.to_address, message.language)
 
     # Email send — failure raises, propagating to caller
-    if settings.EMAIL_PROVIDER == "smtp":
+    if override or settings.EMAIL_PROVIDER == "smtp":
         send_smtp(message)
     elif settings.EMAIL_PROVIDER == "hubspot":
         from ...integrations.hubspot import HubSpotClient, HubSpotNotConfigured
@@ -118,8 +140,9 @@ async def send(message: Message) -> None:
     else:
         raise ValueError(f"Unknown EMAIL_PROVIDER: {settings.EMAIL_PROVIDER}")
 
-    logger.info("Message %d sent via %s.", message.id, settings.EMAIL_PROVIDER)
+    logger.info("Message %d sent via %s.", message.id, "smtp" if override else settings.EMAIL_PROVIDER)
 
-    # WhatsApp piggyback — best-effort, never breaks the email flow
-    if settings.WHATSAPP_ENABLED:
+    # WhatsApp piggyback — best-effort, never breaks the email flow.
+    # Skipped entirely in test mode so no real phone is messaged.
+    if settings.WHATSAPP_ENABLED and not override:
         await _try_whatsapp_template(message)

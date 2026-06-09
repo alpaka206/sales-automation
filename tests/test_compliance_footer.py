@@ -142,6 +142,7 @@ async def test_outbound_message_gets_unsubscribe_footer(mock_suppressed, mock_sm
     with patch("src.integrations.senders.settings") as s:
         s.EMAIL_PROVIDER = "smtp"
         s.WHATSAPP_ENABLED = False
+        s.SEND_OVERRIDE_EMAIL = ""
         await send(msg)
 
     assert msg.body != original_body
@@ -160,6 +161,7 @@ async def test_outbound_message_gets_sender_info_footer(mock_suppressed, mock_sm
     with patch("src.integrations.senders.settings") as s:
         s.EMAIL_PROVIDER = "smtp"
         s.WHATSAPP_ENABLED = False
+        s.SEND_OVERRIDE_EMAIL = ""
         await send(msg)
 
     assert "---" in msg.body
@@ -179,6 +181,7 @@ async def test_inbound_message_no_footer(mock_suppressed, mock_smtp):
     with patch("src.integrations.senders.settings") as s:
         s.EMAIL_PROVIDER = "smtp"
         s.WHATSAPP_ENABLED = False
+        s.SEND_OVERRIDE_EMAIL = ""
         await send(msg)
 
     assert msg.body == original_body

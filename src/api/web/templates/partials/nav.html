@@ -1,5 +1,7 @@
 {% from "partials/icons.html" import icon %}
 {%- set _path = request.url.path if request else "/" -%}
+{%- set _user = request.state.user if (request and request.state) else None -%}
+{%- set _is_admin = _user and _user.role == 'admin' -%}
 {%- macro _nav(href, label, ic, active, badge=None, flag=False) -%}
   <a href="{{ href }}" class="nav-item{% if active %} is-active{% endif %}">
     {{ icon(ic, 18) }}
@@ -29,10 +31,13 @@
     <div class="nav-group-label">설정</div>
     {{ _nav("/icp-rules", "ICP 룰", "icp", _path.startswith("/icp-rules")) }}
     {{ _nav("/knowledge", "지식베이스", "knowledge", _path.startswith("/knowledge")) }}
-    {{ _nav("/settings", "설정", "settings", _path.startswith("/settings"), flag=nav_health_warn) }}
+    {%- if _is_admin %}
+    {{ _nav("/settings/users", "접근 승인", "shield", _path.startswith("/settings/users"), badge=(pending_user_count() or None)) }}
+    {%- endif %}
+    {{ _nav("/settings", "설정", "settings", _path.startswith("/settings") and not _path.startswith("/settings/users"), flag=nav_health_warn) }}
   </nav>
 
-  {%- set _u = request.state.user if (request and request.state) else None -%}
+  {%- set _u = _user -%}
   <div class="operator-card">
     <div class="operator-card__inner">
       {% if _u %}
