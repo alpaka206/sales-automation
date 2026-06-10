@@ -1,6 +1,6 @@
 @echo off
 chcp 65001 >nul
-echo [Sales Automation] Windows .exe 빌드 시작
+echo [PERSO] Windows .exe 빌드 시작
 
 if not exist ".venv\Scripts\python.exe" (
     echo [오류] .venv 가 없습니다. 먼저 scripts\setup.bat 을 실행하세요.

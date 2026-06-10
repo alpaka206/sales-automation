@@ -76,7 +76,7 @@ async def lifespan(app: FastAPI):
         logger.info("Background tasks stopped.")
 
 
-app = FastAPI(title="Sales Automation", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="PERSO Sales Console", version="0.1.0", lifespan=lifespan)
 app.mount(
     "/static",
     StaticFiles(directory=str(Path(__file__).parent / "web" / "static")),
@@ -139,7 +139,7 @@ async def auth_middleware(request: Request, call_next):
             return JSONResponse(
                 status_code=401,
                 content={"detail": "web UI login required"},
-                headers={"WWW-Authenticate": 'Basic realm="Sales Automation"'},
+                headers={"WWW-Authenticate": 'Basic realm="PERSO Sales Console"'},
             )
         return JSONResponse(status_code=403, content={"detail": "web UI is localhost-only"})
 

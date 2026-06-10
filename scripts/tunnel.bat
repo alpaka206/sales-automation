@@ -5,7 +5,7 @@ cd /d "%~dp0\.."
 
 echo.
 echo ========================================================
-echo   Sales Automation - cloudflared 터널
+echo   PERSO Sales Console - cloudflared 터널
 echo ========================================================
 echo.
 

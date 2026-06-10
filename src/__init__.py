@@ -1,1 +1,1 @@
-"""Sales Automation — top-level package."""
+"""PERSO Sales Console — top-level package."""

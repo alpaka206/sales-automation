@@ -1,4 +1,4 @@
-"""CLI entry point for sales automation tools."""
+"""CLI entry point for PERSO Sales Console tools."""
 
 from __future__ import annotations
 
@@ -37,7 +37,7 @@ def doctor() -> int:
     icons = {"PASS": "[OK]", "WARN": "[!!]", "FAIL": "[XX]"}
     has_fail = False
 
-    print("\n  Sales Automation - Pre-flight Check\n")
+    print("\n  PERSO Sales Console - Pre-flight Check\n")
     for status, name, detail in results:
         icon = icons[status]
         print(f"  {icon} {name:20s} {detail}")
@@ -61,7 +61,7 @@ def healthcheck() -> int:
 
     icons = {"PASS": "[OK]", "WARN": "[!!]", "FAIL": "[XX]"}
 
-    print("\n  Sales Automation - Health Check\n")
+    print("\n  PERSO Sales Console - Health Check\n")
     for c in report.checks:
         icon = icons.get(c.status, "[??]")
         latency = f" ({c.latency_ms}ms)" if c.latency_ms else ""
@@ -95,7 +95,7 @@ def init(force: bool = False) -> int:
         print("  .env 파일이 이미 존재합니다. 덮어쓰려면 --force 옵션을 사용하세요.")
         return 0
 
-    print("\n  Sales Automation - 초기 설정\n")
+    print("\n  PERSO Sales Console - 초기 설정\n")
     print("  필수 항목만 입력합니다. 선택 항목은 Enter 로 건너뛰세요.\n")
 
     values: dict[str, str] = {}
@@ -143,7 +143,7 @@ def init(force: bool = False) -> int:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(prog="sales", description="Sales automation CLI tools")
+    parser = argparse.ArgumentParser(prog="sales", description="PERSO Sales Console CLI tools")
     sub = parser.add_subparsers(dest="command")
 
     sub.add_parser("doctor", help="Run pre-flight checklist")
