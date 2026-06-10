@@ -98,4 +98,4 @@ LLM은 **Gemini (Vertex AI)** 단독입니다. API 키가 아니라 **서비스 
 
 ### 배포
 
-`plan/07_free_hosting_guide.md` 참고. 로컬 SQLite + uvicorn으로 충분하며, 필요 시 Render/Railway/Fly.io 무료 티어 사용 가능.
+로컬은 SQLite + uvicorn으로 충분합니다. 클라우드 배포는 **Render**(`render.yaml` + `Dockerfile`)를 사용하며, 단계별 절차는 `docs/배포.md`를 참고하세요. (무료 호스팅 옵션 비교는 `plan/07_free_hosting_guide.md`.)
