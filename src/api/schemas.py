@@ -27,11 +27,15 @@ class InboundWebhookBody(BaseModel):
 
 
 class OutboundRunBody(BaseModel):
+    """Request to run one outbound source. `filters` is source-specific (query, region, ...)."""
+
     source: str
     filters: dict | None = None
 
 
 class ApprovalBody(BaseModel):
+    """Approve/edit/reject action on a pending message (see /approve/{message_id})."""
+
     approver: str
     action: Literal["approve", "edit", "reject"]
     edited_body: str | None = None

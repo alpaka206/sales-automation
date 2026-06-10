@@ -8,6 +8,8 @@ from pydantic import BaseModel
 
 
 class ContactDTO(BaseModel):
+    """A HubSpot contact, flattened to the fields the agents actually use."""
+
     id: str
     email: str | None = None
     firstname: str | None = None
@@ -19,6 +21,8 @@ class ContactDTO(BaseModel):
 
 
 class EngagementDTO(BaseModel):
+    """A timeline engagement (email, note, etc.) on a contact."""
+
     id: str
     type: str
     subject: str | None = None
@@ -27,6 +31,8 @@ class EngagementDTO(BaseModel):
 
 
 class DealDTO(BaseModel):
+    """A deal associated with a contact — used to give the LLM sales context."""
+
     id: str
     name: str | None = None
     stage: str | None = None
@@ -34,6 +40,8 @@ class DealDTO(BaseModel):
 
 
 class TicketDTO(BaseModel):
+    """A support/inbound ticket — carries the inquiry body for ticket-based inbound."""
+
     id: str
     subject: str | None = None
     content: str | None = None

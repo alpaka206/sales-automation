@@ -10,8 +10,13 @@ from sqlalchemy import func
 
 logger = logging.getLogger(__name__)
 
+# Rough heuristic: ~4 chars per token. Only used for budget estimates when a
+# provider response omits real token counts. Korean packs denser, so this
+# over/under-counts somewhat — acceptable since it never feeds billing.
 CHARS_PER_TOKEN = 4
 
+# USD per 1M tokens, per model. Used to estimate spend for the usage dashboard.
+_DEFAULT_RATES = {"input": 0.30, "output": 2.50}
 PRICING: dict[str, dict[str, float]] = {
     "gemini-2.5-flash": {"input": 0.30, "output": 2.50},
     "gemini-2.5-pro": {"input": 1.25, "output": 10.00},
@@ -40,7 +45,7 @@ def estimate_tokens(text: str) -> int:
 
 def estimate_cost(model: str, input_tokens: int, output_tokens: int) -> float:
     """Return estimated cost in USD."""
-    rates = PRICING.get(model, {"input": 0.30, "output": 2.50})
+    rates = PRICING.get(model, _DEFAULT_RATES)
     return (input_tokens * rates["input"] + output_tokens * rates["output"]) / 1_000_000
 
 
