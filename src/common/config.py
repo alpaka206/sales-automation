@@ -113,7 +113,11 @@ class Settings(BaseSettings):
     # ----- Send worker -----
     SEND_WORKER_ENABLED: bool = False
     SEND_RATE_PER_MINUTE: int = 5
-    DAILY_SEND_LIMIT: int = 100
+    # Safety cap on outbound emails/day. Not about "internal vs external" — it guards
+    # the Gmail/SMTP sender quota (free Gmail ~500/day; exceeding throttles the account)
+    # and sender reputation, and is the only backstop once auto-send/auto-followup is on.
+    # Set generously rather than disabling (0 = unlimited). 400 ≈ free-Gmail margin.
+    DAILY_SEND_LIMIT: int = 400
     SEND_JITTER_SECONDS: int = 15
 
     # ----- Behavior knobs -----

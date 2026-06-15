@@ -12,7 +12,11 @@
 </div>
 
 {# ---- KPI cards (built only from data the route provides) ---- #}
-<div class="grid grid-4 mb-gap">
+{# Poll the dashboard and swap just this grid so the counters (승인 대기/오늘 발송/
+   누적 응답/발송됨) stay live without a manual reload — the message table below has
+   its own identical poll. #}
+<div id="kpi-cards" class="grid grid-4 mb-gap"
+     hx-get="/" hx-trigger="every 30s" hx-select="#kpi-cards" hx-target="#kpi-cards" hx-swap="outerHTML">
   <div class="card kpi kpi--accent">
     <div class="kpi__label">승인 대기</div>
     <div class="kpi__row">
@@ -36,7 +40,7 @@
   <div class="card kpi">
     <div class="kpi__label">누적 응답</div>
     <div class="kpi__row">
-      <span class="kpi__value tnum">{{ status_counts.replied }}</span>
+      <span class="kpi__value tnum">{{ replied_count }}</span>
       <span class="kpi__sub">replied</span>
     </div>
     <div class="row t-subtle t-xs">{{ icon("reply", 14) }} 응답 받은 대화</div>

@@ -21,16 +21,13 @@ def _dashboard_context() -> dict:
         # Mirror /messages — show outbound drafts/sent only. Inbound rows are kept
         # for the detail-page reply context but listing them here duplicates the
         # inbound-body box that already appears on each message detail.
-        recent = (
-            session.execute(
-                select(Message, Conversation.topic, Conversation.prospect_id)
-                .join(Conversation, Message.conversation_id == Conversation.id)
-                .where(Message.direction == "outbound")
-                .order_by(Message.created_at.desc())
-                .limit(20)
-            )
-            .all()
-        )
+        recent = session.execute(
+            select(Message, Conversation.topic, Conversation.prospect_id)
+            .join(Conversation, Message.conversation_id == Conversation.id)
+            .where(Message.direction == "outbound")
+            .order_by(Message.created_at.desc())
+            .limit(20)
+        ).all()
         recent_messages = [
             {
                 "id": msg.id,
@@ -56,11 +53,27 @@ def _dashboard_context() -> dict:
             status_counts[status] = cnt
 
         today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
-        today_sent = session.scalar(
-            select(func.count())
-            .select_from(Message)
-            .where(Message.status == "sent", Message.sent_at >= today_start)
-        ) or 0
+        today_sent = (
+            session.scalar(
+                select(func.count())
+                .select_from(Message)
+                .where(Message.status == "sent", Message.sent_at >= today_start)
+            )
+            or 0
+        )
+
+        # "누적 응답" counts threads that got a reply. Replies are recorded on the
+        # boolean Message.replied column (set by reply_check), NOT as a status —
+        # a replied message keeps status="sent". So we must count the column, not
+        # status == "replied" (which is never set).
+        replied_count = (
+            session.scalar(
+                select(func.count())
+                .select_from(Message)
+                .where(Message.direction == "outbound", Message.replied.is_(True))
+            )
+            or 0
+        )
 
         category_rows = session.execute(
             select(Conversation.topic, func.count())
@@ -74,6 +87,7 @@ def _dashboard_context() -> dict:
     return {
         "recent_messages": recent_messages,
         "status_counts": status_counts,
+        "replied_count": replied_count,
         "today_sent": today_sent,
         "daily_limit": settings.DAILY_SEND_LIMIT,
         "category_counts": category_counts,

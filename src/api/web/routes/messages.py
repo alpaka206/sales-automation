@@ -24,14 +24,18 @@ _MAX_EDIT_SUBJECT_LEN = 300
 def _message_detail_context(message_id: int) -> dict:
     """Load a single message with related contact/prospect data."""
     with SessionLocal() as session:
-        msg = session.execute(
-            select(Message)
-            .options(
-                joinedload(Message.conversation).joinedload(Conversation.contact),
-                joinedload(Message.conversation).joinedload(Conversation.prospect),
+        msg = (
+            session.execute(
+                select(Message)
+                .options(
+                    joinedload(Message.conversation).joinedload(Conversation.contact),
+                    joinedload(Message.conversation).joinedload(Conversation.prospect),
+                )
+                .where(Message.id == message_id)
             )
-            .where(Message.id == message_id)
-        ).unique().scalar_one_or_none()
+            .unique()
+            .scalar_one_or_none()
+        )
         if not msg:
             return {}
 
@@ -44,24 +48,32 @@ def _message_detail_context(message_id: int) -> dict:
         inbound_rows = []
         thread_rows = []
         if conv:
-            inbound_rows = session.execute(
-                select(Message)
-                .where(
-                    Message.conversation_id == conv.id,
-                    Message.direction == "inbound",
+            inbound_rows = (
+                session.execute(
+                    select(Message)
+                    .where(
+                        Message.conversation_id == conv.id,
+                        Message.direction == "inbound",
+                    )
+                    .order_by(Message.created_at.desc())
+                    .limit(5)
                 )
-                .order_by(Message.created_at.desc())
-                .limit(5)
-            ).scalars().all()
+                .scalars()
+                .all()
+            )
 
             # Full ticket/conversation thread, oldest → newest. One ticket = one
             # conversation (see agents/inbound.py), so this is the complete back-and-forth
             # history for this ticket: every inbound inquiry and every outbound reply/follow-up.
-            thread_rows = session.execute(
-                select(Message)
-                .where(Message.conversation_id == conv.id)
-                .order_by(Message.created_at.asc(), Message.id.asc())
-            ).scalars().all()
+            thread_rows = (
+                session.execute(
+                    select(Message)
+                    .where(Message.conversation_id == conv.id)
+                    .order_by(Message.created_at.asc(), Message.id.asc())
+                )
+                .scalars()
+                .all()
+            )
 
         domain_profile_data = None
         if contact and contact.domain:
@@ -134,19 +146,27 @@ def _message_detail_context(message_id: int) -> dict:
                 "created_at": msg.created_at,
                 "category": conv.topic if conv else "-",
             },
-            "contact": {
-                "id": contact.id,
-                "name": contact.full_name,
-                "email": contact.email,
-                "company": contact.company,
-            } if contact else None,
-            "prospect": {
-                "id": prospect.id,
-                "name": prospect.full_name,
-                "email": prospect.email,
-                "company": prospect.company,
-                "icp_score": prospect.icp_score,
-            } if prospect else None,
+            "contact": (
+                {
+                    "id": contact.id,
+                    "name": contact.full_name,
+                    "email": contact.email,
+                    "company": contact.company,
+                }
+                if contact
+                else None
+            ),
+            "prospect": (
+                {
+                    "id": prospect.id,
+                    "name": prospect.full_name,
+                    "email": prospect.email,
+                    "company": prospect.company,
+                    "icp_score": prospect.icp_score,
+                }
+                if prospect
+                else None
+            ),
             "domain_profile": domain_profile_data,
         }
 
@@ -164,7 +184,12 @@ def _messages_list_context(status: str = "", channel: str = "") -> dict:
         .where(Message.direction == "outbound")
         .order_by(Message.created_at.desc())
     )
-    if status:
+    if status == "replied":
+        # Replies are tracked on the boolean Message.replied column (set by
+        # reply_check), not as a status — a replied message keeps status="sent".
+        # Mirrors the dashboard "누적 응답" metric.
+        q = q.where(Message.replied.is_(True))
+    elif status:
         q = q.where(Message.status == status)
     if channel:
         q = q.where(Message.channel == channel)
@@ -208,7 +233,9 @@ async def message_detail(request: Request, message_id: int):
 
 
 @router.post("/messages/{message_id}/send")
-async def message_send(request: Request, message_id: int, body: str = Form(""), subject: str = Form("")):
+async def message_send(
+    request: Request, message_id: int, body: str = Form(""), subject: str = Form("")
+):
     """Approve (and optionally edit) a message for sending."""
     try:
         edited = body.strip() if body.strip() else None
@@ -226,14 +253,16 @@ async def message_send(request: Request, message_id: int, body: str = Form(""), 
 async def message_reject(request: Request, message_id: int, reason: str = Form("")):
     """Reject a message with an optional reason."""
     try:
-        reject(message_id, approver=actor_name(request, fallback="web_ui"), reason=reason.strip() or None)
+        reject(
+            message_id,
+            approver=actor_name(request, fallback="web_ui"),
+            reason=reason.strip() or None,
+        )
     except ApprovalError as exc:
         return HTMLResponse(
             f'<div class="text-red-600 text-sm">{esc(str(exc))}</div>', status_code=400
         )
-    return HTMLResponse(
-        '<div class="text-orange-600 text-sm font-medium">거절 처리 완료</div>'
-    )
+    return HTMLResponse('<div class="text-orange-600 text-sm font-medium">거절 처리 완료</div>')
 
 
 @router.post("/messages/{message_id}/edit")
@@ -266,6 +295,4 @@ async def message_edit(message_id: int, body: str = Form(""), subject: str = For
         if subject.strip():
             msg.subject = subject.strip()
         session.commit()
-    return HTMLResponse(
-        '<div class="text-blue-600 text-sm font-medium">저장 완료</div>'
-    )
+    return HTMLResponse('<div class="text-blue-600 text-sm font-medium">저장 완료</div>')
