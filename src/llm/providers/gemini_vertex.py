@@ -86,6 +86,7 @@ def call_gemini(
     system: str | None = None,
     model: str | None = None,
     thinking_budget: int | None = None,
+    grounded: bool = False,
 ) -> LLMResult:
     """Generate content via Gemini on Vertex AI and return an LLMResult.
 
@@ -115,6 +116,13 @@ def call_gemini(
             config.thinking_config = types.ThinkingConfig(thinking_budget=thinking_budget)
         except Exception:  # pragma: no cover - depends on SDK version
             logger.debug("ThinkingConfig unsupported by SDK; proceeding without a thinking cap.")
+    if grounded:
+        # Google Search grounding lets the model look companies up on the web.
+        # Degrade gracefully if the SDK variant lacks the tool types.
+        try:
+            config.tools = [types.Tool(google_search=types.GoogleSearch())]
+        except Exception:  # pragma: no cover - depends on SDK version
+            logger.warning("Google Search grounding unsupported by SDK; proceeding ungrounded.")
     resp = client.models.generate_content(
         model=model,
         contents=prompt,

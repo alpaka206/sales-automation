@@ -159,7 +159,10 @@ class Settings(BaseSettings):
     # ----- Domain enrichment -----
     INBOUND_DOMAIN_ENRICHMENT_ENABLED: bool = True
     INBOUND_DOMAIN_HOMEPAGE_FETCH: bool = True
-    INBOUND_DOMAIN_FETCH_TIMEOUT_SECONDS: float = 5.0
+    INBOUND_DOMAIN_FETCH_TIMEOUT_SECONDS: float = 8.0
+    # Fall back to Gemini's Google Search grounding so well-known companies resolve
+    # even when their homepage blocks bots / is parked / times out.
+    INBOUND_DOMAIN_SEARCH_GROUNDING: bool = True
     INBOUND_DOMAIN_REANALYZE_DAYS: int = 90
 
     # 빈 문자열이면 auth 미들웨어가 모든 요청을 거부합니다(보안). 운영 전 반드시 강한 토큰 설정.

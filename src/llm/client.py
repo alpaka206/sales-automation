@@ -86,7 +86,7 @@ def _strip_code_fences(text: str) -> str:
         elif ch == "}":
             depth -= 1
             if depth == 0:
-                return cleaned[start:i + 1].strip()
+                return cleaned[start : i + 1].strip()
     return text.strip()
 
 
@@ -135,7 +135,10 @@ class LLMClient:
             prompt += "\n\nReturn ONLY valid JSON. Do not wrap in markdown code fences."
 
         text = self._dispatch(
-            prompt, max_tokens=max_tokens, system=system, model=model,
+            prompt,
+            max_tokens=max_tokens,
+            system=system,
+            model=model,
             thinking_budget=thinking_budget,
         )
 
@@ -152,7 +155,10 @@ class LLMClient:
                 + " Return ONLY valid JSON this time. NO markdown fences, NO prose around it."
             )
             text = self._dispatch(
-                retry_prompt, max_tokens=max_tokens, system=system, model=model,
+                retry_prompt,
+                max_tokens=max_tokens,
+                system=system,
+                model=model,
                 thinking_budget=thinking_budget,
             )
             try:
@@ -160,15 +166,50 @@ class LLMClient:
             except ValidationError as second_err:
                 raise LLMError(f"LLM returned invalid JSON twice: {second_err}") from second_err
 
+    def search(
+        self,
+        prompt_name: str,
+        variables: dict[str, object] | None = None,
+        max_tokens: int = 1024,
+        tier: str = "flash",
+    ) -> str:
+        """Run a Google-Search-grounded generation and return the raw text.
+
+        Separate from ``complete`` because grounding (web search tool) doesn't
+        combine with JSON-schema output — callers feed the returned text into a
+        structured ``complete`` call when they need a parsed result.
+        """
+        model = settings.gemini_model_for.get(tier, settings.GEMINI_MODEL)
+        thinking_budget = _THINKING_BUDGET_BY_TIER.get(tier, 0)
+        prompt = load_prompt(prompt_name, variables, include_rules=False)
+        return self._dispatch(
+            prompt,
+            max_tokens=max_tokens,
+            system=None,
+            model=model,
+            thinking_budget=thinking_budget,
+            grounded=True,
+        )
+
     # ------------- internals -------------
 
     def _dispatch(
-        self, prompt: str, max_tokens: int, system: str | None = None, model: str | None = None,
+        self,
+        prompt: str,
+        max_tokens: int,
+        system: str | None = None,
+        model: str | None = None,
         thinking_budget: int | None = None,
+        grounded: bool = False,
     ) -> str:
         try:
             return self._dispatch_once(
-                prompt, max_tokens, system=system, model=model, thinking_budget=thinking_budget
+                prompt,
+                max_tokens,
+                system=system,
+                model=model,
+                thinking_budget=thinking_budget,
+                grounded=grounded,
             )
         except Exception as first_err:
             if not _is_transient(first_err):
@@ -176,16 +217,30 @@ class LLMClient:
             logger.warning("Transient LLM error, retrying in 2s: %s", first_err)
             time.sleep(2)
             return self._dispatch_once(
-                prompt, max_tokens, system=system, model=model, thinking_budget=thinking_budget
+                prompt,
+                max_tokens,
+                system=system,
+                model=model,
+                thinking_budget=thinking_budget,
+                grounded=grounded,
             )
 
     def _dispatch_once(
-        self, prompt: str, max_tokens: int, system: str | None = None, model: str | None = None,
+        self,
+        prompt: str,
+        max_tokens: int,
+        system: str | None = None,
+        model: str | None = None,
         thinking_budget: int | None = None,
+        grounded: bool = False,
     ) -> str:
         llm_result = call_gemini(
-            prompt, max_tokens=max_tokens, system=system, model=model,
+            prompt,
+            max_tokens=max_tokens,
+            system=system,
+            model=model,
             thinking_budget=thinking_budget,
+            grounded=grounded,
         )
 
         log_usage(llm_result, self.provider)

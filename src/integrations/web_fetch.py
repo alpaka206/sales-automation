@@ -29,6 +29,7 @@ class HomepageMeta:
     description: str = ""
     og_description: str = ""
     keywords: str = ""
+    body_text: str = ""
     status: FetchStatus = "ok"
 
 
@@ -72,6 +73,25 @@ _META_REV_RE = re.compile(
 )
 
 
+_SCRIPT_STYLE_RE = re.compile(
+    r"<(script|style|noscript)\b[^>]*>.*?</\1>", re.IGNORECASE | re.DOTALL
+)
+_TAG_RE = re.compile(r"<[^>]+>")
+_WS_RE = re.compile(r"\s+")
+
+
+def _extract_body_text(html: str, limit: int = 2000) -> str:
+    """Strip tags/scripts and return a whitespace-collapsed text snippet.
+
+    Gives the LLM real on-page content (not just meta tags), which is what lets it
+    describe what a company does when the homepage has thin/empty meta.
+    """
+    text = _SCRIPT_STYLE_RE.sub(" ", html)
+    text = _TAG_RE.sub(" ", text)
+    text = _WS_RE.sub(" ", text).strip()
+    return text[:limit]
+
+
 def _extract_meta(html: str) -> dict[str, str]:
     """Extract title and meta tags from HTML using regex."""
     result: dict[str, str] = {}
@@ -112,10 +132,16 @@ def fetch_homepage_meta(
         logger.warning("SSRF guard blocked fetch for domain: %s", domain)
         return HomepageMeta(status="blocked")
 
-    company_name = settings.COMPANY_NAME or "SalesBot"
+    # Browser-like headers — many real company sites sit behind a WAF/CDN that
+    # 403s non-browser User-Agents, which is why even live domains used to come
+    # back as http_4xx. A standard Chrome UA gets through most of them.
     headers = {
-        "User-Agent": f"Mozilla/5.0 (compatible; {company_name}/1.0)",
-        "Accept": "text/html",
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+        ),
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
     }
 
     for scheme in ("https", "http"):
@@ -148,10 +174,36 @@ def fetch_homepage_meta(
                 description=meta.get("description", ""),
                 og_description=meta.get("og_description", ""),
                 keywords=meta.get("keywords", ""),
+                body_text=_extract_body_text(body),
                 status="ok",
             )
 
         except httpx.TimeoutException:
+            # One quick retry on the same scheme before giving up / falling back.
+            try:
+                with httpx.Client(
+                    timeout=timeout,
+                    follow_redirects=True,
+                    max_redirects=_MAX_REDIRECTS,
+                    headers=headers,
+                ) as client:
+                    resp = client.get(url)
+                if (
+                    resp.status_code < 400
+                    and "text/html" in resp.headers.get("content-type", "").lower()
+                ):
+                    body = resp.text[:_MAX_RESPONSE_BYTES]
+                    meta = _extract_meta(body)
+                    return HomepageMeta(
+                        title=meta.get("title", ""),
+                        description=meta.get("description", ""),
+                        og_description=meta.get("og_description", ""),
+                        keywords=meta.get("keywords", ""),
+                        body_text=_extract_body_text(body),
+                        status="ok",
+                    )
+            except Exception:
+                pass
             if scheme == "https":
                 continue
             return HomepageMeta(status="timeout")

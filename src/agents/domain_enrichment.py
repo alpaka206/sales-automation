@@ -19,6 +19,13 @@ logger = logging.getLogger(__name__)
 _MAX_AGE_DAYS = 90
 
 
+def _clamp(value: str | None, limit: int) -> str | None:
+    """Truncate a string to a column's max length (None stays None)."""
+    if value is None:
+        return None
+    return value[:limit]
+
+
 class DomainAnalysisResult(BaseModel):
     """LLM output schema for domain analysis."""
 
@@ -67,6 +74,23 @@ def analyze_domain(
                 logger.warning("Homepage fetch error for %s", domain, exc_info=True)
                 meta = HomepageMeta(status="blocked")
 
+        # Web-search grounding fallback — resolves well-known companies even when
+        # their homepage is blocked/parked/timed out (the common failure we saw).
+        search_findings = ""
+        if settings.INBOUND_DOMAIN_SEARCH_GROUNDING:
+            try:
+                raw = client.search(
+                    "inbound/search_company",
+                    {"domain": domain, "hint_company": hint_company or ""},
+                    tier="pro",
+                )
+                if isinstance(raw, str):
+                    raw = raw.strip()
+                    if raw and "no reliable information found" not in raw.lower():
+                        search_findings = raw
+            except Exception:
+                logger.warning("Domain search grounding failed for %s", domain, exc_info=True)
+
         try:
             analysis = client.complete(
                 "inbound/analyze_domain",
@@ -76,7 +100,9 @@ def analyze_domain(
                     "homepage_title": meta.title,
                     "homepage_description": meta.description or meta.og_description,
                     "homepage_keywords": meta.keywords,
+                    "homepage_body": meta.body_text,
                     "fetch_status": meta.status,
+                    "search_findings": search_findings or "(none)",
                 },
                 schema=DomainAnalysisResult,
             )
@@ -84,10 +110,18 @@ def analyze_domain(
             logger.warning("LLM domain analysis failed for %s", domain, exc_info=True)
             return None
 
-        if meta.status != "ok":
+        # Only force 'low' when we have NO signal at all — neither a successful
+        # homepage fetch nor any search findings. With either, trust the model's
+        # own confidence (the prompt forbids hallucinating beyond the evidence).
+        if meta.status != "ok" and not search_findings:
             analysis.confidence = "low"
 
-        source = "llm+homepage" if meta.status == "ok" else "llm_only"
+        provenance = []
+        if meta.status == "ok":
+            provenance.append("homepage")
+        if search_findings:
+            provenance.append("search")
+        source = ("llm+" + "+".join(provenance)) if provenance else "llm_only"
 
         now = datetime.now(timezone.utc)
         profile = session.get(DomainProfile, domain)
@@ -98,11 +132,14 @@ def analyze_domain(
             profile.analyzed_at = now
             profile.updated_at = now
 
-        profile.company_name = analysis.company_name
-        profile.industry = analysis.industry
-        profile.services = analysis.services
-        profile.target_market = analysis.target_market
-        profile.size_hint = analysis.size_hint
+        # Clamp to the DomainProfile column limits. Grounded search output is
+        # richer than the old homepage-only path and can overflow varchar(128)
+        # (e.g. a long industry/target_market), so guard before persisting.
+        profile.company_name = _clamp(analysis.company_name, 255)
+        profile.industry = _clamp(analysis.industry, 128)
+        profile.services = analysis.services  # Text column, unbounded
+        profile.target_market = _clamp(analysis.target_market, 128)
+        profile.size_hint = _clamp(analysis.size_hint, 64)
         profile.confidence = analysis.confidence
         profile.source = source
         profile.homepage_title = meta.title or None
