@@ -39,22 +39,34 @@ def _settings_context() -> dict:
     env_vars = []
     for field_name, field_info in settings.model_fields.items():
         val = str(getattr(settings, field_name, ""))
-        env_vars.append({
-            "name": field_name,
-            "value": _mask_value(field_name, val),
-        })
+        env_vars.append(
+            {
+                "name": field_name,
+                "value": _mask_value(field_name, val),
+            }
+        )
 
     today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
     week_start = today_start - timedelta(days=today_start.weekday())
 
     try:
         with SessionLocal() as session:
-            today_llm = session.scalar(
-                select(func.count()).select_from(LLMUsage).where(LLMUsage.created_at >= today_start)
-            ) or 0
-            week_llm = session.scalar(
-                select(func.count()).select_from(LLMUsage).where(LLMUsage.created_at >= week_start)
-            ) or 0
+            today_llm = (
+                session.scalar(
+                    select(func.count())
+                    .select_from(LLMUsage)
+                    .where(LLMUsage.created_at >= today_start)
+                )
+                or 0
+            )
+            week_llm = (
+                session.scalar(
+                    select(func.count())
+                    .select_from(LLMUsage)
+                    .where(LLMUsage.created_at >= week_start)
+                )
+                or 0
+            )
     except Exception:
         today_llm = 0
         week_llm = 0
@@ -132,9 +144,54 @@ async def settings_users(request: Request):
         ]
     me = session_user(request) or {}
     return templates.TemplateResponse(
-        request, "settings_users.html",
+        request,
+        "settings_users.html",
         {"users": users, "me_email": me.get("email", ""), "domain": settings.ALLOWED_EMAIL_DOMAIN},
     )
+
+
+@router.post("/settings/users/add")
+async def settings_user_add(
+    request: Request,
+    email: str = Form(""),
+    role: str = Form("member"),
+):
+    """Pre-add an email to the allowlist (admins only).
+
+    Lets an admin grant access before the user's first login, instead of waiting
+    for them to sign in and land in the pending queue. The row is created already
+    approved; the user just signs in with Google and is let straight through.
+    """
+    if not is_admin(request):
+        return _forbidden()
+
+    email = (email or "").strip().lower()
+    domain = (settings.ALLOWED_EMAIL_DOMAIN or "").lower().strip()
+
+    def _err(msg: str) -> HTMLResponse:
+        # 200 (not 4xx) so htmx swaps the banner into #add-user-msg — htmx 2.x does
+        # not swap error-status responses by default.
+        return HTMLResponse(
+            f'<div class="banner banner--danger" style="padding:10px 12px">{esc(msg)}</div>'
+        )
+
+    if not email or "@" not in email:
+        return _err("올바른 이메일 주소를 입력하세요.")
+    if domain and not email.endswith("@" + domain):
+        return _err(f"@{domain} 도메인 계정만 추가할 수 있습니다.")
+
+    role = "admin" if role == "admin" else "member"
+    with SessionLocal() as session:
+        u = session.get(User, email)
+        if u:
+            # Already present — just (re)approve and apply the chosen role.
+            u.approved = True
+            u.role = role
+        else:
+            session.add(User(email=email, approved=True, role=role))
+        session.commit()
+
+    return Response(status_code=204, headers={"HX-Redirect": "/settings/users"})
 
 
 @router.post("/settings/users/{email}")

@@ -14,6 +14,28 @@
   </div>
 </div>
 
+<div class="card" style="margin-bottom:14px">
+  <form hx-post="/settings/users/add" hx-target="#add-user-msg" hx-swap="innerHTML"
+        class="row" style="gap:10px;align-items:flex-end;flex-wrap:wrap">
+    <div style="flex:1 1 260px">
+      <label for="add-user-email" class="t-sm" style="display:block;font-weight:600;margin-bottom:4px">사용자 이메일 추가</label>
+      <input id="add-user-email" name="email" type="email" required
+             class="input" placeholder="name@{{ domain }}" autocomplete="off"
+             style="width:100%">
+    </div>
+    <div>
+      <label for="add-user-role" class="t-sm" style="display:block;font-weight:600;margin-bottom:4px">역할</label>
+      <select id="add-user-role" name="role" class="select">
+        <option value="member">멤버</option>
+        <option value="admin">관리자</option>
+      </select>
+    </div>
+    <button type="submit" class="btn btn--ok">{{ icon("check", 14) }} 추가</button>
+  </form>
+  <div id="add-user-msg" aria-live="polite" style="margin-top:8px"></div>
+  <p class="t-xs t-subtle" style="margin-top:8px">추가한 이메일은 즉시 <strong>승인됨</strong> 상태가 되어, 해당 사용자가 구글 로그인하면 바로 콘솔을 사용할 수 있습니다.</p>
+</div>
+
 <div class="card card--flush">
   <div class="table-wrap">
     <table class="table">
