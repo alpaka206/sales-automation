@@ -137,6 +137,10 @@ def _message_detail_context(message_id: int) -> dict:
                 "body_ko": to_korean(msg.body) if needs_korean(msg.body) else None,
                 "channel": msg.channel,
                 "direction": msg.direction,
+                # Product flow, not raw DB direction. A reply we draft to an inbound
+                # inquiry is direction="outbound" but is conceptually an inbound reply;
+                # outbound-discovery conversations carry a prospect.
+                "flow": "outbound" if prospect is not None else "inbound_reply",
                 "language": msg.language,
                 "to_address": msg.to_address or "",
                 "from_address": msg.from_address or "",

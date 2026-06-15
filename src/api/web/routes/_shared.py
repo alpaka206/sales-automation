@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import html
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from fastapi.templating import Jinja2Templates
@@ -10,6 +11,23 @@ from fastapi.templating import Jinja2Templates
 # routes/ lives under web/; templates are at web/templates.
 _TEMPLATE_DIR = Path(__file__).parent.parent / "templates"
 templates = Jinja2Templates(directory=str(_TEMPLATE_DIR))
+
+# All timestamps are stored as UTC (naive, via models._utcnow). The operator is in
+# Korea, so render everything in KST. Centralised as a Jinja filter so every
+# template formats time the same way.
+_KST = timezone(timedelta(hours=9))
+
+
+def kst(dt: datetime | None, fmt: str = "%Y-%m-%d %H:%M") -> str:
+    """Format a stored (UTC) datetime in Korea Standard Time. '' for None."""
+    if dt is None:
+        return ""
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(_KST).strftime(fmt)
+
+
+templates.env.filters["kst"] = kst
 
 
 def pending_user_count() -> int:
@@ -29,9 +47,12 @@ def pending_user_count() -> int:
         from ....db.session import SessionLocal
 
         with SessionLocal() as session:
-            return session.scalar(
-                select(func.count()).select_from(User).where(User.approved.is_(False))
-            ) or 0
+            return (
+                session.scalar(
+                    select(func.count()).select_from(User).where(User.approved.is_(False))
+                )
+                or 0
+            )
     except Exception:
         return 0
 

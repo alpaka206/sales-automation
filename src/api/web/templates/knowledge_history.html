@@ -27,7 +27,7 @@
         <span style="font-weight:600">{{ r.change_note or '수정' }}</span>
         <span class="tag">{{ r.status }}</span>
         <span class="spacer"></span>
-        <span class="t-xs t-subtle tnum">{{ r.edited_by }} · {{ r.created_at.strftime('%Y-%m-%d %H:%M') if r.created_at else '' }}</span>
+        <span class="t-xs t-subtle tnum">{{ r.edited_by }} · {{ r.created_at | kst }}</span>
       </summary>
       <div style="padding:0 16px 16px;border-top:1px solid var(--border)">
         {% if r.summary %}<div class="t-sm t-subtle" style="margin:12px 0 8px">요약: {{ r.summary }}</div>{% endif %}

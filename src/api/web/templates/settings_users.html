@@ -57,7 +57,7 @@
             {% if u.approved %}<span class="pill pill--ok pill--sm"><span class="pill__dot"></span>승인됨</span>
             {% else %}<span class="pill pill--warn pill--sm"><span class="pill__dot"></span>대기</span>{% endif %}
           </td>
-          <td class="td-subtle tnum">{{ u.last_login_at.strftime('%Y-%m-%d %H:%M') if u.last_login_at else '—' }}</td>
+          <td class="td-subtle tnum">{{ (u.last_login_at | kst) or '—' }}</td>
           <td>
             <div class="row" style="gap:6px;justify-content:flex-end">
               {% if not u.approved %}

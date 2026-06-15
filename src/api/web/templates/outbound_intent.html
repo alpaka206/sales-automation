@@ -21,7 +21,7 @@
   <div>
     <div class="row" style="gap:10px"><span class="pill pill--{{ _is[1] }}"><span class="pill__dot"></span>{{ _is[0] }}</span></div>
     <h1 class="page-title" style="margin-top:10px">발굴 인텐트 #{{ intent.id }}</h1>
-    <p class="page-sub tnum">{{ intent.created_at.strftime('%Y-%m-%d %H:%M') }}</p>
+    <p class="page-sub tnum">{{ intent.created_at | kst }}</p>
   </div>
 </div>
 

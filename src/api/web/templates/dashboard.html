@@ -87,7 +87,7 @@
             </td>
             <td class="truncate" style="max-width:260px">{{ msg.subject }}</td>
             <td class="td-muted">{{ msg.channel }}</td>
-            <td class="td-subtle tnum">{{ msg.created_at.strftime('%m/%d %H:%M') }}</td>
+            <td class="td-subtle tnum">{{ msg.created_at | kst('%m/%d %H:%M') }}</td>
           </tr>
           {% else %}
           <tr><td colspan="5">

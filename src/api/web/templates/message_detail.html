@@ -64,7 +64,7 @@
           <div class="bubble__head">
             <span class="bubble__dir">{{ icon("send", 14) }} 회신 초안 · 실제 발송 본문</span>
             {{ status_pill(t.status, "sm") }}
-            <span class="bubble__time tnum">{{ t.created_at.strftime('%Y-%m-%d %H:%M') }}</span>
+            <span class="bubble__time tnum">{{ t.created_at | kst }}</span>
           </div>
           <form id="msg-form"{% if t.body_ko %} class="has-ko"{% endif %}>
             <div class="msg-orig">
@@ -109,7 +109,7 @@
             {% endif %}
             {{ status_pill(t.status, "sm") }}
             {% if t.body_ko %}<span class="tag" style="height:20px;font-size:11px">번역 가능</span>{% endif %}
-            <span class="bubble__time tnum">{{ (t.sent_at or t.created_at).strftime('%Y-%m-%d %H:%M') }}</span>
+            <span class="bubble__time tnum">{{ (t.sent_at or t.created_at) | kst }}</span>
           </div>
           {% if t.subject %}<div class="bubble__subject">{{ t.subject }}</div>{% endif %}
           <div class="msg-body msg-orig">{{ t.body }}</div>
@@ -136,12 +136,12 @@
       <div class="section-label" style="margin-bottom:12px">발송 정보</div>
       <dl class="info-list">
         <div class="info-row"><dt>채널</dt><dd>{{ msg.channel }}</dd></div>
-        <div class="info-row"><dt>방향</dt><dd>{{ "인바운드" if msg.direction == "inbound" else "아웃바운드" }}</dd></div>
+        <div class="info-row"><dt>구분</dt><dd>{{ "인바운드 회신" if msg.flow == "inbound_reply" else "아웃바운드 발굴" }}</dd></div>
         {% if msg.language %}<div class="info-row"><dt>언어</dt><dd>{{ msg.language }}</dd></div>{% endif %}
         <div class="info-row"><dt>수신자</dt><dd class="mono truncate" style="max-width:170px">{{ msg.to_address or '—' }}</dd></div>
-        {% if msg.scheduled_at %}<div class="info-row"><dt>예약</dt><dd class="tnum">{{ msg.scheduled_at.strftime('%Y-%m-%d %H:%M') }}</dd></div>{% endif %}
-        <div class="info-row"><dt>생성</dt><dd class="tnum">{{ msg.created_at.strftime('%Y-%m-%d %H:%M') }}</dd></div>
-        {% if msg.sent_at %}<div class="info-row"><dt>발송</dt><dd class="tnum">{{ msg.sent_at.strftime('%Y-%m-%d %H:%M') }}</dd></div>{% endif %}
+        {% if msg.scheduled_at %}<div class="info-row"><dt>예약</dt><dd class="tnum">{{ msg.scheduled_at | kst }}</dd></div>{% endif %}
+        <div class="info-row"><dt>생성</dt><dd class="tnum">{{ msg.created_at | kst }}</dd></div>
+        {% if msg.sent_at %}<div class="info-row"><dt>발송</dt><dd class="tnum">{{ msg.sent_at | kst }}</dd></div>{% endif %}
       </dl>
     </div>
 

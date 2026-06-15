@@ -33,7 +33,7 @@
               <span class="pill pill--neutralSubtle pill--sm"><span class="pill__dot"></span>미설정</span>
               {% endif %}
             </td>
-            <td class="td-subtle tnum">{% if rule.updated_at %}{{ rule.updated_at.strftime('%m/%d %H:%M') }}{% else %}—{% endif %}</td>
+            <td class="td-subtle tnum">{% if rule.updated_at %}{{ rule.updated_at | kst('%m/%d %H:%M') }}{% else %}—{% endif %}</td>
             <td style="text-align:right"><span class="chip">편집 {{ icon("chevron", 13) }}</span></td>
           </tr>
           {% endfor %}

@@ -32,7 +32,7 @@
             {% else %}<span class="pill pill--neutralSubtle pill--sm"><span class="pill__dot"></span>{{ doc.status }}</span>{% endif %}
           </td>
           <td class="td-subtle mono">v{{ doc.version }}</td>
-          <td class="td-subtle tnum">{{ doc.updated_at.strftime('%m/%d %H:%M') if doc.updated_at else '—' }}</td>
+          <td class="td-subtle tnum">{{ (doc.updated_at | kst('%m/%d %H:%M')) or '—' }}</td>
         </tr>
         {% else %}
         <tr><td colspan="6">

@@ -119,7 +119,11 @@ class InboundAgent:
             try:
                 self.hubspot.update_inbound_status_sync(contact_info["object_id"], "analyzed")
             except Exception:
-                logger.warning("Failed to set inbound_status=analyzed for %s", contact_info["object_id"], exc_info=True)
+                logger.warning(
+                    "Failed to set inbound_status=analyzed for %s",
+                    contact_info["object_id"],
+                    exc_info=True,
+                )
 
         score = self._score(contact_info, classification.category)
         channel = self._pick_channel(contact_info)
@@ -141,7 +145,9 @@ class InboundAgent:
                 contact_email=contact_info.get("email"),
             )
         except Exception:
-            logger.warning("Approval notification failed for message %d.", message_id, exc_info=True)
+            logger.warning(
+                "Approval notification failed for message %d.", message_id, exc_info=True
+            )
 
         self._mirror_to_sheet(contact_info, classification, score, channel, draft, message_id)
 
@@ -205,11 +211,7 @@ class InboundAgent:
         try:
             conv_id: int | None = None
             if ticket_id:
-                conv = (
-                    session.query(Conversation)
-                    .filter_by(hubspot_ticket_id=ticket_id)
-                    .first()
-                )
+                conv = session.query(Conversation).filter_by(hubspot_ticket_id=ticket_id).first()
                 conv_id = conv.id if conv else None
             else:
                 email = contact_info.get("email", "")
@@ -299,7 +301,9 @@ class InboundAgent:
                 if parts:
                     info["last_message"] = "\n\n".join(parts)
                     info["inbound_source"] = "ticket"
-                    logger.info("Inbound message from ticket %s for contact %s", ticket_id, contact_id)
+                    logger.info(
+                        "Inbound message from ticket %s for contact %s", ticket_id, contact_id
+                    )
             except Exception:
                 logger.warning("HubSpot ticket fetch failed for %s", ticket_id, exc_info=True)
 
@@ -360,7 +364,9 @@ class InboundAgent:
             if deals:
                 parts = []
                 for d in deals:
-                    parts.append(f"- {d.name or 'Unnamed'} (stage: {d.stage or 'unknown'}, amount: {d.amount or 'N/A'})")
+                    parts.append(
+                        f"- {d.name or 'Unnamed'} (stage: {d.stage or 'unknown'}, amount: {d.amount or 'N/A'})"
+                    )
                 info["deal_summary"] = "\n".join(parts)
         except Exception:
             logger.warning("HubSpot deals fetch failed.", exc_info=True)
@@ -373,9 +379,7 @@ class InboundAgent:
                 try:
                     from .domain_enrichment import analyze_domain
 
-                    profile = analyze_domain(
-                        dom, llm=self.llm, hint_company=info.get("company")
-                    )
+                    profile = analyze_domain(dom, llm=self.llm, hint_company=info.get("company"))
                     if profile is not None:
                         info["domain_profile"] = {
                             "domain": profile.domain,
@@ -453,7 +457,14 @@ class InboundAgent:
             scope="inbound",
             llm=self.llm,
         )
-        return self.llm.complete(
+        # Detect the inquiry language deterministically and force the reply into it.
+        # The drafting model alone sometimes replied in Korean to English inquiries;
+        # passing an explicit target language fixes that, and we treat the detected
+        # value as authoritative for storage rather than the model's self-report.
+        from ..llm.language import detect_language, language_label
+
+        reply_lang = detect_language(contact_info["last_message"], llm=self.llm)
+        draft = self.llm.complete(
             "inbound/draft_reply",
             {
                 "contact_name": contact_info["full_name"],
@@ -464,11 +475,14 @@ class InboundAgent:
                 "last_message": contact_info["last_message"],
                 "enrichment_context": _build_enrichment_context(contact_info),
                 "knowledge_docs": knowledge_docs,
+                "reply_language": language_label(reply_lang),
             },
             schema=DraftResult,
             tier="pro",
             max_tokens=4000,
         )
+        draft.language = reply_lang
+        return draft
 
     def _persist(
         self,
@@ -483,7 +497,9 @@ class InboundAgent:
             email = contact_info.get("email", "")
             norm = _normalize_email(email) if email else ""
 
-            contact = session.query(Contact).filter_by(normalized_email=norm).first() if norm else None
+            contact = (
+                session.query(Contact).filter_by(normalized_email=norm).first() if norm else None
+            )
             if not contact:
                 contact = Contact(
                     hubspot_contact_id=contact_info.get("object_id") or None,
@@ -515,11 +531,7 @@ class InboundAgent:
             # conversation per contact, since there's no per-inquiry key.
             ticket_id = contact_info.get("ticket_id")
             if ticket_id:
-                conv = (
-                    session.query(Conversation)
-                    .filter_by(hubspot_ticket_id=ticket_id)
-                    .first()
-                )
+                conv = session.query(Conversation).filter_by(hubspot_ticket_id=ticket_id).first()
                 if not conv:
                     conv = Conversation(
                         contact_id=contact.id,
