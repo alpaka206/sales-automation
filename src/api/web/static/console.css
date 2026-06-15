@@ -523,6 +523,23 @@ input[type="checkbox"].cb:checked::after {
 .spin { animation: spin 1s linear infinite; transform-origin: center; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
+/* Inline spinner (e.g. on the translate toggle while translations load). */
+.spinner {
+  display: inline-block; width: 13px; height: 13px; vertical-align: -2px;
+  border: 2px solid var(--border); border-top-color: var(--accent);
+  border-radius: 50%; animation: spin .6s linear infinite;
+}
+
+/* Skeleton placeholders shown while lazily-loaded content (translations) arrives. */
+.skeleton {
+  display: block; height: 12px; margin: 7px 0; border-radius: 6px;
+  background: linear-gradient(90deg,
+    var(--surface-2) 25%, var(--surface-3) 37%, var(--surface-2) 63%);
+  background-size: 400% 100%; animation: skeleton-shimmer 1.4s ease infinite;
+}
+.skeleton--sm { width: 55%; }
+@keyframes skeleton-shimmer { 0% { background-position: 100% 50%; } 100% { background-position: 0 50%; } }
+
 /* ---------------------------------------------------------------
    Numbered step list (process explainer)
    --------------------------------------------------------------- */

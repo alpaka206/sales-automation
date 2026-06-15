@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+
 from fastapi import APIRouter, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from sqlalchemy import select
@@ -96,7 +98,6 @@ def _message_detail_context(message_id: int) -> dict:
                 {
                     "id": im.id,
                     "body": im.body,
-                    "body_ko": to_korean(im.body) if needs_korean(im.body) else None,
                     "subject": im.subject,
                     "from_address": im.from_address,
                     "channel": im.channel,
@@ -114,7 +115,9 @@ def _message_detail_context(message_id: int) -> dict:
                     "status": tm.status,
                     "subject": tm.subject,
                     "body": tm.body,
-                    "body_ko": to_korean(tm.body) if needs_korean(tm.body) else None,
+                    # Cheap heuristic only — the actual Korean translation is loaded
+                    # lazily via /messages/{id}/translation so the page renders fast.
+                    "translatable": needs_korean(tm.body),
                     "channel": tm.channel,
                     "from_address": tm.from_address,
                     "to_address": tm.to_address,
@@ -134,7 +137,7 @@ def _message_detail_context(message_id: int) -> dict:
                 "status": msg.status,
                 "subject": msg.subject or "",
                 "body": msg.body,
-                "body_ko": to_korean(msg.body) if needs_korean(msg.body) else None,
+                "translatable": needs_korean(msg.body),
                 "channel": msg.channel,
                 "direction": msg.direction,
                 # Product flow, not raw DB direction. A reply we draft to an inbound
@@ -234,6 +237,42 @@ async def message_detail(request: Request, message_id: int):
     if not ctx:
         raise HTTPException(status_code=404, detail="메시지를 찾을 수 없습니다")
     return templates.TemplateResponse(request, "message_detail.html", ctx)
+
+
+@router.get("/messages/{message_id}/translation")
+async def message_translation(message_id: int):
+    """Lazily translate every non-Korean bubble in the thread to Korean.
+
+    Returns htmx out-of-band fragments that fill the empty `#ko-<id>` placeholders
+    rendered by the detail page. Kept off the initial page load (it makes one LLM
+    call per bubble) so opening a message is fast; the operator only pays the
+    translation cost when they click "번역으로 보기". Calls run concurrently.
+    """
+    with SessionLocal() as session:
+        msg = session.get(Message, message_id)
+        if not msg:
+            return HTMLResponse("", status_code=404)
+        rows = (
+            session.execute(
+                select(Message)
+                .where(Message.conversation_id == msg.conversation_id)
+                .order_by(Message.created_at.asc(), Message.id.asc())
+            )
+            .scalars()
+            .all()
+        )
+        targets = [(m.id, m.body) for m in rows if needs_korean(m.body)]
+
+    async def _translate(mid: int, body: str) -> tuple[int, str]:
+        return mid, await asyncio.to_thread(to_korean, body)
+
+    results = await asyncio.gather(*(_translate(mid, body) for mid, body in targets))
+
+    frags = [
+        f'<div id="ko-{mid}" hx-swap-oob="innerHTML">{esc(ko) or "(번역을 가져오지 못했습니다)"}</div>'
+        for mid, ko in results
+    ]
+    return HTMLResponse("".join(frags))
 
 
 @router.post("/messages/{message_id}/send")
