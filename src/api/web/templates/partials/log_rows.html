@@ -1,0 +1,16 @@
+{% for e in events %}
+<tr>
+  <td class="td-subtle tnum" style="white-space:nowrap">{{ e.ts | kst('%m-%d %H:%M:%S') }}</td>
+  <td>
+    {% if e.level == 'ERROR' %}<span class="pill pill--danger pill--sm"><span class="pill__dot"></span>ERROR</span>
+    {% elif e.level == 'WARNING' %}<span class="pill pill--warn pill--sm"><span class="pill__dot"></span>WARN</span>
+    {% else %}<span class="pill pill--neutral pill--sm"><span class="pill__dot"></span>{{ e.level }}</span>{% endif %}
+  </td>
+  <td class="t-sm mono t-subtle" style="white-space:nowrap">{{ e.source }}</td>
+  <td class="t-sm" style="word-break:break-word">{{ e.message }}</td>
+</tr>
+{% else %}
+<tr><td colspan="4">
+  <div class="empty"><div class="empty__text">표시할 로그가 없습니다 — 문제가 없다는 뜻입니다</div></div>
+</td></tr>
+{% endfor %}

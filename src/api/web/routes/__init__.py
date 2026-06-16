@@ -14,6 +14,7 @@ from . import (
     email_templates,
     icp,
     knowledge,
+    logs,
     messages,
     outbound,
     settings_page,
@@ -30,6 +31,7 @@ for _module in (
     icp,
     outbound,
     settings_page,
+    logs,
     unsubscribe,
 ):
     router.include_router(_module.router)

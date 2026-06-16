@@ -36,6 +36,9 @@
     {{ _nav("/settings/users", "접근 승인", "shield", _path.startswith("/settings/users"), badge=(pending_user_count() or None)) }}
     {%- endif %}
     {{ _nav("/settings", "설정", "settings", _path.startswith("/settings") and not _path.startswith("/settings/users"), flag=nav_health_warn) }}
+    {%- if _is_admin %}
+    {{ _nav("/logs", "로그", "file", _path.startswith("/logs")) }}
+    {%- endif %}
   </nav>
 
   {%- set _u = _user -%}

@@ -99,6 +99,27 @@ async def request_id_middleware(request: Request, call_next):
 
 
 @app.middleware("http")
+async def error_capture_middleware(request: Request, call_next):
+    """Record HTTP 4xx/5xx responses into the log buffer for the /logs viewer.
+
+    Skips static assets, favicon, healthz, and 401s (the normal "log in" gate)
+    so the viewer surfaces real problems, not auth-redirect noise.
+    """
+    response = await call_next(request)
+    try:
+        status = response.status_code
+        path = request.url.path
+        noisy = path.startswith("/static") or path in ("/favicon.ico", "/healthz")
+        if status >= 400 and status != 401 and not noisy:
+            from ..common.log_buffer import note_http
+
+            note_http(request.method, path, status)
+    except Exception:
+        pass
+    return response
+
+
+@app.middleware("http")
 async def auth_middleware(request: Request, call_next):
     if request.url.path in API_SKIP_PATHS:
         return await call_next(request)
@@ -114,8 +135,14 @@ async def auth_middleware(request: Request, call_next):
         path = request.url.path
         # Always-public web paths: unsubscribe (signed token), the auth flow itself,
         # and static assets (needed to render the login page before sign-in).
-        if path.startswith("/unsubscribe") or path.startswith("/auth") or path.startswith("/static"):
-            request.state.user = current_user(request) if settings.AUTH_MODE == "google_oauth" else None
+        if (
+            path.startswith("/unsubscribe")
+            or path.startswith("/auth")
+            or path.startswith("/static")
+        ):
+            request.state.user = (
+                current_user(request) if settings.AUTH_MODE == "google_oauth" else None
+            )
             return await call_next(request)
 
         # Google OAuth mode: require a signed session (Google sign-in, domain + allowlist).
@@ -293,7 +320,9 @@ async def approve_message(message_id: int, body: ApprovalBody, request: Request)
         )
         logger.info("Logged HubSpot engagement %s for message %d", engagement_id, message_id)
     except Exception:
-        logger.warning("HubSpot engagement logging failed for message %d", message_id, exc_info=True)
+        logger.warning(
+            "HubSpot engagement logging failed for message %d", message_id, exc_info=True
+        )
         hs = None
 
     if settings.HUBSPOT_UPDATE_CONTACT_INBOUND_STATUS:
@@ -310,10 +339,15 @@ async def approve_message(message_id: int, body: ApprovalBody, request: Request)
                 from ..db.session import SessionLocal
 
                 with SessionLocal() as session:
-                    session.add(Event(
-                        kind="hubspot_status_update_failed",
-                        payload={"contact_id": contact_id, "target_status": "meeting_link_sent"},
-                    ))
+                    session.add(
+                        Event(
+                            kind="hubspot_status_update_failed",
+                            payload={
+                                "contact_id": contact_id,
+                                "target_status": "meeting_link_sent",
+                            },
+                        )
+                    )
                     session.commit()
             except Exception:
                 logger.exception("Failed to queue status update retry")

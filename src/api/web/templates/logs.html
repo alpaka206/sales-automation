@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% from "partials/icons.html" import icon %}
+{% block title %}로그 — PERSO Sales Console{% endblock %}
+{% block content %}
+
+<div style="margin-bottom:14px">
+  <a href="/settings" class="chip">{{ icon("chevron", 14) }} 설정</a>
+</div>
+
+<div class="page-header">
+  <div>
+    <h1 class="page-title">문제 로그</h1>
+    <p class="page-sub">개발자가 살펴봐야 할 항목 — 경고/에러 로그와 HTTP 4xx·5xx 응답을 모아 보여줍니다. (최근 {{ counts.all }}건, 프로세스 재시작 시 초기화)</p>
+  </div>
+  <div class="row" style="gap:8px">
+    <button type="button" class="chip" hx-get="/logs/rows?view={{ view }}" hx-target="#log-rows" hx-swap="innerHTML">{{ icon("refresh", 14) }} 새로고침</button>
+    <button type="button" class="btn btn--ghost btn--sm" hx-post="/logs/clear" hx-confirm="수집된 로그를 모두 비우시겠습니까?">비우기</button>
+  </div>
+</div>
+
+<div class="chip-row" role="tablist" aria-label="로그 필터" style="margin-bottom:14px">
+  {% for val, label, key in [('all','전체','all'), ('error','에러','ERROR'), ('warning','경고','WARNING'), ('http','HTTP 오류','http')] %}
+  <a class="chip{% if view == val %} is-active{% endif %}" href="/logs?view={{ val }}"
+     role="tab" aria-selected="{{ 'true' if view == val else 'false' }}">{{ label }} <span class="tnum t-subtle">{{ counts[key] }}</span></a>
+  {% endfor %}
+</div>
+
+<div class="card card--flush">
+  <div class="table-wrap">
+    <table class="table">
+      <thead>
+        <tr><th scope="col" style="width:130px">시각(KST)</th><th scope="col" style="width:90px">레벨</th><th scope="col" style="width:200px">출처</th><th scope="col">메시지</th></tr>
+      </thead>
+      <tbody id="log-rows" aria-live="polite"
+             hx-get="/logs/rows?view={{ view }}" hx-trigger="every 15s" hx-target="#log-rows" hx-swap="innerHTML">
+        {% include "partials/log_rows.html" %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+{% endblock %}
