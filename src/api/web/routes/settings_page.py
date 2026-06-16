@@ -162,6 +162,7 @@ async def settings_users(request: Request):
 @router.post("/settings/users/add")
 async def settings_user_add(
     request: Request,
+    username: str = Form(""),
     email: str = Form(""),
     role: str = Form("member"),
 ):
@@ -170,12 +171,21 @@ async def settings_user_add(
     Lets an admin grant access before the user's first login, instead of waiting
     for them to sign in and land in the pending queue. The row is created already
     approved; the user just signs in with Google and is let straight through.
+
+    The form sends only the local part (``username``); the @domain is fixed and
+    appended here. ``email`` is still accepted as a fallback for the full address.
     """
     if not is_admin(request):
         return _forbidden()
 
-    email = (email or "").strip().lower()
     domain = (settings.ALLOWED_EMAIL_DOMAIN or "").lower().strip()
+    local = (username or "").strip().lower().lstrip("@")
+    if "@" in local:  # tolerate a pasted full address in the username box
+        local = local.split("@", 1)[0]
+    if local and domain:
+        email = f"{local}@{domain}"
+    else:
+        email = (email or "").strip().lower()
 
     def _err(msg: str) -> HTMLResponse:
         # 200 (not 4xx) so htmx swaps the banner into #add-user-msg — htmx 2.x does

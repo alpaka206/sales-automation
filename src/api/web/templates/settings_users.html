@@ -18,10 +18,15 @@
   <form hx-post="/settings/users/add" hx-target="#add-user-msg" hx-swap="innerHTML"
         class="row" style="gap:10px;align-items:flex-end;flex-wrap:wrap">
     <div style="flex:1 1 260px">
-      <label for="add-user-email" class="t-sm" style="display:block;font-weight:600;margin-bottom:4px">사용자 이메일 추가</label>
-      <input id="add-user-email" name="email" type="email" required
-             class="input" placeholder="name@{{ domain }}" autocomplete="off"
-             style="width:100%">
+      <label for="add-user-username" class="t-sm" style="display:block;font-weight:600;margin-bottom:4px">사용자 이메일 추가 <span class="t-subtle">(@{{ domain }} 자동)</span></label>
+      <div class="row" style="gap:0;align-items:stretch;flex-wrap:nowrap">
+        <input id="add-user-username" name="username" required
+               class="input" placeholder="아이디" autocomplete="off" inputmode="email"
+               aria-describedby="add-user-domain"
+               style="flex:1 1 auto;min-width:0;border-top-right-radius:0;border-bottom-right-radius:0">
+        <span id="add-user-domain" class="input"
+              style="display:flex;align-items:center;flex:0 0 auto;background:var(--surface-3);color:var(--text-subtle);border-left:0;border-top-left-radius:0;border-bottom-left-radius:0;white-space:nowrap">@{{ domain }}</span>
+      </div>
     </div>
     <div>
       <label for="add-user-role" class="t-sm" style="display:block;font-weight:600;margin-bottom:4px">역할</label>
@@ -36,16 +41,6 @@
   <p class="t-xs t-subtle" style="margin-top:8px">추가한 이메일은 즉시 <strong>승인됨</strong> 상태가 되어, 해당 사용자가 구글 로그인하면 바로 콘솔을 사용할 수 있습니다.</p>
 </div>
 
-{# ---- search (client-side filter over both lists) ---- #}
-<div class="card" style="margin-bottom:14px">
-  <label for="user-search" class="t-sm" style="display:block;font-weight:600;margin-bottom:4px">사용자 검색</label>
-  <input id="user-search" type="search" class="input" style="width:100%"
-         placeholder="이름 또는 이메일로 검색" autocomplete="off"
-         aria-describedby="user-search-count"
-         oninput="filterUsers(this.value)">
-  <div id="user-search-count" class="t-xs t-subtle" aria-live="polite" style="margin-top:6px"></div>
-</div>
-
 {# ---- pending applications (approved = false) ---- #}
 <div class="card card--flush" style="margin-bottom:14px" data-user-section>
   <div class="section-header" style="padding:var(--pad-card) var(--pad-card) 0">
@@ -58,6 +53,13 @@
         <div class="section-header__sub">로그인했지만 아직 승인되지 않은 사용자입니다. 승인하거나 거절(삭제)할 수 있습니다.</div>
       </div>
     </div>
+  </div>
+  <div style="padding:12px var(--pad-card) 0">
+    <label for="search-pending" class="t-xs t-subtle" style="display:block;font-weight:600;margin-bottom:4px">신청 검색</label>
+    <input id="search-pending" type="search" class="input" style="width:100%"
+           placeholder="이름 또는 이메일로 검색" autocomplete="off"
+           aria-describedby="count-pending" oninput="filterUserSection(this)">
+    <div id="count-pending" class="t-xs t-subtle" aria-live="polite" style="margin-top:6px"></div>
   </div>
   <div class="table-wrap" style="margin-top:12px">
     <table class="table">
@@ -105,9 +107,16 @@
         <div class="section-header__title">등록된 사용자
           <span class="pill pill--ok pill--sm" style="margin-left:6px"><span class="pill__dot"></span>{{ approved_users | length }}</span>
         </div>
-        <div class="section-header__sub">승인되어 콘솔을 사용할 수 있는 사용자입니다. 해제하면 즉시 삭제됩니다.</div>
+        <div class="section-header__sub">승인되어 콘솔을 사용할 수 있는 사용자입니다. 삭제하면 목록에서 즉시 제거됩니다.</div>
       </div>
     </div>
+  </div>
+  <div style="padding:12px var(--pad-card) 0">
+    <label for="search-approved" class="t-xs t-subtle" style="display:block;font-weight:600;margin-bottom:4px">사용자 검색</label>
+    <input id="search-approved" type="search" class="input" style="width:100%"
+           placeholder="이름 또는 이메일로 검색" autocomplete="off"
+           aria-describedby="count-approved" oninput="filterUserSection(this)">
+    <div id="count-approved" class="t-xs t-subtle" aria-live="polite" style="margin-top:6px"></div>
   </div>
   <div class="table-wrap" style="margin-top:12px">
     <table class="table">
@@ -158,29 +167,27 @@
 </p>
 
 <script>
-  // Client-side filter over both user tables. Hides non-matching rows, toggles a
-  // per-table "no results" row, and announces the total match count.
-  function filterUsers(q) {
-    var query = (q || "").trim().toLowerCase();
-    var total = 0;
-    document.querySelectorAll("[data-user-section]").forEach(function (section) {
-      var shown = 0;
-      section.querySelectorAll("[data-user-row]").forEach(function (row) {
-        var hay = row.getAttribute("data-search") || "";
-        var match = !query || hay.indexOf(query) !== -1;
-        row.hidden = !match;
-        if (match) shown++;
-      });
-      // The "no users" empty row should hide while searching; the "no results"
-      // row shows only when a query is active and nothing matched.
-      var emptyRow = section.querySelector("[data-empty-row]");
-      if (emptyRow) emptyRow.hidden = !!query;
-      var noResults = section.querySelector("[data-no-results]");
-      if (noResults) noResults.hidden = !(query && shown === 0);
-      total += shown;
+  // Per-section client-side filter. Each list (승인 대기 / 등록된 사용자) has its
+  // own search box; this scopes the filter to the section the input belongs to.
+  function filterUserSection(input) {
+    var section = input.closest("[data-user-section]");
+    if (!section) return;
+    var query = (input.value || "").trim().toLowerCase();
+    var shown = 0;
+    section.querySelectorAll("[data-user-row]").forEach(function (row) {
+      var hay = row.getAttribute("data-search") || "";
+      var match = !query || hay.indexOf(query) !== -1;
+      row.hidden = !match;
+      if (match) shown++;
     });
-    var count = document.getElementById("user-search-count");
-    if (count) count.textContent = query ? (total + "명 검색됨") : "";
+    // Hide the "no users" empty row while searching; show "no results" only when
+    // a query is active and nothing matched.
+    var emptyRow = section.querySelector("[data-empty-row]");
+    if (emptyRow) emptyRow.hidden = !!query;
+    var noResults = section.querySelector("[data-no-results]");
+    if (noResults) noResults.hidden = !(query && shown === 0);
+    var countEl = document.getElementById(input.getAttribute("aria-describedby"));
+    if (countEl) countEl.textContent = query ? shown + "명 검색됨" : "";
   }
 </script>
 
