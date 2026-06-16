@@ -130,7 +130,7 @@
           <td>
             <div class="row" style="gap:6px;justify-content:flex-end">
               {% if u.email != me_email %}
-              <button class="btn btn--ghost btn--sm" hx-post="/settings/users/{{ u.email }}" hx-vals='{"action":"revoke"}' hx-confirm="{{ u.email }} 의 접근 권한을 삭제하시겠습니까? 목록에서 완전히 제거됩니다.">해제·삭제</button>
+              <button class="btn btn--ghost btn--sm" hx-post="/settings/users/{{ u.email }}" hx-vals='{"action":"revoke"}' hx-confirm="{{ u.email }} 의 접근 권한을 삭제하시겠습니까? 목록에서 완전히 제거됩니다.">삭제</button>
               {% endif %}
               {% if u.role != 'admin' %}
               <button class="btn btn--subtle btn--sm" hx-post="/settings/users/{{ u.email }}" hx-vals='{"action":"make_admin"}'>관리자로</button>
