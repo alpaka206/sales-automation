@@ -15,18 +15,31 @@ from ._shared import TRACKED_STATUSES, templates
 router = APIRouter(tags=["web"])
 
 
-def _dashboard_context() -> dict:
-    """Query DB for dashboard data."""
+def _dashboard_context(flow: str = "all") -> dict:
+    """Query DB for dashboard data.
+
+    ``flow`` filters the recent-message list by product flow (not DB direction):
+    ``all`` (default), ``inbound`` (replies to inbound inquiries — contact-only
+    conversations), or ``outbound`` (cold-discovery mail — conversations carrying
+    a prospect_id).
+    """
+    if flow not in ("all", "inbound", "outbound"):
+        flow = "all"
     with SessionLocal() as session:
         # Mirror /messages — show outbound drafts/sent only. Inbound rows are kept
         # for the detail-page reply context but listing them here duplicates the
         # inbound-body box that already appears on each message detail.
-        recent = session.execute(
+        stmt = (
             select(Message, Conversation.topic, Conversation.prospect_id)
             .join(Conversation, Message.conversation_id == Conversation.id)
             .where(Message.direction == "outbound")
-            .order_by(Message.created_at.desc())
-            .limit(20)
+        )
+        if flow == "outbound":
+            stmt = stmt.where(Conversation.prospect_id.isnot(None))
+        elif flow == "inbound":
+            stmt = stmt.where(Conversation.prospect_id.is_(None))
+        recent = session.execute(
+            stmt.order_by(Message.created_at.desc()).limit(20)
         ).all()
         recent_messages = [
             {
@@ -85,6 +98,7 @@ def _dashboard_context() -> dict:
         category_counts = [(cat or "기타", cnt) for cat, cnt in category_rows]
 
     return {
+        "flow": flow,
         "recent_messages": recent_messages,
         "status_counts": status_counts,
         "replied_count": replied_count,
@@ -95,7 +109,10 @@ def _dashboard_context() -> dict:
 
 
 @router.get("/")
-async def dashboard(request: Request):
-    """Main dashboard — recent messages, status counts, daily stats."""
-    ctx = _dashboard_context()
+async def dashboard(request: Request, flow: str = "all"):
+    """Main dashboard — recent messages, status counts, daily stats.
+
+    ``?flow=all|inbound|outbound`` filters the recent-message list.
+    """
+    ctx = _dashboard_context(flow)
     return templates.TemplateResponse(request, "dashboard.html", ctx)

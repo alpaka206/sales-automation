@@ -21,8 +21,9 @@ def _client() -> TestClient:
     return TestClient(app)
 
 
-def _mock_dashboard_context():
+def _mock_dashboard_context(flow="all"):
     return {
+        "flow": flow,
         "recent_messages": [
             {
                 "id": 1,
