@@ -223,6 +223,58 @@ class KnowledgeDocumentRevision(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
 
 
+class EmailTemplate(Base):
+    """Editable email building-block templates (signature, greeting, footer, ...).
+
+    Stores reusable snippets keyed by ``key``, optionally scoped per ``language``
+    ("ko" | "en" | "all"). Only ``active`` rows are surfaced to the send path via
+    the lookup helper. Every edit snapshots the prior state into
+    ``email_template_revisions``, mirroring the knowledge-base pattern.
+    """
+
+    __tablename__ = "email_templates"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    key: Mapped[str] = mapped_column(String, unique=True, nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    language: Mapped[str] = mapped_column(String, nullable=False, default="all")
+    channel: Mapped[str] = mapped_column(String, nullable=False, default="email")
+    body: Mapped[str] = mapped_column(Text, nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(String, nullable=False, default="active")
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    author: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=_utcnow, onupdate=_utcnow, nullable=False
+    )
+
+
+class EmailTemplateRevision(Base):
+    """Append-only history of email template edits.
+
+    A new row is written *before* each update with the template's prior content,
+    so the change history survives even if the live template is later edited or
+    deleted. ``template_id`` is a plain int (no hard FK) so revisions outlive
+    their source template.
+    """
+
+    __tablename__ = "email_template_revisions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    template_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    key: Mapped[str] = mapped_column(String, nullable=False)
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    language: Mapped[str] = mapped_column(String, nullable=False, default="all")
+    channel: Mapped[str] = mapped_column(String, nullable=False, default="email")
+    body: Mapped[str] = mapped_column(Text, nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(String, nullable=False, default="active")
+    change_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    edited_by: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+
+
 class OutboundIntent(Base):
     """Stores natural-language queries routed to outbound sources."""
 

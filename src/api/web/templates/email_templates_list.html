@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% from "partials/icons.html" import icon %}
+{% block title %}이메일 템플릿 — PERSO Sales Console{% endblock %}
+{% block content %}
+
+<div class="page-header">
+  <div>
+    <h1 class="page-title">이메일 템플릿</h1>
+    <p class="page-sub">발송 메일에 쓰이는 재사용 조각(서명·인사말·푸터 등). <code>{{ '{{변수}}' }}</code> 사용 가능, active 상태만 발송에 반영됩니다.</p>
+  </div>
+  <a href="/email-templates/new" class="btn btn--primary">{{ icon("plus", 15) }} 새 템플릿</a>
+</div>
+
+<div class="card card--flush">
+  <div class="table-wrap">
+    <table class="table">
+      <thead>
+        <tr><th scope="col">키</th><th scope="col">이름</th><th scope="col">언어</th><th scope="col">상태</th><th scope="col">버전</th><th scope="col">수정일</th></tr>
+      </thead>
+      <tbody>
+        {% for tpl in templates %}
+        <tr class="is-clickable" onclick="location.href='/email-templates/{{ tpl.id }}'">
+          <td class="mono">{{ tpl.key }}</td>
+          <td style="font-weight:600">{{ tpl.name }}</td>
+          <td><span class="tag">{{ tpl.language }}</span></td>
+          <td>
+            {% if tpl.status == 'active' %}<span class="pill pill--ok pill--sm"><span class="pill__dot"></span>active</span>
+            {% elif tpl.status == 'draft' %}<span class="pill pill--warn pill--sm"><span class="pill__dot"></span>draft</span>
+            {% else %}<span class="pill pill--neutralSubtle pill--sm"><span class="pill__dot"></span>{{ tpl.status }}</span>{% endif %}
+          </td>
+          <td class="td-subtle mono">v{{ tpl.version }}</td>
+          <td class="td-subtle tnum">{{ (tpl.updated_at | kst('%m/%d %H:%M')) or '—' }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="6">
+          <div class="empty"><div class="empty__icon">{{ icon("mail", 24) }}</div><div class="empty__text">템플릿이 없습니다</div></div>
+        </td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+{% endblock %}

@@ -76,6 +76,16 @@ def build_footer(language: str, to_email: str, country_code: str | None = None) 
 
     lines: list[str] = ["\n\n---"]
 
+    # Web-editable custom footer note (DB), shown above the legal footer when set.
+    try:
+        from ..db.email_templates import get_email_template
+
+        note = (get_email_template("footer_note", language) or "").strip()
+    except Exception:
+        note = ""
+    if note:
+        lines.append(note)
+
     if region == "kr":
         if settings.KOREA_AD_PREFIX_ENABLED:
             lines.append("(광고)")
