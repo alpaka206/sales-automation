@@ -1,4 +1,4 @@
-"""Tests for the settings page."""
+"""Tests for the settings page (lazy health check + LLM usage)."""
 
 from __future__ import annotations
 
@@ -23,21 +23,9 @@ class _FakeReport(BaseModel):
 
 
 def _mock_settings_context():
-    return {
-        "checks": [
-            {"name": "Database", "status": "PASS", "detail": "ok", "latency_ms": 5},
-            {"name": "Gemini (Vertex)", "status": "FAIL", "detail": "GOOGLE_CREDENTIALS_JSON is empty", "latency_ms": 0},
-        ],
-        "overall_status": "FAIL",
-        "env_vars": [
-            {"name": "HUBSPOT_PRIVATE_APP_TOKEN", "value": "pat-***"},
-            {"name": "APP_HOST", "value": "127.0.0.1"},
-        ],
-        "today_llm": 12,
-        "week_llm": 45,
-        "llm_provider": "gemini_vertex",
-        "llm_ok": False,
-    }
+    # Settings page itself only renders LLM usage now; health checks load lazily
+    # via the /settings/healthcheck fragment.
+    return {"today_llm": 12, "week_llm": 45, "llm_provider": "gemini_vertex"}
 
 
 def _client() -> TestClient:
@@ -52,39 +40,53 @@ def test_settings_page_returns_200():
 
 
 @patch("src.api.web.routes.settings_page._settings_context", _mock_settings_context)
-def test_settings_shows_env_vars_masked():
-    r = _client().get("/settings")
-    assert "HUBSPOT_PRIVATE_APP_TOKEN" in r.text
-    assert "pat-***" in r.text
-
-
-@patch("src.api.web.routes.settings_page._settings_context", _mock_settings_context)
-def test_settings_shows_healthcheck():
-    r = _client().get("/settings")
-    assert "Database" in r.text
-    # Health status renders as a Korean status pill (PASS → 정상) rather than the raw enum.
-    assert "정상" in r.text
-
-
-@patch("src.api.web.routes.settings_page._settings_context", _mock_settings_context)
-def test_settings_shows_gemini_warning():
-    r = _client().get("/settings")
-    assert "GOOGLE_CREDENTIALS_JSON" in r.text
-
-
-@patch("src.api.web.routes.settings_page._settings_context", _mock_settings_context)
 def test_settings_shows_llm_usage():
     r = _client().get("/settings")
     assert "12" in r.text
     assert "45" in r.text
 
 
-def test_settings_refresh_healthcheck():
+@patch("src.api.web.routes.settings_page._settings_context", _mock_settings_context)
+def test_settings_lazy_loads_healthcheck():
+    # The page no longer runs the (slow) checks inline — it pulls them in lazily.
+    r = _client().get("/settings")
+    assert "/settings/healthcheck" in r.text
+    assert "skeleton" in r.text
+
+
+@patch("src.api.web.routes.settings_page._settings_context", _mock_settings_context)
+def test_settings_no_env_vars():
+    # Environment variables are no longer exposed on the settings page.
+    r = _client().get("/settings")
+    assert "환경변수" not in r.text
+
+
+def test_settings_healthcheck_fragment_shows_checks():
     fake_report = _FakeReport(
-        checks=[_FakeCheck(name="DB", status="PASS", detail="ok", latency_ms=3)],
+        checks=[_FakeCheck(name="Database", status="PASS", detail="ok", latency_ms=3)],
         overall_status="PASS",
     )
     with patch("src.common.healthcheck.run_healthchecks", return_value=fake_report):
-        r = _client().post("/settings/refresh-healthcheck")
+        r = _client().get("/settings/healthcheck")
     assert r.status_code == 200
-    assert "DB" in r.text
+    assert "Database" in r.text
+    # Health status renders as a Korean status pill (PASS → 정상) rather than the raw enum.
+    assert "정상" in r.text
+
+
+def test_settings_healthcheck_fragment_gemini_warning():
+    fake_report = _FakeReport(
+        checks=[
+            _FakeCheck(
+                name="Gemini (Vertex)",
+                status="FAIL",
+                detail="GOOGLE_CREDENTIALS_JSON is empty",
+                latency_ms=0,
+            )
+        ],
+        overall_status="FAIL",
+    )
+    with patch("src.common.healthcheck.run_healthchecks", return_value=fake_report):
+        r = _client().get("/settings/healthcheck")
+    assert r.status_code == 200
+    assert "GOOGLE_CREDENTIALS_JSON" in r.text

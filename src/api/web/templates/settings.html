@@ -1,37 +1,23 @@
 {% extends "base.html" %}
 {% from "partials/icons.html" import icon %}
-{% from "partials/ui.html" import status_pill %}
 {% block title %}설정 — PERSO Sales Console{% endblock %}
 {% block content %}
 
 <div class="page-header">
   <div>
     <h1 class="page-title">설정</h1>
-    <p class="page-sub">외부 연동·워커 헬스체크, 환경변수, LLM 사용량.</p>
+    <p class="page-sub">외부 연동·워커 헬스체크와 LLM 사용량.</p>
   </div>
   <div class="row" style="gap:10px">
     {% if request and request.state and request.state.user and request.state.user.role == 'admin' %}
+    <a href="/logs" class="btn btn--subtle">{{ icon("file", 15) }} 로그</a>
     <a href="/settings/users" class="btn btn--subtle">{{ icon("prospects", 15) }} 사용자 관리</a>
     {% endif %}
-    <span class="t-sm t-subtle">전체 상태</span>{{ status_pill(overall_status) }}
   </div>
 </div>
-
-{% if not llm_ok %}
-<div class="banner banner--danger mb-gap">
-  <span class="banner__icon">{{ icon("warn", 18) }}</span>
-  <div>
-    <div class="banner__title">Gemini (Vertex AI) 자격 증명이 없거나 잘못되었습니다.</div>
-    <div class="banner__body">
-      <span class="mono">.env</span>의 <span class="mono">GOOGLE_CREDENTIALS_JSON</span>(서비스 계정 JSON)과
-      <span class="mono">GOOGLE_CLOUD_PROJECT</span> / <span class="mono">GOOGLE_CLOUD_LOCATION</span>을 확인하세요.
-    </div>
-  </div>
-</div>
-{% endif %}
 
 <div class="grid grid-2 mb-gap">
-  {# ---- system health ---- #}
+  {# ---- system health (loaded lazily — the checks hit external services) ---- #}
   <div class="card">
     <div class="section-header">
       <div class="section-header__l">
@@ -40,24 +26,20 @@
           <div class="section-header__sub">외부 연동 · 워커 헬스체크</div></div>
       </div>
       <button type="button" class="chip"
-              hx-post="/settings/refresh-healthcheck" hx-target="#hc-body" hx-swap="innerHTML"
+              hx-get="/settings/healthcheck" hx-target="#hc-card-body" hx-swap="innerHTML"
               hx-indicator="#hc-spin">{{ icon("refresh", 14) }} 새로고침
         <span id="hc-spin" class="htmx-indicator">…</span></button>
     </div>
-    <div class="table-wrap">
-      <table class="table">
-        <thead><tr><th scope="col">항목</th><th scope="col">상태</th><th scope="col">상세</th><th scope="col">지연</th></tr></thead>
-        <tbody id="hc-body" aria-live="polite">
-          {% for c in checks %}
-          <tr>
-            <td style="font-weight:600">{{ c.name }}</td>
-            <td>{{ status_pill(c.status, "sm") }}</td>
-            <td class="td-subtle t-sm">{{ c.detail }}</td>
-            <td class="td-subtle tnum">{{ c.latency_ms }}ms</td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
+    <div id="hc-card-body" hx-get="/settings/healthcheck" hx-trigger="load" hx-swap="innerHTML"
+         aria-busy="true">
+      {# skeleton placeholder shown until the checks return #}
+      <div class="stack" style="gap:10px;padding:8px 2px">
+        <div class="skeleton" style="height:16px;border-radius:6px"></div>
+        <div class="skeleton skeleton--sm" style="height:16px;border-radius:6px"></div>
+        <div class="skeleton" style="height:16px;border-radius:6px"></div>
+        <div class="skeleton skeleton--sm" style="height:16px;border-radius:6px"></div>
+        <div class="skeleton" style="height:16px;border-radius:6px"></div>
+      </div>
     </div>
   </div>
 
@@ -74,25 +56,6 @@
       <div class="kpi"><div class="kpi__label">오늘 호출</div><div class="kpi__value tnum">{{ today_llm }}</div></div>
       <div class="kpi"><div class="kpi__label">이번 주 호출</div><div class="kpi__value tnum">{{ week_llm }}</div></div>
     </div>
-  </div>
-</div>
-
-{# ---- environment variables ---- #}
-<div class="card">
-  <div class="section-header">
-    <div class="section-header__l">
-      <span class="section-header__icon">{{ icon("settings", 17) }}</span>
-      <div><div class="section-header__title">환경변수</div>
-        <div class="section-header__sub">민감 값은 마스킹됩니다</div></div>
-    </div>
-  </div>
-  <div class="grid grid-2" style="gap:2px 32px">
-    {% for ev in env_vars %}
-    <div class="info-row" style="padding:7px 0;border-bottom:1px solid var(--border)">
-      <span class="mono t-xs t-muted">{{ ev.name }}</span>
-      <span class="mono t-xs t-subtle truncate" style="max-width:240px">{{ ev.value }}</span>
-    </div>
-    {% endfor %}
   </div>
 </div>
 

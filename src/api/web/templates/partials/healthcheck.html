@@ -1,0 +1,29 @@
+{% from "partials/icons.html" import icon %}
+{% from "partials/ui.html" import status_pill %}
+<div class="row-between" style="margin-bottom:10px">
+  <span class="t-sm t-subtle">전체 상태</span>{{ status_pill(overall_status) }}
+</div>
+{% if not llm_ok %}
+<div class="banner banner--danger" style="margin-bottom:12px">
+  <span class="banner__icon">{{ icon("warn", 18) }}</span>
+  <div>
+    <div class="banner__title">Gemini (Vertex AI) 자격 증명이 없거나 잘못되었습니다.</div>
+    <div class="banner__body"><span class="mono">.env</span>의 <span class="mono">GOOGLE_CREDENTIALS_JSON</span>·<span class="mono">GOOGLE_CLOUD_PROJECT</span>·<span class="mono">GOOGLE_CLOUD_LOCATION</span>을 확인하세요.</div>
+  </div>
+</div>
+{% endif %}
+<div class="table-wrap">
+  <table class="table">
+    <thead><tr><th scope="col">항목</th><th scope="col">상태</th><th scope="col">상세</th><th scope="col">지연</th></tr></thead>
+    <tbody aria-live="polite">
+      {% for c in checks %}
+      <tr>
+        <td style="font-weight:600">{{ c.name }}</td>
+        <td>{{ status_pill(c.status, "sm") }}</td>
+        <td class="td-subtle t-sm">{{ c.detail }}</td>
+        <td class="td-subtle tnum">{{ c.latency_ms }}ms</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
