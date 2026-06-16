@@ -59,7 +59,12 @@ def analyze_domain(
         if not force_refresh:
             existing = session.get(DomainProfile, domain)
             if existing is not None:
-                age_days = (datetime.now(timezone.utc) - existing.analyzed_at).days
+                # analyzed_at is stored naive-UTC (SQLite) — make it aware before
+                # subtracting from an aware now() to avoid a TypeError.
+                analyzed_at = existing.analyzed_at
+                if analyzed_at.tzinfo is None:
+                    analyzed_at = analyzed_at.replace(tzinfo=timezone.utc)
+                age_days = (datetime.now(timezone.utc) - analyzed_at).days
                 if age_days <= _MAX_AGE_DAYS:
                     logger.info("Domain profile cache hit: %s", domain)
                     return existing
