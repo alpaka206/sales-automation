@@ -36,15 +36,37 @@
   <p class="t-xs t-subtle" style="margin-top:8px">추가한 이메일은 즉시 <strong>승인됨</strong> 상태가 되어, 해당 사용자가 구글 로그인하면 바로 콘솔을 사용할 수 있습니다.</p>
 </div>
 
-<div class="card card--flush">
-  <div class="table-wrap">
+{# ---- search (client-side filter over both lists) ---- #}
+<div class="card" style="margin-bottom:14px">
+  <label for="user-search" class="t-sm" style="display:block;font-weight:600;margin-bottom:4px">사용자 검색</label>
+  <input id="user-search" type="search" class="input" style="width:100%"
+         placeholder="이름 또는 이메일로 검색" autocomplete="off"
+         aria-describedby="user-search-count"
+         oninput="filterUsers(this.value)">
+  <div id="user-search-count" class="t-xs t-subtle" aria-live="polite" style="margin-top:6px"></div>
+</div>
+
+{# ---- pending applications (approved = false) ---- #}
+<div class="card card--flush" style="margin-bottom:14px" data-user-section>
+  <div class="section-header" style="padding:var(--pad-card) var(--pad-card) 0">
+    <div class="section-header__l">
+      <span class="section-header__icon">{{ icon("inbound", 17) }}</span>
+      <div>
+        <div class="section-header__title">승인 대기 · 신청
+          <span class="pill pill--warn pill--sm" style="margin-left:6px"><span class="pill__dot"></span>{{ pending_users | length }}</span>
+        </div>
+        <div class="section-header__sub">로그인했지만 아직 승인되지 않은 사용자입니다. 승인하거나 거절(삭제)할 수 있습니다.</div>
+      </div>
+    </div>
+  </div>
+  <div class="table-wrap" style="margin-top:12px">
     <table class="table">
       <thead>
-        <tr><th scope="col">사용자</th><th scope="col">역할</th><th scope="col">상태</th><th scope="col">최근 로그인</th><th scope="col" style="text-align:right">관리</th></tr>
+        <tr><th scope="col">사용자</th><th scope="col">역할</th><th scope="col">최근 로그인</th><th scope="col" style="text-align:right">관리</th></tr>
       </thead>
       <tbody aria-live="polite">
-        {% for u in users %}
-        <tr>
+        {% for u in pending_users %}
+        <tr data-user-row data-search="{{ (u.name ~ ' ' ~ u.email) | lower }}">
           <td>
             <div style="font-weight:600">{{ u.name or u.email.split('@')[0] }}{% if u.email == me_email %} <span class="t-subtle t-xs">(나)</span>{% endif %}</div>
             <div class="t-xs t-subtle mono">{{ u.email }}</div>
@@ -53,17 +75,62 @@
             {% if u.role == 'admin' %}<span class="pill pill--accent pill--sm"><span class="pill__dot"></span>관리자</span>
             {% else %}<span class="tag">멤버</span>{% endif %}
           </td>
-          <td>
-            {% if u.approved %}<span class="pill pill--ok pill--sm"><span class="pill__dot"></span>승인됨</span>
-            {% else %}<span class="pill pill--warn pill--sm"><span class="pill__dot"></span>대기</span>{% endif %}
-          </td>
           <td class="td-subtle tnum">{{ (u.last_login_at | kst) or '—' }}</td>
           <td>
             <div class="row" style="gap:6px;justify-content:flex-end">
-              {% if not u.approved %}
               <button class="btn btn--ok btn--sm" hx-post="/settings/users/{{ u.email }}" hx-vals='{"action":"approve"}'>{{ icon("check", 14) }} 승인</button>
-              {% elif u.email != me_email %}
-              <button class="btn btn--ghost btn--sm" hx-post="/settings/users/{{ u.email }}" hx-vals='{"action":"revoke"}' hx-confirm="{{ u.email }} 의 접근 권한을 해제하시겠습니까?">해제</button>
+              <button class="btn btn--ghost btn--sm" hx-post="/settings/users/{{ u.email }}" hx-vals='{"action":"reject"}' hx-confirm="{{ u.email }} 의 신청을 거절(삭제)하시겠습니까?">거절</button>
+            </div>
+          </td>
+        </tr>
+        {% else %}
+        <tr data-empty-row><td colspan="4">
+          <div class="empty"><div class="empty__text">대기 중인 신청이 없습니다</div></div>
+        </td></tr>
+        {% endfor %}
+        <tr data-no-results hidden><td colspan="4">
+          <div class="empty"><div class="empty__text">검색 결과가 없습니다</div></div>
+        </td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+{# ---- registered users (approved = true) ---- #}
+<div class="card card--flush" data-user-section>
+  <div class="section-header" style="padding:var(--pad-card) var(--pad-card) 0">
+    <div class="section-header__l">
+      <span class="section-header__icon">{{ icon("prospects", 17) }}</span>
+      <div>
+        <div class="section-header__title">등록된 사용자
+          <span class="pill pill--ok pill--sm" style="margin-left:6px"><span class="pill__dot"></span>{{ approved_users | length }}</span>
+        </div>
+        <div class="section-header__sub">승인되어 콘솔을 사용할 수 있는 사용자입니다. 해제하면 즉시 삭제됩니다.</div>
+      </div>
+    </div>
+  </div>
+  <div class="table-wrap" style="margin-top:12px">
+    <table class="table">
+      <thead>
+        <tr><th scope="col">사용자</th><th scope="col">역할</th><th scope="col">상태</th><th scope="col">최근 로그인</th><th scope="col" style="text-align:right">관리</th></tr>
+      </thead>
+      <tbody aria-live="polite">
+        {% for u in approved_users %}
+        <tr data-user-row data-search="{{ (u.name ~ ' ' ~ u.email) | lower }}">
+          <td>
+            <div style="font-weight:600">{{ u.name or u.email.split('@')[0] }}{% if u.email == me_email %} <span class="t-subtle t-xs">(나)</span>{% endif %}</div>
+            <div class="t-xs t-subtle mono">{{ u.email }}</div>
+          </td>
+          <td>
+            {% if u.role == 'admin' %}<span class="pill pill--accent pill--sm"><span class="pill__dot"></span>관리자</span>
+            {% else %}<span class="tag">멤버</span>{% endif %}
+          </td>
+          <td><span class="pill pill--ok pill--sm"><span class="pill__dot"></span>승인됨</span></td>
+          <td class="td-subtle tnum">{{ (u.last_login_at | kst) or '—' }}</td>
+          <td>
+            <div class="row" style="gap:6px;justify-content:flex-end">
+              {% if u.email != me_email %}
+              <button class="btn btn--ghost btn--sm" hx-post="/settings/users/{{ u.email }}" hx-vals='{"action":"revoke"}' hx-confirm="{{ u.email }} 의 접근 권한을 삭제하시겠습니까? 목록에서 완전히 제거됩니다.">해제·삭제</button>
               {% endif %}
               {% if u.role != 'admin' %}
               <button class="btn btn--subtle btn--sm" hx-post="/settings/users/{{ u.email }}" hx-vals='{"action":"make_admin"}'>관리자로</button>
@@ -74,10 +141,13 @@
           </td>
         </tr>
         {% else %}
-        <tr><td colspan="5">
-          <div class="empty"><div class="empty__icon">{{ icon("prospects", 24) }}</div><div class="empty__text">아직 로그인한 사용자가 없습니다</div></div>
+        <tr data-empty-row><td colspan="5">
+          <div class="empty"><div class="empty__icon">{{ icon("prospects", 24) }}</div><div class="empty__text">아직 등록된 사용자가 없습니다</div></div>
         </td></tr>
         {% endfor %}
+        <tr data-no-results hidden><td colspan="5">
+          <div class="empty"><div class="empty__text">검색 결과가 없습니다</div></div>
+        </td></tr>
       </tbody>
     </table>
   </div>
@@ -86,5 +156,32 @@
 <p class="t-sm t-subtle" style="margin-top:14px">
   부트스트랩 관리자는 <span class="mono">WEB_UI_ADMIN_EMAILS</span>, 사전 허용 이메일은 <span class="mono">WEB_UI_ALLOWED_EMAILS</span> 환경변수로도 지정할 수 있습니다.
 </p>
+
+<script>
+  // Client-side filter over both user tables. Hides non-matching rows, toggles a
+  // per-table "no results" row, and announces the total match count.
+  function filterUsers(q) {
+    var query = (q || "").trim().toLowerCase();
+    var total = 0;
+    document.querySelectorAll("[data-user-section]").forEach(function (section) {
+      var shown = 0;
+      section.querySelectorAll("[data-user-row]").forEach(function (row) {
+        var hay = row.getAttribute("data-search") || "";
+        var match = !query || hay.indexOf(query) !== -1;
+        row.hidden = !match;
+        if (match) shown++;
+      });
+      // The "no users" empty row should hide while searching; the "no results"
+      // row shows only when a query is active and nothing matched.
+      var emptyRow = section.querySelector("[data-empty-row]");
+      if (emptyRow) emptyRow.hidden = !!query;
+      var noResults = section.querySelector("[data-no-results]");
+      if (noResults) noResults.hidden = !(query && shown === 0);
+      total += shown;
+    });
+    var count = document.getElementById("user-search-count");
+    if (count) count.textContent = query ? (total + "명 검색됨") : "";
+  }
+</script>
 
 {% endblock %}

@@ -132,21 +132,30 @@ async def settings_users(request: Request):
             .order_by(User.approved.desc(), User.role.desc(), User.created_at.asc())
             .all()
         )
-        users = [
-            {
+
+        def _row(u: User) -> dict:
+            return {
                 "email": u.email,
                 "name": u.name or "",
                 "role": u.role,
                 "approved": u.approved,
                 "last_login_at": u.last_login_at,
             }
-            for u in rows
-        ]
+
+        # Split into "registered" (approved) vs "applied / pending approval".
+        # A pending row is someone who signed in (or was added) but isn't approved.
+        approved_users = [_row(u) for u in rows if u.approved]
+        pending_users = [_row(u) for u in rows if not u.approved]
     me = session_user(request) or {}
     return templates.TemplateResponse(
         request,
         "settings_users.html",
-        {"users": users, "me_email": me.get("email", ""), "domain": settings.ALLOWED_EMAIL_DOMAIN},
+        {
+            "approved_users": approved_users,
+            "pending_users": pending_users,
+            "me_email": me.get("email", ""),
+            "domain": settings.ALLOWED_EMAIL_DOMAIN,
+        },
     )
 
 
@@ -201,7 +210,12 @@ async def settings_user_update(request: Request, email: str, action: str = Form(
         return _forbidden()
     me = session_user(request) or {}
     email = email.lower()
-    if email == (me.get("email") or "").lower() and action in ("revoke", "make_member"):
+    if email == (me.get("email") or "").lower() and action in (
+        "revoke",
+        "reject",
+        "delete",
+        "make_member",
+    ):
         return HTMLResponse(
             '<div class="banner banner--danger" style="padding:10px 12px">자기 자신의 권한은 해제할 수 없습니다</div>',
             status_code=400,
@@ -211,8 +225,11 @@ async def settings_user_update(request: Request, email: str, action: str = Form(
         if u:
             if action == "approve":
                 u.approved = True
-            elif action == "revoke":
-                u.approved = False
+            elif action in ("revoke", "reject", "delete"):
+                # Revoking a registered user (or rejecting a pending applicant)
+                # removes the row entirely — they don't fall back to the pending
+                # queue. Signing in again re-creates a fresh pending application.
+                session.delete(u)
             elif action == "make_admin":
                 u.role = "admin"
                 u.approved = True
