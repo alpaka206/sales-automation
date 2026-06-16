@@ -342,6 +342,18 @@ async def message_send(
     return HTMLResponse('<div class="text-green-600 text-sm font-medium">승인 및 발송 완료</div>')
 
 
+@router.post("/messages/preview")
+async def message_preview(body: str = Form("")):
+    """Render a draft body as the HTML email it will become — live approval preview.
+
+    Stateless: takes the (possibly edited) textarea content and returns the same
+    styled HTML that the send path attaches, so the approver sees the real look.
+    """
+    from ....integrations.email_html import to_html_email
+
+    return HTMLResponse(to_html_email(body))
+
+
 @router.post("/messages/{message_id}/reject")
 async def message_reject(request: Request, message_id: int, reason: str = Form("")):
     """Reject a message with an optional reason."""

@@ -27,7 +27,9 @@ def _reject_crlf(field: str, value: str) -> None:
 
 def _generate_message_id() -> str:
     """Generate a unique Message-ID for SMTP threading."""
-    domain = settings.SMTP_FROM_EMAIL.rsplit("@", 1)[-1] if settings.SMTP_FROM_EMAIL else "localhost"
+    domain = (
+        settings.SMTP_FROM_EMAIL.rsplit("@", 1)[-1] if settings.SMTP_FROM_EMAIL else "localhost"
+    )
     return f"<{uuid.uuid4()}@{domain}>"
 
 
@@ -40,7 +42,12 @@ def _build_message(message: Message) -> EmailMessage:
     _reject_crlf("From-Email", settings.SMTP_FROM_EMAIL or "")
 
     msg = EmailMessage()
+    # multipart/alternative: plain-text part for fallback + a styled HTML part so the
+    # email renders like a normal formatted email in modern clients.
     msg.set_content(message.body or "", subtype="plain", charset="utf-8")
+    from ..email_html import to_html_email
+
+    msg.add_alternative(to_html_email(message.body or ""), subtype="html", charset="utf-8")
     msg["Subject"] = message.subject or ""
 
     # Use structured Address so the display name is RFC-2047 encoded if it contains
@@ -104,7 +111,9 @@ def send_smtp(message: Message) -> None:
         raise SMTPPermanentError(f"All recipients refused: {exc.recipients}") from exc
     except smtplib.SMTPResponseException as exc:
         if exc.smtp_code in _TRANSIENT_SMTP_CODES:
-            raise SMTPTransientError(f"transient SMTP error {exc.smtp_code}: {exc.smtp_error}") from exc
+            raise SMTPTransientError(
+                f"transient SMTP error {exc.smtp_code}: {exc.smtp_error}"
+            ) from exc
         raise SMTPPermanentError(f"permanent SMTP error {exc.smtp_code}: {exc.smtp_error}") from exc
     except (TimeoutError, ConnectionError, OSError) as exc:
         raise SMTPTransientError(f"SMTP connection failure: {exc}") from exc

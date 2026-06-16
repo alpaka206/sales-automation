@@ -40,6 +40,7 @@ def _html_to_text(s: str | None) -> str | None:
     s = _MULTI_NEWLINE_RE.sub("\n\n", s)
     return s.strip() or None
 
+
 # HubSpot REST returns 429 when over the per-second cap (default 100/10s). 5xx are
 # also transient. We retry both with full-jitter exponential backoff.
 _RETRY_STATUS = {429, 500, 502, 503, 504}
@@ -63,7 +64,9 @@ async def _request_with_retries(
         except (httpx.ReadTimeout, httpx.ConnectTimeout, httpx.ConnectError) as exc:
             if attempt == _MAX_RETRIES:
                 raise
-            logger.warning("HubSpot %s %s transport error (attempt %d): %s", method, url, attempt + 1, exc)
+            logger.warning(
+                "HubSpot %s %s transport error (attempt %d): %s", method, url, attempt + 1, exc
+            )
             await asyncio.sleep(delay + random.uniform(0, 0.5))
             delay = min(delay * 2, 30)
             continue
@@ -85,7 +88,11 @@ async def _request_with_retries(
         wait += random.uniform(0, 0.5)
         logger.warning(
             "HubSpot %s %s returned %d (attempt %d), retrying in %.1fs",
-            method, url, response.status_code, attempt + 1, wait,
+            method,
+            url,
+            response.status_code,
+            attempt + 1,
+            wait,
         )
         await asyncio.sleep(wait)
         delay = min(delay * 2, 30)
@@ -216,6 +223,8 @@ class HubSpotClient:
         """Log an email engagement on the contact's timeline. Returns engagement ID."""
         http = await self._http()
         ts = int((sent_at or datetime.now(timezone.utc)).timestamp() * 1000)
+        from .email_html import to_html_email
+
         payload = {
             "properties": {
                 "hs_timestamp": str(ts),
@@ -223,6 +232,7 @@ class HubSpotClient:
                 "hs_email_direction": "EMAIL",
                 "hs_email_subject": subject,
                 "hs_email_text": body,
+                "hs_email_html": to_html_email(body),
                 "hs_email_status": "SENT",
             },
         }
@@ -262,12 +272,24 @@ class HubSpotClient:
                 {
                     "filters": [
                         {"propertyName": "createdate", "operator": "GT", "value": ts_ms},
-                        {"propertyName": "lifecyclestage", "operator": "EQ", "value": lifecycle_stage},
+                        {
+                            "propertyName": "lifecyclestage",
+                            "operator": "EQ",
+                            "value": lifecycle_stage,
+                        },
                     ]
                 }
             ],
             "sorts": [{"propertyName": "createdate", "direction": "ASCENDING"}],
-            "properties": ["email", "firstname", "lastname", "company", "phone", "country", "lifecyclestage"],
+            "properties": [
+                "email",
+                "firstname",
+                "lastname",
+                "company",
+                "phone",
+                "country",
+                "lifecyclestage",
+            ],
             "limit": limit,
         }
         with httpx.Client(headers=headers, timeout=30.0) as client:
@@ -277,16 +299,18 @@ class HubSpotClient:
         contacts: list[ContactDTO] = []
         for item in results:
             props = item.get("properties", {})
-            contacts.append(ContactDTO(
-                id=str(item["id"]),
-                email=props.get("email"),
-                firstname=props.get("firstname"),
-                lastname=props.get("lastname"),
-                company=props.get("company"),
-                phone=props.get("phone"),
-                country=props.get("country"),
-                lifecyclestage=props.get("lifecyclestage"),
-            ))
+            contacts.append(
+                ContactDTO(
+                    id=str(item["id"]),
+                    email=props.get("email"),
+                    firstname=props.get("firstname"),
+                    lastname=props.get("lastname"),
+                    company=props.get("company"),
+                    phone=props.get("phone"),
+                    country=props.get("country"),
+                    lifecyclestage=props.get("lifecyclestage"),
+                )
+            )
         return contacts
 
     def update_inbound_status_sync(self, contact_id: str, status: str) -> None:
@@ -314,7 +338,9 @@ class HubSpotClient:
             url = f"{BASE_URL}/crm/v3/objects/contacts/{id_or_email}"
             params = {}
 
-        with httpx.Client(headers={"Authorization": f"Bearer {self.token}"}, timeout=30.0) as client:
+        with httpx.Client(
+            headers={"Authorization": f"Bearer {self.token}"}, timeout=30.0
+        ) as client:
             r = client.get(url, params=params)
         if r.status_code == 404:
             raise HubSpotAPIError(f"Contact not found: {id_or_email}")
@@ -355,13 +381,19 @@ class HubSpotClient:
                 if er.status_code != 200:
                     continue
                 ep = er.json().get("properties", {})
-                engagements.append(EngagementDTO(
-                    id=email_id,
-                    type="email",
-                    subject=ep.get("hs_email_subject"),
-                    body=ep.get("hs_email_text"),
-                    timestamp=datetime.fromisoformat(ep["hs_timestamp"]) if ep.get("hs_timestamp") else None,
-                ))
+                engagements.append(
+                    EngagementDTO(
+                        id=email_id,
+                        type="email",
+                        subject=ep.get("hs_email_subject"),
+                        body=ep.get("hs_email_text"),
+                        timestamp=(
+                            datetime.fromisoformat(ep["hs_timestamp"])
+                            if ep.get("hs_timestamp")
+                            else None
+                        ),
+                    )
+                )
         return engagements
 
     def get_latest_form_submission(self, contact_id: str) -> str | None:
@@ -404,7 +436,9 @@ class HubSpotClient:
                     continue
                 ep = er.json().get("properties", {})
                 if ep.get("hs_email_direction") == "INCOMING_EMAIL":
-                    return _html_to_text(ep.get("hs_email_text") or ep.get("hs_email_subject") or None)
+                    return _html_to_text(
+                        ep.get("hs_email_text") or ep.get("hs_email_subject") or None
+                    )
         return None
 
     def get_latest_note(self, contact_id: str) -> str | None:
@@ -454,12 +488,14 @@ class HubSpotClient:
                 if dr.status_code != 200:
                     continue
                 dp = dr.json().get("properties", {})
-                deals.append(DealDTO(
-                    id=deal_id,
-                    name=dp.get("dealname"),
-                    stage=dp.get("dealstage"),
-                    amount=dp.get("amount"),
-                ))
+                deals.append(
+                    DealDTO(
+                        id=deal_id,
+                        name=dp.get("dealname"),
+                        stage=dp.get("dealstage"),
+                        amount=dp.get("amount"),
+                    )
+                )
         return deals
 
     # ------ Ticket API (inbound ticket workflow) ------

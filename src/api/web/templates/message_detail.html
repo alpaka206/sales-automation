@@ -90,6 +90,7 @@
             {% endif %}
             <div class="action-bar">
               <button type="button" class="btn btn--ok" onclick="openSendModal()" aria-haspopup="dialog" aria-controls="send-modal">{{ icon("check", 15) }} 검토 완료 · 발송</button>
+              <button type="button" class="btn btn--subtle" onclick="openPreviewModal()" aria-haspopup="dialog" aria-controls="preview-modal">{{ icon("file", 15) }} 미리보기</button>
               <button type="button" class="btn btn--subtle"
                       hx-post="/messages/{{ msg.id }}/edit" hx-include="#msg-form"
                       hx-target="#action-result" hx-swap="innerHTML">{{ icon("edit", 15) }} 저장</button>
@@ -231,6 +232,22 @@
     </div>
   </div>
 </div>
+
+{# ---------- HTML email preview modal ---------- #}
+<div class="modal-overlay" id="preview-modal" onclick="if(event.target===this)closePreviewModal()">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="preview-modal-title" style="max-width:680px;width:96%">
+    <h2 class="modal__title" id="preview-modal-title">이메일 미리보기</h2>
+    <div class="t-sm t-subtle" style="margin-bottom:10px">
+      제목: <span id="preview-subject" class="mono"></span>
+      <div class="t-xs">수신거부·법적 푸터는 실제 발송 시 자동으로 추가됩니다.</div>
+    </div>
+    <iframe id="preview-frame" title="이메일 미리보기" sandbox=""
+            style="width:100%;height:60vh;border:1px solid var(--border);border-radius:8px;background:#fff"></iframe>
+    <div class="modal__actions">
+      <button type="button" class="btn btn--ghost" onclick="closePreviewModal()">닫기</button>
+    </div>
+  </div>
+</div>
 {% endif %}
 
 {% endblock %}
@@ -239,6 +256,27 @@
 <script>
   function openSendModal() { window.PERSO_modal.open("send-modal"); }
   function closeSendModal() { window.PERSO_modal.close("send-modal"); }
+
+  function openPreviewModal() {
+    var bodyEl = document.getElementById("msg-body");
+    var subjEl = document.getElementById("msg-subject");
+    var frame = document.getElementById("preview-frame");
+    var subjOut = document.getElementById("preview-subject");
+    if (subjOut) subjOut.textContent = subjEl ? subjEl.value : "";
+    var body = bodyEl ? bodyEl.value : "";
+    fetch("/messages/preview", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: "body=" + encodeURIComponent(body),
+    })
+      .then(function (r) { return r.text(); })
+      .then(function (html) { if (frame) frame.srcdoc = html; window.PERSO_modal.open("preview-modal"); })
+      .catch(function () {
+        if (frame) frame.srcdoc = "<p style='font-family:sans-serif;padding:16px'>미리보기를 불러오지 못했습니다.</p>";
+        window.PERSO_modal.open("preview-modal");
+      });
+  }
+  function closePreviewModal() { window.PERSO_modal.close("preview-modal"); }
   document.addEventListener("DOMContentLoaded", function () {
     var btn = document.getElementById("ko-toggle");
     if (!btn) return;
