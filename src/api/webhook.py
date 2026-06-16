@@ -1,8 +1,7 @@
 """HubSpot inbound webhook: v3 signature verification, event mapping, and route.
 
-Only ``ticket.creation`` (and the legacy ``contact.creation`` /
-``contact.propertyChange:lifecyclestage``) drive inbound. Everything else is
-ignored. The route is mounted as a router from ``main.py``.
+Only ``ticket.creation`` drives inbound. Everything else is ignored. The route
+is mounted as a router from ``main.py``.
 """
 
 from __future__ import annotations
@@ -24,7 +23,6 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 _HUBSPOT_SUBSCRIPTION_MAP: dict[str, str] = {
-    "contact.creation": "contact.creation",
     "ticket.creation": "ticket_created",
 }
 
@@ -128,20 +126,9 @@ def _verify_hubspot_signature(
 def _map_hubspot_event(event: HubSpotWebhookEvent) -> str | None:
     """Map HubSpot subscriptionType to internal event_type. Returns None for ignored types.
 
-    Empty propertyValue on a propertyChange is HubSpot's transient state when a
-    field is being cleared/reassigned (e.g. lifecyclestage briefly goes empty when
-    you "downgrade" from MQL back to Lead). Treat as noise — don't draft a reply
-    for a momentarily empty state.
+    Only ``ticket.creation`` drives inbound; everything else is ignored.
     """
-    sub = event.subscriptionType
-    if sub == "contact.propertyChange" and event.propertyName == "lifecyclestage":
-        if not (event.propertyValue or "").strip():
-            return None
-        return "lifecycle_change"
-    # ticket.propertyChange / hs_pipeline_stage is no longer subscribed — only
-    # ticket.creation drives inbound. Any stray ticket.propertyChange falls
-    # through to the map below and is ignored.
-    return _HUBSPOT_SUBSCRIPTION_MAP.get(sub)
+    return _HUBSPOT_SUBSCRIPTION_MAP.get(event.subscriptionType)
 
 
 def _public_request_uri(request: Request, headers: dict[str, str]) -> str:

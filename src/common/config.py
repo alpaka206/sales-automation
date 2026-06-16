@@ -105,10 +105,6 @@ class Settings(BaseSettings):
     # ----- Inbound poller -----
     INBOUND_POLL_ENABLED: bool = False
     INBOUND_POLL_INTERVAL_SECONDS: int = 600
-    # The inbound poller searches HubSpot Tickets created since the last tick.
-    # Tickets are our unit of work (a new ticket = a new inquiry), so this is ON
-    # by default. Set to false only to pause ticket ingestion.
-    INBOUND_POLL_TICKETS: bool = True
 
     # ----- Send worker -----
     SEND_WORKER_ENABLED: bool = False
