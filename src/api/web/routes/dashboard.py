@@ -38,9 +38,7 @@ def _dashboard_context(flow: str = "all") -> dict:
             stmt = stmt.where(Conversation.prospect_id.isnot(None))
         elif flow == "inbound":
             stmt = stmt.where(Conversation.prospect_id.is_(None))
-        recent = session.execute(
-            stmt.order_by(Message.created_at.desc()).limit(20)
-        ).all()
+        recent = session.execute(stmt.order_by(Message.created_at.desc()).limit(5)).all()
         recent_messages = [
             {
                 "id": msg.id,
