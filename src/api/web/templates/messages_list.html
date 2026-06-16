@@ -8,7 +8,6 @@
 <div class="page-header">
   <div>
     <h1 class="page-title">메시지</h1>
-    <p class="page-sub">아웃바운드 드래프트와 발송된 회신. 행을 클릭하면 승인 상세로 이동합니다.</p>
   </div>
   {% if pending_n %}
   <a href="/messages?status=pending_approval" class="pill pill--accent" style="text-decoration:none;height:32px;padding:0 14px">
@@ -17,16 +16,25 @@
   {% endif %}
 </div>
 
-{# ---- filter chips + channel select ---- #}
+{# ---- flow filter (outbound / inbound reply) ---- #}
+{% set flow_chips = [('all','전체'), ('outbound','아웃바운드'), ('inbound','인바운드 회신')] %}
+<div class="chip-row" role="tablist" aria-label="구분 필터" style="margin-bottom:10px">
+  {% for val, label in flow_chips %}
+  <a class="chip{% if filter_flow == val %} is-active{% endif %}" role="tab" aria-selected="{{ 'true' if filter_flow == val else 'false' }}"
+     href="/messages?status={{ filter_status }}&channel={{ filter_channel }}&flow={{ val }}">{{ label }}</a>
+  {% endfor %}
+</div>
+
+{# ---- status filter chips + channel select ---- #}
 {% set chips = [('', '전체'), ('pending_approval','승인 대기'), ('approved','승인됨'), ('sent','발송됨'), ('replied','응답'), ('rejected','거절'), ('bounced','반송')] %}
 <div class="row-between wrap mb-gap" style="align-items:center">
   <div class="chip-row">
     {% for val, label in chips %}
-    <a class="chip{% if filter_status == val %} is-active{% endif %}" href="/messages?status={{ val }}&channel={{ filter_channel }}">{{ label }}</a>
+    <a class="chip{% if filter_status == val %} is-active{% endif %}" href="/messages?status={{ val }}&channel={{ filter_channel }}&flow={{ filter_flow }}">{{ label }}</a>
     {% endfor %}
   </div>
   <select class="select" aria-label="채널 필터" style="width:auto;min-width:150px"
-          onchange="location.href='/messages?status={{ filter_status }}&channel='+this.value">
+          onchange="location.href='/messages?status={{ filter_status }}&channel='+this.value+'&flow={{ filter_flow }}'">
     <option value="">전체 채널</option>
     {% for c in ['email','whatsapp'] %}
     <option value="{{ c }}" {% if filter_channel == c %}selected{% endif %}>{{ c }}</option>

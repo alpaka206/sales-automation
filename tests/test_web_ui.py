@@ -275,7 +275,7 @@ def test_message_edit_saves(pending_msg, _use_test_db):
     session.close()
 
 
-def _mock_messages_list_context(status="", channel=""):
+def _mock_messages_list_context(status="", channel="", flow="all"):
     return {
         "messages": [
             {
@@ -285,12 +285,14 @@ def _mock_messages_list_context(status="", channel=""):
                 "subject": "가격 문의",
                 "channel": "email",
                 "direction": "outgoing",
+                "flow": "inbound_reply",
                 "to_address": "buyer@example.com",
                 "created_at": datetime(2026, 1, 1, 12, 0),
             }
         ],
         "filter_status": status,
         "filter_channel": channel,
+        "filter_flow": flow,
     }
 
 

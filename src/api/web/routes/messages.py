@@ -182,19 +182,29 @@ def _message_detail_context(message_id: int) -> dict:
         }
 
 
-def _messages_list_context(status: str = "", channel: str = "") -> dict:
+def _messages_list_context(status: str = "", channel: str = "", flow: str = "all") -> dict:
     """Query DB for paginated message list.
 
     The list is the approval queue — outbound drafts and sent replies only. Inbound
     rows are persisted (so the detail page can show "what we're replying to") but
     rendering them here would duplicate the box at the top of the detail page.
+
+    ``flow`` filters by product flow: ``outbound`` (cold-discovery mail — the
+    conversation carries a prospect) vs ``inbound`` (a reply to an inbound inquiry —
+    contact-only conversation). ``all`` (default) shows both.
     """
+    if flow not in ("all", "inbound", "outbound"):
+        flow = "all"
     q = (
         select(Message, Conversation.topic, Conversation.prospect_id)
         .join(Conversation, Message.conversation_id == Conversation.id)
         .where(Message.direction == "outbound")
         .order_by(Message.created_at.desc())
     )
+    if flow == "outbound":
+        q = q.where(Conversation.prospect_id.isnot(None))
+    elif flow == "inbound":
+        q = q.where(Conversation.prospect_id.is_(None))
     if status == "replied":
         # Replies are tracked on the boolean Message.replied column (set by
         # reply_check), not as a status — a replied message keeps status="sent".
@@ -222,15 +232,21 @@ def _messages_list_context(status: str = "", channel: str = "") -> dict:
             }
             for msg, topic, prospect_id in rows
         ]
-    return {"messages": messages, "filter_status": status, "filter_channel": channel}
+    return {
+        "messages": messages,
+        "filter_status": status,
+        "filter_channel": channel,
+        "filter_flow": flow,
+    }
 
 
 @router.get("/messages")
 async def messages_list(request: Request):
-    """Message list page — all messages with optional status/channel filters."""
+    """Message list page — all messages with optional status/channel/flow filters."""
     status = request.query_params.get("status", "")
     channel = request.query_params.get("channel", "")
-    ctx = _messages_list_context(status=status, channel=channel)
+    flow = request.query_params.get("flow", "all")
+    ctx = _messages_list_context(status=status, channel=channel, flow=flow)
     return templates.TemplateResponse(request, "messages_list.html", ctx)
 
 

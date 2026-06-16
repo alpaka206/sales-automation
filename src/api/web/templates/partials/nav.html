@@ -42,22 +42,9 @@
   </nav>
 
   {%- set _u = _user -%}
+  {% if _u %}
   <div class="operator-card">
-    <div class="operator-card__inner">
-      {% if _u %}
-      <span class="avatar">{{ (_u.name or _u.email)[:2] }}</span>
-      <span style="min-width:0;flex:1">
-        <span class="operator-card__name" style="display:block">{{ _u.name or _u.email }}</span>
-        <span class="operator-card__role" style="display:block">{{ _u.email }}{% if _u.role == 'admin' %} · 관리자{% endif %}</span>
-      </span>
-      <a href="/auth/logout" class="icon-btn" title="로그아웃" style="width:30px;height:30px">{{ icon("reply", 15) }}</a>
-      {% else %}
-      <span class="avatar">운영</span>
-      <span style="min-width:0">
-        <span class="operator-card__name" style="display:block">운영자</span>
-        <span class="operator-card__role" style="display:block">로컬 / Basic</span>
-      </span>
-      {% endif %}
-    </div>
+    <a href="/auth/logout" class="btn btn--subtle" style="width:100%;justify-content:center">{{ icon("reply", 15) }} 로그아웃</a>
   </div>
+  {% endif %}
 </aside>
