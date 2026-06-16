@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 
 from fastapi import APIRouter, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse
@@ -10,11 +11,14 @@ from sqlalchemy import select
 from sqlalchemy.orm import joinedload
 
 from ....agents.approval import ApprovalError, approve, reject
+from ....common.config import settings
 from ....db.models import Conversation, DomainProfile, Message
 from ....db.session import SessionLocal
 from ....llm.translate import needs_korean, to_korean
 from ..auth import actor_name
 from ._shared import esc, templates
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["web"])
 
@@ -279,7 +283,12 @@ async def message_translation(message_id: int):
 async def message_send(
     request: Request, message_id: int, body: str = Form(""), subject: str = Form("")
 ):
-    """Approve (and optionally edit) a message for sending."""
+    """Approve (and optionally edit) a message, then send it immediately.
+
+    Human approval IS the decision to send, so we dispatch inline here rather than
+    leaving the message in 'approved' for the background send worker — a paused or
+    absent worker must never strand an already-approved reply.
+    """
     try:
         edited = body.strip() if body.strip() else None
         approve(message_id, approver=actor_name(request, fallback="web_ui"), edited_body=edited)
@@ -287,9 +296,50 @@ async def message_send(
         return HTMLResponse(
             f'<div class="text-red-600 text-sm">{esc(str(exc))}</div>', status_code=400
         )
-    return HTMLResponse(
-        '<div class="text-green-600 text-sm font-medium">승인 완료 — 발송 대기 중</div>'
-    )
+
+    from ....agents.approval import mark_sent
+    from ....integrations.senders import send
+
+    subj = bod = contact_id = ""
+    try:
+        # Send with a session-attached message so send() can read its conversation
+        # (the instance returned by approve() is detached).
+        with SessionLocal() as session:
+            m = session.get(Message, message_id)
+            if m is None:
+                return HTMLResponse(
+                    '<div class="text-red-600 text-sm">메시지를 찾을 수 없습니다</div>',
+                    status_code=404,
+                )
+            await send(m)
+            subj, bod = m.subject or "", m.body or ""
+            conv = m.conversation
+            contact_id = str(conv.contact_id) if conv and conv.contact_id else ""
+        mark_sent(message_id)
+    except Exception:
+        logger.exception("Inline send failed for message %d after approval", message_id)
+        return HTMLResponse(
+            '<div class="text-red-600 text-sm font-medium">승인됐지만 발송에 실패했습니다 — 잠시 후 다시 시도해 주세요</div>',
+            status_code=500,
+        )
+
+    # Best-effort HubSpot timeline log when send() didn't already (SMTP / test mode).
+    # Never reverses a successful send.
+    if contact_id and (settings.SEND_OVERRIDE_EMAIL.strip() or settings.EMAIL_PROVIDER == "smtp"):
+        try:
+            from ....integrations.hubspot import HubSpotClient
+
+            await HubSpotClient().create_email_engagement(
+                contact_id=contact_id, subject=subj, body=bod
+            )
+        except Exception:
+            logger.warning(
+                "HubSpot engagement log failed for message %d (send succeeded)",
+                message_id,
+                exc_info=True,
+            )
+
+    return HTMLResponse('<div class="text-green-600 text-sm font-medium">승인 및 발송 완료</div>')
 
 
 @router.post("/messages/{message_id}/reject")

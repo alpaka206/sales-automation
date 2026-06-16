@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -198,8 +198,10 @@ def _use_test_db():
     )
     Base.metadata.create_all(engine)
     factory = sessionmaker(bind=engine, autoflush=False, autocommit=False)
-    with patch("src.api.web.routes.messages.SessionLocal", factory), \
-         patch("src.agents.approval.SessionLocal", factory):
+    with (
+        patch("src.api.web.routes.messages.SessionLocal", factory),
+        patch("src.agents.approval.SessionLocal", factory),
+    ):
         yield factory
 
 
@@ -215,8 +217,12 @@ def pending_msg(_use_test_db):
     session.add(conv)
     session.flush()
     msg = Message(
-        conversation_id=conv.id, direction="outgoing", channel="email",
-        subject="Test", body="Hello", status="pending_approval",
+        conversation_id=conv.id,
+        direction="outgoing",
+        channel="email",
+        subject="Test",
+        body="Hello",
+        status="pending_approval",
     )
     session.add(msg)
     session.commit()
@@ -225,18 +231,22 @@ def pending_msg(_use_test_db):
     return msg_id
 
 
-def test_message_send_approves(pending_msg, _use_test_db):
+@patch("src.integrations.senders.send", new_callable=AsyncMock)
+def test_message_send_approves(mock_send, pending_msg, _use_test_db):
     r = _client().post(f"/messages/{pending_msg}/send", data={"body": "edited", "subject": ""})
     assert r.status_code == 200
     assert "승인" in r.text
+    mock_send.assert_awaited_once()
     session = _use_test_db()
     m = session.get(Message, pending_msg)
-    assert m.status == "approved"
+    # Human approval dispatches immediately, so the message is sent, not queued.
+    assert m.status == "sent"
     assert m.body == "edited"
     session.close()
 
 
-def test_message_send_prevents_double(pending_msg):
+@patch("src.integrations.senders.send", new_callable=AsyncMock)
+def test_message_send_prevents_double(mock_send, pending_msg):
     _client().post(f"/messages/{pending_msg}/send", data={"body": "", "subject": ""})
     r = _client().post(f"/messages/{pending_msg}/send", data={"body": "", "subject": ""})
     assert r.status_code == 400
@@ -253,7 +263,9 @@ def test_message_reject(pending_msg, _use_test_db):
 
 
 def test_message_edit_saves(pending_msg, _use_test_db):
-    r = _client().post(f"/messages/{pending_msg}/edit", data={"body": "new body", "subject": "new subj"})
+    r = _client().post(
+        f"/messages/{pending_msg}/edit", data={"body": "new body", "subject": "new subj"}
+    )
     assert r.status_code == 200
     assert "저장" in r.text
     session = _use_test_db()
@@ -290,7 +302,8 @@ def test_messages_list_returns_200():
     assert "가격 문의" in r.text
 
 
-def test_message_edit_blocked_after_approve(pending_msg):
+@patch("src.integrations.senders.send", new_callable=AsyncMock)
+def test_message_edit_blocked_after_approve(mock_send, pending_msg):
     _client().post(f"/messages/{pending_msg}/send", data={"body": "", "subject": ""})
     r = _client().post(f"/messages/{pending_msg}/edit", data={"body": "x", "subject": ""})
     assert r.status_code == 400
