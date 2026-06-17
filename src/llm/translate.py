@@ -60,9 +60,7 @@ def to_korean(text: str | None, *, llm: LLMClient | None = None) -> str:
 
     try:
         client = llm or LLMClient()
-        result = client.complete(
-            "util/translate_ko", {"text": text}, tier="flash", max_tokens=2000
-        )
+        result = client.complete("util/translate_ko", {"text": text}, tier="flash", max_tokens=2000)
         out = (result or "").strip() if isinstance(result, str) else ""
     except Exception:
         logger.warning("Korean translation failed; showing original.", exc_info=True)
@@ -73,3 +71,29 @@ def to_korean(text: str | None, *, llm: LLMClient | None = None) -> str:
             _cache.clear()
         _cache[key] = out
     return out
+
+
+def translate_to(text: str | None, target_code: str, *, llm: LLMClient | None = None) -> str:
+    """Translate ``text`` into the language named by ISO code ``target_code``.
+
+    Returns "" on blank input or failure (callers keep the original on empty).
+    Used to enforce that an outgoing reply is in the inquiry's language even when
+    the drafting model wrote in the wrong one.
+    """
+    from .language import language_name
+
+    text = (text or "").strip()
+    if not text:
+        return ""
+    try:
+        client = llm or LLMClient()
+        result = client.complete(
+            "util/translate_to",
+            {"text": text, "target_language": language_name(target_code)},
+            tier="flash",
+            max_tokens=2000,
+        )
+        return (result or "").strip() if isinstance(result, str) else ""
+    except Exception:
+        logger.warning("Translation to %s failed; keeping original.", target_code, exc_info=True)
+        return ""

@@ -86,7 +86,12 @@ def poll_tickets_once() -> int:
             continue
 
         if not contact_id:
-            logger.info("Ticket %s has no associated contact — marking processed and skipping.", ticket.id)
+            logger.warning(
+                "Ticket %s (%r) skipped — no associated contact, so there's no email to reply "
+                "to. Associate a contact with the ticket in HubSpot.",
+                ticket.id,
+                (getattr(ticket, "subject", None) or "")[:80],
+            )
             _mark_ticket_processed(ticket.id)
             continue
 

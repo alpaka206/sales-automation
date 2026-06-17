@@ -55,7 +55,9 @@ def _verify_hubspot_signature(
     if not signature or not timestamp:
         logger.warning(
             "webhook reject: missing headers (sig_present=%s, ts_present=%s). seen headers=%s",
-            bool(signature), bool(timestamp), sorted(headers.keys()),
+            bool(signature),
+            bool(timestamp),
+            sorted(headers.keys()),
         )
         raise HTTPException(status_code=401, detail="missing HubSpot signature headers")
 
@@ -71,7 +73,8 @@ def _verify_hubspot_signature(
         logger.warning(
             "webhook reject: timestamp too old (age=%.1fs, max=%.1fs). "
             "HubSpot retries (1min, 5min, 30min) will fail unless this max is raised.",
-            age_ms / 1000, max_age_ms / 1000,
+            age_ms / 1000,
+            max_age_ms / 1000,
         )
         raise HTTPException(status_code=401, detail="request timestamp too old")
 
@@ -91,6 +94,7 @@ def _verify_hubspot_signature(
             try:
                 import json as _json
                 import os as _os
+
                 _os.makedirs("data", exist_ok=True)
                 dump_path = "data/last_rejected_webhook.json"
                 with open(dump_path, "w", encoding="utf-8") as f:
@@ -117,8 +121,12 @@ def _verify_hubspot_signature(
         logger.warning(
             "webhook reject: signature mismatch. method=%s uri=%s body_len=%d ts=%s "
             "received_sig_prefix=%s expected_sig_prefix=%s",
-            request_method, request_uri, len(body), timestamp,
-            signature[:12], expected[:12],
+            request_method,
+            request_uri,
+            len(body),
+            timestamp,
+            signature[:12],
+            expected[:12],
         )
         raise HTTPException(status_code=401, detail="invalid signature")
 
@@ -213,10 +221,12 @@ async def webhook_hubspot_inbound(request: Request) -> dict:
         try:
             if "subscriptionType" not in item:
                 logger.info("Ignoring event without subscriptionType: %s", item)
-                results.append({
-                    "objectId": item.get("objectId"),
-                    "status": "ignored",
-                })
+                results.append(
+                    {
+                        "objectId": item.get("objectId"),
+                        "status": "ignored",
+                    }
+                )
                 continue
 
             event = HubSpotWebhookEvent(**item)
@@ -231,6 +241,7 @@ async def webhook_hubspot_inbound(request: Request) -> dict:
                 # via association so downstream code stays contact-centric.
                 ticket_id = str(event.objectId)
                 from ..integrations.hubspot import HubSpotClient, HubSpotNotConfigured
+
                 try:
                     hs = HubSpotClient()
                     contact_id = await asyncio.to_thread(
@@ -239,15 +250,18 @@ async def webhook_hubspot_inbound(request: Request) -> dict:
                 except HubSpotNotConfigured:
                     contact_id = None
                 if not contact_id:
-                    logger.info(
-                        "Ticket %s has no associated contact — skipping (subscription=%s).",
-                        ticket_id, event.subscriptionType,
+                    logger.warning(
+                        "Ticket %s skipped — no associated contact, so there's no email to "
+                        "reply to. Associate a contact with the ticket in HubSpot.",
+                        ticket_id,
                     )
-                    results.append({
-                        "objectId": event.objectId,
-                        "status": "skipped",
-                        "reason": "no_contact",
-                    })
+                    results.append(
+                        {
+                            "objectId": event.objectId,
+                            "status": "skipped",
+                            "reason": "no_contact",
+                        }
+                    )
                     continue
 
                 internal = {
@@ -268,9 +282,13 @@ async def webhook_hubspot_inbound(request: Request) -> dict:
             # other request — including /healthz and /messages — for the duration.
             # to_thread offloads it so the loop stays responsive.
             result = await asyncio.to_thread(agent.handle, internal)
-            results.append({"object_id": internal["object_id"], "status": "processed", **(result or {})})
+            results.append(
+                {"object_id": internal["object_id"], "status": "processed", **(result or {})}
+            )
         except Exception:
             logger.exception("Error processing webhook event: %s", item)
-            results.append({"object_id": item.get("objectId", item.get("object_id")), "status": "error"})
+            results.append(
+                {"object_id": item.get("objectId", item.get("object_id")), "status": "error"}
+            )
 
     return {"status": "accepted", "results": results}

@@ -77,11 +77,12 @@ class InboundAgent:
         contact_info = self._fetch_contact(event)
 
         if not (contact_info.get("last_message") or "").strip():
-            logger.info(
-                "Inbound skipped — no message body for contact %s (lifecycle=%s). "
-                "Will retry once a form/email/note attaches.",
+            logger.warning(
+                "Inbound skipped — empty body (ticket=%s contact=%s email=%s). The ticket has "
+                "no subject/content to reply to; add the inquiry text to the ticket.",
+                contact_info.get("ticket_id") or "-",
                 contact_info.get("object_id", "?"),
-                contact_info.get("lifecycle_stage", "?"),
+                contact_info.get("email") or "?",
             )
             return {
                 "message_id": None,
@@ -96,12 +97,12 @@ class InboundAgent:
         # draft normally.
         existing = self._existing_pending_draft_id(contact_info)
         if existing is not None:
-            logger.info(
-                "Inbound skipped — pending draft msg %d already awaiting action "
-                "in the same thread (contact=%s ticket=%s).",
+            logger.warning(
+                "Inbound skipped — a draft (msg %d) is already awaiting action in the same "
+                "thread (ticket=%s contact=%s). Approve/reject it before a new draft is made.",
                 existing,
-                contact_info.get("object_id", "?"),
                 contact_info.get("ticket_id") or "-",
+                contact_info.get("object_id", "?"),
             )
             return {
                 "message_id": existing,
@@ -492,6 +493,31 @@ class InboundAgent:
             max_tokens=4000,
         )
         draft.language = reply_lang
+
+        # Guarantee the reply is in the inquiry's language. The pro model sometimes
+        # ignores the instruction and drafts in Korean (the company rules + signature
+        # are Korean). If the body's actual language differs from the target, translate
+        # it into the target — the reply must never go out in the wrong language.
+        from ..llm.translate import translate_to
+
+        actual = detect_language(draft.body, llm=self.llm)
+        if actual != reply_lang:
+            logger.warning(
+                "Reply language mismatch (ticket=%s contact=%s): drafted in '%s' but the "
+                "inquiry is '%s' — translating the reply to '%s'.",
+                contact_info.get("ticket_id") or "-",
+                contact_info.get("email") or "?",
+                actual,
+                reply_lang,
+                reply_lang,
+            )
+            fixed_body = translate_to(draft.body, reply_lang, llm=self.llm)
+            if fixed_body:
+                draft.body = fixed_body
+            if draft.subject:
+                fixed_subject = translate_to(draft.subject, reply_lang, llm=self.llm)
+                if fixed_subject:
+                    draft.subject = fixed_subject
         return draft
 
     def _persist_placeholder(self, contact_info: dict, channel: str) -> int:
