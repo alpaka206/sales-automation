@@ -25,9 +25,6 @@ BASE_URL = "https://api.hubapi.com"
 _BR_RE = re.compile(r"<\s*br\s*/?\s*>", flags=re.IGNORECASE)
 _BLOCK_END_RE = re.compile(r"</\s*(p|div|li|h[1-6])\s*>", flags=re.IGNORECASE)
 _TAG_RE = re.compile(r"<[^>]+>")
-# Email addresses in angle brackets ("From: Name <a@b.com>") look like HTML tags
-# and would be stripped by _TAG_RE — unwrap them first so the address survives.
-_ANGLE_EMAIL_RE = re.compile(r"<([\w.+-]+@[\w.-]+)>")
 _MULTI_SPACE_RE = re.compile(r"[ \t]+")
 _MULTI_NEWLINE_RE = re.compile(r"\n{3,}")
 
@@ -37,7 +34,6 @@ def _html_to_text(s: str | None) -> str | None:
         return s
     s = _BR_RE.sub("\n", s)
     s = _BLOCK_END_RE.sub("\n", s)
-    s = _ANGLE_EMAIL_RE.sub(r"\1", s)
     s = _TAG_RE.sub("", s)
     s = _html.unescape(s)
     s = _MULTI_SPACE_RE.sub(" ", s)
