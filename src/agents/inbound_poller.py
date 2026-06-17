@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from datetime import datetime, timedelta, timezone
 
 from ..common.config import settings
@@ -12,6 +13,63 @@ from ..db.session import SessionLocal
 from ..integrations.hubspot import HubSpotClient, HubSpotNotConfigured
 
 logger = logging.getLogger(__name__)
+
+# Requester recovery from a ticket body when the ticket has no associated contact.
+# HubSpot email-to-ticket usually links the contact, but manually-created /
+# unassociated tickets carry the sender only in the body ("From: Name <email>").
+_FROM_RE = re.compile(r"From:\s*(?P<name>[^<\n]*?)\s*<(?P<email>[^>@\s]+@[^>\s]+)>", re.IGNORECASE)
+_EMAIL_RE = re.compile(r"[\w.+-]+@[\w-]+\.[\w.-]+")
+
+
+def _extract_sender(ticket) -> tuple[str | None, str | None]:
+    """Return (email, name) of the requester parsed from a ticket's body/subject."""
+    text = "\n".join(
+        p
+        for p in (getattr(ticket, "content", None), getattr(ticket, "subject", None))
+        if isinstance(p, str) and p
+    )
+    m = _FROM_RE.search(text or "")
+    if m:
+        return m.group("email").strip(), (m.group("name").strip() or None)
+    m2 = _EMAIL_RE.search(text or "")
+    if m2:
+        return m2.group(0).strip(), None
+    return None, None
+
+
+def build_ticket_event(hubspot: HubSpotClient, ticket_id: str, occurred_at: str) -> dict | None:
+    """Build an InboundAgent event for a ticket, or None if it can't be replied to.
+
+    Prefers the ticket's associated primary contact (gives email + CRM context).
+    When the ticket has no contact, recovers the requester email from the ticket
+    body so the ticket still produces a reply draft — inbound is ticket-driven.
+    """
+    contact_id = hubspot.get_ticket_primary_contact_sync(ticket_id)
+    if contact_id:
+        return {
+            "event_type": "ticket_created",
+            "object_id": contact_id,
+            "ticket_id": ticket_id,
+            "occurred_at": occurred_at,
+        }
+
+    ticket = hubspot.get_ticket_sync(ticket_id)
+    email, name = _extract_sender(ticket)
+    if not email:
+        return None
+    body = "\n\n".join(p for p in (ticket.subject, ticket.content) if p)
+    # Drop the "From: …" header line so the draft reads the inquiry, not metadata.
+    body = (_FROM_RE.sub("", body, count=1).strip()) or body
+    return {
+        "event_type": "ticket_created",
+        "object_id": ticket_id,  # stable id for dedup; not a real contact id
+        "ticket_id": ticket_id,
+        "email": email,
+        "full_name": name or email,
+        "last_message": body,
+        "occurred_at": occurred_at,
+    }
+
 
 TICKET_POLL_MARKER_KIND = "inbound_ticket_poll_marker"
 TICKET_PROCESSED_KIND = "inbound_ticket_processed"
@@ -80,30 +138,29 @@ def poll_tickets_once() -> int:
             continue
 
         try:
-            contact_id = hubspot.get_ticket_primary_contact_sync(ticket.id)
+            event = build_ticket_event(hubspot, ticket.id, now.isoformat())
         except Exception:
-            logger.exception("Ticket %s: contact lookup failed", ticket.id)
+            logger.exception("Ticket %s: event build failed", ticket.id)
             continue
 
-        if not contact_id:
-            logger.info("Ticket %s has no associated contact — marking processed and skipping.", ticket.id)
+        if event is None:
+            logger.info(
+                "Ticket %s has no contact and no email in body — marking processed and skipping.",
+                ticket.id,
+            )
             _mark_ticket_processed(ticket.id)
             continue
 
         from .inbound import InboundAgent
 
         agent = InboundAgent()
-        event = {
-            "event_type": "ticket_created",
-            "object_id": contact_id,
-            "ticket_id": ticket.id,
-            "occurred_at": now.isoformat(),
-        }
         try:
             agent.handle(event)
             _mark_ticket_processed(ticket.id)
             processed += 1
-            logger.info("Ticket poll: processed ticket %s (contact %s)", ticket.id, contact_id)
+            logger.info(
+                "Ticket poll: processed ticket %s (to %s)", ticket.id, event.get("object_id")
+            )
         except Exception:
             logger.exception("Ticket poll: failed to process ticket %s", ticket.id)
 
