@@ -17,7 +17,10 @@ logger = logging.getLogger(__name__)
 # Requester recovery from a ticket body when the ticket has no associated contact.
 # HubSpot email-to-ticket usually links the contact, but manually-created /
 # unassociated tickets carry the sender only in the body ("From: Name <email>").
-_FROM_RE = re.compile(r"From:\s*(?P<name>[^<\n]*?)\s*<(?P<email>[^>@\s]+@[^>\s]+)>", re.IGNORECASE)
+# "From: Name <a@b.com>" or, after HTML cleanup, "From: Name a@b.com".
+_FROM_RE = re.compile(
+    r"From:\s*(?P<name>[^<\n@]*?)\s*<?(?P<email>[\w.+-]+@[\w.-]+)>?", re.IGNORECASE
+)
 _EMAIL_RE = re.compile(r"[\w.+-]+@[\w-]+\.[\w.-]+")
 
 
