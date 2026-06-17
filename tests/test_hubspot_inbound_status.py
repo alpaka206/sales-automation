@@ -25,8 +25,10 @@ def _auth_headers() -> dict[str, str]:
 
 @pytest.fixture(autouse=True)
 def _disable_approval_token_and_send_worker():
-    with patch.object(settings, "APPROVAL_REQUIRE_TOKEN", False), \
-         patch.object(settings, "SEND_WORKER_ENABLED", False):
+    with (
+        patch.object(settings, "APPROVAL_REQUIRE_TOKEN", False),
+        patch.object(settings, "SEND_WORKER_ENABLED", False),
+    ):
         yield
 
 
@@ -34,17 +36,22 @@ def _disable_approval_token_and_send_worker():
 
 
 @patch.object(settings, "HUBSPOT_UPDATE_CONTACT_INBOUND_STATUS", True)
-@patch("src.agents.inbound.InboundAgent._persist", return_value=1)
+@patch("src.agents.inbound.InboundAgent._finalize_draft")
+@patch("src.agents.inbound.InboundAgent._persist_placeholder", return_value=1)
 @patch("src.agents.inbound.InboundAgent._draft_reply")
 @patch("src.agents.inbound.InboundAgent._score", return_value=70)
 @patch("src.agents.inbound.InboundAgent._classify")
 @patch("src.agents.inbound.InboundAgent._fetch_contact")
 @patch("src.agents.inbound.notify_approval")
 def test_handle_sets_analyzed_status(
-    mock_notify, mock_fetch, mock_classify, mock_score, mock_draft, mock_persist
+    mock_notify, mock_fetch, mock_classify, mock_score, mock_draft, mock_placeholder, mock_finalize
 ):
     """After classification, inbound_status should be updated to 'analyzed'."""
-    mock_fetch.return_value = {"object_id": "700", "email": "x@test.com", "last_message": "I want to buy your product"}
+    mock_fetch.return_value = {
+        "object_id": "700",
+        "email": "x@test.com",
+        "last_message": "I want to buy your product",
+    }
 
     mock_classify_result = MagicMock()
     mock_classify_result.category = "purchase_inquiry"
@@ -61,6 +68,7 @@ def test_handle_sets_analyzed_status(
     agent.hubspot = hs_mock
 
     from src.agents.inbound import _processed
+
     _processed.discard("700:None")
 
     agent.handle({"event_type": "contact.creation", "object_id": "700"})
@@ -68,17 +76,22 @@ def test_handle_sets_analyzed_status(
     hs_mock.update_inbound_status_sync.assert_called_once_with("700", "analyzed")
 
 
-@patch("src.agents.inbound.InboundAgent._persist", return_value=2)
+@patch("src.agents.inbound.InboundAgent._finalize_draft")
+@patch("src.agents.inbound.InboundAgent._persist_placeholder", return_value=2)
 @patch("src.agents.inbound.InboundAgent._draft_reply")
 @patch("src.agents.inbound.InboundAgent._score", return_value=60)
 @patch("src.agents.inbound.InboundAgent._classify")
 @patch("src.agents.inbound.InboundAgent._fetch_contact")
 @patch("src.agents.inbound.notify_approval")
 def test_handle_continues_on_status_update_failure(
-    mock_notify, mock_fetch, mock_classify, mock_score, mock_draft, mock_persist
+    mock_notify, mock_fetch, mock_classify, mock_score, mock_draft, mock_placeholder, mock_finalize
 ):
     """If status update fails, handle() should still complete."""
-    mock_fetch.return_value = {"object_id": "701", "email": "y@test.com", "last_message": "I have a question"}
+    mock_fetch.return_value = {
+        "object_id": "701",
+        "email": "y@test.com",
+        "last_message": "I have a question",
+    }
 
     mock_classify_result = MagicMock()
     mock_classify_result.category = "general_inquiry"
@@ -96,6 +109,7 @@ def test_handle_continues_on_status_update_failure(
     agent.hubspot = hs_mock
 
     from src.agents.inbound import _processed
+
     _processed.discard("701:None")
 
     result = agent.handle({"event_type": "contact.creation", "object_id": "701"})
@@ -106,13 +120,17 @@ def test_handle_continues_on_status_update_failure(
 
 def test_no_hubspot_skips_status_update():
     """Without HubSpot client, status update should be skipped."""
-    with patch.object(InboundAgent, "_fetch_contact", return_value={"object_id": "702", "email": "z@test.com"}), \
-         patch.object(InboundAgent, "_classify") as mock_c, \
-         patch.object(InboundAgent, "_score", return_value=50), \
-         patch.object(InboundAgent, "_pick_channel", return_value="email"), \
-         patch.object(InboundAgent, "_draft_reply"), \
-         patch.object(InboundAgent, "_persist", return_value=3), \
-         patch("src.agents.inbound.notify_approval"):
+    with (
+        patch.object(
+            InboundAgent, "_fetch_contact", return_value={"object_id": "702", "email": "z@test.com"}
+        ),
+        patch.object(InboundAgent, "_classify") as mock_c,
+        patch.object(InboundAgent, "_score", return_value=50),
+        patch.object(InboundAgent, "_pick_channel", return_value="email"),
+        patch.object(InboundAgent, "_draft_reply"),
+        patch.object(InboundAgent, "_persist_placeholder", return_value=3),
+        patch("src.agents.inbound.notify_approval"),
+    ):
 
         mock_classify_result = MagicMock()
         mock_classify_result.category = "support"
@@ -123,6 +141,7 @@ def test_no_hubspot_skips_status_update():
         agent.hubspot = None
 
         from src.agents.inbound import _processed
+
         _processed.discard("702:None")
 
         result = agent.handle({"event_type": "contact.creation", "object_id": "702"})
@@ -134,7 +153,11 @@ def test_no_hubspot_skips_status_update():
 
 @patch.object(settings, "HUBSPOT_UPDATE_CONTACT_INBOUND_STATUS", True)
 @patch("src.integrations.hubspot.HubSpotClient.update_inbound_status", new_callable=AsyncMock)
-@patch("src.integrations.hubspot.HubSpotClient.create_email_engagement", new_callable=AsyncMock, return_value="eng-1")
+@patch(
+    "src.integrations.hubspot.HubSpotClient.create_email_engagement",
+    new_callable=AsyncMock,
+    return_value="eng-1",
+)
 @patch("src.integrations.hubspot.HubSpotClient.close", new_callable=AsyncMock)
 @patch("src.integrations.senders.send", new_callable=AsyncMock)
 @patch("src.api.main.approve")
@@ -162,8 +185,16 @@ def test_approve_sets_meeting_link_sent(
 
 
 @patch.object(settings, "HUBSPOT_UPDATE_CONTACT_INBOUND_STATUS", True)
-@patch("src.integrations.hubspot.HubSpotClient.update_inbound_status", new_callable=AsyncMock, side_effect=Exception("prop missing"))
-@patch("src.integrations.hubspot.HubSpotClient.create_email_engagement", new_callable=AsyncMock, return_value="eng-2")
+@patch(
+    "src.integrations.hubspot.HubSpotClient.update_inbound_status",
+    new_callable=AsyncMock,
+    side_effect=Exception("prop missing"),
+)
+@patch(
+    "src.integrations.hubspot.HubSpotClient.create_email_engagement",
+    new_callable=AsyncMock,
+    return_value="eng-2",
+)
 @patch("src.integrations.hubspot.HubSpotClient.close", new_callable=AsyncMock)
 @patch("src.integrations.senders.send", new_callable=AsyncMock)
 @patch("src.api.main.approve")

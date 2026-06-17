@@ -42,7 +42,9 @@
   </select>
 </div>
 
-<div class="card card--flush">
+<div class="card card--flush" id="msg-list"
+     hx-get="/messages?status={{ filter_status }}&channel={{ filter_channel }}&flow={{ filter_flow }}"
+     hx-trigger="every 15s" hx-select="#msg-list" hx-target="#msg-list" hx-swap="outerHTML">
   <div class="table-wrap">
     <table class="table">
       <thead>

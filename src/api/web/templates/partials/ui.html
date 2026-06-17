@@ -6,6 +6,8 @@
 
 {# ---- STATUS → { ko, tone } single source of truth ---- #}
 {%- set STATUS = {
+  "drafting":         ("AI 작성중", "info"),
+  "draft_failed":     ("작성 실패", "danger"),
   "pending_approval": ("승인 대기", "warn"),
   "approved":         ("승인됨",   "info"),
   "queued":           ("발송 대기", "info"),

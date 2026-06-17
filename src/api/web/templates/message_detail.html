@@ -4,15 +4,29 @@
 {% block title %}메시지 #{{ msg.id }} — PERSO Sales Console{% endblock %}
 {% block content %}
 {% set is_pending = msg.status == 'pending_approval' %}
+{% set is_drafting = msg.status == 'drafting' %}
 {% set has_inbound = thread | selectattr('direction', 'equalto', 'inbound') | list | length > 0 %}
 {# Only offer the 원문↔한국어 toggle when something actually needs translating.
    `translatable` is a cheap heuristic computed at render time; the real Korean
    text is fetched lazily on first toggle (see /messages/{id}/translation). #}
 {% set has_translation = thread | selectattr('translatable') | list | length > 0 %}
 
+<div id="content-root">
 <div style="margin-bottom:14px">
   <a href="/messages" class="chip">{{ icon("chevron", 14) }} 메시지 목록</a>
 </div>
+
+{% if is_drafting %}
+{# Poll until the AI draft is ready, then swap in the finished review screen. #}
+<div class="banner banner--info mb-gap" role="status" aria-live="polite"
+     hx-get="/messages/{{ msg.id }}" hx-trigger="every 4s" hx-select="#content-root" hx-target="#content-root" hx-swap="outerHTML">
+  <span class="banner__icon">{{ icon("sparkles", 18) }}</span>
+  <div>
+    <div class="banner__title">AI가 답변을 작성하고 있습니다…</div>
+    <div class="banner__body">문의는 아래에서 바로 확인하실 수 있고, 작성이 끝나면 자동으로 검토·발송 화면으로 전환됩니다.</div>
+  </div>
+</div>
+{% endif %}
 
 <div class="page-header">
   <div>
@@ -121,11 +135,19 @@
             {% if t.translatable %}<span class="tag" style="height:20px;font-size:11px">번역 가능</span>{% endif %}
             <span class="bubble__time tnum">{{ (t.sent_at or t.created_at) | kst }}</span>
           </div>
+          {% if t.is_current and is_drafting %}
+          <div class="msg-body t-muted">
+            <span class="skeleton" style="display:block;height:14px;margin-bottom:8px"></span>
+            <span class="skeleton skeleton--sm" style="display:block;height:14px"></span>
+            <div class="t-sm t-subtle" style="margin-top:10px">{{ icon("sparkles", 13) }} AI가 회신을 작성하고 있습니다…</div>
+          </div>
+          {% else %}
           {% if t.subject %}<div class="bubble__subject">{{ t.subject }}</div>{% endif %}
           <div class="msg-body msg-orig">{{ t.body }}</div>
           {% if t.translatable %}<div class="msg-body t-muted msg-ko" id="ko-{{ t.id }}">
             <span class="skeleton"></span><span class="skeleton skeleton--sm"></span>
           </div>{% endif %}
+          {% endif %}
         </div>
         {% endif %}
       {% endfor %}
@@ -250,6 +272,7 @@
 </div>
 {% endif %}
 
+</div>{# /content-root #}
 {% endblock %}
 
 {% block head %}

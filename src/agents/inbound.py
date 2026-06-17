@@ -109,26 +109,36 @@ class InboundAgent:
                 "object_id": contact_info.get("object_id"),
             }
 
-        classification = self._classify(contact_info)
-
-        if (
-            settings.HUBSPOT_UPDATE_CONTACT_INBOUND_STATUS
-            and self.hubspot
-            and contact_info.get("object_id")
-        ):
-            try:
-                self.hubspot.update_inbound_status_sync(contact_info["object_id"], "analyzed")
-            except Exception:
-                logger.warning(
-                    "Failed to set inbound_status=analyzed for %s",
-                    contact_info["object_id"],
-                    exc_info=True,
-                )
-
-        score = self._score(contact_info, classification.category)
         channel = self._pick_channel(contact_info)
-        draft = self._draft_reply(contact_info, classification, score)
-        message_id = self._persist(contact_info, classification, score, channel, draft)
+        # Persist the inquiry + a "drafting" placeholder up front so the ticket shows
+        # on the site immediately, before the (slower) AI reply draft is ready. The
+        # placeholder flips to pending_approval once the draft finishes.
+        message_id = self._persist_placeholder(contact_info, channel)
+
+        try:
+            classification = self._classify(contact_info)
+
+            if (
+                settings.HUBSPOT_UPDATE_CONTACT_INBOUND_STATUS
+                and self.hubspot
+                and contact_info.get("object_id")
+            ):
+                try:
+                    self.hubspot.update_inbound_status_sync(contact_info["object_id"], "analyzed")
+                except Exception:
+                    logger.warning(
+                        "Failed to set inbound_status=analyzed for %s",
+                        contact_info["object_id"],
+                        exc_info=True,
+                    )
+
+            score = self._score(contact_info, classification.category)
+            draft = self._draft_reply(contact_info, classification, score)
+            self._finalize_draft(message_id, contact_info, classification, score, draft)
+        except Exception:
+            # Don't leave the card spinning forever — surface the failure.
+            self._mark_draft_failed(message_id)
+            raise
 
         try:
             notify_approval(
@@ -241,10 +251,10 @@ class InboundAgent:
 
             existing = (
                 session.query(Message)
-                .filter_by(
-                    conversation_id=conv_id,
-                    direction="outbound",
-                    status="pending_approval",
+                .filter(
+                    Message.conversation_id == conv_id,
+                    Message.direction == "outbound",
+                    Message.status.in_(["pending_approval", "drafting"]),
                 )
                 .order_by(Message.created_at.desc())
                 .first()
@@ -484,14 +494,12 @@ class InboundAgent:
         draft.language = reply_lang
         return draft
 
-    def _persist(
-        self,
-        contact_info: dict,
-        classification: ClassifyResult,
-        score: int,
-        channel: str,
-        draft: DraftResult,
-    ) -> int:
+    def _persist_placeholder(self, contact_info: dict, channel: str) -> int:
+        """Persist the inquiry + a 'drafting' outbound placeholder, before the AI draft.
+
+        Returns the outbound message id. The card appears on the site immediately as
+        "작성중"; _finalize_draft fills it in once the reply is ready.
+        """
         session = SessionLocal()
         try:
             email = contact_info.get("email", "")
@@ -510,72 +518,56 @@ class InboundAgent:
                     domain=_domain_from_email(email) if email else None,
                     country=contact_info.get("country"),
                     lifecycle_stage=contact_info.get("lifecycle_stage"),
-                    score=score,
                     phone=contact_info.get("phone") or None,
                     whatsapp_opt_in=bool(contact_info.get("whatsapp_opt_in")),
                 )
                 session.add(contact)
                 session.flush()
             else:
-                contact.score = score
                 if contact_info.get("phone"):
                     contact.phone = contact_info["phone"]
                 if contact_info.get("whatsapp_opt_in"):
                     contact.whatsapp_opt_in = True
 
             # Ticket-based inbound: one ticket = one inquiry = one conversation.
-            # The same contact opening multiple tickets gets multiple separate
-            # threads (separate draft, separate approval) — that matches the
-            # operator's mental model where each ticket is its own work item.
-            # Legacy non-ticket inbounds (form/email/note) still collapse to one
-            # conversation per contact, since there's no per-inquiry key.
             ticket_id = contact_info.get("ticket_id")
             if ticket_id:
                 conv = session.query(Conversation).filter_by(hubspot_ticket_id=ticket_id).first()
                 if not conv:
                     conv = Conversation(
                         contact_id=contact.id,
-                        topic=classification.category,
+                        topic=None,  # set once classified, in _finalize_draft
                         stage="initial",
                         hubspot_ticket_id=ticket_id,
                     )
                     session.add(conv)
                     session.flush()
             else:
-                # Only match contact-keyed conversations (those without a ticket).
-                # Otherwise a non-ticket event (e.g. a stale lifecyclestage retry)
-                # would land inside a ticket conv that happens to share the contact.
                 conv = (
                     session.query(Conversation)
                     .filter_by(contact_id=contact.id, hubspot_ticket_id=None)
                     .first()
                 )
                 if not conv:
-                    conv = Conversation(
-                        contact_id=contact.id,
-                        topic=classification.category,
-                        stage="initial",
-                    )
+                    conv = Conversation(contact_id=contact.id, topic=None, stage="initial")
                     session.add(conv)
                     session.flush()
 
-            # Persist the inbound body so the approval UI can show what we're replying to.
-            # HubSpot is authoritative but rate-limited and the source row (note/form) can
-            # disappear, so we snapshot it locally.
+            # Snapshot the inbound body so the approval UI can show what we're replying to.
             inbound_body = (contact_info.get("last_message") or "").strip()
             if inbound_body:
-                inbound_msg = Message(
-                    conversation_id=conv.id,
-                    direction="inbound",
-                    channel=channel,
-                    from_address=email or None,
-                    to_address=settings.SMTP_FROM_EMAIL or None,
-                    subject=None,
-                    body=inbound_body,
-                    language=draft.language,
-                    status="received",
+                session.add(
+                    Message(
+                        conversation_id=conv.id,
+                        direction="inbound",
+                        channel=channel,
+                        from_address=email or None,
+                        to_address=settings.SMTP_FROM_EMAIL or None,
+                        subject=None,
+                        body=inbound_body,
+                        status="received",
+                    )
                 )
-                session.add(inbound_msg)
                 conv.last_incoming_at = datetime.now(timezone.utc)
                 session.flush()
 
@@ -586,16 +578,53 @@ class InboundAgent:
                 channel=channel,
                 from_address=settings.SMTP_FROM_EMAIL or None,
                 to_address=to_addr,
-                subject=draft.subject,
-                body=draft.body,
-                language=draft.language,
-                status="pending_approval",
-                score_snapshot=score,
+                subject=None,
+                body="",
+                status="drafting",
                 draft_provider=settings.LLM_PROVIDER,
             )
             session.add(msg)
             session.commit()
-            msg_id = msg.id
-            return msg_id
+            return msg.id
         finally:
             session.close()
+
+    def _finalize_draft(
+        self,
+        message_id: int,
+        contact_info: dict,
+        classification: ClassifyResult,
+        score: int,
+        draft: DraftResult,
+    ) -> None:
+        """Fill the 'drafting' placeholder with the finished reply → pending_approval."""
+        session = SessionLocal()
+        try:
+            msg = session.get(Message, message_id)
+            if not msg:
+                return
+            msg.subject = draft.subject
+            msg.body = draft.body
+            msg.language = draft.language
+            msg.status = "pending_approval"
+            msg.score_snapshot = score
+            conv = session.get(Conversation, msg.conversation_id)
+            if conv:
+                conv.topic = classification.category
+                contact = session.get(Contact, conv.contact_id) if conv.contact_id else None
+                if contact:
+                    contact.score = score
+            session.commit()
+        finally:
+            session.close()
+
+    def _mark_draft_failed(self, message_id: int) -> None:
+        """Flip a stuck 'drafting' placeholder to 'draft_failed' so it doesn't spin."""
+        try:
+            with SessionLocal() as session:
+                msg = session.get(Message, message_id)
+                if msg and msg.status == "drafting":
+                    msg.status = "draft_failed"
+                    session.commit()
+        except Exception:
+            logger.warning("Could not mark draft %s failed", message_id, exc_info=True)
