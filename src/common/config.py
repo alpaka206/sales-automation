@@ -168,7 +168,11 @@ class Settings(BaseSettings):
     # When true, HubSpot inbound webhook requires a verified v3 signature.
     # Set to false ONLY for local development against unsigned mock payloads.
     HUBSPOT_WEBHOOK_REQUIRE_SIGNATURE: bool = True
-    HUBSPOT_SIGNATURE_MAX_AGE_SECONDS: int = 60
+    # Max age of a webhook's signed timestamp before we reject it (replay guard).
+    # 300s tolerates a sleeping free-tier host's wake-up latency on the first
+    # delivery; HubSpot's own tolerance is ~5 min. Lower it for stricter replay
+    # protection on an always-on host.
+    HUBSPOT_SIGNATURE_MAX_AGE_SECONDS: int = 300
     # When true, dump rejected webhook payloads to data/last_rejected_webhook.json
     # for offline signature debugging. Default OFF — the dump writes the request
     # body+headers to disk on an attacker-triggerable path, so only enable while
