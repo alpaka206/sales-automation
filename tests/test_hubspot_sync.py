@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from datetime import datetime
-
 import httpx
 import pytest
 import respx
@@ -89,49 +87,6 @@ async def test_send_email(client: HubSpotClient) -> None:
     eng_id = await client.send_email("123", "Sub", "Body", "from@x.com")
     await client.close()
     assert eng_id == "eng-99"
-
-
-# ---------- search_contacts_sync (covers lines 202-234) ----------
-
-
-@respx.mock
-def test_search_contacts_sync(client: HubSpotClient) -> None:
-    respx.post(f"{BASE_URL}/crm/v3/objects/contacts/search").mock(
-        return_value=httpx.Response(
-            200,
-            json={
-                "results": [
-                    {
-                        "id": "10",
-                        "properties": {
-                            "email": "lead@co.kr",
-                            "firstname": "Kim",
-                            "lastname": "Lee",
-                            "company": "Co",
-                            "phone": "010-0000",
-                            "country": "KR",
-                            "lifecyclestage": "lead",
-                        },
-                    }
-                ]
-            },
-        )
-    )
-    contacts = client.search_contacts_sync(
-        created_after=datetime(2025, 1, 1), lifecycle_stage="lead"
-    )
-    assert len(contacts) == 1
-    assert contacts[0].email == "lead@co.kr"
-    assert contacts[0].country == "KR"
-
-
-@respx.mock
-def test_search_contacts_sync_empty(client: HubSpotClient) -> None:
-    respx.post(f"{BASE_URL}/crm/v3/objects/contacts/search").mock(
-        return_value=httpx.Response(200, json={"results": []})
-    )
-    contacts = client.search_contacts_sync(created_after=datetime(2025, 1, 1))
-    assert contacts == []
 
 
 # ---------- update_inbound_status_sync (covers lines 236-250) ----------

@@ -122,32 +122,6 @@ def test_single_object_not_array(mock_handle, client: TestClient) -> None:
     assert r.json()["results"][0]["status"] == "processed"
 
 
-# ---------- Legacy internal format ----------
-
-
-@patch("src.agents.inbound.InboundAgent.handle", return_value={"message_id": 5})
-def test_legacy_internal_format(mock_handle, client: TestClient) -> None:
-    r = client.post(
-        "/webhook/hubspot/inbound",
-        json={"event_type": "ticket_created", "object_id": "123", "ticket_id": "123"},
-        headers=_auth_headers(),
-    )
-    assert r.status_code == 200
-    assert r.json()["status"] == "accepted"
-    mock_handle.assert_called_once()
-
-
-@patch("src.agents.inbound.InboundAgent.handle", return_value={"message_id": 6})
-def test_legacy_format_in_array(mock_handle, client: TestClient) -> None:
-    r = client.post(
-        "/webhook/hubspot/inbound",
-        json=[{"event_type": "ticket_created", "object_id": "456", "ticket_id": "456"}],
-        headers=_auth_headers(),
-    )
-    assert r.status_code == 200
-    assert r.json()["results"][0]["status"] == "processed"
-
-
 # ---------- Ignored event types ----------
 
 

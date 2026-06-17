@@ -16,7 +16,7 @@ import time
 from fastapi import APIRouter, HTTPException, Request
 
 from ..common.config import settings
-from .schemas import HubSpotWebhookEvent, InboundWebhookBody
+from .schemas import HubSpotWebhookEvent
 
 logger = logging.getLogger(__name__)
 
@@ -204,7 +204,6 @@ async def webhook_hubspot_inbound(request: Request) -> dict:
     else:
         raise HTTPException(status_code=400, detail="expected object or array")
 
-    # Detect format: HubSpot native (has subscriptionType) vs legacy internal (has event_type)
     from ..agents.inbound import InboundAgent
 
     agent = InboundAgent()
@@ -212,53 +211,57 @@ async def webhook_hubspot_inbound(request: Request) -> dict:
 
     for item in events_raw:
         try:
-            if "subscriptionType" in item:
-                event = HubSpotWebhookEvent(**item)
-                event_type = _map_hubspot_event(event)
-                if event_type is None:
-                    logger.info("Ignoring HubSpot event: %s", event.subscriptionType)
-                    results.append({"objectId": event.objectId, "status": "ignored"})
+            if "subscriptionType" not in item:
+                logger.info("Ignoring event without subscriptionType: %s", item)
+                results.append({
+                    "objectId": item.get("objectId"),
+                    "status": "ignored",
+                })
+                continue
+
+            event = HubSpotWebhookEvent(**item)
+            event_type = _map_hubspot_event(event)
+            if event_type is None:
+                logger.info("Ignoring HubSpot event: %s", event.subscriptionType)
+                results.append({"objectId": event.objectId, "status": "ignored"})
+                continue
+
+            if event_type in _TICKET_EVENT_TYPES:
+                # Ticket webhooks give us a ticket id; resolve the primary contact
+                # via association so downstream code stays contact-centric.
+                ticket_id = str(event.objectId)
+                from ..integrations.hubspot import HubSpotClient, HubSpotNotConfigured
+                try:
+                    hs = HubSpotClient()
+                    contact_id = await asyncio.to_thread(
+                        hs.get_ticket_primary_contact_sync, ticket_id
+                    )
+                except HubSpotNotConfigured:
+                    contact_id = None
+                if not contact_id:
+                    logger.info(
+                        "Ticket %s has no associated contact — skipping (subscription=%s).",
+                        ticket_id, event.subscriptionType,
+                    )
+                    results.append({
+                        "objectId": event.objectId,
+                        "status": "skipped",
+                        "reason": "no_contact",
+                    })
                     continue
 
-                if event_type in _TICKET_EVENT_TYPES:
-                    # Ticket webhooks give us a ticket id; resolve the primary contact
-                    # via association so downstream code stays contact-centric.
-                    ticket_id = str(event.objectId)
-                    from ..integrations.hubspot import HubSpotClient, HubSpotNotConfigured
-                    try:
-                        hs = HubSpotClient()
-                        contact_id = await asyncio.to_thread(
-                            hs.get_ticket_primary_contact_sync, ticket_id
-                        )
-                    except HubSpotNotConfigured:
-                        contact_id = None
-                    if not contact_id:
-                        logger.info(
-                            "Ticket %s has no associated contact — skipping (subscription=%s).",
-                            ticket_id, event.subscriptionType,
-                        )
-                        results.append({
-                            "objectId": event.objectId,
-                            "status": "skipped",
-                            "reason": "no_contact",
-                        })
-                        continue
-
-                    internal = {
-                        "event_type": event_type,
-                        "object_id": contact_id,
-                        "ticket_id": ticket_id,
-                        "occurred_at": str(event.occurredAt) if event.occurredAt else None,
-                    }
-                else:
-                    internal = {
-                        "event_type": event_type,
-                        "object_id": str(event.objectId),
-                        "occurred_at": str(event.occurredAt) if event.occurredAt else None,
-                    }
+                internal = {
+                    "event_type": event_type,
+                    "object_id": contact_id,
+                    "ticket_id": ticket_id,
+                    "occurred_at": str(event.occurredAt) if event.occurredAt else None,
+                }
             else:
-                body = InboundWebhookBody(**item)
-                internal = body.model_dump()
+                internal = {
+                    "event_type": event_type,
+                    "object_id": str(event.objectId),
+                    "occurred_at": str(event.occurredAt) if event.occurredAt else None,
+                }
 
             # agent.handle is sync and calls the Gemini API 3x (classify,
             # score_adjust, draft_reply). On the asyncio loop that would block every

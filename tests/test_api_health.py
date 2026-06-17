@@ -48,15 +48,18 @@ def test_protected_route_accepts_valid_token(client: TestClient) -> None:
     assert r.json()["status"] == "ok"
 
 
+@patch("src.integrations.hubspot.HubSpotClient")
 @patch("src.agents.inbound.InboundAgent.handle", return_value={"message_id": 1})
-def test_webhook_inbound(mock_handle, client: TestClient, monkeypatch) -> None:
-    # Default policy is fail-closed (require signature). For this legacy unsigned
-    # payload test, explicitly turn enforcement off.
+def test_webhook_inbound(mock_handle, mock_hs_cls, client: TestClient, monkeypatch) -> None:
+    # Inbound is ticket-only. Default policy is fail-closed (require signature);
+    # for this unsigned smoke test, turn enforcement off.
     monkeypatch.setattr(settings, "HUBSPOT_WEBHOOK_REQUIRE_SIGNATURE", False)
     monkeypatch.setattr(settings, "HUBSPOT_WEBHOOK_SECRET", "")
+    # Ticket → primary contact resolution (webhook needs a contact to reply to).
+    mock_hs_cls.return_value.get_ticket_primary_contact_sync.return_value = "C123"
     r = client.post(
         "/webhook/hubspot/inbound",
-        json={"event_type": "contact.creation", "object_id": "123"},
+        json={"subscriptionType": "ticket.creation", "objectId": 123, "occurredAt": 1684000000000},
         headers={"X-Internal-Token": settings.INTERNAL_API_TOKEN},
     )
     assert r.status_code == 200

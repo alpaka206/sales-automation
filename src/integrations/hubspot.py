@@ -258,61 +258,6 @@ class HubSpotClient:
 
     # ------ Sync helpers (for use in synchronous agent code) ------
 
-    def search_contacts_sync(
-        self,
-        created_after: datetime,
-        lifecycle_stage: str = "lead",
-        limit: int = 100,
-    ) -> list[ContactDTO]:
-        """Search contacts created after a given timestamp with a specific lifecycle stage."""
-        headers = {"Authorization": f"Bearer {self.token}"}
-        ts_ms = str(int(created_after.timestamp() * 1000))
-        body = {
-            "filterGroups": [
-                {
-                    "filters": [
-                        {"propertyName": "createdate", "operator": "GT", "value": ts_ms},
-                        {
-                            "propertyName": "lifecyclestage",
-                            "operator": "EQ",
-                            "value": lifecycle_stage,
-                        },
-                    ]
-                }
-            ],
-            "sorts": [{"propertyName": "createdate", "direction": "ASCENDING"}],
-            "properties": [
-                "email",
-                "firstname",
-                "lastname",
-                "company",
-                "phone",
-                "country",
-                "lifecyclestage",
-            ],
-            "limit": limit,
-        }
-        with httpx.Client(headers=headers, timeout=30.0) as client:
-            r = client.post(f"{BASE_URL}/crm/v3/objects/contacts/search", json=body)
-        r.raise_for_status()
-        results = r.json().get("results", [])
-        contacts: list[ContactDTO] = []
-        for item in results:
-            props = item.get("properties", {})
-            contacts.append(
-                ContactDTO(
-                    id=str(item["id"]),
-                    email=props.get("email"),
-                    firstname=props.get("firstname"),
-                    lastname=props.get("lastname"),
-                    company=props.get("company"),
-                    phone=props.get("phone"),
-                    country=props.get("country"),
-                    lifecyclestage=props.get("lifecyclestage"),
-                )
-            )
-        return contacts
-
     def update_inbound_status_sync(self, contact_id: str, status: str) -> None:
         """Synchronous version of update_inbound_status."""
         headers = {"Authorization": f"Bearer {self.token}"}
@@ -565,7 +510,7 @@ class HubSpotClient:
         pipeline_stage: str | None = None,
         limit: int = 100,
     ) -> list[TicketDTO]:
-        """Tickets created after a given timestamp. Same shape as search_contacts_sync."""
+        """Tickets created after a given timestamp."""
         headers = {"Authorization": f"Bearer {self.token}"}
         ts_ms = str(int(created_after.timestamp() * 1000))
         filters: list[dict] = [

@@ -14,16 +14,6 @@ class HubSpotWebhookEvent(BaseModel):
     objectId: int
     occurredAt: int | None = None
     eventId: int | None = None
-    propertyName: str | None = None
-    propertyValue: str | None = None
-
-
-class InboundWebhookBody(BaseModel):
-    """Legacy internal format — kept for backward compatibility."""
-
-    event_type: str
-    object_id: str
-    occurred_at: str | None = None
 
 
 class OutboundRunBody(BaseModel):
