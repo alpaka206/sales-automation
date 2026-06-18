@@ -5,11 +5,7 @@
 {% block content %}
 {% set is_pending = msg.status == 'pending_approval' %}
 {% set is_drafting = msg.status == 'drafting' %}
-{% set has_inbound = thread | selectattr('direction', 'equalto', 'inbound') | list | length > 0 %}
-{# Only offer the 원문↔한국어 toggle when something actually needs translating.
-   `translatable` is a cheap heuristic computed at render time; the real Korean
-   text is fetched lazily on first toggle (see /messages/{id}/translation). #}
-{% set has_translation = thread | selectattr('translatable') | list | length > 0 %}
+{% set can_translate = msg.target_language and msg.target_language != 'ko' %}
 
 <div id="content-root">
 <div style="margin-bottom:14px">
@@ -37,9 +33,10 @@
       <span class="tag">{{ icon("user", 14) }} 연락처 기준 대화 (티켓 없음)</span>
       {% endif %}
       {{ status_pill(msg.status) }}
+      {% if ticket.inquiry_language %}<span class="tag">{{ icon("translate", 13) }} 문의 언어 · {{ ticket.inquiry_language }}</span>{% endif %}
     </div>
     <h1 class="page-title" style="margin-top:10px">대화 진행 기록 · #{{ msg.id }}</h1>
-    <p class="page-sub">분류 · {{ msg.category }} — 같은 티켓의 문의와 회신이 모두 시간순으로 표시됩니다.</p>
+    <p class="page-sub">분류 · {{ msg.category }} — 같은 티켓의 문의와 회신이 모두 시간순으로 표시됩니다. 고객 문의는 한국어로 번역되어 보이며, “원문 보기”로 원문을 펼칠 수 있습니다.</p>
   </div>
   <div class="row" style="gap:18px">
     {% if msg.score_snapshot is not none %}
@@ -47,15 +44,6 @@
       <div class="kpi__label">스냅샷 점수</div>
       <div style="margin-top:6px">{{ score_meter(msg.score_snapshot, show_bar=False) }}</div>
     </div>
-    {% endif %}
-    {% if has_translation %}
-    {# First click lazily loads translations (OOB fills the #ko-* placeholders);
-       the JS also flips body.show-translation. Subsequent clicks are pure CSS. #}
-    <button type="button" class="chip" id="ko-toggle" title="원문 ↔ 한국어 번역 전환"
-            hx-get="/messages/{{ msg.id }}/translation" hx-trigger="click once" hx-swap="none">
-      {{ icon("translate", 15) }} <span id="ko-toggle-label">번역으로 보기</span>
-      <span class="spinner htmx-indicator" aria-hidden="true" style="margin-left:4px"></span>
-    </button>
     {% endif %}
   </div>
 </div>
@@ -66,8 +54,10 @@
   <div>
     <div class="banner__title">이 메시지는 아직 발송되지 않았습니다.</div>
     <div class="banner__body">
-      아래 진행 기록의 회신 초안에서 <strong>“검토 완료 · 발송”</strong>을 눌러야만 메일이 실제로 나갑니다.
-      모든 발송은 사람 승인을 거칩니다(<span class="mono">AUTO_SEND_THRESHOLD = 1.01</span> — 자동 발송 비활성).
+      초안은 <strong>한국어</strong>로 작성됩니다. 검토·수정 후
+      {% if can_translate %}<strong>“번역하기”</strong>로 문의 언어({{ msg.target_language }})로 바꾼 다음 {% endif %}
+      <strong>“검토 완료 · 발송”</strong>을 눌러야 메일이 실제로 나갑니다.
+      모든 발송은 사람 승인을 거칩니다(<span class="mono">AUTO_SEND_THRESHOLD = 1.01</span>).
     </div>
   </div>
 </div>
@@ -80,29 +70,22 @@
     <div class="thread">
       {% for t in thread %}
         {% if t.is_current and is_pending %}
-        {# ----- editable reply draft (the message being approved) ----- #}
+        {# ----- editable reply draft (the message being approved) — Korean ----- #}
         <div class="bubble bubble--out bubble--current">
           <div class="bubble__head">
-            <span class="bubble__dir">{{ icon("send", 14) }} 회신 초안 · 실제 발송 본문</span>
+            <span class="bubble__dir">{{ icon("send", 14) }} 회신 초안 · 한국어 (검토용)</span>
             {{ status_pill(t.status, "sm") }}
             <span class="bubble__time tnum">{{ t.created_at | kst }}</span>
           </div>
-          <form id="msg-form"{% if t.translatable %} class="has-ko"{% endif %}>
-            <div class="msg-orig">
-              <label class="field-label" for="msg-subject">제목</label>
-              <input class="input" id="msg-subject" name="subject" value="{{ msg.subject }}" style="margin-bottom:12px">
-              <label class="field-label" for="msg-body">본문</label>
-              <textarea class="draft-textarea" id="msg-body" name="body">{{ msg.body }}</textarea>
-            </div>
-            {% if t.translatable %}
-            <div class="msg-ko">
-              <div class="ko-block__label">{{ icon("translate", 13) }} 회신 한국어 번역 <span class="t-subtle" style="font-weight:500">(내부 검토용 · 실제 발송은 원문)</span></div>
-              <div class="msg-body--inset msg-body t-muted" id="ko-{{ t.id }}">
-                <span class="skeleton"></span><span class="skeleton skeleton--sm"></span>
-              </div>
-            </div>
-            {% endif %}
+          <form id="msg-form">
+            <label class="field-label" for="msg-subject">제목</label>
+            <input class="input" id="msg-subject" name="subject" value="{{ msg.subject }}" style="margin-bottom:12px">
+            <label class="field-label" for="msg-body">본문</label>
+            <textarea class="draft-textarea" id="msg-body" name="body">{{ msg.body }}</textarea>
             <div class="action-bar">
+              {% if can_translate %}
+              <button type="button" class="btn btn--subtle" id="translate-btn" onclick="translateDraft()">{{ icon("translate", 15) }} 번역하기 ({{ msg.target_language }})</button>
+              {% endif %}
               <button type="button" class="btn btn--ok" onclick="openSendModal()" aria-haspopup="dialog" aria-controls="send-modal">{{ icon("check", 15) }} 검토 완료 · 발송</button>
               <button type="button" class="btn btn--subtle" onclick="openPreviewModal()" aria-haspopup="dialog" aria-controls="preview-modal">{{ icon("file", 15) }} 미리보기</button>
               <button type="button" class="btn btn--subtle"
@@ -110,6 +93,9 @@
                       hx-target="#action-result" hx-swap="innerHTML">{{ icon("edit", 15) }} 저장</button>
               <button type="button" class="btn btn--danger" onclick="var r=document.getElementById('reject-form');r.hidden=!r.hidden">{{ icon("x", 15) }} 거절</button>
             </div>
+            {% if can_translate %}
+            <div id="translate-note" class="t-xs t-subtle" style="margin-top:8px">발송 전 “번역하기”로 문의 언어로 바꿔주세요. 미번역 시 발송 단계에서 자동 번역됩니다.</div>
+            {% endif %}
           </form>
           <div id="reject-form" hidden style="margin-top:14px;border-top:1px solid var(--border);padding-top:14px">
             <form>
@@ -122,32 +108,68 @@
           </div>
           <div id="action-result" role="status" aria-live="polite" style="margin-top:14px"></div>
         </div>
-        {% else %}
-        {# ----- read-only history bubble (inquiry or past reply) ----- #}
-        <div class="bubble bubble--{{ 'in' if t.direction == 'inbound' else 'out' }}{% if t.is_current %} bubble--current{% endif %}{% if t.translatable %} has-ko{% endif %}">
+
+        {% elif t.is_current and is_drafting %}
+        {# ----- drafting placeholder skeleton ----- #}
+        <div class="bubble bubble--out bubble--current">
           <div class="bubble__head">
-            {% if t.direction == 'inbound' %}
-            <span class="bubble__dir">{{ icon("inbound", 14) }} 고객 문의</span>
-            {% else %}
             <span class="bubble__dir">{{ icon("send", 14) }} 회신</span>
-            {% endif %}
             {{ status_pill(t.status, "sm") }}
-            {% if t.translatable %}<span class="tag" style="height:20px;font-size:11px">번역 가능</span>{% endif %}
             <span class="bubble__time tnum">{{ (t.sent_at or t.created_at) | kst }}</span>
           </div>
-          {% if t.is_current and is_drafting %}
           <div class="msg-body t-muted">
             <span class="skeleton" style="display:block;height:14px;margin-bottom:8px"></span>
             <span class="skeleton skeleton--sm" style="display:block;height:14px"></span>
             <div class="t-sm t-subtle" style="margin-top:10px">{{ icon("sparkles", 13) }} AI가 회신을 작성하고 있습니다…</div>
           </div>
+        </div>
+
+        {% elif t.direction == 'inbound' %}
+        {# ----- customer inquiry: Korean by default, expand original to the side ----- #}
+        <div class="bubble bubble--in{% if t.is_current %} bubble--current{% endif %}">
+          <div class="bubble__head">
+            <span class="bubble__dir">{{ icon("inbound", 14) }} 고객 문의</span>
+            {{ status_pill(t.status, "sm") }}
+            {% if t.needs_ko %}
+            <button type="button" class="chip chip--xs orig-toggle" data-target="orig-{{ t.id }}" aria-expanded="false">
+              {{ icon("translate", 13) }} <span class="orig-toggle__label">원문 보기</span>
+            </button>
+            {% endif %}
+            <span class="bubble__time tnum">{{ (t.sent_at or t.created_at) | kst }}</span>
+          </div>
+          {% if t.needs_ko %}
+          <div class="bubble__cols" id="cols-{{ t.id }}">
+            <div class="bubble__col">
+              <div class="ko-block__label">{{ icon("translate", 12) }} 한국어 번역</div>
+              {% if t.subject_ko or t.subject %}<div class="bubble__subject">{{ t.subject_ko or t.subject }}</div>{% endif %}
+              <div class="msg-body">{{ t.body_ko or t.body }}</div>
+            </div>
+            <div class="bubble__col bubble__col--orig" id="orig-{{ t.id }}" hidden>
+              <div class="ko-block__label t-subtle">원문 ({{ t.language or 'original' }})</div>
+              {% if t.subject %}<div class="bubble__subject">{{ t.subject }}</div>{% endif %}
+              <div class="msg-body">{{ t.body }}</div>
+            </div>
+          </div>
           {% else %}
           {% if t.subject %}<div class="bubble__subject">{{ t.subject }}</div>{% endif %}
-          <div class="msg-body msg-orig">{{ t.body }}</div>
-          {% if t.translatable %}<div class="msg-body t-muted msg-ko" id="ko-{{ t.id }}">
-            <span class="skeleton"></span><span class="skeleton skeleton--sm"></span>
-          </div>{% endif %}
+          <div class="msg-body">{{ t.body }}</div>
           {% endif %}
+        </div>
+
+        {% else %}
+        {# ----- past outbound reply / auto-ack (read-only) ----- #}
+        <div class="bubble bubble--out{% if t.is_current %} bubble--current{% endif %}">
+          <div class="bubble__head">
+            {% if t.is_auto_ack %}
+            <span class="bubble__dir">{{ icon("sparkles", 14) }} 자동 접수확인 (승인 없이 발송)</span>
+            {% else %}
+            <span class="bubble__dir">{{ icon("send", 14) }} 회신</span>
+            {% endif %}
+            {{ status_pill(t.status, "sm") }}
+            <span class="bubble__time tnum">{{ (t.sent_at or t.created_at) | kst }}</span>
+          </div>
+          {% if t.subject %}<div class="bubble__subject">{{ t.subject }}</div>{% endif %}
+          <div class="msg-body">{{ t.body }}</div>
         </div>
         {% endif %}
       {% endfor %}
@@ -156,12 +178,71 @@
 
   {# ---------- sidebar ---------- #}
   <div class="stack" style="gap:var(--gap)">
+
+    {% if summary or customer_requests or progress %}
+    <div class="card">
+      <div class="section-label" style="margin-bottom:12px">대화 요약 · 처리경과</div>
+      {% if summary %}
+      <div class="msg-body--inset" style="margin-bottom:10px">
+        <div class="ko-block__label">요약</div>
+        <div class="t-sm" style="line-height:1.6;white-space:pre-line">{{ summary }}</div>
+      </div>
+      {% endif %}
+      {% if customer_requests %}
+      <div class="msg-body--inset" style="margin-bottom:10px">
+        <div class="ko-block__label" style="color:var(--accent)">고객 요청사항</div>
+        <div class="t-sm" style="line-height:1.6;white-space:pre-line">{{ customer_requests }}</div>
+      </div>
+      {% endif %}
+      {% if progress %}
+      <div class="ko-block__label" style="margin-bottom:6px">처리경과 (추가 기록만 누적)</div>
+      <ul class="progress-log">
+        {% for p in progress %}
+        <li class="progress-log__item">
+          <span class="progress-log__time tnum">{{ p.created_at | kst }}</span>
+          <span class="progress-log__detail">{{ p.detail }}</span>
+        </li>
+        {% endfor %}
+      </ul>
+      {% endif %}
+    </div>
+    {% endif %}
+
+    {% if domain_history and domain_history.total and domain_history.total > 0 %}
+    <div class="card">
+      <div class="section-header" style="margin-bottom:12px">
+        <div class="section-header__l">
+          <span class="section-header__icon">{{ icon("building", 16) }}</span>
+          <div><div class="section-header__title">같은 회사 이력</div>
+            <div class="section-header__sub">{{ domain_history.domain }} · 다른 대화 {{ domain_history.total }}건</div></div>
+        </div>
+      </div>
+      <ul class="domain-hist">
+        {% for r in domain_history.rows %}
+        <li>
+          <a class="domain-hist__link" href="{{ ('/messages/' ~ r.link_message_id) if r.link_message_id else ('/companies/' ~ domain_history.domain) }}">
+            <div class="row" style="gap:6px">
+              <strong class="t-sm truncate">{{ r.contact_name }}</strong>
+              {% if r.ticket_id %}<span class="tag" style="height:18px;font-size:10px">#{{ r.ticket_id }}</span>{% endif %}
+              <span class="t-xs t-subtle" style="margin-left:auto">{{ r.message_count }}건</span>
+            </div>
+            {% if r.topic %}<div class="t-xs t-subtle">{{ r.topic }}</div>{% endif %}
+            {% if r.summary %}<div class="t-xs" style="line-height:1.5;margin-top:2px">{{ r.summary[:120] }}{% if r.summary|length > 120 %}…{% endif %}</div>{% endif %}
+          </a>
+        </li>
+        {% endfor %}
+      </ul>
+      <a href="/companies/{{ domain_history.domain }}" class="btn btn--subtle btn--sm" style="width:100%;justify-content:center;margin-top:10px">{{ icon("chevron", 14) }} 회사 전체 보기</a>
+    </div>
+    {% endif %}
+
     <div class="card">
       <div class="section-label" style="margin-bottom:12px">티켓 / 대화</div>
       <dl class="info-list">
         <div class="info-row"><dt>티켓</dt><dd class="mono">{{ ('#' ~ ticket.ticket_id) if ticket.ticket_id else '— (없음)' }}</dd></div>
         {% if ticket.stage %}<div class="info-row"><dt>단계</dt><dd>{{ ticket.stage }}</dd></div>{% endif %}
         {% if ticket.topic %}<div class="info-row"><dt>분류</dt><dd>{{ ticket.topic }}</dd></div>{% endif %}
+        {% if ticket.inquiry_language %}<div class="info-row"><dt>문의 언어</dt><dd>{{ ticket.inquiry_language }}</dd></div>{% endif %}
         <div class="info-row"><dt>메시지</dt><dd class="tnum">{{ thread | length }}건</dd></div>
       </dl>
     </div>
@@ -171,7 +252,8 @@
       <dl class="info-list">
         <div class="info-row"><dt>채널</dt><dd>{{ msg.channel }}</dd></div>
         <div class="info-row"><dt>구분</dt><dd>{{ "인바운드 회신" if msg.flow == "inbound_reply" else "아웃바운드 발굴" }}</dd></div>
-        {% if msg.language %}<div class="info-row"><dt>언어</dt><dd>{{ msg.language }}</dd></div>{% endif %}
+        {% if msg.language %}<div class="info-row"><dt>초안 언어</dt><dd>{{ msg.language }}</dd></div>{% endif %}
+        {% if msg.target_language %}<div class="info-row"><dt>발송 언어</dt><dd>{{ msg.target_language }}</dd></div>{% endif %}
         <div class="info-row"><dt>수신자</dt><dd class="mono truncate" style="max-width:170px">{{ msg.to_address or '—' }}</dd></div>
         {% if msg.scheduled_at %}<div class="info-row"><dt>예약</dt><dd class="tnum">{{ msg.scheduled_at | kst }}</dd></div>{% endif %}
         <div class="info-row"><dt>생성</dt><dd class="tnum">{{ msg.created_at | kst }}</dd></div>
@@ -179,20 +261,34 @@
       </dl>
     </div>
 
-    {% if contact or prospect %}
+    {% if contact %}
     <div class="card">
-      <div class="section-label" style="margin-bottom:12px">연락처 / 프로스펙트</div>
+      <div class="section-label" style="margin-bottom:12px">연락처 정보 (편집 가능)</div>
+      <dl class="info-list" style="margin-bottom:12px">
+        <div class="info-row"><dt>이름</dt><dd>{{ contact.name }}</dd></div>
+        {% if contact.email %}<div class="info-row"><dt>이메일</dt><dd class="mono truncate" style="max-width:170px">{{ contact.email }}</dd></div>{% endif %}
+        {% if contact.domain %}<div class="info-row"><dt>도메인</dt><dd><a class="mono" href="/companies/{{ contact.domain }}">{{ contact.domain }}</a></dd></div>{% endif %}
+      </dl>
+      <form id="contact-form">
+        <label class="field-label" for="c-company">회사</label>
+        <input class="input" id="c-company" name="company" value="{{ contact.company or '' }}" style="margin-bottom:10px">
+        <label class="field-label" for="c-role">하는 일 / 메모</label>
+        <textarea class="textarea" id="c-role" name="role_description" rows="3" placeholder="이 고객·회사가 어떤 일을 하는지 (대화하며 알게 된 내용 포함). gmail·미확인이어도 입력해 저장됩니다.">{{ contact.role_description or '' }}</textarea>
+        <button type="button" class="btn btn--subtle btn--sm" style="margin-top:10px"
+                hx-post="/contacts/{{ contact.id }}/edit" hx-include="#contact-form"
+                hx-target="#contact-edit-result" hx-swap="innerHTML">{{ icon("check", 14) }} 연락처 저장</button>
+        <div id="contact-edit-result" role="status" aria-live="polite" style="margin-top:8px"></div>
+      </form>
+    </div>
+    {% endif %}
+
+    {% if prospect %}
+    <div class="card">
+      <div class="section-label" style="margin-bottom:12px">프로스펙트</div>
       <dl class="info-list">
-        {% if contact %}
-          <div class="info-row"><dt>이름</dt><dd>{{ contact.name }}</dd></div>
-          {% if contact.email %}<div class="info-row"><dt>이메일</dt><dd class="mono truncate" style="max-width:170px">{{ contact.email }}</dd></div>{% endif %}
-          {% if contact.company %}<div class="info-row"><dt>회사</dt><dd>{{ contact.company }}</dd></div>{% endif %}
-        {% endif %}
-        {% if prospect %}
-          {% if not contact %}<div class="info-row"><dt>이름</dt><dd>{{ prospect.name }}</dd></div>{% endif %}
-          {% if prospect.icp_score is not none %}
-          <div class="info-row"><dt>ICP 점수</dt><dd>{{ score_meter(prospect.icp_score) }}</dd></div>
-          {% endif %}
+        {% if not contact %}<div class="info-row"><dt>이름</dt><dd>{{ prospect.name }}</dd></div>{% endif %}
+        {% if prospect.icp_score is not none %}
+        <div class="info-row"><dt>ICP 점수</dt><dd>{{ score_meter(prospect.icp_score) }}</dd></div>
         {% endif %}
       </dl>
     </div>
@@ -207,15 +303,12 @@
             <div class="section-header__sub">AI가 도메인에서 회사·사업을 분석</div></div>
         </div>
       </div>
-
-      {# what the company actually does — surfaced first so you don't have to look it up #}
       {% if domain_profile.services %}
       <div class="msg-body--inset" style="margin-bottom:12px">
         <div class="ko-block__label" style="color:var(--accent)">{{ icon("sparkles", 13) }} 무엇을 하는 회사</div>
         <div class="t-sm" style="line-height:1.6">{{ domain_profile.services }}</div>
       </div>
       {% endif %}
-
       <dl class="info-list">
         {% if domain_profile.company_name %}<div class="info-row"><dt>회사명</dt><dd>{{ domain_profile.company_name }}</dd></div>{% endif %}
         {% if domain_profile.industry %}<div class="info-row"><dt>산업</dt><dd>{{ domain_profile.industry }}</dd></div>{% endif %}
@@ -242,8 +335,8 @@
     <div class="modal__body" id="send-modal-body">
       승인 즉시 <strong>{{ msg.channel }}</strong>로 발송됩니다.
       {% if msg.to_address %}수신자: <span class="mono">{{ msg.to_address }}</span>.{% endif %}
-      이메일은 SMTP, WhatsApp은 직접 발송되며 HubSpot 타임라인에 기록되고 상태가
-      <span class="mono">new → meeting link sent</span>로 갱신됩니다. 이 동작은 되돌릴 수 없습니다.
+      {% if can_translate %}<br>발송 본문은 문의 언어({{ msg.target_language }})로 나갑니다 — 아직 한국어라면 발송 직전 자동 번역됩니다.{% endif %}
+      이 동작은 되돌릴 수 없습니다.
     </div>
     <div class="modal__actions">
       <button type="button" class="btn btn--ghost" onclick="closeSendModal()">취소</button>
@@ -280,6 +373,32 @@
   function openSendModal() { window.PERSO_modal.open("send-modal"); }
   function closeSendModal() { window.PERSO_modal.close("send-modal"); }
 
+  function translateDraft() {
+    var b = document.getElementById("msg-body");
+    var s = document.getElementById("msg-subject");
+    var note = document.getElementById("translate-note");
+    var btn = document.getElementById("translate-btn");
+    if (!b) return;
+    if (btn) btn.disabled = true;
+    if (note) note.textContent = "번역 중…";
+    fetch("/messages/{{ msg.id }}/translate", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: "body=" + encodeURIComponent(b.value) + "&subject=" + encodeURIComponent(s ? s.value : ""),
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        if (btn) btn.disabled = false;
+        if (d.error) { if (note) note.textContent = d.error; return; }
+        b.value = d.body;
+        if (s && typeof d.subject !== "undefined") s.value = d.subject;
+        if (note) note.textContent = d.translated
+          ? ("번역됨 → " + d.language + " · 필요하면 직접 수정 후 발송하세요.")
+          : "번역할 내용이 없습니다 (이미 발송 언어).";
+      })
+      .catch(function () { if (btn) btn.disabled = false; if (note) note.textContent = "번역 실패 — 다시 시도해 주세요."; });
+  }
+
   function openPreviewModal() {
     var bodyEl = document.getElementById("msg-body");
     var subjEl = document.getElementById("msg-subject");
@@ -300,15 +419,21 @@
       });
   }
   function closePreviewModal() { window.PERSO_modal.close("preview-modal"); }
-  document.addEventListener("DOMContentLoaded", function () {
-    var btn = document.getElementById("ko-toggle");
+
+  {# Per-bubble "원문 보기" toggle: reveals the original beside the translation. #}
+  document.addEventListener("click", function (e) {
+    var btn = e.target.closest(".orig-toggle");
     if (!btn) return;
-    var label = document.getElementById("ko-toggle-label");
-    btn.addEventListener("click", function () {
-      var on = document.body.classList.toggle("show-translation");
-      btn.classList.toggle("is-active", on);
-      if (label) label.textContent = on ? "원문으로 보기" : "번역으로 보기";
-    });
+    var id = btn.getAttribute("data-target");
+    var el = document.getElementById(id);
+    if (!el) return;
+    var cols = el.closest(".bubble__cols");
+    var opening = el.hasAttribute("hidden");
+    if (opening) { el.removeAttribute("hidden"); if (cols) cols.classList.add("is-split"); }
+    else { el.setAttribute("hidden", ""); if (cols) cols.classList.remove("is-split"); }
+    btn.setAttribute("aria-expanded", opening ? "true" : "false");
+    var lbl = btn.querySelector(".orig-toggle__label");
+    if (lbl) lbl.textContent = opening ? "원문 닫기" : "원문 보기";
   });
 </script>
 {% endblock %}

@@ -17,6 +17,15 @@ from src.db import models as _models  # noqa: F401
 from src.db.models import Contact, Conversation, Message
 
 
+@pytest.fixture(autouse=True)
+def _worker_off(monkeypatch):
+    """Pin the background worker OFF so the inline approve→send path is deterministic
+    regardless of the local .env (a test that wants it on re-patches in its body)."""
+    from src.common.config import settings
+
+    monkeypatch.setattr(settings, "SEND_WORKER_ENABLED", False)
+
+
 def _client() -> TestClient:
     return TestClient(app)
 
@@ -250,6 +259,22 @@ def test_message_send_prevents_double(mock_send, pending_msg):
     _client().post(f"/messages/{pending_msg}/send", data={"body": "", "subject": ""})
     r = _client().post(f"/messages/{pending_msg}/send", data={"body": "", "subject": ""})
     assert r.status_code == 400
+
+
+@patch("src.integrations.senders.send", new_callable=AsyncMock)
+def test_message_send_defers_to_worker_when_enabled(mock_send, pending_msg, _use_test_db):
+    """With the background worker on, /send approves but does NOT inline-send (the
+    worker claims approved rows) — prevents a double-send race."""
+    from src.common.config import settings
+
+    with patch.object(settings, "SEND_WORKER_ENABLED", True):
+        r = _client().post(f"/messages/{pending_msg}/send", data={"body": "", "subject": ""})
+    assert r.status_code == 200
+    mock_send.assert_not_awaited()
+    session = _use_test_db()
+    m = session.get(Message, pending_msg)
+    assert m.status == "approved"  # left for the worker
+    session.close()
 
 
 def test_message_reject(pending_msg, _use_test_db):

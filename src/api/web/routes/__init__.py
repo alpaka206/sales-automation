@@ -10,6 +10,7 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 from . import (
+    companies,
     dashboard,
     email_templates,
     icp,
@@ -26,6 +27,7 @@ router = APIRouter(tags=["web"])
 for _module in (
     dashboard,
     messages,
+    companies,
     knowledge,
     email_templates,
     icp,

@@ -6,15 +6,23 @@ import asyncio
 import logging
 
 from fastapi import APIRouter, Form, HTTPException, Request
-from fastapi.responses import HTMLResponse
-from sqlalchemy import select
+from fastapi.responses import HTMLResponse, JSONResponse
+from sqlalchemy import func, select
 from sqlalchemy.orm import joinedload
 
 from ....agents.approval import ApprovalError, approve, reject
 from ....common.config import settings
-from ....db.models import Conversation, DomainProfile, Message
+from ....common.textwash import text_wash
+from ....db.conversation_history import add_progress
+from ....db.models import (
+    Contact,
+    Conversation,
+    ConversationProgress,
+    DomainProfile,
+    Message,
+)
 from ....db.session import SessionLocal
-from ....llm.translate import needs_korean, to_korean
+from ....llm.translate import needs_korean, to_korean, translate_to
 from ..auth import actor_name
 from ._shared import esc, templates
 
@@ -49,33 +57,26 @@ def _message_detail_context(message_id: int) -> dict:
         contact = conv.contact if conv else None
         prospect = conv.prospect if conv else None
 
-        # Pull the inbound messages from the same conversation so the approver can see
-        # what they're replying to. Newest first, capped at 5 — UI shows them above the draft.
-        inbound_rows = []
         thread_rows = []
+        progress_rows = []
         if conv:
-            inbound_rows = (
-                session.execute(
-                    select(Message)
-                    .where(
-                        Message.conversation_id == conv.id,
-                        Message.direction == "inbound",
-                    )
-                    .order_by(Message.created_at.desc())
-                    .limit(5)
-                )
-                .scalars()
-                .all()
-            )
-
-            # Full ticket/conversation thread, oldest → newest. One ticket = one
-            # conversation (see agents/inbound.py), so this is the complete back-and-forth
-            # history for this ticket: every inbound inquiry and every outbound reply/follow-up.
+            # Full ticket/conversation thread, oldest → newest — every inbound inquiry
+            # and every outbound reply / auto-ack / follow-up for this thread.
             thread_rows = (
                 session.execute(
                     select(Message)
                     .where(Message.conversation_id == conv.id)
                     .order_by(Message.created_at.asc(), Message.id.asc())
+                )
+                .scalars()
+                .all()
+            )
+            # Append-only processing log ("처리경과"), oldest → newest.
+            progress_rows = (
+                session.execute(
+                    select(ConversationProgress)
+                    .where(ConversationProgress.conversation_id == conv.id)
+                    .order_by(ConversationProgress.created_at.asc(), ConversationProgress.id.asc())
                 )
                 .scalars()
                 .all()
@@ -97,51 +98,62 @@ def _message_detail_context(message_id: int) -> dict:
                     "analyzed_at": dp.analyzed_at,
                 }
 
+        domain_history = (
+            _domain_history(session, contact.domain, exclude_conv_id=conv.id if conv else None)
+            if (contact and contact.domain)
+            else None
+        )
+
+        # The customer's inquiry is shown TRANSLATED (Korean) by default with the
+        # original behind an expand toggle. ``needs_ko`` flags inbound non-Korean
+        # bubbles; ``body_ko``/``subject_ko`` are filled by the route (concurrently)
+        # so the page already shows Korean without a click.
+        thread = [
+            {
+                "id": tm.id,
+                "direction": tm.direction,
+                "status": tm.status,
+                "subject": tm.subject,
+                "body": tm.body,
+                # Translate inbound bubbles when EITHER the body or the subject is
+                # non-Korean (a Korean body can still have an English subject line).
+                "needs_ko": tm.direction == "inbound"
+                and (needs_korean(tm.body) or needs_korean(tm.subject or "")),
+                "body_ko": None,
+                "subject_ko": None,
+                "is_auto_ack": tm.prompt_variant == "auto_ack",
+                "language": tm.language,
+                "channel": tm.channel,
+                "from_address": tm.from_address,
+                "to_address": tm.to_address,
+                "created_at": tm.created_at,
+                "sent_at": tm.sent_at,
+                "is_current": tm.id == msg.id,
+            }
+            for tm in thread_rows
+        ]
+
         return {
-            "inbound_messages": [
-                {
-                    "id": im.id,
-                    "body": im.body,
-                    "subject": im.subject,
-                    "from_address": im.from_address,
-                    "channel": im.channel,
-                    "created_at": im.created_at,
-                }
-                for im in inbound_rows
+            "thread": thread,
+            "progress": [
+                {"kind": p.kind, "detail": p.detail, "created_at": p.created_at}
+                for p in progress_rows
             ],
-            # Whole-ticket timeline: inquiries and replies interleaved in chronological
-            # order. The current message (being approved/viewed) is flagged so the
-            # template can render it as the editable reply card inline in the thread.
-            "thread": [
-                {
-                    "id": tm.id,
-                    "direction": tm.direction,
-                    "status": tm.status,
-                    "subject": tm.subject,
-                    "body": tm.body,
-                    # Cheap heuristic only — the actual Korean translation is loaded
-                    # lazily via /messages/{id}/translation so the page renders fast.
-                    "translatable": needs_korean(tm.body),
-                    "channel": tm.channel,
-                    "from_address": tm.from_address,
-                    "to_address": tm.to_address,
-                    "created_at": tm.created_at,
-                    "sent_at": tm.sent_at,
-                    "is_current": tm.id == msg.id,
-                }
-                for tm in thread_rows
-            ],
+            "summary": conv.summary if conv else None,
+            "customer_requests": conv.customer_requests if conv else None,
+            "domain_history": domain_history,
             "ticket": {
                 "ticket_id": conv.hubspot_ticket_id if conv else None,
                 "stage": conv.stage if conv else None,
                 "topic": conv.topic if conv else None,
+                "inquiry_language": conv.inquiry_language if conv else None,
             },
             "msg": {
                 "id": msg.id,
                 "status": msg.status,
                 "subject": msg.subject or "",
                 "body": msg.body,
-                "translatable": needs_korean(msg.body),
+                "body_ko": None,
                 "channel": msg.channel,
                 "direction": msg.direction,
                 # Product flow, not raw DB direction. A reply we draft to an inbound
@@ -149,6 +161,7 @@ def _message_detail_context(message_id: int) -> dict:
                 # outbound-discovery conversations carry a prospect.
                 "flow": "outbound" if prospect is not None else "inbound_reply",
                 "language": msg.language,
+                "target_language": msg.target_language,
                 "to_address": msg.to_address or "",
                 "from_address": msg.from_address or "",
                 "score_snapshot": msg.score_snapshot,
@@ -163,6 +176,8 @@ def _message_detail_context(message_id: int) -> dict:
                     "name": contact.full_name,
                     "email": contact.email,
                     "company": contact.company,
+                    "domain": contact.domain,
+                    "role_description": contact.role_description,
                 }
                 if contact
                 else None
@@ -182,6 +197,87 @@ def _message_detail_context(message_id: int) -> dict:
         }
 
 
+def _domain_history(session, domain: str, exclude_conv_id: int | None = None) -> dict:
+    """All other conversations sharing this email domain (same company).
+
+    Captures both "same person, different ticket" and "different people, same
+    company". Returns a summary dict the sidebar renders and the company page links
+    to. Personal/free-email domains (gmail, naver, …) are NEVER grouped — that would
+    expose one customer's history to an unrelated customer on the same provider.
+    """
+    from ....common.domains import is_personal_domain
+
+    if not domain or is_personal_domain(domain):
+        return {"domain": domain, "total": 0, "rows": []}
+    rows = session.execute(
+        select(Conversation, Contact)
+        .join(Contact, Conversation.contact_id == Contact.id)
+        .where(func.lower(Contact.domain) == domain.lower())
+        .order_by(Conversation.created_at.desc())
+    ).all()
+    convs = [(c, ct) for c, ct in rows if c.id != exclude_conv_id]
+    if not convs:
+        return {"domain": domain, "total": 0, "rows": []}
+
+    conv_ids = [c.id for c, _ in convs]
+    latest = dict(
+        session.execute(
+            select(Message.conversation_id, func.max(Message.id))
+            .where(Message.conversation_id.in_(conv_ids))
+            .group_by(Message.conversation_id)
+        ).all()
+    )
+    counts = dict(
+        session.execute(
+            select(Message.conversation_id, func.count(Message.id))
+            .where(Message.conversation_id.in_(conv_ids))
+            .group_by(Message.conversation_id)
+        ).all()
+    )
+    out = []
+    for c, ct in convs[:8]:
+        out.append(
+            {
+                "conversation_id": c.id,
+                "contact_name": ct.full_name,
+                "contact_email": ct.email,
+                "ticket_id": c.hubspot_ticket_id,
+                "topic": c.topic,
+                "summary": c.summary,
+                "message_count": counts.get(c.id, 0),
+                "last_activity": c.last_incoming_at or c.last_outgoing_at or c.created_at,
+                "link_message_id": latest.get(c.id),
+            }
+        )
+    return {"domain": domain, "total": len(convs), "rows": out}
+
+
+async def _translate_inbound_bubbles(ctx: dict) -> None:
+    """Eagerly translate inbound (customer) bubbles to Korean, concurrently.
+
+    Fills ``body_ko``/``subject_ko`` so the operator sees Korean without clicking.
+    Runs each blocking translation in a thread so the event loop stays responsive.
+    """
+    items = [t for t in ctx.get("thread", []) if t.get("needs_ko")]
+    if not items:
+        return
+
+    async def _tx(item: dict) -> None:
+        # Translate only the field(s) that actually need it; show already-Korean
+        # text as-is in the Korean column.
+        if needs_korean(item["body"]):
+            item["body_ko"] = (await asyncio.to_thread(to_korean, item["body"])) or None
+        else:
+            item["body_ko"] = item["body"]
+        subj = item.get("subject")
+        if subj and needs_korean(subj):
+            item["subject_ko"] = (await asyncio.to_thread(to_korean, subj)) or None
+        elif subj:
+            item["subject_ko"] = subj
+
+    await asyncio.gather(*(_tx(t) for t in items))
+
+
 def _messages_list_context(status: str = "", channel: str = "", flow: str = "all") -> dict:
     """Query DB for paginated message list.
 
@@ -199,6 +295,9 @@ def _messages_list_context(status: str = "", channel: str = "", flow: str = "all
         select(Message, Conversation.topic, Conversation.prospect_id)
         .join(Conversation, Message.conversation_id == Conversation.id)
         .where(Message.direction == "outbound")
+        # Auto-ack (접수확인) replies are sent automatically and shown inside the
+        # thread — keep them out of the approval queue list so it isn't noisy.
+        .where((Message.prompt_variant.is_(None)) | (Message.prompt_variant != "auto_ack"))
         .order_by(Message.created_at.desc())
     )
     if flow == "outbound":
@@ -256,43 +355,79 @@ async def message_detail(request: Request, message_id: int):
     ctx = _message_detail_context(message_id)
     if not ctx:
         raise HTTPException(status_code=404, detail="메시지를 찾을 수 없습니다")
+    # Pre-translate the customer's inquiry bubbles to Korean so they're shown
+    # translated by default (the operator can expand the original to the side).
+    await _translate_inbound_bubbles(ctx)
     return templates.TemplateResponse(request, "message_detail.html", ctx)
 
 
-@router.get("/messages/{message_id}/translation")
-async def message_translation(message_id: int):
-    """Lazily translate every non-Korean bubble in the thread to Korean.
+@router.post("/messages/{message_id}/translate")
+async def message_translate(message_id: int, body: str = Form(""), subject: str = Form("")):
+    """Translate the Korean draft into the inquiry's language for the operator.
 
-    Returns htmx out-of-band fragments that fill the empty `#ko-<id>` placeholders
-    rendered by the detail page. Kept off the initial page load (it makes one LLM
-    call per bubble) so opening a message is fast; the operator only pays the
-    translation cost when they click "번역으로 보기". Calls run concurrently.
+    The reply workflow: the operator reviews/edits a KOREAN draft, then presses
+    "번역하기". This translates the (possibly edited) body into the thread's target
+    language, washes it, and persists it so it goes out as-is. The subject already
+    carries "RE: <original>" in the right language, so it is left untouched.
+
+    Returns JSON {subject, body, language, translated} which the page swaps into
+    the editable fields.
     """
+    cur_body = body.strip()
     with SessionLocal() as session:
         msg = session.get(Message, message_id)
         if not msg:
-            return HTMLResponse("", status_code=404)
-        rows = (
-            session.execute(
-                select(Message)
-                .where(Message.conversation_id == msg.conversation_id)
-                .order_by(Message.created_at.asc(), Message.id.asc())
+            return JSONResponse({"error": "메시지를 찾을 수 없습니다"}, status_code=404)
+        if msg.status != "pending_approval":
+            return JSONResponse({"error": f"번역 불가 (현재 상태: {msg.status})"}, status_code=400)
+        conv_id = msg.conversation_id
+        target = (msg.target_language or "").lower()
+        cur_body = cur_body or msg.body or ""
+        cur_subject = subject.strip() or (msg.subject or "")
+
+        # Decide from the BODY's actual language, not the (possibly stale) msg.language
+        # flag — so re-editing the draft back to Korean and pressing 번역하기 again
+        # actually re-translates. needs_korean is a cheap script check (no LLM): a
+        # Korean body + non-Korean target means there's something to translate.
+        needs_tx = bool(target) and target != "ko" and needs_korean(cur_body)
+        if not needs_tx:
+            washed = text_wash(cur_body)
+            msg.body = washed
+            if cur_subject:
+                msg.subject = cur_subject
+            # Keep metadata honest: a non-Korean body for a non-Korean target is
+            # already in the send language.
+            if target and target != "ko" and not needs_korean(washed):
+                msg.language = target
+            session.commit()
+            return JSONResponse(
+                {
+                    "body": washed,
+                    "subject": cur_subject,
+                    "language": msg.language,
+                    "translated": False,
+                }
             )
-            .scalars()
-            .all()
-        )
-        targets = [(m.id, m.body) for m in rows if needs_korean(m.body)]
 
-    async def _translate(mid: int, body: str) -> tuple[int, str]:
-        return mid, await asyncio.to_thread(to_korean, body)
+        translated = await asyncio.to_thread(translate_to, cur_body, target)
+        final_body = text_wash(translated) if translated else text_wash(cur_body)
+        msg.body = final_body
+        if cur_subject:
+            msg.subject = cur_subject
+        if translated:
+            msg.language = target
+        session.commit()
 
-    results = await asyncio.gather(*(_translate(mid, body) for mid, body in targets))
-
-    frags = [
-        f'<div id="ko-{mid}" hx-swap-oob="innerHTML">{esc(ko) or "(번역을 가져오지 못했습니다)"}</div>'
-        for mid, ko in results
-    ]
-    return HTMLResponse("".join(frags))
+    if translated:
+        add_progress(conv_id, "translate", f"회신 초안을 '{target}' 언어로 번역함.")
+    return JSONResponse(
+        {
+            "body": final_body,
+            "subject": cur_subject,
+            "language": target if translated else "ko",
+            "translated": bool(translated),
+        }
+    )
 
 
 @router.post("/messages/{message_id}/send")
@@ -313,10 +448,20 @@ async def message_send(
             f'<div class="text-red-600 text-sm">{esc(str(exc))}</div>', status_code=400
         )
 
+    # When the background send worker is running, let IT claim & send this approved
+    # row — sending inline here too would let both paths dispatch the same email
+    # (the worker claims status='approved'). When the worker is OFF we send inline
+    # below so a paused/absent worker never strands an already-approved reply.
+    if settings.SEND_WORKER_ENABLED:
+        return HTMLResponse(
+            '<div class="text-green-600 text-sm font-medium">승인 완료 — 백그라운드 발송 대기 중</div>'
+        )
+
     from ....agents.approval import mark_sent
     from ....integrations.senders import send
 
     subj = bod = contact_id = ""
+    conv_id_for_log: int | None = None
     try:
         # Send with a session-attached message so send() can read its conversation
         # (the instance returned by approve() is detached).
@@ -328,10 +473,16 @@ async def message_send(
                     status_code=404,
                 )
             await send(m)
+            # send() may have washed/translated the body via the language guard;
+            # persist that so the DB record matches what actually went out.
             subj, bod = m.subject or "", m.body or ""
             conv = m.conversation
             contact_id = str(conv.contact_id) if conv and conv.contact_id else ""
+            conv_id_for_log = m.conversation_id
+            session.commit()
         mark_sent(message_id)
+        if conv_id_for_log:
+            add_progress(conv_id_for_log, "reply", f"회신 발송 완료: {subj}"[:200])
     except Exception:
         logger.exception("Inline send failed for message %d after approval", message_id)
         return HTMLResponse(
@@ -417,3 +568,33 @@ async def message_edit(message_id: int, body: str = Form(""), subject: str = For
             msg.subject = subject.strip()
         session.commit()
     return HTMLResponse('<div class="text-blue-600 text-sm font-medium">저장 완료</div>')
+
+
+_MAX_ROLE_DESC_LEN = 4000
+
+
+@router.post("/contacts/{contact_id}/edit")
+async def contact_edit(contact_id: int, company: str = Form(""), role_description: str = Form("")):
+    """Save operator edits to a contact's company + "what they do" note.
+
+    Works even for gmail/unverified senders — the operator fills these in over the
+    course of a conversation, and they persist to the DB.
+    """
+    if len(role_description) > _MAX_ROLE_DESC_LEN:
+        return HTMLResponse(
+            '<div class="text-red-600 text-sm">설명이 너무 깁니다 (4000자 초과)</div>',
+            status_code=413,
+        )
+    with SessionLocal() as session:
+        c = session.get(Contact, contact_id)
+        if not c:
+            return HTMLResponse(
+                '<div class="text-red-600 text-sm">연락처를 찾을 수 없습니다</div>',
+                status_code=404,
+            )
+        c.company = company.strip() or None
+        c.role_description = role_description.strip() or None
+        session.commit()
+    return HTMLResponse(
+        '<div class="text-green-600 text-sm font-medium">연락처 정보 저장 완료</div>'
+    )

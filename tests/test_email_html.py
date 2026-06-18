@@ -36,3 +36,20 @@ def test_existing_html_passed_through():
 def test_empty_body_is_valid_document():
     html = to_html_email("")
     assert "<html" in html and "<body" in html
+
+
+def test_dash_lines_become_indented_list():
+    html = to_html_email("플랜이 잘 맞습니다:\n- 월 200분 지원\n- 음성 복제 지원")
+    assert "<ul" in html and "<li" in html
+    assert "월 200분 지원" in html
+    assert "음성 복제 지원" in html
+    # The lead line is still a paragraph; the bullets are a single list.
+    assert html.count("<p ") == 1
+    assert html.count("<ul") == 1
+
+
+def test_mixed_paragraph_and_bullets():
+    html = to_html_email("소개합니다.\n- 항목 A\n그리고 마무리합니다.")
+    # text → bullets → text yields two <p> blocks and one <ul>.
+    assert html.count("<ul") == 1
+    assert html.count("<p ") == 2

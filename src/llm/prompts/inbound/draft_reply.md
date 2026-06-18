@@ -1,14 +1,16 @@
 ---
 output: json
 ---
-Draft a reply to this inbound message. Tone and policy are governed by the company rules above.
+인바운드 문의에 대한 회신 초안을 작성하세요. 톤·정책은 위의 company rules를 따릅니다.
 
-Context:
-- contact: {{contact_name}} ({{company}}, {{country}})
-- category: {{category}}
-- score: {{score}}
+중요: 이 초안은 **운영자가 검토하는 한국어 초안**입니다. 항상 한국어로 작성하세요. (실제 발송 시 고객 문의 언어로 자동 번역됩니다. 그러니 회신 언어는 신경 쓰지 말고 자연스러운 한국어로 쓰면 됩니다.)
 
-Most recent inbound (verbatim):
+맥락:
+- 고객: {{contact_name}} ({{company}}, {{country}})
+- 분류: {{category}}
+- 점수: {{score}}
+
+가장 최근 문의(원문 그대로):
 """
 {{last_message}}
 """
@@ -17,18 +19,19 @@ Most recent inbound (verbatim):
 
 {{knowledge_docs}}
 
-Constraints:
-- LANGUAGE (mandatory): Write the ENTIRE reply in {{reply_language}}. This is the language the customer wrote their inquiry in. Do NOT use any other language — in particular, do NOT reply in Korean unless {{reply_language}} is Korean. The signature may keep proper nouns (company/product names) as-is, but all sentences must be in {{reply_language}}.
-- Be concise. No more than 5 short paragraphs.
-- PRICING (pricing_question / purchase_inquiry): When the customer asks about price or plans, RECOMMEND a specific plan that fits their described use case and state its ACTUAL price from the knowledge base (e.g. "For a YouTuber at your volume, the Creator plan at $29/mo is the best fit because…"). You may list 1–3 relevant plans with prices and one line on why each fits. Do NOT default to "let's book a call" for normal self-serve pricing questions. Only recommend Enterprise + offer a sales meeting (instead of a self-serve price) when there are enterprise signals: large org / big-company domain, many seats or spaces, custom security/contract needs, or high volume.
-- Only state prices, plan names, and numbers that appear in the knowledge base — never invent them. If the knowledge base has no price for what's asked, say a teammate will follow up with specifics. For non-pricing facts (refund policy, regions, features), reference them accurately and never invent.
-- Refund / SSO / security / contract / legal questions: don't answer definitively — promise an internal review and a reply within 1–2 business days.
-- Sign with the team signature defined in company rules.
+작성 규칙:
+- **한국어로만** 작성합니다.
+- **가독성 포맷(중요):** 한 문장 또는 한 가지 요점마다 줄을 바꿉니다. 문단과 문단 사이에는 빈 줄을 하나 둡니다. 기능·플랜·스펙처럼 여러 항목을 나열할 때는 각 항목을 `- ` 로 시작하는 불릿 한 줄로 적습니다. (마침표로 끝나는 문장이 한 줄에 여러 개 이어지지 않도록 합니다.)
+- 간결하게. 5개 이내의 짧은 문단.
+- {{pricing_rule}}
+- 지식 베이스에 있는 사실(정책·지역·기능 등)만 인용하고, 없는 정보는 지어내지 말 것. 확실하지 않으면 "정확히 확인 후 다시 안내드리겠습니다"로.
+- 환불·SSO·보안·계약·법무 질문은 단정하지 말고 내부 확인 후 1~2 영업일 내 회신을 약속.
+- company rules에 정의된 팀 서명으로 끝맺습니다.
 
-Return strict JSON only:
+엄격한 JSON만 반환:
 {
-  "subject": "<subject line, empty string for whatsapp>",
-  "body": "<the reply, plain text, real line breaks>",
-  "language": "<ISO 639-1 code of the language you wrote the reply in, e.g. en, ko, ja, vi, th, zh>",
-  "tone_notes": "<optional one-liner about tone choices you made>"
+  "subject": "<제목(한국어). 시스템이 'RE: 원문 제목'으로 다시 만들 수 있으니 내용 위주로>",
+  "body": "<회신 본문(한국어 평문, 실제 줄바꿈 사용)>",
+  "language": "ko",
+  "tone_notes": "<선택: 톤 관련 한 줄 메모>"
 }

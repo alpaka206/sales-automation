@@ -10,10 +10,12 @@ from src.agents.inbound import (
     ClassifyResult,
     ScoreAdjustResult,
     DraftResult,
+    _SummaryResult,
     _base_score,
     _normalize_email,
     _processed,
 )
+from src.common.config import settings
 from src.db.models import Contact, Conversation, Message
 from src.db.models import KnowledgeDocument
 from src.integrations.hubspot import ContactDTO, EngagementDTO, DealDTO
@@ -25,6 +27,15 @@ def _clear_dedup():
     _processed.clear()
     yield
     _processed.clear()
+
+
+@pytest.fixture(autouse=True)
+def _no_auto_ack(monkeypatch):
+    """Disable the immediate auto-ack here so message-count assertions stay exact.
+
+    The auto-ack is covered on its own in test_inbound_auto_ack.py.
+    """
+    monkeypatch.setattr(settings, "INBOUND_AUTO_ACK_ENABLED", False)
 
 
 @pytest.fixture(autouse=True)
@@ -52,6 +63,14 @@ def _mock_llm():
                 language="ko",
                 tone_notes="formal",
             )
+        if "summarize_thread" in prompt_name:
+            return _SummaryResult(summary="요약입니다.", customer_requests="- 요청사항")
+        if "detect_language" in prompt_name:
+            return "en"
+        if "translate_ko" in prompt_name:
+            return "관심 가져주셔서 감사합니다."
+        if "translate_to" in prompt_name:
+            return "translated text"
         return "ok"
 
     llm.complete = MagicMock(side_effect=side_effect)
@@ -78,15 +97,17 @@ def test_inbound_handle_creates_db_rows(db_session) -> None:
 
     with patch("src.agents.inbound.SessionLocal", return_value=db_session):
         agent = InboundAgent(llm=llm, hubspot=None)
-        result = agent.handle({
-            "object_id": "hs-123",
-            "occurred_at": "2026-05-14T10:00:00Z",
-            "email": "buyer@acme.co.kr",
-            "full_name": "Kim Buyer",
-            "company": "Acme Corp",
-            "country": "korea",
-            "last_message": "We want to purchase your product.",
-        })
+        result = agent.handle(
+            {
+                "object_id": "hs-123",
+                "occurred_at": "2026-05-14T10:00:00Z",
+                "email": "buyer@acme.co.kr",
+                "full_name": "Kim Buyer",
+                "company": "Acme Corp",
+                "country": "korea",
+                "last_message": "We want to purchase your product.",
+            }
+        )
 
     assert result is not None
     assert result["category"] == "purchase_inquiry"
@@ -105,11 +126,36 @@ def test_inbound_handle_creates_db_rows(db_session) -> None:
     assert inbound_msg[0].status == "received"
     assert len(outbound_msg) == 1
     assert outbound_msg[0].status == "pending_approval"
-    assert outbound_msg[0].subject == "Re: Inquiry"
+    # Subject is built in code as "RE: <customer subject or localized generic>",
+    # never the raw model subject. No customer subject here → localized generic (en).
+    assert outbound_msg[0].subject == "RE: Your inquiry"
+    # Draft is always Korean; the language to SEND in is the detected inquiry language.
+    assert outbound_msg[0].language == "ko"
+    assert outbound_msg[0].target_language == "en"
 
     conversations = db_session.query(Conversation).all()
     assert len(conversations) == 1
     assert conversations[0].topic == "purchase_inquiry"
+
+
+def test_personal_domain_not_stored(db_session) -> None:
+    """Personal/free-email senders (gmail) must not get a company domain — otherwise
+    unrelated customers would be grouped and their history cross-exposed."""
+    llm = _mock_llm()
+    with patch("src.agents.inbound.SessionLocal", return_value=db_session):
+        agent = InboundAgent(llm=llm, hubspot=None)
+        agent.handle(
+            {
+                "object_id": "hs-personal",
+                "occurred_at": "2026-05-14T10:30:00Z",
+                "email": "someone@gmail.com",
+                "full_name": "Personal User",
+                "last_message": "Hi, a question.",
+            }
+        )
+    c = db_session.query(Contact).filter_by(normalized_email="someone@gmail.com").first()
+    assert c is not None
+    assert c.domain is None
 
 
 def test_inbound_dedup(db_session) -> None:
@@ -161,7 +207,9 @@ def test_inbound_enriched_from_hubspot(db_session, monkeypatch) -> None:
         lifecyclestage="opportunity",
     )
     mock_hs.get_recent_emails_sync.return_value = [
-        EngagementDTO(id="e1", type="email", subject="Previous email", body="We discussed pricing."),
+        EngagementDTO(
+            id="e1", type="email", subject="Previous email", body="We discussed pricing."
+        ),
     ]
     mock_hs.get_associated_deals_sync.return_value = [
         DealDTO(id="d1", name="Acme Deal", stage="negotiation", amount="50000"),
@@ -169,17 +217,21 @@ def test_inbound_enriched_from_hubspot(db_session, monkeypatch) -> None:
 
     with patch("src.agents.inbound.SessionLocal", return_value=db_session):
         agent = InboundAgent(llm=llm, hubspot=mock_hs)
-        result = agent.handle({
-            "object_id": "hs-999",
-            "occurred_at": "2026-05-14T12:00:00Z",
-            "email": "orig@acme.co.kr",
-            "full_name": "Orig Name",
-            "last_message": "We want to proceed.",
-        })
+        result = agent.handle(
+            {
+                "object_id": "hs-999",
+                "occurred_at": "2026-05-14T12:00:00Z",
+                "email": "orig@acme.co.kr",
+                "full_name": "Orig Name",
+                "last_message": "We want to proceed.",
+            }
+        )
 
     assert result is not None
 
-    classify_call = llm.complete.call_args_list[0]
+    # Find the classify call by name — language detection now runs before it, so it's
+    # no longer guaranteed to be call index 0.
+    classify_call = next(c for c in llm.complete.call_args_list if "classify" in c[0][0])
     classify_vars = classify_call[0][1]
     assert classify_vars["contact_name"] == "Kim Enriched"
     assert "Previous email" in classify_vars["enrichment_context"]
@@ -205,17 +257,17 @@ def test_inbound_passes_knowledge_docs_to_draft(db_session) -> None:
     llm = _mock_llm()
     with patch("src.agents.inbound.SessionLocal", return_value=db_session):
         agent = InboundAgent(llm=llm, hubspot=None)
-        agent.handle({
-            "object_id": "hs-kb-1",
-            "occurred_at": "2026-05-14T13:00:00Z",
-            "email": "kb@acme.co.kr",
-            "full_name": "KB Tester",
-            "last_message": "What plans do you offer?",
-        })
+        agent.handle(
+            {
+                "object_id": "hs-kb-1",
+                "occurred_at": "2026-05-14T13:00:00Z",
+                "email": "kb@acme.co.kr",
+                "full_name": "KB Tester",
+                "last_message": "What plans do you offer?",
+            }
+        )
 
-    draft_call = next(
-        c for c in llm.complete.call_args_list if "draft_reply" in c[0][0]
-    )
+    draft_call = next(c for c in llm.complete.call_args_list if "draft_reply" in c[0][0])
     draft_vars = draft_call[0][1]
     assert "knowledge_docs" in draft_vars
     assert "Plans" in draft_vars["knowledge_docs"]
@@ -250,15 +302,15 @@ def test_inbound_omits_knowledge_for_spam(db_session) -> None:
 
     with patch("src.agents.inbound.SessionLocal", return_value=db_session):
         agent = InboundAgent(llm=llm, hubspot=None)
-        agent.handle({
-            "object_id": "hs-spam-1",
-            "occurred_at": "2026-05-14T14:00:00Z",
-            "email": "spam@example.com",
-            "full_name": "Spammer",
-            "last_message": "BUY VIAGRA CHEAP",
-        })
+        agent.handle(
+            {
+                "object_id": "hs-spam-1",
+                "occurred_at": "2026-05-14T14:00:00Z",
+                "email": "spam@example.com",
+                "full_name": "Spammer",
+                "last_message": "BUY VIAGRA CHEAP",
+            }
+        )
 
-    draft_call = next(
-        c for c in llm.complete.call_args_list if "draft_reply" in c[0][0]
-    )
+    draft_call = next(c for c in llm.complete.call_args_list if "draft_reply" in c[0][0])
     assert draft_call[0][1]["knowledge_docs"] == ""

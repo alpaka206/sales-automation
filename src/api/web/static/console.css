@@ -625,3 +625,23 @@ tr.is-clickable { cursor: pointer; }
 
 /* Block background scroll while a modal is open (set on <body> by the modal helper). */
 body.modal-open { overflow: hidden; }
+
+/* ---- Inbound bubble: Korean shown by default, original expands to the side ---- */
+.bubble__cols { display: block; }
+.bubble__cols.is-split { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.bubble__col--orig { border-left: 1px solid var(--border); padding-left: 14px; }
+@media (max-width: 720px) {
+  .bubble__cols.is-split { grid-template-columns: 1fr; }
+  .bubble__col--orig { border-left: 0; padding-left: 0; border-top: 1px solid var(--border); padding-top: 12px; }
+}
+.chip--xs { height: 22px; font-size: 11px; padding: 0 8px; }
+
+/* ---- Append-only processing log ("처리경과") ---- */
+.progress-log { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.progress-log__item { display: flex; gap: 8px; font-size: 12.5px; line-height: 1.5; border-left: 2px solid var(--border); padding-left: 10px; }
+.progress-log__time { color: var(--text-subtle); white-space: nowrap; flex-shrink: 0; font-size: 11px; }
+
+/* ---- Same-company history list ---- */
+.domain-hist { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.domain-hist__link { display: block; padding: 8px; border-radius: 8px; text-decoration: none; color: inherit; }
+.domain-hist__link:hover { background: var(--surface-2); }

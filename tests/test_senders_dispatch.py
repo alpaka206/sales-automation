@@ -18,6 +18,7 @@ def _make_message(**overrides) -> MagicMock:
     msg.subject = overrides.get("subject", "Test")
     msg.body = overrides.get("body", "Hello")
     msg.language = overrides.get("language", "ko")
+    msg.target_language = overrides.get("target_language", None)
     msg.conversation = MagicMock()
     msg.conversation.contact_id = overrides.get("contact_id", 100)
     return msg
@@ -42,7 +43,9 @@ async def test_whatsapp_channel_sends_directly(mock_wa) -> None:
 @patch("src.integrations.compliance.is_suppressed", return_value=True)
 @patch("src.integrations.compliance.append_footer", side_effect=lambda b, *a: b)
 @patch("src.db.session.SessionLocal")
-async def test_suppressed_address_skips_send(mock_session_cls, mock_footer, mock_suppressed, mock_smtp) -> None:
+async def test_suppressed_address_skips_send(
+    mock_session_cls, mock_footer, mock_suppressed, mock_smtp
+) -> None:
     msg = _make_message(to_address="blocked@example.com")
 
     mock_session = MagicMock()
@@ -70,8 +73,10 @@ async def test_suppressed_address_skips_send(mock_session_cls, mock_footer, mock
 async def test_hubspot_provider_send(mock_footer, mock_suppressed, mock_smtp) -> None:
     msg = _make_message()
 
-    with patch("src.integrations.senders.settings") as s, \
-         patch("src.integrations.hubspot.HubSpotClient") as MockHSClient:
+    with (
+        patch("src.integrations.senders.settings") as s,
+        patch("src.integrations.hubspot.HubSpotClient") as MockHSClient,
+    ):
         s.EMAIL_PROVIDER = "hubspot"
         s.WHATSAPP_ENABLED = False
         s.SEND_OVERRIDE_EMAIL = ""
@@ -92,13 +97,17 @@ async def test_hubspot_provider_send(mock_footer, mock_suppressed, mock_smtp) ->
 @patch("src.integrations.senders.send_smtp")
 @patch("src.integrations.compliance.is_suppressed", return_value=False)
 @patch("src.integrations.compliance.append_footer", side_effect=lambda b, *a: b)
-async def test_hubspot_not_configured_falls_back_to_smtp(mock_footer, mock_suppressed, mock_smtp) -> None:
+async def test_hubspot_not_configured_falls_back_to_smtp(
+    mock_footer, mock_suppressed, mock_smtp
+) -> None:
     from src.integrations.hubspot import HubSpotNotConfigured
 
     msg = _make_message()
 
-    with patch("src.integrations.senders.settings") as s, \
-         patch("src.integrations.hubspot.HubSpotClient") as MockHSClient:
+    with (
+        patch("src.integrations.senders.settings") as s,
+        patch("src.integrations.hubspot.HubSpotClient") as MockHSClient,
+    ):
         s.EMAIL_PROVIDER = "hubspot"
         s.WHATSAPP_ENABLED = False
         s.SEND_OVERRIDE_EMAIL = ""

@@ -10,6 +10,10 @@ from pydantic import BaseModel
 
 from ..common.config import settings
 from ..common.domains import is_personal_domain
+from ..common.pricing_guard import strip_price_sentences
+from ..common.subjects import reply_subject
+from ..common.textwash import text_wash
+from ..db.conversation_history import add_progress
 from ..db.models import Contact, Conversation, Message
 from ..db.session import SessionLocal
 from ..integrations.hubspot import HubSpotClient, HubSpotNotConfigured
@@ -25,6 +29,32 @@ from .inbound_scoring import (  # noqa: F401 — re-exported for callers/tests
 )
 
 logger = logging.getLogger(__name__)
+
+# Fallback acknowledgement body if the editable ``auto_ack`` template is missing.
+# ``{name}`` is substituted in code; the whole thing is translated to the inquiry
+# language before sending (the language rule is enforced in code, not the prompt).
+_DEFAULT_AUTO_ACK_KO = (
+    "안녕하세요 {name}님,\n\n"
+    "문의 주셔서 감사합니다. 보내주신 메일은 잘 도착했으며, "
+    "담당자가 내용을 확인한 뒤 24시간 이내에 답변드리겠습니다.\n\n"
+    "감사합니다."
+)
+
+# Pricing guidance handed to the draft prompt. The FIRST reply must not state any
+# amount (a hard rule also enforced by strip_price_sentences); later replies may
+# quote real knowledge-base prices.
+_PRICING_RULE_FIRST = (
+    "이번이 이 고객에게 보내는 **첫 회신**입니다. 금액·가격·요금(숫자)을 절대 적지 "
+    "마세요. 대신 '고객 상황에 맞는 스페셜 프로모션을 안내드릴 수 있다'는 정도만 "
+    "언급하고, 구체적인 플랜과 금액은 짧은 미팅이나 통화에서 안내하겠다고 자연스럽게 "
+    "제안하세요."
+)
+_PRICING_RULE_NORMAL = (
+    "가격·플랜 문의면 고객 사용 사례에 맞는 플랜을 추천하고 지식 베이스에 있는 실제 "
+    "금액을 명시하세요(1~3개). 엔터프라이즈 신호(대규모 조직·다수 시트·보안/계약 요건·"
+    "대량 사용)가 있을 때만 엔터프라이즈와 영업 미팅을 권하세요. 지식 베이스에 없는 "
+    "금액은 절대 만들지 마세요."
+)
 
 # In-memory short-window dedup for webhook retries. Bounded so a long-running
 # process can't leak memory; the authoritative dedup is DB-backed
@@ -48,6 +78,11 @@ class DraftResult(BaseModel):
     body: str
     language: str
     tone_notes: str = ""
+
+
+class _SummaryResult(BaseModel):
+    summary: str = ""
+    customer_requests: str = ""
 
 
 class InboundAgent:
@@ -111,10 +146,27 @@ class InboundAgent:
             }
 
         channel = self._pick_channel(contact_info)
+
+        # Detect the inquiry language ONCE, up front. Every reply in this thread —
+        # the auto-ack now and the operator's reply later — must go out in this
+        # language; that's enforced in code (not the prompt).
+        from ..llm.language import detect_language
+
+        inquiry_lang = detect_language(contact_info.get("last_message", ""), llm=self.llm)
+        contact_info["inquiry_language"] = inquiry_lang
+
         # Persist the inquiry + a "drafting" placeholder up front so the ticket shows
         # on the site immediately, before the (slower) AI reply draft is ready. The
         # placeholder flips to pending_approval once the draft finishes.
-        message_id = self._persist_placeholder(contact_info, channel)
+        message_id, conv_id, is_first_inbound = self._persist_placeholder(
+            contact_info, channel, inquiry_lang
+        )
+
+        # Immediate acknowledgement on the FIRST inbound of a thread. Goes out
+        # without approval, in the inquiry language, and never changes ticket/draft
+        # status. Best-effort: a failure here must not stop the real reply draft.
+        if is_first_inbound and channel == "email" and contact_info.get("email"):
+            self._maybe_send_auto_ack(contact_info, conv_id, inquiry_lang)
 
         try:
             classification = self._classify(contact_info)
@@ -134,12 +186,18 @@ class InboundAgent:
                     )
 
             score = self._score(contact_info, classification.category)
-            draft = self._draft_reply(contact_info, classification, score)
-            self._finalize_draft(message_id, contact_info, classification, score, draft)
+            draft = self._draft_reply(contact_info, classification, score, conv_id)
+            self._finalize_draft(
+                message_id, contact_info, classification, score, draft, conv_id, inquiry_lang
+            )
         except Exception:
             # Don't leave the card spinning forever — surface the failure.
             self._mark_draft_failed(message_id)
             raise
+
+        # Refresh the rolling summary + customer requests (best-effort, separate
+        # from the append-only progress log). Never breaks the pipeline.
+        self._update_summary(conv_id, contact_info)
 
         try:
             notify_approval(
@@ -272,6 +330,10 @@ class InboundAgent:
             "company": event.get("company", ""),
             "country": event.get("country", ""),
             "lifecycle_stage": event.get("lifecycle_stage", ""),
+            # ``subject`` = the customer's own subject line (kept separate so the UI
+            # shows it AND so the reply subject can be "RE: <subject>"). ``last_message``
+            # = the body we reply to (content, falling back to subject if empty).
+            "subject": event.get("subject", ""),
             "last_message": event.get("last_message", ""),
             "whatsapp_opt_in": event.get("whatsapp_opt_in", False),
             "phone": event.get("phone"),
@@ -308,9 +370,13 @@ class InboundAgent:
         if ticket_id and self.hubspot and not info["last_message"]:
             try:
                 ticket = self.hubspot.get_ticket_sync(ticket_id)
-                parts = [p for p in (ticket.subject, ticket.content) if p]
-                if parts:
-                    info["last_message"] = "\n\n".join(parts)
+                if ticket.subject and not info["subject"]:
+                    info["subject"] = ticket.subject
+                # Body to reply to = ticket content; fall back to the subject so a
+                # subject-only ticket ("가끔 제목만 오더라") is never treated as empty.
+                body = ticket.content or ticket.subject or ""
+                if body:
+                    info["last_message"] = body
                     info["inbound_source"] = "ticket"
                     logger.info(
                         "Inbound message from ticket %s for contact %s", ticket_id, contact_id
@@ -456,25 +522,55 @@ class InboundAgent:
             return "email"
         return "none"
 
+    def _is_first_reply(self, conv_id: int | None) -> bool:
+        """True if no real reply has been SENT in this thread yet (auto-ack excluded).
+
+        Drives the "no pricing in the first email" rule. Pending drafts don't count
+        as "already replied" — only an actually-sent operator reply does.
+        """
+        if not conv_id:
+            return True
+        try:
+            with SessionLocal() as session:
+                sent = (
+                    session.query(Message)
+                    .filter(
+                        Message.conversation_id == conv_id,
+                        Message.direction == "outbound",
+                        Message.status == "sent",
+                        (Message.prompt_variant.is_(None)) | (Message.prompt_variant != "auto_ack"),
+                    )
+                    .count()
+                )
+            return sent == 0
+        except Exception:
+            logger.warning("first-reply check failed for conv %s; assuming first.", conv_id)
+            return True
+
     def _draft_reply(
         self,
         contact_info: dict,
         classification: ClassifyResult,
         score: int,
+        conv_id: int | None = None,
     ) -> DraftResult:
+        """Draft the Korean working reply the operator reviews.
+
+        Hard rules enforced in CODE here (not left to the model):
+        - the draft is always Korean (``ensure_korean``);
+        - the first reply contains no prices (``strip_price_sentences``);
+        - the subject is "RE: <customer subject>" with no duplicate prefixes, in
+          the inquiry's language (``reply_subject``).
+        """
+        from ..llm.reply import ensure_korean
+
         knowledge_docs = select_relevant_docs(
             inquiry=contact_info["last_message"],
             category=classification.category,
             scope="inbound",
             llm=self.llm,
         )
-        # Detect the inquiry language deterministically and force the reply into it.
-        # The drafting model alone sometimes replied in Korean to English inquiries;
-        # passing an explicit target language fixes that, and we treat the detected
-        # value as authoritative for storage rather than the model's self-report.
-        from ..llm.language import detect_language, language_label
-
-        reply_lang = detect_language(contact_info["last_message"], llm=self.llm)
+        first_reply = self._is_first_reply(conv_id)
         draft = self.llm.complete(
             "inbound/draft_reply",
             {
@@ -486,45 +582,52 @@ class InboundAgent:
                 "last_message": contact_info["last_message"],
                 "enrichment_context": _build_enrichment_context(contact_info),
                 "knowledge_docs": knowledge_docs,
-                "reply_language": language_label(reply_lang),
+                "pricing_rule": _PRICING_RULE_FIRST if first_reply else _PRICING_RULE_NORMAL,
             },
             schema=DraftResult,
             tier="pro",
             max_tokens=4000,
         )
-        draft.language = reply_lang
 
-        # Guarantee the reply is in the inquiry's language. The pro model sometimes
-        # ignores the instruction and drafts in Korean (the company rules + signature
-        # are Korean). If the body's actual language differs from the target, translate
-        # it into the target — the reply must never go out in the wrong language.
-        from ..llm.translate import translate_to
+        # CODE GUARD 1 — the operator always reviews Korean.
+        draft.body = ensure_korean(draft.body, llm=self.llm)
+        draft.language = "ko"
 
-        actual = detect_language(draft.body, llm=self.llm)
-        if actual != reply_lang:
-            logger.warning(
-                "Reply language mismatch (ticket=%s contact=%s): drafted in '%s' but the "
-                "inquiry is '%s' — translating the reply to '%s'.",
-                contact_info.get("ticket_id") or "-",
-                contact_info.get("email") or "?",
-                actual,
-                reply_lang,
-                reply_lang,
-            )
-            fixed_body = translate_to(draft.body, reply_lang, llm=self.llm)
-            if fixed_body:
-                draft.body = fixed_body
-            if draft.subject:
-                fixed_subject = translate_to(draft.subject, reply_lang, llm=self.llm)
-                if fixed_subject:
-                    draft.subject = fixed_subject
+        # CODE GUARD 2 — the first reply must never state a price. Strip offending
+        # lines deterministically and record it on the progress log.
+        if first_reply and draft.body:
+            cleaned, removed = strip_price_sentences(draft.body)
+            if removed:
+                draft.body = cleaned
+                logger.warning(
+                    "First-reply pricing guard removed %d line(s) (contact=%s): %s",
+                    len(removed),
+                    contact_info.get("email") or "?",
+                    " | ".join(removed)[:300],
+                )
+                if conv_id:
+                    add_progress(
+                        conv_id,
+                        "guard",
+                        f"첫 회신 금액 표기 {len(removed)}건 자동 제거됨 (규칙: 첫 메일 금액 금지).",
+                    )
+
+        # CODE GUARD 3 — subject is "RE: <customer subject>" (or a localized generic
+        # when the inbound had none), with no stacked RE:. Never the raw model subject.
+        draft.subject = reply_subject(
+            contact_info.get("subject"), target_code=contact_info.get("inquiry_language")
+        )
         return draft
 
-    def _persist_placeholder(self, contact_info: dict, channel: str) -> int:
+    def _persist_placeholder(
+        self, contact_info: dict, channel: str, inquiry_lang: str
+    ) -> tuple[int, int, bool]:
         """Persist the inquiry + a 'drafting' outbound placeholder, before the AI draft.
 
-        Returns the outbound message id. The card appears on the site immediately as
-        "작성중"; _finalize_draft fills it in once the reply is ready.
+        Returns ``(outbound_message_id, conversation_id, is_first_inbound)``. The
+        card appears on the site immediately as "작성중"; _finalize_draft fills it in
+        once the reply is ready. ``is_first_inbound`` is True when this is the very
+        first inbound message in the thread (drives the immediate auto-ack).
         """
         session = SessionLocal()
         try:
@@ -535,13 +638,19 @@ class InboundAgent:
                 session.query(Contact).filter_by(normalized_email=norm).first() if norm else None
             )
             if not contact:
+                # Only store a domain for REAL company domains. Personal/free-email
+                # senders (gmail, naver, …) must not be grouped together as one
+                # "company" — that would leak one customer's history to another.
+                dom = _domain_from_email(email) if email else None
+                if dom and is_personal_domain(dom):
+                    dom = None
                 contact = Contact(
                     hubspot_contact_id=contact_info.get("object_id") or None,
                     email=email or None,
                     normalized_email=norm or "unknown",
                     full_name=contact_info["full_name"],
                     company=contact_info.get("company"),
-                    domain=_domain_from_email(email) if email else None,
+                    domain=dom,
                     country=contact_info.get("country"),
                     lifecycle_stage=contact_info.get("lifecycle_stage"),
                     phone=contact_info.get("phone") or None,
@@ -565,6 +674,7 @@ class InboundAgent:
                         topic=None,  # set once classified, in _finalize_draft
                         stage="initial",
                         hubspot_ticket_id=ticket_id,
+                        inquiry_language=inquiry_lang,
                     )
                     session.add(conv)
                     session.flush()
@@ -575,12 +685,31 @@ class InboundAgent:
                     .first()
                 )
                 if not conv:
-                    conv = Conversation(contact_id=contact.id, topic=None, stage="initial")
+                    conv = Conversation(
+                        contact_id=contact.id,
+                        topic=None,
+                        stage="initial",
+                        inquiry_language=inquiry_lang,
+                    )
                     session.add(conv)
                     session.flush()
 
-            # Snapshot the inbound body so the approval UI can show what we're replying to.
+            # The thread language is set from the first inbound and kept stable.
+            if not conv.inquiry_language and inquiry_lang:
+                conv.inquiry_language = inquiry_lang
+
+            # First inbound in the thread? (count BEFORE inserting this one.)
+            prior_inbound = (
+                session.query(Message)
+                .filter(Message.conversation_id == conv.id, Message.direction == "inbound")
+                .count()
+            )
+            is_first_inbound = prior_inbound == 0
+
+            # Snapshot the inbound body + subject so the approval UI shows what we're
+            # replying to (subject kept separate — fixes "가끔 제목만 오더라").
             inbound_body = (contact_info.get("last_message") or "").strip()
+            inbound_subject = (contact_info.get("subject") or "").strip() or None
             if inbound_body:
                 session.add(
                     Message(
@@ -589,13 +718,22 @@ class InboundAgent:
                         channel=channel,
                         from_address=email or None,
                         to_address=settings.SMTP_FROM_EMAIL or None,
-                        subject=None,
+                        subject=inbound_subject,
                         body=inbound_body,
+                        language=inquiry_lang or "en",
                         status="received",
                     )
                 )
                 conv.last_incoming_at = datetime.now(timezone.utc)
                 session.flush()
+                # Append-only progress entry: inquiry received.
+                excerpt = (inbound_subject or inbound_body).replace("\n", " ").strip()
+                add_progress(
+                    conv.id,
+                    "inbound",
+                    f"고객 문의 접수: {excerpt[:140]}",
+                    session=session,
+                )
 
             to_addr = contact_info.get("phone") if channel == "whatsapp" else (email or None)
             msg = Message(
@@ -607,11 +745,12 @@ class InboundAgent:
                 subject=None,
                 body="",
                 status="drafting",
+                target_language=inquiry_lang,
                 draft_provider=settings.LLM_PROVIDER,
             )
             session.add(msg)
             session.commit()
-            return msg.id
+            return msg.id, conv.id, is_first_inbound
         finally:
             session.close()
 
@@ -622,6 +761,8 @@ class InboundAgent:
         classification: ClassifyResult,
         score: int,
         draft: DraftResult,
+        conv_id: int | None = None,
+        inquiry_lang: str | None = None,
     ) -> None:
         """Fill the 'drafting' placeholder with the finished reply → pending_approval."""
         session = SessionLocal()
@@ -631,7 +772,8 @@ class InboundAgent:
                 return
             msg.subject = draft.subject
             msg.body = draft.body
-            msg.language = draft.language
+            msg.language = "ko"  # the draft the operator reviews is always Korean
+            msg.target_language = inquiry_lang or msg.target_language
             msg.status = "pending_approval"
             msg.score_snapshot = score
             conv = session.get(Conversation, msg.conversation_id)
@@ -640,9 +782,191 @@ class InboundAgent:
                 contact = session.get(Contact, conv.contact_id) if conv.contact_id else None
                 if contact:
                     contact.score = score
+                add_progress(
+                    conv.id,
+                    "draft",
+                    f"AI 회신 초안 작성 완료 (분류: {classification.category}). 검토 대기.",
+                    session=session,
+                )
             session.commit()
         finally:
             session.close()
+
+    # ----- Immediate auto-acknowledgement (first inbound only) -----
+
+    def _maybe_send_auto_ack(self, contact_info: dict, conv_id: int, inquiry_lang: str) -> None:
+        """Send the immediate "received, will reply in 24h" acknowledgement.
+
+        Sent WITHOUT approval and in the inquiry's language (enforced in code:
+        Korean template → translate_to). Recorded in the thread as an auto_ack
+        message but never changes the ticket/draft status. Best-effort throughout.
+        """
+        if not settings.INBOUND_AUTO_ACK_ENABLED:
+            return
+        try:
+            from ..db.email_templates import get_email_template
+            from ..llm.translate import translate_to
+
+            name = (contact_info.get("full_name") or "").strip() or "고객님"
+            template = get_email_template("auto_ack", language="ko") or _DEFAULT_AUTO_ACK_KO
+            ko_body = template.replace("{name}", name)
+
+            lang = (inquiry_lang or "ko").lower()
+            if lang != "ko":
+                translated = translate_to(ko_body, lang, llm=self.llm)
+                body = text_wash(translated) if translated else text_wash(ko_body)
+                # If translation failed we keep Korean rather than dropping the ack.
+                final_lang = lang if translated else "ko"
+            else:
+                body = text_wash(ko_body)
+                final_lang = "ko"
+
+            subject = reply_subject(contact_info.get("subject"), target_code=lang)
+            msg_id = self._persist_auto_ack(conv_id, contact_info, subject, body, final_lang, lang)
+            if msg_id is not None:
+                self._dispatch_auto_ack(msg_id, conv_id)
+        except Exception:
+            logger.warning("Auto-ack failed for conv %s (non-fatal).", conv_id, exc_info=True)
+
+    def _persist_auto_ack(
+        self,
+        conv_id: int,
+        contact_info: dict,
+        subject: str,
+        body: str,
+        language: str,
+        target_language: str,
+    ) -> int | None:
+        """Insert the auto-ack message in an interim state, returning its id.
+
+        Interim status is ``auto_sending`` — deliberately NOT ``approved`` so the
+        background send_worker (which claims ``approved`` rows) can never race this
+        inline dispatch and double-send. _dispatch_auto_ack flips it to sent/failed.
+
+        Returns None (skips) if an auto-ack already exists for this conversation, so
+        two near-simultaneous first events (webhook + poller) don't double-ack.
+        """
+        with SessionLocal() as session:
+            existing = (
+                session.query(Message)
+                .filter(
+                    Message.conversation_id == conv_id,
+                    Message.prompt_variant == "auto_ack",
+                )
+                .first()
+            )
+            if existing is not None:
+                return None
+            msg = Message(
+                conversation_id=conv_id,
+                direction="outbound",
+                channel="email",
+                from_address=settings.SMTP_FROM_EMAIL or None,
+                to_address=contact_info.get("email") or None,
+                subject=subject,
+                body=body,
+                language=language,
+                target_language=target_language,
+                status="auto_sending",
+                prompt_variant="auto_ack",
+                approved_by="auto_ack",
+                approved_at=datetime.now(timezone.utc),
+                draft_provider=settings.LLM_PROVIDER,
+            )
+            session.add(msg)
+            session.commit()
+            return msg.id
+
+    def _dispatch_auto_ack(self, message_id: int, conv_id: int) -> None:
+        """Send the auto-ack inline (no worker, no approval) and record the outcome.
+
+        The send attempt and the terminal status (sent/failed) are committed in the
+        SAME session, so a send failure can never strand the row in 'auto_sending'.
+        """
+        import asyncio
+
+        from ..integrations.senders import send
+
+        sent_ok = False
+        try:
+            with SessionLocal() as session:
+                m = session.get(Message, message_id)
+                if m is None:
+                    return
+                try:
+                    asyncio.run(send(m))
+                    m.status = "sent"
+                    m.sent_at = datetime.now(timezone.utc)
+                    sent_ok = True
+                except Exception:
+                    logger.warning(
+                        "Auto-ack send failed for message %d (non-fatal).",
+                        message_id,
+                        exc_info=True,
+                    )
+                    m.status = "failed"
+                session.commit()
+        except Exception:
+            logger.warning("Auto-ack dispatch error for message %d.", message_id, exc_info=True)
+
+        add_progress(
+            conv_id,
+            "auto_ack",
+            (
+                "자동 접수확인 메일 발송됨 (문의 언어, 승인 없이 즉시)."
+                if sent_ok
+                else "자동 접수확인 메일 발송 실패 (로그 확인 필요)."
+            ),
+        )
+
+    # ----- Rolling summary + customer requests -----
+
+    def _update_summary(self, conv_id: int | None, contact_info: dict) -> None:
+        """Refresh the conversation's rolling summary + customer_requests (best-effort)."""
+        if not conv_id:
+            return
+        try:
+            with SessionLocal() as session:
+                rows = (
+                    session.query(Message)
+                    .filter(Message.conversation_id == conv_id)
+                    .order_by(Message.created_at.asc(), Message.id.asc())
+                    .all()
+                )
+                parts: list[str] = []
+                for m in rows:
+                    if not (m.body or "").strip():
+                        continue
+                    who = "고객" if m.direction == "inbound" else "우리"
+                    subj = f"[{m.subject}] " if m.subject else ""
+                    parts.append(f"{who}: {subj}{m.body.strip()}")
+                thread_text = "\n\n".join(parts)[:8000]
+            if not thread_text:
+                return
+
+            result = self.llm.complete(
+                "inbound/summarize_thread",
+                {
+                    "contact_name": contact_info.get("full_name", ""),
+                    "company": contact_info.get("company", ""),
+                    "thread_text": thread_text,
+                },
+                schema=_SummaryResult,
+                tier="flash",
+                max_tokens=1200,
+            )
+            with SessionLocal() as session:
+                conv = session.get(Conversation, conv_id)
+                if conv:
+                    conv.summary = (result.summary or "").strip() or conv.summary
+                    conv.customer_requests = (
+                        result.customer_requests or ""
+                    ).strip() or conv.customer_requests
+                    session.commit()
+        except Exception:
+            logger.warning(
+                "Summary refresh failed for conv %s (non-fatal).", conv_id, exc_info=True
+            )
 
     def _mark_draft_failed(self, message_id: int) -> None:
         """Flip a stuck 'drafting' placeholder to 'draft_failed' so it doesn't spin."""

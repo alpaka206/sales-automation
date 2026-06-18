@@ -37,7 +37,10 @@ def _disable_approval_token_and_send_worker():
 
 @patch.object(settings, "HUBSPOT_UPDATE_CONTACT_INBOUND_STATUS", True)
 @patch("src.agents.inbound.InboundAgent._finalize_draft")
-@patch("src.agents.inbound.InboundAgent._persist_placeholder", return_value=1)
+@patch(
+    "src.agents.inbound.InboundAgent._persist_placeholder",
+    return_value=(1, 1, False),
+)
 @patch("src.agents.inbound.InboundAgent._draft_reply")
 @patch("src.agents.inbound.InboundAgent._score", return_value=70)
 @patch("src.agents.inbound.InboundAgent._classify")
@@ -77,7 +80,10 @@ def test_handle_sets_analyzed_status(
 
 
 @patch("src.agents.inbound.InboundAgent._finalize_draft")
-@patch("src.agents.inbound.InboundAgent._persist_placeholder", return_value=2)
+@patch(
+    "src.agents.inbound.InboundAgent._persist_placeholder",
+    return_value=(2, 2, False),
+)
 @patch("src.agents.inbound.InboundAgent._draft_reply")
 @patch("src.agents.inbound.InboundAgent._score", return_value=60)
 @patch("src.agents.inbound.InboundAgent._classify")
@@ -128,7 +134,8 @@ def test_no_hubspot_skips_status_update():
         patch.object(InboundAgent, "_score", return_value=50),
         patch.object(InboundAgent, "_pick_channel", return_value="email"),
         patch.object(InboundAgent, "_draft_reply"),
-        patch.object(InboundAgent, "_persist_placeholder", return_value=3),
+        patch.object(InboundAgent, "_persist_placeholder", return_value=(3, 3, False)),
+        patch.object(InboundAgent, "_update_summary"),
         patch("src.agents.inbound.notify_approval"),
     ):
 

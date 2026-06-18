@@ -28,6 +28,9 @@ class Contact(Base):
     lifecycle_stage: Mapped[str | None] = mapped_column(String, nullable=True)
     score: Mapped[int | None] = mapped_column(Integer, nullable=True)
     phone: Mapped[str | None] = mapped_column(String, nullable=True)
+    # Operator-editable free-text note on what this person/company does. Filled in
+    # over the course of a conversation even for gmail/unverified senders.
+    role_description: Mapped[str | None] = mapped_column(Text, nullable=True)
     whatsapp_opt_in: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
@@ -61,9 +64,7 @@ class Prospect(Base):
     follow_up_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
 
-    __table_args__ = (
-        Index("ix_prospects_domain_fullname", "domain", "full_name"),
-    )
+    __table_args__ = (Index("ix_prospects_domain_fullname", "domain", "full_name"),)
 
     conversations: Mapped[list[Conversation]] = relationship(back_populates="prospect")
 
@@ -83,11 +84,21 @@ class Conversation(Base):
     last_outgoing_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     last_incoming_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     hubspot_ticket_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    # ISO 639-1 language the customer wrote in — the language every reply in this
+    # thread must go out in (enforced in code at send time).
+    inquiry_language: Mapped[str | None] = mapped_column(String(8), nullable=True)
+    # Rolling LLM-maintained summary + the customer's standing requests. These are
+    # regenerated as the thread evolves (unlike the append-only progress log).
+    summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    customer_requests: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
 
     contact: Mapped[Contact] = relationship(back_populates="conversations")
     prospect: Mapped[Prospect | None] = relationship(back_populates="conversations")
     messages: Mapped[list[Message]] = relationship(back_populates="conversation")
+    progress: Mapped[list[ConversationProgress]] = relationship(
+        back_populates="conversation", order_by="ConversationProgress.created_at"
+    )
 
 
 class Message(Base):
@@ -103,7 +114,11 @@ class Message(Base):
     to_address: Mapped[str | None] = mapped_column(String, nullable=True)
     subject: Mapped[str | None] = mapped_column(String, nullable=True)
     body: Mapped[str] = mapped_column(Text, nullable=False)
+    # ``language`` = language the body is CURRENTLY in (a draft is "ko" until the
+    # operator translates it). ``target_language`` = language it must be SENT in
+    # (the inquiry's language); the send guard enforces body matches it.
     language: Mapped[str] = mapped_column(String, nullable=False, default="ko")
+    target_language: Mapped[str | None] = mapped_column(String(8), nullable=True)
     status: Mapped[str] = mapped_column(String, nullable=False, default="pending_approval")
     score_snapshot: Mapped[int | None] = mapped_column(Integer, nullable=True)
     prompt_variant: Mapped[str | None] = mapped_column(String, nullable=True)
@@ -125,6 +140,29 @@ class Message(Base):
 
     conversation: Mapped[Conversation] = relationship(back_populates="messages")
     approvals: Mapped[list[Approval]] = relationship(back_populates="message")
+
+
+class ConversationProgress(Base):
+    """Append-only, dated processing log for a conversation ("처리경과").
+
+    The operator's rule: existing entries are NEVER edited — only new ones are
+    appended. So there is INSERT-only code against this table (no UPDATE/DELETE),
+    and each row stamps its own ``created_at``. ``kind`` is a short machine tag
+    (inbound / auto_ack / draft / reply / note), ``detail`` the human line shown.
+    """
+
+    __tablename__ = "conversation_progress"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    conversation_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("conversations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    kind: Mapped[str] = mapped_column(String(32), nullable=False, default="note")
+    detail: Mapped[str] = mapped_column(Text, nullable=False)
+    actor: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+
+    conversation: Mapped[Conversation] = relationship(back_populates="progress")
 
 
 class Approval(Base):
@@ -348,7 +386,9 @@ class LLMUsage(Base):
     cache_read_input_tokens: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     cache_creation_input_tokens: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     estimated_cost: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=_utcnow, nullable=False, index=True
+    )
 
 
 class User(Base):
