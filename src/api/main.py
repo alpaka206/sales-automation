@@ -184,7 +184,10 @@ async def auth_middleware(request: Request, call_next):
 # ---------- Health ----------
 
 
-@app.get("/healthz")
+# Accept HEAD as well as GET: uptime monitors (UptimeRobot, etc.) default to HEAD,
+# and a GET-only route returns 405 → the monitor reports the service as Down even
+# though it's healthy. Allowing HEAD keeps the free-tier keepalive ping working.
+@app.api_route("/healthz", methods=["GET", "HEAD"])
 def healthz() -> dict[str, bool]:
     return {"ok": True}
 
