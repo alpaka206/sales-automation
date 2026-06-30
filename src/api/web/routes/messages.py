@@ -14,6 +14,7 @@ from ....agents.approval import ApprovalError, approve, reject
 from ....common.config import settings
 from ....common.textwash import text_wash
 from ....db.conversation_history import add_progress
+from ....db.email_templates import list_signature_templates
 from ....db.models import (
     Contact,
     Conversation,
@@ -33,6 +34,23 @@ router = APIRouter(tags=["web"])
 # Maximum bytes accepted for a single edit — prevents accidental/malicious DoS via huge POST.
 _MAX_EDIT_BODY_BYTES = 100_000
 _MAX_EDIT_SUBJECT_LEN = 300
+
+
+def _clean_signature_key(value: str | None) -> str | None:
+    """Normalize a posted signature choice to a stored value.
+
+    Returns None for the default text signature, ``"none"`` for no signature, or a
+    valid active branded-signature key. Unknown values fall back to None (default)
+    so a stale/forged key can never select an arbitrary template.
+    """
+    v = (value or "").strip()
+    if v in ("", "default", "text"):
+        return None
+    if v == "none":
+        return "none"
+    if v in {s["key"] for s in list_signature_templates()}:
+        return v
+    return None
 
 
 def _message_detail_context(message_id: int) -> dict:
@@ -141,6 +159,7 @@ def _message_detail_context(message_id: int) -> dict:
             ],
             "summary": conv.summary if conv else None,
             "customer_requests": conv.customer_requests if conv else None,
+            "signatures": list_signature_templates(),
             "domain_history": domain_history,
             "ticket": {
                 "ticket_id": conv.hubspot_ticket_id if conv else None,
@@ -162,6 +181,7 @@ def _message_detail_context(message_id: int) -> dict:
                 "flow": "outbound" if prospect is not None else "inbound_reply",
                 "language": msg.language,
                 "target_language": msg.target_language,
+                "signature_key": msg.signature_key or "",
                 "to_address": msg.to_address or "",
                 "from_address": msg.from_address or "",
                 "score_snapshot": msg.score_snapshot,
@@ -362,7 +382,12 @@ async def message_detail(request: Request, message_id: int):
 
 
 @router.post("/messages/{message_id}/translate")
-async def message_translate(message_id: int, body: str = Form(""), subject: str = Form("")):
+async def message_translate(
+    message_id: int,
+    body: str = Form(""),
+    subject: str = Form(""),
+    signature_key: str = Form(""),
+):
     """Translate the Korean draft into the inquiry's language for the operator.
 
     The reply workflow: the operator reviews/edits a KOREAN draft, then presses
@@ -384,6 +409,16 @@ async def message_translate(message_id: int, body: str = Form(""), subject: str 
         target = (msg.target_language or "").lower()
         cur_body = cur_body or msg.body or ""
         cur_subject = subject.strip() or (msg.subject or "")
+
+        # Persist the signature choice; when a branded signature replaces the text
+        # one, strip the text signature BEFORE translating so it never gets carried
+        # (translated) into the outgoing body.
+        from ....integrations.email_html import strip_known_signature, strips_text_signature
+
+        sig_key = _clean_signature_key(signature_key)
+        msg.signature_key = sig_key
+        if strips_text_signature(sig_key):
+            cur_body = strip_known_signature(cur_body)
 
         # Decide from the BODY's actual language, not the (possibly stale) msg.language
         # flag — so re-editing the draft back to Korean and pressing 번역하기 again
@@ -432,7 +467,11 @@ async def message_translate(message_id: int, body: str = Form(""), subject: str 
 
 @router.post("/messages/{message_id}/send")
 async def message_send(
-    request: Request, message_id: int, body: str = Form(""), subject: str = Form("")
+    request: Request,
+    message_id: int,
+    body: str = Form(""),
+    subject: str = Form(""),
+    signature_key: str = Form(""),
 ):
     """Approve (and optionally edit) a message, then send it immediately.
 
@@ -447,6 +486,15 @@ async def message_send(
         return HTMLResponse(
             f'<div class="text-red-600 text-sm">{esc(str(exc))}</div>', status_code=400
         )
+
+    # Persist the operator's signature choice so both the inline send below and the
+    # background worker render the right (branded / none / default) signature.
+    sig_key = _clean_signature_key(signature_key)
+    with SessionLocal() as session:
+        m = session.get(Message, message_id)
+        if m is not None:
+            m.signature_key = sig_key
+            session.commit()
 
     # When the background send worker is running, let IT claim & send this approved
     # row — sending inline here too would let both paths dispatch the same email
@@ -510,15 +558,24 @@ async def message_send(
 
 
 @router.post("/messages/preview")
-async def message_preview(body: str = Form("")):
+async def message_preview(body: str = Form(""), signature_key: str = Form("")):
     """Render a draft body as the HTML email it will become — live approval preview.
 
-    Stateless: takes the (possibly edited) textarea content and returns the same
-    styled HTML that the send path attaches, so the approver sees the real look.
+    Stateless: takes the (possibly edited) textarea content + the chosen signature
+    and returns the same styled HTML the send path attaches, so the approver sees
+    the real look — including a branded signature replacing the text one. (The
+    legal/unsubscribe footer is added only at send time, as the modal notes.)
     """
-    from ....integrations.email_html import to_html_email
+    from ....integrations.email_html import (
+        branded_signature_html,
+        strip_known_signature,
+        strips_text_signature,
+        to_html_email,
+    )
 
-    return HTMLResponse(to_html_email(body))
+    key = _clean_signature_key(signature_key)
+    rendered_body = strip_known_signature(body) if strips_text_signature(key) else body
+    return HTMLResponse(to_html_email(rendered_body, signature_html=branded_signature_html(key)))
 
 
 @router.post("/messages/{message_id}/reject")
@@ -538,8 +595,13 @@ async def message_reject(request: Request, message_id: int, reason: str = Form("
 
 
 @router.post("/messages/{message_id}/edit")
-async def message_edit(message_id: int, body: str = Form(""), subject: str = Form("")):
-    """Save edits to a pending message without sending."""
+async def message_edit(
+    message_id: int,
+    body: str = Form(""),
+    subject: str = Form(""),
+    signature_key: str = Form(""),
+):
+    """Save edits to a pending message without sending (body, subject, signature)."""
     if len(body.encode("utf-8")) > _MAX_EDIT_BODY_BYTES:
         return HTMLResponse(
             '<div class="text-red-600 text-sm">본문이 너무 깁니다 (100KB 초과)</div>',
@@ -566,6 +628,7 @@ async def message_edit(message_id: int, body: str = Form(""), subject: str = For
             msg.body = body.strip()
         if subject.strip():
             msg.subject = subject.strip()
+        msg.signature_key = _clean_signature_key(signature_key)
         session.commit()
     return HTMLResponse('<div class="text-blue-600 text-sm font-medium">저장 완료</div>')
 

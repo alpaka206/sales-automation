@@ -82,6 +82,17 @@
             <input class="input" id="msg-subject" name="subject" value="{{ msg.subject }}" style="margin-bottom:12px">
             <label class="field-label" for="msg-body">본문</label>
             <textarea class="draft-textarea" id="msg-body" name="body">{{ msg.body }}</textarea>
+
+            <label class="field-label" for="msg-signature" style="margin-top:12px">서명 <span class="t-subtle">(브랜드 서명을 고르면 발송 시 기존 텍스트 서명을 대체합니다)</span></label>
+            <select class="select" id="msg-signature" name="signature_key" style="margin-bottom:6px" onchange="syncPreviewIfOpen()">
+              <option value="" {% if not msg.signature_key %}selected{% endif %}>기본 (텍스트 서명)</option>
+              {% for s in signatures %}
+              <option value="{{ s.key }}" {% if msg.signature_key == s.key %}selected{% endif %}>{{ s.name }}{% if s.language and s.language != 'all' %} · {{ s.language }}{% endif %}</option>
+              {% endfor %}
+              <option value="none" {% if msg.signature_key == 'none' %}selected{% endif %}>서명 없음</option>
+            </select>
+            <div class="t-xs t-subtle" style="margin-bottom:12px"><a href="/email-templates" target="_blank">서명 편집·추가 →</a> · 미리보기로 실제 모양을 확인하세요.</div>
+
             <div class="action-bar">
               {% if can_translate %}
               <button type="button" class="btn btn--subtle" id="translate-btn" onclick="translateDraft()">{{ icon("translate", 15) }} 번역하기 ({{ msg.target_language }})</button>
@@ -91,12 +102,24 @@
               <button type="button" class="btn btn--subtle"
                       hx-post="/messages/{{ msg.id }}/edit" hx-include="#msg-form"
                       hx-target="#action-result" hx-swap="innerHTML">{{ icon("edit", 15) }} 저장</button>
+              <button type="button" class="btn btn--subtle" id="calc-btn" onclick="toggleCalc()" aria-expanded="false" aria-controls="calc-panel">{{ icon("calculator", 15) }} 견적 계산기</button>
               <button type="button" class="btn btn--danger" onclick="var r=document.getElementById('reject-form');r.hidden=!r.hidden">{{ icon("x", 15) }} 거절</button>
             </div>
             {% if can_translate %}
             <div id="translate-note" class="t-xs t-subtle" style="margin-top:8px">발송 전 “번역하기”로 문의 언어로 바꿔주세요. 미번역 시 발송 단계에서 자동 번역됩니다.</div>
             {% endif %}
           </form>
+
+          {# ---------- quote calculator (operator reference — NOT sent) ---------- #}
+          <div id="calc-panel" hidden style="margin-top:14px;border-top:1px solid var(--border);padding-top:14px">
+            <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:8px">
+              <div class="ko-block__label" style="margin:0">{{ icon("calculator", 14) }} 비즈니스 플랜 견적 계산기 <span class="t-subtle">— 참고용, 메일에는 포함되지 않습니다</span></div>
+              <a href="/tools/quote-calculator" target="_blank" class="chip chip--xs">{{ icon("file", 13) }} 새 창에서 크게</a>
+            </div>
+            <iframe id="calc-frame" title="견적 계산기" sandbox="allow-scripts allow-popups"
+                    style="width:100%;height:760px;border:1px solid var(--border);border-radius:10px;background:#fff"></iframe>
+          </div>
+
           <div id="reject-form" hidden style="margin-top:14px;border-top:1px solid var(--border);padding-top:14px">
             <form>
               <label class="field-label" for="reject-reason">거절 사유</label>
@@ -384,7 +407,7 @@
     fetch("/messages/{{ msg.id }}/translate", {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: "body=" + encodeURIComponent(b.value) + "&subject=" + encodeURIComponent(s ? s.value : ""),
+      body: "body=" + encodeURIComponent(b.value) + "&subject=" + encodeURIComponent(s ? s.value : "") + "&signature_key=" + encodeURIComponent(sigVal()),
     })
       .then(function (r) { return r.json(); })
       .then(function (d) {
@@ -399,26 +422,53 @@
       .catch(function () { if (btn) btn.disabled = false; if (note) note.textContent = "번역 실패 — 다시 시도해 주세요."; });
   }
 
-  function openPreviewModal() {
+  function sigVal() {
+    var el = document.getElementById("msg-signature");
+    return el ? el.value : "";
+  }
+  var _previewOpen = false;
+  function renderPreview() {
     var bodyEl = document.getElementById("msg-body");
     var subjEl = document.getElementById("msg-subject");
     var frame = document.getElementById("preview-frame");
     var subjOut = document.getElementById("preview-subject");
     if (subjOut) subjOut.textContent = subjEl ? subjEl.value : "";
     var body = bodyEl ? bodyEl.value : "";
-    fetch("/messages/preview", {
+    return fetch("/messages/preview", {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: "body=" + encodeURIComponent(body),
+      body: "body=" + encodeURIComponent(body) + "&signature_key=" + encodeURIComponent(sigVal()),
     })
       .then(function (r) { return r.text(); })
-      .then(function (html) { if (frame) frame.srcdoc = html; window.PERSO_modal.open("preview-modal"); })
+      .then(function (html) { if (frame) frame.srcdoc = html; })
       .catch(function () {
         if (frame) frame.srcdoc = "<p style='font-family:sans-serif;padding:16px'>미리보기를 불러오지 못했습니다.</p>";
-        window.PERSO_modal.open("preview-modal");
       });
   }
-  function closePreviewModal() { window.PERSO_modal.close("preview-modal"); }
+  function openPreviewModal() {
+    renderPreview().then(function () { window.PERSO_modal.open("preview-modal"); _previewOpen = true; });
+  }
+  function closePreviewModal() { _previewOpen = false; window.PERSO_modal.close("preview-modal"); }
+  // Re-render the preview live when the signature dropdown changes while it's open.
+  function syncPreviewIfOpen() { if (_previewOpen) renderPreview(); }
+
+  // Quote calculator: collapsible reference panel, iframe loaded lazily on first open.
+  function toggleCalc() {
+    var panel = document.getElementById("calc-panel");
+    var frame = document.getElementById("calc-frame");
+    var btn = document.getElementById("calc-btn");
+    if (!panel) return;
+    var opening = panel.hasAttribute("hidden");
+    if (opening) {
+      if (frame && !frame.getAttribute("src")) frame.setAttribute("src", "/tools/quote-calculator/app");
+      panel.removeAttribute("hidden");
+      if (btn) btn.setAttribute("aria-expanded", "true");
+      panel.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    } else {
+      panel.setAttribute("hidden", "");
+      if (btn) btn.setAttribute("aria-expanded", "false");
+    }
+  }
 
   {# Per-bubble "원문 보기" toggle: reveals the original beside the translation. #}
   document.addEventListener("click", function (e) {

@@ -44,10 +44,16 @@ def _build_message(message: Message) -> EmailMessage:
     msg = EmailMessage()
     # multipart/alternative: plain-text part for fallback + a styled HTML part so the
     # email renders like a normal formatted email in modern clients.
-    msg.set_content(message.body or "", subtype="plain", charset="utf-8")
-    from ..email_html import to_html_email
+    from ..email_html import branded_signature_html, to_html_email
 
-    msg.add_alternative(to_html_email(message.body or ""), subtype="html", charset="utf-8")
+    # Branded signature card (operator-selected); None keeps the default behavior.
+    sig_html = branded_signature_html(getattr(message, "signature_key", None))
+    msg.set_content(message.body or "", subtype="plain", charset="utf-8")
+    msg.add_alternative(
+        to_html_email(message.body or "", signature_html=sig_html),
+        subtype="html",
+        charset="utf-8",
+    )
     msg["Subject"] = message.subject or ""
 
     # Use structured Address so the display name is RFC-2047 encoded if it contains

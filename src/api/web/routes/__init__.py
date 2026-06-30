@@ -19,6 +19,7 @@ from . import (
     messages,
     outbound,
     settings_page,
+    tools,
     unsubscribe,
 )
 
@@ -33,6 +34,7 @@ for _module in (
     icp,
     outbound,
     settings_page,
+    tools,
     logs,
     unsubscribe,
 ):

@@ -241,6 +241,18 @@ async def send(message: Message) -> None:
         enforce_send_language(message)
         enforce_first_reply_no_price(message)
 
+    # When a branded HTML signature (or "none") is selected, strip the LLM's
+    # default text signature so it doesn't render twice. Done BEFORE the footer is
+    # appended — the text signature sits at the body tail, the footer goes after.
+    from ..email_html import strip_known_signature, strips_text_signature
+
+    if (
+        message.direction == "outbound"
+        and isinstance(message.body, str)
+        and strips_text_signature(getattr(message, "signature_key", None))
+    ):
+        message.body = strip_known_signature(message.body)
+
     if message.to_address and message.direction == "outbound":
         message.body = append_footer(message.body, message.to_address, message.language)
 

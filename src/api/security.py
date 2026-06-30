@@ -18,7 +18,7 @@ API_SKIP_PATHS = ("/healthz", "/docs", "/openapi.json", "/favicon.ico")
 # Browser-facing web UI route prefixes (vs JSON API / webhooks).
 WEB_UI_PREFIXES = (
     "/", "/messages", "/knowledge", "/email-templates", "/outbound", "/settings",
-    "/icp-rules", "/prospects", "/logs", "/unsubscribe", "/static", "/auth",
+    "/icp-rules", "/prospects", "/logs", "/unsubscribe", "/static", "/auth", "/tools",
 )
 LOCALHOST_HOSTS = ("127.0.0.1", "::1", "localhost")
 

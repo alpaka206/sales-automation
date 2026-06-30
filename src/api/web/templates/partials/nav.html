@@ -27,6 +27,7 @@
     {{ _nav("/messages", "메시지", "messages", _path.startswith("/messages"), badge=nav_pending) }}
     {{ _nav("/outbound/new", "아웃바운드", "outbound", _path.startswith("/outbound")) }}
     {{ _nav("/prospects", "프로스펙트", "prospects", _path.startswith("/prospects")) }}
+    {{ _nav("/tools/quote-calculator", "견적 계산기", "calculator", _path.startswith("/tools/quote-calculator")) }}
 
     <div class="nav-group-label">설정</div>
     {{ _nav("/icp-rules", "ICP 룰", "icp", _path.startswith("/icp-rules")) }}

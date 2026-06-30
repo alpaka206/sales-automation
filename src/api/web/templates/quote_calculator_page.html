@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% from "partials/icons.html" import icon %}
+{% block title %}견적 계산기 — PERSO Sales Console{% endblock %}
+{% block content %}
+
+<div class="page-header">
+  <div>
+    <h1 class="page-title">비즈니스 플랜 견적 계산기</h1>
+    <p class="page-sub">고객 월 사용량으로 Tier·크레딧·실질 단가를 계산하는 내부 영업 참고 도구입니다. 메일에는 포함되지 않습니다.</p>
+  </div>
+</div>
+
+<div class="card" style="padding:0;overflow:hidden">
+  <iframe title="비즈니스 플랜 견적 계산기" src="/tools/quote-calculator/app" sandbox="allow-scripts allow-popups"
+          style="width:100%;height:calc(100vh - 220px);min-height:680px;border:0;display:block;background:#fff"></iframe>
+</div>
+
+{% endblock %}

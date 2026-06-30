@@ -120,6 +120,11 @@ class Message(Base):
     language: Mapped[str] = mapped_column(String, nullable=False, default="ko")
     target_language: Mapped[str | None] = mapped_column(String(8), nullable=True)
     status: Mapped[str] = mapped_column(String, nullable=False, default="pending_approval")
+    # Operator-selected outgoing signature. NULL/'' = default text signature (LLM
+    # writes it into the body). 'none' = no signature. Otherwise an email_templates
+    # key (e.g. 'signature_html_ko') whose branded HTML card is attached at send
+    # time, replacing the text signature. See integrations/email_html.py.
+    signature_key: Mapped[str | None] = mapped_column(String, nullable=True)
     score_snapshot: Mapped[int | None] = mapped_column(Integer, nullable=True)
     prompt_variant: Mapped[str | None] = mapped_column(String, nullable=True)
     draft_provider: Mapped[str | None] = mapped_column(String, nullable=True)
