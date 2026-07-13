@@ -183,6 +183,7 @@
         <span class="lab" id="readoutLab" data-i="r_total">Total monthly usage</span>
         <span class="val"><span id="totalMonthly">200</span> <small id="readoutUnit" data-i="u_min2">min / mo</small></span>
       </div>
+      <div class="subnote" id="lipNote" data-i="lip_note" style="display:none">Lip-dubbing burns 3× credits, so the total above is shown in credit-equivalent minutes (= finished minutes × 3) for tier sizing.</div>
       <div class="subnote"><span id="cycleLab" data-i="r_cycle">Over the recommended billing cycle:</span> <b id="totalCycle">—</b></div>
     </div>
 
@@ -192,7 +193,7 @@
       <div id="recobox" class="recobox">
         <div class="reco-head">
           <span class="reco-badge" data-i="reco_best">Best fit</span>
-          <span class="reco-title" id="recoName">Tier 1</span>
+          <span class="reco-title" id="recoName">—</span>
           <span style="font-size:13px;color:var(--muted)" id="recoPrice"></span>
         </div>
         <p class="reco-reason" id="recoReason"></p>
@@ -219,7 +220,7 @@
   <!-- Service credit -->
   <div class="card" style="margin-top:18px">
     <h2><span class="n">4</span><span data-i="s4">Service Credit (Sales)</span></h2>
-    <div class="activetier-tag"><span data-i="sc_applying">Applying to</span>: <b id="scTier">Tier 1</b></div>
+    <div class="activetier-tag"><span data-i="sc_applying">Applying to</span>: <b id="scTier">—</b> <span id="scFollow" style="color:var(--muted);font-weight:400"></span></div>
     <div class="scgrid">
       <div>
         <div class="field" style="margin-bottom:0">
@@ -236,28 +237,28 @@
       <div class="metrics">
         <div class="metric">
           <div class="mlab" data-i="k_final">Final granted credit</div>
-          <div class="mval"><span id="kFinalCredit">30,000</span></div>
-          <div class="msub mut"><span data-i="k_base">Base</span> <span id="kBaseCredit">30,000</span> + <span data-i="k_bonus">bonus</span> <span id="kBonus">0</span></div>
+          <div class="mval"><span id="kFinalCredit">—</span></div>
+          <div class="msub mut"><span data-i="k_base">Base</span> <span id="kBaseCredit">—</span> + <span data-i="k_bonus">bonus</span> <span id="kBonus">—</span></div>
         </div>
         <div class="metric">
           <div class="mlab" data-i="k_minutes">Final dubbing minutes</div>
-          <div class="mval"><span id="kMinutes">500</span> <small data-i="u_min3">min</small></div>
+          <div class="mval"><span id="kMinutes">—</span> <small data-i="u_min3">min</small></div>
           <div class="msub mut" data-i="k_rate">60 credits / min</div>
         </div>
         <div class="metric">
           <div class="mlab" data-i="k_lipminutes">Final lip-sync dubbing minutes</div>
-          <div class="mval"><span id="kLipMinutes">167</span> <small data-i="u_min3">min</small></div>
+          <div class="mval"><span id="kLipMinutes">—</span> <small data-i="u_min3">min</small></div>
           <div class="msub mut" data-i="k_liprate">180 credits / min</div>
         </div>
         <div class="metric">
           <div class="mlab" data-i="k_eff">Effective price / min</div>
-          <div class="mval gradtext">$<span id="kEffPrice">2.00</span></div>
-          <div class="msub down" id="kDiscount" data-i="k_list">List $2.00</div>
+          <div class="mval gradtext">$<span id="kEffPrice">—</span></div>
+          <div class="msub mut" id="kDiscount" data-i="k_list">—</div>
         </div>
         <div class="metric lock">
           <div class="mlab"><span data-i="k_pay">Payment (fixed)</span> <span class="lockchip" data-i="k_locked">LOCKED</span></div>
-          <div class="mval">$<span id="kPayUsd">1,000</span></div>
-          <div class="msub mut">₩<span id="kPayKrw">1,500,000</span> · <span id="kPayCycle">3 mo</span></div>
+          <div class="mval">$<span id="kPayUsd">—</span></div>
+          <div class="msub mut">₩<span id="kPayKrw">—</span> · <span id="kPayCycle">—</span></div>
         </div>
       </div>
     </div>
@@ -270,15 +271,14 @@
   </footer>
 </div>
 
+<!-- Tier policy is the single source of truth in src/common/quote_tiers.py, injected here. -->
+<script type="application/json" id="quote-policy">{{ policy_json | safe }}</script>
 <script>
-/* ---------- Tier policy (from Business Plan image) ---------- */
-const TIERS = [
-  {id:1,key:'t1',cycleMonths:3, usd:1000, krw:1500000, monthlyUsd:333, credits:30000, dubbingMin:500, perMin:2.00, cm:65.0, queue:6, concurrent:3, maxLen:60},
-  {id:2,key:'t2',cycleMonths:6, usd:4000, krw:6000000, monthlyUsd:667, credits:132000, dubbingMin:2200, perMin:1.82, cm:61.5, queue:7, concurrent:3, maxLen:60},
-  {id:3,key:'t3',cycleMonths:12,usd:10000,krw:15000000,monthlyUsd:833, credits:336000, dubbingMin:5600, perMin:1.79, cm:60.8, queue:9, concurrent:3, maxLen:60}
-];
-const CREDITS_PER_MIN = 60;
-TIERS.forEach(t=> t.monthlyCap = t.dubbingMin / t.cycleMonths);
+/* ---------- Tier policy (injected from the backend; derived fields precomputed) ---------- */
+const POLICY = JSON.parse(document.getElementById('quote-policy').textContent);
+const TIERS = POLICY.tiers;
+const CREDITS_PER_MIN = POLICY.creditsPerMin;
+const LIP_MULT = POLICY.lipMult;
 
 /* ---------- i18n ---------- */
 const I = {
@@ -293,15 +293,16 @@ const I = {
     l_basis:'Input basis', l_basis_h:'(monthly rate vs total volume)',
     basis_mo:'Monthly', basis_tot:'Total volume',
     s1_t:'Usage Volume', l_perlang_t:'Total dubbing per language', r_total_t:'Total usage', u_min_t:'min',
-    r_cycle_t:'Monthly equivalent on this tier:', monthlyEq:(min)=>`~${min.toLocaleString()} min/mo`,
+    r_cycle_t:"This tier's monthly capacity:", monthlyEq:(min)=>`~${min.toLocaleString()} min/mo`,
     u_min:'min / mo', u_min2:'min / mo', u_min3:'min',
     r_total:'Total monthly usage', r_cycle:'Over the recommended billing cycle:',
+    lip_note:'Lip-dubbing burns 3× credits, so the total above is shown in credit-equivalent minutes (= finished minutes × 3) for tier sizing.',
     reco_best:'Best fit', m_use:'Your usage', m_cap:'Tier capacity',
-    sc_applying:'Applying to', l_sc:'Service credit to grant', l_sc_h:'(bonus, on top of plan credit)', u_cr:'credits',
+    sc_applying:'Applying to', sc_following:'· following recommendation', l_sc:'Service credit to grant', l_sc_h:'(bonus, on top of plan credit)', u_cr:'credits',
     sc_note:'Payment amount is fixed by the tier and never changes — extra credits only improve the effective per-minute rate the customer sees.',
     k_final:'Final granted credit', k_base:'Base', k_bonus:'bonus', k_minutes:'Final dubbing minutes', k_rate:'60 credits / min',
     k_lipminutes:'Final lip-sync dubbing minutes', k_liprate:'180 credits / min',
-    k_eff:'Effective price / min', k_list:'List $2.00', k_pay:'Payment (fixed)', k_locked:'LOCKED',
+    k_eff:'Effective price / min', k_list:'—', k_pay:'Payment (fixed)', k_locked:'LOCKED',
     e_pos:'Enter a number of 0 or greater.', e_lang:'At least 1 language is required.', e_pos2:'Enter a number of 0 or greater.',
     f1:'<b>How it works:</b> Tier capacity is computed on a monthly basis (cycle dubbing minutes ÷ cycle length): Tier 1 ≈ 167 min/mo, Tier 2 ≈ 367 min/mo, Tier 3 ≈ 467 min/mo. The smallest tier that covers your total monthly usage is recommended.',
     f2:'<b>Below Tier 1?</b> Usage under ~167 min/mo can be served on the Pro subscription. <b>Above Tier 3?</b> Stay on Tier 3 and top up with Get Credit (add-on purchase).',
@@ -315,6 +316,7 @@ const I = {
       ? `The smallest tier that fully covers the total dubbing volume (${t.cycleMonths}-month cycle).`
       : `The smallest tier that fully covers your monthly usage (${t.cycleMonths}-month cycle).`,
     reasonOver:'Usage exceeds the largest self-serve tier — see the top-up note below.',
+    reasonBelowT1:"Below Tier 1's minimum — the Pro subscription is usually the better fit (see note below).",
     reasonEmpty:'Enter a monthly usage to see a recommendation.',
     proBanner:(cap,tot)=> tot
       ? `<b>Below Tier 1.</b> The total volume is under Tier 1's allotment (${cap.toLocaleString()} min). The Pro subscription may be more cost-effective — Tier 1 is the Business plan's entry point. Recommend Pro unless the customer wants Business-grade queue/concurrency.`
@@ -324,6 +326,7 @@ const I = {
       : `<b>Above Tier 3.</b> Stay on Tier 3 and add <b>~${extraMin.toLocaleString()} min</b> (≈ <b>${extraCr.toLocaleString()} credits</b>) per cycle via Get Credit.`,
     payCycle:(m)=>`${m} mo`, listLabel:(p)=>`List $${p.toFixed(2)}`,
     discount:(p,pct)=>`$${p.toFixed(2)} · −${pct}% vs list`,
+    discountSmall:(p)=>`$${p.toFixed(2)} · −<1% vs list`,
     needInput:'—'
   },
   ko:{
@@ -337,15 +340,16 @@ const I = {
     l_basis:'입력 기준', l_basis_h:'(월 사용량 vs 전체 볼륨)',
     basis_mo:'월 기준', basis_tot:'전체 볼륨',
     s1_t:'사용량', l_perlang_t:'언어당 전체 더빙량', r_total_t:'총 사용량', u_min_t:'분',
-    r_cycle_t:'해당 Tier 월 환산:', monthlyEq:(min)=>`~${min.toLocaleString()}분/월`,
+    r_cycle_t:'이 Tier 월 capacity:', monthlyEq:(min)=>`~${min.toLocaleString()}분/월`,
     u_min:'분 / 월', u_min2:'분 / 월', u_min3:'분',
     r_total:'총 월 사용량', r_cycle:'추천 결제주기 기준 총량:',
+    lip_note:'립더빙은 크레딧을 3배 차감하므로, 위 총량은 Tier 산정을 위해 크레딧 환산 분(= 완성 분 × 3)으로 표시됩니다.',
     reco_best:'최적', m_use:'고객 사용량', m_cap:'Tier 월 capacity',
-    sc_applying:'적용 대상', l_sc:'지급할 서비스 크레딧', l_sc_h:'(플랜 크레딧에 더해지는 보너스)', u_cr:'크레딧',
+    sc_applying:'적용 대상', sc_following:'· 추천 따라가는 중', l_sc:'지급할 서비스 크레딧', l_sc_h:'(플랜 크레딧에 더해지는 보너스)', u_cr:'크레딧',
     sc_note:'결제 금액은 Tier로 확정되어 변동되지 않습니다 — 추가 크레딧은 고객이 체감하는 실질 분당 단가만 낮춥니다.',
     k_final:'최종 지급 크레딧', k_base:'기본', k_bonus:'보너스', k_minutes:'최종 더빙 분량', k_rate:'60 크레딧 / 분',
     k_lipminutes:'최종 립더빙 분량', k_liprate:'180 크레딧 / 분',
-    k_eff:'실질 분당 단가', k_list:'정가 $2.00', k_pay:'결제 금액 (고정)', k_locked:'고정',
+    k_eff:'실질 분당 단가', k_list:'—', k_pay:'결제 금액 (고정)', k_locked:'고정',
     e_pos:'0 이상의 숫자를 입력하세요.', e_lang:'언어 수는 최소 1개입니다.', e_pos2:'0 이상의 숫자를 입력하세요.',
     f1:'<b>계산 방식:</b> Tier capacity는 월 환산 기준입니다(사이클 더빙 분량 ÷ 결제주기): Tier 1 ≈ 167분/월, Tier 2 ≈ 367분/월, Tier 3 ≈ 467분/월. 총 월 사용량을 커버하는 가장 작은 Tier를 추천합니다.',
     f2:'<b>Tier 1 미만:</b> 월 ~167분 미만 사용량은 Pro 구독으로 안내합니다. <b>Tier 3 초과:</b> Tier 3 유지 + Get Credit(추가 구매)으로 보충합니다.',
@@ -358,6 +362,7 @@ const I = {
       ? `전체 더빙 볼륨을 완전히 커버하는 가장 작은 Tier입니다 (${t.cycleMonths}개월 주기).`
       : `월 사용량을 완전히 커버하는 가장 작은 Tier입니다 (${t.cycleMonths}개월 주기).`,
     reasonOver:'최대 셀프서브 Tier를 초과합니다 — 아래 추가 구매 안내를 확인하세요.',
+    reasonBelowT1:'Tier 1 최소 사용량 미만 — 보통 Pro 구독이 더 적합합니다 (아래 참고).',
     reasonEmpty:'월 사용량을 입력하면 추천이 표시됩니다.',
     proBanner:(cap,tot)=> tot
       ? `<b>Tier 1 미만.</b> 전체 볼륨이 Tier 1 제공량(${cap.toLocaleString()}분)보다 적습니다. Pro 구독이 더 합리적일 수 있습니다 — Tier 1은 Business 플랜의 최소 진입점입니다. Business급 queue/동시처리가 꼭 필요한 경우가 아니라면 Pro를 권장하세요.`
@@ -367,6 +372,7 @@ const I = {
       : `<b>Tier 3 초과.</b> Tier 3 유지 + 주기당 <b>~${extraMin.toLocaleString()}분</b>(≈ <b>${extraCr.toLocaleString()} 크레딧</b>)을 Get Credit으로 추가하세요.`,
     payCycle:(m)=>`${m}개월`, listLabel:(p)=>`정가 $${p.toFixed(2)}`,
     discount:(p,pct)=>`$${p.toFixed(2)} · 정가 대비 −${pct}%`,
+    discountSmall:(p)=>`$${p.toFixed(2)} · 정가 대비 −1% 미만`,
     needInput:'—'
   }
 };
@@ -378,8 +384,9 @@ let recommended=null;
 
 /* ---------- helpers ---------- */
 const $=id=>document.getElementById(id);
-const fmt=n=>Number(n).toLocaleString(undefined,{maximumFractionDigits:0});
-const fmt1=n=>Number(n).toLocaleString(undefined,{maximumFractionDigits:1});
+const _loc=()=> lang==='ko' ? 'ko-KR' : 'en-US';   // pin grouping to the app toggle, not browser locale
+const fmt=n=>Number(n).toLocaleString(_loc(),{maximumFractionDigits:0});
+const fmt1=n=>Number(n).toLocaleString(_loc(),{maximumFractionDigits:1});
 
 function setLang(l){
   lang=l;
@@ -400,7 +407,7 @@ function bump(id,d){
 }
 
 function setLip(on){
-  lipMult = on ? 3 : 1;
+  lipMult = on ? LIP_MULT : 1;
   document.querySelectorAll('#lipSeg button').forEach(b=>{
     b.classList.toggle('active', parseInt(b.dataset.lip,10)===on);
   });
@@ -421,7 +428,8 @@ function buildTiers(){
   TIERS.forEach(t=>{
     const d=document.createElement('div');
     d.className='tier'; d.id='tier-'+t.key;
-    d.onclick=()=>{ selectedTier=t.id; recalc(); };
+    // click applies credits to this tier; clicking the pinned tier again returns to auto-follow.
+    d.onclick=()=>{ selectedTier = (selectedTier===t.id) ? null : t.id; recalc(); };
     const L=I[lang];
     d.innerHTML=`
       <div class="tname">Tier ${t.id}</div>
@@ -431,7 +439,7 @@ function buildTiers(){
       <div class="tspecs">
         <div><span>${lang==='ko'?'지급 크레딧':'Credits'}</span><span>${fmt(t.credits)}</span></div>
         <div><span>${lang==='ko'?'더빙 분량':'Dubbing'}</span><span>${fmt(t.dubbingMin)} min</span></div>
-        <div><span>${lang==='ko'?'월 capacity':'Monthly cap'}</span><span>${fmt(t.monthlyCap)} min</span></div>
+        <div><span>${lang==='ko'?'월 capacity':'Monthly cap'}</span><span>${fmt(Math.round(t.monthlyCap))} min</span></div>
         <div><span>${lang==='ko'?'분당 단가':'Per-min'}</span><span>$${t.perMin.toFixed(2)}</span></div>
         <div><span>Queue / Conc.</span><span>${t.queue} / ${t.concurrent}</span></div>
       </div>`;
@@ -459,8 +467,11 @@ function recalc(){
 
   const usage = per*langs*lipMult;
   const isTotal = (basis==='total');
-  const capField = isTotal ? 'dubbingMin' : 'monthlyCap';
   const unit = isTotal ? (lang==='ko'?'분':' min') : (lang==='ko'?'분/월':' min/mo');
+  // Capacity a tier absorbs on the active basis, rounded to the SAME number the UI
+  // advertises — so entering a tier's displayed cap (167/367/467) lands on that tier
+  // instead of being bumped up by the sub-minute repeating decimal.
+  const capOf = t => isTotal ? t.dubbingMin : Math.round(t.monthlyCap);
 
   // mode-dependent labels
   $('cardTitle').textContent   = isTotal ? L.s1_t       : L.s1;
@@ -471,13 +482,14 @@ function recalc(){
   $('cycleLab').textContent    = isTotal ? L.r_cycle_t   : L.r_cycle;
 
   $('totalMonthly').textContent = fmt1(usage);
+  $('lipNote').style.display = (lipMult===LIP_MULT) ? 'block' : 'none';
 
   // ----- recommendation -----
   recommended=null; let overflow=false; let belowT1=false;
   if(usage>0 && langs>=1){
-    recommended = TIERS.find(t=> t[capField] >= usage) || null;
+    recommended = TIERS.find(t=> capOf(t) >= usage) || null;
     if(!recommended){ recommended=TIERS[2]; overflow=true; }
-    if(usage < TIERS[0][capField]) belowT1=true;
+    if(usage < capOf(TIERS[0])) belowT1=true;
   }
 
   const recobox=$('recobox');
@@ -493,12 +505,13 @@ function recalc(){
     $('totalCycle').textContent='—';
   } else {
     const t=recommended;
-    const cap=t[capField];
+    const cap=capOf(t);
     $('recoName').textContent = 'Tier '+t.id;
     $('recoPrice').textContent = `· $${fmt(t.usd)} / ${L.payCycle(t.cycleMonths)}`;
-    // reason
+    // reason — belowT1 speaks with one voice as the Pro banner (mutually consistent)
     let reason;
     if(overflow) reason=L.reasonOver;
+    else if(belowT1) reason=L.reasonBelowT1;
     else if(usage <= cap*0.85) reason=L.reasonFit(t,isTotal);
     else reason=L.reasonExact(t,isTotal);
     $('recoReason').textContent=reason;
@@ -507,8 +520,8 @@ function recalc(){
     $('utilFill').style.width = util.toFixed(0)+'%';
     $('utilUse').textContent = fmt1(usage)+unit;
     $('utilCap').textContent = fmt(cap)+unit;
-    // subnote: monthly mode -> cycle total; total mode -> per-month equivalent
-    if(isTotal) $('totalCycle').textContent = L.monthlyEq(Math.round(usage/t.cycleMonths));
+    // subnote: monthly mode -> cycle total; total mode -> this tier's monthly capacity
+    if(isTotal) $('totalCycle').textContent = L.monthlyEq(Math.round(t.monthlyCap));
     else        $('totalCycle').textContent = L.cycleVal(t.cycleMonths, Math.round(usage*t.cycleMonths));
     // banner
     let bh='';
@@ -517,9 +530,15 @@ function recalc(){
       bh+=`<div class="banner pro"><span class="ic">💡</span><div>${L.proBanner(c,isTotal)}</div></div>`;
     }
     if(overflow){
-      const extraMin = isTotal ? Math.ceil(usage - t.dubbingMin) : Math.ceil((usage-t.monthlyCap)*t.cycleMonths);
-      const extraCr=extraMin*CREDITS_PER_MIN;
-      bh+=`<div class="banner over"><span class="ic">⚠️</span><div>${L.overBanner(extraMin,extraCr,isTotal)}</div></div>`;
+      // shortfall in credit-equivalent minutes over the cycle (usage is already lip-inflated)
+      const extraEqMin = isTotal
+        ? Math.ceil(usage - t.dubbingMin)
+        : Math.ceil((usage - Math.round(t.monthlyCap))*t.cycleMonths);
+      const extraCr = extraEqMin*CREDITS_PER_MIN;
+      // display FINISHED minutes: lip burns 3× credits, so finished = credit-equiv ÷ lipMult
+      const extraMin = Math.round(extraEqMin/lipMult);
+      if(extraEqMin>0)
+        bh+=`<div class="banner over"><span class="ic">⚠️</span><div>${L.overBanner(extraMin,extraCr,isTotal)}</div></div>`;
     }
     $('banner').innerHTML=bh;
   }
@@ -538,19 +557,28 @@ function recalc(){
   const baseCr=active.credits;
   const finalCr=baseCr+svc;
   const finalMin=finalCr/CREDITS_PER_MIN;
-  const lipFinalMin=finalCr/(CREDITS_PER_MIN*3);
+  const lipFinalMin=finalCr/(CREDITS_PER_MIN*LIP_MULT);
   const effPrice= finalMin>0 ? active.usd/finalMin : 0;
   const pct = Math.round((1-(effPrice/active.perMin))*100);
+  // a genuine concession = any positive bonus lowers the effective price below list
+  const cheaper = svc>0 && effPrice < active.perMin - 1e-9;
 
   $('scTier').textContent='Tier '+active.id;
+  $('scFollow').textContent = (selectedTier===null) ? L.sc_following : '';
   $('kFinalCredit').textContent=fmt(finalCr);
   $('kBaseCredit').textContent=fmt(baseCr);
   $('kBonus').textContent=fmt(svc);
   $('kMinutes').textContent=fmt(finalMin);
   $('kLipMinutes').textContent=fmt(lipFinalMin);
   $('kEffPrice').textContent=effPrice.toFixed(2);
-  $('kDiscount').innerHTML = (svc>0 && pct>0) ? L.discount(effPrice,pct) : L.listLabel(active.perMin);
-  $('kDiscount').className = (svc>0 && pct>0) ? 'msub down' : 'msub mut';
+  // keep the discount label consistent with the effective-price number shown above it
+  if(cheaper){
+    $('kDiscount').innerHTML = (pct>=1) ? L.discount(effPrice,pct) : L.discountSmall(effPrice);
+    $('kDiscount').className = 'msub down';
+  } else {
+    $('kDiscount').innerHTML = L.listLabel(active.perMin);
+    $('kDiscount').className = 'msub mut';
+  }
   $('kPayUsd').textContent=fmt(active.usd);
   $('kPayKrw').textContent=fmt(active.krw);
   $('kPayCycle').textContent=L.payCycle(active.cycleMonths);
