@@ -16,15 +16,6 @@
   {% endif %}
 </div>
 
-{# ---- flow filter (outbound / inbound reply) ---- #}
-{% set flow_chips = [('all','전체'), ('outbound','아웃바운드'), ('inbound','인바운드 회신')] %}
-<div class="chip-row" role="tablist" aria-label="구분 필터" style="margin-bottom:10px">
-  {% for val, label in flow_chips %}
-  <a class="chip{% if filter_flow == val %} is-active{% endif %}" role="tab" aria-selected="{{ 'true' if filter_flow == val else 'false' }}"
-     href="/messages?status={{ filter_status }}&channel={{ filter_channel }}&flow={{ val }}">{{ label }}</a>
-  {% endfor %}
-</div>
-
 {# ---- status filter chips + channel select ---- #}
 {% set chips = [('', '전체'), ('pending_approval','승인 대기'), ('approved','승인됨'), ('sent','발송됨'), ('replied','응답'), ('rejected','거절'), ('bounced','반송')] %}
 <div class="row-between wrap mb-gap" style="align-items:center">
@@ -49,20 +40,13 @@
     <table class="table">
       <thead>
         <tr>
-          <th scope="col">상태</th><th scope="col">구분</th><th scope="col">제목</th><th scope="col">분류</th><th scope="col">채널</th><th scope="col">수신자</th><th scope="col">시간</th>
+          <th scope="col">상태</th><th scope="col">제목</th><th scope="col">분류</th><th scope="col">채널</th><th scope="col">수신자</th><th scope="col">시간</th>
         </tr>
       </thead>
       <tbody>
         {% for msg in messages %}
         <tr class="is-clickable" onclick="location.href='/messages/{{ msg.id }}'">
           <td>{{ status_pill(msg.status, "sm") }}</td>
-          <td>
-            {% if msg.flow == 'inbound_reply' %}
-            <span class="source-tag" style="gap:6px;color:var(--info)">{{ icon("inbound", 15) }} 인바운드 회신</span>
-            {% else %}
-            <span class="source-tag" style="gap:6px;color:var(--accent)">{{ icon("outbound", 15) }} 아웃바운드</span>
-            {% endif %}
-          </td>
           <td class="truncate" style="max-width:300px">{{ msg.subject }}</td>
           <td class="td-muted">{{ msg.category }}</td>
           <td class="td-muted">{{ msg.channel }}</td>

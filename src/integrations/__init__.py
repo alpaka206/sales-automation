@@ -1,1 +1,1 @@
-"""External service clients: hubspot, slack, youtube, senders."""
+"""External service clients: hubspot, slack, senders."""

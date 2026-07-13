@@ -17,7 +17,7 @@ from fastapi.staticfiles import StaticFiles
 from ..agents.approval import ApprovalError, approve, mark_sent, reject
 from ..common.config import settings
 from ..common.logging import setup_logging
-from .schemas import ApprovalBody, OutboundRunBody
+from .schemas import ApprovalBody
 from .security import (
     API_SKIP_PATHS,
     check_web_ui_basic_auth,
@@ -212,23 +212,6 @@ def internal_healthcheck() -> dict:
 
 
 # ---------- Agent routes ----------
-
-
-@app.post("/run/outbound")
-def run_outbound(body: OutboundRunBody) -> dict:
-    from ..agents.outbound import OutboundAgent
-
-    agent = OutboundAgent()
-    agent.run(source=body.source, filters=body.filters)
-    return {"status": "started"}
-
-
-@app.post("/run/reply_check")
-def run_reply_check() -> dict:
-    from ..agents.reply_check import run
-
-    stats = run()
-    return {"status": "ok", **stats}
 
 
 @app.post("/run/report")

@@ -87,21 +87,6 @@ class Settings(BaseSettings):
     REPORT_SLACK_CHANNEL_ID: str = ""
     REPORT_EMAIL_TO: str = ""
 
-    # ----- Gmail IMAP (reply detection for SMTP-sent mail) -----
-    GMAIL_IMAP_USERNAME: str = ""
-    GMAIL_IMAP_PASSWORD: str = ""
-    GMAIL_IMAP_FOLDER: str = "INBOX"
-
-    # ----- Sources -----
-    YOUTUBE_API_KEY: str = ""
-    GOOGLE_CSE_API_KEY: str = ""
-    GOOGLE_CSE_ID: str = ""
-    JOB_BOARD_SITES: str = "saramin.co.kr,jobkorea.co.kr"
-    LINKEDIN_ENABLED: bool = False
-    LINKEDIN_SCRAPING_ENABLED: bool = False
-    LINKEDIN_SESSION_COOKIE: str = ""
-    LINKEDIN_API_TOKEN: str = ""
-
     # ----- Inbound poller -----
     INBOUND_POLL_ENABLED: bool = False
     INBOUND_POLL_INTERVAL_SECONDS: int = 600
@@ -125,11 +110,6 @@ class Settings(BaseSettings):
 
     # ----- Behavior knobs -----
     AUTO_SEND_THRESHOLD: float = 1.01  # >1.0 => never auto-send
-    OUTBOUND_COOLDOWN_DAYS: int = 90
-    FOLLOWUP_AFTER_DAYS: int = 7
-    FOLLOWUP_AUTO_SEND: bool = False
-    MAX_FOLLOWUPS_PER_PROSPECT: int = 2
-    ICP_THRESHOLD: int = 50
     DAILY_REPORT_HOUR: int = 18
     WEEKLY_REPORT_DOW: int = 5  # 0=Mon, 5=Sat
 

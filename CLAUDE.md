@@ -2,13 +2,14 @@
 
 ## What this project is
 
-A sales automation system with three agents:
+A sales automation system with two agents:
 
 1. **Inbound Agent** — listens for HubSpot inbound inquiries, analyzes them with an LLM, drafts a reply (email or WhatsApp), and sends it after human approval.
-2. **Outbound Agent** — discovers prospects from configurable sources (YouTube, LinkedIn, manual CSV), runs source-specific prompts, dedupes against the DB, sends opening emails, and waits for replies.
-3. **Report Agent** — aggregates the activity of the two agents above into daily and weekly reports.
+2. **Report Agent** — aggregates inbound activity into daily and weekly reports.
 
-This is **not** a "fully autonomous AI agent" — it is a **workflow automation system** where an LLM handles judgment-heavy steps (classification, scoring, drafting) and Python code (including in-process background workers) handles deterministic steps (triggering, sending, recording, follow-ups).
+(An Outbound prospecting agent existed earlier and was **removed entirely** on 2026-07-13 — see git history / branch `chore/remove-outbound-agent`.)
+
+This is **not** a "fully autonomous AI agent" — it is a **workflow automation system** where an LLM handles judgment-heavy steps (classification, scoring, drafting) and Python code (including in-process background workers) handles deterministic steps (triggering, sending, recording).
 
 ## High-level architecture
 
@@ -16,14 +17,14 @@ This is **not** a "fully autonomous AI agent" — it is a **workflow automation 
 HubSpot (CRM, source of truth)
        │
        ▼
-Background workers in FastAPI (inbound_poller, send_worker, reply_check)
+Background workers in FastAPI (inbound_poller, send_worker)
        │           ▲
        ▼           │ approve/reject
    FastAPI BE  ───►  Slack / Web UI
        │
        ├──► LLM layer (Gemini on Vertex AI)
        │
-       ├──► SQLite DB  (prospects, messages, conversations, follow-ups)
+       ├──► SQLite DB  (contacts, conversations, messages)
        │
        └──► Senders (HubSpot Engagements API, SMTP, WhatsApp stub)
 ```
@@ -43,9 +44,9 @@ sales-automation/
 ├── knowledge_base/        # product facts (pricing, policies, FAQ) — selected by category
 ├── src/
 │   ├── api/               # FastAPI app and routes
-│   ├── agents/            # inbound / outbound / report orchestration
+│   ├── agents/            # inbound / report orchestration
 │   ├── llm/               # LLM client (Gemini on Vertex AI)
-│   ├── integrations/      # hubspot, youtube, linkedin, slack, smtp, whatsapp
+│   ├── integrations/      # hubspot, slack, smtp, whatsapp
 │   ├── db/                # SQLAlchemy models, migrations, repositories
 │   └── common/            # logging, config, prompt loading, helpers
 ├── scripts/               # init_db, dev helpers
@@ -68,7 +69,7 @@ The LLM client lives in `src/llm/client.py` and exposes a single `complete(promp
 
 The only provider is **Gemini on Vertex AI** (`src/llm/providers/gemini_vertex.py`), via the `google-genai` SDK. Authentication uses a service-account JSON in `GOOGLE_CREDENTIALS_JSON` (no API key); the project comes from `GOOGLE_CLOUD_PROJECT` or the JSON's `project_id`, region from `GOOGLE_CLOUD_LOCATION`.
 
-**Hybrid model tiers:** `tier="flash"` (default) uses `GEMINI_MODEL` (`gemini-2.5-flash`) for light judgment — classification, scoring, doc routing, enrichment. `tier="pro"` uses `GEMINI_MODEL_PRO` (`gemini-2.5-pro`) for customer-facing drafting — inbound replies, outbound opening emails, follow-ups.
+**Hybrid model tiers:** `tier="flash"` (default) uses `GEMINI_MODEL` (`gemini-2.5-flash`) for light judgment — classification, scoring, doc routing, enrichment. `tier="pro"` uses `GEMINI_MODEL_PRO` (`gemini-2.5-pro`) for customer-facing drafting — inbound replies.
 
 All prompts live as `.md` files in `src/llm/prompts/`. They are loaded by name, not hardcoded as strings.
 
@@ -89,21 +90,13 @@ Stub interface only for now. Real WhatsApp Cloud API integration is parked behin
 
 ## Human-in-the-loop
 
-No outbound message goes out without approval **in the first iteration of the product**. Approval flow:
+No outgoing message goes out without approval **in the first iteration of the product**. Approval flow:
 
 1. Agent drafts message → stores in `messages` table with status `pending_approval`.
 2. BE posts a Slack card with the draft and a link to approve (and exposes Approve / Edit / Reject in the web UI at `/messages/{id}`).
 3. Approval webhook hits FastAPI `/approve/{message_id}` → status flips to `approved` → sender goes.
 
 `AUTO_SEND_THRESHOLD` env var lets us later auto-send when LLM confidence is above a threshold (default: never, `1.01`).
-
-## Dedup rule (Outbound)
-
-A prospect is identified by **normalized email** (lowercased, plus-stripped). The outbound agent dedups **before drafting** (in `OutboundAgent._is_dup`): if the normalized email already exists in **`prospects` (any status) OR `contacts`**, the candidate is skipped (recorded as a `skipped_dup` audit row). This is **existence-based** — an email already in the DB is never re-targeted, regardless of `last_contacted_at` (the old 90-day cooldown re-engage was removed). `_persist_prospect` is upsert-safe so re-runs never hit the UNIQUE constraint. `OUTBOUND_COOLDOWN_DAYS` is retained in config but no longer gates dedup.
-
-## Reply detection
-
-For follow-ups: store `last_outgoing_message_at` per conversation. The in-process reply_check job (callable via `/run/reply_check` or scheduled OS-side) checks the HubSpot inbox / Gmail IMAP for replies. If found → mark `replied=true`, do NOT send follow-up. If not found after N days (`FOLLOWUP_AFTER_DAYS`, default 7) → draft follow-up.
 
 ## Free / local stack
 
@@ -113,11 +106,10 @@ This project must run end-to-end on a developer laptop with no paid services. Cl
 
 - Unit tests for: prompt rendering, LLM client adapters (mock subprocess), HubSpot client (mock httpx), dedup logic.
 - Integration test for end-to-end inbound flow with a fake HubSpot webhook payload and a stub LLM that returns canned JSON.
-- No tests against live HubSpot/YouTube/LinkedIn — all mocked.
+- No tests against live HubSpot — all mocked.
 
 ## What lives where (quick map for Claude)
 
-- New prospect source (e.g. Crunchbase) → `src/integrations/<source>.py` + `src/agents/outbound/source_registry.py` entry.
 - New prompt → `src/llm/prompts/<area>/<name>.md` + reference in code with `load_prompt("<area>/<name>")`.
 - New rule that affects message tone → `company_rules/<n>_<topic>.md`, then the prompt template includes it automatically.
 - New factual reference doc (pricing, policy, FAQ, product info) → copy `knowledge_base/_TEMPLATE.md` to `knowledge_base/<name>.md`, fill the frontmatter (`categories`, `summary`, `tags`, `status: active`, ...), then `python scripts/import_knowledge_base.py`. The inbound agent's LLM router (`select_relevant_docs`) reads `summary`+`tags` to pick docs; edits made via the web UI (`/knowledge`) snapshot history into `knowledge_document_revisions`.

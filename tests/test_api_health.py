@@ -34,16 +34,18 @@ def test_healthz_has_request_id(client: TestClient) -> None:
 
 
 def test_protected_route_rejects_no_token(client: TestClient) -> None:
-    r = client.post("/run/reply_check")
+    r = client.post("/run/report")
     assert r.status_code == 401
     assert r.json()["detail"] == "invalid or missing token"
 
 
 def test_protected_route_accepts_valid_token(client: TestClient) -> None:
-    r = client.post(
-        "/run/reply_check",
-        headers={"X-Internal-Token": settings.INTERNAL_API_TOKEN},
-    )
+    with patch("src.agents.report.ReportAgent") as mock_agent:
+        mock_agent.return_value.generate.return_value = "report body"
+        r = client.post(
+            "/run/report",
+            headers={"X-Internal-Token": settings.INTERNAL_API_TOKEN},
+        )
     assert r.status_code == 200
     assert r.json()["status"] == "ok"
 
@@ -78,24 +80,6 @@ def test_webhook_rejects_unsigned_when_required(client: TestClient, monkeypatch)
     )
     assert r.status_code == 503
     assert "HUBSPOT_WEBHOOK_SECRET" in r.json()["detail"]
-
-
-def test_run_outbound_endpoint_imports_agent(client: TestClient) -> None:
-    """Regression: POST /run/outbound must be able to import OutboundAgent.
-
-    The `outbound/` package previously shadowed a dead `outbound.py`, so
-    `from ..agents.outbound import OutboundAgent` raised ImportError at runtime.
-    """
-    with patch("src.agents.outbound.OutboundAgent") as mock_agent:
-        mock_agent.return_value.run.return_value = {}
-        r = client.post(
-            "/run/outbound",
-            json={"source": "manual_csv", "filters": {}},
-            headers={"X-Internal-Token": settings.INTERNAL_API_TOKEN},
-        )
-    assert r.status_code == 200
-    assert r.json()["status"] == "started"
-    mock_agent.return_value.run.assert_called_once()
 
 
 def test_web_ui_localhost_allowed(client: TestClient, monkeypatch) -> None:

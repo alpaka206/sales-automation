@@ -25,12 +25,9 @@
     <div class="nav-group-label">운영</div>
     {{ _nav("/", "대시보드", "dashboard", _path == "/", badge=nav_pending) }}
     {{ _nav("/messages", "메시지", "messages", _path.startswith("/messages"), badge=nav_pending) }}
-    {{ _nav("/outbound/new", "아웃바운드", "outbound", _path.startswith("/outbound")) }}
-    {{ _nav("/prospects", "프로스펙트", "prospects", _path.startswith("/prospects")) }}
     {{ _nav("/tools/quote-calculator", "견적 계산기", "calculator", _path.startswith("/tools/quote-calculator")) }}
 
     <div class="nav-group-label">설정</div>
-    {{ _nav("/icp-rules", "ICP 룰", "icp", _path.startswith("/icp-rules")) }}
     {{ _nav("/knowledge", "지식베이스", "knowledge", _path.startswith("/knowledge")) }}
     {{ _nav("/email-templates", "이메일 템플릿", "mail", _path.startswith("/email-templates")) }}
     {%- if _is_admin %}

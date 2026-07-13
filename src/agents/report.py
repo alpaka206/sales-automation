@@ -11,7 +11,7 @@ from email.mime.text import MIMEText
 from sqlalchemy import func
 
 from ..common.config import settings
-from ..db.models import Message, Prospect
+from ..db.models import Message
 from ..db.session import SessionLocal
 from ..integrations import slack
 from ..integrations.slack import SlackNotConfigured
@@ -66,34 +66,10 @@ class ReportAgent:
             .scalar()
             or 0
         )
-        prospects = (
-            session.query(func.count(Prospect.id))
-            .filter(Prospect.created_at >= since)
-            .scalar()
-            or 0
-        )
-        prospects_by_status = dict(
-            session.query(Prospect.status, func.count(Prospect.id))
-            .filter(Prospect.created_at >= since)
-            .group_by(Prospect.status)
-            .all()
-        )
-        top_source_row = (
-            session.query(Prospect.source, func.count(Prospect.id))
-            .filter(Prospect.created_at >= since)
-            .group_by(Prospect.source)
-            .order_by(func.count(Prospect.id).desc())
-            .first()
-        )
-        top_source = top_source_row[0] if top_source_row else "N/A"
-
         return {
             "sent": sent,
             "replied": replied,
             "pending": pending,
-            "prospects": prospects,
-            "prospects_by_status": prospects_by_status,
-            "top_source": top_source,
         }
 
     def _generate_narrative(self, stats: dict, period: str) -> str:
@@ -105,15 +81,13 @@ class ReportAgent:
                     "sent_count": str(stats["sent"]),
                     "replied_count": str(stats["replied"]),
                     "pending_count": str(stats["pending"]),
-                    "prospect_count": str(stats["prospects"]),
-                    "top_source": stats["top_source"],
                 },
             )
         except Exception:
             logger.warning("LLM narrative failed, using template.", exc_info=True)
             return (
                 f"{period} report: {stats['sent']} messages sent, "
-                f"{stats['replied']} replies, {stats['prospects']} new prospects."
+                f"{stats['replied']} replies."
             )
 
     def _format_report(self, stats: dict, narrative: str, period: str, since: datetime | None = None) -> str:
@@ -128,16 +102,8 @@ class ReportAgent:
             f"- Messages sent: **{stats['sent']}**",
             f"- Replies received: **{stats['replied']}**",
             f"- Pending approval: **{stats['pending']}**",
-            f"- New prospects: **{stats['prospects']}**",
-            f"- Top source: **{stats['top_source']}**",
             "",
         ]
-
-        if stats["prospects_by_status"]:
-            lines.append("## Prospects by Status")
-            for status, count in sorted(stats["prospects_by_status"].items()):
-                lines.append(f"- {status}: {count}")
-            lines.append("")
 
         llm_section = self._llm_cost_summary(since)
         if llm_section:

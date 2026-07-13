@@ -102,12 +102,6 @@ services:
         value: "false"
       - key: AUTO_SEND_THRESHOLD
         value: "1.01"
-      - key: OUTBOUND_COOLDOWN_DAYS
-        value: "90"
-      - key: FOLLOWUP_AFTER_DAYS
-        value: "4"
-      - key: ICP_THRESHOLD
-        value: "50"
       - key: TIMEZONE
         value: Asia/Seoul
       - key: LOG_LEVEL

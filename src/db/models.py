@@ -40,35 +40,6 @@ class Contact(Base):
     conversations: Mapped[list[Conversation]] = relationship(back_populates="contact")
 
 
-class Prospect(Base):
-    __tablename__ = "prospects"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    source: Mapped[str] = mapped_column(String, nullable=False)
-    source_ref: Mapped[str | None] = mapped_column(String, nullable=True)
-    email: Mapped[str | None] = mapped_column(String, nullable=True)
-    normalized_email: Mapped[str | None] = mapped_column(
-        String, nullable=True, index=True, unique=True
-    )
-    full_name: Mapped[str] = mapped_column(String, nullable=False)
-    company: Mapped[str | None] = mapped_column(String, nullable=True)
-    domain: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
-    country: Mapped[str | None] = mapped_column(String, nullable=True)
-    icp_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    icp_rationale: Mapped[str | None] = mapped_column(Text, nullable=True)
-    status: Mapped[str] = mapped_column(String, nullable=False, default="collected")
-    contact_id: Mapped[int | None] = mapped_column(
-        Integer, ForeignKey("contacts.id", ondelete="SET NULL"), nullable=True
-    )
-    last_contacted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    follow_up_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
-
-    __table_args__ = (Index("ix_prospects_domain_fullname", "domain", "full_name"),)
-
-    conversations: Mapped[list[Conversation]] = relationship(back_populates="prospect")
-
-
 class Conversation(Base):
     __tablename__ = "conversations"
 
@@ -76,9 +47,9 @@ class Conversation(Base):
     contact_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("contacts.id", ondelete="CASCADE"), nullable=False
     )
-    prospect_id: Mapped[int | None] = mapped_column(
-        Integer, ForeignKey("prospects.id", ondelete="SET NULL"), nullable=True
-    )
+    # Vestigial: the outbound agent (and its prospects table) was removed. Kept as a
+    # plain nullable column so existing rows survive; always NULL for inbound threads.
+    prospect_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     topic: Mapped[str | None] = mapped_column(String, nullable=True)
     stage: Mapped[str] = mapped_column(String, nullable=False, default="initial")
     last_outgoing_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
@@ -94,7 +65,6 @@ class Conversation(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
 
     contact: Mapped[Contact] = relationship(back_populates="conversations")
-    prospect: Mapped[Prospect | None] = relationship(back_populates="conversations")
     messages: Mapped[list[Message]] = relationship(back_populates="conversation")
     progress: Mapped[list[ConversationProgress]] = relationship(
         back_populates="conversation", order_by="ConversationProgress.created_at"
@@ -195,19 +165,6 @@ class Event(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
 
     __table_args__ = (Index("ix_events_kind", "kind"),)
-
-
-class CountrySendWindow(Base):
-    """Per-country optimal sending time windows for outbound scheduling."""
-
-    __tablename__ = "country_send_windows"
-
-    country_code: Mapped[str] = mapped_column(String, primary_key=True)
-    country_name: Mapped[str] = mapped_column(String, nullable=False)
-    timezone: Mapped[str] = mapped_column(String, nullable=False)
-    hours_start: Mapped[int] = mapped_column(Integer, nullable=False)
-    hours_end: Mapped[int] = mapped_column(Integer, nullable=False)
-    avoid_days_of_week: Mapped[list | None] = mapped_column(JSON, nullable=True)
 
 
 class KnowledgeDocument(Base):
@@ -316,35 +273,6 @@ class EmailTemplateRevision(Base):
     change_note: Mapped[str | None] = mapped_column(Text, nullable=True)
     edited_by: Mapped[str | None] = mapped_column(String, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
-
-
-class OutboundIntent(Base):
-    """Stores natural-language queries routed to outbound sources."""
-
-    __tablename__ = "outbound_intents"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    user_query: Mapped[str] = mapped_column(Text, nullable=False)
-    routed_source: Mapped[str] = mapped_column(String, nullable=False)
-    routed_filters: Mapped[dict | None] = mapped_column(JSON, nullable=True)
-    confidence: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
-    status: Mapped[str] = mapped_column(String, nullable=False, default="pending_user_input")
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
-
-
-class ICPRule(Base):
-    """Per-source ICP scoring criteria in markdown."""
-
-    __tablename__ = "icp_rules"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    source: Mapped[str] = mapped_column(String, unique=True, nullable=False)
-    criteria_md: Mapped[str] = mapped_column(Text, nullable=False, default="")
-    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=_utcnow, onupdate=_utcnow, nullable=False
-    )
 
 
 class EmailSuppression(Base):

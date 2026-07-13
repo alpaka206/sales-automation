@@ -28,9 +28,6 @@ def doctor() -> int:
     slack = bool(settings.SLACK_BOT_TOKEN and settings.SLACK_APPROVAL_CHANNEL_ID)
     results.append(("PASS" if slack else "WARN", "Slack", "configured" if slack else "not fully configured (optional)"))
 
-    yt = bool(settings.YOUTUBE_API_KEY)
-    results.append(("PASS" if yt else "WARN", "YouTube API", "key set" if yt else "not set (optional)"))
-
     smtp_ok = settings.EMAIL_PROVIDER != "smtp" or (bool(settings.SMTP_USERNAME) and bool(settings.SMTP_PASSWORD))
     results.append(("PASS" if smtp_ok else "FAIL", "SMTP", "ok" if smtp_ok else "EMAIL_PROVIDER=smtp but credentials missing"))
 
@@ -80,7 +77,6 @@ _INIT_FIELDS = [
     ("APPROVAL_CHANNEL", "승인 채널 (slack / none)", "slack"),
     ("SLACK_BOT_TOKEN", "Slack Bot 토큰 (xoxb-..., Slack 선택 시)", ""),
     ("SLACK_APPROVAL_CHANNEL_ID", "Slack 승인 채널 ID (C01234...)", ""),
-    ("YOUTUBE_API_KEY", "YouTube Data API 키 (YouTube 소스 사용 시)", ""),
 ]
 
 

@@ -274,7 +274,6 @@
       <div class="section-label" style="margin-bottom:12px">발송 정보</div>
       <dl class="info-list">
         <div class="info-row"><dt>채널</dt><dd>{{ msg.channel }}</dd></div>
-        <div class="info-row"><dt>구분</dt><dd>{{ "인바운드 회신" if msg.flow == "inbound_reply" else "아웃바운드 발굴" }}</dd></div>
         {% if msg.language %}<div class="info-row"><dt>초안 언어</dt><dd>{{ msg.language }}</dd></div>{% endif %}
         {% if msg.target_language %}<div class="info-row"><dt>발송 언어</dt><dd>{{ msg.target_language }}</dd></div>{% endif %}
         <div class="info-row"><dt>수신자</dt><dd class="mono truncate" style="max-width:170px">{{ msg.to_address or '—' }}</dd></div>
@@ -302,18 +301,6 @@
                 hx-target="#contact-edit-result" hx-swap="innerHTML">{{ icon("check", 14) }} 연락처 저장</button>
         <div id="contact-edit-result" role="status" aria-live="polite" style="margin-top:8px"></div>
       </form>
-    </div>
-    {% endif %}
-
-    {% if prospect %}
-    <div class="card">
-      <div class="section-label" style="margin-bottom:12px">프로스펙트</div>
-      <dl class="info-list">
-        {% if not contact %}<div class="info-row"><dt>이름</dt><dd>{{ prospect.name }}</dd></div>{% endif %}
-        {% if prospect.icp_score is not none %}
-        <div class="info-row"><dt>ICP 점수</dt><dd>{{ score_meter(prospect.icp_score) }}</dd></div>
-        {% endif %}
-      </dl>
     </div>
     {% endif %}
 

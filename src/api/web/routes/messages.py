@@ -61,7 +61,6 @@ def _message_detail_context(message_id: int) -> dict:
                 select(Message)
                 .options(
                     joinedload(Message.conversation).joinedload(Conversation.contact),
-                    joinedload(Message.conversation).joinedload(Conversation.prospect),
                 )
                 .where(Message.id == message_id)
             )
@@ -73,7 +72,6 @@ def _message_detail_context(message_id: int) -> dict:
 
         conv = msg.conversation
         contact = conv.contact if conv else None
-        prospect = conv.prospect if conv else None
 
         thread_rows = []
         progress_rows = []
@@ -175,10 +173,8 @@ def _message_detail_context(message_id: int) -> dict:
                 "body_ko": None,
                 "channel": msg.channel,
                 "direction": msg.direction,
-                # Product flow, not raw DB direction. A reply we draft to an inbound
-                # inquiry is direction="outbound" but is conceptually an inbound reply;
-                # outbound-discovery conversations carry a prospect.
-                "flow": "outbound" if prospect is not None else "inbound_reply",
+                # All threads are inbound replies now (the outbound agent was removed).
+                "flow": "inbound_reply",
                 "language": msg.language,
                 "target_language": msg.target_language,
                 "signature_key": msg.signature_key or "",
@@ -200,17 +196,6 @@ def _message_detail_context(message_id: int) -> dict:
                     "role_description": contact.role_description,
                 }
                 if contact
-                else None
-            ),
-            "prospect": (
-                {
-                    "id": prospect.id,
-                    "name": prospect.full_name,
-                    "email": prospect.email,
-                    "company": prospect.company,
-                    "icp_score": prospect.icp_score,
-                }
-                if prospect
                 else None
             ),
             "domain_profile": domain_profile_data,

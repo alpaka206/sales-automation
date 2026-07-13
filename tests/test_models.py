@@ -6,7 +6,7 @@ import pytest
 from sqlalchemy import exc
 from sqlalchemy.orm import Session
 
-from src.db.models import Approval, Contact, Conversation, Event, Message, Prospect
+from src.db.models import Approval, Contact, Conversation, Event, Message
 
 
 def test_contact_insert_and_defaults(db_session: Session) -> None:
@@ -37,16 +37,6 @@ def test_contact_hubspot_id_unique(db_session: Session) -> None:
     db_session.add(c2)
     with pytest.raises(exc.IntegrityError):
         db_session.commit()
-
-
-def test_prospect_defaults(db_session: Session) -> None:
-    p = Prospect(source="youtube", full_name="Test User")
-    db_session.add(p)
-    db_session.commit()
-    db_session.refresh(p)
-
-    assert p.status == "collected"
-    assert p.follow_up_count == 0
 
 
 def test_message_and_approval_chain(db_session: Session) -> None:

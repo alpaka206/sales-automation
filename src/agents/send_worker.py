@@ -14,7 +14,6 @@ from sqlalchemy import update
 from ..common.config import settings
 from ..db.models import Contact, Conversation, Message
 from ..db.session import SessionLocal
-from .outbound.status import ProspectStatus, transition, InvalidStatusTransition
 
 logger = logging.getLogger(__name__)
 
@@ -128,12 +127,6 @@ async def _send_one(message_id: int) -> bool:
                 msg.sent_at = datetime.now(timezone.utc)
 
                 conv = session.get(Conversation, msg.conversation_id)
-                if conv and conv.prospect_id:
-                    try:
-                        transition(session, conv.prospect_id, ProspectStatus.SENT, reason="send_worker")
-                    except (InvalidStatusTransition, ValueError):
-                        pass
-
                 session.commit()
                 _record_send()
 

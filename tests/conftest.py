@@ -75,10 +75,3 @@ def mock_llm():
     return llm
 
 
-@pytest.fixture(autouse=True)
-def _reset_api_quotas(monkeypatch):
-    """Prevent quota tracking from polluting test runs."""
-    monkeypatch.setattr("src.integrations.google_search._check_quota", lambda cost: None)
-    monkeypatch.setattr("src.integrations.google_search._track_quota", lambda cost: None)
-    monkeypatch.setattr("src.integrations.youtube._check_quota", lambda cost: None)
-    monkeypatch.setattr("src.integrations.youtube._track_quota", lambda cost: None)

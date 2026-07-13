@@ -56,9 +56,8 @@
 </div>
 
 <div class="split split--focus">
-  {# ---- recent outbound messages ---- #}
-  {# Poll preserves the active flow filter so the 30s refresh keeps the selected tab. #}
-  <div class="card card--flush" hx-get="/?flow={{ flow }}" hx-trigger="every 30s" hx-select="#msg-table" hx-target="#msg-table" hx-swap="outerHTML">
+  {# ---- recent messages ---- #}
+  <div class="card card--flush" hx-get="/" hx-trigger="every 30s" hx-select="#msg-table" hx-target="#msg-table" hx-swap="outerHTML">
     <div class="section-header" style="padding:var(--pad-card) var(--pad-card) 0">
       <div class="section-header__l">
         <span class="section-header__icon">{{ icon("send", 17) }}</span>
@@ -66,36 +65,23 @@
       </div>
       <a href="/messages" class="chip">전체 보기</a>
     </div>
-    <div class="chip-row" role="tablist" aria-label="발신 메시지 구분 필터" style="padding:12px var(--pad-card) 0">
-      {% for val, label in [('all','전체'), ('inbound','인바운드 회신'), ('outbound','아웃바운드')] %}
-      <a class="chip{% if flow == val %} is-active{% endif %}" href="/?flow={{ val }}"
-         role="tab" aria-selected="{{ 'true' if flow == val else 'false' }}">{{ label }}</a>
-      {% endfor %}
-    </div>
     <div id="msg-table" class="table-wrap" role="region" aria-label="최근 발신 메시지" aria-live="polite" style="margin-top:12px">
       <table class="table">
         <thead>
           <tr>
-            <th scope="col">상태</th><th scope="col">구분</th><th scope="col">제목</th><th scope="col">채널</th><th scope="col">시간</th>
+            <th scope="col">상태</th><th scope="col">제목</th><th scope="col">채널</th><th scope="col">시간</th>
           </tr>
         </thead>
         <tbody>
           {% for msg in recent_messages %}
           <tr class="is-clickable" onclick="location.href='/messages/{{ msg.id }}'">
             <td>{{ status_pill(msg.status, "sm") }}</td>
-            <td>
-              {% if msg.flow == 'inbound_reply' %}
-              <span class="source-tag" style="gap:6px;color:var(--info)">{{ icon("inbound", 14) }} 인바운드 회신</span>
-              {% else %}
-              <span class="source-tag" style="gap:6px;color:var(--accent)">{{ icon("outbound", 14) }} 아웃바운드</span>
-              {% endif %}
-            </td>
             <td class="truncate" style="max-width:260px">{{ msg.subject }}</td>
             <td class="td-muted">{{ msg.channel }}</td>
             <td class="td-subtle tnum">{{ msg.created_at | kst('%m/%d %H:%M') }}</td>
           </tr>
           {% else %}
-          <tr><td colspan="5">
+          <tr><td colspan="4">
             <div class="empty"><div class="empty__icon">{{ icon("inbound", 24) }}</div><div class="empty__text">메시지가 없습니다</div></div>
           </td></tr>
           {% endfor %}

@@ -17,25 +17,25 @@ def test_defaults() -> None:
     assert s.EMAIL_PROVIDER == "hubspot"
     assert s.WHATSAPP_ENABLED is False
     assert s.AUTO_SEND_THRESHOLD == 1.01
-    assert s.OUTBOUND_COOLDOWN_DAYS == 90
+    assert s.DAILY_SEND_LIMIT == 400
     assert s.APP_PORT == 8000
     assert s.INTERNAL_API_TOKEN == ""
 
 
 def test_bool_from_env() -> None:
-    env = {"WHATSAPP_ENABLED": "true", "LINKEDIN_ENABLED": "1"}
+    env = {"WHATSAPP_ENABLED": "true", "SEND_WORKER_ENABLED": "1"}
     with patch.dict(os.environ, env, clear=False):
         s = Settings()
     assert s.WHATSAPP_ENABLED is True
-    assert s.LINKEDIN_ENABLED is True
+    assert s.SEND_WORKER_ENABLED is True
 
 
 def test_int_from_env() -> None:
-    env = {"APP_PORT": "9999", "OUTBOUND_COOLDOWN_DAYS": "30"}
+    env = {"APP_PORT": "9999", "DAILY_SEND_LIMIT": "30"}
     with patch.dict(os.environ, env, clear=False):
         s = Settings()
     assert s.APP_PORT == 9999
-    assert s.OUTBOUND_COOLDOWN_DAYS == 30
+    assert s.DAILY_SEND_LIMIT == 30
 
 
 def test_literal_validation() -> None:

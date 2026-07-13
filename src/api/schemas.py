@@ -16,13 +16,6 @@ class HubSpotWebhookEvent(BaseModel):
     eventId: int | None = None
 
 
-class OutboundRunBody(BaseModel):
-    """Request to run one outbound source. `filters` is source-specific (query, region, ...)."""
-
-    source: str
-    filters: dict | None = None
-
-
 class ApprovalBody(BaseModel):
     """Approve/edit/reject action on a pending message (see /approve/{message_id})."""
 

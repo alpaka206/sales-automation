@@ -1,8 +1,7 @@
 """Web UI routes — serves Jinja2 templates for the operator dashboard.
 
-Split into cohesive submodules (dashboard, messages, knowledge, icp, outbound,
-settings_page, unsubscribe), aggregated here into a single ``router`` that
-``main.py`` mounts.
+Split into cohesive submodules (dashboard, messages, knowledge, settings_page,
+unsubscribe), aggregated here into a single ``router`` that ``main.py`` mounts.
 """
 
 from __future__ import annotations
@@ -13,11 +12,9 @@ from . import (
     companies,
     dashboard,
     email_templates,
-    icp,
     knowledge,
     logs,
     messages,
-    outbound,
     settings_page,
     tools,
     unsubscribe,
@@ -31,8 +28,6 @@ for _module in (
     companies,
     knowledge,
     email_templates,
-    icp,
-    outbound,
     settings_page,
     tools,
     logs,
