@@ -1,87 +1,21 @@
-"""Settings page: health checks, env var overview, and LLM usage."""
+"""User access management (allowlist) — admin only, Google-OAuth mode.
+
+The general Settings page was removed from the web UI; only the Google-OAuth
+user-approval routes remain (hidden in basic-auth mode).
+"""
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
-
-from fastapi import APIRouter, Request
-from fastapi.responses import HTMLResponse
-from sqlalchemy import func, select
-
-from fastapi import Form
-from fastapi.responses import Response
+from fastapi import APIRouter, Form, Request
+from fastapi.responses import HTMLResponse, Response
 
 from ....common.config import settings
-from ....db.models import LLMUsage, User
+from ....db.models import User
 from ....db.session import SessionLocal
 from ..auth import is_admin, session_user
 from ._shared import esc, templates
 
 router = APIRouter(tags=["web"])
-
-
-def _settings_context() -> dict:
-    """Fast settings-page data: LLM usage only.
-
-    Health checks call external services and are slow, so they are NOT run here —
-    the page loads instantly and pulls them in lazily via /settings/healthcheck.
-    """
-    today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
-    week_start = today_start - timedelta(days=today_start.weekday())
-
-    try:
-        with SessionLocal() as session:
-            today_llm = (
-                session.scalar(
-                    select(func.count())
-                    .select_from(LLMUsage)
-                    .where(LLMUsage.created_at >= today_start)
-                )
-                or 0
-            )
-            week_llm = (
-                session.scalar(
-                    select(func.count())
-                    .select_from(LLMUsage)
-                    .where(LLMUsage.created_at >= week_start)
-                )
-                or 0
-            )
-    except Exception:
-        today_llm = 0
-        week_llm = 0
-
-    return {
-        "today_llm": today_llm,
-        "week_llm": week_llm,
-        "llm_provider": settings.LLM_PROVIDER,
-    }
-
-
-def _healthcheck_context() -> dict:
-    """Run health checks (slow — external services). Used by the lazy fragment."""
-    from ....common.healthcheck import run_healthchecks
-
-    report = run_healthchecks()
-    _llm_checks = [c for c in report.checks if c.name == "Gemini (Vertex)"]
-    llm_ok = all(c.status != "FAIL" for c in _llm_checks) if _llm_checks else True
-    return {
-        "checks": [c.model_dump() for c in report.checks],
-        "overall_status": report.overall_status,
-        "llm_ok": llm_ok,
-    }
-
-
-@router.get("/settings")
-async def settings_page(request: Request):
-    """System settings and LLM usage. Health checks load lazily (see fragment)."""
-    return templates.TemplateResponse(request, "settings.html", _settings_context())
-
-
-@router.get("/settings/healthcheck")
-async def settings_healthcheck(request: Request):
-    """Lazy-loaded health-check fragment (hx-trigger=load + manual refresh)."""
-    return templates.TemplateResponse(request, "partials/healthcheck.html", _healthcheck_context())
 
 
 # --------------------------------------------------------------------------- #

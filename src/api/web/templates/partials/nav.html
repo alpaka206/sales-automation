@@ -28,13 +28,9 @@
     {{ _nav("/tools/quote-calculator", "견적 계산기", "calculator", _path.startswith("/tools/quote-calculator")) }}
 
     <div class="nav-group-label">설정</div>
-    {{ _nav("/knowledge", "지식베이스", "knowledge", _path.startswith("/knowledge")) }}
     {{ _nav("/email-templates", "이메일 템플릿", "mail", _path.startswith("/email-templates")) }}
     {%- if _is_admin %}
     {{ _nav("/settings/users", "접근 승인", "shield", _path.startswith("/settings/users"), badge=(pending_user_count() or None)) }}
-    {%- endif %}
-    {{ _nav("/settings", "설정", "settings", _path.startswith("/settings") and not _path.startswith("/settings/users"), flag=nav_health_warn) }}
-    {%- if _is_admin %}
     {{ _nav("/logs", "로그", "file", _path.startswith("/logs")) }}
     {%- endif %}
   </nav>
