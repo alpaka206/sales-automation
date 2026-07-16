@@ -71,7 +71,7 @@ def test_auto_ack_sent_on_first_inbound(mock_send, _docs, db_session, monkeypatc
     acks = db_session.query(Message).filter_by(prompt_variant="auto_ack").all()
     assert len(acks) == 1
     ack = acks[0]
-    assert ack.direction == "outbound"
+    assert ack.direction == "outgoing"
     assert ack.status == "sent"
     # Mandatory: goes out in the inquiry's language (translated in code).
     assert ack.target_language == "en"

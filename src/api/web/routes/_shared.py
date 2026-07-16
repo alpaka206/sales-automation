@@ -60,8 +60,30 @@ def pending_user_count() -> int:
 # Make the count callable from any template (the nav partial is shared by all pages).
 templates.env.globals["pending_user_count"] = pending_user_count
 
+
+def slack_approval_enabled() -> bool:
+    from ....common.config import settings
+
+    return bool(
+        settings.SLACK_ENABLED
+        and settings.APPROVAL_CHANNEL == "slack"
+        and settings.SLACK_BOT_TOKEN
+        and settings.SLACK_APPROVAL_CHANNEL_ID
+    )
+
+
+templates.env.globals["slack_approval_enabled"] = slack_approval_enabled
+
 # Statuses surfaced on the dashboard's status-count widget.
-TRACKED_STATUSES = ("pending_approval", "approved", "sent", "bounced", "replied")
+TRACKED_STATUSES = (
+    "drafting",
+    "pending_approval",
+    "approved",
+    "sent",
+    "draft_failed",
+    "send_failed",
+    "rejected",
+)
 
 
 def esc(text: str) -> str:

@@ -123,15 +123,6 @@ def test_web_ui_public_correct_basic_auth_allowed(client: TestClient, monkeypatc
     assert r.status_code not in (401, 403)
 
 
-def test_unsubscribe_public_without_auth(client: TestClient, monkeypatch) -> None:
-    """/unsubscribe stays public (own signed token) even on a non-localhost deploy."""
-    monkeypatch.setattr(settings, "APP_HOST", "0.0.0.0")
-    monkeypatch.setattr(settings, "WEB_UI_PASSWORD", "s3cret")
-    # No Basic Auth header, no internal token — must NOT be 401/403 from the gate.
-    r = client.get("/unsubscribe", params={"email": "a@b.com", "token": "bad"})
-    assert r.status_code not in (401, 403)
-
-
 def test_approve_nonexistent_message_returns_400(client: TestClient, monkeypatch) -> None:
     """When APPROVAL_REQUIRE_TOKEN is on (default), the API requires a per-message
     HMAC token in the body. Provide a valid one to reach the not-found path."""

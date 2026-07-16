@@ -67,7 +67,10 @@ def poll_tickets_once() -> int:
     logger.info("Ticket poller tick: checking tickets created after %s", last_poll.isoformat())
 
     try:
-        tickets = hubspot.search_tickets_sync(created_after=last_poll)
+        tickets = hubspot.search_tickets_sync(
+            created_after=last_poll,
+            pipeline_stage=settings.HUBSPOT_TICKET_STAGE_NEW or None,
+        )
     except Exception:
         logger.exception("HubSpot ticket search failed during poll")
         return 0

@@ -45,6 +45,12 @@ services:
         sync: false
       - key: SLACK_APPROVAL_CHANNEL_ID
         sync: false
+      - key: SMTP_USERNAME
+        sync: false
+      - key: SMTP_PASSWORD
+        sync: false
+      - key: SMTP_FROM_EMAIL
+        sync: false
       - key: PUBLIC_BASE_URL           # set to the Render URL after 1st deploy (Slack approval links)
         sync: false
       - key: WEB_UI_PASSWORD           # web UI login (HTTP Basic Auth) — used when AUTH_MODE=basic
@@ -90,9 +96,11 @@ services:
       - key: GOOGLE_SHEETS_INBOUND_TAB
         value: Inbound
       - key: EMAIL_PROVIDER
-        value: hubspot
+        value: smtp
       - key: APPROVAL_CHANNEL
-        value: slack
+        value: none
+      - key: SLACK_ENABLED
+        value: "false"
       - key: WEB_UI_USERNAME
         value: admin
       # Free tier: no always-on workers. Approve sends inline; webhooks drive inbound.

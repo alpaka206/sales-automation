@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% from "partials/icons.html" import icon %}
+{% block title %}고객 히스토리 — PERSO{% endblock %}
+{% block content %}
+
+<div class="page-header">
+  <div>
+    <div class="eyebrow">CUSTOMER HISTORY</div>
+    <h1 class="page-title">고객 히스토리</h1>
+    <p class="page-sub">Negotiation 고객과 서비스 이용 고객의 대화·계약·다음 액션을 한곳에서 확인합니다.</p>
+  </div>
+</div>
+
+<form class="filter-bar mb-gap" method="get">
+  <div class="chip-row">
+    {% for value, label in [('', '전체'), ('negotiation', 'Negotiation'), ('service', '서비스 이용중'), ('pool', '기존 고객 Pool'), ('lost', 'Lost')] %}
+    <a class="chip{% if filter_state == value %} is-active{% endif %}" href="/customers?state={{ value }}&stage={{ filter_stage }}">{{ label }}</a>
+    {% endfor %}
+  </div>
+  <div class="row" style="min-width:min(100%,380px)">
+    <input class="input" name="q" value="{{ query }}" placeholder="회사·이름·이메일 검색" aria-label="고객 검색">
+    <button class="btn btn--subtle" type="submit">검색</button>
+  </div>
+</form>
+
+<div class="card card--flush">
+  <div class="table-wrap">
+    <table class="table">
+      <thead><tr><th>고객</th><th>구분</th><th>파이프라인</th><th>리드 온도</th><th>다음 액션</th><th>최근 활동</th></tr></thead>
+      <tbody>
+        {% for row in rows %}
+        <tr class="is-clickable" onclick="location.href='/customers/{{ row.contact.id }}'">
+          <td>
+            <strong>{{ row.contact.company or row.contact.full_name }}</strong>
+            <div class="t-xs t-subtle">{{ row.contact.full_name }} · {{ row.contact.email or '-' }}</div>
+          </td>
+          <td><span class="tag">{{ row.state }}</span></td>
+          <td>{{ row.stage }}</td>
+          <td>{{ row.temperature or '-' }}</td>
+          <td>
+            <div>{{ row.next_action or '-' }}</div>
+            {% if row.next_action_at %}<div class="t-xs t-subtle tnum">{{ row.next_action_at | kst }}</div>{% endif %}
+          </td>
+          <td class="tnum t-subtle">{{ row.last_activity | kst }}<div class="t-xs">대화 {{ row.conversation_count }}건</div></td>
+        </tr>
+        {% else %}
+        <tr><td colspan="6"><div class="empty"><div class="empty__text">조건에 맞는 고객이 없습니다.</div></div></td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

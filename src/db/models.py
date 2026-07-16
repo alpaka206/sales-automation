@@ -47,9 +47,6 @@ class Conversation(Base):
     contact_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("contacts.id", ondelete="CASCADE"), nullable=False
     )
-    # Vestigial: the outbound agent (and its prospects table) was removed. Kept as a
-    # plain nullable column so existing rows survive; always NULL for inbound threads.
-    prospect_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     topic: Mapped[str | None] = mapped_column(String, nullable=True)
     stage: Mapped[str] = mapped_column(String, nullable=False, default="initial")
     last_outgoing_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
@@ -109,6 +106,7 @@ class Message(Base):
     whatsapp_attempted: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     whatsapp_sent: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     whatsapp_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    slack_notified_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
 
     __table_args__ = (Index("ix_messages_status_scheduled", "status", "scheduled_at"),)
@@ -275,16 +273,6 @@ class EmailTemplateRevision(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
 
 
-class EmailSuppression(Base):
-    """Tracks unsubscribed/bounced/complaint emails to prevent re-sending."""
-
-    __tablename__ = "email_suppression"
-
-    email: Mapped[str] = mapped_column(String, primary_key=True)
-    reason: Mapped[str] = mapped_column(String, nullable=False, default="unsubscribe")
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
-
-
 class DomainProfile(Base):
     """Cached company profile analyzed from an email domain."""
 
@@ -305,6 +293,86 @@ class DomainProfile(Base):
     analyzed_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, default=_utcnow, onupdate=_utcnow
+    )
+
+
+class CustomerProfile(Base):
+    """Operator-owned CRM fields that HubSpot does not reliably provide yet."""
+
+    __tablename__ = "customer_profiles"
+
+    contact_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("contacts.id", ondelete="CASCADE"), primary_key=True
+    )
+    customer_state: Mapped[str] = mapped_column(String(32), nullable=False, default="negotiation")
+    pipeline_stage: Mapped[str] = mapped_column(String(32), nullable=False, default="new")
+    lead_temperature: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    next_action: Mapped[str | None] = mapped_column(Text, nullable=True)
+    next_action_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    industry: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    user_seq: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    current_plan: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    qualification: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    lost_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    last_synced_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=_utcnow, onupdate=_utcnow, nullable=False
+    )
+
+
+class CustomerInteraction(Base):
+    """Normalized manual or synchronized touchpoint across customer channels."""
+
+    __tablename__ = "customer_interactions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    contact_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("contacts.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    conversation_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("conversations.id", ondelete="SET NULL"), nullable=True
+    )
+    channel: Mapped[str] = mapped_column(String(32), nullable=False, default="manual")
+    direction: Mapped[str] = mapped_column(String(16), nullable=False, default="note")
+    subject: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    summary: Mapped[str] = mapped_column(Text, nullable=False)
+    context: Mapped[str | None] = mapped_column(Text, nullable=True)
+    external_id: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
+    artifact_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    happened_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+
+
+class ContractRecord(Base):
+    """Contract, invoice, and payment facts used by customer success and renewal views."""
+
+    __tablename__ = "contract_records"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    contact_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("contacts.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="draft")
+    plan: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    amount: Mapped[float | None] = mapped_column(Float, nullable=True)
+    currency: Mapped[str] = mapped_column(String(8), nullable=False, default="KRW")
+    payment_method: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    contract_date: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    payment_due_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    paid_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
+    language_pairs: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    unit_price: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    quote_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    invoice_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    payment_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=_utcnow, onupdate=_utcnow, nullable=False
     )
 
 
@@ -330,7 +398,7 @@ class User(Base):
     Identity = verified Google email on ALLOWED_EMAIL_DOMAIN. ``approved`` is the
     allowlist gate (bootstrap admins + WEB_UI_ALLOWED_EMAILS are auto-approved on first
     login; others land here as approved=False until an admin approves them). ``name`` is
-    used to auto-attribute knowledge/ICP edits and message approvals.
+    used to auto-attribute knowledge edits and message approvals.
     """
 
     __tablename__ = "users"

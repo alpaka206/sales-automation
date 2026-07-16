@@ -112,7 +112,7 @@ def text_to_html_fragment(text: str) -> str:
 # The LLM writes a small plain-text signature into the draft body. When the
 # operator picks a *branded* HTML signature on the approval screen, that text
 # signature is stripped (so it doesn't appear twice) and the branded card is
-# rendered into the HTML email just above the compliance footer. The card lives
+# rendered into the HTML email below the reply body. The card lives
 # in the editable email_templates store (keys: signature_html_ko / _en), so it
 # is never hard-coded here.
 # ---------------------------------------------------------------------------
@@ -180,7 +180,7 @@ def _signature_candidates() -> list[str]:
                 cands.append(body.strip())
     except Exception:
         pass
-    cands.append("김규원\nPERSO AI | Intern (Developer Relations)\ndevrel.365@gmail.com")
+    cands.append("이혜람\nGrowth, Perso Dubbing | ESTsoft\nleehyeram@estsoft.com")
     seen: set[str] = set()
     out: list[str] = []
     for cand in sorted(cands, key=len, reverse=True):
@@ -194,8 +194,7 @@ def strip_known_signature(body: str) -> str:
     """Remove a trailing default text-signature block from ``body``.
 
     Called when a branded HTML signature replaces it. Best-effort and designed to
-    run on a *footer-free* body (the send path strips before the compliance footer
-    is appended; the preview never has a footer):
+    run on the reply body before the HTML signature is appended:
 
     1. Exact tail match against an active signature template — perfect for the
        common untranslated Korean draft.
@@ -238,9 +237,8 @@ def _content_fragments(text: str) -> tuple[list[str], list[str]]:
 def to_html_email(text: str, signature_html: str | None = None) -> str:
     """Return a full HTML document for the given (plain-text or HTML) body.
 
-    When ``signature_html`` is given, the branded card is rendered just above a
-    trailing compliance footer (a paragraph beginning with ``---``) if present,
-    otherwise appended at the end. With no signature the output is unchanged.
+    When ``signature_html`` is given, the branded signature is appended at the end.
+    With no signature the output is unchanged.
     """
     text = (text or "").strip()
     if not text and not signature_html:

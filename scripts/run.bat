@@ -5,7 +5,7 @@ cd /d "%~dp0\.."
 
 echo.
 echo ========================================================
-echo   PERSO Sales Console - 서버 시작
+echo   PERSO Inbound Console - 서버 시작
 echo ========================================================
 echo.
 

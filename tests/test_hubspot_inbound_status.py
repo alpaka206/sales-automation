@@ -10,8 +10,7 @@ from fastapi.testclient import TestClient
 from src.agents.inbound import InboundAgent
 from src.api.main import app
 from src.common.config import settings
-from src.db.models import Event
-from src.db.session import SessionLocal
+from src.db.models import Contact, CustomerProfile
 
 
 @pytest.fixture()
@@ -45,7 +44,7 @@ def _disable_approval_token_and_send_worker():
 @patch("src.agents.inbound.InboundAgent._score", return_value=70)
 @patch("src.agents.inbound.InboundAgent._classify")
 @patch("src.agents.inbound.InboundAgent._fetch_contact")
-@patch("src.agents.inbound.notify_approval")
+@patch("src.agents.inbound.notify_approval_once")
 def test_handle_sets_analyzed_status(
     mock_notify, mock_fetch, mock_classify, mock_score, mock_draft, mock_placeholder, mock_finalize
 ):
@@ -88,7 +87,7 @@ def test_handle_sets_analyzed_status(
 @patch("src.agents.inbound.InboundAgent._score", return_value=60)
 @patch("src.agents.inbound.InboundAgent._classify")
 @patch("src.agents.inbound.InboundAgent._fetch_contact")
-@patch("src.agents.inbound.notify_approval")
+@patch("src.agents.inbound.notify_approval_once")
 def test_handle_continues_on_status_update_failure(
     mock_notify, mock_fetch, mock_classify, mock_score, mock_draft, mock_placeholder, mock_finalize
 ):
@@ -136,7 +135,7 @@ def test_no_hubspot_skips_status_update():
         patch.object(InboundAgent, "_draft_reply"),
         patch.object(InboundAgent, "_persist_placeholder", return_value=(3, 3, False)),
         patch.object(InboundAgent, "_update_summary"),
-        patch("src.agents.inbound.notify_approval"),
+        patch("src.agents.inbound.notify_approval_once"),
     ):
 
         mock_classify_result = MagicMock()
@@ -155,86 +154,52 @@ def test_no_hubspot_skips_status_update():
         assert result is not None
 
 
-# ---------- Approve endpoint sets "meeting_link_sent" ----------
+# ---------- Send bookkeeping sets customer + optional HubSpot status ----------
 
 
+@pytest.mark.asyncio
 @patch.object(settings, "HUBSPOT_UPDATE_CONTACT_INBOUND_STATUS", True)
-@patch("src.integrations.hubspot.HubSpotClient.update_inbound_status", new_callable=AsyncMock)
-@patch(
-    "src.integrations.hubspot.HubSpotClient.create_email_engagement",
-    new_callable=AsyncMock,
-    return_value="eng-1",
-)
-@patch("src.integrations.hubspot.HubSpotClient.close", new_callable=AsyncMock)
-@patch("src.integrations.senders.send", new_callable=AsyncMock)
-@patch("src.api.main.approve")
-@patch("src.api.main.mark_sent")
-def test_approve_sets_meeting_link_sent(
-    mock_mark_sent, mock_approve, mock_send, mock_close, mock_engagement, mock_status, client
-):
-    """After sending, approve endpoint should update inbound_status to meeting_link_sent."""
-    msg_mock = MagicMock()
-    msg_mock.id = 10
-    msg_mock.status = "approved"
-    msg_mock.subject = "Meeting"
-    msg_mock.body = "Let's meet"
-    msg_mock.conversation.contact_id = 500
-    mock_approve.return_value = msg_mock
+@patch("src.agents.send_worker.add_progress")
+@patch("src.integrations.hubspot.HubSpotClient")
+async def test_send_bookkeeping_sets_meeting_link_sent(mock_hs_cls, mock_progress) -> None:
+    from src.agents.send_worker import _post_send_bookkeeping
 
-    r = client.post(
-        "/approve/10",
-        json={"approver": "user:1", "action": "approve"},
-        headers=_auth_headers(),
-    )
-    assert r.status_code == 200
-    assert r.json()["status"] == "sent"
-    mock_status.assert_called_once_with("500", "meeting_link_sent")
+    session = MagicMock()
+    contact = MagicMock(spec=Contact)
+    contact.hubspot_contact_id = "hs-500"
+    profile = MagicMock(spec=CustomerProfile)
+    session.get.side_effect = lambda model, _id: contact if model is Contact else profile
+    conv = MagicMock(id=2, contact_id=500, hubspot_ticket_id=None)
+    msg = MagicMock(subject="Meeting")
+    client = mock_hs_cls.return_value
+    client.update_inbound_status = AsyncMock()
+    client.close = AsyncMock()
+
+    await _post_send_bookkeeping(session, msg, conv, 10)
+
+    client.update_inbound_status.assert_awaited_once_with("hs-500", "meeting_link_sent")
+    assert profile.pipeline_stage == "meeting_link_sent"
+    session.commit.assert_called_once()
+    mock_progress.assert_called_once()
 
 
+@pytest.mark.asyncio
 @patch.object(settings, "HUBSPOT_UPDATE_CONTACT_INBOUND_STATUS", True)
-@patch(
-    "src.integrations.hubspot.HubSpotClient.update_inbound_status",
-    new_callable=AsyncMock,
-    side_effect=Exception("prop missing"),
-)
-@patch(
-    "src.integrations.hubspot.HubSpotClient.create_email_engagement",
-    new_callable=AsyncMock,
-    return_value="eng-2",
-)
-@patch("src.integrations.hubspot.HubSpotClient.close", new_callable=AsyncMock)
-@patch("src.integrations.senders.send", new_callable=AsyncMock)
-@patch("src.api.main.approve")
-@patch("src.api.main.mark_sent")
-def test_approve_queues_retry_on_status_failure(
-    mock_mark_sent, mock_approve, mock_send, mock_close, mock_engagement, mock_status, client
-):
-    """If status update fails, send still succeeds and failure is queued for retry."""
-    msg_mock = MagicMock()
-    msg_mock.id = 11
-    msg_mock.status = "approved"
-    msg_mock.subject = "Re: Inquiry"
-    msg_mock.body = "Response"
-    msg_mock.conversation.contact_id = 501
-    mock_approve.return_value = msg_mock
+@patch("src.agents.send_worker.add_progress")
+@patch("src.integrations.hubspot.HubSpotClient")
+async def test_send_bookkeeping_ignores_hubspot_status_failure(mock_hs_cls, _progress) -> None:
+    from src.agents.send_worker import _post_send_bookkeeping
 
-    r = client.post(
-        "/approve/11",
-        json={"approver": "user:2", "action": "approve"},
-        headers=_auth_headers(),
-    )
-    assert r.status_code == 200
-    assert r.json()["status"] == "sent"
+    session = MagicMock()
+    contact = MagicMock(spec=Contact)
+    contact.hubspot_contact_id = "hs-501"
+    profile = MagicMock(spec=CustomerProfile)
+    session.get.side_effect = lambda model, _id: contact if model is Contact else profile
+    conv = MagicMock(id=3, contact_id=501, hubspot_ticket_id=None)
+    client = mock_hs_cls.return_value
+    client.update_inbound_status = AsyncMock(side_effect=RuntimeError("prop missing"))
+    client.close = AsyncMock()
 
-    with SessionLocal() as session:
-        retry = (
-            session.query(Event)
-            .filter(Event.kind == "hubspot_status_update_failed")
-            .order_by(Event.id.desc())
-            .first()
-        )
-        assert retry is not None
-        assert retry.payload["contact_id"] == "501"
-        assert retry.payload["target_status"] == "meeting_link_sent"
-        session.delete(retry)
-        session.commit()
+    await _post_send_bookkeeping(session, MagicMock(subject="Reply"), conv, 11)
+
+    assert profile.pipeline_stage == "meeting_link_sent"

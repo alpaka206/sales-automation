@@ -150,7 +150,7 @@ def test_multiple_matches_are_separated(_db_backed_knowledge) -> None:
     assert "---" in out
 
 
-def test_scope_inbound_filters_outbound_docs(_db_backed_knowledge) -> None:
+def test_scope_inbound_includes_shared_docs(_db_backed_knowledge) -> None:
     _insert(
         _db_backed_knowledge,
         title="Inbound Only",
@@ -158,37 +158,18 @@ def test_scope_inbound_filters_outbound_docs(_db_backed_knowledge) -> None:
         categories=["all"],
         scope="inbound",
     )
-    _insert(
-        _db_backed_knowledge,
-        title="Outbound Only",
-        slug="outbound-only",
-        categories=["all"],
-        scope="outbound",
-    )
+    _insert(_db_backed_knowledge, title="Shared", slug="shared", categories=["all"], scope="both")
     out = knowledge.load_relevant_docs("purchase_inquiry", scope="inbound")
     assert "Inbound Only" in out
-    assert "Outbound Only" not in out
+    assert "Shared" in out
 
 
 def test_scope_both_matches_all(_db_backed_knowledge) -> None:
     _insert(_db_backed_knowledge, title="Both", slug="both", categories=["all"], scope="both")
     _insert(_db_backed_knowledge, title="In", slug="in", categories=["all"], scope="inbound")
-    _insert(_db_backed_knowledge, title="Out", slug="out", categories=["all"], scope="outbound")
     out = knowledge.load_relevant_docs("purchase_inquiry", scope="both")
     assert "Both" in out
     assert "In" in out
-    assert "Out" in out
-
-
-def test_scope_default_is_inbound(_db_backed_knowledge) -> None:
-    _insert(
-        _db_backed_knowledge,
-        title="Outbound Doc",
-        slug="outbound",
-        categories=["all"],
-        scope="outbound",
-    )
-    assert knowledge.load_relevant_docs("purchase_inquiry") == ""
 
 
 def test_archived_docs_excluded_from_category_match(_db_backed_knowledge) -> None:

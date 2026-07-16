@@ -42,7 +42,7 @@ def _create_message(session: Session, status: str, scheduled_at: datetime | None
 
     msg = Message(
         conversation_id=conv.id,
-        direction="outbound",
+        direction="outgoing",
         body="Hello",
         status=status,
         scheduled_at=scheduled_at,

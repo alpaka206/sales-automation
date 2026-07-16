@@ -117,6 +117,25 @@ def _require_token() -> str:
     return token
 
 
+def _contact_properties() -> str:
+    names = [
+        "email",
+        "firstname",
+        "lastname",
+        "company",
+        "phone",
+        "country",
+        "lifecyclestage",
+    ]
+    if settings.HUBSPOT_WHATSAPP_OPT_IN_PROPERTY:
+        names.append(settings.HUBSPOT_WHATSAPP_OPT_IN_PROPERTY)
+    return ",".join(names)
+
+
+def _as_bool(value: object) -> bool:
+    return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
 class HubSpotClient:
     """Thin async wrapper around HubSpot CRM v3."""
 
@@ -144,12 +163,12 @@ class HubSpotClient:
 
     async def get_contact(self, id_or_email: str) -> ContactDTO:
         """Fetch a contact by ID or email."""
+        params = {"properties": _contact_properties()}
         if "@" in id_or_email:
             url = f"/crm/v3/objects/contacts/{id_or_email}"
-            params = {"idProperty": "email"}
+            params["idProperty"] = "email"
         else:
             url = f"/crm/v3/objects/contacts/{id_or_email}"
-            params = {}
 
         r = await self._retry("GET", url, params=params)
         if r.status_code == 404:
@@ -163,7 +182,14 @@ class HubSpotClient:
             firstname=props.get("firstname"),
             lastname=props.get("lastname"),
             company=props.get("company"),
+            phone=props.get("phone"),
+            country=props.get("country"),
             lifecyclestage=props.get("lifecyclestage"),
+            whatsapp_opt_in=_as_bool(
+                props.get(settings.HUBSPOT_WHATSAPP_OPT_IN_PROPERTY)
+                if settings.HUBSPOT_WHATSAPP_OPT_IN_PROPERTY
+                else None
+            ),
         )
 
     async def update_contact(self, contact_id: str, properties: dict) -> None:
@@ -246,16 +272,6 @@ class HubSpotClient:
         logger.info("Logged email engagement %s for contact %s", email_id, contact_id)
         return email_id
 
-    async def send_email(
-        self,
-        contact_id: str,
-        subject: str,
-        body: str,
-        from_email: str,
-    ) -> str:
-        """Send an email via HubSpot single-send and log engagement. Returns engagement ID."""
-        return await self.create_email_engagement(contact_id, subject, body)
-
     # ------ Sync helpers (for use in synchronous agent code) ------
 
     def update_inbound_status_sync(self, contact_id: str, status: str) -> None:
@@ -276,12 +292,12 @@ class HubSpotClient:
 
     def get_contact_sync(self, id_or_email: str) -> ContactDTO:
         """Synchronous version of get_contact."""
+        params = {"properties": _contact_properties()}
         if "@" in id_or_email:
             url = f"{BASE_URL}/crm/v3/objects/contacts/{id_or_email}"
-            params = {"idProperty": "email"}
+            params["idProperty"] = "email"
         else:
             url = f"{BASE_URL}/crm/v3/objects/contacts/{id_or_email}"
-            params = {}
 
         with httpx.Client(
             headers={"Authorization": f"Bearer {self.token}"}, timeout=30.0
@@ -301,6 +317,11 @@ class HubSpotClient:
             phone=props.get("phone"),
             country=props.get("country"),
             lifecyclestage=props.get("lifecyclestage"),
+            whatsapp_opt_in=_as_bool(
+                props.get(settings.HUBSPOT_WHATSAPP_OPT_IN_PROPERTY)
+                if settings.HUBSPOT_WHATSAPP_OPT_IN_PROPERTY
+                else None
+            ),
         )
 
     def get_recent_emails_sync(self, contact_id: str, limit: int = 5) -> list[EngagementDTO]:
@@ -321,7 +342,12 @@ class HubSpotClient:
                     continue
                 er = client.get(
                     f"{BASE_URL}/crm/v3/objects/emails/{email_id}",
-                    params={"properties": "hs_email_subject,hs_email_text,hs_timestamp"},
+                    params={
+                        "properties": (
+                            "hs_email_subject,hs_email_text,hs_email_timestamp,hs_timestamp,"
+                            "hs_email_direction"
+                        )
+                    },
                 )
                 if er.status_code != 200:
                     continue
@@ -329,12 +355,14 @@ class HubSpotClient:
                 engagements.append(
                     EngagementDTO(
                         id=email_id,
-                        type="email",
+                        type=(ep.get("hs_email_direction") or "email").lower(),
                         subject=ep.get("hs_email_subject"),
                         body=ep.get("hs_email_text"),
                         timestamp=(
-                            datetime.fromisoformat(ep["hs_timestamp"])
-                            if ep.get("hs_timestamp")
+                            datetime.fromisoformat(
+                                ep.get("hs_email_timestamp") or ep["hs_timestamp"]
+                            )
+                            if ep.get("hs_email_timestamp") or ep.get("hs_timestamp")
                             else None
                         ),
                     )

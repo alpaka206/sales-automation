@@ -83,7 +83,7 @@ async def test_send_one_skips_non_approved() -> None:
     session.flush()
     msg = Message(
         conversation_id=conv.id,
-        direction="outbound",
+        direction="outgoing",
         body="Hello",
         status="pending_approval",
     )
@@ -136,7 +136,7 @@ async def test_send_one_permanent_error() -> None:
     session.flush()
     msg = Message(
         conversation_id=conv.id,
-        direction="outbound",
+        direction="outgoing",
         body="Hello",
         status="approved",
     )
@@ -183,7 +183,7 @@ async def test_send_one_transient_error_retries() -> None:
     session.flush()
     msg = Message(
         conversation_id=conv.id,
-        direction="outbound",
+        direction="outgoing",
         body="Hello",
         status="approved",
     )
@@ -204,5 +204,4 @@ async def test_send_one_transient_error_retries() -> None:
     m = s.get(Message, msg_id)
     assert m.status == "send_failed"
     s.close()
-
 

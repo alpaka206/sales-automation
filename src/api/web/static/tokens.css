@@ -1,8 +1,6 @@
 /* ============================================================
-   PERSO Sales Console — Design Tokens
-   Light/Dark via [data-theme], accent via [data-accent],
-   density via [data-density]. Indigo default.
-   (Vendored verbatim from design_handoff_sales_console/app/tokens.css)
+   PERSO Inbound Console — Design Tokens
+   Light/Dark design tokens for the inbound operations console.
    ============================================================ */
 
 @import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable.css');
@@ -26,12 +24,12 @@
   --row-h: 52px;
   --gap: 20px;
 
-  /* accent — indigo default */
-  --accent: #4f46e5;
-  --accent-hover: #4338ca;
-  --accent-press: #3730a3;
+  /* one restrained accent */
+  --accent: #0f766e;
+  --accent-hover: #115e59;
+  --accent-press: #134e4a;
   --accent-fg: #ffffff;
-  --accent-ring: rgba(79, 70, 229, 0.35);
+  --accent-ring: rgba(15, 118, 110, 0.30);
 }
 
 [data-density="compact"] {
@@ -40,29 +38,21 @@
   --gap: 12px;
 }
 
-/* ---- accent variants (tweakable) ---- */
-[data-accent="sky"]    { --accent:#0284c7; --accent-hover:#0369a1; --accent-press:#075985; --accent-ring:rgba(2,132,199,.35); }
-[data-accent="emerald"]{ --accent:#059669; --accent-hover:#047857; --accent-press:#065f46; --accent-ring:rgba(5,150,105,.35); }
-[data-accent="violet"] { --accent:#7c3aed; --accent-hover:#6d28d9; --accent-press:#5b21b6; --accent-ring:rgba(124,58,237,.35); }
-[data-accent="orange"] { --accent:#ea580c; --accent-hover:#c2410c; --accent-press:#9a3412; --accent-ring:rgba(234,88,12,.35); }
-
 /* ============================ LIGHT ============================ */
 :root, [data-theme="light"] {
-  --bg: #f6f7fb;
-  --bg-grad-1: #eef0fb;
-  --bg-grad-2: #f6f7fb;
+  --bg: #f4f7f6;
   --surface: #ffffff;
-  --surface-2: #f8f9fc;
-  --surface-3: #f1f3f9;
-  --surface-inset: #f4f5fa;
-  --border: #e7e9f2;
-  --border-strong: #d6d9e6;
-  --text: #1a1c2b;
-  --text-muted: #5a607a;
+  --surface-2: #f7faf9;
+  --surface-3: #edf3f1;
+  --surface-inset: #f0f5f3;
+  --border: #dfe8e5;
+  --border-strong: #cbd9d5;
+  --text: #14201e;
+  --text-muted: #52615e;
   /* WCAG 2.1 AA (1.4.3): ≥4.5:1 on white/surface-2/surface-3 (was #8b90a6 ≈ 3.0:1). */
-  --text-subtle: #646a7d;
-  --shadow-sm: 0 1px 2px rgba(20,22,40,.05), 0 1px 3px rgba(20,22,40,.04);
-  --shadow-md: 0 2px 6px rgba(20,22,40,.06), 0 8px 24px rgba(20,22,40,.06);
+  --text-subtle: #65736f;
+  --shadow-sm: 0 1px 2px rgba(15,45,38,.05);
+  --shadow-md: 0 2px 6px rgba(15,45,38,.06), 0 8px 24px rgba(15,45,38,.06);
   --shadow-lg: 0 12px 40px rgba(20,22,40,.12);
   --shadow-pop: 0 18px 50px rgba(20,22,40,.18);
 
@@ -75,32 +65,23 @@
   --reply:#7e22ce;     --reply-soft:#f5e9fc;  --reply-dot:#a855f7;
   --neutral:#475069;   --neutral-soft:#eef0f5;--neutral-dot:#94a3b8;
 
-  --accent-soft: rgba(79,70,229,.10);
-  --accent-soft-border: rgba(79,70,229,.22);
+  --accent-soft: rgba(15,118,110,.09);
+  --accent-soft-border: rgba(15,118,110,.22);
 }
-
-/* accent-soft must track accent var in light */
-[data-accent="sky"]     { --accent-soft: rgba(2,132,199,.10);  --accent-soft-border: rgba(2,132,199,.22); }
-[data-accent="emerald"] { --accent-soft: rgba(5,150,105,.10);  --accent-soft-border: rgba(5,150,105,.22); }
-[data-accent="violet"]  { --accent-soft: rgba(124,58,237,.10); --accent-soft-border: rgba(124,58,237,.22); }
-[data-accent="orange"]  { --accent-soft: rgba(234,88,12,.10);  --accent-soft-border: rgba(234,88,12,.22); }
 
 /* ============================ DARK ============================ */
 [data-theme="dark"] {
-  --bg: #0b0e18;
-  --bg-grad-1: #121633;
-  --bg-grad-2: #0b0e18;
-  --surface: #151a2b;
-  --surface-2: #1a2032;
-  --surface-3: #20273c;
-  --surface-inset: #11162400;
-  --surface-inset: #0f1320;
-  --border: #262d44;
-  --border-strong: #343c58;
-  --text: #eef1fb;
-  --text-muted: #a4abc4;
+  --bg: #09110f;
+  --surface: #111c19;
+  --surface-2: #16231f;
+  --surface-3: #1b2c27;
+  --surface-inset: #0d1714;
+  --border: #243731;
+  --border-strong: #355047;
+  --text: #ecf5f2;
+  --text-muted: #a1b5af;
   /* WCAG 2.1 AA (1.4.3): ≥4.5:1 on dark surfaces (was #6f7793 ≈ 3.7:1). */
-  --text-subtle: #8b93b0;
+  --text-subtle: #879c96;
   --shadow-sm: 0 1px 2px rgba(0,0,0,.4);
   --shadow-md: 0 2px 8px rgba(0,0,0,.4), 0 12px 32px rgba(0,0,0,.35);
   --shadow-lg: 0 16px 48px rgba(0,0,0,.5);
@@ -113,18 +94,14 @@
   --reply:#c084fc;     --reply-soft:rgba(168,85,247,.16);--reply-dot:#a855f7;
   --neutral:#9aa3bd;   --neutral-soft:rgba(148,163,184,.14);--neutral-dot:#94a3b8;
 
-  --accent: #818cf8;
-  --accent-hover: #a5b0ff;
-  --accent-press: #6f7bf0;
-  --accent-fg: #0b0e18;
-  --accent-soft: rgba(129,140,248,.16);
-  --accent-soft-border: rgba(129,140,248,.30);
-  --accent-ring: rgba(129,140,248,.4);
+  --accent: #5eead4;
+  --accent-hover: #99f6e4;
+  --accent-press: #2dd4bf;
+  --accent-fg: #06201b;
+  --accent-soft: rgba(94,234,212,.13);
+  --accent-soft-border: rgba(94,234,212,.28);
+  --accent-ring: rgba(94,234,212,.35);
 }
-[data-theme="dark"][data-accent="sky"]     { --accent:#38bdf8; --accent-hover:#7dd3fc; --accent-press:#0ea5e9; --accent-soft:rgba(56,189,248,.16); --accent-soft-border:rgba(56,189,248,.3); --accent-ring:rgba(56,189,248,.4); --accent-fg:#04121f; }
-[data-theme="dark"][data-accent="emerald"] { --accent:#34d399; --accent-hover:#6ee7b7; --accent-press:#10b981; --accent-soft:rgba(52,211,153,.16); --accent-soft-border:rgba(52,211,153,.3); --accent-ring:rgba(52,211,153,.4); --accent-fg:#04140d; }
-[data-theme="dark"][data-accent="violet"]  { --accent:#a78bfa; --accent-hover:#c4b5fd; --accent-press:#8b5cf6; --accent-soft:rgba(167,139,250,.16); --accent-soft-border:rgba(167,139,250,.3); --accent-ring:rgba(167,139,250,.4); --accent-fg:#0e0820; }
-[data-theme="dark"][data-accent="orange"]  { --accent:#fb923c; --accent-hover:#fdba74; --accent-press:#f97316; --accent-soft:rgba(251,146,60,.16); --accent-soft-border:rgba(251,146,60,.3); --accent-ring:rgba(251,146,60,.4); --accent-fg:#1c0d03; }
 
 /* ============================ BASE ============================ */
 * { box-sizing: border-box; }

@@ -48,9 +48,8 @@ def client() -> TestClient:
 
 
 @patch("src.api.main.approve")
-@patch("src.api.main.mark_sent")
-@patch("src.integrations.senders.send", new_callable=AsyncMock)
-def test_approve_sets_status_to_sent(mock_send, mock_mark_sent, mock_approve, client):
+@patch("src.agents.send_worker.send_approved_now", new_callable=AsyncMock, return_value=True)
+def test_approve_sets_status_to_sent(mock_send_now, mock_approve, client):
     msg = _make_message(status="approved")
     mock_approve.return_value = msg
 
@@ -66,17 +65,15 @@ def test_approve_sets_status_to_sent(mock_send, mock_mark_sent, mock_approve, cl
     assert data["message_id"] == 1
 
     mock_approve.assert_called_once_with(1, "slack:U001", None)
-    mock_send.assert_awaited_once_with(msg)
-    mock_mark_sent.assert_called_once_with(1)
+    mock_send_now.assert_awaited_once_with(1)
 
 
 # ---- edit flow ----
 
 
 @patch("src.api.main.approve")
-@patch("src.api.main.mark_sent")
-@patch("src.integrations.senders.send", new_callable=AsyncMock)
-def test_edit_updates_body_then_sends(mock_send, mock_mark_sent, mock_approve, client):
+@patch("src.agents.send_worker.send_approved_now", new_callable=AsyncMock, return_value=True)
+def test_edit_updates_body_then_sends(mock_send_now, mock_approve, client):
     msg = _make_message(status="approved", body="Edited body")
     mock_approve.return_value = msg
 
@@ -89,7 +86,7 @@ def test_edit_updates_body_then_sends(mock_send, mock_mark_sent, mock_approve, c
     assert r.status_code == 200
     assert r.json()["status"] == "sent"
     mock_approve.assert_called_once_with(1, "slack:U002", "Edited body")
-    mock_send.assert_awaited_once()
+    mock_send_now.assert_awaited_once_with(1)
 
 
 # ---- reject flow ----
@@ -145,8 +142,8 @@ def test_double_approve_returns_400(mock_approve, client):
 
 
 @patch("src.api.main.approve")
-@patch("src.integrations.senders.send", new_callable=AsyncMock, side_effect=RuntimeError("SMTP down"))
-def test_send_failure_returns_500(mock_send, mock_approve, client):
+@patch("src.agents.send_worker.send_approved_now", new_callable=AsyncMock, return_value=False)
+def test_send_failure_returns_500(mock_send_now, mock_approve, client):
     mock_approve.return_value = _make_message()
 
     r = client.post(
@@ -156,30 +153,3 @@ def test_send_failure_returns_500(mock_send, mock_approve, client):
     )
     assert r.status_code == 500
     assert "Send failed" in r.json()["detail"]
-
-
-# ---- hubspot logging failure is best-effort ----
-
-
-@patch("src.api.main.approve")
-@patch("src.api.main.mark_sent")
-@patch("src.integrations.senders.send", new_callable=AsyncMock)
-@patch("src.integrations.hubspot.HubSpotClient")
-def test_hubspot_logging_failure_still_returns_sent(
-    mock_hs_cls, mock_send, mock_mark_sent, mock_approve, client
-):
-    mock_approve.return_value = _make_message()
-    hs_instance = MagicMock()
-    hs_instance.create_email_engagement = AsyncMock(side_effect=RuntimeError("HS down"))
-    hs_instance.close = AsyncMock()
-    mock_hs_cls.return_value = hs_instance
-
-    r = client.post(
-        "/approve/1",
-        json={"approver": "slack:U001", "action": "approve"},
-        headers=TOKEN_HEADER,
-    )
-
-    assert r.status_code == 200
-    assert r.json()["status"] == "sent"
-    mock_mark_sent.assert_called_once_with(1)

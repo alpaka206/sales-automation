@@ -141,7 +141,9 @@ class ReportAgent:
 
     def _distribute(self, report: str, kind: str) -> None:
         """Best-effort delivery to Slack and email."""
-        channel = settings.REPORT_SLACK_CHANNEL_ID or settings.SLACK_APPROVAL_CHANNEL_ID
+        # Reply-ready alerts own the approval channel. Reports are sent to Slack
+        # only when a separate report channel was explicitly configured.
+        channel = settings.REPORT_SLACK_CHANNEL_ID
         if channel:
             try:
                 slack.post_message(channel, report)

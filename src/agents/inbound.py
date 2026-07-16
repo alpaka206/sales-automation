@@ -14,12 +14,12 @@ from ..common.pricing_guard import strip_price_sentences
 from ..common.subjects import reply_subject
 from ..common.textwash import text_wash
 from ..db.conversation_history import add_progress
-from ..db.models import Contact, Conversation, Message
+from ..db.models import Contact, Conversation, CustomerProfile, Message
 from ..db.session import SessionLocal
 from ..integrations.hubspot import HubSpotClient, HubSpotNotConfigured
 from ..llm.client import LLMClient
 from ..llm.knowledge import select_relevant_docs
-from ._notify import notify_approval
+from ._notify import notify_approval_once
 from .inbound_scoring import (  # noqa: F401 — re-exported for callers/tests
     _TARGET_COUNTRIES,
     _base_score,
@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 _DEFAULT_AUTO_ACK_KO = (
     "안녕하세요 {name}님,\n\n"
     "문의 주셔서 감사합니다. 보내주신 메일은 잘 도착했으며, "
-    "담당자가 내용을 확인한 뒤 24시간 이내에 답변드리겠습니다.\n\n"
+    "담당자가 내용을 확인한 뒤 곧 자세한 답변을 보내드리겠습니다.\n\n"
     "감사합니다."
 )
 
@@ -111,6 +111,24 @@ class InboundAgent:
 
         contact_info = self._fetch_contact(event)
 
+        expected_stage = settings.HUBSPOT_TICKET_STAGE_NEW.strip()
+        if (
+            expected_stage
+            and contact_info.get("ticket_id")
+            and contact_info.get("ticket_stage") != expected_stage
+        ):
+            logger.info(
+                "Inbound skipped — ticket %s is stage %s, expected new stage %s.",
+                contact_info.get("ticket_id") or "-",
+                contact_info.get("ticket_stage") or "unknown",
+                expected_stage,
+            )
+            return {
+                "message_id": None,
+                "status": "skipped_not_new",
+                "object_id": contact_info.get("object_id"),
+            }
+
         if not (contact_info.get("last_message") or "").strip():
             logger.warning(
                 "Inbound skipped — empty body (ticket=%s contact=%s email=%s). The ticket has "
@@ -125,11 +143,8 @@ class InboundAgent:
                 "object_id": contact_info.get("object_id"),
             }
 
-        # If a draft is already waiting for human action in the same thread, skip
-        # the whole pipeline. Stops HubSpot webhook retries / repeated property
-        # changes from piling up duplicate drafts before the operator has acted on
-        # the first one. After approve/reject, the next webhook will produce a new
-        # draft normally.
+        # Ticket retries must never create a second usable reply. For contact-only
+        # events, only an unfinished draft blocks the next genuine customer message.
         existing = self._existing_pending_draft_id(contact_info)
         if existing is not None:
             logger.warning(
@@ -200,13 +215,12 @@ class InboundAgent:
         self._update_summary(conv_id, contact_info)
 
         try:
-            notify_approval(
+            notify_approval_once(
                 message_id=message_id,
                 subject=draft.subject,
                 body_snippet=draft.body,
                 score=score,
                 category=classification.category,
-                channel=channel,
                 title="새 인바운드 문의 — 회신 검토 요청",
                 inquiry=contact_info.get("last_message"),
                 contact_name=contact_info.get("full_name"),
@@ -219,6 +233,20 @@ class InboundAgent:
             )
 
         self._mirror_to_sheet(contact_info, classification, score, channel, draft, message_id)
+
+        # A webhook-processed ticket must also be marked for the polling fallback;
+        # otherwise the next poll can treat the same HubSpot ticket as unseen.
+        if contact_info.get("ticket_id"):
+            try:
+                from .inbound_poller import _mark_ticket_processed
+
+                _mark_ticket_processed(str(contact_info["ticket_id"]))
+            except Exception:
+                logger.warning(
+                    "Failed to persist ticket dedup marker for %s.",
+                    contact_info["ticket_id"],
+                    exc_info=True,
+                )
 
         logger.info(
             "Inbound processed: contact=%s category=%s score=%d msg_id=%d",
@@ -270,10 +298,12 @@ class InboundAgent:
             logger.debug("Sheet mirror skipped/failed for msg %d.", message_id, exc_info=True)
 
     def _existing_pending_draft_id(self, contact_info: dict) -> int | None:
-        """Return the id of an outbound pending_approval Message in the same thread.
+        """Return a reply that means this event should not create another draft.
 
         Thread key: ticket_id if present, otherwise the contact (looked up by
-        normalized email, falling back to hubspot_contact_id).
+        normalized email, falling back to hubspot_contact_id). A ticket represents
+        one inquiry, so any usable reply blocks retries. Contact-only conversations
+        may receive real later replies, so only unfinished drafts block them.
         """
         ticket_id = contact_info.get("ticket_id")
         session = SessionLocal()
@@ -308,12 +338,19 @@ class InboundAgent:
             if conv_id is None:
                 return None
 
+            status_filter = (
+                Message.status.notin_(["draft_failed", "rejected"])
+                if ticket_id
+                else Message.status.in_(["drafting", "pending_approval", "approved"])
+            )
             existing = (
                 session.query(Message)
                 .filter(
                     Message.conversation_id == conv_id,
-                    Message.direction == "outbound",
-                    Message.status.in_(["pending_approval", "drafting"]),
+                    Message.direction == "outgoing",
+                    status_filter,
+                    (Message.prompt_variant.is_(None))
+                    | (Message.prompt_variant != "auto_ack"),
                 )
                 .order_by(Message.created_at.desc())
                 .first()
@@ -338,6 +375,7 @@ class InboundAgent:
             "whatsapp_opt_in": event.get("whatsapp_opt_in", False),
             "phone": event.get("phone"),
             "ticket_id": event.get("ticket_id"),
+            "ticket_stage": event.get("ticket_stage"),
             "recent_emails": "",
             "deal_summary": "",
         }
@@ -360,6 +398,7 @@ class InboundAgent:
             info["country"] = hs_contact.country or info["country"]
             info["phone"] = hs_contact.phone or info["phone"]
             info["lifecycle_stage"] = hs_contact.lifecyclestage or info["lifecycle_stage"]
+            info["whatsapp_opt_in"] = bool(hs_contact.whatsapp_opt_in)
         except Exception:
             logger.warning("HubSpot contact fetch failed, using event payload.", exc_info=True)
 
@@ -367,15 +406,16 @@ class InboundAgent:
         # present, we trust the ticket over the form/email/note fallbacks because
         # that's the explicit source the operator created in HubSpot.
         ticket_id = info.get("ticket_id")
-        if ticket_id and self.hubspot and not info["last_message"]:
+        if ticket_id and self.hubspot:
             try:
                 ticket = self.hubspot.get_ticket_sync(ticket_id)
+                info["ticket_stage"] = ticket.pipeline_stage
                 if ticket.subject and not info["subject"]:
                     info["subject"] = ticket.subject
                 # Body to reply to = ticket content; fall back to the subject so a
                 # subject-only ticket ("가끔 제목만 오더라") is never treated as empty.
                 body = ticket.content or ticket.subject or ""
-                if body:
+                if body and not info["last_message"]:
                     info["last_message"] = body
                     info["inbound_source"] = "ticket"
                     logger.info(
@@ -512,14 +552,16 @@ class InboundAgent:
             return base
 
     def _pick_channel(self, contact_info: dict) -> str:
+        # Email is always the primary reply channel. WhatsApp is a best-effort
+        # backup after the email succeeds (handled by the shared sender).
+        if contact_info.get("email"):
+            return "email"
         if (
             contact_info.get("whatsapp_opt_in")
             and contact_info.get("phone")
             and settings.WHATSAPP_ENABLED
         ):
             return "whatsapp"
-        if contact_info.get("email"):
-            return "email"
         return "none"
 
     def _is_first_reply(self, conv_id: int | None) -> bool:
@@ -536,7 +578,7 @@ class InboundAgent:
                     session.query(Message)
                     .filter(
                         Message.conversation_id == conv_id,
-                        Message.direction == "outbound",
+                        Message.direction == "outgoing",
                         Message.status == "sent",
                         (Message.prompt_variant.is_(None)) | (Message.prompt_variant != "auto_ack"),
                     )
@@ -622,9 +664,9 @@ class InboundAgent:
     def _persist_placeholder(
         self, contact_info: dict, channel: str, inquiry_lang: str
     ) -> tuple[int, int, bool]:
-        """Persist the inquiry + a 'drafting' outbound placeholder, before the AI draft.
+        """Persist the inquiry and a drafting reply placeholder before the AI draft.
 
-        Returns ``(outbound_message_id, conversation_id, is_first_inbound)``. The
+        Returns ``(reply_message_id, conversation_id, is_first_inbound)``. The
         card appears on the site immediately as "작성중"; _finalize_draft fills it in
         once the reply is ready. ``is_first_inbound`` is True when this is the very
         first inbound message in the thread (drives the immediate auto-ack).
@@ -659,10 +701,34 @@ class InboundAgent:
                 session.add(contact)
                 session.flush()
             else:
+                contact.hubspot_contact_id = (
+                    contact.hubspot_contact_id or contact_info.get("object_id") or None
+                )
+                contact.email = email or contact.email
+                contact.full_name = contact_info.get("full_name") or contact.full_name
+                contact.company = contact_info.get("company") or contact.company
+                contact.country = contact_info.get("country") or contact.country
+                contact.lifecycle_stage = (
+                    contact_info.get("lifecycle_stage") or contact.lifecycle_stage
+                )
+                if not contact.domain and email:
+                    dom = _domain_from_email(email)
+                    contact.domain = None if is_personal_domain(dom) else dom
                 if contact_info.get("phone"):
                     contact.phone = contact_info["phone"]
                 if contact_info.get("whatsapp_opt_in"):
                     contact.whatsapp_opt_in = True
+
+            profile = session.get(CustomerProfile, contact.id)
+            if profile is None:
+                session.add(
+                    CustomerProfile(
+                        contact_id=contact.id,
+                        customer_state="negotiation",
+                        pipeline_stage="new",
+                        source="hubspot" if contact_info.get("object_id") else "local",
+                    )
+                )
 
             # Ticket-based inbound: one ticket = one inquiry = one conversation.
             ticket_id = contact_info.get("ticket_id")
@@ -711,6 +777,22 @@ class InboundAgent:
             inbound_body = (contact_info.get("last_message") or "").strip()
             inbound_subject = (contact_info.get("subject") or "").strip() or None
             if inbound_body:
+                # If this is a later customer message, the latest detailed reply was
+                # answered. Auto acknowledgements do not count as sales replies.
+                latest_reply = (
+                    session.query(Message)
+                    .filter(
+                        Message.conversation_id == conv.id,
+                        Message.direction == "outgoing",
+                        Message.status == "sent",
+                        (Message.prompt_variant.is_(None))
+                        | (Message.prompt_variant != "auto_ack"),
+                    )
+                    .order_by(Message.sent_at.desc(), Message.id.desc())
+                    .first()
+                )
+                if latest_reply:
+                    latest_reply.replied = True
                 session.add(
                     Message(
                         conversation_id=conv.id,
@@ -738,13 +820,14 @@ class InboundAgent:
             to_addr = contact_info.get("phone") if channel == "whatsapp" else (email or None)
             msg = Message(
                 conversation_id=conv.id,
-                direction="outbound",
+                direction="outgoing",
                 channel=channel,
                 from_address=settings.SMTP_FROM_EMAIL or None,
                 to_address=to_addr,
                 subject=None,
                 body="",
                 status="drafting",
+                signature_key="signature_html_hyeram",
                 target_language=inquiry_lang,
                 draft_provider=settings.LLM_PROVIDER,
             )
@@ -859,7 +942,7 @@ class InboundAgent:
                 return None
             msg = Message(
                 conversation_id=conv_id,
-                direction="outbound",
+                direction="outgoing",
                 channel="email",
                 from_address=settings.SMTP_FROM_EMAIL or None,
                 to_address=contact_info.get("email") or None,
@@ -869,6 +952,7 @@ class InboundAgent:
                 target_language=target_language,
                 status="auto_sending",
                 prompt_variant="auto_ack",
+                signature_key="signature_html_hyeram",
                 approved_by="auto_ack",
                 approved_at=datetime.now(timezone.utc),
                 draft_provider=settings.LLM_PROVIDER,

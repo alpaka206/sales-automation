@@ -44,7 +44,6 @@ def post_approval_card(
     body_snippet: str,
     score: int | None,
     category: str,
-    channel_type: str,
     *,
     title: str | None = None,
     inquiry: str | None = None,
@@ -57,8 +56,8 @@ def post_approval_card(
     The card answers "who / what did they ask / what will we send" at a glance and
     links straight to the message screen for review:
       - ``title``     : Korean header (e.g. "새 인바운드 문의 — 회신 검토 요청").
-      - ``inquiry``   : the customer's inbound message (omitted for outbound cold mail).
-      - ``contact_*`` : who the prospect/customer is.
+      - ``inquiry``   : the customer's inbound message.
+      - ``contact_*`` : who the customer is.
       - ``body_snippet`` : the drafted reply that will go out after approval.
 
     Note: this card is informational — there are no action buttons because the app
@@ -66,7 +65,11 @@ def post_approval_card(
     operator approves via the web UI link (localhost-trusted) or the /approve API with
     a per-message HMAC token.
     """
-    if not settings.SLACK_BOT_TOKEN or not settings.SLACK_APPROVAL_CHANNEL_ID:
+    if (
+        not settings.SLACK_ENABLED
+        or not settings.SLACK_BOT_TOKEN
+        or not settings.SLACK_APPROVAL_CHANNEL_ID
+    ):
         raise SlackNotConfigured("SLACK_BOT_TOKEN or SLACK_APPROVAL_CHANNEL_ID not set.")
 
     url = _approval_url(message_id)
@@ -80,7 +83,7 @@ def post_approval_card(
     cat_safe = _escape_mrkdwn(category)
 
     blocks: list[dict] = [
-        {"type": "header", "text": {"type": "plain_text", "text": f"📨 {header}"[:150]}},
+        {"type": "header", "text": {"type": "plain_text", "text": header[:150]}},
         {
             "type": "section",
             "fields": [
@@ -92,16 +95,16 @@ def post_approval_card(
         },
     ]
 
-    # 문의 내용 — 인바운드일 때만(아웃바운드 콜드메일은 받은 문의가 없음).
+    # Include the received inquiry whenever HubSpot supplied one.
     if inquiry and inquiry.strip():
         blocks.append({
             "type": "section",
-            "text": {"type": "mrkdwn", "text": f"*🗨️ 문의 내용*\n{_quote_mrkdwn(inquiry, 800)}"},
+            "text": {"type": "mrkdwn", "text": f"*문의 내용*\n{_quote_mrkdwn(inquiry, 800)}"},
         })
 
     blocks.append({
         "type": "section",
-        "text": {"type": "mrkdwn", "text": f"*✍️ 나갈 답변 초안* (제목: {subj_safe})"},
+        "text": {"type": "mrkdwn", "text": f"*나갈 답변 초안* (제목: {subj_safe})"},
     })
     blocks.append({
         "type": "section",
@@ -109,7 +112,7 @@ def post_approval_card(
     })
     blocks.append({
         "type": "section",
-        "text": {"type": "mrkdwn", "text": f"<{url}|🔗 메시지 화면에서 검토·승인하기 →>"},
+        "text": {"type": "mrkdwn", "text": f"<{url}|메시지 화면에서 검토·승인하기 →>"},
     })
 
     with httpx.Client(timeout=10) as client:
@@ -133,7 +136,7 @@ def post_approval_card(
 
 def post_message(channel: str, text: str) -> None:
     """Post a plain mrkdwn text message to a Slack channel."""
-    if not settings.SLACK_BOT_TOKEN:
+    if not settings.SLACK_ENABLED or not settings.SLACK_BOT_TOKEN:
         raise SlackNotConfigured("SLACK_BOT_TOKEN not set.")
 
     with httpx.Client(timeout=10) as client:

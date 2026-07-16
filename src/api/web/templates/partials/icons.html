@@ -1,19 +1,14 @@
 {#
-  Inline SVG icon set — ported verbatim from
-  design_handoff_sales_console/app/icons.jsx (24px grid, currentColor stroke 1.7).
+  Inline SVG icon set (24px grid, currentColor stroke 1.7).
   Usage:  {% from "partials/icons.html" import icon %}  {{ icon("dashboard", 18) }}
 #}
 {%- set _s = 'fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"' -%}
 {%- set ICONS = {
   "dashboard": '<rect x="3" y="3" width="7" height="9" rx="1.5" '~_s~'/><rect x="14" y="3" width="7" height="5" rx="1.5" '~_s~'/><rect x="14" y="12" width="7" height="9" rx="1.5" '~_s~'/><rect x="3" y="16" width="7" height="5" rx="1.5" '~_s~'/>',
   "messages": '<path d="M21 11.5a8.38 8.38 0 0 1-9 8.34 8.5 8.5 0 0 1-3.8-.9L3 20l1.3-3.9A8.38 8.38 0 0 1 12 3a8.5 8.5 0 0 1 9 8.5Z" '~_s~'/>',
-  "outbound": '<path d="M22 2 11 13" '~_s~'/><path d="M22 2 15 22l-4-9-9-4 20-7Z" '~_s~'/>',
-  "prospects": '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" '~_s~'/><circle cx="9" cy="7" r="4" '~_s~'/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" '~_s~'/>',
-  "icp": '<circle cx="12" cy="12" r="9" '~_s~'/><circle cx="12" cy="12" r="5" '~_s~'/><circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none"/>',
+  "users": '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" '~_s~'/><circle cx="9" cy="7" r="4" '~_s~'/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" '~_s~'/>',
   "knowledge": '<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" '~_s~'/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2Z" '~_s~'/>',
   "settings": '<circle cx="12" cy="12" r="3" '~_s~'/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z" '~_s~'/>',
-  "youtube": '<rect x="2" y="5" width="20" height="14" rx="4" '~_s~'/><path d="m10 9 5 3-5 3V9Z" fill="currentColor" stroke="none"/>',
-  "linkedin": '<rect x="2" y="2" width="20" height="20" rx="3" '~_s~'/><path d="M7 10v7M7 7v.01M11 17v-4a2 2 0 0 1 4 0v4M11 17v-7" '~_s~'/>',
   "google": '<circle cx="11" cy="11" r="7" '~_s~'/><path d="m21 21-4.3-4.3" '~_s~'/>',
   "briefcase": '<rect x="2" y="7" width="20" height="14" rx="2" '~_s~'/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16" '~_s~'/>',
   "upload": '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12" '~_s~'/>',

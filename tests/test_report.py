@@ -22,11 +22,11 @@ def seeded_db(db_session):
     db_session.flush()
 
     db_session.add(Message(
-        conversation_id=conv.id, direction="outbound", body="Hi",
+        conversation_id=conv.id, direction="outgoing", body="Hi",
         status="sent", sent_at=datetime.now(timezone.utc), replied=False,
     ))
     db_session.add(Message(
-        conversation_id=conv.id, direction="outbound", body="Follow",
+        conversation_id=conv.id, direction="outgoing", body="Follow",
         status="pending_approval", replied=False,
     ))
     db_session.add(Message(

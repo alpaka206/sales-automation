@@ -1,7 +1,7 @@
 [project]
 name = "sales-automation"
 version = "0.1.0"
-description = "Inbound / Outbound / Report sales agents with human-in-the-loop approval."
+description = "Inbound inquiry, customer history, and sales operations with human-approved replies."
 requires-python = ">=3.11"
 readme = "README.md"
 dependencies = [

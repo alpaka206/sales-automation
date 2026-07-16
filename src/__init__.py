@@ -1,1 +1,1 @@
-"""PERSO Sales Console — top-level package."""
+"""PERSO Inbound Console — top-level package."""

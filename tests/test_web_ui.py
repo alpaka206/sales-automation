@@ -30,9 +30,8 @@ def _client() -> TestClient:
     return TestClient(app)
 
 
-def _mock_dashboard_context(flow="all"):
+def _mock_dashboard_context():
     return {
-        "flow": flow,
         "recent_messages": [
             {
                 "id": 1,
@@ -46,12 +45,15 @@ def _mock_dashboard_context(flow="all"):
             }
         ],
         "status_counts": {
+            "drafting": 1,
             "pending_approval": 2,
             "approved": 1,
             "sent": 5,
-            "bounced": 0,
-            "replied": 1,
+            "draft_failed": 0,
+            "send_failed": 0,
+            "rejected": 0,
         },
+        "received_today": 4,
         "today_sent": 3,
         "daily_limit": 100,
         "category_counts": [("pricing_question", 4), ("purchase_inquiry", 2)],
@@ -64,7 +66,7 @@ def _mock_detail_context(message_id):
             "thread": [
                 {
                     "id": 1,
-                    "direction": "outbound",
+                    "direction": "outgoing",
                     "status": "pending_approval",
                     "subject": "가격 안내",
                     "body": "안녕하세요, 가격 안내드립니다.",
@@ -112,7 +114,7 @@ def _mock_detail_context(message_id):
 def test_dashboard_returns_200():
     r = _client().get("/")
     assert r.status_code == 200
-    assert "대시보드" in r.text
+    assert "인바운드" in r.text
 
 
 @patch("src.api.web.routes.dashboard._dashboard_context", _mock_dashboard_context)
@@ -140,8 +142,8 @@ def test_dashboard_loads_pretendard_tokens():
 def test_dashboard_shows_status_counts():
     # KPI cards surface the counts with Korean labels (status pills), not raw enum strings.
     r = _client().get("/")
-    assert "승인 대기" in r.text
-    assert "발송됨" in r.text
+    assert "지금 확인할 답변" in r.text
+    assert "오늘 발송" in r.text
 
 
 @patch("src.api.web.routes.dashboard._dashboard_context", _mock_dashboard_context)
@@ -210,6 +212,8 @@ def _use_test_db():
     with (
         patch("src.api.web.routes.messages.SessionLocal", factory),
         patch("src.agents.approval.SessionLocal", factory),
+        patch("src.agents.send_worker.SessionLocal", factory),
+        patch("src.integrations.senders.SessionLocal", factory, create=True),
     ):
         yield factory
 
@@ -300,7 +304,7 @@ def test_message_edit_saves(pending_msg, _use_test_db):
     session.close()
 
 
-def _mock_messages_list_context(status="", channel="", flow="all"):
+def _mock_messages_list_context(status="", channel=""):
     return {
         "messages": [
             {
@@ -317,7 +321,6 @@ def _mock_messages_list_context(status="", channel="", flow="all"):
         ],
         "filter_status": status,
         "filter_channel": channel,
-        "filter_flow": flow,
     }
 
 
@@ -325,7 +328,7 @@ def _mock_messages_list_context(status="", channel="", flow="all"):
 def test_messages_list_returns_200():
     r = _client().get("/messages")
     assert r.status_code == 200
-    assert "메시지" in r.text
+    assert "답변 검토" in r.text
     assert "가격 문의" in r.text
 
 

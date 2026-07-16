@@ -1,4 +1,4 @@
-"""Send dispatcher - routes to HubSpot, SMTP, or WhatsApp based on channel and settings."""
+"""Send inbound replies through SMTP and optionally mirror them to WhatsApp."""
 
 from __future__ import annotations
 
@@ -14,14 +14,14 @@ logger = logging.getLogger(__name__)
 
 
 def enforce_send_language(message: Message) -> None:
-    """Final code guard: an outbound email leaves in the right language, washed.
+    """Final code guard: a customer reply leaves in the right language, washed.
 
     The operator's hard rule is that a reply must go out in the inquiry's language.
     Our code sets ``message.language`` at every step (draft = 'ko', translate button
     = target, auto-ack = its final language), and ``message.target_language`` holds
     the language it MUST be sent in. So:
 
-    - every outbound email body is whitespace/format-normalized (text wash);
+    - every reply body is whitespace/format-normalized (text wash);
     - if a target is set and the body isn't in it yet (e.g. the operator hit send on
       the Korean draft without translating), it is translated to the target here so
       a wrong-language reply can never leave.
@@ -74,10 +74,8 @@ def enforce_first_reply_no_price(message: Message) -> None:
 
     The draft-time strip can be bypassed (operator types a price into the draft, or
     the translate step re-renders one), so we re-strip prices here — the single send
-    chokepoint — when this is the first real reply in the thread. Only inbound
-    replies are affected: they carry ``target_language`` (cold outbound has it None),
-    and we skip the auto-ack. Runs AFTER translation so a translated-in price is
-    caught too.
+    chokepoint — when this is the first real reply in the thread. We skip the
+    auto-ack. Runs AFTER translation so a translated-in price is caught too.
     """
     if not isinstance(message.target_language, str) or not message.target_language:
         return
@@ -96,7 +94,7 @@ def enforce_first_reply_no_price(message: Message) -> None:
                 session.query(_Message)
                 .filter(
                     _Message.conversation_id == conv_id,
-                    _Message.direction == "outbound",
+                    _Message.direction == "outgoing",
                     _Message.status == "sent",
                     _Message.id != message.id,
                     (_Message.prompt_variant.is_(None)) | (_Message.prompt_variant != "auto_ack"),
@@ -188,6 +186,39 @@ async def _try_whatsapp_template(message: Message) -> None:
         )
 
 
+async def _log_hubspot_email(message: Message) -> None:
+    """Best-effort timeline log after SMTP delivery; never reverses a real send."""
+    try:
+        contact = message.conversation.contact
+        contact_id = contact.hubspot_contact_id if contact else None
+    except Exception:
+        contact_id = None
+    if not contact_id:
+        return
+
+    from ..hubspot import HubSpotClient, HubSpotNotConfigured
+
+    client = None
+    try:
+        client = HubSpotClient()
+        message.hubspot_engagement_id = await client.create_email_engagement(
+            contact_id=contact_id,
+            subject=message.subject or "",
+            body=message.body or "",
+        )
+    except HubSpotNotConfigured:
+        logger.info("HubSpot is not configured; skipping timeline log for message %d.", message.id)
+    except Exception:
+        logger.warning(
+            "HubSpot timeline log failed for message %d; SMTP send succeeded.",
+            message.id,
+            exc_info=True,
+        )
+    finally:
+        if client is not None:
+            await client.close()
+
+
 async def send(message: Message) -> None:
     """Send a message via the appropriate provider.
 
@@ -206,10 +237,8 @@ async def send(message: Message) -> None:
         await send_whatsapp(message)
         return
 
-    from ..compliance import append_footer, is_suppressed
-
     # Test-mode redirect: reroute every customer-facing email to one address and
-    # force SMTP (HubSpot provider would send to the real contact_id instead).
+    # force SMTP. Real HubSpot contacts are not touched in this mode.
     if override:
         original = message.to_address or "(none)"
         message.to_address = override
@@ -222,64 +251,39 @@ async def send(message: Message) -> None:
             override,
         )
 
-    if message.to_address and is_suppressed(message.to_address):
-        logger.info(
-            "Message %d suppressed — %s is on the suppression list.", message.id, message.to_address
-        )
-        from ...db.session import SessionLocal
-
-        with SessionLocal() as session:
-            msg = session.get(Message, message.id)
-            if msg:
-                msg.status = "suppressed"
-                session.commit()
-        return
-
-    # Code-enforced language + text wash, then the first-reply no-price rule (both
-    # before the footer, which must not be washed/stripped).
-    if message.direction == "outbound":
+    # Code-enforced language + text wash, then the first-reply no-price rule.
+    if message.direction == "outgoing":
         enforce_send_language(message)
         enforce_first_reply_no_price(message)
 
     # When a branded HTML signature (or "none") is selected, strip the LLM's
-    # default text signature so it doesn't render twice. Done BEFORE the footer is
-    # appended — the text signature sits at the body tail, the footer goes after.
+    # default text signature so it doesn't render twice.
     from ..email_html import strip_known_signature, strips_text_signature
 
     if (
-        message.direction == "outbound"
+        message.direction == "outgoing"
         and isinstance(message.body, str)
         and strips_text_signature(getattr(message, "signature_key", None))
     ):
         message.body = strip_known_signature(message.body)
 
-    if message.to_address and message.direction == "outbound":
-        message.body = append_footer(message.body, message.to_address, message.language)
-
     # Email send — failure raises, propagating to caller
     if override or settings.EMAIL_PROVIDER == "smtp":
         send_smtp(message)
     elif settings.EMAIL_PROVIDER == "hubspot":
-        from ...integrations.hubspot import HubSpotClient, HubSpotNotConfigured
-
-        try:
-            hs = HubSpotClient()
-            await hs.send_email(
-                contact_id=str(message.conversation.contact_id),
-                subject=message.subject or "",
-                body=message.body,
-                from_email=settings.SMTP_FROM_EMAIL,
-            )
-            await hs.close()
-        except HubSpotNotConfigured:
-            logger.warning("HubSpot not configured, falling back to SMTP.")
-            send_smtp(message)
+        raise RuntimeError(
+            "EMAIL_PROVIDER=hubspot cannot deliver mail through the CRM activity API. "
+            "Set EMAIL_PROVIDER=smtp; sent replies are still logged to HubSpot."
+        )
     else:
         raise ValueError(f"Unknown EMAIL_PROVIDER: {settings.EMAIL_PROVIDER}")
 
     logger.info(
         "Message %d sent via %s.", message.id, "smtp" if override else settings.EMAIL_PROVIDER
     )
+
+    if not override:
+        await _log_hubspot_email(message)
 
     # WhatsApp piggyback — best-effort, never breaks the email flow.
     # Skipped entirely in test mode so no real phone is messaged.

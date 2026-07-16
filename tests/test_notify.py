@@ -5,7 +5,8 @@ from __future__ import annotations
 from unittest.mock import patch
 
 
-from src.agents._notify import notify_approval
+from src.agents._notify import notify_approval, notify_approval_once
+from src.common.config import settings
 from src.integrations.slack import SlackNotConfigured
 
 _CALL_KWARGS = dict(
@@ -14,7 +15,6 @@ _CALL_KWARGS = dict(
     body_snippet="Test body",
     score=75,
     category="inquiry",
-    channel="email",
 )
 
 
@@ -23,7 +23,7 @@ def test_sends_to_slack_when_configured(mock_slack) -> None:
     notify_approval(**_CALL_KWARGS)
 
     mock_slack.post_approval_card.assert_called_once_with(
-        42, "Hello", "Test body", 75, "inquiry", "email",
+        42, "Hello", "Test body", 75, "inquiry",
         title=None, inquiry=None, contact_name=None,
         contact_company=None, contact_email=None,
     )
@@ -46,3 +46,32 @@ def test_does_not_raise_when_slack_errors(mock_slack) -> None:
     notify_approval(**_CALL_KWARGS)
 
     mock_slack.post_approval_card.assert_called_once()
+
+
+@patch("src.agents._notify.notify_approval")
+def test_once_respects_disabled_setting(mock_notify) -> None:
+    with patch.object(settings, "APPROVAL_CHANNEL", "none"):
+        notify_approval_once(**_CALL_KWARGS)
+    mock_notify.assert_not_called()
+
+
+@patch("src.agents._notify.notify_approval")
+@patch("src.agents._notify._claim_slack_notification", return_value=False)
+def test_once_skips_already_notified(_claim, mock_notify) -> None:
+    with (
+        patch.object(settings, "SLACK_ENABLED", True),
+        patch.object(settings, "APPROVAL_CHANNEL", "slack"),
+    ):
+        notify_approval_once(**_CALL_KWARGS)
+    mock_notify.assert_not_called()
+
+
+@patch("src.agents._notify.notify_approval")
+@patch("src.agents._notify._claim_slack_notification", return_value=True)
+def test_once_sends_after_atomic_claim(_claim, mock_notify) -> None:
+    with (
+        patch.object(settings, "SLACK_ENABLED", True),
+        patch.object(settings, "APPROVAL_CHANNEL", "slack"),
+    ):
+        notify_approval_once(**_CALL_KWARGS)
+    mock_notify.assert_called_once_with(**_CALL_KWARGS)

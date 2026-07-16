@@ -183,7 +183,7 @@ def _seed_reply(db_session, body, *, prior_sent=False):
         db_session.add(
             Message(
                 conversation_id=conv.id,
-                direction="outbound",
+                direction="outgoing",
                 channel="email",
                 body="이전 회신",
                 language="en",
@@ -192,7 +192,7 @@ def _seed_reply(db_session, body, *, prior_sent=False):
         )
     msg = Message(
         conversation_id=conv.id,
-        direction="outbound",
+        direction="outgoing",
         channel="email",
         body=body,
         language="ko",

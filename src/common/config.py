@@ -22,7 +22,7 @@ class Settings(BaseSettings):
     #   GEMINI_MODEL      → fast/cheap "flash" tier for light judgment
     #                       (classification, scoring, doc routing, enrichment).
     #   GEMINI_MODEL_PRO  → high-quality "pro" tier for customer-facing drafting
-    #                       (inbound reply drafts, outbound opening emails).
+    #                       (inbound reply drafts).
     # Code picks the tier per call via LLMClient.complete(..., tier="flash"|"pro").
     GEMINI_MODEL: str = "gemini-2.5-flash"
     GEMINI_MODEL_PRO: str = "gemini-2.5-pro"
@@ -42,6 +42,9 @@ class Settings(BaseSettings):
     HUBSPOT_INBOUND_PIPELINE_ID: str = ""
     HUBSPOT_OWNER_ID: str = ""
     HUBSPOT_WEBHOOK_SECRET: str = ""
+    # Only tickets in this HubSpot pipeline stage are treated as new inbound
+    # inquiries. Empty keeps the existing "all newly-created tickets" behavior.
+    HUBSPOT_TICKET_STAGE_NEW: str = ""
     # After SMTP send completes, move the linked HubSpot ticket to this pipeline stage
     # id (e.g. "문의 대기"). Empty = don't touch stage. Find the id in
     # HubSpot Settings → Objects → Tickets → Pipelines (click a stage → copy id).
@@ -52,9 +55,14 @@ class Settings(BaseSettings):
     # ticket pipeline_stage covers the same role in the new workflow. Default
     # off — keeping it on without the property logs a 400 every webhook.
     HUBSPOT_UPDATE_CONTACT_INBOUND_STATUS: bool = False
+    # Optional HubSpot contact property that records explicit WhatsApp consent.
+    # Example: "whatsapp_opt_in". Blank means no HubSpot contact is opted in.
+    HUBSPOT_WHATSAPP_OPT_IN_PROPERTY: str = ""
 
     # ----- Email -----
-    EMAIL_PROVIDER: Literal["hubspot", "smtp"] = "hubspot"
+    # HubSpot's CRM email endpoint only logs activity; it does not deliver mail.
+    # Real replies use SMTP and are logged back to HubSpot afterwards.
+    EMAIL_PROVIDER: Literal["hubspot", "smtp"] = "smtp"
 
     SMTP_HOST: str = "smtp.gmail.com"
     SMTP_PORT: int = 587
@@ -64,8 +72,8 @@ class Settings(BaseSettings):
     SMTP_FROM_EMAIL: str = ""
 
     # ----- Test mode: redirect ALL real sends to one address -----
-    # When non-empty, every customer-facing email (inbound reply, outbound open,
-    # follow-up) is rerouted to this address and sent via SMTP — the HubSpot
+    # When non-empty, every customer-facing inbound reply is rerouted to this
+    # address and sent via SMTP — the HubSpot
     # provider is bypassed so nothing lands on a real contact's timeline, and the
     # WhatsApp piggyback is skipped so no real phone is messaged. The original
     # intended recipient is preserved in the subject as "[TEST→original]".
@@ -79,7 +87,8 @@ class Settings(BaseSettings):
     WHATSAPP_TEMPLATE_NAME: str = "sales_reply_intro"
 
     # ----- Approval -----
-    APPROVAL_CHANNEL: Literal["slack", "none"] = "slack"
+    SLACK_ENABLED: bool = False
+    APPROVAL_CHANNEL: Literal["slack", "none"] = "none"
     SLACK_BOT_TOKEN: str = ""
     SLACK_APPROVAL_CHANNEL_ID: str = ""
 
@@ -93,7 +102,7 @@ class Settings(BaseSettings):
 
     # ----- Inbound auto-acknowledgement -----
     # On the FIRST inbound of a thread, immediately send a "we received your
-    # message, we'll reply within 24h" acknowledgement — WITHOUT human approval,
+    # message, we'll send a detailed reply shortly" acknowledgement — WITHOUT human approval,
     # in the inquiry's language (enforced in code). It does not change the
     # ticket/draft status. Editable text lives in the ``auto_ack`` email template.
     INBOUND_AUTO_ACK_ENABLED: bool = True
@@ -101,9 +110,8 @@ class Settings(BaseSettings):
     # ----- Send worker -----
     SEND_WORKER_ENABLED: bool = False
     SEND_RATE_PER_MINUTE: int = 5
-    # Safety cap on outbound emails/day. Not about "internal vs external" — it guards
-    # the Gmail/SMTP sender quota (free Gmail ~500/day; exceeding throttles the account)
-    # and sender reputation, and is the only backstop once auto-send/auto-followup is on.
+    # Safety cap on customer emails/day. It guards the Gmail/SMTP sender quota
+    # (free Gmail ~500/day; exceeding throttles the account) and sender reputation.
     # Set generously rather than disabling (0 = unlimited). 400 ≈ free-Gmail margin.
     DAILY_SEND_LIMIT: int = 400
     SEND_JITTER_SECONDS: int = 15
@@ -121,13 +129,6 @@ class Settings(BaseSettings):
     APP_PORT: int = 8000
     LOG_LEVEL: str = "INFO"
     TIMEZONE: str = "Asia/Seoul"
-
-    # ----- Company info (compliance footer) -----
-    COMPANY_NAME: str = "perso"
-    COMPANY_REGISTRATION_NUMBER: str = ""
-    COMPANY_ADDRESS: str = ""
-    COMPANY_PRIVACY_POLICY_URL: str = ""
-    KOREA_AD_PREFIX_ENABLED: bool = False
 
     # ----- Google Sheets (inbound mirror) -----
     # Optional: append every processed inbound inquiry as a row to a Google
@@ -169,7 +170,7 @@ class Settings(BaseSettings):
     APPROVAL_REQUIRE_TOKEN: bool = True
     # Comma-separated CIDR or IPs whose X-Forwarded-For we trust.
     TRUSTED_PROXIES: str = ""
-    # External base URL used in unsubscribe / approval links (overrides APP_HOST:APP_PORT in prod).
+    # External base URL used in approval links (overrides APP_HOST:APP_PORT in prod).
     PUBLIC_BASE_URL: str = ""
 
     # ----- Web UI access (public deploy) -----

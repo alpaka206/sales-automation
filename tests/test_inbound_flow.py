@@ -121,17 +121,17 @@ def test_inbound_handle_creates_db_rows(db_session) -> None:
     messages = db_session.query(Message).all()
     assert len(messages) == 2
     inbound_msg = [m for m in messages if m.direction == "inbound"]
-    outbound_msg = [m for m in messages if m.direction == "outbound"]
+    reply_msg = [m for m in messages if m.direction == "outgoing"]
     assert len(inbound_msg) == 1
     assert inbound_msg[0].status == "received"
-    assert len(outbound_msg) == 1
-    assert outbound_msg[0].status == "pending_approval"
+    assert len(reply_msg) == 1
+    assert reply_msg[0].status == "pending_approval"
     # Subject is built in code as "RE: <customer subject or localized generic>",
     # never the raw model subject. No customer subject here → localized generic (en).
-    assert outbound_msg[0].subject == "RE: Your inquiry"
+    assert reply_msg[0].subject == "RE: Your inquiry"
     # Draft is always Korean; the language to SEND in is the detected inquiry language.
-    assert outbound_msg[0].language == "ko"
-    assert outbound_msg[0].target_language == "en"
+    assert reply_msg[0].language == "ko"
+    assert reply_msg[0].target_language == "en"
 
     conversations = db_session.query(Conversation).all()
     assert len(conversations) == 1
@@ -176,14 +176,73 @@ def test_inbound_dedup(db_session) -> None:
 
     assert r1 is not None
     assert r2 is None
-    assert db_session.query(Message).filter_by(direction="outbound").count() == 1
+    assert db_session.query(Message).filter_by(direction="outgoing").count() == 1
+
+
+def test_later_contact_reply_marks_latest_sent_message_answered(db_session) -> None:
+    llm = _mock_llm()
+    first_event = {
+        "object_id": "hs-returning",
+        "occurred_at": "2026-05-14T11:00:00Z",
+        "email": "returning@example.com",
+        "full_name": "Returning Buyer",
+        "last_message": "Please send pricing.",
+    }
+    second_event = {
+        **first_event,
+        "occurred_at": "2026-05-15T11:00:00Z",
+        "last_message": "Thanks. Can we meet tomorrow?",
+    }
+
+    with patch("src.agents.inbound.SessionLocal", return_value=db_session):
+        agent = InboundAgent(llm=llm, hubspot=None)
+        first = agent.handle(first_event)
+        sent = db_session.get(Message, first["message_id"])
+        sent.status = "sent"
+        sent.sent_at = sent.created_at
+        db_session.commit()
+
+        second = agent.handle(second_event)
+
+    assert second is not None
+    assert db_session.get(Message, first["message_id"]).replied is True
+    assert db_session.query(Message).filter_by(direction="outgoing").count() == 2
 
 
 def test_inbound_channel_selection() -> None:
     agent = InboundAgent(llm=_mock_llm(), hubspot=None)
 
+    assert (
+        agent._pick_channel(
+            {"email": "a@b.com", "phone": "+821012345678", "whatsapp_opt_in": True}
+        )
+        == "email"
+    )
     assert agent._pick_channel({"email": "a@b.com"}) == "email"
     assert agent._pick_channel({}) == "none"
+
+
+def test_inbound_skips_ticket_outside_new_stage(monkeypatch) -> None:
+    from src.agents.inbound import _processed
+    from src.common.config import settings
+
+    monkeypatch.setattr(settings, "HUBSPOT_TICKET_STAGE_NEW", "1")
+    agent = InboundAgent.__new__(InboundAgent)
+    agent.llm = _mock_llm()
+    agent.hubspot = None
+    agent._fetch_contact = MagicMock(
+        return_value={
+            "object_id": "hs-stage",
+            "ticket_id": "ticket-1",
+            "ticket_stage": "2",
+            "last_message": "Question",
+        }
+    )
+    _processed.discard("hs-stage:stage-test")
+
+    result = agent.handle({"object_id": "hs-stage", "occurred_at": "stage-test"})
+
+    assert result["status"] == "skipped_not_new"
 
 
 def test_inbound_enriched_from_hubspot(db_session, monkeypatch) -> None:

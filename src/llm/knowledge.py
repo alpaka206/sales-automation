@@ -18,7 +18,7 @@ Matching rules (category mode):
   except ``spam``.
 - A document with an empty or NULL ``categories`` list is treated as ``[all]``.
 - ``scope`` filtering: ``"inbound"`` matches docs with scope ``inbound`` or
-  ``both``; same for ``"outbound"``. ``scope="both"`` matches everything.
+  ``both``. ``scope="both"`` matches everything.
 - Only ``status == "active"`` documents are ever returned.
 - Spam category always returns empty string.
 """

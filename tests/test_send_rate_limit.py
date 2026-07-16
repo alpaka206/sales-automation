@@ -45,7 +45,7 @@ def _create_approved(session: Session, n: int = 1) -> list[int]:
     for _ in range(n):
         msg = Message(
             conversation_id=conv.id,
-            direction="outbound",
+            direction="outgoing",
             body="Hi",
             status="approved",
             scheduled_at=past,

@@ -15,20 +15,22 @@
     <a href="/" class="brand">
       <img src="/static/logo.png" alt="PERSO" class="brand__logo">
       <span>
-        <span class="brand__name" style="display:block">PERSO Sales</span>
-        <span class="brand__sub">Automation Console</span>
+        <span class="brand__name" style="display:block">PERSO Inbound</span>
+        <span class="brand__sub">Reply Console</span>
       </span>
     </a>
   </div>
 
   <nav class="sidebar__nav">
     <div class="nav-group-label">운영</div>
-    {{ _nav("/", "대시보드", "dashboard", _path == "/", badge=nav_pending) }}
-    {{ _nav("/messages", "메시지", "messages", _path.startswith("/messages"), badge=nav_pending) }}
-    {{ _nav("/tools/quote-calculator", "견적 계산기", "calculator", _path.startswith("/tools/quote-calculator")) }}
+    {{ _nav("/", "인바운드 홈", "dashboard", _path == "/", badge=nav_pending) }}
+    {{ _nav("/messages", "답변 검토", "messages", _path.startswith("/messages"), badge=nav_pending) }}
+    {{ _nav("/customers", "고객 히스토리", "user", _path.startswith("/customers")) }}
+    {{ _nav("/operations", "영업 인사이트", "bolt", _path.startswith("/operations")) }}
+    {{ _nav("/tools/quote-calculator", "견적·결제 준비", "calculator", _path.startswith("/tools/quote-calculator")) }}
 
     <div class="nav-group-label">설정</div>
-    {{ _nav("/email-templates", "이메일 템플릿", "mail", _path.startswith("/email-templates")) }}
+    {{ _nav("/email-templates", "이메일 설정", "mail", _path.startswith("/email-templates")) }}
     {%- if _is_admin %}
     {{ _nav("/settings/users", "접근 승인", "shield", _path.startswith("/settings/users"), badge=(pending_user_count() or None)) }}
     {{ _nav("/logs", "로그", "file", _path.startswith("/logs")) }}

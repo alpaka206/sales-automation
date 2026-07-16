@@ -12,7 +12,8 @@ from datetime import datetime, timezone
 from sqlalchemy import update
 
 from ..common.config import settings
-from ..db.models import Contact, Conversation, Message
+from ..db.conversation_history import add_progress
+from ..db.models import Contact, Conversation, CustomerProfile, Message
 from ..db.session import SessionLocal
 
 logger = logging.getLogger(__name__)
@@ -73,7 +74,7 @@ SEND_TRANSIENT_MAX_RETRIES = 3
 async def _post_send_bookkeeping(session, msg, conv, message_id: int) -> None:
     """Best-effort HubSpot side effects after a successful send. Never raises —
     the email already went out, so failures here must not reverse it."""
-    from ..integrations.hubspot import HubSpotClient, move_ticket_stage_after_send
+    from ..integrations.hubspot import HubSpotClient, HubSpotNotConfigured, move_ticket_stage_after_send
 
     ticket_id = conv.hubspot_ticket_id if conv else None
     if ticket_id:
@@ -83,22 +84,29 @@ async def _post_send_bookkeeping(session, msg, conv, message_id: int) -> None:
     if conv and conv.contact_id:
         contact = session.get(Contact, conv.contact_id)
         hubspot_contact_id = contact.hubspot_contact_id if contact else None
-    if hubspot_contact_id:
+    if hubspot_contact_id and settings.HUBSPOT_UPDATE_CONTACT_INBOUND_STATUS:
+        client = None
         try:
-            await HubSpotClient().create_email_engagement(
-                contact_id=hubspot_contact_id,
-                subject=msg.subject or "",
-                body=msg.body or "",
-            )
-            logger.info(
-                "Logged HubSpot engagement for contact %s (msg %d).",
-                hubspot_contact_id, message_id,
-            )
+            client = HubSpotClient()
+            await client.update_inbound_status(hubspot_contact_id, "meeting_link_sent")
+        except HubSpotNotConfigured:
+            logger.info("HubSpot is not configured; skipping contact status update.")
         except Exception:
-            logger.exception(
-                "HubSpot engagement log failed (contact=%s, msg=%d). Send succeeded.",
+            logger.warning(
+                "HubSpot contact status update failed (contact=%s, msg=%d). Send succeeded.",
                 hubspot_contact_id, message_id,
+                exc_info=True,
             )
+        finally:
+            if client is not None:
+                await client.close()
+
+    if conv:
+        profile = session.get(CustomerProfile, conv.contact_id)
+        if profile:
+            profile.pipeline_stage = "meeting_link_sent"
+            session.commit()
+        add_progress(conv.id, "reply", f"답변 발송 완료: {msg.subject or '(제목 없음)'}"[:200])
 
 
 async def _send_one(message_id: int) -> bool:
@@ -127,6 +135,8 @@ async def _send_one(message_id: int) -> bool:
                 msg.sent_at = datetime.now(timezone.utc)
 
                 conv = session.get(Conversation, msg.conversation_id)
+                if conv:
+                    conv.last_outgoing_at = msg.sent_at
                 session.commit()
                 _record_send()
 
@@ -167,6 +177,18 @@ async def _send_one(message_id: int) -> bool:
         session.close()
 
 
+def _claim_id(message_id: int) -> bool:
+    """Atomically claim one specific approved message."""
+    with SessionLocal() as session:
+        result = session.execute(
+            update(Message)
+            .where(Message.id == message_id, Message.status == "approved")
+            .values(status=_WORKER_ID)
+        )
+        session.commit()
+        return result.rowcount == 1
+
+
 def _claim_ready_id() -> int | None:
     """Atomically claim ONE approved message whose scheduled_at has passed.
 
@@ -175,8 +197,7 @@ def _claim_ready_id() -> int | None:
     This works on SQLite (with WAL) and Postgres without needing FOR UPDATE.
     """
     now = datetime.now(timezone.utc)
-    session = SessionLocal()
-    try:
+    with SessionLocal() as session:
         candidate_ids = (
             session.query(Message.id)
             .filter(
@@ -188,20 +209,19 @@ def _claim_ready_id() -> int | None:
             .all()
         )
 
-        for (mid,) in candidate_ids:
-            result = session.execute(
-                update(Message)
-                .where(Message.id == mid, Message.status == "approved")
-                .values(status=_WORKER_ID)
-            )
-            session.commit()
-            if result.rowcount == 1:
-                return mid
-            # rowcount==0 → another worker took it; try next candidate.
+    for (mid,) in candidate_ids:
+        if _claim_id(mid):
+            return mid
+        # Another worker took it; try the next candidate.
 
-        return None
-    finally:
-        session.close()
+    return None
+
+
+async def send_approved_now(message_id: int) -> bool:
+    """Use the same atomic claim and delivery path as the background worker."""
+    if not _claim_id(message_id):
+        return False
+    return await _send_one(message_id)
 
 
 def request_shutdown() -> None:

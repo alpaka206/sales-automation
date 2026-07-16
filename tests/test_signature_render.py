@@ -115,7 +115,7 @@ def test_signature_appended_after_body():
     assert html.index("본문 첫 줄") < html.index("THECARD")
 
 
-def test_signature_inserted_before_compliance_footer():
+def test_signature_inserted_before_trailing_separator():
     card = "<table id='THECARD'><tr><td>SIG</td></tr></table>"
     body = "본문입니다.\n\n감사합니다.\n\n---\n수신 거부: http://x/unsub"
     html = to_html_email(body, signature_html=card)

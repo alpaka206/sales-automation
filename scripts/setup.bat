@@ -5,7 +5,7 @@ cd /d "%~dp0\.."
 
 echo.
 echo ========================================================
-echo   PERSO Sales Console - 초기 설정
+echo   PERSO Inbound Console - 초기 설정
 echo ========================================================
 echo.
 

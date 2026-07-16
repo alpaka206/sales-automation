@@ -23,7 +23,7 @@ _PLACEHOLDER = re.compile(r"\{\{\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\}\}")
 # email signature (DB-backed). Lets ops edit the outgoing signature from the web
 # console without a redeploy. See src/db/email_templates.py + routes/email_templates.py.
 _SIGNATURE_TOKEN = "{{__signature__}}"
-_DEFAULT_SIGNATURE = "김규원\nPERSO AI | Intern (Developer Relations)\ndevrel.365@gmail.com"
+_DEFAULT_SIGNATURE = "이혜람\nGrowth, Perso Dubbing | ESTsoft\nleehyeram@estsoft.com"
 
 
 @lru_cache

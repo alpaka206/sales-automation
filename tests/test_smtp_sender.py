@@ -99,7 +99,7 @@ def test_send_smtp_rejects_crlf_in_to() -> None:
 
 
 def test_send_smtp_threads_via_in_reply_to() -> None:
-    """When the outbound message has in_reply_to set, In-Reply-To + References go in headers."""
+    """When the outgoing reply has in_reply_to set, In-Reply-To + References are set."""
     msg = MagicMock()
     msg.body = "Reply body"
     msg.subject = "Re: Hi"

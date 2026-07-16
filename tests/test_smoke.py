@@ -6,4 +6,4 @@ def test_imports() -> None:
     from src.api.main import app
 
     assert settings is not None
-    assert app.title == "PERSO Sales Console"
+    assert app.title == "PERSO Inbound Console"

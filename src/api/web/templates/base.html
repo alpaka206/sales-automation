@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>{% block title %}PERSO Sales Console{% endblock %}</title>
+  <title>{% block title %}PERSO Inbound{% endblock %}</title>
   {# Restore persisted theme before paint to avoid a flash of the wrong theme. #}
   <script>
     (function () {
@@ -27,8 +27,7 @@
 
     <div class="content">
       <header class="topbar">
-        <button type="button" class="icon-btn" title="검색" aria-label="검색">{{ icon("search", 18) }}</button>
-        <button type="button" class="icon-btn" title="알림" aria-label="알림">{{ icon("bell", 18) }}</button>
+        <span class="topbar__status"><span></span> {% if slack_approval_enabled() %}Slack 알림 · 초안당 1회{% else %}Slack 알림 꺼짐{% endif %}</span>
         <button type="button" class="icon-btn" id="theme-toggle" title="테마 전환" aria-label="테마 전환">
           <span class="theme-toggle__sun">{{ icon("sun", 18) }}</span>
           <span class="theme-toggle__moon" hidden>{{ icon("moon", 18) }}</span>

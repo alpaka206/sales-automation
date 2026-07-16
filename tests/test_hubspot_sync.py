@@ -72,23 +72,6 @@ async def test_update_inbound_status_400_warns(client: HubSpotClient) -> None:
     await client.close()
 
 
-# ---------- send_email delegates (covers line 191) ----------
-
-
-@respx.mock
-@pytest.mark.asyncio
-async def test_send_email(client: HubSpotClient) -> None:
-    respx.post(f"{BASE_URL}/crm/v3/objects/emails").mock(
-        return_value=httpx.Response(200, json={"id": "eng-99"})
-    )
-    respx.put(url__regex=r".*/associations/.*").mock(
-        return_value=httpx.Response(200, json={})
-    )
-    eng_id = await client.send_email("123", "Sub", "Body", "from@x.com")
-    await client.close()
-    assert eng_id == "eng-99"
-
-
 # ---------- update_inbound_status_sync (covers lines 236-250) ----------
 
 

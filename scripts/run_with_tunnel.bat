@@ -5,7 +5,7 @@ cd /d "%~dp0\.."
 
 echo.
 echo ========================================================
-echo   PERSO Sales Console - 서버 + 터널 동시 시작
+echo   PERSO Inbound Console - 서버 + 터널 동시 시작
 echo ========================================================
 echo.
 
@@ -25,7 +25,7 @@ if errorlevel 1 (
 )
 
 echo [1/2] FastAPI 서버를 별도 창에서 시작합니다...
-start "PERSO Sales Console - Server" cmd /c "scripts\run.bat"
+start "PERSO Inbound Console - Server" cmd /c "scripts\run.bat"
 
 REM --- 서버가 뜰 때까지 잠시 대기 ---
 echo       서버 기동 대기 (3초)...

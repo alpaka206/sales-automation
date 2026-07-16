@@ -48,7 +48,7 @@ def test_message_and_approval_chain(db_session: Session) -> None:
     db_session.add(conv)
     db_session.flush()
 
-    msg = Message(conversation_id=conv.id, direction="outbound", body="Hello")
+    msg = Message(conversation_id=conv.id, direction="outgoing", body="Hello")
     db_session.add(msg)
     db_session.flush()
 

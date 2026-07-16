@@ -14,7 +14,7 @@ import tempfile
 #
 # `setdefault` means an explicit override (CI secret, or `DATABASE_URL=...` on
 # the command line) still wins.
-_TEST_DB_PATH = os.path.join(tempfile.gettempdir(), "sales_automation_test.db")
+_TEST_DB_PATH = os.path.join(tempfile.gettempdir(), f"sales_automation_test_{os.getpid()}.db")
 os.environ.setdefault("DATABASE_URL", f"sqlite:///{_TEST_DB_PATH}")
 os.environ.setdefault("INTERNAL_API_TOKEN", "test-internal-token")
 # A dummy HubSpot token so HubSpotClient() constructs instead of raising
@@ -26,6 +26,15 @@ os.environ.setdefault("HUBSPOT_PRIVATE_APP_TOKEN", "test-hubspot-token")
 # .env (SEND_OVERRIDE_EMAIL=...) can't leak in and silently reroute/force-SMTP
 # the dispatch tests. setdefault still lets CI opt in explicitly.
 os.environ.setdefault("SEND_OVERRIDE_EMAIL", "")
+# TestClient must never start real background integrations from a developer's
+# local .env. Individual worker/poller tests invoke those functions explicitly.
+os.environ.setdefault("INBOUND_POLL_ENABLED", "false")
+os.environ.setdefault("SEND_WORKER_ENABLED", "false")
+# Never let tests inherit a developer's real Slack credentials/channel.  Several
+# inbound-flow tests intentionally create review-ready drafts; without this
+# guard those fixtures look exactly like production notifications.
+os.environ.setdefault("SLACK_ENABLED", "false")
+os.environ.setdefault("APPROVAL_CHANNEL", "none")
 
 from unittest.mock import MagicMock  # noqa: E402
 
@@ -73,5 +82,3 @@ def mock_llm():
     llm = MagicMock()
     llm.complete.return_value = "ok"
     return llm
-
-

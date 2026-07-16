@@ -1,4 +1,4 @@
-"""Tests for senders dispatch — suppression, whatsapp channel, hubspot fallback."""
+"""Tests for the inbound reply sender dispatch."""
 
 from __future__ import annotations
 
@@ -13,126 +13,63 @@ def _make_message(**overrides) -> MagicMock:
     msg = MagicMock()
     msg.id = overrides.get("id", 1)
     msg.channel = overrides.get("channel", "email")
-    msg.direction = overrides.get("direction", "outbound")
+    msg.direction = overrides.get("direction", "outgoing")
     msg.to_address = overrides.get("to_address", "to@example.com")
     msg.subject = overrides.get("subject", "Test")
     msg.body = overrides.get("body", "Hello")
     msg.language = overrides.get("language", "ko")
     msg.target_language = overrides.get("target_language", None)
+    msg.prompt_variant = overrides.get("prompt_variant", "auto_ack")
+    msg.signature_key = overrides.get("signature_key", "none")
     msg.conversation = MagicMock()
     msg.conversation.contact_id = overrides.get("contact_id", 100)
+    msg.conversation.contact = None
     return msg
-
-
-# ---------- WhatsApp channel direct send (covers line 72-74) ----------
 
 
 @pytest.mark.asyncio
 @patch("src.integrations.senders.send_whatsapp", new_callable=AsyncMock)
 async def test_whatsapp_channel_sends_directly(mock_wa) -> None:
     msg = _make_message(channel="whatsapp")
-    await send(msg)
-    mock_wa.assert_called_once_with(msg)
-
-
-# ---------- Suppression (covers lines 78-86) ----------
-
-
-@pytest.mark.asyncio
-@patch("src.integrations.senders.send_smtp")
-@patch("src.integrations.compliance.is_suppressed", return_value=True)
-@patch("src.integrations.compliance.append_footer", side_effect=lambda b, *a: b)
-@patch("src.db.session.SessionLocal")
-async def test_suppressed_address_skips_send(
-    mock_session_cls, mock_footer, mock_suppressed, mock_smtp
-) -> None:
-    msg = _make_message(to_address="blocked@example.com")
-
-    mock_session = MagicMock()
-    mock_session.__enter__ = MagicMock(return_value=mock_session)
-    mock_session.__exit__ = MagicMock(return_value=False)
-    mock_session.get.return_value = msg
-    mock_session_cls.return_value = mock_session
-
-    with patch("src.integrations.senders.settings") as s:
-        s.EMAIL_PROVIDER = "smtp"
-        s.WHATSAPP_ENABLED = False
-        s.SEND_OVERRIDE_EMAIL = ""
+    with patch("src.integrations.senders.settings") as configured:
+        configured.SEND_OVERRIDE_EMAIL = ""
         await send(msg)
-
-    mock_smtp.assert_not_called()
-
-
-# ---------- HubSpot provider path (covers lines 94-108) ----------
+    mock_wa.assert_awaited_once_with(msg)
 
 
 @pytest.mark.asyncio
+@patch("src.integrations.senders._log_hubspot_email", new_callable=AsyncMock)
 @patch("src.integrations.senders.send_smtp")
-@patch("src.integrations.compliance.is_suppressed", return_value=False)
-@patch("src.integrations.compliance.append_footer", side_effect=lambda b, *a: b)
-async def test_hubspot_provider_send(mock_footer, mock_suppressed, mock_smtp) -> None:
+async def test_smtp_sends_then_logs_to_hubspot(mock_smtp, mock_log) -> None:
     msg = _make_message()
-
-    with (
-        patch("src.integrations.senders.settings") as s,
-        patch("src.integrations.hubspot.HubSpotClient") as MockHSClient,
-    ):
-        s.EMAIL_PROVIDER = "hubspot"
-        s.WHATSAPP_ENABLED = False
-        s.SEND_OVERRIDE_EMAIL = ""
-        s.SMTP_FROM_EMAIL = "from@x.com"
-
-        hs_instance = AsyncMock()
-        hs_instance.send_email = AsyncMock(return_value="eng-1")
-        MockHSClient.return_value = hs_instance
-
+    with patch("src.integrations.senders.settings") as configured:
+        configured.EMAIL_PROVIDER = "smtp"
+        configured.WHATSAPP_ENABLED = False
+        configured.SEND_OVERRIDE_EMAIL = ""
         await send(msg)
-
-    mock_smtp.assert_not_called()
-    hs_instance.send_email.assert_called_once()
-    hs_instance.close.assert_called_once()
-
-
-@pytest.mark.asyncio
-@patch("src.integrations.senders.send_smtp")
-@patch("src.integrations.compliance.is_suppressed", return_value=False)
-@patch("src.integrations.compliance.append_footer", side_effect=lambda b, *a: b)
-async def test_hubspot_not_configured_falls_back_to_smtp(
-    mock_footer, mock_suppressed, mock_smtp
-) -> None:
-    from src.integrations.hubspot import HubSpotNotConfigured
-
-    msg = _make_message()
-
-    with (
-        patch("src.integrations.senders.settings") as s,
-        patch("src.integrations.hubspot.HubSpotClient") as MockHSClient,
-    ):
-        s.EMAIL_PROVIDER = "hubspot"
-        s.WHATSAPP_ENABLED = False
-        s.SEND_OVERRIDE_EMAIL = ""
-        s.SMTP_FROM_EMAIL = "from@x.com"
-
-        MockHSClient.side_effect = HubSpotNotConfigured("no token")
-
-        await send(msg)
-
     mock_smtp.assert_called_once_with(msg)
-
-
-# ---------- Unknown provider (covers line 109-110) ----------
+    mock_log.assert_awaited_once_with(msg)
 
 
 @pytest.mark.asyncio
-@patch("src.integrations.compliance.is_suppressed", return_value=False)
-@patch("src.integrations.compliance.append_footer", side_effect=lambda b, *a: b)
-async def test_unknown_provider_raises(mock_footer, mock_suppressed) -> None:
+@patch("src.integrations.senders.send_smtp")
+async def test_hubspot_provider_is_rejected(mock_smtp) -> None:
     msg = _make_message()
+    with patch("src.integrations.senders.settings") as configured:
+        configured.EMAIL_PROVIDER = "hubspot"
+        configured.WHATSAPP_ENABLED = False
+        configured.SEND_OVERRIDE_EMAIL = ""
+        with pytest.raises(RuntimeError, match="cannot deliver mail"):
+            await send(msg)
+    mock_smtp.assert_not_called()
 
-    with patch("src.integrations.senders.settings") as s:
-        s.EMAIL_PROVIDER = "carrier_pigeon"
-        s.WHATSAPP_ENABLED = False
-        s.SEND_OVERRIDE_EMAIL = ""
 
+@pytest.mark.asyncio
+async def test_unknown_provider_raises() -> None:
+    msg = _make_message()
+    with patch("src.integrations.senders.settings") as configured:
+        configured.EMAIL_PROVIDER = "carrier_pigeon"
+        configured.WHATSAPP_ENABLED = False
+        configured.SEND_OVERRIDE_EMAIL = ""
         with pytest.raises(ValueError, match="Unknown EMAIL_PROVIDER"):
             await send(msg)

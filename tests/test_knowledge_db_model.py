@@ -60,8 +60,8 @@ def test_categories_json(db: Session) -> None:
 
 
 def test_scope_values(db: Session) -> None:
-    """scope accepts inbound / outbound / both."""
-    for scope in ("inbound", "outbound", "both"):
+    """scope accepts inbound and shared documents."""
+    for scope in ("inbound", "both"):
         doc = KnowledgeDocument(
             title=f"scope-{scope}",
             slug=f"scope-{scope}",
@@ -71,7 +71,7 @@ def test_scope_values(db: Session) -> None:
         )
         db.add(doc)
     db.commit()
-    assert db.query(KnowledgeDocument).count() == 3
+    assert db.query(KnowledgeDocument).count() == 2
 
 
 def test_migration_creates_table() -> None:

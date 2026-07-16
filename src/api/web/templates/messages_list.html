@@ -1,62 +1,51 @@
 {% extends "base.html" %}
 {% from "partials/icons.html" import icon %}
 {% from "partials/ui.html" import status_pill %}
-{% block title %}메시지 — PERSO Sales Console{% endblock %}
+{% block title %}답변 검토 — PERSO{% endblock %}
 {% block content %}
 
 {% set pending_n = messages | selectattr('status', 'equalto', 'pending_approval') | list | length %}
 <div class="page-header">
   <div>
-    <h1 class="page-title">메시지</h1>
+    <div class="eyebrow">REPLY QUEUE</div>
+    <h1 class="page-title">답변 검토</h1>
+    <p class="page-sub">문의 원문, 같은 고객·도메인의 이전 기록, 적용 규정을 함께 확인하고 발송하세요.</p>
   </div>
-  {% if pending_n %}
-  <a href="/messages?status=pending_approval" class="pill pill--accent" style="text-decoration:none;height:32px;padding:0 14px">
-    <span class="pill__dot"></span>승인 대기 {{ pending_n }}건
-  </a>
-  {% endif %}
+  {% if pending_n %}<span class="pill pill--accent"><span class="pill__dot"></span>현재 목록에서 {{ pending_n }}건 대기</span>{% endif %}
 </div>
 
-{# ---- status filter chips + channel select ---- #}
-{% set chips = [('', '전체'), ('pending_approval','승인 대기'), ('approved','승인됨'), ('sent','발송됨'), ('replied','응답'), ('rejected','거절'), ('bounced','반송')] %}
-<div class="row-between wrap mb-gap" style="align-items:center">
+{% set chips = [('', '전체'), ('drafting','작성 중'), ('pending_approval','검토 대기'), ('approved','발송 대기'), ('sent','발송 완료'), ('draft_failed','작성 실패'), ('send_failed','발송 실패'), ('rejected','거절')] %}
+<div class="filter-bar mb-gap">
   <div class="chip-row">
     {% for val, label in chips %}
-    <a class="chip{% if filter_status == val %} is-active{% endif %}" href="/messages?status={{ val }}&channel={{ filter_channel }}&flow={{ filter_flow }}">{{ label }}</a>
+    <a class="chip{% if filter_status == val %} is-active{% endif %}" href="/messages?status={{ val }}&channel={{ filter_channel }}">{{ label }}</a>
     {% endfor %}
   </div>
-  <select class="select" aria-label="채널 필터" style="width:auto;min-width:150px"
-          onchange="location.href='/messages?status={{ filter_status }}&channel='+this.value+'&flow={{ filter_flow }}'">
+  <select class="select filter-bar__select" aria-label="채널 필터"
+          onchange="location.href='/messages?status={{ filter_status }}&channel='+this.value">
     <option value="">전체 채널</option>
-    {% for c in ['email','whatsapp'] %}
-    <option value="{{ c }}" {% if filter_channel == c %}selected{% endif %}>{{ c }}</option>
-    {% endfor %}
+    {% for c in ['email','whatsapp'] %}<option value="{{ c }}" {% if filter_channel == c %}selected{% endif %}>{{ c }}</option>{% endfor %}
   </select>
 </div>
 
 <div class="card card--flush" id="msg-list"
-     hx-get="/messages?status={{ filter_status }}&channel={{ filter_channel }}&flow={{ filter_flow }}"
+     hx-get="/messages?status={{ filter_status }}&channel={{ filter_channel }}"
      hx-trigger="every 15s" hx-select="#msg-list" hx-target="#msg-list" hx-swap="outerHTML">
   <div class="table-wrap">
     <table class="table">
-      <thead>
-        <tr>
-          <th scope="col">상태</th><th scope="col">제목</th><th scope="col">분류</th><th scope="col">채널</th><th scope="col">수신자</th><th scope="col">시간</th>
-        </tr>
-      </thead>
+      <thead><tr><th scope="col">상태</th><th scope="col">답변 제목</th><th scope="col">문의 유형</th><th scope="col">채널</th><th scope="col">수신자</th><th scope="col">시간</th></tr></thead>
       <tbody>
         {% for msg in messages %}
         <tr class="is-clickable" onclick="location.href='/messages/{{ msg.id }}'">
           <td>{{ status_pill(msg.status, "sm") }}</td>
-          <td class="truncate" style="max-width:300px">{{ msg.subject }}</td>
+          <td class="truncate" style="max-width:320px">{{ msg.subject }}</td>
           <td class="td-muted">{{ msg.category }}</td>
           <td class="td-muted">{{ msg.channel }}</td>
-          <td class="td-subtle truncate mono" style="max-width:180px">{{ msg.to_address }}</td>
+          <td class="td-subtle truncate mono" style="max-width:190px">{{ msg.to_address }}</td>
           <td class="td-subtle tnum">{{ msg.created_at | kst('%m/%d %H:%M') }}</td>
         </tr>
         {% else %}
-        <tr><td colspan="7">
-          <div class="empty"><div class="empty__icon">{{ icon("messages", 24) }}</div><div class="empty__text">메시지가 없습니다</div></div>
-        </td></tr>
+        <tr><td colspan="6"><div class="empty"><div class="empty__icon">{{ icon("messages", 24) }}</div><div class="empty__text">조건에 맞는 답변이 없습니다.</div></div></td></tr>
         {% endfor %}
       </tbody>
     </table>

@@ -54,7 +54,7 @@ def _clean_signature_key(value: str | None) -> str | None:
 
 
 def _message_detail_context(message_id: int) -> dict:
-    """Load a single message with related contact/prospect data."""
+    """Load a single message with its related customer data."""
     with SessionLocal() as session:
         msg = (
             session.execute(
@@ -77,7 +77,7 @@ def _message_detail_context(message_id: int) -> dict:
         progress_rows = []
         if conv:
             # Full ticket/conversation thread, oldest → newest — every inbound inquiry
-            # and every outbound reply / auto-ack / follow-up for this thread.
+            # and every outgoing reply or auto-ack for this thread.
             thread_rows = (
                 session.execute(
                     select(Message)
@@ -173,7 +173,7 @@ def _message_detail_context(message_id: int) -> dict:
                 "body_ko": None,
                 "channel": msg.channel,
                 "direction": msg.direction,
-                # All threads are inbound replies now (the outbound agent was removed).
+                # Every thread starts from an inbound inquiry.
                 "flow": "inbound_reply",
                 "language": msg.language,
                 "target_language": msg.target_language,
@@ -283,36 +283,25 @@ async def _translate_inbound_bubbles(ctx: dict) -> None:
     await asyncio.gather(*(_tx(t) for t in items))
 
 
-def _messages_list_context(status: str = "", channel: str = "", flow: str = "all") -> dict:
+def _messages_list_context(status: str = "", channel: str = "") -> dict:
     """Query DB for paginated message list.
 
-    The list is the approval queue — outbound drafts and sent replies only. Inbound
+    The list is the approval queue — outgoing drafts and sent replies only. Inbound
     rows are persisted (so the detail page can show "what we're replying to") but
     rendering them here would duplicate the box at the top of the detail page.
-
-    ``flow`` filters by product flow: ``outbound`` (cold-discovery mail — the
-    conversation carries a prospect) vs ``inbound`` (a reply to an inbound inquiry —
-    contact-only conversation). ``all`` (default) shows both.
     """
-    if flow not in ("all", "inbound", "outbound"):
-        flow = "all"
     q = (
-        select(Message, Conversation.topic, Conversation.prospect_id)
+        select(Message, Conversation.topic)
         .join(Conversation, Message.conversation_id == Conversation.id)
-        .where(Message.direction == "outbound")
+        .where(Message.direction == "outgoing")
         # Auto-ack (접수확인) replies are sent automatically and shown inside the
         # thread — keep them out of the approval queue list so it isn't noisy.
         .where((Message.prompt_variant.is_(None)) | (Message.prompt_variant != "auto_ack"))
         .order_by(Message.created_at.desc())
     )
-    if flow == "outbound":
-        q = q.where(Conversation.prospect_id.isnot(None))
-    elif flow == "inbound":
-        q = q.where(Conversation.prospect_id.is_(None))
     if status == "replied":
-        # Replies are tracked on the boolean Message.replied column (set by
-        # reply_check), not as a status — a replied message keeps status="sent".
-        # Mirrors the dashboard "누적 응답" metric.
+        # A later inbound message marks the latest detailed sent reply as answered;
+        # the reply itself keeps status="sent".
         q = q.where(Message.replied.is_(True))
     elif status:
         q = q.where(Message.status == status)
@@ -329,28 +318,24 @@ def _messages_list_context(status: str = "", channel: str = "", flow: str = "all
                 "subject": msg.subject or "(제목 없음)",
                 "channel": msg.channel,
                 "direction": msg.direction,
-                # Product flow, not DB direction: reply to an inbound inquiry vs outbound cold mail.
-                "flow": "outbound" if prospect_id is not None else "inbound_reply",
                 "to_address": msg.to_address or "-",
                 "created_at": msg.created_at,
             }
-            for msg, topic, prospect_id in rows
+            for msg, topic in rows
         ]
     return {
         "messages": messages,
         "filter_status": status,
         "filter_channel": channel,
-        "filter_flow": flow,
     }
 
 
 @router.get("/messages")
 async def messages_list(request: Request):
-    """Message list page — all messages with optional status/channel/flow filters."""
+    """Inbound reply list with optional status and channel filters."""
     status = request.query_params.get("status", "")
     channel = request.query_params.get("channel", "")
-    flow = request.query_params.get("flow", "all")
-    ctx = _messages_list_context(status=status, channel=channel, flow=flow)
+    ctx = _messages_list_context(status=status, channel=channel)
     return templates.TemplateResponse(request, "messages_list.html", ctx)
 
 
@@ -464,6 +449,12 @@ async def message_send(
     leaving the message in 'approved' for the background send worker — a paused or
     absent worker must never strand an already-approved reply.
     """
+    if len(body.encode("utf-8")) > _MAX_EDIT_BODY_BYTES:
+        return HTMLResponse("<div class='text-red-600 text-sm'>본문이 너무 깁니다.</div>", status_code=400)
+    clean_subject = subject.strip()
+    if len(clean_subject) > _MAX_EDIT_SUBJECT_LEN:
+        return HTMLResponse("<div class='text-red-600 text-sm'>제목이 너무 깁니다.</div>", status_code=400)
+
     try:
         edited = body.strip() if body.strip() else None
         approve(message_id, approver=actor_name(request, fallback="web_ui"), edited_body=edited)
@@ -479,6 +470,8 @@ async def message_send(
         m = session.get(Message, message_id)
         if m is not None:
             m.signature_key = sig_key
+            if clean_subject:
+                m.subject = clean_subject
             session.commit()
 
     # When the background send worker is running, let IT claim & send this approved
@@ -490,54 +483,13 @@ async def message_send(
             '<div class="text-green-600 text-sm font-medium">승인 완료 — 백그라운드 발송 대기 중</div>'
         )
 
-    from ....agents.approval import mark_sent
-    from ....integrations.senders import send
+    from ....agents.send_worker import send_approved_now
 
-    subj = bod = contact_id = ""
-    conv_id_for_log: int | None = None
-    try:
-        # Send with a session-attached message so send() can read its conversation
-        # (the instance returned by approve() is detached).
-        with SessionLocal() as session:
-            m = session.get(Message, message_id)
-            if m is None:
-                return HTMLResponse(
-                    '<div class="text-red-600 text-sm">메시지를 찾을 수 없습니다</div>',
-                    status_code=404,
-                )
-            await send(m)
-            # send() may have washed/translated the body via the language guard;
-            # persist that so the DB record matches what actually went out.
-            subj, bod = m.subject or "", m.body or ""
-            conv = m.conversation
-            contact_id = str(conv.contact_id) if conv and conv.contact_id else ""
-            conv_id_for_log = m.conversation_id
-            session.commit()
-        mark_sent(message_id)
-        if conv_id_for_log:
-            add_progress(conv_id_for_log, "reply", f"회신 발송 완료: {subj}"[:200])
-    except Exception:
-        logger.exception("Inline send failed for message %d after approval", message_id)
+    if not await send_approved_now(message_id):
         return HTMLResponse(
             '<div class="text-red-600 text-sm font-medium">승인됐지만 발송에 실패했습니다 — 잠시 후 다시 시도해 주세요</div>',
             status_code=500,
         )
-
-    # Best-effort HubSpot timeline log when send() didn't already (SMTP / test mode).
-    # Never reverses a successful send.
-    if contact_id and (settings.SEND_OVERRIDE_EMAIL.strip() or settings.EMAIL_PROVIDER == "smtp"):
-        try:
-            from ....integrations.hubspot import HubSpotClient
-
-            await HubSpotClient().create_email_engagement(
-                contact_id=contact_id, subject=subj, body=bod
-            )
-        except Exception:
-            logger.warning(
-                "HubSpot engagement log failed for message %d (send succeeded)",
-                message_id,
-                exc_info=True,
-            )
 
     return HTMLResponse('<div class="text-green-600 text-sm font-medium">승인 및 발송 완료</div>')
 
@@ -548,8 +500,7 @@ async def message_preview(body: str = Form(""), signature_key: str = Form("")):
 
     Stateless: takes the (possibly edited) textarea content + the chosen signature
     and returns the same styled HTML the send path attaches, so the approver sees
-    the real look — including a branded signature replacing the text one. (The
-    legal/unsubscribe footer is added only at send time, as the modal notes.)
+    the real look, including a branded signature replacing the text one.
     """
     from ....integrations.email_html import (
         branded_signature_html,

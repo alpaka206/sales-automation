@@ -22,7 +22,7 @@ def db_with_message(db_session, db_session_factory):
 
     msg = Message(
         conversation_id=conv.id,
-        direction="outbound",
+        direction="outgoing",
         body="Draft body",
         status="pending_approval",
     )

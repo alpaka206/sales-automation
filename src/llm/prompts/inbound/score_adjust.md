@@ -17,7 +17,7 @@ Most recent inbound message:
 {{ last_message }}
 """
 
-Consider: urgency, budget signals, fit with our ICP, specificity of the request.
+Consider urgency, purchase intent, service fit, and specificity of the request.
 
 Return strict JSON only:
 {
