@@ -63,6 +63,13 @@ def test_text_wash_normalizes_bullets():
     assert text_wash("• item one\n· item two") == "- item one\n- item two"
 
 
+def test_text_wash_separates_bullet_blocks_from_prose():
+    raw = "안내드립니다.\n• 첫 번째 조건\n• 두 번째 조건\n회신해 주세요."
+    assert text_wash(raw) == (
+        "안내드립니다.\n\n- 첫 번째 조건\n- 두 번째 조건\n\n회신해 주세요."
+    )
+
+
 def test_text_wash_collapses_inner_spaces():
     assert text_wash("hello    world") == "hello world"
 

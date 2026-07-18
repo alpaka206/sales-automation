@@ -655,6 +655,72 @@ class InboundAgent:
             logger.warning("first-reply check failed for conv %s; assuming first.", conv_id)
             return True
 
+    def _build_conversation_context(
+        self,
+        conv_id: int | None,
+        latest_message: str | None,
+        *,
+        limit: int = 8,
+        max_chars: int = 6000,
+    ) -> str:
+        """Return the rolling summary and latest completed turns for drafting.
+
+        The current inbound message is already supplied separately to the prompt,
+        so its newest matching row is omitted here. Keeping a small, recent window
+        prevents long threads from crowding out the customer's latest intent.
+        """
+        if not conv_id:
+            return ""
+        try:
+            with SessionLocal() as session:
+                conv = session.get(Conversation, conv_id)
+                rows = (
+                    session.query(Message)
+                    .filter(
+                        Message.conversation_id == conv_id,
+                        Message.body != "",
+                        Message.status != "drafting",
+                    )
+                    .order_by(Message.created_at.desc(), Message.id.desc())
+                    .limit(limit + 1)
+                    .all()
+                )
+
+            latest = text_wash(latest_message)
+            skipped_latest = False
+            prior_rows: list[Message] = []
+            for row in rows:
+                body = text_wash(row.body)
+                if (
+                    not skipped_latest
+                    and latest
+                    and row.direction == "inbound"
+                    and body == latest
+                ):
+                    skipped_latest = True
+                    continue
+                prior_rows.append(row)
+                if len(prior_rows) >= limit:
+                    break
+
+            parts: list[str] = []
+            if conv and (conv.summary or "").strip():
+                parts.append(f"기존 대화 요약:\n{conv.summary.strip()}")
+            if conv and (conv.customer_requests or "").strip():
+                parts.append(f"기존 고객 요청사항:\n{conv.customer_requests.strip()}")
+            if prior_rows:
+                turns: list[str] = []
+                for row in reversed(prior_rows):
+                    label = "고객" if row.direction == "inbound" else "우리"
+                    body = text_wash(row.body)[:1200]
+                    subject = f" [{row.subject}]" if row.subject else ""
+                    turns.append(f"{label}{subject}: {body}")
+                parts.append("최근 대화:\n" + "\n\n".join(turns))
+            return "\n\n".join(parts)[:max_chars]
+        except Exception:
+            logger.warning("Conversation context lookup failed for conv %s.", conv_id, exc_info=True)
+            return ""
+
     def _draft_reply(
         self,
         contact_info: dict,
@@ -688,6 +754,9 @@ class InboundAgent:
                 "category": classification.category,
                 "score": str(score),
                 "last_message": contact_info["last_message"],
+                "conversation_context": self._build_conversation_context(
+                    conv_id, contact_info["last_message"]
+                ),
                 "enrichment_context": _build_enrichment_context(contact_info),
                 "knowledge_docs": knowledge_docs,
                 "pricing_rule": _PRICING_RULE_FIRST if first_reply else _PRICING_RULE_NORMAL,
@@ -1150,14 +1219,27 @@ class InboundAgent:
                     .order_by(Message.created_at.asc(), Message.id.asc())
                     .all()
                 )
-                parts: list[str] = []
-                for m in rows:
+                # Keep the newest complete turns when a thread is long. Taking
+                # the first N characters would discard the very message that
+                # triggered the current reply.
+                newest_first: list[str] = []
+                used = 0
+                for m in reversed(rows):
                     if not (m.body or "").strip():
                         continue
                     who = "고객" if m.direction == "inbound" else "우리"
                     subj = f"[{m.subject}] " if m.subject else ""
-                    parts.append(f"{who}: {subj}{m.body.strip()}")
-                thread_text = "\n\n".join(parts)[:8000]
+                    part = f"{who}: {subj}{m.body.strip()}"
+                    remaining = 8000 - used
+                    if remaining <= 0:
+                        break
+                    if len(part) > remaining:
+                        if newest_first:
+                            break
+                        part = part[-remaining:]
+                    newest_first.append(part)
+                    used += len(part) + 2
+                thread_text = "\n\n".join(reversed(newest_first))
             if not thread_text:
                 return
 

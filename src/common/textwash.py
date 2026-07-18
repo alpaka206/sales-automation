@@ -12,6 +12,8 @@ What it does (all deterministic, no LLM):
 - strips leading/trailing blank lines
 - normalizes bullet markers (•, ·, *, –, — at line start) to "- " so the HTML
   renderer can turn them into an indented list
+- keeps one blank line before and after a bullet block so both plain-text and
+  HTML alternatives remain easy to scan
 - collapses runs of 2+ inner spaces to one (preserving a line's leading indent)
 
 It deliberately does NOT touch sentence content, punctuation, URLs, numbers, or
@@ -27,6 +29,7 @@ import re
 _ZERO_WIDTH = re.compile("[﻿​‌‍⁠]")
 # Leading bullet glyphs we normalize to a plain "- " marker.
 _BULLET_LINE = re.compile(r"^(\s*)([•·*▪◦‣–—])\s+")
+_NORMALIZED_BULLET_LINE = re.compile(r"^\s*-\s+\S")
 # 2+ spaces that are NOT at the start of the line (leading indent is preserved).
 _INNER_SPACES = re.compile(r"(?<=\S) {2,}")
 # 3+ newlines (with optional surrounding spaces) → exactly one blank line.
@@ -47,7 +50,20 @@ def text_wash(text: str | None) -> str:
         line = _BULLET_LINE.sub(lambda m: f"{m.group(1)}- ", line)
         line = _INNER_SPACES.sub(" ", line)
         lines.append(line)
-    out = "\n".join(lines)
+    # Separate bullet blocks from surrounding prose. Do not add extra blanks
+    # inside a consecutive list or when the author already supplied one.
+    spaced: list[str] = []
+    for line in lines:
+        is_bullet = bool(_NORMALIZED_BULLET_LINE.match(line))
+        previous_is_bullet = bool(
+            spaced and _NORMALIZED_BULLET_LINE.match(spaced[-1])
+        )
+        if is_bullet and spaced and spaced[-1] and not previous_is_bullet:
+            spaced.append("")
+        elif line and spaced and spaced[-1] and previous_is_bullet and not is_bullet:
+            spaced.append("")
+        spaced.append(line)
+    out = "\n".join(spaced)
 
     # Collapse 3+ newlines to a single blank line, then trim surrounding blanks.
     out = _EXTRA_BLANKS.sub("\n\n", out)
