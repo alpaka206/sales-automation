@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib
 import pkgutil
 import types
 from datetime import datetime, timezone
@@ -180,3 +181,35 @@ class TestRunMigrations:
             result = run_migrations()
 
         assert result == []
+
+
+class TestLegacyProspectStatusMigration:
+    def test_skips_when_outbound_table_does_not_exist(self, mem_engine):
+        migration = importlib.import_module(
+            "src.db.migrations.0007_prospect_status_enum"
+        )
+
+        migration.up(mem_engine)
+
+        assert "prospects" not in inspect(mem_engine).get_table_names()
+
+    def test_updates_existing_legacy_rows(self, mem_engine):
+        migration = importlib.import_module(
+            "src.db.migrations.0007_prospect_status_enum"
+        )
+        with mem_engine.begin() as conn:
+            conn.execute(text("CREATE TABLE prospects (id INTEGER, status TEXT)"))
+            conn.execute(
+                text(
+                    "INSERT INTO prospects (id, status) "
+                    "VALUES (1, 'candidate'), (2, 'drafted')"
+                )
+            )
+
+        migration.up(mem_engine)
+
+        with mem_engine.connect() as conn:
+            statuses = conn.execute(
+                text("SELECT status FROM prospects ORDER BY id")
+            ).scalars().all()
+        assert statuses == ["collected", "analyzed"]
