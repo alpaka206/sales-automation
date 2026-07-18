@@ -29,12 +29,23 @@ os.environ.setdefault("SEND_OVERRIDE_EMAIL", "")
 # TestClient must never start real background integrations from a developer's
 # local .env. Individual worker/poller tests invoke those functions explicitly.
 os.environ.setdefault("INBOUND_POLL_ENABLED", "false")
+os.environ.setdefault("INBOUND_WORKER_ENABLED", "false")
 os.environ.setdefault("SEND_WORKER_ENABLED", "false")
 # Never let tests inherit a developer's real Slack credentials/channel.  Several
 # inbound-flow tests intentionally create review-ready drafts; without this
 # guard those fixtures look exactly like production notifications.
 os.environ.setdefault("SLACK_ENABLED", "false")
 os.environ.setdefault("APPROVAL_CHANNEL", "none")
+# Hard stop for every external write path. Tests that cover a sender enable it
+# explicitly and mock the transport; a developer's real .env must never receive
+# an email, WhatsApp, report, or Sheets write during `pytest`.
+os.environ["INBOUND_AUTO_ACK_ENABLED"] = "false"
+os.environ["SMTP_USERNAME"] = ""
+os.environ["SMTP_PASSWORD"] = ""
+os.environ["REPORT_EMAIL_TO"] = ""
+os.environ["WHATSAPP_ENABLED"] = "false"
+os.environ["GOOGLE_CREDENTIALS_JSON"] = ""
+os.environ["GOOGLE_SHEETS_CREDENTIALS_JSON"] = ""
 
 from unittest.mock import MagicMock  # noqa: E402
 

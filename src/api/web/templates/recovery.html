@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% from "partials/ui.html" import status_pill %}
+{% block title %}장애 복구 · PERSO{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1 class="page-title">장애 복구</h1>
+  </div>
+</div>
+
+<div class="banner banner--warn mb-gap">
+  <div><strong>발송 확인 필요</strong>는 자동 재발송하지 않습니다. 메일함 또는 공급자 기록을 확인한 뒤 결과를 선택하세요.</div>
+</div>
+
+<div class="stack">
+  <section class="card"><div class="card__header"><h2 class="card__title">발송 문제 · {{ messages|length }}건</h2></div>
+    <div class="card__body stack">
+    {% for msg in messages %}
+      <div class="row" style="justify-content:space-between;gap:16px;border-bottom:1px solid var(--border);padding:12px 0">
+        <div><a href="/messages/{{ msg.id }}"><strong>#{{ msg.id }} · {{ msg.subject or '제목 없음' }}</strong></a><div class="t-sm t-subtle">{{ msg.conversation.contact.email or msg.to_address or '-' }}</div>{{ status_pill(msg.status, 'sm') }}</div>
+        <div class="row">
+        {% if msg.status == 'send_failed' %}<form method="post" action="/operations/recovery/messages/{{ msg.id }}/retry"><button class="btn btn--subtle">다시 발송 대기</button></form>{% endif %}
+        {% if msg.status == 'delivery_unknown' %}
+          <form method="post" action="/operations/recovery/messages/{{ msg.id }}/resolve"><input type="hidden" name="action" value="confirmed_sent"><button class="btn btn--ok">발송됨 확인</button></form>
+          <form method="post" action="/operations/recovery/messages/{{ msg.id }}/resolve" onsubmit="return confirm('실제로 발송되지 않은 것을 확인했나요?')"><input type="hidden" name="action" value="confirmed_not_sent"><button class="btn btn--danger">미발송 확인 후 재시도</button></form>
+        {% endif %}
+        </div>
+      </div>
+    {% else %}<div class="empty-state">처리할 발송 문제가 없습니다.</div>{% endfor %}
+    </div>
+  </section>
+
+  <section class="card"><div class="card__header"><h2 class="card__title">문의 처리 실패 · {{ inbound_jobs|length }}건</h2></div><div class="card__body stack">
+    {% for job in inbound_jobs %}<div class="row" style="justify-content:space-between"><div><strong>Job #{{ job.id }}</strong> · Ticket {{ job.payload.get('ticket_id','-') }}<div class="t-sm t-subtle">{{ job.last_error or '오류 정보 없음' }}</div></div><form method="post" action="/operations/recovery/inbound/{{ job.id }}/retry"><button class="btn btn--subtle">처음부터 재처리</button></form></div>{% else %}<div class="empty-state">중단된 문의 작업이 없습니다.</div>{% endfor %}
+  </div></section>
+
+  <section class="card"><div class="card__header"><h2 class="card__title">외부 동기화 실패 · {{ sync_failures|length }}건</h2></div><div class="card__body stack">
+    {% for msg in sync_failures %}<div class="row" style="justify-content:space-between"><div><a href="/messages/{{ msg.id }}"><strong>메시지 #{{ msg.id }}</strong></a><div class="t-sm t-subtle">{{ msg.post_send_sync_error }}</div></div><form method="post" action="/operations/recovery/messages/{{ msg.id }}/sync"><button class="btn btn--subtle">동기화 재시도</button></form></div>{% else %}<div class="empty-state">외부 동기화 실패가 없습니다.</div>{% endfor %}
+  </div></section>
+
+  {% if stale_drafts %}<section class="card"><div class="card__header"><h2 class="card__title">30분 이상 작성 중 · {{ stale_drafts|length }}건</h2></div><div class="card__body">{% for msg in stale_drafts %}<div><a href="/messages/{{ msg.id }}">메시지 #{{ msg.id }}</a> · {{ msg.created_at|kst }}</div>{% endfor %}</div></section>{% endif %}
+</div>
+{% endblock %}

@@ -10,7 +10,8 @@ Gate (enforced in :func:`oauth_callback`):
   3. The email is allowlisted — a bootstrap admin, in ``WEB_UI_ALLOWED_EMAILS``, or an
      existing ``users`` row with ``approved=True``. Others get a "pending approval" page.
 
-The signed session cookie carries {email, name, role, exp}; ``current_user`` reads it.
+The signed session cookie carries {email, name, role, exp}; ``current_user`` also
+checks the current database row so revocation and role changes take effect immediately.
 """
 
 from __future__ import annotations
@@ -55,11 +56,20 @@ _GOOGLE_AUTH_ENDPOINT = "https://accounts.google.com/o/oauth2/v2/auth"
 _GOOGLE_TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token"
 
 
+def normalize_role(role: str | None) -> str:
+    """Map legacy/unknown roles to the least-surprising effective permission."""
+    if role == "admin":
+        return "admin"
+    if role == "viewer":
+        return "viewer"
+    return "operator"  # legacy "member" keeps its existing operational access
+
+
 # --------------------------------------------------------------------------- #
 # Signed-cookie helpers (stdlib HMAC)
 # --------------------------------------------------------------------------- #
 def _secret() -> bytes:
-    key = settings.SESSION_SECRET or settings.INTERNAL_API_TOKEN or settings.WEB_UI_PASSWORD
+    key = settings.SESSION_SECRET
     if not key:
         raise RuntimeError("SESSION_SECRET is required when AUTH_MODE=google_oauth.")
     return key.encode("utf-8")
@@ -94,15 +104,39 @@ def _unsign(token: str) -> dict | None:
 
 
 def make_session(email: str, name: str | None, role: str) -> str:
-    return _sign({"email": email, "name": name or email, "role": role, "exp": int(time.time()) + SESSION_TTL})
+    return _sign(
+        {
+            "email": email,
+            "name": name or email,
+            "role": normalize_role(role),
+            "exp": int(time.time()) + SESSION_TTL,
+        }
+    )
 
 
 def current_user(request: Request) -> dict | None:
-    """Return {email, name, role} from the signed session cookie, or None."""
+    """Return the currently approved DB user for a valid signed cookie."""
     token = request.cookies.get(SESSION_COOKIE)
     if not token:
         return None
-    return _unsign(token)
+    payload = _unsign(token)
+    email = payload.get("email", "").lower() if payload else ""
+    if not email:
+        return None
+    try:
+        with SessionLocal() as session:
+            user = session.get(User, email)
+            if not user or not user.approved:
+                return None
+            return {
+                "email": user.email,
+                "name": user.name or user.email,
+                "role": normalize_role(user.role),
+                "exp": payload["exp"],
+            }
+    except Exception:
+        logger.exception("Session user lookup failed.")
+        return None
 
 
 def session_user(request: Request) -> dict | None:
@@ -122,9 +156,8 @@ def is_admin(request: Request) -> bool:
 
 
 def _cookie_secure(request: Request) -> bool:
-    # Trust X-Forwarded-Proto behind Render's proxy; fall back to the request scheme.
-    proto = request.headers.get("x-forwarded-proto", request.url.scheme)
-    return proto == "https"
+    # PUBLIC_BASE_URL is operator-controlled; arbitrary forwarded headers are not.
+    return request.url.scheme == "https" or settings.PUBLIC_BASE_URL.startswith("https://")
 
 
 def _set_session(resp: Response, request: Request, token: str) -> None:
@@ -166,7 +199,7 @@ def _login_or_pending(email: str, name: str | None, picture: str | None) -> tupl
     with SessionLocal() as session:
         user = session.get(User, email)
         if not user:
-            user = User(email=email, approved=pre_allowed, role="admin" if is_admin else "member")
+            user = User(email=email, approved=pre_allowed, role="admin" if is_admin else "operator")
             session.add(user)
         if name:
             user.name = name
@@ -179,7 +212,14 @@ def _login_or_pending(email: str, name: str | None, picture: str | None) -> tupl
             user.approved = True
         user.last_login_at = datetime.now(timezone.utc)
         session.commit()
-        return ({"email": user.email, "name": user.name or user.email, "role": user.role}, bool(user.approved))
+        return (
+            {
+                "email": user.email,
+                "name": user.name or user.email,
+                "role": normalize_role(user.role),
+            },
+            bool(user.approved),
+        )
 
 
 # --------------------------------------------------------------------------- #

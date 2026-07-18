@@ -6,7 +6,7 @@ categories: [pricing_question]           # 인바운드 분류 매칭 (아래 �
 summary: <한 줄 요약>                     # 라우터가 이 한 줄을 보고 관련성 판단. 핵심만.
 tags: [키워드1, 키워드2]                  # 검색/라우팅 보조 키워드
 # ── 메타데이터 ───────────────────────────────────────
-scope: both                              # inbound | outbound | both
+scope: inbound                           # 인바운드 답변 정책
 author: <작성자>
 status: active                           # active | draft | archived  (active만 LLM에 노출)
 created_at: 2026-01-01                    # YYYY-MM-DD

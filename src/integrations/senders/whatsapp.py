@@ -14,6 +14,10 @@ logger = logging.getLogger(__name__)
 GRAPH_API_URL = "https://graph.facebook.com/v19.0"
 
 
+def _masked_phone(phone: str) -> str:
+    return f"***{phone[-4:]}" if phone else "(missing)"
+
+
 class WhatsAppDisabled(RuntimeError):
     """Raised when WhatsApp sending is attempted but the feature is disabled."""
     pass
@@ -84,7 +88,7 @@ async def send_whatsapp_template(
         raise WhatsAppSendError(f"WhatsApp API error ({error_code}): {error_msg}")
 
     msg_id = data.get("messages", [{}])[0].get("id", "")
-    logger.info("WhatsApp template '%s' sent to %s (msg_id=%s)", tpl, phone, msg_id)
+    logger.info("WhatsApp template '%s' sent to %s (msg_id=%s)", tpl, _masked_phone(phone), msg_id)
     return msg_id
 
 
@@ -109,7 +113,7 @@ async def send_whatsapp_freeform(phone: str, text: str) -> str:
         raise WhatsAppSendError(f"WhatsApp API error ({error_code}): {error_msg}")
 
     msg_id = data.get("messages", [{}])[0].get("id", "")
-    logger.info("WhatsApp freeform sent to %s (msg_id=%s)", phone, msg_id)
+    logger.info("WhatsApp freeform sent to %s (msg_id=%s)", _masked_phone(phone), msg_id)
     return msg_id
 
 

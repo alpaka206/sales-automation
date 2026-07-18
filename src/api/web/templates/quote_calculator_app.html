@@ -7,17 +7,17 @@
 <style>
   :root{
     color-scheme: light;
-    --blue:#266DFF; --purple:#B656FF; --pink:#F78CB2;
+    --blue:#0F766E; --purple:#0F766E; --pink:#0F766E;
     --ink:#0B0B14; --muted:#6B7080; --line:#E7E8EE; --bg:#F6F7FB;
     --card:#FFFFFF; --soft:#F2F3F8; --good:#0Fae6e; --warn:#E0A700; --danger:#E5484D;
-    --grad:linear-gradient(135deg,#266DFF 0%,#B656FF 52%,#F78CB2 100%);
+    --grad:#0F766E;
     --shadow:0 1px 2px rgba(16,20,40,.04),0 8px 24px rgba(16,20,40,.06);
     --radius:16px;
   }
   *{box-sizing:border-box}
   html,body{margin:0}
   body{
-    font-family:'Inter','Pretendard','Noto Sans KR',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+    font-family:'Pretendard Variable',Pretendard;
     background:var(--bg); color:var(--ink); line-height:1.45;
     -webkit-font-smoothing:antialiased; padding:0 18px 64px;
   }
@@ -33,7 +33,7 @@
   .hero h1{font-size:24px;font-weight:800;letter-spacing:-.02em;margin:6px 0 4px}
   .hero p{color:var(--muted);font-size:14px;margin:0;max-width:680px}
   .pill{display:inline-block;font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;
-    background:linear-gradient(135deg,rgba(38,109,255,.12),rgba(182,86,255,.12));color:var(--purple);
+    background:#E7F6EC;color:var(--purple);
     padding:4px 10px;border-radius:999px}
   /* Grid */
   .grid{display:grid;grid-template-columns:380px 1fr;gap:18px;align-items:start}
@@ -68,7 +68,7 @@
   .readout .val small{font-size:13px;font-weight:600;color:var(--muted)}
   .subnote{font-size:12px;color:var(--muted);margin-top:8px}
   /* Recommendation */
-  .recobox{border:1.5px solid var(--line);border-radius:14px;padding:18px;background:linear-gradient(180deg,#fff, #fbfbfe)}
+  .recobox{border:1.5px solid var(--line);border-radius:14px;padding:18px;background:#fff}
   .recobox.t1{border-color:rgba(38,109,255,.4)}
   .recobox.t2{border-color:rgba(182,86,255,.4)}
   .recobox.t3{border-color:rgba(247,140,178,.5)}
@@ -106,7 +106,7 @@
   @media(max-width:760px){.scgrid{grid-template-columns:1fr}}
   .metrics{display:grid;grid-template-columns:1fr 1fr;gap:12px}
   .metric{border:1px solid var(--line);border-radius:12px;padding:14px;background:#fff}
-  .metric.lock{background:repeating-linear-gradient(135deg,#fbfbfe,#fbfbfe 10px,#f4f4f9 10px,#f4f4f9 20px);grid-column:1/-1}
+  .metric.lock{background:#F2F3F8;grid-column:1/-1}
   .metric .mlab{font-size:11px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.03em;display:flex;align-items:center;gap:6px}
   .metric .mval{font-size:22px;font-weight:800;letter-spacing:-.02em;margin-top:5px}
   .metric .mval small{font-size:12px;color:var(--muted);font-weight:600}
@@ -118,7 +118,7 @@
   .activetier-tag b{color:var(--ink)}
   footer{margin-top:22px;padding:16px 6px;color:var(--muted);font-size:11.5px;line-height:1.6}
   footer b{color:#4a4f60}
-  .gradtext{background:var(--grad);-webkit-background-clip:text;background-clip:text;color:transparent}
+  .gradtext{color:var(--purple)}
 </style>
 </head>
 <body>

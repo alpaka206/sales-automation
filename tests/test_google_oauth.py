@@ -1,0 +1,93 @@
+from __future__ import annotations
+
+from unittest.mock import AsyncMock, patch
+
+import pytest
+from fastapi.testclient import TestClient
+
+from src.api.main import app
+from src.api.web.routes.customer_ops import GOOGLE_SHEETS_STATE_COOKIE
+from src.integrations import google_oauth
+
+
+def _configure(monkeypatch):
+    monkeypatch.setattr(google_oauth.settings, "SESSION_SECRET", "test-session-secret")
+    monkeypatch.setattr(
+        google_oauth.settings, "GOOGLE_TOKEN_ENCRYPTION_KEY", "test-token-key"
+    )
+    monkeypatch.setattr(google_oauth.settings, "INTERNAL_API_TOKEN", "")
+    monkeypatch.setattr(google_oauth.settings, "GOOGLE_SHEETS_OAUTH_CLIENT_ID", "client-id")
+    monkeypatch.setattr(google_oauth.settings, "GOOGLE_SHEETS_OAUTH_CLIENT_SECRET", "client-secret")
+
+
+def test_oauth_state_is_signed_and_tamper_evident(monkeypatch):
+    _configure(monkeypatch)
+    state = google_oauth.make_state()
+    google_oauth.validate_state(state)
+
+    with pytest.raises(google_oauth.GoogleOAuthError):
+        google_oauth.validate_state(state[:-1] + ("A" if state[-1] != "A" else "B"))
+
+
+def test_authorization_url_requests_only_identity_and_sheets(monkeypatch):
+    _configure(monkeypatch)
+    url = google_oauth.authorization_url("http://localhost/callback", "signed-state")
+
+    assert url.startswith("https://accounts.google.com/o/oauth2/v2/auth?")
+    assert "client_id=client-id" in url
+    assert "access_type=offline" in url
+    assert "spreadsheets" in url
+    assert "state=signed-state" in url
+
+
+def test_grant_encryption_round_trip(monkeypatch):
+    _configure(monkeypatch)
+    payload = {"refresh_token": "secret-refresh", "access_token": "short-lived"}
+    encrypted = google_oauth._encrypt(payload)
+
+    assert "secret-refresh" not in encrypted
+    assert google_oauth._decrypt(encrypted) == payload
+
+
+def test_grant_encryption_does_not_reuse_session_secret(monkeypatch):
+    _configure(monkeypatch)
+    encrypted = google_oauth._encrypt({"refresh_token": "secret-refresh"})
+    monkeypatch.setattr(google_oauth.settings, "GOOGLE_TOKEN_ENCRYPTION_KEY", "rotated-key")
+
+    with pytest.raises(google_oauth.GoogleOAuthError):
+        google_oauth._decrypt(encrypted)
+
+
+def test_grant_encryption_requires_dedicated_key(monkeypatch):
+    _configure(monkeypatch)
+    monkeypatch.setattr(google_oauth.settings, "GOOGLE_TOKEN_ENCRYPTION_KEY", "")
+
+    with pytest.raises(google_oauth.GoogleOAuthError, match="GOOGLE_TOKEN_ENCRYPTION_KEY"):
+        google_oauth._encrypt({"refresh_token": "secret-refresh"})
+
+
+def test_connect_binds_sheets_oauth_state_to_browser_cookie():
+    with patch.object(google_oauth, "make_state", return_value="signed-state"), patch.object(
+        google_oauth,
+        "authorization_url",
+        return_value="https://accounts.google.com/o/oauth2/v2/auth?state=signed-state",
+    ), TestClient(app) as client:
+        response = client.get("/integrations/google-sheets/connect", follow_redirects=False)
+
+    assert response.status_code == 302
+    assert GOOGLE_SHEETS_STATE_COOKIE in response.headers["set-cookie"]
+    assert "HttpOnly" in response.headers["set-cookie"]
+
+
+def test_callback_rejects_state_from_another_browser_session():
+    exchange = AsyncMock()
+    with patch.object(google_oauth, "exchange_code", exchange), TestClient(app) as client:
+        client.cookies.set(GOOGLE_SHEETS_STATE_COOKIE, "expected-state")
+        response = client.get(
+            "/integrations/google-sheets/callback?state=attacker-state&code=code",
+            follow_redirects=False,
+        )
+
+    assert response.status_code == 303
+    assert "google=error" in response.headers["location"]
+    exchange.assert_not_awaited()

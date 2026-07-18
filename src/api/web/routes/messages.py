@@ -452,27 +452,27 @@ async def message_send(
     if len(body.encode("utf-8")) > _MAX_EDIT_BODY_BYTES:
         return HTMLResponse("<div class='text-red-600 text-sm'>본문이 너무 깁니다.</div>", status_code=400)
     clean_subject = subject.strip()
+    clean_body = body.strip()
+    if not clean_subject or not clean_body:
+        return HTMLResponse(
+            "<div class='text-red-600 text-sm'>제목과 본문을 모두 입력해야 발송할 수 있습니다.</div>",
+            status_code=400,
+        )
     if len(clean_subject) > _MAX_EDIT_SUBJECT_LEN:
         return HTMLResponse("<div class='text-red-600 text-sm'>제목이 너무 깁니다.</div>", status_code=400)
 
     try:
-        edited = body.strip() if body.strip() else None
-        approve(message_id, approver=actor_name(request, fallback="web_ui"), edited_body=edited)
+        approve(
+            message_id,
+            approver=actor_name(request, fallback="web_ui"),
+            edited_body=clean_body,
+            edited_subject=clean_subject,
+            signature_key=_clean_signature_key(signature_key),
+        )
     except ApprovalError as exc:
         return HTMLResponse(
             f'<div class="text-red-600 text-sm">{esc(str(exc))}</div>', status_code=400
         )
-
-    # Persist the operator's signature choice so both the inline send below and the
-    # background worker render the right (branded / none / default) signature.
-    sig_key = _clean_signature_key(signature_key)
-    with SessionLocal() as session:
-        m = session.get(Message, message_id)
-        if m is not None:
-            m.signature_key = sig_key
-            if clean_subject:
-                m.subject = clean_subject
-            session.commit()
 
     # When the background send worker is running, let IT claim & send this approved
     # row — sending inline here too would let both paths dispatch the same email

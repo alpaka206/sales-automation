@@ -12,7 +12,10 @@ import pytest
 from fastapi.testclient import TestClient
 
 from src.api.main import app
+from src.api.webhook import MAX_WEBHOOK_BODY_BYTES, MAX_WEBHOOK_EVENTS
 from src.common.config import settings
+from src.db.models import InboundJob
+from src.db.session import SessionLocal
 
 
 @pytest.fixture()
@@ -32,12 +35,14 @@ def _disable_webhook_signature():
 
 
 @pytest.fixture(autouse=True)
-def _mock_ticket_contact_lookup():
-    """Ticket webhooks resolve the primary contact via association. Mock that lookup
-    so it returns a contact id without hitting HubSpot."""
-    with patch("src.integrations.hubspot.HubSpotClient") as mock_cls:
-        mock_cls.return_value.get_ticket_primary_contact_sync.return_value = "C-contact"
-        yield mock_cls
+def _clean_inbound_jobs():
+    with SessionLocal() as session:
+        session.query(InboundJob).delete()
+        session.commit()
+    yield
+    with SessionLocal() as session:
+        session.query(InboundJob).delete()
+        session.commit()
 
 
 def _sign_request(secret: str, body: bytes, url: str, ts_ms: int | None = None) -> dict[str, str]:
@@ -75,12 +80,11 @@ def test_ticket_creation_payload(mock_handle, client: TestClient) -> None:
     data = r.json()
     assert data["status"] == "accepted"
     assert len(data["results"]) == 1
-    assert data["results"][0]["status"] == "processed"
-    mock_handle.assert_called_once()
-    call_arg = mock_handle.call_args[0][0]
-    assert call_arg["event_type"] == "ticket_created"
-    assert call_arg["ticket_id"] == "901"
-    assert call_arg["object_id"] == "C-contact"
+    assert data["results"][0]["status"] == "queued"
+    mock_handle.assert_not_called()
+    with SessionLocal() as session:
+        job = session.query(InboundJob).one()
+        assert job.event_key == "hubspot:ticket:901:created"
 
 
 @patch("src.agents.inbound.InboundAgent.handle", return_value={"message_id": 3})
@@ -100,10 +104,10 @@ def test_multi_event_payload(mock_handle, client: TestClient) -> None:
     data = r.json()
     results = data["results"]
     assert len(results) == 3
-    assert results[0]["status"] == "processed"
-    assert results[1]["status"] == "processed"
+    assert results[0]["status"] == "queued"
+    assert results[1]["status"] == "queued"
     assert results[2]["status"] == "ignored"
-    assert mock_handle.call_count == 2
+    mock_handle.assert_not_called()
 
 
 @patch("src.agents.inbound.InboundAgent.handle", return_value={"message_id": 4})
@@ -119,7 +123,8 @@ def test_single_object_not_array(mock_handle, client: TestClient) -> None:
         headers=_auth_headers(),
     )
     assert r.status_code == 200
-    assert r.json()["results"][0]["status"] == "processed"
+    assert r.json()["results"][0]["status"] == "queued"
+    mock_handle.assert_not_called()
 
 
 # ---------- Ignored event types ----------
@@ -136,17 +141,63 @@ def test_ignored_subscription_type(client: TestClient) -> None:
     assert r.json()["results"][0]["status"] == "ignored"
 
 
+def test_ticket_stage_change_to_new_is_queued_once(client: TestClient, monkeypatch) -> None:
+    monkeypatch.setattr(settings, "HUBSPOT_TICKET_STAGE_NEW", "new-stage")
+    payload = [
+        {
+            "subscriptionType": "ticket.propertyChange",
+            "objectId": 811,
+            "propertyName": "hs_pipeline_stage",
+            "propertyValue": "new-stage",
+            "occurredAt": 1684000011000,
+            "eventId": 44,
+        },
+        {
+            "subscriptionType": "ticket.propertyChange",
+            "objectId": 811,
+            "propertyName": "hs_pipeline_stage",
+            "propertyValue": "new-stage",
+            "occurredAt": 1684000011000,
+            "eventId": 44,
+        },
+    ]
+
+    response = client.post("/webhook/hubspot/inbound", json=payload, headers=_auth_headers())
+
+    assert response.status_code == 200
+    assert [item["status"] for item in response.json()["results"]] == ["queued", "duplicate"]
+    with SessionLocal() as session:
+        job = session.query(InboundJob).one()
+        assert job.event_key == "hubspot:ticket:811:changed:44"
+
+
+def test_ticket_stage_change_away_from_new_is_ignored(client: TestClient, monkeypatch) -> None:
+    monkeypatch.setattr(settings, "HUBSPOT_TICKET_STAGE_NEW", "new-stage")
+    response = client.post(
+        "/webhook/hubspot/inbound",
+        json=[{
+            "subscriptionType": "ticket.propertyChange",
+            "objectId": 812,
+            "propertyName": "hs_pipeline_stage",
+            "propertyValue": "closed-stage",
+            "eventId": 45,
+        }],
+        headers=_auth_headers(),
+    )
+
+    assert response.status_code == 200
+    assert response.json()["results"][0]["status"] == "ignored"
+
+
 # ---------- Error handling ----------
 
 
 @patch("src.agents.inbound.InboundAgent.handle", side_effect=Exception("boom"))
-def test_one_event_error_does_not_block_others(mock_handle, client: TestClient) -> None:
+def test_duplicate_event_is_acknowledged_without_processing(mock_handle, client: TestClient) -> None:
     payload = [
         {"subscriptionType": "ticket.creation", "objectId": 701, "occurredAt": 1684000020000},
-        {"subscriptionType": "ticket.creation", "objectId": 702, "occurredAt": 1684000021000},
+        {"subscriptionType": "ticket.creation", "objectId": 701, "occurredAt": 1684000021000},
     ]
-    # First call raises, second succeeds
-    mock_handle.side_effect = [Exception("boom"), {"message_id": 7}]
     r = client.post(
         "/webhook/hubspot/inbound",
         json=payload,
@@ -154,8 +205,9 @@ def test_one_event_error_does_not_block_others(mock_handle, client: TestClient) 
     )
     assert r.status_code == 200
     results = r.json()["results"]
-    assert results[0]["status"] == "error"
-    assert results[1]["status"] == "processed"
+    assert results[0]["status"] == "queued"
+    assert results[1]["status"] == "duplicate"
+    mock_handle.assert_not_called()
 
 
 def test_invalid_json_returns_400(client: TestClient) -> None:
@@ -165,6 +217,24 @@ def test_invalid_json_returns_400(client: TestClient) -> None:
         headers={**_auth_headers(), "Content-Type": "application/json"},
     )
     assert r.status_code == 400
+
+
+def test_body_size_is_capped_before_parsing(client: TestClient) -> None:
+    r = client.post(
+        "/webhook/hubspot/inbound",
+        content=b"x" * (MAX_WEBHOOK_BODY_BYTES + 1),
+        headers={**_auth_headers(), "Content-Type": "application/json"},
+    )
+    assert r.status_code == 413
+
+
+def test_batch_size_is_capped(client: TestClient) -> None:
+    payload = [
+        {"subscriptionType": "ticket.creation", "objectId": index}
+        for index in range(MAX_WEBHOOK_EVENTS + 1)
+    ]
+    r = client.post("/webhook/hubspot/inbound", json=payload, headers=_auth_headers())
+    assert r.status_code == 413
 
 
 # ---------- Signature verification ----------

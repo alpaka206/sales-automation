@@ -46,3 +46,19 @@ def test_recent_is_newest_first_and_clear():
     assert [e.message for e in log_buffer.recent()] == ["second", "first"]
     log_buffer.clear()
     assert log_buffer.recent() == []
+
+
+def test_sensitive_values_are_redacted():
+    log_buffer.record(
+        "WARNING",
+        "auth",
+        "buyer@example.com +82 10-1234-5678 access_token=top-secret",
+    )
+
+    message = log_buffer.recent()[0].message
+    assert "buyer@example.com" not in message
+    assert "10-1234-5678" not in message
+    assert "top-secret" not in message
+    assert "[REDACTED_EMAIL]" in message
+    assert "[REDACTED_PHONE]" in message
+    assert "[REDACTED]" in message

@@ -1,0 +1,130 @@
+{% extends "base.html" %}
+{% from "partials/icons.html" import icon %}
+{% block title %}파이프라인 연동관리 — PERSO{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1 class="page-title">문의 파이프라인</h1>
+    <p class="page-sub">드래그 또는 단계 선택으로 이동</p>
+  </div>
+</div>
+
+<div class="pipeline-status mb-gap" aria-label="연동 상태">
+  {% for stage in stages %}
+  <div><span class="status-dot {% if stage.hubspot_id %}is-on{% endif %}"></span><strong>{{ stage.label }}</strong><small>{% if stage.hubspot_id %}HubSpot {{ stage.hubspot_id }}{% else %}로컬 전용{% endif %}</small></div>
+  {% endfor %}
+</div>
+
+{% if request.query_params.get('sync') == 'partial' %}
+<div class="banner banner--warn mb-gap"><div><div class="banner__title">일부 외부 시스템 동기화 실패</div><div class="banner__body">사이트 단계는 저장되었습니다. HubSpot·Google Sheets 연결 상태를 확인한 뒤 다시 이동해 주세요.</div></div></div>
+{% elif request.query_params.get('sync') == 'ok' %}
+<div class="banner banner--ok mb-gap"><div><div class="banner__title">파이프라인 동기화 완료</div></div></div>
+{% endif %}
+
+<div class="kanban" data-pipeline-board>
+  {% for stage in stages %}
+  <section class="kanban-column" id="stage-{{ stage.key }}" data-stage="{{ stage.key }}">
+    <header class="kanban-column__header">
+      <div><strong>{{ stage.label }}</strong><small>{{ stage.description }}</small></div>
+      <span class="kanban-column__count tnum">{{ stage.rows | length }}</span>
+    </header>
+    <div class="kanban-column__body" data-dropzone>
+      {% for row in stage.rows %}
+      <article class="pipeline-card" draggable="true" data-conversation-id="{{ row.conversation.id }}">
+        <a href="/customers/{{ row.contact.id }}">
+          <strong>{{ row.contact.company or row.contact.full_name }}</strong>
+          <span>{{ row.contact.full_name }} · {{ row.contact.country or '국가 미확인' }}</span>
+          <small>{{ row.contact.email or '-' }}</small>
+          <small>문의 #{{ row.conversation.hubspot_ticket_id or row.conversation.id }} · {{ row.last_activity | kst('%m/%d %H:%M') }}</small>
+        </a>
+        <form method="post" action="/pipeline/conversations/{{ row.conversation.id }}/stage">
+          <label class="sr-only" for="stage-conversation-{{ row.conversation.id }}">단계 변경</label>
+          <select class="select select--compact" id="stage-conversation-{{ row.conversation.id }}" name="stage" onchange="this.form.submit()">
+            {% for value, label, description in stage_options %}<option value="{{ value }}" {% if value == row.stage %}selected{% endif %}>{{ label }}</option>{% endfor %}
+          </select>
+        </form>
+      </article>
+      {% else %}<div class="kanban-empty">여기로 카드를 옮길 수 있습니다.</div>{% endfor %}
+    </div>
+  </section>
+  {% endfor %}
+</div>
+
+<section class="integration-panel" id="integrations">
+  {% set _sheet_user = request.state.user if request and request.state else None %}
+  {% set _sheet_admin = (not _sheet_user) or _sheet_user.role == 'admin' %}
+  <div>
+    <div class="section-header__title">Google Sheets 연결</div>
+    <p>지정된 DB 행만 추가 · 기존 형식 유지</p>
+    {% if request.query_params.get('google') == 'connected' %}<div class="banner banner--ok">Google 계정 연결이 완료되었습니다.</div>{% endif %}
+    {% if request.query_params.get('google') == 'disconnected' %}<div class="banner banner--info">Google 계정 연결을 해제했습니다.</div>{% endif %}
+    {% if request.query_params.get('google') in ['error', 'setup_required', 'cancelled'] %}<div class="banner banner--warn">연결하지 못했습니다. {{ request.query_params.get('detail', '') }}</div>{% endif %}
+    {% if request.query_params.get('google') == 'queued' %}<div class="banner banner--info">동기화 요청을 안전하게 접수했습니다. 백그라운드 작업이 이어서 처리합니다.</div>{% endif %}
+    {% if sheet_sync_request and sheet_sync_request.status == 'completed' %}<div class="banner banner--ok">최근 동기화 완료 · 기존 문의 {{ sheet_sync_request.imported or 0 }}건 확인 · 신규 반영 {{ (sheet_sync_request.inbound or 0) + (sheet_sync_request.orders or 0) }}건</div>{% endif %}
+    {% if sheet_sync_request and sheet_sync_request.status in ['requested', 'started'] %}<div class="banner banner--info">최근 동기화 요청을 처리 중입니다. 화면을 나가도 작업은 계속됩니다.</div>{% endif %}
+    {% if sheet_sync_request and sheet_sync_request.status == 'failed' %}<div class="banner banner--warn">최근 동기화에 실패했습니다. 다시 요청하거나 장애 복구 화면에서 연동 상태를 확인해 주세요. {{ sheet_sync_request.error or '' }}</div>{% endif %}
+  </div>
+  <dl>
+    <div><dt>인바운드 문의</dt><dd>{{ sheet.inbound_tab }}</dd></div>
+    <div><dt>퀄리티 분석 참고</dt><dd>{{ sheet.quality_tab }}</dd></div>
+    <div><dt>성사 고객</dt><dd>{{ sheet.orders_tab }}</dd></div>
+  </dl>
+  <div class="integration-actions">
+    {% if _sheet_admin %}
+    {% if sheet.auth_mode == 'user_oauth' %}
+      <span class="tag">{{ sheet.account_email or 'Google 사용자' }} 연결됨</span>
+      <form method="post" action="/integrations/google-sheets/disconnect"><button class="btn btn--subtle" type="submit">연결 해제</button></form>
+    {% elif sheet.auth_mode == 'service_account' %}
+      <span class="tag">서비스 계정 자격 증명 있음</span>
+      {% if sheet.oauth_client_configured %}<a class="btn btn--subtle" href="/integrations/google-sheets/connect">내 Google 계정으로 전환</a>{% endif %}
+    {% elif sheet.oauth_client_configured %}
+      <a class="btn btn--primary" href="/integrations/google-sheets/connect">내 Google 계정 연결</a>
+    {% else %}
+      <span class="tag">OAuth 설정 필요</span>
+    {% endif %}
+    {% if sheet.write_enabled %}
+      <form method="post" action="/integrations/google-sheets/sync"><button class="btn btn--subtle" type="submit">시트 읽기·동기화{% if sheet_pending_count %} · 미처리 {{ sheet_pending_count }}건{% endif %}</button></form>
+    {% endif %}
+    {% else %}
+      <span class="tag">연결 변경·수동 동기화는 관리자 전용</span>
+    {% endif %}
+  </div>
+  {% if not sheet.oauth_client_configured %}
+  <div class="integration-setup">
+    <strong>OAuth 설정</strong>
+    <p>Google Cloud 승인된 리디렉션 URI</p>
+    <code>{{ google_callback_url }}</code>
+  </div>
+  {% endif %}
+</section>
+
+<script>
+(function () {
+  var board = document.querySelector("[data-pipeline-board]");
+  if (!board || !("draggable" in document.createElement("div"))) return;
+  var dragged = null;
+  board.addEventListener("dragstart", function (event) {
+    dragged = event.target.closest("[data-conversation-id]");
+    if (dragged) dragged.classList.add("is-dragging");
+  });
+  board.addEventListener("dragend", function () {
+    if (dragged) dragged.classList.remove("is-dragging");
+    dragged = null;
+  });
+  board.querySelectorAll("[data-dropzone]").forEach(function (zone) {
+    zone.addEventListener("dragover", function (event) { event.preventDefault(); zone.classList.add("is-over"); });
+    zone.addEventListener("dragleave", function () { zone.classList.remove("is-over"); });
+    zone.addEventListener("drop", function (event) {
+      event.preventDefault(); zone.classList.remove("is-over");
+      if (!dragged) return;
+      var stage = zone.closest("[data-stage]").dataset.stage;
+      var body = new URLSearchParams({stage: stage});
+      fetch("/pipeline/conversations/" + dragged.dataset.conversationId + "/stage", {
+        method: "POST", headers: {"Content-Type": "application/x-www-form-urlencoded"}, body: body
+      }).then(function (response) { if (!response.ok) throw new Error("move failed"); location.reload(); })
+        .catch(function () { alert("단계를 옮기지 못했습니다. 잠시 후 다시 시도해 주세요."); });
+    });
+  });
+})();
+</script>
+{% endblock %}

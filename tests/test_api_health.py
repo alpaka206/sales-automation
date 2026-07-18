@@ -8,7 +8,9 @@ from unittest.mock import patch
 import pytest
 from fastapi.testclient import TestClient
 
-from src.api.main import app
+from src.api.main import app, validate_startup_settings
+from src.api.security import is_web_ui_path, web_role_allows
+from src.api.web.routes._shared import external_url
 from src.common.config import settings
 
 
@@ -22,10 +24,14 @@ def client() -> TestClient:
     return TestClient(app)
 
 
+def _remote_client() -> TestClient:
+    return TestClient(app, base_url="https://console.example.com", client=("203.0.113.10", 50000))
+
+
 def test_healthz_no_token(client: TestClient) -> None:
     r = client.get("/healthz")
     assert r.status_code == 200
-    assert r.json() == {"ok": True}
+    assert r.json() == {"ok": True, "database": True}
 
 
 def test_healthz_has_request_id(client: TestClient) -> None:
@@ -66,7 +72,8 @@ def test_webhook_inbound(mock_handle, mock_hs_cls, client: TestClient, monkeypat
     )
     assert r.status_code == 200
     assert r.json()["status"] == "accepted"
-    mock_handle.assert_called_once()
+    assert r.json()["results"][0]["status"] in {"queued", "duplicate"}
+    mock_handle.assert_not_called()
 
 
 def test_webhook_rejects_unsigned_when_required(client: TestClient, monkeypatch) -> None:
@@ -82,45 +89,144 @@ def test_webhook_rejects_unsigned_when_required(client: TestClient, monkeypatch)
     assert "HUBSPOT_WEBHOOK_SECRET" in r.json()["detail"]
 
 
-def test_web_ui_localhost_allowed(client: TestClient, monkeypatch) -> None:
-    """With APP_HOST bound to loopback, the web UI is treated as local → gate passes."""
-    monkeypatch.setattr(settings, "APP_HOST", "127.0.0.1")
-    r = client.get("/messages")
+def test_web_ui_localhost_allowed() -> None:
+    """A real loopback peer + localhost Host passes the local-development gate."""
+    with TestClient(app, base_url="http://localhost", client=("127.0.0.1", 50000)) as client:
+        r = client.get("/messages")
     assert r.status_code not in (401, 403)
 
 
-def test_web_ui_public_no_password_is_403(client: TestClient, monkeypatch) -> None:
-    """Non-localhost + no WEB_UI_PASSWORD → localhost-only gate (403)."""
+def test_google_integration_routes_use_web_ui_auth_gate() -> None:
+    assert is_web_ui_path("/integrations/google-sheets/connect") is True
+    assert is_web_ui_path("/integrations/google-sheets/callback") is True
+
+
+def test_external_operator_links_allow_only_http_schemes() -> None:
+    assert external_url("https://docs.example.com/a") == "https://docs.example.com/a"
+    assert external_url("javascript:alert(1)") == ""
+    assert external_url("//evil.example/path") == ""
+
+
+def test_three_role_web_policy() -> None:
+    assert web_role_allows("viewer", "GET", "/messages")
+    assert not web_role_allows("viewer", "POST", "/messages/1/send")
+    assert web_role_allows("member", "POST", "/messages/1/send")
+    assert web_role_allows("operator", "POST", "/pipeline/1/stage")
+    assert web_role_allows("operator", "POST", "/operations/recovery/messages/1/retry")
+    assert not web_role_allows("operator", "POST", "/knowledge/1")
+    assert not web_role_allows("operator", "PUT", "/email-templates/1")
+    assert not web_role_allows("operator", "POST", "/logs/clear")
+    assert not web_role_allows("operator", "GET", "/integrations/google-sheets/connect")
+    assert web_role_allows("admin", "DELETE", "/email-templates/1")
+
+
+def test_viewer_mutation_is_blocked_by_middleware(monkeypatch) -> None:
+    monkeypatch.setattr(settings, "AUTH_MODE", "google_oauth")
+    with patch(
+        "src.api.main.current_user",
+        return_value={"email": "v@example.com", "name": "V", "role": "viewer"},
+    ):
+        response = TestClient(app).post("/messages/999/edit", data={"body": "x"})
+    assert response.status_code == 403
+    assert response.json()["detail"] == "insufficient role for this action"
+
+
+def test_operator_admin_mutation_is_blocked_by_middleware(monkeypatch) -> None:
+    monkeypatch.setattr(settings, "AUTH_MODE", "google_oauth")
+    with patch(
+        "src.api.main.current_user",
+        return_value={"email": "o@example.com", "name": "O", "role": "operator"},
+    ):
+        response = TestClient(app).post("/knowledge", data={"title": "x"})
+    assert response.status_code == 403
+    assert response.json()["detail"] == "insufficient role for this action"
+
+
+def test_startup_rejects_multiple_in_process_workers(monkeypatch) -> None:
+    monkeypatch.setattr(settings, "WEB_CONCURRENCY", 2)
+    monkeypatch.setattr(settings, "INBOUND_WORKER_ENABLED", True)
+    with pytest.raises(RuntimeError, match="WEB_CONCURRENCY"):
+        validate_startup_settings()
+
+
+def test_startup_rejects_public_basic_without_password(monkeypatch) -> None:
+    monkeypatch.setattr(settings, "WEB_CONCURRENCY", 1)
     monkeypatch.setattr(settings, "APP_HOST", "0.0.0.0")
+    monkeypatch.setattr(settings, "AUTH_MODE", "basic")
     monkeypatch.setattr(settings, "WEB_UI_PASSWORD", "")
-    r = client.get("/messages")
+    with pytest.raises(RuntimeError, match="WEB_UI_PASSWORD"):
+        validate_startup_settings()
+
+
+def test_startup_rejects_incomplete_google_oauth(monkeypatch) -> None:
+    monkeypatch.setattr(settings, "WEB_CONCURRENCY", 1)
+    monkeypatch.setattr(settings, "APP_HOST", "127.0.0.1")
+    monkeypatch.setattr(settings, "AUTH_MODE", "google_oauth")
+    monkeypatch.setattr(settings, "GOOGLE_OAUTH_CLIENT_SECRET", "")
+    monkeypatch.setattr(settings, "SESSION_SECRET", "")
+    with pytest.raises(RuntimeError, match="GOOGLE_OAUTH_CLIENT_SECRET"):
+        validate_startup_settings()
+
+
+def test_startup_rejects_sheets_oauth_without_dedicated_secrets(monkeypatch) -> None:
+    monkeypatch.setattr(settings, "WEB_CONCURRENCY", 1)
+    monkeypatch.setattr(settings, "APP_HOST", "127.0.0.1")
+    monkeypatch.setattr(settings, "PUBLIC_BASE_URL", "")
+    monkeypatch.setattr(settings, "AUTH_MODE", "basic")
+    monkeypatch.setattr(settings, "GOOGLE_SHEETS_OAUTH_CLIENT_ID", "client-id")
+    monkeypatch.setattr(settings, "GOOGLE_SHEETS_OAUTH_CLIENT_SECRET", "client-secret")
+    monkeypatch.setattr(settings, "SESSION_SECRET", "")
+    monkeypatch.setattr(settings, "GOOGLE_TOKEN_ENCRYPTION_KEY", "")
+
+    with pytest.raises(RuntimeError, match="GOOGLE_TOKEN_ENCRYPTION_KEY"):
+        validate_startup_settings()
+
+
+def test_web_ui_public_no_password_is_403(monkeypatch) -> None:
+    """Non-localhost + no WEB_UI_PASSWORD → localhost-only gate (403)."""
+    monkeypatch.setattr(settings, "WEB_UI_PASSWORD", "")
+    r = _remote_client().get("/messages")
     assert r.status_code == 403
     assert r.json()["detail"] == "web UI is localhost-only"
 
 
-def test_web_ui_public_requires_basic_auth(client: TestClient, monkeypatch) -> None:
+def test_web_ui_public_requires_basic_auth(monkeypatch) -> None:
     """Non-localhost + WEB_UI_PASSWORD set, no creds → 401 with WWW-Authenticate."""
-    monkeypatch.setattr(settings, "APP_HOST", "0.0.0.0")
     monkeypatch.setattr(settings, "WEB_UI_PASSWORD", "s3cret")
-    r = client.get("/messages")
+    r = _remote_client().get("/messages")
     assert r.status_code == 401
     assert r.headers.get("WWW-Authenticate", "").startswith("Basic")
 
 
-def test_web_ui_public_wrong_password_is_401(client: TestClient, monkeypatch) -> None:
-    monkeypatch.setattr(settings, "APP_HOST", "0.0.0.0")
+def test_web_ui_public_wrong_password_is_401(monkeypatch) -> None:
     monkeypatch.setattr(settings, "WEB_UI_PASSWORD", "s3cret")
     monkeypatch.setattr(settings, "WEB_UI_USERNAME", "admin")
-    r = client.get("/messages", headers=_basic("admin", "wrong"))
+    r = _remote_client().get("/messages", headers=_basic("admin", "wrong"))
     assert r.status_code == 401
 
 
-def test_web_ui_public_correct_basic_auth_allowed(client: TestClient, monkeypatch) -> None:
-    monkeypatch.setattr(settings, "APP_HOST", "0.0.0.0")
+def test_web_ui_public_correct_basic_auth_allowed(monkeypatch) -> None:
     monkeypatch.setattr(settings, "WEB_UI_PASSWORD", "s3cret")
     monkeypatch.setattr(settings, "WEB_UI_USERNAME", "admin")
-    r = client.get("/messages", headers=_basic("admin", "s3cret"))
+    r = _remote_client().get("/messages", headers=_basic("admin", "s3cret"))
     assert r.status_code not in (401, 403)
+
+
+def test_cross_site_web_write_is_blocked(client: TestClient) -> None:
+    r = client.post(
+        "/messages/999/edit",
+        data={"body": "x"},
+        headers={"Origin": "https://evil.example", "Sec-Fetch-Site": "cross-site"},
+    )
+    assert r.status_code == 403
+    assert r.json()["detail"] == "cross-site request blocked"
+
+
+def test_security_headers_and_remote_docs_gate(client: TestClient) -> None:
+    r = client.get("/healthz")
+    assert r.headers["X-Content-Type-Options"] == "nosniff"
+    assert r.headers["X-Frame-Options"] == "SAMEORIGIN"
+    assert _remote_client().get("/docs").status_code == 404
 
 
 def test_approve_nonexistent_message_returns_400(client: TestClient, monkeypatch) -> None:

@@ -1,26 +1,90 @@
 {% extends "base.html" %}
 {% from "partials/icons.html" import icon %}
-{% block title %}영업 인사이트 — PERSO{% endblock %}
+{% block title %}인바운드 인사이트 — PERSO{% endblock %}
 {% block content %}
-<div class="page-header"><div><div class="eyebrow">SALES INSIGHTS</div><h1 class="page-title">영업 인사이트</h1><p class="page-sub">자동 기록을 맹신하지 않고, 지금 확인해야 할 고객을 근거와 함께 보여줍니다.</p></div></div>
-
-{% set groups = [
-  ('답장 누락 가능성', '고객의 최근 메시지 이후 우리 답변이 없는 대화', missing_reply, 'danger'),
-  ('14일 이상 소통 없음', 'Negotiation 상태에서 최근 활동이 오래된 고객', stale, 'warn'),
-  ('비즈니스 플랜 후보', '서비스 이용중이지만 Business·Enterprise가 아닌 고객', upsell, 'accent'),
-  ('Closed Lost', '사유를 세분화하고 재접촉 여부를 판단할 고객', lost, 'neutral')
-] %}
-<div class="insight-grid mb-gap">
-  {% for title, description, rows, tone in groups %}
-  <section class="card insight-card insight-card--{{ tone }}">
-    <div class="row-between"><div><div class="section-header__title">{{ title }}</div><div class="section-header__sub">{{ description }}</div></div><strong class="insight-card__count tnum">{{ rows | length }}</strong></div>
-    <div class="insight-list">{% for row in rows[:8] %}<a href="/customers/{{ row.contact.id }}"><span><strong>{{ row.contact.company or row.contact.full_name }}</strong><small>{{ row.next_action or row.stage }}</small></span><time>{{ row.last_activity | kst('%m/%d') }}</time></a>{% else %}<p>현재 확인할 고객이 없습니다.</p>{% endfor %}</div>
-  </section>
-  {% endfor %}
+<div class="page-header insights-header">
+  <div>
+    <h1 class="page-title">인바운드 인사이트</h1>
+  </div>
+  <div class="period-switch" aria-label="집계 단위">
+    {% for value, label in [('day','일'),('month','월'),('year','년')] %}<a href="/operations?period={{ value }}" class="{% if period == value %}is-active{% endif %}">{{ label }}</a>{% endfor %}
+  </div>
 </div>
 
+<div class="metric-strip mb-gap">
+  <div><span>선택 기간 문의</span><strong class="tnum">{{ inbound_in_period }}</strong></div>
+  <div><span>누적 문의</span><strong class="tnum">{{ inbound_total }}</strong></div>
+  <div><span>평균 퀄리티</span><strong class="tnum">{{ average_score if average_score is not none else '-' }}</strong></div>
+  <div><span>70점 이상</span><strong class="tnum">{{ qualified_count }}</strong></div>
+</div>
+
+<div class="insights-layout mb-gap">
+  <section class="card inquiry-chart-card">
+    <div class="section-header">
+      <div class="section-header__title">문의량 · 누적 추이</div>
+      <div class="chart-legend"><span><i></i>기간 문의</span><span><i></i>누적</span></div>
+    </div>
+    <div class="inquiry-chart" role="img" aria-label="기간별 문의량과 누적 문의 차트">
+      <svg class="inquiry-chart__line" viewBox="0 0 1000 250" preserveAspectRatio="none" aria-hidden="true">
+        <polyline points="{{ line_points }}" fill="none" stroke="currentColor" stroke-width="3" vector-effect="non-scaling-stroke" />
+      </svg>
+      <div class="inquiry-chart__bars">
+        {% for point in chart %}
+        <div class="chart-bar-cell" title="{{ point.label }} · {{ point.count }}건 · 누적 {{ point.total }}건">
+          <div class="chart-bar" style="height:{{ point.bar_height }}%"></div>
+          {% if point.show_label %}<span>{{ point.label }}</span>{% endif %}
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    <details class="copy-block chart-data"><summary>정확한 수치 보기</summary>
+      <div class="table-wrap"><table><thead><tr><th>기간</th><th>해당 기간 문의</th><th>누적 문의</th></tr></thead><tbody>{% for point in chart %}<tr><td>{{ point.label }}</td><td class="tnum">{{ point.count }}</td><td class="tnum">{{ point.total }}</td></tr>{% endfor %}</tbody></table></div>
+    </details>
+  </section>
+
+  <section class="card country-card">
+    <div class="section-header"><div><div class="section-header__title">국가별 문의</div><div class="section-header__sub">HubSpot 연락처 기준</div></div></div>
+    <div class="country-list">
+      {% for row in country_rows %}
+      <div class="country-row">
+        <div class="row-between"><strong>{{ row.country }}</strong><span class="tnum">{{ row.total }} · {{ row.share }}%</span></div>
+        <div class="country-row__track"><span style="width:{{ row.width }}%"></span></div>
+        <div class="country-row__trend" aria-label="기간별 {{ row.country }} 문의">
+          {% set peak = row.trend|max if row.trend else 1 %}
+          {% for count in row.trend %}<i style="height:{{ (count / (peak or 1) * 100)|round }}%" title="{{ count }}건"></i>{% endfor %}
+        </div>
+      </div>
+      {% else %}<div class="empty"><div class="empty__text">국가 데이터가 아직 없습니다.</div></div>{% endfor %}
+    </div>
+  </section>
+</div>
+
+<section id="updates" class="updates-section">
+  <div class="section-heading-row"><h2>업데이트 필요 고객</h2></div>
+  {% set groups = [
+    ('답장 누락 가능성', '고객의 최근 문의 이후 우리 답변이 없는 대화', missing_reply, 'danger'),
+    ('30일 동안 고객 답장 없음', '우리 메일 발송 후 한 달 동안 회신이 없는 고객', waiting_customer, 'warn'),
+    ('14일 이상 소통 없음', 'Negotiation 상태에서 최근 활동이 오래된 고객', stale, 'warn')
+  ] %}
+  <div class="insight-grid mb-gap">
+    {% for title, description, rows, tone in groups %}
+    <section class="card insight-card insight-card--{{ tone }}">
+      <div class="row-between"><div><div class="section-header__title">{{ title }}</div><div class="section-header__sub">{{ description }}</div></div><strong class="insight-card__count tnum">{{ rows | length }}</strong></div>
+      <div class="insight-list">{% for row in rows %}<a href="/customers/{{ row.contact.id }}"><span><strong>{{ row.contact.company or row.contact.full_name }}</strong><small>{{ row.next_action or row.stage }}</small></span><time>{{ row.last_activity | kst('%m/%d') }}</time></a>{% else %}<p>현재 확인할 고객이 없습니다.</p>{% endfor %}</div>
+    </section>
+    {% endfor %}
+    <section class="card insight-card insight-card--accent">
+      <div class="row-between"><div><div class="section-header__title">60일 이내 계약 만료</div><div class="section-header__sub">갱신 조건과 담당자 확인이 필요한 고객</div></div><strong class="insight-card__count tnum">{{ renewals | length }}</strong></div>
+      <div class="insight-list">{% for contract, contact in renewals %}<a href="/customers/{{ contact.id }}"><span><strong>{{ contact.company or contact.full_name }}</strong><small>{{ contract.plan or '플랜 미정' }}</small></span><time>{{ contract.expires_at | kst('%m/%d') }}</time></a>{% else %}<p>60일 이내 갱신 고객이 없습니다.</p>{% endfor %}</div>
+    </section>
+  </div>
+</section>
+
 <section class="card card--flush">
-  <div class="table-heading"><div class="section-header__title">60일 이내 갱신</div><div class="section-header__sub">계약 만료일 기준</div></div>
-  <div class="table-wrap"><table class="table"><thead><tr><th>고객</th><th>플랜</th><th>계약 금액</th><th>만료일</th></tr></thead><tbody>{% for contract, contact in renewals %}<tr class="is-clickable" onclick="location.href='/customers/{{ contact.id }}'"><td>{{ contact.company or contact.full_name }}</td><td>{{ contract.plan or '-' }}</td><td class="tnum">{% if contract.amount is not none %}{{ '{:,.0f}'.format(contract.amount) }} {{ contract.currency }}{% else %}-{% endif %}</td><td class="tnum">{{ contract.expires_at | kst('%Y-%m-%d') }}</td></tr>{% else %}<tr><td colspan="4"><div class="empty"><div class="empty__text">60일 이내 갱신 고객이 없습니다.</div></div></td></tr>{% endfor %}</tbody></table></div>
+  <div class="table-heading"><div><div class="section-header__title">영업 기회 풀</div><div class="section-header__sub">Closed Lost {{ lost|length }}명 · 플랜 확장 후보 {{ upsell|length }}명</div></div></div>
+  <div class="opportunity-split">
+    <div><strong>Closed Lost</strong>{% for row in lost[:6] %}<a href="/customers/{{ row.contact.id }}">{{ row.contact.company or row.contact.full_name }}<span>{{ row.profile.lost_reason if row.profile and row.profile.lost_reason else '사유 확인 필요' }}</span></a>{% else %}<p>대상 없음</p>{% endfor %}</div>
+    <div><strong>비즈니스 플랜 후보</strong>{% for row in upsell[:6] %}<a href="/customers/{{ row.contact.id }}">{{ row.contact.company or row.contact.full_name }}<span>{{ row.profile.current_plan if row.profile else '플랜 미확인' }}</span></a>{% else %}<p>대상 없음</p>{% endfor %}</div>
+  </div>
 </section>
 {% endblock %}

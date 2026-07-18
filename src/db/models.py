@@ -3,8 +3,21 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from decimal import Decimal
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Index, Integer, JSON, String, Text
+from sqlalchemy import (
+    Boolean,
+    DateTime,
+    Float,
+    ForeignKey,
+    Index,
+    Integer,
+    JSON,
+    Numeric,
+    String,
+    Text,
+    text,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .base import Base
@@ -20,7 +33,7 @@ class Contact(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     hubspot_contact_id: Mapped[str | None] = mapped_column(String, unique=True, nullable=True)
     email: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
-    normalized_email: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    normalized_email: Mapped[str] = mapped_column(String, nullable=False, unique=True, index=True)
     full_name: Mapped[str] = mapped_column(String, nullable=False)
     company: Mapped[str | None] = mapped_column(String, nullable=True)
     domain: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
@@ -32,6 +45,9 @@ class Contact(Base):
     # over the course of a conversation even for gmail/unverified senders.
     role_description: Mapped[str | None] = mapped_column(Text, nullable=True)
     whatsapp_opt_in: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    # Stable ID allocated in the existing Inbound DB (1000-series). Reused by
+    # the order sheet so both tabs keep the sales team's original join key.
+    sheet_client_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=_utcnow, onupdate=_utcnow, nullable=False
@@ -51,7 +67,9 @@ class Conversation(Base):
     stage: Mapped[str] = mapped_column(String, nullable=False, default="initial")
     last_outgoing_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     last_incoming_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    hubspot_ticket_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    hubspot_ticket_id: Mapped[str | None] = mapped_column(
+        String(64), nullable=True, unique=True, index=True
+    )
     # ISO 639-1 language the customer wrote in — the language every reply in this
     # thread must go out in (enforced in code at send time).
     inquiry_language: Mapped[str | None] = mapped_column(String(8), nullable=True)
@@ -59,6 +77,12 @@ class Conversation(Base):
     # regenerated as the thread evolves (unlike the append-only progress log).
     summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     customer_requests: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Exact row written for this inquiry. Pipeline moves update only that row's
+    # stage cells and never rewrite the operator-owned sheet layout.
+    sheet_inbound_row: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Stable key written into this inquiry's sheet row. Unlike a physical row
+    # number it survives operator sorting and inserted rows.
+    sheet_client_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
 
     contact: Mapped[Contact] = relationship(back_populates="conversations")
@@ -97,7 +121,17 @@ class Message(Base):
     draft_provider: Mapped[str | None] = mapped_column(String, nullable=True)
     approved_by: Mapped[str | None] = mapped_column(String, nullable=True)
     approved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # Lease timestamp for the worker that changed status to ``sending:*``.
+    # A different worker may reclaim the row only after this lease is stale.
+    send_claimed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    send_attempts: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     sent_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # Delivery and CRM/Sheets synchronization are separate commits: SMTP may
+    # succeed while a downstream system is temporarily unavailable.
+    post_send_synced_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    post_send_sync_attempted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    post_send_sync_attempts: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    post_send_sync_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     replied: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     smtp_message_id: Mapped[str | None] = mapped_column(String, nullable=True)
     in_reply_to: Mapped[str | None] = mapped_column(String, nullable=True)
@@ -107,9 +141,31 @@ class Message(Base):
     whatsapp_sent: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     whatsapp_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     slack_notified_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    slack_notification_attempted_at: Mapped[datetime | None] = mapped_column(
+        DateTime, nullable=True
+    )
+    slack_notification_attempts: Mapped[int] = mapped_column(
+        Integer, default=0, nullable=False
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
 
-    __table_args__ = (Index("ix_messages_status_scheduled", "status", "scheduled_at"),)
+    __table_args__ = (
+        Index("ix_messages_status_scheduled", "status", "scheduled_at"),
+        Index("ix_messages_status_claimed", "status", "send_claimed_at"),
+        Index(
+            "ux_messages_one_auto_ack_per_conversation",
+            "conversation_id",
+            unique=True,
+            sqlite_where=text("prompt_variant = 'auto_ack'"),
+            postgresql_where=text("prompt_variant = 'auto_ack'"),
+        ),
+        Index(
+            "ix_messages_post_send_sync",
+            "status",
+            "post_send_synced_at",
+            "post_send_sync_attempted_at",
+        ),
+    )
 
     conversation: Mapped[Conversation] = relationship(back_populates="messages")
     approvals: Mapped[list[Approval]] = relationship(back_populates="message")
@@ -163,6 +219,44 @@ class Event(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
 
     __table_args__ = (Index("ix_events_kind", "kind"),)
+
+
+class InboundJob(Base):
+    """Durable, idempotent work item for one HubSpot inbound ticket."""
+
+    __tablename__ = "inbound_jobs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    event_key: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
+    source: Mapped[str] = mapped_column(String(32), nullable=False)
+    payload: Mapped[dict] = mapped_column(JSON, nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="pending")
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    available_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+    locked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    locked_by: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=_utcnow, onupdate=_utcnow, nullable=False
+    )
+
+    __table_args__ = (Index("ix_inbound_jobs_ready", "status", "available_at"),)
+
+
+class IntegrationCredential(Base):
+    """Encrypted delegated credentials for operator-owned integrations."""
+
+    __tablename__ = "integration_credentials"
+
+    provider: Mapped[str] = mapped_column(String(64), primary_key=True)
+    account_email: Mapped[str | None] = mapped_column(String(320), nullable=True)
+    encrypted_payload: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=_utcnow, onupdate=_utcnow, nullable=False
+    )
 
 
 class KnowledgeDocument(Base):
@@ -355,9 +449,18 @@ class ContractRecord(Base):
     contact_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("contacts.id", ondelete="CASCADE"), nullable=False, index=True
     )
+    conversation_id: Mapped[int | None] = mapped_column(
+        Integer,
+        ForeignKey("conversations.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    # Snapshot of the inquiry's stable Sheets key. Never derive an order from the
+    # contact-level legacy key when a contact has several inquiries.
+    sheet_client_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="draft")
     plan: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    amount: Mapped[float | None] = mapped_column(Float, nullable=True)
+    amount: Mapped[Decimal | None] = mapped_column(Numeric(18, 2), nullable=True)
     currency: Mapped[str] = mapped_column(String(8), nullable=False, default="KRW")
     payment_method: Mapped[str | None] = mapped_column(String(32), nullable=True)
     contract_date: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
@@ -370,6 +473,11 @@ class ContractRecord(Base):
     invoice_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     payment_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Sheet-specific operational fields stay flexible without duplicating the
+    # entire external workbook schema as database columns.
+    sheet_fields: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    sheet_order_row: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    sheet_synced_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=_utcnow, onupdate=_utcnow, nullable=False

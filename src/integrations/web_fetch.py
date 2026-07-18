@@ -8,6 +8,7 @@ import re
 import socket
 from dataclasses import dataclass
 from typing import Literal
+from urllib.parse import urljoin, urlsplit
 
 import httpx
 
@@ -17,6 +18,7 @@ logger = logging.getLogger(__name__)
 
 _MAX_RESPONSE_BYTES = 1_000_000
 _MAX_REDIRECTS = 3
+_REDIRECT_STATUSES = {301, 302, 303, 307, 308}
 
 FetchStatus = Literal["ok", "timeout", "http_4xx", "http_5xx", "blocked", "skipped"]
 
@@ -39,7 +41,7 @@ def _is_private_ip(host: str) -> bool:
         infos = socket.getaddrinfo(host, None, socket.AF_UNSPEC, socket.SOCK_STREAM)
         for _family, _type, _proto, _canonname, sockaddr in infos:
             ip = ipaddress.ip_address(sockaddr[0])
-            if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved:
+            if not ip.is_global:
                 return True
     except (socket.gaierror, OSError, ValueError):
         return True
@@ -56,10 +58,61 @@ def _is_ssrf_target(domain: str) -> bool:
         return True
     try:
         ip = ipaddress.ip_address(lower)
-        return ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved
+        return not ip.is_global
     except ValueError:
         pass
     return _is_private_ip(lower)
+
+
+def _blocked_url(url: str) -> bool:
+    """Validate every requested URL, including each redirect destination."""
+    try:
+        parsed = urlsplit(url)
+        if (
+            parsed.scheme not in {"http", "https"}
+            or not parsed.hostname
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.port not in {None, 80, 443}
+        ):
+            return True
+    except ValueError:
+        return True
+    return _is_ssrf_target(parsed.hostname)
+
+
+def _stream_html(client: httpx.Client, url: str) -> tuple[FetchStatus, str]:
+    """Fetch bounded HTML while manually validating redirects."""
+    for hop in range(_MAX_REDIRECTS + 1):
+        if _blocked_url(url):
+            return "blocked", ""
+        with client.stream("GET", url, follow_redirects=False) as resp:
+            if resp.status_code in _REDIRECT_STATUSES:
+                location = resp.headers.get("location", "")
+                if not location or hop == _MAX_REDIRECTS:
+                    return "blocked", ""
+                url = urljoin(url, location)
+                continue
+            if resp.status_code >= 500:
+                return "http_5xx", ""
+            if resp.status_code >= 400:
+                return "http_4xx", ""
+            if "text/html" not in resp.headers.get("content-type", "").lower():
+                return "blocked", ""
+            try:
+                if int(resp.headers.get("content-length", "0")) > _MAX_RESPONSE_BYTES:
+                    return "blocked", ""
+            except ValueError:
+                pass
+
+            body = bytearray()
+            for chunk in resp.iter_bytes():
+                body.extend(chunk)
+                if len(body) > _MAX_RESPONSE_BYTES:
+                    return "blocked", ""
+            encoding = resp.encoding or "utf-8"
+            return "ok", bytes(body).decode(encoding, errors="replace")
+    return "blocked", ""
 
 
 _TITLE_RE = re.compile(r"<title[^>]*>(.*?)</title>", re.IGNORECASE | re.DOTALL)
@@ -144,29 +197,24 @@ def fetch_homepage_meta(
         "Accept-Language": "en-US,en;q=0.9",
     }
 
-    for scheme in ("https", "http"):
-        url = f"{scheme}://{domain}"
-        try:
-            with httpx.Client(
-                timeout=timeout,
-                follow_redirects=True,
-                max_redirects=_MAX_REDIRECTS,
-                headers=headers,
-            ) as client:
-                resp = client.get(url)
-
-            content_type = resp.headers.get("content-type", "")
-            if "text/html" not in content_type.lower():
-                return HomepageMeta(status="blocked")
-
-            body = resp.text[:_MAX_RESPONSE_BYTES]
-
-            if resp.status_code >= 500:
-                return HomepageMeta(status="http_5xx")
-            if resp.status_code >= 400:
+    with httpx.Client(timeout=timeout, headers=headers) as client:
+        for scheme in ("https", "http"):
+            try:
+                status, body = _stream_html(client, f"{scheme}://{domain}")
+            except httpx.TimeoutException:
                 if scheme == "https":
                     continue
-                return HomepageMeta(status="http_4xx")
+                return HomepageMeta(status="timeout")
+            except Exception:
+                if scheme == "https":
+                    continue
+                logger.debug("Homepage fetch failed for %s", domain, exc_info=True)
+                return HomepageMeta(status="blocked")
+
+            if status == "http_4xx" and scheme == "https":
+                continue
+            if status != "ok":
+                return HomepageMeta(status=status)
 
             meta = _extract_meta(body)
             return HomepageMeta(
@@ -177,40 +225,5 @@ def fetch_homepage_meta(
                 body_text=_extract_body_text(body),
                 status="ok",
             )
-
-        except httpx.TimeoutException:
-            # One quick retry on the same scheme before giving up / falling back.
-            try:
-                with httpx.Client(
-                    timeout=timeout,
-                    follow_redirects=True,
-                    max_redirects=_MAX_REDIRECTS,
-                    headers=headers,
-                ) as client:
-                    resp = client.get(url)
-                if (
-                    resp.status_code < 400
-                    and "text/html" in resp.headers.get("content-type", "").lower()
-                ):
-                    body = resp.text[:_MAX_RESPONSE_BYTES]
-                    meta = _extract_meta(body)
-                    return HomepageMeta(
-                        title=meta.get("title", ""),
-                        description=meta.get("description", ""),
-                        og_description=meta.get("og_description", ""),
-                        keywords=meta.get("keywords", ""),
-                        body_text=_extract_body_text(body),
-                        status="ok",
-                    )
-            except Exception:
-                pass
-            if scheme == "https":
-                continue
-            return HomepageMeta(status="timeout")
-        except Exception:
-            if scheme == "https":
-                continue
-            logger.debug("Homepage fetch failed for %s", domain, exc_info=True)
-            return HomepageMeta(status="blocked")
 
     return HomepageMeta(status="timeout")

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import smtplib
+import ssl
 import uuid
 from email.headerregistry import Address
 from email.message import EmailMessage
@@ -25,12 +26,17 @@ def _reject_crlf(field: str, value: str) -> None:
         raise SMTPHeaderInjectionError(f"{field} contains illegal CR/LF characters")
 
 
-def _generate_message_id() -> str:
-    """Generate a unique Message-ID for SMTP threading."""
+def _generate_message_id(message_key: str | int | None = None) -> str:
+    """Generate a stable per-row Message-ID, or a random one without a row key."""
     domain = (
         settings.SMTP_FROM_EMAIL.rsplit("@", 1)[-1] if settings.SMTP_FROM_EMAIL else "localhost"
     )
-    return f"<{uuid.uuid4()}@{domain}>"
+    unique = (
+        uuid.uuid5(uuid.NAMESPACE_URL, f"sales-automation:{domain}:{message_key}")
+        if message_key is not None
+        else uuid.uuid4()
+    )
+    return f"<{unique}@{domain}>"
 
 
 def _build_message(message: Message) -> EmailMessage:
@@ -78,7 +84,13 @@ def _build_message(message: Message) -> EmailMessage:
         msg["In-Reply-To"] = message.in_reply_to
         msg["References"] = message.in_reply_to
 
-    message_id = _generate_message_id()
+    stored_message_id = getattr(message, "smtp_message_id", None)
+    if isinstance(stored_message_id, str) and stored_message_id:
+        _reject_crlf("Message-ID", stored_message_id)
+        message_id = stored_message_id
+    else:
+        row_id = getattr(message, "id", None)
+        message_id = _generate_message_id(row_id if isinstance(row_id, int) else None)
     msg["Message-ID"] = message_id
     return msg
 
@@ -94,6 +106,10 @@ class SMTPTransientError(RuntimeError):
     """Connection / temp failure — retry is worth trying."""
 
 
+class SMTPDeliveryUnknown(RuntimeError):
+    """The SMTP DATA exchange may have succeeded; retrying could duplicate mail."""
+
+
 def send_smtp(message: Message) -> None:
     """Send an email via SMTP.
 
@@ -106,29 +122,41 @@ def send_smtp(message: Message) -> None:
     msg = _build_message(message)
     message_id = msg["Message-ID"]
 
+    server: smtplib.SMTP | None = None
     try:
-        with smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT, timeout=30) as server:
-            server.starttls()
+        try:
+            server = smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT, timeout=30)
+            server.starttls(context=ssl.create_default_context())
             server.login(settings.SMTP_USERNAME, settings.SMTP_PASSWORD)
+        except smtplib.SMTPAuthenticationError as exc:
+            raise SMTPPermanentError("SMTP authentication failed") from exc
+        except smtplib.SMTPResponseException as exc:
+            if exc.smtp_code in _TRANSIENT_SMTP_CODES:
+                raise SMTPTransientError(f"transient SMTP setup error {exc.smtp_code}") from exc
+            raise SMTPPermanentError(f"permanent SMTP setup error {exc.smtp_code}") from exc
+        except (smtplib.SMTPServerDisconnected, TimeoutError, ConnectionError, OSError) as exc:
+            raise SMTPTransientError(f"SMTP connection failure: {exc}") from exc
+
+        try:
             server.send_message(msg)
-    except smtplib.SMTPAuthenticationError as exc:
-        raise SMTPPermanentError(f"SMTP auth failed: {exc}") from exc
-    except smtplib.SMTPRecipientsRefused as exc:
-        raise SMTPPermanentError(f"All recipients refused: {exc.recipients}") from exc
-    except smtplib.SMTPResponseException as exc:
-        if exc.smtp_code in _TRANSIENT_SMTP_CODES:
-            raise SMTPTransientError(
-                f"transient SMTP error {exc.smtp_code}: {exc.smtp_error}"
-            ) from exc
-        raise SMTPPermanentError(f"permanent SMTP error {exc.smtp_code}: {exc.smtp_error}") from exc
-    except (TimeoutError, ConnectionError, OSError) as exc:
-        raise SMTPTransientError(f"SMTP connection failure: {exc}") from exc
+        except smtplib.SMTPRecipientsRefused as exc:
+            raise SMTPPermanentError("SMTP rejected every recipient") from exc
+        except smtplib.SMTPResponseException as exc:
+            if exc.smtp_code in _TRANSIENT_SMTP_CODES:
+                raise SMTPTransientError(f"transient SMTP delivery error {exc.smtp_code}") from exc
+            raise SMTPPermanentError(f"permanent SMTP delivery error {exc.smtp_code}") from exc
+        except (smtplib.SMTPServerDisconnected, TimeoutError, ConnectionError, OSError) as exc:
+            raise SMTPDeliveryUnknown("SMTP delivery outcome is unknown") from exc
+    finally:
+        if server is not None:
+            try:
+                server.quit()
+            except Exception:
+                try:
+                    server.close()
+                except Exception:
+                    pass
 
     message.smtp_message_id = message_id
 
-    logger.info(
-        "SMTP: sent email to %s, subject=%s, message_id=%s",
-        message.to_address,
-        message.subject,
-        message_id,
-    )
+    logger.info("SMTP sent message row=%s, message_id=%s", message.id, message_id)

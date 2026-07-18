@@ -8,19 +8,31 @@ from __future__ import annotations
 
 import base64
 import hmac
+from urllib.parse import urlsplit
 
 from fastapi import Request
 
 from ..common.config import settings
 
 # Paths the auth middleware lets through without any check.
-API_SKIP_PATHS = ("/healthz", "/docs", "/openapi.json", "/favicon.ico")
+API_SKIP_PATHS = ("/healthz", "/favicon.ico")
+LOCAL_DOC_PATHS = ("/docs", "/redoc", "/openapi.json")
 # Browser-facing web UI route prefixes (vs JSON API / webhooks).
 WEB_UI_PREFIXES = (
     "/", "/messages", "/email-templates", "/settings",
     "/logs", "/static", "/auth", "/tools", "/customers", "/operations",
+    "/pipeline",
+    "/knowledge", "/integrations",
 )
 LOCALHOST_HOSTS = ("127.0.0.1", "::1", "localhost")
+_SAFE_METHODS = {"GET", "HEAD", "OPTIONS", "TRACE"}
+_ADMIN_MUTATION_PREFIXES = (
+    "/settings/users",
+    "/knowledge",
+    "/email-templates",
+    "/integrations",
+    "/logs",
+)
 
 
 def is_web_ui_path(path: str) -> bool:
@@ -47,18 +59,59 @@ def client_ip(request: Request) -> str | None:
 def is_localhost(request: Request) -> bool:
     """Return True when the request originates from localhost.
 
-    Trust model:
-      1. If APP_HOST is bound to a loopback address, the OS already guarantees
-         no external traffic can reach this process — every request is local.
-      2. Otherwise, we inspect the real peer IP. We do NOT honor
-         X-Forwarded-For unless the immediate peer is on TRUSTED_PROXIES.
-         A naive `X-Forwarded-For` trust would let any external client spoof
-         the header and bypass the localhost-only gate.
+    ``APP_HOST`` only controls the bind address and is not authentication. Both
+    the network peer and requested hostname must be local, preventing a reverse
+    proxy or container bind from turning every external request into localhost.
     """
-    if settings.APP_HOST in LOCALHOST_HOSTS:
-        return True
     ip = client_ip(request)
-    return ip in LOCALHOST_HOSTS
+    host = (request.url.hostname or "").lower()
+    if ip == "testclient":
+        return host in {"testserver", *LOCALHOST_HOSTS}
+    return ip in LOCALHOST_HOSTS and host in LOCALHOST_HOSTS
+
+
+def is_same_origin_browser_request(request: Request) -> bool:
+    """Reject cross-site browser writes while preserving authenticated API clients."""
+    if request.method in {"GET", "HEAD", "OPTIONS", "TRACE"}:
+        return True
+    if request.headers.get("sec-fetch-site", "").lower() == "cross-site":
+        return False
+
+    source = request.headers.get("origin")
+    if source == "null":
+        return False
+    if not source:
+        source = request.headers.get("referer")
+    if not source:
+        return True
+
+    expected = settings.PUBLIC_BASE_URL or str(request.base_url)
+    return _origin(source) == _origin(expected)
+
+
+def web_role_allows(role: str, method: str, path: str) -> bool:
+    """Three-role policy for browser routes; legacy ``member`` means operator."""
+    effective = role if role in {"admin", "viewer"} else "operator"
+    if effective == "admin":
+        return True
+    if path == "/integrations" or path.startswith("/integrations/"):
+        return False
+    if method.upper() in _SAFE_METHODS:
+        return True
+    if effective == "viewer":
+        return False
+    return not any(path == prefix or path.startswith(prefix + "/") for prefix in _ADMIN_MUTATION_PREFIXES)
+
+
+def _origin(value: str) -> tuple[str, str, int] | None:
+    try:
+        parsed = urlsplit(value)
+        if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+            return None
+        port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    except ValueError:
+        return None
+    return parsed.scheme, parsed.hostname.lower(), port
 
 
 def check_web_ui_basic_auth(request: Request) -> bool:

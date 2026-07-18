@@ -9,11 +9,26 @@ SSHing into the box. In-memory only — bounded and reset on process restart.
 from __future__ import annotations
 
 import logging
+import re
 from collections import deque
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
 _MAX = 500
+_EMAIL_RE = re.compile(r"(?<![\w.+-])[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}(?![\w.-])")
+_PHONE_RE = re.compile(r"(?<!\d)(?:\+?\d[\d ().-]{7,}\d)(?!\d)")
+_SECRET_RE = re.compile(
+    r"(?i)\b(authorization|api[_ -]?key|access[_ -]?token|refresh[_ -]?token|"
+    r"password|client[_ -]?secret)\b(\s*[:=]\s*|\s+)([^\s,;]+)"
+)
+
+
+def redact_sensitive(value: object) -> str:
+    """Best-effort PII/secret masking for operator-visible and stdout logs."""
+    text = str(value or "")
+    text = _EMAIL_RE.sub("[REDACTED_EMAIL]", text)
+    text = _PHONE_RE.sub("[REDACTED_PHONE]", text)
+    return _SECRET_RE.sub(r"\1\2[REDACTED]", text)
 
 
 @dataclass(frozen=True)
@@ -37,8 +52,8 @@ def record(level: str, source: str, message: str, kind: str = "log") -> None:
             LogEvent(
                 ts=datetime.now(timezone.utc),
                 level=(level or "INFO").upper(),
-                source=source or "",
-                message=message or "",
+                source=redact_sensitive(source),
+                message=redact_sensitive(message),
                 kind=kind,
             )
         )

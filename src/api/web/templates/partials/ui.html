@@ -1,34 +1,30 @@
-{#
-  Shared inbound console UI macros.
-  Import: {% from "partials/ui.html" import status_pill, score_meter, country_chip %}
-#}
-
-{# ---- STATUS → { ko, tone } single source of truth ---- #}
+{# Shared status and score components. #}
 {%- set STATUS = {
-  "drafting":         ("AI 작성중", "info"),
+  "drafting":         ("AI 작성 중", "info"),
   "draft_failed":     ("작성 실패", "danger"),
   "send_failed":      ("발송 실패", "danger"),
+  "delivery_unknown": ("발송 확인 필요", "warn"),
   "pending_approval": ("승인 대기", "warn"),
-  "approved":         ("승인됨",   "info"),
+  "approved":         ("승인됨", "info"),
   "queued":           ("발송 대기", "info"),
-  "sent":             ("발송됨",   "accent"),
-  "rejected":         ("거절",     "danger"),
-  "received":         ("수신",     "info"),
-  "analyzed":         ("분석됨",   "info"),
-  "failed":           ("실패",     "danger"),
-  "PASS":             ("정상",     "ok"),
-  "WARN":             ("주의",     "warn"),
-  "FAIL":             ("실패",     "danger")
+  "sent":             ("발송됨", "accent"),
+  "test_sent":        ("테스트 발송", "info"),
+  "rejected":         ("거절", "danger"),
+  "received":         ("수신", "info"),
+  "analyzed":         ("분석됨", "info"),
+  "failed":           ("실패", "danger"),
+  "PASS":             ("정상", "ok"),
+  "WARN":             ("주의", "warn"),
+  "FAIL":             ("실패", "danger")
 } -%}
 
 {%- macro status_pill(status, size="md") -%}
-  {%- set m = STATUS.get(status, (status, "neutral")) -%}
-  <span class="pill pill--{{ m[1] }}{% if size == 'sm' %} pill--sm{% endif %}">
-    <span class="pill__dot"></span>{{ m[0] }}
+  {%- set item = STATUS.get(status, (status, "neutral")) -%}
+  <span class="pill pill--{{ item[1] }}{% if size == 'sm' %} pill--sm{% endif %}">
+    <span class="pill__dot"></span>{{ item[0] }}
   </span>
 {%- endmacro -%}
 
-{# ---- reply confidence meter: >=70 high, >=50 mid, else low; None => none ---- #}
 {%- macro score_meter(score, show_bar=True, width=56) -%}
   {%- if score is none -%}{%- set tier = "none" -%}
   {%- elif score >= 70 -%}{%- set tier = "high" -%}
@@ -41,18 +37,4 @@
       <span class="score__fill" style="width:{{ 0 if score is none else score }}%"></span>
     </span>{% endif %}
   </span>
-{%- endmacro -%}
-
-{# ---- country chip (flag from data.js COUNTRIES) ---- #}
-{%- set COUNTRIES = {
-  "KR": ("대한민국", "🇰🇷"), "JP": ("일본", "🇯🇵"), "SG": ("싱가포르", "🇸🇬"),
-  "ID": ("인도네시아", "🇮🇩"), "VN": ("베트남", "🇻🇳"), "TH": ("태국", "🇹🇭"),
-  "US": ("미국", "🇺🇸"), "GB": ("영국", "🇬🇧"), "DE": ("독일", "🇩🇪"), "FR": ("프랑스", "🇫🇷")
-} -%}
-{%- macro country_chip(code, with_name=True) -%}
-  {%- if not code -%}<span class="country-chip t-subtle">—</span>
-  {%- else -%}
-  {%- set c = COUNTRIES.get(code, (code, "🏳️")) -%}
-  <span class="country-chip"><span class="country-chip__flag">{{ c[1] }}</span>{% if with_name %}{{ c[0] }}{% endif %}</span>
-  {%- endif -%}
 {%- endmacro -%}

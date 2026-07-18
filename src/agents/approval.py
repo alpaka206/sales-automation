@@ -7,6 +7,8 @@ import hmac
 import logging
 from datetime import datetime, timezone
 
+from sqlalchemy import update
+
 from ..common.config import settings
 from ..db.models import Approval, Conversation, Message
 from ..db.session import SessionLocal
@@ -45,35 +47,54 @@ def verify_approval_token(message_id: int, token: str) -> bool:
     return hmac.compare_digest(expected, token)
 
 
-def approve(message_id: int, approver: str, edited_body: str | None = None) -> Message:
-    """Approve a message, optionally editing the body. Returns the updated message."""
+def approve(
+    message_id: int,
+    approver: str,
+    edited_body: str | None = None,
+    *,
+    edited_subject: str | None = None,
+    signature_key: str | None = None,
+) -> Message:
+    """Atomically freeze the operator-reviewed message and approve it."""
     session = SessionLocal()
     try:
-        msg = session.get(Message, message_id)
-        if not msg:
-            raise ApprovalError(f"Message {message_id} not found.")
-        if msg.status != "pending_approval":
+        values: dict[str, object] = {
+            "status": "approved",
+            "approved_by": approver,
+            "approved_at": datetime.now(timezone.utc),
+        }
+        if edited_body is not None:
+            values["body"] = edited_body
+        if edited_subject is not None:
+            values["subject"] = edited_subject
+        if signature_key is not None:
+            values["signature_key"] = signature_key
+
+        result = session.execute(
+            update(Message)
+            .where(Message.id == message_id, Message.status == "pending_approval")
+            .values(**values)
+        )
+        if result.rowcount != 1:
+            session.rollback()
+            msg = session.get(Message, message_id)
+            if not msg:
+                raise ApprovalError(f"Message {message_id} not found.")
             raise ApprovalError(f"Message {message_id} is {msg.status}, not pending_approval.")
 
-        action = "edit" if edited_body else "approve"
-        diff = None
-        if edited_body:
-            diff = edited_body
-            msg.body = edited_body
-
-        msg.status = "approved"
-        msg.approved_by = approver
-        msg.approved_at = datetime.now(timezone.utc)
+        action = "edit" if edited_body is not None else "approve"
 
         session.add(
             Approval(
                 message_id=message_id,
                 approver=approver,
                 action=action,
-                diff=diff,
+                diff=edited_body if edited_body is not None else None,
             )
         )
         session.commit()
+        msg = session.get(Message, message_id)
+        assert msg is not None
         session.refresh(msg)
         logger.info("Message %d approved by %s.", message_id, approver)
         return msg
@@ -82,16 +103,20 @@ def approve(message_id: int, approver: str, edited_body: str | None = None) -> M
 
 
 def reject(message_id: int, approver: str, reason: str | None = None) -> Message:
-    """Reject a message."""
+    """Reject a message only while it is still awaiting approval."""
     session = SessionLocal()
     try:
-        msg = session.get(Message, message_id)
-        if not msg:
-            raise ApprovalError(f"Message {message_id} not found.")
-        if msg.status != "pending_approval":
+        result = session.execute(
+            update(Message)
+            .where(Message.id == message_id, Message.status == "pending_approval")
+            .values(status="rejected")
+        )
+        if result.rowcount != 1:
+            session.rollback()
+            msg = session.get(Message, message_id)
+            if not msg:
+                raise ApprovalError(f"Message {message_id} not found.")
             raise ApprovalError(f"Message {message_id} is {msg.status}, not pending_approval.")
-
-        msg.status = "rejected"
 
         session.add(
             Approval(
@@ -102,6 +127,8 @@ def reject(message_id: int, approver: str, reason: str | None = None) -> Message
             )
         )
         session.commit()
+        msg = session.get(Message, message_id)
+        assert msg is not None
         session.refresh(msg)
         logger.info("Message %d rejected by %s. Reason: %s", message_id, approver, reason)
         return msg

@@ -10,7 +10,7 @@
 <div class="page-header">
   <div>
     <h1 class="page-title">사용자 관리 · 접근 허용</h1>
-    <p class="page-sub"><strong>@{{ domain }}</strong> 구글 계정만 로그인 가능하며, 여기서 <strong>승인</strong>된 사용자만 콘솔을 사용할 수 있습니다.</p>
+    <p class="page-sub"><strong>@{{ domain }}</strong> Google 계정 · 승인 사용자만 접근</p>
   </div>
 </div>
 
@@ -31,7 +31,8 @@
     <div>
       <label for="add-user-role" class="t-sm" style="display:block;font-weight:600;margin-bottom:4px">역할</label>
       <select id="add-user-role" name="role" class="select">
-        <option value="member">멤버</option>
+        <option value="operator">운영자</option>
+        <option value="viewer">조회 전용</option>
         <option value="admin">관리자</option>
       </select>
     </div>
@@ -50,7 +51,6 @@
         <div class="section-header__title">승인 대기 · 신청
           <span class="pill pill--warn pill--sm" style="margin-left:6px"><span class="pill__dot"></span>{{ pending_users | length }}</span>
         </div>
-        <div class="section-header__sub">로그인했지만 아직 승인되지 않은 사용자입니다. 승인하거나 거절(삭제)할 수 있습니다.</div>
       </div>
     </div>
   </div>
@@ -75,7 +75,8 @@
           </td>
           <td>
             {% if u.role == 'admin' %}<span class="pill pill--accent pill--sm"><span class="pill__dot"></span>관리자</span>
-            {% else %}<span class="tag">멤버</span>{% endif %}
+            {% elif u.role == 'viewer' %}<span class="tag">조회 전용</span>
+            {% else %}<span class="tag">운영자</span>{% endif %}
           </td>
           <td class="td-subtle tnum">{{ (u.last_login_at | kst) or '—' }}</td>
           <td>
@@ -107,7 +108,6 @@
         <div class="section-header__title">등록된 사용자
           <span class="pill pill--ok pill--sm" style="margin-left:6px"><span class="pill__dot"></span>{{ approved_users | length }}</span>
         </div>
-        <div class="section-header__sub">승인되어 콘솔을 사용할 수 있는 사용자입니다. 삭제하면 목록에서 즉시 제거됩니다.</div>
       </div>
     </div>
   </div>
@@ -132,7 +132,8 @@
           </td>
           <td>
             {% if u.role == 'admin' %}<span class="pill pill--accent pill--sm"><span class="pill__dot"></span>관리자</span>
-            {% else %}<span class="tag">멤버</span>{% endif %}
+            {% elif u.role == 'viewer' %}<span class="tag">조회 전용</span>
+            {% else %}<span class="tag">운영자</span>{% endif %}
           </td>
           <td><span class="pill pill--ok pill--sm"><span class="pill__dot"></span>승인됨</span></td>
           <td class="td-subtle tnum">{{ (u.last_login_at | kst) or '—' }}</td>
@@ -141,11 +142,9 @@
               {% if u.email != me_email %}
               <button class="btn btn--ghost btn--sm" hx-post="/settings/users/{{ u.email }}" hx-vals='{"action":"revoke"}' hx-confirm="{{ u.email }} 의 접근 권한을 삭제하시겠습니까? 목록에서 완전히 제거됩니다.">삭제</button>
               {% endif %}
-              {% if u.role != 'admin' %}
-              <button class="btn btn--subtle btn--sm" hx-post="/settings/users/{{ u.email }}" hx-vals='{"action":"make_admin"}'>관리자로</button>
-              {% elif u.email != me_email %}
-              <button class="btn btn--subtle btn--sm" hx-post="/settings/users/{{ u.email }}" hx-vals='{"action":"make_member"}'>멤버로</button>
-              {% endif %}
+              {% if u.role != 'admin' %}<button class="btn btn--subtle btn--sm" hx-post="/settings/users/{{ u.email }}" hx-vals='{"action":"make_admin"}'>관리자로</button>{% endif %}
+              {% if u.role != 'operator' and u.email != me_email %}<button class="btn btn--subtle btn--sm" hx-post="/settings/users/{{ u.email }}" hx-vals='{"action":"make_operator"}'>운영자로</button>{% endif %}
+              {% if u.role != 'viewer' and u.email != me_email %}<button class="btn btn--subtle btn--sm" hx-post="/settings/users/{{ u.email }}" hx-vals='{"action":"make_viewer"}'>조회 전용으로</button>{% endif %}
             </div>
           </td>
         </tr>

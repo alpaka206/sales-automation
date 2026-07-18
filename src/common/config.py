@@ -7,7 +7,6 @@ even before the operator fills in `.env`.
 
 from __future__ import annotations
 
-from functools import lru_cache
 from typing import Literal
 
 from pydantic import Field
@@ -49,6 +48,13 @@ class Settings(BaseSettings):
     # id (e.g. "문의 대기"). Empty = don't touch stage. Find the id in
     # HubSpot Settings → Objects → Tickets → Pipelines (click a stage → copy id).
     HUBSPOT_TICKET_STAGE_AFTER_SEND: str = ""
+    # Optional mappings for the remaining local pipeline stages. Blank means
+    # the card moves locally without attempting an unsupported HubSpot write.
+    HUBSPOT_TICKET_STAGE_NEGOTIATION: str = ""
+    HUBSPOT_TICKET_STAGE_CONTRACTED: str = ""
+    HUBSPOT_TICKET_STAGE_ONBOARDING: str = ""
+    HUBSPOT_TICKET_STAGE_ACTIVE: str = ""
+    HUBSPOT_TICKET_STAGE_CLOSED_LOST: str = ""
     # Set to true ONLY if the HubSpot account has a custom `inbound_status`
     # text property on contacts. We write "analyzed" / "meeting_link_sent" to
     # it for operator visibility, but the value is never read back, and the
@@ -60,10 +66,7 @@ class Settings(BaseSettings):
     HUBSPOT_WHATSAPP_OPT_IN_PROPERTY: str = ""
 
     # ----- Email -----
-    # HubSpot's CRM email endpoint only logs activity; it does not deliver mail.
-    # Real replies use SMTP and are logged back to HubSpot afterwards.
-    EMAIL_PROVIDER: Literal["hubspot", "smtp"] = "smtp"
-
+    # SMTP delivers mail; HubSpot's email API only receives a timeline copy.
     SMTP_HOST: str = "smtp.gmail.com"
     SMTP_PORT: int = 587
     SMTP_USERNAME: str = ""
@@ -93,12 +96,14 @@ class Settings(BaseSettings):
     SLACK_APPROVAL_CHANNEL_ID: str = ""
 
     # ----- Reports -----
-    REPORT_SLACK_CHANNEL_ID: str = ""
     REPORT_EMAIL_TO: str = ""
 
     # ----- Inbound poller -----
     INBOUND_POLL_ENABLED: bool = False
     INBOUND_POLL_INTERVAL_SECONDS: int = 600
+    INBOUND_INITIAL_LOOKBACK_HOURS: int = 24
+    # Webhook and poller only enqueue; this worker performs HubSpot/AI work with retries.
+    INBOUND_WORKER_ENABLED: bool = True
 
     # ----- Inbound auto-acknowledgement -----
     # On the FIRST inbound of a thread, immediately send a "we received your
@@ -117,7 +122,8 @@ class Settings(BaseSettings):
     SEND_JITTER_SECONDS: int = 15
 
     # ----- Behavior knobs -----
-    AUTO_SEND_THRESHOLD: float = 1.01  # >1.0 => never auto-send
+    # 0.0..1.0 enables score-based auto-send; >1.0 keeps human approval required.
+    AUTO_SEND_THRESHOLD: float = 1.01
     DAILY_REPORT_HOUR: int = 18
     WEEKLY_REPORT_DOW: int = 5  # 0=Mon, 5=Sat
 
@@ -127,18 +133,26 @@ class Settings(BaseSettings):
     # ----- App -----
     APP_HOST: str = "127.0.0.1"
     APP_PORT: int = 8000
+    WEB_CONCURRENCY: int = 1
     LOG_LEVEL: str = "INFO"
     TIMEZONE: str = "Asia/Seoul"
 
     # ----- Google Sheets (inbound mirror) -----
-    # Optional: append every processed inbound inquiry as a row to a Google
-    # Sheet for at-a-glance tracking. Uses a SEPARATE Google credential from
-    # Vertex AI — a dedicated service-account JSON whose client email must be
-    # granted edit access to the target spreadsheet (share the sheet with it).
-    GSHEETS_ENABLED: bool = False
+    # This workbook is the fixed sales-team format. It is enabled automatically
+    # when either Sheets-specific or the existing Google service-account JSON is
+    # available; no extra feature flags are required.
     GOOGLE_SHEETS_CREDENTIALS_JSON: str = ""
-    GOOGLE_SHEETS_SPREADSHEET_ID: str = ""
-    GOOGLE_SHEETS_INBOUND_TAB: str = "Inbound"
+    # User OAuth is the fallback when Workspace policy blocks sharing the file
+    # with a service account. These may reuse the web-login OAuth client.
+    GOOGLE_SHEETS_OAUTH_CLIENT_ID: str = ""
+    GOOGLE_SHEETS_OAUTH_CLIENT_SECRET: str = ""
+    # Dedicated encryption key for delegated refresh tokens. Do not reuse the
+    # browser session or internal API signing secret in production.
+    GOOGLE_TOKEN_ENCRYPTION_KEY: str = ""
+    GOOGLE_SHEETS_SPREADSHEET_ID: str = "1L5HeDOrNQjEzWvfZVAIdQKjSXxF9hznu6fPIOGgFHpw"
+    GOOGLE_SHEETS_INBOUND_TAB: str = "Inbound DB"
+    GOOGLE_SHEETS_QUALITY_TAB: str = "Inbound 퀄리티 분석"
+    GOOGLE_SHEETS_ORDERS_TAB: str = "수주 DB"
 
     # ----- Domain enrichment -----
     INBOUND_DOMAIN_ENRICHMENT_ENABLED: bool = True
@@ -185,7 +199,7 @@ class Settings(BaseSettings):
     # "basic"  : localhost-only, or HTTP Basic Auth when WEB_UI_PASSWORD is set (default).
     # "google_oauth" : Google sign-in restricted to ALLOWED_EMAIL_DOMAIN + an allowlist.
     # Until the Google credentials below are set, keep "basic" so the deploy never locks out.
-    AUTH_MODE: str = "basic"
+    AUTH_MODE: Literal["basic", "google_oauth"] = "basic"
     GOOGLE_OAUTH_CLIENT_ID: str = ""
     GOOGLE_OAUTH_CLIENT_SECRET: str = ""
     # Only verified emails on this domain may sign in (e.g. estsoft.com Google Workspace).
@@ -203,10 +217,4 @@ class Settings(BaseSettings):
         return "gemini_vertex"
 
 
-@lru_cache
-def get_settings() -> Settings:
-    """Cached settings accessor — use this everywhere instead of constructing Settings()."""
-    return Settings()
-
-
-settings = get_settings()
+settings = Settings()

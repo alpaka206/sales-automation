@@ -129,7 +129,7 @@ def post_approval_card(
         r.raise_for_status()
         data = r.json()
         if not data.get("ok"):
-            logger.error("Slack API error: %s", data.get("error"))
+            raise RuntimeError(f"Slack API error: {data.get('error') or 'unknown_error'}")
 
     logger.info("Posted approval card for message %d to Slack.", message_id)
 
@@ -148,6 +148,6 @@ def post_message(channel: str, text: str) -> None:
         r.raise_for_status()
         data = r.json()
         if not data.get("ok"):
-            logger.error("Slack API error: %s", data.get("error"))
+            raise RuntimeError(f"Slack API error: {data.get('error') or 'unknown_error'}")
 
     logger.info("Posted message to Slack channel %s.", channel)

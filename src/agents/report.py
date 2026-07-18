@@ -13,8 +13,6 @@ from sqlalchemy import func
 from ..common.config import settings
 from ..db.models import Message
 from ..db.session import SessionLocal
-from ..integrations import slack
-from ..integrations.slack import SlackNotConfigured
 from ..llm.client import LLMClient
 from ..llm.pricing import format_cost, get_usage_since
 
@@ -140,18 +138,7 @@ class ReportAgent:
         logger.info("Report saved to %s", path)
 
     def _distribute(self, report: str, kind: str) -> None:
-        """Best-effort delivery to Slack and email."""
-        # Reply-ready alerts own the approval channel. Reports are sent to Slack
-        # only when a separate report channel was explicitly configured.
-        channel = settings.REPORT_SLACK_CHANNEL_ID
-        if channel:
-            try:
-                slack.post_message(channel, report)
-            except SlackNotConfigured:
-                logger.debug("Slack not configured for report distribution.")
-            except Exception:
-                logger.warning("Failed to post report to Slack.", exc_info=True)
-
+        """Best-effort email delivery. Slack is reserved for reply-ready alerts."""
         if settings.REPORT_EMAIL_TO:
             self._email_report(report, kind)
 

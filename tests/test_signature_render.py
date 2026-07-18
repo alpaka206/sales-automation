@@ -12,6 +12,7 @@ from sqlalchemy import create_engine, inspect, text
 import src.db.email_templates as et
 from src.integrations.email_html import (
     branded_signature_html,
+    sanitize_email_html,
     strip_known_signature,
     strips_text_signature,
     to_html_email,
@@ -127,6 +128,29 @@ def test_no_signature_is_backward_compatible():
     plain = to_html_email("본문\n\n둘째 문단")
     assert "THECARD" not in plain
     assert plain.count("<p ") == 2
+
+
+def test_email_html_sanitizes_active_content_and_unsafe_urls():
+    fragment = (
+        '<p onclick="steal()">Hello<script>alert(1)</script>'
+        '<a href="javascript:alert(2)">bad</a><a href="https://example.com">good</a></p>'
+    )
+    clean = sanitize_email_html(fragment)
+    assert "onclick" not in clean
+    assert "script" not in clean
+    assert "alert(1)" not in clean
+    assert "javascript:" not in clean
+    assert 'href="https://example.com"' in clean
+
+
+def test_signature_keeps_safe_table_formatting_but_drops_script():
+    html = to_html_email(
+        "Hello",
+        signature_html='<table id="THECARD"><tr><td style="color:#123">Sig</td></tr></table><script>x</script>',
+    )
+    assert 'id="THECARD"' in html
+    assert 'style="color:#123"' in html
+    assert "<script" not in html
 
 
 # ---------------------------------------------------------------------------

@@ -27,7 +27,7 @@ title: 2026 요금제
 categories: [pricing_question, purchase_inquiry]
 tags: [요금제, 가격, 플랜]
 summary: 셀프서브·엔터프라이즈 요금 구조와 가격 응대 어조.
-scope: both
+scope: inbound
 author: PERSO Sales
 status: active
 created_at: 2026-06-02
@@ -45,7 +45,7 @@ updated_at: 2026-06-02
 | `categories` | 권장 | 인바운드 분류 매칭(폴백 경로). DB `categories` JSON. 가능 값: `purchase_inquiry`, `partnership`, `pricing_question`, `support`, `recruiting`, `other`. 모든 카테고리는 `[all]`, 생략 시 `[all]` 취급. |
 | `tags` | 권장 | LLM 문서 라우터가 참고하는 키워드 리스트. |
 | `summary` | **강력 권장** | 한 줄 요약. **LLM 라우터가 본문 대신 이 줄을 읽고 관련성을 판단**하므로 핵심을 정확히. |
-| `scope` | 선택 | `inbound` / `outbound` / `both`(기본). |
+| `scope` | 선택 | 인바운드 답변용 `inbound`를 사용합니다. 기존 공통 문서는 `both`도 읽을 수 있습니다. |
 | `author` | 선택 | 작성자. |
 | `status` | 선택 | `active`(기본) / `draft` / `archived`. **`active`만 LLM에 노출**됩니다. |
 | `created_at`, `updated_at` | 선택 | `YYYY-MM-DD`. DB에도 타임스탬프가 자동 관리됩니다. |

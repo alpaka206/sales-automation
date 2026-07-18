@@ -29,7 +29,7 @@ _BRANDED = [
         "브랜드 서명 (한국어)",
         "ko",
         "signature_html_ko.html",
-        '<div style="font-family:sans-serif;font-size:13px;color:#222633;">'
+        '<div style="font-family:Pretendard;font-size:13px;color:#222633;">'
         "이혜람 · Perso Dubbing<br>"
         '<a href="mailto:leehyeram@estsoft.com" style="color:#222633;">leehyeram@estsoft.com</a></div>',
     ),
@@ -38,7 +38,7 @@ _BRANDED = [
         "Branded signature (English)",
         "en",
         "signature_html_en.html",
-        '<div style="font-family:sans-serif;font-size:13px;color:#222633;">'
+        '<div style="font-family:Pretendard;font-size:13px;color:#222633;">'
         "Hyeram Lee · Perso Dubbing<br>"
         '<a href="mailto:leehyeram@estsoft.com" style="color:#222633;">leehyeram@estsoft.com</a></div>',
     ),

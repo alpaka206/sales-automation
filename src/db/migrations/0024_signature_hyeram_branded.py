@@ -35,7 +35,7 @@ _KEY = "signature_html_hyeram"
 _NAME = "이혜람 (Perso Dubbing)"
 _SEED_FILE = "signature_html_hyeram.html"
 _FALLBACK = (
-    '<div style="font-family:sans-serif;font-size:13px;color:#222633;">'
+    '<div style="font-family:Pretendard;font-size:13px;color:#222633;">'
     "이혜람 · Hyeram Lee — Perso Dubbing<br>"
     '<a href="mailto:leehyeram@estsoft.com" style="color:#222633;">leehyeram@estsoft.com</a></div>'
 )

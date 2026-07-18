@@ -10,7 +10,6 @@
 <div class="page-header">
   <div>
     <h1 class="page-title">{% if mode == 'edit' %}템플릿 편집{% else %}새 템플릿 작성{% endif %}</h1>
-    <p class="page-sub">키는 발송 코드가 참조하는 식별자입니다. active 상태만 발송에 반영됩니다.</p>
   </div>
   {% if mode == 'edit' %}
   <a href="/email-templates/{{ tpl.id }}/history" class="btn btn--subtle">{{ icon("history", 15) }} 수정 이력 (v{{ tpl.version }})</a>
@@ -100,7 +99,7 @@
     if (!ta || !fr) return;
     fr.srcdoc =
       '<!doctype html><html><head><meta charset="utf-8"></head>' +
-      '<body style="margin:0;padding:24px;background:#fff;font-family:-apple-system,\'Segoe UI\',\'Apple SD Gothic Neo\',sans-serif">' +
+      '<body style="margin:0;padding:24px;background:#fff;font-family:\'Pretendard Variable\',Pretendard">' +
       ta.value +
       "</body></html>";
     fr.hidden = false;

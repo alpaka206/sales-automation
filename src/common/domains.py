@@ -22,29 +22,6 @@ PERSONAL_DOMAINS: frozenset[str] = frozenset({
     "163.com",
 })
 
-_ROLE_PREFIXES: frozenset[str] = frozenset({
-    "info",
-    "sales",
-    "hello",
-    "contact",
-    "admin",
-    "support",
-    "hr",
-    "recruit",
-    "noreply",
-    "no-reply",
-    "marketing",
-    "webmaster",
-    "postmaster",
-    "abuse",
-})
-
-
 def is_personal_domain(domain: str) -> bool:
     """Return True if the domain belongs to a free/personal email provider."""
     return domain.lower().strip() in PERSONAL_DOMAINS
-
-
-def is_role_address(local_part: str) -> bool:
-    """Return True if the local part is a generic role address (info@, sales@, etc.). Used by inbound contact scoring."""
-    return local_part.lower().strip() in _ROLE_PREFIXES

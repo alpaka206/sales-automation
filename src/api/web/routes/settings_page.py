@@ -12,7 +12,7 @@ from fastapi.responses import HTMLResponse, Response
 from ....common.config import settings
 from ....db.models import User
 from ....db.session import SessionLocal
-from ..auth import is_admin, session_user
+from ..auth import is_admin, normalize_role, session_user
 from ._shared import esc, templates
 
 router = APIRouter(tags=["web"])
@@ -41,7 +41,7 @@ async def settings_users(request: Request):
             return {
                 "email": u.email,
                 "name": u.name or "",
-                "role": u.role,
+                "role": normalize_role(u.role),
                 "approved": u.approved,
                 "last_login_at": u.last_login_at,
             }
@@ -68,7 +68,7 @@ async def settings_user_add(
     request: Request,
     username: str = Form(""),
     email: str = Form(""),
-    role: str = Form("member"),
+    role: str = Form("operator"),
 ):
     """Pre-add an email to the allowlist (admins only).
 
@@ -103,7 +103,7 @@ async def settings_user_add(
     if domain and not email.endswith("@" + domain):
         return _err(f"@{domain} 도메인 계정만 추가할 수 있습니다.")
 
-    role = "admin" if role == "admin" else "member"
+    role = normalize_role(role)
     with SessionLocal() as session:
         u = session.get(User, email)
         if u:
@@ -129,6 +129,8 @@ async def settings_user_update(request: Request, email: str, action: str = Form(
         "reject",
         "delete",
         "make_member",
+        "make_operator",
+        "make_viewer",
     ):
         return HTMLResponse(
             '<div class="banner banner--danger" style="padding:10px 12px">자기 자신의 권한은 해제할 수 없습니다</div>',
@@ -147,8 +149,10 @@ async def settings_user_update(request: Request, email: str, action: str = Form(
             elif action == "make_admin":
                 u.role = "admin"
                 u.approved = True
-            elif action == "make_member":
-                u.role = "member"
+            elif action in ("make_member", "make_operator"):
+                u.role = "operator"
+            elif action == "make_viewer":
+                u.role = "viewer"
             session.commit()
     # htmx: reload the page to reflect the change
     return Response(status_code=204, headers={"HX-Redirect": "/settings/users"})

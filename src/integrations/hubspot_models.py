@@ -50,4 +50,5 @@ class TicketDTO(BaseModel):
     priority: str | None = None
     source_type: str | None = None
     created_at: datetime | None = None
+    updated_at: datetime | None = None
     primary_contact_id: str | None = None

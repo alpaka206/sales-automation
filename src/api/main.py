@@ -7,6 +7,7 @@ import hmac
 import logging
 import uuid
 from contextlib import asynccontextmanager
+from urllib.parse import urlsplit
 
 from pathlib import Path
 
@@ -20,9 +21,12 @@ from ..common.logging import setup_logging
 from .schemas import ApprovalBody
 from .security import (
     API_SKIP_PATHS,
+    LOCAL_DOC_PATHS,
     check_web_ui_basic_auth,
     is_localhost,
+    is_same_origin_browser_request,
     is_web_ui_path,
+    web_role_allows,
 )
 from .web.auth import current_user, router as auth_router
 from .web.routes import router as web_router
@@ -32,17 +36,72 @@ setup_logging()
 logger = logging.getLogger(__name__)
 
 
+def validate_startup_settings() -> None:
+    """Fail fast on configurations that are unsafe with this in-process runtime."""
+    errors: list[str] = []
+    workers_enabled = any(
+        (
+            settings.INBOUND_WORKER_ENABLED,
+            settings.INBOUND_POLL_ENABLED,
+            settings.SEND_WORKER_ENABLED,
+        )
+    )
+    if settings.WEB_CONCURRENCY > 1 and workers_enabled:
+        errors.append("WEB_CONCURRENCY must be 1 while in-process workers are enabled")
+
+    public_url = urlsplit(settings.PUBLIC_BASE_URL) if settings.PUBLIC_BASE_URL else None
+    if public_url and (public_url.scheme not in {"http", "https"} or not public_url.hostname):
+        errors.append("PUBLIC_BASE_URL must be an absolute http(s) URL")
+    public_host = bool(public_url and public_url.hostname not in {"localhost", "127.0.0.1", "::1"})
+    public_bind = settings.APP_HOST not in {"localhost", "127.0.0.1", "::1"}
+    if (public_bind or public_host) and settings.AUTH_MODE == "basic" and not settings.WEB_UI_PASSWORD:
+        errors.append("WEB_UI_PASSWORD is required for a public basic-auth deployment")
+
+    if settings.AUTH_MODE == "google_oauth":
+        required = {
+            "GOOGLE_OAUTH_CLIENT_ID": settings.GOOGLE_OAUTH_CLIENT_ID,
+            "GOOGLE_OAUTH_CLIENT_SECRET": settings.GOOGLE_OAUTH_CLIENT_SECRET,
+            "SESSION_SECRET": settings.SESSION_SECRET,
+            "ALLOWED_EMAIL_DOMAIN": settings.ALLOWED_EMAIL_DOMAIN,
+        }
+        missing = [name for name, value in required.items() if not value]
+        if missing:
+            errors.append("google_oauth requires " + ", ".join(missing))
+    sheets_oauth_configured = bool(
+        settings.GOOGLE_SHEETS_OAUTH_CLIENT_ID
+        or settings.GOOGLE_SHEETS_OAUTH_CLIENT_SECRET
+    )
+    if sheets_oauth_configured:
+        required = {
+            "GOOGLE_SHEETS_OAUTH_CLIENT_ID": settings.GOOGLE_SHEETS_OAUTH_CLIENT_ID,
+            "GOOGLE_SHEETS_OAUTH_CLIENT_SECRET": settings.GOOGLE_SHEETS_OAUTH_CLIENT_SECRET,
+            "SESSION_SECRET": settings.SESSION_SECRET,
+            "GOOGLE_TOKEN_ENCRYPTION_KEY": settings.GOOGLE_TOKEN_ENCRYPTION_KEY,
+        }
+        missing = [name for name, value in required.items() if not value]
+        if missing:
+            errors.append("Google Sheets OAuth requires " + ", ".join(missing))
+    if public_host and public_url and public_url.scheme != "https":
+        errors.append("PUBLIC_BASE_URL must use https in production")
+    if errors:
+        raise RuntimeError("Unsafe startup configuration: " + "; ".join(errors))
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Start background workers on startup, signal graceful shutdown on exit.
 
-    Atomic claim in send_worker makes the loop safe under multiple processes,
-    but each FastAPI worker still spins its own task — when running under
-    `uvicorn --workers N` you'll get N concurrent workers competing for the
-    same DB rows. Set DISABLE_BACKGROUND_WORKERS=true on N-1 of them, or run
-    a single worker with `gunicorn --workers 1` + separate process for sends.
+    The startup guard rejects multiple web processes while these in-process
+    workers are enabled; scale them as separate services instead.
     """
+    validate_startup_settings()
     tasks: list[asyncio.Task] = []
+
+    if settings.INBOUND_WORKER_ENABLED:
+        from ..agents.inbound_worker import run_inbound_worker
+
+        tasks.append(asyncio.create_task(run_inbound_worker(), name="inbound_worker"))
+        logger.info("Durable inbound worker background task started.")
 
     if settings.INBOUND_POLL_ENABLED:
         from ..agents.inbound_poller import run_poller
@@ -121,8 +180,13 @@ async def error_capture_middleware(request: Request, call_next):
 
 @app.middleware("http")
 async def auth_middleware(request: Request, call_next):
-    if request.url.path in API_SKIP_PATHS:
+    path = request.url.path
+    if path in API_SKIP_PATHS:
         return await call_next(request)
+    if path in LOCAL_DOC_PATHS:
+        if is_localhost(request):
+            return await call_next(request)
+        return Response(status_code=404)
 
     # HubSpot webhook signature is verified inside the route handler — the middleware
     # must let the request through so the route can run the verifier. The fail-closed
@@ -140,11 +204,19 @@ async def auth_middleware(request: Request, call_next):
             )
             return await call_next(request)
 
+        if not is_same_origin_browser_request(request):
+            return JSONResponse(status_code=403, content={"detail": "cross-site request blocked"})
+
         # Google OAuth mode: require a signed session (Google sign-in, domain + allowlist).
         if settings.AUTH_MODE == "google_oauth":
             user = current_user(request)
             request.state.user = user
             if user:
+                if not web_role_allows(user["role"], request.method, path):
+                    return JSONResponse(
+                        status_code=403,
+                        content={"detail": "insufficient role for this action"},
+                    )
                 return await call_next(request)
             accepts_html = "text/html" in request.headers.get("accept", "")
             if request.method == "GET" and accepts_html:
@@ -176,6 +248,18 @@ async def auth_middleware(request: Request, call_next):
     return await call_next(request)
 
 
+@app.middleware("http")
+async def security_headers_middleware(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "SAMEORIGIN"
+    response.headers["Referrer-Policy"] = "same-origin"
+    response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+    if request.url.scheme == "https" or settings.PUBLIC_BASE_URL.startswith("https://"):
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    return response
+
+
 # ---------- Health ----------
 
 
@@ -183,8 +267,19 @@ async def auth_middleware(request: Request, call_next):
 # and a GET-only route returns 405 → the monitor reports the service as Down even
 # though it's healthy. Allowing HEAD keeps the free-tier keepalive ping working.
 @app.api_route("/healthz", methods=["GET", "HEAD"])
-def healthz() -> dict[str, bool]:
-    return {"ok": True}
+def healthz():
+    """Readiness check: traffic is accepted only when the database responds."""
+    from sqlalchemy import text
+
+    from ..db.session import engine
+
+    try:
+        with engine.connect() as connection:
+            connection.execute(text("SELECT 1"))
+    except Exception:
+        logger.exception("Database readiness check failed.")
+        return JSONResponse(status_code=503, content={"ok": False, "database": False})
+    return {"ok": True, "database": True}
 
 
 @app.get("/favicon.ico", include_in_schema=False)

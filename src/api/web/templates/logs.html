@@ -10,7 +10,7 @@
 <div class="page-header">
   <div>
     <h1 class="page-title">문제 로그</h1>
-    <p class="page-sub">개발자가 살펴봐야 할 항목 — 경고/에러 로그와 HTTP 4xx·5xx 응답을 모아 보여줍니다. (최근 {{ counts.all }}건, 프로세스 재시작 시 초기화)</p>
+    <p class="page-sub">경고·오류 {{ counts.all }}건 · 재시작 시 초기화</p>
   </div>
   <div class="row" style="gap:8px">
     <button type="button" class="chip" hx-get="/logs/rows?view={{ view }}" hx-target="#log-rows" hx-swap="innerHTML">{{ icon("refresh", 14) }} 새로고침</button>

@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+{% from "partials/icons.html" import icon %}
+{% block title %}{% if mode == 'edit' %}정책 문서 편집{% else %}새 정책 문서{% endif %} · PERSO Inbound{% endblock %}
+{% block content %}
+
+<div style="margin-bottom:14px">
+  <a href="/knowledge" class="chip">{{ icon("chevron", 14) }} 정책·지식 문서</a>
+</div>
+
+<div class="page-header">
+  <div>
+    <h1 class="page-title">{% if mode == 'edit' %}정책 문서 편집{% else %}새 정책 문서{% endif %}</h1>
+  </div>
+  {% if mode == 'edit' %}
+  <a href="/knowledge/{{ doc.id }}/history" class="btn btn--subtle">{{ icon("history", 15) }} 변경 이력 · v{{ doc.version }}</a>
+  {% endif %}
+</div>
+
+{% if request.query_params.get('saved') %}
+<div class="banner banner--ok" role="status" style="margin-bottom:16px">정책 문서를 저장했습니다. AI 참조 캐시에도 즉시 반영되었습니다.</div>
+{% endif %}
+{% if errors %}
+<div class="banner banner--danger" role="alert" style="margin-bottom:16px">
+  <strong>저장하지 못했습니다.</strong>
+  <ul style="margin:7px 0 0;padding-left:18px">{% for error in errors %}<li>{{ error }}</li>{% endfor %}</ul>
+</div>
+{% endif %}
+
+<form method="post" action="{% if mode == 'edit' %}/knowledge/{{ doc.id }}{% else %}/knowledge{% endif %}" class="card" style="max-width:980px">
+  {% if mode == 'edit' %}<input type="hidden" name="expected_version" value="{{ doc.version }}">{% endif %}
+
+  <div class="grid grid-2" style="margin-bottom:16px">
+    <div>
+      <label class="field-label" for="knowledge-title">문서 제목</label>
+      <input class="input" id="knowledge-title" name="title" value="{{ doc.title }}" maxlength="160" required placeholder="예: 환불 및 결제 취소 정책">
+    </div>
+    <div>
+      <label class="field-label" for="knowledge-slug">문서 키 <span class="t-subtle">(AI 내부 식별자)</span></label>
+      <input class="input mono" id="knowledge-slug" name="slug" value="{{ doc.slug }}" maxlength="80" required pattern="[a-z0-9]+(?:[-_][a-z0-9]+)*" placeholder="refund-policy" {% if mode == 'edit' %}readonly aria-readonly="true"{% endif %}>
+    </div>
+  </div>
+
+  <div class="grid grid-2" style="margin-bottom:16px">
+    <div>
+      <label class="field-label" for="knowledge-scope">적용 범위</label>
+      <select class="select" id="knowledge-scope" name="scope">
+        <option value="inbound" {% if doc.scope == 'inbound' %}selected{% endif %}>인바운드 답변</option>
+        <option value="both" {% if doc.scope == 'both' %}selected{% endif %}>공통</option>
+      </select>
+    </div>
+    <div>
+      <label class="field-label" for="knowledge-status">상태 <span class="t-subtle">(활성만 AI가 사용)</span></label>
+      <select class="select" id="knowledge-status" name="status">
+        <option value="active" {% if doc.status == 'active' %}selected{% endif %}>활성</option>
+        <option value="inactive" {% if doc.status == 'inactive' %}selected{% endif %}>비활성</option>
+      </select>
+    </div>
+  </div>
+
+  <div class="grid grid-2" style="margin-bottom:16px">
+    <div>
+      <label class="field-label" for="knowledge-categories">답변 분류 <span class="t-subtle">(쉼표로 구분)</span></label>
+      <input class="input mono" id="knowledge-categories" name="categories" value="{{ doc.categories_text }}" placeholder="pricing_question, purchase_inquiry">
+      <p class="t-xs t-subtle" style="margin:6px 0 0">모든 문의에 적용하려면 <span class="mono">all</span>을 입력하세요.</p>
+    </div>
+    <div>
+      <label class="field-label" for="knowledge-tags">검색 태그 <span class="t-subtle">(쉼표로 구분)</span></label>
+      <input class="input" id="knowledge-tags" name="tags" value="{{ doc.tags_text }}" placeholder="환불, 결제 취소, 카드">
+      <p class="t-xs t-subtle" style="margin:6px 0 0">고객이 실제로 사용할 만한 표현을 적으면 문서 선택 정확도가 높아집니다.</p>
+    </div>
+  </div>
+
+  <label class="field-label" for="knowledge-summary">AI 선택 요약</label>
+  <textarea class="textarea" id="knowledge-summary" name="summary" maxlength="1000" rows="3" style="margin-bottom:16px" placeholder="이 문서를 어떤 문의에 참고해야 하는지 2~3문장으로 설명하세요.">{{ doc.summary }}</textarea>
+
+  <label class="field-label" for="knowledge-body">정책 본문</label>
+  <textarea class="draft-textarea" id="knowledge-body" name="body" maxlength="100000" required style="min-height:360px" placeholder="확정된 정책, 예외 조건, 고객에게 안내할 표현을 적어 주세요.">{{ doc.body }}</textarea>
+  <p class="t-xs t-subtle" style="margin:7px 0 0">마크다운으로 제목과 목록을 구분할 수 있습니다. 비밀번호·API 키·주민번호 같은 민감정보는 입력하지 마세요.</p>
+
+  {% if mode == 'edit' %}
+  <label class="field-label" for="knowledge-change-note" style="margin-top:18px">변경 사유 <span class="t-subtle">(이력에 기록)</span></label>
+  <input class="input" id="knowledge-change-note" name="change_note" maxlength="500" placeholder="예: 환불 요청 가능 기간을 14일로 변경">
+  {% endif %}
+
+  <div class="action-bar">
+    <button type="submit" class="btn btn--primary">{{ icon("check", 15) }} {% if mode == 'edit' %}변경사항 저장{% else %}문서 생성{% endif %}</button>
+    <a href="/knowledge" class="btn btn--subtle">취소</a>
+  </div>
+</form>
+
+{% endblock %}

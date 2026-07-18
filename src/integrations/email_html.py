@@ -12,6 +12,8 @@ from __future__ import annotations
 
 import html as _html
 import re
+from html.parser import HTMLParser
+from urllib.parse import urlsplit
 
 _URL_RE = re.compile(r"(https?://[^\s<>\"']+)")
 # Detect operator-authored HTML. Deliberately excludes single-letter tags (b, i) so
@@ -22,6 +24,126 @@ _HTMLISH_RE = re.compile(
 )
 
 _CONTENT_TOKEN = "@@CONTENT@@"
+
+_ALLOWED_TAGS = {
+    "a", "blockquote", "br", "div", "em", "h1", "h2", "h3", "h4", "h5", "h6",
+    "hr", "img", "li", "ol", "p", "span", "strong", "table", "tbody", "td", "tfoot",
+    "th", "thead", "tr", "ul",
+}
+_VOID_TAGS = {"br", "hr", "img"}
+_DROP_CONTENT_TAGS = {
+    "base", "button", "embed", "form", "head", "iframe", "input", "link", "math", "meta",
+    "object", "option", "script", "select", "style", "svg", "textarea",
+}
+_GLOBAL_ATTRS = {"class", "id", "role", "style", "title", "aria-label"}
+_TAG_ATTRS = {
+    "a": {"href", "rel", "target"},
+    "img": {"alt", "height", "src", "width"},
+    "table": {"align", "border", "cellpadding", "cellspacing", "width"},
+    "td": {"align", "colspan", "height", "rowspan", "valign", "width"},
+    "th": {"align", "colspan", "height", "rowspan", "valign", "width"},
+}
+_UNSAFE_CSS_RE = re.compile(r"(?:expression\s*\(|url\s*\(|@import|-moz-binding|javascript:)", re.I)
+
+
+def _safe_url(value: str, *, image: bool = False) -> bool:
+    value = value.strip()
+    if not value or "\r" in value or "\n" in value:
+        return False
+    if value.startswith("#") and not image:
+        return True
+    try:
+        parsed = urlsplit(value)
+    except ValueError:
+        return False
+    scheme = parsed.scheme.lower()
+    allowed = {"http", "https", "cid"} if image else {"http", "https", "mailto", "tel"}
+    if scheme not in allowed or parsed.username is not None or parsed.password is not None:
+        return False
+    return bool(parsed.hostname) if scheme in {"http", "https"} else bool(parsed.path)
+
+
+class _EmailHTMLSanitizer(HTMLParser):
+    """Allowlist sanitizer for customer-facing HTML."""
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=False)
+        self.output: list[str] = []
+        self.open_tags: list[str] = []
+        self.drop_depth = 0
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        tag = tag.lower()
+        if self.drop_depth:
+            if tag in _DROP_CONTENT_TAGS:
+                self.drop_depth += 1
+            return
+        if tag in _DROP_CONTENT_TAGS:
+            self.drop_depth = 1
+            return
+        if tag not in _ALLOWED_TAGS:
+            return
+
+        clean: list[str] = []
+        allowed_attrs = _GLOBAL_ATTRS | _TAG_ATTRS.get(tag, set())
+        for raw_name, raw_value in attrs:
+            name = raw_name.lower()
+            value = raw_value or ""
+            if name not in allowed_attrs or name.startswith("on"):
+                continue
+            if name == "style" and _UNSAFE_CSS_RE.search(value):
+                continue
+            if name == "href" and not _safe_url(value):
+                continue
+            if name == "src" and not _safe_url(value, image=True):
+                continue
+            clean.append(f' {name}="{_html.escape(value, quote=True)}"')
+        self.output.append(f"<{tag}{''.join(clean)}>")
+        if tag not in _VOID_TAGS:
+            self.open_tags.append(tag)
+
+    def handle_startendtag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        self.handle_starttag(tag, attrs)
+        if tag.lower() not in _VOID_TAGS:
+            self.handle_endtag(tag)
+
+    def handle_endtag(self, tag: str) -> None:
+        tag = tag.lower()
+        if self.drop_depth:
+            if tag in _DROP_CONTENT_TAGS:
+                self.drop_depth -= 1
+            return
+        if tag not in self.open_tags:
+            return
+        while self.open_tags:
+            opened = self.open_tags.pop()
+            self.output.append(f"</{opened}>")
+            if opened == tag:
+                break
+
+    def handle_data(self, data: str) -> None:
+        if not self.drop_depth:
+            self.output.append(_html.escape(data, quote=False))
+
+    def handle_entityref(self, name: str) -> None:
+        if not self.drop_depth:
+            self.output.append(f"&{name};")
+
+    def handle_charref(self, name: str) -> None:
+        if not self.drop_depth:
+            self.output.append(f"&#{name};")
+
+    def result(self) -> str:
+        while self.open_tags:
+            self.output.append(f"</{self.open_tags.pop()}>")
+        return "".join(self.output)
+
+
+def sanitize_email_html(fragment: str) -> str:
+    parser = _EmailHTMLSanitizer()
+    parser.feed(fragment or "")
+    parser.close()
+    return parser.result()
 
 # Table-based shell with inline styles — the layout that survives across email clients.
 _SHELL = (
@@ -34,8 +156,7 @@ _SHELL = (
     '<table role="presentation" width="600" cellpadding="0" cellspacing="0" '
     'style="max-width:600px;width:100%;background:#ffffff;border-radius:10px;'
     'border:1px solid #e6e8eb;"><tr><td '
-    "style=\"padding:28px 32px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',"
-    "Roboto,'Apple SD Gothic Neo','Malgun Gothic',sans-serif;font-size:15px;"
+    "style=\"padding:28px 32px;font-family:'Pretendard Variable',Pretendard;font-size:15px;"
     'line-height:1.7;color:#1f2329;word-break:break-word;">'
     + _CONTENT_TOKEN
     + "</td></tr></table></td></tr></table></body></html>"
@@ -90,20 +211,6 @@ def _render_paragraph(para: str) -> str:
     flush_text()
     flush_bullets()
     return "\n".join(blocks)
-
-
-def text_to_html_fragment(text: str) -> str:
-    """Convert a plain-text body to an HTML fragment (paragraphs, lists, <br>, links).
-
-    Passes the text through untouched when it already looks like HTML.
-    """
-    text = (text or "").strip()
-    if not text:
-        return "<p></p>"
-    if _HTMLISH_RE.search(text):
-        return text  # operator-authored HTML — trust it
-    paragraphs = re.split(r"\n\s*\n", text)
-    return "\n".join(_render_paragraph(para) for para in paragraphs)
 
 
 # ---------------------------------------------------------------------------
@@ -229,7 +336,7 @@ def strip_known_signature(body: str) -> str:
 def _content_fragments(text: str) -> tuple[list[str], list[str]]:
     """Return (rendered HTML blocks, raw paragraphs) in parallel order."""
     if _HTMLISH_RE.search(text):
-        return [text], [text]  # operator-authored HTML — trust it as one block
+        return [sanitize_email_html(text)], [text]
     paras = re.split(r"\n\s*\n", text)
     return [_render_paragraph(p) for p in paras], paras
 
@@ -251,7 +358,10 @@ def to_html_email(text: str, signature_html: str | None = None) -> str:
             if paras[i].lstrip().startswith("---"):
                 insert_at = i
                 break
-        rendered.insert(insert_at, _SIGNATURE_WRAP.replace("@@SIG@@", signature_html))
+        rendered.insert(
+            insert_at,
+            _SIGNATURE_WRAP.replace("@@SIG@@", sanitize_email_html(signature_html)),
+        )
 
     content = "\n".join(rendered) or "<p></p>"
     return _SHELL.replace(_CONTENT_TOKEN, content)

@@ -161,10 +161,10 @@ def test_check_send_quota_limit_hit() -> None:
 def test_run_healthchecks_includes_gemini(db_session_factory) -> None:
     with patch("src.common.healthcheck.settings") as s, \
          patch("src.db.session.SessionLocal", db_session_factory), \
+         patch("smtplib.SMTP"), \
          patch("src.llm.providers.gemini_vertex.call_gemini"):
         s.GOOGLE_CREDENTIALS_JSON = '{"project_id": "p"}'
         s.HUBSPOT_PRIVATE_APP_TOKEN = ""
-        s.EMAIL_PROVIDER = "hubspot"
         s.SEND_WORKER_ENABLED = False
 
         report = run_healthchecks()
@@ -182,7 +182,6 @@ def test_run_healthchecks_with_smtp(mock_smtp, db_session_factory) -> None:
          patch("src.llm.providers.gemini_vertex.call_gemini"):
         s.GOOGLE_CREDENTIALS_JSON = '{"project_id": "p"}'
         s.HUBSPOT_PRIVATE_APP_TOKEN = ""
-        s.EMAIL_PROVIDER = "smtp"
         s.SMTP_HOST = "smtp.gmail.com"
         s.SMTP_PORT = 587
         s.SMTP_USERNAME = ""
@@ -198,11 +197,11 @@ def test_run_healthchecks_with_smtp(mock_smtp, db_session_factory) -> None:
 def test_run_healthchecks_with_send_worker(db_session_factory) -> None:
     with patch("src.common.healthcheck.settings") as s, \
          patch("src.db.session.SessionLocal", db_session_factory), \
+         patch("smtplib.SMTP"), \
          patch("src.llm.providers.gemini_vertex.call_gemini"), \
          patch("src.agents.send_worker.get_daily_count", return_value=0):
         s.GOOGLE_CREDENTIALS_JSON = '{"project_id": "p"}'
         s.HUBSPOT_PRIVATE_APP_TOKEN = ""
-        s.EMAIL_PROVIDER = "hubspot"
         s.SEND_WORKER_ENABLED = True
         s.DAILY_SEND_LIMIT = 100
 
@@ -216,10 +215,10 @@ def test_run_healthchecks_overall_warn(db_session_factory) -> None:
     with patch("src.common.healthcheck.settings") as s, \
          patch("src.db.session.SessionLocal", db_session_factory), \
          patch("src.common.healthcheck.shutil.disk_usage") as mock_du, \
+         patch("smtplib.SMTP"), \
          patch("src.llm.providers.gemini_vertex.call_gemini"):
         s.GOOGLE_CREDENTIALS_JSON = '{"project_id": "p"}'
         s.HUBSPOT_PRIVATE_APP_TOKEN = ""
-        s.EMAIL_PROVIDER = "hubspot"
         s.SEND_WORKER_ENABLED = False
 
         mock_du.return_value = MagicMock(free=100 * 1024 * 1024)

@@ -99,13 +99,6 @@ def detect_language(text: str | None, *, llm: LLMClient | None = None) -> str:
     return _DEFAULT
 
 
-def language_label(code: str) -> str:
-    """Human-readable target for the draft prompt, e.g. 'English (en)'."""
-    code = (code or "").lower()
-    name = _LANG_NAMES.get(code)
-    return f"{name} ({code})" if name else code
-
-
 def language_name(code: str) -> str:
     """English name of a language code (e.g. 'en' → 'English'), or the code itself."""
     return _LANG_NAMES.get((code or "").lower(), code or "")

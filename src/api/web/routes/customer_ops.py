@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import hmac
 import logging
-from collections import defaultdict
+from collections import Counter, defaultdict
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal, InvalidOperation
+from urllib.parse import quote
 
 from fastapi import APIRouter, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -26,6 +29,138 @@ from ._shared import templates
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["web"])
+GOOGLE_SHEETS_STATE_COOKIE = "perso_sheets_oauth_state"
+
+PIPELINE_STAGES: tuple[tuple[str, str, str], ...] = (
+    ("new", "New", "새 문의"),
+    ("meeting_link_sent", "Meeting link sent", "답변 발송"),
+    ("negotiation", "Negotiation", "협의 중"),
+    ("contracted", "Contracted", "계약 확정"),
+    ("onboarding", "Onboarding", "도입 준비"),
+    ("active", "Active", "서비스 이용"),
+    ("closed_lost", "Closed Lost", "종료"),
+)
+VALID_PIPELINE_STAGES = {stage for stage, _, _ in PIPELINE_STAGES}
+CONTRACT_STATUSES = {"draft", "sent", "contracted", "active", "expired", "cancelled"}
+
+
+def _stage_id(stage: str) -> str:
+    return {
+        "new": settings.HUBSPOT_TICKET_STAGE_NEW,
+        "meeting_link_sent": settings.HUBSPOT_TICKET_STAGE_AFTER_SEND,
+        "negotiation": settings.HUBSPOT_TICKET_STAGE_NEGOTIATION,
+        "contracted": settings.HUBSPOT_TICKET_STAGE_CONTRACTED,
+        "onboarding": settings.HUBSPOT_TICKET_STAGE_ONBOARDING,
+        "active": settings.HUBSPOT_TICKET_STAGE_ACTIVE,
+        "closed_lost": settings.HUBSPOT_TICKET_STAGE_CLOSED_LOST,
+    }.get(stage, "").strip()
+
+
+def _naive(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    return value.replace(tzinfo=None) if value.tzinfo else value
+
+
+def _contract_amount(value: str) -> Decimal | None:
+    raw = value.replace(",", "").strip()
+    if not raw:
+        return None
+    try:
+        amount = Decimal(raw)
+    except InvalidOperation as exc:
+        raise HTTPException(status_code=400, detail="계약 금액은 숫자로 입력해 주세요.") from exc
+    if not amount.is_finite():
+        raise HTTPException(status_code=400, detail="계약 금액은 유한한 숫자여야 합니다.")
+    return amount
+
+
+def _contract_conversation(session, contact_id: int, raw_id: str) -> Conversation | None:
+    """Resolve an explicit inquiry, otherwise use this contact's latest inquiry."""
+    if raw_id.strip():
+        try:
+            conversation_id = int(raw_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="올바른 문의를 선택해 주세요.") from exc
+        conversation = session.get(Conversation, conversation_id)
+        if not conversation or conversation.contact_id != contact_id:
+            raise HTTPException(status_code=400, detail="이 고객의 문의만 계약에 연결할 수 있습니다.")
+        return conversation
+    return session.scalar(
+        select(Conversation)
+        .where(Conversation.contact_id == contact_id)
+        .order_by(Conversation.created_at.desc(), Conversation.id.desc())
+        .limit(1)
+    )
+
+
+def _set_local_stage(contact_id: int, stage: str) -> tuple[str | None, int | None]:
+    """Persist the operator's stage and return its HubSpot and Sheets references."""
+    if stage not in VALID_PIPELINE_STAGES:
+        raise HTTPException(status_code=400, detail="지원하지 않는 파이프라인 단계입니다")
+    with SessionLocal() as session:
+        contact = session.get(Contact, contact_id)
+        if not contact:
+            raise HTTPException(status_code=404, detail="고객을 찾을 수 없습니다")
+        profile = session.get(CustomerProfile, contact_id) or CustomerProfile(contact_id=contact_id)
+        profile.pipeline_stage = stage
+        if stage in {"onboarding", "active"}:
+            profile.customer_state = "service"
+        elif stage == "closed_lost":
+            profile.customer_state = "lost"
+        elif profile.customer_state in {"service", "lost"}:
+            profile.customer_state = "negotiation"
+        session.add(profile)
+        latest_conversation = session.execute(
+            select(Conversation)
+            .where(
+                Conversation.contact_id == contact_id,
+            )
+            .order_by(Conversation.created_at.desc())
+            .limit(1)
+        ).scalar_one_or_none()
+        if latest_conversation:
+            latest_conversation.stage = stage
+        session.commit()
+    return (
+        latest_conversation.hubspot_ticket_id if latest_conversation else None,
+        (
+            latest_conversation.sheet_client_id
+            if latest_conversation and latest_conversation.sheet_client_id
+            else contact.sheet_client_id
+        ),
+    )
+
+
+async def _sync_stage(
+    ticket_id: str | None, stage: str, contact_id: int, sheet_client_id: int | None = None
+) -> dict[str, bool | None]:
+    from ....integrations.google_sheets import is_configured, update_inbound_stage
+
+    with SessionLocal() as session:
+        profile = session.get(CustomerProfile, contact_id)
+        qualification = profile.qualification if profile else None
+    sheet_result: bool | None = None
+    if sheet_client_id and is_configured():
+        sheet_result = await asyncio.to_thread(
+            update_inbound_stage, sheet_client_id, stage, qualification
+        )
+
+    stage_id = _stage_id(stage)
+    if not ticket_id or not stage_id:
+        return {"sheets": sheet_result, "hubspot": None}
+    from ....integrations.hubspot import HubSpotClient, HubSpotNotConfigured
+
+    try:
+        client = HubSpotClient()
+        await asyncio.to_thread(client.update_ticket_stage_sync, ticket_id, stage_id)
+        hubspot_result: bool | None = True
+    except HubSpotNotConfigured:
+        hubspot_result = False
+    except Exception:
+        hubspot_result = False
+        logger.warning("HubSpot pipeline sync failed for contact %d", contact_id, exc_info=True)
+    return {"sheets": sheet_result, "hubspot": hubspot_result}
 
 
 def _parse_dt(value: str) -> datetime | None:
@@ -79,6 +214,84 @@ def _customer_rows() -> list[dict]:
         )
     rows.sort(key=lambda row: row["last_activity"] or datetime.min, reverse=True)
     return rows
+
+
+def _pipeline_rows() -> list[dict]:
+    """One board card per inquiry, while contact history stays consolidated."""
+    with SessionLocal() as session:
+        conversations = session.execute(
+            select(Conversation).order_by(Conversation.created_at.desc())
+        ).scalars().all()
+        contact_ids = {conversation.contact_id for conversation in conversations}
+        contacts = {
+            contact.id: contact
+            for contact in session.execute(select(Contact).where(Contact.id.in_(contact_ids))).scalars()
+        } if contact_ids else {}
+        profiles = {
+            profile.contact_id: profile
+            for profile in session.execute(
+                select(CustomerProfile).where(CustomerProfile.contact_id.in_(contact_ids))
+            ).scalars()
+        } if contact_ids else {}
+
+    rows: list[dict] = []
+    for conversation in conversations:
+        contact = contacts.get(conversation.contact_id)
+        if not contact:
+            continue
+        profile = profiles.get(contact.id)
+        # Conversation.stage is the pipeline source of truth; profile is only a
+        # customer-summary projection and must not relocate another inquiry.
+        stage = conversation.stage if conversation.stage in VALID_PIPELINE_STAGES else "new"
+        rows.append(
+            {
+                "conversation": conversation,
+                "contact": contact,
+                "profile": profile,
+                "stage": stage,
+                "last_activity": conversation.last_incoming_at
+                or conversation.last_outgoing_at
+                or conversation.created_at,
+            }
+        )
+    return rows
+
+
+def _set_conversation_stage(conversation_id: int, stage: str) -> tuple[str | None, int, int | None]:
+    if stage not in VALID_PIPELINE_STAGES:
+        raise HTTPException(status_code=400, detail="지원하지 않는 파이프라인 단계입니다")
+    with SessionLocal() as session:
+        conversation = session.get(Conversation, conversation_id)
+        if not conversation:
+            raise HTTPException(status_code=404, detail="문의를 찾을 수 없습니다")
+        contact = session.get(Contact, conversation.contact_id)
+        if not contact:
+            raise HTTPException(status_code=404, detail="고객을 찾을 수 없습니다")
+        conversation.stage = stage
+        latest_id = session.scalar(
+            select(Conversation.id)
+            .where(Conversation.contact_id == contact.id)
+            .order_by(Conversation.created_at.desc(), Conversation.id.desc())
+            .limit(1)
+        )
+        if latest_id == conversation.id:
+            profile = session.get(CustomerProfile, contact.id) or CustomerProfile(
+                contact_id=contact.id
+            )
+            profile.pipeline_stage = stage
+            if stage in {"onboarding", "active"}:
+                profile.customer_state = "service"
+            elif stage == "closed_lost":
+                profile.customer_state = "lost"
+            elif profile.customer_state in {"service", "lost"}:
+                profile.customer_state = "negotiation"
+            session.add(profile)
+        session.commit()
+        return (
+            conversation.hubspot_ticket_id,
+            contact.id,
+            conversation.sheet_client_id,
+        )
 
 
 @router.get("/customers")
@@ -235,16 +448,7 @@ async def customer_profile_save(
     notes: str = Form(""),
 ):
     valid_states = {"negotiation", "service", "pool", "lost"}
-    valid_stages = {
-        "new",
-        "meeting_link_sent",
-        "negotiation",
-        "contracted",
-        "onboarding",
-        "active",
-        "closed_lost",
-    }
-    if customer_state not in valid_states or pipeline_stage not in valid_stages:
+    if customer_state not in valid_states or pipeline_stage not in VALID_PIPELINE_STAGES:
         raise HTTPException(status_code=400, detail="지원하지 않는 고객 상태 또는 파이프라인 단계입니다")
     with SessionLocal() as session:
         contact = session.get(Contact, contact_id)
@@ -278,23 +482,16 @@ async def customer_profile_save(
         )
         session.commit()
 
-    stage_id = None
-    if pipeline_stage == "new":
-        stage_id = settings.HUBSPOT_TICKET_STAGE_NEW
-    elif pipeline_stage == "meeting_link_sent":
-        stage_id = settings.HUBSPOT_TICKET_STAGE_AFTER_SEND
-    if latest_ticket and stage_id:
-        from ....integrations.hubspot import HubSpotClient, HubSpotNotConfigured
-
-        try:
-            client = HubSpotClient()
-            await asyncio.to_thread(
-                client.update_ticket_stage_sync, latest_ticket.hubspot_ticket_id, stage_id
-            )
-        except HubSpotNotConfigured:
-            pass
-        except Exception:
-            logger.warning("HubSpot pipeline sync failed for contact %d", contact_id, exc_info=True)
+    await _sync_stage(
+        latest_ticket.hubspot_ticket_id if latest_ticket else None,
+        pipeline_stage,
+        contact_id,
+        (
+            latest_ticket.sheet_client_id
+            if latest_ticket and latest_ticket.sheet_client_id
+            else contact.sheet_client_id
+        ),
+    )
     return RedirectResponse(f"/customers/{contact_id}", status_code=303)
 
 
@@ -334,12 +531,130 @@ async def interaction_add(
             profile.pipeline_stage = "negotiation"
             session.add(profile)
         session.commit()
+    if channel == "meeting":
+        ticket_id, sheet_client_id = _set_local_stage(contact_id, "negotiation")
+        await _sync_stage(ticket_id, "negotiation", contact_id, sheet_client_id)
     return RedirectResponse(f"/customers/{contact_id}#history", status_code=303)
 
 
 @router.post("/customers/{contact_id}/contracts")
 async def contract_add(
     contact_id: int,
+    conversation_id: str = Form(""),
+    status: str = Form("draft"),
+    plan: str = Form(""),
+    amount: str = Form(""),
+    currency: str = Form("KRW"),
+    payment_method: str = Form(""),
+    payment_instrument: str = Form(""),
+    payment_terms: str = Form("일시불"),
+    contract_method: str = Form(""),
+    billing_email: str = Form(""),
+    contract_months: str = Form(""),
+    owner_email: str = Form(""),
+    space_seq: str = Form(""),
+    plan_start_date: str = Form(""),
+    enterprise_name: str = Form(""),
+    invitation_limit: str = Form(""),
+    queue_limit: str = Form(""),
+    concurrent_jobs: str = Form(""),
+    space_count: str = Form(""),
+    contract_credits: str = Form(""),
+    credit_history: str = Form(""),
+    payer: str = Form(""),
+    plan_notes: str = Form(""),
+    contract_date: str = Form(""),
+    payment_due_at: str = Form(""),
+    paid_at: str = Form(""),
+    expires_at: str = Form(""),
+    language_pairs: str = Form(""),
+    unit_price: str = Form(""),
+    quote_url: str = Form(""),
+    invoice_url: str = Form(""),
+    payment_url: str = Form(""),
+    notes: str = Form(""),
+):
+    parsed_amount = _contract_amount(amount)
+    if status not in CONTRACT_STATUSES:
+        raise HTTPException(status_code=400, detail="지원하지 않는 계약 상태입니다")
+    with SessionLocal() as session:
+        contact = session.get(Contact, contact_id)
+        if not contact:
+            raise HTTPException(status_code=404, detail="고객을 찾을 수 없습니다")
+        conversation = _contract_conversation(session, contact_id, conversation_id)
+        sheet_fields = {
+            "payment_instrument": payment_instrument.strip(),
+            "payment_terms": payment_terms.strip(),
+            "contract_method": contract_method.strip(),
+            "billing_email": billing_email.strip(),
+            "contract_months": contract_months.strip(),
+            "owner_email": owner_email.strip(),
+            "space_seq": space_seq.strip(),
+            "plan_start_date": plan_start_date.strip(),
+            "enterprise_name": enterprise_name.strip(),
+            "invitation_limit": invitation_limit.strip(),
+            "queue_limit": queue_limit.strip(),
+            "concurrent_jobs": concurrent_jobs.strip(),
+            "space_count": space_count.strip(),
+            "contract_credits": contract_credits.strip(),
+            "credit_history": credit_history.strip(),
+            "payer": payer.strip(),
+            "plan_notes": plan_notes.strip(),
+        }
+        contract = ContractRecord(
+            contact_id=contact_id,
+            conversation_id=conversation.id if conversation else None,
+            sheet_client_id=conversation.sheet_client_id if conversation else None,
+            status=status[:32],
+            plan=plan.strip() or None,
+            amount=parsed_amount,
+            currency=currency.strip().upper()[:8] or "KRW",
+            payment_method=payment_method.strip() or None,
+            contract_date=_parse_dt(contract_date),
+            payment_due_at=_parse_dt(payment_due_at),
+            paid_at=_parse_dt(paid_at),
+            expires_at=_parse_dt(expires_at),
+            language_pairs=[v.strip() for v in language_pairs.split(",") if v.strip()] or None,
+            unit_price=unit_price.strip() or None,
+            quote_url=quote_url.strip() or None,
+            invoice_url=invoice_url.strip() or None,
+            payment_url=payment_url.strip() or None,
+            notes=notes.strip() or None,
+            sheet_fields={key: value for key, value in sheet_fields.items() if value},
+        )
+        session.add(contract)
+        if status in {"active", "contracted"}:
+            profile = session.get(CustomerProfile, contact_id) or CustomerProfile(
+                contact_id=contact_id
+            )
+            profile.customer_state = "service" if status == "active" else "negotiation"
+            profile.pipeline_stage = status
+            profile.current_plan = plan.strip() or profile.current_plan
+            session.add(profile)
+        session.commit()
+        contract_id = contract.id
+        linked_conversation_id = contract.conversation_id
+
+    if status in {"active", "contracted"}:
+        from ....agents.sheet_sync import sync_contract_order
+
+        target_stage = "active" if status == "active" else "contracted"
+        if linked_conversation_id:
+            ticket_id, _, sheet_client_id = _set_conversation_stage(
+                linked_conversation_id, target_stage
+            )
+        else:
+            ticket_id, sheet_client_id = _set_local_stage(contact_id, target_stage)
+        await asyncio.to_thread(sync_contract_order, contract_id)
+        await _sync_stage(ticket_id, target_stage, contact_id, sheet_client_id)
+    return RedirectResponse(f"/customers/{contact_id}#contracts", status_code=303)
+
+
+@router.post("/customers/{contact_id}/contracts/{contract_id}")
+async def contract_update(
+    contact_id: int,
+    contract_id: int,
+    conversation_id: str = Form(""),
     status: str = Form("draft"),
     plan: str = Form(""),
     amount: str = Form(""),
@@ -356,41 +671,49 @@ async def contract_add(
     payment_url: str = Form(""),
     notes: str = Form(""),
 ):
-    try:
-        parsed_amount = float(amount.replace(",", "")) if amount.strip() else None
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail="계약 금액은 숫자로 입력해 주세요") from exc
+    """Correct operator-owned contract facts without creating a duplicate row."""
+    parsed_amount = _contract_amount(amount)
+    if status not in CONTRACT_STATUSES:
+        raise HTTPException(status_code=400, detail="지원하지 않는 계약 상태입니다")
+
     with SessionLocal() as session:
-        if not session.get(Contact, contact_id):
-            raise HTTPException(status_code=404, detail="고객을 찾을 수 없습니다")
-        contract = ContractRecord(
-                contact_id=contact_id,
-                status=status[:32],
-                plan=plan.strip() or None,
-                amount=parsed_amount,
-                currency=currency.strip().upper()[:8] or "KRW",
-                payment_method=payment_method.strip() or None,
-                contract_date=_parse_dt(contract_date),
-                payment_due_at=_parse_dt(payment_due_at),
-                paid_at=_parse_dt(paid_at),
-                expires_at=_parse_dt(expires_at),
-                language_pairs=[v.strip() for v in language_pairs.split(",") if v.strip()] or None,
-                unit_price=unit_price.strip() or None,
-                quote_url=quote_url.strip() or None,
-                invoice_url=invoice_url.strip() or None,
-                payment_url=payment_url.strip() or None,
-                notes=notes.strip() or None,
-            )
-        session.add(contract)
-        if status == "active":
-            profile = session.get(CustomerProfile, contact_id) or CustomerProfile(
-                contact_id=contact_id
-            )
-            profile.customer_state = "service"
-            profile.pipeline_stage = "active"
-            profile.current_plan = plan.strip() or profile.current_plan
-            session.add(profile)
+        contract = session.get(ContractRecord, contract_id)
+        contact = session.get(Contact, contact_id)
+        if not contact or not contract or contract.contact_id != contact_id:
+            raise HTTPException(status_code=404, detail="계약을 찾을 수 없습니다")
+        conversation = _contract_conversation(session, contact_id, conversation_id)
+        contract.conversation_id = conversation.id if conversation else None
+        contract.sheet_client_id = conversation.sheet_client_id if conversation else None
+        contract.status = status
+        contract.plan = plan.strip() or None
+        contract.amount = parsed_amount
+        contract.currency = currency.strip().upper()[:8] or "KRW"
+        contract.payment_method = payment_method.strip() or None
+        contract.contract_date = _parse_dt(contract_date)
+        contract.payment_due_at = _parse_dt(payment_due_at)
+        contract.paid_at = _parse_dt(paid_at)
+        contract.expires_at = _parse_dt(expires_at)
+        contract.language_pairs = [v.strip() for v in language_pairs.split(",") if v.strip()] or None
+        contract.unit_price = unit_price.strip() or None
+        contract.quote_url = quote_url.strip() or None
+        contract.invoice_url = invoice_url.strip() or None
+        contract.payment_url = payment_url.strip() or None
+        contract.notes = notes.strip() or None
+        contract.sheet_synced_at = None
         session.commit()
+        linked_conversation_id = contract.conversation_id
+
+    if status in {"contracted", "active"}:
+        from ....agents.sheet_sync import sync_contract_order
+
+        await asyncio.to_thread(sync_contract_order, contract_id)
+        if linked_conversation_id:
+            ticket_id, _, sheet_client_id = _set_conversation_stage(
+                linked_conversation_id, status
+            )
+        else:
+            ticket_id, sheet_client_id = _set_local_stage(contact_id, status)
+        await _sync_stage(ticket_id, status, contact_id, sheet_client_id)
     return RedirectResponse(f"/customers/{contact_id}#contracts", status_code=303)
 
 
@@ -491,11 +814,289 @@ async def customer_sync(contact_id: int):
     return RedirectResponse(f"/customers/{contact_id}", status_code=303)
 
 
+@router.get("/pipeline")
+async def pipeline_board(request: Request):
+    from ....integrations.google_sheets import connection_summary
+    from ....agents.sheet_sync import (
+        full_sheet_sync_status,
+        pending_inbound_count,
+        pending_order_count,
+    )
+
+    rows = _pipeline_rows()
+    by_stage = {stage: [] for stage, _, _ in PIPELINE_STAGES}
+    for row in rows:
+        by_stage.setdefault(row["stage"], []).append(row)
+    stage_config = [
+        {
+            "key": stage,
+            "label": label,
+            "description": description,
+            "hubspot_id": _stage_id(stage),
+            "rows": by_stage.get(stage, []),
+        }
+        for stage, label, description in PIPELINE_STAGES
+    ]
+    return templates.TemplateResponse(
+        request,
+        "pipeline.html",
+        {
+            "stages": stage_config,
+            "stage_options": PIPELINE_STAGES,
+            "sheet": connection_summary(),
+            "sheet_pending_count": pending_inbound_count() + pending_order_count(),
+            "sheet_sync_request": full_sheet_sync_status(),
+            "google_callback_url": _google_callback_url(request),
+        },
+    )
+
+
+@router.post("/pipeline/{contact_id}/stage")
+async def pipeline_stage_move(contact_id: int, stage: str = Form(...)):
+    ticket_id, sheet_client_id = _set_local_stage(contact_id, stage)
+    result = await _sync_stage(ticket_id, stage, contact_id, sheet_client_id)
+    state = "partial" if False in result.values() else "ok"
+    return RedirectResponse(f"/pipeline?sync={state}#stage-{stage}", status_code=303)
+
+
+@router.post("/pipeline/conversations/{conversation_id}/stage")
+async def pipeline_inquiry_stage_move(conversation_id: int, stage: str = Form(...)):
+    ticket_id, contact_id, sheet_client_id = _set_conversation_stage(conversation_id, stage)
+    result = await _sync_stage(ticket_id, stage, contact_id, sheet_client_id)
+    state = "partial" if False in result.values() else "ok"
+    return RedirectResponse(f"/pipeline?sync={state}#stage-{stage}", status_code=303)
+
+
+def _google_callback_url(request: Request) -> str:
+    base = settings.PUBLIC_BASE_URL.strip().rstrip("/")
+    if not base:
+        scheme = request.headers.get("x-forwarded-proto", request.url.scheme)
+        base = f"{scheme}://{request.url.netloc}"
+    return f"{base}/integrations/google-sheets/callback"
+
+
+def _require_integration_admin(request: Request) -> None:
+    if settings.AUTH_MODE != "google_oauth":
+        return
+    from ..auth import is_admin
+
+    if not is_admin(request):
+        raise HTTPException(status_code=403, detail="관리자만 외부 계정을 연결할 수 있습니다")
+
+
+@router.get("/integrations/google-sheets/connect")
+async def google_sheets_connect(request: Request):
+    from ....integrations.google_oauth import authorization_url, make_state
+
+    _require_integration_admin(request)
+    try:
+        state = make_state()
+        url = authorization_url(_google_callback_url(request), state)
+    except Exception as exc:
+        logger.warning("Google Sheets OAuth start failed.", exc_info=True)
+        return RedirectResponse(
+            f"/pipeline?google=setup_required&detail={quote(str(exc)[:180])}#integrations",
+            status_code=303,
+        )
+    response = RedirectResponse(url, status_code=302)
+    proto = request.headers.get("x-forwarded-proto", request.url.scheme)
+    response.set_cookie(
+        GOOGLE_SHEETS_STATE_COOKIE,
+        state,
+        max_age=600,
+        httponly=True,
+        secure=proto == "https",
+        samesite="lax",
+        path="/integrations/google-sheets/callback",
+    )
+    return response
+
+
+@router.get("/integrations/google-sheets/callback")
+async def google_sheets_callback(
+    request: Request,
+    state: str = "",
+    code: str = "",
+    error: str = "",
+):
+    from ....integrations.google_oauth import exchange_code, validate_state
+
+    _require_integration_admin(request)
+    try:
+        expected_state = request.cookies.get(GOOGLE_SHEETS_STATE_COOKIE, "")
+        if not expected_state or not hmac.compare_digest(expected_state, state):
+            raise ValueError("Google 연결 요청 세션이 일치하지 않습니다. 다시 연결해 주세요.")
+        validate_state(state)
+        if error:
+            raise ValueError(f"Google 연결이 취소되었습니다: {error[:120]}")
+        if not code:
+            raise ValueError("Google authorization code is missing.")
+        _payload, account_email = await exchange_code(code, _google_callback_url(request))
+    except Exception as exc:
+        logger.warning("Google Sheets OAuth callback failed.", exc_info=True)
+        response = RedirectResponse(
+            f"/pipeline?google=error&detail={quote(str(exc)[:180])}#integrations",
+            status_code=303,
+        )
+        response.delete_cookie(
+            GOOGLE_SHEETS_STATE_COOKIE, path="/integrations/google-sheets/callback"
+        )
+        return response
+    logger.info("Google Sheets user OAuth connected for %s.", account_email or "unknown account")
+    response = RedirectResponse("/pipeline?google=connected#integrations", status_code=303)
+    response.delete_cookie(
+        GOOGLE_SHEETS_STATE_COOKIE, path="/integrations/google-sheets/callback"
+    )
+    return response
+
+
+@router.post("/integrations/google-sheets/disconnect")
+async def google_sheets_disconnect(request: Request):
+    from ....integrations.google_oauth import delete_grant
+
+    _require_integration_admin(request)
+    delete_grant()
+    return RedirectResponse("/pipeline?google=disconnected#integrations", status_code=303)
+
+
+@router.post("/integrations/google-sheets/sync")
+async def google_sheets_sync(request: Request):
+    from ....agents.sheet_sync import request_full_sheet_sync
+    from ..auth import actor_name
+
+    _require_integration_admin(request)
+    try:
+        request_id = request_full_sheet_sync(actor_name(request, "local-admin"))
+    except Exception as exc:
+        logger.warning("Google Sheets manual synchronization failed.", exc_info=True)
+        return RedirectResponse(
+            f"/pipeline?google=error&detail={quote(str(exc)[:180])}#integrations",
+            status_code=303,
+        )
+    return RedirectResponse(
+        f"/pipeline?google=queued&request_id={request_id}#integrations",
+        status_code=303,
+    )
+
+
+def _month_start(value: datetime, months_back: int) -> datetime:
+    month_index = value.year * 12 + value.month - 1 - months_back
+    return datetime(month_index // 12, month_index % 12 + 1, 1)
+
+
+def _bucket_key(value: datetime, period: str):
+    if period == "year":
+        return value.year
+    if period == "month":
+        return value.year, value.month
+    return value.date()
+
+
+def _inbound_analytics(period: str) -> dict:
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    if period == "year":
+        starts = [datetime(now.year - offset, 1, 1) for offset in range(4, -1, -1)]
+        labels = [str(value.year) for value in starts]
+    elif period == "month":
+        starts = [_month_start(now, offset) for offset in range(11, -1, -1)]
+        labels = [value.strftime("%y.%m") for value in starts]
+    else:
+        period = "day"
+        today = datetime(now.year, now.month, now.day)
+        starts = [today - timedelta(days=offset) for offset in range(29, -1, -1)]
+        labels = [value.strftime("%m/%d") for value in starts]
+
+    start = starts[0]
+    keys = [_bucket_key(value, period) for value in starts]
+    index = {key: idx for idx, key in enumerate(keys)}
+    counts = [0 for _ in starts]
+    countries: list[Counter[str]] = [Counter() for _ in starts]
+    scores: list[int] = []
+    before = 0
+    with SessionLocal() as session:
+        records = session.execute(
+            select(Message.created_at, Message.score_snapshot, Contact.country, Contact.score)
+            .join(Conversation, Message.conversation_id == Conversation.id)
+            .join(Contact, Conversation.contact_id == Contact.id)
+            .where(Message.direction == "inbound")
+        ).all()
+
+    for created_at, score_snapshot, country, contact_score in records:
+        created = _naive(created_at)
+        if not created or created < start:
+            before += 1
+            continue
+        idx = index.get(_bucket_key(created, period))
+        if idx is None or created > now:
+            continue
+        counts[idx] += 1
+        countries[idx][(country or "국가 미확인").strip() or "국가 미확인"] += 1
+        score = score_snapshot if score_snapshot is not None else contact_score
+        if score is not None:
+            scores.append(int(score))
+
+    cumulative: list[int] = []
+    running = before
+    for count in counts:
+        running += count
+        cumulative.append(running)
+
+    max_count = max(counts, default=0) or 1
+    max_cumulative = max(cumulative, default=0) or 1
+    chart = []
+    for idx, (label, count, total) in enumerate(zip(labels, counts, cumulative, strict=True)):
+        x = 0 if len(starts) == 1 else idx * 1000 / (len(starts) - 1)
+        y = 230 - (total / max_cumulative * 205)
+        chart.append(
+            {
+                "label": label,
+                "count": count,
+                "total": total,
+                "bar_height": round(count / max_count * 100, 2),
+                "x": round(x, 2),
+                "y": round(y, 2),
+                "show_label": period != "day" or idx % 5 == 0 or idx == len(starts) - 1,
+            }
+        )
+
+    country_totals: Counter[str] = Counter()
+    for bucket in countries:
+        country_totals.update(bucket)
+    country_rows = []
+    largest_country = max(country_totals.values(), default=0) or 1
+    for country, total in country_totals.most_common():
+        country_rows.append(
+            {
+                "country": country,
+                "total": total,
+                "share": round(total / max(sum(counts), 1) * 100, 1),
+                "width": round(total / largest_country * 100, 1),
+                "trend": [bucket.get(country, 0) for bucket in countries],
+            }
+        )
+
+    return {
+        "period": period,
+        "chart": chart,
+        "line_points": " ".join(f'{point["x"]},{point["y"]}' for point in chart),
+        "country_rows": country_rows,
+        "inbound_in_period": sum(counts),
+        "inbound_total": cumulative[-1] if cumulative else 0,
+        "average_score": round(sum(scores) / len(scores), 1) if scores else None,
+        "qualified_count": sum(score >= 70 for score in scores),
+    }
+
+
 @router.get("/operations")
 async def operations(request: Request):
+    period = request.query_params.get("period", "month")
+    if period not in {"day", "month", "year"}:
+        period = "month"
+    analytics = _inbound_analytics(period)
     rows = _customer_rows()
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     stale_before = now - timedelta(days=14)
+    waiting_before = now - timedelta(days=30)
     renew_before = now + timedelta(days=60)
     with SessionLocal() as session:
         conversations = session.execute(select(Conversation)).scalars().all()
@@ -521,13 +1122,18 @@ async def operations(request: Request):
         and row["last_activity"].replace(tzinfo=None) < stale_before
     ]
     missing_reply = []
+    waiting_customer = []
     for conv in conversations:
-        incoming = conv.last_incoming_at
-        outgoing = conv.last_outgoing_at
+        incoming = _naive(conv.last_incoming_at)
+        outgoing = _naive(conv.last_outgoing_at)
         if incoming and (not outgoing or incoming > outgoing):
             row = row_by_contact.get(conv.contact_id)
             if row and row not in missing_reply:
                 missing_reply.append(row)
+        if outgoing and outgoing < waiting_before and (not incoming or incoming < outgoing):
+            row = row_by_contact.get(conv.contact_id)
+            if row and row not in waiting_customer:
+                waiting_customer.append(row)
     lost = [row for row in rows if row["stage"] == "closed_lost" or row["state"] == "lost"]
     upsell = [
         row
@@ -539,8 +1145,10 @@ async def operations(request: Request):
         request,
         "operations.html",
         {
+            **analytics,
             "stale": stale,
             "missing_reply": missing_reply,
+            "waiting_customer": waiting_customer,
             "renewals": renewals,
             "lost": lost,
             "upsell": upsell,

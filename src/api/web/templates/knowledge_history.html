@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% from "partials/icons.html" import icon %}
+{% block title %}변경 이력 · {{ doc.title }}{% endblock %}
+{% block content %}
+
+<div style="margin-bottom:14px">
+  <a href="/knowledge/{{ doc.id }}" class="chip">{{ icon("chevron", 14) }} 문서 편집</a>
+</div>
+
+<div class="page-header">
+  <div>
+    <h1 class="page-title">변경 이력</h1>
+    <p class="page-sub">{{ doc.title }} · <span class="mono">v{{ doc.version }}</span></p>
+  </div>
+</div>
+
+<div style="max-width:980px">
+  {% for revision in revisions %}
+  <details class="card" style="padding:0;margin-bottom:12px" {% if loop.first %}open{% endif %}>
+    <summary style="cursor:pointer;list-style:none;padding:16px 18px;display:flex;flex-wrap:wrap;gap:10px;align-items:center">
+      <strong class="mono">v{{ revision.version }}</strong>
+      <span style="font-weight:650">{{ revision.change_note or '내용 수정' }}</span>
+      {% if revision.status == 'active' %}<span class="pill pill--ok pill--sm"><span class="pill__dot"></span>활성</span>
+      {% else %}<span class="pill pill--neutralSubtle pill--sm"><span class="pill__dot"></span>비활성</span>{% endif %}
+      <span class="spacer"></span>
+      <span class="t-xs t-subtle">{{ revision.edited_by }} · {{ revision.created_at | kst }}</span>
+    </summary>
+    <div style="padding:18px;border-top:1px solid var(--border)">
+      <dl class="profile-grid" style="margin:0 0 16px">
+        <div><dt class="t-xs t-subtle">적용 범위</dt><dd style="margin:5px 0 0">{{ '인바운드' if revision.scope == 'inbound' else '공통' }}</dd></div>
+        <div><dt class="t-xs t-subtle">답변 분류</dt><dd class="mono t-sm" style="margin:5px 0 0">{{ revision.categories_text or 'all' }}</dd></div>
+        <div class="profile-grid__wide"><dt class="t-xs t-subtle">검색 태그</dt><dd style="margin:5px 0 0">{{ revision.tags_text or '-' }}</dd></div>
+      </dl>
+      {% if revision.summary %}
+      <div class="banner" style="margin-bottom:14px"><strong>AI 선택 요약</strong><div class="t-sm" style="margin-top:5px;line-height:1.6">{{ revision.summary }}</div></div>
+      {% endif %}
+      <pre class="msg-body--inset" style="white-space:pre-wrap;overflow-wrap:anywhere;margin:0;line-height:1.7">{{ revision.body }}</pre>
+    </div>
+  </details>
+  {% else %}
+  <div class="card empty">
+    <div class="empty__icon">{{ icon("history", 24) }}</div>
+    <div class="empty__text">아직 저장된 변경 이력이 없습니다.</div>
+  </div>
+  {% endfor %}
+</div>
+
+{% endblock %}

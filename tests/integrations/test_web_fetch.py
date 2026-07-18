@@ -5,10 +5,34 @@ from __future__ import annotations
 from unittest.mock import MagicMock, patch
 
 from src.integrations.web_fetch import (
+    _MAX_RESPONSE_BYTES,
     _extract_meta,
     _is_ssrf_target,
     fetch_homepage_meta,
 )
+
+
+def _stream_response(
+    *, status: int = 200, content_type: str = "text/html", body: bytes = b"", location: str = ""
+):
+    response = MagicMock()
+    response.__enter__ = MagicMock(return_value=response)
+    response.__exit__ = MagicMock(return_value=False)
+    response.status_code = status
+    response.headers = {"content-type": content_type}
+    if location:
+        response.headers["location"] = location
+    response.encoding = "utf-8"
+    response.iter_bytes.return_value = iter([body])
+    return response
+
+
+def _mock_client(response):
+    client = MagicMock()
+    client.__enter__ = MagicMock(return_value=client)
+    client.__exit__ = MagicMock(return_value=False)
+    client.stream.return_value = response
+    return client
 
 
 class TestSSRFGuard:
@@ -73,20 +97,15 @@ class TestFetchHomepageMeta:
 
     @patch("src.integrations.web_fetch._is_ssrf_target", return_value=False)
     def test_successful_html_fetch(self, _mock_ssrf):
-        mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        mock_resp.headers = {"content-type": "text/html; charset=utf-8"}
-        mock_resp.text = """
+        body = """
         <html><head>
             <title>Test Corp</title>
             <meta name="description" content="We make things.">
         </head></html>
-        """
-
-        mock_client = MagicMock()
-        mock_client.__enter__ = MagicMock(return_value=mock_client)
-        mock_client.__exit__ = MagicMock(return_value=False)
-        mock_client.get.return_value = mock_resp
+        """.encode()
+        mock_client = _mock_client(
+            _stream_response(content_type="text/html; charset=utf-8", body=body)
+        )
 
         with patch("src.integrations.web_fetch.httpx.Client", return_value=mock_client):
             result = fetch_homepage_meta("test.com", timeout=5.0)
@@ -97,15 +116,9 @@ class TestFetchHomepageMeta:
 
     @patch("src.integrations.web_fetch._is_ssrf_target", return_value=False)
     def test_non_html_returns_blocked(self, _mock_ssrf):
-        mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        mock_resp.headers = {"content-type": "application/json"}
-        mock_resp.text = '{"api": true}'
-
-        mock_client = MagicMock()
-        mock_client.__enter__ = MagicMock(return_value=mock_client)
-        mock_client.__exit__ = MagicMock(return_value=False)
-        mock_client.get.return_value = mock_resp
+        mock_client = _mock_client(
+            _stream_response(content_type="application/json", body=b'{"api": true}')
+        )
 
         with patch("src.integrations.web_fetch.httpx.Client", return_value=mock_client):
             result = fetch_homepage_meta("api.example.com", timeout=5.0)
@@ -119,7 +132,7 @@ class TestFetchHomepageMeta:
         mock_client = MagicMock()
         mock_client.__enter__ = MagicMock(return_value=mock_client)
         mock_client.__exit__ = MagicMock(return_value=False)
-        mock_client.get.side_effect = httpx.TimeoutException("timed out")
+        mock_client.stream.side_effect = httpx.TimeoutException("timed out")
 
         with patch("src.integrations.web_fetch.httpx.Client", return_value=mock_client):
             result = fetch_homepage_meta("slow.example.com", timeout=1.0)
@@ -128,17 +141,29 @@ class TestFetchHomepageMeta:
 
     @patch("src.integrations.web_fetch._is_ssrf_target", return_value=False)
     def test_http_5xx_returns_5xx_status(self, _mock_ssrf):
-        mock_resp = MagicMock()
-        mock_resp.status_code = 503
-        mock_resp.headers = {"content-type": "text/html"}
-        mock_resp.text = "<html><body>503</body></html>"
-
-        mock_client = MagicMock()
-        mock_client.__enter__ = MagicMock(return_value=mock_client)
-        mock_client.__exit__ = MagicMock(return_value=False)
-        mock_client.get.return_value = mock_resp
+        mock_client = _mock_client(_stream_response(status=503, body=b"error"))
 
         with patch("src.integrations.web_fetch.httpx.Client", return_value=mock_client):
             result = fetch_homepage_meta("down.example.com", timeout=5.0)
 
         assert result.status == "http_5xx"
+
+    @patch("src.integrations.web_fetch._is_private_ip", return_value=False)
+    def test_redirect_to_private_target_is_blocked(self, _mock_private):
+        redirect = _stream_response(status=302, location="http://169.254.169.254/latest")
+        mock_client = _mock_client(redirect)
+        with patch("src.integrations.web_fetch.httpx.Client", return_value=mock_client):
+            result = fetch_homepage_meta("example.com")
+        assert result.status == "blocked"
+        assert mock_client.stream.call_count == 1
+
+    @patch("src.integrations.web_fetch._is_ssrf_target", return_value=False)
+    def test_oversized_stream_is_blocked(self, _mock_ssrf):
+        response = _stream_response(body=b"")
+        response.iter_bytes.return_value = iter(
+            [b"x" * (_MAX_RESPONSE_BYTES // 2), b"x" * (_MAX_RESPONSE_BYTES // 2 + 1)]
+        )
+        mock_client = _mock_client(response)
+        with patch("src.integrations.web_fetch.httpx.Client", return_value=mock_client):
+            result = fetch_homepage_meta("large.example.com")
+        assert result.status == "blocked"

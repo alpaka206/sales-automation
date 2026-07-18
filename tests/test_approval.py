@@ -61,6 +61,24 @@ def test_approve_with_edit(db_with_message) -> None:
     assert approvals[0].diff == "New body"
 
 
+def test_approve_freezes_subject_and_signature_in_same_commit(db_with_message) -> None:
+    session, _Session, msg_id = db_with_message
+
+    with patch("src.agents.approval.SessionLocal", return_value=session):
+        result = approve(
+            msg_id,
+            approver="web:user",
+            edited_body="Final body",
+            edited_subject="Final subject",
+            signature_key="none",
+        )
+
+    assert result.status == "approved"
+    assert result.body == "Final body"
+    assert result.subject == "Final subject"
+    assert result.signature_key == "none"
+
+
 def test_reject(db_with_message) -> None:
     session, Session, msg_id = db_with_message
 

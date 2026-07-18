@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import datetime
 
 import httpx
@@ -119,3 +120,41 @@ def test_no_token_from_settings_raises() -> None:
         mock_settings.HUBSPOT_PRIVATE_APP_TOKEN = ""
         with pytest.raises(HubSpotNotConfigured):
             HubSpotClient()
+
+
+def test_move_ticket_stage_reports_result() -> None:
+    from unittest.mock import patch
+
+    from src.integrations.hubspot import move_ticket_stage_after_send
+
+    with patch("src.integrations.hubspot.settings") as mock_settings, patch(
+        "src.integrations.hubspot.HubSpotClient"
+    ) as mock_client:
+        mock_settings.HUBSPOT_TICKET_STAGE_AFTER_SEND = "meeting-link-sent"
+        assert move_ticket_stage_after_send("ticket-1") is True
+        mock_client.return_value.update_ticket_stage_sync.side_effect = RuntimeError("down")
+        assert move_ticket_stage_after_send("ticket-2") is False
+
+
+@respx.mock
+def test_search_tickets_follows_paging(client: HubSpotClient) -> None:
+    route = respx.post(f"{BASE_URL}/crm/v3/objects/tickets/search")
+    route.side_effect = [
+        httpx.Response(
+            200,
+            json={
+                "results": [{"id": "1", "properties": {}}],
+                "paging": {"next": {"after": "cursor-2"}},
+            },
+        ),
+        httpx.Response(200, json={"results": [{"id": "2", "properties": {}}]}),
+    ]
+
+    tickets = client.search_tickets_sync(datetime(2026, 7, 18), limit=1000)
+
+    assert [ticket.id for ticket in tickets] == ["1", "2"]
+    assert route.call_count == 2
+    first_body = json.loads(route.calls[0].request.content)
+    assert first_body["filterGroups"][0]["filters"][0]["propertyName"] == "hs_lastmodifieddate"
+    assert first_body["sorts"][0]["propertyName"] == "hs_lastmodifieddate"
+    assert json.loads(route.calls[1].request.content)["after"] == "cursor-2"

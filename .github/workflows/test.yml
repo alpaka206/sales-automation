@@ -6,12 +6,21 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+
+concurrency:
+  group: test-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     strategy:
+      fail-fast: false
       matrix:
-        python-version: ["3.12"]
+        python-version: ["3.11", "3.12"]
 
     steps:
       - uses: actions/checkout@v4
@@ -20,14 +29,82 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
 
       - name: Install dependencies
         run: |
-          python -m pip install --upgrade pip
-          pip install -e ".[dev]"
+          python -m pip install --upgrade pip setuptools
+          python -m pip install -e ".[dev,postgres]"
+          python -m pip check
 
       - name: Lint
         run: ruff check src/ tests/
 
       - name: Test
         run: pytest -q
+
+      - name: Audit dependencies
+        if: matrix.python-version == '3.12'
+        run: |
+          python -m pip install "pip-audit>=2.7,<3"
+          python -m pip_audit --local
+
+  postgres-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: sales_automation_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d sales_automation_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/sales_automation_test
+      INTERNAL_API_TOKEN: ci-test-token
+      INBOUND_WORKER_ENABLED: "false"
+      INBOUND_POLL_ENABLED: "false"
+      SEND_WORKER_ENABLED: "false"
+      INBOUND_AUTO_ACK_ENABLED: "false"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip setuptools
+          python -m pip install -e ".[dev,postgres]"
+      - name: Apply migrations twice
+        run: |
+          python scripts/init_db.py
+          python scripts/init_db.py
+      - name: Verify Postgres schema and app health
+        run: |
+          python - <<'PY'
+          from sqlalchemy import inspect
+          from src.db.session import engine
+
+          tables = set(inspect(engine).get_table_names())
+          required = {"_migrations", "contacts", "conversations", "messages", "inbound_jobs"}
+          assert required <= tables, required - tables
+          PY
+          pytest -q tests/test_smoke.py tests/test_api_health.py::test_healthz_no_token
+
+  docker-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build production image
+        run: docker build --tag sales-automation:ci .

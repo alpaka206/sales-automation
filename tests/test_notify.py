@@ -2,11 +2,17 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
-
-from src.agents._notify import notify_approval, notify_approval_once
+from src.agents import _notify
+from src.agents._notify import (
+    notify_approval,
+    notify_approval_once,
+    retry_pending_approval_notifications,
+)
 from src.common.config import settings
+from src.db.models import Contact, Conversation, Message
 from src.integrations.slack import SlackNotConfigured
 
 _CALL_KWARGS = dict(
@@ -75,3 +81,77 @@ def test_once_sends_after_atomic_claim(_claim, mock_notify) -> None:
     ):
         notify_approval_once(**_CALL_KWARGS)
     mock_notify.assert_called_once_with(**_CALL_KWARGS)
+
+
+@patch("src.agents._notify.notify_approval", return_value=True)
+def test_failed_slack_attempt_is_retried_after_delay(
+    mock_notify, db_session_factory, monkeypatch
+) -> None:
+    monkeypatch.setattr(_notify, "SessionLocal", db_session_factory)
+    with db_session_factory() as session:
+        contact = Contact(normalized_email="retry@example.com", full_name="Retry Buyer")
+        session.add(contact)
+        session.flush()
+        conversation = Conversation(contact_id=contact.id, topic="inquiry")
+        session.add(conversation)
+        session.flush()
+        message = Message(
+            conversation_id=conversation.id,
+            direction="outgoing",
+            channel="email",
+            subject="Reply",
+            body="Draft",
+            status="pending_approval",
+            slack_notification_attempts=1,
+            slack_notification_attempted_at=datetime.now(timezone.utc)
+            - timedelta(seconds=_notify.SLACK_NOTIFICATION_RETRY_SECONDS + 1),
+        )
+        session.add(message)
+        session.commit()
+        message_id = message.id
+
+    with (
+        patch.object(settings, "SLACK_ENABLED", True),
+        patch.object(settings, "APPROVAL_CHANNEL", "slack"),
+    ):
+        assert retry_pending_approval_notifications() == 1
+
+    with db_session_factory() as session:
+        stored = session.get(Message, message_id)
+        assert stored.slack_notification_attempts == 2
+        assert stored.slack_notified_at is not None
+    mock_notify.assert_called_once()
+
+
+@patch("src.agents._notify.notify_approval", return_value=True)
+def test_ready_draft_missed_before_first_notify_is_recovered(
+    mock_notify, db_session_factory, monkeypatch
+) -> None:
+    monkeypatch.setattr(_notify, "SessionLocal", db_session_factory)
+    with db_session_factory() as session:
+        contact = Contact(normalized_email="missed@example.com", full_name="Missed")
+        session.add(contact)
+        session.flush()
+        conversation = Conversation(contact_id=contact.id, topic="inquiry")
+        session.add(conversation)
+        session.flush()
+        session.add(
+            Message(
+                conversation_id=conversation.id,
+                direction="outgoing",
+                channel="email",
+                subject="Reply",
+                body="Draft",
+                status="pending_approval",
+                slack_notification_attempts=0,
+                slack_notification_attempted_at=None,
+            )
+        )
+        session.commit()
+
+    with (
+        patch.object(settings, "SLACK_ENABLED", True),
+        patch.object(settings, "APPROVAL_CHANNEL", "slack"),
+    ):
+        assert retry_pending_approval_notifications() == 1
+    mock_notify.assert_called_once()

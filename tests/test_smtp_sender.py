@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+import ssl
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from src.integrations.senders.smtp import _generate_message_id, send_smtp
+from src.integrations.senders.smtp import SMTPDeliveryUnknown, _generate_message_id, send_smtp
 
 
 def test_generate_message_id_with_domain() -> None:
@@ -36,8 +37,7 @@ def test_send_smtp_no_credentials() -> None:
 @patch("src.integrations.senders.smtp.smtplib.SMTP")
 def test_send_smtp_success(mock_smtp_cls) -> None:
     mock_server = MagicMock()
-    mock_smtp_cls.return_value.__enter__ = MagicMock(return_value=mock_server)
-    mock_smtp_cls.return_value.__exit__ = MagicMock(return_value=False)
+    mock_smtp_cls.return_value = mock_server
 
     msg = MagicMock()
     msg.body = "Hello"
@@ -56,9 +56,64 @@ def test_send_smtp_success(mock_smtp_cls) -> None:
         send_smtp(msg)
 
     mock_server.starttls.assert_called_once()
+    tls_context = mock_server.starttls.call_args.kwargs["context"]
+    assert tls_context.verify_mode == ssl.CERT_REQUIRED
+    assert tls_context.check_hostname is True
     mock_server.login.assert_called_once_with("user", "pass")
     mock_server.send_message.assert_called_once()
     assert msg.smtp_message_id is not None
+
+
+@patch("src.integrations.senders.smtp.smtplib.SMTP")
+def test_disconnect_during_data_is_not_safe_to_retry(mock_smtp_cls) -> None:
+    server = MagicMock()
+    server.send_message.side_effect = OSError("connection lost after DATA")
+    mock_smtp_cls.return_value = server
+    msg = MagicMock(
+        body="Hello",
+        subject="Test",
+        to_address="to@example.com",
+        in_reply_to=None,
+        smtp_message_id=None,
+    )
+
+    with patch("src.integrations.senders.smtp.settings") as mock_settings:
+        mock_settings.SMTP_USERNAME = "user"
+        mock_settings.SMTP_PASSWORD = "pass"
+        mock_settings.SMTP_HOST = "smtp.example.com"
+        mock_settings.SMTP_PORT = 587
+        mock_settings.SMTP_FROM_EMAIL = "from@example.com"
+        mock_settings.SMTP_FROM_NAME = "Sender"
+        with pytest.raises(SMTPDeliveryUnknown):
+            send_smtp(msg)
+
+
+def test_message_id_is_stable_for_same_database_row() -> None:
+    with patch("src.integrations.senders.smtp.settings") as mock_settings:
+        mock_settings.SMTP_FROM_EMAIL = "from@example.com"
+        assert _generate_message_id(42) == _generate_message_id(42)
+        assert _generate_message_id(42) != _generate_message_id(43)
+
+
+@pytest.mark.asyncio
+async def test_async_sender_runs_smtp_off_event_loop() -> None:
+    from src.integrations.senders import send
+    from src.integrations.senders.smtp import send_smtp as smtp_callable
+
+    msg = MagicMock()
+    msg.id = 42
+    msg.channel = "email"
+    msg.direction = "incoming"
+    msg.conversation.contact = None
+
+    with patch("src.integrations.senders.settings") as mock_settings, patch(
+        "src.integrations.senders.asyncio.to_thread", new_callable=AsyncMock
+    ) as mock_to_thread:
+        mock_settings.SEND_OVERRIDE_EMAIL = ""
+        mock_settings.WHATSAPP_ENABLED = False
+        await send(msg)
+
+    mock_to_thread.assert_awaited_once_with(smtp_callable, msg)
 
 
 def test_send_smtp_rejects_crlf_in_subject() -> None:
@@ -111,8 +166,7 @@ def test_send_smtp_threads_via_in_reply_to() -> None:
         "src.integrations.senders.smtp.settings"
     ) as mock_settings:
         mock_server = MagicMock()
-        mock_smtp_cls.return_value.__enter__ = MagicMock(return_value=mock_server)
-        mock_smtp_cls.return_value.__exit__ = MagicMock(return_value=False)
+        mock_smtp_cls.return_value = mock_server
         mock_settings.SMTP_USERNAME = "user"
         mock_settings.SMTP_PASSWORD = "pass"
         mock_settings.SMTP_HOST = "smtp.gmail.com"

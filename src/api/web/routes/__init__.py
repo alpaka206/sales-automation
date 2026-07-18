@@ -14,8 +14,10 @@ from . import (
     customer_ops,
     dashboard,
     email_templates,
+    knowledge,
     logs,
     messages,
+    recovery,
     settings_page,
     tools,
 )
@@ -25,9 +27,11 @@ router = APIRouter(tags=["web"])
 for _module in (
     dashboard,
     messages,
+    recovery,
     companies,
     customer_ops,
     email_templates,
+    knowledge,
     settings_page,
     tools,
     logs,

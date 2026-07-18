@@ -1,3 +1,0 @@
-# Postgres driver — install on Render/Supabase deploys.
-# Local dev with SQLite does not need this.
-psycopg2-binary>=2.9

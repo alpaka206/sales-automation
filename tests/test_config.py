@@ -14,7 +14,6 @@ def test_defaults() -> None:
         s = Settings(_env_file=None)
     assert s.LLM_PROVIDER == "gemini_vertex"
     assert s.GEMINI_MODEL == "gemini-2.5-flash"
-    assert s.EMAIL_PROVIDER == "smtp"
     assert s.WHATSAPP_ENABLED is False
     assert s.AUTO_SEND_THRESHOLD == 1.01
     assert s.DAILY_SEND_LIMIT == 400

@@ -18,7 +18,7 @@
 <div class="customer-layout">
   <div class="stack">
     <section class="card">
-      <div class="section-header"><div><div class="section-header__title">고객 상태와 다음 액션</div><div class="section-header__sub">사이트에서 저장한 값이 운영 기준입니다.</div></div></div>
+      <div class="section-header"><div class="section-header__title">고객 상태 · 다음 액션</div></div>
       <form method="post" action="/customers/{{ contact.id }}/profile" class="profile-grid">
         <label><span class="field-label">고객 구분</span><select class="select" name="customer_state">{% for v,l in [('negotiation','Negotiation'),('service','서비스 이용중'),('pool','기존 고객 Pool'),('lost','Lost')] %}<option value="{{ v }}" {% if profile and profile.customer_state == v %}selected{% endif %}>{{ l }}</option>{% endfor %}</select></label>
         <label><span class="field-label">파이프라인</span><select class="select" name="pipeline_stage">{% for v,l in [('new','New'),('meeting_link_sent','Meeting link sent'),('negotiation','Negotiation'),('contracted','Contracted'),('onboarding','Onboarding'),('active','Active'),('closed_lost','Closed Lost')] %}<option value="{{ v }}" {% if profile and profile.pipeline_stage == v %}selected{% endif %}>{{ l }}</option>{% endfor %}</select></label>
@@ -38,7 +38,7 @@
 
     <section class="card" id="history">
       <div class="section-header">
-        <div><div class="section-header__title">통합 히스토리</div><div class="section-header__sub">HubSpot·이메일·온라인미팅·카카오·WhatsApp·전화·수동 기록</div></div>
+        <div class="section-header__title">통합 히스토리</div>
         <details class="inline-details"><summary class="btn btn--subtle btn--sm">{{ icon("plus",14) }} 기록 추가</summary>
           <form method="post" action="/customers/{{ contact.id }}/interactions" class="quick-form">
             <select class="select" name="channel">{% for v in ['manual','hubspot','email','meeting','kakao','whatsapp','phone','invoice','contract'] %}<option value="{{ v }}">{{ v }}</option>{% endfor %}</select>
@@ -61,7 +61,7 @@
             {% if item.subject %}<strong class="history-item__title">{{ item.subject }}</strong>{% endif %}
             <div class="history-item__body">{{ item.summary }}</div>
             {% if item.context %}<div class="t-xs t-subtle" style="margin-top:6px">{{ item.context }}</div>{% endif %}
-            {% if item.artifact_url %}<a href="{{ item.artifact_url }}" target="_blank" rel="noopener" class="overview-link" style="margin-top:8px">관련 자료 열기 {{ icon("arrowRight",13) }}</a>{% endif %}
+            {% if item.artifact_url | external_url %}<a href="{{ item.artifact_url | external_url }}" target="_blank" rel="noopener noreferrer" class="overview-link" style="margin-top:8px">관련 자료 열기 {{ icon("arrowRight",13) }}</a>{% endif %}
           </div>
         </article>
         {% else %}<div class="empty"><div class="empty__text">아직 히스토리가 없습니다.</div></div>{% endfor %}
@@ -71,18 +71,19 @@
 
   <aside class="stack">
     <section class="card" id="contracts">
-      <div class="section-header"><div><div class="section-header__title">계약·결제</div><div class="section-header__sub">Invoice와 갱신일 포함</div></div></div>
+      <div class="section-header"><div class="section-header__title">계약 · 결제</div></div>
       {% for c in contracts %}
       <div class="contract-row">
         <div class="row-between"><strong>{{ c.plan or '플랜 미정' }}</strong><span class="tag">{{ c.status }}</span></div>
-        <div class="tnum" style="font-size:20px;font-weight:800;margin:8px 0">{% if c.amount is not none %}{{ '{:,.0f}'.format(c.amount) }} {{ c.currency }}{% else %}-{% endif %}</div>
+        <div class="tnum" style="font-size:20px;font-weight:800;margin:8px 0">{% if c.amount is not none %}{{ '{:,.2f}'.format(c.amount).rstrip('0').rstrip('.') }} {{ c.currency }}{% else %}-{% endif %}</div>
         <dl class="info-list">
+          <div class="info-row"><dt>연결 문의</dt><dd>{% if c.conversation_id %}#{{ c.conversation_id }} · Client ID {{ c.sheet_client_id or '미동기화' }}{% else %}미연결{% endif %}</dd></div>
           <div class="info-row"><dt>계약일</dt><dd>{{ c.contract_date | kst('%Y-%m-%d') if c.contract_date else '-' }}</dd></div>
           <div class="info-row"><dt>결제 예정</dt><dd>{{ c.payment_due_at | kst('%Y-%m-%d') if c.payment_due_at else '-' }}</dd></div>
           <div class="info-row"><dt>만료일</dt><dd>{{ c.expires_at | kst('%Y-%m-%d') if c.expires_at else '-' }}</dd></div>
           <div class="info-row"><dt>결제 방식</dt><dd>{{ c.payment_method or '-' }}</dd></div>
         </dl>
-        <div class="chip-row" style="margin-top:10px">{% if c.quote_url %}<a class="chip" href="{{ c.quote_url }}" target="_blank">견적서</a>{% endif %}{% if c.invoice_url %}<a class="chip" href="{{ c.invoice_url }}" target="_blank">Invoice</a>{% endif %}{% if c.payment_url %}<a class="chip" href="{{ c.payment_url }}" target="_blank">결제 링크</a>{% endif %}</div>
+        <div class="chip-row" style="margin-top:10px">{% if c.quote_url | external_url %}<a class="chip" href="{{ c.quote_url | external_url }}" target="_blank" rel="noopener noreferrer">견적서</a>{% endif %}{% if c.invoice_url | external_url %}<a class="chip" href="{{ c.invoice_url | external_url }}" target="_blank" rel="noopener noreferrer">Invoice</a>{% endif %}{% if c.payment_url | external_url %}<a class="chip" href="{{ c.payment_url | external_url }}" target="_blank" rel="noopener noreferrer">결제 링크</a>{% endif %}</div>
         <details class="copy-block"><summary>Flex 품의용 값</summary><pre id="contract-copy-{{ c.id }}">고객: {{ contact.company or contact.full_name }}
 플랜: {{ c.plan or '-' }}
 금액: {{ c.amount or '-' }} {{ c.currency }}
@@ -92,17 +93,42 @@
 만료일: {{ c.expires_at | kst('%Y-%m-%d') if c.expires_at else '-' }}
 언어쌍: {{ (c.language_pairs or []) | join(', ') }}
 단가: {{ c.unit_price or '-' }}</pre><button type="button" class="btn btn--subtle btn--sm" onclick="navigator.clipboard.writeText(document.getElementById('contract-copy-{{ c.id }}').innerText)">복사</button></details>
+        <details class="copy-block"><summary>계약 수정</summary>
+          <form method="post" action="/customers/{{ contact.id }}/contracts/{{ c.id }}" class="stack" style="margin-top:12px;gap:10px">
+            <label><span class="field-label">계약이 성사된 문의</span><select class="select" name="conversation_id"><option value="">최근 문의 자동 선택</option>{% for conv in conversations %}<option value="{{ conv.id }}" {% if c.conversation_id == conv.id %}selected{% endif %}>#{{ conv.id }} · {{ conv.created_at | kst('%Y-%m-%d') }} · {{ conv.topic or conv.stage }} · Client ID {{ conv.sheet_client_id or '미동기화' }}</option>{% endfor %}</select></label>
+            <div class="grid grid-2"><label><span class="field-label">플랜</span><input class="input" name="plan" value="{{ c.plan or '' }}"></label><label><span class="field-label">상태</span><select class="select" name="status">{% for value,label in [('draft','초안'),('sent','계약서 발송'),('contracted','계약 확정'),('active','서비스 이용'),('expired','종료'),('cancelled','취소')] %}<option value="{{ value }}" {% if c.status == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></label></div>
+            <div class="grid grid-2"><label><span class="field-label">금액</span><input class="input" name="amount" inputmode="decimal" value="{{ c.amount if c.amount is not none else '' }}"></label><label><span class="field-label">통화</span><input class="input" name="currency" value="{{ c.currency }}"></label></div>
+            <label><span class="field-label">결제 채널</span><select class="select" name="payment_method"><option value="">미정</option>{% for value,label in [('portone','포트원'),('stripe','Stripe'),('bank_transfer','세금계산서·계좌이체')] %}<option value="{{ value }}" {% if c.payment_method == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
+            <div class="grid grid-2"><label><span class="field-label">계약일</span><input class="input" type="date" name="contract_date" value="{{ c.contract_date.strftime('%Y-%m-%d') if c.contract_date else '' }}"></label><label><span class="field-label">결제 예정일</span><input class="input" type="date" name="payment_due_at" value="{{ c.payment_due_at.strftime('%Y-%m-%d') if c.payment_due_at else '' }}"></label></div>
+            <div class="grid grid-2"><label><span class="field-label">입금일</span><input class="input" type="date" name="paid_at" value="{{ c.paid_at.strftime('%Y-%m-%d') if c.paid_at else '' }}"></label><label><span class="field-label">만료일</span><input class="input" type="date" name="expires_at" value="{{ c.expires_at.strftime('%Y-%m-%d') if c.expires_at else '' }}"></label></div>
+            <label><span class="field-label">언어쌍</span><input class="input" name="language_pairs" value="{{ (c.language_pairs or []) | join(', ') }}"></label><label><span class="field-label">계약 단가</span><input class="input" name="unit_price" value="{{ c.unit_price or '' }}"></label>
+            <label><span class="field-label">견적서 URL</span><input class="input" name="quote_url" value="{{ c.quote_url or '' }}"></label><label><span class="field-label">Invoice URL</span><input class="input" name="invoice_url" value="{{ c.invoice_url or '' }}"></label><label><span class="field-label">결제 링크</span><input class="input" name="payment_url" value="{{ c.payment_url or '' }}"></label>
+            <label><span class="field-label">계약 메모</span><textarea class="textarea" name="notes">{{ c.notes or '' }}</textarea></label><button class="btn btn--primary" type="submit">수정 저장</button>
+          </form>
+        </details>
       </div>
       {% else %}<p class="t-sm t-subtle">등록된 계약이 없습니다.</p>{% endfor %}
       <details class="inline-details" style="margin-top:14px"><summary class="btn btn--subtle btn--sm">{{ icon("plus",14) }} 계약 추가</summary>
         <form method="post" action="/customers/{{ contact.id }}/contracts" class="stack" style="margin-top:12px;gap:10px">
-          <div class="grid grid-2"><input class="input" name="plan" placeholder="플랜"><select class="select" name="status"><option value="draft">draft</option><option value="sent">sent</option><option value="active">active</option><option value="expired">expired</option></select></div>
+          <label><span class="field-label">계약이 성사된 문의</span><select class="select" name="conversation_id"><option value="">최근 문의 자동 선택</option>{% for conv in conversations %}<option value="{{ conv.id }}">#{{ conv.id }} · {{ conv.created_at | kst('%Y-%m-%d') }} · {{ conv.topic or conv.stage }} · Client ID {{ conv.sheet_client_id or '미동기화' }}</option>{% endfor %}</select></label>
+          <div class="grid grid-2"><input class="input" name="plan" placeholder="플랜"><select class="select" name="status"><option value="draft">초안</option><option value="sent">계약서 발송</option><option value="contracted">계약 확정</option><option value="active">서비스 이용</option><option value="expired">종료</option></select></div>
           <div class="grid grid-2"><input class="input" name="amount" inputmode="decimal" placeholder="금액"><input class="input" name="currency" value="KRW" placeholder="통화"></div>
-          <select class="select" name="payment_method"><option value="">결제 방식</option><option value="portone">포트원</option><option value="stripe">Stripe</option><option value="bank_transfer">세금계산서·계좌이체</option></select>
+          <div class="grid grid-2"><select class="select" name="payment_method"><option value="">결제 채널</option><option value="portone">포트원</option><option value="stripe">Stripe</option><option value="bank_transfer">세금계산서·계좌이체</option></select><select class="select" name="payment_terms"><option value="일시불">일시불</option><option value="할부">할부</option></select></div>
           <div class="grid grid-2"><label><span class="field-label">계약일</span><input class="input" type="date" name="contract_date"></label><label><span class="field-label">결제 예정일</span><input class="input" type="date" name="payment_due_at"></label></div>
           <div class="grid grid-2"><label><span class="field-label">입금일</span><input class="input" type="date" name="paid_at"></label><label><span class="field-label">만료일</span><input class="input" type="date" name="expires_at"></label></div>
           <input class="input" name="language_pairs" placeholder="언어쌍, 쉼표 구분"><input class="input" name="unit_price" placeholder="계약 단가">
           <input class="input" name="quote_url" placeholder="견적서 URL"><input class="input" name="invoice_url" placeholder="Invoice URL"><input class="input" name="payment_url" placeholder="결제 링크">
+          <details class="copy-block order-sheet-fields"><summary>수주 DB 상세 필드</summary><div class="stack" style="margin-top:12px;gap:10px">
+            <input class="input" name="contract_method" placeholder="계약서 방식 (예: 직접 계약 · DocuSign)">
+            <div class="grid grid-2"><input class="input" name="payment_instrument" placeholder="결제 수단 표기"><input class="input" name="billing_email" type="email" value="{{ contact.email or '' }}" placeholder="Billing Email"></div>
+            <div class="grid grid-2"><input class="input" name="contract_months" inputmode="numeric" placeholder="계약기간(개월)"><input class="input" name="owner_email" type="email" placeholder="Perso Owner Email"></div>
+            <div class="grid grid-2"><input class="input" name="space_seq" placeholder="space_seq"><input class="input" type="date" name="plan_start_date" aria-label="플랜 시작일"></div>
+            <input class="input" name="enterprise_name" value="{{ contact.company or '' }}" placeholder="Enterprise Name">
+            <div class="grid grid-2"><input class="input" name="invitation_limit" inputmode="numeric" placeholder="초대 인원"><input class="input" name="queue_limit" inputmode="numeric" placeholder="Queue limit"></div>
+            <div class="grid grid-2"><input class="input" name="concurrent_jobs" inputmode="numeric" placeholder="동시 작업"><input class="input" name="space_count" inputmode="numeric" placeholder="Space 개수"></div>
+            <div class="grid grid-2"><input class="input" name="contract_credits" placeholder="계약 크레딧"><input class="input" name="payer" placeholder="지급자"></div>
+            <textarea class="textarea" name="credit_history" placeholder="크레딧 제공 히스토리"></textarea><textarea class="textarea" name="plan_notes" placeholder="플랜 비고"></textarea>
+          </div></details>
           <textarea class="textarea" name="notes" placeholder="계약 메모"></textarea><button class="btn btn--primary" type="submit">계약 저장</button>
         </form>
       </details>

@@ -34,14 +34,15 @@ def test_post_approval_card_success() -> None:
 
 
 @respx.mock
-def test_post_approval_card_api_error_logged() -> None:
+def test_post_approval_card_api_error_raises() -> None:
     respx.post("https://slack.com/api/chat.postMessage").mock(
         return_value=httpx.Response(200, json={"ok": False, "error": "channel_not_found"})
     )
     with patch("src.integrations.slack.settings") as s:
         s.SLACK_BOT_TOKEN = "xoxb-test"
         s.SLACK_APPROVAL_CHANNEL_ID = "C999"
-        post_approval_card(1, "Sub", "Body", None, "general")
+        with pytest.raises(RuntimeError, match="channel_not_found"):
+            post_approval_card(1, "Sub", "Body", None, "general")
 
 
 @respx.mock
@@ -114,4 +115,5 @@ def test_post_message_api_error() -> None:
     )
     with patch("src.integrations.slack.settings") as s:
         s.SLACK_BOT_TOKEN = "xoxb-test"
-        post_message("C123", "text")
+        with pytest.raises(RuntimeError, match="invalid_auth"):
+            post_message("C123", "text")

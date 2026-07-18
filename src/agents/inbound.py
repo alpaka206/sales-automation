@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import hashlib
 import logging
 from datetime import datetime, timezone
 from typing import Any
 
 from pydantic import BaseModel
+from sqlalchemy.exc import IntegrityError
 
 from ..common.config import settings
 from ..common.domains import is_personal_domain
@@ -14,7 +16,7 @@ from ..common.pricing_guard import strip_price_sentences
 from ..common.subjects import reply_subject
 from ..common.textwash import text_wash
 from ..db.conversation_history import add_progress
-from ..db.models import Contact, Conversation, CustomerProfile, Message
+from ..db.models import Approval, Contact, Conversation, CustomerProfile, InboundJob, Message
 from ..db.session import SessionLocal
 from ..integrations.hubspot import HubSpotClient, HubSpotNotConfigured
 from ..llm.client import LLMClient
@@ -29,6 +31,7 @@ from .inbound_scoring import (  # noqa: F401 — re-exported for callers/tests
 )
 
 logger = logging.getLogger(__name__)
+_DEFAULT_HUBSPOT = object()
 
 # Fallback acknowledgement body if the editable ``auto_ack`` template is missing.
 # ``{name}`` is substituted in code; the whole thing is translated to the inquiry
@@ -56,11 +59,9 @@ _PRICING_RULE_NORMAL = (
     "금액은 절대 만들지 마세요."
 )
 
-# In-memory short-window dedup for webhook retries. Bounded so a long-running
-# process can't leak memory; the authoritative dedup is DB-backed
-# (_existing_pending_draft_id), so evicting old keys here is harmless.
+# Kept for compatibility with older extensions/tests; durable queue keys now
+# provide production deduplication and this set is intentionally not consulted.
 _processed: set[str] = set()
-_PROCESSED_CAP = 10_000
 
 
 class ClassifyResult(BaseModel):
@@ -91,24 +92,19 @@ class InboundAgent:
     def __init__(
         self,
         llm: LLMClient | None = None,
-        hubspot: HubSpotClient | None = None,
+        hubspot: HubSpotClient | None | object = _DEFAULT_HUBSPOT,
     ) -> None:
         self.llm = llm or LLMClient()
+        if hubspot is not _DEFAULT_HUBSPOT:
+            self.hubspot = hubspot
+            return
         try:
-            self.hubspot = hubspot or HubSpotClient()
+            self.hubspot = HubSpotClient()
         except HubSpotNotConfigured:
             self.hubspot = None
 
     def handle(self, event: dict[str, Any]) -> dict[str, Any] | None:
         """Process an inbound webhook event. Returns summary dict or None if skipped."""
-        dedup_key = f"{event.get('object_id')}:{event.get('occurred_at')}"
-        if dedup_key in _processed:
-            logger.info("Skipping duplicate event: %s", dedup_key)
-            return None
-        if len(_processed) >= _PROCESSED_CAP:
-            _processed.clear()
-        _processed.add(dedup_key)
-
         contact_info = self._fetch_contact(event)
 
         expected_stage = settings.HUBSPOT_TICKET_STAGE_NEW.strip()
@@ -131,11 +127,10 @@ class InboundAgent:
 
         if not (contact_info.get("last_message") or "").strip():
             logger.warning(
-                "Inbound skipped — empty body (ticket=%s contact=%s email=%s). The ticket has "
+                "Inbound skipped — empty body (ticket=%s contact=%s). The ticket has "
                 "no subject/content to reply to; add the inquiry text to the ticket.",
                 contact_info.get("ticket_id") or "-",
                 contact_info.get("object_id", "?"),
-                contact_info.get("email") or "?",
             )
             return {
                 "message_id": None,
@@ -145,7 +140,8 @@ class InboundAgent:
 
         # Ticket retries must never create a second usable reply. For contact-only
         # events, only an unfinished draft blocks the next genuine customer message.
-        existing = self._existing_pending_draft_id(contact_info)
+        resume_message_id = event.get("_draft_message_id")
+        existing = self._existing_pending_draft_id(contact_info, resume_message_id)
         if existing is not None:
             logger.warning(
                 "Inbound skipped — a draft (msg %d) is already awaiting action in the same "
@@ -174,15 +170,31 @@ class InboundAgent:
         # on the site immediately, before the (slower) AI reply draft is ready. The
         # placeholder flips to pending_approval once the draft finishes.
         message_id, conv_id, is_first_inbound = self._persist_placeholder(
-            contact_info, channel, inquiry_lang
+            contact_info,
+            channel,
+            inquiry_lang,
+            resume_message_id=resume_message_id,
+            inbound_job_id=event.get("_inbound_job_id"),
         )
 
         # Immediate acknowledgement on the FIRST inbound of a thread. Goes out
         # without approval, in the inquiry language, and never changes ticket/draft
-        # status. Best-effort: a failure here must not stop the real reply draft.
+        # status. It is queued before the external Sheet write so a slow Sheet can
+        # never delay the customer receipt email.
         if is_first_inbound and channel == "email" and contact_info.get("email"):
             self._maybe_send_auto_ack(contact_info, conv_id, inquiry_lang)
 
+        # The sales ledger is written as soon as the acknowledgement is queued.
+        # AI drafting may take time or fail, but the inbound itself must never wait.
+        self._mirror_new_inbound_to_sheet(contact_info, channel, message_id, conv_id)
+
+        # History, deal, and domain research is useful for the detailed draft but
+        # must never delay the immediate receipt acknowledgement above.
+        self._enrich_draft_context(contact_info)
+
+        classification = None
+        score = None
+        draft = None
         try:
             classification = self._classify(contact_info)
 
@@ -202,7 +214,7 @@ class InboundAgent:
 
             score = self._score(contact_info, classification.category)
             draft = self._draft_reply(contact_info, classification, score, conv_id)
-            self._finalize_draft(
+            auto_approved = self._finalize_draft(
                 message_id, contact_info, classification, score, draft, conv_id, inquiry_lang
             )
         except Exception:
@@ -214,25 +226,27 @@ class InboundAgent:
         # from the append-only progress log). Never breaks the pipeline.
         self._update_summary(conv_id, contact_info)
 
-        try:
-            notify_approval_once(
-                message_id=message_id,
-                subject=draft.subject,
-                body_snippet=draft.body,
-                score=score,
-                category=classification.category,
-                title="새 인바운드 문의 — 회신 검토 요청",
-                inquiry=contact_info.get("last_message"),
-                contact_name=contact_info.get("full_name"),
-                contact_company=contact_info.get("company"),
-                contact_email=contact_info.get("email"),
-            )
-        except Exception:
-            logger.warning(
-                "Approval notification failed for message %d.", message_id, exc_info=True
-            )
-
-        self._mirror_to_sheet(contact_info, classification, score, channel, draft, message_id)
+        if auto_approved:
+            if not settings.SEND_WORKER_ENABLED:
+                self._dispatch_approved(message_id)
+        else:
+            try:
+                notify_approval_once(
+                    message_id=message_id,
+                    subject=draft.subject,
+                    body_snippet=draft.body,
+                    score=score,
+                    category=classification.category,
+                    title="새 인바운드 문의 — 회신 검토 요청",
+                    inquiry=contact_info.get("last_message"),
+                    contact_name=contact_info.get("full_name"),
+                    contact_company=contact_info.get("company"),
+                    contact_email=contact_info.get("email"),
+                )
+            except Exception:
+                logger.warning(
+                    "Approval notification failed for message %d.", message_id, exc_info=True
+                )
 
         # A webhook-processed ticket must also be marked for the polling fallback;
         # otherwise the next poll can treat the same HubSpot ticket as unseen.
@@ -249,8 +263,8 @@ class InboundAgent:
                 )
 
         logger.info(
-            "Inbound processed: contact=%s category=%s score=%d msg_id=%d",
-            contact_info.get("email", "unknown"),
+            "Inbound processed: contact_id=%s category=%s score=%d msg_id=%d",
+            contact_info.get("object_id", "unknown"),
             classification.category,
             score,
             message_id,
@@ -263,41 +277,83 @@ class InboundAgent:
             "channel": channel,
         }
 
-    def _mirror_to_sheet(
-        self,
-        contact_info: dict,
-        classification: ClassifyResult,
-        score: int,
-        channel: str,
-        draft: DraftResult,
-        message_id: int,
+    def _mirror_new_inbound_to_sheet(
+        self, contact_info: dict, channel: str, message_id: int, conv_id: int
     ) -> None:
-        """Best-effort append of this inquiry to the Google Sheet mirror."""
+        """Append the new inquiry once and remember its exact external row."""
         try:
+            from .sheet_sync import reserve_inbound_client_id
             from ..integrations.google_sheets import record_inbound
 
+            reserved_client_id = reserve_inbound_client_id(conv_id)
+
+            with SessionLocal() as session:
+                conv = session.get(Conversation, conv_id)
+                if not conv or conv.sheet_inbound_row:
+                    return
+                contact = session.get(Contact, conv.contact_id)
+                profile = session.get(CustomerProfile, conv.contact_id)
+
+            when = datetime.now(timezone.utc)
+            raw_when = contact_info.get("occurred_at")
+            try:
+                if isinstance(raw_when, (int, float)) or str(raw_when or "").isdigit():
+                    stamp = float(raw_when)
+                    when = datetime.fromtimestamp(stamp / 1000 if stamp > 10_000_000_000 else stamp, timezone.utc)
+                elif raw_when:
+                    when = datetime.fromisoformat(str(raw_when).replace("Z", "+00:00"))
+            except (ValueError, OSError, OverflowError):
+                logger.debug("Could not parse inbound occurred_at=%r; using now.", raw_when)
+
             excerpt = (contact_info.get("last_message") or "").strip().replace("\n", " ")
-            record_inbound(
+            domain_profile = contact_info.get("domain_profile") or {}
+            qualification = profile.qualification if profile else None
+            if not qualification:
+                lifecycle = str(contact_info.get("lifecycle_stage") or "").lower()
+                qualification = "PQL" if lifecycle in {"customer", "opportunity"} else "MQL"
+            result = record_inbound(
                 {
-                    "processed_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-                    "message_id": message_id,
-                    "status": "pending_approval",
-                    "category": classification.category,
-                    "score": score,
-                    "channel": channel,
+                    "client_id": reserved_client_id,
+                    "sales_direction": "Inbound",
+                    "inquiry_date": when.date().isoformat(),
+                    "deal_stage": "New",
+                    "deal_stage_detail": "Inquiry",
+                    "pipeline": qualification,
+                    "company": contact_info.get("company") or "알 수 없음",
                     "full_name": contact_info.get("full_name", ""),
+                    "phone": contact_info.get("phone") or "알 수 없음",
                     "email": contact_info.get("email", ""),
-                    "company": contact_info.get("company", ""),
-                    "country": contact_info.get("country", ""),
-                    "subject": draft.subject,
-                    "summary": classification.reasoning,
-                    "inbound_excerpt": excerpt[:300],
+                    "country": contact_info.get("country") or "알 수 없음",
+                    "company_type": (profile.industry if profile else None)
+                    or domain_profile.get("industry")
+                    or "확인 안 됨",
+                    "channel": "허브스팟" if contact_info.get("object_id") else channel,
+                    "plan": (profile.current_plan if profile else None) or "N/A",
+                    "user_seq": profile.user_seq if profile else "",
+                    "source": profile.source if profile else "",
+                    "history": excerpt[:2000],
+                    "inquiry_month": when.strftime("%Y-%m"),
+                    "inquiry_quarter": f"{when.year}-Q{(when.month - 1) // 3 + 1}",
                 }
             )
+            if not result:
+                return
+            with SessionLocal() as session:
+                conv = session.get(Conversation, conv_id)
+                if not conv:
+                    return
+                contact = session.get(Contact, conv.contact_id)
+                conv.sheet_inbound_row = result.row
+                conv.sheet_client_id = result.client_id
+                if contact and result.client_id and not contact.sheet_client_id:
+                    contact.sheet_client_id = result.client_id
+                session.commit()
         except Exception:
-            logger.debug("Sheet mirror skipped/failed for msg %d.", message_id, exc_info=True)
+            logger.warning("Sheet mirror skipped/failed for msg %d.", message_id, exc_info=True)
 
-    def _existing_pending_draft_id(self, contact_info: dict) -> int | None:
+    def _existing_pending_draft_id(
+        self, contact_info: dict, resume_message_id: int | None = None
+    ) -> int | None:
         """Return a reply that means this event should not create another draft.
 
         Thread key: ticket_id if present, otherwise the contact (looked up by
@@ -355,6 +411,12 @@ class InboundAgent:
                 .order_by(Message.created_at.desc())
                 .first()
             )
+            if (
+                existing
+                and existing.id == resume_message_id
+                and existing.status in {"drafting", "draft_failed"}
+            ):
+                return None
             return existing.id if existing else None
         finally:
             session.close()
@@ -378,6 +440,7 @@ class InboundAgent:
             "ticket_stage": event.get("ticket_stage"),
             "recent_emails": "",
             "deal_summary": "",
+            "domain_profile": None,
         }
 
         if not self.hubspot:
@@ -464,31 +527,36 @@ class InboundAgent:
         else:
             info["inbound_source"] = "none"
 
-        try:
-            emails = self.hubspot.get_recent_emails_sync(contact_id, limit=5)
-            if emails:
-                snippets = []
-                for e in emails:
-                    subj = e.subject or "(no subject)"
-                    body = (e.body or "")[:200]
-                    snippets.append(f"- {subj}: {body}")
-                info["recent_emails"] = "\n".join(snippets)
-        except Exception:
-            logger.warning("HubSpot email history fetch failed.", exc_info=True)
+        return info
 
-        try:
-            deals = self.hubspot.get_associated_deals_sync(contact_id)
-            if deals:
-                parts = []
-                for d in deals:
-                    parts.append(
-                        f"- {d.name or 'Unnamed'} (stage: {d.stage or 'unknown'}, amount: {d.amount or 'N/A'})"
-                    )
-                info["deal_summary"] = "\n".join(parts)
-        except Exception:
-            logger.warning("HubSpot deals fetch failed.", exc_info=True)
+    def _enrich_draft_context(self, info: dict[str, Any]) -> None:
+        """Add slower CRM/history/domain facts after the receipt email is sent."""
+        contact_id = info.get("object_id")
+        if self.hubspot and contact_id:
+            try:
+                emails = self.hubspot.get_recent_emails_sync(contact_id, limit=5)
+                if emails:
+                    snippets = []
+                    for e in emails:
+                        subj = e.subject or "(no subject)"
+                        body = (e.body or "")[:200]
+                        snippets.append(f"- {subj}: {body}")
+                    info["recent_emails"] = "\n".join(snippets)
+            except Exception:
+                logger.warning("HubSpot email history fetch failed.", exc_info=True)
 
-        info["domain_profile"] = None
+            try:
+                deals = self.hubspot.get_associated_deals_sync(contact_id)
+                if deals:
+                    parts = []
+                    for d in deals:
+                        parts.append(
+                            f"- {d.name or 'Unnamed'} (stage: {d.stage or 'unknown'}, amount: {d.amount or 'N/A'})"
+                        )
+                    info["deal_summary"] = "\n".join(parts)
+            except Exception:
+                logger.warning("HubSpot deals fetch failed.", exc_info=True)
+
         email = info.get("email", "")
         if email and settings.INBOUND_DOMAIN_ENRICHMENT_ENABLED:
             dom = _domain_from_email(email)
@@ -510,8 +578,6 @@ class InboundAgent:
                         }
                 except Exception:
                     logger.warning("Domain enrichment failed for %s", dom, exc_info=True)
-
-        return info
 
     def _classify(self, contact_info: dict) -> ClassifyResult:
         return self.llm.complete(
@@ -662,7 +728,13 @@ class InboundAgent:
         return draft
 
     def _persist_placeholder(
-        self, contact_info: dict, channel: str, inquiry_lang: str
+        self,
+        contact_info: dict,
+        channel: str,
+        inquiry_lang: str,
+        *,
+        resume_message_id: int | None = None,
+        inbound_job_id: int | None = None,
     ) -> tuple[int, int, bool]:
         """Persist the inquiry and a drafting reply placeholder before the AI draft.
 
@@ -686,10 +758,17 @@ class InboundAgent:
                 dom = _domain_from_email(email) if email else None
                 if dom and is_personal_domain(dom):
                     dom = None
+                anonymous_key = (
+                    contact_info.get("object_id")
+                    or contact_info.get("ticket_id")
+                    or hashlib.sha256(
+                        f"{contact_info.get('full_name')}|{contact_info.get('last_message')}".encode()
+                    ).hexdigest()[:20]
+                )
                 contact = Contact(
                     hubspot_contact_id=contact_info.get("object_id") or None,
                     email=email or None,
-                    normalized_email=norm or "unknown",
+                    normalized_email=norm or f"unknown:{anonymous_key}",
                     full_name=contact_info["full_name"],
                     company=contact_info.get("company"),
                     domain=dom,
@@ -738,7 +817,7 @@ class InboundAgent:
                     conv = Conversation(
                         contact_id=contact.id,
                         topic=None,  # set once classified, in _finalize_draft
-                        stage="initial",
+                        stage="new",
                         hubspot_ticket_id=ticket_id,
                         inquiry_language=inquiry_lang,
                     )
@@ -754,7 +833,7 @@ class InboundAgent:
                     conv = Conversation(
                         contact_id=contact.id,
                         topic=None,
-                        stage="initial",
+                        stage="new",
                         inquiry_language=inquiry_lang,
                     )
                     session.add(conv)
@@ -776,7 +855,9 @@ class InboundAgent:
             # replying to (subject kept separate — fixes "가끔 제목만 오더라").
             inbound_body = (contact_info.get("last_message") or "").strip()
             inbound_subject = (contact_info.get("subject") or "").strip() or None
-            if inbound_body:
+            # A durable retry of the same HubSpot ticket may replace a failed
+            # draft, but it must not append the customer's inquiry a second time.
+            if inbound_body and (not ticket_id or is_first_inbound):
                 # If this is a later customer message, the latest detailed reply was
                 # answered. Auto acknowledgements do not count as sales replies.
                 latest_reply = (
@@ -818,20 +899,54 @@ class InboundAgent:
                 )
 
             to_addr = contact_info.get("phone") if channel == "whatsapp" else (email or None)
-            msg = Message(
-                conversation_id=conv.id,
-                direction="outgoing",
-                channel=channel,
-                from_address=settings.SMTP_FROM_EMAIL or None,
-                to_address=to_addr,
-                subject=None,
-                body="",
-                status="drafting",
-                signature_key="signature_html_hyeram",
-                target_language=inquiry_lang,
-                draft_provider=settings.LLM_PROVIDER,
-            )
-            session.add(msg)
+            msg = session.get(Message, resume_message_id) if resume_message_id else None
+            if not (
+                msg
+                and msg.conversation_id == conv.id
+                and msg.direction == "outgoing"
+                and msg.prompt_variant != "auto_ack"
+                and msg.status in {"drafting", "draft_failed"}
+            ):
+                msg = Message(
+                    conversation_id=conv.id,
+                    direction="outgoing",
+                    channel=channel,
+                    from_address=settings.SMTP_FROM_EMAIL or None,
+                    to_address=to_addr,
+                    subject=None,
+                    body="",
+                    status="drafting",
+                    signature_key="signature_html_hyeram",
+                    target_language=inquiry_lang,
+                    draft_provider=settings.LLM_PROVIDER,
+                )
+                session.add(msg)
+                session.flush()
+            else:
+                # Resume the exact placeholder linked to this durable job.  A
+                # separate ticket-change job has no such link and remains blocked.
+                msg.status = "drafting"
+                msg.subject = None
+                msg.body = ""
+
+                # If the process died before creating the first auto-ack, retry it.
+                has_auto_ack = (
+                    session.query(Message.id)
+                    .filter(
+                        Message.conversation_id == conv.id,
+                        Message.prompt_variant == "auto_ack",
+                    )
+                    .first()
+                    is not None
+                )
+                is_first_inbound = prior_inbound == 1 and not has_auto_ack
+
+            if inbound_job_id:
+                job = session.get(InboundJob, inbound_job_id)
+                if job and job.status == "processing":
+                    payload = dict(job.payload or {})
+                    payload["draft_message_id"] = msg.id
+                    job.payload = payload
             session.commit()
             return msg.id, conv.id, is_first_inbound
         finally:
@@ -846,19 +961,37 @@ class InboundAgent:
         draft: DraftResult,
         conv_id: int | None = None,
         inquiry_lang: str | None = None,
-    ) -> None:
-        """Fill the 'drafting' placeholder with the finished reply → pending_approval."""
+    ) -> bool:
+        """Finalize the draft and return whether score-based auto-approval applied."""
         session = SessionLocal()
         try:
             msg = session.get(Message, message_id)
             if not msg:
-                return
+                return False
             msg.subject = draft.subject
             msg.body = draft.body
             msg.language = "ko"  # the draft the operator reviews is always Korean
             msg.target_language = inquiry_lang or msg.target_language
-            msg.status = "pending_approval"
+            threshold = settings.AUTO_SEND_THRESHOLD
+            auto_approved = (
+                0.0 <= threshold <= 1.0
+                and score / 100 >= threshold
+                and classification.category.lower() != "spam"
+                and msg.channel in {"email", "whatsapp"}
+                and bool(msg.to_address)
+            )
+            msg.status = "approved" if auto_approved else "pending_approval"
             msg.score_snapshot = score
+            if auto_approved:
+                msg.approved_by = "auto:score-threshold"
+                msg.approved_at = datetime.now(timezone.utc)
+                session.add(
+                    Approval(
+                        message_id=message_id,
+                        approver="auto:score-threshold",
+                        action="approve",
+                    )
+                )
             conv = session.get(Conversation, msg.conversation_id)
             if conv:
                 conv.topic = classification.category
@@ -872,6 +1005,7 @@ class InboundAgent:
                     session=session,
                 )
             session.commit()
+            return auto_approved
         finally:
             session.close()
 
@@ -922,14 +1056,16 @@ class InboundAgent:
     ) -> int | None:
         """Insert the auto-ack message in an interim state, returning its id.
 
-        Interim status is ``auto_sending`` — deliberately NOT ``approved`` so the
-        background send_worker (which claims ``approved`` rows) can never race this
-        inline dispatch and double-send. _dispatch_auto_ack flips it to sent/failed.
+        Status is ``approved`` so both the immediate attempt and transient retries use
+        the same atomic claim and lease as every other outbound message.
 
         Returns None (skips) if an auto-ack already exists for this conversation, so
         two near-simultaneous first events (webhook + poller) don't double-ack.
         """
         with SessionLocal() as session:
+            # Serialise the check+insert on the parent row. PostgreSQL honours the
+            # row lock; SQLite serialises the write transaction itself.
+            session.query(Conversation).filter(Conversation.id == conv_id).with_for_update().one()
             existing = (
                 session.query(Message)
                 .filter(
@@ -950,7 +1086,7 @@ class InboundAgent:
                 body=body,
                 language=language,
                 target_language=target_language,
-                status="auto_sending",
+                status="approved",
                 prompt_variant="auto_ack",
                 signature_key="signature_html_hyeram",
                 approved_by="auto_ack",
@@ -958,40 +1094,26 @@ class InboundAgent:
                 draft_provider=settings.LLM_PROVIDER,
             )
             session.add(msg)
-            session.commit()
+            try:
+                session.commit()
+            except IntegrityError:
+                # A concurrent webhook/poller transaction won the unique
+                # one-auto-ack-per-conversation constraint.
+                session.rollback()
+                return None
             return msg.id
 
     def _dispatch_auto_ack(self, message_id: int, conv_id: int) -> None:
-        """Send the auto-ack inline (no worker, no approval) and record the outcome.
-
-        The send attempt and the terminal status (sent/failed) are committed in the
-        SAME session, so a send failure can never strand the row in 'auto_sending'.
-        """
+        """Attempt immediately; known transient SMTP failures stay in the send queue."""
         import asyncio
 
-        from ..integrations.senders import send
+        from .send_worker import send_approved_now
 
-        sent_ok = False
         try:
-            with SessionLocal() as session:
-                m = session.get(Message, message_id)
-                if m is None:
-                    return
-                try:
-                    asyncio.run(send(m))
-                    m.status = "sent"
-                    m.sent_at = datetime.now(timezone.utc)
-                    sent_ok = True
-                except Exception:
-                    logger.warning(
-                        "Auto-ack send failed for message %d (non-fatal).",
-                        message_id,
-                        exc_info=True,
-                    )
-                    m.status = "failed"
-                session.commit()
+            sent_ok = asyncio.run(send_approved_now(message_id))
         except Exception:
             logger.warning("Auto-ack dispatch error for message %d.", message_id, exc_info=True)
+            sent_ok = False
 
         add_progress(
             conv_id,
@@ -999,9 +1121,20 @@ class InboundAgent:
             (
                 "자동 접수확인 메일 발송됨 (문의 언어, 승인 없이 즉시)."
                 if sent_ok
-                else "자동 접수확인 메일 발송 실패 (로그 확인 필요)."
+                else "자동 접수확인 메일 발송 재시도 대기 또는 수동 확인 필요."
             ),
         )
+
+    def _dispatch_approved(self, message_id: int) -> None:
+        """Send an auto-approved draft inline only when no background worker runs."""
+        import asyncio
+
+        from .send_worker import send_approved_now
+
+        try:
+            asyncio.run(send_approved_now(message_id))
+        except Exception:
+            logger.warning("Auto-approved send failed for message %d.", message_id, exc_info=True)
 
     # ----- Rolling summary + customer requests -----
 

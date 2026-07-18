@@ -119,10 +119,12 @@ def test_dashboard_returns_200():
 
 @patch("src.api.web.routes.dashboard._dashboard_context", _mock_dashboard_context)
 def test_dashboard_loads_design_css():
-    # The redesign replaced the Tailwind CDN with the PERSO design tokens/components CSS.
     r = _client().get("/")
     assert "/static/console.css" in r.text
     assert "/static/tokens.css" in r.text
+    assert "theme-toggle" not in r.text
+    assert "data-theme" not in r.text
+    assert "새 문의에서 답변 발송까지" not in r.text
 
 
 @patch("src.api.web.routes.dashboard._dashboard_context", _mock_dashboard_context)
@@ -140,9 +142,8 @@ def test_dashboard_loads_pretendard_tokens():
 
 @patch("src.api.web.routes.dashboard._dashboard_context", _mock_dashboard_context)
 def test_dashboard_shows_status_counts():
-    # KPI cards surface the counts with Korean labels (status pills), not raw enum strings.
     r = _client().get("/")
-    assert "지금 확인할 답변" in r.text
+    assert "검토 대기" in r.text
     assert "오늘 발송" in r.text
 
 
@@ -246,7 +247,7 @@ def pending_msg(_use_test_db):
 
 @patch("src.integrations.senders.send", new_callable=AsyncMock)
 def test_message_send_approves(mock_send, pending_msg, _use_test_db):
-    r = _client().post(f"/messages/{pending_msg}/send", data={"body": "edited", "subject": ""})
+    r = _client().post(f"/messages/{pending_msg}/send", data={"body": "edited", "subject": "Test"})
     assert r.status_code == 200
     assert "승인" in r.text
     mock_send.assert_awaited_once()
@@ -260,8 +261,8 @@ def test_message_send_approves(mock_send, pending_msg, _use_test_db):
 
 @patch("src.integrations.senders.send", new_callable=AsyncMock)
 def test_message_send_prevents_double(mock_send, pending_msg):
-    _client().post(f"/messages/{pending_msg}/send", data={"body": "", "subject": ""})
-    r = _client().post(f"/messages/{pending_msg}/send", data={"body": "", "subject": ""})
+    _client().post(f"/messages/{pending_msg}/send", data={"body": "Hello", "subject": "Test"})
+    r = _client().post(f"/messages/{pending_msg}/send", data={"body": "Hello", "subject": "Test"})
     assert r.status_code == 400
 
 
@@ -272,7 +273,7 @@ def test_message_send_defers_to_worker_when_enabled(mock_send, pending_msg, _use
     from src.common.config import settings
 
     with patch.object(settings, "SEND_WORKER_ENABLED", True):
-        r = _client().post(f"/messages/{pending_msg}/send", data={"body": "", "subject": ""})
+        r = _client().post(f"/messages/{pending_msg}/send", data={"body": "Hello", "subject": "Test"})
     assert r.status_code == 200
     mock_send.assert_not_awaited()
     session = _use_test_db()
@@ -334,6 +335,6 @@ def test_messages_list_returns_200():
 
 @patch("src.integrations.senders.send", new_callable=AsyncMock)
 def test_message_edit_blocked_after_approve(mock_send, pending_msg):
-    _client().post(f"/messages/{pending_msg}/send", data={"body": "", "subject": ""})
+    _client().post(f"/messages/{pending_msg}/send", data={"body": "Hello", "subject": "Test"})
     r = _client().post(f"/messages/{pending_msg}/edit", data={"body": "x", "subject": ""})
     assert r.status_code == 400

@@ -43,33 +43,8 @@ async def test_whatsapp_channel_sends_directly(mock_wa) -> None:
 async def test_smtp_sends_then_logs_to_hubspot(mock_smtp, mock_log) -> None:
     msg = _make_message()
     with patch("src.integrations.senders.settings") as configured:
-        configured.EMAIL_PROVIDER = "smtp"
         configured.WHATSAPP_ENABLED = False
         configured.SEND_OVERRIDE_EMAIL = ""
         await send(msg)
     mock_smtp.assert_called_once_with(msg)
     mock_log.assert_awaited_once_with(msg)
-
-
-@pytest.mark.asyncio
-@patch("src.integrations.senders.send_smtp")
-async def test_hubspot_provider_is_rejected(mock_smtp) -> None:
-    msg = _make_message()
-    with patch("src.integrations.senders.settings") as configured:
-        configured.EMAIL_PROVIDER = "hubspot"
-        configured.WHATSAPP_ENABLED = False
-        configured.SEND_OVERRIDE_EMAIL = ""
-        with pytest.raises(RuntimeError, match="cannot deliver mail"):
-            await send(msg)
-    mock_smtp.assert_not_called()
-
-
-@pytest.mark.asyncio
-async def test_unknown_provider_raises() -> None:
-    msg = _make_message()
-    with patch("src.integrations.senders.settings") as configured:
-        configured.EMAIL_PROVIDER = "carrier_pigeon"
-        configured.WHATSAPP_ENABLED = False
-        configured.SEND_OVERRIDE_EMAIL = ""
-        with pytest.raises(ValueError, match="Unknown EMAIL_PROVIDER"):
-            await send(msg)

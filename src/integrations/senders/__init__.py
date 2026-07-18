@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import copy
 import logging
 
 from ...common.config import settings
@@ -152,6 +154,10 @@ async def _try_whatsapp_template(message: Message) -> None:
     phone: str | None = None
     try:
         with SessionLocal() as session:
+            stored = session.get(Message, message.id)
+            if stored and stored.whatsapp_sent:
+                logger.info("WhatsApp already sent for message %d; skipping replay.", message.id)
+                return
             c = session.get(Contact, message.conversation.contact_id)
             if c and c.whatsapp_opt_in:
                 phone = getattr(c, "phone", None)
@@ -170,6 +176,7 @@ async def _try_whatsapp_template(message: Message) -> None:
     try:
         await send_whatsapp_template(
             phone=phone,
+            language_code=(message.target_language or message.language or "ko")[:8],
             params=[message.body[:1024]],
         )
         _record_whatsapp_result(message.id, attempted=True, sent=True)
@@ -240,6 +247,9 @@ async def send(message: Message) -> None:
     # Test-mode redirect: reroute every customer-facing email to one address and
     # force SMTP. Real HubSpot contacts are not touched in this mode.
     if override:
+        # Never mutate the ORM row: test delivery must not replace the real recipient
+        # or reviewed subject that operators see in the console.
+        message = copy.copy(message)
         original = message.to_address or "(none)"
         message.to_address = override
         if message.subject and not message.subject.startswith("[TEST"):
@@ -267,25 +277,18 @@ async def send(message: Message) -> None:
     ):
         message.body = strip_known_signature(message.body)
 
-    # Email send — failure raises, propagating to caller
-    if override or settings.EMAIL_PROVIDER == "smtp":
-        send_smtp(message)
-    elif settings.EMAIL_PROVIDER == "hubspot":
-        raise RuntimeError(
-            "EMAIL_PROVIDER=hubspot cannot deliver mail through the CRM activity API. "
-            "Set EMAIL_PROVIDER=smtp; sent replies are still logged to HubSpot."
-        )
-    else:
-        raise ValueError(f"Unknown EMAIL_PROVIDER: {settings.EMAIL_PROVIDER}")
-
-    logger.info(
-        "Message %d sent via %s.", message.id, "smtp" if override else settings.EMAIL_PROVIDER
-    )
+    # SMTP is the only delivery channel; HubSpot receives a timeline copy afterwards.
+    await asyncio.to_thread(send_smtp, message)
+    logger.info("Message %d sent via smtp.", message.id)
 
     if not override:
         await _log_hubspot_email(message)
 
     # WhatsApp piggyback — best-effort, never breaks the email flow.
     # Skipped entirely in test mode so no real phone is messaged.
-    if settings.WHATSAPP_ENABLED and not override:
+    if (
+        settings.WHATSAPP_ENABLED
+        and not override
+        and getattr(message, "prompt_variant", None) != "auto_ack"
+    ):
         await _try_whatsapp_template(message)

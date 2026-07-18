@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 import pytest
 from unittest.mock import patch, MagicMock
 
@@ -16,7 +18,7 @@ from src.agents.inbound import (
     _processed,
 )
 from src.common.config import settings
-from src.db.models import Contact, Conversation, Message
+from src.db.models import Contact, Conversation, InboundJob, Message
 from src.db.models import KnowledgeDocument
 from src.integrations.hubspot import ContactDTO, EngagementDTO, DealDTO
 from src.llm import knowledge
@@ -175,8 +177,62 @@ def test_inbound_dedup(db_session) -> None:
         r2 = agent.handle(event)
 
     assert r1 is not None
-    assert r2 is None
+    assert r2 is not None
+    assert r2["status"] == "skipped_existing_pending"
     assert db_session.query(Message).filter_by(direction="outgoing").count() == 1
+
+
+def test_durable_retry_resumes_linked_placeholder(db_session, db_session_factory) -> None:
+    """A lease retry finishes the same draft instead of leaving it spinning forever."""
+    now = datetime.now(timezone.utc)
+    job = InboundJob(
+        event_key="hubspot:ticket:T-resume:created",
+        source="webhook",
+        payload={"ticket_id": "T-resume"},
+        status="processing",
+        attempts=1,
+        available_at=now,
+        locked_at=now,
+    )
+    db_session.add(job)
+    db_session.commit()
+
+    info = {
+        "object_id": "hs-resume",
+        "ticket_id": "T-resume",
+        "ticket_stage": settings.HUBSPOT_TICKET_STAGE_NEW,
+        "email": "resume@example.com",
+        "full_name": "Resume User",
+        "company": "Resume Co",
+        "country": "us",
+        "last_message": "Please tell me about the service.",
+    }
+    with patch("src.agents.inbound.SessionLocal", db_session_factory):
+        agent = InboundAgent(llm=_mock_llm(), hubspot=None)
+        message_id, _, _ = agent._persist_placeholder(
+            info, "email", "en", inbound_job_id=job.id
+        )
+
+        db_session.expire_all()
+        assert db_session.get(InboundJob, job.id).payload["draft_message_id"] == message_id
+
+        result = agent.handle(
+            {
+                **info,
+                "_inbound_job_id": job.id,
+                "_draft_message_id": message_id,
+            }
+        )
+
+    assert result["message_id"] == message_id
+    assert db_session.query(Message).filter_by(direction="inbound").count() == 1
+    detailed = (
+        db_session.query(Message)
+        .filter(Message.direction == "outgoing", Message.prompt_variant.is_(None))
+        .all()
+    )
+    assert len(detailed) == 1
+    assert detailed[0].status == "pending_approval"
 
 
 def test_later_contact_reply_marks_latest_sent_message_answered(db_session) -> None:

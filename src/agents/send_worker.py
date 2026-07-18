@@ -7,9 +7,9 @@ import logging
 import os
 import random
 from collections import deque
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import update
+from sqlalchemy import func, select, update
 
 from ..common.config import settings
 from ..db.conversation_history import add_progress
@@ -44,15 +44,19 @@ def _daily_limit_reached() -> bool:
     """Check if daily send limit has been reached."""
     if settings.DAILY_SEND_LIMIT <= 0:
         return False
-    return _daily_count >= settings.DAILY_SEND_LIMIT
+    daily, _minute = _database_send_counts()
+    return max(_daily_count, daily) >= settings.DAILY_SEND_LIMIT
 
 
 def _minute_window_full() -> bool:
     """Check if per-minute rate limit is reached."""
+    if settings.SEND_RATE_PER_MINUTE <= 0:
+        return False
     now = asyncio.get_event_loop().time()
     while _sent_timestamps and now - _sent_timestamps[0] > 60:
         _sent_timestamps.popleft()
-    return len(_sent_timestamps) >= settings.SEND_RATE_PER_MINUTE
+    _daily, minute = _database_send_counts()
+    return max(len(_sent_timestamps), minute) >= settings.SEND_RATE_PER_MINUTE
 
 
 def _record_send() -> None:
@@ -65,20 +69,47 @@ def _record_send() -> None:
 def get_daily_count() -> int:
     """Return current daily send count (for healthcheck)."""
     _reset_daily_if_needed()
-    return _daily_count
+    daily, _minute = _database_send_counts()
+    return max(_daily_count, daily)
+
+
+def _database_send_counts(now: datetime | None = None) -> tuple[int, int]:
+    """Persist rate accounting across restarts and the current process."""
+    current = now or datetime.now(timezone.utc)
+    day_start = current.replace(hour=0, minute=0, second=0, microsecond=0)
+    minute_start = current - timedelta(seconds=60)
+    try:
+        with SessionLocal() as session:
+            daily = session.scalar(
+                select(func.count(Message.id)).where(Message.sent_at >= day_start)
+            ) or 0
+            minute = session.scalar(
+                select(func.count(Message.id)).where(Message.sent_at >= minute_start)
+            ) or 0
+        return int(daily), int(minute)
+    except Exception:
+        logger.warning("Could not read persisted send quota; using process counters.", exc_info=True)
+        return 0, 0
 
 
 SEND_TRANSIENT_MAX_RETRIES = 3
+SEND_LEASE_SECONDS = 15 * 60
+POST_SEND_SYNC_MAX_RETRIES = 8
+AUTO_ACK_QUEUE_MAX_ATTEMPTS = 5
 
 
 async def _post_send_bookkeeping(session, msg, conv, message_id: int) -> None:
     """Best-effort HubSpot side effects after a successful send. Never raises —
     the email already went out, so failures here must not reverse it."""
-    from ..integrations.hubspot import HubSpotClient, HubSpotNotConfigured, move_ticket_stage_after_send
+    from ..integrations.google_sheets import is_configured as sheets_configured
+    from ..integrations.google_sheets import update_inbound_stage
+    from ..integrations.hubspot import HubSpotClient, HubSpotNotConfigured
+    from ..integrations.hubspot import move_ticket_stage_after_send
 
+    errors: list[str] = []
     ticket_id = conv.hubspot_ticket_id if conv else None
-    if ticket_id:
-        await asyncio.to_thread(move_ticket_stage_after_send, ticket_id)
+    if ticket_id and not await asyncio.to_thread(move_ticket_stage_after_send, ticket_id):
+        errors.append("hubspot_ticket_stage")
 
     hubspot_contact_id = None
     if conv and conv.contact_id:
@@ -90,8 +121,9 @@ async def _post_send_bookkeeping(session, msg, conv, message_id: int) -> None:
             client = HubSpotClient()
             await client.update_inbound_status(hubspot_contact_id, "meeting_link_sent")
         except HubSpotNotConfigured:
-            logger.info("HubSpot is not configured; skipping contact status update.")
-        except Exception:
+            errors.append("hubspot_contact_status:not_configured")
+        except Exception as exc:
+            errors.append(f"hubspot_contact_status:{type(exc).__name__}")
             logger.warning(
                 "HubSpot contact status update failed (contact=%s, msg=%d). Send succeeded.",
                 hubspot_contact_id, message_id,
@@ -105,7 +137,31 @@ async def _post_send_bookkeeping(session, msg, conv, message_id: int) -> None:
         profile = session.get(CustomerProfile, conv.contact_id)
         if profile:
             profile.pipeline_stage = "meeting_link_sent"
-            session.commit()
+        sheet_client_id = conv.sheet_client_id or (contact.sheet_client_id if contact else None)
+        if not sheets_configured():
+            errors.append("google_sheets:not_configured")
+        elif not isinstance(sheet_client_id, int) or sheet_client_id <= 0:
+            errors.append("google_sheets:missing_client_id")
+        else:
+            sheet_ok = await asyncio.to_thread(
+                update_inbound_stage,
+                sheet_client_id,
+                "meeting_link_sent",
+                profile.qualification if profile else None,
+            )
+            if not sheet_ok:
+                errors.append("google_sheets_stage")
+
+        now = datetime.now(timezone.utc)
+        previous_attempts = msg.post_send_sync_attempts
+        previous_attempts = previous_attempts if isinstance(previous_attempts, int) else 0
+        msg.post_send_sync_attempted_at = now
+        msg.post_send_sync_attempts = previous_attempts + 1
+        msg.post_send_sync_error = ", ".join(errors)[:1000] or None
+        msg.post_send_synced_at = None if errors else now
+        session.commit()
+        if msg.post_send_sync_attempts > 1:
+            return
         add_progress(conv.id, "reply", f"답변 발송 완료: {msg.subject or '(제목 없음)'}"[:200])
 
 
@@ -118,7 +174,11 @@ async def _send_one(message_id: int) -> bool:
     send_failed without retry.
     """
     from ..integrations.senders import send
-    from ..integrations.senders.smtp import SMTPPermanentError, SMTPTransientError
+    from ..integrations.senders.smtp import (
+        SMTPDeliveryUnknown,
+        SMTPPermanentError,
+        SMTPTransientError,
+    )
 
     session = SessionLocal()
     try:
@@ -127,22 +187,53 @@ async def _send_one(message_id: int) -> bool:
             # Lost the row (shouldn't happen — caller already claimed) or another process intervened.
             return False
 
+        if msg.channel == "email" and not msg.smtp_message_id:
+            from ..integrations.senders.smtp import _generate_message_id
+
+            # Persist the provider reconciliation key before touching SMTP.
+            msg.smtp_message_id = _generate_message_id(message_id)
+            session.commit()
+
         last_exc: Exception | None = None
         for attempt in range(SEND_TRANSIENT_MAX_RETRIES):
             try:
                 await send(msg)
-                msg.status = "sent"
+                test_mode = bool(settings.SEND_OVERRIDE_EMAIL.strip())
+                msg.status = "test_sent" if test_mode else "sent"
+                msg.send_claimed_at = None
                 msg.sent_at = datetime.now(timezone.utc)
 
                 conv = session.get(Conversation, msg.conversation_id)
-                if conv:
+                if conv and not test_mode:
                     conv.last_outgoing_at = msg.sent_at
+                    if msg.prompt_variant != "auto_ack":
+                        conv.stage = "meeting_link_sent"
+                if msg.prompt_variant == "auto_ack" or test_mode:
+                    msg.post_send_synced_at = msg.sent_at
                 session.commit()
                 _record_send()
 
-                await _post_send_bookkeeping(session, msg, conv, message_id)
+                if msg.prompt_variant != "auto_ack" and not test_mode:
+                    try:
+                        await _post_send_bookkeeping(session, msg, conv, message_id)
+                    except Exception:
+                        # Delivery is already committed. A bookkeeping outage must
+                        # never turn a delivered email into `send_failed`.
+                        logger.exception(
+                            "Post-send bookkeeping failed for message %d; queued for retry.",
+                            message_id,
+                        )
                 logger.info("Worker sent message %d.", message_id)
                 return True
+            except SMTPDeliveryUnknown as exc:
+                session.rollback()
+                msg = session.get(Message, message_id)
+                if msg:
+                    msg.status = "delivery_unknown"
+                    msg.send_claimed_at = None
+                    session.commit()
+                logger.error("SMTP delivery outcome unknown for message %d: %s", message_id, exc)
+                return False
             except SMTPPermanentError as exc:
                 last_exc = exc
                 logger.error("Permanent send failure for message %d: %s", message_id, exc)
@@ -169,8 +260,25 @@ async def _send_one(message_id: int) -> bool:
         session.rollback()
         msg = session.get(Message, message_id)
         if msg:
-            msg.status = "send_failed"
+            retry_auto_ack = (
+                isinstance(last_exc, SMTPTransientError)
+                and msg.prompt_variant == "auto_ack"
+                and msg.send_attempts < AUTO_ACK_QUEUE_MAX_ATTEMPTS
+            )
+            msg.status = "approved" if retry_auto_ack else "send_failed"
+            msg.send_claimed_at = None
+            if retry_auto_ack:
+                delay = min(60 * (2 ** max(msg.send_attempts - 1, 0)), 15 * 60)
+                msg.scheduled_at = datetime.now(timezone.utc) + timedelta(seconds=delay)
             session.commit()
+            if retry_auto_ack:
+                logger.warning(
+                    "Auto-ack %d requeued after transient SMTP failure (attempt %d/%d).",
+                    message_id,
+                    msg.send_attempts,
+                    AUTO_ACK_QUEUE_MAX_ATTEMPTS,
+                )
+                return False
         logger.error("Worker failed to send message %d: %s", message_id, last_exc)
         return False
     finally:
@@ -183,7 +291,11 @@ def _claim_id(message_id: int) -> bool:
         result = session.execute(
             update(Message)
             .where(Message.id == message_id, Message.status == "approved")
-            .values(status=_WORKER_ID)
+            .values(
+                status=_WORKER_ID,
+                send_claimed_at=datetime.now(timezone.utc),
+                send_attempts=Message.send_attempts + 1,
+            )
         )
         session.commit()
         return result.rowcount == 1
@@ -219,6 +331,17 @@ def _claim_ready_id() -> int | None:
 
 async def send_approved_now(message_id: int) -> bool:
     """Use the same atomic claim and delivery path as the background worker."""
+    _reset_daily_if_needed()
+    if _daily_limit_reached() or _minute_window_full():
+        with SessionLocal() as session:
+            session.execute(
+                update(Message)
+                .where(Message.id == message_id, Message.status == "approved")
+                .values(scheduled_at=datetime.now(timezone.utc) + timedelta(seconds=60))
+            )
+            session.commit()
+        logger.warning("Message %d deferred by the shared send quota.", message_id)
+        return False
     if not _claim_id(message_id):
         return False
     return await _send_one(message_id)
@@ -230,23 +353,70 @@ def request_shutdown() -> None:
     _shutdown = True
 
 
-def _reclaim_stuck_sending() -> int:
-    """Reset rows stuck in `sending:*` to `approved` so they're retried.
+def _reclaim_stuck_sending(now: datetime | None = None) -> int:
+    """Quarantine stale sends whose delivery outcome cannot be known safely.
 
-    A row gets stuck if the worker crashed between claim and the final commit.
-    Called once at startup. Safe under multiple workers (idempotent UPDATE).
+    SMTP may have accepted the message just before the worker crashed. Automatic
+    replay could duplicate a customer email, so an operator must verify it first.
     """
     session = SessionLocal()
     try:
+        cutoff = (now or datetime.now(timezone.utc)) - timedelta(seconds=SEND_LEASE_SECONDS)
         result = session.execute(
             update(Message)
-            .where(Message.status.like("sending:%"))
-            .values(status="approved")
+            .where(
+                Message.status.like("sending:%"),
+                Message.send_claimed_at.is_not(None),
+                Message.send_claimed_at <= cutoff,
+            )
+            .values(status="delivery_unknown", send_claimed_at=None)
         )
         session.commit()
         return result.rowcount or 0
     finally:
         session.close()
+
+
+def _sync_retry_due(msg: Message, now: datetime) -> bool:
+    attempted_at = msg.post_send_sync_attempted_at
+    if attempted_at is None:
+        return True
+    if attempted_at.tzinfo is None:
+        attempted_at = attempted_at.replace(tzinfo=timezone.utc)
+    delay = min(3600, 60 * (2 ** max((msg.post_send_sync_attempts or 1) - 1, 0)))
+    return attempted_at <= now - timedelta(seconds=delay)
+
+
+async def _retry_post_send_syncs(limit: int = 20) -> int:
+    """Retry CRM/Sheets updates without ever resending the delivered email."""
+    now = datetime.now(timezone.utc)
+    with SessionLocal() as session:
+        candidates = (
+            session.query(Message.id)
+            .filter(
+                Message.status == "sent",
+                Message.post_send_synced_at.is_(None),
+                Message.post_send_sync_attempts < POST_SEND_SYNC_MAX_RETRIES,
+            )
+            .order_by(Message.post_send_sync_attempted_at.asc().nullsfirst())
+            .limit(limit)
+            .all()
+        )
+
+    retried = 0
+    for (message_id,) in candidates:
+        with SessionLocal() as session:
+            msg = session.get(Message, message_id)
+            if not msg or not _sync_retry_due(msg, now):
+                continue
+            conv = session.get(Conversation, msg.conversation_id)
+            try:
+                await _post_send_bookkeeping(session, msg, conv, message_id)
+                retried += 1
+            except Exception:
+                session.rollback()
+                logger.exception("Post-send sync retry failed for message %d.", message_id)
+    return retried
 
 
 async def run_send_worker() -> None:
@@ -264,13 +434,21 @@ async def run_send_worker() -> None:
         settings.SEND_JITTER_SECONDS,
     )
 
-    reclaimed = _reclaim_stuck_sending()
-    if reclaimed:
-        logger.info("Reclaimed %d message(s) stuck in 'sending:*' state.", reclaimed)
-
     while not _shutdown:
         try:
+            from .worker_heartbeat import record_worker_heartbeat
+
+            await asyncio.to_thread(record_worker_heartbeat, "send")
             _reset_daily_if_needed()
+            quarantined = _reclaim_stuck_sending()
+            if quarantined:
+                logger.warning(
+                    "Quarantined %d stale send(s) as delivery_unknown.", quarantined
+                )
+            await _retry_post_send_syncs()
+            from ._notify import retry_pending_approval_notifications
+
+            await asyncio.to_thread(retry_pending_approval_notifications)
 
             if _daily_limit_reached():
                 logger.info(

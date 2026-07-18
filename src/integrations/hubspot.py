@@ -266,9 +266,10 @@ class HubSpotClient:
         r.raise_for_status()
         email_id = r.json()["id"]
 
-        await http.put(
+        association = await http.put(
             f"/crm/v3/objects/emails/{email_id}/associations/contacts/{contact_id}/198",
         )
+        association.raise_for_status()
         logger.info("Logged email engagement %s for contact %s", email_id, contact_id)
         return email_id
 
@@ -474,18 +475,25 @@ class HubSpotClient:
     # ------ Ticket API (inbound ticket workflow) ------
 
     _TICKET_PROPERTIES = (
-        "subject,content,hs_pipeline_stage,hs_ticket_priority,source_type,createdate"
+        "subject,content,hs_pipeline_stage,hs_ticket_priority,source_type,createdate,hs_lastmodifieddate"
     )
 
     def _ticket_from_api(self, item: dict, primary_contact_id: str | None = None) -> TicketDTO:
         props = item.get("properties", {})
         created_raw = props.get("createdate")
+        updated_raw = props.get("hs_lastmodifieddate")
         created_at = None
+        updated_at = None
         if created_raw:
             try:
                 created_at = datetime.fromisoformat(created_raw.replace("Z", "+00:00"))
             except ValueError:
                 created_at = None
+        if updated_raw:
+            try:
+                updated_at = datetime.fromisoformat(updated_raw.replace("Z", "+00:00"))
+            except ValueError:
+                updated_at = None
         return TicketDTO(
             id=str(item["id"]),
             subject=props.get("subject"),
@@ -494,6 +502,7 @@ class HubSpotClient:
             priority=props.get("hs_ticket_priority"),
             source_type=props.get("source_type"),
             created_at=created_at,
+            updated_at=updated_at,
             primary_contact_id=primary_contact_id,
         )
 
@@ -538,29 +547,45 @@ class HubSpotClient:
         pipeline_stage: str | None = None,
         limit: int = 100,
     ) -> list[TicketDTO]:
-        """Tickets created after a given timestamp."""
+        """Tickets changed after a timestamp, following HubSpot search pages.
+
+        Searching the modification timestamp also catches tickets created in
+        another stage and later moved into the configured New stage.
+        """
         headers = {"Authorization": f"Bearer {self.token}"}
         ts_ms = str(int(created_after.timestamp() * 1000))
         filters: list[dict] = [
-            {"propertyName": "createdate", "operator": "GT", "value": ts_ms},
+            {"propertyName": "hs_lastmodifieddate", "operator": "GT", "value": ts_ms},
         ]
         if pipeline_stage:
             filters.append(
                 {"propertyName": "hs_pipeline_stage", "operator": "EQ", "value": pipeline_stage}
             )
-        body = {
-            "filterGroups": [{"filters": filters}],
-            "sorts": [{"propertyName": "createdate", "direction": "ASCENDING"}],
-            "properties": self._TICKET_PROPERTIES.split(","),
-            "limit": limit,
-        }
+        tickets: list[TicketDTO] = []
+        after: str | None = None
         with httpx.Client(headers=headers, timeout=30.0) as client:
-            r = client.post(f"{BASE_URL}/crm/v3/objects/tickets/search", json=body)
-        r.raise_for_status()
-        return [self._ticket_from_api(item) for item in r.json().get("results", [])]
+            while len(tickets) < limit:
+                body = {
+                    "filterGroups": [{"filters": filters}],
+                    "sorts": [
+                        {"propertyName": "hs_lastmodifieddate", "direction": "ASCENDING"}
+                    ],
+                    "properties": self._TICKET_PROPERTIES.split(","),
+                    "limit": min(100, limit - len(tickets)),
+                }
+                if after:
+                    body["after"] = after
+                response = client.post(f"{BASE_URL}/crm/v3/objects/tickets/search", json=body)
+                response.raise_for_status()
+                page = response.json()
+                tickets.extend(self._ticket_from_api(item) for item in page.get("results", []))
+                after = page.get("paging", {}).get("next", {}).get("after")
+                if not after:
+                    break
+        return tickets
 
 
-def move_ticket_stage_after_send(ticket_id: str | None) -> None:
+def move_ticket_stage_after_send(ticket_id: str | None) -> bool:
     """Best-effort: move a ticket to settings.HUBSPOT_TICKET_STAGE_AFTER_SEND.
 
     Shared by the approval endpoint (mark_sent) and the send worker so the
@@ -569,11 +594,15 @@ def move_ticket_stage_after_send(ticket_id: str | None) -> None:
     """
     target = settings.HUBSPOT_TICKET_STAGE_AFTER_SEND
     if not ticket_id or not target:
-        return
+        return True
     try:
         HubSpotClient().update_ticket_stage_sync(ticket_id, target)
+        succeeded = True
         logger.info("Moved ticket %s → stage %s after send.", ticket_id, target)
     except HubSpotNotConfigured:
+        succeeded = False
         logger.warning("HubSpot not configured; cannot move ticket %s stage.", ticket_id)
     except Exception:
+        succeeded = False
         logger.exception("Ticket stage update failed (ticket=%s). Send succeeded.", ticket_id)
+    return succeeded

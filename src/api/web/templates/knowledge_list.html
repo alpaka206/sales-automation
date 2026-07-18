@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% from "partials/icons.html" import icon %}
+{% block title %}정책·지식 문서 · PERSO Inbound{% endblock %}
+{% block content %}
+
+<div class="page-header">
+  <div>
+    <h1 class="page-title">정책·지식 문서</h1>
+    <p class="page-sub">활성 문서만 AI 답변에 사용</p>
+  </div>
+  <a href="/knowledge/new" class="btn btn--primary">{{ icon("plus", 15) }} 새 문서</a>
+</div>
+
+<div class="row" style="gap:8px;margin-bottom:16px;flex-wrap:wrap">
+  <a href="/knowledge" class="chip{% if filter_status == 'all' %} is-active{% endif %}">전체 {{ active_count + inactive_count }}</a>
+  <a href="/knowledge?status=active" class="chip{% if filter_status == 'active' %} is-active{% endif %}">활성 {{ active_count }}</a>
+  <a href="/knowledge?status=inactive" class="chip{% if filter_status == 'inactive' %} is-active{% endif %}">비활성 {{ inactive_count }}</a>
+</div>
+
+<div class="card card--flush">
+  <div class="table-wrap">
+    <table class="table">
+      <thead>
+        <tr>
+          <th scope="col">문서</th>
+          <th scope="col">답변 분류</th>
+          <th scope="col">적용 범위</th>
+          <th scope="col">상태</th>
+          <th scope="col">버전</th>
+          <th scope="col">수정일</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for doc in documents %}
+        <tr class="is-clickable" onclick="location.href='/knowledge/{{ doc.id }}'">
+          <td>
+            <a href="/knowledge/{{ doc.id }}" style="color:inherit;text-decoration:none;font-weight:700">{{ doc.title }}</a>
+            <div class="t-xs t-subtle mono" style="margin-top:4px">{{ doc.slug }}</div>
+            {% if doc.summary %}<div class="t-xs t-subtle" style="margin-top:5px;max-width:520px">{{ doc.summary }}</div>{% endif %}
+          </td>
+          <td>
+            {% for category in doc.categories_text.split(', ') if category %}<span class="tag">{{ category }}</span>{% else %}<span class="tag">all</span>{% endfor %}
+          </td>
+          <td class="td-subtle">{{ '인바운드' if doc.scope == 'inbound' else '공통' }}</td>
+          <td>
+            {% if doc.status == 'active' %}<span class="pill pill--ok pill--sm"><span class="pill__dot"></span>활성</span>
+            {% else %}<span class="pill pill--neutralSubtle pill--sm"><span class="pill__dot"></span>비활성</span>{% endif %}
+          </td>
+          <td class="mono td-subtle">v{{ doc.version }}</td>
+          <td class="td-subtle tnum">{{ doc.updated_at | kst('%Y-%m-%d %H:%M') }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="6">
+          <div class="empty">
+            <div class="empty__icon">{{ icon("knowledge", 24) }}</div>
+            <div class="empty__text">조건에 맞는 정책 문서가 없습니다.</div>
+            <a href="/knowledge/new" class="btn btn--subtle btn--sm">첫 문서 만들기</a>
+          </div>
+        </td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+{% endblock %}

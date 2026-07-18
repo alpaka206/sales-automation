@@ -6,6 +6,7 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from sqlalchemy.exc import IntegrityError
 
 from src.agents.inbound import (
     ClassifyResult,
@@ -16,7 +17,7 @@ from src.agents.inbound import (
     _processed,
 )
 from src.common.config import settings
-from src.db.models import Message
+from src.db.models import Approval, Contact, Conversation, Message
 
 
 @pytest.fixture(autouse=True)
@@ -61,9 +62,14 @@ _EVENT = {
 
 @patch("src.agents.inbound.select_relevant_docs", return_value="")
 @patch("src.integrations.senders.send", new_callable=AsyncMock)
-def test_auto_ack_sent_on_first_inbound(mock_send, _docs, db_session, monkeypatch):
+def test_auto_ack_sent_on_first_inbound(
+    mock_send, _docs, db_session, db_session_factory, monkeypatch
+):
     monkeypatch.setattr(settings, "INBOUND_AUTO_ACK_ENABLED", True)
-    with patch("src.agents.inbound.SessionLocal", return_value=db_session):
+    with (
+        patch("src.agents.inbound.SessionLocal", db_session_factory),
+        patch("src.agents.send_worker.SessionLocal", db_session_factory),
+    ):
         agent = InboundAgent(llm=_mock_llm(), hubspot=None)
         agent.handle(dict(_EVENT))
 
@@ -77,13 +83,24 @@ def test_auto_ack_sent_on_first_inbound(mock_send, _docs, db_session, monkeypatc
     assert ack.target_language == "en"
     assert ack.language == "en"
     assert ack.body == "We received your message and will reply within 24 hours."
+    detailed = (
+        db_session.query(Message)
+        .filter(Message.direction == "outgoing", Message.prompt_variant.is_(None))
+        .one()
+    )
+    assert detailed.status == "pending_approval"
 
 
 @patch("src.agents.inbound.select_relevant_docs", return_value="")
 @patch("src.integrations.senders.send", new_callable=AsyncMock)
-def test_auto_ack_not_duplicated(mock_send, _docs, db_session, monkeypatch):
+def test_auto_ack_not_duplicated(
+    mock_send, _docs, db_session, db_session_factory, monkeypatch
+):
     monkeypatch.setattr(settings, "INBOUND_AUTO_ACK_ENABLED", True)
-    with patch("src.agents.inbound.SessionLocal", return_value=db_session):
+    with (
+        patch("src.agents.inbound.SessionLocal", db_session_factory),
+        patch("src.agents.send_worker.SessionLocal", db_session_factory),
+    ):
         agent = InboundAgent(llm=_mock_llm(), hubspot=None)
         agent.handle(dict(_EVENT))
         # A second event for the same contact must not produce a second auto-ack.
@@ -91,6 +108,37 @@ def test_auto_ack_not_duplicated(mock_send, _docs, db_session, monkeypatch):
 
     acks = db_session.query(Message).filter_by(prompt_variant="auto_ack").count()
     assert acks == 1
+
+
+def test_database_rejects_duplicate_auto_ack(db_session):
+    contact = Contact(normalized_email="ack-constraint@example.com", full_name="Ack")
+    db_session.add(contact)
+    db_session.flush()
+    conversation = Conversation(contact_id=contact.id)
+    db_session.add(conversation)
+    db_session.flush()
+    db_session.add(
+        Message(
+            conversation_id=conversation.id,
+            direction="outgoing",
+            channel="email",
+            body="first",
+            prompt_variant="auto_ack",
+        )
+    )
+    db_session.commit()
+    db_session.add(
+        Message(
+            conversation_id=conversation.id,
+            direction="outgoing",
+            channel="email",
+            body="second",
+            prompt_variant="auto_ack",
+        )
+    )
+    with pytest.raises(IntegrityError):
+        db_session.commit()
+    db_session.rollback()
 
 
 @patch("src.agents.inbound.select_relevant_docs", return_value="")
@@ -103,3 +151,43 @@ def test_auto_ack_disabled(mock_send, _docs, db_session, monkeypatch):
 
     assert db_session.query(Message).filter_by(prompt_variant="auto_ack").count() == 0
     mock_send.assert_not_awaited()
+
+
+@patch("src.agents.inbound.select_relevant_docs", return_value="")
+def test_auto_ack_is_queued_before_sheet_write(_docs, db_session_factory, monkeypatch):
+    monkeypatch.setattr(settings, "INBOUND_AUTO_ACK_ENABLED", True)
+    order: list[str] = []
+    with (
+        patch("src.agents.inbound.SessionLocal", db_session_factory),
+        patch.object(InboundAgent, "_maybe_send_auto_ack", side_effect=lambda *a: order.append("ack")),
+        patch.object(
+            InboundAgent,
+            "_mirror_new_inbound_to_sheet",
+            side_effect=lambda *a: order.append("sheet"),
+        ),
+    ):
+        InboundAgent(llm=_mock_llm(), hubspot=None).handle(dict(_EVENT))
+
+    assert order[:2] == ["ack", "sheet"]
+
+
+@patch("src.agents.inbound.notify_approval_once")
+@patch("src.agents.inbound.select_relevant_docs", return_value="")
+def test_score_threshold_can_auto_approve_safely(
+    _docs, mock_notify, db_session, db_session_factory, monkeypatch
+):
+    monkeypatch.setattr(settings, "INBOUND_AUTO_ACK_ENABLED", False)
+    monkeypatch.setattr(settings, "AUTO_SEND_THRESHOLD", 0.0)
+    monkeypatch.setattr(settings, "SEND_WORKER_ENABLED", True)
+    with patch("src.agents.inbound.SessionLocal", db_session_factory):
+        InboundAgent(llm=_mock_llm(), hubspot=None).handle(dict(_EVENT))
+
+    reply = (
+        db_session.query(Message)
+        .filter(Message.direction == "outgoing", Message.prompt_variant.is_(None))
+        .one()
+    )
+    assert reply.status == "approved"
+    assert reply.approved_by == "auto:score-threshold"
+    assert db_session.query(Approval).filter_by(message_id=reply.id).count() == 1
+    mock_notify.assert_not_called()

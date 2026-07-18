@@ -14,6 +14,8 @@ class HubSpotWebhookEvent(BaseModel):
     objectId: int
     occurredAt: int | None = None
     eventId: int | None = None
+    propertyName: str | None = None
+    propertyValue: str | None = None
 
 
 class ApprovalBody(BaseModel):

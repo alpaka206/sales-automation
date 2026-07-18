@@ -1,18 +1,9 @@
 {% from "partials/icons.html" import icon %}<!DOCTYPE html>
-<html lang="ko" data-theme="light" data-density="comfortable">
+<html lang="ko" data-density="comfortable">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>{% block title %}PERSO Inbound{% endblock %}</title>
-  {# Restore persisted theme before paint to avoid a flash of the wrong theme. #}
-  <script>
-    (function () {
-      try {
-        var t = localStorage.getItem("perso-theme");
-        if (t === "dark" || t === "light") document.documentElement.setAttribute("data-theme", t);
-      } catch (e) {}
-    })();
-  </script>
   <link rel="icon" type="image/png" href="/static/logo.png">
   <link rel="stylesheet" href="/static/tokens.css">
   <link rel="stylesheet" href="/static/console.css">
@@ -20,18 +11,18 @@
   <script src="/static/a11y.js" defer></script>
   {% block head %}{% endblock %}
 </head>
-<body>
+{% set _session_user = request.state.user if (request and request.state) else None %}
+{% set _effective_role = _session_user.role if _session_user else 'admin' %}
+<body data-user-role="{{ _effective_role }}">
   <a href="#main" class="skip-link">본문으로 건너뛰기</a>
   <div class="app-shell">
     {% include "partials/nav.html" %}
 
     <div class="content">
       <header class="topbar">
-        <span class="topbar__status"><span></span> {% if slack_approval_enabled() %}Slack 알림 · 초안당 1회{% else %}Slack 알림 꺼짐{% endif %}</span>
-        <button type="button" class="icon-btn" id="theme-toggle" title="테마 전환" aria-label="테마 전환">
-          <span class="theme-toggle__sun">{{ icon("sun", 18) }}</span>
-          <span class="theme-toggle__moon" hidden>{{ icon("moon", 18) }}</span>
-        </button>
+        {% set _slack_on = slack_approval_enabled() %}
+        <span class="topbar__status{% if not _slack_on %} is-off{% endif %}"><span></span> {% if _slack_on %}Slack · 답변 준비 시 1회{% else %}Slack 알림 꺼짐{% endif %}</span>
+        {% if _effective_role == 'viewer' %}<span class="tag">조회 전용</span>{% endif %}
       </header>
 
       <main class="main" id="main" tabindex="-1">
@@ -42,23 +33,35 @@
 
   <script>
     (function () {
-      var btn = document.getElementById("theme-toggle");
-      if (!btn) return;
-      var sun = btn.querySelector(".theme-toggle__sun");
-      var moon = btn.querySelector(".theme-toggle__moon");
-      function sync() {
-        var dark = document.documentElement.getAttribute("data-theme") === "dark";
-        if (sun) sun.hidden = dark;
-        if (moon) moon.hidden = !dark;
+      var role = document.body.dataset.userRole;
+      if (role === "admin") return;
+      var adminPrefixes = ["/settings/users", "/knowledge", "/email-templates", "/integrations", "/logs"];
+      function isAdminAction(value) {
+        return adminPrefixes.some(function (prefix) { return value === prefix || value.indexOf(prefix + "/") === 0; });
       }
-      btn.addEventListener("click", function () {
-        var dark = document.documentElement.getAttribute("data-theme") === "dark";
-        var next = dark ? "light" : "dark";
-        document.documentElement.setAttribute("data-theme", next);
-        try { localStorage.setItem("perso-theme", next); } catch (e) {}
-        sync();
+      document.querySelectorAll("form").forEach(function (form) {
+        var method = (form.getAttribute("method") || "get").toLowerCase();
+        var action = form.getAttribute("action") || location.pathname;
+        var blocked = method === "post" && (role === "viewer" || isAdminAction(action));
+        if (!blocked) return;
+        form.querySelectorAll("button, input, textarea, select").forEach(function (field) {
+          field.disabled = true;
+          field.setAttribute("aria-disabled", "true");
+        });
+        form.title = role === "viewer" ? "조회 전용 계정입니다." : "관리자 권한이 필요합니다.";
       });
-      sync();
+      document.querySelectorAll("[hx-post]").forEach(function (element) {
+        var action = element.getAttribute("hx-post") || "";
+        if (role === "viewer" || isAdminAction(action)) {
+          element.setAttribute("disabled", "disabled");
+          element.setAttribute("aria-disabled", "true");
+        }
+      });
+      if (role === "viewer") {
+        document.querySelectorAll("[draggable='true']").forEach(function (element) {
+          element.setAttribute("draggable", "false");
+        });
+      }
     })();
   </script>
 </body>
