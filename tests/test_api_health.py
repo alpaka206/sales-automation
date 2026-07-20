@@ -121,7 +121,7 @@ def test_three_role_web_policy() -> None:
     assert web_role_allows("member", "POST", "/messages/1/send")
     assert web_role_allows("operator", "POST", "/pipeline/1/stage")
     assert web_role_allows("operator", "POST", "/operations/recovery/messages/1/retry")
-    assert not web_role_allows("operator", "POST", "/knowledge/1")
+    assert not web_role_allows("operator", "POST", "/integrations/1")
     assert not web_role_allows("operator", "PUT", "/email-templates/1")
     assert not web_role_allows("operator", "POST", "/logs/clear")
     assert not web_role_allows("operator", "GET", "/integrations/google-sheets/connect")
@@ -145,7 +145,7 @@ def test_operator_admin_mutation_is_blocked_by_middleware(monkeypatch) -> None:
         "src.api.main.current_user",
         return_value={"email": "o@example.com", "name": "O", "role": "operator"},
     ):
-        response = TestClient(app).post("/knowledge", data={"title": "x"})
+        response = TestClient(app).post("/integrations", data={"title": "x"})
     assert response.status_code == 403
     assert response.json()["detail"] == "insufficient role for this action"
 

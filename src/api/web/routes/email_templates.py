@@ -1,8 +1,8 @@
 """Email template CRUD web routes + revision history.
 
-Mirrors the knowledge-base pattern (knowledge.py): CRUD with a revision snapshot
-taken before each edit/delete, plus a history view. This module owns only the
-editable store + UI; integration with the send path is done elsewhere.
+CRUD with a revision snapshot taken before each edit/delete, plus a history
+view. This module owns only the editable store + UI; integration with the send
+path is done elsewhere.
 """
 
 from __future__ import annotations

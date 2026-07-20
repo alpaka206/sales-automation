@@ -35,7 +35,7 @@
     (function () {
       var role = document.body.dataset.userRole;
       if (role === "admin") return;
-      var adminPrefixes = ["/settings/users", "/knowledge", "/email-templates", "/integrations", "/logs"];
+      var adminPrefixes = ["/settings/users", "/email-templates", "/integrations", "/logs"];
       function isAdminAction(value) {
         return adminPrefixes.some(function (prefix) { return value === prefix || value.indexOf(prefix + "/") === 0; });
       }
