@@ -121,15 +121,17 @@ def _set_local_stage(contact_id: int, stage: str) -> tuple[str | None, int | Non
         ).scalar_one_or_none()
         if latest_conversation:
             latest_conversation.stage = stage
-        session.commit()
-    return (
-        latest_conversation.hubspot_ticket_id if latest_conversation else None,
-        (
+        # Capture primitives while the session is open — expire_on_commit=True in
+        # production detaches these instances after the `with` block, so reading
+        # them in the return tuple would raise DetachedInstanceError.
+        ticket_id = latest_conversation.hubspot_ticket_id if latest_conversation else None
+        sheet_client_id = (
             latest_conversation.sheet_client_id
             if latest_conversation and latest_conversation.sheet_client_id
             else contact.sheet_client_id
-        ),
-    )
+        )
+        session.commit()
+    return ticket_id, sheet_client_id
 
 
 async def _sync_stage(
@@ -480,18 +482,17 @@ async def customer_profile_save(
             .scalars()
             .first()
         )
-        session.commit()
-
-    await _sync_stage(
-        latest_ticket.hubspot_ticket_id if latest_ticket else None,
-        pipeline_stage,
-        contact_id,
-        (
+        # Capture primitives before the session closes (expire_on_commit=True in
+        # production would detach latest_ticket/contact after the `with` block).
+        ticket_id = latest_ticket.hubspot_ticket_id if latest_ticket else None
+        sheet_client_id = (
             latest_ticket.sheet_client_id
             if latest_ticket and latest_ticket.sheet_client_id
             else contact.sheet_client_id
-        ),
-    )
+        )
+        session.commit()
+
+    await _sync_stage(ticket_id, pipeline_stage, contact_id, sheet_client_id)
     return RedirectResponse(f"/customers/{contact_id}", status_code=303)
 
 

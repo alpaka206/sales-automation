@@ -81,7 +81,9 @@ class Conversation(Base):
     # stage cells and never rewrite the operator-owned sheet layout.
     sheet_inbound_row: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # Stable key written into this inquiry's sheet row. Unlike a physical row
-    # number it survives operator sorting and inserted rows.
+    # number it survives operator sorting and inserted rows. Uniqueness is
+    # enforced by migration 0035 (a unique index), not at the model level — the
+    # 0035 migration test must be able to create_all then insert legacy dupes.
     sheet_client_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
 

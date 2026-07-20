@@ -81,28 +81,6 @@ async def test_create_email_engagement(client: HubSpotClient) -> None:
     assert eng_id == "eng-1"
 
 
-@respx.mock
-@pytest.mark.asyncio
-async def test_list_contact_engagements(client: HubSpotClient) -> None:
-    respx.get(
-        f"{BASE_URL}/crm/v3/objects/contacts/123/associations/emails"
-    ).mock(
-        return_value=httpx.Response(
-            200,
-            json={
-                "results": [
-                    {"id": "e1"},
-                    {"id": "e2"},
-                ],
-            },
-        )
-    )
-    engs = await client.list_contact_engagements("123")
-    await client.close()
-    assert len(engs) == 2
-    assert engs[0].id == "e1"
-
-
 def test_no_token_raises() -> None:
     from unittest.mock import patch
 

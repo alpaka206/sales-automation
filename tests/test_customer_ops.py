@@ -89,6 +89,62 @@ def test_profile_and_meeting_move_pipeline(customer_db, customer_id) -> None:
         assert session.query(CustomerInteraction).count() == 1
 
 
+@pytest.fixture()
+def customer_db_prod_session():
+    """Session factory with expire_on_commit=True, matching the production
+    sessionmaker. Regression guard for the DetachedInstanceError that only
+    surfaces when ORM attributes are read after the `with SessionLocal()` block —
+    the default customer_db fixture uses expire_on_commit=False and hides it."""
+    engine = create_engine(
+        "sqlite:///:memory:", connect_args={"check_same_thread": False}, poolclass=StaticPool
+    )
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine, expire_on_commit=True)
+    with patch("src.api.web.routes.customer_ops.SessionLocal", factory):
+        yield factory
+
+
+def test_profile_and_stage_survive_expired_session(customer_db_prod_session) -> None:
+    factory = customer_db_prod_session
+    with factory() as session:
+        contact = Contact(
+            normalized_email="prod@example.com",
+            email="prod@example.com",
+            full_name="Prod Buyer",
+            company="Prod Co",
+            domain="example.com",
+            sheet_client_id=555,
+        )
+        session.add(contact)
+        session.flush()
+        session.add(
+            Conversation(
+                contact_id=contact.id,
+                stage="initial",
+                hubspot_ticket_id="T-1",
+                sheet_client_id=555,
+            )
+        )
+        session.commit()
+        cid = contact.id
+    # Both handlers read latest_ticket/contact attributes after committing; with
+    # expire_on_commit=True that raised DetachedInstanceError (→ 500) before the
+    # primitives were captured inside the session block.
+    with TestClient(app) as client:
+        profile = client.post(
+            f"/customers/{cid}/profile",
+            data={"customer_state": "negotiation", "pipeline_stage": "new"},
+            follow_redirects=False,
+        )
+        meeting = client.post(
+            f"/customers/{cid}/interactions",
+            data={"channel": "meeting", "direction": "note", "summary": "Demo booked"},
+            follow_redirects=False,
+        )
+    assert profile.status_code == 303
+    assert meeting.status_code == 303
+
+
 def test_active_contract_marks_service_customer(customer_db, customer_id) -> None:
     with TestClient(app) as client:
         response = client.post(

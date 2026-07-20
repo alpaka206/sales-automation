@@ -9,7 +9,6 @@ import re
 
 from ..common.domains import is_personal_domain
 
-_PERSONAL_DOMAINS = {"gmail.com", "naver.com", "daum.net", "yahoo.com", "hotmail.com"}
 _TARGET_COUNTRIES = {"kr", "korea", "jp", "japan", "sg", "th", "vn", "id", "ph", "my"}
 
 
@@ -27,7 +26,7 @@ def _base_score(email: str | None, country: str | None, domain_profile: dict | N
     score = 50
     if email:
         dom = _domain_from_email(email)
-        if dom in _PERSONAL_DOMAINS or is_personal_domain(dom):
+        if is_personal_domain(dom):
             score -= 10
         else:
             score += 15

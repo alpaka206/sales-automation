@@ -124,8 +124,6 @@ class Settings(BaseSettings):
     # ----- Behavior knobs -----
     # 0.0..1.0 enables score-based auto-send; >1.0 keeps human approval required.
     AUTO_SEND_THRESHOLD: float = 1.01
-    DAILY_REPORT_HOUR: int = 18
-    WEEKLY_REPORT_DOW: int = 5  # 0=Mon, 5=Sat
 
     # ----- DB -----
     DATABASE_URL: str = "sqlite:///./data/app.db"

@@ -112,6 +112,7 @@ async def _post_send_bookkeeping(session, msg, conv, message_id: int) -> None:
         errors.append("hubspot_ticket_stage")
 
     hubspot_contact_id = None
+    contact = None
     if conv and conv.contact_id:
         contact = session.get(Contact, conv.contact_id)
         hubspot_contact_id = contact.hubspot_contact_id if contact else None

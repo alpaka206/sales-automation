@@ -101,6 +101,14 @@ def test_google_integration_routes_use_web_ui_auth_gate() -> None:
     assert is_web_ui_path("/integrations/google-sheets/callback") is True
 
 
+def test_operator_pages_use_web_ui_auth_gate() -> None:
+    # /companies (domain history) and /contacts/{id}/edit must pass through the
+    # browser auth/role/CSRF gate, not fall through to the internal-token API gate
+    # (which would 401 a logged-in operator's browser).
+    assert is_web_ui_path("/companies/example.com") is True
+    assert is_web_ui_path("/contacts/1/edit") is True
+
+
 def test_external_operator_links_allow_only_http_schemes() -> None:
     assert external_url("https://docs.example.com/a") == "https://docs.example.com/a"
     assert external_url("javascript:alert(1)") == ""

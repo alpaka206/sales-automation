@@ -214,31 +214,6 @@ class HubSpotClient:
                 )
             raise
 
-    async def list_contact_engagements(
-        self,
-        contact_id: str,
-        since: datetime | None = None,
-        limit: int = 10,
-    ) -> list[EngagementDTO]:
-        """List recent engagements for a contact."""
-        http = await self._http()
-        r = await http.get(
-            f"/crm/v3/objects/contacts/{contact_id}/associations/emails",
-            params={"limit": limit},
-        )
-        r.raise_for_status()
-        results = r.json().get("results", [])
-
-        engagements: list[EngagementDTO] = []
-        for item in results:
-            engagements.append(
-                EngagementDTO(
-                    id=str(item.get("id", "")),
-                    type="email",
-                )
-            )
-        return engagements
-
     async def create_email_engagement(
         self,
         contact_id: str,
