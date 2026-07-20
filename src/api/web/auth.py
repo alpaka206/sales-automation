@@ -233,6 +233,21 @@ def _redirect_uri(request: Request) -> str:
     return _base_url(request) + "/auth/callback"
 
 
+def _oauth_ready() -> bool:
+    """True only when Google sign-in is fully usable end to end.
+
+    The consent redirect signs the OAuth ``state`` with SESSION_SECRET, so a
+    client id alone is not enough — without the secret (allowed in basic mode,
+    where the startup guard doesn't require it) the button would render but the
+    signing step raises. Gate the button and the route on the same full check.
+    """
+    return bool(
+        settings.GOOGLE_OAUTH_CLIENT_ID
+        and settings.GOOGLE_OAUTH_CLIENT_SECRET
+        and settings.SESSION_SECRET
+    )
+
+
 @router.get("/auth/login")
 async def login_page(request: Request):
     """Landing page with a 'Sign in with Google' button."""
@@ -240,14 +255,14 @@ async def login_page(request: Request):
         return RedirectResponse("/", status_code=302)
     return _templates().TemplateResponse(
         request, "auth/login.html",
-        {"domain": settings.ALLOWED_EMAIL_DOMAIN, "configured": bool(settings.GOOGLE_OAUTH_CLIENT_ID)},
+        {"domain": settings.ALLOWED_EMAIL_DOMAIN, "configured": _oauth_ready()},
     )
 
 
 @router.get("/auth/google")
 async def auth_google(request: Request):
     """Redirect to Google's consent screen (restricted to the company domain)."""
-    if not settings.GOOGLE_OAUTH_CLIENT_ID:
+    if not _oauth_ready():
         return HTMLResponse("Google OAuth is not configured.", status_code=503)
     state = _sign({"n": secrets.token_urlsafe(16), "exp": int(time.time()) + STATE_TTL})
     params = {
@@ -322,6 +337,6 @@ async def logout(request: Request):
 def _deny(request: Request, message: str) -> HTMLResponse:
     return _templates().TemplateResponse(
         request, "auth/login.html",
-        {"domain": settings.ALLOWED_EMAIL_DOMAIN, "configured": bool(settings.GOOGLE_OAUTH_CLIENT_ID), "error": message},
+        {"domain": settings.ALLOWED_EMAIL_DOMAIN, "configured": _oauth_ready(), "error": message},
         status_code=403,
     )
