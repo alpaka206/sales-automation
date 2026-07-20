@@ -177,6 +177,13 @@ def test_poll_tickets_once_drains_more_than_one_page(mock_hs_cls, mock_enqueue):
     final_ticket.updated_at = base + timedelta(seconds=2)
     mock_hs.search_tickets_sync.side_effect = [first_page, [final_ticket]]
 
+    # Anchor the poll cursor just behind the fixture data. Without a marker the
+    # cursor derives from the real clock (now - initial lookback); once real time
+    # advances past `base`, the first page's timestamps fall before the cursor and
+    # this drain-advance path is never exercised — a time-bomb that fails the test
+    # on any run after base + lookback. Production always has a recent marker.
+    _save_ticket_poll_marker(base - timedelta(minutes=30))
+
     assert poll_tickets_once() == POLL_BATCH_SIZE + 1
     assert mock_hs.search_tickets_sync.call_count == 2
     second_after = mock_hs.search_tickets_sync.call_args_list[1].kwargs["created_after"]
