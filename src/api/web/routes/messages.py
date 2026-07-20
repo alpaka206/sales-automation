@@ -17,8 +17,11 @@ from ....db.conversation_history import add_progress
 from ....db.email_templates import list_signature_templates
 from ....db.models import (
     Contact,
+    ContractRecord,
     Conversation,
     ConversationProgress,
+    CustomerInteraction,
+    CustomerProfile,
     DomainProfile,
     Message,
 )
@@ -120,6 +123,11 @@ def _message_detail_context(message_id: int) -> dict:
             else None
         )
 
+        # Customer-level history (CRM state, contract, cross-channel touchpoints)
+        # surfaced inline so the operator sees who this customer is without leaving
+        # the reply screen. Full editable view stays at /customers/{id}.
+        customer = _customer_history(session, contact.id) if contact else None
+
         # The customer's inquiry is shown TRANSLATED (Korean) by default with the
         # original behind an expand toggle. ``needs_ko`` flags inbound non-Korean
         # bubbles; ``body_ko``/``subject_ko`` are filled by the route (concurrently)
@@ -199,7 +207,81 @@ def _message_detail_context(message_id: int) -> dict:
                 else None
             ),
             "domain_profile": domain_profile_data,
+            "customer": customer,
         }
+
+
+def _customer_history(session, contact_id: int) -> dict:
+    """Read-only customer-level history for the message-detail sidebar.
+
+    Mirrors the pieces of the /customers/{id} page that are NOT already on the
+    reply screen: the CustomerProfile snapshot (pipeline/state/temperature/next
+    action), the latest contract, and the cross-channel touchpoint log
+    (CustomerInteraction — manual notes + HubSpot-synced emails/deals/notes).
+    Everything is serialized to plain dicts before the session closes, so the
+    template never touches a detached ORM object. Editing lives at /customers/{id}.
+    """
+    profile = session.get(CustomerProfile, contact_id)
+    interactions = (
+        session.execute(
+            select(CustomerInteraction)
+            .where(CustomerInteraction.contact_id == contact_id)
+            .order_by(CustomerInteraction.happened_at.desc())
+            .limit(6)
+        )
+        .scalars()
+        .all()
+    )
+    contract = (
+        session.execute(
+            select(ContractRecord)
+            .where(ContractRecord.contact_id == contact_id)
+            .order_by(ContractRecord.created_at.desc())
+            .limit(1)
+        )
+        .scalar_one_or_none()
+    )
+
+    profile_data = (
+        {
+            "customer_state": profile.customer_state,
+            "pipeline_stage": profile.pipeline_stage,
+            "lead_temperature": profile.lead_temperature,
+            "current_plan": profile.current_plan,
+            "next_action": profile.next_action,
+            "next_action_at": profile.next_action_at,
+        }
+        if profile
+        else None
+    )
+    contract_data = (
+        {
+            "status": contract.status,
+            "plan": contract.plan,
+            "amount": contract.amount,
+            "currency": contract.currency,
+            "expires_at": contract.expires_at,
+        }
+        if contract
+        else None
+    )
+    interaction_rows = [
+        {
+            "channel": it.channel,
+            "direction": it.direction,
+            "subject": it.subject,
+            "summary": it.summary,
+            "happened_at": it.happened_at,
+        }
+        for it in interactions
+    ]
+    return {
+        "profile": profile_data,
+        "contract": contract_data,
+        "interactions": interaction_rows,
+        "detail_url": f"/customers/{contact_id}",
+        "has_any": bool(profile_data or contract_data or interaction_rows),
+    }
 
 
 def _domain_history(session, domain: str, exclude_conv_id: int | None = None) -> dict:

@@ -197,6 +197,53 @@ def test_message_detail_shows_send_button():
     assert "거절" in r.text
 
 
+def test_message_detail_embeds_customer_history(_use_test_db):
+    """The reply detail page surfaces the customer's CRM state, contract, and
+    cross-channel touchpoints inline (via the real _message_detail_context /
+    _customer_history), so the operator doesn't leave for the /customers page."""
+    from datetime import datetime, timezone
+
+    from src.db.models import ContractRecord, CustomerInteraction, CustomerProfile
+
+    session = _use_test_db()
+    contact = Contact(
+        normalized_email="buyer@acme.com", full_name="Acme Buyer",
+        email="buyer@acme.com", domain="acme.com", company="Acme",
+    )
+    session.add(contact)
+    session.flush()
+    contact_id = contact.id
+    conv = Conversation(contact_id=contact_id, topic="가격 문의")
+    session.add(conv)
+    session.flush()
+    msg = Message(
+        conversation_id=conv.id, direction="outgoing", channel="email",
+        subject="안내", body="안녕하세요", status="pending_approval",
+    )
+    session.add(msg)
+    session.add(CustomerProfile(
+        contact_id=contact_id, customer_state="service", pipeline_stage="active",
+        lead_temperature="hot", current_plan="PERSO Pro", next_action="금요일 재연락",
+    ))
+    session.add(CustomerInteraction(
+        contact_id=contact_id, channel="meeting", direction="outgoing",
+        subject="킥오프 미팅", summary="온보딩 일정 확정",
+        happened_at=datetime(2026, 7, 1, tzinfo=timezone.utc),
+    ))
+    session.add(ContractRecord(contact_id=contact_id, status="active", plan="PERSO Pro", currency="KRW"))
+    session.commit()
+    msg_id = msg.id
+    session.close()
+
+    r = _client().get(f"/messages/{msg_id}")
+    assert r.status_code == 200
+    assert "고객 히스토리" in r.text          # the embedded panel
+    assert "서비스 이용중" in r.text          # customer_state label
+    assert "금요일 재연락" in r.text          # next action
+    assert "킥오프 미팅" in r.text            # interaction touchpoint
+    assert f"/customers/{contact_id}" in r.text  # link to full editable view
+
+
 # ---------- Message actions (send/reject/edit) ----------
 
 

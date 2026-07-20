@@ -255,6 +255,63 @@
     </div>
     {% endif %}
 
+    {% if customer and customer.has_any %}
+    <div class="card">
+      <div class="section-header" style="margin-bottom:12px">
+        <div class="section-header__l">
+          <span class="section-header__icon">{{ icon("user", 16) }}</span>
+          <div><div class="section-header__title">고객 히스토리</div>
+            <div class="section-header__sub">CRM 상태 · 계약 · 접점 기록</div></div>
+        </div>
+      </div>
+
+      {% if customer.profile %}
+      {% set p = customer.profile %}
+      {% set state_l = {'negotiation':'Negotiation','service':'서비스 이용중','pool':'기존 고객 Pool','lost':'Lost'} %}
+      {% set stage_l = {'new':'New','meeting_link_sent':'Meeting link sent','negotiation':'Negotiation','contracted':'Contracted','onboarding':'Onboarding','active':'Active','closed_lost':'Closed Lost'} %}
+      <dl class="info-list" style="margin-bottom:12px">
+        <div class="info-row"><dt>고객 구분</dt><dd>{{ state_l.get(p.customer_state, p.customer_state) }}</dd></div>
+        <div class="info-row"><dt>파이프라인</dt><dd>{{ stage_l.get(p.pipeline_stage, p.pipeline_stage) }}</dd></div>
+        {% if p.lead_temperature %}<div class="info-row"><dt>리드 온도</dt><dd>{{ p.lead_temperature }}</dd></div>{% endif %}
+        {% if p.current_plan %}<div class="info-row"><dt>현재 플랜</dt><dd>{{ p.current_plan }}</dd></div>{% endif %}
+      </dl>
+      {% if p.next_action %}
+      <div class="msg-body--inset" style="margin-bottom:12px">
+        <div class="ko-block__label" style="color:var(--accent)">다음 액션{% if p.next_action_at %} · {{ p.next_action_at | kst }}{% endif %}</div>
+        <div class="t-sm" style="line-height:1.6;white-space:pre-line">{{ p.next_action }}</div>
+      </div>
+      {% endif %}
+      {% endif %}
+
+      {% if customer.contract %}
+      {% set c = customer.contract %}
+      <dl class="info-list" style="margin-bottom:12px">
+        <div class="info-row"><dt>계약</dt><dd>{{ c.plan or '-' }} <span class="tag">{{ c.status }}</span></dd></div>
+        {% if c.amount %}<div class="info-row"><dt>금액</dt><dd class="tnum">{{ c.amount }} {{ c.currency }}</dd></div>{% endif %}
+        {% if c.expires_at %}<div class="info-row"><dt>만료·갱신</dt><dd class="tnum">{{ c.expires_at | kst }}</dd></div>{% endif %}
+      </dl>
+      {% endif %}
+
+      {% if customer.interactions %}
+      <div class="ko-block__label" style="margin-bottom:6px">접점 기록 (최근 {{ customer.interactions|length }}건)</div>
+      <div class="history-list">
+        {% for it in customer.interactions %}
+        <article class="history-item">
+          <div class="history-item__rail"><span></span></div>
+          <div>
+            <div class="row wrap"><span class="tag">{{ it.channel }}</span><span class="tag">{{ it.direction }}</span><time class="t-xs t-subtle tnum">{{ it.happened_at | kst }}</time></div>
+            {% if it.subject %}<strong class="history-item__title">{{ it.subject }}</strong>{% endif %}
+            <div class="history-item__body">{{ it.summary[:160] }}{% if it.summary|length > 160 %}…{% endif %}</div>
+          </div>
+        </article>
+        {% endfor %}
+      </div>
+      {% endif %}
+
+      <a href="{{ customer.detail_url }}" class="btn btn--subtle btn--sm" style="width:100%;justify-content:center;margin-top:10px">{{ icon("chevron", 14) }} 전체 고객 히스토리 · 편집</a>
+    </div>
+    {% endif %}
+
     <div class="card">
       <div class="section-label" style="margin-bottom:12px">티켓 / 대화</div>
       <dl class="info-list">
