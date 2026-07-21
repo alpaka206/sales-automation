@@ -141,12 +141,9 @@ class Settings(BaseSettings):
     TIMEZONE: str = "Asia/Seoul"
 
     # ----- Google Sheets (inbound mirror) -----
-    # This workbook is the fixed sales-team format. It is enabled automatically
-    # when either Sheets-specific or the existing Google service-account JSON is
-    # available; no extra feature flags are required.
-    GOOGLE_SHEETS_CREDENTIALS_JSON: str = ""
-    # User OAuth is the fallback when Workspace policy blocks sharing the file
-    # with a service account. These may reuse the web-login OAuth client.
+    # This workbook is the fixed sales-team format. Sync is user-OAuth-only —
+    # Workspace policy blocks sharing the file with a service account. These may
+    # reuse the web-login OAuth client.
     GOOGLE_SHEETS_OAUTH_CLIENT_ID: str = ""
     GOOGLE_SHEETS_OAUTH_CLIENT_SECRET: str = ""
     # Dedicated encryption key for delegated refresh tokens. Do not reuse the
@@ -208,9 +205,8 @@ class Settings(BaseSettings):
     # Only verified emails on this domain may sign in (e.g. estsoft.com Google Workspace).
     ALLOWED_EMAIL_DOMAIN: str = "estsoft.com"
     # Bootstrap admins (comma-separated emails): auto-approved with role=admin on first login.
+    # Everyone else signs in as pending and is approved by an admin inside the UI.
     WEB_UI_ADMIN_EMAILS: str = ""
-    # Static allowlist (comma-separated emails) approved without an admin action.
-    WEB_UI_ALLOWED_EMAILS: str = ""
     # HMAC key for signing the session cookie. REQUIRED when AUTH_MODE=google_oauth.
     SESSION_SECRET: str = ""
 

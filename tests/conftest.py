@@ -48,8 +48,11 @@ os.environ["INBOUND_AUTO_ACK_ENABLED"] = "false"
 os.environ["SMTP_USERNAME"] = ""
 os.environ["SMTP_PASSWORD"] = ""
 os.environ["REPORT_EMAIL_TO"] = ""
+# A developer's real PUBLIC_BASE_URL (e.g. the Render URL) must not leak in — it is
+# the same-origin baseline for the CSRF check, so a non-empty value 403s the web
+# POST tests (recovery, customer ops) whose Origin is http://testserver.
+os.environ["PUBLIC_BASE_URL"] = ""
 os.environ["GOOGLE_CREDENTIALS_JSON"] = ""
-os.environ["GOOGLE_SHEETS_CREDENTIALS_JSON"] = ""
 
 from unittest.mock import MagicMock  # noqa: E402
 

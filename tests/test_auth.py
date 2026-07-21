@@ -78,19 +78,17 @@ def test_domain_gate():
         assert not auth._domain_ok("estsoft.com@gmail.com")
 
 
-def test_allowlist_admin_and_member_and_pending():
+def test_admin_autoapproved_others_pending_until_approved():
     factory = _mem_factory()
     with patch.object(auth, "SessionLocal", factory), \
-         patch.object(settings, "WEB_UI_ADMIN_EMAILS", "boss@estsoft.com"), \
-         patch.object(settings, "WEB_UI_ALLOWED_EMAILS", "member@estsoft.com"):
+         patch.object(settings, "WEB_UI_ADMIN_EMAILS", "boss@estsoft.com"):
         admin, ok = auth._login_or_pending("boss@estsoft.com", "Boss", None)
         assert ok and admin["role"] == "admin"
 
-        member, ok = auth._login_or_pending("member@estsoft.com", "Mem", None)
-        assert ok and member["role"] == "operator"
-
+        # Non-admins are pending until an admin approves them inside the UI.
         newcomer, ok = auth._login_or_pending("new@estsoft.com", "New", None)
-        assert not ok  # pending approval until an admin approves
+        assert not ok
+        assert newcomer["role"] == "operator"
 
         # An admin approval flips the gate.
         session = factory()

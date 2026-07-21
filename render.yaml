@@ -77,17 +77,12 @@ services:
         sync: false
       - key: ALLOWED_EMAIL_DOMAIN      # only verified Google accounts on this domain may sign in
         value: estsoft.com
-      - key: WEB_UI_ADMIN_EMAILS       # comma-separated bootstrap admins (auto-approved)
-        sync: false
-      - key: WEB_UI_ALLOWED_EMAILS     # comma-separated pre-approved emails (no admin action needed)
+      - key: WEB_UI_ADMIN_EMAILS       # comma-separated bootstrap admins (auto-approved); others approved in-app
         sync: false
       - key: SESSION_SECRET            # random long string; required when AUTH_MODE=google_oauth
         generateValue: true
 
-      # ----- Optional: separate credential for Sheets -----
-      # If omitted, GOOGLE_CREDENTIALS_JSON is reused automatically.
-      - key: GOOGLE_SHEETS_CREDENTIALS_JSON
-        sync: false
+      # ----- Google Sheets: user-OAuth only (service-account sharing is policy-blocked) -----
       - key: GOOGLE_SHEETS_OAUTH_CLIENT_ID
         sync: false
       - key: GOOGLE_SHEETS_OAUTH_CLIENT_SECRET

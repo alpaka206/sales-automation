@@ -502,9 +502,9 @@ class User(Base):
     """Operator who can access the web UI (Google OAuth, allowlisted).
 
     Identity = verified Google email on ALLOWED_EMAIL_DOMAIN. ``approved`` is the
-    allowlist gate (bootstrap admins + WEB_UI_ALLOWED_EMAILS are auto-approved on first
-    login; others land here as approved=False until an admin approves them). ``name`` is
-    used to auto-attribute knowledge edits and message approvals.
+    access gate (bootstrap admins in WEB_UI_ADMIN_EMAILS are auto-approved on first
+    login; everyone else lands here as approved=False until an admin approves them).
+    ``name`` is used to auto-attribute knowledge edits and message approvals.
     """
 
     __tablename__ = "users"

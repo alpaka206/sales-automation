@@ -7,8 +7,9 @@ stdlib-HMAC-signed cookie (no Authlib / itsdangerous / server-side session store
 Gate (enforced in :func:`oauth_callback`):
   1. Google ID token signature/aud/exp verified by Google's library.
   2. ``email_verified`` is true AND the email is on ``ALLOWED_EMAIL_DOMAIN``.
-  3. The email is allowlisted — a bootstrap admin, in ``WEB_UI_ALLOWED_EMAILS``, or an
-     existing ``users`` row with ``approved=True``. Others get a "pending approval" page.
+  3. The email is approved — a bootstrap admin (``WEB_UI_ADMIN_EMAILS``) or an existing
+     ``users`` row with ``approved=True``. Everyone else lands on a "pending approval"
+     page until an admin approves them in the UI.
 
 The signed session cookie carries {email, name, role, exp}; ``current_user`` also
 checks the current database row so revocation and role changes take effect immediately.
@@ -182,10 +183,6 @@ def _admin_emails() -> set[str]:
     return _email_set(settings.WEB_UI_ADMIN_EMAILS)
 
 
-def _allowed_emails() -> set[str]:
-    return _email_set(settings.WEB_UI_ALLOWED_EMAILS)
-
-
 def _domain_ok(email: str) -> bool:
     dom = (settings.ALLOWED_EMAIL_DOMAIN or "").lower().strip()
     return bool(dom) and email.lower().endswith("@" + dom)
@@ -195,11 +192,10 @@ def _login_or_pending(email: str, name: str | None, picture: str | None) -> tupl
     """Upsert the user on login and return ({email,name,role}, approved)."""
     email = email.lower()
     is_admin = email in _admin_emails()
-    pre_allowed = is_admin or email in _allowed_emails()
     with SessionLocal() as session:
         user = session.get(User, email)
         if not user:
-            user = User(email=email, approved=pre_allowed, role="admin" if is_admin else "operator")
+            user = User(email=email, approved=is_admin, role="admin" if is_admin else "operator")
             session.add(user)
         if name:
             user.name = name
@@ -207,8 +203,6 @@ def _login_or_pending(email: str, name: str | None, picture: str | None) -> tupl
             user.picture = picture
         if is_admin:
             user.role = "admin"
-            user.approved = True
-        elif pre_allowed:
             user.approved = True
         user.last_login_at = datetime.now(timezone.utc)
         session.commit()

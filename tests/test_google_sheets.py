@@ -8,8 +8,14 @@ from src.integrations import google_sheets as gs
 
 
 def _configure(monkeypatch):
-    monkeypatch.setattr(gs.settings, "GOOGLE_SHEETS_CREDENTIALS_JSON", '{"type":"service_account"}')
-    monkeypatch.setattr(gs.settings, "GOOGLE_CREDENTIALS_JSON", "")
+    from src.integrations import google_oauth
+
+    # Sheets sync is user-OAuth-only; simulate a connected Google account.
+    monkeypatch.setattr(
+        google_oauth,
+        "load_grant",
+        lambda: ({"access_token": "x", "refresh_token": "y", "scopes": []}, "sales@example.com"),
+    )
     monkeypatch.setattr(gs.settings, "GOOGLE_SHEETS_SPREADSHEET_ID", "SHEET123")
     monkeypatch.setattr(gs.settings, "GOOGLE_SHEETS_INBOUND_TAB", "Inbound DB")
     monkeypatch.setattr(gs.settings, "GOOGLE_SHEETS_ORDERS_TAB", "수주 DB")
@@ -57,18 +63,17 @@ class _FakeService:
         return self._v
 
 
-def test_existing_google_credential_enables_sync(monkeypatch):
+def test_user_oauth_grant_enables_sync(monkeypatch):
     _configure(monkeypatch)
-    monkeypatch.setattr(gs.settings, "GOOGLE_SHEETS_CREDENTIALS_JSON", "")
-    monkeypatch.setattr(gs.settings, "GOOGLE_CREDENTIALS_JSON", '{"type":"service_account"}')
     assert gs.is_configured() is True
     assert gs.writes_enabled() is True
 
 
-def test_record_inbound_noop_without_credentials(monkeypatch):
+def test_record_inbound_noop_without_connection(monkeypatch):
+    from src.integrations import google_oauth
+
     _configure(monkeypatch)
-    monkeypatch.setattr(gs.settings, "GOOGLE_SHEETS_CREDENTIALS_JSON", "")
-    monkeypatch.setattr(gs.settings, "GOOGLE_CREDENTIALS_JSON", "")
+    monkeypatch.setattr(google_oauth, "load_grant", lambda: None)  # not connected
     assert gs.record_inbound({"email": "a@b.com"}) is None
 
 

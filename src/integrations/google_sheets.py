@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import logging
 import threading
 from dataclasses import dataclass
@@ -84,19 +83,8 @@ class GoogleSheetsError(RuntimeError):
     pass
 
 
-def _credential_json() -> str:
-    """Prefer a Sheets credential, otherwise reuse the existing Google account."""
-    dedicated = settings.GOOGLE_SHEETS_CREDENTIALS_JSON.strip()
-    if dedicated:
-        try:
-            if isinstance(json.loads(dedicated), dict):
-                return dedicated
-        except json.JSONDecodeError:
-            logger.warning("Invalid Sheets-specific credential; using GOOGLE_CREDENTIALS_JSON.")
-    return settings.GOOGLE_CREDENTIALS_JSON.strip()
-
-
 def is_configured() -> bool:
+    """Sheets sync is user-OAuth-only (org policy blocks service-account sharing)."""
     from .google_oauth import load_grant
 
     try:
@@ -104,10 +92,7 @@ def is_configured() -> bool:
     except Exception:
         logger.warning("Stored Google Sheets OAuth grant is unavailable.", exc_info=True)
         has_user_grant = False
-    return bool(
-        settings.GOOGLE_SHEETS_SPREADSHEET_ID.strip()
-        and (has_user_grant or _credential_json())
-    )
+    return bool(settings.GOOGLE_SHEETS_SPREADSHEET_ID.strip() and has_user_grant)
 
 
 def writes_enabled() -> bool:
@@ -124,7 +109,6 @@ def writes_enabled() -> bool:
 def _build_service():
     try:
         from google.oauth2 import credentials as user_credentials
-        from google.oauth2 import service_account
         from googleapiclient.discovery import build
     except ImportError as exc:  # pragma: no cover
         raise GoogleSheetsError("Install google-api-python-client and google-auth.") from exc
@@ -132,30 +116,23 @@ def _build_service():
     from .google_oauth import TOKEN_URL, client_id, client_secret, load_grant
 
     grant = load_grant()
-    if grant is not None:
-        payload, _account_email = grant
-        expiry = datetime.fromtimestamp(
-            int(payload.get("expires_at") or 0), tz=timezone.utc
-        ).replace(tzinfo=None)
-        credentials = user_credentials.Credentials(
-            token=payload.get("access_token"),
-            refresh_token=payload.get("refresh_token"),
-            token_uri=TOKEN_URL,
-            client_id=client_id(),
-            client_secret=client_secret(),
-            scopes=payload.get("scopes") or _SCOPES,
-            expiry=expiry,
+    if grant is None:
+        raise GoogleSheetsError(
+            "Google Sheets is not connected — complete the OAuth sign-in first."
         )
-        return build("sheets", "v4", credentials=credentials, cache_discovery=False)
-
-    raw = _credential_json()
-    if not raw:
-        raise GoogleSheetsError("Google service-account JSON is empty.")
-    try:
-        info = json.loads(raw)
-    except json.JSONDecodeError as exc:
-        raise GoogleSheetsError(f"Google credential is not valid JSON: {exc}") from exc
-    credentials = service_account.Credentials.from_service_account_info(info, scopes=_SCOPES)
+    payload, _account_email = grant
+    expiry = datetime.fromtimestamp(
+        int(payload.get("expires_at") or 0), tz=timezone.utc
+    ).replace(tzinfo=None)
+    credentials = user_credentials.Credentials(
+        token=payload.get("access_token"),
+        refresh_token=payload.get("refresh_token"),
+        token_uri=TOKEN_URL,
+        client_id=client_id(),
+        client_secret=client_secret(),
+        scopes=payload.get("scopes") or _SCOPES,
+        expiry=expiry,
+    )
     return build("sheets", "v4", credentials=credentials, cache_discovery=False)
 
 
@@ -555,7 +532,7 @@ def connection_summary() -> dict[str, object]:
         "inbound_tab": settings.GOOGLE_SHEETS_INBOUND_TAB,
         "quality_tab": settings.GOOGLE_SHEETS_QUALITY_TAB,
         "orders_tab": settings.GOOGLE_SHEETS_ORDERS_TAB,
-        "auth_mode": "user_oauth" if grant else ("service_account" if _credential_json() else "none"),
+        "auth_mode": "user_oauth" if grant else "none",
         "account_email": grant[1] if grant else None,
         "oauth_client_configured": client_is_configured(),
     }
