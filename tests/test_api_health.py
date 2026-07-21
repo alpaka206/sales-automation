@@ -66,7 +66,7 @@ def test_webhook_inbound(mock_handle, mock_hs_cls, client: TestClient, monkeypat
     # Ticket → primary contact resolution (webhook needs a contact to reply to).
     mock_hs_cls.return_value.get_ticket_primary_contact_sync.return_value = "C123"
     r = client.post(
-        "/webhook/hubspot/inbound",
+        "/webhooks/hubspot",
         json={"subscriptionType": "ticket.creation", "objectId": 123, "occurredAt": 1684000000000},
         headers={"X-Internal-Token": settings.INTERNAL_API_TOKEN},
     )
@@ -82,7 +82,7 @@ def test_webhook_rejects_unsigned_when_required(client: TestClient, monkeypatch)
     monkeypatch.setattr(settings, "HUBSPOT_WEBHOOK_REQUIRE_SIGNATURE", True)
     monkeypatch.setattr(settings, "HUBSPOT_WEBHOOK_SECRET", "")
     r = client.post(
-        "/webhook/hubspot/inbound",
+        "/webhooks/hubspot",
         json={"event_type": "contact.creation", "object_id": "123"},
     )
     assert r.status_code == 503

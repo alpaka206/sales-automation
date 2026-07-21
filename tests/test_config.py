@@ -21,6 +21,15 @@ def test_defaults() -> None:
     assert s.INTERNAL_API_TOKEN == ""
 
 
+def test_hubspot_token_accepts_both_env_names() -> None:
+    # New naming (HUBSPOT_ACCESS_TOKEN) and legacy (HUBSPOT_PRIVATE_APP_TOKEN)
+    # both populate the same field.
+    with patch.dict(os.environ, {"HUBSPOT_ACCESS_TOKEN": "pat-new"}, clear=True):
+        assert Settings(_env_file=None).HUBSPOT_PRIVATE_APP_TOKEN == "pat-new"
+    with patch.dict(os.environ, {"HUBSPOT_PRIVATE_APP_TOKEN": "pat-legacy"}, clear=True):
+        assert Settings(_env_file=None).HUBSPOT_PRIVATE_APP_TOKEN == "pat-legacy"
+
+
 def test_bool_from_env() -> None:
     env = {"INBOUND_POLL_ENABLED": "true", "SEND_WORKER_ENABLED": "1"}
     with patch.dict(os.environ, env, clear=False):

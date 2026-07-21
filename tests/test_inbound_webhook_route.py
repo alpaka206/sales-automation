@@ -72,7 +72,7 @@ def test_ticket_creation_payload(mock_handle, client: TestClient) -> None:
         }
     ]
     r = client.post(
-        "/webhook/hubspot/inbound",
+        "/webhooks/hubspot",
         json=payload,
         headers=_auth_headers(),
     )
@@ -96,7 +96,7 @@ def test_multi_event_payload(mock_handle, client: TestClient) -> None:
         {"subscriptionType": "deal.creation", "objectId": 905, "occurredAt": 1684000004000},
     ]
     r = client.post(
-        "/webhook/hubspot/inbound",
+        "/webhooks/hubspot",
         json=payload,
         headers=_auth_headers(),
     )
@@ -118,7 +118,7 @@ def test_single_object_not_array(mock_handle, client: TestClient) -> None:
         "occurredAt": 1684000005000,
     }
     r = client.post(
-        "/webhook/hubspot/inbound",
+        "/webhooks/hubspot",
         json=payload,
         headers=_auth_headers(),
     )
@@ -133,7 +133,7 @@ def test_single_object_not_array(mock_handle, client: TestClient) -> None:
 def test_ignored_subscription_type(client: TestClient) -> None:
     payload = [{"subscriptionType": "deal.creation", "objectId": 800, "occurredAt": 1684000010000}]
     r = client.post(
-        "/webhook/hubspot/inbound",
+        "/webhooks/hubspot",
         json=payload,
         headers=_auth_headers(),
     )
@@ -162,7 +162,7 @@ def test_ticket_stage_change_to_new_is_queued_once(client: TestClient, monkeypat
         },
     ]
 
-    response = client.post("/webhook/hubspot/inbound", json=payload, headers=_auth_headers())
+    response = client.post("/webhooks/hubspot", json=payload, headers=_auth_headers())
 
     assert response.status_code == 200
     assert [item["status"] for item in response.json()["results"]] == ["queued", "duplicate"]
@@ -174,7 +174,7 @@ def test_ticket_stage_change_to_new_is_queued_once(client: TestClient, monkeypat
 def test_ticket_stage_change_away_from_new_is_ignored(client: TestClient, monkeypatch) -> None:
     monkeypatch.setattr(settings, "HUBSPOT_TICKET_STAGE_NEW", "new-stage")
     response = client.post(
-        "/webhook/hubspot/inbound",
+        "/webhooks/hubspot",
         json=[{
             "subscriptionType": "ticket.propertyChange",
             "objectId": 812,
@@ -199,7 +199,7 @@ def test_duplicate_event_is_acknowledged_without_processing(mock_handle, client:
         {"subscriptionType": "ticket.creation", "objectId": 701, "occurredAt": 1684000021000},
     ]
     r = client.post(
-        "/webhook/hubspot/inbound",
+        "/webhooks/hubspot",
         json=payload,
         headers=_auth_headers(),
     )
@@ -212,7 +212,7 @@ def test_duplicate_event_is_acknowledged_without_processing(mock_handle, client:
 
 def test_invalid_json_returns_400(client: TestClient) -> None:
     r = client.post(
-        "/webhook/hubspot/inbound",
+        "/webhooks/hubspot",
         content=b"not-json",
         headers={**_auth_headers(), "Content-Type": "application/json"},
     )
@@ -221,7 +221,7 @@ def test_invalid_json_returns_400(client: TestClient) -> None:
 
 def test_body_size_is_capped_before_parsing(client: TestClient) -> None:
     r = client.post(
-        "/webhook/hubspot/inbound",
+        "/webhooks/hubspot",
         content=b"x" * (MAX_WEBHOOK_BODY_BYTES + 1),
         headers={**_auth_headers(), "Content-Type": "application/json"},
     )
@@ -233,7 +233,7 @@ def test_batch_size_is_capped(client: TestClient) -> None:
         {"subscriptionType": "ticket.creation", "objectId": index}
         for index in range(MAX_WEBHOOK_EVENTS + 1)
     ]
-    r = client.post("/webhook/hubspot/inbound", json=payload, headers=_auth_headers())
+    r = client.post("/webhooks/hubspot", json=payload, headers=_auth_headers())
     assert r.status_code == 413
 
 
@@ -245,13 +245,13 @@ def test_valid_signature_accepted(mock_handle, client: TestClient) -> None:
     secret = "test-webhook-secret-123"
     payload = [{"subscriptionType": "ticket.creation", "objectId": 600, "occurredAt": 1684000030000}]
     body = json.dumps(payload).encode()
-    url = "https://testserver/webhook/hubspot/inbound"
+    url = "https://testserver/webhooks/hubspot"
     sig_headers = _sign_request(secret, body, url)
 
     with patch.object(settings, "HUBSPOT_WEBHOOK_SECRET", secret), \
          patch.object(settings, "HUBSPOT_WEBHOOK_REQUIRE_SIGNATURE", True):
         r = client.post(
-            "/webhook/hubspot/inbound",
+            "/webhooks/hubspot",
             content=body,
             headers={"Content-Type": "application/json", **sig_headers},
         )
@@ -267,7 +267,7 @@ def test_invalid_signature_rejected(client: TestClient) -> None:
     with patch.object(settings, "HUBSPOT_WEBHOOK_SECRET", secret), \
          patch.object(settings, "HUBSPOT_WEBHOOK_REQUIRE_SIGNATURE", True):
         r = client.post(
-            "/webhook/hubspot/inbound",
+            "/webhooks/hubspot",
             content=body,
             headers={
                 "Content-Type": "application/json",
@@ -285,7 +285,7 @@ def test_missing_signature_headers_rejected(client: TestClient) -> None:
     with patch.object(settings, "HUBSPOT_WEBHOOK_SECRET", secret), \
          patch.object(settings, "HUBSPOT_WEBHOOK_REQUIRE_SIGNATURE", True):
         r = client.post(
-            "/webhook/hubspot/inbound",
+            "/webhooks/hubspot",
             json=payload,
             headers={},
         )
@@ -296,14 +296,14 @@ def test_expired_timestamp_rejected(client: TestClient) -> None:
     secret = "test-webhook-secret-exp"
     payload = [{"subscriptionType": "ticket.creation", "objectId": 603}]
     body = json.dumps(payload).encode()
-    url = "https://testserver/webhook/hubspot/inbound"
+    url = "https://testserver/webhooks/hubspot"
     old_ts = int(time.time() * 1000) - 400_000  # 400 seconds ago > 300s max
     sig_headers = _sign_request(secret, body, url, ts_ms=old_ts)
 
     with patch.object(settings, "HUBSPOT_WEBHOOK_SECRET", secret), \
          patch.object(settings, "HUBSPOT_WEBHOOK_REQUIRE_SIGNATURE", True):
         r = client.post(
-            "/webhook/hubspot/inbound",
+            "/webhooks/hubspot",
             content=body,
             headers={"Content-Type": "application/json", **sig_headers},
         )
@@ -314,7 +314,7 @@ def test_expired_timestamp_rejected(client: TestClient) -> None:
 def test_no_secret_configured_skips_verification(mock_handle, client: TestClient) -> None:
     """When HUBSPOT_WEBHOOK_SECRET is empty, signature verification is skipped (uses token auth)."""
     r = client.post(
-        "/webhook/hubspot/inbound",
+        "/webhooks/hubspot",
         json=[{"subscriptionType": "ticket.creation", "objectId": 604}],
         headers=_auth_headers(),
     )

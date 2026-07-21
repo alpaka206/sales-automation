@@ -79,7 +79,7 @@ echo.
 echo   data\last_tunnel_url.txt 에 저장 완료.
 echo.
 echo   HubSpot 웹훅 URL:
-echo     !TUNNEL_URL!/webhook/hubspot/inbound
+echo     !TUNNEL_URL!/webhooks/hubspot
 echo.
 echo   터널을 종료하려면 Ctrl+C 또는 이 창을 닫으세요.
 echo.

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import Field
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -37,8 +37,12 @@ class Settings(BaseSettings):
         return {"flash": self.GEMINI_MODEL, "pro": self.GEMINI_MODEL_PRO}
 
     # ----- HubSpot -----
-    HUBSPOT_PRIVATE_APP_TOKEN: str = ""
-    HUBSPOT_INBOUND_PIPELINE_ID: str = ""
+    # Private App access token (pat-na1-...). Accepts either env name:
+    # HUBSPOT_ACCESS_TOKEN (new naming) or HUBSPOT_PRIVATE_APP_TOKEN (legacy).
+    HUBSPOT_PRIVATE_APP_TOKEN: str = Field(
+        default="",
+        validation_alias=AliasChoices("HUBSPOT_ACCESS_TOKEN", "HUBSPOT_PRIVATE_APP_TOKEN"),
+    )
     HUBSPOT_OWNER_ID: str = ""
     HUBSPOT_WEBHOOK_SECRET: str = ""
     # Only tickets in this HubSpot pipeline stage are treated as new inbound

@@ -191,7 +191,7 @@ async def auth_middleware(request: Request, call_next):
     # HubSpot webhook signature is verified inside the route handler — the middleware
     # must let the request through so the route can run the verifier. The fail-closed
     # behavior (reject unsigned requests) is enforced inside _verify_hubspot_signature.
-    if request.url.path == "/webhook/hubspot/inbound":
+    if request.url.path in {"/webhooks/hubspot", "/webhook/hubspot/inbound"}:
         return await call_next(request)
 
     # Web UI routes are allowed from localhost without API token.

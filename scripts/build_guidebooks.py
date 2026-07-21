@@ -929,7 +929,7 @@ def build_developer_guide() -> Path:
         [
             "Private App에 연락처·티켓·활동 읽기/쓰기 권한을 최소 범위로 부여한다.",
             "Webhook 앱에 ticket.creation과 ticket.propertyChange(hs_pipeline_stage)를 등록한다.",
-            "Callback은 https://<PUBLIC_BASE_URL>/webhook/hubspot/inbound 로 설정한다.",
+            "Callback은 https://<PUBLIC_BASE_URL>/webhooks/hubspot 로 설정한다.",
             "HUBSPOT_WEBHOOK_SECRET과 signature required=true를 운영에서 고정한다.",
             "실제 pipeline의 New, Meeting link sent, Negotiation, Contracted, Onboarding, Active, Closed Lost 내부 ID를 환경값에 매핑한다.",
             "문의 본문·연락처 association이 있는 내부 테스트 티켓을 New로 이동해 end-to-end를 검증한다.",
@@ -1188,7 +1188,7 @@ def build_developer_guide() -> Path:
         [
             ("/healthz", "DB readiness"),
             ("/internal/healthcheck", "토큰 보호 live integration 점검"),
-            ("/webhook/hubspot/inbound", "HubSpot 공개 webhook"),
+            ("/webhooks/hubspot", "HubSpot 공개 webhook"),
             ("/messages", "답변 검토"),
             ("/customers", "고객·계약·통합 이력"),
             ("/operations", "문의/국가/후속 대상 인사이트"),

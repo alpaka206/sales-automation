@@ -119,6 +119,10 @@ def _public_request_uri(request: Request, headers: dict[str, str]) -> str:
     return f"{proto}://{public_host}{request.url.path}{query}"
 
 
+# Canonical path matches the HubSpot Private App's webhook Target URL. The old
+# path is kept as a legacy alias so any in-flight delivery during a cutover is not
+# lost (the signature is computed over the actual request path, so both verify).
+@router.post("/webhooks/hubspot")
 @router.post("/webhook/hubspot/inbound")
 async def webhook_hubspot_inbound(request: Request) -> dict:
     """Verify and durably enqueue events, then acknowledge without external calls."""
