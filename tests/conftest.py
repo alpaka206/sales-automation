@@ -36,14 +36,18 @@ os.environ.setdefault("SEND_WORKER_ENABLED", "false")
 # guard those fixtures look exactly like production notifications.
 os.environ.setdefault("SLACK_ENABLED", "false")
 os.environ.setdefault("APPROVAL_CHANNEL", "none")
+# Run tests as if live so sender/HubSpot tests exercise the real code path against
+# their mocked transports (creds are neutralized below, so no real I/O happens).
+# The pre-launch safe-mode guard itself is covered by tests/test_safe_mode.py,
+# which flips this off per-test via monkeypatch.
+os.environ.setdefault("LIVE_EXTERNAL_WRITES", "true")
 # Hard stop for every external write path. Tests that cover a sender enable it
 # explicitly and mock the transport; a developer's real .env must never receive
-# an email, WhatsApp, report, or Sheets write during `pytest`.
+# an email, report, or Sheets write during `pytest`.
 os.environ["INBOUND_AUTO_ACK_ENABLED"] = "false"
 os.environ["SMTP_USERNAME"] = ""
 os.environ["SMTP_PASSWORD"] = ""
 os.environ["REPORT_EMAIL_TO"] = ""
-os.environ["WHATSAPP_ENABLED"] = "false"
 os.environ["GOOGLE_CREDENTIALS_JSON"] = ""
 os.environ["GOOGLE_SHEETS_CREDENTIALS_JSON"] = ""
 

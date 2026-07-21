@@ -16,7 +16,6 @@ def test_contact_insert_and_defaults(db_session: Session) -> None:
     db_session.refresh(c)
 
     assert c.id is not None
-    assert c.whatsapp_opt_in is False
     assert c.created_at is not None
     assert c.updated_at is not None
 

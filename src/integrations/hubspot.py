@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 import httpx
 
 from ..common.config import settings
+from ..common.safe_mode import guard_external_write
 from .hubspot_models import ContactDTO, DealDTO, EngagementDTO, TicketDTO
 
 logger = logging.getLogger(__name__)
@@ -127,13 +128,7 @@ def _contact_properties() -> str:
         "country",
         "lifecyclestage",
     ]
-    if settings.HUBSPOT_WHATSAPP_OPT_IN_PROPERTY:
-        names.append(settings.HUBSPOT_WHATSAPP_OPT_IN_PROPERTY)
     return ",".join(names)
-
-
-def _as_bool(value: object) -> bool:
-    return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
 
 
 class HubSpotClient:
@@ -185,15 +180,11 @@ class HubSpotClient:
             phone=props.get("phone"),
             country=props.get("country"),
             lifecyclestage=props.get("lifecyclestage"),
-            whatsapp_opt_in=_as_bool(
-                props.get(settings.HUBSPOT_WHATSAPP_OPT_IN_PROPERTY)
-                if settings.HUBSPOT_WHATSAPP_OPT_IN_PROPERTY
-                else None
-            ),
         )
 
     async def update_contact(self, contact_id: str, properties: dict) -> None:
         """Update a contact's properties."""
+        guard_external_write("hubspot:update_contact")
         r = await self._retry(
             "PATCH",
             f"/crm/v3/objects/contacts/{contact_id}",
@@ -222,6 +213,7 @@ class HubSpotClient:
         sent_at: datetime | None = None,
     ) -> str:
         """Log an email engagement on the contact's timeline. Returns engagement ID."""
+        guard_external_write("hubspot:create_email_engagement")
         http = await self._http()
         ts = int((sent_at or datetime.now(timezone.utc)).timestamp() * 1000)
         from .email_html import to_html_email
@@ -252,6 +244,7 @@ class HubSpotClient:
 
     def update_inbound_status_sync(self, contact_id: str, status: str) -> None:
         """Synchronous version of update_inbound_status."""
+        guard_external_write("hubspot:update_inbound_status")
         headers = {"Authorization": f"Bearer {self.token}"}
         with httpx.Client(headers=headers, timeout=30.0) as client:
             r = client.patch(
@@ -293,11 +286,6 @@ class HubSpotClient:
             phone=props.get("phone"),
             country=props.get("country"),
             lifecyclestage=props.get("lifecyclestage"),
-            whatsapp_opt_in=_as_bool(
-                props.get(settings.HUBSPOT_WHATSAPP_OPT_IN_PROPERTY)
-                if settings.HUBSPOT_WHATSAPP_OPT_IN_PROPERTY
-                else None
-            ),
         )
 
     def get_recent_emails_sync(self, contact_id: str, limit: int = 5) -> list[EngagementDTO]:
@@ -508,6 +496,7 @@ class HubSpotClient:
 
     def update_ticket_stage_sync(self, ticket_id: str, stage_id: str) -> None:
         """Move a ticket to a different pipeline stage. Raises on HTTP error."""
+        guard_external_write("hubspot:update_ticket_stage")
         headers = {"Authorization": f"Bearer {self.token}"}
         with httpx.Client(headers=headers, timeout=30.0) as client:
             r = client.patch(

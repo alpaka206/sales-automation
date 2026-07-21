@@ -11,7 +11,6 @@ HubSpot 신규 문의를 받아 접수 확인 메일을 즉시 보내고, Gemini
 5. 초안이 준비된 시점에만 Slack 알림을 보냅니다.
 6. 운영자가 웹 UI에서 수정·번역·서명 선택 후 발송합니다.
 7. SMTP 발송 성공 후 HubSpot 이메일 활동을 기록하고 티켓 단계를 이동합니다.
-8. 명시적 동의와 전화번호가 있는 고객은 WhatsApp 템플릿도 보조 채널로 시도합니다.
 
 현재 개발자 HubSpot 계정에는 `Meeting link sent` 단계가 없어 임시로 `New(1) → Waiting on contact(2)`를 사용합니다. 실제 계정 연결 시 `.env`의 단계 ID만 바꾸면 됩니다.
 
@@ -22,7 +21,7 @@ HubSpot 신규 문의를 받아 접수 확인 메일을 즉시 보내고, Gemini
 - 동일 인물·동일 회사 도메인 히스토리
 - Negotiation / 서비스 이용 고객 상태와 파이프라인
 - HubSpot 이메일·Deal·메모 수동 동기화
-- 미팅·카카오·WhatsApp·전화·계약 등 수동 히스토리 입력
+- 미팅·카카오·전화·계약 등 수동 히스토리 입력
 - 계약 금액·결제 예정일·입금일·만료일·언어쌍·Invoice·결제 링크 관리
 - 답장 누락, 장기 미접촉, 갱신 임박, 플랜 업셀 후보 인사이트
 - 견적 계산기와 Flex 품의용 계약값 복사
@@ -50,7 +49,7 @@ scripts\run.bat
 주요 폴더:
 
 - `src/agents`: 문의 처리와 발송 워커
-- `src/integrations`: HubSpot, SMTP, Slack, WhatsApp
+- `src/integrations`: HubSpot, SMTP, Slack
 - `src/api/web`: 운영 UI
 - `company_rules`: 답변 원칙
 - `knowledge_base`: AI가 선택해서 참고할 정책·제품 문서

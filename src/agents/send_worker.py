@@ -199,7 +199,12 @@ async def _send_one(message_id: int) -> bool:
         for attempt in range(SEND_TRANSIENT_MAX_RETRIES):
             try:
                 await send(msg)
-                test_mode = bool(settings.SEND_OVERRIDE_EMAIL.strip())
+                from ..common.safe_mode import resolve_send_override
+
+                # Non-empty in safe mode (forced ronald@…) → status "test_sent" and
+                # post-send HubSpot/Sheets bookkeeping is skipped, same as an
+                # explicit SEND_OVERRIDE_EMAIL.
+                test_mode = bool(resolve_send_override())
                 msg.status = "test_sent" if test_mode else "sent"
                 msg.send_claimed_at = None
                 msg.sent_at = datetime.now(timezone.utc)

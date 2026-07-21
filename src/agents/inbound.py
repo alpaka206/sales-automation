@@ -434,7 +434,6 @@ class InboundAgent:
             # = the body we reply to (content, falling back to subject if empty).
             "subject": event.get("subject", ""),
             "last_message": event.get("last_message", ""),
-            "whatsapp_opt_in": event.get("whatsapp_opt_in", False),
             "phone": event.get("phone"),
             "ticket_id": event.get("ticket_id"),
             "ticket_stage": event.get("ticket_stage"),
@@ -461,7 +460,6 @@ class InboundAgent:
             info["country"] = hs_contact.country or info["country"]
             info["phone"] = hs_contact.phone or info["phone"]
             info["lifecycle_stage"] = hs_contact.lifecyclestage or info["lifecycle_stage"]
-            info["whatsapp_opt_in"] = bool(hs_contact.whatsapp_opt_in)
         except Exception:
             logger.warning("HubSpot contact fetch failed, using event payload.", exc_info=True)
 
@@ -618,17 +616,8 @@ class InboundAgent:
             return base
 
     def _pick_channel(self, contact_info: dict) -> str:
-        # Email is always the primary reply channel. WhatsApp is a best-effort
-        # backup after the email succeeds (handled by the shared sender).
-        if contact_info.get("email"):
-            return "email"
-        if (
-            contact_info.get("whatsapp_opt_in")
-            and contact_info.get("phone")
-            and settings.WHATSAPP_ENABLED
-        ):
-            return "whatsapp"
-        return "none"
+        # Email is the only reply channel.
+        return "email" if contact_info.get("email") else "none"
 
     def _is_first_reply(self, conv_id: int | None) -> bool:
         """True if no real reply has been SENT in this thread yet (auto-ack excluded).
@@ -844,7 +833,6 @@ class InboundAgent:
                     country=contact_info.get("country"),
                     lifecycle_stage=contact_info.get("lifecycle_stage"),
                     phone=contact_info.get("phone") or None,
-                    whatsapp_opt_in=bool(contact_info.get("whatsapp_opt_in")),
                 )
                 session.add(contact)
                 session.flush()
@@ -864,8 +852,6 @@ class InboundAgent:
                     contact.domain = None if is_personal_domain(dom) else dom
                 if contact_info.get("phone"):
                     contact.phone = contact_info["phone"]
-                if contact_info.get("whatsapp_opt_in"):
-                    contact.whatsapp_opt_in = True
 
             profile = session.get(CustomerProfile, contact.id)
             if profile is None:
@@ -967,7 +953,7 @@ class InboundAgent:
                     session=session,
                 )
 
-            to_addr = contact_info.get("phone") if channel == "whatsapp" else (email or None)
+            to_addr = email or None
             msg = session.get(Message, resume_message_id) if resume_message_id else None
             if not (
                 msg
@@ -1046,7 +1032,7 @@ class InboundAgent:
                 0.0 <= threshold <= 1.0
                 and score / 100 >= threshold
                 and classification.category.lower() != "spam"
-                and msg.channel in {"email", "whatsapp"}
+                and msg.channel == "email"
                 and bool(msg.to_address)
             )
             msg.status = "approved" if auto_approved else "pending_approval"

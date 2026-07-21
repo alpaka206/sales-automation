@@ -268,12 +268,7 @@ def test_later_contact_reply_marks_latest_sent_message_answered(db_session) -> N
 def test_inbound_channel_selection() -> None:
     agent = InboundAgent(llm=_mock_llm(), hubspot=None)
 
-    assert (
-        agent._pick_channel(
-            {"email": "a@b.com", "phone": "+821012345678", "whatsapp_opt_in": True}
-        )
-        == "email"
-    )
+    assert agent._pick_channel({"email": "a@b.com", "phone": "+821012345678"}) == "email"
     assert agent._pick_channel({"email": "a@b.com"}) == "email"
     assert agent._pick_channel({}) == "none"
 

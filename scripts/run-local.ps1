@@ -1,7 +1,7 @@
 # Local-dev launcher. Overrides only the unsafe/prod-targeting settings via
 # process env (pydantic-settings: env vars > .env file), so your real .env is
 # never modified. Uses a local SQLite DB and disables every worker that would
-# act on the shared production system (poller, send, auto-ack, Slack, WhatsApp).
+# act on the shared production system (poller, send, auto-ack, Slack).
 #
 #   .\scripts\run-local.ps1              # migrate + serve on 127.0.0.1:8000
 #   .\scripts\run-local.ps1 -NoServe     # just apply migrations to local.db
@@ -21,7 +21,6 @@ $env:SEND_WORKER_ENABLED            = "false"
 $env:INBOUND_AUTO_ACK_ENABLED       = "false"
 $env:APPROVAL_CHANNEL               = "none"
 $env:SLACK_ENABLED                  = "false"
-$env:WHATSAPP_ENABLED               = "false"
 $env:SEND_OVERRIDE_EMAIL            = ""
 $env:INBOUND_DOMAIN_ENRICHMENT_ENABLED = "false"   # no outbound homepage fetches per request
 

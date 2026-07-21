@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import logging
 import smtplib
 import ssl
@@ -116,6 +117,18 @@ def send_smtp(message: Message) -> None:
     Classifies SMTP failures into transient vs permanent so the worker can decide
     whether to retry. Header CRLF injection is rejected before connecting.
     """
+    # Final safety boundary (pre-launch): no email may reach a real customer.
+    # resolve_send_override() is non-empty while external writes are disabled, so
+    # force the recipient here too — even a caller that bypassed send() cannot
+    # email a customer. send() already redirected on the normal path, so this is
+    # a no-op there (to_address already equals the override).
+    from ...common.safe_mode import resolve_send_override
+
+    override = resolve_send_override()
+    if override and (message.to_address or "") != override:
+        message = copy.copy(message)
+        message.to_address = override
+
     if not settings.SMTP_USERNAME or not settings.SMTP_PASSWORD:
         raise SMTPPermanentError("SMTP credentials not configured.")
 

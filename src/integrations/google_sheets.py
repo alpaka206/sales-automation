@@ -111,8 +111,14 @@ def is_configured() -> bool:
 
 
 def writes_enabled() -> bool:
-    """Writes are automatic once credentials exist; no duplicate feature flag."""
-    return is_configured()
+    """Writes are automatic once credentials exist; no duplicate feature flag.
+
+    Pre-launch safe mode disables ALL Sheet writes (append + stage update) so test
+    rows never pollute the shared sales workbook. Reads are unaffected.
+    """
+    from ..common.safe_mode import live_external_writes
+
+    return is_configured() and live_external_writes()
 
 
 def _build_service():

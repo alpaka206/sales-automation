@@ -1,4 +1,4 @@
-"""Send inbound replies through SMTP and optionally mirror them to WhatsApp."""
+"""Send inbound replies through SMTP."""
 
 from __future__ import annotations
 
@@ -6,11 +6,9 @@ import asyncio
 import copy
 import logging
 
-from ...common.config import settings
 from ...common.textwash import text_wash
 from ...db.models import Message
 from .smtp import send_smtp
-from .whatsapp import WhatsAppDisabled, send_whatsapp, send_whatsapp_template
 
 logger = logging.getLogger(__name__)
 
@@ -30,8 +28,6 @@ def enforce_send_language(message: Message) -> None:
 
     Translation failures are logged and the body is sent as-is rather than dropped.
     """
-    if message.channel == "whatsapp":
-        return
     if isinstance(message.body, str):
         message.body = text_wash(message.body)
 
@@ -122,77 +118,6 @@ def enforce_first_reply_no_price(message: Message) -> None:
         )
 
 
-def _record_whatsapp_result(
-    message_id: int, attempted: bool, sent: bool, error: str | None = None
-) -> None:
-    """Persist WhatsApp delivery result to the messages table."""
-    from ...db.session import SessionLocal
-
-    try:
-        with SessionLocal() as session:
-            msg = session.get(Message, message_id)
-            if msg:
-                msg.whatsapp_attempted = attempted
-                msg.whatsapp_sent = sent
-                msg.whatsapp_error = error
-                session.commit()
-    except Exception:
-        logger.warning("Failed to record WhatsApp result for message %d", message_id, exc_info=True)
-
-
-async def _try_whatsapp_template(message: Message) -> None:
-    """Attempt a WhatsApp template send alongside email, recording result in DB.
-
-    Always fetches the phone from the Contact record — never reuses the email
-    in message.to_address. WhatsApp Cloud API has no native "does this number
-    have WhatsApp?" lookup, so we send the template and let the API return
-    error 131009 if the number is not on WhatsApp (handled in whatsapp.py).
-    """
-    from ...db.session import SessionLocal
-    from ...db.models import Contact
-
-    phone: str | None = None
-    try:
-        with SessionLocal() as session:
-            stored = session.get(Message, message.id)
-            if stored and stored.whatsapp_sent:
-                logger.info("WhatsApp already sent for message %d; skipping replay.", message.id)
-                return
-            c = session.get(Contact, message.conversation.contact_id)
-            if c and c.whatsapp_opt_in:
-                phone = getattr(c, "phone", None)
-    except Exception:
-        logger.warning(
-            "Failed to look up WhatsApp phone for contact %d",
-            message.conversation.contact_id,
-            exc_info=True,
-        )
-
-    if not phone:
-        return
-
-    _record_whatsapp_result(message.id, attempted=True, sent=False)
-
-    try:
-        await send_whatsapp_template(
-            phone=phone,
-            language_code=(message.target_language or message.language or "ko")[:8],
-            params=[message.body[:1024]],
-        )
-        _record_whatsapp_result(message.id, attempted=True, sent=True)
-        logger.info("WhatsApp template also sent for message %d.", message.id)
-    except WhatsAppDisabled:
-        _record_whatsapp_result(message.id, attempted=False, sent=False)
-        logger.info("WhatsApp disabled, skipping template send for message %d.", message.id)
-    except Exception as exc:
-        _record_whatsapp_result(message.id, attempted=True, sent=False, error=str(exc))
-        logger.warning(
-            "WhatsApp template send failed for message %d, email unaffected.",
-            message.id,
-            exc_info=True,
-        )
-
-
 async def _log_hubspot_email(message: Message) -> None:
     """Best-effort timeline log after SMTP delivery; never reverses a real send."""
     try:
@@ -227,22 +152,13 @@ async def _log_hubspot_email(message: Message) -> None:
 
 
 async def send(message: Message) -> None:
-    """Send a message via the appropriate provider.
+    """Send a message via SMTP. Email failure raises (caller handles)."""
+    from ...common.safe_mode import resolve_send_override
 
-    Email failure raises (caller handles). WhatsApp failure is logged but does not
-    affect the email outcome.
-    """
-    override = settings.SEND_OVERRIDE_EMAIL.strip()
-
-    if message.channel == "whatsapp":
-        if override:
-            logger.info(
-                "TEST MODE (SEND_OVERRIDE_EMAIL set): skipping WhatsApp send for message %d.",
-                message.id,
-            )
-            return
-        await send_whatsapp(message)
-        return
+    # In pre-launch safe mode this is ALWAYS non-empty (forces ronald@…), so every
+    # branch below that keys off `override` reroutes mail and suppresses HubSpot
+    # side effects automatically.
+    override = resolve_send_override()
 
     # Test-mode redirect: reroute every customer-facing email to one address and
     # force SMTP. Real HubSpot contacts are not touched in this mode.
@@ -283,12 +199,3 @@ async def send(message: Message) -> None:
 
     if not override:
         await _log_hubspot_email(message)
-
-    # WhatsApp piggyback — best-effort, never breaks the email flow.
-    # Skipped entirely in test mode so no real phone is messaged.
-    if (
-        settings.WHATSAPP_ENABLED
-        and not override
-        and getattr(message, "prompt_variant", None) != "auto_ack"
-    ):
-        await _try_whatsapp_template(message)

@@ -44,7 +44,6 @@ class Contact(Base):
     # Operator-editable free-text note on what this person/company does. Filled in
     # over the course of a conversation even for gmail/unverified senders.
     role_description: Mapped[str | None] = mapped_column(Text, nullable=True)
-    whatsapp_opt_in: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     # Stable ID allocated in the existing Inbound DB (1000-series). Reused by
     # the order sheet so both tabs keep the sales team's original join key.
     sheet_client_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
@@ -139,9 +138,6 @@ class Message(Base):
     in_reply_to: Mapped[str | None] = mapped_column(String, nullable=True)
     hubspot_engagement_id: Mapped[str | None] = mapped_column(String, nullable=True)
     scheduled_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    whatsapp_attempted: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-    whatsapp_sent: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-    whatsapp_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     slack_notified_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     slack_notification_attempted_at: Mapped[datetime | None] = mapped_column(
         DateTime, nullable=True

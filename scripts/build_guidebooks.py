@@ -599,7 +599,7 @@ def build_diagrams() -> None:
         ((625, 190, 975, 360), "2. 즉시 접수확인", "첫 문의에만, 사람 승인 없이 고객 언어로 발송"),
         ((1180, 190, 1530, 360), "3. AI + 내부 규정", "문의 분류, 관련 문서 선택, 한국어 검토 초안"),
         ((1180, 590, 1530, 760), "4. 사람 검토", "수정, 번역, 서명, 미리보기 후 발송 승인"),
-        ((625, 590, 975, 760), "5. 실제 발송", "SMTP 이메일이 주 채널, 조건 충족 시 WhatsApp"),
+        ((625, 590, 975, 760), "5. 실제 발송", "SMTP 이메일로 발송"),
         ((70, 590, 420, 760), "6. 상태 동기화", "HubSpot, 사이트 파이프라인, Inbound DB 갱신"),
     ]
     for xy, title, body in boxes:
@@ -726,7 +726,6 @@ def build_developer_guide() -> Path:
             ("Google Sheets", "서비스 계정 자격증명 감지, 편집 권한 불가", "사용자 OAuth 웹 클라이언트 생성·연결"),
             ("SMTP", "자격증명 있음, SMTP가 실제 전달 수단", "SEND_OVERRIDE_EMAIL로 1건 검증 후 해제"),
             ("Slack", "토큰은 있을 수 있으나 전체 스위치와 채널 모드 OFF", "필요할 때 reply-ready 알림만 활성"),
-            ("WhatsApp", "자격증명 없음, OFF", "Meta 승인 템플릿·opt-in 속성 준비"),
             ("UI 인증", "로컬 basic 모드", "운영은 회사 Google OAuth와 allowlist 권장"),
             ("배포", "단일 프로세스·worker heartbeat·시작 안전검사", "Managed PostgreSQL, 공개 HTTPS, WEB_CONCURRENCY=1"),
         ],
@@ -748,7 +747,7 @@ def build_developer_guide() -> Path:
             ("Webhook은 빨리 응답", "서명 검증과 DB enqueue까지만 하고 외부 API/AI 호출은 worker로 넘긴다."),
             ("DB가 시스템 원장", "Google Sheets는 운영 미러이며 백업이나 유일한 정합성 원장이 아니다."),
             ("고객 발송과 CRM 동기화 분리", "SMTP 성공 후 HubSpot/Sheets가 실패해도 메일을 실패로 되돌리거나 재발송하지 않는다."),
-            ("안전 기본값", "상세 답변은 기본적으로 사람 승인, Slack/WhatsApp은 기본 비활성이다."),
+            ("안전 기본값", "상세 답변은 기본적으로 사람 승인, Slack은 기본 비활성이다."),
         ],
         [2160, 7200],
     )
@@ -788,7 +787,7 @@ def build_developer_guide() -> Path:
             ("src/agents/inbound.py", "문의 저장, auto-ack, Sheets mirror, AI 분류·초안"),
             ("src/agents/send_worker.py", "승인 메시지 claim, rate limit, SMTP, delivery_unknown, post-sync retry"),
             ("src/agents/sheet_sync.py", "Inbound DB import/backfill, 수주 DB sync, durable 수동 sync 요청"),
-            ("src/integrations", "HubSpot, Google Sheets/OAuth, SMTP, Slack, WhatsApp, HTML 이메일"),
+            ("src/integrations", "HubSpot, Google Sheets/OAuth, SMTP, Slack, HTML 이메일"),
             ("src/api/web", "운영자 UI routes, templates, auth, static design system"),
             ("src/db/models.py", "연락처·대화·메시지·계약·문서·자격증명 데이터 모델"),
             ("src/db/migrations", "기존 데이터를 보존하는 additive schema migration"),
@@ -834,7 +833,7 @@ def build_developer_guide() -> Path:
         doc,
         [
             "SEND_OVERRIDE_EMAIL에 내부 테스트 주소를 설정하면 원본 DB 수신자를 바꾸지 않고 테스트 주소로만 보내며 상태를 test_sent로 기록한다.",
-            "test_sent는 HubSpot 활동·문의 단계·Sheets·WhatsApp을 전혀 변경하지 않는다.",
+            "test_sent는 HubSpot 활동·문의 단계·Sheets를 전혀 변경하지 않는다.",
             "실서비스 전 반드시 SEND_OVERRIDE_EMAIL을 비운다.",
             "개발 계정 단계 ID 1→2를 실제 계정에 그대로 복사하지 않는다. scripts/list_ticket_stages.py로 내부 ID를 확인한다.",
         ],
@@ -854,7 +853,6 @@ def build_developer_guide() -> Path:
             ("발송", "SEND_WORKER, RATE, DAILY_LIMIT, JITTER, AUTO_SEND_THRESHOLD", "approved→sent"),
             ("Google Sheets", "OAuth client ID/secret, SESSION_SECRET, GOOGLE_TOKEN_ENCRYPTION_KEY", "pipeline 연결 패널"),
             ("Slack", "SLACK_ENABLED, APPROVAL_CHANNEL, token, channel ID", "pending approval 1건"),
-            ("WhatsApp", "enabled, phone number ID, access token, template, opt-in property", "동의한 내부 번호"),
             ("UI 인증", "AUTH_MODE, Google OAuth, allowed domain/list, SESSION_SECRET", "viewer/operator/admin 로그인"),
             ("프로세스", "WEB_CONCURRENCY=1, worker enable 3종", "startup guard, heartbeat health"),
         ],
@@ -877,10 +875,10 @@ def build_developer_guide() -> Path:
         [
             ("Contact", "사람·회사 식별", "normalized_email unique, domain, HubSpot ID, sheet client ID"),
             ("Conversation", "한 문의/티켓의 thread", "HubSpot ticket ID unique, stage, language, summary, sheet key"),
-            ("Message", "inbound/auto_ack/draft/reply", "status, target language, send lease, post-sync, Slack/WhatsApp flags"),
+            ("Message", "inbound/auto_ack/draft/reply", "status, target language, send lease, post-sync, Slack flags"),
             ("InboundJob", "Webhook/poller durable work", "event_key unique, owner lease·heartbeat, attempts, available_at"),
             ("CustomerProfile", "운영자 관리 상태", "pipeline, temperature, MQL/PQL, next action, plan"),
-            ("CustomerInteraction", "다채널 통합 이력", "meeting/Kakao/WhatsApp/phone/manual, artifact URL"),
+            ("CustomerInteraction", "다채널 통합 이력", "meeting/Kakao/phone/manual, artifact URL"),
             ("ContractRecord", "계약·결제·갱신", "문의 conversation snapshot, Decimal 금액, order sheet sync"),
             ("Knowledge/Email revisions", "정책·템플릿 버전", "수정 전 snapshot을 append-only 보관"),
             ("IntegrationCredential", "위임 OAuth", "provider별 1행, refresh token 암호화"),
@@ -981,7 +979,7 @@ def build_developer_guide() -> Path:
     )
 
     add_page_break(doc)
-    add_heading(doc, "11. 이메일, Slack, WhatsApp", 1)
+    add_heading(doc, "11. 이메일과 Slack", 1)
     add_table(
         doc,
         ["채널", "현재 동작", "운영 주의"],
@@ -989,7 +987,6 @@ def build_developer_guide() -> Path:
             ("SMTP", "실제 고객 이메일 전달, TLS, stable Message-ID, HTML 서명", "rate/day cap, delivery_unknown runbook"),
             ("HubSpot Email", "발송 성공 후 CRM 활동 기록", "실제 전달 수단이 아님"),
             ("Slack", "pending_approval 초안당 1회, 실패만 최대 5회 재시도", "비공개 승인 채널, PII 보존정책"),
-            ("WhatsApp", "명시 opt-in+전화번호+승인 템플릿일 때 상세답변 보조 발송", "번호 사전검색 불가, 실패가 이메일을 취소하지 않음"),
         ],
         [1560, 4680, 3120],
     )
@@ -1138,7 +1135,7 @@ def build_developer_guide() -> Path:
     add_callout(
         doc,
         "Go-live 게이트",
-        "실제 고객에게 보내기 전 SEND_OVERRIDE_EMAIL이 비어 있는지, Slack/WhatsApp이 의도한 값인지, 개발 stage 1→2가 실제 ID로 교체됐는지를 두 사람이 교차 확인한다.",
+        "실제 고객에게 보내기 전 SEND_OVERRIDE_EMAIL이 비어 있는지, Slack이 의도한 값인지, 개발 stage 1→2가 실제 ID로 교체됐는지를 두 사람이 교차 확인한다.",
         fill=SUCCESS,
         accent=PERSO_TEAL,
     )
@@ -1239,7 +1236,7 @@ def build_operator_guide() -> Path:
     add_callout(
         doc,
         "현재 안전 기본값",
-        "상세 답변은 자동으로 바로 나가지 않는다. 사람이 '검토 완료 · 발송'을 눌러야 한다. Slack과 WhatsApp도 기본값은 꺼져 있다.",
+        "상세 답변은 자동으로 바로 나가지 않는다. 사람이 '검토 완료 · 발송'을 눌러야 한다. Slack도 기본값은 꺼져 있다.",
         fill=SUCCESS,
         accent=PERSO_TEAL,
     )
@@ -1292,7 +1289,6 @@ def build_operator_guide() -> Path:
             ("승인", "첫 문의에 자동", "기본적으로 사람 검토"),
             ("Slack", "보내지 않음", "초안이 검토 대기일 때만 가능"),
             ("단계 이동", "하지 않음", "성공 후 Meeting link sent"),
-            ("WhatsApp", "보내지 않음", "동의·전화번호·설정 충족 시 보조 발송"),
         ],
         [1560, 3900, 3900],
         font_size=8.6,
@@ -1424,7 +1420,7 @@ def build_operator_guide() -> Path:
             ("기본 상태", "Negotiation/서비스 이용/기존 Pool/Lost, pipeline, 리드 온도"),
             ("고객 정보", "회사, 성함, 이메일, 전화번호, 국가, 산업군, user-seq, MQL/PQL"),
             ("다음 행동", "다음 액션, 예정일, 유입 소스, 운영 메모, Lost 사유"),
-            ("통합 이력", "HubSpot 이메일·Deal·메모, 미팅·카카오·WhatsApp·전화·수동 기록"),
+            ("통합 이력", "HubSpot 이메일·Deal·메모, 미팅·카카오·전화·수동 기록"),
             ("자료", "Gemini 회의록·Invoice·계약서 등 외부 URL"),
             ("계약", "금액, 날짜, 만료, 언어쌍, 단가, Invoice/결제 URL"),
         ],
@@ -1435,7 +1431,7 @@ def build_operator_guide() -> Path:
         [
             "고객 목록에서 회사·이름·이메일을 검색하거나 상태로 좁힌다.",
             "고객 상세의 HubSpot 동기화를 눌러 연락처, 최근 이메일 20건, Deal, 최신 메모를 가져온다.",
-            "온라인 미팅·카카오·전화·WhatsApp·계약서처럼 자동 연결이 없는 기록은 기록 추가로 남긴다.",
+            "온라인 미팅·카카오·전화·계약서처럼 자동 연결이 없는 기록은 기록 추가로 남긴다.",
             "회의록·Invoice·계약서 URL을 artifact URL에 붙인다.",
             "미팅 기록은 Negotiation으로 이동할 수 있고, 계약 상태 active는 서비스 이용중으로 이동한다.",
             "계약 저장 때 실제 성사된 문의를 선택한다. 같은 고객의 다른 문의 카드는 그대로 유지된다.",
@@ -1648,7 +1644,7 @@ def build_operator_guide() -> Path:
         size=9.5,
     )
 
-    add_heading(doc, "15. Slack과 WhatsApp", 1)
+    add_heading(doc, "15. Slack", 1)
     add_table(
         doc,
         ["질문", "답"],
@@ -1657,9 +1653,6 @@ def build_operator_guide() -> Path:
             ("접수확인 때문에 오나?", "아니오"),
             ("같은 초안이 반복되나?", "성공하면 1회 기록. 실패한 알림만 제한 재시도"),
             ("Slack을 즉시 끄려면?", "관리자가 SLACK_ENABLED=false, APPROVAL_CHANNEL=none으로 재시작"),
-            ("WhatsApp 번호를 검색하나?", "Meta에 사전 검색 API가 없어 승인 템플릿 발송 결과로 판단"),
-            ("WhatsApp은 누구에게 가나?", "기능 ON, 전화번호, HubSpot 명시 opt-in, 상세답변 조건을 모두 충족한 고객"),
-            ("WhatsApp 실패 시 메일도 실패하나?", "아니오. 이메일 성공은 유지"),
         ],
         [3300, 6060],
         font_size=8.9,
@@ -1715,7 +1708,6 @@ def build_operator_guide() -> Path:
             ("Google Sheets", "편집 가능한 전용 계정으로 동의", "OAuth client/callback/secret 설정"),
             ("SMTP", "From 이름·주소·테스트 수신 확인", "자격증명, SPF/DKIM/DMARC, quota"),
             ("Slack", "비공개 채널·수신자 결정", "flag/token/channel 설정"),
-            ("WhatsApp", "opt-in 문구·템플릿 내용 승인", "Meta token, phone ID, property 연결"),
             ("권한", "승인할 사용자·역할 결정", "Google OAuth/allowlist/session 설정"),
             ("운영 시작", "소량 문의 전건 사람 승인", "모니터링·백업·장애 대응"),
         ],
@@ -1729,7 +1721,6 @@ def build_operator_guide() -> Path:
             "HubSpot은 개발자 계정의 New(1)→Waiting on contact(2)를 임시 사용한다.",
             "Google Sheets는 서비스 계정 공유가 막혀 있고 사용자 OAuth Client ID/Secret 설정이 남아 있다.",
             "Slack은 꺼져 있어 초안이 준비돼도 보내지 않는다.",
-            "WhatsApp은 계정·템플릿·opt-in 연결 전까지 보내지 않는다.",
             "상세 답변 자동승인은 꺼져 있고 사람이 승인한다.",
         ],
     )
@@ -1767,7 +1758,6 @@ def build_operator_guide() -> Path:
             "□ 발송 대기 중 버튼 반복 클릭",
             "□ 발송 확인 필요를 확인 없이 재발송",
             "□ Google 시트 헤더·수식·분석 탭 구조 임의 변경",
-            "□ 고객 동의 없이 WhatsApp 발송",
             "□ 비밀키·고객 개인정보를 공개 채널이나 문서에 복사",
         ],
     )

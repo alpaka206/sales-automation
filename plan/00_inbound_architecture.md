@@ -11,7 +11,7 @@ The send worker is the single delivery path for both the API and web UI. The SMT
 - `Contact`: identity and HubSpot link
 - `Conversation` / `Message`: inquiry and reply history
 - `CustomerProfile`: customer state, pipeline, temperature, qualification, next action
-- `CustomerInteraction`: HubSpot/email/meeting/Kakao/WhatsApp/phone/manual touchpoints
+- `CustomerInteraction`: HubSpot/email/meeting/Kakao/phone/manual touchpoints
 - `ContractRecord`: contract, invoice, payment, plan, renewal facts
 
 External services without credentials are connected through explicit manual sync or URL fields. They must never be represented as successfully synchronized when only local data exists.

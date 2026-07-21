@@ -743,7 +743,6 @@ def _sync_hubspot(contact_id: int) -> int:
         contact.phone = dto.phone or contact.phone
         contact.country = dto.country or contact.country
         contact.lifecycle_stage = dto.lifecyclestage or contact.lifecycle_stage
-        contact.whatsapp_opt_in = dto.whatsapp_opt_in or contact.whatsapp_opt_in
         profile = session.get(CustomerProfile, contact_id) or CustomerProfile(contact_id=contact_id)
         profile.last_synced_at = datetime.now(timezone.utc)
         session.add(profile)

@@ -152,6 +152,13 @@ class ReportAgent:
         if not recipients:
             return
 
+        # Pre-launch: all outbound email is force-routed to the test recipient.
+        from ..common.safe_mode import resolve_send_override
+
+        override = resolve_send_override()
+        if override:
+            recipients = [override]
+
         date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         subject = f"{kind.title()} Report — {date_str}"
 

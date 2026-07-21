@@ -61,9 +61,6 @@ class Settings(BaseSettings):
     # ticket pipeline_stage covers the same role in the new workflow. Default
     # off — keeping it on without the property logs a 400 every webhook.
     HUBSPOT_UPDATE_CONTACT_INBOUND_STATUS: bool = False
-    # Optional HubSpot contact property that records explicit WhatsApp consent.
-    # Example: "whatsapp_opt_in". Blank means no HubSpot contact is opted in.
-    HUBSPOT_WHATSAPP_OPT_IN_PROPERTY: str = ""
 
     # ----- Email -----
     # SMTP delivers mail; HubSpot's email API only receives a timeline copy.
@@ -74,20 +71,24 @@ class Settings(BaseSettings):
     SMTP_FROM_NAME: str = "Sales Team"
     SMTP_FROM_EMAIL: str = ""
 
+    # ----- Launch safety switch (pre-launch "대전제") -----
+    # Master kill switch for ALL external side effects. Default False = SAFE:
+    #   - every HubSpot write is hard-blocked (ticket stage, contact/inbound status,
+    #     timeline email) → the real HubSpot account cannot change during testing;
+    #   - Google Sheets writes are disabled (no test rows in the shared workbook);
+    #   - every outbound email is force-routed to the test recipient (ronald@…),
+    #     so no customer is ever emailed even if SEND_OVERRIDE_EMAIL is cleared.
+    # Reads (HubSpot GET, Gemini, homepage fetch) stay on. Going live = set this to
+    # true AND clear SEND_OVERRIDE_EMAIL. See src/common/safe_mode.py.
+    LIVE_EXTERNAL_WRITES: bool = False
+
     # ----- Test mode: redirect ALL real sends to one address -----
     # When non-empty, every customer-facing inbound reply is rerouted to this
-    # address and sent via SMTP — the HubSpot
-    # provider is bypassed so nothing lands on a real contact's timeline, and the
-    # WhatsApp piggyback is skipped so no real phone is messaged. The original
-    # intended recipient is preserved in the subject as "[TEST→original]".
+    # address and sent via SMTP — the HubSpot provider is bypassed so nothing lands
+    # on a real contact's timeline. The original intended recipient is preserved in
+    # the subject as "[TEST→original]".
     # Requires SMTP_USERNAME/SMTP_PASSWORD. Leave EMPTY in production.
     SEND_OVERRIDE_EMAIL: str = ""
-
-    # ----- WhatsApp -----
-    WHATSAPP_ENABLED: bool = False
-    WHATSAPP_PHONE_NUMBER_ID: str = ""
-    WHATSAPP_ACCESS_TOKEN: str = ""
-    WHATSAPP_TEMPLATE_NAME: str = "sales_reply_intro"
 
     # ----- Approval -----
     SLACK_ENABLED: bool = False

@@ -1,31 +1,24 @@
-"""Tests for dual email+WhatsApp send dispatcher with DB tracking."""
+"""Tests for the SMTP send dispatcher with DB tracking."""
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
 import pytest
 
 from src.db.models import Contact, Conversation, Message
 from src.db.session import SessionLocal
-from src.integrations.senders import _try_whatsapp_template, send
-from src.integrations.senders.whatsapp import WhatsAppSendError
+from src.integrations.senders import send
 
 
 def _create_test_message(phone: str = "+821012345678") -> int:
-    """Create a test message in DB and return its ID.
-
-    Email is stored on message.to_address (the primary channel); phone lives
-    on the Contact row and the dispatcher reads it from there for the
-    WhatsApp piggyback.
-    """
+    """Create a test message in DB and return its ID."""
     with SessionLocal() as session:
         contact = Contact(
             normalized_email="dual-test@example.com",
             email="dual-test@example.com",
             full_name="Dual Test",
             phone=phone,
-            whatsapp_opt_in=True,
         )
         session.add(contact)
         session.flush()
@@ -65,100 +58,20 @@ def _cleanup():
         session.commit()
 
 
-# ---------- Schema check ----------
-
-
-def test_whatsapp_columns_exist():
-    """Messages table should have whatsapp tracking columns."""
-    msg_id = _create_test_message()
-    msg = _get_message(msg_id)
-    assert msg.whatsapp_attempted is False
-    assert msg.whatsapp_sent is False
-    assert msg.whatsapp_error is None
-
-
-# ---------- Both succeed ----------
-
-
-@pytest.mark.asyncio
-@patch("src.integrations.senders.send_whatsapp_template", new_callable=AsyncMock, return_value="wamid.ok")
-@patch("src.integrations.senders.send_smtp")
-async def test_email_and_whatsapp_both_succeed(mock_smtp, mock_wa):
-    msg_id = _create_test_message()
-
-    with SessionLocal() as session:
-        msg = session.get(Message, msg_id)
-        with patch("src.integrations.senders.settings") as mock_settings:
-            mock_settings.SEND_OVERRIDE_EMAIL = ""
-            mock_settings.WHATSAPP_ENABLED = True
-            mock_settings.SMTP_USERNAME = "user"
-            mock_settings.SMTP_PASSWORD = "pass"
-            await send(msg)
-
-    updated = _get_message(msg_id)
-    assert updated.whatsapp_attempted is True
-    assert updated.whatsapp_sent is True
-    assert updated.whatsapp_error is None
-    mock_smtp.assert_called_once()
-    mock_wa.assert_called_once()
-
-
-# ---------- Email succeeds, WhatsApp fails ----------
-
-
-@pytest.mark.asyncio
-@patch("src.integrations.senders.send_whatsapp_template", new_callable=AsyncMock, side_effect=WhatsAppSendError("API fail"))
-@patch("src.integrations.senders.send_smtp")
-async def test_email_succeeds_whatsapp_fails(mock_smtp, mock_wa):
-    msg_id = _create_test_message()
-
-    with SessionLocal() as session:
-        msg = session.get(Message, msg_id)
-        with patch("src.integrations.senders.settings") as mock_settings:
-            mock_settings.SEND_OVERRIDE_EMAIL = ""
-            mock_settings.WHATSAPP_ENABLED = True
-            mock_settings.SMTP_USERNAME = "user"
-            mock_settings.SMTP_PASSWORD = "pass"
-            await send(msg)  # Should NOT raise
-
-    updated = _get_message(msg_id)
-    assert updated.whatsapp_attempted is True
-    assert updated.whatsapp_sent is False
-    assert "API fail" in updated.whatsapp_error
-
-
-# ---------- WhatsApp disabled ----------
-
-
 @pytest.mark.asyncio
 @patch("src.integrations.senders.send_smtp")
-async def test_whatsapp_disabled_skips(mock_smtp):
-    msg_id = _create_test_message()
+async def test_override_uses_copy_and_does_not_mutate_database_message(mock_smtp, monkeypatch):
+    # The override source of truth is resolve_send_override(), which reads the real
+    # settings singleton (production has exactly one). Setting it there activates the
+    # test-mode reroute + copy.
+    from src.common.config import settings as real_settings
 
-    with SessionLocal() as session:
-        msg = session.get(Message, msg_id)
-        with patch("src.integrations.senders.settings") as mock_settings:
-            mock_settings.SEND_OVERRIDE_EMAIL = ""
-            mock_settings.WHATSAPP_ENABLED = False
-            mock_settings.SMTP_USERNAME = "user"
-            mock_settings.SMTP_PASSWORD = "pass"
-            await send(msg)
+    monkeypatch.setattr(real_settings, "SEND_OVERRIDE_EMAIL", "safe-test@example.com")
 
-    updated = _get_message(msg_id)
-    assert updated.whatsapp_attempted is False
-    assert updated.whatsapp_sent is False
-
-
-@pytest.mark.asyncio
-@patch("src.integrations.senders.send_smtp")
-async def test_override_uses_copy_and_does_not_mutate_database_message(mock_smtp):
     msg_id = _create_test_message()
     with SessionLocal() as session:
         msg = session.get(Message, msg_id)
-        with patch("src.integrations.senders.settings") as mock_settings:
-            mock_settings.SEND_OVERRIDE_EMAIL = "safe-test@example.com"
-            mock_settings.WHATSAPP_ENABLED = False
-            await send(msg)
+        await send(msg)
         session.commit()
 
     delivered = mock_smtp.call_args.args[0]
@@ -169,47 +82,11 @@ async def test_override_uses_copy_and_does_not_mutate_database_message(mock_smtp
 
 
 @pytest.mark.asyncio
-@patch("src.integrations.senders.send_whatsapp_template", new_callable=AsyncMock)
-@patch("src.integrations.senders.send_smtp")
-async def test_auto_ack_never_piggybacks_whatsapp(mock_smtp, mock_wa):
-    msg_id = _create_test_message()
-    with SessionLocal() as session:
-        msg = session.get(Message, msg_id)
-        msg.prompt_variant = "auto_ack"
-        with patch("src.integrations.senders.settings") as mock_settings:
-            mock_settings.SEND_OVERRIDE_EMAIL = ""
-            mock_settings.WHATSAPP_ENABLED = True
-            await send(msg)
-
-    mock_smtp.assert_called_once()
-    mock_wa.assert_not_called()
-
-
-@pytest.mark.asyncio
-@patch("src.integrations.senders.send_whatsapp_template", new_callable=AsyncMock)
-async def test_successful_whatsapp_is_not_replayed(mock_wa):
-    msg_id = _create_test_message()
-    with SessionLocal() as session:
-        stored = session.get(Message, msg_id)
-        stored.whatsapp_sent = True
-        session.commit()
-        await _try_whatsapp_template(stored)
-
-    mock_wa.assert_not_awaited()
-
-
-# ---------- Email fails → entire send fails ----------
-
-
-@pytest.mark.asyncio
 @patch("src.integrations.senders.send_smtp", side_effect=RuntimeError("SMTP down"))
 async def test_email_failure_raises(mock_smtp):
     msg_id = _create_test_message()
 
     with SessionLocal() as session:
         msg = session.get(Message, msg_id)
-        with patch("src.integrations.senders.settings") as mock_settings:
-            mock_settings.SEND_OVERRIDE_EMAIL = ""
-            mock_settings.WHATSAPP_ENABLED = True
-            with pytest.raises(RuntimeError, match="SMTP down"):
-                await send(msg)
+        with pytest.raises(RuntimeError, match="SMTP down"):
+            await send(msg)

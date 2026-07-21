@@ -158,15 +158,6 @@ def test_send_guard_noop_without_target():
     assert msg.body == "안녕하세요."
 
 
-def test_send_guard_skips_whatsapp():
-    from src.integrations.senders import enforce_send_language
-
-    msg = _msg(channel="whatsapp", language="ko", target_language="en")
-    with patch("src.llm.translate.translate_to") as tx:
-        enforce_send_language(msg)
-    tx.assert_not_called()
-
-
 def test_contains_price_english_words():
     # English spelled-out currency must also be caught (survives a mostly-Korean draft).
     assert contains_price("The plan is 29 dollars a month")

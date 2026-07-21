@@ -22,7 +22,7 @@
   <select class="select filter-bar__select" aria-label="채널 필터"
           onchange="location.href='/messages?status={{ filter_status }}&channel='+this.value">
     <option value="">전체 채널</option>
-    {% for c in ['email','whatsapp'] %}<option value="{{ c }}" {% if filter_channel == c %}selected{% endif %}>{{ c }}</option>{% endfor %}
+    {% for c in ['email'] %}<option value="{{ c }}" {% if filter_channel == c %}selected{% endif %}>{{ c }}</option>{% endfor %}
   </select>
 </div>
 

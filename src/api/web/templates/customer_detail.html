@@ -41,7 +41,7 @@
         <div class="section-header__title">통합 히스토리</div>
         <details class="inline-details"><summary class="btn btn--subtle btn--sm">{{ icon("plus",14) }} 기록 추가</summary>
           <form method="post" action="/customers/{{ contact.id }}/interactions" class="quick-form">
-            <select class="select" name="channel">{% for v in ['manual','hubspot','email','meeting','kakao','whatsapp','phone','invoice','contract'] %}<option value="{{ v }}">{{ v }}</option>{% endfor %}</select>
+            <select class="select" name="channel">{% for v in ['manual','hubspot','email','meeting','kakao','phone','invoice','contract'] %}<option value="{{ v }}">{{ v }}</option>{% endfor %}</select>
             <select class="select" name="direction"><option value="note">메모</option><option value="incoming">고객 → 우리</option><option value="outgoing">우리 → 고객</option></select>
             <input class="input" name="subject" placeholder="주제">
             <input class="input" type="datetime-local" name="happened_at">

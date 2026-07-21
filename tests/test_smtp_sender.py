@@ -106,11 +106,9 @@ async def test_async_sender_runs_smtp_off_event_loop() -> None:
     msg.direction = "incoming"
     msg.conversation.contact = None
 
-    with patch("src.integrations.senders.settings") as mock_settings, patch(
+    with patch(
         "src.integrations.senders.asyncio.to_thread", new_callable=AsyncMock
     ) as mock_to_thread:
-        mock_settings.SEND_OVERRIDE_EMAIL = ""
-        mock_settings.WHATSAPP_ENABLED = False
         await send(msg)
 
     mock_to_thread.assert_awaited_once_with(smtp_callable, msg)

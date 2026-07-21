@@ -18,7 +18,6 @@ class ContactDTO(BaseModel):
     phone: str | None = None
     country: str | None = None
     lifecyclestage: str | None = None
-    whatsapp_opt_in: bool = False
 
 
 class EngagementDTO(BaseModel):

@@ -28,23 +28,10 @@ def _make_message(**overrides) -> MagicMock:
 
 
 @pytest.mark.asyncio
-@patch("src.integrations.senders.send_whatsapp", new_callable=AsyncMock)
-async def test_whatsapp_channel_sends_directly(mock_wa) -> None:
-    msg = _make_message(channel="whatsapp")
-    with patch("src.integrations.senders.settings") as configured:
-        configured.SEND_OVERRIDE_EMAIL = ""
-        await send(msg)
-    mock_wa.assert_awaited_once_with(msg)
-
-
-@pytest.mark.asyncio
 @patch("src.integrations.senders._log_hubspot_email", new_callable=AsyncMock)
 @patch("src.integrations.senders.send_smtp")
 async def test_smtp_sends_then_logs_to_hubspot(mock_smtp, mock_log) -> None:
     msg = _make_message()
-    with patch("src.integrations.senders.settings") as configured:
-        configured.WHATSAPP_ENABLED = False
-        configured.SEND_OVERRIDE_EMAIL = ""
-        await send(msg)
+    await send(msg)
     mock_smtp.assert_called_once_with(msg)
     mock_log.assert_awaited_once_with(msg)
