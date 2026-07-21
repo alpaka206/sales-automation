@@ -33,24 +33,20 @@ services:
       # ----- Required: set these manually in the Render dashboard -----
       - key: DATABASE_URL              # Supabase / Neon Postgres URI
         sync: false
-      - key: HUBSPOT_PRIVATE_APP_TOKEN
+      # Two secrets — set these in the Render dashboard (HubSpot App -> Auth tab).
+      - key: HUBSPOT_ACCESS_TOKEN      # Private App access token (pat-na1-...)
         sync: false
-      - key: HUBSPOT_WEBHOOK_SECRET    # HubSpot app client secret — required for webhook signature check
+      - key: HUBSPOT_WEBHOOK_SECRET    # Client secret — required for webhook v3 signature check
         sync: false
+      # [B2B] AI Dubbing pipeline (798618015) stage IDs — set here, no dashboard entry needed.
       - key: HUBSPOT_TICKET_STAGE_NEW
-        sync: false
+        value: "1172180243"            # New — the webhook "new inbound" trigger
       - key: HUBSPOT_TICKET_STAGE_AFTER_SEND
-        sync: false
+        value: "1193842435"            # Meeting Link Sent — moved here after a reply is sent
       - key: HUBSPOT_TICKET_STAGE_NEGOTIATION
-        sync: false
-      - key: HUBSPOT_TICKET_STAGE_CONTRACTED
-        sync: false
-      - key: HUBSPOT_TICKET_STAGE_ONBOARDING
-        sync: false
-      - key: HUBSPOT_TICKET_STAGE_ACTIVE
-        sync: false
+        value: "1193733925"            # Negotiating
       - key: HUBSPOT_TICKET_STAGE_CLOSED_LOST
-        sync: false
+        value: "1172180246"            # Lost
       - key: GOOGLE_CREDENTIALS_JSON   # Vertex AI service-account JSON (full contents)
         sync: false
       - key: GOOGLE_CLOUD_PROJECT      # optional; falls back to JSON project_id
@@ -65,8 +61,8 @@ services:
         sync: false
       - key: SMTP_FROM_EMAIL
         sync: false
-      - key: PUBLIC_BASE_URL           # set to the Render URL after 1st deploy (Slack approval links)
-        sync: false
+      - key: PUBLIC_BASE_URL           # Render URL (Slack approval links, OAuth redirect base)
+        value: https://sales-automation-4if2.onrender.com
       - key: WEB_UI_PASSWORD           # web UI login (HTTP Basic Auth) — used when AUTH_MODE=basic
         sync: false
 
@@ -102,6 +98,13 @@ services:
       # ----- Auto-generated on first deploy -----
       - key: INTERNAL_API_TOKEN
         generateValue: true
+
+      # ----- Pre-launch safety -----
+      # LIVE_EXTERNAL_WRITES is intentionally NOT declared here: the code default
+      # is false (SAFE) — all HubSpot writes blocked, every email forced to the
+      # test recipient. To GO LIVE, add LIVE_EXTERNAL_WRITES=true in the Render
+      # dashboard (a dashboard var persists across deploys) AND clear
+      # SEND_OVERRIDE_EMAIL. Until then the webhook only detects + drafts.
 
       # ----- Sensible defaults (override in dashboard if needed) -----
       - key: GEMINI_MODEL
