@@ -35,14 +35,16 @@ from dotenv import dotenv_values
 
 API = "https://api.render.com/v1"
 
-# Values that must differ on the deployed service vs local dev.
+# Values that must differ on the deployed service vs local dev, plus Render infra
+# vars that live in render.yaml (not .env) and must not be wiped.
 PROD_OVERRIDES = {
     "APP_HOST": "0.0.0.0",
     "AUTH_MODE": "google_oauth",
+    "PYTHON_VERSION": "3.11.9",  # Render build Python; from render.yaml, not .env
 }
 
-# Never ship these to Render even if present locally (local-only conveniences).
-EXCLUDE: set[str] = set()
+# Never ship these to Render (deploy-tooling creds that live in .env for convenience).
+EXCLUDE: set[str] = {"RENDER_API_KEY", "RENDER_SERVICE_ID"}
 
 # Substrings that mark a key as secret, for masking this script's own output.
 _SECRET_HINTS = ("TOKEN", "SECRET", "PASSWORD", "KEY", "CREDENTIALS", "DATABASE_URL")
@@ -50,18 +52,36 @@ _SECRET_HINTS = ("TOKEN", "SECRET", "PASSWORD", "KEY", "CREDENTIALS", "DATABASE_
 
 def _mask(key: str, value: str) -> str:
     if any(h in key.upper() for h in _SECRET_HINTS) and value:
-        return f"{value[:4]}…{value[-2:]} ({len(value)} chars)" if len(value) > 8 else "***"
+        return f"{value[:4]}...{value[-2:]} ({len(value)} chars)" if len(value) > 8 else "***"
     return value
 
 
+def _env_path() -> Path:
+    p = Path(__file__).resolve().parent.parent / ".env"
+    if not p.exists():
+        sys.exit(f"ERROR: {p} not found.")
+    return p
+
+
 def _desired_env() -> dict[str, str]:
-    env_path = Path(__file__).resolve().parent.parent / ".env"
-    if not env_path.exists():
-        sys.exit(f"ERROR: {env_path} not found.")
-    raw = dotenv_values(env_path)
-    env = {k: v for k, v in raw.items() if v is not None and k not in EXCLUDE}
+    raw = dotenv_values(_env_path())
+    env = {}
+    for k, v in raw.items():
+        if v is None or k in EXCLUDE:
+            continue
+        # python-dotenv mis-parses `KEY=   # comment` (empty value + inline comment)
+        # as the comment being the value. A real value never starts with '#'.
+        env[k] = "" if v.strip().startswith("#") else v
     env.update(PROD_OVERRIDES)
     return env
+
+
+def _render_creds() -> tuple[str, str]:
+    """RENDER_API_KEY / RENDER_SERVICE_ID from the shell env, falling back to .env."""
+    dotenv = dotenv_values(_env_path())
+    api_key = (os.environ.get("RENDER_API_KEY") or dotenv.get("RENDER_API_KEY") or "").strip()
+    service_id = (os.environ.get("RENDER_SERVICE_ID") or dotenv.get("RENDER_SERVICE_ID") or "").strip()
+    return api_key, service_id
 
 
 def _fetch_current(client: httpx.Client, service_id: str) -> dict[str, str]:
@@ -87,18 +107,27 @@ def _fetch_current(client: httpx.Client, service_id: str) -> dict[str, str]:
     return current
 
 
+def _verify(insecure: bool):
+    """TLS verification: a CA bundle path (corp proxy), or False when --insecure."""
+    if insecure:
+        print("WARNING: TLS verification disabled (--insecure). Only use on a trusted network.\n")
+        return False
+    return os.environ.get("RENDER_CA_BUNDLE") or os.environ.get("SSL_CERT_FILE") or True
+
+
 def main() -> None:
-    apply = "--apply" in sys.argv[1:]
-    api_key = os.environ.get("RENDER_API_KEY", "").strip()
-    service_id = os.environ.get("RENDER_SERVICE_ID", "").strip()
+    args = sys.argv[1:]
+    apply = "--apply" in args
+    api_key, service_id = _render_creds()
     if not api_key or not service_id:
-        sys.exit("ERROR: set RENDER_API_KEY and RENDER_SERVICE_ID environment variables first.")
+        sys.exit("ERROR: set RENDER_API_KEY and RENDER_SERVICE_ID (shell env or .env) first.")
 
     desired = _desired_env()
 
     with httpx.Client(
         headers={"Authorization": f"Bearer {api_key}", "Accept": "application/json"},
         timeout=30,
+        verify=_verify("--insecure" in args),
     ) as client:
         current = _fetch_current(client, service_id)
 
@@ -114,7 +143,7 @@ def main() -> None:
         for k in changed:
             print(f"  ~ CHANGE  {k} = {_mask(k, desired[k])}")
         for k in removed:
-            print(f"  - REMOVE  {k}  (on Render, not in .env — will be wiped)")
+            print(f"  - REMOVE  {k}  (on Render, not in .env -- will be wiped)")
         print(f"\n  {len(unchanged)} unchanged.")
 
         if not apply:
