@@ -24,7 +24,6 @@
       <div class="nav-section__title">{{ icon("inbound", 17) }}<span>인바운드 답장</span></div>
       {{ _nav("/", "문의 대시보드", "dashboard", _path == "/", badge=nav_pending, mobile=True, mobile_label="인바운드") }}
       {{ _nav("/messages", "답변 검토", "messages", _path.startswith("/messages"), badge=nav_pending) }}
-      {{ _nav("/customers", "고객·회사 히스토리", "user", _path.startswith("/customers")) }}
       {{ _nav("/email-templates", "이메일 규칙·서명", "mail", _path.startswith("/email-templates")) }}
     </section>
 

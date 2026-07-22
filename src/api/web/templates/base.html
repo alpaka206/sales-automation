@@ -20,8 +20,6 @@
 
     <div class="content">
       <header class="topbar">
-        {% set _slack_on = slack_approval_enabled() %}
-        <span class="topbar__status{% if not _slack_on %} is-off{% endif %}"><span></span> {% if _slack_on %}Slack · 답변 준비 시 1회{% else %}Slack 알림 꺼짐{% endif %}</span>
         {% if _effective_role == 'viewer' %}<span class="tag">조회 전용</span>{% endif %}
       </header>
 

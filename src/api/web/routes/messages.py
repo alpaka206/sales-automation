@@ -385,6 +385,9 @@ def _messages_list_context(status: str = "", channel: str = "") -> dict:
         # A later inbound message marks the latest detailed sent reply as answered;
         # the reply itself keeps status="sent".
         q = q.where(Message.replied.is_(True))
+    elif status == "awaiting":
+        # Merged "발송 대기" bucket: awaiting human review + approved-and-queued.
+        q = q.where(Message.status.in_(("pending_approval", "approved")))
     elif status:
         q = q.where(Message.status == status)
     if channel:
