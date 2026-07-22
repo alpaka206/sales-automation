@@ -51,6 +51,7 @@
 
   {% if _user %}
   <div class="operator-card">
+    {% if _user.role == 'viewer' %}<span class="tag" style="display:block;text-align:center;margin-bottom:8px">조회 전용</span>{% endif %}
     <a href="/auth/logout" class="btn btn--subtle" style="width:100%;justify-content:center">{{ icon("reply", 15) }} 로그아웃</a>
   </div>
   {% endif %}

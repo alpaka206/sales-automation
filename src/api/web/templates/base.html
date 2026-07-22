@@ -19,10 +19,6 @@
     {% include "partials/nav.html" %}
 
     <div class="content">
-      <header class="topbar">
-        {% if _effective_role == 'viewer' %}<span class="tag">조회 전용</span>{% endif %}
-      </header>
-
       <main class="main" id="main" tabindex="-1">
         {% block content %}{% endblock %}
       </main>
