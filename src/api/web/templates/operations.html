@@ -63,7 +63,9 @@
   <div class="section-heading-row"><h2>업데이트 필요 고객</h2></div>
   {% set groups = [
     ('답장 누락 가능성', '고객의 최근 문의 이후 우리 답변이 없는 대화', missing_reply, 'danger'),
-    ('30일 동안 고객 답장 없음', '우리 메일 발송 후 한 달 동안 회신이 없는 고객', waiting_customer, 'warn'),
+    ('1차 리마인더 단계', '발송 후 %d일 무응답 · HubSpot 자동화가 1차 리마인더를 보내는 구간' % follow_up_days.reminder_1, due_reminder_1, 'warn'),
+    ('2차 리마인더 단계', '발송 후 %d일 무응답 · 2차 리마인더 구간' % follow_up_days.reminder_2, due_reminder_2, 'warn'),
+    ('Unqualified 대상', '발송 후 %d일 무응답 · 무응답 종료 대상' % follow_up_days.unqualified, due_unqualified, 'danger'),
     ('14일 이상 소통 없음', 'Negotiation 상태에서 최근 활동이 오래된 고객', stale, 'warn')
   ] %}
   <div class="insight-grid mb-gap">

@@ -78,14 +78,15 @@ def test_domain_gate():
         assert not auth._domain_ok("estsoft.com@gmail.com")
 
 
-def test_admin_autoapproved_others_pending_until_approved():
+def test_first_login_bootstraps_admin_others_pending_until_approved():
+    """Operators live in the DB only: first sign-in bootstraps, the rest wait."""
     factory = _mem_factory()
-    with patch.object(auth, "SessionLocal", factory), \
-         patch.object(settings, "WEB_UI_ADMIN_EMAILS", "boss@estsoft.com"):
+    with patch.object(auth, "SessionLocal", factory):
+        # The very first account on an empty table becomes an approved admin.
         admin, ok = auth._login_or_pending("boss@estsoft.com", "Boss", None)
         assert ok and admin["role"] == "admin"
 
-        # Non-admins are pending until an admin approves them inside the UI.
+        # Once a row exists the bootstrap is dead: newcomers are pending operators.
         newcomer, ok = auth._login_or_pending("new@estsoft.com", "New", None)
         assert not ok
         assert newcomer["role"] == "operator"
@@ -98,6 +99,16 @@ def test_admin_autoapproved_others_pending_until_approved():
         session.close()
         _, ok2 = auth._login_or_pending("new@estsoft.com", "New", None)
         assert ok2
+
+        # Re-login never re-promotes: the bootstrap admin stays admin, the rest don't.
+        again, ok3 = auth._login_or_pending("new@estsoft.com", "New", None)
+        assert ok3 and again["role"] == "operator"
+
+
+def test_no_env_admin_allowlist_exists():
+    """The env allowlist is gone — authorization must come from the users table."""
+    assert not hasattr(settings, "WEB_UI_ADMIN_EMAILS")
+    assert not hasattr(auth, "_admin_emails")
 
 
 def test_current_user_uses_live_approval_and_role():

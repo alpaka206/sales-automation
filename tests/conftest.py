@@ -72,6 +72,23 @@ if _real_engine.url.get_backend_name() == "sqlite":
     Base.metadata.create_all(_real_engine)
 
 
+@pytest.fixture(autouse=True)
+def _allow_send_in_tests(monkeypatch):
+    """Lift the operator's temporary no-send switch for the suite.
+
+    ``safe_mode.EMAIL_SENDING_ENABLED`` is False in the shipped code so nothing can
+    email while pre-launch. The SMTP tests need to exercise the real code path, and
+    they can do so safely: SMTP_USERNAME/PASSWORD are blanked above and every one of
+    those tests substitutes a fake ``smtplib.SMTP``, so no socket is ever opened.
+
+    The switch's own behaviour (that it blocks) is asserted explicitly in
+    tests/test_safe_mode.py, which flips it back off inside the test.
+    """
+    from src.common import safe_mode
+
+    monkeypatch.setattr(safe_mode, "EMAIL_SENDING_ENABLED", True)
+
+
 @pytest.fixture()
 def db_engine():
     """In-memory SQLite engine with all tables created."""

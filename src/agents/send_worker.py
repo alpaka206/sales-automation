@@ -209,8 +209,14 @@ async def _send_one(message_id: int) -> bool:
                 msg.send_claimed_at = None
                 msg.sent_at = datetime.now(timezone.utc)
 
+                # Local bookkeeping records OUR activity and is always written, including
+                # in safe mode. Gating it on `not test_mode` used to leave last_outgoing_at
+                # and stage permanently unset pre-launch (safe mode always forces an
+                # override address), which silently emptied every "no reply for N days"
+                # and pipeline view. External side effects stay guarded — the HubSpot /
+                # Sheets writes below still run only when `not test_mode`.
                 conv = session.get(Conversation, msg.conversation_id)
-                if conv and not test_mode:
+                if conv:
                     conv.last_outgoing_at = msg.sent_at
                     if msg.prompt_variant != "auto_ack":
                         conv.stage = "meeting_link_sent"

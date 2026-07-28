@@ -265,6 +265,39 @@ def test_later_contact_reply_marks_latest_sent_message_answered(db_session) -> N
     assert db_session.query(Message).filter_by(direction="outgoing").count() == 2
 
 
+def test_test_sent_reply_is_marked_answered_in_safe_mode(db_session) -> None:
+    """Pre-launch safe mode stores "test_sent", not "sent" — replies must still count.
+
+    Matching only status=="sent" left Message.replied permanently False before
+    go-live, zeroing the reply-rate report and /messages?status=replied.
+    """
+    llm = _mock_llm()
+    first_event = {
+        "object_id": "hs-safe-mode-reply",
+        "occurred_at": "2026-05-14T11:00:00Z",
+        "email": "safemode@example.com",
+        "full_name": "Safe Mode Buyer",
+        "last_message": "Please send pricing.",
+    }
+    second_event = {
+        **first_event,
+        "occurred_at": "2026-05-15T11:00:00Z",
+        "last_message": "Thanks. Can we meet tomorrow?",
+    }
+
+    with patch("src.agents.inbound.SessionLocal", return_value=db_session):
+        agent = InboundAgent(llm=llm, hubspot=None)
+        first = agent.handle(first_event)
+        sent = db_session.get(Message, first["message_id"])
+        sent.status = "test_sent"  # what safe mode actually writes
+        sent.sent_at = sent.created_at
+        db_session.commit()
+
+        agent.handle(second_event)
+
+    assert db_session.get(Message, first["message_id"]).replied is True
+
+
 def test_inbound_channel_selection() -> None:
     agent = InboundAgent(llm=_mock_llm(), hubspot=None)
 

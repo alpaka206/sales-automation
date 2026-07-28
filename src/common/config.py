@@ -45,20 +45,55 @@ class Settings(BaseSettings):
     )
     HUBSPOT_OWNER_ID: str = ""
     HUBSPOT_WEBHOOK_SECRET: str = ""
-    # Only tickets in this HubSpot pipeline stage are treated as new inbound
-    # inquiries. Empty keeps the existing "all newly-created tickets" behavior.
+    # ----- [B2B] AI Dubbing ticket pipeline stage ids -----
+    # The env names below mirror the stage labels in HubSpot (New / Meeting link sent /
+    # Negotiating / Reminder Sent / Won / Lost / Closed). The older internal names are
+    # kept as aliases so an existing .env or Render dashboard keeps working — same
+    # pattern as HUBSPOT_ACCESS_TOKEN above. Find an id in HubSpot Settings → Objects →
+    # Tickets → Pipelines (click a stage → copy id), or run scripts/list_ticket_stages.py.
+    #
+    # Only tickets in this stage are treated as new inbound inquiries. Empty keeps the
+    # existing "all newly-created tickets" behavior.
     HUBSPOT_TICKET_STAGE_NEW: str = ""
-    # After SMTP send completes, move the linked HubSpot ticket to this pipeline stage
-    # id (e.g. "문의 대기"). Empty = don't touch stage. Find the id in
-    # HubSpot Settings → Objects → Tickets → Pipelines (click a stage → copy id).
-    HUBSPOT_TICKET_STAGE_AFTER_SEND: str = ""
-    # Optional mappings for the remaining local pipeline stages. Blank means
-    # the card moves locally without attempting an unsupported HubSpot write.
-    HUBSPOT_TICKET_STAGE_NEGOTIATION: str = ""
+    # After SMTP send completes, move the linked ticket here. Empty = don't touch stage.
+    HUBSPOT_TICKET_STAGE_AFTER_SEND: str = Field(
+        default="",
+        validation_alias=AliasChoices(
+            "HUBSPOT_TICKET_STAGE_MEETING_LINK_SENT", "HUBSPOT_TICKET_STAGE_AFTER_SEND"
+        ),
+    )
+    HUBSPOT_TICKET_STAGE_NEGOTIATION: str = Field(
+        default="",
+        validation_alias=AliasChoices(
+            "HUBSPOT_TICKET_STAGE_NEGOTIATING", "HUBSPOT_TICKET_STAGE_NEGOTIATION"
+        ),
+    )
+    HUBSPOT_TICKET_STAGE_CLOSED_LOST: str = Field(
+        default="",
+        validation_alias=AliasChoices(
+            "HUBSPOT_TICKET_STAGE_LOST", "HUBSPOT_TICKET_STAGE_CLOSED_LOST"
+        ),
+    )
+    # Stages that exist in the real pipeline. Declared so the values are actually read
+    # (pydantic's extra="ignore" silently drops anything undeclared). Not yet mapped to
+    # a local board column — see PIPELINE_STAGES in src/api/web/routes/customer_ops.py.
+    HUBSPOT_TICKET_STAGE_REMINDER_SENT: str = ""
+    HUBSPOT_TICKET_STAGE_WON: str = ""
+    # "X_Follow Up Needed" — not in the written pipeline definition, but it holds more
+    # B2B tickets than any other stage, so it must be mappable or half the board is blind.
+    HUBSPOT_TICKET_STAGE_FOLLOW_UP_NEEDED: str = ""
+    # "Unqualified" is being converted to a closed stage on the HubSpot side.
+    HUBSPOT_TICKET_STAGE_CLOSED: str = Field(
+        default="",
+        validation_alias=AliasChoices(
+            "HUBSPOT_TICKET_STAGE_CLOSED", "HUBSPOT_TICKET_STAGE_UNQUALIFIED"
+        ),
+    )
+    # Legacy local-only stages with no counterpart in the B2B Dubbing pipeline. Blank
+    # means the card moves locally without attempting an unsupported HubSpot write.
     HUBSPOT_TICKET_STAGE_CONTRACTED: str = ""
     HUBSPOT_TICKET_STAGE_ONBOARDING: str = ""
     HUBSPOT_TICKET_STAGE_ACTIVE: str = ""
-    HUBSPOT_TICKET_STAGE_CLOSED_LOST: str = ""
     # Set to true ONLY if the HubSpot account has a custom `inbound_status`
     # text property on contacts. We write "analyzed" / "meeting_link_sent" to
     # it for operator visibility, but the value is never read back, and the
@@ -204,9 +239,9 @@ class Settings(BaseSettings):
     GOOGLE_OAUTH_CLIENT_SECRET: str = ""
     # Only verified emails on this domain may sign in (e.g. estsoft.com Google Workspace).
     ALLOWED_EMAIL_DOMAIN: str = "estsoft.com"
-    # Bootstrap admins (comma-separated emails): auto-approved with role=admin on first login.
-    # Everyone else signs in as pending and is approved by an admin inside the UI.
-    WEB_UI_ADMIN_EMAILS: str = ""
+    # NOTE: there is deliberately no admin-email env var. Operators are managed only in
+    # the `users` table (/settings/users); the first sign-in on an empty table bootstraps
+    # an admin, and scripts/bootstrap_admin.py is the recovery path.
     # HMAC key for signing the session cookie. REQUIRED when AUTH_MODE=google_oauth.
     SESSION_SECRET: str = ""
 

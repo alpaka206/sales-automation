@@ -39,14 +39,24 @@ services:
       - key: HUBSPOT_WEBHOOK_SECRET    # Client secret — required for webhook v3 signature check
         sync: false
       # [B2B] AI Dubbing pipeline (798618015) stage IDs — set here, no dashboard entry needed.
+      # [B2B] AI Dubbing pipeline (798618015). Names mirror the HubSpot stage labels;
+      # the older names (AFTER_SEND / NEGOTIATION / CLOSED_LOST) still resolve as aliases.
       - key: HUBSPOT_TICKET_STAGE_NEW
         value: "1172180243"            # New — the webhook "new inbound" trigger
-      - key: HUBSPOT_TICKET_STAGE_AFTER_SEND
-        value: "1193842435"            # Meeting Link Sent — moved here after a reply is sent
-      - key: HUBSPOT_TICKET_STAGE_NEGOTIATION
+      - key: HUBSPOT_TICKET_STAGE_MEETING_LINK_SENT
+        value: "1193842435"            # Meeting link sent — moved here after a reply is sent
+      - key: HUBSPOT_TICKET_STAGE_NEGOTIATING
         value: "1193733925"            # Negotiating
-      - key: HUBSPOT_TICKET_STAGE_CLOSED_LOST
+      - key: HUBSPOT_TICKET_STAGE_REMINDER_SENT
+        value: "1196621584"            # Reminder sent
+      - key: HUBSPOT_TICKET_STAGE_FOLLOW_UP_NEEDED
+        value: "1193733926"            # X_Follow Up Needed — holds the most B2B tickets
+      - key: HUBSPOT_TICKET_STAGE_WON
+        value: "1196772135"            # Won
+      - key: HUBSPOT_TICKET_STAGE_LOST
         value: "1172180246"            # Lost
+      - key: HUBSPOT_TICKET_STAGE_CLOSED
+        value: "1404814097"            # Closed — what Unqualified is being converted to
       - key: GOOGLE_CREDENTIALS_JSON   # Vertex AI service-account JSON (full contents)
         sync: false
       - key: GOOGLE_CLOUD_PROJECT      # optional; falls back to JSON project_id
@@ -77,8 +87,8 @@ services:
         sync: false
       - key: ALLOWED_EMAIL_DOMAIN      # only verified Google accounts on this domain may sign in
         value: estsoft.com
-      - key: WEB_UI_ADMIN_EMAILS       # comma-separated bootstrap admins (auto-approved); others approved in-app
-        sync: false
+      # Operators are managed only in the `users` table (/settings/users). The first
+      # sign-in on an empty table bootstraps an admin; no env allowlist exists.
       - key: SESSION_SECRET            # random long string; required when AUTH_MODE=google_oauth
         generateValue: true
 
@@ -114,6 +124,12 @@ services:
         value: "false"
       - key: WEB_UI_USERNAME
         value: admin
+      # The auto-acknowledgement is the ONLY path that emails without a human pressing
+      # approve — it dispatches inline the moment an inbound ticket lands. Left
+      # undeclared it fell back to the code default (true), so the deployed console
+      # mailed on its own. Pinned false until go-live is deliberate.
+      - key: INBOUND_AUTO_ACK_ENABLED
+        value: "false"
       # Webhook is primary; poller is the 10-minute recovery path for missed events.
       - key: SEND_WORKER_ENABLED
         value: "true"

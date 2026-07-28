@@ -7,9 +7,14 @@ stdlib-HMAC-signed cookie (no Authlib / itsdangerous / server-side session store
 Gate (enforced in :func:`oauth_callback`):
   1. Google ID token signature/aud/exp verified by Google's library.
   2. ``email_verified`` is true AND the email is on ``ALLOWED_EMAIL_DOMAIN``.
-  3. The email is approved — a bootstrap admin (``WEB_UI_ADMIN_EMAILS``) or an existing
-     ``users`` row with ``approved=True``. Everyone else lands on a "pending approval"
-     page until an admin approves them in the UI.
+  3. The email is approved — an existing ``users`` row with ``approved=True``. Everyone
+     else lands on a "pending approval" page until an admin approves them in the UI.
+
+Operators live in the ``users`` table only; there is no env-var allowlist. The very
+first sign-in on an empty table bootstraps that account as an approved admin (see
+:func:`_login_or_pending`), which is safe because step 2 already restricts sign-in to
+the company domain. ``scripts/bootstrap_admin.py`` is the recovery path if the table
+ever ends up with no admin.
 
 The signed session cookie carries {email, name, role, exp}; ``current_user`` also
 checks the current database row so revocation and role changes take effect immediately.
@@ -173,37 +178,40 @@ def clear_session(resp: Response) -> None:
 
 
 # --------------------------------------------------------------------------- #
-# Allowlist
+# Domain gate + DB-backed operator directory
 # --------------------------------------------------------------------------- #
-def _email_set(raw: str) -> set[str]:
-    return {e.strip().lower() for e in (raw or "").split(",") if e.strip()}
-
-
-def _admin_emails() -> set[str]:
-    return _email_set(settings.WEB_UI_ADMIN_EMAILS)
-
-
 def _domain_ok(email: str) -> bool:
     dom = (settings.ALLOWED_EMAIL_DOMAIN or "").lower().strip()
     return bool(dom) and email.lower().endswith("@" + dom)
 
 
 def _login_or_pending(email: str, name: str | None, picture: str | None) -> tuple[dict, bool]:
-    """Upsert the user on login and return ({email,name,role}, approved)."""
+    """Upsert the user on login and return ({email,name,role}, approved).
+
+    Authorization lives entirely in the ``users`` table. The single exception is
+    bootstrap: on a brand-new deployment the table is empty and nobody could ever
+    approve anybody, so the first account to sign in is created as an approved
+    admin. The caller has already verified the Google ID token and enforced
+    ``ALLOWED_EMAIL_DOMAIN``, so this can only ever be a company account. Once any
+    row exists the branch is dead and every newcomer lands as pending.
+    """
     email = email.lower()
-    is_admin = email in _admin_emails()
     with SessionLocal() as session:
         user = session.get(User, email)
         if not user:
-            user = User(email=email, approved=is_admin, role="admin" if is_admin else "operator")
+            bootstrap = session.query(User).count() == 0
+            if bootstrap:
+                logger.warning("Bootstrapping first admin from empty users table: %s", email)
+            user = User(
+                email=email,
+                approved=bootstrap,
+                role="admin" if bootstrap else "operator",
+            )
             session.add(user)
         if name:
             user.name = name
         if picture:
             user.picture = picture
-        if is_admin:
-            user.role = "admin"
-            user.approved = True
         user.last_login_at = datetime.now(timezone.utc)
         session.commit()
         return (

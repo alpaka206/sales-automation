@@ -1,0 +1,220 @@
+"""HubSpot -> local stage detection.
+
+Sales moves tickets in HubSpot directly. Before this existed the webhook accepted a
+stage change only when the new value was the New stage and dropped every other
+transition, so a ticket could reach Won in HubSpot while our board still showed New.
+"""
+
+from __future__ import annotations
+
+from unittest.mock import patch
+
+import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
+
+from src.agents import stage_sync
+from src.common.config import settings
+from src.db.base import Base
+from src.db.models import Contact, Conversation, CustomerProfile
+
+# Numeric: HubSpotWebhookEvent.objectId is an int, and the webhook stringifies it.
+TICKET = "4200001"
+
+STAGE_IDS = {
+    "HUBSPOT_TICKET_STAGE_NEW": "1172180243",
+    "HUBSPOT_TICKET_STAGE_AFTER_SEND": "1193842435",
+    "HUBSPOT_TICKET_STAGE_NEGOTIATION": "1193733925",
+    "HUBSPOT_TICKET_STAGE_REMINDER_SENT": "1196621584",
+    "HUBSPOT_TICKET_STAGE_FOLLOW_UP_NEEDED": "1193733926",
+    "HUBSPOT_TICKET_STAGE_WON": "1196772135",
+    "HUBSPOT_TICKET_STAGE_CLOSED_LOST": "1172180246",
+    "HUBSPOT_TICKET_STAGE_CLOSED": "1404814097",
+}
+
+
+@pytest.fixture()
+def stages(monkeypatch):
+    for attr, value in STAGE_IDS.items():
+        monkeypatch.setattr(settings, attr, value)
+
+
+@pytest.fixture()
+def db(monkeypatch):
+    engine = create_engine(
+        "sqlite:///:memory:", connect_args={"check_same_thread": False}, poolclass=StaticPool
+    )
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine, expire_on_commit=False)
+    monkeypatch.setattr(stage_sync, "SessionLocal", factory)
+    with factory() as session:
+        contact = Contact(normalized_email="buyer@example.com", full_name="Buyer")
+        session.add(contact)
+        session.flush()
+        session.add(
+            Conversation(contact_id=contact.id, stage="new", hubspot_ticket_id=TICKET)
+        )
+        session.commit()
+    return factory
+
+
+def test_every_pipeline_stage_is_mapped(stages):
+    """All 8 stages of [B2B] AI Dubbing must resolve — an unmapped one is invisible."""
+    expected = {
+        "1172180243": "new",
+        "1193842435": "meeting_link_sent",
+        "1193733925": "negotiation",
+        "1196621584": "reminder_sent",
+        "1193733926": "follow_up_needed",
+        "1196772135": "won",
+        "1172180246": "closed_lost",
+        "1404814097": "closed",
+    }
+    assert stage_sync.stage_id_to_local() == expected
+
+
+def test_blank_stage_ids_do_not_collide(monkeypatch):
+    """Unconfigured stages must be skipped, not all collapse onto the empty id."""
+    for attr in STAGE_IDS:
+        monkeypatch.setattr(settings, attr, "")
+    monkeypatch.setattr(settings, "HUBSPOT_TICKET_STAGE_CONTRACTED", "")
+    monkeypatch.setattr(settings, "HUBSPOT_TICKET_STAGE_ONBOARDING", "")
+    monkeypatch.setattr(settings, "HUBSPOT_TICKET_STAGE_ACTIVE", "")
+    assert stage_sync.stage_id_to_local() == {}
+    assert stage_sync.local_stage_for("") is None
+
+
+@pytest.mark.parametrize(
+    ("stage_id", "expected_stage", "expected_state"),
+    [
+        ("1193733925", "negotiation", "negotiation"),
+        ("1196621584", "reminder_sent", None),
+        ("1193733926", "follow_up_needed", None),
+        ("1196772135", "won", "service"),
+        ("1172180246", "closed_lost", "lost"),
+        ("1404814097", "closed", "lost"),
+    ],
+)
+def test_hubspot_move_updates_local_conversation(
+    db, stages, stage_id, expected_stage, expected_state
+):
+    assert stage_sync.sync_stage_from_hubspot(TICKET, stage_id) == expected_stage
+
+    with db() as session:
+        conv = session.query(Conversation).filter_by(hubspot_ticket_id=TICKET).one()
+        assert conv.stage == expected_stage
+        profile = session.get(CustomerProfile, conv.contact_id)
+        assert profile is not None
+        assert profile.pipeline_stage == expected_stage
+        if expected_state:
+            assert profile.customer_state == expected_state
+
+
+def test_repeat_of_the_same_stage_is_a_no_op(db, stages):
+    """Returns None the second time so callers do not log a phantom transition."""
+    assert stage_sync.sync_stage_from_hubspot(TICKET, "1196772135") == "won"
+    assert stage_sync.sync_stage_from_hubspot(TICKET, "1196772135") is None
+
+
+def test_reopening_clears_a_closed_customer_state(db, stages):
+    """Won -> Negotiating must not leave the profile stuck in 'service'."""
+    stage_sync.sync_stage_from_hubspot(TICKET, "1196772135")
+    stage_sync.sync_stage_from_hubspot(TICKET, "1193733925")
+    with db() as session:
+        conv = session.query(Conversation).filter_by(hubspot_ticket_id=TICKET).one()
+        assert session.get(CustomerProfile, conv.contact_id).customer_state == "negotiation"
+
+
+def test_unknown_ticket_and_unmapped_stage_are_ignored(db, stages):
+    assert stage_sync.sync_stage_from_hubspot("no-such-ticket", "1196772135") is None
+    assert stage_sync.sync_stage_from_hubspot(TICKET, "999999999") is None
+    assert stage_sync.sync_stage_from_hubspot(None, "1196772135") is None
+    with db() as session:
+        assert session.query(Conversation).filter_by(hubspot_ticket_id=TICKET).one().stage == "new"
+
+
+def test_webhook_records_a_non_new_stage_change(db, stages, monkeypatch):
+    """The regression: a move to Won used to be dropped as 'ignored'."""
+    from src.api import webhook
+    from src.api.schemas import HubSpotWebhookEvent
+
+    event = HubSpotWebhookEvent(
+        subscriptionType="ticket.propertyChange",
+        objectId=TICKET,
+        propertyName="hs_pipeline_stage",
+        propertyValue="1196772135",
+    )
+    # Not inbound work...
+    assert webhook._map_hubspot_event(event) is None
+    # ...but still recorded.
+    assert webhook._sync_stage_change(event) == "won"
+
+    with db() as session:
+        assert session.query(Conversation).filter_by(hubspot_ticket_id=TICKET).one().stage == "won"
+
+
+def test_webhook_ignores_non_stage_property_changes(db, stages):
+    from src.api import webhook
+    from src.api.schemas import HubSpotWebhookEvent
+
+    event = HubSpotWebhookEvent(
+        subscriptionType="ticket.propertyChange",
+        objectId=TICKET,
+        propertyName="subject",
+        propertyValue="renamed",
+    )
+    assert webhook._sync_stage_change(event) is None
+
+
+def test_poller_reconcile_sweeps_every_stage(db, stages, monkeypatch):
+    """The reconcile pass must search ALL stages, unlike the New-only inbound poll."""
+    from src.agents import inbound_poller
+    from src.integrations.hubspot_models import TicketDTO
+
+    monkeypatch.setattr(inbound_poller, "SessionLocal", db)
+    captured: dict = {}
+
+    class FakeHubSpot:
+        def search_tickets_sync(self, created_after, pipeline_stage=None, limit=100):
+            captured["pipeline_stage"] = pipeline_stage
+            return [TicketDTO(id=TICKET, pipeline_stage="1193733926")]
+
+    monkeypatch.setattr(inbound_poller, "HubSpotClient", lambda *a, **k: FakeHubSpot())
+
+    assert inbound_poller.reconcile_ticket_stages_once() == 1
+    assert captured["pipeline_stage"] is None, "reconcile must not filter to one stage"
+
+    with db() as session:
+        conv = session.query(Conversation).filter_by(hubspot_ticket_id=TICKET).one()
+        assert conv.stage == "follow_up_needed"
+
+
+def test_reconcile_survives_one_bad_ticket(db, stages, monkeypatch):
+    """A single failure must not abort the sweep or lose the other updates."""
+    from src.agents import inbound_poller
+    from src.integrations.hubspot_models import TicketDTO
+
+    monkeypatch.setattr(inbound_poller, "SessionLocal", db)
+
+    class FakeHubSpot:
+        def search_tickets_sync(self, created_after, pipeline_stage=None, limit=100):
+            return [
+                TicketDTO(id="boom", pipeline_stage="1196772135"),
+                TicketDTO(id=TICKET, pipeline_stage="1196772135"),
+            ]
+
+    monkeypatch.setattr(inbound_poller, "HubSpotClient", lambda *a, **k: FakeHubSpot())
+
+    real = stage_sync.sync_stage_from_hubspot
+
+    def flaky(ticket_id, stage_id, source="hubspot"):
+        if ticket_id == "boom":
+            raise RuntimeError("HubSpot hiccup")
+        return real(ticket_id, stage_id, source=source)
+
+    with patch.object(stage_sync, "sync_stage_from_hubspot", flaky):
+        assert inbound_poller.reconcile_ticket_stages_once() == 1
+
+    with db() as session:
+        assert session.query(Conversation).filter_by(hubspot_ticket_id=TICKET).one().stage == "won"

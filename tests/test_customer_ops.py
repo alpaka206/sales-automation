@@ -247,6 +247,46 @@ def test_operations_surfaces_stale_and_renewal(customer_db, customer_id) -> None
     assert "Example Co" in response.text
 
 
+@pytest.mark.parametrize(
+    ("silent_days", "expected_bucket"),
+    [
+        (1, None),                 # inside the grace window — not due yet
+        (5, "due_reminder_1"),     # past 3d
+        (11, "due_reminder_2"),    # past 3+7d
+        (30, "due_unqualified"),   # past 3+7+3d
+    ],
+)
+def test_operations_follow_up_ladder_buckets(
+    customer_db, customer_id, silent_days, expected_bucket
+) -> None:
+    """Each thread lands on exactly one rung of the 3/7/3 ladder, keyed off our last mail."""
+    from src.api.web.routes import customer_ops
+
+    with customer_db() as session:
+        conv = session.query(Conversation).filter_by(contact_id=customer_id).one()
+        # We mailed last; the customer has been silent since.
+        conv.last_outgoing_at = datetime.now() - timedelta(days=silent_days)
+        conv.last_incoming_at = datetime.now() - timedelta(days=silent_days + 1)
+        session.commit()
+
+    captured: dict = {}
+    real_render = customer_ops.templates.TemplateResponse
+
+    def _capture(request, name, context=None, *a, **kw):
+        if name == "operations.html":
+            captured.update(context or {})
+        return real_render(request, name, context, *a, **kw)
+
+    with patch.object(customer_ops.templates, "TemplateResponse", _capture), TestClient(app) as client:
+        assert client.get("/operations").status_code == 200
+
+    buckets = ("due_reminder_1", "due_reminder_2", "due_unqualified")
+    populated = [b for b in buckets if captured.get(b)]
+    assert populated == ([expected_bucket] if expected_bucket else [])
+    # Never double-counted: a thread appears on at most one rung.
+    assert len(populated) <= 1
+
+
 def test_pipeline_board_moves_card_locally(customer_db, customer_id) -> None:
     with customer_db() as session:
         conversation_id = session.query(Conversation).filter_by(contact_id=customer_id).one().id

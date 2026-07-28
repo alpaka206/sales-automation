@@ -915,12 +915,16 @@ class InboundAgent:
             if inbound_body and (not ticket_id or is_first_inbound):
                 # If this is a later customer message, the latest detailed reply was
                 # answered. Auto acknowledgements do not count as sales replies.
+                # "test_sent" is the safe-mode counterpart of "sent" (the mail was
+                # dispatched, just force-routed to the pre-launch test address). Matching
+                # only "sent" left Message.replied permanently False before go-live,
+                # which zeroed the reply-rate report and the /messages?status=replied view.
                 latest_reply = (
                     session.query(Message)
                     .filter(
                         Message.conversation_id == conv.id,
                         Message.direction == "outgoing",
-                        Message.status == "sent",
+                        Message.status.in_(("sent", "test_sent")),
                         (Message.prompt_variant.is_(None))
                         | (Message.prompt_variant != "auto_ack"),
                     )

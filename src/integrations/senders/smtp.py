@@ -111,6 +111,15 @@ class SMTPDeliveryUnknown(RuntimeError):
     """The SMTP DATA exchange may have succeeded; retrying could duplicate mail."""
 
 
+class SMTPSendingDisabled(SMTPPermanentError):
+    """The operator's temporary no-send switch is engaged (safe_mode.EMAIL_SENDING_ENABLED).
+
+    Subclasses SMTPPermanentError so the send worker stops instead of retrying: the
+    message is marked send_failed and stays visible, rather than silently looking
+    delivered or spinning in a retry loop.
+    """
+
+
 def send_smtp(message: Message) -> None:
     """Send an email via SMTP.
 
@@ -122,7 +131,17 @@ def send_smtp(message: Message) -> None:
     # force the recipient here too — even a caller that bypassed send() cannot
     # email a customer. send() already redirected on the normal path, so this is
     # a no-op there (to_address already equals the override).
-    from ...common.safe_mode import resolve_send_override
+    from ...common.safe_mode import email_sending_enabled, resolve_send_override
+
+    # Hard stop, checked before anything else: while the operator's temporary
+    # no-send switch is engaged nothing is emailed at all, not even to the
+    # pre-launch test recipient. This is the lowest chokepoint every send path
+    # reaches, so no caller can route around it.
+    if not email_sending_enabled():
+        raise SMTPSendingDisabled(
+            "Email sending is disabled in code "
+            "(src/common/safe_mode.py: EMAIL_SENDING_ENABLED = False)."
+        )
 
     override = resolve_send_override()
     if override and (message.to_address or "") != override:

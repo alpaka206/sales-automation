@@ -36,6 +36,31 @@ logger = logging.getLogger(__name__)
 # — this holds even if SEND_OVERRIDE_EMAIL is empty/cleared.
 PRELAUNCH_TEST_RECIPIENT = "ronald@estsoft.com"
 
+# --------------------------------------------------------------------------- #
+# TEMPORARY HARD KILL SWITCH — no email leaves this process at all.
+#
+# While this is False, NOTHING is emailed by any path: not a customer, and not even
+# PRELAUNCH_TEST_RECIPIENT. It sits below the send-override reroute, so it also
+# catches callers that bypass senders.send().
+#
+# It is deliberately a module constant and NOT an env var. Env is exactly what we
+# could not trust: LIVE_EXTERNAL_WRITES / INBOUND_AUTO_ACK_ENABLED live in a Render
+# dashboard nobody can audit from here, and scripts/render_env_sync.py can overwrite
+# the whole set from a local .env. A constant cannot be flipped by deployment config.
+#
+# TO RESUME SENDING: set this back to True. That is the entire switch.
+# --------------------------------------------------------------------------- #
+EMAIL_SENDING_ENABLED = False
+
+
+def email_sending_enabled() -> bool:
+    """False while the operator's temporary no-send switch is engaged.
+
+    Read through this function (not the constant) so tests and the eventual
+    re-enable only have one place to touch.
+    """
+    return bool(EMAIL_SENDING_ENABLED)
+
 
 class ExternalWriteBlocked(RuntimeError):
     """Raised when an external write (HubSpot/Sheets) is attempted in safe mode."""

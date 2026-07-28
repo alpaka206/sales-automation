@@ -16,6 +16,7 @@ logger = logging.getLogger(__name__)
 
 TICKET_POLL_MARKER_KIND = "inbound_ticket_poll_marker"
 TICKET_PROCESSED_KIND = "inbound_ticket_processed"
+STAGE_POLL_MARKER_KIND = "hubspot_stage_poll_marker"
 POLL_OVERLAP = timedelta(minutes=15)
 POLL_BATCH_SIZE = 1000
 
@@ -124,6 +125,66 @@ def poll_tickets_once() -> int:
     return queued
 
 
+def _get_last_stage_poll_at() -> datetime:
+    with SessionLocal() as session:
+        row = (
+            session.query(Event)
+            .filter(Event.kind == STAGE_POLL_MARKER_KIND)
+            .order_by(Event.created_at.desc())
+            .first()
+        )
+    if row and row.payload and "poll_at" in row.payload:
+        return datetime.fromisoformat(row.payload["poll_at"])
+    return datetime.now(timezone.utc) - timedelta(hours=settings.INBOUND_INITIAL_LOOKBACK_HOURS)
+
+
+def reconcile_ticket_stages_once() -> int:
+    """Catch HubSpot stage moves the webhook never delivered.
+
+    The webhook is best-effort: a missed delivery, a bulk edit, or an import moves a
+    ticket with no ``propertyChange`` reaching us. This sweeps every ticket touched
+    since the last run — across ALL stages, unlike ``poll_tickets_once`` which
+    deliberately searches only the New stage — and realigns our copy.
+
+    Read-only against HubSpot; the only writes are to our own tables. Returns the
+    number of conversations whose stage actually moved.
+    """
+    try:
+        hubspot = HubSpotClient()
+    except HubSpotNotConfigured:
+        return 0
+
+    from .stage_sync import sync_stage_from_hubspot
+
+    last_poll = _get_last_stage_poll_at()
+    now = datetime.now(timezone.utc)
+    try:
+        tickets = hubspot.search_tickets_sync(
+            created_after=last_poll - POLL_OVERLAP,
+            pipeline_stage=None,  # every stage — that is the whole point
+            limit=POLL_BATCH_SIZE,
+        )
+    except Exception:
+        logger.exception("HubSpot stage reconcile search failed")
+        return 0
+
+    changed = 0
+    for ticket in tickets:
+        try:
+            if sync_stage_from_hubspot(ticket.id, ticket.pipeline_stage, source="poller"):
+                changed += 1
+        except Exception:
+            # One bad ticket must not abort the sweep or hold back the watermark.
+            logger.exception("Stage reconcile failed for ticket %s", ticket.id)
+
+    with SessionLocal() as session:
+        session.add(Event(kind=STAGE_POLL_MARKER_KIND, payload={"poll_at": now.isoformat()}))
+        session.commit()
+    if changed:
+        logger.info("Stage reconcile: %d conversation(s) realigned to HubSpot", changed)
+    return changed
+
+
 async def run_poller() -> None:
     """Run the polling fallback and sheet backfill at the configured interval."""
     interval = settings.INBOUND_POLL_INTERVAL_SECONDS
@@ -136,6 +197,7 @@ async def run_poller() -> None:
                 record_worker_heartbeat, "poller", min_interval_seconds=0
             )
             await asyncio.to_thread(poll_tickets_once)
+            await asyncio.to_thread(reconcile_ticket_stages_once)
             from .sheet_sync import (
                 process_requested_sheet_sync,
                 sync_pending_inbound_rows,

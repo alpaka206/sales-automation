@@ -90,6 +90,13 @@ def _verify_hubspot_signature(
 
 
 def _map_hubspot_event(event: HubSpotWebhookEvent) -> str | None:
+    """Which pipeline this event feeds, or None to ignore it.
+
+    Only a move INTO the New stage starts inbound processing (fetch → classify →
+    draft). Every other ``hs_pipeline_stage`` change is handled separately by
+    :func:`_sync_stage_change`, which just records where the ticket went — it must
+    not enqueue a draft for a ticket that moved to Won or Lost.
+    """
     event_type = _HUBSPOT_SUBSCRIPTION_MAP.get(event.subscriptionType)
     if event_type != "ticket_stage_changed":
         return event_type
@@ -97,6 +104,29 @@ def _map_hubspot_event(event: HubSpotWebhookEvent) -> str | None:
     if event.propertyName != "hs_pipeline_stage" or not target:
         return None
     return event_type if event.propertyValue == target else None
+
+
+def _sync_stage_change(event: HubSpotWebhookEvent) -> str | None:
+    """Record a HubSpot-side stage move on our copy of the conversation.
+
+    Local DB write only, so it is unaffected by the pre-launch external-write guard.
+    Never raises: a bookkeeping failure must not make us 500 at HubSpot, which would
+    trigger redelivery of the whole batch.
+    """
+    if (
+        _HUBSPOT_SUBSCRIPTION_MAP.get(event.subscriptionType) != "ticket_stage_changed"
+        or event.propertyName != "hs_pipeline_stage"
+    ):
+        return None
+    try:
+        from ..agents.stage_sync import sync_stage_from_hubspot
+
+        return sync_stage_from_hubspot(
+            str(event.objectId), str(event.propertyValue or ""), source="webhook"
+        )
+    except Exception:
+        logger.exception("Stage sync failed for ticket %s", event.objectId)
+        return None
 
 
 def _public_request_uri(request: Request, headers: dict[str, str]) -> str:
@@ -179,7 +209,13 @@ async def webhook_hubspot_inbound(request: Request) -> dict:
             continue
         event_type = _map_hubspot_event(event)
         if event_type is None:
-            results.append({"objectId": event.objectId, "status": "ignored"})
+            # Not inbound work — but it may still be a stage move we should record.
+            synced = _sync_stage_change(event)
+            results.append(
+                {"objectId": event.objectId, "status": "stage_synced", "stage": synced}
+                if synced
+                else {"objectId": event.objectId, "status": "ignored"}
+            )
             continue
 
         occurrence_key = None

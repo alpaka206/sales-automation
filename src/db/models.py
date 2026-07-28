@@ -499,12 +499,13 @@ class LLMUsage(Base):
 
 
 class User(Base):
-    """Operator who can access the web UI (Google OAuth, allowlisted).
+    """Operator who can access the web UI (Google OAuth).
 
+    This table is the ONLY operator directory — no env-var allowlist exists.
     Identity = verified Google email on ALLOWED_EMAIL_DOMAIN. ``approved`` is the
-    access gate (bootstrap admins in WEB_UI_ADMIN_EMAILS are auto-approved on first
-    login; everyone else lands here as approved=False until an admin approves them).
-    ``name`` is used to auto-attribute knowledge edits and message approvals.
+    access gate: the first sign-in on an empty table becomes an approved admin, and
+    everyone after lands here as approved=False until an admin approves them in
+    /settings/users. ``name`` auto-attributes knowledge edits and message approvals.
     """
 
     __tablename__ = "users"

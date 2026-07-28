@@ -31,29 +31,44 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["web"])
 GOOGLE_SHEETS_STATE_COOKIE = "perso_sheets_oauth_state"
 
+# Mirrors the [B2B] AI Dubbing ticket pipeline in HubSpot, in flow order. Operators
+# also move tickets in HubSpot directly, so every HubSpot stage needs a local key here
+# or src/agents/stage_sync.py cannot record where a ticket actually is.
+# The last three are legacy local-only stages with no HubSpot counterpart; they are
+# kept so existing rows keep rendering instead of silently falling back to "new".
 PIPELINE_STAGES: tuple[tuple[str, str, str], ...] = (
     ("new", "New", "새 문의"),
     ("meeting_link_sent", "Meeting link sent", "답변 발송"),
-    ("negotiation", "Negotiation", "협의 중"),
-    ("contracted", "Contracted", "계약 확정"),
-    ("onboarding", "Onboarding", "도입 준비"),
-    ("active", "Active", "서비스 이용"),
-    ("closed_lost", "Closed Lost", "종료"),
+    ("reminder_sent", "Reminder sent", "리마인더 발송"),
+    ("follow_up_needed", "Follow up needed", "후속 조치 필요"),
+    ("negotiation", "Negotiating", "협의 중"),
+    ("won", "Won", "계약 성사"),
+    ("closed_lost", "Lost", "실패"),
+    ("closed", "Closed", "협상 전 종료"),
+    ("contracted", "Contracted", "계약 확정 (구)"),
+    ("onboarding", "Onboarding", "도입 준비 (구)"),
+    ("active", "Active", "서비스 이용 (구)"),
 )
 VALID_PIPELINE_STAGES = {stage for stage, _, _ in PIPELINE_STAGES}
 CONTRACT_STATUSES = {"draft", "sent", "contracted", "active", "expired", "cancelled"}
 
+# Days of customer silence (measured from our last outgoing mail) at which each rung
+# of the B2B follow-up ladder becomes due: reply -> +3d 1st reminder -> +7d 2nd reminder
+# -> +3d Unqualified. The reminder MAIL itself is sent by the HubSpot workflow, not by
+# this app; these thresholds only drive the read-only /operations board so an operator
+# can see which threads HubSpot is about to act on (and catch ones it missed, e.g. a
+# deal that moved to another channel and was never pulled into Negotiating).
+FOLLOW_UP_REMINDER_1_DAYS = 3
+FOLLOW_UP_REMINDER_2_DAYS = FOLLOW_UP_REMINDER_1_DAYS + 7   # 10
+FOLLOW_UP_UNQUALIFIED_DAYS = FOLLOW_UP_REMINDER_2_DAYS + 3  # 13
+
 
 def _stage_id(stage: str) -> str:
-    return {
-        "new": settings.HUBSPOT_TICKET_STAGE_NEW,
-        "meeting_link_sent": settings.HUBSPOT_TICKET_STAGE_AFTER_SEND,
-        "negotiation": settings.HUBSPOT_TICKET_STAGE_NEGOTIATION,
-        "contracted": settings.HUBSPOT_TICKET_STAGE_CONTRACTED,
-        "onboarding": settings.HUBSPOT_TICKET_STAGE_ONBOARDING,
-        "active": settings.HUBSPOT_TICKET_STAGE_ACTIVE,
-        "closed_lost": settings.HUBSPOT_TICKET_STAGE_CLOSED_LOST,
-    }.get(stage, "").strip()
+    """Local stage key -> HubSpot stage id. Inverse of stage_sync.local_stage_for()."""
+    from ....agents.stage_sync import LOCAL_STAGE_TO_SETTING
+
+    attr = LOCAL_STAGE_TO_SETTING.get(stage)
+    return (getattr(settings, attr, "") or "").strip() if attr else ""
 
 
 def _naive(value: datetime | None) -> datetime | None:
@@ -1096,7 +1111,9 @@ async def operations(request: Request):
     rows = _customer_rows()
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     stale_before = now - timedelta(days=14)
-    waiting_before = now - timedelta(days=30)
+    reminder_1_before = now - timedelta(days=FOLLOW_UP_REMINDER_1_DAYS)
+    reminder_2_before = now - timedelta(days=FOLLOW_UP_REMINDER_2_DAYS)
+    unqualified_before = now - timedelta(days=FOLLOW_UP_UNQUALIFIED_DAYS)
     renew_before = now + timedelta(days=60)
     with SessionLocal() as session:
         conversations = session.execute(select(Conversation)).scalars().all()
@@ -1122,7 +1139,9 @@ async def operations(request: Request):
         and row["last_activity"].replace(tzinfo=None) < stale_before
     ]
     missing_reply = []
-    waiting_customer = []
+    due_reminder_1 = []
+    due_reminder_2 = []
+    due_unqualified = []
     for conv in conversations:
         incoming = _naive(conv.last_incoming_at)
         outgoing = _naive(conv.last_outgoing_at)
@@ -1130,10 +1149,25 @@ async def operations(request: Request):
             row = row_by_contact.get(conv.contact_id)
             if row and row not in missing_reply:
                 missing_reply.append(row)
-        if outgoing and outgoing < waiting_before and (not incoming or incoming < outgoing):
-            row = row_by_contact.get(conv.contact_id)
-            if row and row not in waiting_customer:
-                waiting_customer.append(row)
+            continue
+        # Waiting on the customer: we mailed last and they have not answered since.
+        # Buckets are exclusive so the counts add up - each thread shows on the one
+        # rung of the ladder it currently sits at.
+        if not outgoing or (incoming and incoming >= outgoing):
+            continue
+        row = row_by_contact.get(conv.contact_id)
+        if not row:
+            continue
+        if outgoing < unqualified_before:
+            bucket = due_unqualified
+        elif outgoing < reminder_2_before:
+            bucket = due_reminder_2
+        elif outgoing < reminder_1_before:
+            bucket = due_reminder_1
+        else:
+            continue
+        if row not in bucket:
+            bucket.append(row)
     lost = [row for row in rows if row["stage"] == "closed_lost" or row["state"] == "lost"]
     upsell = [
         row
@@ -1148,7 +1182,14 @@ async def operations(request: Request):
             **analytics,
             "stale": stale,
             "missing_reply": missing_reply,
-            "waiting_customer": waiting_customer,
+            "due_reminder_1": due_reminder_1,
+            "due_reminder_2": due_reminder_2,
+            "due_unqualified": due_unqualified,
+            "follow_up_days": {
+                "reminder_1": FOLLOW_UP_REMINDER_1_DAYS,
+                "reminder_2": FOLLOW_UP_REMINDER_2_DAYS,
+                "unqualified": FOLLOW_UP_UNQUALIFIED_DAYS,
+            },
             "renewals": renewals,
             "lost": lost,
             "upsell": upsell,
