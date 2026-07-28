@@ -198,6 +198,9 @@ async def run_poller() -> None:
             )
             await asyncio.to_thread(poll_tickets_once)
             await asyncio.to_thread(reconcile_ticket_stages_once)
+            from .hubspot_backfill import process_requested_hubspot_backfill
+
+            await asyncio.to_thread(process_requested_hubspot_backfill)
             from .sheet_sync import (
                 process_requested_sheet_sync,
                 sync_pending_inbound_rows,

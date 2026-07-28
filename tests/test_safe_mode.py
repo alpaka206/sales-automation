@@ -239,6 +239,26 @@ def test_no_send_switch_blocks_smtp_entirely(no_send, monkeypatch):
         smtp.send_smtp(msg)
 
 
+def test_no_send_switch_covers_the_report_emailer(no_send, monkeypatch):
+    """report.py opens its own smtplib connection, bypassing the smtp.py chokepoint."""
+    from src.agents.report import ReportAgent
+
+    monkeypatch.setattr(settings, "REPORT_EMAIL_TO", "boss@estsoft.com")
+    monkeypatch.setattr(settings, "SMTP_USERNAME", "user")
+    monkeypatch.setattr(settings, "SMTP_PASSWORD", "pass")
+    monkeypatch.setattr(settings, "SMTP_FROM_EMAIL", "sales@estsoft.com")
+
+    # _email_report wraps its send in `except Exception`, so a raising fake would be
+    # swallowed and the test would pass either way. Record the attempt instead.
+    opened: list[str] = []
+    monkeypatch.setattr(smtplib, "SMTP", lambda *a, **k: opened.append("smtp"))
+
+    agent = ReportAgent.__new__(ReportAgent)
+    agent._email_report("report body", "daily")
+
+    assert opened == [], "report emailer opened SMTP despite the no-send switch"
+
+
 def test_no_send_switch_marks_message_failed_not_sent(no_send, monkeypatch):
     """A blocked send must never leave the row looking delivered."""
     import asyncio

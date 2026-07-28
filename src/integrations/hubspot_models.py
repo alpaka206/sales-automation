@@ -45,6 +45,7 @@ class TicketDTO(BaseModel):
     id: str
     subject: str | None = None
     content: str | None = None
+    pipeline: str | None = None
     pipeline_stage: str | None = None
     priority: str | None = None
     source_type: str | None = None

@@ -288,6 +288,93 @@ class HubSpotClient:
             lifecyclestage=props.get("lifecyclestage"),
         )
 
+    def list_tickets_with_contacts_sync(
+        self, pipeline: str | None = None, page_limit: int = 100
+    ) -> list[tuple[TicketDTO, list[str]]]:
+        """Every ticket plus its associated contact ids, as (ticket, contact_ids).
+
+        Uses the LIST endpoint rather than search because only list can return
+        associations inline (``associations=contacts``). That trades a slightly
+        larger scan — every pipeline, ~29 pages for this portal — for one call per
+        page instead of one association GET per ticket, and it avoids
+        ``get_ticket_primary_contact_sync``'s ``limit=1`` (which drops the second
+        contact on multi-contact tickets) and its habit of reporting a 429 as
+        "no contact". ``pipeline`` filters client-side, after the fetch.
+
+        Raises on any non-200 so a rate-limited page fails the run loudly instead
+        of silently yielding a short list.
+        """
+        headers = {"Authorization": f"Bearer {self.token}"}
+        out: list[tuple[TicketDTO, list[str]]] = []
+        after: str | None = None
+        with httpx.Client(headers=headers, timeout=60.0) as client:
+            while True:
+                params: dict[str, str | int] = {
+                    "limit": page_limit,
+                    "properties": self._TICKET_PROPERTIES,
+                    "associations": "contacts",
+                }
+                if after:
+                    params["after"] = after
+                r = client.get(f"{BASE_URL}/crm/v3/objects/tickets", params=params)
+                r.raise_for_status()
+                page = r.json()
+                for item in page.get("results", []):
+                    ticket = self._ticket_from_api(item)
+                    if pipeline and ticket.pipeline != pipeline:
+                        continue
+                    ids = [
+                        str(a["id"])
+                        for a in item.get("associations", {})
+                        .get("contacts", {})
+                        .get("results", [])
+                        if a.get("id")
+                    ]
+                    out.append((ticket, ids))
+                after = page.get("paging", {}).get("next", {}).get("after")
+                if not after:
+                    break
+        return out
+
+    def get_contacts_batch_sync(self, contact_ids: list[str]) -> dict[str, ContactDTO]:
+        """Fetch many contacts in 100-id batches, keyed by id.
+
+        A backfill would otherwise issue one GET per ticket. Ids that no longer
+        exist are simply absent from the result — HubSpot returns 207 with the
+        survivors rather than failing the whole batch, so a deleted contact costs
+        us that one row instead of the run.
+        """
+        out: dict[str, ContactDTO] = {}
+        if not contact_ids:
+            return out
+        props = _contact_properties().split(",")
+        headers = {"Authorization": f"Bearer {self.token}"}
+        unique = list(dict.fromkeys(str(c) for c in contact_ids if c))
+        with httpx.Client(headers=headers, timeout=60.0) as client:
+            for start in range(0, len(unique), 100):
+                chunk = unique[start : start + 100]
+                r = client.post(
+                    f"{BASE_URL}/crm/v3/objects/contacts/batch/read",
+                    json={"properties": props, "inputs": [{"id": cid} for cid in chunk]},
+                )
+                if r.status_code not in (200, 207):
+                    raise HubSpotAPIError(
+                        f"contacts batch read failed ({r.status_code}): {r.text[:200]}"
+                    )
+                for item in r.json().get("results", []):
+                    p = item.get("properties", {}) or {}
+                    out[str(item["id"])] = ContactDTO(
+                        id=str(item["id"]),
+                        email=p.get("email"),
+                        firstname=p.get("firstname"),
+                        lastname=p.get("lastname"),
+                        company=p.get("company"),
+                        phone=p.get("phone"),
+                        country=p.get("country"),
+                        lifecyclestage=p.get("lifecyclestage"),
+                    )
+        return out
+
     def get_recent_emails_sync(self, contact_id: str, limit: int = 5) -> list[EngagementDTO]:
         """Fetch recent email engagements with content for a contact (sync)."""
         headers = {"Authorization": f"Bearer {self.token}"}
@@ -438,7 +525,8 @@ class HubSpotClient:
     # ------ Ticket API (inbound ticket workflow) ------
 
     _TICKET_PROPERTIES = (
-        "subject,content,hs_pipeline_stage,hs_ticket_priority,source_type,createdate,hs_lastmodifieddate"
+        "subject,content,hs_pipeline,hs_pipeline_stage,hs_ticket_priority,"
+        "source_type,createdate,hs_lastmodifieddate"
     )
 
     def _ticket_from_api(self, item: dict, primary_contact_id: str | None = None) -> TicketDTO:
@@ -461,6 +549,7 @@ class HubSpotClient:
             id=str(item["id"]),
             subject=props.get("subject"),
             content=_html_to_text(props.get("content")),
+            pipeline=props.get("hs_pipeline"),
             pipeline_stage=props.get("hs_pipeline_stage"),
             priority=props.get("hs_ticket_priority"),
             source_type=props.get("source_type"),
@@ -510,17 +599,26 @@ class HubSpotClient:
         created_after: datetime,
         pipeline_stage: str | None = None,
         limit: int = 100,
+        pipeline: str | None = None,
     ) -> list[TicketDTO]:
         """Tickets changed after a timestamp, following HubSpot search pages.
 
         Searching the modification timestamp also catches tickets created in
         another stage and later moved into the configured New stage.
+
+        ``pipeline`` narrows to one pipeline across ALL its stages — that is what a
+        backfill wants, whereas ``pipeline_stage`` pins a single stage. The
+        timestamp filter must stay first: tests/test_hubspot.py pins filters[0].
         """
         headers = {"Authorization": f"Bearer {self.token}"}
         ts_ms = str(int(created_after.timestamp() * 1000))
         filters: list[dict] = [
             {"propertyName": "hs_lastmodifieddate", "operator": "GT", "value": ts_ms},
         ]
+        if pipeline:
+            filters.append(
+                {"propertyName": "hs_pipeline", "operator": "EQ", "value": pipeline}
+            )
         if pipeline_stage:
             filters.append(
                 {"propertyName": "hs_pipeline_stage", "operator": "EQ", "value": pipeline_stage}

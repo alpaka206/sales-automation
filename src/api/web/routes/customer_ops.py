@@ -832,6 +832,7 @@ async def customer_sync(contact_id: int):
 @router.get("/pipeline")
 async def pipeline_board(request: Request):
     from ....integrations.google_sheets import connection_summary
+    from ....agents.hubspot_backfill import hubspot_backfill_status
     from ....agents.sheet_sync import (
         full_sheet_sync_status,
         pending_inbound_count,
@@ -861,6 +862,7 @@ async def pipeline_board(request: Request):
             "sheet": connection_summary(),
             "sheet_pending_count": pending_inbound_count() + pending_order_count(),
             "sheet_sync_request": full_sheet_sync_status(),
+            "backfill_request": hubspot_backfill_status(),
             "google_callback_url": _google_callback_url(request),
         },
     )
@@ -880,6 +882,29 @@ async def pipeline_inquiry_stage_move(conversation_id: int, stage: str = Form(..
     result = await _sync_stage(ticket_id, stage, contact_id, sheet_client_id)
     state = "partial" if False in result.values() else "ok"
     return RedirectResponse(f"/pipeline?sync={state}#stage-{stage}", status_code=303)
+
+
+@router.post("/pipeline/backfill")
+async def pipeline_backfill(request: Request):
+    """Queue the one-shot HubSpot -> DB backfill (admin only).
+
+    Records a request and returns immediately; the poller performs the work on its
+    next tick. HubSpot is read-only here and no mail can result — see
+    src/agents/hubspot_backfill.py.
+    """
+    from ....agents.hubspot_backfill import request_hubspot_backfill
+    from ..auth import actor_name
+
+    _require_integration_admin(request)
+    try:
+        request_hubspot_backfill(actor_name(request, "local-admin"))
+    except Exception as exc:
+        logger.warning("HubSpot backfill could not be queued.", exc_info=True)
+        return RedirectResponse(
+            f"/pipeline?backfill=error&detail={quote(str(exc)[:180])}#integrations",
+            status_code=303,
+        )
+    return RedirectResponse("/pipeline?backfill=queued#integrations", status_code=303)
 
 
 def _google_callback_url(request: Request) -> str:
