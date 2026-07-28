@@ -63,12 +63,15 @@ _GOOGLE_TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token"
 
 
 def normalize_role(role: str | None) -> str:
-    """Map legacy/unknown roles to the least-surprising effective permission."""
-    if role == "admin":
-        return "admin"
-    if role == "viewer":
-        return "viewer"
-    return "operator"  # legacy "member" keeps its existing operational access
+    """Collapse every stored role to one of the two the console actually has.
+
+    There are exactly two: ``admin`` (labelled 운영자 in the UI — full access,
+    including user management) and ``viewer`` (read-only). The former separate
+    "operator" tier was merged into admin, so legacy ``operator``/``member`` rows
+    resolve to full access rather than being stranded on a tier that no longer
+    exists. Only an explicit ``viewer`` is restricted.
+    """
+    return "viewer" if role == "viewer" else "admin"
 
 
 # --------------------------------------------------------------------------- #
@@ -202,11 +205,10 @@ def _login_or_pending(email: str, name: str | None, picture: str | None) -> tupl
             bootstrap = session.query(User).count() == 0
             if bootstrap:
                 logger.warning("Bootstrapping first admin from empty users table: %s", email)
-            user = User(
-                email=email,
-                approved=bootstrap,
-                role="admin" if bootstrap else "operator",
-            )
+            # Only two roles exist; "admin" is the full-access one. The access gate
+            # is `approved`, not the role, so a non-bootstrap newcomer is created
+            # unapproved and stays locked out until an admin adds them.
+            user = User(email=email, approved=bootstrap, role="admin")
             session.add(user)
         if name:
             user.name = name

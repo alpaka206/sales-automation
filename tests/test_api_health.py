@@ -115,17 +115,22 @@ def test_external_operator_links_allow_only_http_schemes() -> None:
     assert external_url("//evil.example/path") == ""
 
 
-def test_three_role_web_policy() -> None:
+def test_two_role_web_policy() -> None:
+    """관리자 was merged into 운영자: only `viewer` is restricted."""
+    # viewer: reads yes, writes no, integrations never (they mint OAuth grants).
     assert web_role_allows("viewer", "GET", "/messages")
     assert not web_role_allows("viewer", "POST", "/messages/1/send")
-    assert web_role_allows("member", "POST", "/messages/1/send")
-    assert web_role_allows("operator", "POST", "/pipeline/1/stage")
-    assert web_role_allows("operator", "POST", "/operations/recovery/messages/1/retry")
-    assert not web_role_allows("operator", "POST", "/integrations/1")
-    assert not web_role_allows("operator", "PUT", "/email-templates/1")
-    assert not web_role_allows("operator", "POST", "/logs/clear")
-    assert not web_role_allows("operator", "GET", "/integrations/google-sheets/connect")
-    assert web_role_allows("admin", "DELETE", "/email-templates/1")
+    assert not web_role_allows("viewer", "GET", "/integrations/google-sheets/connect")
+    assert not web_role_allows("viewer", "POST", "/integrations/1")
+
+    # Everything else is full access, including the legacy stored values.
+    for role in ("admin", "operator", "member"):
+        assert web_role_allows(role, "POST", "/messages/1/send"), role
+        assert web_role_allows(role, "POST", "/pipeline/1/stage"), role
+        assert web_role_allows(role, "PUT", "/email-templates/1"), role
+        assert web_role_allows(role, "POST", "/logs/clear"), role
+        assert web_role_allows(role, "GET", "/integrations/google-sheets/connect"), role
+        assert web_role_allows(role, "DELETE", "/email-templates/1"), role
 
 
 def test_viewer_mutation_is_blocked_by_middleware(monkeypatch) -> None:
@@ -139,11 +144,22 @@ def test_viewer_mutation_is_blocked_by_middleware(monkeypatch) -> None:
     assert response.json()["detail"] == "insufficient role for this action"
 
 
-def test_operator_admin_mutation_is_blocked_by_middleware(monkeypatch) -> None:
+def test_operator_reaches_admin_routes_after_role_merge(monkeypatch) -> None:
+    """A legacy `operator` now has full access, so the middleware must not 403 it."""
     monkeypatch.setattr(settings, "AUTH_MODE", "google_oauth")
     with patch(
         "src.api.main.current_user",
         return_value={"email": "o@example.com", "name": "O", "role": "operator"},
+    ):
+        response = TestClient(app).post("/integrations", data={"title": "x"})
+    assert response.status_code != 403
+
+
+def test_viewer_admin_mutation_is_blocked_by_middleware(monkeypatch) -> None:
+    monkeypatch.setattr(settings, "AUTH_MODE", "google_oauth")
+    with patch(
+        "src.api.main.current_user",
+        return_value={"email": "v@example.com", "name": "V", "role": "viewer"},
     ):
         response = TestClient(app).post("/integrations", data={"title": "x"})
     assert response.status_code == 403

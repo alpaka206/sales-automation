@@ -3,22 +3,19 @@
 {% block title %}사용자 관리 — PERSO Inbound{% endblock %}
 {% block content %}
 
-<div style="margin-bottom:14px">
-  <a href="/settings" class="chip">{{ icon("chevron", 14) }} 설정</a>
-</div>
-
 <div class="page-header">
   <div>
     <h1 class="page-title">사용자 관리 · 접근 허용</h1>
-    <p class="page-sub"><strong>@{{ domain }}</strong> Google 계정 · 승인 사용자만 접근</p>
   </div>
 </div>
 
 <div class="card" style="margin-bottom:14px">
   <form hx-post="/settings/users/add" hx-target="#add-user-msg" hx-swap="innerHTML"
         class="row" style="gap:10px;align-items:flex-end;flex-wrap:wrap">
-    <div style="flex:1 1 260px">
-      <label for="add-user-username" class="t-sm" style="display:block;font-weight:600;margin-bottom:4px">사용자 이메일 추가 <span class="t-subtle">(@{{ domain }} 자동)</span></label>
+    {# The id box + @domain suffix together are sized to hold a full address, so the
+       control reads as one email-width field rather than a short id stub. #}
+    <div style="flex:1 1 360px;max-width:420px">
+      <label for="add-user-username" class="t-sm" style="display:block;font-weight:600;margin-bottom:4px">사용자 이메일 추가</label>
       <div class="row" style="gap:0;align-items:stretch;flex-wrap:nowrap">
         <input id="add-user-username" name="username" required
                class="input" placeholder="아이디" autocomplete="off" inputmode="email"
@@ -31,72 +28,13 @@
     <div>
       <label for="add-user-role" class="t-sm" style="display:block;font-weight:600;margin-bottom:4px">역할</label>
       <select id="add-user-role" name="role" class="select">
-        <option value="operator">운영자</option>
+        <option value="admin">운영자</option>
         <option value="viewer">조회 전용</option>
-        <option value="admin">관리자</option>
       </select>
     </div>
     <button type="submit" class="btn btn--ok">{{ icon("check", 14) }} 추가</button>
   </form>
   <div id="add-user-msg" aria-live="polite" style="margin-top:8px"></div>
-  <p class="t-xs t-subtle" style="margin-top:8px">추가한 이메일은 즉시 <strong>승인됨</strong> 상태가 되어, 해당 사용자가 구글 로그인하면 바로 콘솔을 사용할 수 있습니다.</p>
-</div>
-
-{# ---- pending applications (approved = false) ---- #}
-<div class="card card--flush" style="margin-bottom:14px" data-user-section>
-  <div class="section-header" style="padding:var(--pad-card) var(--pad-card) 0">
-    <div class="section-header__l">
-      <span class="section-header__icon">{{ icon("inbound", 17) }}</span>
-      <div>
-        <div class="section-header__title">승인 대기 · 신청
-          <span class="pill pill--warn pill--sm" style="margin-left:6px"><span class="pill__dot"></span>{{ pending_users | length }}</span>
-        </div>
-      </div>
-    </div>
-  </div>
-  <div style="padding:12px var(--pad-card) 0">
-    <label for="search-pending" class="t-xs t-subtle" style="display:block;font-weight:600;margin-bottom:4px">신청 검색</label>
-    <input id="search-pending" type="search" class="input" style="width:100%"
-           placeholder="이름 또는 이메일로 검색" autocomplete="off"
-           aria-describedby="count-pending" oninput="filterUserSection(this)">
-    <div id="count-pending" class="t-xs t-subtle" aria-live="polite" style="margin-top:6px"></div>
-  </div>
-  <div class="table-wrap" style="margin-top:12px">
-    <table class="table">
-      <thead>
-        <tr><th scope="col">사용자</th><th scope="col">역할</th><th scope="col">최근 로그인</th><th scope="col" style="text-align:right">관리</th></tr>
-      </thead>
-      <tbody aria-live="polite">
-        {% for u in pending_users %}
-        <tr data-user-row data-search="{{ (u.name ~ ' ' ~ u.email) | lower }}">
-          <td>
-            <div style="font-weight:600">{{ u.name or u.email.split('@')[0] }}{% if u.email == me_email %} <span class="t-subtle t-xs">(나)</span>{% endif %}</div>
-            <div class="t-xs t-subtle mono">{{ u.email }}</div>
-          </td>
-          <td>
-            {% if u.role == 'admin' %}<span class="pill pill--accent pill--sm"><span class="pill__dot"></span>관리자</span>
-            {% elif u.role == 'viewer' %}<span class="tag">조회 전용</span>
-            {% else %}<span class="tag">운영자</span>{% endif %}
-          </td>
-          <td class="td-subtle tnum">{{ (u.last_login_at | kst) or '—' }}</td>
-          <td>
-            <div class="row" style="gap:6px;justify-content:flex-end">
-              <button class="btn btn--ok btn--sm" hx-post="/settings/users/{{ u.email }}" hx-vals='{"action":"approve"}'>{{ icon("check", 14) }} 승인</button>
-              <button class="btn btn--ghost btn--sm" hx-post="/settings/users/{{ u.email }}" hx-vals='{"action":"reject"}' hx-confirm="{{ u.email }} 의 신청을 거절(삭제)하시겠습니까?">거절</button>
-            </div>
-          </td>
-        </tr>
-        {% else %}
-        <tr data-empty-row><td colspan="4">
-          <div class="empty"><div class="empty__text">대기 중인 신청이 없습니다</div></div>
-        </td></tr>
-        {% endfor %}
-        <tr data-no-results hidden><td colspan="4">
-          <div class="empty"><div class="empty__text">검색 결과가 없습니다</div></div>
-        </td></tr>
-      </tbody>
-    </table>
-  </div>
 </div>
 
 {# ---- registered users (approved = true) ---- #}
@@ -131,9 +69,8 @@
             <div class="t-xs t-subtle mono">{{ u.email }}</div>
           </td>
           <td>
-            {% if u.role == 'admin' %}<span class="pill pill--accent pill--sm"><span class="pill__dot"></span>관리자</span>
-            {% elif u.role == 'viewer' %}<span class="tag">조회 전용</span>
-            {% else %}<span class="tag">운영자</span>{% endif %}
+            {% if u.role == 'viewer' %}<span class="tag">조회 전용</span>
+            {% else %}<span class="pill pill--accent pill--sm"><span class="pill__dot"></span>운영자</span>{% endif %}
           </td>
           <td><span class="pill pill--ok pill--sm"><span class="pill__dot"></span>승인됨</span></td>
           <td class="td-subtle tnum">{{ (u.last_login_at | kst) or '—' }}</td>
@@ -142,8 +79,7 @@
               {% if u.email != me_email %}
               <button class="btn btn--ghost btn--sm" hx-post="/settings/users/{{ u.email }}" hx-vals='{"action":"revoke"}' hx-confirm="{{ u.email }} 의 접근 권한을 삭제하시겠습니까? 목록에서 완전히 제거됩니다.">삭제</button>
               {% endif %}
-              {% if u.role != 'admin' %}<button class="btn btn--subtle btn--sm" hx-post="/settings/users/{{ u.email }}" hx-vals='{"action":"make_admin"}'>관리자로</button>{% endif %}
-              {% if u.role != 'operator' and u.email != me_email %}<button class="btn btn--subtle btn--sm" hx-post="/settings/users/{{ u.email }}" hx-vals='{"action":"make_operator"}'>운영자로</button>{% endif %}
+              {% if u.role == 'viewer' %}<button class="btn btn--subtle btn--sm" hx-post="/settings/users/{{ u.email }}" hx-vals='{"action":"make_admin"}'>운영자로</button>{% endif %}
               {% if u.role != 'viewer' and u.email != me_email %}<button class="btn btn--subtle btn--sm" hx-post="/settings/users/{{ u.email }}" hx-vals='{"action":"make_viewer"}'>조회 전용으로</button>{% endif %}
             </div>
           </td>
@@ -162,8 +98,7 @@
 </div>
 
 <script>
-  // Per-section client-side filter. Each list (승인 대기 / 등록된 사용자) has its
-  // own search box; this scopes the filter to the section the input belongs to.
+  // Client-side filter scoped to the section the search box belongs to.
   function filterUserSection(input) {
     var section = input.closest("[data-user-section]");
     if (!section) return;

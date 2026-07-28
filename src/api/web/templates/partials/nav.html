@@ -34,16 +34,19 @@
       {{ _nav("/operations/recovery", "장애 복구", "shield", _path.startswith("/operations/recovery")) }}
     </section>
 
-    <section class="nav-section{% if _path.startswith('/pipeline') or _path.startswith('/tools/quote-calculator') %} is-current{% endif %}">
+    {# The quote calculator route still exists at /tools/quote-calculator; it is just
+       no longer linked from the sidebar. #}
+    <section class="nav-section{% if _path.startswith('/pipeline') %} is-current{% endif %}">
       <div class="nav-section__title">{{ icon("briefcase", 17) }}<span>파이프라인 연동관리</span></div>
       {{ _nav("/pipeline", "문의 파이프라인", "sliders", _path.startswith("/pipeline"), mobile=True, mobile_label="파이프라인") }}
-      {{ _nav("/tools/quote-calculator", "견적·결제 준비", "calculator", _path.startswith("/tools/quote-calculator")) }}
     </section>
 
     {%- if _is_admin %}
     <section class="nav-section nav-section--system">
       <div class="nav-section__title">{{ icon("settings", 17) }}<span>시스템</span></div>
-      {{ _nav("/settings/users", "접근 승인", "shield", _path.startswith("/settings/users"), badge=(pending_user_count() or None)) }}
+      {# No pending badge: access is granted only by adding an address on that page,
+         so there is no application queue to count. #}
+      {{ _nav("/settings/users", "접근 승인", "shield", _path.startswith("/settings/users")) }}
       {{ _nav("/logs", "운영 로그", "file", _path.startswith("/logs")) }}
     </section>
     {%- endif %}

@@ -5,14 +5,7 @@
 <div class="page-header">
   <div>
     <h1 class="page-title">문의 파이프라인</h1>
-    <p class="page-sub">드래그 또는 단계 선택으로 이동</p>
   </div>
-</div>
-
-<div class="pipeline-status mb-gap" aria-label="연동 상태">
-  {% for stage in stages %}
-  <div><span class="status-dot {% if stage.hubspot_id %}is-on{% endif %}"></span><strong>{{ stage.label }}</strong><small>{% if stage.hubspot_id %}HubSpot {{ stage.hubspot_id }}{% else %}로컬 전용{% endif %}</small></div>
-  {% endfor %}
 </div>
 
 {% if request.query_params.get('sync') == 'partial' %}

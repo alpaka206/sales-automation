@@ -86,10 +86,10 @@ def test_first_login_bootstraps_admin_others_pending_until_approved():
         admin, ok = auth._login_or_pending("boss@estsoft.com", "Boss", None)
         assert ok and admin["role"] == "admin"
 
-        # Once a row exists the bootstrap is dead: newcomers are pending operators.
-        newcomer, ok = auth._login_or_pending("new@estsoft.com", "New", None)
+        # Once a row exists the bootstrap is dead: newcomers land unapproved.
+        # `approved` is the gate, so the role they carry does not let them in.
+        _newcomer, ok = auth._login_or_pending("new@estsoft.com", "New", None)
         assert not ok
-        assert newcomer["role"] == "operator"
 
         # An admin approval flips the gate.
         session = factory()
@@ -100,9 +100,9 @@ def test_first_login_bootstraps_admin_others_pending_until_approved():
         _, ok2 = auth._login_or_pending("new@estsoft.com", "New", None)
         assert ok2
 
-        # Re-login never re-promotes: the bootstrap admin stays admin, the rest don't.
+        # Re-login never changes an existing row's approval.
         again, ok3 = auth._login_or_pending("new@estsoft.com", "New", None)
-        assert ok3 and again["role"] == "operator"
+        assert ok3
 
 
 def test_no_env_admin_allowlist_exists():
@@ -121,13 +121,15 @@ def test_current_user_uses_live_approval_and_role():
             session.commit()
         token = auth.make_session("a@estsoft.com", "Old name", "admin")
         request = _request_with_session(token)
-        assert auth.current_user(request)["role"] == "operator"
+        # Legacy "member" is full access under the two-role model.
+        assert auth.current_user(request)["role"] == "admin"
 
+        # Demotion in the DB takes effect on the very next request.
         with factory() as session:
             user = session.get(User, "a@estsoft.com")
-            user.role = "admin"
+            user.role = "viewer"
             session.commit()
-        assert auth.current_user(request)["role"] == "admin"
+        assert auth.current_user(request)["role"] == "viewer"
 
         with factory() as session:
             user = session.get(User, "a@estsoft.com")
@@ -136,11 +138,11 @@ def test_current_user_uses_live_approval_and_role():
         assert auth.current_user(request) is None
 
 
-def test_role_normalization_keeps_legacy_members_operational():
-    assert auth.normalize_role("member") == "operator"
-    assert auth.normalize_role("operator") == "operator"
+def test_only_two_roles_exist():
+    """관리자 was merged into 운영자: everything that is not viewer is full access."""
     assert auth.normalize_role("viewer") == "viewer"
-    assert auth.normalize_role("admin") == "admin"
+    for legacy in ("admin", "operator", "member", "", None, "something-else"):
+        assert auth.normalize_role(legacy) == "admin", legacy
 
 
 def test_admin_can_assign_viewer_and_operator_roles():
@@ -163,10 +165,11 @@ def test_admin_can_assign_viewer_and_operator_roles():
         with factory() as session:
             assert session.get(User, "reader@estsoft.com").role == "viewer"
 
+        # Promoting back lands on "admin" — the single full-access role.
         response = client.post(
             "/settings/users/reader@estsoft.com",
-            data={"action": "make_operator"},
+            data={"action": "make_admin"},
         )
         assert response.status_code == 204
         with factory() as session:
-            assert session.get(User, "reader@estsoft.com").role == "operator"
+            assert session.get(User, "reader@estsoft.com").role == "admin"

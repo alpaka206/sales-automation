@@ -3,7 +3,8 @@
 The calculator is an INTERNAL sales reference (it carries margin / credit policy
 data), so it is served only behind the web-UI auth gate via these routes, never
 from the public ``/static`` mount. The compose screen embeds ``/app`` in an
-iframe; ``/tools/quote-calculator`` is a full-page view linked from the nav.
+iframe; ``/tools/quote-calculator`` is a full-page view. It is intentionally not in
+the sidebar (removed 2026-07-28) — reach it by URL.
 
 The tier pricing table is NOT hardcoded in the client any more — it lives in
 ``src/common/quote_tiers.py`` (the single source of truth, unit-tested) and is

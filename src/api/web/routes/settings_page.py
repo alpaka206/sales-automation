@@ -46,17 +46,17 @@ async def settings_users(request: Request):
                 "last_login_at": u.last_login_at,
             }
 
-        # Split into "registered" (approved) vs "applied / pending approval".
-        # A pending row is someone who signed in (or was added) but isn't approved.
+        # Access is granted by an admin adding the address here; there is no
+        # self-service application queue, so only approved rows are listed. A row
+        # left unapproved is someone who signed in without being added — they stay
+        # locked out until an admin adds them explicitly.
         approved_users = [_row(u) for u in rows if u.approved]
-        pending_users = [_row(u) for u in rows if not u.approved]
     me = session_user(request) or {}
     return templates.TemplateResponse(
         request,
         "settings_users.html",
         {
             "approved_users": approved_users,
-            "pending_users": pending_users,
             "me_email": me.get("email", ""),
             "domain": settings.ALLOWED_EMAIL_DOMAIN,
         },
@@ -68,13 +68,13 @@ async def settings_user_add(
     request: Request,
     username: str = Form(""),
     email: str = Form(""),
-    role: str = Form("operator"),
+    role: str = Form("admin"),
 ):
-    """Pre-add an email to the allowlist (admins only).
+    """Add an email to the allowlist (admins only). This is the ONLY way in.
 
-    Lets an admin grant access before the user's first login, instead of waiting
-    for them to sign in and land in the pending queue. The row is created already
-    approved; the user just signs in with Google and is let straight through.
+    There is no pending queue: an address that was never added here cannot reach
+    the console. The row is created already approved, so the user just signs in
+    with Google and is let straight through.
 
     The form sends only the local part (``username``); the @domain is fixed and
     appended here. ``email`` is still accepted as a fallback for the full address.
@@ -128,8 +128,6 @@ async def settings_user_update(request: Request, email: str, action: str = Form(
         "revoke",
         "reject",
         "delete",
-        "make_member",
-        "make_operator",
         "make_viewer",
     ):
         return HTMLResponse(
@@ -142,15 +140,13 @@ async def settings_user_update(request: Request, email: str, action: str = Form(
             if action == "approve":
                 u.approved = True
             elif action in ("revoke", "reject", "delete"):
-                # Revoking a registered user (or rejecting a pending applicant)
-                # removes the row entirely — they don't fall back to the pending
-                # queue. Signing in again re-creates a fresh pending application.
+                # Removes the row entirely. Signing in again does NOT restore
+                # access — an admin has to add the address back.
                 session.delete(u)
-            elif action == "make_admin":
+            # Two roles only: "admin" (운영자, full access) and "viewer" (read-only).
+            elif action in ("make_admin", "make_member", "make_operator"):
                 u.role = "admin"
                 u.approved = True
-            elif action in ("make_member", "make_operator"):
-                u.role = "operator"
             elif action == "make_viewer":
                 u.role = "viewer"
             session.commit()

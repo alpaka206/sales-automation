@@ -89,17 +89,19 @@ def is_same_origin_browser_request(request: Request) -> bool:
 
 
 def web_role_allows(role: str, method: str, path: str) -> bool:
-    """Three-role policy for browser routes; legacy ``member`` means operator."""
-    effective = role if role in {"admin", "viewer"} else "operator"
-    if effective == "admin":
+    """Two-role policy for browser routes.
+
+    ``viewer`` is read-only; everything else (``admin``, plus the legacy
+    ``operator``/``member`` values that were merged into it) has full access.
+    Mirrors auth.normalize_role — keep the two in step.
+    """
+    if role != "viewer":
         return True
+    # Viewers may read anything the UI renders, but never mutate and never reach
+    # the integration-connect flows (which hand out OAuth grants).
     if path == "/integrations" or path.startswith("/integrations/"):
         return False
-    if method.upper() in _SAFE_METHODS:
-        return True
-    if effective == "viewer":
-        return False
-    return not any(path == prefix or path.startswith(prefix + "/") for prefix in _ADMIN_MUTATION_PREFIXES)
+    return method.upper() in _SAFE_METHODS
 
 
 def _origin(value: str) -> tuple[str, str, int] | None:
