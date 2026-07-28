@@ -135,6 +135,33 @@ def test_backfill_leaves_last_incoming_at_null(db, fake):
         assert all(c.sheet_client_id is None for c in s.query(Conversation).all())
 
 
+def test_backfill_rows_are_invisible_to_the_sheet_sync(db, fake, monkeypatch):
+    """The bulk import must never end up appended to the shared sales workbook.
+
+    sync_pending_inbound_rows selects `sheet_inbound_row IS NULL AND
+    last_incoming_at IS NOT NULL`; backfilled rows fail the second half, so they are
+    not queued even after LIVE_EXTERNAL_WRITES is turned on.
+    """
+    from sqlalchemy import select
+
+    from src.agents import sheet_sync
+
+    hubspot_backfill.backfill_b2b_pipeline()
+
+    monkeypatch.setattr(sheet_sync, "SessionLocal", db)
+    with db() as s:
+        queued = s.execute(
+            select(Conversation.id).where(
+                Conversation.sheet_inbound_row.is_(None),
+                Conversation.last_incoming_at.isnot(None),
+            )
+        ).all()
+    assert queued == [], "backfilled conversations must not be queued for the sheet"
+
+    # And the operator-facing "미처리" badge stays at zero because of it.
+    assert sheet_sync.pending_inbound_count() == 0
+
+
 def test_backfill_is_idempotent(db, fake):
     first = hubspot_backfill.backfill_b2b_pipeline()
     second = hubspot_backfill.backfill_b2b_pipeline()

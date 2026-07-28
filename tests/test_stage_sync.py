@@ -117,6 +117,57 @@ def test_repeat_of_the_same_stage_is_a_no_op(db, stages):
     assert stage_sync.sync_stage_from_hubspot(TICKET, "1196772135") is None
 
 
+def test_hubspot_move_is_mirrored_into_the_sheet(db, stages, monkeypatch):
+    """A stage dragged in HubSpot must reach the sales workbook with no manual step."""
+    with db() as session:
+        conv = session.query(Conversation).filter_by(hubspot_ticket_id=TICKET).one()
+        conv.sheet_client_id = 1042
+        session.commit()
+
+    calls: list[tuple] = []
+    import src.integrations.google_sheets as gs
+
+    monkeypatch.setattr(
+        gs, "update_inbound_stage", lambda cid, stage, *a, **k: calls.append((cid, stage)) or True
+    )
+
+    stage_sync.sync_stage_from_hubspot(TICKET, "1196772135")
+    assert calls == [(1042, "won")]
+
+
+def test_sheet_mirror_failure_does_not_break_the_local_move(db, stages, monkeypatch):
+    """A Sheets outage must not make the webhook 500 (HubSpot would redeliver)."""
+    with db() as session:
+        conv = session.query(Conversation).filter_by(hubspot_ticket_id=TICKET).one()
+        conv.sheet_client_id = 1042
+        session.commit()
+
+    import src.integrations.google_sheets as gs
+
+    def boom(*a, **k):
+        raise RuntimeError("Sheets down")
+
+    monkeypatch.setattr(gs, "update_inbound_stage", boom)
+
+    assert stage_sync.sync_stage_from_hubspot(TICKET, "1196772135") == "won"
+    with db() as session:
+        assert session.query(Conversation).filter_by(hubspot_ticket_id=TICKET).one().stage == "won"
+
+
+def test_no_sheet_write_without_a_workbook_row(db, stages, monkeypatch):
+    """Backfilled conversations have no sheet_client_id, so the bulk import can
+    never push hundreds of rows into the shared workbook."""
+    calls: list[tuple] = []
+    import src.integrations.google_sheets as gs
+
+    monkeypatch.setattr(
+        gs, "update_inbound_stage", lambda cid, stage, *a, **k: calls.append((cid, stage)) or True
+    )
+
+    stage_sync.sync_stage_from_hubspot(TICKET, "1196772135")  # sheet_client_id is None
+    assert calls == []
+
+
 def test_reopening_clears_a_closed_customer_state(db, stages):
     """Won -> Negotiating must not leave the profile stuck in 'service'."""
     stage_sync.sync_stage_from_hubspot(TICKET, "1196772135")

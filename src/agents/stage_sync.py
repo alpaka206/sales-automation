@@ -20,7 +20,7 @@ from __future__ import annotations
 import logging
 
 from ..db.conversation_history import add_progress
-from ..db.models import Conversation, CustomerProfile
+from ..db.models import Contact, Conversation, CustomerProfile
 from ..db.session import SessionLocal
 
 logger = logging.getLogger(__name__)
@@ -80,6 +80,34 @@ def local_stage_for(hubspot_stage_id: str | None) -> str | None:
     return stage_id_to_local().get(str(hubspot_stage_id).strip())
 
 
+def _mirror_stage_to_sheet(client_id: int | None, stage: str, ticket_id: str) -> None:
+    """Push a HubSpot-driven stage move into the sales workbook, best effort.
+
+    This is what makes the Sheet track HubSpot without anyone re-typing it. Three
+    things gate it, all deliberate:
+
+    - ``update_inbound_stage`` no-ops unless ``writes_enabled()``, i.e. until
+      ``LIVE_EXTERNAL_WRITES`` is turned on. Pre-launch nothing is written.
+    - It needs the workbook's stable Client ID. Rows created by
+      ``hubspot_backfill`` have none, so the one-shot import can never write 300+
+      rows into the shared sheet — only threads the Sheet already knows about are
+      updated.
+    - It never raises. A Sheets outage must not break the webhook (which would make
+      HubSpot redeliver) or abort the poller sweep.
+    """
+    if not client_id:
+        return
+    try:
+        from ..integrations.google_sheets import update_inbound_stage
+
+        if update_inbound_stage(client_id, stage):
+            logger.info("Sheet stage updated from HubSpot (ticket=%s -> %s)", ticket_id, stage)
+    except Exception:
+        logger.warning(
+            "Sheet stage update failed for ticket %s (stage=%s)", ticket_id, stage, exc_info=True
+        )
+
+
 def sync_stage_from_hubspot(
     ticket_id: str | None,
     hubspot_stage_id: str | None,
@@ -89,6 +117,10 @@ def sync_stage_from_hubspot(
 
     Returns the new local stage when something actually changed, else None — so
     callers can log or count real transitions without re-reporting no-ops.
+
+    Also mirrors the move into the Google Sheet when that thread has a workbook row
+    (see :func:`_mirror_stage_to_sheet`), so a stage someone drags in HubSpot lands
+    in the sales sheet with no manual step.
 
     Silently ignores tickets we never ingested and stage ids that are not configured;
     both are normal (other pipelines share the same webhook).
@@ -110,6 +142,12 @@ def sync_stage_from_hubspot(
 
         previous = conv.stage
         conv.stage = local_stage
+        # Read the workbook key while the session is open; the mirror runs after the
+        # commit, and these instances are detached once the block exits.
+        sheet_client_id = conv.sheet_client_id
+        if not sheet_client_id and conv.contact_id:
+            contact = session.get(Contact, conv.contact_id)
+            sheet_client_id = contact.sheet_client_id if contact else None
 
         if conv.contact_id:
             profile = session.get(CustomerProfile, conv.contact_id)
@@ -136,4 +174,6 @@ def sync_stage_from_hubspot(
         "Stage synced from HubSpot (ticket=%s, %s -> %s, source=%s)",
         ticket_id, previous, local_stage, source,
     )
+    # After the commit, so a Sheets failure can never roll back the local move.
+    _mirror_stage_to_sheet(sheet_client_id, local_stage, str(ticket_id))
     return local_stage
