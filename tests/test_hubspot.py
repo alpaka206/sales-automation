@@ -136,3 +136,64 @@ def test_search_tickets_follows_paging(client: HubSpotClient) -> None:
     assert first_body["filterGroups"][0]["filters"][0]["propertyName"] == "hs_lastmodifieddate"
     assert first_body["sorts"][0]["propertyName"] == "hs_lastmodifieddate"
     assert json.loads(route.calls[1].request.content)["after"] == "cursor-2"
+
+
+@respx.mock
+def test_bulk_ticket_walk_retries_a_429_instead_of_aborting(client: HubSpotClient, monkeypatch) -> None:
+    """The backfill walks ~30 pages back to back and tripped HubSpot's 100/10s cap.
+
+    A 429 on page 2 used to raise straight out of raise_for_status(), and since the
+    backfill is not resumable the whole run restarted from page 1 every time.
+    """
+    monkeypatch.setattr("src.integrations.hubspot.time.sleep", lambda *_: None)
+    route = respx.get(f"{BASE_URL}/crm/v3/objects/tickets")
+    route.side_effect = [
+        httpx.Response(
+            200,
+            json={
+                "results": [
+                    {
+                        "id": "1",
+                        "properties": {"hs_pipeline": "798618015"},
+                        "associations": {"contacts": {"results": [{"id": "c1"}]}},
+                    }
+                ],
+                "paging": {"next": {"after": "cursor-2"}},
+            },
+        ),
+        httpx.Response(429, headers={"retry-after": "0"}, json={"message": "rate limited"}),
+        httpx.Response(
+            200,
+            json={
+                "results": [
+                    {"id": "2", "properties": {"hs_pipeline": "other"}},
+                    {"id": "3", "properties": {"hs_pipeline": "798618015"}},
+                ]
+            },
+        ),
+    ]
+
+    pairs = client.list_tickets_with_contacts_sync(pipeline="798618015")
+
+    assert route.call_count == 3, "the 429 must be retried, not raised"
+    # Only the requested pipeline survives; page 2's other-pipeline ticket is dropped.
+    assert [t.id for t, _ in pairs] == ["1", "3"]
+    assert pairs[0][1] == ["c1"]
+
+
+@respx.mock
+def test_contacts_batch_read_retries_a_429(client: HubSpotClient, monkeypatch) -> None:
+    monkeypatch.setattr("src.integrations.hubspot.time.sleep", lambda *_: None)
+    route = respx.post(f"{BASE_URL}/crm/v3/objects/contacts/batch/read")
+    route.side_effect = [
+        httpx.Response(429, headers={"retry-after": "0"}, json={"message": "rate limited"}),
+        httpx.Response(
+            200,
+            json={"results": [{"id": "c1", "properties": {"email": "a@b.com"}}]},
+        ),
+    ]
+
+    got = client.get_contacts_batch_sync(["c1"])
+
+    assert route.call_count == 2
+    assert got["c1"].email == "a@b.com"

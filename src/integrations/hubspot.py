@@ -7,6 +7,7 @@ import html as _html
 import logging
 import random
 import re
+import time
 from datetime import datetime, timezone
 
 import httpx
@@ -96,6 +97,58 @@ async def _request_with_retries(
             wait,
         )
         await asyncio.sleep(wait)
+        delay = min(delay * 2, 30)
+
+    return response  # type: ignore[return-value]
+
+
+# Private apps allow ~100 requests / 10s. A bulk walk issues its calls back to back
+# and will trip that within a couple of seconds, so pace them as well as retry.
+_BULK_PACE_SECONDS = 0.12
+
+
+def _sync_request_with_retries(
+    client: httpx.Client,
+    method: str,
+    url: str,
+    **kwargs,
+) -> httpx.Response:
+    """Blocking twin of :func:`_request_with_retries`.
+
+    The bulk backfill walks ~30 pages of tickets and several contact batches on a
+    sync client; without this a single 429 mid-walk aborted the whole run (and the
+    backfill is not resumable, so it restarted from page 1 every time).
+    """
+    delay = 1.0
+    for attempt in range(_MAX_RETRIES + 1):
+        try:
+            response = client.request(method, url, **kwargs)
+        except (httpx.ReadTimeout, httpx.ConnectTimeout, httpx.ConnectError) as exc:
+            if attempt == _MAX_RETRIES:
+                raise
+            logger.warning(
+                "HubSpot %s %s transport error (attempt %d): %s", method, url, attempt + 1, exc
+            )
+            time.sleep(delay + random.uniform(0, 0.5))
+            delay = min(delay * 2, 30)
+            continue
+
+        if response.status_code not in _RETRY_STATUS:
+            return response
+        if attempt == _MAX_RETRIES:
+            return response
+
+        retry_after = response.headers.get("retry-after")
+        try:
+            wait = float(retry_after) if retry_after else delay
+        except ValueError:
+            wait = delay
+        wait += random.uniform(0, 0.5)
+        logger.warning(
+            "HubSpot %s %s returned %d (attempt %d), retrying in %.1fs",
+            method, url, response.status_code, attempt + 1, wait,
+        )
+        time.sleep(wait)
         delay = min(delay * 2, 30)
 
     return response  # type: ignore[return-value]
@@ -316,7 +369,9 @@ class HubSpotClient:
                 }
                 if after:
                     params["after"] = after
-                r = client.get(f"{BASE_URL}/crm/v3/objects/tickets", params=params)
+                r = _sync_request_with_retries(
+                    client, "GET", f"{BASE_URL}/crm/v3/objects/tickets", params=params
+                )
                 r.raise_for_status()
                 page = r.json()
                 for item in page.get("results", []):
@@ -334,6 +389,7 @@ class HubSpotClient:
                 after = page.get("paging", {}).get("next", {}).get("after")
                 if not after:
                     break
+                time.sleep(_BULK_PACE_SECONDS)
         return out
 
     def get_contacts_batch_sync(self, contact_ids: list[str]) -> dict[str, ContactDTO]:
@@ -352,8 +408,12 @@ class HubSpotClient:
         unique = list(dict.fromkeys(str(c) for c in contact_ids if c))
         with httpx.Client(headers=headers, timeout=60.0) as client:
             for start in range(0, len(unique), 100):
+                if start:
+                    time.sleep(_BULK_PACE_SECONDS)
                 chunk = unique[start : start + 100]
-                r = client.post(
+                r = _sync_request_with_retries(
+                    client,
+                    "POST",
                     f"{BASE_URL}/crm/v3/objects/contacts/batch/read",
                     json={"properties": props, "inputs": [{"id": cid} for cid in chunk]},
                 )
