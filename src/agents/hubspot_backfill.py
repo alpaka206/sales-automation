@@ -145,7 +145,17 @@ def backfill_b2b_pipeline(pipeline: str = B2B_PIPELINE_ID) -> dict:
     Returns counts. Raises HubSpotNotConfigured when there is no token.
     """
     client = HubSpotClient()
-    pairs = client.list_tickets_with_contacts_sync(pipeline=pipeline)
+    fetched = client.list_tickets_with_contacts_sync(pipeline=pipeline)
+    # Paging over a live table can hand back the same ticket twice when rows shift
+    # between pages; keep the first sighting so the loop never inserts a duplicate.
+    seen_tickets: set[str] = set()
+    pairs = []
+    for ticket, ids in fetched:
+        if ticket.id in seen_tickets:
+            continue
+        seen_tickets.add(ticket.id)
+        pairs.append((ticket, ids))
+
     contact_ids = [cid for _ticket, ids in pairs for cid in ids]
     contacts_by_id = client.get_contacts_batch_sync(contact_ids)
 
@@ -212,6 +222,12 @@ def backfill_b2b_pipeline(pipeline: str = B2B_PIPELINE_ID) -> dict:
             if profile is None:
                 profile = CustomerProfile(contact_id=contact.id)
                 session.add(profile)
+                # SessionLocal runs with autoflush=False, so a pending row is
+                # invisible to the next iteration's session.get(). One contact can
+                # own several tickets (311 tickets, 272 contacts here), and without
+                # this flush the second of them inserted a second profile with the
+                # same primary key and the whole run died on commit.
+                session.flush()
             profile.pipeline_stage = stage
 
         session.commit()

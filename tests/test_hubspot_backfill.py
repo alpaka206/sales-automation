@@ -43,7 +43,12 @@ def db(monkeypatch):
         "sqlite:///:memory:", connect_args={"check_same_thread": False}, poolclass=StaticPool
     )
     Base.metadata.create_all(engine)
-    factory = sessionmaker(bind=engine, expire_on_commit=False)
+    # Mirror src/db/session.py exactly. With the default autoflush=True a pending
+    # row is visible to the next session.get(), which hid a duplicate-insert bug
+    # that only showed up against the real database.
+    factory = sessionmaker(
+        bind=engine, autoflush=False, autocommit=False, expire_on_commit=False
+    )
     monkeypatch.setattr(hubspot_backfill, "SessionLocal", factory)
     return factory
 
@@ -112,6 +117,44 @@ def test_backfill_creates_rows_for_every_stage(db, fake):
         "t-lost": "closed_lost",
         "t-followup": "follow_up_needed",
     }
+
+
+def test_one_contact_owning_several_tickets(db, fake):
+    """Regression: this failed against Postgres with
+
+        duplicate key value violates unique constraint "customer_profiles_pkey"
+
+    The profile lookup could not see the row added for the contact's first ticket
+    (autoflush is off), so the second ticket inserted a second profile with the same
+    primary key. Real data has 311 tickets across 272 contacts, so it always hit.
+    """
+    # The two tickets must be ADJACENT. Creating a new contact calls session.flush(),
+    # which incidentally flushes the previous profile too — so putting them apart
+    # hides the bug, which is exactly why the first version of this test passed.
+    fake.pairs.insert(1, (_ticket("t-second", "1196772135"), ["c1"]))
+
+    counts = hubspot_backfill.backfill_b2b_pipeline()
+
+    assert counts["conversations_created"] == 5
+    with db() as s:
+        # One contact, one profile, but both of its tickets present.
+        assert s.query(Contact).filter_by(normalized_email="buyer@bigcorp.com").count() == 1
+        assert s.query(CustomerProfile).count() == 4
+        convs = s.query(Conversation).filter_by(
+            contact_id=s.query(Contact).filter_by(normalized_email="buyer@bigcorp.com").one().id
+        ).all()
+        assert {c.hubspot_ticket_id for c in convs} == {"t-new", "t-second"}
+
+
+def test_duplicate_ticket_from_paging_is_ignored(db, fake):
+    """Paging a live table can return the same ticket twice; it must not double-insert."""
+    fake.pairs.append((_ticket("t-new", "1172180243"), ["c1"]))  # same id as pairs[0]
+
+    counts = hubspot_backfill.backfill_b2b_pipeline()
+
+    assert counts["tickets"] == 5, "the repeat must not be counted twice"
+    with db() as s:
+        assert s.query(Conversation).filter_by(hubspot_ticket_id="t-new").count() == 1
 
 
 def test_backfill_never_creates_messages_or_jobs(db, fake):
