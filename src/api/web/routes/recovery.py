@@ -12,7 +12,6 @@ from sqlalchemy.orm import joinedload
 from ....db.models import Conversation, Event, InboundJob, Message
 from ....db.session import SessionLocal
 from ..auth import actor_name
-from ._shared import templates
 
 router = APIRouter(tags=["web"])
 
@@ -31,8 +30,12 @@ def _audit(session, request: Request, action: str, object_type: str, object_id: 
     )
 
 
-@router.get("/operations/recovery")
-async def recovery_console(request: Request):
+def recovery_context() -> dict:
+    """The four durable failure lists, for whoever renders them.
+
+    Lives here next to the retry/resolve actions that operate on the same rows; the
+    /logs page imports it so both tabs of the operations screen come from one query.
+    """
     stale_before = datetime.now(timezone.utc) - timedelta(minutes=30)
     with SessionLocal() as session:
         inbound_jobs = session.scalars(
@@ -66,16 +69,25 @@ async def recovery_console(request: Request):
             .order_by(Message.post_send_sync_attempted_at.desc())
             .limit(100)
         ).unique().all()
-    return templates.TemplateResponse(
-        request,
-        "recovery.html",
-        {
-            "inbound_jobs": inbound_jobs,
-            "messages": messages,
-            "stale_drafts": stale_drafts,
-            "sync_failures": sync_failures,
-        },
+    return {
+        "inbound_jobs": inbound_jobs,
+        "messages": messages,
+        "stale_drafts": stale_drafts,
+        "sync_failures": sync_failures,
+    }
+
+
+def recovery_pending_count(context: dict) -> int:
+    """How many rows actually need an operator. Stale drafts are informational."""
+    return sum(
+        len(context[key]) for key in ("messages", "inbound_jobs", "sync_failures")
     )
+
+
+@router.get("/operations/recovery")
+async def recovery_console_redirect():
+    """The console moved into /logs; keep old links and bookmarks working."""
+    return RedirectResponse("/logs?tab=recovery", status_code=308)
 
 
 @router.post("/operations/recovery/inbound/{job_id}/retry")
@@ -98,7 +110,7 @@ async def retry_inbound_job(request: Request, job_id: int):
             raise HTTPException(status_code=409, detail="재처리할 수 없는 작업 상태입니다")
         _audit(session, request, "retry", "inbound_job", job_id)
         session.commit()
-    return RedirectResponse("/operations/recovery?updated=inbound", status_code=303)
+    return RedirectResponse("/logs?tab=recovery&updated=inbound", status_code=303)
 
 
 @router.post("/operations/recovery/messages/{message_id}/retry")
@@ -117,7 +129,7 @@ async def retry_failed_message(request: Request, message_id: int):
             raise HTTPException(status_code=409, detail="발송 실패 상태만 재시도할 수 있습니다")
         _audit(session, request, "retry", "message", message_id)
         session.commit()
-    return RedirectResponse("/operations/recovery?updated=message", status_code=303)
+    return RedirectResponse("/logs?tab=recovery&updated=message", status_code=303)
 
 
 @router.post("/operations/recovery/messages/{message_id}/resolve")
@@ -151,7 +163,7 @@ async def resolve_unknown_delivery(
                 conversation.stage = "meeting_link_sent"
         _audit(session, request, action, "message", message_id)
         session.commit()
-    return RedirectResponse("/operations/recovery?updated=delivery", status_code=303)
+    return RedirectResponse("/logs?tab=recovery&updated=delivery", status_code=303)
 
 
 @router.post("/operations/recovery/messages/{message_id}/sync")
@@ -171,4 +183,4 @@ async def retry_message_sync(request: Request, message_id: int):
             raise HTTPException(status_code=409, detail="발송 완료된 메시지만 동기화할 수 있습니다")
         _audit(session, request, "retry_sync", "message", message_id)
         session.commit()
-    return RedirectResponse("/operations/recovery?updated=sync", status_code=303)
+    return RedirectResponse("/logs?tab=recovery&updated=sync", status_code=303)

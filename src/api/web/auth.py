@@ -164,6 +164,19 @@ def is_admin(request: Request) -> bool:
     return bool(u and u.get("role") == "admin")
 
 
+def admin_required(request: Request) -> bool:
+    """True when the caller may open an admin-only screen.
+
+    Roles exist only under ``AUTH_MODE=google_oauth``. In basic/localhost mode there
+    is no session user at all, so demanding ``role == "admin"`` locks out everyone —
+    which is exactly what /logs did while the sidebar kept offering the link. This
+    mirrors the sidebar's own rule and ``customer_ops._require_integration_admin``.
+    """
+    if settings.AUTH_MODE != "google_oauth":
+        return True
+    return is_admin(request)
+
+
 def _cookie_secure(request: Request) -> bool:
     # PUBLIC_BASE_URL is operator-controlled; arbitrary forwarded headers are not.
     return request.url.scheme == "https" or settings.PUBLIC_BASE_URL.startswith("https://")

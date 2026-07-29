@@ -64,6 +64,44 @@ def test_recovery_console_lists_failures(recovery_db) -> None:
     assert f"#{message_id}" in response.text
 
 
+def test_old_recovery_url_redirects_into_the_operations_screen(recovery_db) -> None:
+    """The console moved into /logs; bookmarks and the audit trail's links still work."""
+    with TestClient(app) as client:
+        response = client.get("/operations/recovery", follow_redirects=False)
+    assert response.status_code == 308
+    assert response.headers["location"] == "/logs?tab=recovery"
+
+
+def test_operations_screen_defaults_to_the_recovery_tab(recovery_db) -> None:
+    """Recovery is the tab with work on it; logs are for diagnosing what it shows."""
+    message_id, _job_id = _seed(recovery_db, "send_failed")
+    with TestClient(app) as client:
+        response = client.get("/logs")
+    assert response.status_code == 200
+    assert f"#{message_id}" in response.text
+    assert "발송 문제" in response.text
+
+
+def test_log_tab_still_renders_and_keeps_the_recovery_count_visible(recovery_db) -> None:
+    """A failure arriving while you read logs must not be invisible."""
+    _seed(recovery_db, "send_failed")
+    with TestClient(app) as client:
+        response = client.get("/logs?tab=log")
+    assert response.status_code == 200
+    assert "시각(KST)" in response.text  # the log table
+    assert "복구 대상" in response.text  # the tab strip, with its count
+
+
+def test_operations_screen_is_reachable_without_a_session_user(recovery_db) -> None:
+    """Basic/localhost mode has no users, so role=="admin" can never be true there.
+
+    /logs demanded exactly that while the sidebar kept offering the link, so the page
+    403'd for every local operator. Merging recovery in would have taken that with it.
+    """
+    with TestClient(app) as client:
+        assert client.get("/logs").status_code == 200
+
+
 def test_failed_message_can_be_requeued(recovery_db) -> None:
     message_id, _job_id = _seed(recovery_db, "send_failed")
     with TestClient(app) as client:
