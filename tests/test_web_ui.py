@@ -35,28 +35,21 @@ def _mock_dashboard_context():
         "recent_messages": [
             {
                 "id": 1,
-                "status": "sent",
-                "category": "pricing_question",
+                "status": "pending_approval",
+                "stage": "new",
                 "subject": "가격 문의",
                 "channel": "email",
-                "direction": "outgoing",
-                "flow": "inbound_reply",
                 "created_at": datetime(2026, 1, 1, 12, 0),
             }
         ],
-        "status_counts": {
-            "drafting": 1,
-            "pending_approval": 2,
-            "approved": 1,
-            "sent": 5,
-            "draft_failed": 0,
-            "send_failed": 0,
-            "rejected": 0,
-        },
+        "awaiting_total": 7,
+        "awaiting_new": 4,
+        "awaiting_negotiation": 3,
         "received_today": 4,
-        "today_sent": 3,
-        "daily_limit": 100,
-        "category_counts": [("pricing_question", 4), ("purchase_inquiry", 2)],
+        # The board renders below the queue; an empty board is enough for these tests.
+        "stages": [{"key": "new", "label": "New", "description": "새 문의", "rows": []}],
+        "stage_options": (("new", "New", "새 문의"),),
+        "stage_labels": {"new": "New"},
     }
 
 
@@ -141,10 +134,12 @@ def test_dashboard_loads_pretendard_tokens():
 
 
 @patch("src.api.web.routes.dashboard._dashboard_context", _mock_dashboard_context)
-def test_dashboard_shows_status_counts():
+def test_dashboard_shows_queue_counters():
+    """The five KPI cards became four inline counters beside the queue heading."""
     r = _client().get("/")
-    assert "검토 대기" in r.text
-    assert "오늘 발송" in r.text
+    assert "답변 대기중인 문의" in r.text
+    for label in ("오늘 접수", "ALL", "New", "Negotiating"):
+        assert label in r.text, label
 
 
 @patch("src.api.web.routes.dashboard._dashboard_context", _mock_dashboard_context)
@@ -154,16 +149,18 @@ def test_dashboard_shows_recent_messages():
 
 
 @patch("src.api.web.routes.dashboard._dashboard_context", _mock_dashboard_context)
-def test_dashboard_shows_category_counts():
+def test_dashboard_hosts_the_pipeline_board():
+    """The board moved here from /pipeline, below the queue."""
     r = _client().get("/")
-    assert "pricing_question" in r.text
+    assert "data-pipeline-board" in r.text
+    assert "문의 파이프라인" in r.text
 
 
 @patch("src.api.web.routes.dashboard._dashboard_context", _mock_dashboard_context)
-def test_dashboard_shows_daily_send_stats():
+def test_dashboard_no_longer_shows_inquiry_type():
+    """문의 유형 is retired: the panel, the column, and the stored value are all gone."""
     r = _client().get("/")
-    assert "오늘 발송" in r.text
-    assert "100" in r.text
+    assert "문의 유형" not in r.text
 
 
 @patch("src.api.web.routes.dashboard._dashboard_context", _mock_dashboard_context)
@@ -213,7 +210,7 @@ def test_message_detail_embeds_customer_history(_use_test_db):
     session.add(contact)
     session.flush()
     contact_id = contact.id
-    conv = Conversation(contact_id=contact_id, topic="가격 문의")
+    conv = Conversation(contact_id=contact_id, inquiry_subject="가격 문의")
     session.add(conv)
     session.flush()
     msg = Message(
@@ -241,7 +238,9 @@ def test_message_detail_embeds_customer_history(_use_test_db):
     assert "서비스 이용중" in r.text          # customer_state label
     assert "금요일 재연락" in r.text          # next action
     assert "킥오프 미팅" in r.text            # interaction touchpoint
-    assert f"/customers/{contact_id}" in r.text  # link to full editable view
+    # The panel is scoped to THIS customer and no longer links out: the full history
+    # lives in its own sidebar section (고객 히스토리 → 인바운드 고객 히스토리) now.
+    assert f"/customers/{contact_id}" not in r.text
 
 
 # ---------- Message actions (send/reject/edit) ----------
@@ -274,7 +273,7 @@ def pending_msg(_use_test_db):
     contact = Contact(normalized_email="t@e.com", full_name="T", email="t@e.com")
     session.add(contact)
     session.flush()
-    conv = Conversation(contact_id=contact.id, topic="test")
+    conv = Conversation(contact_id=contact.id, inquiry_subject="test")
     session.add(conv)
     session.flush()
     msg = Message(
@@ -352,23 +351,24 @@ def test_message_edit_saves(pending_msg, _use_test_db):
     session.close()
 
 
-def _mock_messages_list_context(status="", channel=""):
+def _mock_messages_list_context(status="awaiting", stage="", sort="oldest"):
     return {
         "messages": [
             {
                 "id": 1,
-                "status": "sent",
-                "category": "pricing_question",
+                "status": "pending_approval",
+                "stage": "new",
                 "subject": "가격 문의",
                 "channel": "email",
-                "direction": "outgoing",
-                "flow": "inbound_reply",
-                "to_address": "buyer@example.com",
-                "created_at": datetime(2026, 1, 1, 12, 0),
+                "email": "buyer@example.com",
+                "received_at": datetime(2026, 1, 1, 12, 0),
+                "waiting_since": datetime(2026, 1, 1, 12, 0),
             }
         ],
         "filter_status": status,
-        "filter_channel": channel,
+        "filter_stage": stage,
+        "filter_sort": sort,
+        "now": datetime(2026, 1, 2, 12, 0),
     }
 
 

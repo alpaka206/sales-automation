@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -170,7 +171,7 @@ def _message_detail_context(message_id: int) -> dict:
             "ticket": {
                 "ticket_id": conv.hubspot_ticket_id if conv else None,
                 "stage": conv.stage if conv else None,
-                "topic": conv.topic if conv else None,
+                "inquiry_subject": conv.inquiry_subject if conv else None,
                 "inquiry_language": conv.inquiry_language if conv else None,
             },
             "msg": {
@@ -192,7 +193,6 @@ def _message_detail_context(message_id: int) -> dict:
                 "scheduled_at": msg.scheduled_at,
                 "sent_at": msg.sent_at,
                 "created_at": msg.created_at,
-                "category": conv.topic if conv else "-",
             },
             "contact": (
                 {
@@ -279,7 +279,6 @@ def _customer_history(session, contact_id: int) -> dict:
         "profile": profile_data,
         "contract": contract_data,
         "interactions": interaction_rows,
-        "detail_url": f"/customers/{contact_id}",
         "has_any": bool(profile_data or contract_data or interaction_rows),
     }
 
@@ -329,7 +328,7 @@ def _domain_history(session, domain: str, exclude_conv_id: int | None = None) ->
                 "contact_name": ct.full_name,
                 "contact_email": ct.email,
                 "ticket_id": c.hubspot_ticket_id,
-                "topic": c.topic,
+                "inquiry_subject": c.inquiry_subject,
                 "summary": c.summary,
                 "message_count": counts.get(c.id, 0),
                 "last_activity": c.last_incoming_at or c.last_outgoing_at or c.created_at,
@@ -365,62 +364,109 @@ async def _translate_inbound_bubbles(ctx: dict) -> None:
     await asyncio.gather(*(_tx(t) for t in items))
 
 
-def _messages_list_context(status: str = "", channel: str = "") -> dict:
-    """Query DB for paginated message list.
+# The two status buckets the operator reviews. "발송대기" is everything a human still
+# has to act on; "발송완료" is everything finished, with 거절 distinguished in the row.
+# Deliberately absent: "approved" (queued, nothing to decide) and "delivery_unknown"
+# (resolved on the 운영 로그 복구 tab, which owns that workflow). A row mid-send carries
+# a transient "sending:<pid>:<rand>" status and matches neither, so it hides for the
+# few seconds it is claimed instead of rendering that token as a pill.
+LIST_STATUS_BUCKETS: dict[str, tuple[str, ...]] = {
+    "awaiting": ("pending_approval", "drafting", "draft_failed", "send_failed"),
+    "sent": ("sent", "test_sent", "rejected"),
+}
+# Stage chips. "" = 전체. Only these two stages get their own chip; the board has more.
+LIST_STAGES = ("new", "negotiation")
+LIST_SORTS = ("oldest", "newest")
 
-    The list is the approval queue — outgoing drafts and sent replies only. Inbound
-    rows are persisted (so the detail page can show "what we're replying to") but
-    rendering them here would duplicate the box at the top of the detail page.
+
+def _messages_list_context(
+    status: str = "awaiting",
+    stage: str = "",
+    sort: str = "oldest",
+) -> dict:
+    """The approval queue: outgoing drafts and finished replies, never inbound rows.
+
+    Every parameter is validated against a fixed set before it reaches SQL or the
+    polling URL in the template — the same allow-list discipline as
+    ``VALID_PIPELINE_STAGES``. Unvalidated values would be interpolated into the
+    template's ``hx-get`` attribute, where an ``&`` survives escaping and appends a
+    parameter to the 15-second poll.
     """
+    from .customer_ops import VALID_PIPELINE_STAGES
+
+    status = status if status in LIST_STATUS_BUCKETS else "awaiting"
+    stage = stage if stage in LIST_STAGES else ""
+    sort = sort if sort in LIST_SORTS else "oldest"
+
+    # Conversation is already joined, so stage / inquiry_subject / created_at /
+    # last_incoming_at are select-list additions. Only Contact is new, and
+    # Conversation.contact_id is NOT NULL so an inner join loses nothing.
     q = (
-        select(Message, Conversation.topic)
+        select(
+            Message,
+            Conversation.stage,
+            Conversation.inquiry_subject,
+            Conversation.created_at,
+            Conversation.last_incoming_at,
+            Contact.email,
+        )
         .join(Conversation, Message.conversation_id == Conversation.id)
+        .join(Contact, Conversation.contact_id == Contact.id)
         .where(Message.direction == "outgoing")
         # Auto-ack (접수확인) replies are sent automatically and shown inside the
         # thread — keep them out of the approval queue list so it isn't noisy.
         .where((Message.prompt_variant.is_(None)) | (Message.prompt_variant != "auto_ack"))
-        .order_by(Message.created_at.desc())
+        .where(Message.status.in_(LIST_STATUS_BUCKETS[status]))
     )
-    if status == "replied":
-        # A later inbound message marks the latest detailed sent reply as answered;
-        # the reply itself keeps status="sent".
-        q = q.where(Message.replied.is_(True))
-    elif status == "awaiting":
-        # Merged "발송 대기" bucket: awaiting human review + approved-and-queued.
-        q = q.where(Message.status.in_(("pending_approval", "approved")))
-    elif status:
-        q = q.where(Message.status == status)
-    if channel:
-        q = q.where(Message.channel == channel)
-    q = q.limit(100)
+    if stage:
+        q = q.where(Conversation.stage == stage)
+    # Sort by the column the 접수 시간 cell actually shows, not by our draft's
+    # created_at — otherwise "오래된 순" produces a visibly unsorted date column.
+    order_column = (
+        Conversation.last_incoming_at if stage == "negotiation" else Conversation.created_at
+    )
+    q = q.order_by(order_column.asc() if sort == "oldest" else order_column.desc()).limit(100)
+
     with SessionLocal() as session:
         rows = session.execute(q).all()
         messages = [
             {
                 "id": msg.id,
                 "status": msg.status,
-                "category": topic or "-",
-                "subject": msg.subject or "(제목 없음)",
+                "stage": conv_stage if conv_stage in VALID_PIPELINE_STAGES else "new",
+                # The customer's own subject. Falls back to our reply subject only
+                # because drafting/draft_failed rows can predate both.
+                "subject": inquiry_subject or msg.subject or "(제목 없음)",
                 "channel": msg.channel,
-                "direction": msg.direction,
-                "to_address": msg.to_address or "-",
-                "created_at": msg.created_at,
+                "email": email or "-",
+                # New chip → when the ticket arrived; Negotiating → when they last
+                # wrote back. Both already on the row, no extra query.
+                "received_at": (
+                    last_incoming_at if stage == "negotiation" and last_incoming_at else conv_created
+                ),
+                # Priority is measured from the customer's last message, not from our
+                # draft: it answers "how long have they been waiting?".
+                "waiting_since": last_incoming_at or conv_created,
             }
-            for msg, topic in rows
+            for msg, conv_stage, inquiry_subject, conv_created, last_incoming_at, email in rows
         ]
     return {
         "messages": messages,
         "filter_status": status,
-        "filter_channel": channel,
+        "filter_stage": stage,
+        "filter_sort": sort,
+        "now": datetime.now(timezone.utc).replace(tzinfo=None),
     }
 
 
 @router.get("/messages")
 async def messages_list(request: Request):
-    """Inbound reply list with optional status and channel filters."""
-    status = request.query_params.get("status", "")
-    channel = request.query_params.get("channel", "")
-    ctx = _messages_list_context(status=status, channel=channel)
+    """Inbound reply list, filtered by status bucket and pipeline stage."""
+    ctx = _messages_list_context(
+        status=request.query_params.get("status", "awaiting"),
+        stage=request.query_params.get("stage", ""),
+        sort=request.query_params.get("sort", "oldest"),
+    )
     return templates.TemplateResponse(request, "messages_list.html", ctx)
 
 

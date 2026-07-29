@@ -6,70 +6,61 @@
 
 <h1 class="sr-only">문의 대시보드</h1>
 
-<section id="kpi-cards" class="inbound-overview mb-gap"
-         hx-get="/" hx-trigger="every 30s" hx-select="#kpi-cards" hx-target="#kpi-cards" hx-swap="outerHTML">
-  <div class="inbound-overview__focus">
-    <span class="inbound-overview__label">검토 대기</span>
-    <div class="inbound-overview__number tnum">{{ status_counts.pending_approval }}</div>
-    <a href="/messages?status=awaiting" class="overview-link">검토 {{ icon("arrowRight", 15) }}</a>
-  </div>
-  <dl class="metric-strip">
-    <div><dt>오늘 접수</dt><dd class="tnum">{{ received_today }}</dd></div>
-    <div><dt>작성 중</dt><dd class="tnum">{{ status_counts.drafting }}</dd></div>
-    <div><dt>오늘 발송</dt><dd class="tnum">{{ today_sent }}</dd><span>{% if daily_limit %}한도 {{ daily_limit }}{% else %}한도 없음{% endif %}</span></div>
-    <div><dt>확인 필요</dt><dd class="tnum">{{ status_counts.draft_failed + status_counts.send_failed + status_counts.get('delivery_unknown', 0) }}</dd></div>
-  </dl>
-</section>
+{% if request.query_params.get('sync') == 'partial' %}
+<div class="banner banner--warn mb-gap"><div><div class="banner__title">일부 외부 시스템 동기화 실패</div><div class="banner__body">사이트 단계는 저장되었습니다. HubSpot·Google Sheets 연결 상태를 확인한 뒤 다시 이동해 주세요.</div></div></div>
+{% elif request.query_params.get('sync') == 'ok' %}
+<div class="banner banner--ok mb-gap"><div><div class="banner__title">파이프라인 동기화 완료</div></div></div>
+{% endif %}
 
-<div class="split split--focus">
-  <section class="card card--flush" hx-get="/" hx-trigger="every 30s" hx-select="#msg-table" hx-target="#msg-table" hx-swap="outerHTML">
-    <div class="section-header table-heading">
-      <div class="section-header__l">
-        <span class="section-header__icon">{{ icon("messages", 17) }}</span>
-        <div>
-          <div class="section-header__title">최근 답변</div>
-          <div class="section-header__sub">접수 확인 제외</div>
-        </div>
+{# The polled id wraps the HEADING as well as the table, because the counters live in
+   the heading row. When only #msg-table was swapped they went stale within a minute. #}
+<section class="card card--flush mb-gap" id="queue-panel"
+         hx-get="/" hx-trigger="every 30s" hx-select="#queue-panel" hx-target="#queue-panel" hx-swap="outerHTML">
+  <div class="section-header table-heading">
+    <div class="section-header__l">
+      <span class="section-header__icon">{{ icon("messages", 17) }}</span>
+      <div>
+        <div class="section-header__title">답변 대기중인 문의</div>
+        <div class="section-header__sub">접수 확인 제외</div>
       </div>
+    </div>
+    <div class="queue-counters">
+      <span><em>오늘 접수</em><b class="tnum">{{ received_today }}</b></span>
+      <span><em>ALL</em><b class="tnum">{{ awaiting_total }}</b></span>
+      <span><em>New</em><b class="tnum">{{ awaiting_new }}</b></span>
+      <span><em>Negotiating</em><b class="tnum">{{ awaiting_negotiation }}</b></span>
       <a href="/messages" class="chip">전체 보기</a>
     </div>
-    <div id="msg-table" class="table-wrap" role="region" aria-label="최근 답변" aria-live="polite">
-      <table class="table">
-        <thead><tr><th scope="col">상태</th><th scope="col">제목</th><th scope="col">채널</th><th scope="col">시간</th></tr></thead>
-        <tbody>
-          {% for msg in recent_messages %}
-          <tr class="is-clickable" onclick="location.href='/messages/{{ msg.id }}'">
-            <td>{{ status_pill(msg.status, "sm") }}</td>
-            <td class="truncate" style="max-width:300px">{{ msg.subject }}</td>
-            <td class="td-muted">{{ msg.channel }}</td>
-            <td class="td-subtle tnum">{{ msg.created_at | kst('%m/%d %H:%M') }}</td>
-          </tr>
-          {% else %}
-          <tr><td colspan="4"><div class="empty"><div class="empty__icon">{{ icon("inbound", 24) }}</div><div class="empty__text">아직 준비된 답변이 없습니다.</div></div></td></tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-  </section>
+  </div>
+  <div class="table-wrap" role="region" aria-label="답변 대기중인 문의" aria-live="polite">
+    <table class="table">
+      <thead><tr><th scope="col">상태</th><th scope="col">Stage</th><th scope="col">문의 제목</th><th scope="col">채널</th><th scope="col">시간</th></tr></thead>
+      <tbody>
+        {% for msg in recent_messages %}
+        <tr class="is-clickable" onclick="location.href='/messages/{{ msg.id }}'">
+          <td>{{ status_pill(msg.status, "sm") }}</td>
+          <td class="td-muted">{{ stage_labels.get(msg.stage, msg.stage) }}</td>
+          <td class="truncate" style="max-width:300px">{{ msg.subject }}</td>
+          <td class="td-muted">{{ msg.channel }}</td>
+          <td class="td-subtle tnum">{{ msg.created_at | kst('%m/%d %H:%M') }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="5"><div class="empty"><div class="empty__icon">{{ icon("inbound", 24) }}</div><div class="empty__text">답변을 기다리는 문의가 없습니다.</div></div></td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
 
-  <section class="card category-panel">
-    <div class="section-header">
-      <div class="section-header__title">문의 유형</div>
+<div class="section-header table-heading">
+  <div class="section-header__l">
+    <span class="section-header__icon">{{ icon("sliders", 17) }}</span>
+    <div>
+      <div class="section-header__title">문의 파이프라인</div>
     </div>
-    {% if category_counts %}
-    {% set cat_max = category_counts[0][1] if category_counts else 1 %}
-    <div class="stack" style="gap:16px">
-      {% for cat, cnt in category_counts[:8] %}
-      <div>
-        <div class="row-between category-row"><span>{{ cat }}</span><strong class="tnum">{{ cnt }}</strong></div>
-        <div class="progress" style="height:5px"><div class="progress__fill" style="width: {{ (cnt / cat_max * 100) if cat_max else 0 }}%"></div></div>
-      </div>
-      {% endfor %}
-    </div>
-    {% else %}
-    <div class="empty"><div class="empty__text">분류 데이터가 쌓이면 여기에 표시됩니다.</div></div>
-    {% endif %}
-  </section>
+  </div>
 </div>
+
+{% include "partials/pipeline_board.html" %}
 
 {% endblock %}

@@ -1,96 +1,126 @@
-"""Dashboard route — recent messages, status counts, daily stats."""
+"""Dashboard route — the awaiting-reply queue, its counters, and the pipeline board.
+
+The board used to be its own page at /pipeline. It lives here now, below the queue,
+because both answer "what needs me next?" and the operator was navigating between them
+constantly. /pipeline's POST actions kept their paths; only the page moved.
+"""
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Request
 from sqlalchemy import func, select
 
-from ....common.config import settings
 from ....db.models import Conversation, Message
 from ....db.session import SessionLocal
-from ._shared import TRACKED_STATUSES, templates
+from ._shared import templates
 
 router = APIRouter(tags=["web"])
 
+# Statuses that mean "a human still has to act on this reply". Mirrors the 발송대기
+# chip on /messages (routes/messages.py) — the dashboard is that list, truncated.
+AWAITING_STATUSES = ("pending_approval", "drafting", "draft_failed", "send_failed")
+
+# Board stages the dashboard counts separately. Everything else is folded into ALL.
+_COUNTED_STAGES = ("new", "negotiation")
+
+_RECENT_LIMIT = 8
+
+
+def _kst_day_start() -> datetime:
+    """Midnight in KST, expressed as the naive UTC the DB columns store.
+
+    The counter is labelled 오늘 and the UI renders KST, so a UTC midnight would move
+    the boundary by nine hours — inquiries from 09:00 KST onward counted as yesterday.
+    """
+    kst_now = datetime.now(timezone.utc) + timedelta(hours=9)
+    kst_midnight = kst_now.replace(hour=0, minute=0, second=0, microsecond=0)
+    return (kst_midnight - timedelta(hours=9)).replace(tzinfo=None)
+
 
 def _dashboard_context() -> dict:
-    """Query inbound queue, delivery, and category data for the dashboard."""
+    """Awaiting-reply rows, their counters, and the pipeline board."""
+    from .customer_ops import PIPELINE_STAGES, VALID_PIPELINE_STAGES, _pipeline_rows
+
     with SessionLocal() as session:
-        stmt = (
-            select(Message, Conversation.topic)
+        awaiting = (
+            select(Message, Conversation.stage, Conversation.inquiry_subject)
             .join(Conversation, Message.conversation_id == Conversation.id)
             .where(Message.direction == "outgoing")
+            .where(Message.status.in_(AWAITING_STATUSES))
             .where((Message.prompt_variant.is_(None)) | (Message.prompt_variant != "auto_ack"))
         )
-        recent = session.execute(stmt.order_by(Message.created_at.desc()).limit(5)).all()
+        recent = session.execute(
+            awaiting.order_by(Message.created_at.desc()).limit(_RECENT_LIMIT)
+        ).all()
         recent_messages = [
             {
                 "id": msg.id,
                 "status": msg.status,
-                "category": topic or "-",
-                "subject": msg.subject or "(제목 없음)",
+                # Coerced the same way the board does it, so a legacy "initial" row
+                # does not render a stage the operator has never seen.
+                "stage": stage if stage in VALID_PIPELINE_STAGES else "new",
+                "subject": inquiry_subject or msg.subject or "(제목 없음)",
                 "channel": msg.channel,
-                "direction": msg.direction,
                 "created_at": msg.created_at,
             }
-            for msg, topic in recent
+            for msg, stage, inquiry_subject in recent
         ]
 
-        status_rows = session.execute(
-            select(Message.status, func.count())
+        stage_rows = session.execute(
+            select(Conversation.stage, func.count())
+            .select_from(Message)
+            .join(Conversation, Message.conversation_id == Conversation.id)
             .where(Message.direction == "outgoing")
+            .where(Message.status.in_(AWAITING_STATUSES))
             .where((Message.prompt_variant.is_(None)) | (Message.prompt_variant != "auto_ack"))
-            .group_by(Message.status)
+            .group_by(Conversation.stage)
         ).all()
-        status_counts = {s: 0 for s in TRACKED_STATUSES}
-        for status, cnt in status_rows:
-            status_counts[status] = cnt
+        awaiting_by_stage = {stage: 0 for stage in _COUNTED_STAGES}
+        awaiting_total = 0
+        for stage, count in stage_rows:
+            awaiting_total += count
+            key = stage if stage in VALID_PIPELINE_STAGES else "new"
+            if key in awaiting_by_stage:
+                awaiting_by_stage[key] += count
 
-        today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
-        today_sent = (
-            session.scalar(
-                select(func.count())
-                .select_from(Message)
-                .where(
-                    Message.direction == "outgoing",
-                    Message.status == "sent",
-                    Message.sent_at >= today_start,
-                    (Message.prompt_variant.is_(None)) | (Message.prompt_variant != "auto_ack"),
-                )
-            )
-            or 0
-        )
         received_today = (
             session.scalar(
                 select(func.count())
                 .select_from(Message)
-                .where(Message.direction == "inbound", Message.created_at >= today_start)
+                .where(Message.direction == "inbound", Message.created_at >= _kst_day_start())
             )
             or 0
         )
 
-        category_rows = session.execute(
-            select(Conversation.topic, func.count())
-            .where(Conversation.topic.isnot(None))
-            .group_by(Conversation.topic)
-            .order_by(func.count().desc())
-        ).all()
-        category_counts = [(cat or "기타", cnt) for cat, cnt in category_rows]
+    rows = _pipeline_rows()
+    by_stage: dict[str, list] = {stage: [] for stage, _, _ in PIPELINE_STAGES}
+    for row in rows:
+        by_stage.setdefault(row["stage"], []).append(row)
 
     return {
         "recent_messages": recent_messages,
-        "status_counts": status_counts,
+        "awaiting_total": awaiting_total,
+        "awaiting_new": awaiting_by_stage["new"],
+        "awaiting_negotiation": awaiting_by_stage["negotiation"],
         "received_today": received_today,
-        "today_sent": today_sent,
-        "daily_limit": settings.DAILY_SEND_LIMIT,
-        "category_counts": category_counts,
+        "stages": [
+            {
+                "key": stage,
+                "label": label,
+                "description": description,
+                "rows": by_stage.get(stage, []),
+            }
+            for stage, label, description in PIPELINE_STAGES
+        ],
+        "stage_options": PIPELINE_STAGES,
+        "stage_labels": {key: label for key, label, _ in PIPELINE_STAGES},
     }
 
 
 @router.get("/")
 async def dashboard(request: Request):
-    """Main inbound dashboard — recent inquiries, queue, and delivery stats."""
+    """Main inbound dashboard — awaiting replies on top, the pipeline board below."""
     ctx = _dashboard_context()
     return templates.TemplateResponse(request, "dashboard.html", ctx)

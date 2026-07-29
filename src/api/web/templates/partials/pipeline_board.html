@@ -1,19 +1,8 @@
-{% extends "base.html" %}
 {% from "partials/icons.html" import icon %}
-{% block title %}파이프라인 연동관리 — PERSO{% endblock %}
-{% block content %}
-<div class="page-header page-header--bare">
-  <div>
-    <h1 class="page-title">문의 파이프라인</h1>
-  </div>
-</div>
-
-{% if request.query_params.get('sync') == 'partial' %}
-<div class="banner banner--warn mb-gap"><div><div class="banner__title">일부 외부 시스템 동기화 실패</div><div class="banner__body">사이트 단계는 저장되었습니다. HubSpot·Google Sheets 연결 상태를 확인한 뒤 다시 이동해 주세요.</div></div></div>
-{% elif request.query_params.get('sync') == 'ok' %}
-<div class="banner banner--ok mb-gap"><div><div class="banner__title">파이프라인 동기화 완료</div></div></div>
-{% endif %}
-
+{# The pipeline board, extracted from the retired /pipeline page so the dashboard
+   can host it. MUST NOT sit inside an HTMX-polled region: the dropzone listeners
+   below bind once at parse time, and an outerHTML swap would replace the nodes
+   they are bound to, leaving a board that renders but refuses drops. #}
 <div class="kanban" data-pipeline-board>
   {% for stage in stages %}
   <section class="kanban-column" id="stage-{{ stage.key }}" data-stage="{{ stage.key }}">
@@ -44,27 +33,6 @@
   </section>
   {% endfor %}
 </div>
-
-{# The one-shot "HubSpot 전체 가져오기" panel was removed once the import had run —
-   day to day the webhook and the 10-minute poller keep the board current. The
-   POST /pipeline/backfill route is deliberately kept: it is the only thing that
-   picks up a ticket created straight into a non-New stage, which the inbound path
-   never sees. Re-add the panel here if that is ever needed again. #}
-{% if backfill_request and backfill_request.status in ['requested', 'started'] %}
-<div class="banner banner--info mb-gap">HubSpot 가져오기를 처리 중입니다. 화면을 나가도 계속됩니다.</div>
-{% elif request.query_params.get('backfill') == 'queued' %}
-<div class="banner banner--info mb-gap">HubSpot 가져오기를 접수했습니다.</div>
-{% elif backfill_request and backfill_request.status == 'failed' %}
-<div class="banner banner--warn mb-gap">HubSpot 가져오기에 실패했습니다. {{ backfill_request.error or '' }}</div>
-{% endif %}
-
-{# The Google Sheets panel was removed at the operator's request: with the account
-   supplied by GOOGLE_SHEETS_OAUTH_REFRESH_TOKEN there is nothing left to click, and
-   the tab names never changed. Gone with it: the manual "시트 읽기·동기화" button, the
-   pending-row count, and the sync-status banners. The routes are all still live —
-   POST /integrations/google-sheets/sync, and connect/callback/disconnect for the
-   browser flow — so this is a UI removal, not a capability one. Restore from git if
-   a manual sync entry point is ever needed again. #}
 
 <script>
 (function () {
@@ -175,4 +143,3 @@
   });
 })();
 </script>
-{% endblock %}

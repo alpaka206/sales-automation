@@ -807,34 +807,14 @@ async def customer_sync(contact_id: int):
 
 
 @router.get("/pipeline")
-async def pipeline_board(request: Request):
-    # The Sheets panel is gone from this page, so its context is gone too — building
-    # it cost a grant decrypt plus two pending-row counts on every board load.
-    from ....agents.hubspot_backfill import hubspot_backfill_status
+async def pipeline_board_redirect():
+    """The board moved onto the dashboard; keep bookmarks and old links working.
 
-    rows = _pipeline_rows()
-    by_stage = {stage: [] for stage, _, _ in PIPELINE_STAGES}
-    for row in rows:
-        by_stage.setdefault(row["stage"], []).append(row)
-    stage_config = [
-        {
-            "key": stage,
-            "label": label,
-            "description": description,
-            "hubspot_id": _stage_id(stage),
-            "rows": by_stage.get(stage, []),
-        }
-        for stage, label, description in PIPELINE_STAGES
-    ]
-    return templates.TemplateResponse(
-        request,
-        "pipeline.html",
-        {
-            "stages": stage_config,
-            "stage_options": PIPELINE_STAGES,
-            "backfill_request": hubspot_backfill_status(),
-        },
-    )
+    The POST actions below keep their /pipeline/... paths — security.py:24 and the
+    board's own drag-drop fetch are both pinned to that prefix — so only the page
+    itself moved. They now redirect to / where the board actually renders.
+    """
+    return RedirectResponse("/", status_code=308)
 
 
 @router.post("/pipeline/{contact_id}/stage")
@@ -842,7 +822,7 @@ async def pipeline_stage_move(contact_id: int, stage: str = Form(...)):
     ticket_id, sheet_client_id = _set_local_stage(contact_id, stage)
     result = await _sync_stage(ticket_id, stage, contact_id, sheet_client_id)
     state = "partial" if False in result.values() else "ok"
-    return RedirectResponse(f"/pipeline?sync={state}#stage-{stage}", status_code=303)
+    return RedirectResponse(f"/?sync={state}#stage-{stage}", status_code=303)
 
 
 @router.post("/pipeline/conversations/{conversation_id}/stage")
@@ -850,7 +830,7 @@ async def pipeline_inquiry_stage_move(conversation_id: int, stage: str = Form(..
     ticket_id, contact_id, sheet_client_id = _set_conversation_stage(conversation_id, stage)
     result = await _sync_stage(ticket_id, stage, contact_id, sheet_client_id)
     state = "partial" if False in result.values() else "ok"
-    return RedirectResponse(f"/pipeline?sync={state}#stage-{stage}", status_code=303)
+    return RedirectResponse(f"/?sync={state}#stage-{stage}", status_code=303)
 
 
 @router.post("/pipeline/backfill")
@@ -870,10 +850,10 @@ async def pipeline_backfill(request: Request):
     except Exception as exc:
         logger.warning("HubSpot backfill could not be queued.", exc_info=True)
         return RedirectResponse(
-            f"/pipeline?backfill=error&detail={quote(str(exc)[:180])}#integrations",
+            f"/?backfill=error&detail={quote(str(exc)[:180])}",
             status_code=303,
         )
-    return RedirectResponse("/pipeline?backfill=queued#integrations", status_code=303)
+    return RedirectResponse("/?backfill=queued", status_code=303)
 
 
 def _google_callback_url(request: Request) -> str:
@@ -904,7 +884,7 @@ async def google_sheets_connect(request: Request):
     except Exception as exc:
         logger.warning("Google Sheets OAuth start failed.", exc_info=True)
         return RedirectResponse(
-            f"/pipeline?google=setup_required&detail={quote(str(exc)[:180])}#integrations",
+            f"/?google=setup_required&detail={quote(str(exc)[:180])}",
             status_code=303,
         )
     response = RedirectResponse(url, status_code=302)
@@ -944,7 +924,7 @@ async def google_sheets_callback(
     except Exception as exc:
         logger.warning("Google Sheets OAuth callback failed.", exc_info=True)
         response = RedirectResponse(
-            f"/pipeline?google=error&detail={quote(str(exc)[:180])}#integrations",
+            f"/?google=error&detail={quote(str(exc)[:180])}",
             status_code=303,
         )
         response.delete_cookie(
@@ -952,7 +932,7 @@ async def google_sheets_callback(
         )
         return response
     logger.info("Google Sheets user OAuth connected for %s.", account_email or "unknown account")
-    response = RedirectResponse("/pipeline?google=connected#integrations", status_code=303)
+    response = RedirectResponse("/?google=connected", status_code=303)
     response.delete_cookie(
         GOOGLE_SHEETS_STATE_COOKIE, path="/integrations/google-sheets/callback"
     )
@@ -969,10 +949,10 @@ async def google_sheets_disconnect(request: Request):
         # Say so rather than reporting a disconnect that did not happen.
         detail = quote("GOOGLE_SHEETS_OAUTH_REFRESH_TOKEN 으로 연결된 계정입니다. 해제하려면 그 환경변수를 비우세요.")
         return RedirectResponse(
-            f"/pipeline?google=error&detail={detail}#integrations", status_code=303
+            f"/?google=error&detail={detail}", status_code=303
         )
     delete_grant()
-    return RedirectResponse("/pipeline?google=disconnected#integrations", status_code=303)
+    return RedirectResponse("/?google=disconnected", status_code=303)
 
 
 @router.post("/integrations/google-sheets/sync")
@@ -986,11 +966,11 @@ async def google_sheets_sync(request: Request):
     except Exception as exc:
         logger.warning("Google Sheets manual synchronization failed.", exc_info=True)
         return RedirectResponse(
-            f"/pipeline?google=error&detail={quote(str(exc)[:180])}#integrations",
+            f"/?google=error&detail={quote(str(exc)[:180])}",
             status_code=303,
         )
     return RedirectResponse(
-        f"/pipeline?google=queued&request_id={request_id}#integrations",
+        f"/?google=queued&request_id={request_id}",
         status_code=303,
     )
 

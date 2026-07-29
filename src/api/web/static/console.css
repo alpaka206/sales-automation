@@ -242,19 +242,12 @@
 .kpi__sub { font-size: 13px; color: var(--text-subtle); }
 .kpi--accent { border-color: var(--accent-soft-border); background: color-mix(in srgb, var(--accent-soft) 60%, var(--surface)); }
 
-/* Inbound overview: one decision area with supporting metrics. */
-.inbound-overview {
-  display: grid; grid-template-columns: minmax(300px, .9fr) minmax(520px, 1.6fr);
-  overflow: hidden; border: 1px solid var(--border); border-radius: var(--r-xl);
-  background: var(--surface); box-shadow: var(--shadow-sm);
-}
-.inbound-overview__focus {
-  min-height: 254px; padding: 30px; display: flex; flex-direction: column; align-items: flex-start;
-  background: var(--accent-soft); border-right: 1px solid var(--accent-soft-border);
-}
-.inbound-overview__label { color: var(--accent); font-size: 12px; font-weight: 750; }
-.inbound-overview__number { margin: 22px 0 18px; font-size: clamp(56px, 7vw, 82px); font-weight: 850; line-height: .82; letter-spacing: -.06em; }
-.overview-link { margin-top: auto; display: inline-flex; align-items: center; gap: 8px; color: var(--accent); font-size: 13px; font-weight: 750; text-decoration: none; }
+/* Inline counters beside the 답변 대기중인 문의 heading. They replaced a five-card
+   KPI block; the numbers stayed, the 254px-tall hero did not. */
+.queue-counters { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; }
+.queue-counters span { display: inline-flex; align-items: baseline; gap: 6px; }
+.queue-counters em { font-style: normal; color: var(--text-subtle); font-size: 11.5px; }
+.queue-counters b { font-size: 15px; font-weight: 750; }
 .metric-strip { margin: 0; display: grid; grid-template-columns: repeat(2, 1fr); }
 .metric-strip > div { min-height: 127px; padding: 24px; border-bottom: 1px solid var(--border); }
 .metric-strip > div:nth-child(odd) { border-right: 1px solid var(--border); }
@@ -362,20 +355,6 @@
 .pipeline-card > a small { margin-top: 3px; color: var(--text-subtle); font-size: 10.5px; }
 .select--compact { height: 32px; font-size: 11.5px; }
 .kanban-empty { padding: 24px 12px; border: 1px dashed var(--border-strong); color: var(--text-subtle); font-size: 11px; text-align: center; }
-.integration-panel {
-  display: grid; grid-template-columns: minmax(240px,1fr) minmax(360px,1.4fr) auto; gap: 24px; align-items: center;
-  padding: 20px; border: 1px solid var(--border); background: var(--surface);
-}
-.integration-panel p { margin: 5px 0 0; color: var(--text-muted); font-size: 12px; line-height: 1.5; }
-.integration-panel dl { display: grid; grid-template-columns: repeat(3,1fr); gap: 10px; margin: 0; }
-.integration-panel dl div { min-width: 0; }
-.integration-panel dt { color: var(--text-subtle); font-size: 10.5px; }
-.integration-panel dd { margin: 4px 0 0; overflow: hidden; color: var(--text); font-size: 11.5px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
-.integration-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
-.integration-actions form { margin: 0; }
-.integration-setup { grid-column: 1 / -1; padding-top: 14px; border-top: 1px solid var(--border); }
-.integration-setup strong { font-size: 12px; }
-.integration-setup code { display: block; margin-top: 8px; padding: 10px 12px; overflow-x: auto; border: 1px solid var(--border); background: var(--surface-2); color: var(--text); font-size: 11px; }
 
 /* Inbound insights */
 .period-switch { display: flex; padding: 3px; border: 1px solid var(--border); background: var(--surface); }
@@ -497,7 +476,6 @@
 .grid-4 { grid-template-columns: repeat(4, minmax(0,1fr)); }
 .grid-5 { grid-template-columns: repeat(5, minmax(0,1fr)); }
 .split { display: grid; grid-template-columns: minmax(0,1fr) 320px; gap: var(--gap); align-items: start; }
-.split--focus { grid-template-columns: 1.7fr 1fr; }
 .stack { display: flex; flex-direction: column; gap: var(--gap); }
 .row { display: flex; align-items: center; gap: 10px; }
 .row-between { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
@@ -507,13 +485,10 @@
 
 @media (max-width: 900px) {
   .grid-3, .grid-4, .grid-5 { grid-template-columns: repeat(2, minmax(0,1fr)); }
-  .split, .split--focus { grid-template-columns: 1fr; }
-  .inbound-overview { grid-template-columns: 1fr; }
-  .inbound-overview__focus { min-height: 220px; border-right: 0; border-bottom: 1px solid var(--accent-soft-border); }
+  .split { grid-template-columns: 1fr; }
   .customer-layout { grid-template-columns: 1fr; }
   .profile-grid { grid-template-columns: repeat(2, minmax(0,1fr)); }
   .insights-layout { grid-template-columns: 1fr; }
-  .integration-panel { grid-template-columns: 1fr; gap: 14px; }
 }
 @media (max-width: 720px) {
   .app-shell { display: block; }
@@ -550,7 +525,6 @@
   /* Phones have less chrome to subtract; the header is a flex item now, so the
      old sticky `top` offset here no longer applies. */
   .kanban-column { height: calc(100dvh - 150px); }
-  .integration-panel dl { grid-template-columns: 1fr; }
   .inquiry-chart-card, .country-card { padding: 16px; }
   .inquiry-chart-card .section-header { align-items: flex-start; flex-direction: column; }
   .inquiry-chart { height: 240px; }
@@ -763,3 +737,11 @@ body.modal-open { overflow: hidden; }
 .domain-hist { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
 .domain-hist__link { display: block; padding: 8px; border-radius: 8px; text-decoration: none; color: inherit; }
 .domain-hist__link:hover { background: var(--surface-2); }
+
+/* Waiting-time dot on /messages. Colour encodes how long the CUSTOMER has waited
+   since their own last message: <=1d, <=3d, over. The title/sr-only text carries the
+   same information for anyone not reading colour. */
+.wait-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; }
+.wait-dot--ok { background: var(--ok-dot); }
+.wait-dot--warn { background: var(--warn-dot); }
+.wait-dot--danger { background: var(--danger-dot); }

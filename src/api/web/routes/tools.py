@@ -1,14 +1,15 @@
-"""Operator tools — the business-plan (quote) calculator embedded in compose.
+"""Operator tools — the 활용 툴 sidebar section.
 
-The calculator is an INTERNAL sales reference (it carries margin / credit policy
-data), so it is served only behind the web-UI auth gate via these routes, never
-from the public ``/static`` mount. The compose screen embeds ``/app`` in an
-iframe; ``/tools/quote-calculator`` is a full-page view. It is intentionally not in
-the sidebar (removed 2026-07-28) — reach it by URL.
+These are INTERNAL sales references (the calculator carries margin / credit policy
+data), so they are served only behind the web-UI auth gate via these routes, never
+from the public ``/static`` mount. All three open in a new tab from the sidebar.
 
 The tier pricing table is NOT hardcoded in the client any more — it lives in
 ``src/common/quote_tiers.py`` (the single source of truth, unit-tested) and is
 injected into the calculator template here.
+
+견적서 / 계약서 are placeholders: the routes and the sidebar slots exist so the
+navigation is settled, and the content lands later.
 """
 
 from __future__ import annotations
@@ -22,10 +23,51 @@ from ._shared import templates
 router = APIRouter(tags=["web"])
 
 
+# Placeholder tools: title + the sentence the operator should see until it is built.
+_PLACEHOLDERS = {
+    "quotation": ("견적서", "견적서 생성 기능은 준비 중입니다."),
+    "contract": ("계약서", "계약서 생성 기능은 준비 중입니다."),
+}
+
+
 @router.get("/tools/quote-calculator")
 async def quote_calculator_page(request: Request):
     """Full-page calculator view (nav target + 'open large' link)."""
     return templates.TemplateResponse(request, "quote_calculator_page.html", {})
+
+
+@router.get("/tools/quotation")
+async def quotation_page(request: Request):
+    title, message = _PLACEHOLDERS["quotation"]
+    return templates.TemplateResponse(
+        request, "tool_placeholder.html", {"tool_title": title, "tool_message": message}
+    )
+
+
+@router.get("/tools/contract")
+async def contract_page(request: Request):
+    title, message = _PLACEHOLDERS["contract"]
+    return templates.TemplateResponse(
+        request, "tool_placeholder.html", {"tool_title": title, "tool_message": message}
+    )
+
+
+@router.get("/outbound-history")
+async def outbound_history_page(request: Request):
+    """Placeholder peer of the inbound customer history (/customers).
+
+    Deliberately its OWN top-level path rather than /customers/outbound: Starlette
+    matches on path shape, so a literal segment under /customers would be shadowed by
+    ``/customers/{contact_id}`` in customer_ops, which is included first.
+    """
+    return templates.TemplateResponse(
+        request,
+        "tool_placeholder.html",
+        {
+            "tool_title": "아웃바운드 고객 히스토리",
+            "tool_message": "아웃바운드 고객 히스토리는 준비 중입니다.",
+        },
+    )
 
 
 @router.get("/tools/quote-calculator/app")

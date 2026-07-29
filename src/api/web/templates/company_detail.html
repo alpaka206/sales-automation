@@ -36,7 +36,7 @@
           {% if c.ticket_id %}<span class="tag" style="height:20px;font-size:11px">#{{ c.ticket_id }}</span>{% endif %}
           <span class="t-xs t-subtle" style="margin-left:auto">{{ c.message_count }}건 · {{ c.last_activity | kst }}</span>
         </div>
-        {% if c.topic %}<div class="t-xs t-subtle" style="margin-bottom:6px">분류 · {{ c.topic }}</div>{% endif %}
+        {% if c.inquiry_subject %}<div class="t-xs t-subtle" style="margin-bottom:6px">{{ c.inquiry_subject }}</div>{% endif %}
         {% if c.summary %}
         <div class="msg-body--inset" style="margin-bottom:8px">
           <div class="ko-block__label">요약</div>

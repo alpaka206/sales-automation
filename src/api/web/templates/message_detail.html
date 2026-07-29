@@ -98,7 +98,6 @@
               <button type="button" class="btn btn--subtle"
                       hx-post="/messages/{{ msg.id }}/edit" hx-include="#msg-form"
                       hx-target="#action-result" hx-swap="innerHTML">{{ icon("edit", 15) }} 저장</button>
-              <button type="button" class="btn btn--subtle" id="calc-btn" onclick="toggleCalc()" aria-expanded="false" aria-controls="calc-panel">{{ icon("calculator", 15) }} 견적 계산기</button>
               <button type="button" class="btn btn--danger" onclick="var r=document.getElementById('reject-form');r.hidden=!r.hidden">{{ icon("x", 15) }} 거절</button>
             </div>
             {% if can_translate %}
@@ -106,15 +105,10 @@
             {% endif %}
           </form>
 
-          {# ---------- quote calculator (operator reference — NOT sent) ---------- #}
-          <div id="calc-panel" hidden style="margin-top:14px;border-top:1px solid var(--border);padding-top:14px">
-            <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:8px">
-              <div class="ko-block__label" style="margin:0">{{ icon("calculator", 14) }} 비즈니스 플랜 견적 계산기 <span class="t-subtle">— 참고용, 메일에는 포함되지 않습니다</span></div>
-              <a href="/tools/quote-calculator" target="_blank" class="chip chip--xs">{{ icon("file", 13) }} 새 창에서 크게</a>
-            </div>
-            <iframe id="calc-frame" title="견적 계산기" sandbox="allow-scripts allow-popups"
-                    style="width:100%;height:760px;border:1px solid var(--border);border-radius:10px;background:#fff"></iframe>
-          </div>
+          {# The quote calculator moved to the 활용 툴 sidebar section, where it
+             opens in its own tab. Embedding it here loaded a second full page
+             inside the reply screen for a reference the operator consults
+             occasionally. Routes unchanged: /tools/quote-calculator. #}
 
           <div id="reject-form" hidden style="margin-top:14px;border-top:1px solid var(--border);padding-top:14px">
             <form>
@@ -245,7 +239,7 @@
               {% if r.ticket_id %}<span class="tag" style="height:18px;font-size:10px">#{{ r.ticket_id }}</span>{% endif %}
               <span class="t-xs t-subtle" style="margin-left:auto">{{ r.message_count }}건</span>
             </div>
-            {% if r.topic %}<div class="t-xs t-subtle">{{ r.topic }}</div>{% endif %}
+            {% if r.inquiry_subject %}<div class="t-xs t-subtle">{{ r.inquiry_subject }}</div>{% endif %}
             {% if r.summary %}<div class="t-xs" style="line-height:1.5;margin-top:2px">{{ r.summary[:120] }}{% if r.summary|length > 120 %}…{% endif %}</div>{% endif %}
           </a>
         </li>
@@ -308,7 +302,6 @@
       </div>
       {% endif %}
 
-      <a href="{{ customer.detail_url }}" class="btn btn--subtle btn--sm" style="width:100%;justify-content:center;margin-top:10px">{{ icon("chevron", 14) }} 전체 고객 히스토리 · 편집</a>
     </div>
     {% endif %}
 
@@ -317,7 +310,7 @@
       <dl class="info-list">
         <div class="info-row"><dt>티켓</dt><dd class="mono">{{ ('#' ~ ticket.ticket_id) if ticket.ticket_id else '— (없음)' }}</dd></div>
         {% if ticket.stage %}<div class="info-row"><dt>단계</dt><dd>{{ ticket.stage }}</dd></div>{% endif %}
-        {% if ticket.topic %}<div class="info-row"><dt>분류</dt><dd>{{ ticket.topic }}</dd></div>{% endif %}
+        {% if ticket.inquiry_subject %}<div class="info-row"><dt>문의 제목</dt><dd>{{ ticket.inquiry_subject }}</dd></div>{% endif %}
         {% if ticket.inquiry_language %}<div class="info-row"><dt>문의 언어</dt><dd>{{ ticket.inquiry_language }}</dd></div>{% endif %}
         <div class="info-row"><dt>메시지</dt><dd class="tnum">{{ thread | length }}건</dd></div>
       </dl>
@@ -492,22 +485,6 @@
   function syncPreviewIfOpen() { if (_previewOpen) renderPreview(); }
 
   // Quote calculator: collapsible reference panel, iframe loaded lazily on first open.
-  function toggleCalc() {
-    var panel = document.getElementById("calc-panel");
-    var frame = document.getElementById("calc-frame");
-    var btn = document.getElementById("calc-btn");
-    if (!panel) return;
-    var opening = panel.hasAttribute("hidden");
-    if (opening) {
-      if (frame && !frame.getAttribute("src")) frame.setAttribute("src", "/tools/quote-calculator/app");
-      panel.removeAttribute("hidden");
-      if (btn) btn.setAttribute("aria-expanded", "true");
-      panel.scrollIntoView({ behavior: "smooth", block: "nearest" });
-    } else {
-      panel.setAttribute("hidden", "");
-      if (btn) btn.setAttribute("aria-expanded", "false");
-    }
-  }
 
   {# Per-bubble "원문 보기" toggle: reveals the original beside the translation. #}
   document.addEventListener("click", function (e) {

@@ -21,7 +21,7 @@ LOCAL_DOC_PATHS = ("/docs", "/redoc", "/openapi.json")
 WEB_UI_PREFIXES = (
     "/", "/messages", "/email-templates", "/settings",
     "/logs", "/static", "/auth", "/tools", "/customers", "/operations",
-    "/pipeline", "/companies", "/contacts",
+    "/pipeline", "/companies", "/contacts", "/outbound-history",
     "/integrations",
 )
 LOCALHOST_HOSTS = ("127.0.0.1", "::1", "localhost")

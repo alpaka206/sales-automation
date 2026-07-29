@@ -10,33 +10,55 @@
   </div>
 </div>
 
-{% set chips = [('', '전체'), ('awaiting','발송 대기'), ('sent','발송 완료'), ('draft_failed','작성 실패'), ('send_failed','발송 실패'), ('delivery_unknown','발송 확인 필요'), ('rejected','거절')] %}
+{% set _q = '?status=' ~ filter_status ~ '&stage=' ~ filter_stage ~ '&sort=' ~ filter_sort %}
 <div class="filter-bar mb-gap">
   <div class="chip-row">
-    {% for val, label in chips %}
-    <a class="chip{% if filter_status == val %} is-active{% endif %}" href="/messages?status={{ val }}">{{ label }}</a>
+    {% for val, label in [('awaiting','발송 대기'), ('sent','발송 완료')] %}
+    <a class="chip{% if filter_status == val %} is-active{% endif %}"
+       href="/messages?status={{ val }}&stage={{ filter_stage }}&sort={{ filter_sort }}">{{ label }}</a>
+    {% endfor %}
+  </div>
+  {# Sort lives on the right of the status row so the two chip rows stay visually
+     parallel. Oldest-first is the default: the queue is worked FIFO. #}
+  <div class="chip-row">
+    {% for val, label in [('oldest','오래된 순'), ('newest','최신순')] %}
+    <a class="chip{% if filter_sort == val %} is-active{% endif %}"
+       href="/messages?status={{ filter_status }}&stage={{ filter_stage }}&sort={{ val }}">{{ label }}</a>
     {% endfor %}
   </div>
 </div>
 
+<div class="chip-row mb-gap">
+  {% for val, label in [('','전체'), ('new','New'), ('negotiation','Negotiating')] %}
+  <a class="chip{% if filter_stage == val %} is-active{% endif %}"
+     href="/messages?status={{ filter_status }}&stage={{ val }}&sort={{ filter_sort }}">{{ label }}</a>
+  {% endfor %}
+</div>
+
 <div class="card card--flush" id="msg-list"
-     hx-get="/messages?status={{ filter_status }}"
+     hx-get="/messages{{ _q }}"
      hx-trigger="every 15s" hx-select="#msg-list" hx-target="#msg-list" hx-swap="outerHTML">
   <div class="table-wrap">
     <table class="table">
-      <thead><tr><th scope="col">상태</th><th scope="col">답변 제목</th><th scope="col">문의 유형</th><th scope="col">채널</th><th scope="col">수신자</th><th scope="col">시간</th></tr></thead>
+      <thead><tr><th scope="col">상태</th><th scope="col">Stage</th><th scope="col">문의 제목</th><th scope="col">우선순위</th><th scope="col">채널</th><th scope="col">소통 Email</th><th scope="col">접수 시간</th></tr></thead>
       <tbody>
         {% for msg in messages %}
+        {# Days the customer has been waiting since their own last message. #}
+        {% set _waited = ((now - msg.waiting_since).total_seconds() / 86400) if msg.waiting_since else 0 %}
+        {% if _waited <= 1 %}{% set _p = ('ok', '1일 이내') %}
+        {% elif _waited <= 3 %}{% set _p = ('warn', '3일 이내') %}
+        {% else %}{% set _p = ('danger', '3일 초과') %}{% endif %}
         <tr class="is-clickable" onclick="location.href='/messages/{{ msg.id }}'">
           <td>{{ status_pill(msg.status, "sm") }}</td>
-          <td class="truncate" style="max-width:320px">{{ msg.subject }}</td>
-          <td class="td-muted">{{ msg.category }}</td>
+          <td class="td-muted">{{ msg.stage }}</td>
+          <td class="truncate" style="max-width:300px">{{ msg.subject }}</td>
+          <td><span class="wait-dot wait-dot--{{ _p[0] }}" title="{{ _p[1] }}"></span><span class="sr-only">{{ _p[1] }}</span></td>
           <td class="td-muted">{{ msg.channel }}</td>
-          <td class="td-subtle truncate mono" style="max-width:190px">{{ msg.to_address }}</td>
-          <td class="td-subtle tnum">{{ msg.created_at | kst('%m/%d %H:%M') }}</td>
+          <td class="td-subtle truncate mono" style="max-width:190px">{{ msg.email }}</td>
+          <td class="td-subtle tnum">{{ msg.received_at | kst('%m/%d %H:%M') }}</td>
         </tr>
         {% else %}
-        <tr><td colspan="6"><div class="empty"><div class="empty__icon">{{ icon("messages", 24) }}</div><div class="empty__text">조건에 맞는 답변이 없습니다.</div></div></td></tr>
+        <tr><td colspan="7"><div class="empty"><div class="empty__icon">{{ icon("messages", 24) }}</div><div class="empty__text">조건에 맞는 답변이 없습니다.</div></div></td></tr>
         {% endfor %}
       </tbody>
     </table>

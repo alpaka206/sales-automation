@@ -615,9 +615,9 @@ def build_diagrams() -> None:
     d = ImageDraw.Draw(img)
     d.text((70, 50), "왼쪽 메뉴는 세 가지 일로 나뉩니다", font=_font(42, True), fill=f"#{INK}")
     cols = [
-        (70, "인바운드 답장", ["문의 대시보드", "답변 검토", "고객·회사 히스토리", "이메일 규칙·서명", "정책·지식 문서"]),
-        (560, "인사이트", ["문의·국가 추이", "업데이트 필요 고객", "답장 누락", "갱신 임박", "장애 복구"]),
-        (1050, "파이프라인 연동관리", ["문의 파이프라인", "HubSpot 단계", "Google Sheets 연결", "견적·결제 준비", "수주 DB 반영"]),
+        (70, "인바운드 답장", ["문의 대시보드", "답변 검토", "이메일 답변 설정"]),
+        (560, "인사이트", ["문의·국가 추이", "업데이트 필요 고객"]),
+        (1050, "고객 히스토리 · 활용 툴", ["인바운드 고객 히스토리", "아웃바운드 고객 히스토리", "견적 계산기", "견적서", "계약서"]),
     ]
     fills = ["EAF4F1", "EEF2F8", "F4F1EA"]
     for (x, title, items), fill in zip(cols, fills, strict=True):
@@ -674,8 +674,8 @@ def build_diagrams() -> None:
 
     img = Image.new("RGB", (1600, 720), "#F7F9F8")
     d = ImageDraw.Draw(img)
-    d.text((70, 45), "장애 복구는 재발송보다 상태 확인이 먼저입니다", font=_font(40, True), fill=f"#{INK}")
-    d.text((70, 100), "사이트의 장애 복구 화면은 안전하게 다시 할 수 있는 작업과 사람 확인이 필요한 작업을 분리합니다.", font=_font(21), fill=f"#{MUTED}")
+    d.text((70, 45), "운영 로그의 복구 대상은 재발송보다 상태 확인이 먼저입니다", font=_font(40, True), fill=f"#{INK}")
+    d.text((70, 100), "운영 로그 → 복구 대상 탭은 안전하게 다시 할 수 있는 작업과 사람 확인이 필요한 작업을 분리합니다.", font=_font(21), fill=f"#{MUTED}")
     recovery_boxes = [
         ((70, 190, 410, 430), "Dead 문의 작업", "원인 수정\n→ 문의 작업 재시도"),
         ((445, 190, 785, 430), "확정 발송 실패", "주소·SMTP 수정\n→ 발송 재시도"),
@@ -1194,7 +1194,7 @@ def build_developer_guide() -> Path:
             ("/customers", "고객·계약·통합 이력"),
             ("/operations", "문의/국가/후속 대상 인사이트"),
             ("/operations/recovery", "dead job·실패 발송·불명확 발송·외부 sync 복구"),
-            ("/pipeline", "문의 단위 Kanban과 Sheets 연결"),
+            ("/", "답변 대기 큐와 문의 단위 Kanban 보드"),
             ("/settings/users", "Google OAuth 사용자 승인"),
         ],
         [3000, 6360],
@@ -1249,7 +1249,7 @@ def build_operator_guide() -> Path:
         doc,
         ASSET_DIR / "menu_map.png",
         "그림 1. 왼쪽 메뉴의 세 가지 업무 영역",
-        "인바운드 답장, 인사이트, 파이프라인 연동관리의 하위 메뉴 구조",
+        "인바운드 답장, 인사이트, 고객 히스토리, 활용 툴의 하위 메뉴 구조",
     )
     add_table(
         doc,
@@ -1257,7 +1257,7 @@ def build_operator_guide() -> Path:
         [
             ("인바운드 답장", "새 문의를 확인하고 답변을 검토하거나 정책·서명을 관리할 때"),
             ("인사이트", "문의량·국가 추이와 후속 연락이 필요한 고객을 찾을 때"),
-            ("파이프라인 연동관리", "문의 단계를 옮기고 Google Sheets·견적·계약 흐름을 관리할 때"),
+            ("문의 대시보드", "답변 대기 큐를 보고 문의 단계를 옮길 때"),
         ],
         [3000, 6360],
     )
@@ -1446,11 +1446,11 @@ def build_operator_guide() -> Path:
     add_para(doc, "현재 Gemini 회의록, 카카오, 전화, Stripe 데이터를 자동으로 가져오는 연결은 없다. 자료 URL과 요약을 사람이 기록한다.", color=MUTED, size=9.7)
 
     add_page_break(doc)
-    add_heading(doc, "9. 이메일 규칙·서명과 정책·지식 문서", 1)
+    add_heading(doc, "9. 이메일 답변 설정과 정책·지식 문서", 1)
     add_image(
         doc,
         ASSET_DIR / "07_email_templates.png",
-        "그림 5. 이메일 규칙·서명 목록",
+        "그림 5. 이메일 답변 설정 목록",
         "자동 접수확인과 텍스트·HTML 서명을 관리하는 이메일 템플릿 목록",
         width=5.75,
     )

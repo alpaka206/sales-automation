@@ -104,7 +104,7 @@ async def company_detail(request: Request, domain: str):
                         "contact_name": ct.full_name,
                         "contact_email": ct.email,
                         "ticket_id": cv.hubspot_ticket_id,
-                        "topic": cv.topic,
+                        "inquiry_subject": cv.inquiry_subject,
                         "summary": cv.summary,
                         "customer_requests": cv.customer_requests,
                         "message_count": counts.get(cv.id, 0),
