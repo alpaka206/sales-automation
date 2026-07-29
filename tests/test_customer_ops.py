@@ -162,7 +162,11 @@ def test_active_contract_marks_service_customer(customer_db, customer_id) -> Non
         profile = session.get(CustomerProfile, customer_id)
         contract = session.query(ContractRecord).one()
         assert profile.customer_state == "service"
-        assert profile.pipeline_stage == "active"
+        # A contract status is not a board stage. Saving one settles customer_state and
+        # leaves the pipeline column where the operator put it — before migration 0040
+        # this wrote "active" into pipeline_stage, which is how that string became a
+        # board column in the first place.
+        assert profile.pipeline_stage == "new"
         assert contract.amount == Decimal("1200000.00")
         assert contract.conversation_id is not None
 
@@ -204,7 +208,8 @@ def test_contract_uses_selected_inquiry_not_latest_contact_inquiry(
         assert contract.conversation_id == selected_id
         assert contract.sheet_client_id == 1336
         assert contract.amount == Decimal("123.45")
-        assert session.get(Conversation, selected_id).stage == "contracted"
+        # Saving a contract links the inquiry but no longer moves its board stage.
+        assert session.get(Conversation, selected_id).stage == "negotiation"
         assert session.get(Conversation, latest_id).stage == "new"
 
 
@@ -287,6 +292,37 @@ def test_operations_follow_up_ladder_buckets(
     assert len(populated) <= 1
 
 
+def test_customer_detail_offers_only_stages_the_board_still_has(customer_id) -> None:
+    """The profile <select> used to carry its own hardcoded copy of the stage list.
+
+    It went stale on the trim and offered contracted/onboarding/active — values the
+    POST handler then rejected with a 400, so the form could not be submitted at all.
+    """
+    import re
+
+    from src.api.web.routes.customer_ops import PIPELINE_STAGES
+
+    with TestClient(app) as client:
+        page = client.get(f"/customers/{customer_id}")
+        rejected = client.post(
+            f"/customers/{customer_id}/profile",
+            data={"customer_state": "negotiation", "pipeline_stage": "onboarding"},
+            follow_redirects=False,
+        )
+
+    assert page.status_code == 200
+    # Scoped to the pipeline_stage <select>: the CONTRACT status dropdown on the same
+    # page legitimately still offers "contracted" and "active" — a separate vocabulary
+    # that happens to share those two tokens.
+    select = re.search(r'<select[^>]*name="pipeline_stage".*?</select>', page.text, re.S)
+    assert select, "customer detail must render a pipeline_stage select"
+    options = re.findall(r'<option value="([^"]*)"', select.group(0))
+    assert options == [key for key, _label, _description in PIPELINE_STAGES]
+    for _key, label, _description in PIPELINE_STAGES:
+        assert label in select.group(0), label
+    assert rejected.status_code == 400
+
+
 def test_pipeline_board_moves_card_locally(customer_db, customer_id) -> None:
     with customer_db() as session:
         conversation_id = session.query(Conversation).filter_by(contact_id=customer_id).one().id
@@ -294,17 +330,25 @@ def test_pipeline_board_moves_card_locally(customer_db, customer_id) -> None:
         board = client.get("/pipeline")
         moved = client.post(
             f"/pipeline/conversations/{conversation_id}/stage",
+            data={"stage": "won"},
+            follow_redirects=False,
+        )
+        rejected = client.post(
+            f"/pipeline/conversations/{conversation_id}/stage",
             data={"stage": "active"},
             follow_redirects=False,
         )
     assert board.status_code == 200
     assert "문의 파이프라인" in board.text
     assert moved.status_code == 303
+    # A retired stage key must be refused, not silently accepted and then rendered
+    # in the New column.
+    assert rejected.status_code == 400
     with customer_db() as session:
         profile = session.get(CustomerProfile, customer_id)
-        assert profile.pipeline_stage == "active"
+        assert profile.pipeline_stage == "won"
         assert profile.customer_state == "service"
-        assert session.get(Conversation, conversation_id).stage == "active"
+        assert session.get(Conversation, conversation_id).stage == "won"
 
 
 def test_pipeline_keeps_each_inquiry_stage_and_only_latest_updates_profile(

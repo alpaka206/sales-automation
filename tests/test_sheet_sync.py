@@ -239,7 +239,9 @@ def test_profile_uses_latest_inquiry_not_physical_row_order(monkeypatch, db_sess
     assert calls == 1
     with db_session_factory() as session:
         profile = session.scalar(select(CustomerProfile))
-        assert profile.pipeline_stage == "contracted"
+        # Workbook "Won" -> local "won". It used to import as "contracted", a key the
+        # board no longer has; the round trip now uses the same name in both directions.
+        assert profile.pipeline_stage == "won"
         assert profile.customer_state == "service"
         assert profile.current_plan == "Enterprise"
 
@@ -319,7 +321,7 @@ def test_order_sync_uses_contract_inquiry_snapshot(monkeypatch, db_session_facto
         session.flush()
         conversation = Conversation(
             contact_id=contact.id,
-            stage="contracted",
+            stage="won",
             sheet_client_id=1337,
         )
         session.add(conversation)
@@ -355,7 +357,7 @@ def test_order_sync_hydrates_snapshot_after_inquiry_sync(monkeypatch, db_session
         contact = Contact(normalized_email="late-order@example.com", full_name="Late")
         session.add(contact)
         session.flush()
-        conversation = Conversation(contact_id=contact.id, stage="contracted", sheet_client_id=1450)
+        conversation = Conversation(contact_id=contact.id, stage="won", sheet_client_id=1450)
         session.add(conversation)
         session.flush()
         contract = ContractRecord(

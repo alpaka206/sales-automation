@@ -433,6 +433,12 @@ async def message_detail(request: Request, message_id: int):
     # Pre-translate the customer's inquiry bubbles to Korean so they're shown
     # translated by default (the operator can expand the original to the side).
     await _translate_inbound_bubbles(ctx)
+    # Stage labels come from the board's own tuple; a second hardcoded copy here went
+    # stale the moment the pipeline was trimmed. Imported late — customer_ops imports
+    # this package's shared template env.
+    from .customer_ops import PIPELINE_STAGES
+
+    ctx["stage_labels"] = {key: label for key, label, _desc in PIPELINE_STAGES}
     return templates.TemplateResponse(request, "message_detail.html", ctx)
 
 

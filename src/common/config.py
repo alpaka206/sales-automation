@@ -75,13 +75,9 @@ class Settings(BaseSettings):
         ),
     )
     # Stages that exist in the real pipeline. Declared so the values are actually read
-    # (pydantic's extra="ignore" silently drops anything undeclared). Not yet mapped to
-    # a local board column — see PIPELINE_STAGES in src/api/web/routes/customer_ops.py.
+    # (pydantic's extra="ignore" silently drops anything undeclared).
     HUBSPOT_TICKET_STAGE_REMINDER_SENT: str = ""
     HUBSPOT_TICKET_STAGE_WON: str = ""
-    # "X_Follow Up Needed" — not in the written pipeline definition, but it holds more
-    # B2B tickets than any other stage, so it must be mappable or half the board is blind.
-    HUBSPOT_TICKET_STAGE_FOLLOW_UP_NEEDED: str = ""
     # "Unqualified" is being converted to a closed stage on the HubSpot side.
     HUBSPOT_TICKET_STAGE_CLOSED: str = Field(
         default="",
@@ -89,11 +85,9 @@ class Settings(BaseSettings):
             "HUBSPOT_TICKET_STAGE_CLOSED", "HUBSPOT_TICKET_STAGE_UNQUALIFIED"
         ),
     )
-    # Legacy local-only stages with no counterpart in the B2B Dubbing pipeline. Blank
-    # means the card moves locally without attempting an unsupported HubSpot write.
-    HUBSPOT_TICKET_STAGE_CONTRACTED: str = ""
-    HUBSPOT_TICKET_STAGE_ONBOARDING: str = ""
-    HUBSPOT_TICKET_STAGE_ACTIVE: str = ""
+    # These seven are the whole pipeline. FOLLOW_UP_NEEDED / CONTRACTED / ONBOARDING /
+    # ACTIVE were retired in migration 0040 — do not redeclare them without a matching
+    # HubSpot stage and an entry in stage_sync.LOCAL_STAGE_TO_SETTING.
     # Set to true ONLY if the HubSpot account has a custom `inbound_status`
     # text property on contacts. We write "analyzed" / "meeting_link_sent" to
     # it for operator visibility, but the value is never read back, and the
@@ -120,6 +114,13 @@ class Settings(BaseSettings):
     # Reads (HubSpot GET, Gemini, homepage fetch) stay on. Going live = set this to
     # true AND clear SEND_OVERRIDE_EMAIL. See src/common/safe_mode.py.
     LIVE_EXTERNAL_WRITES: bool = False
+    # Per-destination switches, consulted ONLY once LIVE_EXTERNAL_WRITES is true.
+    # Default true, so flipping the master alone behaves exactly as before. Set one to
+    # false to go live on one destination and not the other — e.g. keep mirroring into
+    # the workbook while HubSpot is mid-reorganisation and a stray stage move would
+    # fight whoever is editing the pipeline. Neither can override the master.
+    LIVE_HUBSPOT_WRITES: bool = True
+    LIVE_SHEETS_WRITES: bool = True
 
     # ----- Test mode: redirect ALL real sends to one address -----
     # When non-empty, every customer-facing inbound reply is rerouted to this
@@ -177,16 +178,29 @@ class Settings(BaseSettings):
 
     # ----- Google Sheets (inbound mirror) -----
     # This workbook is the fixed sales-team format. Sync is user-OAuth-only —
-    # Workspace policy blocks sharing the file with a service account. These may
-    # reuse the web-login OAuth client.
-    GOOGLE_SHEETS_OAUTH_CLIENT_ID: str = ""
-    GOOGLE_SHEETS_OAUTH_CLIENT_SECRET: str = ""
+    # Workspace policy blocks sharing the file with a service account.
+    # The OAuth client is GOOGLE_OAUTH_CLIENT_ID/_SECRET below; there is no separate
+    # Sheets client. Setup is one scope added to that existing client.
     # Dedicated encryption key for delegated refresh tokens. Do not reuse the
     # browser session or internal API signing secret in production.
+    # Only needed for the browser "Connect" flow — a refresh token supplied below
+    # is never written to the database, so it needs no encryption key.
     GOOGLE_TOKEN_ENCRYPTION_KEY: str = ""
-    GOOGLE_SHEETS_SPREADSHEET_ID: str = "1L5HeDOrNQjEzWvfZVAIdQKjSXxF9hznu6fPIOGgFHpw"
+    # Refresh token for the workbook owner's own Google account, issued once by
+    # scripts/connect_google_sheets.py. When set it REPLACES the /pipeline connect
+    # button: the app authenticates straight from env, so a fresh deploy or a reset
+    # database needs no click. Treat it like a password.
+    GOOGLE_SHEETS_OAUTH_REFRESH_TOKEN: str = ""
+    # Display only — which account that refresh token belongs to, shown on /pipeline.
+    GOOGLE_SHEETS_ACCOUNT_EMAIL: str = ""
+    # The live workbook, "사본 [Perso AI] B2B 통합 대시보드". This default is what a
+    # deployment uses when the env var is unset, so it must name the CURRENT workbook —
+    # leaving the previous one here would send writes to a stale sheet the moment
+    # LIVE_SHEETS_WRITES is on.
+    GOOGLE_SHEETS_SPREADSHEET_ID: str = "1NWdn-rH3BdfRPCldglDnQnAl4IFmP9LnRkDkGBdmGRo"
     GOOGLE_SHEETS_INBOUND_TAB: str = "Inbound DB"
-    GOOGLE_SHEETS_QUALITY_TAB: str = "Inbound 퀄리티 분석"
+    # Reference-only, and absent from the current workbook. Blank hides it on /pipeline.
+    GOOGLE_SHEETS_QUALITY_TAB: str = ""
     GOOGLE_SHEETS_ORDERS_TAB: str = "수주 DB"
 
     # ----- Domain enrichment -----

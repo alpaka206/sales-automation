@@ -29,6 +29,12 @@ SCOPES = (
     "email",
     "https://www.googleapis.com/auth/spreadsheets",
 )
+# What the API calls actually need. openid/email above exist only so the browser flow
+# can read back WHICH account consented; an env-supplied grant is told that by
+# GOOGLE_SHEETS_ACCOUNT_EMAIL. Asking for them anyway makes google-auth warn
+# "Not all requested scopes were granted … missing scopes email" on every refresh,
+# because the consent screen grants only what its Data Access page lists.
+API_SCOPES = ("https://www.googleapis.com/auth/spreadsheets",)
 TOKEN_URL = "https://oauth2.googleapis.com/token"
 AUTHORIZE_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 USERINFO_URL = "https://openidconnect.googleapis.com/v1/userinfo"
@@ -40,13 +46,18 @@ class GoogleOAuthError(RuntimeError):
 
 
 def client_id() -> str:
-    return (settings.GOOGLE_SHEETS_OAUTH_CLIENT_ID or settings.GOOGLE_OAUTH_CLIENT_ID).strip()
+    """Sheets shares the web-login OAuth client — there is no separate Sheets client.
+
+    A second client would mean a second consent screen and a second set of redirect
+    URIs to keep in step, for no gain: both flows sign in the same operators against
+    the same Google project. Adding the spreadsheets scope to the existing client is
+    the whole setup.
+    """
+    return settings.GOOGLE_OAUTH_CLIENT_ID.strip()
 
 
 def client_secret() -> str:
-    return (
-        settings.GOOGLE_SHEETS_OAUTH_CLIENT_SECRET or settings.GOOGLE_OAUTH_CLIENT_SECRET
-    ).strip()
+    return settings.GOOGLE_OAUTH_CLIENT_SECRET.strip()
 
 
 def client_is_configured() -> bool:
@@ -137,7 +148,42 @@ def _decrypt(value: str) -> dict:
     return payload
 
 
+def env_grant() -> tuple[dict, str | None] | None:
+    """The grant supplied entirely by ``.env``, or None when no token is configured.
+
+    Only ``refresh_token`` is load-bearing. Nothing in this app ever persists a
+    refreshed access token — ``google_sheets._build_service`` rebuilds credentials per
+    call — so an ``expires_at`` of 0 (epoch, i.e. already expired) makes google-auth
+    fetch a fresh access token on the first API call, exactly as it does for a grant
+    that has been sitting in the database for an hour.
+
+    The client id/secret still come from env either way: the refresh_token grant needs
+    them. What this removes is the browser round trip, and with it the need for
+    SESSION_SECRET and GOOGLE_TOKEN_ENCRYPTION_KEY on this path.
+    """
+    refresh_token = settings.GOOGLE_SHEETS_OAUTH_REFRESH_TOKEN.strip()
+    if not refresh_token:
+        return None
+    payload = {
+        "access_token": "",
+        "refresh_token": refresh_token,
+        "expires_at": 0,
+        "scopes": list(API_SCOPES),
+    }
+    return payload, settings.GOOGLE_SHEETS_ACCOUNT_EMAIL.strip() or None
+
+
 def load_grant() -> tuple[dict, str | None] | None:
+    """The active grant: .env first, then whatever the browser flow stored.
+
+    Env wins deliberately. A refresh token in the deployment config is the operator's
+    explicit statement of which account to use, and it must survive a database reset —
+    if a stale IntegrationCredential row could shadow it, "connected" would depend on
+    which of the two was written last.
+    """
+    from_env = env_grant()
+    if from_env is not None:
+        return from_env
     with SessionLocal() as session:
         row = session.get(IntegrationCredential, PROVIDER)
         if row is None:

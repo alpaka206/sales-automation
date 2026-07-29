@@ -42,26 +42,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import httpx  # noqa: E402
 
 from src.common.config import settings  # noqa: E402
+from src.common.tls import use_os_trust_store  # noqa: E402
 
 
-def _use_os_trust_store() -> None:
-    """Trust the OS certificate store as well as certifi's bundle.
-
-    The ESTsoft network runs a TLS-inspecting appliance (ePrism SSL, SOOSAN INT)
-    that re-signs HTTPS with a private root. Windows trusts it, but Python ships
-    its own certifi bundle that does not, so every HubSpot call fails with
-    CERTIFICATE_VERIFY_FAILED. `truststore` makes Python read the same store the
-    browser uses, which keeps verification ON — never pass verify=False here.
-    Optional: on a normal network (or on Render) certifi already works.
-    """
-    try:
-        import truststore
-    except ImportError:
-        return
-    truststore.inject_into_ssl()
-
-
-_use_os_trust_store()
+use_os_trust_store()
 
 BASE = "https://api.hubapi.com"
 OUT_DIR = Path(__file__).resolve().parents[1] / "data" / "hubspot_export"

@@ -34,6 +34,67 @@ def safe(monkeypatch):
 def live(monkeypatch):
     """Force live mode (external writes allowed)."""
     monkeypatch.setattr(settings, "LIVE_EXTERNAL_WRITES", True)
+    monkeypatch.setattr(settings, "LIVE_HUBSPOT_WRITES", True)
+    monkeypatch.setattr(settings, "LIVE_SHEETS_WRITES", True)
+
+
+# ---- Per-destination switches are SUBORDINATE to the master ------------------
+
+def test_per_channel_switches_cannot_override_safe_mode(safe, monkeypatch):
+    """The whole point of the master: turning a channel on must not open a hole.
+
+    If either of these could let a write through, "is it safe?" would stop being a
+    single question and the 대전제 would depend on three variables agreeing.
+    """
+    from src.integrations import google_sheets
+
+    monkeypatch.setattr(settings, "LIVE_HUBSPOT_WRITES", True)
+    monkeypatch.setattr(settings, "LIVE_SHEETS_WRITES", True)
+    monkeypatch.setattr(google_sheets, "is_configured", lambda: True)
+
+    assert safe_mode.live_hubspot_writes() is False
+    assert safe_mode.live_sheets_writes() is False
+    assert google_sheets.writes_enabled() is False
+    with pytest.raises(ExternalWriteBlocked):
+        guard_external_write("hubspot:update_ticket_stage")
+
+
+def test_hubspot_can_be_held_back_while_sheets_go_live(live, monkeypatch):
+    from src.integrations import google_sheets
+
+    monkeypatch.setattr(settings, "LIVE_HUBSPOT_WRITES", False)
+    monkeypatch.setattr(google_sheets, "is_configured", lambda: True)
+
+    with pytest.raises(ExternalWriteBlocked, match="LIVE_HUBSPOT_WRITES"):
+        guard_external_write("hubspot:update_ticket_stage")
+    assert google_sheets.writes_enabled() is True
+
+
+def test_sheets_can_be_held_back_while_hubspot_goes_live(live, monkeypatch):
+    from src.integrations import google_sheets
+
+    monkeypatch.setattr(settings, "LIVE_SHEETS_WRITES", False)
+    monkeypatch.setattr(google_sheets, "is_configured", lambda: True)
+
+    assert google_sheets.writes_enabled() is False
+    guard_external_write("hubspot:update_ticket_stage")  # must not raise
+
+
+def test_an_unregistered_channel_falls_back_to_the_master(safe):
+    """A new write path that forgets to register a gate must still be blocked."""
+    with pytest.raises(ExternalWriteBlocked):
+        guard_external_write("some_new_crm:push")
+
+
+def test_per_channel_defaults_are_permissive_so_the_master_alone_goes_live(monkeypatch):
+    """Flipping only LIVE_EXTERNAL_WRITES must behave exactly as it did before."""
+    from src.common.config import Settings
+
+    monkeypatch.delenv("LIVE_HUBSPOT_WRITES", raising=False)
+    monkeypatch.delenv("LIVE_SHEETS_WRITES", raising=False)
+    bare = Settings(_env_file=None)
+    assert bare.LIVE_HUBSPOT_WRITES is True
+    assert bare.LIVE_SHEETS_WRITES is True
 
 
 # ---- The switch itself -------------------------------------------------------
@@ -116,6 +177,26 @@ def test_sheets_writes_enabled_when_live(live, monkeypatch):
 
     monkeypatch.setattr(google_sheets, "is_configured", lambda: True)
     assert google_sheets.writes_enabled() is True
+
+
+def test_env_refresh_token_does_not_bypass_safe_mode(safe, monkeypatch):
+    """A .env-supplied Google account connects the workbook but must not unblock it.
+
+    GOOGLE_SHEETS_OAUTH_REFRESH_TOKEN makes is_configured() true with no operator
+    action at all — no click, no database row. That is the whole point of it, and it
+    is exactly why it must still land behind LIVE_EXTERNAL_WRITES: otherwise setting
+    one env var would silently start writing into the shared sales workbook.
+    """
+    from src.integrations import google_oauth, google_sheets
+
+    monkeypatch.setattr(settings, "GOOGLE_SHEETS_OAUTH_REFRESH_TOKEN", "1//fake-refresh")
+    monkeypatch.setattr(settings, "GOOGLE_SHEETS_ACCOUNT_EMAIL", "owner@estsoft.com")
+
+    assert google_oauth.env_grant() is not None
+    assert google_oauth.load_grant()[0]["refresh_token"] == "1//fake-refresh"
+    assert google_sheets.is_configured() is True
+    assert google_sheets.writes_enabled() is False
+    assert google_sheets.update_inbound_stage(1336, "won") is False
 
 
 # ---- Every email is forced to the test recipient ----------------------------

@@ -213,3 +213,72 @@ class TestLegacyProspectStatusMigration:
                 text("SELECT status FROM prospects ORDER BY id")
             ).scalars().all()
         assert statuses == ["collected", "analyzed"]
+
+
+class TestRetireLegacyPipelineStages:
+    """Migration 0040 — the board dropped from 11 stage keys to 7."""
+
+    MODULE = "src.db.migrations.0040_retire_legacy_pipeline_stages"
+
+    def _seed(self, engine):
+        with engine.begin() as conn:
+            conn.execute(text("CREATE TABLE conversations (id INTEGER, stage TEXT)"))
+            conn.execute(
+                text("CREATE TABLE customer_profiles (contact_id INTEGER, pipeline_stage TEXT)")
+            )
+            conn.execute(
+                text(
+                    "INSERT INTO conversations (id, stage) VALUES "
+                    "(1, 'follow_up_needed'), (2, 'contracted'), (3, 'onboarding'), "
+                    "(4, 'active'), (5, 'negotiation'), (6, 'won')"
+                )
+            )
+            conn.execute(
+                text(
+                    "INSERT INTO customer_profiles (contact_id, pipeline_stage) VALUES "
+                    "(1, 'active'), (2, 'closed_lost')"
+                )
+            )
+
+    def test_skips_when_tables_do_not_exist(self, mem_engine):
+        importlib.import_module(self.MODULE).up(mem_engine)
+
+        assert "conversations" not in inspect(mem_engine).get_table_names()
+
+    def test_remaps_both_stage_columns_and_leaves_kept_stages_alone(self, mem_engine):
+        self._seed(mem_engine)
+
+        importlib.import_module(self.MODULE).up(mem_engine)
+
+        with mem_engine.connect() as conn:
+            stages = conn.execute(
+                text("SELECT stage FROM conversations ORDER BY id")
+            ).scalars().all()
+            profiles = conn.execute(
+                text("SELECT pipeline_stage FROM customer_profiles ORDER BY contact_id")
+            ).scalars().all()
+        assert stages == ["negotiation", "won", "won", "won", "negotiation", "won"]
+        assert profiles == ["won", "closed_lost"]
+
+    def test_is_idempotent(self, mem_engine):
+        """migrate.py commits up() and the tracker row separately, and CI runs
+        init_db.py twice — a second pass must be a no-op, not a second remap."""
+        self._seed(mem_engine)
+        migration = importlib.import_module(self.MODULE)
+
+        migration.up(mem_engine)
+        migration.up(mem_engine)
+
+        with mem_engine.connect() as conn:
+            stages = conn.execute(
+                text("SELECT stage FROM conversations ORDER BY id")
+            ).scalars().all()
+        assert stages == ["negotiation", "won", "won", "won", "negotiation", "won"]
+
+    def test_every_target_survives_the_trim(self):
+        """A remap that lands on a key the board no longer renders is worse than none."""
+        from src.api.web.routes.customer_ops import VALID_PIPELINE_STAGES
+
+        migration = importlib.import_module(self.MODULE)
+        assert set(migration.STAGE_MAPPING.values()) <= VALID_PIPELINE_STAGES
+        assert not set(migration.STAGE_MAPPING) & VALID_PIPELINE_STAGES

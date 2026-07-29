@@ -192,18 +192,38 @@ def test_startup_rejects_incomplete_google_oauth(monkeypatch) -> None:
         validate_startup_settings()
 
 
-def test_startup_rejects_sheets_oauth_without_dedicated_secrets(monkeypatch) -> None:
+def _basic_startup(monkeypatch) -> None:
     monkeypatch.setattr(settings, "WEB_CONCURRENCY", 1)
     monkeypatch.setattr(settings, "APP_HOST", "127.0.0.1")
     monkeypatch.setattr(settings, "PUBLIC_BASE_URL", "")
     monkeypatch.setattr(settings, "AUTH_MODE", "basic")
-    monkeypatch.setattr(settings, "GOOGLE_SHEETS_OAUTH_CLIENT_ID", "client-id")
-    monkeypatch.setattr(settings, "GOOGLE_SHEETS_OAUTH_CLIENT_SECRET", "client-secret")
+
+
+def test_startup_rejects_a_sheets_refresh_token_without_its_oauth_client(monkeypatch) -> None:
+    """The token is exchanged using that client — alone it can never authenticate."""
+    _basic_startup(monkeypatch)
+    monkeypatch.setattr(settings, "GOOGLE_SHEETS_OAUTH_REFRESH_TOKEN", "1//env-refresh")
+    monkeypatch.setattr(settings, "GOOGLE_OAUTH_CLIENT_ID", "")
+    monkeypatch.setattr(settings, "GOOGLE_OAUTH_CLIENT_SECRET", "")
+
+    with pytest.raises(RuntimeError, match="GOOGLE_OAUTH_CLIENT_ID"):
+        validate_startup_settings()
+
+
+def test_startup_accepts_a_sheets_refresh_token_with_the_login_client(monkeypatch) -> None:
+    """Sheets reuses the web-login client; no Sheets-specific secret exists to demand.
+
+    SESSION_SECRET and GOOGLE_TOKEN_ENCRYPTION_KEY stay blank on purpose: the env
+    token path signs no OAuth state and stores nothing in the database.
+    """
+    _basic_startup(monkeypatch)
+    monkeypatch.setattr(settings, "GOOGLE_SHEETS_OAUTH_REFRESH_TOKEN", "1//env-refresh")
+    monkeypatch.setattr(settings, "GOOGLE_OAUTH_CLIENT_ID", "client-id")
+    monkeypatch.setattr(settings, "GOOGLE_OAUTH_CLIENT_SECRET", "client-secret")
     monkeypatch.setattr(settings, "SESSION_SECRET", "")
     monkeypatch.setattr(settings, "GOOGLE_TOKEN_ENCRYPTION_KEY", "")
 
-    with pytest.raises(RuntimeError, match="GOOGLE_TOKEN_ENCRYPTION_KEY"):
-        validate_startup_settings()
+    validate_startup_settings()
 
 
 def test_web_ui_public_no_password_is_403(monkeypatch) -> None:

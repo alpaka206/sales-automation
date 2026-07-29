@@ -24,26 +24,33 @@ _ALIASES: dict[str, tuple[str, ...]] = {
     # Inbound DB
     "client_id": ("Cluent ID", "Client ID", "client_id"),
     "sales_direction": ("영업방향",),
-    "inquiry_date": ("문의 날짜",),
-    "deal_stage": ("Deal Stage",),
-    "deal_stage_detail": ("Deal Stage Detail",),
+    "inquiry_date": ("문의 날짜", "Create Date"),
+    # "Ticket Status"/"Deal Detail" are the rebuilt workbook's names for these two.
+    # update_inbound_stage writes _STAGE_VALUES into exactly this pair, so a wrong
+    # alias here silently overwrites a different column of the sales team's sheet.
+    "deal_stage": ("Deal Stage", "Ticket Status"),
+    "deal_stage_detail": ("Deal Stage Detail", "Deal Detail"),
     "pipeline": ("Pipeline",),
-    "company": ("고객사", "회사", "회사명"),
-    "full_name": ("고객사 담당자", "담당자", "성함", "이름"),
-    "phone": ("Contact Phone #", "전화번호", "연락처"),
-    "email": ("Contact Email", "Billing Email", "이메일", "메일"),
-    "country": ("Country", "국가"),
+    # The workbook was rebuilt with English column names in 2026; both spellings are
+    # listed so an older copy of the sheet keeps working.
+    "company": ("고객사", "회사", "회사명", "Company Name"),
+    "full_name": ("고객사 담당자", "담당자", "성함", "이름", "Full Name"),
+    "phone": ("Contact Phone #", "전화번호", "연락처", "Phone Number"),
+    "email": ("Contact Email", "Billing Email", "이메일", "메일", "Email"),
+    "country": ("Country", "국가", "IP Country"),
     "company_type": ("기업 종류", "산업군"),
     "channel": ("소통 채널", "채널"),
-    "plan": ("구독 플랜", "플랜"),
-    "user_seq": ("User_Seq", "user-seq"),
-    "source": ("Perso AI 알게된 경로", "유입 소스"),
+    "plan": ("구독 플랜", "플랜", "Plan"),
+    # Normalisation strips whitespace but keeps underscores, so "User_Seq" and
+    # "user seq" are two distinct spellings and both have to be listed.
+    "user_seq": ("User_Seq", "user-seq", "user seq"),
+    "source": ("Perso AI 알게된 경로", "유입 소스", "Perso Dubbing 알게된 경로"),
     "history": ("문의 히스토리", "문의 내용"),
     "first_meeting_at": ("초도 미팅 날짜",),
     "proposal_call": ("제안 통화",),
     "amount": ("제안가", "총 계약 금액 (VAT포함)", "계약 금액"),
     "amount_usd": ("제안가 USD",),
-    "notes": ("제안가 비고", "계약 비고", "비고", "메모"),
+    "notes": ("제안가 비고", "계약 비고", "비고", "메모", "제안 비고"),
     "credits": ("제안 크레딧", "계약 크레딧"),
     "inquiry_month": ("문의 월(YYYY-MM)",),
     "inquiry_quarter": ("문의 분기(YYYY-Qn)",),
@@ -100,10 +107,13 @@ def writes_enabled() -> bool:
 
     Pre-launch safe mode disables ALL Sheet writes (append + stage update) so test
     rows never pollute the shared sales workbook. Reads are unaffected.
-    """
-    from ..common.safe_mode import live_external_writes
 
-    return is_configured() and live_external_writes()
+    ``live_sheets_writes`` is LIVE_EXTERNAL_WRITES and LIVE_SHEETS_WRITES together,
+    so the workbook can be held read-only after go-live without blocking HubSpot.
+    """
+    from ..common.safe_mode import live_sheets_writes
+
+    return is_configured() and live_sheets_writes()
 
 
 def _build_service():
@@ -193,27 +203,69 @@ def _column_letter(index: int) -> str:
     return result
 
 
-def _headers(service, tab: str) -> list[object]:
+# How many leading rows to scan for the real header. The sales workbook puts a merged
+# group-label row above Inbound DB's header ("고객사", "고객사 담당자" spanning several
+# columns) and an ID-rule note above 수주 DB's, so row 1 is not the header there.
+_HEADER_SCAN_ROWS = 5
+
+
+@dataclass(frozen=True)
+class _SheetHeader:
+    """A tab's header row and where it sits, so data ranges follow it.
+
+    Row 1 used to be hardcoded in five places. On a workbook whose header is row 2
+    that made every read return the label row as a record and every row number off by
+    one — silently, because the values still parse.
+    """
+
+    values: list[object]
+    row: int  # 1-based, as Sheets counts
+
+    @property
+    def first_data_row(self) -> int:
+        return self.row + 1
+
+    @property
+    def last_column(self) -> str:
+        return _column_letter(len(self.values) - 1)
+
+
+def _headers(service, tab: str) -> _SheetHeader:
+    """Locate the header: the first row carrying a recognisable Client ID column.
+
+    Client ID is the workbook's join key — every tab this app touches is keyed on it,
+    and the readers already refuse a tab without one — so its presence identifies the
+    header far more reliably than "the first non-empty row", which is exactly what a
+    merged group-label row would win.
+    """
     values = (
         service.spreadsheets()
         .values()
         .get(
             spreadsheetId=settings.GOOGLE_SHEETS_SPREADSHEET_ID.strip(),
-            range=f"'{tab}'!1:1",
+            range=f"'{tab}'!1:{_HEADER_SCAN_ROWS}",
         )
         .execute()
         .get("values")
         or []
     )
-    if not values or not values[0]:
-        raise GoogleSheetsError(f"'{tab}' tab has no header row; refusing to modify it.")
-    return values[0]
+    lookup = _header_lookup({"client_id": ""})
+    for offset, row in enumerate(values, start=1):
+        if any(_key_for_header(cell, lookup) == "client_id" for cell in row):
+            return _SheetHeader(values=list(row), row=offset)
+    # No Client ID anywhere in the scanned rows. Fall back to the first non-empty row
+    # so callers report the real problem ("no Client ID column") rather than a
+    # misleading "no header row".
+    for offset, row in enumerate(values, start=1):
+        if row:
+            return _SheetHeader(values=list(row), row=offset)
+    raise GoogleSheetsError(f"'{tab}' tab has no header row; refusing to modify it.")
 
 
-def _next_inbound_client_id(service, tab: str, headers: list[object]) -> int:
+def _next_inbound_client_id(service, tab: str, header: _SheetHeader) -> int:
     lookup = _header_lookup({"client_id": ""})
     index = next(
-        (idx for idx, header in enumerate(headers) if _key_for_header(header, lookup) == "client_id"),
+        (idx for idx, cell in enumerate(header.values) if _key_for_header(cell, lookup) == "client_id"),
         None,
     )
     if index is None:
@@ -224,7 +276,7 @@ def _next_inbound_client_id(service, tab: str, headers: list[object]) -> int:
         .values()
         .get(
             spreadsheetId=settings.GOOGLE_SHEETS_SPREADSHEET_ID.strip(),
-            range=f"'{tab}'!{column}2:{column}",
+            range=f"'{tab}'!{column}{header.first_data_row}:{column}",
         )
         .execute()
         .get("values")
@@ -253,33 +305,32 @@ def _row_number(response: dict) -> int | None:
 def _existing_row_for_keys(
     service,
     tab: str,
-    headers: list[object],
+    header: _SheetHeader,
     record: dict,
     keys: tuple[str, ...],
 ) -> int | None:
     """Return an existing row matching all stable business keys."""
     lookup = _header_lookup({key: "" for key in keys})
     indexes: dict[str, int] = {}
-    for index, header in enumerate(headers):
-        key = _key_for_header(header, lookup)
+    for index, cell in enumerate(header.values):
+        key = _key_for_header(cell, lookup)
         if key:
             indexes[key] = index
     if set(indexes) != set(keys):
         raise GoogleSheetsError(f"Sheet is missing idempotency columns: {', '.join(keys)}")
-    last_column = _column_letter(len(headers) - 1)
     rows = (
         service.spreadsheets()
         .values()
         .get(
             spreadsheetId=settings.GOOGLE_SHEETS_SPREADSHEET_ID.strip(),
-            range=f"'{tab}'!A2:{last_column}",
+            range=f"'{tab}'!A{header.first_data_row}:{header.last_column}",
         )
         .execute()
         .get("values")
         or []
     )
     expected = {key: str(record.get(key, "") or "").replace(",", "").strip() for key in keys}
-    for offset, row in enumerate(rows, start=2):
+    for offset, row in enumerate(rows, start=header.first_data_row):
         if all(
             str(row[indexes[key]] if indexes[key] < len(row) else "").replace(",", "").strip()
             == expected[key]
@@ -290,13 +341,13 @@ def _existing_row_for_keys(
 
 
 def _update_existing_nonempty_cells(
-    service, tab: str, headers: list[object], row: int, record: dict
+    service, tab: str, header: _SheetHeader, row: int, record: dict
 ) -> None:
     """Update app-owned non-empty values without clearing operator-maintained cells."""
     lookup = _header_lookup(record)
     data = []
-    for index, header in enumerate(headers):
-        key = _key_for_header(header, lookup)
+    for index, cell in enumerate(header.values):
+        key = _key_for_header(cell, lookup)
         value = record.get(key) if key else None
         if key and value not in (None, ""):
             data.append(
@@ -325,27 +376,29 @@ def _append_existing_tab(
     # uses one sync worker; the lock also protects local webhook/poller overlap.
     with _APPEND_LOCK:
         service = _build_service()
-        headers = _headers(service, tab)
+        header = _headers(service, tab)
         payload = dict(record)
         client_id = payload.get("client_id")
         if allocate_client_id and not client_id:
-            client_id = _next_inbound_client_id(service, tab, headers)
+            client_id = _next_inbound_client_id(service, tab, header)
             payload["client_id"] = client_id
         if dedup_keys:
-            existing_row = _existing_row_for_keys(service, tab, headers, payload, dedup_keys)
+            existing_row = _existing_row_for_keys(service, tab, header, payload, dedup_keys)
             if existing_row:
-                _update_existing_nonempty_cells(service, tab, headers, existing_row, payload)
+                _update_existing_nonempty_cells(service, tab, header, existing_row, payload)
                 return SheetWriteResult(
                     row=existing_row,
                     client_id=int(client_id) if client_id else None,
                 )
-        row = _mapped_row(headers, payload)
+        row = _mapped_row(header.values, payload)
         response = (
             service.spreadsheets()
             .values()
             .append(
+                # Anchor the table at the header, not A1: with a label row above it,
+                # A1 makes Sheets treat that row as the table and append beside it.
                 spreadsheetId=settings.GOOGLE_SHEETS_SPREADSHEET_ID.strip(),
-                range=f"'{tab}'!A1",
+                range=f"'{tab}'!A{header.row}",
                 valueInputOption="RAW",
                 insertDataOption="INSERT_ROWS",
                 body={"values": [row]},
@@ -384,27 +437,27 @@ def read_inbound_records(limit: int = 5000) -> list[dict]:
         raise GoogleSheetsError("Google Sheets credentials are not configured.")
     service = _build_service()
     tab = settings.GOOGLE_SHEETS_INBOUND_TAB.strip() or "Inbound DB"
-    headers = _headers(service, tab)
+    header = _headers(service, tab)
     client_id_lookup = _header_lookup({"client_id": ""})
     if not any(
-        _key_for_header(header, client_id_lookup) == "client_id" for header in headers
+        _key_for_header(cell, client_id_lookup) == "client_id" for cell in header.values
     ):
         raise GoogleSheetsError("Inbound DB has no Client ID column; refusing to import it.")
-    last_column = _column_letter(len(headers) - 1)
+    first = header.first_data_row
     rows = (
         service.spreadsheets()
         .values()
         .get(
             spreadsheetId=settings.GOOGLE_SHEETS_SPREADSHEET_ID.strip(),
-            range=f"'{tab}'!A2:{last_column}{max(2, limit + 1)}",
+            range=f"'{tab}'!A{first}:{header.last_column}{max(first, limit + first - 1)}",
         )
         .execute()
         .get("values")
         or []
     )
     records = []
-    for row_number, row in enumerate(rows[:limit], start=2):
-        record = _record_from_row(headers, row)
+    for row_number, row in enumerate(rows[:limit], start=first):
+        record = _record_from_row(header.values, row)
         if any(str(value or "").strip() for value in record.values()):
             record["_row"] = row_number
             records.append(record)
@@ -419,32 +472,37 @@ def append_order_row(record: dict) -> SheetWriteResult:
     )
 
 
+# Local stage -> the workbook's (Deal Stage, Deal Stage Detail) pair. Only the values
+# the sales team already uses in those columns may appear here — writing a new token
+# would pollute a column the team filters on. "won" inherits ("Won", "Closed Won") from
+# the retired contracted/onboarding/active keys (migration 0040).
+# reminder_sent and closed have no workbook vocabulary yet, so update_inbound_stage
+# leaves the sheet untouched for them, exactly as it did before the trim.
 _STAGE_VALUES = {
     "new": ("New", "Inquiry"),
     "meeting_link_sent": ("Meeting Link Sent", "Inquiry"),
     "negotiation": ("Negotiation", "Meeting"),
-    "contracted": ("Won", "Closed Won"),
-    "onboarding": ("Won", "Closed Won"),
-    "active": ("Won", "Closed Won"),
+    "won": ("Won", "Closed Won"),
     "closed_lost": ("Lost_Rejected", "Closed Lost"),
 }
 
 
-def _row_for_client_id(service, tab: str, headers: list[object], client_id: int) -> int | None:
+def _row_for_client_id(service, tab: str, header: _SheetHeader, client_id: int) -> int | None:
     lookup = _header_lookup({"client_id": ""})
     index = next(
-        (idx for idx, header in enumerate(headers) if _key_for_header(header, lookup) == "client_id"),
+        (idx for idx, cell in enumerate(header.values) if _key_for_header(cell, lookup) == "client_id"),
         None,
     )
     if index is None:
         raise GoogleSheetsError("Inbound DB has no Client ID column.")
     column = _column_letter(index)
+    first = header.first_data_row
     values = (
         service.spreadsheets()
         .values()
         .get(
             spreadsheetId=settings.GOOGLE_SHEETS_SPREADSHEET_ID.strip(),
-            range=f"'{tab}'!{column}2:{column}",
+            range=f"'{tab}'!{column}{first}:{column}",
         )
         .execute()
         .get("values")
@@ -452,7 +510,11 @@ def _row_for_client_id(service, tab: str, headers: list[object], client_id: int)
     )
     target = str(client_id).replace(",", "").strip()
     return next(
-        (index + 2 for index, value in enumerate(values) if value and str(value[0]).replace(",", "").strip() == target),
+        (
+            offset + first
+            for offset, value in enumerate(values)
+            if value and str(value[0]).replace(",", "").strip() == target
+        ),
         None,
     )
 
@@ -464,8 +526,8 @@ def update_inbound_stage(client_id: int | None, stage: str, pipeline: str | None
     try:
         service = _build_service()
         tab = settings.GOOGLE_SHEETS_INBOUND_TAB.strip() or "Inbound DB"
-        headers = _headers(service, tab)
-        row = _row_for_client_id(service, tab, headers, client_id)
+        header = _headers(service, tab)
+        row = _row_for_client_id(service, tab, header, client_id)
         if row is None:
             raise GoogleSheetsError(f"Inbound DB Client ID {client_id} was not found.")
         values = {
@@ -476,8 +538,8 @@ def update_inbound_stage(client_id: int | None, stage: str, pipeline: str | None
             values["pipeline"] = pipeline
         lookup = _header_lookup(values)
         data = []
-        for index, header in enumerate(headers):
-            key = _key_for_header(header, lookup)
+        for index, cell in enumerate(header.values):
+            key = _key_for_header(cell, lookup)
             if key:
                 column = _column_letter(index)
                 data.append({"range": f"'{tab}'!{column}{row}", "values": [[values[key]]]})
@@ -519,20 +581,28 @@ def record_order(record: dict) -> SheetWriteResult | None:
 
 
 def connection_summary() -> dict[str, object]:
-    from .google_oauth import client_is_configured, load_grant
+    from .google_oauth import client_is_configured, env_grant, load_grant
 
     try:
         grant = load_grant()
     except Exception:
         logger.warning("Unable to read Google Sheets OAuth grant.", exc_info=True)
         grant = None
+    if grant is None:
+        auth_mode = "none"
+    elif env_grant() is not None:
+        # Configured in .env — the panel must not offer a Disconnect button that
+        # would delete a database row the app is not reading.
+        auth_mode = "env_refresh_token"
+    else:
+        auth_mode = "user_oauth"
     return {
         "configured": is_configured(),
         "write_enabled": writes_enabled(),
         "inbound_tab": settings.GOOGLE_SHEETS_INBOUND_TAB,
         "quality_tab": settings.GOOGLE_SHEETS_QUALITY_TAB,
         "orders_tab": settings.GOOGLE_SHEETS_ORDERS_TAB,
-        "auth_mode": "user_oauth" if grant else "none",
+        "auth_mode": auth_mode,
         "account_email": grant[1] if grant else None,
         "oauth_client_configured": client_is_configured(),
     }

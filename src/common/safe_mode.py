@@ -21,6 +21,11 @@ delivery). If the flag is unset, misspelled, or config fails to load, the system
 stays SAFE. This is enforced in deterministic code, not prompts — every external
 write/send chokepoint routes through this module; ``tests/test_safe_mode.py``
 pins the guaranteed behavior.
+
+Once live, ``LIVE_HUBSPOT_WRITES`` and ``LIVE_SHEETS_WRITES`` (both default true)
+turn the two destinations on and off independently, so one can go live before the
+other. They are strictly SUBORDINATE: neither can permit a write while
+``LIVE_EXTERNAL_WRITES`` is false, so the master remains the one thing to check.
 """
 
 from __future__ import annotations
@@ -67,8 +72,32 @@ class ExternalWriteBlocked(RuntimeError):
 
 
 def live_external_writes() -> bool:
-    """True only when the operator has explicitly enabled real external writes."""
+    """True only when the operator has explicitly enabled real external writes.
+
+    The MASTER switch. Everything below is subordinate to it: while this is false no
+    per-channel setting can let a write through, so the 대전제 stays a single
+    unambiguous opt-in.
+    """
     return bool(settings.LIVE_EXTERNAL_WRITES)
+
+
+def live_hubspot_writes() -> bool:
+    """True when HubSpot writes specifically are allowed.
+
+    Lets ticket-stage moves, contact updates and timeline emails be turned off on
+    their own while the Sheet keeps syncing — useful when HubSpot is mid-cleanup and
+    a stray stage write would fight whoever is reorganising the pipeline.
+    """
+    return live_external_writes() and bool(settings.LIVE_HUBSPOT_WRITES)
+
+
+def live_sheets_writes() -> bool:
+    """True when Google Sheets writes specifically are allowed.
+
+    The mirror image: go live on HubSpot while the workbook stays read-only, e.g.
+    before the sales team has agreed the sheet is safe to be written by a machine.
+    """
+    return live_external_writes() and bool(settings.LIVE_SHEETS_WRITES)
 
 
 def safe_mode() -> bool:
@@ -76,19 +105,34 @@ def safe_mode() -> bool:
     return not live_external_writes()
 
 
-def guard_external_write(action: str) -> None:
-    """Hard block: refuse any external write while in safe mode.
+# Channel name (the part before ":" in an action label) -> its gate. An unrecognised
+# channel falls back to the master switch, so a new write path is blocked by default
+# in safe mode even if someone forgets to register it here.
+_CHANNEL_GATES = {
+    "hubspot": (live_hubspot_writes, "LIVE_HUBSPOT_WRITES"),
+    "sheets": (live_sheets_writes, "LIVE_SHEETS_WRITES"),
+}
 
-    ``action`` is a short label ("hubspot:update_ticket_stage", ...) used only for
-    logging. Callers wrap this where a raised block should be swallowed gracefully
-    (the web pipeline-move action, post-send bookkeeping, etc.).
+
+def guard_external_write(action: str) -> None:
+    """Hard block: refuse an external write unless its channel is live.
+
+    ``action`` is a short label ("hubspot:update_ticket_stage", ...). The part before
+    the colon selects the channel gate; the whole label is used for logging. Callers
+    wrap this where a raised block should be swallowed gracefully (the web
+    pipeline-move action, post-send bookkeeping, etc.).
     """
+    gate, channel_flag = _CHANNEL_GATES.get(
+        action.split(":", 1)[0], (live_external_writes, "")
+    )
+    if gate():
+        return
     if safe_mode():
-        logger.warning(
-            "SAFE MODE: blocked external write '%s' — set LIVE_EXTERNAL_WRITES=true to go live.",
-            action,
-        )
-        raise ExternalWriteBlocked(f"safe mode active — refused external write: {action}")
+        remedy = "set LIVE_EXTERNAL_WRITES=true to go live"
+    else:
+        remedy = f"{channel_flag} is false"
+    logger.warning("SAFE MODE: blocked external write '%s' — %s.", action, remedy)
+    raise ExternalWriteBlocked(f"refused external write: {action} ({remedy})")
 
 
 def resolve_send_override() -> str:

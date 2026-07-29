@@ -27,7 +27,6 @@ STAGE_IDS = {
     "HUBSPOT_TICKET_STAGE_AFTER_SEND": "1193842435",
     "HUBSPOT_TICKET_STAGE_NEGOTIATION": "1193733925",
     "HUBSPOT_TICKET_STAGE_REMINDER_SENT": "1196621584",
-    "HUBSPOT_TICKET_STAGE_FOLLOW_UP_NEEDED": "1193733926",
     "HUBSPOT_TICKET_STAGE_WON": "1196772135",
     "HUBSPOT_TICKET_STAGE_CLOSED_LOST": "1172180246",
     "HUBSPOT_TICKET_STAGE_CLOSED": "1404814097",
@@ -60,13 +59,12 @@ def db(monkeypatch):
 
 
 def test_every_pipeline_stage_is_mapped(stages):
-    """All 8 stages of [B2B] AI Dubbing must resolve — an unmapped one is invisible."""
+    """All 7 stages of [B2B] AI Dubbing must resolve — an unmapped one is invisible."""
     expected = {
         "1172180243": "new",
         "1193842435": "meeting_link_sent",
         "1193733925": "negotiation",
         "1196621584": "reminder_sent",
-        "1193733926": "follow_up_needed",
         "1196772135": "won",
         "1172180246": "closed_lost",
         "1404814097": "closed",
@@ -74,13 +72,70 @@ def test_every_pipeline_stage_is_mapped(stages):
     assert stage_sync.stage_id_to_local() == expected
 
 
+def test_board_columns_are_exactly_the_seven_stages_in_flow_order():
+    """The board's column order IS this tuple — nothing else defines it."""
+    from src.api.web.routes.customer_ops import PIPELINE_STAGES
+
+    assert [key for key, _, _ in PIPELINE_STAGES] == [
+        "new",
+        "meeting_link_sent",
+        "negotiation",
+        "reminder_sent",
+        "won",
+        "closed_lost",
+        "closed",
+    ]
+    assert [label for _, label, _ in PIPELINE_STAGES] == [
+        "New",
+        "Meeting Link Sent",
+        "Negotiating",
+        "Reminder Sent",
+        "Won",
+        "Lost",
+        "Closed",
+    ]
+
+
+def test_board_and_hubspot_maps_hold_the_same_keys():
+    """A key in one but not the other is a column that cannot sync, or a silent drop."""
+    from src.api.web.routes.customer_ops import VALID_PIPELINE_STAGES
+
+    assert set(stage_sync.LOCAL_STAGE_TO_SETTING) == VALID_PIPELINE_STAGES
+
+
+def test_the_workbook_round_trip_uses_one_vocabulary():
+    """Sheet write and sheet read must agree, or an import undoes the board.
+
+    google_sheets writes ("Won", …) for a local stage; sheet_sync reads it back. When
+    the two disagree — as they did while the write said "contracted" and the board said
+    "won" — a full sheet sync silently rewrites the stage an operator just set.
+    """
+    from src.agents.sheet_sync import _local_stage
+    from src.api.web.routes.customer_ops import VALID_PIPELINE_STAGES
+    from src.integrations.google_sheets import _STAGE_VALUES
+
+    assert set(_STAGE_VALUES) <= VALID_PIPELINE_STAGES
+    for stage, (deal_stage, _detail) in _STAGE_VALUES.items():
+        assert _local_stage({"deal_stage": deal_stage}) == stage, deal_stage
+
+
+def test_settled_states_only_name_stages_that_exist():
+    from src.api.web.routes.customer_ops import VALID_PIPELINE_STAGES
+
+    assert set(stage_sync.STATE_FOR_STAGE) <= VALID_PIPELINE_STAGES
+
+
+def test_reopening_from_a_settled_stage_returns_to_negotiation():
+    assert stage_sync.customer_state_for("won", "negotiation") == "service"
+    assert stage_sync.customer_state_for("closed", "service") == "lost"
+    assert stage_sync.customer_state_for("negotiation", "lost") == "negotiation"
+    assert stage_sync.customer_state_for("new", "prospect") == "prospect"
+
+
 def test_blank_stage_ids_do_not_collide(monkeypatch):
     """Unconfigured stages must be skipped, not all collapse onto the empty id."""
     for attr in STAGE_IDS:
         monkeypatch.setattr(settings, attr, "")
-    monkeypatch.setattr(settings, "HUBSPOT_TICKET_STAGE_CONTRACTED", "")
-    monkeypatch.setattr(settings, "HUBSPOT_TICKET_STAGE_ONBOARDING", "")
-    monkeypatch.setattr(settings, "HUBSPOT_TICKET_STAGE_ACTIVE", "")
     assert stage_sync.stage_id_to_local() == {}
     assert stage_sync.local_stage_for("") is None
 
@@ -90,7 +145,6 @@ def test_blank_stage_ids_do_not_collide(monkeypatch):
     [
         ("1193733925", "negotiation", "negotiation"),
         ("1196621584", "reminder_sent", None),
-        ("1193733926", "follow_up_needed", None),
         ("1196772135", "won", "service"),
         ("1172180246", "closed_lost", "lost"),
         ("1404814097", "closed", "lost"),
@@ -229,7 +283,7 @@ def test_poller_reconcile_sweeps_every_stage(db, stages, monkeypatch):
     class FakeHubSpot:
         def search_tickets_sync(self, created_after, pipeline_stage=None, limit=100):
             captured["pipeline_stage"] = pipeline_stage
-            return [TicketDTO(id=TICKET, pipeline_stage="1193733926")]
+            return [TicketDTO(id=TICKET, pipeline_stage="1193733925")]
 
     monkeypatch.setattr(inbound_poller, "HubSpotClient", lambda *a, **k: FakeHubSpot())
 
@@ -238,7 +292,7 @@ def test_poller_reconcile_sweeps_every_stage(db, stages, monkeypatch):
 
     with db() as session:
         conv = session.query(Conversation).filter_by(hubspot_ticket_id=TICKET).one()
-        assert conv.stage == "follow_up_needed"
+        assert conv.stage == "negotiation"
 
 
 def test_reconcile_survives_one_bad_ticket(db, stages, monkeypatch):

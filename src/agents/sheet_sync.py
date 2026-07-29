@@ -196,12 +196,17 @@ def _sheet_date(value: object) -> datetime | None:
 
 
 def _local_stage(record: dict) -> str | None:
+    """Workbook Deal Stage -> local stage. The inverse of google_sheets._STAGE_VALUES.
+
+    Keep the two in step: this is the read half of a round trip, so a value that only
+    one side knows means an import silently rewrites a stage the board just set.
+    """
     stage = _clean_sheet_value(record.get("deal_stage")).lower().replace(" ", "_")
     return {
         "new": "new",
         "meeting_link_sent": "meeting_link_sent",
         "negotiation": "negotiation",
-        "won": "contracted",
+        "won": "won",
         "lost_rejected": "closed_lost",
     }.get(stage)
 
@@ -215,11 +220,9 @@ def _profile_time_key(value: datetime | None) -> datetime:
 
 
 def _customer_state(stage: str) -> str:
-    if stage in {"contracted", "onboarding", "active"}:
-        return "service"
-    if stage == "closed_lost":
-        return "lost"
-    return "negotiation"
+    from .stage_sync import STATE_FOR_STAGE
+
+    return STATE_FOR_STAGE.get(stage, "negotiation")
 
 
 def _import_inbound_records(records: list[dict]) -> int:

@@ -49,8 +49,6 @@ services:
         value: "1193733925"            # Negotiating
       - key: HUBSPOT_TICKET_STAGE_REMINDER_SENT
         value: "1196621584"            # Reminder sent
-      - key: HUBSPOT_TICKET_STAGE_FOLLOW_UP_NEEDED
-        value: "1193733926"            # X_Follow Up Needed — holds the most B2B tickets
       - key: HUBSPOT_TICKET_STAGE_WON
         value: "1196772135"            # Won
       - key: HUBSPOT_TICKET_STAGE_LOST
@@ -93,10 +91,15 @@ services:
         generateValue: true
 
       # ----- Google Sheets: user-OAuth only (service-account sharing is policy-blocked) -----
-      - key: GOOGLE_SHEETS_OAUTH_CLIENT_ID
+      # The OAuth client is GOOGLE_OAUTH_CLIENT_ID/_SECRET above — Sheets has none of
+      # its own. Add the spreadsheets scope to that client, nothing else.
+      # Set this and no one ever clicks "연결" on /pipeline — not after a redeploy, not
+      # after a database reset. Issue it once with scripts/connect_google_sheets.py.
+      - key: GOOGLE_SHEETS_OAUTH_REFRESH_TOKEN
         sync: false
-      - key: GOOGLE_SHEETS_OAUTH_CLIENT_SECRET
+      - key: GOOGLE_SHEETS_ACCOUNT_EMAIL # display only: whose account the token belongs to
         sync: false
+      # Only used by the browser connect flow, which the refresh token above replaces.
       - key: GOOGLE_TOKEN_ENCRYPTION_KEY # delegated refresh-token encryption; separate from session/API secrets
         generateValue: true
 
@@ -110,6 +113,9 @@ services:
       # test recipient. To GO LIVE, add LIVE_EXTERNAL_WRITES=true in the Render
       # dashboard (a dashboard var persists across deploys) AND clear
       # SEND_OVERRIDE_EMAIL. Until then the webhook only detects + drafts.
+      # LIVE_HUBSPOT_WRITES / LIVE_SHEETS_WRITES are likewise undeclared; they default
+      # to true and only matter once the master is on, for going live on one
+      # destination before the other. Neither can override the master.
 
       # ----- Sensible defaults (override in dashboard if needed) -----
       - key: GEMINI_MODEL

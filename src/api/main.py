@@ -18,6 +18,7 @@ from fastapi.staticfiles import StaticFiles
 from ..agents.approval import ApprovalError, approve, reject
 from ..common.config import settings
 from ..common.logging import setup_logging
+from ..common.tls import use_os_trust_store
 from .schemas import ApprovalBody
 from .security import (
     API_SKIP_PATHS,
@@ -32,6 +33,11 @@ from .web.auth import current_user, router as auth_router
 from .web.routes import router as web_router
 from .webhook import router as webhook_router
 
+# Must precede the first outbound HTTPS call, not the first import: httpx and
+# googleapiclient build their SSL contexts per client/request, so patching `ssl` here
+# covers every one of them. Without it the office network's TLS-inspecting proxy makes
+# Sheets, HubSpot and Vertex all fail with CERTIFICATE_VERIFY_FAILED.
+use_os_trust_store()
 setup_logging()
 logger = logging.getLogger(__name__)
 
@@ -67,20 +73,19 @@ def validate_startup_settings() -> None:
         missing = [name for name, value in required.items() if not value]
         if missing:
             errors.append("google_oauth requires " + ", ".join(missing))
-    sheets_oauth_configured = bool(
-        settings.GOOGLE_SHEETS_OAUTH_CLIENT_ID
-        or settings.GOOGLE_SHEETS_OAUTH_CLIENT_SECRET
-    )
-    if sheets_oauth_configured:
+    # A refresh token is worthless without the OAuth client that minted it: every
+    # Sheets call exchanges it for an access token using that client id and secret.
+    # Fail here rather than let each call fail one by one at runtime.
+    if settings.GOOGLE_SHEETS_OAUTH_REFRESH_TOKEN.strip():
         required = {
-            "GOOGLE_SHEETS_OAUTH_CLIENT_ID": settings.GOOGLE_SHEETS_OAUTH_CLIENT_ID,
-            "GOOGLE_SHEETS_OAUTH_CLIENT_SECRET": settings.GOOGLE_SHEETS_OAUTH_CLIENT_SECRET,
-            "SESSION_SECRET": settings.SESSION_SECRET,
-            "GOOGLE_TOKEN_ENCRYPTION_KEY": settings.GOOGLE_TOKEN_ENCRYPTION_KEY,
+            "GOOGLE_OAUTH_CLIENT_ID": settings.GOOGLE_OAUTH_CLIENT_ID,
+            "GOOGLE_OAUTH_CLIENT_SECRET": settings.GOOGLE_OAUTH_CLIENT_SECRET,
         }
         missing = [name for name, value in required.items() if not value]
         if missing:
-            errors.append("Google Sheets OAuth requires " + ", ".join(missing))
+            errors.append(
+                "GOOGLE_SHEETS_OAUTH_REFRESH_TOKEN requires " + ", ".join(missing)
+            )
     if public_host and public_url and public_url.scheme != "https":
         errors.append("PUBLIC_BASE_URL must use https in production")
     if errors:

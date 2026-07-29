@@ -16,8 +16,9 @@ def _configure(monkeypatch):
         google_oauth.settings, "GOOGLE_TOKEN_ENCRYPTION_KEY", "test-token-key"
     )
     monkeypatch.setattr(google_oauth.settings, "INTERNAL_API_TOKEN", "")
-    monkeypatch.setattr(google_oauth.settings, "GOOGLE_SHEETS_OAUTH_CLIENT_ID", "client-id")
-    monkeypatch.setattr(google_oauth.settings, "GOOGLE_SHEETS_OAUTH_CLIENT_SECRET", "client-secret")
+    # Sheets shares the web-login client; there is no Sheets-specific one to set.
+    monkeypatch.setattr(google_oauth.settings, "GOOGLE_OAUTH_CLIENT_ID", "client-id")
+    monkeypatch.setattr(google_oauth.settings, "GOOGLE_OAUTH_CLIENT_SECRET", "client-secret")
 
 
 def test_oauth_state_is_signed_and_tamper_evident(monkeypatch):
@@ -64,6 +65,71 @@ def test_grant_encryption_requires_dedicated_key(monkeypatch):
 
     with pytest.raises(google_oauth.GoogleOAuthError, match="GOOGLE_TOKEN_ENCRYPTION_KEY"):
         google_oauth._encrypt({"refresh_token": "secret-refresh"})
+
+
+def test_env_refresh_token_is_a_complete_grant_without_the_browser(monkeypatch):
+    """The whole point: no click, no database row, no encryption key needed.
+
+    _build_service only ever uses refresh_token + the client id/secret, so this payload
+    is sufficient. expires_at=0 is epoch — already expired — which is what makes
+    google-auth fetch a fresh access token on the first call.
+    """
+    monkeypatch.setattr(google_oauth.settings, "GOOGLE_TOKEN_ENCRYPTION_KEY", "")
+    monkeypatch.setattr(google_oauth.settings, "SESSION_SECRET", "")
+    monkeypatch.setattr(
+        google_oauth.settings, "GOOGLE_SHEETS_OAUTH_REFRESH_TOKEN", "1//env-refresh"
+    )
+    monkeypatch.setattr(
+        google_oauth.settings, "GOOGLE_SHEETS_ACCOUNT_EMAIL", "owner@estsoft.com"
+    )
+
+    payload, email = google_oauth.load_grant()
+    assert payload["refresh_token"] == "1//env-refresh"
+    assert payload["expires_at"] == 0
+    assert email == "owner@estsoft.com"
+
+
+def test_env_grant_requests_only_the_sheets_scope(monkeypatch):
+    """openid/email are browser-flow-only; asking for them warns on every refresh.
+
+    The consent screen grants what its Data Access page lists — spreadsheets — so
+    google-auth logged "Not all requested scopes were granted … missing scopes email"
+    on each token refresh until the env payload stopped claiming them.
+    """
+    monkeypatch.setattr(
+        google_oauth.settings, "GOOGLE_SHEETS_OAUTH_REFRESH_TOKEN", "1//env-refresh"
+    )
+
+    payload, _email = google_oauth.env_grant()
+    assert payload["scopes"] == ["https://www.googleapis.com/auth/spreadsheets"]
+    assert "email" not in payload["scopes"]
+
+
+def test_env_refresh_token_wins_over_a_stored_grant(monkeypatch):
+    """Env is the deployment's explicit choice of account; a stale row must not shadow it."""
+    _configure(monkeypatch)
+    monkeypatch.setattr(
+        google_oauth.settings, "GOOGLE_SHEETS_OAUTH_REFRESH_TOKEN", "1//env-refresh"
+    )
+    called = False
+
+    def _fail_if_read(*_args, **_kwargs):
+        nonlocal called
+        called = True
+        raise AssertionError("the database must not be consulted when env is set")
+
+    monkeypatch.setattr(google_oauth, "SessionLocal", _fail_if_read)
+
+    assert google_oauth.load_grant()[0]["refresh_token"] == "1//env-refresh"
+    assert called is False
+
+
+def test_blank_env_refresh_token_falls_back_to_the_stored_grant(monkeypatch):
+    """An empty env var must not read as "connected" — the browser flow still works."""
+    _configure(monkeypatch)
+    monkeypatch.setattr(google_oauth.settings, "GOOGLE_SHEETS_OAUTH_REFRESH_TOKEN", "   ")
+
+    assert google_oauth.env_grant() is None
 
 
 def test_connect_binds_sheets_oauth_state_to_browser_cookie():
