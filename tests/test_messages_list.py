@@ -134,3 +134,19 @@ def test_priority_dot_reflects_how_long_the_customer_waited(queue):
     assert "wait-dot--ok" in html
     assert "wait-dot--warn" in html
     assert "wait-dot--danger" in html
+
+
+def test_stage_column_shows_the_label_not_the_raw_key(queue):
+    """The column is headed "Stage" and must read New / Negotiating.
+
+    The board, the dashboard and this list all render stages; each one that builds
+    its own mapping is a place the wording can drift, so all three use PIPELINE_STAGES.
+    """
+    from src.api.web.routes._shared import templates
+
+    html = templates.get_template("messages_list.html").render(
+        _messages_list_context(status="awaiting")
+    )
+    assert ">New<" in html
+    assert ">Negotiating<" in html
+    assert ">negotiation<" not in html

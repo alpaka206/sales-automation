@@ -50,7 +50,7 @@
         {% else %}{% set _p = ('danger', '3일 초과') %}{% endif %}
         <tr class="is-clickable" onclick="location.href='/messages/{{ msg.id }}'">
           <td>{{ status_pill(msg.status, "sm") }}</td>
-          <td class="td-muted">{{ msg.stage }}</td>
+          <td class="td-muted">{{ stage_labels.get(msg.stage, msg.stage) }}</td>
           <td class="truncate" style="max-width:300px">{{ msg.subject }}</td>
           <td><span class="wait-dot wait-dot--{{ _p[0] }}" title="{{ _p[1] }}"></span><span class="sr-only">{{ _p[1] }}</span></td>
           <td class="td-muted">{{ msg.channel }}</td>

@@ -368,6 +368,7 @@ def _mock_messages_list_context(status="awaiting", stage="", sort="oldest"):
         "filter_status": status,
         "filter_stage": stage,
         "filter_sort": sort,
+        "stage_labels": {"new": "New", "negotiation": "Negotiating"},
         "now": datetime(2026, 1, 2, 12, 0),
     }
 

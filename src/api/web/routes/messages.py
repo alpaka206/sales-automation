@@ -392,7 +392,7 @@ def _messages_list_context(
     template's ``hx-get`` attribute, where an ``&`` survives escaping and appends a
     parameter to the 15-second poll.
     """
-    from .customer_ops import VALID_PIPELINE_STAGES
+    from .customer_ops import PIPELINE_STAGES, VALID_PIPELINE_STAGES
 
     status = status if status in LIST_STATUS_BUCKETS else "awaiting"
     stage = stage if stage in LIST_STAGES else ""
@@ -455,6 +455,9 @@ def _messages_list_context(
         "filter_status": status,
         "filter_stage": stage,
         "filter_sort": sort,
+        # Same label map as the board and the dashboard — the column must read
+        # "New"/"Negotiating", not the raw stage key.
+        "stage_labels": {key: label for key, label, _ in PIPELINE_STAGES},
         "now": datetime.now(timezone.utc).replace(tzinfo=None),
     }
 
