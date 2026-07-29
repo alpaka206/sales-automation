@@ -137,7 +137,42 @@ def _decrypt(value: str) -> dict:
     return payload
 
 
+def env_grant() -> tuple[dict, str | None] | None:
+    """The grant supplied entirely by ``.env``, or None when no token is configured.
+
+    Only ``refresh_token`` is load-bearing. Nothing in this app ever persists a
+    refreshed access token — ``google_sheets._build_service`` rebuilds credentials per
+    call — so an ``expires_at`` of 0 (epoch, i.e. already expired) makes google-auth
+    fetch a fresh access token on the first API call, exactly as it does for a grant
+    that has been sitting in the database for an hour.
+
+    The client id/secret still come from env either way: the refresh_token grant needs
+    them. What this removes is the browser round trip, and with it the need for
+    SESSION_SECRET and GOOGLE_TOKEN_ENCRYPTION_KEY on this path.
+    """
+    refresh_token = settings.GOOGLE_SHEETS_OAUTH_REFRESH_TOKEN.strip()
+    if not refresh_token:
+        return None
+    payload = {
+        "access_token": "",
+        "refresh_token": refresh_token,
+        "expires_at": 0,
+        "scopes": list(SCOPES),
+    }
+    return payload, settings.GOOGLE_SHEETS_ACCOUNT_EMAIL.strip() or None
+
+
 def load_grant() -> tuple[dict, str | None] | None:
+    """The active grant: .env first, then whatever the browser flow stored.
+
+    Env wins deliberately. A refresh token in the deployment config is the operator's
+    explicit statement of which account to use, and it must survive a database reset —
+    if a stale IntegrationCredential row could shadow it, "connected" would depend on
+    which of the two was written last.
+    """
+    from_env = env_grant()
+    if from_env is not None:
+        return from_env
     with SessionLocal() as session:
         row = session.get(IntegrationCredential, PROVIDER)
         if row is None:

@@ -27,7 +27,7 @@ STAGE_IDS = {
     "HUBSPOT_TICKET_STAGE_NEGOTIATION": "1193733925",
     "HUBSPOT_TICKET_STAGE_WON": "1196772135",
     "HUBSPOT_TICKET_STAGE_CLOSED_LOST": "1172180246",
-    "HUBSPOT_TICKET_STAGE_FOLLOW_UP_NEEDED": "1193733926",
+    "HUBSPOT_TICKET_STAGE_REMINDER_SENT": "1196621584",
 }
 
 
@@ -87,7 +87,7 @@ def fake(monkeypatch, db, stages):
         (_ticket("t-new", "1172180243"), ["c1"]),
         (_ticket("t-won", "1196772135"), ["c2"]),
         (_ticket("t-lost", "1172180246"), ["c3"]),
-        (_ticket("t-followup", "1193733926"), ["c4"]),
+        (_ticket("t-reminded", "1196621584"), ["c4"]),
         (_ticket("t-orphan", "1193733925"), []),  # no contact on the ticket
     ]
     contacts = [
@@ -115,7 +115,7 @@ def test_backfill_creates_rows_for_every_stage(db, fake):
         "t-new": "new",
         "t-won": "won",
         "t-lost": "closed_lost",
-        "t-followup": "follow_up_needed",
+        "t-reminded": "reminder_sent",
     }
 
 

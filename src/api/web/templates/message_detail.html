@@ -268,7 +268,7 @@
       {% if customer.profile %}
       {% set p = customer.profile %}
       {% set state_l = {'negotiation':'Negotiation','service':'서비스 이용중','pool':'기존 고객 Pool','lost':'Lost'} %}
-      {% set stage_l = {'new':'New','meeting_link_sent':'Meeting link sent','negotiation':'Negotiation','contracted':'Contracted','onboarding':'Onboarding','active':'Active','closed_lost':'Closed Lost'} %}
+      {% set stage_l = stage_labels %}
       <dl class="info-list" style="margin-bottom:12px">
         <div class="info-row"><dt>고객 구분</dt><dd>{{ state_l.get(p.customer_state, p.customer_state) }}</dd></div>
         <div class="info-row"><dt>파이프라인</dt><dd>{{ stage_l.get(p.pipeline_stage, p.pipeline_stage) }}</dd></div>

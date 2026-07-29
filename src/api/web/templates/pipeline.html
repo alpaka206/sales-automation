@@ -24,7 +24,9 @@
     <div class="kanban-column__body" data-dropzone>
       {% for row in stage.rows %}
       <article class="pipeline-card" draggable="true" data-conversation-id="{{ row.conversation.id }}">
-        <a href="/customers/{{ row.contact.id }}">
+        {# draggable=false: without it the browser makes the ANCHOR the drag source and
+           the ghost is a link chip, not the card. The card must own the drag. #}
+        <a href="/customers/{{ row.contact.id }}" draggable="false">
           <strong>{{ row.contact.company or row.contact.full_name }}</strong>
           <span>{{ row.contact.full_name }} · {{ row.contact.country or '국가 미확인' }}</span>
           <small>{{ row.contact.email or '-' }}</small>
@@ -78,12 +80,11 @@
   </dl>
   <div class="integration-actions">
     {% if _sheet_admin %}
-    {% if sheet.auth_mode == 'user_oauth' %}
+    {% if sheet.auth_mode == 'env_refresh_token' %}
+      <span class="tag">{{ sheet.account_email or 'Google 사용자' }} 연결됨 · .env</span>
+    {% elif sheet.auth_mode == 'user_oauth' %}
       <span class="tag">{{ sheet.account_email or 'Google 사용자' }} 연결됨</span>
       <form method="post" action="/integrations/google-sheets/disconnect"><button class="btn btn--subtle" type="submit">연결 해제</button></form>
-    {% elif sheet.auth_mode == 'service_account' %}
-      <span class="tag">서비스 계정 자격 증명 있음</span>
-      {% if sheet.oauth_client_configured %}<a class="btn btn--subtle" href="/integrations/google-sheets/connect">내 Google 계정으로 전환</a>{% endif %}
     {% elif sheet.oauth_client_configured %}
       <a class="btn btn--primary" href="/integrations/google-sheets/connect">내 Google 계정 연결</a>
     {% else %}
@@ -109,27 +110,107 @@
 (function () {
   var board = document.querySelector("[data-pipeline-board]");
   if (!board || !("draggable" in document.createElement("div"))) return;
+
   var dragged = null;
+  var origin = null;          // the card's own column, so a no-op drop skips the POST
+  var placeholder = null;     // shows where the card will land, at the card's own size
+  var overCounts = new WeakMap();  // dragenter/leave fire per child; count to avoid flicker
+
+  function makePlaceholder(card) {
+    var node = document.createElement("div");
+    node.className = "kanban-card-placeholder";
+    node.style.height = card.getBoundingClientRect().height + "px";
+    return node;
+  }
+
   board.addEventListener("dragstart", function (event) {
-    dragged = event.target.closest("[data-conversation-id]");
-    if (dragged) dragged.classList.add("is-dragging");
-  });
-  board.addEventListener("dragend", function () {
-    if (dragged) dragged.classList.remove("is-dragging");
-    dragged = null;
-  });
-  board.querySelectorAll("[data-dropzone]").forEach(function (zone) {
-    zone.addEventListener("dragover", function (event) { event.preventDefault(); zone.classList.add("is-over"); });
-    zone.addEventListener("dragleave", function () { zone.classList.remove("is-over"); });
-    zone.addEventListener("drop", function (event) {
-      event.preventDefault(); zone.classList.remove("is-over");
+    var card = event.target.closest("[data-conversation-id]");
+    if (!card) return;
+    // Dragging from inside the stage <select> must not move the card.
+    if (event.target.closest("select, form")) { event.preventDefault(); return; }
+    dragged = card;
+    origin = card.closest("[data-stage]");
+
+    var rect = card.getBoundingClientRect();
+    if (event.dataTransfer) {
+      event.dataTransfer.effectAllowed = "move";
+      // Firefox refuses to start a drag unless some data is set.
+      event.dataTransfer.setData("text/plain", card.dataset.conversationId);
+      // Drag the whole card box, grabbed at the exact point the pointer went down.
+      if (event.dataTransfer.setDragImage) {
+        event.dataTransfer.setDragImage(card, event.clientX - rect.left, event.clientY - rect.top);
+      }
+    }
+    placeholder = makePlaceholder(card);
+    // Deferred: the browser snapshots the drag image synchronously here, so hiding
+    // the card in this same tick would make the ghost disappear too.
+    setTimeout(function () {
       if (!dragged) return;
-      var stage = zone.closest("[data-stage]").dataset.stage;
-      var body = new URLSearchParams({stage: stage});
-      fetch("/pipeline/conversations/" + dragged.dataset.conversationId + "/stage", {
-        method: "POST", headers: {"Content-Type": "application/x-www-form-urlencoded"}, body: body
-      }).then(function (response) { if (!response.ok) throw new Error("move failed"); location.reload(); })
-        .catch(function () { alert("단계를 옮기지 못했습니다. 잠시 후 다시 시도해 주세요."); });
+      dragged.classList.add("is-dragging");
+      if (dragged.parentNode) dragged.parentNode.insertBefore(placeholder, dragged.nextSibling);
+    }, 0);
+  });
+
+  function endDrag() {
+    if (dragged) dragged.classList.remove("is-dragging");
+    if (placeholder && placeholder.parentNode) placeholder.parentNode.removeChild(placeholder);
+    board.querySelectorAll("[data-dropzone].is-over").forEach(function (zone) {
+      zone.classList.remove("is-over");
+      overCounts.set(zone, 0);
+    });
+    dragged = null;
+    origin = null;
+    placeholder = null;
+  }
+
+  board.addEventListener("dragend", endDrag);
+
+  board.querySelectorAll("[data-dropzone]").forEach(function (zone) {
+    zone.addEventListener("dragenter", function (event) {
+      if (!dragged) return;
+      event.preventDefault();
+      overCounts.set(zone, (overCounts.get(zone) || 0) + 1);
+      zone.classList.add("is-over");
+      // Move the placeholder into this column so the card's destination is visible.
+      if (placeholder) zone.appendChild(placeholder);
+    });
+    zone.addEventListener("dragover", function (event) {
+      if (!dragged) return;
+      event.preventDefault();
+      if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
+    });
+    zone.addEventListener("dragleave", function () {
+      var next = (overCounts.get(zone) || 1) - 1;
+      overCounts.set(zone, next);
+      if (next <= 0) zone.classList.remove("is-over");
+    });
+    zone.addEventListener("drop", function (event) {
+      event.preventDefault();
+      if (!dragged) return;
+      var column = zone.closest("[data-stage]");
+      var stage = column.dataset.stage;
+      var conversationId = dragged.dataset.conversationId;
+      if (column === origin) { endDrag(); return; }
+
+      // Move the real card now so the board does not snap back while the POST runs.
+      zone.appendChild(dragged);
+      dragged.classList.remove("is-dragging");
+      zone.classList.remove("is-over");
+      if (placeholder && placeholder.parentNode) placeholder.parentNode.removeChild(placeholder);
+      board.classList.add("is-saving");
+
+      fetch("/pipeline/conversations/" + conversationId + "/stage", {
+        method: "POST", headers: {"Content-Type": "application/x-www-form-urlencoded"},
+        body: new URLSearchParams({stage: stage})
+      }).then(function (response) {
+        if (!response.ok) throw new Error("move failed");
+        location.reload();
+      }).catch(function () {
+        board.classList.remove("is-saving");
+        alert("단계를 옮기지 못했습니다. 잠시 후 다시 시도해 주세요.");
+        location.reload();
+      });
+      endDrag();
     });
   });
 })();

@@ -32,29 +32,33 @@ logger = logging.getLogger(__name__)
 LOCAL_STAGE_TO_SETTING: dict[str, str] = {
     "new": "HUBSPOT_TICKET_STAGE_NEW",
     "meeting_link_sent": "HUBSPOT_TICKET_STAGE_AFTER_SEND",
-    "reminder_sent": "HUBSPOT_TICKET_STAGE_REMINDER_SENT",
-    "follow_up_needed": "HUBSPOT_TICKET_STAGE_FOLLOW_UP_NEEDED",
     "negotiation": "HUBSPOT_TICKET_STAGE_NEGOTIATION",
+    "reminder_sent": "HUBSPOT_TICKET_STAGE_REMINDER_SENT",
     "won": "HUBSPOT_TICKET_STAGE_WON",
     "closed_lost": "HUBSPOT_TICKET_STAGE_CLOSED_LOST",
     "closed": "HUBSPOT_TICKET_STAGE_CLOSED",
-    # Legacy local-only stages; their env vars are blank on the B2B pipeline.
-    "contracted": "HUBSPOT_TICKET_STAGE_CONTRACTED",
-    "onboarding": "HUBSPOT_TICKET_STAGE_ONBOARDING",
-    "active": "HUBSPOT_TICKET_STAGE_ACTIVE",
 }
 
-# Local stages that imply the customer relationship has moved on. Mirrors the
-# customer_state logic in customer_ops._set_local_stage so a HubSpot-driven move and
-# an operator-driven move leave the profile in the same shape.
-_STATE_FOR_STAGE: dict[str, str] = {
+# Local stages that imply the customer relationship has moved on. THE one copy of this
+# rule: customer_ops (operator move) and sheet_sync (workbook import) import it too, so
+# all three paths leave the profile in the same shape. Before migration 0040 each kept
+# its own divergent copy.
+STATE_FOR_STAGE: dict[str, str] = {
     "won": "service",
-    "contracted": "service",
-    "onboarding": "service",
-    "active": "service",
     "closed_lost": "lost",
     "closed": "lost",
 }
+
+
+def customer_state_for(stage: str, current: str | None) -> str:
+    """The customer_state a stage move implies, given the profile's current state."""
+    settled = STATE_FOR_STAGE.get(stage)
+    if settled:
+        return settled
+    if current in {"service", "lost"}:
+        # Moved back into an open stage — reopen instead of leaving it closed.
+        return "negotiation"
+    return current or "negotiation"
 
 
 def stage_id_to_local() -> dict[str, str]:
@@ -155,12 +159,7 @@ def sync_stage_from_hubspot(
                 profile = CustomerProfile(contact_id=conv.contact_id)
                 session.add(profile)
             profile.pipeline_stage = local_stage
-            new_state = _STATE_FOR_STAGE.get(local_stage)
-            if new_state:
-                profile.customer_state = new_state
-            elif profile.customer_state in {"service", "lost"}:
-                # Moved back into an open stage — reopen instead of leaving it closed.
-                profile.customer_state = "negotiation"
+            profile.customer_state = customer_state_for(local_stage, profile.customer_state)
 
         add_progress(
             conv.id,

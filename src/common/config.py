@@ -75,13 +75,9 @@ class Settings(BaseSettings):
         ),
     )
     # Stages that exist in the real pipeline. Declared so the values are actually read
-    # (pydantic's extra="ignore" silently drops anything undeclared). Not yet mapped to
-    # a local board column — see PIPELINE_STAGES in src/api/web/routes/customer_ops.py.
+    # (pydantic's extra="ignore" silently drops anything undeclared).
     HUBSPOT_TICKET_STAGE_REMINDER_SENT: str = ""
     HUBSPOT_TICKET_STAGE_WON: str = ""
-    # "X_Follow Up Needed" — not in the written pipeline definition, but it holds more
-    # B2B tickets than any other stage, so it must be mappable or half the board is blind.
-    HUBSPOT_TICKET_STAGE_FOLLOW_UP_NEEDED: str = ""
     # "Unqualified" is being converted to a closed stage on the HubSpot side.
     HUBSPOT_TICKET_STAGE_CLOSED: str = Field(
         default="",
@@ -89,11 +85,9 @@ class Settings(BaseSettings):
             "HUBSPOT_TICKET_STAGE_CLOSED", "HUBSPOT_TICKET_STAGE_UNQUALIFIED"
         ),
     )
-    # Legacy local-only stages with no counterpart in the B2B Dubbing pipeline. Blank
-    # means the card moves locally without attempting an unsupported HubSpot write.
-    HUBSPOT_TICKET_STAGE_CONTRACTED: str = ""
-    HUBSPOT_TICKET_STAGE_ONBOARDING: str = ""
-    HUBSPOT_TICKET_STAGE_ACTIVE: str = ""
+    # These seven are the whole pipeline. FOLLOW_UP_NEEDED / CONTRACTED / ONBOARDING /
+    # ACTIVE were retired in migration 0040 — do not redeclare them without a matching
+    # HubSpot stage and an entry in stage_sync.LOCAL_STAGE_TO_SETTING.
     # Set to true ONLY if the HubSpot account has a custom `inbound_status`
     # text property on contacts. We write "analyzed" / "meeting_link_sent" to
     # it for operator visibility, but the value is never read back, and the
@@ -183,7 +177,16 @@ class Settings(BaseSettings):
     GOOGLE_SHEETS_OAUTH_CLIENT_SECRET: str = ""
     # Dedicated encryption key for delegated refresh tokens. Do not reuse the
     # browser session or internal API signing secret in production.
+    # Only needed for the browser "Connect" flow — a refresh token supplied below
+    # is never written to the database, so it needs no encryption key.
     GOOGLE_TOKEN_ENCRYPTION_KEY: str = ""
+    # Refresh token for the workbook owner's own Google account, issued once by
+    # scripts/connect_google_sheets.py. When set it REPLACES the /pipeline connect
+    # button: the app authenticates straight from env, so a fresh deploy or a reset
+    # database needs no click. Treat it like a password.
+    GOOGLE_SHEETS_OAUTH_REFRESH_TOKEN: str = ""
+    # Display only — which account that refresh token belongs to, shown on /pipeline.
+    GOOGLE_SHEETS_ACCOUNT_EMAIL: str = ""
     GOOGLE_SHEETS_SPREADSHEET_ID: str = "1L5HeDOrNQjEzWvfZVAIdQKjSXxF9hznu6fPIOGgFHpw"
     GOOGLE_SHEETS_INBOUND_TAB: str = "Inbound DB"
     GOOGLE_SHEETS_QUALITY_TAB: str = "Inbound 퀄리티 분석"

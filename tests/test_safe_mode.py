@@ -118,6 +118,26 @@ def test_sheets_writes_enabled_when_live(live, monkeypatch):
     assert google_sheets.writes_enabled() is True
 
 
+def test_env_refresh_token_does_not_bypass_safe_mode(safe, monkeypatch):
+    """A .env-supplied Google account connects the workbook but must not unblock it.
+
+    GOOGLE_SHEETS_OAUTH_REFRESH_TOKEN makes is_configured() true with no operator
+    action at all — no click, no database row. That is the whole point of it, and it
+    is exactly why it must still land behind LIVE_EXTERNAL_WRITES: otherwise setting
+    one env var would silently start writing into the shared sales workbook.
+    """
+    from src.integrations import google_oauth, google_sheets
+
+    monkeypatch.setattr(settings, "GOOGLE_SHEETS_OAUTH_REFRESH_TOKEN", "1//fake-refresh")
+    monkeypatch.setattr(settings, "GOOGLE_SHEETS_ACCOUNT_EMAIL", "owner@estsoft.com")
+
+    assert google_oauth.env_grant() is not None
+    assert google_oauth.load_grant()[0]["refresh_token"] == "1//fake-refresh"
+    assert google_sheets.is_configured() is True
+    assert google_sheets.writes_enabled() is False
+    assert google_sheets.update_inbound_stage(1336, "won") is False
+
+
 # ---- Every email is forced to the test recipient ----------------------------
 
 def test_override_forces_ronald_in_safe_mode(safe, monkeypatch):

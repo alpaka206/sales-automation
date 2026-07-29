@@ -419,13 +419,17 @@ def append_order_row(record: dict) -> SheetWriteResult:
     )
 
 
+# Local stage -> the workbook's (Deal Stage, Deal Stage Detail) pair. Only the values
+# the sales team already uses in those columns may appear here — writing a new token
+# would pollute a column the team filters on. "won" inherits ("Won", "Closed Won") from
+# the retired contracted/onboarding/active keys (migration 0040).
+# reminder_sent and closed have no workbook vocabulary yet, so update_inbound_stage
+# leaves the sheet untouched for them, exactly as it did before the trim.
 _STAGE_VALUES = {
     "new": ("New", "Inquiry"),
     "meeting_link_sent": ("Meeting Link Sent", "Inquiry"),
     "negotiation": ("Negotiation", "Meeting"),
-    "contracted": ("Won", "Closed Won"),
-    "onboarding": ("Won", "Closed Won"),
-    "active": ("Won", "Closed Won"),
+    "won": ("Won", "Closed Won"),
     "closed_lost": ("Lost_Rejected", "Closed Lost"),
 }
 
@@ -519,20 +523,28 @@ def record_order(record: dict) -> SheetWriteResult | None:
 
 
 def connection_summary() -> dict[str, object]:
-    from .google_oauth import client_is_configured, load_grant
+    from .google_oauth import client_is_configured, env_grant, load_grant
 
     try:
         grant = load_grant()
     except Exception:
         logger.warning("Unable to read Google Sheets OAuth grant.", exc_info=True)
         grant = None
+    if grant is None:
+        auth_mode = "none"
+    elif env_grant() is not None:
+        # Configured in .env — the panel must not offer a Disconnect button that
+        # would delete a database row the app is not reading.
+        auth_mode = "env_refresh_token"
+    else:
+        auth_mode = "user_oauth"
     return {
         "configured": is_configured(),
         "write_enabled": writes_enabled(),
         "inbound_tab": settings.GOOGLE_SHEETS_INBOUND_TAB,
         "quality_tab": settings.GOOGLE_SHEETS_QUALITY_TAB,
         "orders_tab": settings.GOOGLE_SHEETS_ORDERS_TAB,
-        "auth_mode": "user_oauth" if grant else "none",
+        "auth_mode": auth_mode,
         "account_email": grant[1] if grant else None,
         "oauth_client_configured": client_is_configured(),
     }

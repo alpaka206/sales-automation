@@ -75,9 +75,13 @@ def validate_startup_settings() -> None:
         required = {
             "GOOGLE_SHEETS_OAUTH_CLIENT_ID": settings.GOOGLE_SHEETS_OAUTH_CLIENT_ID,
             "GOOGLE_SHEETS_OAUTH_CLIENT_SECRET": settings.GOOGLE_SHEETS_OAUTH_CLIENT_SECRET,
-            "SESSION_SECRET": settings.SESSION_SECRET,
-            "GOOGLE_TOKEN_ENCRYPTION_KEY": settings.GOOGLE_TOKEN_ENCRYPTION_KEY,
         }
+        if not settings.GOOGLE_SHEETS_OAUTH_REFRESH_TOKEN.strip():
+            # Only the browser connect flow needs these two: SESSION_SECRET signs the
+            # OAuth state, GOOGLE_TOKEN_ENCRYPTION_KEY encrypts the stored grant. A
+            # refresh token in env skips both — nothing is signed and nothing is stored.
+            required["SESSION_SECRET"] = settings.SESSION_SECRET
+            required["GOOGLE_TOKEN_ENCRYPTION_KEY"] = settings.GOOGLE_TOKEN_ENCRYPTION_KEY
         missing = [name for name, value in required.items() if not value]
         if missing:
             errors.append("Google Sheets OAuth requires " + ", ".join(missing))

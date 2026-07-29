@@ -15,6 +15,7 @@ from fastapi import APIRouter, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import select
 
+from ....agents.stage_sync import customer_state_for
 from ....common.config import settings
 from ....db.models import (
     Contact,
@@ -34,20 +35,16 @@ GOOGLE_SHEETS_STATE_COOKIE = "perso_sheets_oauth_state"
 # Mirrors the [B2B] AI Dubbing ticket pipeline in HubSpot, in flow order. Operators
 # also move tickets in HubSpot directly, so every HubSpot stage needs a local key here
 # or src/agents/stage_sync.py cannot record where a ticket actually is.
-# The last three are legacy local-only stages with no HubSpot counterpart; they are
-# kept so existing rows keep rendering instead of silently falling back to "new".
+# Legacy keys (follow_up_needed, contracted, onboarding, active) were retired in
+# migration 0040; nothing may reintroduce them without a HubSpot stage to match.
 PIPELINE_STAGES: tuple[tuple[str, str, str], ...] = (
     ("new", "New", "새 문의"),
-    ("meeting_link_sent", "Meeting link sent", "답변 발송"),
-    ("reminder_sent", "Reminder sent", "리마인더 발송"),
-    ("follow_up_needed", "Follow up needed", "후속 조치 필요"),
+    ("meeting_link_sent", "Meeting Link Sent", "답변 발송"),
     ("negotiation", "Negotiating", "협의 중"),
+    ("reminder_sent", "Reminder Sent", "리마인더 발송"),
     ("won", "Won", "계약 성사"),
     ("closed_lost", "Lost", "실패"),
     ("closed", "Closed", "협상 전 종료"),
-    ("contracted", "Contracted", "계약 확정 (구)"),
-    ("onboarding", "Onboarding", "도입 준비 (구)"),
-    ("active", "Active", "서비스 이용 (구)"),
 )
 VALID_PIPELINE_STAGES = {stage for stage, _, _ in PIPELINE_STAGES}
 CONTRACT_STATUSES = {"draft", "sent", "contracted", "active", "expired", "cancelled"}
@@ -119,12 +116,7 @@ def _set_local_stage(contact_id: int, stage: str) -> tuple[str | None, int | Non
             raise HTTPException(status_code=404, detail="고객을 찾을 수 없습니다")
         profile = session.get(CustomerProfile, contact_id) or CustomerProfile(contact_id=contact_id)
         profile.pipeline_stage = stage
-        if stage in {"onboarding", "active"}:
-            profile.customer_state = "service"
-        elif stage == "closed_lost":
-            profile.customer_state = "lost"
-        elif profile.customer_state in {"service", "lost"}:
-            profile.customer_state = "negotiation"
+        profile.customer_state = customer_state_for(stage, profile.customer_state)
         session.add(profile)
         latest_conversation = session.execute(
             select(Conversation)
@@ -296,12 +288,7 @@ def _set_conversation_stage(conversation_id: int, stage: str) -> tuple[str | Non
                 contact_id=contact.id
             )
             profile.pipeline_stage = stage
-            if stage in {"onboarding", "active"}:
-                profile.customer_state = "service"
-            elif stage == "closed_lost":
-                profile.customer_state = "lost"
-            elif profile.customer_state in {"service", "lost"}:
-                profile.customer_state = "negotiation"
+            profile.customer_state = customer_state_for(stage, profile.customer_state)
             session.add(profile)
         session.commit()
         return (
@@ -437,6 +424,9 @@ def _customer_context(contact_id: int) -> dict | None:
             "contracts": contracts,
             "timeline": timeline[:100],
             "same_company": same_company,
+            # Drives the pipeline <select>. Hardcoding it here once let this page keep
+            # offering stages the board had already dropped, which POSTs then rejected.
+            "stage_options": PIPELINE_STAGES,
         }
 
 
@@ -639,30 +629,24 @@ async def contract_add(
             sheet_fields={key: value for key, value in sheet_fields.items() if value},
         )
         session.add(contract)
+        # A contract status is NOT a pipeline stage. Until migration 0040 this wrote
+        # status straight into pipeline_stage ("contracted"/"active"), which is how
+        # those strings became board columns in the first place. The board stage stays
+        # the operator's call — saving a contract only settles customer_state.
         if status in {"active", "contracted"}:
             profile = session.get(CustomerProfile, contact_id) or CustomerProfile(
                 contact_id=contact_id
             )
             profile.customer_state = "service" if status == "active" else "negotiation"
-            profile.pipeline_stage = status
             profile.current_plan = plan.strip() or profile.current_plan
             session.add(profile)
         session.commit()
         contract_id = contract.id
-        linked_conversation_id = contract.conversation_id
 
     if status in {"active", "contracted"}:
         from ....agents.sheet_sync import sync_contract_order
 
-        target_stage = "active" if status == "active" else "contracted"
-        if linked_conversation_id:
-            ticket_id, _, sheet_client_id = _set_conversation_stage(
-                linked_conversation_id, target_stage
-            )
-        else:
-            ticket_id, sheet_client_id = _set_local_stage(contact_id, target_stage)
         await asyncio.to_thread(sync_contract_order, contract_id)
-        await _sync_stage(ticket_id, target_stage, contact_id, sheet_client_id)
     return RedirectResponse(f"/customers/{contact_id}#contracts", status_code=303)
 
 
@@ -717,19 +701,12 @@ async def contract_update(
         contract.notes = notes.strip() or None
         contract.sheet_synced_at = None
         session.commit()
-        linked_conversation_id = contract.conversation_id
 
+    # As in contract_add: the contract status no longer drives the board stage.
     if status in {"contracted", "active"}:
         from ....agents.sheet_sync import sync_contract_order
 
         await asyncio.to_thread(sync_contract_order, contract_id)
-        if linked_conversation_id:
-            ticket_id, _, sheet_client_id = _set_conversation_stage(
-                linked_conversation_id, status
-            )
-        else:
-            ticket_id, sheet_client_id = _set_local_stage(contact_id, status)
-        await _sync_stage(ticket_id, status, contact_id, sheet_client_id)
     return RedirectResponse(f"/customers/{contact_id}#contracts", status_code=303)
 
 
@@ -992,9 +969,16 @@ async def google_sheets_callback(
 
 @router.post("/integrations/google-sheets/disconnect")
 async def google_sheets_disconnect(request: Request):
-    from ....integrations.google_oauth import delete_grant
+    from ....integrations.google_oauth import delete_grant, env_grant
 
     _require_integration_admin(request)
+    if env_grant() is not None:
+        # Deleting the row would not disconnect anything — env wins in load_grant().
+        # Say so rather than reporting a disconnect that did not happen.
+        detail = quote("GOOGLE_SHEETS_OAUTH_REFRESH_TOKEN 으로 연결된 계정입니다. 해제하려면 그 환경변수를 비우세요.")
+        return RedirectResponse(
+            f"/pipeline?google=error&detail={detail}#integrations", status_code=303
+        )
     delete_grant()
     return RedirectResponse("/pipeline?google=disconnected#integrations", status_code=303)
 

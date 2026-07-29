@@ -344,8 +344,17 @@
   padding: 10px; transition: background .16s ease;
 }
 .kanban-column__body.is-over { background: var(--accent-soft); }
-.pipeline-card { padding: 13px; margin-bottom: 9px; border: 1px solid var(--border); background: var(--surface); box-shadow: var(--shadow-sm); }
-.pipeline-card.is-dragging { opacity: .45; }
+.pipeline-card { padding: 13px; margin-bottom: 9px; border: 1px solid var(--border); background: var(--surface); box-shadow: var(--shadow-sm); cursor: grab; }
+.pipeline-card:active { cursor: grabbing; }
+/* The card is hidden, not faded, while it is being dragged: the drag image IS the
+   card box, so leaving a solid copy behind reads as two cards. */
+.pipeline-card.is-dragging { display: none; }
+/* Stands in for the card at its own height so the columns do not reflow mid-drag. */
+.kanban-card-placeholder {
+  margin-bottom: 9px; border: 1px dashed var(--accent);
+  background: var(--accent-soft); pointer-events: none;
+}
+.kanban.is-saving { pointer-events: none; opacity: .7; }
 .pipeline-card > a { display: block; margin-bottom: 10px; color: inherit; text-decoration: none; }
 .pipeline-card > a strong, .pipeline-card > a span, .pipeline-card > a small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pipeline-card > a strong { font-size: 13px; }

@@ -49,8 +49,6 @@ services:
         value: "1193733925"            # Negotiating
       - key: HUBSPOT_TICKET_STAGE_REMINDER_SENT
         value: "1196621584"            # Reminder sent
-      - key: HUBSPOT_TICKET_STAGE_FOLLOW_UP_NEEDED
-        value: "1193733926"            # X_Follow Up Needed — holds the most B2B tickets
       - key: HUBSPOT_TICKET_STAGE_WON
         value: "1196772135"            # Won
       - key: HUBSPOT_TICKET_STAGE_LOST
@@ -97,6 +95,13 @@ services:
         sync: false
       - key: GOOGLE_SHEETS_OAUTH_CLIENT_SECRET
         sync: false
+      # Set this and no one ever clicks "연결" on /pipeline — not after a redeploy, not
+      # after a database reset. Issue it once with scripts/connect_google_sheets.py.
+      - key: GOOGLE_SHEETS_OAUTH_REFRESH_TOKEN
+        sync: false
+      - key: GOOGLE_SHEETS_ACCOUNT_EMAIL # display only: whose account the token belongs to
+        sync: false
+      # Only used by the browser connect flow, which the refresh token above replaces.
       - key: GOOGLE_TOKEN_ENCRYPTION_KEY # delegated refresh-token encryption; separate from session/API secrets
         generateValue: true
 
