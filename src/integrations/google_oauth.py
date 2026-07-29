@@ -40,13 +40,18 @@ class GoogleOAuthError(RuntimeError):
 
 
 def client_id() -> str:
-    return (settings.GOOGLE_SHEETS_OAUTH_CLIENT_ID or settings.GOOGLE_OAUTH_CLIENT_ID).strip()
+    """Sheets shares the web-login OAuth client — there is no separate Sheets client.
+
+    A second client would mean a second consent screen and a second set of redirect
+    URIs to keep in step, for no gain: both flows sign in the same operators against
+    the same Google project. Adding the spreadsheets scope to the existing client is
+    the whole setup.
+    """
+    return settings.GOOGLE_OAUTH_CLIENT_ID.strip()
 
 
 def client_secret() -> str:
-    return (
-        settings.GOOGLE_SHEETS_OAUTH_CLIENT_SECRET or settings.GOOGLE_OAUTH_CLIENT_SECRET
-    ).strip()
+    return settings.GOOGLE_OAUTH_CLIENT_SECRET.strip()
 
 
 def client_is_configured() -> bool:

@@ -16,8 +16,9 @@ def _configure(monkeypatch):
         google_oauth.settings, "GOOGLE_TOKEN_ENCRYPTION_KEY", "test-token-key"
     )
     monkeypatch.setattr(google_oauth.settings, "INTERNAL_API_TOKEN", "")
-    monkeypatch.setattr(google_oauth.settings, "GOOGLE_SHEETS_OAUTH_CLIENT_ID", "client-id")
-    monkeypatch.setattr(google_oauth.settings, "GOOGLE_SHEETS_OAUTH_CLIENT_SECRET", "client-secret")
+    # Sheets shares the web-login client; there is no Sheets-specific one to set.
+    monkeypatch.setattr(google_oauth.settings, "GOOGLE_OAUTH_CLIENT_ID", "client-id")
+    monkeypatch.setattr(google_oauth.settings, "GOOGLE_OAUTH_CLIENT_SECRET", "client-secret")
 
 
 def test_oauth_state_is_signed_and_tamper_evident(monkeypatch):

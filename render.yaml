@@ -91,10 +91,8 @@ services:
         generateValue: true
 
       # ----- Google Sheets: user-OAuth only (service-account sharing is policy-blocked) -----
-      - key: GOOGLE_SHEETS_OAUTH_CLIENT_ID
-        sync: false
-      - key: GOOGLE_SHEETS_OAUTH_CLIENT_SECRET
-        sync: false
+      # The OAuth client is GOOGLE_OAUTH_CLIENT_ID/_SECRET above — Sheets has none of
+      # its own. Add the spreadsheets scope to that client, nothing else.
       # Set this and no one ever clicks "연결" on /pipeline — not after a redeploy, not
       # after a database reset. Issue it once with scripts/connect_google_sheets.py.
       - key: GOOGLE_SHEETS_OAUTH_REFRESH_TOKEN

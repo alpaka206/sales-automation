@@ -948,15 +948,16 @@ def build_developer_guide() -> Path:
 
     add_page_break(doc)
     add_heading(doc, "10. Google Sheets 연결과 정합성", 1)
-    add_heading(doc, "권장: 관리자 사용자 OAuth", 2)
+    add_heading(doc, "권장: .env refresh token (연결 버튼 불필요)", 2)
     add_steps(
         doc,
         [
-            "Google Cloud에서 OAuth 2.0 Web application client를 만든다.",
-            "로컬 callback http://127.0.0.1:8000/integrations/google-sheets/callback 과 운영 callback을 승인 URI에 등록한다.",
-            "Client ID/Secret을 GOOGLE_SHEETS_OAUTH_CLIENT_ID/SECRET에 저장하고 서버를 재시작한다.",
-            "SESSION_SECRET과 별도의 GOOGLE_TOKEN_ENCRYPTION_KEY를 secret manager에 생성한다.",
-            "파이프라인 화면에서 시트 편집 권한이 있는 전용 업무 계정으로 연결한다.",
+            "Sheets는 웹 로그인과 같은 OAuth 클라이언트(GOOGLE_OAUTH_CLIENT_ID/SECRET)를 쓴다. 별도 클라이언트를 만들지 않는다.",
+            "console.cloud.google.com/apis/library/sheets.googleapis.com 에서 Google Sheets API를 Enable 한다.",
+            "console.cloud.google.com/auth/clients 에서 그 클라이언트에 승인 URI http://127.0.0.1:8000/integrations/google-sheets/callback 을 추가한다.",
+            "console.cloud.google.com/auth/scopes (구 OAuth consent screen → Scopes, 현재 Google Auth Platform → Data Access)에서 .../auth/spreadsheets 스코프를 추가한다.",
+            "python scripts/connect_google_sheets.py 를 한 번 실행해 시트 편집 권한이 있는 전용 업무 계정으로 동의한다.",
+            "출력된 GOOGLE_SHEETS_OAUTH_REFRESH_TOKEN 을 .env와 배포 환경변수에 저장하고 서버를 재시작한다. 이후 파이프라인 화면에서 연결할 일이 없다.",
             "시트 읽기·동기화를 누르면 요청이 DB에 먼저 저장된다. 처리 중·완료·실패 상태를 화면에서 확인한다.",
         ],
     )

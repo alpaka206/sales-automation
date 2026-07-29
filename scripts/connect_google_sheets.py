@@ -10,13 +10,16 @@ after a database reset, on any machine.
     python scripts/connect_google_sheets.py --write-env      # also update .env in place
     python scripts/connect_google_sheets.py --port 8765      # if 8000 is taken
 
-Prerequisites, in Google Cloud console (see docs/설정.md for the click path):
-  1. APIs & Services -> Library -> enable "Google Sheets API".
-  2. OAuth consent screen -> Internal (Workspace) -> add scope .../auth/spreadsheets.
-  3. Credentials -> Create -> OAuth client ID -> Web application, and register
-     http://127.0.0.1:8000/integrations/google-sheets/callback as an authorized
-     redirect URI (the same path the app uses, so one entry covers both).
-  4. Put the client id/secret in GOOGLE_SHEETS_OAUTH_CLIENT_ID / _SECRET.
+Sheets uses the SAME OAuth client as web login (GOOGLE_OAUTH_CLIENT_ID / _SECRET) —
+there is no separate Sheets client to create. Three things to set on that existing
+client, by direct URL because the 2025 console reorganised these pages into "Google
+Auth Platform" and the old "OAuth consent screen" menu item no longer exists:
+  1. console.cloud.google.com/apis/library/sheets.googleapis.com -> Enable
+  2. console.cloud.google.com/auth/clients -> that client -> add redirect URI
+     http://127.0.0.1:8000/integrations/google-sheets/callback
+     (the same path the app serves, so one entry covers this script and the app)
+  3. console.cloud.google.com/auth/scopes -> ADD OR REMOVE SCOPES ->
+     .../auth/spreadsheets   (this is the page that used to be called "Scopes")
 
 Sign in as the account that can EDIT the workbook. The token is a credential: it is
 printed to your terminal and nowhere else, and it is never sent to this app's server.
@@ -36,7 +39,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import httpx  # noqa: E402
 
-from src.common.config import settings  # noqa: E402
 from src.integrations.google_oauth import (  # noqa: E402
     AUTHORIZE_URL,
     SCOPES,
@@ -158,18 +160,14 @@ def main() -> None:
 
     if not client_id() or not client_secret():
         raise SystemExit(
-            "OAuth 클라이언트가 없습니다. GOOGLE_SHEETS_OAUTH_CLIENT_ID / _SECRET 를 채우거나,\n"
-            "웹 로그인용 GOOGLE_OAUTH_CLIENT_ID / _SECRET 를 채우면 그것을 재사용합니다.\n"
-            "만드는 방법은 docs/설정.md 의 'Google Sheets를 내 계정으로 연결' 절을 보세요."
+            ".env 의 GOOGLE_OAUTH_CLIENT_ID / GOOGLE_OAUTH_CLIENT_SECRET 를 먼저 채우세요.\n"
+            "Sheets 는 웹 로그인과 같은 OAuth 클라이언트를 씁니다 — 별도 클라이언트는 없습니다.\n"
+            "자세한 절차는 docs/설정.md 의 'Google Sheets를 내 계정으로 연결' 절을 보세요."
         )
 
-    # Say which client is in play — GOOGLE_SHEETS_OAUTH_* falls back to the web-login
-    # client, so "which one did it use" is otherwise invisible until Google errors.
-    reused = not settings.GOOGLE_SHEETS_OAUTH_CLIENT_ID.strip()
-    print(f"OAuth 클라이언트: {client_id()}")
-    if reused:
-        print("  (GOOGLE_OAUTH_CLIENT_ID — 웹 로그인용 클라이언트를 재사용합니다)")
-    print()
+    # Print it so a 401/invalid_client from Google can be traced to the right client
+    # in the console without guessing which project it lives in.
+    print(f"OAuth 클라이언트: {client_id()}\n")
 
     redirect_uri = f"http://127.0.0.1:{args.port}{CALLBACK_PATH}"
     state = secrets.token_urlsafe(24)

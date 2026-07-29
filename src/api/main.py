@@ -67,24 +67,19 @@ def validate_startup_settings() -> None:
         missing = [name for name, value in required.items() if not value]
         if missing:
             errors.append("google_oauth requires " + ", ".join(missing))
-    sheets_oauth_configured = bool(
-        settings.GOOGLE_SHEETS_OAUTH_CLIENT_ID
-        or settings.GOOGLE_SHEETS_OAUTH_CLIENT_SECRET
-    )
-    if sheets_oauth_configured:
+    # A refresh token is worthless without the OAuth client that minted it: every
+    # Sheets call exchanges it for an access token using that client id and secret.
+    # Fail here rather than let each call fail one by one at runtime.
+    if settings.GOOGLE_SHEETS_OAUTH_REFRESH_TOKEN.strip():
         required = {
-            "GOOGLE_SHEETS_OAUTH_CLIENT_ID": settings.GOOGLE_SHEETS_OAUTH_CLIENT_ID,
-            "GOOGLE_SHEETS_OAUTH_CLIENT_SECRET": settings.GOOGLE_SHEETS_OAUTH_CLIENT_SECRET,
+            "GOOGLE_OAUTH_CLIENT_ID": settings.GOOGLE_OAUTH_CLIENT_ID,
+            "GOOGLE_OAUTH_CLIENT_SECRET": settings.GOOGLE_OAUTH_CLIENT_SECRET,
         }
-        if not settings.GOOGLE_SHEETS_OAUTH_REFRESH_TOKEN.strip():
-            # Only the browser connect flow needs these two: SESSION_SECRET signs the
-            # OAuth state, GOOGLE_TOKEN_ENCRYPTION_KEY encrypts the stored grant. A
-            # refresh token in env skips both — nothing is signed and nothing is stored.
-            required["SESSION_SECRET"] = settings.SESSION_SECRET
-            required["GOOGLE_TOKEN_ENCRYPTION_KEY"] = settings.GOOGLE_TOKEN_ENCRYPTION_KEY
         missing = [name for name, value in required.items() if not value]
         if missing:
-            errors.append("Google Sheets OAuth requires " + ", ".join(missing))
+            errors.append(
+                "GOOGLE_SHEETS_OAUTH_REFRESH_TOKEN requires " + ", ".join(missing)
+            )
     if public_host and public_url and public_url.scheme != "https":
         errors.append("PUBLIC_BASE_URL must use https in production")
     if errors:

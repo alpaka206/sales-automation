@@ -171,10 +171,9 @@ class Settings(BaseSettings):
 
     # ----- Google Sheets (inbound mirror) -----
     # This workbook is the fixed sales-team format. Sync is user-OAuth-only —
-    # Workspace policy blocks sharing the file with a service account. These may
-    # reuse the web-login OAuth client.
-    GOOGLE_SHEETS_OAUTH_CLIENT_ID: str = ""
-    GOOGLE_SHEETS_OAUTH_CLIENT_SECRET: str = ""
+    # Workspace policy blocks sharing the file with a service account.
+    # The OAuth client is GOOGLE_OAUTH_CLIENT_ID/_SECRET below; there is no separate
+    # Sheets client. Setup is one scope added to that existing client.
     # Dedicated encryption key for delegated refresh tokens. Do not reuse the
     # browser session or internal API signing secret in production.
     # Only needed for the browser "Connect" flow — a refresh token supplied below
