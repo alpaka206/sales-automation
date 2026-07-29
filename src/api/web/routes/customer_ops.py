@@ -808,13 +808,9 @@ async def customer_sync(contact_id: int):
 
 @router.get("/pipeline")
 async def pipeline_board(request: Request):
-    from ....integrations.google_sheets import connection_summary
+    # The Sheets panel is gone from this page, so its context is gone too — building
+    # it cost a grant decrypt plus two pending-row counts on every board load.
     from ....agents.hubspot_backfill import hubspot_backfill_status
-    from ....agents.sheet_sync import (
-        full_sheet_sync_status,
-        pending_inbound_count,
-        pending_order_count,
-    )
 
     rows = _pipeline_rows()
     by_stage = {stage: [] for stage, _, _ in PIPELINE_STAGES}
@@ -836,11 +832,7 @@ async def pipeline_board(request: Request):
         {
             "stages": stage_config,
             "stage_options": PIPELINE_STAGES,
-            "sheet": connection_summary(),
-            "sheet_pending_count": pending_inbound_count() + pending_order_count(),
-            "sheet_sync_request": full_sheet_sync_status(),
             "backfill_request": hubspot_backfill_status(),
-            "google_callback_url": _google_callback_url(request),
         },
     )
 

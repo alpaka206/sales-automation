@@ -45,9 +45,6 @@
   {% endfor %}
 </div>
 
-{% set _sheet_user = request.state.user if request and request.state else None %}
-{% set _sheet_admin = (not _sheet_user) or _sheet_user.role == 'admin' %}
-
 {# The one-shot "HubSpot 전체 가져오기" panel was removed once the import had run —
    day to day the webhook and the 10-minute poller keep the board current. The
    POST /pipeline/backfill route is deliberately kept: it is the only thing that
@@ -61,52 +58,13 @@
 <div class="banner banner--warn mb-gap">HubSpot 가져오기에 실패했습니다. {{ backfill_request.error or '' }}</div>
 {% endif %}
 
-<section class="integration-panel" id="integrations">
-  <div>
-    <div class="section-header__title">Google Sheets 연결</div>
-    <p>지정된 DB 행만 추가 · 기존 형식 유지</p>
-    {% if request.query_params.get('google') == 'connected' %}<div class="banner banner--ok">Google 계정 연결이 완료되었습니다.</div>{% endif %}
-    {% if request.query_params.get('google') == 'disconnected' %}<div class="banner banner--info">Google 계정 연결을 해제했습니다.</div>{% endif %}
-    {% if request.query_params.get('google') in ['error', 'setup_required', 'cancelled'] %}<div class="banner banner--warn">연결하지 못했습니다. {{ request.query_params.get('detail', '') }}</div>{% endif %}
-    {% if request.query_params.get('google') == 'queued' %}<div class="banner banner--info">동기화 요청을 안전하게 접수했습니다. 백그라운드 작업이 이어서 처리합니다.</div>{% endif %}
-    {% if sheet_sync_request and sheet_sync_request.status == 'completed' %}<div class="banner banner--ok">최근 동기화 완료 · 기존 문의 {{ sheet_sync_request.imported or 0 }}건 확인 · 신규 반영 {{ (sheet_sync_request.inbound or 0) + (sheet_sync_request.orders or 0) }}건</div>{% endif %}
-    {% if sheet_sync_request and sheet_sync_request.status in ['requested', 'started'] %}<div class="banner banner--info">최근 동기화 요청을 처리 중입니다. 화면을 나가도 작업은 계속됩니다.</div>{% endif %}
-    {% if sheet_sync_request and sheet_sync_request.status == 'failed' %}<div class="banner banner--warn">최근 동기화에 실패했습니다. 다시 요청하거나 장애 복구 화면에서 연동 상태를 확인해 주세요. {{ sheet_sync_request.error or '' }}</div>{% endif %}
-  </div>
-  <dl>
-    <div><dt>인바운드 문의</dt><dd>{{ sheet.inbound_tab }}</dd></div>
-    {# Reference-only and absent from some workbooks; naming a tab that does not exist
-       reads as a broken connection. #}
-    {% if sheet.quality_tab %}<div><dt>퀄리티 분석 참고</dt><dd>{{ sheet.quality_tab }}</dd></div>{% endif %}
-    <div><dt>성사 고객</dt><dd>{{ sheet.orders_tab }}</dd></div>
-  </dl>
-  <div class="integration-actions">
-    {% if _sheet_admin %}
-    {% if sheet.auth_mode == 'env_refresh_token' %}
-      <span class="tag">{{ sheet.account_email or 'Google 사용자' }} 연결됨 · .env</span>
-    {% elif sheet.auth_mode == 'user_oauth' %}
-      <span class="tag">{{ sheet.account_email or 'Google 사용자' }} 연결됨</span>
-      <form method="post" action="/integrations/google-sheets/disconnect"><button class="btn btn--subtle" type="submit">연결 해제</button></form>
-    {% elif sheet.oauth_client_configured %}
-      <a class="btn btn--primary" href="/integrations/google-sheets/connect">내 Google 계정 연결</a>
-    {% else %}
-      <span class="tag">OAuth 설정 필요</span>
-    {% endif %}
-    {% if sheet.write_enabled %}
-      <form method="post" action="/integrations/google-sheets/sync"><button class="btn btn--subtle" type="submit">시트 읽기·동기화{% if sheet_pending_count %} · 미처리 {{ sheet_pending_count }}건{% endif %}</button></form>
-    {% endif %}
-    {% else %}
-      <span class="tag">연결 변경·수동 동기화는 관리자 전용</span>
-    {% endif %}
-  </div>
-  {% if not sheet.oauth_client_configured %}
-  <div class="integration-setup">
-    <strong>OAuth 설정</strong>
-    <p>Google Cloud 승인된 리디렉션 URI</p>
-    <code>{{ google_callback_url }}</code>
-  </div>
-  {% endif %}
-</section>
+{# The Google Sheets panel was removed at the operator's request: with the account
+   supplied by GOOGLE_SHEETS_OAUTH_REFRESH_TOKEN there is nothing left to click, and
+   the tab names never changed. Gone with it: the manual "시트 읽기·동기화" button, the
+   pending-row count, and the sync-status banners. The routes are all still live —
+   POST /integrations/google-sheets/sync, and connect/callback/disconnect for the
+   browser flow — so this is a UI removal, not a capability one. Restore from git if
+   a manual sync entry point is ever needed again. #}
 
 <script>
 (function () {

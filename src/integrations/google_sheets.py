@@ -580,29 +580,6 @@ def record_order(record: dict) -> SheetWriteResult | None:
         return None
 
 
-def connection_summary() -> dict[str, object]:
-    from .google_oauth import client_is_configured, env_grant, load_grant
-
-    try:
-        grant = load_grant()
-    except Exception:
-        logger.warning("Unable to read Google Sheets OAuth grant.", exc_info=True)
-        grant = None
-    if grant is None:
-        auth_mode = "none"
-    elif env_grant() is not None:
-        # Configured in .env — the panel must not offer a Disconnect button that
-        # would delete a database row the app is not reading.
-        auth_mode = "env_refresh_token"
-    else:
-        auth_mode = "user_oauth"
-    return {
-        "configured": is_configured(),
-        "write_enabled": writes_enabled(),
-        "inbound_tab": settings.GOOGLE_SHEETS_INBOUND_TAB,
-        "quality_tab": settings.GOOGLE_SHEETS_QUALITY_TAB,
-        "orders_tab": settings.GOOGLE_SHEETS_ORDERS_TAB,
-        "auth_mode": auth_mode,
-        "account_email": grant[1] if grant else None,
-        "oauth_client_configured": client_is_configured(),
-    }
+# connection_summary() lived here to feed the /pipeline Sheets panel and nothing else.
+# The panel was removed, so it went with it. The real predicates — is_configured() and
+# writes_enabled() — are above and still used throughout.
