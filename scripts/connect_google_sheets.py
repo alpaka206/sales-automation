@@ -36,6 +36,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import httpx  # noqa: E402
 
+from src.common.config import settings  # noqa: E402
 from src.integrations.google_oauth import (  # noqa: E402
     AUTHORIZE_URL,
     SCOPES,
@@ -157,9 +158,18 @@ def main() -> None:
 
     if not client_id() or not client_secret():
         raise SystemExit(
-            "GOOGLE_SHEETS_OAUTH_CLIENT_ID / GOOGLE_SHEETS_OAUTH_CLIENT_SECRET 를 .env 에 먼저 넣으세요.\n"
+            "OAuth 클라이언트가 없습니다. GOOGLE_SHEETS_OAUTH_CLIENT_ID / _SECRET 를 채우거나,\n"
+            "웹 로그인용 GOOGLE_OAUTH_CLIENT_ID / _SECRET 를 채우면 그것을 재사용합니다.\n"
             "만드는 방법은 docs/설정.md 의 'Google Sheets를 내 계정으로 연결' 절을 보세요."
         )
+
+    # Say which client is in play — GOOGLE_SHEETS_OAUTH_* falls back to the web-login
+    # client, so "which one did it use" is otherwise invisible until Google errors.
+    reused = not settings.GOOGLE_SHEETS_OAUTH_CLIENT_ID.strip()
+    print(f"OAuth 클라이언트: {client_id()}")
+    if reused:
+        print("  (GOOGLE_OAUTH_CLIENT_ID — 웹 로그인용 클라이언트를 재사용합니다)")
+    print()
 
     redirect_uri = f"http://127.0.0.1:{args.port}{CALLBACK_PATH}"
     state = secrets.token_urlsafe(24)
