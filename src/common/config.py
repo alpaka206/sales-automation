@@ -114,6 +114,13 @@ class Settings(BaseSettings):
     # Reads (HubSpot GET, Gemini, homepage fetch) stay on. Going live = set this to
     # true AND clear SEND_OVERRIDE_EMAIL. See src/common/safe_mode.py.
     LIVE_EXTERNAL_WRITES: bool = False
+    # Per-destination switches, consulted ONLY once LIVE_EXTERNAL_WRITES is true.
+    # Default true, so flipping the master alone behaves exactly as before. Set one to
+    # false to go live on one destination and not the other — e.g. keep mirroring into
+    # the workbook while HubSpot is mid-reorganisation and a stray stage move would
+    # fight whoever is editing the pipeline. Neither can override the master.
+    LIVE_HUBSPOT_WRITES: bool = True
+    LIVE_SHEETS_WRITES: bool = True
 
     # ----- Test mode: redirect ALL real sends to one address -----
     # When non-empty, every customer-facing inbound reply is rerouted to this

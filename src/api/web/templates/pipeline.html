@@ -75,7 +75,9 @@
   </div>
   <dl>
     <div><dt>인바운드 문의</dt><dd>{{ sheet.inbound_tab }}</dd></div>
-    <div><dt>퀄리티 분석 참고</dt><dd>{{ sheet.quality_tab }}</dd></div>
+    {# Reference-only and absent from some workbooks; naming a tab that does not exist
+       reads as a broken connection. #}
+    {% if sheet.quality_tab %}<div><dt>퀄리티 분석 참고</dt><dd>{{ sheet.quality_tab }}</dd></div>{% endif %}
     <div><dt>성사 고객</dt><dd>{{ sheet.orders_tab }}</dd></div>
   </dl>
   <div class="integration-actions">

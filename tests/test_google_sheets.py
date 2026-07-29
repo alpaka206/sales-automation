@@ -35,7 +35,9 @@ class _FakeValues:
 
     def get(self, spreadsheetId, range):
         self.store.setdefault("read_ranges", []).append(range)
-        if range.endswith("1:1"):
+        # The header scan asks for a band of leading rows ("'Tab'!1:5") because the
+        # real header is not always row 1 — see _SheetHeader.
+        if range.rsplit("!", 1)[-1].startswith("1:"):
             return _Exec({"values": self.store.get("existing_header")})
         if range in self.store.get("range_values", {}):
             return _Exec({"values": self.store["range_values"][range]})
@@ -104,6 +106,79 @@ def test_append_matches_real_inbound_headers_and_allocates_1000_id(monkeypatch):
     assert store["append_range"] == "'Inbound DB'!A1"
     assert store["value_input"] == "RAW"
     assert store["appended"] == [[1336, "Inbound", "2026-07-18", "New", "buyer@corp.com"]]
+
+
+def test_header_below_a_merged_group_label_row_is_found(monkeypatch):
+    """The live workbook's Inbound DB puts a merged group-label row above the header.
+
+    Row 1 there is mostly blank with "고객사" / "고객사 담당자" spanning several columns.
+    Taking row 1 as the header made read_inbound_records raise "no Client ID column"
+    and would have made every write land a column off.
+    """
+    _configure(monkeypatch)
+    store = {
+        # The live layout: merged group labels on row 1, real header on row 2.
+        "existing_header": [
+            ["", "", "", "", "고객사", "", "고객사 담당자"],
+            ["Client ID", "Pipeline", "기업 종류", "Company Name",
+             "Full Name", "Email", "Plan"],
+            ["9001", "MQL", "기업", "한스바이오메드", "Kim", "c@hansbiomed.com", "Pro"],
+        ],
+        # limit=10 from the first data row (3) reads rows 3..12.
+        "range_values": {
+            "'Inbound DB'!A3:G12": [
+                ["9001", "MQL", "기업", "한스바이오메드", "Kim", "c@hansbiomed.com", "Pro"],
+            ],
+        },
+    }
+    monkeypatch.setattr(gs, "_build_service", lambda: _FakeService(store))
+
+    records = gs.read_inbound_records(limit=10)
+
+    assert len(records) == 1
+    assert records[0]["client_id"] == "9001"
+    # English column names from the rebuilt workbook must map like the Korean ones.
+    assert records[0]["company"] == "한스바이오메드"
+    assert records[0]["full_name"] == "Kim"
+    assert records[0]["email"] == "c@hansbiomed.com"
+    assert records[0]["plan"] == "Pro"
+    # Row 3 is the first data row; the label row and the header must not be records,
+    # and the number has to be the real sheet row so stage updates hit the right cell.
+    assert records[0]["_row"] == 3
+
+
+def test_stage_update_targets_the_row_offset_by_a_two_row_header(monkeypatch):
+    """An off-by-one here overwrites a different customer's stage cells."""
+    _configure(monkeypatch)
+    store = {
+        "existing_header": [
+            ["", "", "고객사"],
+            ["Client ID", "Deal Stage", "Deal Stage Detail"],
+        ],
+        # Column A from the first data row (3) down: 9001 is row 3, 9002 is row 4.
+        "range_values": {"'Inbound DB'!A3:A": [["9001"], ["9002"]]},
+    }
+    monkeypatch.setattr(gs, "_build_service", lambda: _FakeService(store))
+
+    assert gs.update_inbound_stage(9002, "won") is True
+    ranges = [item["range"] for item in store["batch"]["data"]]
+    assert ranges == ["'Inbound DB'!B4", "'Inbound DB'!C4"]
+
+
+def test_append_anchors_the_table_at_the_header_not_a1(monkeypatch):
+    """Appending against A1 lets Sheets treat the label row as the table."""
+    _configure(monkeypatch)
+    store = {
+        "existing_header": [
+            ["", "고객사"],
+            ["Cluent ID", "Deal Stage"],
+        ],
+    }
+    monkeypatch.setattr(gs, "_build_service", lambda: _FakeService(store))
+
+    gs.append_inbound_row({"client_id": 1336, "deal_stage": "New"})
+
+    assert store["append_range"] == "'Inbound DB'!A2"
 
 
 def test_append_refuses_empty_header_row(monkeypatch):

@@ -34,6 +34,67 @@ def safe(monkeypatch):
 def live(monkeypatch):
     """Force live mode (external writes allowed)."""
     monkeypatch.setattr(settings, "LIVE_EXTERNAL_WRITES", True)
+    monkeypatch.setattr(settings, "LIVE_HUBSPOT_WRITES", True)
+    monkeypatch.setattr(settings, "LIVE_SHEETS_WRITES", True)
+
+
+# ---- Per-destination switches are SUBORDINATE to the master ------------------
+
+def test_per_channel_switches_cannot_override_safe_mode(safe, monkeypatch):
+    """The whole point of the master: turning a channel on must not open a hole.
+
+    If either of these could let a write through, "is it safe?" would stop being a
+    single question and the 대전제 would depend on three variables agreeing.
+    """
+    from src.integrations import google_sheets
+
+    monkeypatch.setattr(settings, "LIVE_HUBSPOT_WRITES", True)
+    monkeypatch.setattr(settings, "LIVE_SHEETS_WRITES", True)
+    monkeypatch.setattr(google_sheets, "is_configured", lambda: True)
+
+    assert safe_mode.live_hubspot_writes() is False
+    assert safe_mode.live_sheets_writes() is False
+    assert google_sheets.writes_enabled() is False
+    with pytest.raises(ExternalWriteBlocked):
+        guard_external_write("hubspot:update_ticket_stage")
+
+
+def test_hubspot_can_be_held_back_while_sheets_go_live(live, monkeypatch):
+    from src.integrations import google_sheets
+
+    monkeypatch.setattr(settings, "LIVE_HUBSPOT_WRITES", False)
+    monkeypatch.setattr(google_sheets, "is_configured", lambda: True)
+
+    with pytest.raises(ExternalWriteBlocked, match="LIVE_HUBSPOT_WRITES"):
+        guard_external_write("hubspot:update_ticket_stage")
+    assert google_sheets.writes_enabled() is True
+
+
+def test_sheets_can_be_held_back_while_hubspot_goes_live(live, monkeypatch):
+    from src.integrations import google_sheets
+
+    monkeypatch.setattr(settings, "LIVE_SHEETS_WRITES", False)
+    monkeypatch.setattr(google_sheets, "is_configured", lambda: True)
+
+    assert google_sheets.writes_enabled() is False
+    guard_external_write("hubspot:update_ticket_stage")  # must not raise
+
+
+def test_an_unregistered_channel_falls_back_to_the_master(safe):
+    """A new write path that forgets to register a gate must still be blocked."""
+    with pytest.raises(ExternalWriteBlocked):
+        guard_external_write("some_new_crm:push")
+
+
+def test_per_channel_defaults_are_permissive_so_the_master_alone_goes_live(monkeypatch):
+    """Flipping only LIVE_EXTERNAL_WRITES must behave exactly as it did before."""
+    from src.common.config import Settings
+
+    monkeypatch.delenv("LIVE_HUBSPOT_WRITES", raising=False)
+    monkeypatch.delenv("LIVE_SHEETS_WRITES", raising=False)
+    bare = Settings(_env_file=None)
+    assert bare.LIVE_HUBSPOT_WRITES is True
+    assert bare.LIVE_SHEETS_WRITES is True
 
 
 # ---- The switch itself -------------------------------------------------------
