@@ -16,7 +16,7 @@ from ..common.pricing_guard import strip_price_sentences
 from ..common.subjects import reply_subject
 from ..common.textwash import text_wash
 from ..db.conversation_history import add_progress
-from ..db.models import Approval, Contact, Conversation, CustomerProfile, InboundJob, Message
+from ..db.models import Contact, Conversation, CustomerProfile, InboundJob, Message
 from ..db.session import SessionLocal
 from ..integrations.hubspot import HubSpotClient, HubSpotNotConfigured
 from ..llm.client import LLMClient
@@ -214,7 +214,7 @@ class InboundAgent:
 
             score = self._score(contact_info, classification.category)
             draft = self._draft_reply(contact_info, classification, score, conv_id)
-            auto_approved = self._finalize_draft(
+            self._finalize_draft(
                 message_id, contact_info, classification, score, draft, conv_id, inquiry_lang
             )
         except Exception:
@@ -226,27 +226,26 @@ class InboundAgent:
         # from the append-only progress log). Never breaks the pipeline.
         self._update_summary(conv_id, contact_info)
 
-        if auto_approved:
-            if not settings.SEND_WORKER_ENABLED:
-                self._dispatch_approved(message_id)
-        else:
-            try:
-                notify_approval_once(
-                    message_id=message_id,
-                    subject=draft.subject,
-                    body_snippet=draft.body,
-                    score=score,
-                    category=classification.category,
-                    title="새 인바운드 문의 — 회신 검토 요청",
-                    inquiry=contact_info.get("last_message"),
-                    contact_name=contact_info.get("full_name"),
-                    contact_company=contact_info.get("company"),
-                    contact_email=contact_info.get("email"),
-                )
-            except Exception:
-                logger.warning(
-                    "Approval notification failed for message %d.", message_id, exc_info=True
-                )
+        # Unconditional: the draft is always pending_approval now, so there is always
+        # someone to notify. The old `if auto_approved: dispatch else: notify` fork is
+        # gone with the auto-approval branch.
+        try:
+            notify_approval_once(
+                message_id=message_id,
+                subject=draft.subject,
+                body_snippet=draft.body,
+                score=score,
+                category=classification.category,
+                title="새 인바운드 문의 — 회신 검토 요청",
+                inquiry=contact_info.get("last_message"),
+                contact_name=contact_info.get("full_name"),
+                contact_company=contact_info.get("company"),
+                contact_email=contact_info.get("email"),
+            )
+        except Exception:
+            logger.warning(
+                "Approval notification failed for message %d.", message_id, exc_info=True
+            )
 
         # A webhook-processed ticket must also be marked for the polling fallback;
         # otherwise the next poll can treat the same HubSpot ticket as unseen.
@@ -871,7 +870,9 @@ class InboundAgent:
                 if not conv:
                     conv = Conversation(
                         contact_id=contact.id,
-                        topic=None,  # set once classified, in _finalize_draft
+                        # The customer's own subject line, captured at ingest. It used to
+                        # be left None here and filled with the AI category later.
+                        inquiry_subject=(contact_info.get("subject") or "").strip() or None,
                         stage="new",
                         hubspot_ticket_id=ticket_id,
                         inquiry_language=inquiry_lang,
@@ -887,7 +888,7 @@ class InboundAgent:
                 if not conv:
                     conv = Conversation(
                         contact_id=contact.id,
-                        topic=None,
+                        inquiry_subject=(contact_info.get("subject") or "").strip() or None,
                         stage="new",
                         inquiry_language=inquiry_lang,
                     )
@@ -1031,40 +1032,26 @@ class InboundAgent:
             msg.body = draft.body
             msg.language = "ko"  # the draft the operator reviews is always Korean
             msg.target_language = inquiry_lang or msg.target_language
-            threshold = settings.AUTO_SEND_THRESHOLD
-            auto_approved = (
-                0.0 <= threshold <= 1.0
-                and score / 100 >= threshold
-                and classification.category.lower() != "spam"
-                and msg.channel == "email"
-                and bool(msg.to_address)
-            )
-            msg.status = "approved" if auto_approved else "pending_approval"
+            # A detailed reply ALWAYS waits for a human. This used to be a score-vs-
+            # AUTO_SEND_THRESHOLD comparison that could set "approved" on its own; the
+            # operator's rule is that only the receipt acknowledgement ever sends by
+            # itself, so the branch is gone rather than merely configured shut. Nothing
+            # in config can reopen it — see tests/test_safe_mode.py.
+            msg.status = "pending_approval"
             msg.score_snapshot = score
-            if auto_approved:
-                msg.approved_by = "auto:score-threshold"
-                msg.approved_at = datetime.now(timezone.utc)
-                session.add(
-                    Approval(
-                        message_id=message_id,
-                        approver="auto:score-threshold",
-                        action="approve",
-                    )
-                )
             conv = session.get(Conversation, msg.conversation_id)
             if conv:
-                conv.topic = classification.category
                 contact = session.get(Contact, conv.contact_id) if conv.contact_id else None
                 if contact:
                     contact.score = score
                 add_progress(
                     conv.id,
                     "draft",
-                    f"AI 회신 초안 작성 완료 (분류: {classification.category}). 검토 대기.",
+                    "AI 회신 초안 작성 완료. 검토 대기.",
                     session=session,
                 )
             session.commit()
-            return auto_approved
+            return False
         finally:
             session.close()
 
@@ -1184,16 +1171,9 @@ class InboundAgent:
             ),
         )
 
-    def _dispatch_approved(self, message_id: int) -> None:
-        """Send an auto-approved draft inline only when no background worker runs."""
-        import asyncio
-
-        from .send_worker import send_approved_now
-
-        try:
-            asyncio.run(send_approved_now(message_id))
-        except Exception:
-            logger.warning("Auto-approved send failed for message %d.", message_id, exc_info=True)
+    # _dispatch_approved() lived here. Its only caller was the auto-approval branch,
+    # which is gone: a detailed reply is never approved without a human, so there is
+    # never a freshly-approved draft for the inbound agent to send inline.
 
     # ----- Rolling summary + customer requests -----
 

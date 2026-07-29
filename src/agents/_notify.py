@@ -151,7 +151,10 @@ def retry_pending_approval_notifications(limit: int = 20) -> int:
                     "subject": message.subject or "",
                     "body_snippet": message.body,
                     "score": message.score_snapshot,
-                    "category": conversation.topic or "inquiry",
+                    # The AI category is transient now — nothing stores it, so a retry
+                    # cannot recover the one used on the first attempt. The subject is
+                    # what an operator actually reads in the Slack card anyway.
+                    "category": conversation.inquiry_subject or "inquiry",
                     "title": "새 인바운드 문의 — 회신 검토 요청",
                     "inquiry": inbound.body if inbound else None,
                     "contact_name": contact.full_name,

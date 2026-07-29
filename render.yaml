@@ -145,8 +145,6 @@ services:
         value: "true"
       - key: INBOUND_INITIAL_LOOKBACK_HOURS
         value: "24"
-      - key: AUTO_SEND_THRESHOLD
-        value: "1.01"
       - key: TIMEZONE
         value: Asia/Seoul
       - key: LOG_LEVEL

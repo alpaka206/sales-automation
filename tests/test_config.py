@@ -15,7 +15,6 @@ def test_defaults() -> None:
     assert s.LLM_PROVIDER == "gemini_vertex"
     assert s.GEMINI_MODEL == "gemini-2.5-flash"
     assert s.LIVE_EXTERNAL_WRITES is False
-    assert s.AUTO_SEND_THRESHOLD == 1.01
     assert s.DAILY_SEND_LIMIT == 400
     assert s.APP_PORT == 8000
     assert s.INTERNAL_API_TOKEN == ""

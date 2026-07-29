@@ -62,7 +62,13 @@ class Conversation(Base):
     contact_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("contacts.id", ondelete="CASCADE"), nullable=False
     )
-    topic: Mapped[str | None] = mapped_column(String, nullable=True)
+    # The customer's own inquiry subject — what they wrote in the subject line, or the
+    # HubSpot ticket subject for rows created by the backfill. Renamed from ``topic`` in
+    # migration 0041: that column held two unrelated things, an AI "문의 유형" category on
+    # the inbound path and the ticket subject on the backfill path, and only the second
+    # was ever worth showing. The category is now transient — it still routes knowledge
+    # docs and adjusts the lead score inside one inbound run, but nothing stores it.
+    inquiry_subject: Mapped[str | None] = mapped_column(String, nullable=True)
     stage: Mapped[str] = mapped_column(String, nullable=False, default="initial")
     last_outgoing_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     last_incoming_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

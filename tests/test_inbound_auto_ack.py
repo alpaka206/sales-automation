@@ -173,11 +173,17 @@ def test_auto_ack_is_queued_before_sheet_write(_docs, db_session_factory, monkey
 
 @patch("src.agents.inbound.notify_approval_once")
 @patch("src.agents.inbound.select_relevant_docs", return_value="")
-def test_score_threshold_can_auto_approve_safely(
+def test_detailed_reply_is_never_auto_approved(
     _docs, mock_notify, db_session, db_session_factory, monkeypatch
 ):
+    """A detailed reply always waits for a human — structurally, not by configuration.
+
+    This used to be a score-vs-AUTO_SEND_THRESHOLD comparison that could set
+    "approved" on its own, held shut only by the threshold being above 1.0. The
+    operator's rule is that nothing but the receipt acknowledgement ever sends
+    unattended, so the branch is gone and there is no setting left to reopen it.
+    """
     monkeypatch.setattr(settings, "INBOUND_AUTO_ACK_ENABLED", False)
-    monkeypatch.setattr(settings, "AUTO_SEND_THRESHOLD", 0.0)
     monkeypatch.setattr(settings, "SEND_WORKER_ENABLED", True)
     with patch("src.agents.inbound.SessionLocal", db_session_factory):
         InboundAgent(llm=_mock_llm(), hubspot=None).handle(dict(_EVENT))
@@ -187,7 +193,8 @@ def test_score_threshold_can_auto_approve_safely(
         .filter(Message.direction == "outgoing", Message.prompt_variant.is_(None))
         .one()
     )
-    assert reply.status == "approved"
-    assert reply.approved_by == "auto:score-threshold"
-    assert db_session.query(Approval).filter_by(message_id=reply.id).count() == 1
-    mock_notify.assert_not_called()
+    assert reply.status == "pending_approval"
+    assert reply.approved_by is None
+    assert db_session.query(Approval).filter_by(message_id=reply.id).count() == 0
+    # And an operator is told there is something to review.
+    mock_notify.assert_called_once()

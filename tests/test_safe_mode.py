@@ -64,6 +64,18 @@ def test_pytest_can_never_move_a_real_hubspot_ticket():
     assert settings.HUBSPOT_PRIVATE_APP_TOKEN == "test-hubspot-token"
 
 
+def test_no_setting_can_make_a_detailed_reply_send_itself():
+    """Only the receipt acknowledgement is ever unattended.
+
+    That used to depend on AUTO_SEND_THRESHOLD staying above 1.0 — a number in a
+    dashboard nobody audits. The branch it guarded is gone, so the guarantee is now
+    structural: there is no config key left that could re-open it.
+    """
+    from src.common.config import Settings
+
+    assert not hasattr(Settings(_env_file=None), "AUTO_SEND_THRESHOLD")
+
+
 # ---- Per-destination switches are SUBORDINATE to the master ------------------
 
 def test_per_channel_switches_cannot_override_safe_mode(safe, monkeypatch):

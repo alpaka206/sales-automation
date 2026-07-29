@@ -174,7 +174,7 @@ def _seed_reply(db_session, body, *, prior_sent=False):
     c = Contact(normalized_email="x@acme.com", full_name="X", email="x@acme.com", domain="acme.com")
     db_session.add(c)
     db_session.flush()
-    conv = Conversation(contact_id=c.id, topic="pricing")
+    conv = Conversation(contact_id=c.id, inquiry_subject="pricing")
     db_session.add(conv)
     db_session.flush()
     if prior_sent:

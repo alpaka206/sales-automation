@@ -208,7 +208,7 @@ def backfill_b2b_pipeline(pipeline: str = B2B_PIPELINE_ID) -> dict:
                     contact_id=contact.id,
                     hubspot_ticket_id=ticket.id,
                     stage=stage,
-                    topic=ticket.subject or None,
+                    inquiry_subject=ticket.subject or None,
                     # last_incoming_at stays NULL on purpose — see module docstring.
                     created_at=ticket.created_at or datetime.now(timezone.utc),
                 )

@@ -282,3 +282,53 @@ class TestRetireLegacyPipelineStages:
         migration = importlib.import_module(self.MODULE)
         assert set(migration.STAGE_MAPPING.values()) <= VALID_PIPELINE_STAGES
         assert not set(migration.STAGE_MAPPING) & VALID_PIPELINE_STAGES
+
+
+class TestConversationInquirySubject:
+    """Migration 0041 — conversations.topic held two unrelated things."""
+
+    MODULE = "src.db.migrations.0041_conversation_inquiry_subject"
+
+    def _seed(self, engine):
+        with engine.begin() as conn:
+            conn.execute(text("CREATE TABLE conversations (id INTEGER, topic TEXT)"))
+            conn.execute(
+                text(
+                    "INSERT INTO conversations (id, topic) VALUES "
+                    "(1, 'pricing_question'), (2, 'Bulk dubbing quote'), "
+                    "(3, 'spam'), (4, NULL)"
+                )
+            )
+
+    def _subjects(self, engine):
+        with engine.connect() as conn:
+            return conn.execute(
+                text("SELECT inquiry_subject FROM conversations ORDER BY id")
+            ).scalars().all()
+
+    def test_skips_when_table_does_not_exist(self, mem_engine):
+        importlib.import_module(self.MODULE).up(mem_engine)
+
+        assert "conversations" not in inspect(mem_engine).get_table_names()
+
+    def test_renames_and_clears_only_the_category_values(self, mem_engine):
+        """A real ticket subject must survive; an AI category must not become one."""
+        self._seed(mem_engine)
+
+        importlib.import_module(self.MODULE).up(mem_engine)
+
+        columns = {c["name"] for c in inspect(mem_engine).get_columns("conversations")}
+        assert "inquiry_subject" in columns
+        assert "topic" not in columns
+        assert self._subjects(mem_engine) == [None, "Bulk dubbing quote", None, None]
+
+    def test_is_idempotent(self, mem_engine):
+        """migrate.py commits up() and the tracker row separately, and CI runs
+        init_db.py twice — the second pass must find the rename already done."""
+        self._seed(mem_engine)
+        migration = importlib.import_module(self.MODULE)
+
+        migration.up(mem_engine)
+        migration.up(mem_engine)
+
+        assert self._subjects(mem_engine) == [None, "Bulk dubbing quote", None, None]

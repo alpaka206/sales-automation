@@ -23,7 +23,7 @@ def _create_test_message(phone: str = "+821012345678") -> int:
         session.add(contact)
         session.flush()
 
-        conv = Conversation(contact_id=contact.id, topic="test")
+        conv = Conversation(contact_id=contact.id, inquiry_subject="test")
         session.add(conv)
         session.flush()
 
@@ -51,7 +51,7 @@ def _cleanup():
     with SessionLocal() as session:
         for msg in session.query(Message).filter(Message.subject == "Test").all():
             session.delete(msg)
-        for conv in session.query(Conversation).filter(Conversation.topic == "test").all():
+        for conv in session.query(Conversation).filter(Conversation.inquiry_subject == "test").all():
             session.delete(conv)
         for c in session.query(Contact).filter(Contact.normalized_email == "dual-test@example.com").all():
             session.delete(c)

@@ -92,7 +92,7 @@ def test_failed_slack_attempt_is_retried_after_delay(
         contact = Contact(normalized_email="retry@example.com", full_name="Retry Buyer")
         session.add(contact)
         session.flush()
-        conversation = Conversation(contact_id=contact.id, topic="inquiry")
+        conversation = Conversation(contact_id=contact.id, inquiry_subject="inquiry")
         session.add(conversation)
         session.flush()
         message = Message(
@@ -132,7 +132,7 @@ def test_ready_draft_missed_before_first_notify_is_recovered(
         contact = Contact(normalized_email="missed@example.com", full_name="Missed")
         session.add(contact)
         session.flush()
-        conversation = Conversation(contact_id=contact.id, topic="inquiry")
+        conversation = Conversation(contact_id=contact.id, inquiry_subject="inquiry")
         session.add(conversation)
         session.flush()
         session.add(

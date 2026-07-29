@@ -162,9 +162,9 @@ class Settings(BaseSettings):
     DAILY_SEND_LIMIT: int = 400
     SEND_JITTER_SECONDS: int = 15
 
-    # ----- Behavior knobs -----
-    # 0.0..1.0 enables score-based auto-send; >1.0 keeps human approval required.
-    AUTO_SEND_THRESHOLD: float = 1.01
+    # AUTO_SEND_THRESHOLD used to live here. Score-based auto-approval is gone:
+    # a detailed reply now always waits for a human, so there is no threshold to
+    # set and no setting that could re-enable unattended sending.
 
     # ----- DB -----
     DATABASE_URL: str = "sqlite:///./data/app.db"

@@ -108,6 +108,7 @@ def test_inbound_handle_creates_db_rows(db_session) -> None:
                 "company": "Acme Corp",
                 "country": "korea",
                 "last_message": "We want to purchase your product.",
+                "subject": "Bulk dubbing quote",
             }
         )
 
@@ -129,15 +130,18 @@ def test_inbound_handle_creates_db_rows(db_session) -> None:
     assert len(reply_msg) == 1
     assert reply_msg[0].status == "pending_approval"
     # Subject is built in code as "RE: <customer subject or localized generic>",
-    # never the raw model subject. No customer subject here → localized generic (en).
-    assert reply_msg[0].subject == "RE: Your inquiry"
+    # never the raw model subject.
+    assert reply_msg[0].subject == "RE: Bulk dubbing quote"
     # Draft is always Korean; the language to SEND in is the detected inquiry language.
     assert reply_msg[0].language == "ko"
     assert reply_msg[0].target_language == "en"
 
     conversations = db_session.query(Conversation).all()
     assert len(conversations) == 1
-    assert conversations[0].topic == "purchase_inquiry"
+    # The AI category is no longer persisted — it routes knowledge docs and adjusts the
+    # score inside this run and is then discarded. The column now holds the customer's
+    # own subject line instead (migration 0041).
+    assert conversations[0].inquiry_subject == "Bulk dubbing quote"
 
 
 def test_personal_domain_not_stored(db_session) -> None:
