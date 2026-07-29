@@ -29,6 +29,12 @@ SCOPES = (
     "email",
     "https://www.googleapis.com/auth/spreadsheets",
 )
+# What the API calls actually need. openid/email above exist only so the browser flow
+# can read back WHICH account consented; an env-supplied grant is told that by
+# GOOGLE_SHEETS_ACCOUNT_EMAIL. Asking for them anyway makes google-auth warn
+# "Not all requested scopes were granted … missing scopes email" on every refresh,
+# because the consent screen grants only what its Data Access page lists.
+API_SCOPES = ("https://www.googleapis.com/auth/spreadsheets",)
 TOKEN_URL = "https://oauth2.googleapis.com/token"
 AUTHORIZE_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 USERINFO_URL = "https://openidconnect.googleapis.com/v1/userinfo"
@@ -162,7 +168,7 @@ def env_grant() -> tuple[dict, str | None] | None:
         "access_token": "",
         "refresh_token": refresh_token,
         "expires_at": 0,
-        "scopes": list(SCOPES),
+        "scopes": list(API_SCOPES),
     }
     return payload, settings.GOOGLE_SHEETS_ACCOUNT_EMAIL.strip() or None
 

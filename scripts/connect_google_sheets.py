@@ -39,6 +39,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import httpx  # noqa: E402
 
+from src.common.tls import use_os_trust_store  # noqa: E402
 from src.integrations.google_oauth import (  # noqa: E402
     AUTHORIZE_URL,
     SCOPES,
@@ -51,22 +52,7 @@ from src.integrations.google_oauth import (  # noqa: E402
 CALLBACK_PATH = "/integrations/google-sheets/callback"
 ENV_PATH = Path(__file__).resolve().parents[1] / ".env"
 
-
-def _use_os_trust_store() -> None:
-    """Trust the OS certificate store as well as certifi's bundle.
-
-    The ESTsoft network re-signs HTTPS with a private root that Windows trusts but
-    Python's bundled certifi does not, so oauth2.googleapis.com would fail with
-    CERTIFICATE_VERIFY_FAILED. Keeps verification ON — never pass verify=False.
-    """
-    try:
-        import truststore
-    except ImportError:
-        return
-    truststore.inject_into_ssl()
-
-
-_use_os_trust_store()
+use_os_trust_store()
 
 
 class _CallbackHandler(BaseHTTPRequestHandler):

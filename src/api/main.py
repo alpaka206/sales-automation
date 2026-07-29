@@ -18,6 +18,7 @@ from fastapi.staticfiles import StaticFiles
 from ..agents.approval import ApprovalError, approve, reject
 from ..common.config import settings
 from ..common.logging import setup_logging
+from ..common.tls import use_os_trust_store
 from .schemas import ApprovalBody
 from .security import (
     API_SKIP_PATHS,
@@ -32,6 +33,11 @@ from .web.auth import current_user, router as auth_router
 from .web.routes import router as web_router
 from .webhook import router as webhook_router
 
+# Must precede the first outbound HTTPS call, not the first import: httpx and
+# googleapiclient build their SSL contexts per client/request, so patching `ssl` here
+# covers every one of them. Without it the office network's TLS-inspecting proxy makes
+# Sheets, HubSpot and Vertex all fail with CERTIFICATE_VERIFY_FAILED.
+use_os_trust_store()
 setup_logging()
 logger = logging.getLogger(__name__)
 

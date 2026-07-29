@@ -89,6 +89,22 @@ def test_env_refresh_token_is_a_complete_grant_without_the_browser(monkeypatch):
     assert email == "owner@estsoft.com"
 
 
+def test_env_grant_requests_only_the_sheets_scope(monkeypatch):
+    """openid/email are browser-flow-only; asking for them warns on every refresh.
+
+    The consent screen grants what its Data Access page lists — spreadsheets — so
+    google-auth logged "Not all requested scopes were granted … missing scopes email"
+    on each token refresh until the env payload stopped claiming them.
+    """
+    monkeypatch.setattr(
+        google_oauth.settings, "GOOGLE_SHEETS_OAUTH_REFRESH_TOKEN", "1//env-refresh"
+    )
+
+    payload, _email = google_oauth.env_grant()
+    assert payload["scopes"] == ["https://www.googleapis.com/auth/spreadsheets"]
+    assert "email" not in payload["scopes"]
+
+
 def test_env_refresh_token_wins_over_a_stored_grant(monkeypatch):
     """Env is the deployment's explicit choice of account; a stale row must not shadow it."""
     _configure(monkeypatch)
