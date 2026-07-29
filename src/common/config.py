@@ -193,9 +193,14 @@ class Settings(BaseSettings):
     GOOGLE_SHEETS_OAUTH_REFRESH_TOKEN: str = ""
     # Display only — which account that refresh token belongs to, shown on /pipeline.
     GOOGLE_SHEETS_ACCOUNT_EMAIL: str = ""
-    GOOGLE_SHEETS_SPREADSHEET_ID: str = "1L5HeDOrNQjEzWvfZVAIdQKjSXxF9hznu6fPIOGgFHpw"
+    # The live workbook, "사본 [Perso AI] B2B 통합 대시보드". This default is what a
+    # deployment uses when the env var is unset, so it must name the CURRENT workbook —
+    # leaving the previous one here would send writes to a stale sheet the moment
+    # LIVE_SHEETS_WRITES is on.
+    GOOGLE_SHEETS_SPREADSHEET_ID: str = "1NWdn-rH3BdfRPCldglDnQnAl4IFmP9LnRkDkGBdmGRo"
     GOOGLE_SHEETS_INBOUND_TAB: str = "Inbound DB"
-    GOOGLE_SHEETS_QUALITY_TAB: str = "Inbound 퀄리티 분석"
+    # Reference-only, and absent from the current workbook. Blank hides it on /pipeline.
+    GOOGLE_SHEETS_QUALITY_TAB: str = ""
     GOOGLE_SHEETS_ORDERS_TAB: str = "수주 DB"
 
     # ----- Domain enrichment -----
