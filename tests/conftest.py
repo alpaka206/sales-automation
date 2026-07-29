@@ -41,6 +41,12 @@ os.environ.setdefault("APPROVAL_CHANNEL", "none")
 # The pre-launch safe-mode guard itself is covered by tests/test_safe_mode.py,
 # which flips this off per-test via monkeypatch.
 os.environ.setdefault("LIVE_EXTERNAL_WRITES", "true")
+# Pin the per-destination switches too, or a developer running with
+# LIVE_HUBSPOT_WRITES=false in .env silently reroutes the HubSpot tests down the
+# blocked path. Safe to leave permissive: the credentials below are neutralized, so
+# "live" here means "exercise the real code path against a mocked transport".
+os.environ.setdefault("LIVE_HUBSPOT_WRITES", "true")
+os.environ.setdefault("LIVE_SHEETS_WRITES", "true")
 # Hard stop for every external write path. Tests that cover a sender enable it
 # explicitly and mock the transport; a developer's real .env must never receive
 # an email, report, or Sheets write during `pytest`.
@@ -53,6 +59,35 @@ os.environ["REPORT_EMAIL_TO"] = ""
 # POST tests (recovery, customer ops) whose Origin is http://testserver.
 os.environ["PUBLIC_BASE_URL"] = ""
 os.environ["GOOGLE_CREDENTIALS_JSON"] = ""
+# Google Sheets, and this one is not theoretical: it already happened. The suite runs
+# with LIVE_EXTERNAL_WRITES=true, and Sheets used to be safe here only because a grant
+# lived in the DATABASE — the temp SQLite has no IntegrationCredential row, so
+# is_configured() was False. Once load_grant() learned to read the refresh token from
+# the environment, that accident stopped protecting anything and `pytest` began
+# appending fixture rows ("Spammer", "buyer@acme.com", …) straight into the shared
+# sales workbook. Blank the credential, not just the flag: assign, never setdefault,
+# so no CI secret or developer .env can put it back.
+os.environ["GOOGLE_SHEETS_OAUTH_REFRESH_TOKEN"] = ""
+os.environ["GOOGLE_SHEETS_ACCOUNT_EMAIL"] = ""
+os.environ["GOOGLE_SHEETS_SPREADSHEET_ID"] = ""
+# HubSpot stage ids, for the same reason one level down. The dummy token above turns a
+# stray write into a 401 rather than a real change, but a 401 is still a request to the
+# live account from someone's `pytest`. With no stage id configured, _stage_id() returns
+# "" and the call is never made. Tests that need them set them explicitly (the `stages`
+# fixtures in test_stage_sync.py / test_hubspot_backfill.py).
+for _stage_var in (
+    "HUBSPOT_TICKET_STAGE_NEW",
+    "HUBSPOT_TICKET_STAGE_MEETING_LINK_SENT",
+    "HUBSPOT_TICKET_STAGE_AFTER_SEND",
+    "HUBSPOT_TICKET_STAGE_NEGOTIATING",
+    "HUBSPOT_TICKET_STAGE_NEGOTIATION",
+    "HUBSPOT_TICKET_STAGE_REMINDER_SENT",
+    "HUBSPOT_TICKET_STAGE_WON",
+    "HUBSPOT_TICKET_STAGE_LOST",
+    "HUBSPOT_TICKET_STAGE_CLOSED_LOST",
+    "HUBSPOT_TICKET_STAGE_CLOSED",
+):
+    os.environ[_stage_var] = ""
 
 from unittest.mock import MagicMock  # noqa: E402
 

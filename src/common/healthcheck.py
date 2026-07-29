@@ -43,6 +43,10 @@ def run_healthchecks() -> HealthReport:
     if settings.HUBSPOT_PRIVATE_APP_TOKEN:
         checks.append(_check_hubspot())
 
+    # Unconditional: "no token configured" is itself the failure worth reporting now
+    # that nothing in the UI shows the connection state.
+    checks.append(_check_google_sheets())
+
     checks.append(_check_smtp())
 
     checks.append(_check_disk_space())
@@ -203,6 +207,54 @@ def _check_gemini() -> CheckResult:
         if status_code == 429 or "429" in err or "quota" in err:
             return CheckResult(name="Gemini (Vertex)", status="WARN", detail="Rate limited / quota (429)", latency_ms=ms)
         return CheckResult(name="Gemini (Vertex)", status="FAIL", detail=str(e)[:200], latency_ms=ms)
+
+
+def _check_google_sheets() -> CheckResult:
+    """Prove the workbook is actually reachable, not merely that a token is set.
+
+    The Sheets connection has no UI any more, so a silent break — a revoked grant, a
+    rotated client secret, a workbook that stopped being shared — would otherwise show
+    up as inbound rows quietly never reaching the sheet. This exercises the whole
+    chain: refresh the token, then read the header of the Inbound DB tab.
+
+    Read-only: it never writes, so it is safe under LIVE_SHEETS_WRITES=false.
+    """
+    from ..integrations.google_sheets import GoogleSheetsError, _headers, is_configured
+
+    start = time.monotonic()
+    if not is_configured():
+        return CheckResult(
+            name="google_sheets",
+            status="FAIL",
+            detail="not connected — set GOOGLE_SHEETS_OAUTH_REFRESH_TOKEN",
+            latency_ms=0,
+        )
+    tab = settings.GOOGLE_SHEETS_INBOUND_TAB.strip() or "Inbound DB"
+    try:
+        from ..integrations.google_sheets import _build_service
+
+        header = _headers(_build_service(), tab)
+        ms = int((time.monotonic() - start) * 1000)
+        account = settings.GOOGLE_SHEETS_ACCOUNT_EMAIL.strip() or "connected"
+        return CheckResult(
+            name="google_sheets",
+            status="PASS",
+            detail=f"{account} · '{tab}' header row {header.row}, {len(header.values)} cols",
+            latency_ms=ms,
+        )
+    except Exception as e:
+        ms = int((time.monotonic() - start) * 1000)
+        err = str(e)
+        # invalid_grant is the one that matters: the refresh token is dead and no
+        # amount of retrying fixes it. Google expires them after 7 days while the
+        # OAuth app is in "Testing", and revokes them when access is withdrawn.
+        if "invalid_grant" in err:
+            detail = "refresh token rejected (invalid_grant) — re-run scripts/connect_google_sheets.py"
+        elif isinstance(e, GoogleSheetsError):
+            detail = err[:200]
+        else:
+            detail = f"{type(e).__name__}: {err[:180]}"
+        return CheckResult(name="google_sheets", status="FAIL", detail=detail, latency_ms=ms)
 
 
 def _check_hubspot() -> CheckResult:

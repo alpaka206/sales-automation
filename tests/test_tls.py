@@ -25,6 +25,41 @@ def test_the_app_entrypoint_injects_before_serving():
     assert tls._injected is True
 
 
+def test_sheets_healthcheck_reports_a_missing_connection_as_fail(monkeypatch):
+    """With no UI showing the connection, this check is the only signal it broke."""
+    from src.common import healthcheck
+    from src.integrations import google_sheets
+
+    monkeypatch.setattr(google_sheets, "is_configured", lambda: False)
+
+    result = healthcheck._check_google_sheets()
+
+    assert result.status == "FAIL"
+    assert "GOOGLE_SHEETS_OAUTH_REFRESH_TOKEN" in result.detail
+
+
+def test_sheets_healthcheck_names_a_dead_refresh_token(monkeypatch):
+    """invalid_grant needs its own message: retrying never fixes it, only reconnecting.
+
+    Google expires refresh tokens after 7 days while the OAuth app sits in "Testing",
+    which is the most likely way this connection dies on its own.
+    """
+    from src.common import healthcheck
+    from src.integrations import google_sheets
+
+    monkeypatch.setattr(google_sheets, "is_configured", lambda: True)
+    monkeypatch.setattr(
+        google_sheets,
+        "_build_service",
+        lambda: (_ for _ in ()).throw(RuntimeError("('invalid_grant: Bad Request', {})")),
+    )
+
+    result = healthcheck._check_google_sheets()
+
+    assert result.status == "FAIL"
+    assert "connect_google_sheets.py" in result.detail
+
+
 def test_verification_stays_on():
     """This is a trust-store swap, not a bypass. CERT_NONE here would be a silent
     downgrade of every outbound call in the process."""

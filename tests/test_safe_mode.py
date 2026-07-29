@@ -38,6 +38,32 @@ def live(monkeypatch):
     monkeypatch.setattr(settings, "LIVE_SHEETS_WRITES", True)
 
 
+# ---- The suite itself must never reach a real external system ----------------
+#
+# These assert on conftest's environment, not on a fixture, because that environment IS
+# the guarantee. It failed once: the suite runs with LIVE_EXTERNAL_WRITES=true, and
+# Sheets was safe only by accident — the grant lived in the database, and the temp
+# SQLite had no row. When load_grant() gained an env fallback the accident stopped
+# holding, and `pytest` appended 34 fixture rows to the shared sales workbook.
+
+def test_pytest_can_never_write_to_a_real_google_sheet():
+    from src.integrations import google_sheets
+
+    assert settings.GOOGLE_SHEETS_OAUTH_REFRESH_TOKEN == ""
+    assert settings.GOOGLE_SHEETS_SPREADSHEET_ID == ""
+    assert google_sheets.is_configured() is False
+    assert google_sheets.writes_enabled() is False
+
+
+def test_pytest_can_never_move_a_real_hubspot_ticket():
+    """No stage id configured means _stage_id() returns "" and no request is sent."""
+    from src.agents.stage_sync import LOCAL_STAGE_TO_SETTING
+
+    for attr in LOCAL_STAGE_TO_SETTING.values():
+        assert getattr(settings, attr) == "", attr
+    assert settings.HUBSPOT_PRIVATE_APP_TOKEN == "test-hubspot-token"
+
+
 # ---- Per-destination switches are SUBORDINATE to the master ------------------
 
 def test_per_channel_switches_cannot_override_safe_mode(safe, monkeypatch):
@@ -191,6 +217,8 @@ def test_env_refresh_token_does_not_bypass_safe_mode(safe, monkeypatch):
 
     monkeypatch.setattr(settings, "GOOGLE_SHEETS_OAUTH_REFRESH_TOKEN", "1//fake-refresh")
     monkeypatch.setattr(settings, "GOOGLE_SHEETS_ACCOUNT_EMAIL", "owner@estsoft.com")
+    # conftest blanks the workbook id for the whole suite; is_configured() needs one.
+    monkeypatch.setattr(settings, "GOOGLE_SHEETS_SPREADSHEET_ID", "SHEET123")
 
     assert google_oauth.env_grant() is not None
     assert google_oauth.load_grant()[0]["refresh_token"] == "1//fake-refresh"

@@ -5,6 +5,7 @@ from __future__ import annotations
 from unittest.mock import MagicMock, patch
 
 from src.common.healthcheck import (
+    CheckResult,
     _check_hubspot,
     _check_send_quota,
     _check_smtp,
@@ -161,6 +162,9 @@ def test_check_send_quota_limit_hit() -> None:
 def test_run_healthchecks_includes_gemini(db_session_factory) -> None:
     with patch("src.common.healthcheck.settings") as s, \
          patch("src.db.session.SessionLocal", db_session_factory), \
+         patch("src.common.healthcheck._check_google_sheets",
+               return_value=CheckResult(name="google_sheets", status="PASS",
+                                        detail="patched", latency_ms=0)), \
          patch("smtplib.SMTP"), \
          patch("src.llm.providers.gemini_vertex.call_gemini"):
         s.GOOGLE_CREDENTIALS_JSON = '{"project_id": "p"}'
@@ -179,6 +183,9 @@ def test_run_healthchecks_with_smtp(mock_smtp, db_session_factory) -> None:
 
     with patch("src.common.healthcheck.settings") as s, \
          patch("src.db.session.SessionLocal", db_session_factory), \
+         patch("src.common.healthcheck._check_google_sheets",
+               return_value=CheckResult(name="google_sheets", status="PASS",
+                                        detail="patched", latency_ms=0)), \
          patch("src.llm.providers.gemini_vertex.call_gemini"):
         s.GOOGLE_CREDENTIALS_JSON = '{"project_id": "p"}'
         s.HUBSPOT_PRIVATE_APP_TOKEN = ""
@@ -197,6 +204,9 @@ def test_run_healthchecks_with_smtp(mock_smtp, db_session_factory) -> None:
 def test_run_healthchecks_with_send_worker(db_session_factory) -> None:
     with patch("src.common.healthcheck.settings") as s, \
          patch("src.db.session.SessionLocal", db_session_factory), \
+         patch("src.common.healthcheck._check_google_sheets",
+               return_value=CheckResult(name="google_sheets", status="PASS",
+                                        detail="patched", latency_ms=0)), \
          patch("smtplib.SMTP"), \
          patch("src.llm.providers.gemini_vertex.call_gemini"), \
          patch("src.agents.send_worker.get_daily_count", return_value=0):
@@ -214,6 +224,9 @@ def test_run_healthchecks_with_send_worker(db_session_factory) -> None:
 def test_run_healthchecks_overall_warn(db_session_factory) -> None:
     with patch("src.common.healthcheck.settings") as s, \
          patch("src.db.session.SessionLocal", db_session_factory), \
+         patch("src.common.healthcheck._check_google_sheets",
+               return_value=CheckResult(name="google_sheets", status="PASS",
+                                        detail="patched", latency_ms=0)), \
          patch("src.common.healthcheck.shutil.disk_usage") as mock_du, \
          patch("smtplib.SMTP"), \
          patch("src.llm.providers.gemini_vertex.call_gemini"):
