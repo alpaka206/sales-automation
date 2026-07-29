@@ -33,6 +33,15 @@ from pathlib import Path
 import httpx
 from dotenv import dotenv_values
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from src.common.tls import use_os_trust_store  # noqa: E402
+
+# api.render.com is re-signed by the office TLS proxy like every other host, so
+# without this the only way through was --insecure, which turns verification off
+# entirely while shipping every production secret.
+use_os_trust_store()
+
 API = "https://api.render.com/v1"
 
 # Values that must differ on the deployed service vs local dev, plus Render infra
@@ -41,6 +50,10 @@ PROD_OVERRIDES = {
     "APP_HOST": "0.0.0.0",
     "AUTH_MODE": "google_oauth",
     "PYTHON_VERSION": "3.11.9",  # Render build Python; from render.yaml, not .env
+    # Local .env leaves this blank so the OAuth callback resolves to 127.0.0.1. A
+    # full replace would therefore blank it on Render too, breaking approval links
+    # and the Google redirect — the one value that must never be copied from dev.
+    "PUBLIC_BASE_URL": "https://sales-automation-4if2.onrender.com",
 }
 
 # Never ship these to Render (deploy-tooling creds that live in .env for convenience).
