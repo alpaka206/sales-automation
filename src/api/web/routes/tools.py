@@ -54,7 +54,7 @@ async def contract_page(request: Request):
 
 @router.get("/outbound-history")
 async def outbound_history_page(request: Request):
-    """Placeholder peer of the inbound customer history (/customers).
+    """수주 고객 — placeholder peer of 리드 히스토리 (/customers).
 
     Deliberately its OWN top-level path rather than /customers/outbound: Starlette
     matches on path shape, so a literal segment under /customers would be shadowed by
@@ -64,8 +64,8 @@ async def outbound_history_page(request: Request):
         request,
         "tool_placeholder.html",
         {
-            "tool_title": "아웃바운드 고객 히스토리",
-            "tool_message": "아웃바운드 고객 히스토리는 준비 중입니다.",
+            "tool_title": "수주 고객",
+            "tool_message": "수주 고객 화면은 준비 중입니다.",
         },
     )
 

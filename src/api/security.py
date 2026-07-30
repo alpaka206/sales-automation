@@ -19,7 +19,7 @@ API_SKIP_PATHS = ("/healthz", "/favicon.ico")
 LOCAL_DOC_PATHS = ("/docs", "/redoc", "/openapi.json")
 # Browser-facing web UI route prefixes (vs JSON API / webhooks).
 WEB_UI_PREFIXES = (
-    "/", "/messages", "/email-templates", "/settings",
+    "/", "/overview", "/messages", "/email-templates", "/settings",
     "/logs", "/static", "/auth", "/tools", "/customers", "/operations",
     "/pipeline", "/companies", "/contacts", "/outbound-history",
     "/integrations",

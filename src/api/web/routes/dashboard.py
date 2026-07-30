@@ -111,3 +111,19 @@ async def dashboard(request: Request):
     """Main inbound dashboard — awaiting replies on top, the pipeline board below."""
     ctx = _dashboard_context()
     return templates.TemplateResponse(request, "dashboard.html", ctx)
+
+
+@router.get("/overview")
+async def overview(request: Request):
+    """전체 대시보드 — the whole-business view, first entry in the sidebar.
+
+    A slot, not a page yet: the nav entry exists so the map is settled while what belongs
+    on it is decided, the same way 견적서 / 계약서 do. Its path is registered in
+    security.WEB_UI_PREFIXES, without which the auth middleware treats it as a JSON API
+    route and demands an internal token.
+    """
+    return templates.TemplateResponse(
+        request,
+        "tool_placeholder.html",
+        {"tool_title": "전체 대시보드", "tool_message": "전체 대시보드는 준비 중입니다."},
+    )

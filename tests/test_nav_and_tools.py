@@ -20,18 +20,46 @@ def _nav_html() -> str:
         return client.get("/messages").text
 
 
-def test_sidebar_sections_are_the_six_the_operator_asked_for():
+def test_sidebar_sections_are_the_ones_the_operator_asked_for():
     html = _nav_html()
-    for title in ("인바운드 답장", "인사이트", "고객 히스토리", "활용 툴"):
+    for title in ("인바운드 회신", "인사이트", "고객 관리", "활용 툴"):
         assert title in html, title
     # 파이프라인 연동관리 was a section with one entry; the board moved onto /.
     assert "파이프라인 연동관리" not in html
 
 
-def test_email_settings_entry_is_renamed():
+def test_every_renamed_entry_lost_its_old_wording():
+    """The sidebar is the console's only map, so a half-applied rename leaves two names
+    for one screen. Each pair is (what it used to say, what it says now)."""
     html = _nav_html()
-    assert "이메일 답변 설정" in html
+    for old, new in (
+        ("인바운드 답장", "인바운드 회신"),
+        ("이메일 답변 설정", "답변 템플릿"),
+        ("문의·국가 추이", "리드 추이"),
+        ("업데이트 필요 고객", "고객 인사이트"),
+        ("고객 히스토리", "고객 관리"),
+        ("인바운드 고객 히스토리", "리드 히스토리"),
+        ("아웃바운드 고객 히스토리", "수주 고객"),
+    ):
+        assert new in html, new
+        assert old not in html, old
     assert "이메일 규칙" not in html
+
+
+def test_overview_sits_above_the_first_section_and_renders():
+    """전체 대시보드 is the whole-business view: first entry, outside every section.
+
+    The page is a placeholder for now. /overview also has to be in
+    security.WEB_UI_PREFIXES — without it the auth middleware reads the path as a JSON
+    API route and answers 401 instead of rendering.
+    """
+    html = _nav_html()
+    assert html.index('href="/overview"') < html.index("인바운드 회신")
+    with TestClient(app) as client:
+        response = client.get("/overview")
+    assert response.status_code == 200
+    assert "전체 대시보드" in response.text
+    assert "준비 중" in response.text
 
 
 def test_tool_entries_open_in_a_new_tab():
@@ -45,10 +73,10 @@ def test_tool_entries_open_in_a_new_tab():
         assert 'rel="noopener"' in anchor.group(0), href
 
 
-def test_customer_history_section_links_both_directions():
+def test_customer_section_links_both_directions():
     html = _nav_html()
-    assert "인바운드 고객 히스토리" in html
-    assert "아웃바운드 고객 히스토리" in html
+    assert "리드 히스토리" in html
+    assert "수주 고객" in html
 
 
 def test_placeholder_tools_render_a_coming_soon_page():
@@ -56,7 +84,8 @@ def test_placeholder_tools_render_a_coming_soon_page():
         for path, title in (
             ("/tools/quotation", "견적서"),
             ("/tools/contract", "계약서"),
-            ("/outbound-history", "아웃바운드 고객 히스토리"),
+            ("/outbound-history", "수주 고객"),
+            ("/overview", "전체 대시보드"),
         ):
             response = client.get(path)
             assert response.status_code == 200, path

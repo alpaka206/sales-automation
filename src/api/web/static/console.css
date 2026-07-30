@@ -45,6 +45,11 @@
   flex: 1;
   overflow-y: auto;
 }
+/* This box scrolls when the menu is taller than the window, so nothing in it may be
+   shrunk to make room. Without this the 전체 대시보드 entry — the only child whose
+   min-content height is a single line — was squeezed from 42px to 17px, and its active
+   highlight with it, while the sections kept their size. */
+.sidebar__nav > * { flex: 0 0 auto; }
 
 /* Collapsed: a rail wide enough for the toggle only. The class lives on <html> so the
    inline script in base.html can set it from localStorage before the first paint. */
@@ -60,6 +65,11 @@
 .brand__name { font-weight: 800; font-size: 14.5px; letter-spacing: -.02em; line-height: 1.1; }
 
 .nav-section { padding: 11px 0 13px; border-bottom: 1px solid var(--border); }
+/* 전체 대시보드 is the one entry that belongs to no group. Give it a rule underneath, or
+   it reads as the first item of the section below it. (Sections are `display: contents`
+   on a phone, so this border simply does not render there.) */
+.sidebar__nav > .nav-item { margin-bottom: 8px; }
+.sidebar__nav > .nav-item + .nav-section { border-top: 1px solid var(--border); }
 .nav-section:last-child { border-bottom: 0; }
 .nav-section__title {
   display: flex; align-items: center; gap: 8px; padding: 0 10px 8px;
