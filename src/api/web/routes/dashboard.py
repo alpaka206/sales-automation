@@ -15,17 +15,22 @@ from sqlalchemy import func, select
 from ....db.models import Conversation, Message
 from ....db.session import SessionLocal
 from ._shared import templates
+from .messages import LIST_STATUS_BUCKETS, _messages_list_context
 
 router = APIRouter(tags=["web"])
 
-# Statuses that mean "a human still has to act on this reply". Mirrors the 발송대기
-# chip on /messages (routes/messages.py) — the dashboard is that list, truncated.
-AWAITING_STATUSES = ("pending_approval", "drafting", "draft_failed", "send_failed")
+# Statuses that mean "a human still has to act on this reply". Not a second copy of the
+# 발송대기 bucket on /messages — literally that bucket, so the counters here can never
+# count a different set of rows than the list they link to.
+AWAITING_STATUSES = LIST_STATUS_BUCKETS["awaiting"]
 
 # Board stages the dashboard counts separately. Everything else is folded into ALL.
 _COUNTED_STAGES = ("new", "negotiation")
 
-_RECENT_LIMIT = 8
+# The queue panel is a peek, not a list: the five rows that have waited longest. The
+# full, filterable list is one click away on 답변 검토, so a longer table here only
+# pushed the pipeline board off the screen.
+_QUEUE_LIMIT = 5
 
 
 def _kst_day_start() -> datetime:
@@ -43,31 +48,13 @@ def _dashboard_context() -> dict:
     """Awaiting-reply rows, their counters, and the pipeline board."""
     from .customer_ops import PIPELINE_STAGES, VALID_PIPELINE_STAGES, _pipeline_rows
 
-    with SessionLocal() as session:
-        awaiting = (
-            select(Message, Conversation.stage, Conversation.inquiry_subject)
-            .join(Conversation, Message.conversation_id == Conversation.id)
-            .where(Message.direction == "outgoing")
-            .where(Message.status.in_(AWAITING_STATUSES))
-            .where((Message.prompt_variant.is_(None)) | (Message.prompt_variant != "auto_ack"))
-        )
-        recent = session.execute(
-            awaiting.order_by(Message.created_at.desc()).limit(_RECENT_LIMIT)
-        ).all()
-        recent_messages = [
-            {
-                "id": msg.id,
-                "status": msg.status,
-                # Coerced the same way the board does it, so a legacy "initial" row
-                # does not render a stage the operator has never seen.
-                "stage": stage if stage in VALID_PIPELINE_STAGES else "new",
-                "subject": inquiry_subject or msg.subject or "(제목 없음)",
-                "channel": msg.channel,
-                "created_at": msg.created_at,
-            }
-            for msg, stage, inquiry_subject in recent
-        ]
+    # The queue panel IS the 답변 검토 list — same query, same row shape, same table
+    # partial — sorted oldest-first and cut to _QUEUE_LIMIT. Building it here from a
+    # second, near-identical query is what let the two tables drift apart before.
+    queue = _messages_list_context(status="awaiting", stage="", sort="oldest")
+    recent_messages = queue["messages"][:_QUEUE_LIMIT]
 
+    with SessionLocal() as session:
         stage_rows = session.execute(
             select(Conversation.stage, func.count())
             .select_from(Message)
@@ -101,6 +88,8 @@ def _dashboard_context() -> dict:
 
     return {
         "recent_messages": recent_messages,
+        # The shared queue table dates the 우선순위 dot against "now".
+        "now": queue["now"],
         "awaiting_total": awaiting_total,
         "awaiting_new": awaiting_by_stage["new"],
         "awaiting_negotiation": awaiting_by_stage["negotiation"],
@@ -109,13 +98,11 @@ def _dashboard_context() -> dict:
             {
                 "key": stage,
                 "label": label,
-                "description": description,
                 "rows": by_stage.get(stage, []),
             }
-            for stage, label, description in PIPELINE_STAGES
+            for stage, label, _ in PIPELINE_STAGES
         ],
-        "stage_options": PIPELINE_STAGES,
-        "stage_labels": {key: label for key, label, _ in PIPELINE_STAGES},
+        "stage_labels": queue["stage_labels"],
     }
 
 

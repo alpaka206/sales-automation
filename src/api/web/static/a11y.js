@@ -70,6 +70,28 @@
 
   window.PERSO_modal = { open: open, close: close };
 
+  // Sidebar collapse. The class is on <html> (base.html sets it from localStorage
+  // before paint); this only handles the click and keeps aria-expanded honest.
+  function syncNavToggle(button) {
+    var collapsed = document.documentElement.classList.contains("nav-collapsed");
+    button.setAttribute("aria-expanded", collapsed ? "false" : "true");
+  }
+
+  document.addEventListener("DOMContentLoaded", function () {
+    var button = document.querySelector("[data-nav-toggle]");
+    if (!button) return;
+    syncNavToggle(button);
+    button.addEventListener("click", function () {
+      var collapsed = document.documentElement.classList.toggle("nav-collapsed");
+      try {
+        localStorage.setItem("perso.nav", collapsed ? "collapsed" : "open");
+      } catch (e) {
+        /* storage blocked — the toggle still works for this page */
+      }
+      syncNavToggle(button);
+    });
+  });
+
   // Make clickable table rows keyboard-operable (2.1.1 / 4.1.2).
   document.addEventListener("DOMContentLoaded", function () {
     var rows = document.querySelectorAll("tr.is-clickable");

@@ -351,6 +351,22 @@ def test_pipeline_board_moves_card_locally(customer_db, customer_id) -> None:
         assert session.get(Conversation, conversation_id).stage == "won"
 
 
+def test_pipeline_cards_have_no_stage_dropdown(customer_db, customer_id) -> None:
+    """Cards move by drag and drop only.
+
+    The per-card 단계 변경 <select> is gone: it repeated the drop target and took a third
+    of the card. The POST it submitted to stays — the drop handler calls it — and so does
+    the 파이프라인 select on the customer page, which writes the profile projection.
+    """
+    with TestClient(app) as client:
+        board = client.get("/pipeline")
+    assert board.status_code == 200
+    assert "data-pipeline-board" in board.text          # the board itself still renders
+    assert "pipeline-card" in board.text                # with cards on it
+    assert 'name="stage"' not in board.text
+    assert "단계 변경" not in board.text
+
+
 def test_pipeline_keeps_each_inquiry_stage_and_only_latest_updates_profile(
     customer_db, customer_id
 ) -> None:

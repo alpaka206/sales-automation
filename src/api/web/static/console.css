@@ -5,8 +5,16 @@
 /* ---------------------------------------------------------------
    App shell
    --------------------------------------------------------------- */
+/* One fixed frame, exactly the height of the window: the DOCUMENT never scrolls,
+   `.content` does. Two things follow. The left nav is structurally always on screen —
+   it used to be `position: sticky`, which held only as long as the page's own height
+   was honest, and the pipeline board's overflowing columns made it lie. And a page can
+   now ask to fit the frame (see .main--fit), because .content finally hands its child
+   a DEFINITE height to divide up; under `min-height` alone every child was sized by
+   its own content, so nothing could be told to fill "the rest". */
 .app-shell {
-  min-height: 100dvh;
+  height: 100dvh;
+  overflow: hidden;
   display: flex;
   flex-direction: row;
   background: var(--bg);
@@ -19,13 +27,18 @@
   background: var(--surface);
   display: flex;
   flex-direction: column;
-  height: 100dvh;
-  position: sticky;
-  top: 0;
+  height: 100%;
+  min-height: 0;
 }
-.sidebar__brandwrap { padding: 18px 16px 14px; }
+.sidebar__top { display: flex; justify-content: flex-end; padding: 9px 9px 1px; }
+/* Bare icon — no box. The hover tint is the only affordance it needs. */
+.sidebar-toggle {
+  display: grid; place-items: center; width: 30px; height: 30px; padding: 0;
+  border: 0; border-radius: var(--r-sm); background: transparent; color: var(--text-subtle);
+}
+.sidebar-toggle:hover { background: var(--surface-3); color: var(--text); }
 .sidebar__nav {
-  padding: 6px 12px;
+  padding: 4px 12px 6px;
   display: flex;
   flex-direction: column;
   gap: 3px;
@@ -33,7 +46,13 @@
   overflow-y: auto;
 }
 
-.brand { display: flex; align-items: center; gap: 11px; text-decoration: none; color: inherit; }
+/* Collapsed: a rail wide enough for the toggle only. The class lives on <html> so the
+   inline script in base.html can set it from localStorage before the first paint. */
+.nav-collapsed .sidebar { width: 52px; }
+.nav-collapsed .sidebar__top { justify-content: center; padding: 9px 0 1px; }
+.nav-collapsed .sidebar__nav, .nav-collapsed .operator-card { display: none; }
+
+/* Still used by the sign-in card; the sidebar wordmark itself is gone. */
 .brand__logo {
   width: 34px; height: 34px; border-radius: 9px; flex-shrink: 0; display: block;
   object-fit: cover;
@@ -81,11 +100,34 @@
   overflow-wrap: anywhere;
 }
 
-.content { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+/* The page scroller. min-height:0 is what lets it be exactly the frame height instead
+   of growing with its content. */
+.content { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow-y: auto; }
 .nav-section .nav-item { height: 36px; padding-left: 35px; font-size: 12.5px; }
 .nav-section .nav-item .ic { display: none; }
 /* Desktop-only operator console — use the full width, no centered max-width. */
 .main { flex: 1; padding: 28px 34px 80px; width: 100%; min-width: 0; }
+/* A page that FITS the screen instead of running past it: the last block takes
+   whatever height the blocks above it leave, and scrolls inside itself. The dashboard
+   uses it because the pipeline board is sized as if it started at the top of the
+   window — stacked under the queue panel it always hung a few hundred px below the
+   fold, so the page scrolled and the board's own columns scrolled inside that. */
+/* Tighter than a normal page on purpose: every px the headings and padding give back
+   goes to the board, which is the block that was left too short on a laptop screen. */
+.main--fit { display: flex; flex-direction: column; min-height: 0; padding: 18px 34px 14px; }
+.main--fit .table-heading { padding: 13px 22px 11px; }
+.main--fit #queue-panel { margin-bottom: 12px; }
+/* `grid-template-rows: 100%` is what actually bounds the board. Flex hands the grid a
+   definite height (min-height keeps it usable on a short window, at the cost of a
+   little page scroll there), and the explicit row makes the columns exactly that tall
+   — an implicit `auto` row sizes to its CONTENT, so a 22-card column grew to 3300px
+   and took the page with it, however the columns themselves were sized. */
+/* The floor is three whole cards (3 x 112 + header 50 + padding 20): on a laptop screen
+   the queue panel leaves the board barely 200px, and a column showing one and a half
+   cards is not a board. Below that height the page scrolls — finite, and it stops at the
+   end of the board. */
+.main--fit .kanban { flex: 1 1 auto; min-height: 406px; margin-bottom: 0; grid-template-rows: 100%; }
+.main--fit .kanban-column { height: auto; min-height: 0; }
 
 /* ---------------------------------------------------------------
    Page header
@@ -321,19 +363,27 @@
 /* The header no longer needs `position: sticky` — as a non-shrinking flex item it
    stays put while the body scrolls underneath it. */
 .kanban-column__header {
-  flex: 0 0 auto; display: flex; justify-content: space-between; gap: 8px;
-  padding: 14px; border-bottom: 1px solid var(--border); background: var(--surface);
+  flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between;
+  gap: 8px; padding: 12px 14px; border-bottom: 1px solid var(--border); background: var(--surface);
 }
-.kanban-column__header strong { display: block; font-size: 12.5px; }
-.kanban-column__header small { display: block; margin-top: 3px; color: var(--text-subtle); font-size: 10.5px; }
+.kanban-column__header strong { font-size: 12.5px; }
 .kanban-column__count {
   display: grid; place-items: center; min-width: 24px; height: 24px; padding: 0 7px;
   border: 1px solid var(--border); border-radius: var(--r-full); color: var(--text-muted); font-size: 11px;
 }
 /* min-height:0 is what actually lets a flex child shrink below its content and
    scroll; without it the body would still push the column open. */
+/* position: relative is load-bearing, not decoration. Each card carries a `.sr-only`
+   label for its stage <select>, and `.sr-only` is `position: absolute` — with no
+   positioned ancestor its containing block was the INITIAL one, so those 1px labels
+   were laid out at the document origin's coordinate space and escaped this scroller
+   entirely. 22 cards in one column meant ~3000px of invisible scrollable overflow on
+   the document: the page scrolled for screens on end past the end of the content, and
+   the sticky sidebar (whose own containing block was honestly sized) scrolled away
+   long before the bottom. Making this box the containing block clips them with the
+   rest of the column's content. */
 .kanban-column__body {
-  flex: 1 1 auto; min-height: 0; overflow-y: auto;
+  flex: 1 1 auto; min-height: 0; overflow-y: auto; position: relative;
   padding: 10px; transition: background .16s ease;
 }
 .kanban-column__body.is-over { background: var(--accent-soft); }
@@ -353,7 +403,6 @@
 .pipeline-card > a strong { font-size: 13px; }
 .pipeline-card > a span { margin-top: 5px; color: var(--text-muted); font-size: 11.5px; }
 .pipeline-card > a small { margin-top: 3px; color: var(--text-subtle); font-size: 10.5px; }
-.select--compact { height: 32px; font-size: 11.5px; }
 .kanban-empty { padding: 24px 12px; border: 1px dashed var(--border-strong); color: var(--text-subtle); font-size: 11px; text-align: center; }
 
 /* Inbound insights */
@@ -407,7 +456,10 @@
 .table tbody tr.is-clickable:hover { background: var(--surface-2); }
 .table .td-muted { color: var(--text-muted); }
 .table .td-subtle { color: var(--text-subtle); }
-.table-wrap { overflow-x: auto; }
+/* position: relative for the same reason as .kanban-column__body: the 우선순위 cell's
+   `.sr-only` text is absolutely positioned, and without a containing block here it
+   anchored to the initial one and added its offset to the document's scroll height. */
+.table-wrap { overflow-x: auto; position: relative; }
 
 /* ---------------------------------------------------------------
    Filter chips / search / form controls
@@ -491,12 +543,19 @@
   .insights-layout { grid-template-columns: 1fr; }
 }
 @media (max-width: 720px) {
-  .app-shell { display: block; }
+  /* A phone is a normal scrolling document with a fixed bottom bar, not a frame:
+     undo the desktop shell so the page (not .content) scrolls again. */
+  .app-shell { display: block; height: auto; overflow: visible; }
+  .content { overflow: visible; }
   .sidebar {
     width: 100%; height: auto; position: fixed; inset: auto 0 0; z-index: 70;
     border: 1px solid var(--border); border-width: 1px 0 0; box-shadow: var(--shadow-lg);
   }
-  .sidebar__brandwrap, .nav-group-label, .nav-section__title, .nav-item--secondary, .nav-section--system, .operator-card { display: none; }
+  /* The bottom bar IS the navigation on a phone, so it must never be collapsible. */
+  .sidebar__top { display: none; }
+  .nav-collapsed .sidebar { width: 100%; }
+  .nav-collapsed .sidebar__nav { display: flex; }
+  .nav-group-label, .nav-section__title, .nav-item--secondary, .nav-section--system, .operator-card { display: none; }
   .sidebar__nav { padding: 7px 8px; flex-direction: row; gap: 4px; overflow-x: auto; }
   .nav-section { display: contents; }
   .nav-item { min-width: 76px; height: 50px; padding: 5px 9px; flex: 1; flex-direction: column; justify-content: center; gap: 3px; font-size: 10.5px; }
@@ -525,6 +584,12 @@
   /* Phones have less chrome to subtract; the header is a flex item now, so the
      old sticky `top` offset here no longer applies. */
   .kanban-column { height: calc(100dvh - 150px); }
+  /* No fit-to-screen layout on a phone: the shell is a normal scrolling document
+     here, so the board goes back to its own bounded height (without this override
+     the columns would stretch to fit every card and the page would scroll forever). */
+  .main--fit { display: block; padding-bottom: 100px; }
+  .main--fit .kanban { margin-bottom: var(--gap); }
+  .main--fit .kanban-column { height: calc(100dvh - 150px); }
   .inquiry-chart-card, .country-card { padding: 16px; }
   .inquiry-chart-card .section-header { align-items: flex-start; flex-direction: column; }
   .inquiry-chart { height: 240px; }
@@ -692,6 +757,12 @@ input[type="checkbox"].cb:focus-visible {
 }
 
 /* Screen-reader-only text (visually hidden but available to AT). */
+/* Visually hidden, still announced. NOTE: `position: absolute` with no offsets means
+   the containing block is the nearest POSITIONED ancestor — the initial one if there is
+   none — so inside a scroll container these boxes are not clipped by it and their
+   static position keeps inflating the document's scrollable overflow. Any scroll
+   container holding .sr-only content needs `position: relative` (see
+   .kanban-column__body, where a column of cards cost ~3000px of phantom page scroll). */
 .sr-only {
   position: absolute !important;
   width: 1px; height: 1px;
@@ -715,8 +786,11 @@ input[type="checkbox"].cb:focus-visible {
 /* Clickable table rows are keyboard-operable (role="button" + tabindex in markup). */
 tr.is-clickable { cursor: pointer; }
 
-/* Block background scroll while a modal is open (set on <body> by the modal helper). */
+/* Block background scroll while a modal is open (set on <body> by the modal helper).
+   `.content` is the scroller on desktop and the document is the scroller on a phone,
+   so both have to be pinned. */
 body.modal-open { overflow: hidden; }
+body.modal-open .content { overflow: hidden; }
 
 /* ---- Inbound bubble: Korean shown by default, original expands to the side ---- */
 .bubble__cols { display: block; }

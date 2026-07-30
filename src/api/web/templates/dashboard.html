@@ -1,7 +1,10 @@
 {% extends "base.html" %}
 {% from "partials/icons.html" import icon %}
-{% from "partials/ui.html" import status_pill %}
+{% from "partials/queue_table.html" import queue_table %}
 {% block title %}인바운드 홈 — PERSO{% endblock %}
+{# The queue and the board share one screen: `main--fit` makes the board fill exactly
+   the space the queue leaves, so this page never scrolls past the fold. #}
+{% block main_class %}main--fit{% endblock %}
 {% block content %}
 
 <h1 class="sr-only">문의 대시보드</h1>
@@ -19,10 +22,7 @@
   <div class="section-header table-heading">
     <div class="section-header__l">
       <span class="section-header__icon">{{ icon("messages", 17) }}</span>
-      <div>
-        <div class="section-header__title">답변 대기중인 문의</div>
-        <div class="section-header__sub">접수 확인 제외</div>
-      </div>
+      <div class="section-header__title">답변 대기중인 문의</div>
     </div>
     <div class="queue-counters">
       <span><em>오늘 접수</em><b class="tnum">{{ received_today }}</b></span>
@@ -32,32 +32,14 @@
       <a href="/messages" class="chip">전체 보기</a>
     </div>
   </div>
-  <div class="table-wrap" role="region" aria-label="답변 대기중인 문의" aria-live="polite">
-    <table class="table">
-      <thead><tr><th scope="col">상태</th><th scope="col">Stage</th><th scope="col">문의 제목</th><th scope="col">채널</th><th scope="col">시간</th></tr></thead>
-      <tbody>
-        {% for msg in recent_messages %}
-        <tr class="is-clickable" onclick="location.href='/messages/{{ msg.id }}'">
-          <td>{{ status_pill(msg.status, "sm") }}</td>
-          <td class="td-muted">{{ stage_labels.get(msg.stage, msg.stage) }}</td>
-          <td class="truncate" style="max-width:300px">{{ msg.subject }}</td>
-          <td class="td-muted">{{ msg.channel }}</td>
-          <td class="td-subtle tnum">{{ msg.created_at | kst('%m/%d %H:%M') }}</td>
-        </tr>
-        {% else %}
-        <tr><td colspan="5"><div class="empty"><div class="empty__icon">{{ icon("inbound", 24) }}</div><div class="empty__text">답변을 기다리는 문의가 없습니다.</div></div></td></tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
+  {{ queue_table(recent_messages, now, stage_labels,
+                 "답변을 기다리는 문의가 없습니다.", region_label="답변 대기중인 문의") }}
 </section>
 
 <div class="section-header table-heading">
   <div class="section-header__l">
     <span class="section-header__icon">{{ icon("sliders", 17) }}</span>
-    <div>
-      <div class="section-header__title">문의 파이프라인</div>
-    </div>
+    <div class="section-header__title">문의 파이프라인</div>
   </div>
 </div>
 

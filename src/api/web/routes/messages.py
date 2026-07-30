@@ -374,8 +374,17 @@ LIST_STATUS_BUCKETS: dict[str, tuple[str, ...]] = {
     "awaiting": ("pending_approval", "drafting", "draft_failed", "send_failed"),
     "sent": ("sent", "test_sent", "rejected"),
 }
-# Stage chips. "" = 전체. Only these two stages get their own chip; the board has more.
-LIST_STAGES = ("new", "negotiation")
+# Stage chips, per status bucket ("" = 전체). The two buckets sit at opposite ends of the
+# pipeline, so one shared chip row was wrong in both directions: a reply still waiting
+# belongs to a ticket nobody has answered (New) or one under negotiation, and nothing
+# else — while sending is exactly what moves a ticket PAST New, so 발송 완료 never has a
+# New row and does have the downstream stages. Chips are rendered in PIPELINE_STAGES
+# order; a stage that is not in the current bucket falls back to 전체 (see below), which
+# is what happens when the operator switches buckets with a stage chip active.
+LIST_STAGES: dict[str, tuple[str, ...]] = {
+    "awaiting": ("new", "negotiation"),
+    "sent": ("meeting_link_sent", "negotiation", "reminder_sent", "won", "closed_lost", "closed"),
+}
 LIST_SORTS = ("oldest", "newest")
 
 
@@ -395,7 +404,9 @@ def _messages_list_context(
     from .customer_ops import PIPELINE_STAGES, VALID_PIPELINE_STAGES
 
     status = status if status in LIST_STATUS_BUCKETS else "awaiting"
-    stage = stage if stage in LIST_STAGES else ""
+    # Validated against the CHOSEN bucket's stages, so this also drops a stage the
+    # operator carried over from the other bucket instead of returning an empty list.
+    stage = stage if stage in LIST_STAGES[status] else ""
     sort = sort if sort in LIST_SORTS else "oldest"
 
     # Conversation is already joined, so stage / inquiry_subject / created_at /
@@ -455,6 +466,10 @@ def _messages_list_context(
         "filter_status": status,
         "filter_stage": stage,
         "filter_sort": sort,
+        # Built here, not in the template: the labels come from PIPELINE_STAGES, which is
+        # also what fixes their order and keeps a renamed stage from needing two edits.
+        "stage_chips": [("", "전체")]
+        + [(key, label) for key, label, _ in PIPELINE_STAGES if key in LIST_STAGES[status]],
         # Same label map as the board and the dashboard — the column must read
         # "New"/"Negotiating", not the raw stage key.
         "stage_labels": {key: label for key, label, _ in PIPELINE_STAGES},

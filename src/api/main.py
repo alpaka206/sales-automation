@@ -256,6 +256,12 @@ async def auth_middleware(request: Request, call_next):
 @app.middleware("http")
 async def security_headers_middleware(request: Request, call_next):
     response = await call_next(request)
+    # StaticFiles sends only etag/last-modified, so Chrome heuristically caches the
+    # console's CSS/JS and keeps serving the old copy after a UI change — a UI edit then
+    # looks like it did nothing until someone hard-reloads. no-cache still allows a 304,
+    # it just forbids using the cached copy without asking.
+    if request.url.path.startswith("/static"):
+        response.headers["Cache-Control"] = "no-cache"
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "SAMEORIGIN"
     response.headers["Referrer-Policy"] = "same-origin"

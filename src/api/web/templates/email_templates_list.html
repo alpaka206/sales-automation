@@ -3,11 +3,10 @@
 {% block title %}이메일 템플릿 — PERSO Inbound{% endblock %}
 {% block content %}
 
+{# The wrapper div stays even though .page-title is visually hidden: it is the
+   in-flow left item that keeps 새 템플릿 on the right of the header row. #}
 <div class="page-header">
-  <div>
-    <h1 class="page-title">이메일 템플릿</h1>
-    <p class="page-sub"><code>{{ '{{변수}}' }}</code> 사용 · active만 발송</p>
-  </div>
+  <div><h1 class="page-title">이메일 템플릿</h1></div>
   <a href="/email-templates/new" class="btn btn--primary">{{ icon("plus", 15) }} 새 템플릿</a>
 </div>
 

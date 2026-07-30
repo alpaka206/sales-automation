@@ -13,14 +13,19 @@
     {%- if badge %}<span class="nav-item__badge tnum">{{ badge }}</span>{% endif %}
   </a>
 {%- endmacro -%}
+{# No brand block: the wordmark was a link to / that the 문의 대시보드 item already is.
+   Its row now carries the collapse toggle instead — collapsing leaves a narrow rail
+   with just this button, so there is always something to click to bring the menu back.
+   The state is remembered in localStorage and applied to <html> by the inline script in
+   base.html, before first paint, so a collapsed nav does not flash open on every load. #}
 <aside class="sidebar">
-  <div class="sidebar__brandwrap">
-    <a href="/" class="brand">
-      <span class="brand__name">PERSO</span>
-    </a>
+  <div class="sidebar__top">
+    <button type="button" class="sidebar-toggle" data-nav-toggle
+            aria-controls="sidebar-nav" aria-expanded="true" aria-label="메뉴 접기/펼치기"
+            title="메뉴 접기/펼치기">{{ icon("panel", 17) }}</button>
   </div>
 
-  <nav class="sidebar__nav" aria-label="주요 메뉴">
+  <nav class="sidebar__nav" id="sidebar-nav" aria-label="주요 메뉴">
     <section class="nav-section{% if _path == '/' or _path.startswith('/messages') or _path.startswith('/customers') or _path.startswith('/email-templates') %} is-current{% endif %}">
       <div class="nav-section__title">{{ icon("inbound", 17) }}<span>인바운드 답장</span></div>
       {{ _nav("/", "문의 대시보드", "dashboard", _path == "/", badge=nav_pending, mobile=True, mobile_label="인바운드") }}

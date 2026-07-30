@@ -1,6 +1,5 @@
 {% extends "base.html" %}
-{% from "partials/icons.html" import icon %}
-{% from "partials/ui.html" import status_pill %}
+{% from "partials/queue_table.html" import queue_table %}
 {% block title %}답변 검토 — PERSO{% endblock %}
 {% block content %}
 
@@ -28,8 +27,11 @@
   </div>
 </div>
 
+{# Stage chips come from the route: which stages a bucket can contain differs (발송 대기
+   is New/Negotiating only; 발송 완료 starts at Meeting Link Sent), so this row is not a
+   fixed list. #}
 <div class="chip-row mb-gap">
-  {% for val, label in [('','전체'), ('new','New'), ('negotiation','Negotiating')] %}
+  {% for val, label in stage_chips %}
   <a class="chip{% if filter_stage == val %} is-active{% endif %}"
      href="/messages?status={{ filter_status }}&stage={{ val }}&sort={{ filter_sort }}">{{ label }}</a>
   {% endfor %}
@@ -38,31 +40,7 @@
 <div class="card card--flush" id="msg-list"
      hx-get="/messages{{ _q }}"
      hx-trigger="every 15s" hx-select="#msg-list" hx-target="#msg-list" hx-swap="outerHTML">
-  <div class="table-wrap">
-    <table class="table">
-      <thead><tr><th scope="col">상태</th><th scope="col">Stage</th><th scope="col">문의 제목</th><th scope="col">우선순위</th><th scope="col">채널</th><th scope="col">소통 Email</th><th scope="col">접수 시간</th></tr></thead>
-      <tbody>
-        {% for msg in messages %}
-        {# Days the customer has been waiting since their own last message. #}
-        {% set _waited = ((now - msg.waiting_since).total_seconds() / 86400) if msg.waiting_since else 0 %}
-        {% if _waited <= 1 %}{% set _p = ('ok', '1일 이내') %}
-        {% elif _waited <= 3 %}{% set _p = ('warn', '3일 이내') %}
-        {% else %}{% set _p = ('danger', '3일 초과') %}{% endif %}
-        <tr class="is-clickable" onclick="location.href='/messages/{{ msg.id }}'">
-          <td>{{ status_pill(msg.status, "sm") }}</td>
-          <td class="td-muted">{{ stage_labels.get(msg.stage, msg.stage) }}</td>
-          <td class="truncate" style="max-width:300px">{{ msg.subject }}</td>
-          <td><span class="wait-dot wait-dot--{{ _p[0] }}" title="{{ _p[1] }}"></span><span class="sr-only">{{ _p[1] }}</span></td>
-          <td class="td-muted">{{ msg.channel }}</td>
-          <td class="td-subtle truncate mono" style="max-width:190px">{{ msg.email }}</td>
-          <td class="td-subtle tnum">{{ msg.received_at | kst('%m/%d %H:%M') }}</td>
-        </tr>
-        {% else %}
-        <tr><td colspan="7"><div class="empty"><div class="empty__icon">{{ icon("messages", 24) }}</div><div class="empty__text">조건에 맞는 답변이 없습니다.</div></div></td></tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
+  {{ queue_table(messages, now, stage_labels, "조건에 맞는 답변이 없습니다.") }}
 </div>
 
 {% endblock %}

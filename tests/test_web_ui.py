@@ -31,6 +31,8 @@ def _client() -> TestClient:
 
 
 def _mock_dashboard_context():
+    # Row shape is the /messages one — the dashboard queue renders the same partial
+    # from the same context builder, so a row that works there works here.
     return {
         "recent_messages": [
             {
@@ -39,16 +41,18 @@ def _mock_dashboard_context():
                 "stage": "new",
                 "subject": "가격 문의",
                 "channel": "email",
-                "created_at": datetime(2026, 1, 1, 12, 0),
+                "email": "buyer@example.com",
+                "received_at": datetime(2026, 1, 1, 12, 0),
+                "waiting_since": datetime(2026, 1, 1, 12, 0),
             }
         ],
+        "now": datetime(2026, 1, 2, 12, 0),
         "awaiting_total": 7,
         "awaiting_new": 4,
         "awaiting_negotiation": 3,
         "received_today": 4,
         # The board renders below the queue; an empty board is enough for these tests.
-        "stages": [{"key": "new", "label": "New", "description": "새 문의", "rows": []}],
-        "stage_options": (("new", "New", "새 문의"),),
+        "stages": [{"key": "new", "label": "New", "rows": []}],
         "stage_labels": {"new": "New"},
     }
 
@@ -167,6 +171,84 @@ def test_dashboard_no_longer_shows_inquiry_type():
 def test_dashboard_message_link():
     r = _client().get("/")
     assert "/messages/1" in r.text
+
+
+@patch("src.api.web.routes.dashboard._dashboard_context", _mock_dashboard_context)
+def test_dashboard_queue_table_is_the_review_table():
+    """Both pages render partials/queue_table.html, so the columns cannot drift.
+
+    The dashboard's own copy of this table had gone stale: no 우선순위, no 소통 Email,
+    and its date column was headed 시간 while /messages headed the same value 접수 시간.
+    """
+    r = _client().get("/")
+    for header in ("상태", "Stage", "문의 제목", "우선순위", "채널", "소통 Email", "접수 시간"):
+        assert f'<th scope="col">{header}</th>' in r.text, header
+    assert "buyer@example.com" in r.text        # 소통 Email cell
+    assert "wait-dot--ok" in r.text             # 우선순위 dot, 1 day waited
+
+
+@patch("src.api.web.routes.dashboard._dashboard_context", _mock_dashboard_context)
+def test_dashboard_drops_the_receipt_ack_caption():
+    """'접수 확인 제외' captioned the queue; the table never listed acks anyway."""
+    r = _client().get("/")
+    assert "접수 확인 제외" not in r.text
+
+
+@patch("src.api.web.routes.dashboard._dashboard_context", _mock_dashboard_context)
+def test_pipeline_columns_show_the_label_only():
+    """The Korean gloss under every column label (New / 새 문의) is gone."""
+    r = _client().get("/")
+    assert "New" in r.text
+    assert "새 문의" not in r.text
+
+
+def test_dashboard_queue_is_the_five_oldest(db_session_factory, monkeypatch):
+    """답변 대기중인 문의 is a peek at the front of the FIFO queue, not the queue.
+
+    Five rows, oldest first — the rest is one click away on 답변 검토. The counters
+    beside the heading still see every awaiting row.
+    """
+    from src.api.web.routes import customer_ops, dashboard
+    from src.api.web.routes import messages as messages_route
+    from src.api.web.routes.dashboard import _dashboard_context
+
+    for module in (dashboard, messages_route, customer_ops):
+        monkeypatch.setattr(module, "SessionLocal", db_session_factory)
+
+    with db_session_factory() as session:
+        contact = Contact(normalized_email="q@example.com", email="q@example.com", full_name="Q")
+        session.add(contact)
+        session.flush()
+        for day in range(1, 8):
+            conv = Conversation(
+                contact_id=contact.id,
+                stage="new",
+                inquiry_subject=f"문의-{day:02d}",
+                created_at=datetime(2026, 1, day, 9, 0),
+            )
+            session.add(conv)
+            session.flush()
+            session.add(
+                Message(
+                    conversation_id=conv.id,
+                    direction="outgoing",
+                    channel="email",
+                    subject="RE: 문의",
+                    body="draft",
+                    status="pending_approval",
+                )
+            )
+        session.commit()
+
+    ctx = _dashboard_context()
+    assert [row["subject"] for row in ctx["recent_messages"]] == [
+        "문의-01",
+        "문의-02",
+        "문의-03",
+        "문의-04",
+        "문의-05",
+    ]
+    assert ctx["awaiting_total"] == 7
 
 
 # ---------- Message detail ----------

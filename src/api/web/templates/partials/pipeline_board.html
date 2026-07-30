@@ -6,8 +6,10 @@
 <div class="kanban" data-pipeline-board>
   {% for stage in stages %}
   <section class="kanban-column" id="stage-{{ stage.key }}" data-stage="{{ stage.key }}">
+    {# Label only. The Korean gloss under it (New / 새 문의) said nothing the label did
+       not, on all seven columns at once. #}
     <header class="kanban-column__header">
-      <div><strong>{{ stage.label }}</strong><small>{{ stage.description }}</small></div>
+      <strong>{{ stage.label }}</strong>
       <span class="kanban-column__count tnum">{{ stage.rows | length }}</span>
     </header>
     <div class="kanban-column__body" data-dropzone>
@@ -21,12 +23,6 @@
           <small>{{ row.contact.email or '-' }}</small>
           <small>문의 #{{ row.conversation.hubspot_ticket_id or row.conversation.id }} · {{ row.last_activity | kst('%m/%d %H:%M') }}</small>
         </a>
-        <form method="post" action="/pipeline/conversations/{{ row.conversation.id }}/stage">
-          <label class="sr-only" for="stage-conversation-{{ row.conversation.id }}">단계 변경</label>
-          <select class="select select--compact" id="stage-conversation-{{ row.conversation.id }}" name="stage" onchange="this.form.submit()">
-            {% for value, label, description in stage_options %}<option value="{{ value }}" {% if value == row.stage %}selected{% endif %}>{{ label }}</option>{% endfor %}
-          </select>
-        </form>
       </article>
       {% else %}<div class="kanban-empty">여기로 카드를 옮길 수 있습니다.</div>{% endfor %}
     </div>
@@ -54,8 +50,6 @@
   board.addEventListener("dragstart", function (event) {
     var card = event.target.closest("[data-conversation-id]");
     if (!card) return;
-    // Dragging from inside the stage <select> must not move the card.
-    if (event.target.closest("select, form")) { event.preventDefault(); return; }
     dragged = card;
     origin = card.closest("[data-stage]");
 

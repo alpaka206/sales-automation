@@ -9,6 +9,12 @@
   <link rel="stylesheet" href="/static/console.css">
   <script src="https://unpkg.com/htmx.org@2.0.4"></script>
   <script src="/static/a11y.js" defer></script>
+  {# Restore the collapsed nav BEFORE the first paint — a deferred script would let the
+     full-width sidebar flash on every page load. Wrapped: localStorage throws when
+     storage is blocked, and this must never break the page. #}
+  <script>
+    try { if (localStorage.getItem("perso.nav") === "collapsed") document.documentElement.classList.add("nav-collapsed"); } catch (e) {}
+  </script>
   {% block head %}{% endblock %}
 </head>
 {% set _session_user = request.state.user if (request and request.state) else None %}
@@ -19,7 +25,9 @@
     {% include "partials/nav.html" %}
 
     <div class="content">
-      <main class="main" id="main" tabindex="-1">
+      {# main_class lets a page opt into a different scroll model — see .main--fit,
+         used by the dashboard so its board fills the screen instead of running past it. #}
+      <main class="main {% block main_class %}{% endblock %}" id="main" tabindex="-1">
         {% block content %}{% endblock %}
       </main>
     </div>

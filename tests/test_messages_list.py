@@ -96,6 +96,47 @@ def test_stage_chip_filters_the_bucket(queue):
     }
 
 
+def test_stage_chips_differ_by_status_bucket(queue):
+    """The two buckets sit at opposite ends of the pipeline.
+
+    발송 대기 can only hold tickets nobody has answered (New) or ones being negotiated;
+    sending is what moves a ticket past New, so 발송 완료 offers the downstream stages
+    instead. One shared chip row offered New to 발송 완료 (always empty) and hid
+    Won/Lost/Closed from it.
+    """
+    awaiting = _messages_list_context(status="awaiting")["stage_chips"]
+    sent = _messages_list_context(status="sent")["stage_chips"]
+    assert [key for key, _ in awaiting] == ["", "new", "negotiation"]
+    assert [key for key, _ in sent] == [
+        "",
+        "meeting_link_sent",
+        "negotiation",
+        "reminder_sent",
+        "won",
+        "closed_lost",
+        "closed",
+    ]
+    # Labels and order are the board's, not a second hand-written list.
+    assert [label for _, label in sent] == [
+        "전체",
+        "Meeting Link Sent",
+        "Negotiating",
+        "Reminder Sent",
+        "Won",
+        "Lost",
+        "Closed",
+    ]
+
+
+def test_stage_carried_over_from_the_other_bucket_falls_back_to_all(queue):
+    """The bucket chips keep the current stage in their href, so 발송 대기(New) → 발송 완료
+    arrives with stage=new — a combination that can never match. Show everything the
+    bucket has instead of an empty table."""
+    ctx = _messages_list_context(status="sent", stage="new")
+    assert ctx["filter_stage"] == ""
+    assert _emails(status="sent", stage="new") == _emails(status="sent")
+
+
 def test_rows_carry_the_inquiry_subject_not_our_reply_subject(queue):
     rows = _messages_list_context(status="awaiting")["messages"]
     assert all(row["subject"].startswith("문의 ") for row in rows)
