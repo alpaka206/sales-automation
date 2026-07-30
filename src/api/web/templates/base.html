@@ -5,10 +5,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>{% block title %}PERSO Inbound{% endblock %}</title>
   <link rel="icon" type="image/png" href="/static/logo.png">
-  <link rel="stylesheet" href="/static/tokens.css">
-  <link rel="stylesheet" href="/static/console.css">
+  {# asset_url stamps each file with its mtime — see routes/_shared.py. Without it a
+     browser can keep using a cached console.css for hours after it changes. #}
+  <link rel="stylesheet" href="{{ asset_url('tokens.css') }}">
+  <link rel="stylesheet" href="{{ asset_url('console.css') }}">
   <script src="https://unpkg.com/htmx.org@2.0.4"></script>
-  <script src="/static/a11y.js" defer></script>
+  <script src="{{ asset_url('a11y.js') }}" defer></script>
   {# Restore the collapsed nav BEFORE the first paint — a deferred script would let the
      full-width sidebar flash on every page load. Wrapped: localStorage throws when
      storage is blocked, and this must never break the page. #}

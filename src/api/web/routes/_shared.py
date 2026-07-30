@@ -11,7 +11,28 @@ from fastapi.templating import Jinja2Templates
 
 # routes/ lives under web/; templates are at web/templates.
 _TEMPLATE_DIR = Path(__file__).parent.parent / "templates"
+_STATIC_DIR = Path(__file__).parent.parent / "static"
 templates = Jinja2Templates(directory=str(_TEMPLATE_DIR))
+
+
+def asset_url(name: str) -> str:
+    """``/static/<name>`` stamped with the file's mtime.
+
+    StaticFiles serves only etag/last-modified, so a browser that already has
+    console.css can go on using its copy without asking — a CSS or JS change then looks
+    like it did nothing until someone hard-reloads, which is exactly what happened while
+    the nav toggle was being added (it rendered as an unstyled default button). A changed
+    file gets a new URL here, and no cache can answer a URL it has never seen. Falls back
+    to the plain path if the file is missing, so a bad name is a 404, not a 500.
+    """
+    try:
+        stamp = int((_STATIC_DIR / name).stat().st_mtime)
+    except OSError:
+        return f"/static/{name}"
+    return f"/static/{name}?v={stamp}"
+
+
+templates.env.globals["asset_url"] = asset_url
 
 # All timestamps are stored as UTC (naive, via models._utcnow). The operator is in
 # Korea, so render everything in KST. Centralised as a Jinja filter so every

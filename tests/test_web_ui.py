@@ -125,6 +125,24 @@ def test_dashboard_loads_design_css():
 
 
 @patch("src.api.web.routes.dashboard._dashboard_context", _mock_dashboard_context)
+def test_static_assets_are_cache_busted():
+    """A CSS/JS change has to reach the operator without a hard reload.
+
+    StaticFiles sends no Cache-Control of its own, so Chrome kept serving a cached
+    console.css and a finished UI change rendered as the old one (the nav toggle showed
+    up as an unstyled default button). Two defences: the URL carries the file's mtime, and
+    /static answers no-cache so even an un-stamped URL is revalidated.
+    """
+    import re
+
+    r = _client().get("/")
+    assert re.search(r"/static/console\.css\?v=\d+", r.text)
+    assert re.search(r"/static/tokens\.css\?v=\d+", r.text)
+    assert re.search(r"/static/a11y\.js\?v=\d+", r.text)
+    assert _client().get("/static/console.css").headers["cache-control"] == "no-cache"
+
+
+@patch("src.api.web.routes.dashboard._dashboard_context", _mock_dashboard_context)
 def test_dashboard_has_htmx():
     r = _client().get("/")
     assert "htmx.org" in r.text
