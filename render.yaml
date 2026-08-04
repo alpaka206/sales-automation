@@ -22,12 +22,17 @@ services:
     healthCheckPath: /healthz
     autoDeploy: true
     # The console is a React app compiled ahead of time, and its output is gitignored,
-    # so nothing arrives with the checkout. Without this the service comes up healthy and
-    # every screen — including sign-in, which serves the same document — answers 503.
-    # The `test -f` is deliberate: a build that produced no bundle must FAIL the deploy,
-    # leaving the previous release serving, rather than publishing a console nobody can
-    # log into.
+    # so nothing arrives with the checkout. Without the npm lines the service comes up
+    # and every screen — including sign-in, which serves the same document — answers 503.
+    #
+    # `set -e` is load-bearing. A multi-line buildCommand is a shell script, and a
+    # script's exit status is its LAST command's. Without it npm could fail, `test -f`
+    # could fail, and the build would still "succeed" because init_db.py at the bottom
+    # returned 0 — which is exactly how a release with no console reached production and
+    # reported a successful build.
     buildCommand: |
+      set -e
+      node --version && npm --version
       npm --prefix frontend ci
       npm --prefix frontend run build
       test -f src/api/static/app/index.html
