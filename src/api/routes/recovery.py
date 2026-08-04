@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Form, HTTPException, Request
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import RedirectResponse
 from sqlalchemy import select, update
 from sqlalchemy.orm import joinedload
@@ -82,6 +83,51 @@ def recovery_pending_count(context: dict) -> int:
     return sum(
         len(context[key]) for key in ("messages", "inbound_jobs", "sync_failures")
     )
+
+
+@router.post("/operations/recovery/hubspot-sync")
+async def hubspot_reconcile(request: Request, apply: str = Form("")):
+    """최신화 — ask HubSpot about every thread we are still holding an answer for.
+
+    The drift this exists for: a ticket answered, moved or deleted in HubSpot while our
+    queue still shows an unsent draft, so the operator is asked to send a reply the
+    customer already has — or one for a thread that no longer exists.
+
+    Read-mostly. It sends nothing and writes nothing to HubSpot; the only local writes
+    retire drafts and close threads whose ticket is gone.
+    """
+    from ...agents.hubspot_reconcile import reconcile_with_hubspot
+
+    # apply=false unless the operator confirmed. Stage moves land either way; retiring a
+    # draft on a 404 does not, because 404 is also what a ticket id from another portal
+    # or a backfilled row looks like.
+    report = await run_in_threadpool(reconcile_with_hubspot, apply=apply == "true")
+    with SessionLocal() as session:
+        _audit(session, request, "hubspot_reconcile", "conversation", report["retired"])
+        session.commit()
+    return report
+
+
+@router.post("/operations/recovery/clear-failures")
+async def clear_send_failures(request: Request):
+    """Empty the 발송·작성 실패 list.
+
+    Retires rather than deletes: `rejected` is the status the review screen already uses
+    for "this draft will not be sent", so the row leaves every queue while the thread
+    keeps its history. A failure worth investigating should be investigated before this
+    is pressed — that is why it is a button an operator chooses, not a sweep on a timer.
+    """
+    with SessionLocal() as session:
+        rows = session.scalars(
+            select(Message).where(
+                Message.status.in_(["send_failed", "draft_failed", "delivery_unknown"])
+            )
+        ).all()
+        for row in rows:
+            row.status = "rejected"
+        _audit(session, request, "clear_send_failures", "message", len(rows))
+        session.commit()
+    return {"cleared": len(rows)}
 
 
 @router.get("/operations/recovery")

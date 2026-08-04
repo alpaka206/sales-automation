@@ -4,8 +4,8 @@ import { useState } from "react";
 import { getJSON, postForm } from "../lib/api";
 import { kst } from "../lib/format";
 import { Modal } from "../ui/Modal";
-import { Loading } from "../ui/Loading";
 import { DataTable } from "../ui/DataTable";
+import { Loading } from "../ui/Loading";
 
 // 복구 — the tab with work on it. Read-only lists plus the retry/resolve actions, which
 // post to the routes they always did so the retry logic stays server-side.
@@ -22,6 +22,8 @@ type Data = {
 export function Recovery() {
   const queryClient = useQueryClient();
   const [pending, setPending] = useState<Action | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [note, setNote] = useState<string | null>(null);
   const { data, isPending, error } = useQuery({
     queryKey: ["recovery"],
     queryFn: () => getJSON<Data>("/api/ui/recovery"),
@@ -46,8 +48,32 @@ export function Recovery() {
 
   async function run(action: Action) {
     setPending(null);
+    if (action.path.endsWith("/clear-failures")) {
+      await sync(action.path, {}, (r) => `발송 실패 ${r.cleared}건 정리됨`);
+      return;
+    }
+    if (action.path.endsWith("/hubspot-sync")) {
+      await sync(action.path, action.body ?? {}, (r) => `초안 ${r.retired}건 종료됨`);
+      return;
+    }
     await postForm(action.path, action.body ?? {});
     await queryClient.invalidateQueries({ queryKey: ["recovery"] });
+  }
+
+  /** HubSpot 최신화 and the failure sweep. Deliberately small: the result is one line,
+   *  because the answer is usually "nothing to do" and that should not need a dialog. */
+  async function sync(path: string, body: Record<string, string>, describe: (r: any) => string) {
+    setBusy(path);
+    setNote(null);
+    try {
+      const response = await postForm(path, body);
+      setNote(describe(await response.json()));
+      await queryClient.invalidateQueries();
+    } catch (error) {
+      setNote(`실패: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setBusy(null);
+    }
   }
 
   const section = (title: string, hint: string, rows: Msg[], actions?: (row: Msg) => Action[]) => (
@@ -97,6 +123,42 @@ export function Recovery() {
 
   return (
     <>
+      <div className="filter-bar mb-gap" style={{ justifyContent: "flex-start", gap: 8 }}>
+        {/* Two passes. The first only counts: a 404 from HubSpot is how a deleted ticket
+            looks, but it is also how a ticket id from another portal or a backfilled row
+            looks, and retiring a draft is not undoable. Stage moves apply on the first
+            pass — those are just agreeing with what HubSpot already shows. */}
+        <button type="button" className="btn btn--subtle btn--sm" disabled={busy !== null}
+                onClick={() => void sync("/operations/recovery/hubspot-sync", {}, (r) => {
+                  if (r.error) return r.error;
+                  const moved = r.moved + r.swept;
+                  if (r.deleted > 0) {
+                    setPending({
+                      label: `초안 ${r.deleted}건 종료`,
+                      path: "/operations/recovery/hubspot-sync",
+                      body: { apply: "true" },
+                      danger: true,
+                      confirm: `HubSpot에 없는 티켓이 ${r.deleted}건입니다. 해당 티켓의 대기 중인 초안을 종료하고 문의를 '협상 전 종료'로 옮깁니다. 대화 기록은 남습니다.`,
+                    });
+                    return `확인 ${r.checked}건 · 단계 정정 ${moved} · 삭제된 티켓 ${r.deleted}건 확인 필요`;
+                  }
+                  return `확인 ${r.checked}건 · 단계 정정 ${moved} · 정리할 항목 없음`;
+                })}>
+          {busy === "/operations/recovery/hubspot-sync" && <span className="spinner" style={{ marginRight: 6 }} />}
+          HubSpot 최신화
+        </button>
+        <button type="button" className="btn btn--subtle btn--sm" disabled={busy !== null}
+                onClick={() => setPending({
+                  label: "발송 실패 내역 정리",
+                  path: "/operations/recovery/clear-failures",
+                  danger: true,
+                  confirm: "발송·작성 실패 목록을 모두 정리합니다. 각 건은 '거절' 상태가 되어 목록에서 사라지고, 대화 기록은 그대로 남습니다.",
+                })}>
+          발송 실패 정리
+        </button>
+        {note && <span className="t-xs t-subtle">{note}</span>}
+      </div>
+
       {/* delivery_unknown is not a retry: the mail may have gone out. The operator says
           which, and only the "not sent" branch queues it again — hence the confirm. */}
       {section("발송·작성 실패", "재시도하면 같은 워커 경로로 다시 처리합니다.", data.messages,
