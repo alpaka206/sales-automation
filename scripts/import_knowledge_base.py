@@ -1,4 +1,16 @@
-"""Import existing knowledge_base/*.md files into the knowledge_documents table."""
+r"""Seed the knowledge_documents table from the bundled Markdown files.
+
+The database is the source of truth for knowledge, not these files. They exist to give a
+fresh install something to answer with; after the first load, documents are edited in the
+console or refreshed from Notion (``scripts/sync_notion_local.py``).
+
+So this INSERTS what is missing and leaves what is already there alone. It used to upsert
+— re-running it overwrote every edit made since, which is exactly the failure mode of
+keeping content in two places. ``--force`` restores a document from its file on purpose.
+
+    .\.venv\Scripts\python.exe scripts/import_knowledge_base.py
+    .\.venv\Scripts\python.exe scripts/import_knowledge_base.py --force
+"""
 
 from __future__ import annotations
 
@@ -16,7 +28,8 @@ from src.db.models import KnowledgeDocument  # noqa: E402
 setup_logging()
 logger = logging.getLogger(__name__)
 
-KNOWLEDGE_DIR = Path(__file__).resolve().parents[1] / "knowledge_base"
+# Seeds moved under src/ so they ship in the wheel; the repo-root folder is gone.
+KNOWLEDGE_DIR = Path(__file__).resolve().parents[1] / "src" / "db" / "seeds" / "knowledge"
 _FRONTMATTER_RE = re.compile(r"\A---\s*\n(.*?)\n---\s*\n(.*)\Z", re.DOTALL)
 _LIST_INLINE_RE = re.compile(r"\[(.*)\]")
 
@@ -63,14 +76,15 @@ def _as_list(value: object) -> list[str]:
     return []
 
 
-def main() -> None:
-    """Read knowledge_base/*.md and upsert into knowledge_documents."""
+def main(force: bool = False) -> None:
+    """Insert any bundled document the database does not have yet."""
     if not KNOWLEDGE_DIR.exists():
         logger.warning("knowledge_base/ directory not found — nothing to import.")
         return
 
     md_files = sorted(KNOWLEDGE_DIR.glob("*.md"))
-    imported = 0
+    inserted = 0
+    kept = 0
 
     session = SessionLocal()
     try:
@@ -93,6 +107,11 @@ def main() -> None:
             status = str(meta.get("status") or "active") or "active"
 
             existing = session.query(KnowledgeDocument).filter_by(slug=slug).first()
+            if existing and not force:
+                # Already in the database, which owns it now. Overwriting here is how an
+                # operator's edit silently disappears on the next deploy.
+                kept += 1
+                continue
             if existing:
                 existing.title = title
                 existing.categories = categories
@@ -102,7 +121,7 @@ def main() -> None:
                 existing.scope = scope
                 existing.status = status
                 existing.body = body.strip()
-                logger.info("Updated existing doc: %s", slug)
+                logger.info("Restored from file (--force): %s", slug)
             else:
                 doc = KnowledgeDocument(
                     title=title,
@@ -117,10 +136,14 @@ def main() -> None:
                 )
                 session.add(doc)
                 logger.info("Inserted new doc: %s", slug)
-            imported += 1
+            inserted += 1
 
         session.commit()
-        logger.info("Import complete - %d document(s) processed.", imported)
+        logger.info(
+            "Seed complete - %d inserted, %d already in the database (left untouched).",
+            inserted,
+            kept,
+        )
     except Exception:
         session.rollback()
         raise
@@ -129,4 +152,6 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    import sys
+
+    main(force="--force" in sys.argv)

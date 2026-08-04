@@ -96,8 +96,13 @@ def test_migration_idempotent() -> None:
     up(engine)
 
 
-def test_import_script_upsert(tmp_path, monkeypatch) -> None:
-    """import_knowledge_base.py creates rows and is idempotent."""
+def test_import_script_seeds_then_stops_writing(tmp_path, monkeypatch) -> None:
+    """It creates missing rows and then leaves the database alone.
+
+    It used to upsert, so re-running it overwrote whatever had been edited in the console
+    or pulled from Notion since — the database owns knowledge now, and these files only
+    give a fresh install something to answer with.
+    """
     kb_dir = tmp_path / "knowledge_base"
     kb_dir.mkdir()
     (kb_dir / "pricing.md").write_text(
@@ -129,5 +134,11 @@ def test_import_script_upsert(tmp_path, monkeypatch) -> None:
     imp.main()
     assert session.query(KnowledgeDocument).count() == 1
     db_doc = session.query(KnowledgeDocument).first()
-    assert db_doc.title == "Pricing Updated"
-    assert db_doc.body == "New body."
+    assert db_doc.title == "Pricing"      # the database copy stands
+    assert db_doc.body == "Body here."
+
+    # …unless restoring from the file is the point.
+    imp.main(force=True)
+    restored = session.query(KnowledgeDocument).first()
+    assert restored.title == "Pricing Updated"
+    assert restored.body == "New body."

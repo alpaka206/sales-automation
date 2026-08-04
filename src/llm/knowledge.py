@@ -96,7 +96,7 @@ def reset_cache() -> None:
     """Invalidate cached knowledge-doc queries AND the company-rules prompt cache.
 
     Used by tests and by the web UI after a knowledge edit, so an operator who
-    also edited company_rules/*.md doesn't keep seeing stale rules until restart.
+    also edited a policy document doesn't keep seeing a stale copy until restart.
     """
     _load_from_db.cache_clear()
     from .prompts import get_company_rules
