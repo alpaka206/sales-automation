@@ -17,7 +17,7 @@ dependencies = [
     "google-genai>=0.3,<3",
     "google-api-python-client>=2.100,<3",
     "google-auth>=2.30,<3",
-    "cryptography>=48.0.1,<50",
+    "cryptography>=50.0.0,<51",
     # Lets Python verify TLS against the OS trust store. Required on networks that
     # re-sign HTTPS with a private root (the ESTsoft office appliance does); certifi
     # alone fails every outbound call there. See src/common/tls.py.
