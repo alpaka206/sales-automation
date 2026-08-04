@@ -53,7 +53,7 @@ export function Recovery() {
       return;
     }
     if (action.path.endsWith("/hubspot-sync")) {
-      await sync(action.path, action.body ?? {}, (r) => `초안 ${r.retired}건 종료됨`);
+      await sync(action.path, action.body ?? {}, (r) => `문의 ${r.retired}건 삭제됨`);
       return;
     }
     await postForm(action.path, action.body ?? {});
@@ -134,13 +134,13 @@ export function Recovery() {
                   const moved = r.moved + r.swept;
                   if (r.deleted > 0) {
                     setPending({
-                      label: `초안 ${r.deleted}건 종료`,
+                      label: `문의 ${r.deleted}건 삭제`,
                       path: "/operations/recovery/hubspot-sync",
                       body: { apply: "true" },
                       danger: true,
-                      confirm: `HubSpot에 없는 티켓이 ${r.deleted}건입니다. 해당 티켓의 대기 중인 초안을 종료하고 문의를 '협상 전 종료'로 옮깁니다. 대화 기록은 남습니다.`,
+                      confirm: `HubSpot에 없는 티켓이 ${r.deleted}건입니다. 해당 문의와 그 메일 기록을 완전히 삭제합니다 — 되돌릴 수 없습니다. 고객 정보와 계약, 직접 남긴 소통 기록은 그대로 남습니다.`,
                     });
-                    return `확인 ${r.checked}건 · 단계 정정 ${moved} · 삭제된 티켓 ${r.deleted}건 확인 필요`;
+                    return `확인 ${r.checked}건 · 단계 정정 ${moved} · HubSpot에 없는 티켓 ${r.deleted}건`;
                   }
                   return `확인 ${r.checked}건 · 단계 정정 ${moved} · 정리할 항목 없음`;
                 })}>

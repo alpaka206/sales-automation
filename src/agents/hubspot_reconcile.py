@@ -45,40 +45,71 @@ def _open_ticket_ids() -> list[tuple[int, str]]:
     return [(conv_id, str(ticket_id)) for conv_id, ticket_id in rows if ticket_id]
 
 
-def _close_deleted(conversation_id: int, ticket_id: str) -> int:
-    """The ticket is gone from HubSpot. Retire what we were holding for it.
+def delete_conversation(conversation_id: int, ticket_id: str) -> int:
+    """The ticket is gone from HubSpot, so the thread goes here too.
 
-    Retired, not deleted: the row is what answers "why did this customer never get a
-    reply" months later, and it costs nothing to keep. What matters to the operator is
-    that it leaves every queue, which `superseded` and the closed stage both do.
+    What goes: the conversation, its messages, its progress log. A thread whose ticket
+    was deleted is a thread that should not have existed.
+
+    What STAYS, and this is the part that matters:
+
+      * the Contact — a real person who may have other inquiries
+      * ContractRecord — money. A contract is never deleted because a ticket was; its
+        conversation_id is ON DELETE SET NULL for exactly this
+      * CustomerInteraction — the operator's own note about a meeting that really
+        happened, likewise detached rather than destroyed
+
+    Children are removed explicitly rather than left to the FK: the cascades are declared
+    ON DELETE, which SQLite only honours with foreign_keys=ON and which the ORM would
+    otherwise try to satisfy by nulling a NOT NULL column. Being explicit also makes the
+    blast radius readable, which for a delete is the point.
     """
-    from .stage_sync import add_progress
+    from sqlalchemy import delete, update
+
+    from ..db.models import ContractRecord, ConversationProgress, CustomerInteraction
 
     with SessionLocal() as session:
-        drafts = (
-            session.query(Message)
-            .filter(
-                Message.conversation_id == conversation_id,
-                Message.direction == "outgoing",
-                Message.status.in_(_UNSENT),
+        if session.get(Conversation, conversation_id) is None:
+            return 0
+        removed = session.query(Message).filter(
+            Message.conversation_id == conversation_id
+        ).count()
+
+        for model in (ContractRecord, CustomerInteraction):
+            session.execute(
+                update(model)
+                .where(model.conversation_id == conversation_id)
+                .values(conversation_id=None)
             )
-            .all()
+        session.execute(
+            delete(ConversationProgress).where(
+                ConversationProgress.conversation_id == conversation_id
+            )
         )
-        for draft in drafts:
-            draft.status = "superseded"
-        conv = session.get(Conversation, conversation_id)
-        if conv is not None:
-            conv.stage = "closed"
-        if drafts:
-            add_progress(
-                conversation_id,
-                "draft_retired",
-                f"HubSpot에서 티켓 {ticket_id}이(가) 삭제되어 대기 중이던 초안 "
-                f"{len(drafts)}건을 종료 처리했습니다.",
-                session=session,
-            )
+        session.execute(delete(Message).where(Message.conversation_id == conversation_id))
+        session.execute(delete(Conversation).where(Conversation.id == conversation_id))
         session.commit()
-    return len(drafts)
+
+    logger.info(
+        "Deleted conversation %s (HubSpot ticket %s is gone); %d message(s) removed.",
+        conversation_id, ticket_id, removed,
+    )
+    return removed
+
+
+def delete_by_ticket(ticket_id: str) -> int:
+    """Delete the thread for a ticket id, if we have one. For the webhook."""
+    with SessionLocal() as session:
+        conv = (
+            session.query(Conversation)
+            .filter(Conversation.hubspot_ticket_id == str(ticket_id))
+            .one_or_none()
+        )
+        conversation_id = conv.id if conv else None
+    if conversation_id is None:
+        return 0
+    delete_conversation(conversation_id, str(ticket_id))
+    return 1
 
 
 def reconcile_with_hubspot(*, apply: bool = False) -> dict:
@@ -89,13 +120,12 @@ def reconcile_with_hubspot(*, apply: bool = False) -> dict:
     replied to can be wrong about its stage without anyone being asked to do the wrong
     thing, and the poller sweeps those anyway.
 
-    ``apply=False`` is the default ON PURPOSE, and it is the difference between this
-    being safe and being a footgun. A stage move is reversible and gets applied either
-    way. Retiring a draft because HubSpot answered 404 is not, and 404 does not only mean
-    "deleted" — it is also what a ticket id from another portal, a backfilled row, or an
-    id we recorded wrong looks like. Testing this against a database of made-up ticket
-    ids retired three real drafts in one click, which is exactly the accident an operator
-    would have had. So the first pass only counts, and the operator confirms.
+    ``apply=False`` is the default ON PURPOSE, and it matters more now that the second
+    pass DELETES rather than retires. A stage move is reversible and gets applied either
+    way. A delete is not, and 404 does not only mean "deleted" — it is also what a ticket
+    id from another portal, a backfilled row, or an id we recorded wrong looks like.
+    Testing this against a database of made-up ticket ids acted on three threads in one
+    click. So the first pass only counts, and the operator confirms a number.
     """
     from .inbound_poller import reconcile_ticket_stages_once
     from .stage_sync import sync_stage_from_hubspot
@@ -128,7 +158,8 @@ def reconcile_with_hubspot(*, apply: bool = False) -> dict:
             if exc.response.status_code in (404, 410):
                 report["deleted"] += 1
                 if apply:
-                    report["retired"] += _close_deleted(conversation_id, ticket_id)
+                    delete_conversation(conversation_id, ticket_id)
+                    report["retired"] += 1
             else:
                 # 401/403 means the token is the problem, not the ticket. Saying "this
                 # ticket was deleted" then would be a lie with consequences.

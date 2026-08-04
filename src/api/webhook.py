@@ -106,6 +106,33 @@ def _map_hubspot_event(event: HubSpotWebhookEvent) -> str | None:
     return event_type if event.propertyValue == target else None
 
 
+# Deletion is deliberately NOT in _HUBSPOT_SUBSCRIPTION_MAP: a mapped type gets enqueued
+# as inbound work, and fetching a ticket that no longer exists is not work.
+_DELETION_SUBSCRIPTION = "ticket.deletion"
+
+
+def _handle_deletion(event: HubSpotWebhookEvent) -> int:
+    """A ticket deleted in HubSpot takes its thread with it.
+
+    Until now nothing looked for absence: the webhook only ever hears about creations and
+    property changes, and the poller sweeps tickets HubSpot has, never the ones it no
+    longer has. So a deleted ticket left an unsent draft sitting in 발송 대기 forever,
+    waiting on a thread that stopped existing.
+
+    Never raises. A bookkeeping failure must not 500 at HubSpot, which would have it
+    redeliver the whole batch.
+    """
+    if event.subscriptionType != _DELETION_SUBSCRIPTION:
+        return 0
+    try:
+        from ..agents.hubspot_reconcile import delete_by_ticket
+
+        return delete_by_ticket(str(event.objectId))
+    except Exception:
+        logger.exception("Ticket deletion sync failed for %s", event.objectId)
+        return 0
+
+
 def _sync_stage_change(event: HubSpotWebhookEvent) -> str | None:
     """Record a HubSpot-side stage move on our copy of the conversation.
 
@@ -209,7 +236,11 @@ async def webhook_hubspot_inbound(request: Request) -> dict:
             continue
         event_type = _map_hubspot_event(event)
         if event_type is None:
-            # Not inbound work — but it may still be a stage move we should record.
+            # Not inbound work — but it may be a ticket that is gone, or a stage move we
+            # should record.
+            if _handle_deletion(event):
+                results.append({"objectId": event.objectId, "status": "deleted"})
+                continue
             synced = _sync_stage_change(event)
             results.append(
                 {"objectId": event.objectId, "status": "stage_synced", "stage": synced}

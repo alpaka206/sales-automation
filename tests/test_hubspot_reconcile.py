@@ -102,8 +102,9 @@ def test_a_404_alone_never_retires_a_draft(monkeypatch, waiting_draft):
         assert session.get(Message, message_id).status == "pending_approval"
 
 
-def test_the_confirmed_pass_retires_and_closes(monkeypatch, waiting_draft):
-    """Once the operator has seen the count and said yes."""
+def test_the_confirmed_pass_deletes_the_thread(monkeypatch, waiting_draft):
+    """Once the operator has seen the count and said yes. The ticket was deleted in
+    HubSpot, so the thread goes with it."""
     from src.agents.hubspot_reconcile import reconcile_with_hubspot
 
     _hubspot_says_gone(monkeypatch)
@@ -113,9 +114,72 @@ def test_the_confirmed_pass_retires_and_closes(monkeypatch, waiting_draft):
 
     assert report["retired"] == 1
     with SessionLocal() as session:
-        assert session.get(Message, message_id).status == "superseded"
-        # Closed, not deleted: the thread still answers "why did this never get a reply".
-        assert session.get(Conversation, conversation_id).stage == "closed"
+        assert session.get(Message, message_id) is None
+        assert session.get(Conversation, conversation_id) is None
+
+
+def test_deleting_a_thread_never_takes_the_customer_or_the_money(waiting_draft):
+    """The blast radius, asserted rather than assumed. A ticket deleted in HubSpot says
+    nothing about whether the customer is real or whether they signed something."""
+    from decimal import Decimal
+
+    from src.agents.hubspot_reconcile import delete_conversation
+    from src.db.models import ContractRecord, CustomerInteraction
+
+    contact_id, conversation_id, _message_id = waiting_draft
+    with SessionLocal() as session:
+        session.add(ContractRecord(contact_id=contact_id, conversation_id=conversation_id,
+                                   status="active", amount=Decimal("1000"), currency="USD"))
+        session.add(CustomerInteraction(contact_id=contact_id, conversation_id=conversation_id,
+                                        channel="meeting", summary="미팅 요약"))
+        session.commit()
+
+    delete_conversation(conversation_id, "99999999")
+
+    with SessionLocal() as session:
+        assert session.get(Conversation, conversation_id) is None
+        assert session.get(Contact, contact_id) is not None, "the person is still real"
+        contract = session.query(ContractRecord).filter_by(contact_id=contact_id).one()
+        assert contract.amount == Decimal("1000"), "a contract is never deleted for this"
+        assert contract.conversation_id is None, "just detached"
+        note = session.query(CustomerInteraction).filter_by(contact_id=contact_id).one()
+        assert note.summary == "미팅 요약", "the meeting still happened"
+
+
+def test_a_deletion_webhook_removes_the_thread(monkeypatch, waiting_draft):
+    """HubSpot tells us when a ticket is deleted and nothing used to listen, so the draft
+    sat in 발송 대기 waiting on a thread that had stopped existing."""
+    from unittest.mock import patch
+
+    from fastapi.testclient import TestClient
+
+    from src.api.main import app
+    from src.common.config import settings
+
+    _contact_id, conversation_id, _message_id = waiting_draft
+    with (
+        patch.object(settings, "HUBSPOT_WEBHOOK_SECRET", ""),
+        patch.object(settings, "HUBSPOT_WEBHOOK_REQUIRE_SIGNATURE", False),
+        TestClient(app) as client,
+    ):
+        response = client.post(
+            "/webhooks/hubspot",
+            json=[{"subscriptionType": "ticket.deletion", "objectId": 99999999,
+                   "eventId": 1, "occurredAt": 1}],
+            headers={"X-Internal-Token": settings.INTERNAL_API_TOKEN},
+        )
+    assert response.status_code == 200, response.text
+    assert response.json()["results"][0]["status"] == "deleted"
+    with SessionLocal() as session:
+        assert session.get(Conversation, conversation_id) is None
+
+
+def test_a_deleted_ticket_is_never_queued_as_inbound_work():
+    """Fetching a ticket that no longer exists is not work. Mapping the subscription type
+    would have enqueued exactly that."""
+    from src.api import webhook
+
+    assert "ticket.deletion" not in webhook._HUBSPOT_SUBSCRIPTION_MAP
 
 
 def test_an_auth_failure_is_not_a_deleted_ticket(monkeypatch, waiting_draft):
