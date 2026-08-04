@@ -40,6 +40,30 @@ from .inbound_scoring import (  # noqa: F401 — re-exported for callers/tests
 
 logger = logging.getLogger(__name__)
 
+# Categories that are not sales leads at all (B2B 리드 대응 정책 §1). A reply shaped like
+# a sales answer is the wrong reply for these, so the draft says so instead of looking
+# like every other one in the queue.
+_NOT_A_LEAD = {
+    "spam": "영업·홍보 목적으로 보이는 문의입니다. 회신 전 판단이 필요합니다.",
+    "support": "제품 사용 중 문제(CS) 문의입니다. 세일즈 회신이 아니라 CS 응대 정책에 따라야 합니다.",
+    "recruiting": "채용 문의입니다. 세일즈 대상이 아닙니다.",
+}
+_NO_SOURCE = "정책 문서에서 근거를 찾지 못했습니다. 문서에 없는 내용을 지어내지 않았는지 확인하세요."
+
+
+def _review_note(category: str, had_documents: bool) -> str | None:
+    """Why this draft needs a closer look, or None when nothing stood out.
+
+    Both conditions come from the policy and both are known at drafting time: §1 says the
+    unqualified types are not sales leads, and §2-4 says not to invent what the documents
+    do not contain. A draft written with no document behind it is precisely the case that
+    rule exists for.
+    """
+    reasons = [note for key, note in _NOT_A_LEAD.items() if key == category]
+    if not had_documents:
+        reasons.append(_NO_SOURCE)
+    return " ".join(reasons) or None
+
 
 def _default_signature() -> str | None:
     """Which signature a new draft carries — an operator's choice, read per draft.
@@ -804,6 +828,9 @@ class InboundAgent:
             scope="inbound",
             llm=self.llm,
         )
+        # Recorded on the message: an answer with no document behind it is the one the
+        # guardrail about not inventing things exists for.
+        self._last_draft_had_documents = bool((knowledge_docs or "").strip())
         first_reply = self._is_first_reply(conv_id)
         draft = self.llm.complete(
             "inbound/draft_reply",
@@ -1118,6 +1145,11 @@ class InboundAgent:
             # in config can reopen it — see tests/test_safe_mode.py.
             msg.status = "pending_approval"
             msg.score_snapshot = score
+            # Not a second approval gate — every detailed reply already waits for a human.
+            # This says WHICH of the waiting ones is the risky one.
+            msg.review_note = _review_note(
+                classification.category, getattr(self, "_last_draft_had_documents", True)
+            )
             conv = session.get(Conversation, msg.conversation_id)
             if conv:
                 contact = session.get(Contact, conv.contact_id) if conv.contact_id else None

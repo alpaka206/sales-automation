@@ -224,6 +224,7 @@ def _message_detail_context(message_id: int) -> dict:
             ),
             "summary": conv.summary if conv else None,
             "customer_requests": conv.customer_requests if conv else None,
+            "review_note": msg.review_note,
             "signatures": list_signature_templates(),
             "domain_history": domain_history,
             "ticket": {
@@ -605,6 +606,8 @@ def _messages_list_context(
                 "subject": inquiry_subject or strip_reply_prefixes(msg.subject) or "(제목 없음)",
                 "channel": msg.channel,
                 "email": email or "-",
+                # Why this one is riskier than the rest, when it is.
+                "review_note": msg.review_note,
                 # New chip → when the ticket arrived; Negotiating → when they last
                 # wrote back. Both already on the row, no extra query.
                 "received_at": (

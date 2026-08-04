@@ -119,6 +119,10 @@ class Message(Base):
     # (migration 0045). None means "not translated yet", not "no translation needed".
     body_ko: Mapped[str | None] = mapped_column(Text, nullable=True)
     subject_ko: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Why this draft deserves a closer look than the rest. Every detailed reply already
+    # waits for a human; this says WHICH of them is the risky one (migration 0047).
+    # None is the normal case.
+    review_note: Mapped[str | None] = mapped_column(Text, nullable=True)
     # ``language`` = language the body is CURRENTLY in (a draft is "ko" until the
     # operator translates it). ``target_language`` = language it must be SENT in
     # (the inquiry's language); the send guard enforces body matches it.

@@ -15,6 +15,7 @@ export type QueueRow = {
   email: string;
   received_at: string;
   waiting_since: string | null;
+  review_note?: string | null;
 };
 
 const STATUS_LABELS: Record<string, string> = {
@@ -72,8 +73,24 @@ export function QueueTable({
         },
         { label: "Stage", width: "11%", className: "td-muted",
           cell: (row) => stageLabels[row.stage] ?? row.stage },
-        { label: "문의 제목", width: "30%", className: "truncate",
-          cell: (row) => <Link to={`/messages/${row.id}`}>{row.subject}</Link> },
+        {
+          label: "문의 제목",
+          width: "30%",
+          cell: (row) => (
+            <>
+              <Link to={`/messages/${row.id}`} className="truncate" style={{ display: "block" }}>
+                {row.subject}
+              </Link>
+              {/* Not a second approval gate — every one of these waits for a human
+                  anyway. It says which one to open first. */}
+              {row.review_note && (
+                <span className="pill pill--warn pill--sm" title={row.review_note}>
+                  <span className="pill__dot" />검토 필요
+                </span>
+              )}
+            </>
+          ),
+        },
         {
           // One dot wide, centred under its own heading.
           label: "우선순위",
