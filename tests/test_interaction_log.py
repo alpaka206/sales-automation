@@ -19,7 +19,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from src.api.main import app
-from src.api.web.routes.customer_ops import MANUAL_LOG_STAGES, PIPELINE_STAGES
+from src.api.routes.customer_ops import MANUAL_LOG_STAGES, PIPELINE_STAGES
 from src.db.base import Base
 from src.db.models import Contact, Conversation, CustomerInteraction, Message
 
@@ -75,9 +75,9 @@ def log_db():
             ids[f"{key}_message"] = message.id
         session.commit()
     with (
-        patch("src.api.web.routes.customer_ops.SessionLocal", factory),
-        patch("src.api.web.routes.messages.SessionLocal", factory),
-        patch("src.api.web.routes.dashboard.SessionLocal", factory),
+        patch("src.api.routes.customer_ops.SessionLocal", factory),
+        patch("src.api.routes.messages.SessionLocal", factory),
+        patch("src.api.routes.dashboard.SessionLocal", factory),
     ):
         yield factory, ids
 
@@ -154,7 +154,7 @@ def test_a_column_loads_one_page_and_still_counts_them_all(log_db):
     request, to draw columns nobody scrolls to the bottom of. It reads a page now — but
     the header count must stay the real total, or capping quietly changes the number an
     operator reads off the board."""
-    from src.api.web.routes.customer_ops import _pipeline_rows
+    from src.api.routes.customer_ops import _pipeline_rows
 
     factory, ids = log_db
     with factory() as session:
@@ -176,7 +176,7 @@ def test_a_column_loads_one_page_and_still_counts_them_all(log_db):
 
 
 def test_a_column_page_picks_up_where_the_last_one_stopped(log_db):
-    from src.api.web.routes.customer_ops import _pipeline_rows
+    from src.api.routes.customer_ops import _pipeline_rows
 
     factory, ids = log_db
     with factory() as session:
@@ -361,7 +361,7 @@ def test_the_ticket_screen_separates_its_own_records_from_the_rest(log_db):
             ]
         )
         session.commit()
-    from src.api.web.routes.messages import _message_detail_context
+    from src.api.routes.messages import _message_detail_context
 
     ctx = _message_detail_context(ids["negotiating_message"])
     assert [row["summary"] for row in ctx["ticket_interactions"]] == ["전화로 납기 협의"]

@@ -9,8 +9,8 @@ from fastapi.responses import RedirectResponse
 from sqlalchemy import select, update
 from sqlalchemy.orm import joinedload
 
-from ....db.models import Conversation, Event, InboundJob, Message
-from ....db.session import SessionLocal
+from ...db.models import Conversation, Event, InboundJob, Message
+from ...db.session import SessionLocal
 from ..auth import actor_name
 
 router = APIRouter(tags=["web"])

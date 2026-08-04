@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 
 from src.api.main import app, validate_startup_settings
 from src.api.security import is_web_ui_path, web_role_allows
-from src.api.web.routes._shared import external_url
+from src.api.routes._shared import external_url
 from src.common.config import settings
 
 

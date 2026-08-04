@@ -11,13 +11,13 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from sqlalchemy import func, select
 from sqlalchemy.orm import joinedload
 
-from ....agents.approval import ApprovalError, approve, reject
-from ....common.config import settings
-from ....common.subjects import strip_reply_prefixes
-from ....common.textwash import text_wash
-from ....db.conversation_history import add_progress
-from ....db.email_templates import list_signature_templates
-from ....db.models import (
+from ...agents.approval import ApprovalError, approve, reject
+from ...common.config import settings
+from ...common.subjects import strip_reply_prefixes
+from ...common.textwash import text_wash
+from ...db.conversation_history import add_progress
+from ...db.email_templates import list_signature_templates
+from ...db.models import (
     Contact,
     ContractRecord,
     Conversation,
@@ -27,8 +27,8 @@ from ....db.models import (
     DomainProfile,
     Message,
 )
-from ....db.session import SessionLocal
-from ....llm.translate import needs_korean, to_korean, translate_to
+from ...db.session import SessionLocal
+from ...llm.translate import needs_korean, to_korean, translate_to
 from ..auth import actor_name
 from ._shared import esc
 
@@ -346,7 +346,7 @@ def _domain_history(session, domain: str, exclude_conv_id: int | None = None) ->
     to. Personal/free-email domains (gmail, naver, …) are NEVER grouped — that would
     expose one customer's history to an unrelated customer on the same provider.
     """
-    from ....common.domains import is_personal_domain
+    from ...common.domains import is_personal_domain
 
     if not domain or is_personal_domain(domain):
         return {"domain": domain, "total": 0, "rows": []}
@@ -581,7 +581,7 @@ async def message_translate(
         # Persist the signature choice; when a branded signature replaces the text
         # one, strip the text signature BEFORE translating so it never gets carried
         # (translated) into the outgoing body.
-        from ....integrations.email_html import strip_known_signature, strips_text_signature
+        from ...integrations.email_html import strip_known_signature, strips_text_signature
 
         sig_key = _clean_signature_key(signature_key)
         msg.signature_key = sig_key
@@ -681,7 +681,7 @@ async def message_send(
             '<div class="text-green-600 text-sm font-medium">승인 완료 — 백그라운드 발송 대기 중</div>'
         )
 
-    from ....agents.send_worker import send_approved_now
+    from ...agents.send_worker import send_approved_now
 
     if not await send_approved_now(message_id):
         return HTMLResponse(
@@ -700,7 +700,7 @@ async def message_preview(body: str = Form(""), signature_key: str = Form("")):
     and returns the same styled HTML the send path attaches, so the approver sees
     the real look, including a branded signature replacing the text one.
     """
-    from ....integrations.email_html import (
+    from ...integrations.email_html import (
         branded_signature_html,
         strip_known_signature,
         strips_text_signature,

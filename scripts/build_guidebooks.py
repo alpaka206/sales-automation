@@ -456,7 +456,7 @@ def add_page_break(doc: Document) -> None:
 
 
 def add_cover(doc: Document, *, kicker: str, title: str, subtitle: str, audience: str) -> None:
-    logo = ROOT / "src" / "api" / "web" / "static" / "logo.png"
+    logo = ROOT / "src" / "api" / "static" / "logo.png"
     p_logo = doc.add_paragraph()
     p_logo.alignment = WD_ALIGN_PARAGRAPH.CENTER
     p_logo.paragraph_format.space_before = Pt(72)

@@ -38,9 +38,9 @@ from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from google.auth.transport import requests as google_requests
 from google.oauth2 import id_token as google_id_token
 
-from ...common.config import settings
-from ...db.models import User
-from ...db.session import SessionLocal
+from ..common.config import settings
+from ..db.models import User
+from ..db.session import SessionLocal
 
 logger = logging.getLogger(__name__)
 

@@ -33,7 +33,7 @@ def customer_db():
     )
     Base.metadata.create_all(engine)
     factory = sessionmaker(bind=engine, expire_on_commit=False)
-    with patch("src.api.web.routes.customer_ops.SessionLocal", factory):
+    with patch("src.api.routes.customer_ops.SessionLocal", factory):
         yield factory
 
 
@@ -80,7 +80,7 @@ def test_recent_activity_is_the_latest_thing_that_happened(customer_db) -> None:
     latest of the three timestamps. `incoming or outgoing` returned the customer's own
     message even when our reply came after it: a thread answered today reported the
     inquiry's date and sank below threads nobody had touched in a week."""
-    from src.api.web.routes.customer_ops import _customer_rows
+    from src.api.routes.customer_ops import _customer_rows
 
     with customer_db() as session:
         for email, incoming, outgoing in (
@@ -142,7 +142,7 @@ def customer_db_prod_session():
     )
     Base.metadata.create_all(engine)
     factory = sessionmaker(bind=engine, expire_on_commit=True)
-    with patch("src.api.web.routes.customer_ops.SessionLocal", factory):
+    with patch("src.api.routes.customer_ops.SessionLocal", factory):
         yield factory
 
 
@@ -331,7 +331,7 @@ def test_customer_detail_offers_only_stages_the_board_still_has(customer_id) -> 
     handler then rejected with a 400, so the form could not be submitted at all. The
     server ships the options now, from the board's own tuple.
     """
-    from src.api.web.routes.customer_ops import PIPELINE_STAGES
+    from src.api.routes.customer_ops import PIPELINE_STAGES
 
     with TestClient(app) as client:
         page = client.get(f"/api/ui/customers/{customer_id}").json()
@@ -384,7 +384,7 @@ def test_sync_state_separates_blocked_from_failed() -> None:
     row, or pre-launch safe mode). Reporting None as success promised the operator that
     HubSpot and the workbook had moved when nothing had been sent.
     """
-    from src.api.web.routes.customer_ops import _sync_state
+    from src.api.routes.customer_ops import _sync_state
 
     assert _sync_state({"sheets": True, "hubspot": True}) == "ok"
     assert _sync_state({"sheets": None, "hubspot": True}) == "ok"
@@ -434,7 +434,7 @@ def test_board_move_finds_the_sheet_row_on_the_contact(customer_db, customer_id)
     to read the conversation's alone — so a drop for an imported inquiry skipped the Sheet
     while the same move from the customer page updated it.
     """
-    from src.api.web.routes.customer_ops import _set_conversation_stage
+    from src.api.routes.customer_ops import _set_conversation_stage
 
     with customer_db() as session:
         contact = session.get(Contact, customer_id)
@@ -458,7 +458,7 @@ def test_the_workbook_has_no_wording_for_two_board_stages() -> None:
     actually uses in that column — invented wording would corrupt their filters. When they
     are added here, delete this test.
     """
-    from src.api.web.routes.customer_ops import PIPELINE_STAGES
+    from src.api.routes.customer_ops import PIPELINE_STAGES
     from src.integrations.google_sheets import _STAGE_VALUES
 
     missing = [key for key, _label, _description in PIPELINE_STAGES if key not in _STAGE_VALUES]

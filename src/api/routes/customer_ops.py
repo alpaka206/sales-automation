@@ -15,9 +15,9 @@ from fastapi import APIRouter, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import func, select
 
-from ....agents.stage_sync import customer_state_for
-from ....common.config import settings
-from ....db.models import (
+from ...agents.stage_sync import customer_state_for
+from ...common.config import settings
+from ...db.models import (
     Contact,
     ContractRecord,
     Conversation,
@@ -25,7 +25,7 @@ from ....db.models import (
     CustomerProfile,
     Message,
 )
-from ....db.session import SessionLocal
+from ...db.session import SessionLocal
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["web"])
@@ -94,7 +94,7 @@ def _announce(topic: str) -> None:
 
 def _stage_id(stage: str) -> str:
     """Local stage key -> HubSpot stage id. Inverse of stage_sync.local_stage_for()."""
-    from ....agents.stage_sync import LOCAL_STAGE_TO_SETTING
+    from ...agents.stage_sync import LOCAL_STAGE_TO_SETTING
 
     attr = LOCAL_STAGE_TO_SETTING.get(stage)
     return (getattr(settings, attr, "") or "").strip() if attr else ""
@@ -184,8 +184,8 @@ async def _sync_stage(
     which is a failure the operator should be warned about. Collapsing "blocked" into
     False made every single card move report 동기화 실패 while the 대전제 is engaged.
     """
-    from ....common.safe_mode import ExternalWriteBlocked, live_sheets_writes
-    from ....integrations.google_sheets import is_configured, update_inbound_stage
+    from ...common.safe_mode import ExternalWriteBlocked, live_sheets_writes
+    from ...integrations.google_sheets import is_configured, update_inbound_stage
 
     with SessionLocal() as session:
         profile = session.get(CustomerProfile, contact_id)
@@ -201,7 +201,7 @@ async def _sync_stage(
     stage_id = _stage_id(stage)
     if not ticket_id or not stage_id:
         return {"sheets": sheet_result, "hubspot": None}
-    from ....integrations.hubspot import HubSpotClient, HubSpotNotConfigured
+    from ...integrations.hubspot import HubSpotClient, HubSpotNotConfigured
 
     try:
         client = HubSpotClient()
@@ -845,7 +845,7 @@ async def contract_add(
         contract_id = contract.id
 
     if status in {"active", "contracted"}:
-        from ....agents.sheet_sync import sync_contract_order
+        from ...agents.sheet_sync import sync_contract_order
 
         await asyncio.to_thread(sync_contract_order, contract_id)
     return RedirectResponse(f"/customers/{contact_id}#contracts", status_code=303)
@@ -905,14 +905,14 @@ async def contract_update(
 
     # As in contract_add: the contract status no longer drives the board stage.
     if status in {"contracted", "active"}:
-        from ....agents.sheet_sync import sync_contract_order
+        from ...agents.sheet_sync import sync_contract_order
 
         await asyncio.to_thread(sync_contract_order, contract_id)
     return RedirectResponse(f"/customers/{contact_id}#contracts", status_code=303)
 
 
 def _sync_hubspot(contact_id: int) -> int:
-    from ....integrations.hubspot import HubSpotClient
+    from ...integrations.hubspot import HubSpotClient
 
     with SessionLocal() as session:
         contact = session.get(Contact, contact_id)
@@ -1044,7 +1044,7 @@ async def pipeline_backfill(request: Request):
     next tick. HubSpot is read-only here and no mail can result — see
     src/agents/hubspot_backfill.py.
     """
-    from ....agents.hubspot_backfill import request_hubspot_backfill
+    from ...agents.hubspot_backfill import request_hubspot_backfill
     from ..auth import actor_name
 
     _require_integration_admin(request)
@@ -1078,7 +1078,7 @@ def _require_integration_admin(request: Request) -> None:
 
 @router.get("/integrations/google-sheets/connect")
 async def google_sheets_connect(request: Request):
-    from ....integrations.google_oauth import authorization_url, make_state
+    from ...integrations.google_oauth import authorization_url, make_state
 
     _require_integration_admin(request)
     try:
@@ -1111,7 +1111,7 @@ async def google_sheets_callback(
     code: str = "",
     error: str = "",
 ):
-    from ....integrations.google_oauth import exchange_code, validate_state
+    from ...integrations.google_oauth import exchange_code, validate_state
 
     _require_integration_admin(request)
     try:
@@ -1144,7 +1144,7 @@ async def google_sheets_callback(
 
 @router.post("/integrations/google-sheets/disconnect")
 async def google_sheets_disconnect(request: Request):
-    from ....integrations.google_oauth import delete_grant, env_grant
+    from ...integrations.google_oauth import delete_grant, env_grant
 
     _require_integration_admin(request)
     if env_grant() is not None:
@@ -1160,7 +1160,7 @@ async def google_sheets_disconnect(request: Request):
 
 @router.post("/integrations/google-sheets/sync")
 async def google_sheets_sync(request: Request):
-    from ....agents.sheet_sync import request_full_sheet_sync
+    from ...agents.sheet_sync import request_full_sheet_sync
     from ..auth import actor_name
 
     _require_integration_admin(request)

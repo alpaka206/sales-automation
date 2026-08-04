@@ -8,7 +8,7 @@ export default defineConfig({
   plugins: [react()],
   base: "/static/app/",
   build: {
-    outDir: "../src/api/web/static/app",
+    outDir: "../src/api/static/app",
     emptyOutDir: true,
   },
   server: {

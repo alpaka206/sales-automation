@@ -6,7 +6,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from src.api.main import app
-from src.api.web.routes.customer_ops import GOOGLE_SHEETS_STATE_COOKIE
+from src.api.routes.customer_ops import GOOGLE_SHEETS_STATE_COOKIE
 from src.integrations import google_oauth
 
 

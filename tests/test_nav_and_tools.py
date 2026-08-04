@@ -150,7 +150,7 @@ def test_the_calculator_document_is_still_served():
 def test_the_quote_calculator_keeps_its_pricing_out_of_the_public_mount():
     """The tier policy carries internal margin data, so it is served behind the auth
     gate and never from /static."""
-    assert not pathlib.Path("src/api/web/static/quote_calculator_app.html").exists()
+    assert not pathlib.Path("src/api/static/quote_calculator_app.html").exists()
 
 
 def test_only_the_templates_that_are_not_screens_remain():
@@ -160,8 +160,8 @@ def test_only_the_templates_that_are_not_screens_remain():
     calculator is an embedded document — everything else is React.
     """
     remaining = sorted(
-        str(path.relative_to("src/api/web/templates")).replace("\\", "/")
-        for path in pathlib.Path("src/api/web/templates").rglob("*.html")
+        str(path.relative_to("src/api/templates")).replace("\\", "/")
+        for path in pathlib.Path("src/api/templates").rglob("*.html")
     )
     assert remaining == [
         "auth/login.html",
@@ -172,7 +172,7 @@ def test_only_the_templates_that_are_not_screens_remain():
 
 
 def test_no_route_renders_a_screen_template_any_more():
-    routes = pathlib.Path("src/api/web/routes")
+    routes = pathlib.Path("src/api/routes")
     offenders = [
         str(path)
         for path in routes.glob("*.py")

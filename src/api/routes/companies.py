@@ -12,8 +12,8 @@ import logging
 from fastapi import APIRouter
 from sqlalchemy import func, select
 
-from ....db.models import Contact, Conversation, ConversationProgress, Message
-from ....db.session import SessionLocal
+from ...db.models import Contact, Conversation, ConversationProgress, Message
+from ...db.session import SessionLocal
 
 
 logger = logging.getLogger(__name__)
@@ -27,7 +27,7 @@ def company_context(domain: str) -> dict:
     Extracted from the page handler at the React cutover: the screen reads it as JSON
     now, and the personal-domain refusal below has to stay on this side of the wire.
     """
-    from ....common.domains import is_personal_domain
+    from ...common.domains import is_personal_domain
 
     domain_l = (domain or "").lower()
     # Never aggregate personal/free-email domains (gmail, naver, …) as one company —

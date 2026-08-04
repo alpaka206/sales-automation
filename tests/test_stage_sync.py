@@ -74,7 +74,7 @@ def test_every_pipeline_stage_is_mapped(stages):
 
 def test_board_columns_are_exactly_the_seven_stages_in_flow_order():
     """The board's column order IS this tuple — nothing else defines it."""
-    from src.api.web.routes.customer_ops import PIPELINE_STAGES
+    from src.api.routes.customer_ops import PIPELINE_STAGES
 
     assert [key for key, _, _ in PIPELINE_STAGES] == [
         "new",
@@ -98,7 +98,7 @@ def test_board_columns_are_exactly_the_seven_stages_in_flow_order():
 
 def test_board_and_hubspot_maps_hold_the_same_keys():
     """A key in one but not the other is a column that cannot sync, or a silent drop."""
-    from src.api.web.routes.customer_ops import VALID_PIPELINE_STAGES
+    from src.api.routes.customer_ops import VALID_PIPELINE_STAGES
 
     assert set(stage_sync.LOCAL_STAGE_TO_SETTING) == VALID_PIPELINE_STAGES
 
@@ -111,7 +111,7 @@ def test_the_workbook_round_trip_uses_one_vocabulary():
     "won" — a full sheet sync silently rewrites the stage an operator just set.
     """
     from src.agents.sheet_sync import _local_stage
-    from src.api.web.routes.customer_ops import VALID_PIPELINE_STAGES
+    from src.api.routes.customer_ops import VALID_PIPELINE_STAGES
     from src.integrations.google_sheets import _STAGE_VALUES
 
     assert set(_STAGE_VALUES) <= VALID_PIPELINE_STAGES
@@ -120,7 +120,7 @@ def test_the_workbook_round_trip_uses_one_vocabulary():
 
 
 def test_settled_states_only_name_stages_that_exist():
-    from src.api.web.routes.customer_ops import VALID_PIPELINE_STAGES
+    from src.api.routes.customer_ops import VALID_PIPELINE_STAGES
 
     assert set(stage_sync.STATE_FOR_STAGE) <= VALID_PIPELINE_STAGES
 
@@ -391,7 +391,7 @@ def test_a_draft_still_being_written_is_left_alone(db, stages):
 
 def test_retired_drafts_leave_the_waiting_queue():
     """`superseded` is finished work: out of 발송 대기, visible under 발송 완료."""
-    from src.api.web.routes.messages import LIST_STATUS_BUCKETS
+    from src.api.routes.messages import LIST_STATUS_BUCKETS
 
     assert "superseded" not in LIST_STATUS_BUCKETS["awaiting"]
     assert "superseded" in LIST_STATUS_BUCKETS["sent"]

@@ -277,7 +277,7 @@ class TestRetireLegacyPipelineStages:
 
     def test_every_target_survives_the_trim(self):
         """A remap that lands on a key the board no longer renders is worse than none."""
-        from src.api.web.routes.customer_ops import VALID_PIPELINE_STAGES
+        from src.api.routes.customer_ops import VALID_PIPELINE_STAGES
 
         migration = importlib.import_module(self.MODULE)
         assert set(migration.STAGE_MAPPING.values()) <= VALID_PIPELINE_STAGES

@@ -18,7 +18,7 @@ import asyncio
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
-from ....db.models import Contact, Conversation, CustomerProfile
+from ...db.models import Contact, Conversation, CustomerProfile
 
 router = APIRouter(tags=["ui-api"])
 
@@ -433,10 +433,10 @@ def _template_kind(key: str) -> str:
 @router.get("/api/ui/email-templates")
 async def ui_email_templates():
     """Grouped, not one flat list — and each group says what it is for."""
-    from ....db.models import EmailTemplate
-    from ....db.session import SessionLocal
+    from ...db.models import EmailTemplate
+    from ...db.session import SessionLocal
 
-    from ....db.models import PolicySource
+    from ...db.models import PolicySource
 
     with SessionLocal() as session:
         policy_count = session.query(PolicySource).count()
@@ -474,8 +474,8 @@ async def ui_email_templates():
 
 @router.get("/api/ui/email-templates/{template_id}")
 async def ui_email_template(template_id: int):
-    from ....db.models import EmailTemplate
-    from ....db.session import SessionLocal
+    from ...db.models import EmailTemplate
+    from ...db.session import SessionLocal
 
     with SessionLocal() as session:
         row = session.get(EmailTemplate, template_id)
@@ -499,8 +499,8 @@ async def ui_policy_docs():
     what got pulled — without it the only way to check a document was to open Notion and
     compare by eye, which is the manual copying this feature exists to remove.
     """
-    from ....db.models import PolicySource
-    from ....db.session import SessionLocal
+    from ...db.models import PolicySource
+    from ...db.session import SessionLocal
     from .policy_docs import MODES
 
     with SessionLocal() as session:

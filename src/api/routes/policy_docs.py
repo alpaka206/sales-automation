@@ -16,8 +16,8 @@ import logging
 from fastapi import APIRouter, Form, HTTPException
 from fastapi.responses import RedirectResponse
 
-from ....db.models import PolicySource
-from ....db.session import SessionLocal
+from ...db.models import PolicySource
+from ...db.session import SessionLocal
 
 logger = logging.getLogger(__name__)
 
@@ -62,7 +62,7 @@ async def policy_docs_add(
     notion_url: str = Form(...),
     mode: str = Form("knowledge"),
 ):
-    from ....integrations.notion import NotionError, page_id_from_url
+    from ...integrations.notion import NotionError, page_id_from_url
 
     label = label.strip()
     notion_url = notion_url.strip()
@@ -121,7 +121,7 @@ async def policy_docs_sync():
     """Read every registered page now, instead of waiting for the poller tick."""
     import asyncio
 
-    from ....agents.policy_sync import sync_policy_sources
+    from ...agents.policy_sync import sync_policy_sources
 
     try:
         result = await asyncio.to_thread(sync_policy_sources)

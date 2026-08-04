@@ -11,9 +11,9 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 from starlette.requests import Request
 
-from src.api.web import auth
+from src.api import auth
 from src.api.main import app
-from src.api.web.routes import settings_page
+from src.api.routes import settings_page
 from src.common.config import settings
 from src.db.base import Base
 from src.db.models import User

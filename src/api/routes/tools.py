@@ -17,7 +17,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Request
 from fastapi.responses import Response
 
-from ....common.quote_tiers import policy_client_json
+from ...common.quote_tiers import policy_client_json
 from ._shared import templates
 
 router = APIRouter(tags=["web"])

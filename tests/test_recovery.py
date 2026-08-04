@@ -24,7 +24,7 @@ def recovery_db():
     )
     Base.metadata.create_all(engine)
     factory = sessionmaker(bind=engine, expire_on_commit=False)
-    with patch("src.api.web.routes.recovery.SessionLocal", factory):
+    with patch("src.api.routes.recovery.SessionLocal", factory):
         yield factory
 
 

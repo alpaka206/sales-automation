@@ -14,9 +14,9 @@ from fastapi.responses import HTMLResponse
 
 from ..auth import actor_name
 
-from ....db.email_templates import SIGNATURE_KEY_PREFIX
-from ....db.models import EmailTemplate, EmailTemplateRevision
-from ....db.session import SessionLocal
+from ...db.email_templates import SIGNATURE_KEY_PREFIX
+from ...db.models import EmailTemplate, EmailTemplateRevision
+from ...db.session import SessionLocal
 
 router = APIRouter(tags=["web"])
 

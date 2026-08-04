@@ -66,7 +66,7 @@ include = ["src*"]
 # committed (see .gitignore), so `npm --prefix frontend ci && npm --prefix frontend run
 # build` has to run before `pip wheel .` — without it the console answers 503 and says so.
 [tool.setuptools.package-data]
-"src.api.web" = [
+"src.api" = [
     "static/*",
     "static/app/*",
     "static/app/assets/*",

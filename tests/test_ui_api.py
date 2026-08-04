@@ -13,7 +13,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from src.api.main import app
-from src.api.web.routes import ui_api
+from src.api.routes import ui_api
 
 
 def test_the_json_screens_are_browser_paths_not_token_api_routes():
@@ -109,7 +109,7 @@ async def test_a_stalled_tab_cannot_block_a_write():
 def test_broadcasting_never_breaks_the_write_it_follows(monkeypatch):
     """_announce is fire-and-forget: a stage move must succeed even if nothing is
     listening or the broadcast itself explodes."""
-    from src.api.web.routes import customer_ops
+    from src.api.routes import customer_ops
 
     def boom(_topic: str) -> None:
         raise RuntimeError("no listeners")

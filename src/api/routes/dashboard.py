@@ -12,8 +12,8 @@ from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter
 from sqlalchemy import func, select
 
-from ....db.models import Conversation, Message
-from ....db.session import SessionLocal
+from ...db.models import Conversation, Message
+from ...db.session import SessionLocal
 from .messages import LIST_STATUS_BUCKETS, _messages_list_context
 
 router = APIRouter(tags=["web"])

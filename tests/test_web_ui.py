@@ -114,7 +114,7 @@ def _mock_detail_context(message_id):
     return {}
 
 
-@patch("src.api.web.routes.dashboard._dashboard_context", _mock_dashboard_context)
+@patch("src.api.routes.dashboard._dashboard_context", _mock_dashboard_context)
 def test_the_dashboard_payload_has_the_two_panels_the_screen_draws():
     r = _client().get("/api/ui/dashboard")
     assert r.status_code == 200
@@ -148,7 +148,7 @@ def test_the_shell_loads_the_korean_ui_font():
     assert "/static/tokens.css" in r.text
 
 
-@patch("src.api.web.routes.dashboard._dashboard_context", _mock_dashboard_context)
+@patch("src.api.routes.dashboard._dashboard_context", _mock_dashboard_context)
 def test_dashboard_shows_queue_counters():
     """The five KPI cards became four inline counters beside the queue heading."""
     counters = _client().get("/api/ui/dashboard").json()["counters"]
@@ -160,13 +160,13 @@ def test_dashboard_shows_queue_counters():
         assert label in screen, label
 
 
-@patch("src.api.web.routes.dashboard._dashboard_context", _mock_dashboard_context)
+@patch("src.api.routes.dashboard._dashboard_context", _mock_dashboard_context)
 def test_dashboard_json_carries_the_queue_rows():
     payload = _client().get("/api/ui/dashboard").json()
     assert [row["subject"] for row in payload["queue"]] == ["가격 문의"]
 
 
-@patch("src.api.web.routes.dashboard._dashboard_context", _mock_dashboard_context)
+@patch("src.api.routes.dashboard._dashboard_context", _mock_dashboard_context)
 def test_dashboard_json_carries_the_board():
     """The board is on the dashboard, below the queue — one screen, one payload."""
     payload = _client().get("/api/ui/dashboard").json()
@@ -183,7 +183,7 @@ def test_dashboard_no_longer_shows_inquiry_type():
         assert "문의 유형" not in source, screen
 
 
-@patch("src.api.web.routes.dashboard._dashboard_context", _mock_dashboard_context)
+@patch("src.api.routes.dashboard._dashboard_context", _mock_dashboard_context)
 def test_a_queue_row_carries_the_id_its_link_is_built_from():
     payload = _client().get("/api/ui/dashboard").json()
     assert payload["queue"][0]["id"] == 1
@@ -205,7 +205,7 @@ def test_dashboard_queue_table_is_the_review_table():
 
 
 
-@patch("src.api.web.routes.dashboard._dashboard_context", _mock_dashboard_context)
+@patch("src.api.routes.dashboard._dashboard_context", _mock_dashboard_context)
 def test_dashboard_drops_the_receipt_ack_caption():
     """'접수 확인 제외' captioned the queue; the table never listed acks anyway."""
     r = _client().get("/")
@@ -215,7 +215,7 @@ def test_dashboard_drops_the_receipt_ack_caption():
 def test_pipeline_columns_show_the_label_only():
     """The Korean gloss under each header (New / 새 문의) said nothing the label did not,
     on all seven columns at once. The server ships the label; the board prints it."""
-    from src.api.web.routes.customer_ops import PIPELINE_STAGES
+    from src.api.routes.customer_ops import PIPELINE_STAGES
 
     board = pathlib.Path("frontend/src/ui/Board.tsx").read_text(encoding="utf-8")
     assert "{stage.label}" in board
@@ -229,9 +229,9 @@ def test_dashboard_queue_is_the_five_oldest(db_session_factory, monkeypatch):
     Five rows, oldest first — the rest is one click away on 회신 및 검토. The counters
     beside the heading still see every awaiting row.
     """
-    from src.api.web.routes import customer_ops, dashboard
-    from src.api.web.routes import messages as messages_route
-    from src.api.web.routes.dashboard import _dashboard_context
+    from src.api.routes import customer_ops, dashboard
+    from src.api.routes import messages as messages_route
+    from src.api.routes.dashboard import _dashboard_context
 
     for module in (dashboard, messages_route, customer_ops):
         monkeypatch.setattr(module, "SessionLocal", db_session_factory)
@@ -275,7 +275,7 @@ def test_dashboard_queue_is_the_five_oldest(db_session_factory, monkeypatch):
 # ---------- Message detail ----------
 
 
-@patch("src.api.web.routes.messages._message_detail_context", _mock_detail_context)
+@patch("src.api.routes.messages._message_detail_context", _mock_detail_context)
 def test_the_ticket_payload_loads_for_a_real_message():
     r = _client().get("/api/ui/messages/1")
     assert r.status_code == 200
@@ -284,7 +284,7 @@ def test_the_ticket_payload_loads_for_a_real_message():
     assert "Test User" in r.text
 
 
-@patch("src.api.web.routes.messages._message_detail_context", _mock_detail_context)
+@patch("src.api.routes.messages._message_detail_context", _mock_detail_context)
 def test_message_detail_404_for_missing():
     """An unknown id is a 404 from the JSON, not a blank screen. (/messages/99999 itself
     redirects into the SPA — client routing cannot know the id is bad until it asks.)"""
@@ -363,7 +363,7 @@ def _use_test_db():
     Base.metadata.create_all(engine)
     factory = sessionmaker(bind=engine, autoflush=False, autocommit=False)
     with (
-        patch("src.api.web.routes.messages.SessionLocal", factory),
+        patch("src.api.routes.messages.SessionLocal", factory),
         patch("src.agents.approval.SessionLocal", factory),
         patch("src.agents.send_worker.SessionLocal", factory),
         patch("src.integrations.senders.SessionLocal", factory, create=True),
@@ -479,7 +479,7 @@ def _mock_messages_list_context(status="awaiting", stage="", sort="oldest"):
     }
 
 
-@patch("src.api.web.routes.messages._messages_list_context", _mock_messages_list_context)
+@patch("src.api.routes.messages._messages_list_context", _mock_messages_list_context)
 def test_the_queue_payload_carries_the_rows_the_screen_lists():
     r = _client().get("/api/ui/messages")
     assert r.status_code == 200

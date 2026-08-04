@@ -79,15 +79,15 @@ def pending_user_count() -> int:
     Returns 0 outside Google-OAuth mode or on any error, so a DB hiccup never
     breaks page rendering. Exposed to templates as a Jinja global below.
     """
-    from ....common.config import settings
+    from ...common.config import settings
 
     if settings.AUTH_MODE != "google_oauth":
         return 0
     try:
         from sqlalchemy import func, select
 
-        from ....db.models import User
-        from ....db.session import SessionLocal
+        from ...db.models import User
+        from ...db.session import SessionLocal
 
         with SessionLocal() as session:
             return (

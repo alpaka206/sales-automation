@@ -9,9 +9,9 @@ from __future__ import annotations
 from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse, Response
 
-from ....common.config import settings
-from ....db.models import User
-from ....db.session import SessionLocal
+from ...common.config import settings
+from ...db.models import User
+from ...db.session import SessionLocal
 from ..auth import is_admin, normalize_role, session_user
 from ._shared import esc
 

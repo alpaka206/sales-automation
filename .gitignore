@@ -57,7 +57,7 @@ design_handoff_sales_console
 
 # React console: dependencies and build output (built by `npm run build` in frontend/).
 frontend/node_modules/
-src/api/web/static/app/
+src/api/static/app/
 
 # Generated guidebooks (scripts/build_guidebooks.py writes them on demand).
 output/

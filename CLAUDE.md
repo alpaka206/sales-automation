@@ -43,12 +43,12 @@ Do not send live messages in tests. `tests/conftest.py` disables background inte
 ## Front end
 
 The console is React (`frontend/`, Vite + TypeScript + React Query), served by FastAPI at
-`/app`; every old page URL 302s there. `src/api/web/templates/` holds only what is not a
+`/app`; every old page URL 302s there. `src/api/templates/` holds only what is not a
 screen: the two sign-in pages (rendered before a session exists) and the quote-calculator
 document the console embeds.
 
 - **Build before packaging.** `npm --prefix frontend ci && npm --prefix frontend run build`
-  writes `src/api/web/static/app/`, which is gitignored and shipped via
+  writes `src/api/static/app/`, which is gitignored and shipped via
   `[tool.setuptools.package-data]`. Skip it and `/app` answers 503.
 - **Styling is `static/console.css`**, linked rather than bundled — one copy of the design
   for the SPA and for the sign-in pages. There is no CSS framework.

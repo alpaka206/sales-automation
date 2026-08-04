@@ -11,8 +11,8 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 
 import pytest
-from src.api.web.routes import messages as messages_route
-from src.api.web.routes.messages import LIST_STATUS_BUCKETS, _messages_list_context
+from src.api.routes import messages as messages_route
+from src.api.routes.messages import LIST_STATUS_BUCKETS, _messages_list_context
 from src.db.models import Contact, Conversation, Message
 
 

@@ -33,7 +33,7 @@ def template_db():
     )
     Base.metadata.create_all(engine)
     factory = sessionmaker(bind=engine, expire_on_commit=False)
-    with patch("src.api.web.routes.email_templates.SessionLocal", factory):
+    with patch("src.api.routes.email_templates.SessionLocal", factory):
         yield factory
 
 

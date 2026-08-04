@@ -29,8 +29,8 @@ from .security import (
     is_web_ui_path,
     web_role_allows,
 )
-from .web.auth import current_user, router as auth_router
-from .web.routes import router as web_router
+from .auth import current_user, router as auth_router
+from .routes import router as web_router
 from .webhook import router as webhook_router
 
 # Must precede the first outbound HTTPS call, not the first import: httpx and
@@ -143,17 +143,16 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="PERSO Inbound Console", version="0.1.0", lifespan=lifespan)
 app.mount(
     "/static",
-    StaticFiles(directory=str(Path(__file__).parent / "web" / "static")),
+    StaticFiles(directory=str(Path(__file__).parent / "static")),
     name="static",
 )
 app.include_router(auth_router)
 app.include_router(web_router)
 app.include_router(webhook_router)
 
-# The React console, built by `npm run build` in frontend/ into web/static/app. Its own
-# prefix on purpose: the Jinja screens keep serving every path they always did while
-# screens are ported one at a time, so nothing stops working mid-migration.
-_SPA_INDEX = Path(__file__).parent / "web" / "static" / "app" / "index.html"
+# The React console, built by `npm run build` in frontend/ into api/static/app. Its own
+# prefix so /static keeps meaning "assets" and the old page URLs stay free to redirect.
+_SPA_INDEX = Path(__file__).parent / "static" / "app" / "index.html"
 
 
 @app.get("/app", include_in_schema=False)
@@ -314,7 +313,7 @@ def healthz():
 def favicon():
     from fastapi.responses import FileResponse
 
-    logo = Path(__file__).parent / "web" / "static" / "logo.png"
+    logo = Path(__file__).parent / "static" / "logo.png"
     if logo.exists():
         return FileResponse(str(logo), media_type="image/png")
     return Response(status_code=404)

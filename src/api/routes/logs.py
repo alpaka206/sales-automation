@@ -11,7 +11,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Request
 from fastapi.responses import Response
 
-from ....common import log_buffer
+from ...common import log_buffer
 from ..auth import admin_required
 
 router = APIRouter(tags=["web"])

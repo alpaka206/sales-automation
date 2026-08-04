@@ -223,7 +223,7 @@ def test_later_reply_keeps_price_at_send(db_session, monkeypatch):
 
 
 def test_domain_history_skips_personal_domain(db_session):
-    from src.api.web.routes.messages import _domain_history
+    from src.api.routes.messages import _domain_history
 
     result = _domain_history(db_session, "gmail.com")
     assert result["total"] == 0
