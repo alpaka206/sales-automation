@@ -12,6 +12,10 @@ could harm real data or reach a real customer:
   (``ronald@estsoft.com`` unless ``SEND_OVERRIDE_EMAIL`` overrides it), so no
   customer can ever be emailed — even if the env override is later cleared.
 
+Email is a separate axis from this master switch, and it is the ONE thing still held
+back: ``EMAIL_SENDING_ENABLED = False`` means nothing is emailed at all. HubSpot and
+the Sheet are live; only delivery is off. See the EMAIL block below.
+
 Reads stay ON (HubSpot GET, Gemini, homepage fetch) so the whole pipeline can be
 exercised against real inbound data with zero external side effects.
 
@@ -42,29 +46,53 @@ logger = logging.getLogger(__name__)
 PRELAUNCH_TEST_RECIPIENT = "ronald@estsoft.com"
 
 # --------------------------------------------------------------------------- #
-# TEMPORARY HARD KILL SWITCH — no email leaves this process at all.
+# EMAIL: sending is OFF. Everything else is live.
 #
-# While this is False, NOTHING is emailed by any path: not a customer, and not even
-# PRELAUNCH_TEST_RECIPIENT. It sits below the send-override reroute, so it also
-# catches callers that bypass senders.send().
+# 2026-08-04, the operator's decision: "메일 발송되는 것만 막고 나머지는 모두 다 되도록."
+# Ticket stages, contact updates and the sales workbook all write for real; no message
+# leaves this process, not even to the test address.
 #
-# It is deliberately a module constant and NOT an env var. Env is exactly what we
-# could not trust: LIVE_EXTERNAL_WRITES / INBOUND_AUTO_ACK_ENABLED live in a Render
-# dashboard nobody can audit from here, and scripts/render_env_sync.py can overwrite
-# the whole set from a local .env. A constant cannot be flipped by deployment config.
+# 2026-07-30 (superseded): sending was ON and pinned to ronald@estsoft.com.
 #
-# TO RESUME SENDING: set this back to True. That is the entire switch.
+# Both switches are module constants and NOT env vars. Env is exactly what we could
+# not trust: LIVE_EXTERNAL_WRITES / SEND_OVERRIDE_EMAIL live in a Render dashboard
+# nobody can audit from here, and scripts/render_env_sync.py can overwrite the whole
+# set from a local .env. A constant cannot be flipped by deployment config.
+#
+#   EMAIL_SENDING_ENABLED  False = nothing is emailed at all, not even to the test
+#                          address (the lowest chokepoint, below the reroute, so it
+#                          catches callers that bypass senders.send()). True = SMTP
+#                          delivery happens.
+#   FORCE_TEST_RECIPIENT   True = every message goes to PRELAUNCH_TEST_RECIPIENT and
+#                          nowhere else. SEND_OVERRIDE_EMAIL is IGNORED while this is
+#                          on — the operator's instruction is "ronald@estsoft.com 으로만",
+#                          and honouring an env address here would mean a deployment
+#                          dashboard could still redirect mail somewhere unreviewed.
+#                          This holds EVEN IN LIVE MODE, which is the point.
+#
+# REACHING REAL CUSTOMERS is therefore a deliberate two-place act: set
+# FORCE_TEST_RECIPIENT = False here AND clear SEND_OVERRIDE_EMAIL. Nothing in a
+# deployment dashboard can do the first one.
 # --------------------------------------------------------------------------- #
 EMAIL_SENDING_ENABLED = False
+# Kept ON underneath the no-send switch, deliberately. It is the second layer: if
+# EMAIL_SENDING_ENABLED is ever flipped back without thinking, delivery resumes pinned to
+# one address rather than reaching customers. Two mistakes are needed, not one.
+FORCE_TEST_RECIPIENT = True
 
 
 def email_sending_enabled() -> bool:
-    """False while the operator's temporary no-send switch is engaged.
+    """False while the operator's no-send switch is engaged (nothing is emailed at all).
 
-    Read through this function (not the constant) so tests and the eventual
-    re-enable only have one place to touch.
+    Read through this function (not the constant) so tests and any future change only
+    have one place to touch.
     """
     return bool(EMAIL_SENDING_ENABLED)
+
+
+def force_test_recipient() -> bool:
+    """True while every outbound email is pinned to the single test address."""
+    return bool(FORCE_TEST_RECIPIENT)
 
 
 class ExternalWriteBlocked(RuntimeError):
@@ -138,12 +166,16 @@ def guard_external_write(action: str) -> None:
 def resolve_send_override() -> str:
     """The address ALL outbound email must be rerouted to, or '' for real delivery.
 
-    - Safe mode (pre-launch): always non-empty — SEND_OVERRIDE_EMAIL if set, else
-      the built-in ``ronald@estsoft.com``. Guarantees no customer email even if the
-      env override is cleared.
-    - Live mode: honors SEND_OVERRIDE_EMAIL as-is ('' = real delivery to customers).
+    - ``FORCE_TEST_RECIPIENT`` (the current posture): always ``ronald@estsoft.com``,
+      whatever the master switch says and whatever ``SEND_OVERRIDE_EMAIL`` holds. The
+      env value is deliberately ignored: "only ronald@estsoft.com" is a code guarantee,
+      and reading an address from a deployment dashboard would not be one.
+    - Safe mode (pre-launch): always non-empty, for the same reason.
+    - Neither engaged: honors SEND_OVERRIDE_EMAIL as-is ('' = real customer delivery).
     """
     explicit = settings.SEND_OVERRIDE_EMAIL.strip()
+    if force_test_recipient():
+        return PRELAUNCH_TEST_RECIPIENT
     if live_external_writes():
         return explicit
     return explicit or PRELAUNCH_TEST_RECIPIENT

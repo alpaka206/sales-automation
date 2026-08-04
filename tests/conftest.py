@@ -109,19 +109,28 @@ if _real_engine.url.get_backend_name() == "sqlite":
 
 @pytest.fixture(autouse=True)
 def _allow_send_in_tests(monkeypatch):
-    """Lift the operator's temporary no-send switch for the suite.
+    """Put the suite on the REAL delivery path, the same reason as LIVE_EXTERNAL_WRITES.
 
-    ``safe_mode.EMAIL_SENDING_ENABLED`` is False in the shipped code so nothing can
-    email while pre-launch. The SMTP tests need to exercise the real code path, and
-    they can do so safely: SMTP_USERNAME/PASSWORD are blanked above and every one of
-    those tests substitutes a fake ``smtplib.SMTP``, so no socket is ever opened.
+    Two shipped email switches are lifted here so the sender / worker / dispatch tests
+    exercise production behaviour instead of test-mode behaviour:
 
-    The switch's own behaviour (that it blocks) is asserted explicitly in
-    tests/test_safe_mode.py, which flips it back off inside the test.
+    - ``EMAIL_SENDING_ENABLED`` — if the operator ever engages the no-send switch again,
+      every send test would otherwise assert a refusal.
+    - ``FORCE_TEST_RECIPIENT`` — shipped True, which reroutes every message to
+      ronald@estsoft.com and marks it ``test_sent``. Real delivery (``sent`` + a HubSpot
+      timeline entry) is the path worth covering, and it is the one that must keep
+      working the day the pin comes off.
+
+    Safe to do: SMTP_USERNAME/PASSWORD are blanked above and every one of those tests
+    substitutes a fake ``smtplib.SMTP``, so no socket is ever opened.
+
+    Both switches' own behaviour — that they block, and that the pin outranks the master
+    switch — is asserted in tests/test_safe_mode.py, which sets them back explicitly.
     """
     from src.common import safe_mode
 
     monkeypatch.setattr(safe_mode, "EMAIL_SENDING_ENABLED", True)
+    monkeypatch.setattr(safe_mode, "FORCE_TEST_RECIPIENT", False)
 
 
 @pytest.fixture()

@@ -251,9 +251,32 @@ def test_explicit_override_still_wins_in_safe_mode(safe, monkeypatch):
     assert resolve_send_override() == "qa@example.com"
 
 
-def test_no_override_when_live(live, monkeypatch):
+def test_live_mode_alone_cannot_reach_a_customer(live, monkeypatch):
+    """FORCE_TEST_RECIPIENT outranks the master switch.
+
+    This is the whole point of that constant: LIVE_EXTERNAL_WRITES is already true, so
+    without it, blanking SEND_OVERRIDE_EMAIL in a Render dashboard was the only step
+    between this system and a real customer's inbox. Set explicitly rather than trusting
+    the ambient value — conftest turns it off for the suite so the sender tests can
+    exercise real delivery.
+    """
+    monkeypatch.setattr(safe_mode, "FORCE_TEST_RECIPIENT", True)
+    monkeypatch.setattr(settings, "SEND_OVERRIDE_EMAIL", "")
+    assert resolve_send_override() == PRELAUNCH_TEST_RECIPIENT
+    # …and the env value cannot redirect it either: "ronald@estsoft.com 으로만" is the
+    # instruction, so an address in a deployment dashboard is ignored while the pin is on.
+    monkeypatch.setattr(settings, "SEND_OVERRIDE_EMAIL", "qa@example.com")
+    assert resolve_send_override() == PRELAUNCH_TEST_RECIPIENT
+
+
+def test_real_delivery_needs_both_switches_off(live, monkeypatch):
+    """The documented go-live: unpin in code AND clear the env override."""
+    monkeypatch.setattr(safe_mode, "FORCE_TEST_RECIPIENT", False)
     monkeypatch.setattr(settings, "SEND_OVERRIDE_EMAIL", "")
     assert resolve_send_override() == ""
+    # Either one alone still protects the customer.
+    monkeypatch.setattr(settings, "SEND_OVERRIDE_EMAIL", "qa@example.com")
+    assert resolve_send_override() == "qa@example.com"
 
 
 def test_send_smtp_forces_recipient_to_ronald(safe, monkeypatch):
@@ -305,31 +328,51 @@ def test_send_smtp_forces_recipient_to_ronald(safe, monkeypatch):
     assert msg.to_address == "real.customer@bigcorp.com"
 
 
-# ---- The temporary hard no-send switch ---------------------------------------
-# safe_mode.EMAIL_SENDING_ENABLED is False in shipped code. The autouse conftest
-# fixture lifts it for the suite, so these tests put it back to its real value.
+# ---- The two email constants, as SHIPPED --------------------------------------
+# Sending is on and pinned to the test address. Both values are read out of the source
+# file rather than imported, so a monkeypatch elsewhere in the suite cannot make these
+# pass: what is asserted here is what the repository actually ships.
 
 
 @pytest.fixture()
 def no_send(monkeypatch):
-    """Restore the shipped value of the operator's no-send switch."""
+    """Engage the operator's no-send switch (nothing is emailed at all)."""
     monkeypatch.setattr(safe_mode, "EMAIL_SENDING_ENABLED", False)
 
 
-def test_no_send_switch_ships_disabled():
-    """The constant must stay False until the operator deliberately re-enables it."""
+def _shipped_constant(name: str):
     import ast
     import pathlib
 
     source = pathlib.Path(safe_mode.__file__).read_text(encoding="utf-8")
     tree = ast.parse(source)
-    value = next(
+    return next(
         node.value.value
         for node in tree.body
         if isinstance(node, ast.Assign)
-        and any(getattr(t, "id", None) == "EMAIL_SENDING_ENABLED" for t in node.targets)
+        and any(getattr(t, "id", None) == name for t in node.targets)
     )
-    assert value is False, "EMAIL_SENDING_ENABLED was re-enabled in source"
+
+
+def test_email_ships_off_while_everything_else_writes_for_real():
+    """The current posture, asserted from source: HubSpot and the Sheet are live and
+    nothing is emailed.
+
+    Two layers, and both are code rather than env — a deployment dashboard can flip
+    neither. EMAIL_SENDING_ENABLED is the no-send switch; FORCE_TEST_RECIPIENT stays on
+    underneath it so that turning sending back on resumes delivery pinned to one address
+    instead of reaching customers. Going live on email is therefore still a reviewed
+    change, in two places.
+    """
+    assert _shipped_constant("EMAIL_SENDING_ENABLED") is False, (
+        "email sending was turned back on in source — the operator's posture is that "
+        "HubSpot and the Sheet write for real and NOTHING is emailed."
+    )
+    assert _shipped_constant("FORCE_TEST_RECIPIENT") is True, (
+        "FORCE_TEST_RECIPIENT was turned off in source — every email would go to its "
+        "real recipient. Clear SEND_OVERRIDE_EMAIL in the same change only if that is "
+        "genuinely go-live."
+    )
 
 
 def test_no_send_switch_blocks_smtp_entirely(no_send, monkeypatch):

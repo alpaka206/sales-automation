@@ -118,13 +118,22 @@ def enforce_first_reply_no_price(message: Message) -> None:
         )
 
 
-async def _log_hubspot_email(message: Message) -> None:
-    """Best-effort timeline log after SMTP delivery; never reverses a real send."""
+async def _log_hubspot_email(message: Message, row: Message | None = None) -> None:
+    """Best-effort timeline log after SMTP delivery; never reverses a real send.
+
+    ``message`` is what actually left (in test mode a copy whose subject carries the
+    ``[TEST→…]`` marker, so the timeline says what really happened). ``row`` is the ORM
+    record: relationships are read from it and the engagement id is stamped on it, because
+    the copy shares session state and may not be able to load either.
+    """
+    record = row if row is not None else message
     try:
-        contact = message.conversation.contact
+        conversation = record.conversation
+        contact = conversation.contact if conversation else None
         contact_id = contact.hubspot_contact_id if contact else None
+        ticket_id = conversation.hubspot_ticket_id if conversation else None
     except Exception:
-        contact_id = None
+        contact_id, ticket_id = None, None
     if not contact_id:
         return
 
@@ -133,10 +142,11 @@ async def _log_hubspot_email(message: Message) -> None:
     client = None
     try:
         client = HubSpotClient()
-        message.hubspot_engagement_id = await client.create_email_engagement(
+        record.hubspot_engagement_id = await client.create_email_engagement(
             contact_id=contact_id,
             subject=message.subject or "",
             body=message.body or "",
+            ticket_id=ticket_id,
         )
     except HubSpotNotConfigured:
         logger.info("HubSpot is not configured; skipping timeline log for message %d.", message.id)
@@ -152,12 +162,20 @@ async def _log_hubspot_email(message: Message) -> None:
 
 
 async def send(message: Message) -> None:
-    """Send a message via SMTP. Email failure raises (caller handles)."""
+    """Send a message via SMTP, then record it on the HubSpot timeline.
+
+    HubSpot is not a transport here and cannot be: it has no API that sends this reply
+    (the transactional single-send needs a paid add-on and a designed template). The CRM
+    email object it writes at the end IS the customer history.
+    """
     from ...common.safe_mode import resolve_send_override
 
+    # The ORM record the caller will commit. `message` is rebound to a copy below when
+    # the mail is rerouted, and the copy must not be what carries the engagement id.
+    row = message
+
     # In pre-launch safe mode this is ALWAYS non-empty (forces ronald@…), so every
-    # branch below that keys off `override` reroutes mail and suppresses HubSpot
-    # side effects automatically.
+    # branch below that keys off `override` reroutes the mail.
     override = resolve_send_override()
 
     # Test-mode redirect: reroute every customer-facing email to one address and
@@ -197,5 +215,8 @@ async def send(message: Message) -> None:
     await asyncio.to_thread(send_smtp, message)
     logger.info("Message %d sent via smtp.", message.id)
 
-    if not override:
-        await _log_hubspot_email(message)
+    # Logged for a rerouted send too. Skipping it used to leave the customer's history
+    # with a gap for every test send — and while FORCE_TEST_RECIPIENT is pinned on, that
+    # is every send there is. What goes on the timeline is what actually left, subject
+    # marker and all, so a test copy can never read as a real reply to the customer.
+    await _log_hubspot_email(message, row)
