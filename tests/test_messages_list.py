@@ -64,12 +64,22 @@ def _emails(**kwargs) -> set[str]:
     return {row["email"] for row in _messages_list_context(**kwargs)["messages"]}
 
 
-def test_awaiting_bucket_is_everything_a_human_must_still_act_on(queue):
+def test_awaiting_is_new_only_whatever_the_status_says(queue):
+    """발송 대기 is New, always — and this is the query, not just the chip.
+
+    Drafts are only ever generated for New tickets (InboundAgent returns
+    "skipped_not_new" for anything else), so a waiting draft on a later stage means the
+    ticket moved on: somebody answered it in HubSpot while ours sat here. Listing it asks
+    the operator to send a reply the customer already received.
+
+    That includes a draft whose SEND failed, like nego-failed here. It is not lost — a
+    failed send belongs to 운영 로그 ▸ 복구, which owns retrying it.
+    """
     assert _emails(status="awaiting") == {
         "new-pending@example.com",
         "new-drafting@example.com",
-        "nego-failed@example.com",
     }
+    assert "nego-failed@example.com" not in _emails(status="awaiting")
 
 
 def test_queued_and_delivery_unknown_are_not_in_the_queue(queue):
@@ -218,7 +228,7 @@ def test_priority_is_measured_from_the_customers_last_message(queue):
     }
     assert waited["new-pending@example.com"] == 0     # → green
     assert waited["new-drafting@example.com"] == 2    # → orange
-    assert waited["nego-failed@example.com"] == 9     # → red
+    # nego-failed is not here to check: 발송 대기 is New only.
 
 
 def test_the_stage_labels_come_from_the_board_not_a_second_list(queue):

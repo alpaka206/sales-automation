@@ -54,13 +54,15 @@ def list_now() -> datetime:
 
 _MAX_EDIT_BODY_BYTES = 100_000
 
-# 처리 경과 answers "what happened with this customer". These two answer "what the app
-# did to itself" and say nothing the screen is not already showing: the auto-acknowledgement
-# is the first row of the thread above, and "초안 작성 완료" is what the 검토 대기 status
-# means. Hidden on read only — the rows are still written and still there to explain a
-# support question. A FAILED auto-ack is a different sentence and needs a human, so it
-# keeps its own kind and is not in here.
-_ROUTINE_PROGRESS_KINDS = ("draft", "auto_ack")
+# 처리 경과 answers "what happened with this customer". These answer "what the app did to
+# itself" and say nothing the screen is not already showing: the auto-acknowledgement is
+# the first row of the thread above, "초안 작성 완료" is what the 검토 대기 status means,
+# and "HubSpot에서 단계 변경 감지: new → meeting_link_sent" is bookkeeping about a move
+# the Stage column already displays. Hidden on read only — the rows are still written and
+# still there to explain a support question. A FAILED auto-ack and a draft HubSpot retired
+# out from under the operator are different sentences that need a human, so they keep
+# their own kinds and are not in here.
+_ROUTINE_PROGRESS_KINDS = ("draft", "auto_ack", "stage")
 _MAX_EDIT_SUBJECT_LEN = 300
 
 
@@ -574,6 +576,13 @@ def _messages_list_context(
     )
     if stage:
         q = q.where(Conversation.stage == stage)
+    elif status == "awaiting":
+        # 발송 대기 is New, always. Drafts are only ever generated for New tickets, so a
+        # waiting draft on any later stage means the ticket moved on — somebody answered
+        # it in HubSpot while ours sat here. Showing it asks the operator to send a reply
+        # the customer already has. LIST_STAGES said "New only"; it only ever constrained
+        # the chip, never the query, so the rows leaked in anyway.
+        q = q.where(Conversation.stage.in_(LIST_STAGES["awaiting"]))
     # Sort by the column the 접수 시간 cell actually shows, not by our draft's
     # created_at — otherwise "오래된 순" produces a visibly unsorted date column.
     order_column = (

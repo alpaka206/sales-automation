@@ -53,7 +53,8 @@ export function Recovery() {
       return;
     }
     if (action.path.endsWith("/hubspot-sync")) {
-      await sync(action.path, action.body ?? {}, (r) => `문의 ${r.retired}건 삭제됨`);
+      await sync(action.path, action.body ?? {}, (r) =>
+        `삭제 ${r.deleted}건 · 초안 정리 ${r.retired}건`);
       return;
     }
     await postForm(action.path, action.body ?? {});
@@ -132,17 +133,24 @@ export function Recovery() {
                 onClick={() => void sync("/operations/recovery/hubspot-sync", {}, (r) => {
                   if (r.error) return r.error;
                   const moved = r.moved + r.swept;
-                  if (r.deleted > 0) {
+                  const summary = `확인 ${r.checked}건 · 단계 정정 ${moved}`;
+                  if (r.deleted > 0 || r.stale > 0) {
                     setPending({
-                      label: `문의 ${r.deleted}건 삭제`,
+                      label: "정리",
                       path: "/operations/recovery/hubspot-sync",
                       body: { apply: "true" },
                       danger: true,
-                      confirm: `HubSpot에 없는 티켓이 ${r.deleted}건입니다. 해당 문의와 그 메일 기록을 완전히 삭제합니다 — 되돌릴 수 없습니다. 고객 정보와 계약, 직접 남긴 소통 기록은 그대로 남습니다.`,
+                      confirm: [
+                        r.deleted > 0 &&
+                          `HubSpot에 없는 티켓 ${r.deleted}건 — 해당 문의와 메일 기록을 완전히 삭제합니다. 되돌릴 수 없습니다.`,
+                        r.stale > 0 &&
+                          `New가 아닌 문의 ${r.stale}건 — 대기 중인 회신 초안을 종료합니다. 문의와 기록은 남습니다.`,
+                        "고객 정보와 계약, 직접 남긴 소통 기록은 어느 쪽에서도 지워지지 않습니다.",
+                      ].filter(Boolean).join("\n\n"),
                     });
-                    return `확인 ${r.checked}건 · 단계 정정 ${moved} · HubSpot에 없는 티켓 ${r.deleted}건`;
+                    return `${summary} · 삭제 대상 ${r.deleted} · 초안 정리 대상 ${r.stale}`;
                   }
-                  return `확인 ${r.checked}건 · 단계 정정 ${moved} · 정리할 항목 없음`;
+                  return `${summary} · 정리할 항목 없음`;
                 })}>
           {busy === "/operations/recovery/hubspot-sync" && <span className="spinner" style={{ marginRight: 6 }} />}
           HubSpot 최신화

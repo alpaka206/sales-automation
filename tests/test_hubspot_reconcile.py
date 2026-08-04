@@ -217,3 +217,35 @@ def test_it_only_looks_at_threads_still_holding_an_answer(monkeypatch, waiting_d
         session.get(Message, message_id).status = "sent"
         session.commit()
     assert (conversation_id, "99999999") not in _open_ticket_ids()
+
+
+def test_a_thread_past_new_has_its_draft_retired_not_deleted(monkeypatch, waiting_draft):
+    """After 최신화 only New keeps a waiting draft. Anything past it was answered in
+    HubSpot, so our draft is a reply the customer already has.
+
+    Retired, not deleted, and the difference is the point: the ticket still EXISTS. Only
+    a ticket that is gone from HubSpot earns a delete.
+    """
+    from src.agents import hubspot_reconcile
+
+    class Negotiating:
+        def get_ticket_sync(self, ticket_id):
+            class Ticket:
+                id = ticket_id
+                pipeline_stage = "negotiating-stage-id"
+            return Ticket()
+
+    monkeypatch.setattr(hubspot_reconcile, "HubSpotClient", lambda: Negotiating())
+    monkeypatch.setattr("src.agents.inbound_poller.reconcile_ticket_stages_once", lambda: 0)
+    monkeypatch.setattr("src.agents.stage_sync.local_stage_for", lambda _id: "negotiation")
+    monkeypatch.setattr("src.agents.stage_sync.sync_stage_from_hubspot",
+                        lambda *a, **k: None)
+
+    _contact_id, conversation_id, message_id = waiting_draft
+    dry = hubspot_reconcile.reconcile_with_hubspot()
+    assert dry["stale"] == 1 and dry["retired"] == 0
+
+    hubspot_reconcile.reconcile_with_hubspot(apply=True)
+    with SessionLocal() as session:
+        assert session.get(Message, message_id).status == "superseded"
+        assert session.get(Conversation, conversation_id) is not None, "the ticket exists"

@@ -112,6 +112,21 @@ def delete_by_ticket(ticket_id: str) -> int:
     return 1
 
 
+def _retire_drafts(conversation_id: int, local_stage: str) -> int:
+    """Close the drafts on a thread HubSpot has already moved past New.
+
+    Retired, not deleted, and the difference is deliberate: the ticket still EXISTS, so
+    this is a real customer thread that someone answered elsewhere. Only a ticket that is
+    gone from HubSpot earns a delete.
+    """
+    from .stage_sync import _retire_superseded_drafts
+
+    with SessionLocal() as session:
+        retired = _retire_superseded_drafts(session, conversation_id, local_stage)
+        session.commit()
+    return retired
+
+
 def reconcile_with_hubspot(*, apply: bool = False) -> dict:
     """Realign every thread we are still holding an answer for. Returns a small report.
 
@@ -128,10 +143,10 @@ def reconcile_with_hubspot(*, apply: bool = False) -> dict:
     click. So the first pass only counts, and the operator confirms a number.
     """
     from .inbound_poller import reconcile_ticket_stages_once
-    from .stage_sync import sync_stage_from_hubspot
+    from .stage_sync import local_stage_for, sync_stage_from_hubspot
 
     report = {
-        "checked": 0, "moved": 0, "deleted": 0, "retired": 0, "swept": 0,
+        "checked": 0, "moved": 0, "deleted": 0, "retired": 0, "stale": 0, "swept": 0,
         "applied": apply, "error": None,
     }
 
@@ -173,5 +188,16 @@ def reconcile_with_hubspot(*, apply: bool = False) -> dict:
         # loss, and it is the half of the drift that needs no judgement.
         if sync_stage_from_hubspot(ticket.id, ticket.pipeline_stage, source="manual"):
             report["moved"] += 1
+
+        # After 최신화 only New keeps a waiting draft. Anything past it was answered in
+        # HubSpot, so the draft is an answer the customer already has. sync_stage_from_
+        # hubspot retires drafts when the stage MOVES; a thread that was already sitting
+        # on a later stage never moved, so nothing ever cleared it — which is how these
+        # accumulated in 발송 대기 in the first place.
+        local_stage = local_stage_for(ticket.pipeline_stage)
+        if local_stage and local_stage != "new":
+            report["stale"] += 1
+            if apply:
+                report["retired"] += _retire_drafts(conversation_id, local_stage)
 
     return report
