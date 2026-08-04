@@ -7,16 +7,39 @@ path is done elsewhere.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Form, HTTPException, Request
+import re
+
+from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse
 
 from ..auth import actor_name
 
+from ....db.email_templates import SIGNATURE_KEY_PREFIX
 from ....db.models import EmailTemplate, EmailTemplateRevision
 from ....db.session import SessionLocal
-from ._shared import templates
 
 router = APIRouter(tags=["web"])
+
+
+def _generate_key(session, name: str, language: str) -> str:
+    """Derive a unique storage key from the name, so the operator never types one.
+
+    The key is a code reference: ``auto_ack``, ``signature_ko`` and the reply-format row
+    are fetched by exact key from the send path, and the compose screen's signature picker
+    lists everything under ``signature_html_``. Those rows already exist and are only ever
+    edited — so a template CREATED here can be reached by exactly one thing, that picker,
+    and it gets the prefix that puts it there. A key with any other shape would produce a
+    row nothing in the app can ever read.
+    """
+    base = re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_")
+    # A Korean name romanizes to nothing; fall back to the language it is written for.
+    base = base or (language if language and language != "all" else "custom")
+    candidate = f"{SIGNATURE_KEY_PREFIX}{base}"[:100]
+    suffix = 2
+    while session.query(EmailTemplate).filter_by(key=candidate).first():
+        candidate = f"{SIGNATURE_KEY_PREFIX}{base}_{suffix}"[:100]
+        suffix += 1
+    return candidate
 
 
 def _snapshot_revision(session, tpl: EmailTemplate, change_note: str, edited_by: str) -> None:
@@ -37,88 +60,31 @@ def _snapshot_revision(session, tpl: EmailTemplate, change_note: str, edited_by:
     )
 
 
-@router.get("/email-templates")
-async def email_templates_list(request: Request):
-    """List all email templates."""
-    with SessionLocal() as session:
-        rows = session.query(EmailTemplate).order_by(EmailTemplate.updated_at.desc()).all()
-        items = [
-            {
-                "id": t.id,
-                "key": t.key,
-                "name": t.name,
-                "language": t.language or "all",
-                "status": t.status or "active",
-                "version": t.version or 1,
-                "updated_at": t.updated_at,
-            }
-            for t in rows
-        ]
-    return templates.TemplateResponse(request, "email_templates_list.html", {"templates": items})
-
-
-@router.get("/email-templates/new")
-async def email_templates_new(request: Request):
-    """Form to create a new email template."""
-    return templates.TemplateResponse(
-        request, "email_templates_form.html", {"tpl": None, "mode": "create"}
-    )
-
-
-@router.get("/email-templates/{tpl_id}")
-async def email_templates_edit(request: Request, tpl_id: int):
-    """Edit form for an existing email template."""
-    with SessionLocal() as session:
-        tpl = session.get(EmailTemplate, tpl_id)
-        if not tpl:
-            raise HTTPException(status_code=404, detail="템플릿을 찾을 수 없습니다")
-        item = {
-            "id": tpl.id,
-            "key": tpl.key,
-            "name": tpl.name,
-            "language": tpl.language or "all",
-            "channel": tpl.channel or "email",
-            "description": tpl.description or "",
-            "status": tpl.status or "active",
-            "version": tpl.version or 1,
-            "body": tpl.body,
-        }
-    return templates.TemplateResponse(
-        request, "email_templates_form.html", {"tpl": item, "mode": "edit"}
-    )
-
-
 @router.post("/email-templates")
 async def email_templates_create(
     request: Request,
-    key: str = Form(""),
     name: str = Form(""),
     language: str = Form("all"),
-    description: str = Form(""),
-    status: str = Form("active"),
     body: str = Form(""),
 ):
-    """Create a new email template and record its first revision."""
+    """Create a new email template and record its first revision.
+
+    The key is derived from the name (see ``_generate_key``) rather than asked for, and
+    the status is always ``active`` — see the note on the update handler.
+    """
     author = actor_name(request, fallback="") or "web"
-    if not key.strip() or not name.strip():
+    if not name.strip():
         return HTMLResponse(
-            '<div class="text-red-600 text-sm">키와 이름은 필수입니다</div>',
+            '<div class="text-red-600 text-sm">템플릿 이름은 필수입니다</div>',
             status_code=400,
         )
     with SessionLocal() as session:
-        existing = session.query(EmailTemplate).filter_by(key=key.strip()).first()
-        if existing:
-            return HTMLResponse(
-                '<div class="text-red-600 text-sm">이미 존재하는 키입니다</div>',
-                status_code=400,
-            )
         tpl = EmailTemplate(
-            key=key.strip(),
+            key=_generate_key(session, name.strip(), language.strip()),
             name=name.strip(),
             language=language.strip() or "all",
             channel="email",
-            description=description.strip() or None,
-            status=status.strip() or "active",
+            status="active",
             version=1,
             author=author,
             body=body,
@@ -139,12 +105,16 @@ async def email_templates_update(
     request: Request,
     name: str = Form(""),
     language: str = Form("all"),
-    description: str = Form(""),
-    status: str = Form("active"),
     body: str = Form(""),
-    change_note: str = Form(""),
 ):
-    """Update an email template, snapshotting the prior state into history."""
+    """Update an email template, snapshotting the prior state into history.
+
+    ``key``, ``description`` and ``status`` are deliberately absent. The key is a code
+    reference the send path resolves and must not move; the description was a field
+    nothing ever displayed; and only ``active`` rows are ever read, so draft/archived
+    described a template that exists and does nothing. Saving revives a dormant row
+    rather than leaving it unreachable now that nothing can set the value back.
+    """
     author = actor_name(request, fallback="") or "web"
     with SessionLocal() as session:
         tpl = session.get(EmailTemplate, tpl_id)
@@ -154,24 +124,17 @@ async def email_templates_update(
                 status_code=404,
             )
         # Snapshot the current (pre-edit) state, then bump version and apply.
-        _snapshot_revision(
-            session,
-            tpl,
-            change_note=change_note.strip() or "edited",
-            edited_by=author,
-        )
+        _snapshot_revision(session, tpl, change_note="edited", edited_by=author)
         if name.strip():
             tpl.name = name.strip()
         tpl.language = language.strip() or "all"
-        tpl.description = description.strip() or None
-        tpl.status = status.strip() or "active"
+        tpl.status = "active"
         tpl.version = (tpl.version or 1) + 1
         tpl.body = body
         session.commit()
-        new_version = tpl.version
-    return HTMLResponse(
-        f'<div class="text-green-600 text-sm font-medium">저장 완료 (v{new_version})</div>'
-    )
+    # The version still increments — it orders the revision history — it is just not a
+    # number anyone reads off a screen.
+    return HTMLResponse('<div class="text-green-600 text-sm font-medium">저장 완료</div>')
 
 
 @router.delete("/email-templates/{tpl_id}")
@@ -194,36 +157,3 @@ async def email_templates_delete(tpl_id: int, request: Request):
     )
 
 
-@router.get("/email-templates/{tpl_id}/history")
-async def email_templates_history(request: Request, tpl_id: int):
-    """Show the revision history for an email template."""
-    with SessionLocal() as session:
-        tpl = session.get(EmailTemplate, tpl_id)
-        revs = (
-            session.query(EmailTemplateRevision)
-            .filter_by(template_id=tpl_id)
-            .order_by(EmailTemplateRevision.created_at.desc())
-            .all()
-        )
-        current = (
-            {"id": tpl.id, "name": tpl.name, "version": tpl.version or 1}
-            if tpl
-            else {"id": tpl_id, "name": "(삭제됨)", "version": "-"}
-        )
-        items = [
-            {
-                "key": r.key,
-                "name": r.name,
-                "language": r.language or "all",
-                "change_note": r.change_note or "",
-                "edited_by": r.edited_by or "",
-                "status": r.status,
-                "description": r.description or "",
-                "body": r.body,
-                "created_at": r.created_at,
-            }
-            for r in revs
-        ]
-    return templates.TemplateResponse(
-        request, "email_templates_history.html", {"tpl": current, "revisions": items}
-    )
