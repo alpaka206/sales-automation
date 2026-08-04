@@ -31,7 +31,8 @@ def _remote_client() -> TestClient:
 def test_healthz_no_token(client: TestClient) -> None:
     r = client.get("/healthz")
     assert r.status_code == 200
-    assert r.json() == {"ok": True, "database": True}
+    # console: the bundle has to exist too — a release nobody can log into is not ready.
+    assert r.json() == {"ok": True, "database": True, "console": True}
 
 
 def test_healthz_has_request_id(client: TestClient) -> None:

@@ -193,3 +193,34 @@ def test_no_route_renders_a_screen_template_any_more():
         if re.search(r"TemplateResponse\(", path.read_text(encoding="utf-8"))
     ]
     assert offenders == []
+
+
+def test_health_fails_when_the_console_cannot_be_served():
+    """The release that broke production reported /healthz ok while every screen — and
+    sign-in, which serves the same document — answered 503. The platform saw a healthy
+    deploy and cut traffic over to a console nobody could open.
+
+    A console that cannot be opened is not a healthy release. Saying so is what makes the
+    platform keep the previous one serving instead.
+    """
+    import shutil
+
+    from src.api.main import _SPA_INDEX
+
+    bundle = _SPA_INDEX.parent
+    assert bundle.exists(), "run: npm --prefix frontend ci && npm --prefix frontend run build"
+
+    with TestClient(app) as client:
+        healthy = client.get("/healthz")
+    assert healthy.status_code == 200
+    assert healthy.json()["console"] is True
+
+    moved = bundle.with_suffix(".missing")
+    shutil.move(str(bundle), str(moved))
+    try:
+        with TestClient(app) as client:
+            broken = client.get("/healthz")
+    finally:
+        shutil.move(str(moved), str(bundle))
+    assert broken.status_code == 503
+    assert broken.json() == {"ok": False, "database": True, "console": False}

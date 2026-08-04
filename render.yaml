@@ -11,7 +11,7 @@
 # 1. Push this repo to GitHub.
 # 2. Render dashboard → New → Blueprint → connect your GitHub repo → pick `main`.
 # 3. Fill the env vars marked `sync: false` in the dashboard.
-# 4. First deploy runs the build (installs deps + applies migrations).
+# 4. First deploy runs the build (console bundle + deps + migrations).
 
 services:
   - type: web
@@ -21,7 +21,16 @@ services:
     branch: main
     healthCheckPath: /healthz
     autoDeploy: true
+    # The console is a React app compiled ahead of time, and its output is gitignored,
+    # so nothing arrives with the checkout. Without this the service comes up healthy and
+    # every screen — including sign-in, which serves the same document — answers 503.
+    # The `test -f` is deliberate: a build that produced no bundle must FAIL the deploy,
+    # leaving the previous release serving, rather than publishing a console nobody can
+    # log into.
     buildCommand: |
+      npm --prefix frontend ci
+      npm --prefix frontend run build
+      test -f src/api/static/app/index.html
       pip install --upgrade pip setuptools
       pip install ".[postgres]"
       python scripts/init_db.py
@@ -29,6 +38,9 @@ services:
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.9
+      # For the console build above. Matches the version CI builds with.
+      - key: NODE_VERSION
+        value: "24"
 
       # ----- Required: set these manually in the Render dashboard -----
       - key: DATABASE_URL              # Supabase / Neon Postgres URI

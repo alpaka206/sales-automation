@@ -329,7 +329,15 @@ async def security_headers_middleware(request: Request, call_next):
 # though it's healthy. Allowing HEAD keeps the free-tier keepalive ping working.
 @app.api_route("/healthz", methods=["GET", "HEAD"])
 def healthz():
-    """Readiness check: traffic is accepted only when the database responds."""
+    """Readiness check: traffic is accepted only when the database responds AND the
+    console exists to serve.
+
+    The bundle used to be outside this answer, and that is how a release went out where
+    /healthz said ok while every screen — sign-in included, since it serves the same
+    document — returned 503. The deploy was reported healthy and nobody could log in.
+    A console that cannot be opened is not a healthy release, so the check says so and
+    the platform keeps the previous one serving.
+    """
     from sqlalchemy import text
 
     from ..db.session import engine
@@ -339,8 +347,16 @@ def healthz():
             connection.execute(text("SELECT 1"))
     except Exception:
         logger.exception("Database readiness check failed.")
-        return JSONResponse(status_code=503, content={"ok": False, "database": False})
-    return {"ok": True, "database": True}
+        return JSONResponse(status_code=503, content={"ok": False, "database": False, "console": None})
+
+    if not _SPA_INDEX.exists():
+        logger.error(
+            "Console bundle missing at %s — the build step did not run. "
+            "Every /app URL and the sign-in page will answer 503.",
+            _SPA_INDEX,
+        )
+        return JSONResponse(status_code=503, content={"ok": False, "database": True, "console": False})
+    return {"ok": True, "database": True, "console": True}
 
 
 @app.get("/favicon.ico", include_in_schema=False)
