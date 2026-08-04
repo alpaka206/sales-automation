@@ -19,10 +19,13 @@ API_SKIP_PATHS = ("/healthz", "/favicon.ico")
 LOCAL_DOC_PATHS = ("/docs", "/redoc", "/openapi.json")
 # Browser-facing web UI route prefixes (vs JSON API / webhooks).
 WEB_UI_PREFIXES = (
-    "/", "/overview", "/messages", "/email-templates", "/settings",
+    "/", "/overview", "/messages", "/email-templates", "/policy-docs", "/settings",
     "/logs", "/static", "/auth", "/tools", "/customers", "/operations",
     "/pipeline", "/companies", "/contacts", "/outbound-history",
     "/integrations",
+    # The React screens: served from /app, reading /api/ui with the operator's
+    # session cookie. Browser paths, not token-authenticated JSON API routes.
+    "/app", "/api/ui",
 )
 LOCALHOST_HOSTS = ("127.0.0.1", "::1", "localhost")
 _SAFE_METHODS = {"GET", "HEAD", "OPTIONS", "TRACE"}

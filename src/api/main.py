@@ -12,7 +12,7 @@ from urllib.parse import urlsplit
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse, RedirectResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from ..agents.approval import ApprovalError, approve, reject
@@ -149,6 +149,23 @@ app.mount(
 app.include_router(auth_router)
 app.include_router(web_router)
 app.include_router(webhook_router)
+
+# The React console, built by `npm run build` in frontend/ into web/static/app. Its own
+# prefix on purpose: the Jinja screens keep serving every path they always did while
+# screens are ported one at a time, so nothing stops working mid-migration.
+_SPA_INDEX = Path(__file__).parent / "web" / "static" / "app" / "index.html"
+
+
+@app.get("/app", include_in_schema=False)
+@app.get("/app/{_spa_path:path}", include_in_schema=False)
+async def spa(_spa_path: str = "") -> FileResponse:
+    """Every /app URL returns the same document — the router picks the screen."""
+    if not _SPA_INDEX.exists():
+        raise HTTPException(
+            status_code=503,
+            detail="React 콘솔이 아직 빌드되지 않았습니다: frontend/ 에서 npm run build",
+        )
+    return FileResponse(_SPA_INDEX, media_type="text/html")
 
 
 # ---------- Middleware ----------

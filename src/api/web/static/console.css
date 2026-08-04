@@ -327,6 +327,9 @@
   border: 1px solid var(--border); border-radius: var(--r-md); background: var(--surface); box-shadow: var(--shadow-pop);
 }
 .quick-form__wide { grid-column: 1 / -1; }
+/* The same form in normal flow — inside the board's modal, where a popover anchored to
+   a summary element has nothing to anchor to. Shares .quick-form__wide. */
+.record-form { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 10px; }
 .history-list { display: flex; flex-direction: column; }
 .history-item { display: grid; grid-template-columns: 18px 1fr; gap: 10px; min-width: 0; }
 .history-item__rail { display: flex; justify-content: center; position: relative; }
@@ -397,7 +400,8 @@
   padding: 10px; transition: background .16s ease;
 }
 .kanban-column__body.is-over { background: var(--accent-soft); }
-.pipeline-card { padding: 13px; margin-bottom: 9px; border: 1px solid var(--border); background: var(--surface); box-shadow: var(--shadow-sm); cursor: grab; }
+/* position: relative is the containing block for the corner 소통 기록 button. */
+.pipeline-card { position: relative; padding: 13px; margin-bottom: 9px; border: 1px solid var(--border); background: var(--surface); box-shadow: var(--shadow-sm); cursor: grab; }
 .pipeline-card:active { cursor: grabbing; }
 /* The card is hidden, not faded, while it is being dragged: the drag image IS the
    card box, so leaving a solid copy behind reads as two cards. */
@@ -408,12 +412,30 @@
   background: var(--accent-soft); pointer-events: none;
 }
 .kanban.is-saving { pointer-events: none; opacity: .7; }
-.pipeline-card > a { display: block; margin-bottom: 10px; color: inherit; text-decoration: none; }
+/* No bottom margin: it was the gap under a per-card stage <select> that no longer
+   exists, and on a fixed-height column that dead strip costs cards on screen. */
+.pipeline-card > a { display: block; color: inherit; text-decoration: none; }
 .pipeline-card > a strong, .pipeline-card > a span, .pipeline-card > a small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pipeline-card > a strong { font-size: 13px; }
 .pipeline-card > a span { margin-top: 5px; color: var(--text-muted); font-size: 11.5px; }
 .pipeline-card > a small { margin-top: 3px; color: var(--text-subtle); font-size: 10.5px; }
+/* 소통 기록 (+) — only on cards past 답변 발송, and pinned to the corner rather than
+   given a row: a column is a fixed-height scroller, so a line per card costs cards on
+   screen. Out of flow, so it adds no height at all. */
+.pipeline-card__log {
+  position: absolute; top: 7px; right: 7px; z-index: 1;
+  display: grid; place-items: center; width: 24px; height: 24px; padding: 0;
+  border: 1px solid var(--border); border-radius: var(--r-full); background: var(--surface-2);
+  color: var(--text-subtle); cursor: pointer;
+}
+.pipeline-card__log:hover { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+/* Keeps a long company name from running under the button. Carried by a modifier on the
+   card rather than :has(), so it does not depend on the browser's selector support. */
+.pipeline-card--logged > a strong { padding-right: 26px; }
 .kanban-empty { padding: 24px 12px; border: 1px dashed var(--border-strong); color: var(--text-subtle); font-size: 11px; text-align: center; }
+/* The bottom-of-column sentinel. It has to occupy real height or it can never be
+   "revealed" by scrolling, and it replaces itself with the page it fetched. */
+.kanban-more { padding: 14px 12px; }
 
 /* Inbound insights */
 .period-switch { display: flex; padding: 3px; border: 1px solid var(--border); background: var(--surface); }
@@ -462,6 +484,12 @@
 }
 .table tbody td { padding: 0 16px; height: var(--row-h); border-bottom: 1px solid var(--border); color: var(--text); vertical-align: middle; }
 .table tbody tr:last-child td { border-bottom: none; }
+/* Columns sized by the <colgroup>, not by whatever rows happen to be on screen. On a
+   filtered list an auto table re-measures every time the filter changes, so picking a
+   stage moved every column sideways — the row you were reading jumped out from under the
+   cursor. Cells clip instead of widening. */
+.table--fixed { table-layout: fixed; }
+.table--fixed tbody td { overflow: hidden; text-overflow: ellipsis; }
 .table tbody tr.is-clickable { cursor: pointer; }
 .table tbody tr.is-clickable:hover { background: var(--surface-2); }
 .table .td-muted { color: var(--text-muted); }
@@ -493,6 +521,16 @@
   padding: 0 12px; height: 38px; font-size: 13.5px; outline: none;
 }
 .textarea { height: auto; padding: 10px 12px; line-height: 1.6; resize: vertical; }
+/* A select that sits inside a table cell: sized to the row, and borderless until it is
+   hovered or focused so a column of them does not read as a wall of input boxes. */
+/* Fixed width, not `auto`: sized to the longest option so choosing a shorter one
+   ("New" after "Meeting Link Sent") cannot shrink the control and shift its column. */
+.select--inline {
+  width: 168px; max-width: 100%; height: 28px; padding: 0 6px;
+  font-size: 12.5px; border-color: transparent; background: transparent;
+  text-transform: none; letter-spacing: normal;
+}
+.select--inline:hover { border-color: var(--border); background: var(--surface); }
 .input:focus, .select:focus, .textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-ring); }
 .input::placeholder, .textarea::placeholder { color: var(--text-subtle); }
 .search {
@@ -699,6 +737,8 @@ body.show-translation .has-ko .msg-ko { display: block; }
   border: 1px solid var(--border); border-radius: var(--r-lg);
   box-shadow: var(--shadow-pop); padding: 22px; animation: fadeUp .18s ease;
 }
+/* A form, not a confirmation — 440px puts one field per line. */
+.modal--wide { max-width: 640px; max-height: calc(100dvh - 48px); overflow-y: auto; }
 .modal__title { font-size: 16px; font-weight: 800; letter-spacing: -.02em; }
 .modal__body { font-size: 13px; color: var(--text-muted); margin-top: 8px; line-height: 1.6; }
 .modal__actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; }
@@ -825,6 +865,10 @@ body.modal-open .content { overflow: hidden; }
 /* Waiting-time dot on /messages. Colour encodes how long the CUSTOMER has waited
    since their own last message: <=1d, <=3d, over. The title/sr-only text carries the
    same information for anyone not reading colour. */
+/* The 우선순위 column is one dot wide; centre it under its own heading rather than
+   letting it hang on the left edge of a column sized by the label above it. */
+.table thead th.th-center { text-align: center; }
+.table tbody td.td-center { text-align: center; }
 .wait-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; }
 .wait-dot--ok { background: var(--ok-dot); }
 .wait-dot--warn { background: var(--warn-dot); }

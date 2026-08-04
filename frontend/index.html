@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="ko" data-density="comfortable">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>PERSO Inbound</title>
+    <!-- The SAME stylesheets the Jinja screens use, linked rather than bundled: one copy
+         of the design, no asset rewriting, and a CSS fix lands on both stacks at once. -->
+    <link rel="stylesheet" href="/static/tokens.css" />
+    <link rel="stylesheet" href="/static/console.css" />
+    <script>
+      // Applied before first paint, exactly as base.html does it, or a collapsed sidebar
+      // flashes open on every load.
+      try {
+        if (localStorage.getItem("perso.nav") === "collapsed")
+          document.documentElement.classList.add("nav-collapsed");
+      } catch (e) {}
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

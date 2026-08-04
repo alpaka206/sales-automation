@@ -61,3 +61,15 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["src*"]
+
+# Non-Python files that must ride along inside the wheel. The React console is BUILT, not
+# committed (see .gitignore), so `npm --prefix frontend ci && npm --prefix frontend run
+# build` has to run before `pip wheel .` — without it the console answers 503 and says so.
+[tool.setuptools.package-data]
+"src.api.web" = [
+    "static/*",
+    "static/app/*",
+    "static/app/assets/*",
+    "templates/*.html",
+    "templates/*/*.html",
+]

@@ -1,0 +1,71 @@
+import { useQuery } from "@tanstack/react-query";
+import { Link } from "react-router-dom";
+import { getJSON } from "../lib/api";
+import { Icon } from "../ui/Icon";
+import { QueueTable, type QueueRow } from "../ui/QueueTable";
+import { Board, type Stage } from "../ui/Board";
+
+type DashboardData = {
+  queue: QueueRow[];
+  now: string;
+  counters: {
+    received_today: number;
+    awaiting_total: number;
+    awaiting_new: number;
+    awaiting_negotiation: number;
+  };
+  stage_labels: Record<string, string>;
+  manual_log_stages: string[];
+  stages: Stage[];
+};
+
+export function Dashboard() {
+  const { data, isPending, error } = useQuery({
+    queryKey: ["dashboard"],
+    queryFn: () => getJSON<DashboardData>("/api/ui/dashboard"),
+    // The queue used to be re-fetched by a 30s HTMX poll that swapped the whole panel.
+    // Same cadence, but it revalidates data instead of replacing DOM.
+    refetchInterval: 30_000,
+  });
+
+  if (error) return <div className="banner banner--warn"><div><div className="banner__title">불러오지 못했습니다</div><div className="banner__body">{String(error)}</div></div></div>;
+  if (isPending || !data) return <div className="skeleton" style={{ height: 200 }} />;
+
+  const c = data.counters;
+  return (
+    <>
+      <h1 className="sr-only">문의 대시보드</h1>
+
+      <section className="card card--flush mb-gap">
+        <div className="section-header table-heading">
+          <div className="section-header__l">
+            <span className="section-header__icon"><Icon name="messages" size={17} /></span>
+            <div className="section-header__title">답변 대기중인 문의</div>
+          </div>
+          <div className="queue-counters">
+            <span><em>오늘 접수</em><b className="tnum">{c.received_today}</b></span>
+            <span><em>ALL</em><b className="tnum">{c.awaiting_total}</b></span>
+            <span><em>New</em><b className="tnum">{c.awaiting_new}</b></span>
+            <span><em>Negotiating</em><b className="tnum">{c.awaiting_negotiation}</b></span>
+            <Link to="/messages" className="chip">전체 보기</Link>
+          </div>
+        </div>
+        <QueueTable
+          rows={data.queue}
+          now={data.now}
+          stageLabels={data.stage_labels}
+          emptyText="답변을 기다리는 문의가 없습니다."
+        />
+      </section>
+
+      <div className="section-header table-heading">
+        <div className="section-header__l">
+          <span className="section-header__icon"><Icon name="sliders" size={17} /></span>
+          <div className="section-header__title">문의 파이프라인</div>
+        </div>
+      </div>
+
+      <Board stages={data.stages} manualLogStages={data.manual_log_stages} />
+    </>
+  );
+}
