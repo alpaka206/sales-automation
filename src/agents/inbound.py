@@ -39,6 +39,17 @@ from .inbound_scoring import (  # noqa: F401 — re-exported for callers/tests
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _default_signature() -> str | None:
+    """Which signature a new draft carries — an operator's choice, read per draft.
+
+    Imported here rather than at module load for the same reason every other template
+    helper in this file is: the DB layer must not be pulled in before settings are.
+    """
+    from ..db.email_templates import default_signature_key
+
+    return default_signature_key()
 _DEFAULT_HUBSPOT = object()
 
 # Fallback acknowledgement body if the editable ``auto_ack`` template is missing.
@@ -1044,7 +1055,7 @@ class InboundAgent:
                     subject=None,
                     body="",
                     status="drafting",
-                    signature_key="signature_html_hyeram",
+                    signature_key=_default_signature(),
                     target_language=inquiry_lang,
                     draft_provider=settings.LLM_PROVIDER,
                 )
@@ -1198,7 +1209,7 @@ class InboundAgent:
                 target_language=target_language,
                 status="approved",
                 prompt_variant="auto_ack",
-                signature_key="signature_html_hyeram",
+                signature_key=_default_signature(),
                 approved_by="auto_ack",
                 approved_at=datetime.now(timezone.utc),
                 draft_provider=settings.LLM_PROVIDER,

@@ -6,11 +6,15 @@ the send path calls into.
 
 from __future__ import annotations
 
+import logging
+
 from .models import EmailTemplate
 from .session import SessionLocal
 
 # Branded HTML signatures are keyed with this prefix so the compose-screen picker
 # can discover them generically (no hard-coded ko/en list).
+logger = logging.getLogger(__name__)
+
 SIGNATURE_KEY_PREFIX = "signature_html_"
 
 
@@ -37,6 +41,56 @@ def list_signature_templates() -> list[dict]:
             ]
     except Exception:
         return []
+
+
+def default_signature_key() -> str | None:
+    """The signature a new draft is stamped with, as chosen in the console.
+
+    Was the literal "signature_html_hyeram", written twice into the inbound agent — so
+    the person who signs the company's mail could only be changed by editing Python.
+
+    Falls back to the first active signature when nothing is flagged, because a draft
+    with no signature at all is worse than one signed by whoever is left. Never raises:
+    None means "sign nothing", which the send path already handles.
+    """
+    try:
+        with SessionLocal() as session:
+            row = (
+                session.query(EmailTemplate)
+                .filter(
+                    EmailTemplate.key.like(f"{SIGNATURE_KEY_PREFIX}%"),
+                    EmailTemplate.status == "active",
+                    EmailTemplate.is_default.is_(True),
+                )
+                .first()
+            )
+            if row is None:
+                row = (
+                    session.query(EmailTemplate)
+                    .filter(
+                        EmailTemplate.key.like(f"{SIGNATURE_KEY_PREFIX}%"),
+                        EmailTemplate.status == "active",
+                    )
+                    .order_by(EmailTemplate.language, EmailTemplate.name)
+                    .first()
+                )
+            return row.key if row else None
+    except Exception:
+        logger.warning("Default signature lookup failed", exc_info=True)
+        return None
+
+
+def set_default_signature(key: str) -> None:
+    """Move the default. One statement clears, one sets — the unique index in the
+    database is what actually guarantees a single default, not this ordering."""
+    with SessionLocal() as session:
+        session.query(EmailTemplate).filter(EmailTemplate.is_default.is_(True)).update(
+            {"is_default": False}
+        )
+        session.query(EmailTemplate).filter(EmailTemplate.key == key).update(
+            {"is_default": True}
+        )
+        session.commit()
 
 
 def get_email_template(key: str, language: str | None = None) -> str | None:
