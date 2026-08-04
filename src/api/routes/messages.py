@@ -38,6 +38,14 @@ router = APIRouter(tags=["web"])
 
 # Maximum bytes accepted for a single edit — prevents accidental/malicious DoS via huge POST.
 _MAX_EDIT_BODY_BYTES = 100_000
+
+# 처리 경과 answers "what happened with this customer". These two answer "what the app
+# did to itself" and say nothing the screen is not already showing: the auto-acknowledgement
+# is the first row of the thread above, and "초안 작성 완료" is what the 검토 대기 status
+# means. Hidden on read only — the rows are still written and still there to explain a
+# support question. A FAILED auto-ack is a different sentence and needs a human, so it
+# keeps its own kind and is not in here.
+_ROUTINE_PROGRESS_KINDS = ("draft", "auto_ack")
 _MAX_EDIT_SUBJECT_LEN = 300
 
 
@@ -80,6 +88,7 @@ def _message_detail_context(message_id: int) -> dict:
 
         thread_rows = []
         progress_rows = []
+        interaction_rows = []
         if conv:
             # Full ticket/conversation thread, oldest → newest — every inbound inquiry
             # and every outgoing reply or auto-ack for this thread.
@@ -92,12 +101,28 @@ def _message_detail_context(message_id: int) -> dict:
                 .scalars()
                 .all()
             )
-            # Append-only processing log ("처리경과"), oldest → newest.
+            # 처리 경과, oldest → newest. Filtered on READ, never deleted: progress rows
+            # are append-only, and what the machine did to itself is still worth having
+            # in the row when something has to be explained.
             progress_rows = (
                 session.execute(
                     select(ConversationProgress)
                     .where(ConversationProgress.conversation_id == conv.id)
+                    .where(ConversationProgress.kind.not_in(_ROUTINE_PROGRESS_KINDS))
                     .order_by(ConversationProgress.created_at.asc(), ConversationProgress.id.asc())
+                )
+                .scalars()
+                .all()
+            )
+            # The other half of the story: after the first reply the thread leaves
+            # HubSpot for mail, WhatsApp, a phone call or a meeting, and only the
+            # operator knows what was said. Those notes belong on this log, not on a
+            # separate one — "메일이 나갔다 → 미팅했고 요구사항은 이것" is one sequence.
+            interaction_rows = (
+                session.execute(
+                    select(CustomerInteraction)
+                    .where(CustomerInteraction.conversation_id == conv.id)
+                    .order_by(CustomerInteraction.happened_at.asc(), CustomerInteraction.id.asc())
                 )
                 .scalars()
                 .all()
@@ -167,10 +192,19 @@ def _message_detail_context(message_id: int) -> dict:
 
         return {
             "thread": thread,
-            "progress": [
-                {"kind": p.kind, "detail": p.detail, "created_at": p.created_at}
-                for p in progress_rows
-            ],
+            "progress": sorted(
+                [
+                    {"kind": p.kind, "detail": p.detail, "created_at": p.created_at,
+                     "channel": None, "handler": None}
+                    for p in progress_rows
+                ]
+                + [
+                    {"kind": "interaction", "detail": i.summary, "created_at": i.happened_at,
+                     "channel": i.channel, "handler": i.handler}
+                    for i in interaction_rows
+                ],
+                key=lambda entry: entry["created_at"],
+            ),
             "summary": conv.summary if conv else None,
             "customer_requests": conv.customer_requests if conv else None,
             "signatures": list_signature_templates(),

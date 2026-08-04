@@ -144,7 +144,9 @@ def _retire_superseded_drafts(session, conversation_id: int, local_stage: str) -
     if drafts:
         add_progress(
             conversation_id,
-            "draft",
+            # Its own kind: 처리 경과 hides the routine "draft" entries, and a draft
+            # retired out from under the operator is the opposite of routine.
+            "draft_retired",
             f"HubSpot에서 단계가 {local_stage}(으)로 이동해 대기 중이던 초안 "
             f"{len(drafts)}건을 종료 처리했습니다. 이미 답변이 나간 문의입니다.",
             session=session,

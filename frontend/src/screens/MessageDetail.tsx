@@ -4,6 +4,7 @@ import { Link, useParams } from "react-router-dom";
 import { getJSON, postForm } from "../lib/api";
 import { kst } from "../lib/format";
 import { Icon } from "../ui/Icon";
+import { channelLabel } from "../ui/InteractionForm";
 import { Modal } from "../ui/Modal";
 import { InteractionForm, InteractionItem, type Interaction } from "../ui/InteractionForm";
 
@@ -24,7 +25,10 @@ type Bubble = {
 };
 type Detail = {
   thread: Bubble[];
-  progress: { kind: string; detail: string; created_at: string }[];
+  progress: {
+    kind: string; detail: string; created_at: string;
+    channel: string | null; handler: string | null;
+  }[];
   summary: string | null;
   customer_requests: string | null;
   signatures: { key: string; name: string; language: string }[];
@@ -301,7 +305,18 @@ export function MessageDetail() {
                   {data.progress.map((p, index) => (
                     <li key={index} className="progress-log__item">
                       <span className="progress-log__time tnum">{kst(p.created_at)}</span>
-                      <span className="progress-log__detail">{p.detail}</span>
+                      <span className="progress-log__detail">
+                        {/* An operator's own note, in the same sequence as the sends —
+                            "메일이 나갔다 → 미팅했고 요구사항은 이것" is one story, and
+                            it was split across two screens. */}
+                        {p.kind === "interaction" && (
+                          <span className="tag" style={{ marginRight: 6 }}>
+                            {channelLabel(p.channel || "manual")}
+                            {p.handler ? ` · ${p.handler}` : ""}
+                          </span>
+                        )}
+                        <span style={{ whiteSpace: "pre-line" }}>{p.detail}</span>
+                      </span>
                     </li>
                   ))}
                 </ul>

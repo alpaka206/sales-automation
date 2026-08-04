@@ -1112,12 +1112,8 @@ class InboundAgent:
                 contact = session.get(Contact, conv.contact_id) if conv.contact_id else None
                 if contact:
                     contact.score = score
-                add_progress(
-                    conv.id,
-                    "draft",
-                    "AI 회신 초안 작성 완료. 검토 대기.",
-                    session=session,
-                )
+                # No progress entry: "초안 작성 완료. 검토 대기." is exactly what the
+                # pending_approval status already says, on the same screen.
             session.commit()
             return False
         finally:
@@ -1229,15 +1225,16 @@ class InboundAgent:
             logger.warning("Auto-ack dispatch error for message %d.", message_id, exc_info=True)
             sent_ok = False
 
-        add_progress(
-            conv_id,
-            "auto_ack",
-            (
-                "자동 접수확인 메일 발송됨 (문의 언어, 승인 없이 즉시)."
-                if sent_ok
-                else "자동 접수확인 메일 발송 재시도 대기 또는 수동 확인 필요."
-            ),
-        )
+        # Only the failure. A successful acknowledgement IS the first outgoing message
+        # in the thread above — a log line repeating it is a second copy of the same
+        # fact. A failure is a different sentence and needs a person, so it keeps its
+        # own kind and stays on 처리 경과.
+        if not sent_ok:
+            add_progress(
+                conv_id,
+                "auto_ack_failed",
+                "자동 접수확인 메일 발송 재시도 대기 또는 수동 확인 필요.",
+            )
 
     # _dispatch_approved() lived here. Its only caller was the auto-approval branch,
     # which is gone: a detailed reply is never approved without a human, so there is
