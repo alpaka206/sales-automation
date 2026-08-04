@@ -283,11 +283,11 @@ async def ui_company(domain: str):
 
 @router.get("/api/ui/settings/users")
 async def ui_settings_users(request: Request):
-    """접근 승인. Admin-gated by the SAME check the page uses (settings_page.is_admin —
-    which is NOT logs.py's admin_required; they disagree in basic mode)."""
-    from ..auth import is_admin
+    """접근 승인. Gated by admin_required, the one gate — the same function every other
+    admin screen uses, so which module a route imports from stops deciding who gets in."""
+    from ..auth import admin_required
 
-    if not is_admin(request):
+    if not admin_required(request):
         raise HTTPException(status_code=403, detail="관리자만 접근할 수 있습니다.")
     from .settings_page import settings_users
 
@@ -349,9 +349,6 @@ async def ui_logs(request: Request, view: str = "all"):
     happens to look similar — a JSON copy of a screen must not be the way around that
     screen's gate, and it must not refuse what the screen allows either.
 
-    (There are two admin checks in this app: ``admin_required`` here and in logs.py, and
-    ``is_admin`` in settings_page.py. They disagree in basic mode, which is why 접근 승인
-    is unreachable there while 운영 로그 is not.)
     """
     from ..auth import admin_required
     from .logs import _events

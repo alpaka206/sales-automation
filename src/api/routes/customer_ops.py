@@ -1085,9 +1085,9 @@ def _google_callback_url(request: Request) -> str:
 def _require_integration_admin(request: Request) -> None:
     if settings.AUTH_MODE != "google_oauth":
         return
-    from ..auth import is_admin
+    from ..auth import admin_required
 
-    if not is_admin(request):
+    if not admin_required(request):
         raise HTTPException(status_code=403, detail="관리자만 외부 계정을 연결할 수 있습니다")
 
 

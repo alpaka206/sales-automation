@@ -12,7 +12,7 @@ from fastapi.responses import HTMLResponse, Response
 from ...common.config import settings
 from ...db.models import User
 from ...db.session import SessionLocal
-from ..auth import is_admin, normalize_role, session_user
+from ..auth import admin_required, normalize_role, session_user
 from ._shared import esc
 
 router = APIRouter(tags=["web"])
@@ -41,7 +41,7 @@ async def settings_user_add(
     The form sends only the local part (``username``); the @domain is fixed and
     appended here. ``email`` is still accepted as a fallback for the full address.
     """
-    if not is_admin(request):
+    if not admin_required(request):
         return _forbidden()
 
     domain = (settings.ALLOWED_EMAIL_DOMAIN or "").lower().strip()
@@ -82,7 +82,7 @@ async def settings_user_add(
 @router.post("/settings/users/{email}")
 async def settings_user_update(request: Request, email: str, action: str = Form("")):
     """Approve / revoke / change role for a user. Admins can't lock themselves out."""
-    if not is_admin(request):
+    if not admin_required(request):
         return _forbidden()
     me = session_user(request) or {}
     email = email.lower()

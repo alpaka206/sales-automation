@@ -154,21 +154,37 @@ def actor_name(request: Request, fallback: str = "") -> str:
 
 
 def is_admin(request: Request) -> bool:
+    """Whether THIS session belongs to an admin, by the role in the users table.
+
+    Answers a narrower question than :func:`admin_required` and is not a gate: with no
+    session it is False, which in basic mode is every request. Use it to decide what to
+    show someone, never whether to let them in.
+    """
     u = session_user(request)
     return bool(u and u.get("role") == "admin")
 
 
 def admin_required(request: Request) -> bool:
-    """True when the caller may open an admin-only screen.
+    """The ONE gate for admin-only screens. The users table decides.
 
-    Roles exist only under ``AUTH_MODE=google_oauth``. In basic/localhost mode there
-    is no session user at all, so demanding ``role == "admin"`` locks out everyone —
-    which is exactly what /logs did while the sidebar kept offering the link. This
-    mirrors the sidebar's own rule and ``customer_ops._require_integration_admin``.
+    There used to be two, and they disagreed. `is_admin` alone locks out everybody in
+    basic mode — there is no session user to have a role — so 접근 승인 was permanently
+    "관리자만 접근할 수 있습니다" to an operator who *is* an admin in the database, while
+    운영 로그 right beside it opened fine. Whether an admin got in depended on which of
+    the two functions the route happened to import.
+
+    The rule, in one place:
+
+      * a session -> ``normalize_role`` of that user's stored role, read from the DB on
+        every request (a role changed in 접근 승인 takes effect immediately, no re-login)
+      * no session -> basic mode, which has no operator directory at all. Getting this
+        far already means localhost or the shared WEB_UI_PASSWORD, and that same door
+        allows sending mail and moving stages. Refusing only the admin screens there
+        would not be security, just an unreachable screen.
     """
-    if settings.AUTH_MODE != "google_oauth":
-        return True
-    return is_admin(request)
+    if session_user(request) is not None:
+        return is_admin(request)
+    return settings.AUTH_MODE != "google_oauth"
 
 
 def _cookie_secure(request: Request) -> bool:
