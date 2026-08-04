@@ -13,7 +13,7 @@ from ....common.config import settings
 from ....db.models import User
 from ....db.session import SessionLocal
 from ..auth import is_admin, normalize_role, session_user
-from ._shared import esc, templates
+from ._shared import esc
 
 router = APIRouter(tags=["web"])
 
@@ -23,44 +23,6 @@ router = APIRouter(tags=["web"])
 # --------------------------------------------------------------------------- #
 def _forbidden() -> Response:
     return Response(content="관리자만 접근할 수 있습니다.", status_code=403)
-
-
-@router.get("/settings/users")
-async def settings_users(request: Request):
-    """Allowlist management: approve/revoke who may use the console (admins only)."""
-    if not is_admin(request):
-        return _forbidden()
-    with SessionLocal() as session:
-        rows = (
-            session.query(User)
-            .order_by(User.approved.desc(), User.role.desc(), User.created_at.asc())
-            .all()
-        )
-
-        def _row(u: User) -> dict:
-            return {
-                "email": u.email,
-                "name": u.name or "",
-                "role": normalize_role(u.role),
-                "approved": u.approved,
-                "last_login_at": u.last_login_at,
-            }
-
-        # Access is granted by an admin adding the address here; there is no
-        # self-service application queue, so only approved rows are listed. A row
-        # left unapproved is someone who signed in without being added — they stay
-        # locked out until an admin adds them explicitly.
-        approved_users = [_row(u) for u in rows if u.approved]
-    me = session_user(request) or {}
-    return templates.TemplateResponse(
-        request,
-        "settings_users.html",
-        {
-            "approved_users": approved_users,
-            "me_email": me.get("email", ""),
-            "domain": settings.ALLOWED_EMAIL_DOMAIN,
-        },
-    )
 
 
 @router.post("/settings/users/add")

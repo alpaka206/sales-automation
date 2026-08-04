@@ -30,46 +30,6 @@ _PLACEHOLDERS = {
 }
 
 
-@router.get("/tools/quote-calculator")
-async def quote_calculator_page(request: Request):
-    """Full-page calculator view (nav target + 'open large' link)."""
-    return templates.TemplateResponse(request, "quote_calculator_page.html", {})
-
-
-@router.get("/tools/quotation")
-async def quotation_page(request: Request):
-    title, message = _PLACEHOLDERS["quotation"]
-    return templates.TemplateResponse(
-        request, "tool_placeholder.html", {"tool_title": title, "tool_message": message}
-    )
-
-
-@router.get("/tools/contract")
-async def contract_page(request: Request):
-    title, message = _PLACEHOLDERS["contract"]
-    return templates.TemplateResponse(
-        request, "tool_placeholder.html", {"tool_title": title, "tool_message": message}
-    )
-
-
-@router.get("/outbound-history")
-async def outbound_history_page(request: Request):
-    """수주 고객 — placeholder peer of 리드 히스토리 (/customers).
-
-    Deliberately its OWN top-level path rather than /customers/outbound: Starlette
-    matches on path shape, so a literal segment under /customers would be shadowed by
-    ``/customers/{contact_id}`` in customer_ops, which is included first.
-    """
-    return templates.TemplateResponse(
-        request,
-        "tool_placeholder.html",
-        {
-            "tool_title": "수주 고객",
-            "tool_message": "수주 고객 화면은 준비 중입니다.",
-        },
-    )
-
-
 @router.get("/tools/quote-calculator/app")
 async def quote_calculator_app(request: Request) -> Response:
     """Calculator HTML for the iframe, with the tier policy injected from Python.

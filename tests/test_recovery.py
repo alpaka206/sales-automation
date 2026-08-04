@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pathlib
+
 from unittest.mock import patch
 
 import pytest
@@ -57,11 +59,11 @@ def _seed(factory, status: str) -> tuple[int, int]:
 
 
 def test_recovery_console_lists_failures(recovery_db) -> None:
-    message_id, _job_id = _seed(recovery_db, "send_failed")
+    message_id, job_id = _seed(recovery_db, "send_failed")
     with TestClient(app) as client:
-        response = client.get("/operations/recovery")
-    assert response.status_code == 200
-    assert f"#{message_id}" in response.text
+        payload = client.get("/api/ui/recovery").json()
+    assert message_id in [row["id"] for row in payload["messages"]]
+    assert job_id in [row["id"] for row in payload["inbound_jobs"]]
 
 
 def test_old_recovery_url_redirects_into_the_operations_screen(recovery_db) -> None:
@@ -73,23 +75,28 @@ def test_old_recovery_url_redirects_into_the_operations_screen(recovery_db) -> N
 
 
 def test_operations_screen_defaults_to_the_recovery_tab(recovery_db) -> None:
-    """Recovery is the tab with work on it; logs are for diagnosing what it shows."""
-    message_id, _job_id = _seed(recovery_db, "send_failed")
-    with TestClient(app) as client:
-        response = client.get("/logs")
-    assert response.status_code == 200
-    assert f"#{message_id}" in response.text
-    assert "발송 문제" in response.text
+    """Recovery is the tab with work on it; logs are for diagnosing what it shows.
 
-
-def test_log_tab_still_renders_and_keeps_the_recovery_count_visible(recovery_db) -> None:
-    """A failure arriving while you read logs must not be invisible."""
+    The default lives in the screen now (Simple.tsx reads ?tab, defaulting to recovery);
+    what the server owes it is the count that makes the tab worth opening.
+    """
     _seed(recovery_db, "send_failed")
     with TestClient(app) as client:
-        response = client.get("/logs?tab=log")
-    assert response.status_code == 200
-    assert "시각(KST)" in response.text  # the log table
-    assert "복구 대상" in response.text  # the tab strip, with its count
+        payload = client.get("/api/ui/recovery").json()
+    assert payload["pending"] >= 1
+    screen = pathlib.Path("frontend/src/screens/Simple.tsx").read_text(encoding="utf-8")
+    assert 'params.get("tab") ?? "recovery"' in screen
+
+
+def test_both_tabs_are_served_and_neither_hides_the_other(recovery_db) -> None:
+    """A failure arriving while you read logs must not be invisible: both tabs are on
+    one screen, each backed by its own endpoint."""
+    _seed(recovery_db, "send_failed")
+    with TestClient(app) as client:
+        assert client.get("/api/ui/logs").status_code == 200
+        assert client.get("/api/ui/recovery").json()["pending"] >= 1
+    screen = pathlib.Path("frontend/src/screens/Simple.tsx").read_text(encoding="utf-8")
+    assert '"복구"' in screen and '"로그"' in screen
 
 
 def test_operations_screen_is_reachable_without_a_session_user(recovery_db) -> None:
