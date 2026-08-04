@@ -1,8 +1,8 @@
-"""Web UI routes — serves Jinja2 templates for the operator dashboard.
+"""The console's HTTP surface, aggregated into one router that ``main.py`` mounts.
 
-Split into cohesive submodules (dashboard, messages, email_templates,
-settings_page), aggregated here into a single ``router`` that
-``main.py`` mounts.
+No longer page handlers: the screens are React and read ``ui_api``'s JSON. What is
+left in each module is the writes that screen posts — send, approve, stage change — plus
+``legacy_redirects`` for the URLs those pages used to own.
 """
 
 from __future__ import annotations
@@ -20,7 +20,6 @@ from . import (
     policy_docs,
     recovery,
     settings_page,
-    tools,
     ui_api,
 )
 
@@ -35,7 +34,6 @@ for _module in (
     email_templates,
     policy_docs,
     settings_page,
-    tools,
     logs,
     ui_api,
     legacy_redirects,

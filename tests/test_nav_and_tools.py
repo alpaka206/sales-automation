@@ -139,36 +139,36 @@ def test_the_spa_serves_every_screen_route():
             assert client.get(path).status_code == 200, path
 
 
-def test_the_calculator_document_is_still_served():
-    """It is the page the console embeds in an iframe, not a screen that was ported."""
+def test_the_calculator_document_url_lands_on_the_screen_that_replaced_it():
+    """It used to be an HTML document in an iframe; it is a React screen now."""
     with TestClient(app) as client:
-        response = client.get("/tools/quote-calculator/app")
-    assert response.status_code == 200
-    assert "<html" in response.text.lower()
+        response = client.get("/tools/quote-calculator/app", follow_redirects=False)
+    assert response.status_code == 302
+    assert response.headers["location"] == "/app/tools/quote-calculator"
 
 
 def test_the_quote_calculator_keeps_its_pricing_out_of_the_public_mount():
-    """The tier policy carries internal margin data, so it is served behind the auth
-    gate and never from /static."""
+    """The tier policy carries internal margin data, so the screen fetches it from
+    /api/ui behind the auth gate — never from /static, which is served to anyone."""
+    from src.common.quote_tiers import policy_client
+
     assert not pathlib.Path("src/api/static/quote_calculator_app.html").exists()
-
-
-def test_only_the_templates_that_are_not_screens_remain():
-    """The cutover's actual deliverable: no screen is rendered from HTML any more.
-
-    Sign-in renders server-side (there is no session yet to run the SPA), and the
-    calculator is an embedded document — everything else is React.
-    """
-    remaining = sorted(
-        str(path.relative_to("src/api/templates")).replace("\\", "/")
-        for path in pathlib.Path("src/api/templates").rglob("*.html")
+    prices = {str(t["krw"]) for t in policy_client()["tiers"]}
+    published = " ".join(
+        path.read_text(encoding="utf-8", errors="ignore")
+        for path in pathlib.Path("src/api/static").rglob("*")
+        if path.is_file() and path.suffix in {".js", ".html", ".css"}
     )
-    assert remaining == [
-        "auth/login.html",
-        "auth/pending.html",
-        "partials/icons.html",      # imported by the two auth pages
-        "quote_calculator_app.html",
-    ]
+    assert not (prices & set(published.split())), "tier prices reached the public mount"
+
+
+def test_no_html_template_is_left_to_render():
+    """The cutover's actual deliverable: not one screen comes from a template.
+
+    Sign-in was the last holdout — it renders before there is a session, so it serves
+    the SPA document itself rather than a Jinja page.
+    """
+    assert not pathlib.Path("src/api/templates").exists()
 
 
 def test_no_route_renders_a_screen_template_any_more():
@@ -177,6 +177,5 @@ def test_no_route_renders_a_screen_template_any_more():
         str(path)
         for path in routes.glob("*.py")
         if re.search(r"TemplateResponse\(", path.read_text(encoding="utf-8"))
-        and path.name not in {"tools.py"}  # the calculator document
     ]
     assert offenders == []
