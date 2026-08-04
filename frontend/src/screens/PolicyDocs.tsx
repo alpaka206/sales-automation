@@ -121,6 +121,55 @@ const columns = (act: (path: string) => void): Column<Row>[] => [
   },
 ];
 
+/** 노션 Export zip 을 올려 등록된 문서를 한 번에 갱신합니다.
+ *
+ *  왜 업로드인가: 로컬 실행 스크립트는 노션에서 읽어 DB에 쓰는데, 사내망이 DB 포트를 막고
+ *  있어 담당자 PC는 DB에 닿지 못합니다. 노션은 브라우저로만 되고 DB는 서버만 되니 양쪽을
+ *  다 할 수 있는 기계가 없습니다. 파일로 옮기면 각 구간이 실제로 뚫려 있는 경로만 씁니다. */
+function UploadExport({ onDone }: { onDone: () => void }) {
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState<string | null>(null);
+
+  return (
+    <>
+      <label className={`btn btn--subtle btn--sm${busy ? " is-disabled" : ""}`}
+             style={{ cursor: busy ? "default" : "pointer" }}>
+        {busy && <span className="spinner" style={{ marginRight: 6 }} />}
+        노션 Export 올리기
+        <input
+          type="file"
+          accept=".zip"
+          hidden
+          disabled={busy}
+          onChange={async (event) => {
+            const file = event.target.files?.[0];
+            event.target.value = "";
+            if (!file) return;
+            setBusy(true);
+            setNote(null);
+            try {
+              const body = new FormData();
+              body.append("export", file);
+              const response = await fetch("/policy-docs/upload-export", {
+                method: "POST", credentials: "same-origin", body,
+              });
+              const result = await response.json();
+              if (!response.ok) throw new Error(result.detail ?? response.status);
+              setNote(`갱신 ${result.synced} · 실패 ${result.failed} · 건너뜀 ${result.skipped}`);
+              onDone();
+            } catch (error) {
+              setNote(`실패: ${error instanceof Error ? error.message : String(error)}`);
+            } finally {
+              setBusy(false);
+            }
+          }}
+        />
+      </label>
+      {note && <span className="t-xs t-subtle">{note}</span>}
+    </>
+  );
+}
+
 export function PolicyDocs({ onBack }: { onBack?: () => void }) {
   const [params, setParams] = useSearchParams();
   const queryClient = useQueryClient();
@@ -204,6 +253,7 @@ export function PolicyDocs({ onBack }: { onBack?: () => void }) {
       <div className="page-header">
         <div><h1 className="page-title">정책 문서</h1></div>
         <div className="row" style={{ gap: 8 }}>
+          <UploadExport onDone={refresh} />
           <AddSource modes={data.modes} onDone={refresh} />
         </div>
       </div>
