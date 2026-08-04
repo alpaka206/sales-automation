@@ -1,4 +1,11 @@
 .venv
+# The console's dependencies are installed inside the node build stage; the host copy is
+# both huge and built for the wrong platform.
+frontend/node_modules
+frontend/tsconfig.tsbuildinfo
+# Built by that stage too, never copied in — the image must not be able to ship a stale
+# bundle that happened to be sitting in someone's working tree.
+src/api/static/app
 .git
 .github
 .env
