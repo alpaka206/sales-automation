@@ -191,6 +191,23 @@ class Settings(BaseSettings):
     # button: the app authenticates straight from env, so a fresh deploy or a reset
     # database needs no click. Treat it like a password.
     GOOGLE_SHEETS_OAUTH_REFRESH_TOKEN: str = ""
+    # ----- Notion (policy documents) -----
+    # Internal integration token, READ scope only. Policy (plans, credits, CS rules) is
+    # owned in Notion by the people who write it; this console syncs a copy so an edit
+    # there reaches the drafting prompt without a deploy. Empty = the sync is skipped and
+    # the last synced copy keeps being used.
+    # Each page must also be shared with the integration in Notion (page ··· → 연결).
+    NOTION_TOKEN: str = ""
+
+    # The way in when the token above is unavailable — a company workspace where nobody
+    # can create an integration. ``token_v2`` is the cookie of a logged-in Notion session:
+    # a PERSONAL credential, so it belongs on the operator's machine and nowhere else.
+    # Read ONLY by scripts/sync_notion_local.py; no server code path may touch it, which
+    # tests/test_notion_local_sync.py asserts. Leave blank in every deployment.
+    NOTION_TOKEN_V2: str = ""
+    # Only when one browser session holds several Notion accounts.
+    NOTION_ACTIVE_USER_ID: str = ""
+
     # Display only — which account that refresh token belongs to, shown on /pipeline.
     GOOGLE_SHEETS_ACCOUNT_EMAIL: str = ""
     # The live workbook, "사본 [Perso AI] B2B 통합 대시보드". This default is what a
