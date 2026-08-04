@@ -10,8 +10,6 @@ What did NOT move:
   * every POST/PUT/DELETE — the React screens post to exactly those routes, which is why
     the send guard, the stage sync and the safe-mode block still have one implementation
   * ``/auth/*`` — sign-in renders server-side, before there is a session to run the SPA
-  * ``/tools/quote-calculator/app`` — the calculator itself is an HTML document the
-    console embeds, not a screen
   * ``/static`` and the JSON under ``/api/ui``
 
 301 would be cached by the browser forever; 307/308 preserve the method, which is wrong
@@ -39,6 +37,7 @@ _MOVED: tuple[tuple[str, str], ...] = (
     ("/logs", "/app/logs"),
     ("/settings/users", "/app/settings/users"),
     ("/outbound-history", "/app/outbound-history"),
+    ("/tools/quote-calculator/app", "/app/tools/quote-calculator"),
     ("/tools/quote-calculator", "/app/tools/quote-calculator"),
     ("/tools/quotation", "/app/tools/quotation"),
     ("/tools/contract", "/app/tools/contract"),

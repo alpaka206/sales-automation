@@ -19,6 +19,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
 from ...db.models import Contact, Conversation, CustomerProfile
+from ._shared import external_url
 
 router = APIRouter(tags=["ui-api"])
 
@@ -471,6 +472,19 @@ async def ui_email_templates():
     }
 
 
+@router.get("/api/ui/quote-policy")
+async def quote_policy() -> dict:
+    """The tier table the 견적 계산기 screen prices against.
+
+    Behind the console's auth gate rather than on /static because the policy is internal
+    sales data — `tier_to_client_dict` already strips contribution margin, and the gate
+    keeps the rest of it off the public mount.
+    """
+    from ...common.quote_tiers import policy_client
+
+    return policy_client()
+
+
 @router.get("/api/ui/email-templates/{template_id}")
 async def ui_email_template(template_id: int):
     from ...db.models import EmailTemplate
@@ -515,7 +529,10 @@ async def ui_policy_docs():
                     "id": row.id,
                     "label": row.label,
                     "title": row.title,
-                    "notion_url": row.notion_url,
+                    # The screen renders this straight into an href, so a stored
+                    # "javascript:" would execute in the console. Sanitised here, once,
+                    # rather than in the component that happens to link it.
+                    "notion_url": external_url(row.notion_url),
                     "mode": row.mode,
                     "status": row.status,
                     "body": row.body,

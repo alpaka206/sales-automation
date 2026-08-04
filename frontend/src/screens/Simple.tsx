@@ -21,22 +21,6 @@ export function Placeholder({ title, message }: { title: string; message: string
   );
 }
 
-/** 견적 계산기 — an internal reference page served behind the auth gate, embedded as-is. */
-export function QuoteCalculator() {
-  return (
-    <>
-      <div className="page-header">
-        <div><h1 className="page-title">견적 계산기</h1></div>
-        <a className="btn btn--subtle" href="/tools/quote-calculator" target="_blank" rel="noopener">
-          새 탭에서 크게 보기
-        </a>
-      </div>
-      <iframe title="견적 계산기" src="/tools/quote-calculator/app"
-              style={{ width: "100%", height: "calc(100dvh - 190px)", border: "1px solid var(--border)", borderRadius: 8, background: "var(--surface)" }} />
-    </>
-  );
-}
-
 type Log = { rows: { ts: string; level: string; source: string; message: string; kind: string }[] };
 
 /** 운영 로그 — two tabs, as the page always had: 복구 has the work, 로그 diagnoses it.

@@ -9,13 +9,12 @@ boundary-rounding the JS applies).
 
 from __future__ import annotations
 
-import json
 
 from src.common.quote_tiers import (
     CREDITS_PER_MIN,
     LIP_MULT,
     TIERS,
-    policy_client_json,
+    policy_client,
     tier_to_client_dict,
     validate_policy,
 )
@@ -46,7 +45,7 @@ def test_caps_strictly_ascending():
 
 
 def test_client_payload_excludes_internal_margin():
-    payload = json.loads(policy_client_json())
+    payload = policy_client()
     assert payload["creditsPerMin"] == CREDITS_PER_MIN
     assert payload["lipMult"] == LIP_MULT
     assert len(payload["tiers"]) == len(TIERS)

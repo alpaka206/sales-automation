@@ -22,7 +22,6 @@ included in the client payload, even though the route is auth-gated.
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
 
 CREDITS_PER_MIN = 60  # 60 credits = 1 dubbing minute (all tiers)
@@ -97,16 +96,17 @@ def tier_to_client_dict(t: Tier) -> dict:
     }
 
 
-def policy_client_json() -> str:
-    """The JSON blob the template injects: the two policy constants + all tiers."""
-    return json.dumps(
-        {
-            "creditsPerMin": CREDITS_PER_MIN,
-            "lipMult": LIP_MULT,
-            "tiers": [tier_to_client_dict(t) for t in TIERS],
-        },
-        ensure_ascii=False,
-    )
+def policy_client() -> dict:
+    """What the calculator screen fetches: the two policy constants + all tiers.
+
+    Served as JSON rather than injected into a template — the calculator is a React
+    screen now, so the tier table travels the same way every other screen's data does.
+    """
+    return {
+        "creditsPerMin": CREDITS_PER_MIN,
+        "lipMult": LIP_MULT,
+        "tiers": [tier_to_client_dict(t) for t in TIERS],
+    }
 
 
 def validate_policy() -> None:
