@@ -52,3 +52,19 @@ class TicketDTO(BaseModel):
     created_at: datetime | None = None
     updated_at: datetime | None = None
     primary_contact_id: str | None = None
+    # HubSpot's own `hs_all_associated_contact_emails`: the address(es) the ticket is
+    # held against. This is the one the reply must go to — the operator's rule is that
+    # the answer belongs to the ticket, not to whatever the contact record happens to
+    # say. HubSpot returns a semicolon/comma-separated list when several contacts are
+    # associated; `contact_email` exposes the first one.
+    contact_emails: str | None = None
+
+    @property
+    def contact_email(self) -> str | None:
+        """First address on the ticket, or None when it carries none."""
+        raw = (self.contact_emails or "").replace(";", ",")
+        for part in raw.split(","):
+            cleaned = part.strip()
+            if cleaned:
+                return cleaned
+        return None

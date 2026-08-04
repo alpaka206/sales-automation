@@ -521,7 +521,18 @@ def _row_for_client_id(service, tab: str, header: _SheetHeader, client_id: int) 
 
 def update_inbound_stage(client_id: int | None, stage: str, pipeline: str | None = None) -> bool:
     """Find the stable Client ID and update only its current stage cells."""
-    if not client_id or stage not in _STAGE_VALUES or not writes_enabled():
+    if not client_id or not writes_enabled():
+        return False
+    if stage not in _STAGE_VALUES:
+        # The board has seven stages; the workbook's Deal Stage column has words for five
+        # of them (reminder_sent and closed have none). Silence here meant the sheet kept
+        # its old stage with nothing to show anyone why — say it in the log at least.
+        logger.warning(
+            "Google Sheets has no Deal Stage wording for local stage '%s' — the workbook "
+            "keeps its previous value (client_id=%s).",
+            stage,
+            client_id,
+        )
         return False
     try:
         service = _build_service()

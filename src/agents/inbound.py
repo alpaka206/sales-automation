@@ -21,6 +21,7 @@ from ..db.session import SessionLocal
 from ..integrations.hubspot import HubSpotClient, HubSpotNotConfigured
 from ..llm.client import LLMClient
 from ..llm.knowledge import select_relevant_docs
+from ..llm.prompts import apply_link_tokens, get_reply_format
 from ._notify import notify_approval_once
 from .inbound_scoring import (  # noqa: F401 — re-exported for callers/tests
     _TARGET_COUNTRIES,
@@ -470,6 +471,20 @@ class InboundAgent:
             try:
                 ticket = self.hubspot.get_ticket_sync(ticket_id)
                 info["ticket_stage"] = ticket.pipeline_stage
+                # The reply goes to the address the TICKET is held against, not to
+                # whatever the contact record says. A contact can carry an older or
+                # personal address; the ticket's is the one the inquiry arrived on, and
+                # the operator's rule is that the answer belongs to the ticket.
+                ticket_email = ticket.contact_email
+                if ticket_email and ticket_email != info.get("email"):
+                    logger.info(
+                        "Ticket %s: replying to its own address %s (contact record says %s).",
+                        ticket_id,
+                        ticket_email,
+                        info.get("email") or "-",
+                    )
+                if ticket_email:
+                    info["email"] = ticket_email
                 if ticket.subject and not info["subject"]:
                     info["subject"] = ticket.subject
                 # Body to reply to = ticket content; fall back to the subject so a
@@ -748,6 +763,9 @@ class InboundAgent:
                 "enrichment_context": _build_enrichment_context(contact_info),
                 "knowledge_docs": knowledge_docs,
                 "pricing_rule": _PRICING_RULE_FIRST if first_reply else _PRICING_RULE_NORMAL,
+                # The reply SHAPE (opening / middle / closing), edited in the console.
+                # Read per draft, so a change there lands on the next reply.
+                "reply_format": get_reply_format(),
             },
             schema=DraftResult,
             tier="pro",
@@ -757,6 +775,10 @@ class InboundAgent:
         # CODE GUARD 1 — the operator always reviews Korean.
         draft.body = ensure_korean(draft.body, llm=self.llm)
         draft.language = "ko"
+
+        # CODE GUARD 1b — links are substituted, never generated. Runs AFTER
+        # ensure_korean: translation would happily rewrite a URL.
+        draft.body = apply_link_tokens(draft.body)
 
         # CODE GUARD 2 — the first reply must never state a price. Strip offending
         # lines deterministically and record it on the progress log.

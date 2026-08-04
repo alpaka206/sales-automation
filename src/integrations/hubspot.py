@@ -264,8 +264,19 @@ class HubSpotClient:
         subject: str,
         body: str,
         sent_at: datetime | None = None,
+        ticket_id: str | None = None,
     ) -> str:
-        """Log an email engagement on the contact's timeline. Returns engagement ID."""
+        """Log an email engagement and return its id.
+
+        HubSpot has no API that SENDS this reply (the transactional single-send needs a
+        paid add-on and a designed template), so this CRM email object IS the history:
+        SMTP delivers, and this records what went out.
+
+        Associated with the contact (type 198) and, when the thread has one, with the
+        TICKET (type 224). The ticket association is what the operator actually reads —
+        without it a reply lands on the contact timeline only, and the 문의 it answers
+        shows no activity at all.
+        """
         guard_external_write("hubspot:create_email_engagement")
         http = await self._http()
         ts = int((sent_at or datetime.now(timezone.utc)).timestamp() * 1000)
@@ -290,7 +301,30 @@ class HubSpotClient:
             f"/crm/v3/objects/emails/{email_id}/associations/contacts/{contact_id}/198",
         )
         association.raise_for_status()
-        logger.info("Logged email engagement %s for contact %s", email_id, contact_id)
+
+        if ticket_id:
+            # Best effort on purpose: the engagement already exists and is worth keeping
+            # even if this fails, and a raise here would send the caller down its
+            # "logging failed" path after a mail that really did go out.
+            try:
+                ticket_link = await http.put(
+                    f"/crm/v3/objects/emails/{email_id}/associations/tickets/{ticket_id}/224",
+                )
+                ticket_link.raise_for_status()
+            except Exception:
+                logger.warning(
+                    "Email engagement %s was logged but could not be attached to ticket %s.",
+                    email_id,
+                    ticket_id,
+                    exc_info=True,
+                )
+
+        logger.info(
+            "Logged email engagement %s for contact %s (ticket %s)",
+            email_id,
+            contact_id,
+            ticket_id or "-",
+        )
         return email_id
 
     # ------ Sync helpers (for use in synchronous agent code) ------
@@ -586,7 +620,7 @@ class HubSpotClient:
 
     _TICKET_PROPERTIES = (
         "subject,content,hs_pipeline,hs_pipeline_stage,hs_ticket_priority,"
-        "source_type,createdate,hs_lastmodifieddate"
+        "source_type,createdate,hs_lastmodifieddate,hs_all_associated_contact_emails"
     )
 
     def _ticket_from_api(self, item: dict, primary_contact_id: str | None = None) -> TicketDTO:
@@ -616,6 +650,7 @@ class HubSpotClient:
             created_at=created_at,
             updated_at=updated_at,
             primary_contact_id=primary_contact_id,
+            contact_emails=props.get("hs_all_associated_contact_emails"),
         )
 
     def get_ticket_sync(self, ticket_id: str) -> TicketDTO:

@@ -112,6 +112,46 @@ def _mirror_stage_to_sheet(client_id: int | None, stage: str, ticket_id: str) ->
         )
 
 
+# Draft states that a HubSpot-side answer makes pointless. ``drafting`` is deliberately
+# absent: that row is mid-flight in the inbound worker, which would write over this.
+_SUPERSEDABLE = ("pending_approval", "draft_failed", "send_failed")
+
+
+def _retire_superseded_drafts(session, conversation_id: int, local_stage: str) -> int:
+    """Close drafts that a human already answered in HubSpot. Returns how many.
+
+    Drafts are written for New tickets. When such a ticket turns up in a later stage it
+    means someone replied in HubSpot while we were still holding an unsent draft — real
+    work carried on during the pre-launch pause. Leaving the draft in 발송 대기 asks the
+    operator to send an answer the customer has already received, and it is exactly why
+    the queue shows rows whose Stage is not New.
+    """
+    from ..db.models import Message
+
+    if local_stage == "new":
+        return 0
+    drafts = (
+        session.query(Message)
+        .filter(
+            Message.conversation_id == conversation_id,
+            Message.direction == "outgoing",
+            Message.status.in_(_SUPERSEDABLE),
+        )
+        .all()
+    )
+    for draft in drafts:
+        draft.status = "superseded"
+    if drafts:
+        add_progress(
+            conversation_id,
+            "draft",
+            f"HubSpot에서 단계가 {local_stage}(으)로 이동해 대기 중이던 초안 "
+            f"{len(drafts)}건을 종료 처리했습니다. 이미 답변이 나간 문의입니다.",
+            session=session,
+        )
+    return len(drafts)
+
+
 def sync_stage_from_hubspot(
     ticket_id: str | None,
     hubspot_stage_id: str | None,
@@ -167,11 +207,12 @@ def sync_stage_from_hubspot(
             f"HubSpot에서 단계 변경 감지: {previous or '미지정'} → {local_stage} ({source}).",
             session=session,
         )
+        retired = _retire_superseded_drafts(session, conv.id, local_stage)
         session.commit()
 
     logger.info(
-        "Stage synced from HubSpot (ticket=%s, %s -> %s, source=%s)",
-        ticket_id, previous, local_stage, source,
+        "Stage synced from HubSpot (ticket=%s, %s -> %s, source=%s, drafts_retired=%d)",
+        ticket_id, previous, local_stage, source, retired,
     )
     # After the commit, so a Sheets failure can never roll back the local move.
     _mirror_stage_to_sheet(sheet_client_id, local_stage, str(ticket_id))
