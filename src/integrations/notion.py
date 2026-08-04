@@ -14,6 +14,8 @@ Auth is a Notion INTERNAL integration token (``NOTION_TOKEN``) and each page mus
 shared with that integration in Notion — without the share the API answers 404 even
 though the token is valid, which is the single most common setup mistake, so
 :func:`fetch_page` says so in the error instead of surfacing a bare 404.
+
+이 경로가 지금 안 쓰이는 이유: docs/정책문서-동기화-설계.md
 """
 
 from __future__ import annotations

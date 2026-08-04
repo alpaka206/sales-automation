@@ -17,6 +17,8 @@ owner renames in Notion must still land on the row that was registered with that
 
 Read-only in the strictest sense — this module opens a zip and a directory and nothing
 else. It cannot reach the network.
+
+zip 을 파싱하는 이유: docs/정책문서-동기화-설계.md
 """
 
 from __future__ import annotations

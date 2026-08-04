@@ -17,6 +17,14 @@ PERSO Inbound is a FastAPI workflow for inbound inquiry handling and customer op
 - Personal email domains are never grouped as one company.
 - Existing conversation progress rows are append-only.
 
+- **정책·지식 문서는 노션에서 오되, 노션 API로는 오지 않는다.** 이 워크스페이스는 내부 통합
+  토큰을 만들 수 없고(그래서 `NOTION_TOKEN`은 영원히 비어 있다), 사내망은 담당자 PC에서
+  DB로 가는 5432/6543을 막는다. 노션을 읽을 수 있는 기계와 DB에 쓸 수 있는 기계가 서로 달라,
+  사람이 Export zip을 콘솔에 드롭한다. 올린 파일이 곧 목록이고 처음 보는 문서는 자동
+  등록된다. **이걸 "API로 하면 될 텐데"로 바꾸기 전에 `docs/정책문서-동기화-설계.md`의 확인
+  절차를 돌려라** — 조건이 바뀌었으면 되돌리는 게 맞고, 안 바뀌었으면 그 문서에 왜 안 되는지가
+  실측과 함께 적혀 있다.
+
 ## Stack
 
 - Python 3.11+, FastAPI, SQLAlchemy, React (Vite + TypeScript + React Query)

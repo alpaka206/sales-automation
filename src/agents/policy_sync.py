@@ -13,6 +13,8 @@ mode that would put invented numbers in front of a customer.
 the per-inquiry document router already reads, so registering a page is all it takes for
 the drafting prompt to start quoting it. ``mode='rules'`` rows are read straight out of
 ``policy_sources`` by ``llm.prompts._rules_from_db``.
+
+노션 API 를 쓰지 않는 이유: docs/정책문서-동기화-설계.md
 """
 
 from __future__ import annotations

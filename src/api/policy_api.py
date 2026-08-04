@@ -16,6 +16,8 @@
 로컬은 DB를 몰라도 되고, 서버는 노션을 몰라도 됩니다. 저장 로직은
 :func:`sync_policy_sources` 하나뿐 — 무엇이 저장되고 무엇이 지식 문서가 되는지가 갈리면
 "콘솔로 넣은 것과 스크립트로 넣은 것이 다르다"가 되므로, 여기서는 fetcher만 바꿔 끼웁니다.
+
+이 경로가 존재하는 이유: docs/정책문서-동기화-설계.md
 """
 
 from __future__ import annotations

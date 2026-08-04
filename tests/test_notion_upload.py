@@ -91,3 +91,32 @@ def test_an_oversized_upload_is_refused_before_it_is_parsed(size):
             files={"export": ("huge.zip", b"0" * size, "application/zip")},
         )
     assert response.status_code == 413
+
+
+def test_the_design_note_survives_and_the_code_points_at_it():
+    """이 설계는 제약의 결과이지 취향이 아닙니다.
+
+    "노션 API 쓰면 되는데" 는 합리적인 질문이고, 그 답이 코드 어디에도 없으면 누군가 —
+    사람이든 모델이든 — 되돌려 놓고 왜 안 되는지를 처음부터 다시 알아내게 됩니다. 실제로
+    막힌 지점(통합 토큰 발급 불가, 5432 차단, file.notion.com 403)은 전부 실행해서 확인한
+    것이라 다시 알아내는 데 시간이 듭니다.
+
+    그래서 문서가 있고, 관련 모듈이 전부 그 문서를 가리킵니다.
+    """
+    import pathlib
+
+    note = pathlib.Path("docs/정책문서-동기화-설계.md")
+    assert note.exists(), "설계 근거 문서가 사라졌습니다"
+    text = note.read_text(encoding="utf-8")
+    # 다시 검토할 때 무엇을 확인해야 하는지가 없으면 문서가 아니라 변명입니다.
+    assert "Test-NetConnection" in text and "NOTION_TOKEN" in text
+
+    pointing = [
+        "src/agents/policy_sync.py",
+        "src/api/policy_api.py",
+        "src/integrations/notion.py",
+        "src/integrations/notion_export.py",
+        "src/integrations/policy_push.py",
+    ]
+    for path in pointing:
+        assert "정책문서-동기화-설계" in pathlib.Path(path).read_text(encoding="utf-8"), path

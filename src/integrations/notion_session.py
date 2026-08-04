@@ -19,6 +19,8 @@ Getting the cookie (once; it lasts months):
     put it in ``.env`` as ``NOTION_TOKEN_V2=v02%3Auser_token_or…``
 
 Read-only: the only task it enqueues is ``exportBlock``. It cannot edit a page.
+
+이 경로가 보조인 이유: docs/정책문서-동기화-설계.md
 """
 
 from __future__ import annotations
