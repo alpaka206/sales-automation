@@ -9,13 +9,24 @@ import { describe, expect, it } from "vitest";
  *
  * This console does not have that. It mounts <BrowserRouter> and renders <Routes>, with
  * no data router, no route `loader`/`action`, and no RSC — every write is a plain fetch
- * POST to a FastAPI route, where the auth gate and the safe-mode block live. There is
- * also nowhere to upgrade TO: 7.18.2 is the newest release and the advisory covers
- * everything from 7.12.0, so npm's only offer is a downgrade to 7.11.0 — seven minors
- * back, to remove a code path we do not compile in.
+ * POST to a FastAPI route, where the auth gate and the safe-mode block live.
  *
- * So this test, not a downgrade. The day someone adopts the data router or RSC, the
- * exposure becomes real and this fails, which is the moment to re-decide.
+ * DO NOT "fix" it by downgrading. npm offers 7.11.0, and that version is inside a
+ * different range — 6.0.0–7.17.0 — carrying FOURTEEN advisories, several of which do
+ * reach a plain client router:
+ *
+ *   GHSA-wrjc-x8rr-h8h6  open redirect via backslash in <Link> and useNavigate
+ *   GHSA-2w69-qvjg-hvjx  XSS via open redirects
+ *   GHSA-jjmj-jmhj-qwj2  open redirect leading to XSS
+ *   GHSA-2j2x-hqr9-3h42  protocol-relative // open redirect
+ *
+ * We use <Link> and <NavLink> on every screen. 7.18.2 is the version that fixes all
+ * of those, and npm's own advice FROM 7.11.0 is to install 7.18.2 — the two ranges
+ * point at each other. Of the two, the one that leaves only an unreachable RSC flaw is
+ * this one.
+ *
+ * So this test instead. The day someone adopts the data router or RSC, the exposure
+ * becomes real and this fails, which is the moment to decide again.
  */
 
 const SOURCE = readdirSync("src", { recursive: true, encoding: "utf-8" })

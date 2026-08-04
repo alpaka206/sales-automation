@@ -45,4 +45,8 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=3s --start-period=20s --retries=3 \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=2)"
 
+# Migrations run here, not from a developer's machine — that machine cannot reach the
+# database (outbound 5432 is blocked on the corporate network). See the script.
+# Invoked through sh, so a checkout without the executable bit (Windows) still runs.
+ENTRYPOINT ["sh", "/app/scripts/docker-entrypoint.sh"]
 CMD ["uvicorn", "src.api.main:app", "--host", "0.0.0.0", "--port", "8000"]
