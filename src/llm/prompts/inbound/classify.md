@@ -20,8 +20,27 @@ Most recent inbound message (verbatim):
 
 {{enrichment_context}}
 
+These are the inquiry types the B2B 리드 대응 정책 sorts a lead into. The first two are
+NOT sales leads and are handled separately; the rest are. An inquiry may touch several —
+pick the one the customer is mainly asking about, and the document router will pull in the
+rest by meaning.
+
+  support         CS 문의. An error or problem while USING the product (upload failed,
+                  credits not granted, account/billing trouble). Not a lead.
+  spam            영업·홍보 목적. They are selling to us, not buying.
+  pricing_question  견적·가격. Quote, price, cost, estimate, "which plan should we take".
+  plan_features   B2B 플랜 기능. Whether a specific capability exists — workflow,
+                  permissions, quality, max length, volume.
+  languages       지원 언어. Whether a source/target language pair is dubbed.
+  credits         크레딧 차감 방식. Usage, deduction rules, what happens on a failed job.
+  purchase_inquiry  전반적 소개 · 비즈니스 플랜 설명. What the service is, how it works,
+                  whether it could be adopted, B2B versus B2C.
+  partnership     Reseller, integration or joint-business proposals worth reviewing.
+  recruiting      Job applications.
+  other           A real inquiry that is none of the above.
+
 Return strict JSON only:
 {
-  "category": "purchase_inquiry" | "partnership" | "pricing_question" | "support" | "recruiting" | "spam" | "other",
+  "category": "support" | "spam" | "pricing_question" | "plan_features" | "languages" | "credits" | "purchase_inquiry" | "partnership" | "recruiting" | "other",
   "reasoning": "<one short sentence in the same language as the message>"
 }
