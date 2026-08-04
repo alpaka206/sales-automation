@@ -101,6 +101,24 @@ jobs:
           PY
           pytest -q tests/test_smoke.py tests/test_api_health.py::test_healthz_no_token
 
+  console:
+    # The calculator's arithmetic is a customer quote, so it is pinned against what the
+    # pre-React calculator rendered. Runs on its own because nothing here needs Python.
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm --prefix frontend ci
+      - name: Test
+        run: npm --prefix frontend test
+      - name: Typecheck and build
+        run: npm --prefix frontend run build
+
   docker-build:
     runs-on: ubuntu-latest
     timeout-minutes: 15

@@ -49,7 +49,12 @@ exempt from the auth gate, so React can draw it before a session exists).
 
 - **Build before packaging.** `npm --prefix frontend ci && npm --prefix frontend run build`
   writes `src/api/static/app/`, which is gitignored and shipped via
-  `[tool.setuptools.package-data]`. Skip it and `/app` answers 503.
+  `[tool.setuptools.package-data]`. Skip it and `/app` answers 503. The Dockerfile's node
+  stage does this itself, so `docker build` needs no prior step.
+- **`npm --prefix frontend test`** replays 1,512 quotes the pre-React calculator
+  rendered against `src/lib/quote.ts`. `frontend/test/quote.golden.json` is not a fixture
+  to refresh: a failure means the console now quotes a different price than the
+  calculator the sales team has been using.
 - **Styling is `static/console.css`**, linked rather than bundled — one copy of the design
   for the SPA and for the sign-in pages. There is no CSS framework.
 - **Reads go through `/api/ui/*`**, which calls the SAME context builders the templates

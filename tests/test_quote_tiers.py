@@ -9,6 +9,8 @@ boundary-rounding the JS applies).
 
 from __future__ import annotations
 
+import pytest
+
 
 from src.common.quote_tiers import (
     CREDITS_PER_MIN,
@@ -76,3 +78,25 @@ def test_displayed_cap_lands_on_that_tier():
 def test_krw_is_uniform_exchange_rate():
     rates = {t.krw / t.usd for t in TIERS}
     assert len(rates) == 1  # a single, consistent KRW/USD across all tiers
+
+
+def test_the_javascript_golden_table_was_priced_from_this_tier_table():
+    """frontend/test/quote.test.ts replays 1,512 quotes the pre-React calculator
+    produced. Those rows only mean anything against the prices they came from, so the
+    tier table is captured with them — and this is what makes a price change here fail
+    instead of quietly leaving that table describing the old one.
+
+    If this fails, the golden file has to be regenerated from the new prices. That is a
+    deliberate act: it changes what the sales team quotes.
+    """
+    import json
+    import pathlib
+
+    golden = pathlib.Path("frontend/test/quote.golden.json")
+    if not golden.exists():          # source checkout without the console
+        pytest.skip("frontend/ is not present")
+
+    captured = json.loads(golden.read_text(encoding="utf-8"))["policy"]
+    assert captured == policy_client(), (
+        "tier prices changed — regenerate frontend/test/quote.golden.json on purpose"
+    )
