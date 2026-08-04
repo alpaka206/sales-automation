@@ -14,8 +14,12 @@ import { PolicyDocs } from "./screens/PolicyDocs";
 import { Operations } from "./screens/Operations";
 import { CompanyDetail } from "./screens/CompanyDetail";
 import { SettingsUsers } from "./screens/SettingsUsers";
-import { Logs, Placeholder } from "./screens/Simple";
+import { Logs } from "./screens/Simple";
 import { QuoteCalculator } from "./screens/QuoteCalculator";
+import { Overview } from "./screens/Overview";
+import { Contracts } from "./screens/Contracts";
+import { Quotation } from "./screens/Quotation";
+import { ContractDoc } from "./screens/ContractDoc";
 import { SignIn } from "./screens/SignIn";
 
 const root = createRoot(document.getElementById("root")!);
@@ -56,16 +60,10 @@ function mountConsole() {
             <Route path="settings/users" element={<SettingsUsers />} />
             <Route path="logs" element={<Logs />} />
             <Route path="tools/quote-calculator" element={<QuoteCalculator />} />
-            {/* Slots whose screen is not built yet — the same placeholders the Jinja app
-                serves, so the map is settled and nothing 404s. */}
-            <Route path="overview" element={
-              <Placeholder title="전체 대시보드" message="전체 대시보드는 준비 중입니다." />} />
-            <Route path="outbound-history" element={
-              <Placeholder title="수주 고객" message="수주 고객 화면은 준비 중입니다." />} />
-            <Route path="tools/quotation" element={
-              <Placeholder title="견적서" message="견적서 생성 기능은 준비 중입니다." />} />
-            <Route path="tools/contract" element={
-              <Placeholder title="계약서" message="계약서 생성 기능은 준비 중입니다." />} />
+            <Route path="overview" element={<Overview />} />
+            <Route path="outbound-history" element={<Contracts />} />
+            <Route path="tools/quotation" element={<Quotation />} />
+            <Route path="tools/contract" element={<ContractDoc />} />
           </Route>
         </Routes>
       </BrowserRouter>

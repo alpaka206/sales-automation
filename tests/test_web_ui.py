@@ -213,8 +213,12 @@ def test_every_table_is_the_same_table():
     screens = list(pathlib.Path("frontend/src/screens").glob("*.tsx"))
     screens += [path for path in pathlib.Path("frontend/src/ui").glob("*.tsx")
                 if path.name != "DataTable.tsx"]
+    # `className="table"` is the console's list table specifically. The printed
+    # documents' `sheet__table` is not one — it has a totals row, its own print
+    # stylesheet, and no shared columns to drift from.
     offenders = [
-        str(path) for path in screens if "<table" in path.read_text(encoding="utf-8")
+        str(path) for path in screens
+        if 'className="table' in path.read_text(encoding="utf-8")
     ]
     assert offenders == []
 

@@ -293,6 +293,10 @@
 .kpi__row { display: flex; align-items: baseline; gap: 8px; }
 .kpi__sub { font-size: 13px; color: var(--text-subtle); }
 .kpi--accent { border-color: var(--accent-soft-border); background: color-mix(in srgb, var(--accent-soft) 60%, var(--surface)); }
+/* A KPI that links somewhere is still a card. Without this it renders as an underlined
+   blue link the width of the card, which is what 전체 대시보드 did. */
+a.kpi { text-decoration: none; color: inherit; }
+a.kpi:hover { border-color: var(--accent); }
 
 /* Inline counters beside the 답변 대기중인 문의 heading. They replaced a five-card
    KPI block; the numbers stayed, the 254px-tall hero did not. */

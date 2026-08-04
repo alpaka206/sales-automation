@@ -1,26 +1,8 @@
 import { useQuery } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
 import { getJSON } from "../lib/api";
-import { Icon } from "../ui/Icon";
 import { DataTable } from "../ui/DataTable";
 import { Recovery } from "./Recovery";
-
-// The screens that are a sentence or an iframe. They were four near-identical Jinja
-// templates; here they are one component with an argument, because that is all the
-// difference between them ever was.
-export function Placeholder({ title, message }: { title: string; message: string }) {
-  return (
-    <>
-      <div className="page-header"><div><h1 className="page-title">{title}</h1></div></div>
-      <div className="card" style={{ maxWidth: 640 }}>
-        <div className="empty">
-          <div className="empty__icon"><Icon name="clock" size={24} /></div>
-          <div className="empty__text">{message}</div>
-        </div>
-      </div>
-    </>
-  );
-}
 
 type Log = { rows: { ts: string; level: string; source: string; message: string; kind: string }[] };
 
