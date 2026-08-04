@@ -319,6 +319,46 @@ class KnowledgeDocumentRevision(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
 
 
+class PolicySource(Base):
+    """A Notion page this console treats as policy, plus the last copy it read.
+
+    The registry an operator maintains on 정책 문서: a label ("Business 플랜 정책") and a
+    Notion URL. Policy is owned in Notion, so the console never edits ``body`` — the sync
+    overwrites it from the page. Keeping the copy here is what makes a Notion outage a
+    non-event: drafting reads this row, never the network.
+
+    ``mode`` decides how the copy is used:
+      ``rules``     — always applied, concatenated into the LLM system instruction
+                      (this is what ``company_rules/*.md`` used to be).
+      ``knowledge`` — offered to the per-inquiry document router, i.e. upserted into
+                      ``knowledge_documents`` under ``slug``.
+    """
+
+    __tablename__ = "policy_sources"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    label: Mapped[str] = mapped_column(String, nullable=False)
+    notion_url: Mapped[str] = mapped_column(Text, nullable=False)
+    # 32-hex, derived from the URL on save so a re-typed URL cannot create a duplicate.
+    notion_page_id: Mapped[str] = mapped_column(String, unique=True, nullable=False, index=True)
+    mode: Mapped[str] = mapped_column(String, nullable=False, default="knowledge")
+    # Ordering for mode='rules': the system instruction is read top to bottom.
+    order_index: Mapped[int] = mapped_column(Integer, nullable=False, default=100)
+    status: Mapped[str] = mapped_column(String, nullable=False, default="active")
+    # The synced copy. NULL until the first successful sync.
+    body: Mapped[str | None] = mapped_column(Text, nullable=True)
+    title: Mapped[str | None] = mapped_column(String, nullable=True)
+    summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    last_synced_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # Last failure, kept alongside the good copy so the screen can show "동기화 실패,
+    # 지난 사본 사용 중" instead of either hiding the problem or dropping the policy.
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=_utcnow, onupdate=_utcnow, nullable=False
+    )
+
+
 class EmailTemplate(Base):
     """Editable email building-block templates (signature, greeting, footer, ...).
 
@@ -434,7 +474,11 @@ class CustomerInteraction(Base):
         Integer, ForeignKey("conversations.id", ondelete="SET NULL"), nullable=True
     )
     channel: Mapped[str] = mapped_column(String(32), nullable=False, default="manual")
+    # Only the HubSpot sync sets a real direction now. A hand-written record is the whole
+    # exchange summarized once, which has no single direction, so it stores the default —
+    # ``handler`` is what a manual record is asked for instead (migration 0044).
     direction: Mapped[str] = mapped_column(String(16), nullable=False, default="note")
+    handler: Mapped[str | None] = mapped_column(String(120), nullable=True)
     subject: Mapped[str | None] = mapped_column(String(300), nullable=True)
     summary: Mapped[str] = mapped_column(Text, nullable=False)
     context: Mapped[str | None] = mapped_column(Text, nullable=True)
