@@ -14,76 +14,6 @@ type Row = {
 };
 type Data = { modes: { key: string; label: string }[]; rows: Row[] };
 
-/** The registration form. Notion links move — a page gets rewritten, a section is split,
- *  someone reorganises the workspace — so adding, pausing and removing one has to be
- *  something the operator does, not a deploy. The list has always lived in the database;
- *  this screen just stopped offering the controls when it was ported. */
-function AddSource({ modes, onDone }: { modes: { key: string; label: string }[]; onDone: () => void }) {
-  const [open, setOpen] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  if (!open) {
-    return (
-      <button type="button" className="btn btn--subtle btn--sm" onClick={() => setOpen(true)}>
-        <Icon name="plus" size={14} /> 노션 문서 추가
-      </button>
-    );
-  }
-  return (
-    <form
-      className="card mb-gap"
-      onSubmit={async (event) => {
-        event.preventDefault();
-        const form = new FormData(event.currentTarget);
-        setBusy(true);
-        setError(null);
-        try {
-          await postForm("/policy-docs", {
-            label: String(form.get("label") ?? ""),
-            notion_url: String(form.get("notion_url") ?? ""),
-            mode: String(form.get("mode") ?? "knowledge"),
-          });
-          setOpen(false);
-          onDone();
-        } catch (err) {
-          setError(err instanceof Error ? err.message : String(err));
-        } finally {
-          setBusy(false);
-        }
-      }}
-    >
-      <div className="grid grid-3" style={{ gap: 12 }}>
-        <label style={{ display: "block" }}>
-          <span className="field-label">문서 이름</span>
-          <input className="input" name="label" required placeholder="예: 환불 정책" />
-        </label>
-        <label style={{ display: "block" }}>
-          <span className="field-label">노션 링크</span>
-          <input className="input" name="notion_url" required placeholder="https://www.notion.so/..." />
-        </label>
-        <label style={{ display: "block" }}>
-          <span className="field-label">적용 방식</span>
-          <select className="select" name="mode" defaultValue="knowledge">
-            {modes.map((mode) => <option key={mode.key} value={mode.key}>{mode.label}</option>)}
-          </select>
-        </label>
-      </div>
-      {error && <div className="t-xs" style={{ color: "var(--danger)", marginTop: 8 }}>{error}</div>}
-      <div className="row" style={{ gap: 8, marginTop: 12 }}>
-        <button className="btn btn--primary btn--sm" type="submit" disabled={busy}>
-          {busy && <span className="spinner" style={{ marginRight: 6 }} />}추가
-        </button>
-        <button className="btn btn--ghost btn--sm" type="button" onClick={() => setOpen(false)}>취소</button>
-      </div>
-    </form>
-  );
-}
-
-// 분량 and 상태 were columns of their own; the length is on the document page and a
-// healthy document had nothing to say in a status column but "사용 중". What is worth
-// interrupting for — a failed sync serving a stale copy, or a document switched off —
-// says so under the name, where it is impossible to read past.
 const columns = (act: (path: string) => void): Column<Row>[] => [
   {
     label: "문서",
@@ -121,6 +51,7 @@ const columns = (act: (path: string) => void): Column<Row>[] => [
   },
 ];
 
+
 /** 노션 Export zip 을 올려 등록된 문서를 한 번에 갱신합니다.
  *
  *  왜 업로드인가: 로컬 실행 스크립트는 노션에서 읽어 DB에 쓰는데, 사내망이 DB 포트를 막고
@@ -128,45 +59,64 @@ const columns = (act: (path: string) => void): Column<Row>[] => [
  *  다 할 수 있는 기계가 없습니다. 파일로 옮기면 각 구간이 실제로 뚫려 있는 경로만 씁니다. */
 function UploadExport({ onDone }: { onDone: () => void }) {
   const [busy, setBusy] = useState(false);
+  const [over, setOver] = useState(false);
   const [note, setNote] = useState<string | null>(null);
 
+  async function upload(file: File) {
+    setBusy(true);
+    setNote(null);
+    try {
+      const body = new FormData();
+      body.append("export", file);
+      const response = await fetch("/policy-docs/upload-export", {
+        method: "POST", credentials: "same-origin", body,
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.detail ?? response.status);
+      const added = result.added
+        ? ` · 새로 추가 ${result.added} (${(result.added_labels ?? []).join(", ")})`
+        : "";
+      setNote(`갱신 ${result.synced}${added}${result.failed ? ` · 실패 ${result.failed}` : ""}`);
+      onDone();
+    } catch (error) {
+      setNote(`실패: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
-    <>
-      <label className={`btn btn--subtle btn--sm${busy ? " is-disabled" : ""}`}
-             style={{ cursor: busy ? "default" : "pointer" }}>
-        {busy && <span className="spinner" style={{ marginRight: 6 }} />}
-        노션 Export 올리기
-        <input
-          type="file"
-          accept=".zip"
-          hidden
-          disabled={busy}
-          onChange={async (event) => {
-            const file = event.target.files?.[0];
-            event.target.value = "";
-            if (!file) return;
-            setBusy(true);
-            setNote(null);
-            try {
-              const body = new FormData();
-              body.append("export", file);
-              const response = await fetch("/policy-docs/upload-export", {
-                method: "POST", credentials: "same-origin", body,
-              });
-              const result = await response.json();
-              if (!response.ok) throw new Error(result.detail ?? response.status);
-              setNote(`갱신 ${result.synced} · 실패 ${result.failed} · 건너뜀 ${result.skipped}`);
-              onDone();
-            } catch (error) {
-              setNote(`실패: ${error instanceof Error ? error.message : String(error)}`);
-            } finally {
-              setBusy(false);
-            }
-          }}
-        />
+    <div
+      className={`dropzone${over ? " is-over" : ""}${busy ? " is-busy" : ""}`}
+      onDragOver={(event) => { event.preventDefault(); setOver(true); }}
+      onDragLeave={() => setOver(false)}
+      onDrop={(event) => {
+        event.preventDefault();
+        setOver(false);
+        const file = event.dataTransfer.files?.[0];
+        if (file && !busy) void upload(file);
+      }}
+    >
+      <label style={{ cursor: busy ? "default" : "pointer", display: "block" }}>
+        <div className="row" style={{ gap: 8, justifyContent: "center" }}>
+          {busy ? <span className="spinner" /> : <Icon name="file" size={16} />}
+          <strong className="t-sm">
+            {busy ? "읽는 중…" : "노션 Export zip 을 여기에 끌어다 놓으세요"}
+          </strong>
+        </div>
+        <div className="t-xs t-subtle" style={{ marginTop: 4 }}>
+          클릭해서 고를 수도 있습니다 · zip 안의 문서는 <strong>전부</strong> 반영되고,
+          처음 보는 문서는 <strong>문의별 참고로 자동 추가</strong>됩니다
+        </div>
+        <input type="file" accept=".zip" hidden disabled={busy}
+               onChange={(event) => {
+                 const file = event.target.files?.[0];
+                 event.target.value = "";
+                 if (file) void upload(file);
+               }} />
       </label>
-      {note && <span className="t-xs t-subtle">{note}</span>}
-    </>
+      {note && <div className="t-xs t-subtle" style={{ marginTop: 8 }}>{note}</div>}
+    </div>
   );
 }
 
@@ -252,11 +202,11 @@ export function PolicyDocs({ onBack }: { onBack?: () => void }) {
       </div>
       <div className="page-header">
         <div><h1 className="page-title">정책 문서</h1></div>
-        <div className="row" style={{ gap: 8 }}>
-          <UploadExport onDone={refresh} />
-          <AddSource modes={data.modes} onDone={refresh} />
-        </div>
       </div>
+
+      {/* 드롭이 주된 방법입니다. URL 을 하나씩 등록하게 하면 노션에서 문서를 만든 사람과
+          콘솔에 등록하는 사람이 같아야 하고, 한쪽만 하면 조용히 누락됩니다. */}
+      <UploadExport onDone={refresh} />
       {data.modes.map((mode) => (
         <section key={mode.key} className="mb-gap">
           <div className="section-header table-heading">

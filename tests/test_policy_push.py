@@ -33,17 +33,31 @@ def test_a_browser_session_cannot_reach_it():
 
 
 def test_the_server_decides_what_gets_stored_not_the_uploader():
-    """올린 쪽은 본문만 건넵니다. 어떤 행이 갱신되는지는 서버의 등록부가 정합니다 —
-    등록되지 않은 페이지를 올려도 아무 일도 일어나지 않아야 합니다."""
+    """올린 쪽은 본문만 건넵니다. 어떤 행이 갱신되는지는 서버의 등록부가 정합니다.
+
+    이 경로가 등록까지 하지 않는 것은 의도입니다: 로컬 러너는 먼저 서버에 무엇이 등록돼
+    있는지 묻고 그것만 읽어 옵니다. 등록은 zip 을 드롭할 때 파일이 스스로 합니다.
+    """
+    from src.db.models import PolicySource
+    from src.db.session import SessionLocal
+
+    unknown = "https://www.notion.so/deadbeefdeadbeefdeadbeefdeadbeef"
+    before = SessionLocal().query(PolicySource).count()
     with TestClient(app) as client:
         response = client.post(
             "/api/policy/push",
             headers=_token(),
-            json={"pages": [{"notion_url": _URL, "title": "몰래", "markdown": "본문"}]},
+            json={"pages": [{"notion_url": unknown, "title": "몰래", "markdown": "본문"}]},
         )
     assert response.status_code == 200
-    # 등록부가 비어 있으므로 저장된 것이 없습니다.
-    assert response.json()["synced"] == 0
+    with SessionLocal() as session:
+        assert session.query(PolicySource).count() == before, "이 경로는 행을 만들지 않습니다"
+        assert (
+            session.query(PolicySource)
+            .filter(PolicySource.label == "몰래")
+            .count()
+            == 0
+        )
 
 
 def test_an_unreadable_url_is_ignored_rather_than_failing_the_batch():

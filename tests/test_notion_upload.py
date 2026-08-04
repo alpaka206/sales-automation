@@ -34,7 +34,7 @@ def test_an_upload_needs_no_database_access_from_the_uploader():
 
     source = inspect.getsource(policy_docs.policy_docs_upload_export)
     assert "sync_policy_sources" in source, "서버가 직접 저장해야 합니다"
-    assert "fetcher_from_export" in source, "업로드한 zip 이 곧 출처입니다"
+    assert "read_export" in source, "업로드한 zip 이 곧 출처입니다"
 
 
 def test_a_file_that_is_not_an_export_is_refused_with_a_readable_reason():

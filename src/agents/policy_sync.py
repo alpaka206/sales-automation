@@ -80,6 +80,68 @@ def _upsert_knowledge(session, source: PolicySource, title: str, markdown: str) 
     logger.info("Policy sync: updated knowledge document %s (v%d)", slug, doc.version)
 
 
+# 한 번 올리는 zip 이 담을 만한 문서 수의 상한. 정책 페이지와 그 자식들은 수십 개면 넉넉하고,
+# 워크스페이스 전체를 통째로 내보낸 zip 이 실수로 올라왔을 때 등록부가 수백 줄로 불어나는
+# 것을 막습니다. 넘으면 아무것도 추가하지 않고 이유를 말합니다.
+MAX_NEW_SOURCES = 60
+
+
+def register_export_pages(pages: dict) -> dict:
+    """내보내기에 있는 페이지를 등록부에 반영합니다 — 있으면 두고, 없으면 추가.
+
+    URL 을 하나씩 손으로 등록하게 하면, 노션에서 자식 문서를 만든 사람과 콘솔에 등록하는
+    사람이 같아야 하고 한쪽만 하면 조용히 누락됩니다. 실제로 그렇게 누락돼 있었습니다:
+    정책 문서는 등록됐는데 그 아래 지원 언어·크레딧·플랜 기능은 아무도 등록하지 않아서
+    AI 가 존재조차 몰랐습니다.
+
+    그래서 파일이 곧 목록입니다. 올린 zip 에 있는 문서는 전부 읽습니다.
+
+    새 문서는 ``knowledge``(문의별 참고)로 들어옵니다. ``rules``(항상 적용)는 모든 회신에
+    붙어 다니므로 늘어나면 안 되는 쪽이고, 무엇이 거기 들어갈지는 사람이 정할 일입니다 —
+    콘솔에서 바꿀 수 있습니다.
+
+    지우지 않습니다. zip 에 없는 문서를 사라진 것으로 볼 수는 없습니다 — 한 페이지만
+    내보낸 zip 을 올렸을 뿐일 수도 있으니까요. 삭제는 콘솔에서 사람이 합니다.
+    """
+    from ..db.models import PolicySource
+
+    added, existing = [], 0
+    with SessionLocal() as session:
+        known = {
+            row.notion_page_id
+            for row in session.query(PolicySource.notion_page_id).all()
+        }
+        unknown = [pid for pid in pages if pid not in known]
+        if len(unknown) > MAX_NEW_SOURCES:
+            return {
+                "added": 0,
+                "existing": len(pages) - len(unknown),
+                "error": (
+                    f"새 문서가 {len(unknown)}개입니다. 워크스페이스 전체를 내보낸 zip 인 것 "
+                    f"같습니다 — 정책 페이지 하나를 'Include subpages' 로 내보내 주세요."
+                ),
+            }
+
+        for page_id, page in pages.items():
+            if page_id in known:
+                existing += 1
+                continue
+            source = PolicySource(
+                label=(page.title or page_id)[:200],
+                # 내보내기에는 원래 URL 이 없습니다. 페이지 id 로 정규 주소를 만들면
+                # page_id_from_url 이 같은 id 로 되돌려 읽으므로 동기화가 이어집니다.
+                notion_url=f"https://www.notion.so/{page_id}",
+                notion_page_id=page_id,
+                mode="knowledge",
+                status="active",
+            )
+            session.add(source)
+            added.append(source.label)
+        session.commit()
+
+    return {"added": len(added), "existing": existing, "labels": added, "error": None}
+
+
 def sync_policy_sources(
     only_id: int | None = None,
     fetcher: Callable[[str], "NotionPage"] | None = None,

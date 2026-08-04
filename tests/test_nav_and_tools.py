@@ -32,23 +32,22 @@ def test_policy_docs_is_a_category_not_a_sidebar_entry():
     assert 'kind === "policy"' in templates_screen
 
 
-def test_the_policy_text_is_read_only_but_the_registration_is_not():
-    """Two different things, and the screen used to refuse both.
+def test_the_policy_text_is_read_only_but_the_list_is_managed_by_dropping_a_file():
+    """The CONTENT is read-only — it is a copy pulled from Notion, so an edit here is
+    undone by the next upload. There is no editor for a document body.
 
-    The CONTENT is read-only and must stay that way — it is a copy pulled from Notion, so
-    an edit here is undone by the next sync. There is no editor for a document body.
+    WHICH pages get pulled is decided by the file. Registering a URL by hand was offered
+    for a while and was dead on arrival: there is no Notion API token on this workspace,
+    so a registered URL had nothing that could ever fetch it and sat empty forever. The
+    export names its own pages, so dropping it registers what it contains.
 
-    WHICH pages get pulled is the opposite: links move, pages get split, someone
-    reorganises the workspace. Registering, pausing and removing one has to be an operator
-    action, and the list has always been rows in the database — the screen simply stopped
-    offering the controls when it was ported to React.
+    Pausing and removing stay, because those are judgements a file cannot make.
     """
     policy = pathlib.Path("frontend/src/screens/PolicyDocs.tsx").read_text(encoding="utf-8")
     assert "읽기 전용" in policy
     # No editor for the body: it is rendered in a <pre>, never a textarea.
     assert "<textarea" not in policy
-    # But the registration is manageable, against the routes that already existed.
-    assert 'postForm("/policy-docs"' in policy
+    assert "dropzone" in policy and "upload-export" in policy
     assert "/toggle" in policy and "/delete" in policy
 
 

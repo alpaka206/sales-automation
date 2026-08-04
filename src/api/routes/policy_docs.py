@@ -153,11 +153,12 @@ async def policy_docs_upload_export(request: Request, export: UploadFile = File(
 
     import asyncio
 
-    from ...agents.policy_sync import sync_policy_sources
-    from ...integrations.notion_export import NotionExportError, fetcher_from_export
+    from ...agents.policy_sync import register_export_pages, sync_policy_sources
+    from ...integrations.notion import page_id_from_url
+    from ...integrations.notion_export import NotionExportError, read_export
 
     try:
-        fetcher = fetcher_from_export(payload)
+        pages = await asyncio.to_thread(read_export, payload)
     except NotionExportError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
@@ -166,7 +167,24 @@ async def policy_docs_upload_export(request: Request, export: UploadFile = File(
             detail="노션 Markdown & CSV 내보내기 zip 이 아닌 것 같습니다",
         ) from exc
 
-    result = await asyncio.to_thread(sync_policy_sources, fetcher=fetcher)
+    # 파일이 곧 목록입니다. URL 을 하나씩 손으로 등록하게 하면 노션에서 문서를 만든 사람과
+    # 콘솔에 등록하는 사람이 같아야 하고, 한쪽만 하면 조용히 누락됩니다 — 실제로 그렇게
+    # 누락돼 있었습니다.
+    registered = await asyncio.to_thread(register_export_pages, pages)
+    if registered.get("error"):
+        raise HTTPException(status_code=400, detail=registered["error"])
+
+    def fetch(url_or_id: str):
+        page = pages.get(page_id_from_url(url_or_id))
+        if page is None:
+            raise NotionExportError(
+                "이 내보내기에 없는 문서입니다. 해당 페이지를 포함해 다시 내보내 주세요."
+            )
+        return page
+
+    result = await asyncio.to_thread(sync_policy_sources, fetcher=fetch)
+    result["added"] = registered["added"]
+    result["added_labels"] = registered["labels"]
     return result
 
 
