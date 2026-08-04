@@ -38,14 +38,14 @@ def enforce_send_language(message: Message) -> None:
     current = message.language if isinstance(message.language, str) else ""
     current = current.lower()
 
-    from ...llm.translate import needs_korean, translate_to
+    from ...llm.translate import is_mostly_korean, translate_to
 
     if current == target:
         # Metadata says we're already in the target. Trust it, EXCEPT the cheap
         # script sanity check: if the target isn't Korean yet the body is actually
         # predominantly Korean (e.g. the operator translated, then re-typed Korean),
         # the metadata is stale — fall through and translate. No LLM call here.
-        if not (target != "ko" and not needs_korean(message.body)):
+        if not (target != "ko" and is_mostly_korean(message.body)):
             return
 
     translated = translate_to(message.body, target)

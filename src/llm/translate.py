@@ -24,22 +24,35 @@ def _is_hangul(ch: str) -> bool:
     return "가" <= ch <= "힣" or "ᄀ" <= ch <= "ᇿ" or "㄰" <= ch <= "㆏"
 
 
-def needs_korean(text: str | None) -> bool:
-    """Whether a Korean translation should be shown for this text.
+def _hangul_share(text: str | None) -> float | None:
+    """Share of the letters that are Hangul, or None when there are no letters to judge.
 
-    Ratio-based, not presence-based: an English reply that ends with a Korean
-    signature is still mostly English and should be translated. Only text that is
-    *predominantly* Korean (>= half of its letters are Hangul) is treated as
-    already-Korean and skipped.
+    Ratio, not presence: an English reply ending in a Korean signature is still mostly
+    English. None (a URL, a number, an empty draft) is neither language — callers must
+    not translate it in either direction.
     """
-    text = (text or "").strip()
-    if not text:
-        return False
-    letters = [ch for ch in text if ch.isalpha()]
+    letters = [ch for ch in (text or "").strip() if ch.isalpha()]
     if not letters:
-        return False
-    hangul = sum(1 for ch in letters if _is_hangul(ch))
-    return (hangul / len(letters)) < 0.5
+        return None
+    return sum(1 for ch in letters if _is_hangul(ch)) / len(letters)
+
+
+def needs_korean(text: str | None) -> bool:
+    """Whether a Korean translation should be SHOWN for this text — i.e. it is not
+    already Korean. Used to give the operator a Korean reading of a foreign inquiry."""
+    share = _hangul_share(text)
+    return share is not None and share < 0.5
+
+
+def is_mostly_korean(text: str | None) -> bool:
+    """Whether this text IS Korean — i.e. there is something to translate OUT of.
+
+    Deliberately not `not needs_korean(...)`. They are both False for text with no
+    letters at all, and writing one as the other's negation is how the review screen's
+    번역하기 came to test for the opposite of what it meant.
+    """
+    share = _hangul_share(text)
+    return share is not None and share >= 0.5
 
 
 def to_korean(text: str | None, *, llm: LLMClient | None = None) -> str:

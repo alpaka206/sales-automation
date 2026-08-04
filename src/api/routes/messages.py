@@ -28,7 +28,7 @@ from ...db.models import (
     Message,
 )
 from ...db.session import SessionLocal
-from ...llm.translate import needs_korean, to_korean, translate_to
+from ...llm.translate import is_mostly_korean, needs_korean, to_korean, translate_to
 from ..auth import actor_name
 from ._shared import esc
 
@@ -590,17 +590,18 @@ async def message_translate(
 
         # Decide from the BODY's actual language, not the (possibly stale) msg.language
         # flag — so re-editing the draft back to Korean and pressing 번역하기 again
-        # actually re-translates. needs_korean is a cheap script check (no LLM): a
-        # Korean body + non-Korean target means there's something to translate.
-        needs_tx = bool(target) and target != "ko" and needs_korean(cur_body)
+        # actually re-translates. A cheap script check, no LLM: a Korean body and a
+        # non-Korean target means there is something to translate.
+        needs_tx = bool(target) and target != "ko" and is_mostly_korean(cur_body)
         if not needs_tx:
             washed = text_wash(cur_body)
             msg.body = washed
             if cur_subject:
                 msg.subject = cur_subject
             # Keep metadata honest: a non-Korean body for a non-Korean target is
-            # already in the send language.
-            if target and target != "ko" and not needs_korean(washed):
+            # already in the send language. Stamping the target onto a KOREAN body is
+            # what made a Korean draft claim to be English.
+            if target and target != "ko" and not is_mostly_korean(washed):
                 msg.language = target
             session.commit()
             return JSONResponse(
