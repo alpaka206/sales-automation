@@ -85,6 +85,64 @@ def _no_route_message() -> str:
     )
 
 
+def _run_via_server(args, fetcher) -> int:
+    """서버에서 목록을 받아 노션을 읽고, 읽은 것을 서버로 되돌려 줍니다.
+
+    로컬은 DB를 전혀 건드리지 않습니다. 이 PC가 DB에 닿지 못하는 것이 이 경로가 존재하는
+    이유이고, 여기서 DB를 열려고 하면 30초 타임아웃 말고는 아무 일도 일어나지 않습니다.
+    """
+    from src.common.config import settings
+    from src.integrations.policy_push import PolicyPushError, PolicyServer
+
+    base = args.server or settings.PUBLIC_BASE_URL
+    try:
+        server = PolicyServer(base, settings.INTERNAL_API_TOKEN)
+        sources = server.sources()
+    except PolicyPushError as exc:
+        print(f"[실패] {exc}")
+        return 2
+
+    print(f"서버: {base}")
+    if not sources:
+        print("서버에 등록된 노션 문서가 없습니다.")
+        print("콘솔 [이메일 템플릿 → 정책 문서 → 노션 문서 추가] 에서 먼저 등록해 주세요.")
+        return 1
+    if args.only is not None:
+        sources = [s for s in sources if s["id"] == args.only]
+    print(f"대상 {len(sources)}건")
+
+    pages, failed = [], 0
+    for source in sources:
+        try:
+            page = fetcher(source["notion_url"])
+        except Exception as exc:
+            failed += 1
+            print(f"  ✗ [{source['id']}] {source['label']}: {exc}")
+            continue
+        print(f"  ✓ [{source['id']}] {source['label']} → '{page.title}' {len(page.markdown):,}자")
+        pages.append(
+            {"notion_url": source["notion_url"], "title": page.title, "markdown": page.markdown}
+        )
+
+    if args.check or args.dry_run:
+        print("서버에는 아무것도 올리지 않았습니다.")
+        return 1 if failed else 0
+    if not pages:
+        print("올릴 내용이 없습니다.")
+        return 1
+
+    try:
+        result = server.push(pages)
+    except PolicyPushError as exc:
+        print(f"[실패] {exc}")
+        return 2
+
+    print()
+    print(f"완료: 갱신 {result['synced']} · 실패 {result['failed']} · 건너뜀 {result['skipped']}")
+    print("콘솔의 '정책 문서' 화면에서 마지막 동기화 시각으로 확인할 수 있습니다.")
+    return 1 if (failed or result["failed"]) else 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="노션 정책 문서를 로컬에서 읽어 DB 사본을 갱신합니다.",
@@ -95,6 +153,13 @@ def main() -> int:
     parser.add_argument("--only", type=int, metavar="ID", help="정책 문서 화면의 특정 행만 갱신")
     parser.add_argument("--dry-run", action="store_true", help="DB에 쓰지 않고 결과만 출력")
     parser.add_argument("--check", action="store_true", help="노션에 닿는지만 확인")
+    parser.add_argument(
+        "--server",
+        metavar="URL",
+        help="DB 대신 이 서버로 올립니다 (기본: .env 의 PUBLIC_BASE_URL). "
+        "사내망에서는 DB 포트가 막혀 있어 이 방법만 됩니다.",
+    )
+    parser.add_argument("--local-db", action="store_true", help="서버 대신 DB에 직접 씁니다")
     args = parser.parse_args()
 
     setup_logging()
@@ -109,6 +174,11 @@ def main() -> int:
         print(_no_route_message())
         return 2
     print(f"읽는 방법: {how}")
+
+    # 서버로 올리는 것이 기본입니다. 사내망에서 DB 포트가 막혀 있어 --local-db 는 여기서
+    # 타임아웃으로 끝나고, 그 사실을 먼저 알려 주는 편이 낫습니다.
+    if not args.local_db:
+        return _run_via_server(args, fetcher)
 
     rows = _registered(args.only)
     if not rows:

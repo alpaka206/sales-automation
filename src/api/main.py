@@ -31,6 +31,7 @@ from .security import (
     web_role_allows,
 )
 from .auth import current_user, router as auth_router
+from .policy_api import router as policy_api_router
 from .routes import router as web_router
 from .webhook import router as webhook_router
 
@@ -150,6 +151,7 @@ app.mount(
 app.include_router(auth_router)
 app.include_router(web_router)
 app.include_router(webhook_router)
+app.include_router(policy_api_router)
 
 # The React console, built by `npm run build` in frontend/ into api/static/app. Its own
 # prefix so /static keeps meaning "assets" and the old page URLs stay free to redirect.
