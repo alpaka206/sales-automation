@@ -284,15 +284,11 @@ def _signature_candidates() -> list[str]:
     """
     cands: list[str] = []
     try:
-        from ..db.email_templates import get_email_template
+        from ..db.email_templates import all_text_signatures
 
-        for key in ("signature_ko", "signature_en"):
-            body = get_email_template(key)
-            if body and body.strip():
-                cands.append(body.strip())
+        cands.extend(all_text_signatures())
     except Exception:
         pass
-    cands.append("이혜람\nGrowth, Perso Dubbing | ESTsoft\nleehyeram@estsoft.com")
     seen: set[str] = set()
     out: list[str] = []
     for cand in sorted(cands, key=len, reverse=True):

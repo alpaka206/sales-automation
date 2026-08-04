@@ -1461,7 +1461,7 @@ def build_operator_guide() -> Path:
             ("auto_ack", "첫 문의 즉시 접수확인", "이름 자리는 정확히 {name}"),
             ("signature_ko", "한국어 초안의 기본 텍스트 서명", "활성 상태만 적용"),
             ("signature_html_*", "검토 화면의 브랜드 서명", "공개 HTTPS 이미지 URL"),
-            ("signature_html_hyeram", "기본 브랜드 HTML 서명", "키 이름 변경 금지"),
+            ("signature_html_*", "기본 브랜드 HTML 서명", "콘솔에서 추가·변경"),
         ],
         [2200, 3600, 3560],
         font_size=8.7,

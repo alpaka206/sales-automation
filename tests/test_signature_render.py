@@ -28,14 +28,19 @@ def fake_templates(monkeypatch):
     table = {
         "signature_ko": _KO_SIG,
         "signature_en": _EN_SIG,
-        "signature_html_ko": "<table id='sig-ko'><tr><td>이혜람 카드</td></tr></table>",
-        "signature_html_en": "<table id='sig-en'><tr><td>Hyeram card</td></tr></table>",
+        "signature_html_ko": "<table id='sig-ko'><tr><td>브랜드 서명 카드</td></tr></table>",
+        "signature_html_en": "<table id='sig-en'><tr><td>Branded card</td></tr></table>",
     }
 
     def _get(key, language=None):
         return table.get(key)
 
     monkeypatch.setattr(et, "get_email_template", _get)
+    # The strip list comes from the templates table as a whole now, not from two named
+    # keys — a signature paused last month still has to be strippable off an old draft.
+    monkeypatch.setattr(
+        et, "all_text_signatures", lambda: [table["signature_ko"], table["signature_en"]]
+    )
     return table
 
 

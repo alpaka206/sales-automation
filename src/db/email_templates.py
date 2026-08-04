@@ -66,7 +66,7 @@ def all_text_signatures() -> list[str]:
 def default_signature_key() -> str | None:
     """The signature a new draft is stamped with, as chosen in the console.
 
-    Was the literal "signature_html_hyeram", written twice into the inbound agent — so
+    Was a literal signature key, written twice into the inbound agent — so
     the person who signs the company's mail could only be changed by editing Python.
 
     Falls back to the first active signature when nothing is flagged, because a draft
