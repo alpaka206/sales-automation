@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pathlib
+
 from datetime import datetime, timedelta
 from decimal import Decimal
 from unittest.mock import patch
@@ -52,6 +54,9 @@ def customer_id(customer_db) -> int:
                 contact_id=contact.id,
                 stage="initial",
                 last_incoming_at=datetime.now() - timedelta(days=20),
+                # Backdated too: 최근 활동 is the latest of the three timestamps, so a row
+                # stamped "now" is never stale however old its last inbound is.
+                created_at=datetime.now() - timedelta(days=21),
             )
         )
         session.commit()
@@ -60,13 +65,50 @@ def customer_id(customer_db) -> int:
 
 def test_customer_list_and_detail(customer_db, customer_id) -> None:
     with TestClient(app) as client:
-        listing = client.get("/customers")
-        detail = client.get(f"/customers/{customer_id}")
-    assert listing.status_code == 200
-    assert "Example Co" in listing.text
-    assert detail.status_code == 200
-    assert "통합 히스토리" in detail.text
-    assert "계약이 성사된 문의" in detail.text
+        listing = client.get("/api/ui/customers").json()
+        detail = client.get(f"/api/ui/customers/{customer_id}").json()
+    assert "Example Co" in [row["company"] for row in listing["rows"]]
+    assert detail["contact"]["company"] == "Example Co"
+    # The screen's two sections need these: the timeline, and the inquiry a contract
+    # gets attached to.
+    assert "timeline" in detail
+    assert "conversations" in detail
+
+
+def test_recent_activity_is_the_latest_thing_that_happened(customer_db) -> None:
+    """The column is headed 최근 활동 and the list sorts on it, so it has to mean the
+    latest of the three timestamps. `incoming or outgoing` returned the customer's own
+    message even when our reply came after it: a thread answered today reported the
+    inquiry's date and sank below threads nobody had touched in a week."""
+    from src.api.web.routes.customer_ops import _customer_rows
+
+    with customer_db() as session:
+        for email, incoming, outgoing in (
+            # Answered today, but the customer wrote a week ago.
+            ("answered@example.com", datetime(2026, 7, 28), datetime(2026, 8, 4)),
+            # Nobody has touched this one since the customer wrote.
+            ("stale@example.com", datetime(2026, 8, 1), None),
+        ):
+            contact = Contact(normalized_email=email, email=email, full_name=email)
+            session.add(contact)
+            session.flush()
+            session.add(
+                Conversation(
+                    contact_id=contact.id,
+                    stage="negotiation",
+                    last_incoming_at=incoming,
+                    last_outgoing_at=outgoing,
+                    created_at=datetime(2026, 7, 20),
+                )
+            )
+        session.commit()
+
+    rows = _customer_rows()
+    assert [row["contact"].email for row in rows] == [
+        "answered@example.com",
+        "stale@example.com",
+    ]
+    assert rows[0]["last_activity"] == datetime(2026, 8, 4)
 
 
 def test_profile_and_meeting_move_pipeline(customer_db, customer_id) -> None:
@@ -199,10 +241,11 @@ def test_contract_uses_selected_inquiry_not_latest_contact_inquiry(
             },
             follow_redirects=False,
         )
-        detail = client.get(f"/customers/{customer_id}")
+        detail = client.get(f"/api/ui/customers/{customer_id}").json()
 
     assert response.status_code == 303
-    assert "123.45 KRW" in detail.text
+    saved = detail["contracts"][0]
+    assert (saved["amount"], saved["currency"]) == (123.45, "KRW")
     with customer_db() as session:
         contract = session.query(ContractRecord).one()
         assert contract.conversation_id == selected_id
@@ -246,10 +289,9 @@ def test_operations_surfaces_stale_and_renewal(customer_db, customer_id) -> None
         )
         session.commit()
     with TestClient(app) as client:
-        response = client.get("/operations")
-    assert response.status_code == 200
-    assert "14일 이상 소통 없음" in response.text
-    assert "Example Co" in response.text
+        payload = client.get("/api/ui/operations").json()
+    assert "Example Co" in [row["company"] for row in payload["lists"]["stale"]]
+    assert payload["renewals"], "an active contract expiring inside 60 days must show"
 
 
 @pytest.mark.parametrize(
@@ -265,8 +307,6 @@ def test_operations_follow_up_ladder_buckets(
     customer_db, customer_id, silent_days, expected_bucket
 ) -> None:
     """Each thread lands on exactly one rung of the 3/7/3 ladder, keyed off our last mail."""
-    from src.api.web.routes import customer_ops
-
     with customer_db() as session:
         conv = session.query(Conversation).filter_by(contact_id=customer_id).one()
         # We mailed last; the customer has been silent since.
@@ -274,52 +314,38 @@ def test_operations_follow_up_ladder_buckets(
         conv.last_incoming_at = datetime.now() - timedelta(days=silent_days + 1)
         session.commit()
 
-    captured: dict = {}
-    real_render = customer_ops.templates.TemplateResponse
-
-    def _capture(request, name, context=None, *a, **kw):
-        if name == "operations.html":
-            captured.update(context or {})
-        return real_render(request, name, context, *a, **kw)
-
-    with patch.object(customer_ops.templates, "TemplateResponse", _capture), TestClient(app) as client:
-        assert client.get("/operations").status_code == 200
+    with TestClient(app) as client:
+        lists = client.get("/api/ui/operations").json()["lists"]
 
     buckets = ("due_reminder_1", "due_reminder_2", "due_unqualified")
-    populated = [b for b in buckets if captured.get(b)]
+    populated = [bucket for bucket in buckets if lists[bucket]]
     assert populated == ([expected_bucket] if expected_bucket else [])
     # Never double-counted: a thread appears on at most one rung.
     assert len(populated) <= 1
 
 
 def test_customer_detail_offers_only_stages_the_board_still_has(customer_id) -> None:
-    """The profile <select> used to carry its own hardcoded copy of the stage list.
+    """The profile stage picker used to carry its own hardcoded copy of the stage list.
 
-    It went stale on the trim and offered contracted/onboarding/active — values the
-    POST handler then rejected with a 400, so the form could not be submitted at all.
+    It went stale on the trim and offered contracted/onboarding/active — values the POST
+    handler then rejected with a 400, so the form could not be submitted at all. The
+    server ships the options now, from the board's own tuple.
     """
-    import re
-
     from src.api.web.routes.customer_ops import PIPELINE_STAGES
 
     with TestClient(app) as client:
-        page = client.get(f"/customers/{customer_id}")
+        page = client.get(f"/api/ui/customers/{customer_id}").json()
         rejected = client.post(
             f"/customers/{customer_id}/profile",
             data={"customer_state": "negotiation", "pipeline_stage": "onboarding"},
             follow_redirects=False,
         )
 
-    assert page.status_code == 200
-    # Scoped to the pipeline_stage <select>: the CONTRACT status dropdown on the same
-    # page legitimately still offers "contracted" and "active" — a separate vocabulary
-    # that happens to share those two tokens.
-    select = re.search(r'<select[^>]*name="pipeline_stage".*?</select>', page.text, re.S)
-    assert select, "customer detail must render a pipeline_stage select"
-    options = re.findall(r'<option value="([^"]*)"', select.group(0))
-    assert options == [key for key, _label, _description in PIPELINE_STAGES]
-    for _key, label, _description in PIPELINE_STAGES:
-        assert label in select.group(0), label
+    assert [option["key"] for option in page["stage_options"]] == [
+        key for key, _, _ in PIPELINE_STAGES
+    ]
+    for retired in ("contracted", "onboarding", "active", "follow_up_needed"):
+        assert retired not in [option["key"] for option in page["stage_options"]]
     assert rejected.status_code == 400
 
 
@@ -327,7 +353,7 @@ def test_pipeline_board_moves_card_locally(customer_db, customer_id) -> None:
     with customer_db() as session:
         conversation_id = session.query(Conversation).filter_by(contact_id=customer_id).one().id
     with TestClient(app) as client:
-        board = client.get("/pipeline")
+        board = client.get("/api/ui/dashboard")
         moved = client.post(
             f"/pipeline/conversations/{conversation_id}/stage",
             data={"stage": "won"},
@@ -339,7 +365,7 @@ def test_pipeline_board_moves_card_locally(customer_db, customer_id) -> None:
             follow_redirects=False,
         )
     assert board.status_code == 200
-    assert "문의 파이프라인" in board.text
+    assert [stage["key"] for stage in board.json()["stages"]][0] == "new"
     assert moved.status_code == 303
     # A retired stage key must be refused, not silently accepted and then rendered
     # in the New column.
@@ -351,6 +377,94 @@ def test_pipeline_board_moves_card_locally(customer_db, customer_id) -> None:
         assert session.get(Conversation, conversation_id).stage == "won"
 
 
+def test_sync_state_separates_blocked_from_failed() -> None:
+    """"저장됐다"와 "연동됐다"는 다른 말이다.
+
+    False is attempted-and-failed; None is not attempted at all (no ticket id, no sheet
+    row, or pre-launch safe mode). Reporting None as success promised the operator that
+    HubSpot and the workbook had moved when nothing had been sent.
+    """
+    from src.api.web.routes.customer_ops import _sync_state
+
+    assert _sync_state({"sheets": True, "hubspot": True}) == "ok"
+    assert _sync_state({"sheets": None, "hubspot": True}) == "ok"
+    assert _sync_state({"sheets": False, "hubspot": True}) == "partial"
+    assert _sync_state({"sheets": None, "hubspot": False}) == "partial"
+    assert _sync_state({"sheets": None, "hubspot": None}) == "local"
+
+
+def test_board_move_in_safe_mode_reports_local_not_a_failure(
+    customer_db, customer_id, monkeypatch
+) -> None:
+    """Pre-launch, a card move is local-only BY DESIGN, so it must not cry 동기화 실패.
+
+    The HubSpot write raises ExternalWriteBlocked; that is the 대전제 working, and the
+    banner has to say "저장했지만 연동은 하지 않았다" rather than warn about a failure.
+    """
+    from src.common import safe_mode
+    from src.common.config import settings
+
+    monkeypatch.setattr(settings, "LIVE_EXTERNAL_WRITES", False)
+    monkeypatch.setattr(settings, "HUBSPOT_TICKET_STAGE_WON", "stage-won")
+    assert safe_mode.safe_mode() is True
+
+    with customer_db() as session:
+        conversation = session.query(Conversation).filter_by(contact_id=customer_id).one()
+        conversation.hubspot_ticket_id = "T-900"
+        session.commit()
+        conversation_id = conversation.id
+
+    with TestClient(app) as client:
+        moved = client.post(
+            f"/pipeline/conversations/{conversation_id}/stage",
+            data={"stage": "won"},
+            follow_redirects=False,
+        )
+    assert moved.status_code == 303
+    assert moved.headers["location"] == "/?sync=local#stage-won"
+    # The local move still sticks — that is the half that must never depend on HubSpot.
+    with customer_db() as session:
+        assert session.get(Conversation, conversation_id).stage == "won"
+
+
+def test_board_move_finds_the_sheet_row_on_the_contact(customer_db, customer_id) -> None:
+    """A conversation carries its own sheet id only when THIS app appended the row.
+
+    Rows imported from the workbook put the id on the contact instead, and the board used
+    to read the conversation's alone — so a drop for an imported inquiry skipped the Sheet
+    while the same move from the customer page updated it.
+    """
+    from src.api.web.routes.customer_ops import _set_conversation_stage
+
+    with customer_db() as session:
+        contact = session.get(Contact, customer_id)
+        contact.sheet_client_id = 4321
+        conversation = session.query(Conversation).filter_by(contact_id=customer_id).one()
+        assert conversation.sheet_client_id is None
+        session.commit()
+        conversation_id = conversation.id
+
+    _ticket, _contact_id, sheet_client_id = _set_conversation_stage(conversation_id, "negotiation")
+    assert sheet_client_id == 4321
+
+
+def test_the_workbook_has_no_wording_for_two_board_stages() -> None:
+    """A KNOWN gap, pinned so it cannot be mistaken for working.
+
+    The board has seven stages; the workbook's Deal Stage column has words for five. Moving
+    a card to Reminder Sent or Closed updates this database and HubSpot but leaves the
+    sheet on its previous stage (the write logs a warning and reports failure, so it shows
+    up as 동기화 실패 rather than silence). Fixing it needs the two values the sales team
+    actually uses in that column — invented wording would corrupt their filters. When they
+    are added here, delete this test.
+    """
+    from src.api.web.routes.customer_ops import PIPELINE_STAGES
+    from src.integrations.google_sheets import _STAGE_VALUES
+
+    missing = [key for key, _label, _description in PIPELINE_STAGES if key not in _STAGE_VALUES]
+    assert missing == ["reminder_sent", "closed"]
+
+
 def test_pipeline_cards_have_no_stage_dropdown(customer_db, customer_id) -> None:
     """Cards move by drag and drop only.
 
@@ -359,12 +473,12 @@ def test_pipeline_cards_have_no_stage_dropdown(customer_db, customer_id) -> None
     the 파이프라인 select on the customer page, which writes the profile projection.
     """
     with TestClient(app) as client:
-        board = client.get("/pipeline")
-    assert board.status_code == 200
-    assert "data-pipeline-board" in board.text          # the board itself still renders
-    assert "pipeline-card" in board.text                # with cards on it
-    assert 'name="stage"' not in board.text
-    assert "단계 변경" not in board.text
+        board = client.get("/api/ui/dashboard").json()
+    assert any(stage["cards"] for stage in board["stages"])   # the board has cards
+    # Dropping is the only way to move a card: no per-card stage <select> anywhere.
+    source = pathlib.Path("frontend/src/ui/Board.tsx").read_text(encoding="utf-8")
+    assert "<select" not in source
+    assert "단계 변경" not in source
 
 
 def test_pipeline_keeps_each_inquiry_stage_and_only_latest_updates_profile(
@@ -392,7 +506,7 @@ def test_pipeline_keeps_each_inquiry_stage_and_only_latest_updates_profile(
         newer_id = newer.id
 
     with TestClient(app) as client:
-        board = client.get("/pipeline")
+        board = client.get("/api/ui/dashboard")
         moved = client.post(
             f"/pipeline/conversations/{older_id}/stage",
             data={"stage": "closed_lost"},
@@ -426,11 +540,11 @@ def test_insights_show_volume_and_country(customer_db, customer_id) -> None:
         )
         session.commit()
     with TestClient(app) as client:
-        response = client.get("/operations?period=day")
-    assert response.status_code == 200
-    assert "문의량 · 누적 추이" in response.text
-    assert "Korea" in response.text
-    assert "70점 이상" in response.text
+        payload = client.get("/api/ui/operations?period=day").json()
+    assert payload["period"] == "day"
+    assert payload["chart"]                                   # the volume series
+    assert "Korea" in [row["country"] for row in payload["country_rows"]]
+    assert payload["qualified_count"] >= 0                    # the 70점 이상 counter
 
 
 def test_contract_can_be_corrected_without_duplicate(customer_db, customer_id) -> None:

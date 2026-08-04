@@ -9,12 +9,11 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter
 from sqlalchemy import func, select
 
 from ....db.models import Conversation, Message
 from ....db.session import SessionLocal
-from ._shared import templates
 from .messages import LIST_STATUS_BUCKETS, _messages_list_context
 
 router = APIRouter(tags=["web"])
@@ -28,7 +27,7 @@ AWAITING_STATUSES = LIST_STATUS_BUCKETS["awaiting"]
 _COUNTED_STAGES = ("new", "negotiation")
 
 # The queue panel is a peek, not a list: the five rows that have waited longest. The
-# full, filterable list is one click away on 답변 검토, so a longer table here only
+# full, filterable list is one click away on 회신 및 검토, so a longer table here only
 # pushed the pipeline board off the screen.
 _QUEUE_LIMIT = 5
 
@@ -46,9 +45,14 @@ def _kst_day_start() -> datetime:
 
 def _dashboard_context() -> dict:
     """Awaiting-reply rows, their counters, and the pipeline board."""
-    from .customer_ops import PIPELINE_STAGES, VALID_PIPELINE_STAGES, _pipeline_rows
+    from .customer_ops import (
+        MANUAL_LOG_STAGES,
+        PIPELINE_STAGES,
+        VALID_PIPELINE_STAGES,
+        _pipeline_rows,
+    )
 
-    # The queue panel IS the 답변 검토 list — same query, same row shape, same table
+    # The queue panel IS the 회신 및 검토 list — same query, same row shape, same table
     # partial — sorted oldest-first and cut to _QUEUE_LIMIT. Building it here from a
     # second, near-identical query is what let the two tables drift apart before.
     queue = _messages_list_context(status="awaiting", stage="", sort="oldest")
@@ -81,7 +85,9 @@ def _dashboard_context() -> dict:
             or 0
         )
 
-    rows = _pipeline_rows()
+    # Capped per column, with the true per-stage totals alongside — the header must not
+    # start under-reporting just because the column stopped rendering every card.
+    rows, stage_totals = _pipeline_rows()
     by_stage: dict[str, list] = {stage: [] for stage, _, _ in PIPELINE_STAGES}
     for row in rows:
         by_stage.setdefault(row["stage"], []).append(row)
@@ -99,31 +105,13 @@ def _dashboard_context() -> dict:
                 "key": stage,
                 "label": label,
                 "rows": by_stage.get(stage, []),
+                # What the column HAS, not what it drew.
+                "total": stage_totals.get(stage, 0),
             }
             for stage, label, _ in PIPELINE_STAGES
         ],
         "stage_labels": queue["stage_labels"],
+        # Which columns offer the 소통 기록 (+) button — from 답변 발송 onward, where the
+        # thread has left HubSpot and only the operator knows what was said.
+        "manual_log_stages": MANUAL_LOG_STAGES,
     }
-
-
-@router.get("/")
-async def dashboard(request: Request):
-    """Main inbound dashboard — awaiting replies on top, the pipeline board below."""
-    ctx = _dashboard_context()
-    return templates.TemplateResponse(request, "dashboard.html", ctx)
-
-
-@router.get("/overview")
-async def overview(request: Request):
-    """전체 대시보드 — the whole-business view, first entry in the sidebar.
-
-    A slot, not a page yet: the nav entry exists so the map is settled while what belongs
-    on it is decided, the same way 견적서 / 계약서 do. Its path is registered in
-    security.WEB_UI_PREFIXES, without which the auth middleware treats it as a JSON API
-    route and demands an internal token.
-    """
-    return templates.TemplateResponse(
-        request,
-        "tool_placeholder.html",
-        {"tool_title": "전체 대시보드", "tool_message": "전체 대시보드는 준비 중입니다."},
-    )

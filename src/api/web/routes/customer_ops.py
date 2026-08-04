@@ -6,14 +6,14 @@ import asyncio
 import hashlib
 import hmac
 import logging
-from collections import Counter, defaultdict
+from collections import Counter
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from urllib.parse import quote
 
 from fastapi import APIRouter, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from ....agents.stage_sync import customer_state_for
 from ....common.config import settings
@@ -26,7 +26,6 @@ from ....db.models import (
     Message,
 )
 from ....db.session import SessionLocal
-from ._shared import templates
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["web"])
@@ -49,6 +48,28 @@ PIPELINE_STAGES: tuple[tuple[str, str, str], ...] = (
 VALID_PIPELINE_STAGES = {stage for stage, _, _ in PIPELINE_STAGES}
 CONTRACT_STATUSES = {"draft", "sent", "contracted", "active", "expired", "cancelled"}
 
+# Stages where the automated part of the thread is over. Up to 답변 발송 the app owns the
+# conversation (auto-acknowledgement, then the reviewed AI reply out through HubSpot);
+# from that point the customer answers on whatever channel they prefer — email, WhatsApp,
+# phone, SMS — and only the operator knows what was said. So the board offers its 기록
+# 추가 (+) button on these stages and not on 새 문의, where nothing has been answered yet.
+_STAGE_ORDER = [stage for stage, _, _ in PIPELINE_STAGES]
+MANUAL_LOG_STAGES: tuple[str, ...] = tuple(_STAGE_ORDER[_STAGE_ORDER.index("meeting_link_sent") :])
+
+# How many cards one board column renders. A column is a fixed-height scroller and the
+# busiest stage here holds 157 threads: nobody drags card 150, and loading them cost a
+# full read of every conversation, contact and profile on every dashboard request. The
+# header keeps showing the REAL total (see _pipeline_rows), and the column says so when
+# it is showing fewer than it counts.
+BOARD_CARDS_PER_STAGE = 60
+
+# Logging a 미팅 means the deal is live, and it used to move the thread to 협의 중 from
+# WHEREVER it was. That was harmless while the only way to log one was the customer page;
+# with a + button on every board card past 답변 발송 it would drag a Won card backwards on
+# the next call note. A meeting only ever advances a thread that has not started
+# negotiating yet.
+_MEETING_ADVANCES_FROM = {"new", "meeting_link_sent"}
+
 # Days of customer silence (measured from our last outgoing mail) at which each rung
 # of the B2B follow-up ladder becomes due: reply -> +3d 1st reminder -> +7d 2nd reminder
 # -> +3d Unqualified. The reminder MAIL itself is sent by the HubSpot workflow, not by
@@ -58,6 +79,17 @@ CONTRACT_STATUSES = {"draft", "sent", "contracted", "active", "expired", "cancel
 FOLLOW_UP_REMINDER_1_DAYS = 3
 FOLLOW_UP_REMINDER_2_DAYS = FOLLOW_UP_REMINDER_1_DAYS + 7   # 10
 FOLLOW_UP_UNQUALIFIED_DAYS = FOLLOW_UP_REMINDER_2_DAYS + 3  # 13
+
+
+def _announce(topic: str) -> None:
+    """Tell every open console something changed. Best effort — a write must never fail
+    because nobody was listening."""
+    try:
+        from .ui_api import publish
+
+        publish(topic)
+    except Exception:  # pragma: no cover - broadcasting is not the operation
+        logger.debug("Live update broadcast failed for %s", topic, exc_info=True)
 
 
 def _stage_id(stage: str) -> str:
@@ -144,6 +176,15 @@ def _set_local_stage(contact_id: int, stage: str) -> tuple[str | None, int | Non
 async def _sync_stage(
     ticket_id: str | None, stage: str, contact_id: int, sheet_client_id: int | None = None
 ) -> dict[str, bool | None]:
+    """Push a stage the operator just moved to HubSpot and the sales workbook.
+
+    Three-valued per channel, and the distinction is the point: True written, False
+    ATTEMPTED AND FAILED, None NOT ATTEMPTED. Not attempted covers a thread with no
+    ticket id, an inquiry with no row in the workbook, and pre-launch safe mode — none of
+    which is a failure the operator should be warned about. Collapsing "blocked" into
+    False made every single card move report 동기화 실패 while the 대전제 is engaged.
+    """
+    from ....common.safe_mode import ExternalWriteBlocked, live_sheets_writes
     from ....integrations.google_sheets import is_configured, update_inbound_stage
 
     with SessionLocal() as session:
@@ -151,8 +192,10 @@ async def _sync_stage(
         qualification = profile.qualification if profile else None
     sheet_result: bool | None = None
     if sheet_client_id and is_configured():
-        sheet_result = await asyncio.to_thread(
-            update_inbound_stage, sheet_client_id, stage, qualification
+        sheet_result = (
+            await asyncio.to_thread(update_inbound_stage, sheet_client_id, stage, qualification)
+            if live_sheets_writes()
+            else None
         )
 
     stage_id = _stage_id(stage)
@@ -164,12 +207,30 @@ async def _sync_stage(
         client = HubSpotClient()
         await asyncio.to_thread(client.update_ticket_stage_sync, ticket_id, stage_id)
         hubspot_result: bool | None = True
+    except ExternalWriteBlocked:
+        # The guard doing its job, not a failure. Must precede the generic handler
+        # below — ExternalWriteBlocked is a RuntimeError.
+        hubspot_result = None
     except HubSpotNotConfigured:
         hubspot_result = False
     except Exception:
         hubspot_result = False
         logger.warning("HubSpot pipeline sync failed for contact %d", contact_id, exc_info=True)
     return {"sheets": sheet_result, "hubspot": hubspot_result}
+
+
+def _sync_state(result: dict[str, bool | None]) -> str:
+    """The banner flag for what actually happened: partial / ok / local.
+
+    ``local`` is the honest answer when nothing was even attempted — the stage moved in
+    this database and nowhere else. It used to render as 동기화 완료, which read as a
+    promise that HubSpot and the workbook had been updated.
+    """
+    if False in result.values():
+        return "partial"
+    if any(value is True for value in result.values()):
+        return "ok"
+    return "local"
 
 
 def _parse_dt(value: str) -> datetime | None:
@@ -183,30 +244,52 @@ def _parse_dt(value: str) -> datetime | None:
 
 
 def _customer_rows() -> list[dict]:
-    with SessionLocal() as session:
-        contacts = session.execute(select(Contact).order_by(Contact.updated_at.desc())).scalars().all()
-        profiles = {p.contact_id: p for p in session.execute(select(CustomerProfile)).scalars()}
-        conversations = session.execute(select(Conversation)).scalars().all()
-        contracts = session.execute(select(ContractRecord)).scalars().all()
+    """One row per contact, newest activity first.
 
-    convs_by_contact: dict[int, list[Conversation]] = defaultdict(list)
-    for conv in conversations:
-        convs_by_contact[conv.contact_id].append(conv)
-    contracts_by_contact: dict[int, list[ContractRecord]] = defaultdict(list)
-    for contract in contracts:
-        contracts_by_contact[contract.contact_id].append(contract)
+    Three grouped/joined reads instead of four table dumps: this used to pull every
+    conversation and every contract into Python only to count them and pick one, which
+    is what a GROUP BY and a WHERE are for. The aggregates return one row per contact —
+    the size of the page itself — rather than one per conversation.
+    """
+    activity = (
+        select(
+            Conversation.contact_id,
+            func.count().label("conversations"),
+            func.max(Conversation.last_incoming_at).label("incoming"),
+            func.max(Conversation.last_outgoing_at).label("outgoing"),
+            func.max(Conversation.created_at).label("created"),
+        )
+        .group_by(Conversation.contact_id)
+        .subquery()
+    )
+    with SessionLocal() as session:
+        loaded = session.execute(
+            select(Contact, CustomerProfile, activity)
+            .outerjoin(CustomerProfile, CustomerProfile.contact_id == Contact.id)
+            .outerjoin(activity, activity.c.contact_id == Contact.id)
+        ).all()
+        # Only the one contract the row shows, not every contract ever signed.
+        active_contracts = {
+            contract.contact_id: contract
+            for contract in session.execute(
+                select(ContractRecord)
+                .where(ContractRecord.status == "active")
+                .order_by(ContractRecord.created_at.desc())
+            ).scalars()
+        }
 
     rows: list[dict] = []
-    for contact in contacts:
-        profile = profiles.get(contact.id)
-        convs = convs_by_contact.get(contact.id, [])
-        last_activity = max(
-            (c.last_incoming_at or c.last_outgoing_at or c.created_at for c in convs),
-            default=contact.updated_at,
-        )
-        active_contract = next(
-            (c for c in contracts_by_contact.get(contact.id, []) if c.status == "active"), None
-        )
+    for contact, profile, _cid, conversations, incoming, outgoing, created in loaded:
+        # The LATEST of everything that happened, not the first non-null. `incoming or
+        # outgoing` returned the customer's last message even when our reply came after
+        # it, so a thread answered this morning reported the inquiry's date and sorted
+        # below threads nobody had touched in days — under a column headed 최근 활동.
+        # ponytail: the three MAXes are reduced here because "greatest of N columns" has
+        # no portable SQL spelling (SQLite max(), PostgreSQL GREATEST). Push it into SQL
+        # with a dialect switch only if this list ever needs SQL-side paging.
+        stamps = [when for when in (incoming, outgoing, created) if when is not None]
+        last_activity = max(stamps) if stamps else contact.updated_at
+        active_contract = active_contracts.get(contact.id)
         rows.append(
             {
                 "contact": contact,
@@ -217,7 +300,7 @@ def _customer_rows() -> list[dict]:
                 "next_action": profile.next_action if profile else None,
                 "next_action_at": profile.next_action_at if profile else None,
                 "last_activity": last_activity,
-                "conversation_count": len(convs),
+                "conversation_count": conversations or 0,
                 "active_contract": active_contract,
             }
         )
@@ -225,30 +308,80 @@ def _customer_rows() -> list[dict]:
     return rows
 
 
-def _pipeline_rows() -> list[dict]:
-    """One board card per inquiry, while contact history stays consolidated."""
+_CARD_ORDER = (Conversation.created_at.desc(), Conversation.id.desc())
+
+
+def _pipeline_rows(
+    *,
+    stage: str | None = None,
+    limit: int = BOARD_CARDS_PER_STAGE,
+    offset: int = 0,
+) -> tuple[list[dict], dict[str, int]]:
+    """Board cards, newest first — one page of them — plus the true size of each column.
+
+    Returns ``(rows, totals)``. ``totals`` is what the column header shows: paging the
+    cards must not quietly change the number an operator reads off the board.
+
+    This used to load EVERY conversation, then every contact, then every profile, then a
+    grouped scan of the whole messages table — four unbounded reads on every dashboard
+    request, to render columns nobody scrolls to the bottom of. Cost is now set by
+    ``limit``, not by how much history exists.
+
+    Two shapes, one body. ``stage=None`` is the board's first paint: a window function
+    takes the top ``limit`` of EVERY column in one query. ``stage="won"`` is what the
+    column asks for when it is scrolled to the bottom, and needs no window at all — a
+    filtered LIMIT/OFFSET. Both then join Contact and CustomerProfile in the same trip
+    and look up newest-message ids only for the rows that survived.
+
+    The window function needs SQLite >= 3.25 (2018) and any supported PostgreSQL.
+    """
+    query = (
+        select(Conversation, Contact, CustomerProfile)
+        .join(Contact, Conversation.contact_id == Contact.id)
+        .outerjoin(CustomerProfile, CustomerProfile.contact_id == Contact.id)
+        .order_by(*_CARD_ORDER)
+    )
+    if stage is None:
+        numbered = select(
+            Conversation.id.label("conversation_id"),
+            func.row_number()
+            .over(partition_by=Conversation.stage, order_by=_CARD_ORDER)
+            .label("rank"),
+        ).subquery()
+        query = query.join(numbered, numbered.c.conversation_id == Conversation.id).where(
+            numbered.c.rank <= limit
+        )
+    else:
+        query = query.where(Conversation.stage == stage).limit(limit).offset(offset)
+
     with SessionLocal() as session:
-        conversations = session.execute(
-            select(Conversation).order_by(Conversation.created_at.desc())
-        ).scalars().all()
-        contact_ids = {conversation.contact_id for conversation in conversations}
-        contacts = {
-            contact.id: contact
-            for contact in session.execute(select(Contact).where(Contact.id.in_(contact_ids))).scalars()
-        } if contact_ids else {}
-        profiles = {
-            profile.contact_id: profile
-            for profile in session.execute(
-                select(CustomerProfile).where(CustomerProfile.contact_id.in_(contact_ids))
-            ).scalars()
-        } if contact_ids else {}
+        totals: dict[str, int] = {}
+        counts = select(Conversation.stage, func.count()).group_by(Conversation.stage)
+        if stage is not None:
+            counts = counts.where(Conversation.stage == stage)
+        for stage_key, count in session.execute(counts).all():
+            key = stage_key if stage_key in VALID_PIPELINE_STAGES else "new"
+            totals[key] = totals.get(key, 0) + count
+
+        loaded = session.execute(query).all()
+
+        # Only for the cards actually rendered. The old grouped scan read every row in
+        # the messages table to answer a question about at most a few hundred threads.
+        conversation_ids = [conversation.id for conversation, _c, _p in loaded]
+        latest_message = (
+            dict(
+                session.execute(
+                    select(Message.conversation_id, func.max(Message.id))
+                    .where(Message.conversation_id.in_(conversation_ids))
+                    .group_by(Message.conversation_id)
+                ).all()
+            )
+            if conversation_ids
+            else {}
+        )
 
     rows: list[dict] = []
-    for conversation in conversations:
-        contact = contacts.get(conversation.contact_id)
-        if not contact:
-            continue
-        profile = profiles.get(contact.id)
+    for conversation, contact, profile in loaded:
         # Conversation.stage is the pipeline source of truth; profile is only a
         # customer-summary projection and must not relocate another inquiry.
         stage = conversation.stage if conversation.stage in VALID_PIPELINE_STAGES else "new"
@@ -258,12 +391,29 @@ def _pipeline_rows() -> list[dict]:
                 "contact": contact,
                 "profile": profile,
                 "stage": stage,
-                "last_activity": conversation.last_incoming_at
-                or conversation.last_outgoing_at
-                or conversation.created_at,
+                # The workbook's stable key for this inquiry. Threads imported from the
+                # sheet carry it on the contact, ones this app appended on the
+                # conversation — same fallback order as every stage-sync path.
+                "client_id": conversation.sheet_client_id or contact.sheet_client_id,
+                # None only for a thread with no message rows at all (a backfilled
+                # ticket whose mail was never ingested); the card falls back to the
+                # customer page then.
+                "link_message_id": latest_message.get(conversation.id),
+                # Latest of the three, for the same reason as _customer_rows: `incoming
+                # or outgoing` dated a card by the customer's message even when our reply
+                # was newer.
+                "last_activity": max(
+                    when
+                    for when in (
+                        conversation.last_incoming_at,
+                        conversation.last_outgoing_at,
+                        conversation.created_at,
+                    )
+                    if when is not None
+                ),
             }
         )
-    return rows
+    return rows, totals
 
 
 def _set_conversation_stage(conversation_id: int, stage: str) -> tuple[str | None, int, int | None]:
@@ -290,46 +440,17 @@ def _set_conversation_stage(conversation_id: int, stage: str) -> tuple[str | Non
             profile.pipeline_stage = stage
             profile.customer_state = customer_state_for(stage, profile.customer_state)
             session.add(profile)
+        # Fall back to the CONTACT's sheet id, exactly as _set_local_stage and the send
+        # worker do. A conversation gets its own id only when this app appended the row;
+        # rows imported from the workbook carry it on the contact, and without this
+        # fallback a board drop for one of those silently skipped the Sheet.
+        sheet_client_id = conversation.sheet_client_id or contact.sheet_client_id
         session.commit()
         return (
             conversation.hubspot_ticket_id,
             contact.id,
-            conversation.sheet_client_id,
+            sheet_client_id,
         )
-
-
-@router.get("/customers")
-async def customers(request: Request):
-    state = request.query_params.get("state", "")
-    stage = request.query_params.get("stage", "")
-    query = request.query_params.get("q", "").strip().lower()
-    rows = _customer_rows()
-    if state:
-        rows = [row for row in rows if row["state"] == state]
-    if stage:
-        rows = [row for row in rows if row["stage"] == stage]
-    if query:
-        rows = [
-            row
-            for row in rows
-            if query
-            in " ".join(
-                filter(
-                    None,
-                    [
-                        row["contact"].full_name,
-                        row["contact"].email,
-                        row["contact"].company,
-                        row["contact"].domain,
-                    ],
-                )
-            ).lower()
-        ]
-    return templates.TemplateResponse(
-        request,
-        "customers.html",
-        {"rows": rows, "filter_state": state, "filter_stage": stage, "query": query},
-    )
 
 
 def _customer_context(contact_id: int) -> dict | None:
@@ -393,6 +514,7 @@ def _customer_context(contact_id: int) -> dict | None:
             {
                 "channel": m.channel,
                 "direction": m.direction,
+                "handler": None,
                 "subject": m.subject,
                 "summary": m.body,
                 "context": None,
@@ -406,6 +528,7 @@ def _customer_context(contact_id: int) -> dict | None:
             {
                 "channel": item.channel,
                 "direction": item.direction,
+                "handler": item.handler,
                 "subject": item.subject,
                 "summary": item.summary,
                 "context": item.context,
@@ -428,14 +551,6 @@ def _customer_context(contact_id: int) -> dict | None:
             # offering stages the board had already dropped, which POSTs then rejected.
             "stage_options": PIPELINE_STAGES,
         }
-
-
-@router.get("/customers/{contact_id}")
-async def customer_detail(request: Request, contact_id: int):
-    ctx = _customer_context(contact_id)
-    if not ctx:
-        raise HTTPException(status_code=404, detail="고객을 찾을 수 없습니다")
-    return templates.TemplateResponse(request, "customer_detail.html", ctx)
 
 
 @router.post("/customers/{contact_id}/profile")
@@ -501,27 +616,89 @@ async def customer_profile_save(
     return RedirectResponse(f"/customers/{contact_id}", status_code=303)
 
 
+def _internal_path(target: str, fallback: str) -> str:
+    """A same-site absolute path, or the fallback. Never an off-site redirect.
+
+    The return address arrives in a form field, so ``//evil.example`` and
+    ``https://evil.example`` — both of which a browser follows off this site — are
+    rejected, as are the backslash and CR/LF forms used to smuggle them past a naive
+    prefix check.
+    """
+    value = (target or "").strip()
+    ok = (
+        value.startswith("/")
+        and not value.startswith("//")
+        and "\\" not in value
+        and "\r" not in value
+        and "\n" not in value
+    )
+    return value if ok else fallback
+
+
+def _linked_conversation(session, raw: str, contact_id: int) -> Conversation | None:
+    """The inquiry a manual record belongs to, or None for a contact-wide note.
+
+    The id comes from a hidden form field, so it is checked against THIS contact —
+    otherwise an edited field could file one customer's call notes under another
+    customer's ticket.
+    """
+    value = (raw or "").strip()
+    if not value.isdigit():
+        return None
+    conversation = session.get(Conversation, int(value))
+    if conversation is None or conversation.contact_id != contact_id:
+        return None
+    return conversation
+
+
 @router.post("/customers/{contact_id}/interactions")
 async def interaction_add(
     contact_id: int,
     channel: str = Form("manual"),
     direction: str = Form("note"),
+    handler: str = Form(""),
     subject: str = Form(""),
     summary: str = Form(""),
     context: str = Form(""),
     artifact_url: str = Form(""),
     happened_at: str = Form(""),
+    conversation_id: str = Form(""),
+    redirect_to: str = Form(""),
 ):
+    """Record one manual touchpoint — email, WhatsApp, phone, SMS, meeting.
+
+    This is the only way anything that happened after the first reply reaches this
+    system: from 답변 발송 onward the thread leaves HubSpot and only the operator knows
+    what was said.
+
+    One record is the whole exchange, summarized once. The form used to ask for a
+    ``direction`` and that was the wrong question — it made the operator cut one
+    conversation into "who spoke" rows. It asks who handled it instead; ``direction``
+    keeps its default here and carries a real value only on HubSpot-synced rows.
+
+    ``conversation_id`` files the record under ONE inquiry (the board's + button and the
+    ticket screen send it, so the ticket can show its own log); the contact-level form on
+    리드 히스토리 leaves it blank and the record stays customer-wide. ``redirect_to``
+    returns the operator to where they were instead of the customer page.
+    """
     if not summary.strip():
         return HTMLResponse("내용을 입력해 주세요.", status_code=400)
+    back = _internal_path(redirect_to, f"/customers/{contact_id}#history")
+    # Which thread (if any) the 미팅 rule below should advance. Decided inside the
+    # session, applied after the commit — _set_* open their own sessions.
+    advance_conversation_id: int | None = None
+    advance_contact = False
     with SessionLocal() as session:
         if not session.get(Contact, contact_id):
             raise HTTPException(status_code=404, detail="고객을 찾을 수 없습니다")
+        conversation = _linked_conversation(session, conversation_id, contact_id)
         session.add(
             CustomerInteraction(
                 contact_id=contact_id,
+                conversation_id=conversation.id if conversation else None,
                 channel=channel[:32],
                 direction=direction[:16],
+                handler=handler.strip()[:120] or None,
                 subject=subject.strip()[:300] or None,
                 summary=summary.strip(),
                 context=context.strip() or None,
@@ -530,17 +707,41 @@ async def interaction_add(
             )
         )
         if channel == "meeting":
-            profile = session.get(CustomerProfile, contact_id) or CustomerProfile(
-                contact_id=contact_id
-            )
-            profile.customer_state = "negotiation"
-            profile.pipeline_stage = "negotiation"
-            session.add(profile)
+            if conversation is not None:
+                # A record filed against one ticket moves THAT ticket, never the
+                # contact's newest — the operator clicked a specific card. Unknown
+                # stages ("initial", pre-0040 keys) read as 새 문의, exactly as the
+                # board renders them.
+                current = (
+                    conversation.stage
+                    if conversation.stage in VALID_PIPELINE_STAGES
+                    else "new"
+                )
+                if current in _MEETING_ADVANCES_FROM:
+                    advance_conversation_id = conversation.id
+            else:
+                profile = session.get(CustomerProfile, contact_id) or CustomerProfile(
+                    contact_id=contact_id
+                )
+                # A profile built a line ago has no stage yet — the column default is
+                # applied on INSERT, so read it as the 새 문의 it is about to become.
+                if (profile.pipeline_stage or "new") in _MEETING_ADVANCES_FROM:
+                    profile.customer_state = "negotiation"
+                    profile.pipeline_stage = "negotiation"
+                    session.add(profile)
+                    advance_contact = True
         session.commit()
-    if channel == "meeting":
+
+    if advance_conversation_id is not None:
+        ticket_id, _contact_id, sheet_client_id = _set_conversation_stage(
+            advance_conversation_id, "negotiation"
+        )
+        await _sync_stage(ticket_id, "negotiation", contact_id, sheet_client_id)
+    elif advance_contact:
         ticket_id, sheet_client_id = _set_local_stage(contact_id, "negotiation")
         await _sync_stage(ticket_id, "negotiation", contact_id, sheet_client_id)
-    return RedirectResponse(f"/customers/{contact_id}#history", status_code=303)
+    _announce("interactions")
+    return RedirectResponse(back, status_code=303)
 
 
 @router.post("/customers/{contact_id}/contracts")
@@ -821,16 +1022,18 @@ async def pipeline_board_redirect():
 async def pipeline_stage_move(contact_id: int, stage: str = Form(...)):
     ticket_id, sheet_client_id = _set_local_stage(contact_id, stage)
     result = await _sync_stage(ticket_id, stage, contact_id, sheet_client_id)
-    state = "partial" if False in result.values() else "ok"
-    return RedirectResponse(f"/?sync={state}#stage-{stage}", status_code=303)
+    _announce("pipeline")
+    return RedirectResponse(f"/?sync={_sync_state(result)}#stage-{stage}", status_code=303)
 
 
 @router.post("/pipeline/conversations/{conversation_id}/stage")
 async def pipeline_inquiry_stage_move(conversation_id: int, stage: str = Form(...)):
+    """The board's drop target. The local move is committed first and always sticks;
+    HubSpot and the workbook follow, and the ?sync flag says which of them actually did."""
     ticket_id, contact_id, sheet_client_id = _set_conversation_stage(conversation_id, stage)
     result = await _sync_stage(ticket_id, stage, contact_id, sheet_client_id)
-    state = "partial" if False in result.values() else "ok"
-    return RedirectResponse(f"/?sync={state}#stage-{stage}", status_code=303)
+    _announce("pipeline")
+    return RedirectResponse(f"/?sync={_sync_state(result)}#stage-{stage}", status_code=303)
 
 
 @router.post("/pipeline/backfill")
@@ -1083,9 +1286,9 @@ def _inbound_analytics(period: str) -> dict:
     }
 
 
-@router.get("/operations")
-async def operations(request: Request):
-    period = request.query_params.get("period", "month")
+def _operations_context(period: str) -> dict:
+    """인사이트. Extracted from the route so the React screen reads the same numbers —
+    a second copy of this arithmetic is a second set of answers to 몇 건이냐."""
     if period not in {"day", "month", "year"}:
         period = "month"
     analytics = _inbound_analytics(period)
@@ -1156,10 +1359,7 @@ async def operations(request: Request):
         if row["state"] == "service"
         and (not row["profile"] or (row["profile"].current_plan or "").lower() not in {"business", "enterprise"})
     ]
-    return templates.TemplateResponse(
-        request,
-        "operations.html",
-        {
+    return {
             **analytics,
             "stale": stale,
             "missing_reply": missing_reply,
@@ -1174,5 +1374,6 @@ async def operations(request: Request):
             "renewals": renewals,
             "lost": lost,
             "upsell": upsell,
-        },
-    )
+    }
+
+

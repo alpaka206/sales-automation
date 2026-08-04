@@ -1,4 +1,4 @@
-"""The 답변 검토 queue: which rows appear, in what order, and how they are labelled.
+"""The 회신 및 검토 queue: which rows appear, in what order, and how they are labelled.
 
 The list was rebuilt around two questions an operator actually asks — "what still
 needs me?" and "who has been waiting longest?" — so the chips are status buckets
@@ -89,24 +89,29 @@ def test_rejected_sits_with_completed_not_with_waiting(queue):
 
 
 def test_stage_chip_filters_the_bucket(queue):
-    assert _emails(status="awaiting", stage="negotiation") == {"nego-failed@example.com"}
     assert _emails(status="awaiting", stage="new") == {
         "new-pending@example.com",
         "new-drafting@example.com",
     }
+    assert _emails(status="sent", stage="negotiation") == {"nego-sent@example.com"}
+    # Negotiating is not a 발송 대기 chip any more, so asking for it there falls back to
+    # 전체 rather than filtering — the bucket still holds the row, it just has no chip.
+    assert _emails(status="awaiting", stage="negotiation") == _emails(status="awaiting")
 
 
 def test_stage_chips_differ_by_status_bucket(queue):
     """The two buckets sit at opposite ends of the pipeline.
 
-    발송 대기 can only hold tickets nobody has answered (New) or ones being negotiated;
-    sending is what moves a ticket past New, so 발송 완료 offers the downstream stages
-    instead. One shared chip row offered New to 발송 완료 (always empty) and hid
-    Won/Lost/Closed from it.
+    발송 대기 can only hold tickets nobody has answered (New); sending is what moves a
+    ticket past New, so 발송 완료 offers the downstream stages instead. One shared chip
+    row offered New to 발송 완료 (always empty) and hid Won/Lost/Closed from it.
+
+    발송 대기 gets NO chip row: once the Negotiating chip was dropped it was down to
+    전체 and New over the same rows, and a filter that cannot filter is worse than none.
     """
     awaiting = _messages_list_context(status="awaiting")["stage_chips"]
     sent = _messages_list_context(status="sent")["stage_chips"]
-    assert [key for key, _ in awaiting] == ["", "new", "negotiation"]
+    assert awaiting == []
     assert [key for key, _ in sent] == [
         "",
         "meeting_link_sent",
@@ -143,6 +148,46 @@ def test_rows_carry_the_inquiry_subject_not_our_reply_subject(queue):
     assert not any("우리 답변 제목" in row["subject"] for row in rows)
 
 
+def test_the_column_never_shows_the_re_prefix_we_added(db_session_factory, monkeypatch):
+    """문의 제목 is the HubSpot subject, and "RE:" is ours, not theirs.
+
+    A ticket with no stored inquiry_subject (drafting rows can predate it) falls back to
+    our reply subject — which is built as "RE: <original>" — so the prefix we added has
+    to come back off. A "Re:" the CUSTOMER wrote is part of their subject and stays.
+    """
+    monkeypatch.setattr(messages_route, "SessionLocal", db_session_factory)
+    with db_session_factory() as session:
+        for email, inquiry_subject in (
+            ("fallback@example.com", None),
+            ("their-own-re@example.com", "Re: 지난주 견적 건"),
+        ):
+            contact = Contact(normalized_email=email, email=email, full_name=email)
+            session.add(contact)
+            session.flush()
+            conv = Conversation(
+                contact_id=contact.id, stage="new", inquiry_subject=inquiry_subject
+            )
+            session.add(conv)
+            session.flush()
+            session.add(
+                Message(
+                    conversation_id=conv.id,
+                    direction="outgoing",
+                    channel="email",
+                    subject="RE: 더빙 단가 문의",
+                    body="draft",
+                    status="pending_approval",
+                )
+            )
+        session.commit()
+
+    subjects = {
+        row["email"]: row["subject"] for row in _messages_list_context()["messages"]
+    }
+    assert subjects["fallback@example.com"] == "더빙 단가 문의"
+    assert subjects["their-own-re@example.com"] == "Re: 지난주 견적 건"
+
+
 def test_default_order_is_oldest_first(queue):
     """The queue is worked FIFO, so the default must not be newest-first."""
     ctx = _messages_list_context()
@@ -163,31 +208,26 @@ def test_unknown_filter_values_fall_back_instead_of_reaching_sql(queue):
     )
 
 
-def test_priority_dot_reflects_how_long_the_customer_waited(queue):
-    """Rendered straight from the context: the in-memory DB is per-connection, so a
-    TestClient request would reach a different (empty) database."""
-    from src.api.web.routes._shared import templates
+def test_priority_is_measured_from_the_customers_last_message(queue):
+    """The dot's colour is decided in the screen from ``waiting_since`` (QueueTable.tsx);
+    what the server owes it is that value, measured from the CUSTOMER's last message and
+    not from our draft — "how long have they been waiting?"."""
+    ctx = _messages_list_context(status="awaiting")
+    waited = {
+        row["email"]: (ctx["now"] - row["waiting_since"]).days for row in ctx["messages"]
+    }
+    assert waited["new-pending@example.com"] == 0     # → green
+    assert waited["new-drafting@example.com"] == 2    # → orange
+    assert waited["nego-failed@example.com"] == 9     # → red
 
-    html = templates.get_template("messages_list.html").render(
-        _messages_list_context(status="awaiting")
-    )
-    # 0 days waited -> green, 2 days -> orange, 9 days -> red.
-    assert "wait-dot--ok" in html
-    assert "wait-dot--warn" in html
-    assert "wait-dot--danger" in html
 
+def test_the_stage_labels_come_from_the_board_not_a_second_list(queue):
+    """The column is headed "Stage" and must read New / Negotiating, never the raw key.
 
-def test_stage_column_shows_the_label_not_the_raw_key(queue):
-    """The column is headed "Stage" and must read New / Negotiating.
-
-    The board, the dashboard and this list all render stages; each one that builds
-    its own mapping is a place the wording can drift, so all three use PIPELINE_STAGES.
+    The board, the dashboard and this list all show stages; each one that builds its own
+    mapping is a place the wording can drift, so the server ships one map and every
+    screen looks the label up in it.
     """
-    from src.api.web.routes._shared import templates
-
-    html = templates.get_template("messages_list.html").render(
-        _messages_list_context(status="awaiting")
-    )
-    assert ">New<" in html
-    assert ">Negotiating<" in html
-    assert ">negotiation<" not in html
+    labels = _messages_list_context(status="awaiting")["stage_labels"]
+    assert labels["new"] == "New"
+    assert labels["negotiation"] == "Negotiating"

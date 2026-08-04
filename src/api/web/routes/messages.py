@@ -6,13 +6,14 @@ import asyncio
 import logging
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Form, HTTPException, Request
+from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from sqlalchemy import func, select
 from sqlalchemy.orm import joinedload
 
 from ....agents.approval import ApprovalError, approve, reject
 from ....common.config import settings
+from ....common.subjects import strip_reply_prefixes
 from ....common.textwash import text_wash
 from ....db.conversation_history import add_progress
 from ....db.email_templates import list_signature_templates
@@ -29,7 +30,7 @@ from ....db.models import (
 from ....db.session import SessionLocal
 from ....llm.translate import needs_korean, to_korean, translate_to
 from ..auth import actor_name
-from ._shared import esc, templates
+from ._shared import esc
 
 logger = logging.getLogger(__name__)
 
@@ -127,7 +128,13 @@ def _message_detail_context(message_id: int) -> dict:
         # Customer-level history (CRM state, contract, cross-channel touchpoints)
         # surfaced inline so the operator sees who this customer is without leaving
         # the reply screen. Full editable view stays at /customers/{id}.
-        customer = _customer_history(session, contact.id) if contact else None
+        customer = (
+            _customer_history(
+                session, contact.id, exclude_conversation_id=conv.id if conv else None
+            )
+            if contact
+            else None
+        )
 
         # The customer's inquiry is shown TRANSLATED (Korean) by default with the
         # original behind an expand toggle. ``needs_ko`` flags inbound non-Korean
@@ -169,11 +176,49 @@ def _message_detail_context(message_id: int) -> dict:
             "signatures": list_signature_templates(),
             "domain_history": domain_history,
             "ticket": {
+                "id": conv.id if conv else None,
                 "ticket_id": conv.hubspot_ticket_id if conv else None,
                 "stage": conv.stage if conv else None,
                 "inquiry_subject": conv.inquiry_subject if conv else None,
                 "inquiry_language": conv.inquiry_language if conv else None,
+                # The Inbound DB workbook's stable key for this inquiry (e.g. 1330).
+                # Threads this app appended carry it on the conversation; ones imported
+                # from the sheet carry it on the contact — same fallback order every
+                # stage-sync path uses.
+                "client_id": (
+                    (conv.sheet_client_id if conv else None)
+                    or (contact.sheet_client_id if contact else None)
+                ),
             },
+            # This ticket's own manual touchpoints — what happened on email, WhatsApp,
+            # phone or SMS after the first reply. Contact-wide records (logged from
+            # 리드 히스토리, or synced from HubSpot) carry no conversation_id and stay
+            # in the sidebar's 접점 기록 instead.
+            "ticket_interactions": (
+                [
+                    {
+                        "id": it.id,
+                        "channel": it.channel,
+                        "direction": it.direction,
+                        "handler": it.handler,
+                        "subject": it.subject,
+                        "summary": it.summary,
+                        "context": it.context,
+                        "artifact_url": it.artifact_url,
+                        "happened_at": it.happened_at,
+                    }
+                    for it in session.execute(
+                        select(CustomerInteraction)
+                        .where(CustomerInteraction.conversation_id == conv.id)
+                        .order_by(
+                            CustomerInteraction.happened_at.desc(),
+                            CustomerInteraction.id.desc(),
+                        )
+                    ).scalars()
+                ]
+                if conv
+                else []
+            ),
             "msg": {
                 "id": msg.id,
                 "status": msg.status,
@@ -211,7 +256,7 @@ def _message_detail_context(message_id: int) -> dict:
         }
 
 
-def _customer_history(session, contact_id: int) -> dict:
+def _customer_history(session, contact_id: int, exclude_conversation_id: int | None = None) -> dict:
     """Read-only customer-level history for the message-detail sidebar.
 
     Mirrors the pieces of the /customers/{id} page that are NOT already on the
@@ -220,14 +265,23 @@ def _customer_history(session, contact_id: int) -> dict:
     (CustomerInteraction — manual notes + HubSpot-synced emails/deals/notes).
     Everything is serialized to plain dicts before the session closes, so the
     template never touches a detached ORM object. Editing lives at /customers/{id}.
+
+    ``exclude_conversation_id`` drops the records THIS ticket already lists in its own
+    소통 기록 card, the same way ``_domain_history`` excludes the open thread — otherwise
+    every call the operator logs here would render twice on one screen.
     """
     profile = session.get(CustomerProfile, contact_id)
+    interaction_q = select(CustomerInteraction).where(
+        CustomerInteraction.contact_id == contact_id
+    )
+    if exclude_conversation_id is not None:
+        interaction_q = interaction_q.where(
+            (CustomerInteraction.conversation_id.is_(None))
+            | (CustomerInteraction.conversation_id != exclude_conversation_id)
+        )
     interactions = (
         session.execute(
-            select(CustomerInteraction)
-            .where(CustomerInteraction.contact_id == contact_id)
-            .order_by(CustomerInteraction.happened_at.desc())
-            .limit(6)
+            interaction_q.order_by(CustomerInteraction.happened_at.desc()).limit(6)
         )
         .scalars()
         .all()
@@ -269,6 +323,7 @@ def _customer_history(session, contact_id: int) -> dict:
         {
             "channel": it.channel,
             "direction": it.direction,
+            "handler": it.handler,
             "subject": it.subject,
             "summary": it.summary,
             "happened_at": it.happened_at,
@@ -372,7 +427,10 @@ async def _translate_inbound_bubbles(ctx: dict) -> None:
 # few seconds it is claimed instead of rendering that token as a pill.
 LIST_STATUS_BUCKETS: dict[str, tuple[str, ...]] = {
     "awaiting": ("pending_approval", "drafting", "draft_failed", "send_failed"),
-    "sent": ("sent", "test_sent", "rejected"),
+    # "superseded" = a human answered this ticket in HubSpot while the draft waited, so
+    # stage_sync closed it. Finished work, not a decision: it belongs here, and keeping
+    # it out of 발송 대기 is the point.
+    "sent": ("sent", "test_sent", "rejected", "superseded"),
 }
 # Stage chips, per status bucket ("" = 전체). The two buckets sit at opposite ends of the
 # pipeline, so one shared chip row was wrong in both directions: a reply still waiting
@@ -382,7 +440,10 @@ LIST_STATUS_BUCKETS: dict[str, tuple[str, ...]] = {
 # order; a stage that is not in the current bucket falls back to 전체 (see below), which
 # is what happens when the operator switches buckets with a stage chip active.
 LIST_STAGES: dict[str, tuple[str, ...]] = {
-    "awaiting": ("new", "negotiation"),
+    # 발송 대기 is New only. Drafts are generated for New tickets and nothing else
+    # (InboundAgent.handle returns "skipped_not_new" for any other stage), so a
+    # Negotiating chip here could only ever return an empty table.
+    "awaiting": ("new",),
     "sent": ("meeting_link_sent", "negotiation", "reminder_sent", "won", "closed_lost", "closed"),
 }
 LIST_SORTS = ("oldest", "newest")
@@ -445,9 +506,12 @@ def _messages_list_context(
                 "id": msg.id,
                 "status": msg.status,
                 "stage": conv_stage if conv_stage in VALID_PIPELINE_STAGES else "new",
-                # The customer's own subject. Falls back to our reply subject only
-                # because drafting/draft_failed rows can predate both.
-                "subject": inquiry_subject or msg.subject or "(제목 없음)",
+                # The customer's own subject, shown exactly as HubSpot holds it. The
+                # fallback is our REPLY subject (drafting/draft_failed rows can predate
+                # the ticket subject), and that one is built as "RE: <original>" — this
+                # column is 문의 제목, so the prefix we added comes back off. A "RE:"
+                # the CUSTOMER wrote is part of their subject and stays.
+                "subject": inquiry_subject or strip_reply_prefixes(msg.subject) or "(제목 없음)",
                 "channel": msg.channel,
                 "email": email or "-",
                 # New chip → when the ticket arrived; Negotiating → when they last
@@ -468,42 +532,21 @@ def _messages_list_context(
         "filter_sort": sort,
         # Built here, not in the template: the labels come from PIPELINE_STAGES, which is
         # also what fixes their order and keeps a renamed stage from needing two edits.
-        "stage_chips": [("", "전체")]
-        + [(key, label) for key, label, _ in PIPELINE_STAGES if key in LIST_STAGES[status]],
+        #
+        # Empty when the bucket holds a single stage. 발송 대기 is New-only since the
+        # Negotiating chip was dropped, so its row had become 전체 and New — two chips
+        # selecting the same rows, and a filter that cannot filter is worse than none.
+        "stage_chips": (
+            [("", "전체")]
+            + [(key, label) for key, label, _ in PIPELINE_STAGES if key in LIST_STAGES[status]]
+            if len(LIST_STAGES[status]) > 1
+            else []
+        ),
         # Same label map as the board and the dashboard — the column must read
         # "New"/"Negotiating", not the raw stage key.
         "stage_labels": {key: label for key, label, _ in PIPELINE_STAGES},
         "now": datetime.now(timezone.utc).replace(tzinfo=None),
     }
-
-
-@router.get("/messages")
-async def messages_list(request: Request):
-    """Inbound reply list, filtered by status bucket and pipeline stage."""
-    ctx = _messages_list_context(
-        status=request.query_params.get("status", "awaiting"),
-        stage=request.query_params.get("stage", ""),
-        sort=request.query_params.get("sort", "oldest"),
-    )
-    return templates.TemplateResponse(request, "messages_list.html", ctx)
-
-
-@router.get("/messages/{message_id}")
-async def message_detail(request: Request, message_id: int):
-    """Message detail page with editable body and send/reject actions."""
-    ctx = _message_detail_context(message_id)
-    if not ctx:
-        raise HTTPException(status_code=404, detail="메시지를 찾을 수 없습니다")
-    # Pre-translate the customer's inquiry bubbles to Korean so they're shown
-    # translated by default (the operator can expand the original to the side).
-    await _translate_inbound_bubbles(ctx)
-    # Stage labels come from the board's own tuple; a second hardcoded copy here went
-    # stale the moment the pipeline was trimmed. Imported late — customer_ops imports
-    # this package's shared template env.
-    from .customer_ops import PIPELINE_STAGES
-
-    ctx["stage_labels"] = {key: label for key, label, _desc in PIPELINE_STAGES}
-    return templates.TemplateResponse(request, "message_detail.html", ctx)
 
 
 @router.post("/messages/{message_id}/translate")

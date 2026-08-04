@@ -9,39 +9,38 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter
 from sqlalchemy import func, select
 
 from ....db.models import Contact, Conversation, ConversationProgress, Message
 from ....db.session import SessionLocal
-from ._shared import templates
+
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["web"])
 
 
-@router.get("/companies/{domain}")
-async def company_detail(request: Request, domain: str):
-    """Render every contact + conversation for an email domain."""
+def company_context(domain: str) -> dict:
+    """Every contact and conversation sharing one email domain.
+
+    Extracted from the page handler at the React cutover: the screen reads it as JSON
+    now, and the personal-domain refusal below has to stay on this side of the wire.
+    """
     from ....common.domains import is_personal_domain
 
     domain_l = (domain or "").lower()
     # Never aggregate personal/free-email domains (gmail, naver, …) as one company —
     # that would expose unrelated customers' conversations to each other.
     if not domain_l or is_personal_domain(domain_l):
-        return templates.TemplateResponse(
-            request,
-            "company_detail.html",
-            {
+        return {
                 "domain": domain,
                 "company_name": None,
                 "people": [],
                 "conversations": [],
                 "total_conversations": 0,
                 "personal_domain": True,
-            },
-        )
+        }
     with SessionLocal() as session:
         contacts = (
             session.execute(
@@ -138,4 +137,4 @@ async def company_detail(request: Request, domain: str):
         "conversations": conversations,
         "total_conversations": len(conversations),
     }
-    return templates.TemplateResponse(request, "company_detail.html", ctx)
+    return ctx
