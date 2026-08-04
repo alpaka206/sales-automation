@@ -112,6 +112,12 @@ class Message(Base):
     to_address: Mapped[str | None] = mapped_column(String, nullable=True)
     subject: Mapped[str | None] = mapped_column(String, nullable=True)
     body: Mapped[str] = mapped_column(Text, nullable=False)
+    # The Korean the review screen shows for a foreign-language inbound bubble. Stored
+    # because a body never changes, so its translation never changes — and the only cache
+    # before this was process memory, which Render empties every time the service sleeps
+    # (migration 0045). None means "not translated yet", not "no translation needed".
+    body_ko: Mapped[str | None] = mapped_column(Text, nullable=True)
+    subject_ko: Mapped[str | None] = mapped_column(Text, nullable=True)
     # ``language`` = language the body is CURRENTLY in (a draft is "ko" until the
     # operator translates it). ``target_language`` = language it must be SENT in
     # (the inquiry's language); the send guard enforces body matches it.

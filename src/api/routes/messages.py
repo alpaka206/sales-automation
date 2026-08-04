@@ -191,8 +191,8 @@ def _message_detail_context(message_id: int) -> dict:
                 # non-Korean (a Korean body can still have an English subject line).
                 "needs_ko": tm.direction == "inbound"
                 and (needs_korean(tm.body) or needs_korean(tm.subject or "")),
-                "body_ko": None,
-                "subject_ko": None,
+                "body_ko": tm.body_ko,
+                "subject_ko": tm.subject_ko,
                 "is_auto_ack": tm.prompt_variant == "auto_ack",
                 "language": tm.language,
                 "channel": tm.channel,
@@ -443,29 +443,62 @@ def _domain_history(session, domain: str, exclude_conv_id: int | None = None) ->
 
 
 async def _translate_inbound_bubbles(ctx: dict) -> None:
-    """Eagerly translate inbound (customer) bubbles to Korean, concurrently.
+    """Fill in the Korean for inbound bubbles, translating only what is missing.
 
-    Fills ``body_ko``/``subject_ko`` so the operator sees Korean without clicking.
-    Runs each blocking translation in a thread so the event loop stays responsive.
+    The operator sees Korean without clicking, which is worth waiting for ONCE. It used
+    to be waited for on every open: the only cache was a dict in process memory, and
+    Render's free plan empties that every time the service sleeps. A three-bubble English
+    thread meant six Gemini calls and 1.8 seconds before the ticket appeared.
+
+    A message body never changes, so its translation never changes — it is stored on the
+    row now (migration 0045). Anything already translated is a column read; only genuinely
+    new text reaches the model, and the result is written back so nobody waits for it
+    twice. Each blocking call still runs in a thread so the event loop stays responsive.
     """
     items = [t for t in ctx.get("thread", []) if t.get("needs_ko")]
     if not items:
         return
 
-    async def _tx(item: dict) -> None:
-        # Translate only the field(s) that actually need it; show already-Korean
-        # text as-is in the Korean column.
-        if needs_korean(item["body"]):
-            item["body_ko"] = (await asyncio.to_thread(to_korean, item["body"])) or None
-        else:
-            item["body_ko"] = item["body"]
-        subj = item.get("subject")
-        if subj and needs_korean(subj):
-            item["subject_ko"] = (await asyncio.to_thread(to_korean, subj)) or None
-        elif subj:
-            item["subject_ko"] = subj
+    async def _tx(item: dict) -> dict | None:
+        """Returns what to persist, or None when nothing new was translated."""
+        fresh: dict = {}
+        if item.get("body_ko") is None:
+            if needs_korean(item["body"]):
+                translated = await asyncio.to_thread(to_korean, item["body"])
+                item["body_ko"] = translated or None
+                if translated:
+                    fresh["body_ko"] = translated
+            else:
+                # Already Korean: show it as-is rather than round-tripping it.
+                item["body_ko"] = item["body"]
+        subject = item.get("subject")
+        if subject and item.get("subject_ko") is None:
+            if needs_korean(subject):
+                translated = await asyncio.to_thread(to_korean, subject)
+                item["subject_ko"] = translated or None
+                if translated:
+                    fresh["subject_ko"] = translated
+            else:
+                item["subject_ko"] = subject
+        return {"id": item["id"], **fresh} if fresh else None
 
-    await asyncio.gather(*(_tx(t) for t in items))
+    written = [row for row in await asyncio.gather(*(_tx(t) for t in items)) if row]
+    if not written:
+        return
+    # Best effort: a failure here costs one repeated translation, never the page.
+    try:
+        with SessionLocal() as session:
+            for row in written:
+                message = session.get(Message, row["id"])
+                if message is None:
+                    continue
+                if "body_ko" in row:
+                    message.body_ko = row["body_ko"]
+                if "subject_ko" in row:
+                    message.subject_ko = row["subject_ko"]
+            session.commit()
+    except Exception:
+        logger.warning("Could not store Korean translations", exc_info=True)
 
 
 # The two status buckets the operator reviews. "발송대기" is everything a human still
