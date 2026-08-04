@@ -9,7 +9,7 @@ type Row = {
   status: string; body: string | null; chars: number;
   last_synced_at: string | null; last_error: string | null; from_file: boolean;
 };
-type Data = { modes: { key: string; label: string; description: string }[]; rows: Row[] };
+type Data = { modes: { key: string; label: string }[]; rows: Row[] };
 
 export function PolicyDocs({ onBack }: { onBack?: () => void }) {
   const [params, setParams] = useSearchParams();
@@ -86,10 +86,7 @@ export function PolicyDocs({ onBack }: { onBack?: () => void }) {
         </button>
       </div>
       <div className="page-header">
-        <div>
-          <h1 className="page-title">정책 문서</h1>
-          <p className="page-sub">노션에서 수정하고 로컬 동기화로 가져옵니다. 여기서는 확인만 합니다.</p>
-        </div>
+        <div><h1 className="page-title">정책 문서</h1></div>
       </div>
       {data.modes.map((mode) => {
         const rows = data.rows.filter((row) => row.mode === mode.key);
@@ -98,10 +95,7 @@ export function PolicyDocs({ onBack }: { onBack?: () => void }) {
             <div className="section-header table-heading">
               <div className="section-header__l">
                 <span className="section-header__icon"><Icon name="file" size={16} /></span>
-                <div>
-                  <div className="section-header__title">{mode.label}</div>
-                  <div className="section-header__sub">{mode.description}</div>
-                </div>
+                <div className="section-header__title">{mode.label}</div>
               </div>
             </div>
             <div className="card card--flush">

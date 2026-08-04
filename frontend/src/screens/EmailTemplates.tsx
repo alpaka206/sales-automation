@@ -6,7 +6,7 @@ import { Icon } from "../ui/Icon";
 import { kst } from "../lib/format";
 import { PolicyDocs } from "./PolicyDocs";
 
-type Kind = { key: string; label: string; description: string; count: number; can_create: boolean; read_only: boolean };
+type Kind = { key: string; label: string; count: number; can_create: boolean; read_only: boolean };
 type Item = { id: number; name: string; language: string; updated_at: string; kind: string; chars: number };
 type List = { kinds: Kind[]; items: Item[] };
 type Detail = { id: number; name: string; language: string; body: string; kind: string };
@@ -146,10 +146,7 @@ export function EmailTemplates() {
                       entry.key === "signature" ? "edit" : entry.key === "policy" ? "file" : "mail"
                     } size={16} />
                   </span>
-                  <div>
-                    <div className="section-header__title">{entry.label}</div>
-                    <div className="section-header__sub">{entry.description}</div>
-                  </div>
+                  <div className="section-header__title">{entry.label}</div>
                 </div>
                 <span className="tag tnum">{entry.count}</span>
               </div>
@@ -178,7 +175,6 @@ export function EmailTemplates() {
       <div className="page-header">
         <div>
           <h1 className="page-title">{group?.label}</h1>
-          <p className="page-sub">{group?.description}</p>
         </div>
         {group?.can_create && (
           <button type="button" className="btn btn--primary"

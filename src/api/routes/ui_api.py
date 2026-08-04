@@ -416,13 +416,13 @@ async def ui_customer_detail(contact_id: int):
 # a row is used: its key. `signature_*` is what the compose screen's picker offers;
 # everything else is a body the send path fetches by exact name (auto_ack, the reply
 # format). Flat, the list mixed the two and gave no clue which was which.
-TEMPLATE_KINDS: tuple[tuple[str, str, str], ...] = (
-    ("signature", "서명", "메일 끝에 붙는 서명. 답변 화면의 서명 선택기가 여기서 목록을 읽습니다."),
-    ("template", "이메일 템플릿", "자동 접수확인·답변 형식 등 본문 템플릿. 코드가 이름으로 찾아 씁니다."),
+TEMPLATE_KINDS: tuple[tuple[str, str], ...] = (
+    ("signature", "서명"),
+    ("template", "이메일 템플릿"),
     # Read-only, and it lives here because an operator asking "what does the reply say?"
     # is asking about all three. Policy is owned in Notion and pulled in by
     # scripts/sync_notion_local.py; editing a copy here would be undone by the next sync.
-    ("policy", "정책 문서", "답변에 적용되는 정책. 노션에서 수정하고 로컬 동기화로 가져옵니다 — 여기서는 확인만."),
+    ("policy", "정책 문서"),
 )
 
 
@@ -457,7 +457,6 @@ async def ui_email_templates():
             {
                 "key": key,
                 "label": label,
-                "description": description,
                 "count": policy_count if key == "policy"
                 else sum(1 for item in items if item["kind"] == key),
                 # New rows are only reachable as signatures: the send path resolves the
@@ -466,7 +465,7 @@ async def ui_email_templates():
                 "can_create": key == "signature",
                 "read_only": key == "policy",
             }
-            for key, label, description in TEMPLATE_KINDS
+            for key, label in TEMPLATE_KINDS
         ],
         "items": items,
     }
@@ -510,7 +509,7 @@ async def ui_policy_docs():
             .all()
         )
         return {
-            "modes": [{"key": key, "label": label, "description": desc} for key, label, desc in MODES],
+            "modes": [{"key": key, "label": label} for key, label in MODES],
             "rows": [
                 {
                     "id": row.id,

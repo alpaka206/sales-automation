@@ -24,10 +24,10 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["web"])
 
 MODES = (
-    ("knowledge", "문의별 참고", "문의 내용에 맞으면 답변 작성 시 이 문서를 참고합니다."),
-    ("rules", "항상 적용", "모든 답변에 항상 적용되는 규칙입니다(톤·금지사항 등)."),
+    ("knowledge", "문의별 참고"),
+    ("rules", "항상 적용"),
 )
-_MODE_KEYS = {key for key, _label, _desc in MODES}
+_MODE_KEYS = {key for key, _label in MODES}
 
 
 def _rows() -> list[dict]:
