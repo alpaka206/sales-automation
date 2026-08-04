@@ -79,7 +79,7 @@ def _as_list(value: object) -> list[str]:
 def main(force: bool = False) -> None:
     """Insert any bundled document the database does not have yet."""
     if not KNOWLEDGE_DIR.exists():
-        logger.warning("knowledge_base/ directory not found — nothing to import.")
+        logger.warning("%s not found — nothing to import.", KNOWLEDGE_DIR)
         return
 
     md_files = sorted(KNOWLEDGE_DIR.glob("*.md"))
