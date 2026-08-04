@@ -133,6 +133,20 @@ def test_the_old_pipeline_url_still_lands():
     assert response.headers["location"] == "/"
 
 
+def test_the_console_bundle_exists_to_be_served():
+    """Read this first when /app tests fail with 503.
+
+    Everything below asserts the console is served, and the bundle is gitignored — it is
+    produced by `npm --prefix frontend ci && npm --prefix frontend run build`, which CI
+    does before pytest and a developer already has in their working tree. Without it
+    seven tests fail as an unexplained Service Unavailable.
+    """
+    assert pathlib.Path("src/api/static/app/index.html").exists(), (
+        "React 콘솔이 빌드되지 않았습니다: npm --prefix frontend ci "
+        "&& npm --prefix frontend run build"
+    )
+
+
 def test_the_spa_serves_every_screen_route():
     with TestClient(app) as client:
         for path in ("/app", "/app/messages", "/app/customers/1", "/app/settings/users"):
