@@ -164,6 +164,11 @@ export function Recovery() {
                 })}>
           발송 실패 정리
         </button>
+        {/* A plain link, not a fetch: the browser's own download is the whole feature,
+            and routing it through JS would only mean rebuilding Save As. */}
+        <a className="btn btn--subtle btn--sm" href="/operations/export/inquiries">
+          문의 원문 내려받기
+        </a>
         {note && <span className="t-xs t-subtle">{note}</span>}
       </div>
 
