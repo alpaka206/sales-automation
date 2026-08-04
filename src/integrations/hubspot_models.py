@@ -17,6 +17,9 @@ class ContactDTO(BaseModel):
     company: str | None = None
     phone: str | None = None
     country: str | None = None
+    # HubSpot's IP-derived country, in English. The form-entered `country` above is
+    # usually blank, so this is what the workbook's IP Country column is filled from.
+    ip_country: str | None = None
     lifecyclestage: str | None = None
 
 

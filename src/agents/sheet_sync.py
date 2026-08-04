@@ -11,6 +11,7 @@ from sqlalchemy.exc import IntegrityError
 
 from .inbound_scoring import _normalize_email
 from ..db.models import Contact, ContractRecord, Conversation, CustomerProfile, Event, Message
+from ..common.sheet_values import country_in_korean, normalise_plan
 from ..db.session import SessionLocal
 from ..integrations.google_sheets import (
     read_inbound_records,
@@ -648,10 +649,10 @@ def sync_pending_inbound_rows(limit: int = 50) -> int:
                 "full_name": contact.full_name,
                 "phone": contact.phone or "알 수 없음",
                 "email": contact.email or "",
-                "country": contact.country or "알 수 없음",
+                "country": country_in_korean(contact.country),
                 "company_type": (profile.industry if profile else None) or "확인 안 됨",
                 "channel": "허브스팟" if contact.hubspot_contact_id else inbound.channel,
-                "plan": (profile.current_plan if profile else None) or "N/A",
+                "plan": normalise_plan(profile.current_plan if profile else None),
                 "user_seq": profile.user_seq if profile else "",
                 "source": profile.source if profile else "",
                 "history": inbound.body.replace("\n", " ")[:2000],

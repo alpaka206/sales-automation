@@ -19,6 +19,13 @@ from ..db.conversation_history import add_progress
 from ..db.models import Contact, Conversation, CustomerProfile, InboundJob, Message
 from ..db.session import SessionLocal
 from ..integrations.hubspot import HubSpotClient, HubSpotNotConfigured
+from ..common.sheet_values import (
+    COMPANY_TYPES,
+    UNKNOWN_COMPANY_TYPE,
+    UNKNOWN_COUNTRY,
+    country_in_korean,
+    normalise_plan,
+)
 from ..llm.client import LLMClient
 from ..llm.knowledge import select_relevant_docs
 from ..llm.prompts import apply_link_tokens, get_reply_format
@@ -68,6 +75,12 @@ _processed: set[str] = set()
 class ClassifyResult(BaseModel):
     category: str
     reasoning: str
+
+
+class CompanyTypeResult(BaseModel):
+    company_type: str
+    confidence: str = ""
+    reason: str = ""
 
 
 class ScoreAdjustResult(BaseModel):
@@ -306,7 +319,6 @@ class InboundAgent:
                 logger.debug("Could not parse inbound occurred_at=%r; using now.", raw_when)
 
             excerpt = (contact_info.get("last_message") or "").strip().replace("\n", " ")
-            domain_profile = contact_info.get("domain_profile") or {}
             qualification = profile.qualification if profile else None
             if not qualification:
                 lifecycle = str(contact_info.get("lifecycle_stage") or "").lower()
@@ -323,12 +335,14 @@ class InboundAgent:
                     "full_name": contact_info.get("full_name", ""),
                     "phone": contact_info.get("phone") or "알 수 없음",
                     "email": contact_info.get("email", ""),
-                    "country": contact_info.get("country") or "알 수 없음",
+                    # HubSpot's IP-derived country, in the language the column is in.
+                    "country": country_in_korean(contact_info.get("ip_country"))
+                    if contact_info.get("ip_country")
+                    else (contact_info.get("country") or UNKNOWN_COUNTRY),
                     "company_type": (profile.industry if profile else None)
-                    or domain_profile.get("industry")
-                    or "확인 안 됨",
+                    or self._company_type(contact_info),
                     "channel": "허브스팟" if contact_info.get("object_id") else channel,
-                    "plan": (profile.current_plan if profile else None) or "N/A",
+                    "plan": normalise_plan(profile.current_plan if profile else None),
                     "user_seq": profile.user_seq if profile else "",
                     "source": profile.source if profile else "",
                     "history": excerpt[:2000],
@@ -590,6 +604,38 @@ class InboundAgent:
                         }
                 except Exception:
                     logger.warning("Domain enrichment failed for %s", dom, exc_info=True)
+
+    def _company_type(self, contact_info: dict) -> str:
+        """기업 종류 for the workbook: what kind of organisation asked.
+
+        HubSpot carries the contact's Company Name but not the category the sales team
+        files by, so the name is evidence rather than the answer — and a personal address
+        with no company is itself evidence (a 크리에이터, usually). The model picks from a
+        closed list; anything off it, or any failure, files as 확인 안 됨 rather than
+        inventing a value the column cannot be filtered on.
+        """
+        domain_profile = contact_info.get("domain_profile") or {}
+        try:
+            result = self.llm.complete(
+                "inbound/company_type",
+                {
+                    "company": contact_info.get("company") or "",
+                    "domain": contact_info.get("domain") or "",
+                    "industry_hint": domain_profile.get("services")
+                    or domain_profile.get("industry")
+                    or "",
+                    "inquiry": (contact_info.get("last_message") or "")[:1500],
+                },
+                schema=CompanyTypeResult,
+            )
+        except Exception:
+            logger.warning("기업 종류 classification failed; filing as 확인 안 됨.", exc_info=True)
+            return UNKNOWN_COMPANY_TYPE
+        value = (result.company_type or "").strip()
+        if value not in COMPANY_TYPES:
+            logger.info("기업 종류 %r is not one the column offers; filing as 확인 안 됨.", value)
+            return UNKNOWN_COMPANY_TYPE
+        return value
 
     def _classify(self, contact_info: dict) -> ClassifyResult:
         return self.llm.complete(

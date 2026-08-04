@@ -179,6 +179,10 @@ def _contact_properties() -> str:
         "company",
         "phone",
         "country",
+        # Where the visitor actually browsed from. `country` is whatever they typed into
+        # a form (often blank); this one HubSpot derives from the IP and it is the value
+        # the workbook's IP Country column means.
+        "hs_ip_country",
         "lifecyclestage",
     ]
     return ",".join(names)
@@ -232,6 +236,7 @@ class HubSpotClient:
             company=props.get("company"),
             phone=props.get("phone"),
             country=props.get("country"),
+            ip_country=props.get("hs_ip_country"),
             lifecyclestage=props.get("lifecyclestage"),
         )
 
@@ -372,6 +377,7 @@ class HubSpotClient:
             company=props.get("company"),
             phone=props.get("phone"),
             country=props.get("country"),
+            ip_country=props.get("hs_ip_country"),
             lifecyclestage=props.get("lifecyclestage"),
         )
 
@@ -465,6 +471,7 @@ class HubSpotClient:
                         company=p.get("company"),
                         phone=p.get("phone"),
                         country=p.get("country"),
+                        ip_country=p.get("hs_ip_country"),
                         lifecyclestage=p.get("lifecyclestage"),
                     )
         return out

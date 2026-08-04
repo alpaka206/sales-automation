@@ -296,6 +296,55 @@ def _next_inbound_client_id(service, tab: str, header: _SheetHeader) -> int:
     return next_id
 
 
+# Pipeline (E on the current sheet) is a FORMULA, not a value the app decides once and
+# forgets. The sales team edits 구독 플랜 by hand as a deal moves, and a written-in
+# "MQL" would then contradict the plan sitting beside it — the formula re-reads that cell
+# forever. The operator's rule, 2026-08-04:
+#
+#     N/A                    -> MQL      (nothing bought yet; Free is written as N/A)
+#     엔터프라이즈             -> 재계약    (already a customer; this is a renewal)
+#     pro / creator / starter / 사용중(플랜 미확인) -> PQL
+#
+# No blank branch: this app always fills the plan cell, so an empty one cannot arise from
+# the inbound path. A cell someone clears by hand therefore reads PQL.
+#
+# The plan column is located by header rather than hardcoded as N, so inserting a column
+# does not silently point the formula at the wrong one.
+def _pipeline_formula(header: _SheetHeader, row: int) -> str | None:
+    lookup = _header_lookup({"plan": ""})
+    plan_index = next(
+        (i for i, cell in enumerate(header.values) if _key_for_header(cell, lookup) == "plan"),
+        None,
+    )
+    if plan_index is None:
+        return None
+    cell = f"{_column_letter(plan_index)}{row}"
+    return f'=IF({cell}="N/A","MQL",IF({cell}="엔터프라이즈","재계약","PQL"))'
+
+
+def _write_pipeline_formula(service, tab: str, header: _SheetHeader, row: int) -> None:
+    """Put the formula in Pipeline for a row that was just written.
+
+    Separate from the append because the row number is only known from its response, and
+    the formula has to name that row. USER_ENTERED, or Sheets stores the text of it.
+    """
+    lookup = _header_lookup({"pipeline": ""})
+    pipeline_index = next(
+        (i for i, cell in enumerate(header.values) if _key_for_header(cell, lookup) == "pipeline"),
+        None,
+    )
+    formula = _pipeline_formula(header, row)
+    if pipeline_index is None or formula is None:
+        logger.info("Sheet has no Pipeline/Plan column pair; skipping the formula.")
+        return
+    service.spreadsheets().values().update(
+        spreadsheetId=settings.GOOGLE_SHEETS_SPREADSHEET_ID.strip(),
+        range=f"'{tab}'!{_column_letter(pipeline_index)}{row}",
+        valueInputOption="USER_ENTERED",
+        body={"values": [[formula]]},
+    ).execute()
+
+
 def _row_number(response: dict) -> int | None:
     updated_range = str((response.get("updates") or {}).get("updatedRange") or "")
     digits = "".join(ch for ch in updated_range.rsplit("!", 1)[-1].split(":", 1)[0] if ch.isdigit())
@@ -386,6 +435,7 @@ def _append_existing_tab(
             existing_row = _existing_row_for_keys(service, tab, header, payload, dedup_keys)
             if existing_row:
                 _update_existing_nonempty_cells(service, tab, header, existing_row, payload)
+                _write_pipeline_formula(service, tab, header, existing_row)
                 return SheetWriteResult(
                     row=existing_row,
                     client_id=int(client_id) if client_id else None,
@@ -405,7 +455,10 @@ def _append_existing_tab(
             )
             .execute()
         )
-    return SheetWriteResult(row=_row_number(response), client_id=int(client_id) if client_id else None)
+        appended = _row_number(response)
+        if appended:
+            _write_pipeline_formula(service, tab, header, appended)
+    return SheetWriteResult(row=appended, client_id=int(client_id) if client_id else None)
 
 
 def append_inbound_row(record: dict) -> SheetWriteResult:

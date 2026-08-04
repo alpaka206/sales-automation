@@ -362,3 +362,42 @@ def test_read_inbound_records_fails_loudly_when_client_id_header_drifted(monkeyp
         gs.read_inbound_records()
     assert "appended" not in store
     assert "batch" not in store
+
+
+# ---- Pipeline is a formula, not a value --------------------------------------------
+
+
+def test_pipeline_is_written_as_a_formula_over_the_plan_cell():
+    """The sales team edits 구독 플랜 by hand as a deal moves. A written-in "MQL" would
+    then sit beside a plan that contradicts it; a formula re-reads that cell forever.
+
+    The plan column is found by header rather than hardcoded as N, so inserting a column
+    cannot silently point the formula at a different one.
+    """
+    from src.integrations.google_sheets import _pipeline_formula, _SheetHeader
+
+    header = _SheetHeader(
+        values=["Client ID", "영업방향", "문의 날짜", "Ticket Status", "Pipeline", "구독 플랜"],
+        row=1,
+    )
+    assert _pipeline_formula(header, 168) == (
+        '=IF(F168="N/A","MQL",IF(F168="엔터프라이즈","재계약","PQL"))'
+    )
+
+
+def test_a_sheet_without_a_plan_column_gets_no_formula():
+    """Rather than writing one that points at whatever happens to sit in N."""
+    from src.integrations.google_sheets import _pipeline_formula, _SheetHeader
+
+    assert _pipeline_formula(_SheetHeader(values=["Client ID", "Pipeline"], row=1), 5) is None
+
+
+def test_the_formula_branches_match_the_operators_rule():
+    """N/A -> MQL, 엔터프라이즈 -> 재계약, everything else -> PQL. No blank branch: this
+    app always fills the plan cell (Free is written as N/A)."""
+    from src.integrations.google_sheets import _pipeline_formula, _SheetHeader
+
+    formula = _pipeline_formula(_SheetHeader(values=["Pipeline", "Plan"], row=1), 2)
+    assert '"N/A","MQL"' in formula
+    assert '"엔터프라이즈","재계약"' in formula
+    assert formula.endswith('"PQL"))')
