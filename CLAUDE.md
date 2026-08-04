@@ -19,7 +19,7 @@ PERSO Inbound is a FastAPI workflow for inbound inquiry handling and customer op
 
 ## Stack
 
-- Python 3.11+, FastAPI, SQLAlchemy, Jinja/HTMX
+- Python 3.11+, FastAPI, SQLAlchemy, React (Vite + TypeScript + React Query)
 - Gemini on Vertex AI (`flash` for routing/classification, `pro` for customer replies)
 - SQLite locally; PostgreSQL-compatible migrations
 - SMTP delivery, HubSpot CRM synchronization, optional Slack
@@ -43,9 +43,9 @@ Do not send live messages in tests. `tests/conftest.py` disables background inte
 ## Front end
 
 The console is React (`frontend/`, Vite + TypeScript + React Query), served by FastAPI at
-`/app`; every old page URL 302s there. `src/api/templates/` holds only what is not a
-screen: the two sign-in pages (rendered before a session exists) and the quote-calculator
-document the console embeds.
+`/app`; every old page URL 302s there. There are no HTML templates left and no template
+engine — sign-in was the last holdout, and it serves the same SPA document (`/auth/*` is
+exempt from the auth gate, so React can draw it before a session exists).
 
 - **Build before packaging.** `npm --prefix frontend ci && npm --prefix frontend run build`
   writes `src/api/static/app/`, which is gitignored and shipped via
