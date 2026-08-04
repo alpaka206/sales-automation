@@ -40,6 +40,20 @@ _POLL_SECONDS = 2.0
 _POLL_LIMIT = 60  # 2 minutes: a policy page exports in seconds, a huge one takes longer.
 
 
+_DOWNLOAD_DENIED = (
+    "내보내기 파일을 받지 못했습니다 (노션이 다운로드를 거부).\n"
+    "  내보내기 생성은 성공했으므로 token_v2 는 유효합니다. 노션이 파일 다운로드를\n"
+    "  별도 쿠키(file_token)로 분리했고, 그 값이 없거나 만료됐습니다.\n"
+    "\n"
+    "  해결 (둘 중 하나):\n"
+    "   1) .env 에 NOTION_FILE_TOKEN 추가\n"
+    "      notion.so 에서 F12 → Application → Cookies → file_token 값\n"
+    "   2) 더 확실한 방법: 노션 페이지에서 ··· → Export → Markdown & CSV 로 zip 을\n"
+    "      받아 이 배치 파일 아이콘 위로 끌어다 놓으세요. 쿠키를 전혀 쓰지 않으므로\n"
+    "      노션이 무엇을 바꾸든 계속 됩니다."
+)
+
+
 class NotionSessionError(NotionError):
     """The browser-session route failed. The message says which half to fix."""
 
@@ -148,9 +162,20 @@ def export_page_zip(url_or_id: str, *, time_zone: str = "Asia/Seoul") -> bytes:
                 "브라우저에서 직접 내보낸 뒤 --export 로 넣어 주세요."
             )
 
-        # Signed S3 URL — a separate host, and the cookie must not be sent to it.
+        # 서명된 URL 이지만 서명만으로는 부족합니다. 노션이 파일 호스트를 분리하면서
+        # file.notion.com 은 file_token 쿠키를 따로 봅니다 — token_v2 는 www.notion.so
+        # 에만 통해서, 내보내기 생성까지는 되고 다운로드에서 막힙니다.
+        cookies = []
+        file_token = settings.NOTION_FILE_TOKEN.strip()
+        if file_token:
+            cookies.append(f"file_token={file_token}")
+        cookies.append(f"token_v2={settings.NOTION_TOKEN_V2.strip()}")
+        headers = {"User-Agent": _UA, "Cookie": "; ".join(cookies)}
+
         with httpx.Client(timeout=120.0, follow_redirects=True) as plain:
-            download = plain.get(export_url, headers={"User-Agent": _UA})
+            download = plain.get(export_url, headers=headers)
+            if download.status_code in (401, 403):
+                raise NotionSessionError(_DOWNLOAD_DENIED)
             download.raise_for_status()
             logger.info("Notion export downloaded for %s (%d bytes)", page_id, len(download.content))
             return download.content

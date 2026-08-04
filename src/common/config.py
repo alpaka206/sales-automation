@@ -207,6 +207,10 @@ class Settings(BaseSettings):
     NOTION_TOKEN_V2: str = ""
     # Only when one browser session holds several Notion accounts.
     NOTION_ACTIVE_USER_ID: str = ""
+    # 노션이 파일 다운로드를 별도 쿠키로 나눴습니다. token_v2 는 www.notion.so 의 API 에만
+    # 통하고, 내보내기 zip 이 놓이는 file.notion.com 은 이 쿠키를 봅니다. 없으면 내보내기
+    # 생성까지는 되고 다운로드에서 "Access denied" 가 납니다.
+    NOTION_FILE_TOKEN: str = ""
 
     # Display only — which account that refresh token belongs to, shown on /pipeline.
     GOOGLE_SHEETS_ACCOUNT_EMAIL: str = ""
