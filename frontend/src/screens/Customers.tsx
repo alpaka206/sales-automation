@@ -39,6 +39,9 @@ export function Customers() {
   });
 
   const labels = Object.fromEntries((data?.stage_options ?? []).map((s) => [s.key, s.label]));
+  // 협상중 고객 — 사이드바가 stage=negotiation 으로 들어오는 그 화면. 리드 히스토리와 같은
+  // 컴포넌트지만 "이 단계만 보는 화면"이라는 점이 다릅니다.
+  const isFixedStage = stage === "negotiation";
 
   return (
     <>
@@ -88,8 +91,12 @@ export function Customers() {
               ),
             },
             {
-              // The column that shows the stage is the one that filters by it.
-              label: (
+              // 리드 히스토리에서는 이 컬럼이 곧 필터입니다 — 단계를 보여주는 열이 단계로
+              // 거르는 열이기도 한 것. 협상중 고객에서는 뺍니다: 그 화면은 이미 한 단계만
+              // 보는 화면이라, 여기 드롭다운이 있으면 이 행의 단계를 바꾸는 것처럼 보입니다.
+              label: isFixedStage ? (
+                "파이프라인"
+              ) : (
                 <>
                   <label className="sr-only" htmlFor="stage-filter">파이프라인 단계로 보기</label>
                   <select

@@ -516,3 +516,17 @@ def test_message_edit_blocked_after_approve(mock_send, pending_msg):
     _client().post(f"/messages/{pending_msg}/send", data={"body": "Hello", "subject": "Test"})
     r = _client().post(f"/messages/{pending_msg}/edit", data={"body": "x", "subject": ""})
     assert r.status_code == 400
+
+
+def test_the_stage_dropdown_is_only_on_the_screen_it_filters():
+    """리드 히스토리에서는 단계를 보여주는 열이 단계로 거르는 열이기도 합니다.
+
+    협상중 고객에서는 뺍니다. 그 화면은 이미 한 단계만 보는 화면이라, 행마다 드롭다운이
+    붙어 있으면 이 고객의 단계를 바꾸는 컨트롤처럼 보입니다 — 단계는 파이프라인 보드나
+    HubSpot 에서 움직이는 것이지 목록에서 고르는 것이 아닙니다.
+    """
+    customers = pathlib.Path("frontend/src/screens/Customers.tsx").read_text(encoding="utf-8")
+    assert 'const isFixedStage = stage === "negotiation";' in customers
+    assert "label: isFixedStage ? (" in customers
+    # 필터 자체는 남아 있어야 합니다 — 리드 히스토리가 그것으로 좁힙니다.
+    assert 'id="stage-filter"' in customers
