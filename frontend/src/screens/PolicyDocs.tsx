@@ -1,6 +1,7 @@
-import { useQuery } from "@tanstack/react-query";
+import { useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
-import { getJSON } from "../lib/api";
+import { getJSON, postForm } from "../lib/api";
 import { Icon } from "../ui/Icon";
 import { DataTable, type Column } from "../ui/DataTable";
 import { kst } from "../lib/format";
@@ -13,11 +14,77 @@ type Row = {
 };
 type Data = { modes: { key: string; label: string }[]; rows: Row[] };
 
+/** The registration form. Notion links move — a page gets rewritten, a section is split,
+ *  someone reorganises the workspace — so adding, pausing and removing one has to be
+ *  something the operator does, not a deploy. The list has always lived in the database;
+ *  this screen just stopped offering the controls when it was ported. */
+function AddSource({ modes, onDone }: { modes: { key: string; label: string }[]; onDone: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  if (!open) {
+    return (
+      <button type="button" className="btn btn--subtle btn--sm" onClick={() => setOpen(true)}>
+        <Icon name="plus" size={14} /> 노션 문서 추가
+      </button>
+    );
+  }
+  return (
+    <form
+      className="card mb-gap"
+      onSubmit={async (event) => {
+        event.preventDefault();
+        const form = new FormData(event.currentTarget);
+        setBusy(true);
+        setError(null);
+        try {
+          await postForm("/policy-docs", {
+            label: String(form.get("label") ?? ""),
+            notion_url: String(form.get("notion_url") ?? ""),
+            mode: String(form.get("mode") ?? "knowledge"),
+          });
+          setOpen(false);
+          onDone();
+        } catch (err) {
+          setError(err instanceof Error ? err.message : String(err));
+        } finally {
+          setBusy(false);
+        }
+      }}
+    >
+      <div className="grid grid-3" style={{ gap: 12 }}>
+        <label style={{ display: "block" }}>
+          <span className="field-label">문서 이름</span>
+          <input className="input" name="label" required placeholder="예: 환불 정책" />
+        </label>
+        <label style={{ display: "block" }}>
+          <span className="field-label">노션 링크</span>
+          <input className="input" name="notion_url" required placeholder="https://www.notion.so/..." />
+        </label>
+        <label style={{ display: "block" }}>
+          <span className="field-label">적용 방식</span>
+          <select className="select" name="mode" defaultValue="knowledge">
+            {modes.map((mode) => <option key={mode.key} value={mode.key}>{mode.label}</option>)}
+          </select>
+        </label>
+      </div>
+      {error && <div className="t-xs" style={{ color: "var(--danger)", marginTop: 8 }}>{error}</div>}
+      <div className="row" style={{ gap: 8, marginTop: 12 }}>
+        <button className="btn btn--primary btn--sm" type="submit" disabled={busy}>
+          {busy && <span className="spinner" style={{ marginRight: 6 }} />}추가
+        </button>
+        <button className="btn btn--ghost btn--sm" type="button" onClick={() => setOpen(false)}>취소</button>
+      </div>
+    </form>
+  );
+}
+
 // 분량 and 상태 were columns of their own; the length is on the document page and a
 // healthy document had nothing to say in a status column but "사용 중". What is worth
 // interrupting for — a failed sync serving a stale copy, or a document switched off —
 // says so under the name, where it is impossible to read past.
-const COLUMNS: Column<Row>[] = [
+const columns = (act: (path: string) => void): Column<Row>[] => [
   {
     label: "문서",
     width: "70%",
@@ -36,12 +103,32 @@ const COLUMNS: Column<Row>[] = [
       </>
     ),
   },
-  { label: "마지막 동기화", width: "30%", className: "tnum td-subtle",
+  { label: "마지막 동기화", width: "18%", className: "tnum td-subtle",
     cell: (row) => (row.last_synced_at ? kst(row.last_synced_at) : "—") },
+  {
+    width: "12%",
+    // Pausing keeps the registration and the synced copy; only 삭제 forgets the link.
+    cell: (row) => (
+      <div className="row" style={{ gap: 6 }} onClick={(event) => event.stopPropagation()}>
+        <button type="button" className="btn btn--subtle btn--sm"
+                onClick={() => act(`/policy-docs/${row.id}/toggle`)}>
+          {row.status === "active" ? "중지" : "사용"}
+        </button>
+        <button type="button" className="btn btn--ghost btn--sm"
+                onClick={() => act(`/policy-docs/${row.id}/delete`)}>삭제</button>
+      </div>
+    ),
+  },
 ];
 
 export function PolicyDocs({ onBack }: { onBack?: () => void }) {
   const [params, setParams] = useSearchParams();
+  const queryClient = useQueryClient();
+  const refresh = () => void queryClient.invalidateQueries({ queryKey: ["policy-docs"] });
+  const act = async (path: string) => {
+    await postForm(path, {});
+    refresh();
+  };
   const open = params.get("doc");
   const { data, isPending } = useQuery({
     queryKey: ["policy-docs"],
@@ -116,6 +203,9 @@ export function PolicyDocs({ onBack }: { onBack?: () => void }) {
       </div>
       <div className="page-header">
         <div><h1 className="page-title">정책 문서</h1></div>
+        <div className="row" style={{ gap: 8 }}>
+          <AddSource modes={data.modes} onDone={refresh} />
+        </div>
       </div>
       {data.modes.map((mode) => (
         <section key={mode.key} className="mb-gap">
@@ -129,7 +219,7 @@ export function PolicyDocs({ onBack }: { onBack?: () => void }) {
             {/* The SAME columns object for both groups. Two tables measuring their own
                 widths put the same column in two different places. */}
             <DataTable
-              columns={COLUMNS}
+              columns={columns(act)}
               rows={data.rows.filter((row) => row.mode === mode.key)}
               rowKey={(row) => row.id}
               empty="등록된 문서가 없습니다."

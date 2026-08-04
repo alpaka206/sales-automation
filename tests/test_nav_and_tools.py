@@ -24,16 +24,32 @@ ROUTES = pathlib.Path("frontend/src/main.tsx").read_text(encoding="utf-8")
 
 def test_policy_docs_is_a_category_not_a_sidebar_entry():
     """Reading policy is part of "what does the reply actually say?", so it sits with the
-    signatures and templates. It stays read-only: the copy here is pulled from Notion and
-    editing it would be undone by the next sync."""
+    signatures and templates."""
     assert '"/policy-docs"' not in SHELL
     templates_screen = pathlib.Path("frontend/src/screens/EmailTemplates.tsx").read_text(
         encoding="utf-8"
     )
     assert 'kind === "policy"' in templates_screen
+
+
+def test_the_policy_text_is_read_only_but_the_registration_is_not():
+    """Two different things, and the screen used to refuse both.
+
+    The CONTENT is read-only and must stay that way — it is a copy pulled from Notion, so
+    an edit here is undone by the next sync. There is no editor for a document body.
+
+    WHICH pages get pulled is the opposite: links move, pages get split, someone
+    reorganises the workspace. Registering, pausing and removing one has to be an operator
+    action, and the list has always been rows in the database — the screen simply stopped
+    offering the controls when it was ported to React.
+    """
     policy = pathlib.Path("frontend/src/screens/PolicyDocs.tsx").read_text(encoding="utf-8")
     assert "읽기 전용" in policy
-    assert "<textarea" not in policy and "<input" not in policy
+    # No editor for the body: it is rendered in a <pre>, never a textarea.
+    assert "<textarea" not in policy
+    # But the registration is manageable, against the routes that already existed.
+    assert 'postForm("/policy-docs"' in policy
+    assert "/toggle" in policy and "/delete" in policy
 
 
 def test_sidebar_sections_are_the_ones_the_operator_asked_for():
