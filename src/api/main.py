@@ -279,6 +279,31 @@ async def auth_middleware(request: Request, call_next):
 
 
 @app.middleware("http")
+async def publish_changes_middleware(request: Request, call_next):
+    """Tell every open console that a write happened — here, not in 30 handlers.
+
+    This is what makes "내가 바꾸면 다른 화면에서도 바뀐다" true for ALL of them. Of the
+    thirty write endpoints, three called _announce by hand: a stage move and a logged
+    interaction. Sending a reply, approving access, editing a template, adding a
+    contract, retrying a failed job — none of them reached another tab, and each new
+    write route was one more chance to forget.
+
+    A successful non-GET IS the event. The topic is the path, which is diagnostic only:
+    the client invalidates its whole cache on any event, because a write on one screen
+    routinely changes what a different screen shows.
+    """
+    response = await call_next(request)
+    if request.method != "GET" and response.status_code < 400:
+        from .routes.ui_api import publish
+
+        try:
+            publish(request.url.path)
+        except Exception:  # pragma: no cover - a broadcast must never undo a saved write
+            logger.warning("change broadcast failed", exc_info=True)
+    return response
+
+
+@app.middleware("http")
 async def security_headers_middleware(request: Request, call_next):
     response = await call_next(request)
     # StaticFiles sends only etag/last-modified, so Chrome heuristically caches the

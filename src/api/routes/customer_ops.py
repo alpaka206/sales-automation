@@ -95,8 +95,13 @@ FOLLOW_UP_UNQUALIFIED_DAYS = FOLLOW_UP_REMINDER_2_DAYS + 3  # 13
 
 
 def _announce(topic: str) -> None:
-    """Tell every open console something changed. Best effort — a write must never fail
-    because nobody was listening."""
+    """Tell every open console something changed.
+
+    Nothing in this module calls it any more — publish_changes_middleware broadcasts
+    every successful write, so a handler cannot forget. Kept for a caller that is not an
+    HTTP request (a background worker finishing a draft), which the middleware cannot
+    see. Best effort: a write must never fail because nobody was listening.
+    """
     try:
         from .ui_api import publish
 
@@ -753,7 +758,6 @@ async def interaction_add(
     elif advance_contact:
         ticket_id, sheet_client_id = _set_local_stage(contact_id, "negotiation")
         await _sync_stage(ticket_id, "negotiation", contact_id, sheet_client_id)
-    _announce("interactions")
     return RedirectResponse(back, status_code=303)
 
 
@@ -1035,7 +1039,6 @@ async def pipeline_board_redirect():
 async def pipeline_stage_move(contact_id: int, stage: str = Form(...)):
     ticket_id, sheet_client_id = _set_local_stage(contact_id, stage)
     result = await _sync_stage(ticket_id, stage, contact_id, sheet_client_id)
-    _announce("pipeline")
     return RedirectResponse(f"/?sync={_sync_state(result)}#stage-{stage}", status_code=303)
 
 
@@ -1045,7 +1048,6 @@ async def pipeline_inquiry_stage_move(conversation_id: int, stage: str = Form(..
     HubSpot and the workbook follow, and the ?sync flag says which of them actually did."""
     ticket_id, contact_id, sheet_client_id = _set_conversation_stage(conversation_id, stage)
     result = await _sync_stage(ticket_id, stage, contact_id, sheet_client_id)
-    _announce("pipeline")
     return RedirectResponse(f"/?sync={_sync_state(result)}#stage-{stage}", status_code=303)
 
 

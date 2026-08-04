@@ -107,12 +107,36 @@ async def test_a_stalled_tab_cannot_block_a_write():
 
 
 def test_broadcasting_never_breaks_the_write_it_follows(monkeypatch):
-    """_announce is fire-and-forget: a stage move must succeed even if nothing is
-    listening or the broadcast itself explodes."""
-    from src.api.routes import customer_ops
+    """Fire-and-forget: the save already happened. A broadcast that explodes must not
+    turn a successful write into a 500 the operator retries."""
+    from fastapi.testclient import TestClient
+
+    from src.api.main import app
 
     def boom(_topic: str) -> None:
         raise RuntimeError("no listeners")
 
     monkeypatch.setattr(ui_api, "publish", boom)
-    customer_ops._announce("pipeline")  # swallowed, by design
+    with TestClient(app) as client:
+        # Any write route; this one needs no fixtures and no external call.
+        response = client.post("/logs/clear", follow_redirects=False)
+    assert response.status_code < 500
+
+
+def test_every_write_route_reaches_the_other_tabs(monkeypatch):
+    """The point of the middleware: no handler has to remember.
+
+    Three of thirty endpoints used to announce by hand — a stage move and a logged
+    interaction. Sending a reply, approving access, editing a template, adding a
+    contract: none of them reached another tab.
+    """
+    from fastapi.testclient import TestClient
+
+    from src.api.main import app
+
+    seen: list[str] = []
+    monkeypatch.setattr(ui_api, "publish", seen.append)
+    with TestClient(app) as client:
+        client.post("/logs/clear", follow_redirects=False)
+        client.get("/healthz")
+    assert seen == ["/logs/clear"], "a successful write must publish, a read must not"
