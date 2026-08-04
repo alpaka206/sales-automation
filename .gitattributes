@@ -1,0 +1,7 @@
+# core.autocrlf=true on this machine rewrites LF to CRLF on checkout. That is fine for
+# Python and TypeScript; it is fatal for a shell script that runs inside a Linux
+# container, where `sh` reads the trailing \r as part of the command and the release
+# fails to start. These files stay LF in the working tree no matter whose machine it is.
+*.sh text eol=lf
+Dockerfile text eol=lf
+.dockerignore text eol=lf
