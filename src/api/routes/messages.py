@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -37,6 +37,21 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["web"])
 
 # Maximum bytes accepted for a single edit — prevents accidental/malicious DoS via huge POST.
+def list_now() -> datetime:
+    """The clock a list is dated against, truncated to the minute.
+
+    It rides in the payload so every row's "waited N days" is measured against one
+    instant instead of each browser's own clock. Truncated because a microsecond-precise
+    timestamp changes the response body on every single request, which defeats the
+    conditional GET in front of it — the console would re-download an identical list every
+    15 seconds forever. The dot it feeds is bucketed in DAYS; a minute of coarseness is
+    invisible to it and turns three of four polls into a 304.
+    """
+    # Rounded UP, not down. Truncating alone puts `now` up to 59 seconds in the past,
+    # and a row created moments ago then reports a NEGATIVE age against it.
+    return (datetime.now(timezone.utc) + timedelta(minutes=1)).replace(second=0, microsecond=0)
+
+
 _MAX_EDIT_BODY_BYTES = 100_000
 
 # 처리 경과 answers "what happened with this customer". These two answer "what the app
@@ -579,7 +594,7 @@ def _messages_list_context(
         # Same label map as the board and the dashboard — the column must read
         # "New"/"Negotiating", not the raw stage key.
         "stage_labels": {key: label for key, label, _ in PIPELINE_STAGES},
-        "now": datetime.now(timezone.utc).replace(tzinfo=None),
+        "now": list_now().replace(tzinfo=None),
     }
 
 

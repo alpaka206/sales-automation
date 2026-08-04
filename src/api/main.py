@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import hmac
 import logging
 import uuid
@@ -276,6 +277,52 @@ async def auth_middleware(request: Request, call_next):
     if not hmac.compare_digest(token, settings.INTERNAL_API_TOKEN):
         return JSONResponse(status_code=401, content={"detail": "invalid or missing token"})
     return await call_next(request)
+
+
+@app.middleware("http")
+async def conditional_get_middleware(request: Request, call_next):
+    """Answer 304 when a screen re-reads data it already has.
+
+    The console polls (the review list every 15s, the board every 30s) and every write
+    invalidates every open tab's cache, so the same JSON was being sent again and again
+    to clients that already held an identical copy. Most of those reads change nothing.
+
+    This is the HTTP answer to that, not a second API: hash the body, hand it back as an
+    ETag, and when the browser offers the same one, reply 304 with no body at all. The
+    request still happens — the client still learns whether it is current — but the
+    payload does not move. React Query needs no changes; fetch resolves a 304 from the
+    browser's own copy.
+
+    `no-cache` rather than a max-age: the console must never show a stale row because a
+    cache decided the answer was still fresh. It means "always ask", not "never store".
+    """
+    if request.method != "GET" or not request.url.path.startswith("/api/ui/"):
+        return await call_next(request)
+    # SSE. Hashing a stream that never ends would hang the request.
+    if request.url.path == "/api/ui/events":
+        return await call_next(request)
+
+    response = await call_next(request)
+    if response.status_code != 200:
+        return response
+
+    body = b"".join([chunk async for chunk in response.body_iterator])
+    etag = '"%s"' % hashlib.sha256(body).hexdigest()[:32]
+    headers = dict(response.headers)
+    headers["ETag"] = etag
+    headers["Cache-Control"] = "no-cache"
+
+    if request.headers.get("if-none-match") == etag:
+        headers.pop("content-length", None)
+        return Response(status_code=304, headers=headers)
+
+    headers["content-length"] = str(len(body))
+    return Response(
+        content=body,
+        status_code=response.status_code,
+        headers=headers,
+        media_type=response.media_type,
+    )
 
 
 @app.middleware("http")

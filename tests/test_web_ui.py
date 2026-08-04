@@ -211,8 +211,11 @@ def test_every_table_is_the_same_table():
     is exactly what 문의별 참고 and 항상 적용 did.
     """
     screens = list(pathlib.Path("frontend/src/screens").glob("*.tsx"))
+    # DataTable is the one. Loading draws the SHAPE of a table before there are any rows
+    # — it has no columns to drift from, and routing a placeholder through the component
+    # that renders data would mean inventing rows to render.
     screens += [path for path in pathlib.Path("frontend/src/ui").glob("*.tsx")
-                if path.name != "DataTable.tsx"]
+                if path.name not in {"DataTable.tsx", "Loading.tsx"}]
     # `className="table"` is the console's list table specifically. The printed
     # documents' `sheet__table` is not one — it has a totals row, its own print
     # stylesheet, and no shared columns to drift from.

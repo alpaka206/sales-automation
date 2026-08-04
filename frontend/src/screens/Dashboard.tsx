@@ -4,6 +4,7 @@ import { getJSON } from "../lib/api";
 import { Icon } from "../ui/Icon";
 import { QueueTable, type QueueRow } from "../ui/QueueTable";
 import { Board, type Stage } from "../ui/Board";
+import { LoadingBlock } from "../ui/Loading";
 
 type DashboardData = {
   queue: QueueRow[];
@@ -29,7 +30,7 @@ export function Dashboard() {
   });
 
   if (error) return <div className="banner banner--warn"><div><div className="banner__title">불러오지 못했습니다</div><div className="banner__body">{String(error)}</div></div></div>;
-  if (isPending || !data) return <div className="skeleton" style={{ height: 200 }} />;
+  if (isPending || !data) return <LoadingBlock />;
 
   const c = data.counters;
   return (

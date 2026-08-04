@@ -7,6 +7,7 @@ import { Icon } from "../ui/Icon";
 import { channelLabel } from "../ui/InteractionForm";
 import { Modal } from "../ui/Modal";
 import { InteractionForm, InteractionItem, type Interaction } from "../ui/InteractionForm";
+import { LoadingBlock } from "../ui/Loading";
 
 type Bubble = {
   id: number;
@@ -81,7 +82,7 @@ export function MessageDetail() {
     }
   }, [data]);
 
-  if (isPending || !data) return <div className="skeleton" style={{ height: 300 }} />;
+  if (isPending || !data) return <LoadingBlock />;
 
   const { msg, ticket, contact } = data;
   const isPendingApproval = msg.status === "pending_approval";

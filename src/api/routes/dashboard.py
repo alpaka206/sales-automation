@@ -14,7 +14,7 @@ from sqlalchemy import func, select
 
 from ...db.models import Conversation, Message
 from ...db.session import SessionLocal
-from .messages import LIST_STATUS_BUCKETS, _messages_list_context
+from .messages import LIST_STATUS_BUCKETS, _messages_list_context, list_now
 
 router = APIRouter(tags=["web"])
 
@@ -102,7 +102,7 @@ def _overview_context() -> dict:
     counters = _awaiting_counters()
     _rows, stage_totals = _pipeline_rows(limit=0)
     return {
-        "now": datetime.now(timezone.utc),
+        "now": list_now(),
         "counters": counters,
         "stages": [
             {"key": key, "label": korean, "total": stage_totals.get(key, 0),

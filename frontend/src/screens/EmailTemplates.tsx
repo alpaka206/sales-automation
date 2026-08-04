@@ -5,6 +5,7 @@ import { getJSON, postForm } from "../lib/api";
 import { Icon } from "../ui/Icon";
 import { DataTable } from "../ui/DataTable";
 import { kst } from "../lib/format";
+import { Loading } from "../ui/Loading";
 import { PolicyDocs } from "./PolicyDocs";
 
 type Kind = { key: string; label: string; count: number; can_create: boolean; read_only: boolean };
@@ -127,7 +128,7 @@ export function EmailTemplates() {
     );
   }
 
-  if (isPending || !data) return <div className="skeleton" style={{ height: 200 }} />;
+  if (isPending || !data) return <Loading columns={3} />;
 
   // Top level: the kinds. Flat, the list mixed signatures with the bodies the send path
   // resolves by name, and nothing on screen said which was which.

@@ -3,6 +3,7 @@ import { Link, useParams } from "react-router-dom";
 import { getJSON } from "../lib/api";
 import { Icon } from "../ui/Icon";
 import { kst } from "../lib/format";
+import { LoadingBlock } from "../ui/Loading";
 
 type Data = {
   domain: string;
@@ -26,7 +27,7 @@ export function CompanyDetail() {
     queryFn: () => getJSON<Data>(`/api/ui/companies/${domain}`),
   });
 
-  if (isPending || !data) return <div className="skeleton" style={{ height: 240 }} />;
+  if (isPending || !data) return <LoadingBlock />;
 
   return (
     <>

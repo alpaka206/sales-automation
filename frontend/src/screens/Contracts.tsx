@@ -1,9 +1,10 @@
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { Link, useSearchParams } from "react-router-dom";
 import { getJSON } from "../lib/api";
 import { kst } from "../lib/format";
 import { DataTable } from "../ui/DataTable";
+import { Loading, Refreshing } from "../ui/Loading";
 
 /** 수주 고객 — the contract book.
  *
@@ -63,9 +64,10 @@ export function Contracts() {
   const q = params.get("q") ?? "";
   const [typed, setTyped] = useState(q);
 
-  const { data, isPending } = useQuery({
+  const { data, isPending, isFetching } = useQuery({
     queryKey: ["contracts", status, q],
     queryFn: () => getJSON<Data>(`/api/ui/contracts?status=${encodeURIComponent(status)}&q=${encodeURIComponent(q)}`),
+    placeholderData: keepPreviousData,
   });
   const summary = data?.summary;
 
@@ -126,6 +128,8 @@ export function Contracts() {
       </form>
 
       <div className="card card--flush">
+        {isPending || !data ? <Loading columns={7} /> : (
+        <Refreshing active={isFetching}>
         <DataTable
           columns={[
             {
@@ -196,10 +200,12 @@ export function Contracts() {
               },
             },
           ]}
-          rows={data?.rows ?? []}
+          rows={data.rows}
           rowKey={(row) => row.id}
-          empty={isPending ? "불러오는 중…" : "조건에 맞는 계약이 없습니다."}
+          empty="조건에 맞는 계약이 없습니다."
         />
+        </Refreshing>
+        )}
       </div>
     </>
   );

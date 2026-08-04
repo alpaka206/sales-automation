@@ -5,6 +5,7 @@ import { getJSON, postForm } from "../lib/api";
 import { Icon } from "../ui/Icon";
 import { kst } from "../lib/format";
 import { DataTable } from "../ui/DataTable";
+import { Loading } from "../ui/Loading";
 
 type User = { email: string; name: string; role: string; approved: boolean; last_login_at: string | null };
 type Data = { approved_users: User[]; me_email: string; domain: string };
@@ -29,7 +30,7 @@ export function SettingsUsers() {
       </div>
     );
   }
-  if (isPending || !data) return <div className="skeleton" style={{ height: 200 }} />;
+  if (isPending || !data) return <Loading columns={5} />;
 
   async function act(email: string, action: string) {
     await postForm(`/settings/users/${encodeURIComponent(email)}`, { action });

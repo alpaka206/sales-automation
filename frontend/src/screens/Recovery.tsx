@@ -4,6 +4,7 @@ import { useState } from "react";
 import { getJSON, postForm } from "../lib/api";
 import { kst } from "../lib/format";
 import { Modal } from "../ui/Modal";
+import { Loading } from "../ui/Loading";
 import { DataTable } from "../ui/DataTable";
 
 // 복구 — the tab with work on it. Read-only lists plus the retry/resolve actions, which
@@ -31,7 +32,7 @@ export function Recovery() {
   if (error) {
     return <div className="card"><div className="empty"><div className="empty__text">관리자만 접근할 수 있습니다.</div></div></div>;
   }
-  if (isPending || !data) return <div className="skeleton" style={{ height: 200 }} />;
+  if (isPending || !data) return <Loading columns={3} />;
 
   type Action = {
     label: string; path: string;

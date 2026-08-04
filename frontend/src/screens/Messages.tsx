@@ -1,7 +1,8 @@
-import { useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
 import { getJSON } from "../lib/api";
 import { QueueTable, type QueueRow } from "../ui/QueueTable";
+import { Loading, Refreshing } from "../ui/Loading";
 
 type MessagesData = {
   messages: QueueRow[];
@@ -28,12 +29,16 @@ export function Messages() {
   const stage = params.get("stage") ?? "";
   const sort = params.get("sort") ?? "oldest";
 
-  const { data, isPending } = useQuery({
+  const { data, isPending, isFetching } = useQuery({
     queryKey: ["messages", status, stage, sort],
     queryFn: () =>
       getJSON<MessagesData>(`/api/ui/messages?status=${status}&stage=${stage}&sort=${sort}`),
     // The Jinja list polled itself every 15s; the cache revalidates on the same beat.
     refetchInterval: 15_000,
+    // A filter is a different cache key, so switching one used to blank the table while
+    // the new rows loaded. Keep showing the rows that are there — dimmed, with the
+    // spinner — instead of throwing away what the operator is reading.
+    placeholderData: keepPreviousData,
   });
 
   const set = (next: Record<string, string>) =>
@@ -91,14 +96,16 @@ export function Messages() {
 
       <div className="card card--flush">
         {isPending || !data ? (
-          <div className="skeleton" style={{ height: 160 }} />
+          <Loading columns={7} />
         ) : (
-          <QueueTable
-            rows={data.messages}
-            now={data.now}
-            stageLabels={data.stage_labels}
-            emptyText="조건에 맞는 답변이 없습니다."
-          />
+          <Refreshing active={isFetching}>
+            <QueueTable
+              rows={data.messages}
+              now={data.now}
+              stageLabels={data.stage_labels}
+              emptyText="조건에 맞는 답변이 없습니다."
+            />
+          </Refreshing>
         )}
       </div>
     </>

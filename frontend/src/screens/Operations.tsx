@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Link, useSearchParams } from "react-router-dom";
 import { getJSON } from "../lib/api";
 import { kst } from "../lib/format";
+import { LoadingBlock } from "../ui/Loading";
 
 type Lead = {
   contact_id: number; company: string | null; name: string; email: string | null;
@@ -63,7 +64,7 @@ export function Operations() {
     queryFn: () => getJSON<Data>(`/api/ui/operations?period=${period}`),
   });
 
-  if (isPending || !data) return <div className="skeleton" style={{ height: 300 }} />;
+  if (isPending || !data) return <LoadingBlock />;
   const days = data.follow_up_days;
   const maxCount = Math.max(1, ...data.chart.map((point) => point.count));
 

@@ -1,9 +1,10 @@
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { Link, useSearchParams } from "react-router-dom";
 import { getJSON } from "../lib/api";
 import { kst } from "../lib/format";
 import { DataTable } from "../ui/DataTable";
+import { Loading, Refreshing } from "../ui/Loading";
 
 type Row = {
   contact_id: number;
@@ -30,10 +31,11 @@ export function Customers() {
   const q = params.get("q") ?? "";
   const [typed, setTyped] = useState(q);
 
-  const { data, isPending } = useQuery({
+  const { data, isPending, isFetching } = useQuery({
     queryKey: ["customers", stage, q],
     queryFn: () =>
       getJSON<CustomersData>(`/api/ui/customers?stage=${stage}&q=${encodeURIComponent(q)}`),
+    placeholderData: keepPreviousData,
   });
 
   const labels = Object.fromEntries((data?.stage_options ?? []).map((s) => [s.key, s.label]));
@@ -67,6 +69,8 @@ export function Customers() {
       </form>
 
       <div className="card card--flush">
+        {isPending || !data ? <Loading columns={5} /> : (
+        <Refreshing active={isFetching}>
         <DataTable
           columns={[
             {
@@ -129,10 +133,12 @@ export function Customers() {
               ),
             },
           ]}
-          rows={data?.rows ?? []}
+          rows={data.rows}
           rowKey={(row) => row.contact_id}
-          empty={isPending ? "불러오는 중…" : "조건에 맞는 고객이 없습니다."}
+          empty="조건에 맞는 고객이 없습니다."
         />
+        </Refreshing>
+        )}
       </div>
     </>
   );

@@ -4,6 +4,7 @@ import { getJSON, postForm } from "../lib/api";
 import { Icon } from "../ui/Icon";
 import { kst } from "../lib/format";
 import { InteractionForm, InteractionItem, type Interaction } from "../ui/InteractionForm";
+import { LoadingBlock } from "../ui/Loading";
 
 type Contract = {
   id: number; plan: string | null; status: string; amount: number | null; currency: string;
@@ -52,7 +53,7 @@ export function CustomerDetail() {
   });
   const refresh = () => queryClient.invalidateQueries();
 
-  if (isPending || !data) return <div className="skeleton" style={{ height: 260 }} />;
+  if (isPending || !data) return <LoadingBlock />;
   const { contact, profile } = data;
 
   // Every write goes to the route the Jinja form posts to: the stage sync, the sheet

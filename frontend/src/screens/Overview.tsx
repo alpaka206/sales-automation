@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { getJSON } from "../lib/api";
 import { Icon } from "../ui/Icon";
+import { LoadingBlock } from "../ui/Loading";
 
 /** 전체 대시보드 — the screen above the groups.
  *
@@ -45,7 +46,7 @@ export function Overview() {
     queryFn: () => getJSON<Data>("/api/ui/overview"),
   });
 
-  if (isPending || !data) return <div className="skeleton" style={{ height: 240 }} />;
+  if (isPending || !data) return <LoadingBlock />;
 
   const { counters, contracts } = data;
   const money = contracts.active_amounts.length === 0

@@ -4,6 +4,7 @@ import { getJSON } from "../lib/api";
 import { Icon } from "../ui/Icon";
 import { DataTable, type Column } from "../ui/DataTable";
 import { kst } from "../lib/format";
+import { Loading } from "../ui/Loading";
 
 type Row = {
   id: number; label: string; title: string | null; notion_url: string; mode: string;
@@ -47,7 +48,7 @@ export function PolicyDocs({ onBack }: { onBack?: () => void }) {
     queryFn: () => getJSON<Data>("/api/ui/policy-docs"),
   });
 
-  if (isPending || !data) return <div className="skeleton" style={{ height: 200 }} />;
+  if (isPending || !data) return <Loading columns={2} />;
 
   const doc = open ? data.rows.find((row) => String(row.id) === open) : null;
   if (doc) {
