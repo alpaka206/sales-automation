@@ -155,16 +155,25 @@ app.include_router(webhook_router)
 _SPA_INDEX = Path(__file__).parent / "static" / "app" / "index.html"
 
 
-@app.get("/app", include_in_schema=False)
-@app.get("/app/{_spa_path:path}", include_in_schema=False)
-async def spa(_spa_path: str = "") -> FileResponse:
-    """Every /app URL returns the same document — the router picks the screen."""
+def spa_document(status_code: int = 200) -> FileResponse:
+    """The built console. One document for every screen, including sign-in.
+
+    auth.py serves it too, which is why this is a function rather than only a route: the
+    sign-in screen has to render before there is a session, and it is the same bundle.
+    """
     if not _SPA_INDEX.exists():
         raise HTTPException(
             status_code=503,
             detail="React 콘솔이 아직 빌드되지 않았습니다: frontend/ 에서 npm run build",
         )
-    return FileResponse(_SPA_INDEX, media_type="text/html")
+    return FileResponse(_SPA_INDEX, media_type="text/html", status_code=status_code)
+
+
+@app.get("/app", include_in_schema=False)
+@app.get("/app/{_spa_path:path}", include_in_schema=False)
+async def spa(_spa_path: str = "") -> FileResponse:
+    """Every /app URL returns the same document — the router picks the screen."""
+    return spa_document()
 
 
 # ---------- Middleware ----------

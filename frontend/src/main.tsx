@@ -14,13 +14,31 @@ import { PolicyDocs } from "./screens/PolicyDocs";
 import { Operations } from "./screens/Operations";
 import { CompanyDetail } from "./screens/CompanyDetail";
 import { SettingsUsers } from "./screens/SettingsUsers";
-import { Logs, Placeholder, QuoteCalculator } from "./screens/Simple";
+import { Logs, Placeholder } from "./screens/Simple";
+import { QuoteCalculator } from "./screens/QuoteCalculator";
+import { SignIn } from "./screens/SignIn";
+
+const root = createRoot(document.getElementById("root")!);
+
+// Sign-in renders before there is a session, so it is not a route: it has no sidebar, no
+// data to fetch, and no event stream to open. /auth/* is also the one prefix the auth
+// middleware lets through, which is why the URL stays exactly what it was.
+if (location.pathname.startsWith("/auth/")) {
+  root.render(
+    <StrictMode>
+      <SignIn pending={location.pathname.startsWith("/auth/google")} />
+    </StrictMode>,
+  );
+} else {
+  mountConsole();
+}
 
 // Opened once for the whole app, not per screen: one stream feeds every cached query.
-listenForChanges(queryClient);
+function mountConsole() {
+  listenForChanges(queryClient);
 
-// basename: the app is served from /app, so the router's "/" is /app.
-createRoot(document.getElementById("root")!).render(
+  // basename: the app is served from /app, so the router's "/" is /app.
+  root.render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
       <BrowserRouter basename="/app">
@@ -53,4 +71,5 @@ createRoot(document.getElementById("root")!).render(
       </BrowserRouter>
     </QueryClientProvider>
   </StrictMode>,
-);
+  );
+}

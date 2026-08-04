@@ -61,3 +61,4 @@ src/api/static/app/
 
 # Generated guidebooks (scripts/build_guidebooks.py writes them on demand).
 output/
+frontend/tsconfig.tsbuildinfo

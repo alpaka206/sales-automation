@@ -30,7 +30,7 @@ import logging
 import secrets
 import time
 from datetime import datetime, timezone
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode
 
 import httpx
 from fastapi import APIRouter, Request
@@ -44,12 +44,6 @@ from ..db.session import SessionLocal
 
 logger = logging.getLogger(__name__)
 
-
-def _templates():
-    # Lazy import: the routes package imports actor_name from this module, so importing
-    # routes._shared at module load would create a circular import.
-    from .routes._shared import templates
-    return templates
 
 router = APIRouter(tags=["auth"])
 
@@ -265,15 +259,37 @@ def _oauth_ready() -> bool:
     )
 
 
+def _sign_in_document(status_code: int = 200) -> Response:
+    """The console's own document, rendered before there is a session.
+
+    /auth/* is the one prefix the auth middleware lets through unauthenticated, and the
+    SPA bundle lives under /static which it also lets through — so React can draw the
+    sign-in screen without anything about the gate changing. Keeping the URL is the
+    point: a redirect into /app would have to be excepted from the very check that
+    sends people here.
+    """
+    from .main import spa_document
+
+    return spa_document(status_code=status_code)
+
+
+@router.get("/auth/state")
+async def auth_state(request: Request):
+    """What the sign-in screen needs to draw itself. Readable without a session."""
+    user = current_user(request)
+    return {
+        "domain": settings.ALLOWED_EMAIL_DOMAIN,
+        "configured": _oauth_ready(),
+        "email": (user or {}).get("email", ""),
+    }
+
+
 @router.get("/auth/login")
 async def login_page(request: Request):
     """Landing page with a 'Sign in with Google' button."""
     if current_user(request):
         return RedirectResponse("/", status_code=302)
-    return _templates().TemplateResponse(
-        request, "auth/login.html",
-        {"domain": settings.ALLOWED_EMAIL_DOMAIN, "configured": _oauth_ready()},
-    )
+    return _sign_in_document()
 
 
 @router.get("/auth/google")
@@ -301,10 +317,10 @@ async def auth_google(request: Request):
 async def auth_callback(request: Request, code: str = "", state: str = "", error: str = ""):
     """Exchange the code, verify the ID token, enforce domain + allowlist, set the session."""
     if error:
-        return _deny(request, f"Google 로그인 취소/오류: {error}")
+        return _deny(f"Google 로그인 취소/오류: {error}")
     cookie_state = request.cookies.get(STATE_COOKIE, "")
     if not code or not state or state != cookie_state or _unsign(state) is None:
-        return _deny(request, "잘못된 로그인 요청입니다 (state 불일치). 다시 시도하세요.")
+        return _deny("잘못된 로그인 요청입니다 (state 불일치). 다시 시도하세요.")
 
     try:
         async with httpx.AsyncClient(timeout=15) as client:
@@ -322,20 +338,18 @@ async def auth_callback(request: Request, code: str = "", state: str = "", error
         )
     except Exception:
         logger.exception("OAuth token exchange/verification failed.")
-        return _deny(request, "로그인 검증에 실패했습니다. 다시 시도하세요.")
+        return _deny("로그인 검증에 실패했습니다. 다시 시도하세요.")
 
     email = (claims.get("email") or "").lower()
     if not claims.get("email_verified") or not _domain_ok(email):
-        return _deny(
-            request,
-            f"{settings.ALLOWED_EMAIL_DOMAIN} 계정으로만 로그인할 수 있습니다. (시도한 계정: {email or '알 수 없음'})",
-        )
+        # The address they tried is deliberately NOT echoed: the message now travels as a
+        # query parameter, and query strings end up in proxy and access logs.
+        logger.info("Web UI login refused (domain/verification): %s", email or "?")
+        return _deny(f"{settings.ALLOWED_EMAIL_DOMAIN} 계정으로만 로그인할 수 있습니다.")
 
     user, approved = _login_or_pending(email, claims.get("name"), claims.get("picture"))
     if not approved:
-        return _templates().TemplateResponse(
-            request, "auth/pending.html", {"email": email}, status_code=403,
-        )
+        return _sign_in_document(status_code=403)
 
     resp = RedirectResponse("/", status_code=302)
     _set_session(resp, request, make_session(user["email"], user["name"], user["role"]))
@@ -351,9 +365,12 @@ async def logout(request: Request):
     return resp
 
 
-def _deny(request: Request, message: str) -> HTMLResponse:
-    return _templates().TemplateResponse(
-        request, "auth/login.html",
-        {"domain": settings.ALLOWED_EMAIL_DOMAIN, "configured": _oauth_ready(), "error": message},
-        status_code=403,
+def _deny(message: str) -> Response:
+    """Refuse a sign-in and say why, on the screen they came from.
+
+    The reason rides in the query string because the document is static — it is the same
+    bundle for everyone, so nothing about the attempt can be baked into it.
+    """
+    return RedirectResponse(
+        f"/auth/login?error={quote(message)}", status_code=303
     )

@@ -173,3 +173,36 @@ def test_admin_can_assign_viewer_and_operator_roles():
         assert response.status_code == 204
         with factory() as session:
             assert session.get(User, "reader@estsoft.com").role == "admin"
+
+
+def test_sign_in_renders_the_console_bundle_not_a_template():
+    """The last screen to leave Jinja. It renders before there is a session, so it keeps
+    the /auth/login URL — the one prefix the auth middleware lets through — and serves the
+    same SPA document every other screen does."""
+    from fastapi.testclient import TestClient
+
+    from src.api.main import app
+
+    with TestClient(app) as client:
+        page = client.get("/auth/login")
+        assert page.status_code == 200
+        assert "/static/app/" in page.text          # the bundle, not a rendered page
+
+        state = client.get("/auth/state")
+        assert state.status_code == 200
+        assert set(state.json()) == {"domain", "configured", "email"}
+
+
+def test_a_refused_sign_in_says_why_without_putting_the_account_in_the_url():
+    """The reason travels in the query string because the document is static. The
+    attempted address must not: it is the one piece of personal data in the exchange."""
+    import inspect
+
+    from src.api.auth import _deny, auth_callback
+
+    response = _deny("도메인이 다릅니다")
+    assert response.status_code == 303
+    assert response.headers["location"].startswith("/auth/login?error=")
+    # Query strings reach proxy and access logs, so no _deny message may carry the email.
+    source = inspect.getsource(auth_callback)
+    assert "_deny" in source and "{email" not in source
