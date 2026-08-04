@@ -31,8 +31,8 @@ def test_complete_text(mock_gemini, mock_log, client: LLMClient) -> None:
     mock_gemini.return_value = _result("Hello world")
     result = client.complete("test/hello", {"name": "Alice"})
     assert result == "Hello world"
-    # company rules are passed as the system instruction, not inlined in the prompt
-    assert mock_gemini.call_args.kwargs["system"]
+    # company rules travel as the system instruction, not inlined in the prompt
+    assert "system" in mock_gemini.call_args.kwargs
 
 
 @patch("src.llm.client.LLMClient._log_event")
@@ -64,10 +64,18 @@ def test_schema_fails_twice_raises(mock_gemini, mock_log, client: LLMClient) -> 
 @patch("src.llm.client.LLMClient._log_event")
 @patch("src.llm.client.call_gemini")
 def test_prompt_includes_company_rules(mock_gemini, mock_log, client: LLMClient) -> None:
+    """Whatever the rules resolve to must reach Gemini as the system instruction.
+
+    The rules come from the database now (policy_sources, synced from Notion), so this
+    asserts the WIRING rather than a non-empty string: patch the loader and check the
+    exact value lands in the call. Asserting non-empty would only prove a test database
+    happened to be seeded.
+    """
+    rules = "## Company rules (must follow)\n항상 존댓말."
     mock_gemini.return_value = _result("ok")
-    client.complete("test/hello", {"name": "F"})
-    system_sent = mock_gemini.call_args.kwargs["system"]
-    assert isinstance(system_sent, str) and system_sent.strip()
+    with patch("src.llm.client.get_company_rules", return_value=rules):
+        client.complete("test/hello", {"name": "F"})
+    assert mock_gemini.call_args.kwargs["system"] == rules
 
 
 # ---- hybrid model tier tests ----

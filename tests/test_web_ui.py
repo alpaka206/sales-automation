@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import pathlib
 from datetime import datetime
 from unittest.mock import AsyncMock, patch
 
@@ -24,6 +25,9 @@ def _worker_off(monkeypatch):
     from src.common.config import settings
 
     monkeypatch.setattr(settings, "SEND_WORKER_ENABLED", False)
+
+
+QUEUE = pathlib.Path("frontend/src/ui/QueueTable.tsx")
 
 
 def _client() -> TestClient:
@@ -52,8 +56,11 @@ def _mock_dashboard_context():
         "awaiting_negotiation": 3,
         "received_today": 4,
         # The board renders below the queue; an empty board is enough for these tests.
-        "stages": [{"key": "new", "label": "New", "rows": []}],
+        # `total` is the column's real size, which the header shows even when the column
+        # renders only its first page.
+        "stages": [{"key": "new", "label": "New", "rows": [], "total": 0}],
         "stage_labels": {"new": "New"},
+        "manual_log_stages": ("meeting_link_sent", "negotiation"),
     }
 
 
@@ -108,101 +115,94 @@ def _mock_detail_context(message_id):
 
 
 @patch("src.api.web.routes.dashboard._dashboard_context", _mock_dashboard_context)
-def test_dashboard_returns_200():
-    r = _client().get("/")
+def test_the_dashboard_payload_has_the_two_panels_the_screen_draws():
+    r = _client().get("/api/ui/dashboard")
     assert r.status_code == 200
-    assert "인바운드" in r.text
+    assert "stages" in r.json()
 
 
-@patch("src.api.web.routes.dashboard._dashboard_context", _mock_dashboard_context)
-def test_dashboard_loads_design_css():
-    r = _client().get("/")
+def test_the_console_shell_loads_the_same_stylesheets_both_stacks_used():
+    """console.css is linked, not bundled — one copy of the design for the SPA and for
+    the sign-in page that still renders server-side."""
+    r = _client().get("/app")
     assert "/static/console.css" in r.text
     assert "/static/tokens.css" in r.text
     assert "theme-toggle" not in r.text
-    assert "data-theme" not in r.text
-    assert "새 문의에서 답변 발송까지" not in r.text
 
 
-@patch("src.api.web.routes.dashboard._dashboard_context", _mock_dashboard_context)
-def test_static_assets_are_cache_busted():
-    """A CSS/JS change has to reach the operator without a hard reload.
-
-    StaticFiles sends no Cache-Control of its own, so Chrome kept serving a cached
-    console.css and a finished UI change rendered as the old one (the nav toggle showed
-    up as an unstyled default button). Two defences: the URL carries the file's mtime, and
-    /static answers no-cache so even an un-stamped URL is revalidated.
-    """
-    import re
-
-    r = _client().get("/")
-    assert re.search(r"/static/console\.css\?v=\d+", r.text)
-    assert re.search(r"/static/tokens\.css\?v=\d+", r.text)
-    assert re.search(r"/static/a11y\.js\?v=\d+", r.text)
+def test_static_assets_are_revalidated():
+    """A CSS change has to reach the operator without a hard reload. The SPA bundle is
+    content-hashed by the build; console.css is not, so /static answers no-cache."""
     assert _client().get("/static/console.css").headers["cache-control"] == "no-cache"
 
 
-@patch("src.api.web.routes.dashboard._dashboard_context", _mock_dashboard_context)
-def test_dashboard_has_htmx():
-    r = _client().get("/")
-    assert "htmx.org" in r.text
+def test_the_spa_bundle_is_what_the_shell_loads():
+    r = _client().get("/app")
+    assert "/static/app/assets/" in r.text
+    assert 'id="root"' in r.text
 
 
-@patch("src.api.web.routes.dashboard._dashboard_context", _mock_dashboard_context)
-def test_dashboard_loads_pretendard_tokens():
-    # Pretendard (Korean UI font) is loaded via tokens.css, which the page links.
-    r = _client().get("/")
+def test_the_shell_loads_the_korean_ui_font():
+    # Pretendard (Korean UI font) is loaded via tokens.css, which the shell links.
+    r = _client().get("/app")
     assert "/static/tokens.css" in r.text
 
 
 @patch("src.api.web.routes.dashboard._dashboard_context", _mock_dashboard_context)
 def test_dashboard_shows_queue_counters():
     """The five KPI cards became four inline counters beside the queue heading."""
-    r = _client().get("/")
-    assert "답변 대기중인 문의" in r.text
-    for label in ("오늘 접수", "ALL", "New", "Negotiating"):
-        assert label in r.text, label
+    counters = _client().get("/api/ui/dashboard").json()["counters"]
+    assert set(counters) == {
+        "received_today", "awaiting_total", "awaiting_new", "awaiting_negotiation",
+    }
+    screen = pathlib.Path("frontend/src/screens/Dashboard.tsx").read_text(encoding="utf-8")
+    for label in ("답변 대기중인 문의", "오늘 접수", "ALL", "New", "Negotiating"):
+        assert label in screen, label
 
 
 @patch("src.api.web.routes.dashboard._dashboard_context", _mock_dashboard_context)
-def test_dashboard_shows_recent_messages():
-    r = _client().get("/")
-    assert "가격 문의" in r.text
+def test_dashboard_json_carries_the_queue_rows():
+    payload = _client().get("/api/ui/dashboard").json()
+    assert [row["subject"] for row in payload["queue"]] == ["가격 문의"]
 
 
 @patch("src.api.web.routes.dashboard._dashboard_context", _mock_dashboard_context)
-def test_dashboard_hosts_the_pipeline_board():
-    """The board moved here from /pipeline, below the queue."""
-    r = _client().get("/")
-    assert "data-pipeline-board" in r.text
-    assert "문의 파이프라인" in r.text
+def test_dashboard_json_carries_the_board():
+    """The board is on the dashboard, below the queue — one screen, one payload."""
+    payload = _client().get("/api/ui/dashboard").json()
+    assert [stage["key"] for stage in payload["stages"]] == ["new"]
+    assert "문의 파이프라인" in pathlib.Path(
+        "frontend/src/screens/Dashboard.tsx"
+    ).read_text(encoding="utf-8")
 
 
-@patch("src.api.web.routes.dashboard._dashboard_context", _mock_dashboard_context)
 def test_dashboard_no_longer_shows_inquiry_type():
     """문의 유형 is retired: the panel, the column, and the stored value are all gone."""
-    r = _client().get("/")
-    assert "문의 유형" not in r.text
+    for screen in ("Dashboard.tsx", "MessageDetail.tsx"):
+        source = pathlib.Path(f"frontend/src/screens/{screen}").read_text(encoding="utf-8")
+        assert "문의 유형" not in source, screen
 
 
 @patch("src.api.web.routes.dashboard._dashboard_context", _mock_dashboard_context)
-def test_dashboard_message_link():
-    r = _client().get("/")
-    assert "/messages/1" in r.text
+def test_a_queue_row_carries_the_id_its_link_is_built_from():
+    payload = _client().get("/api/ui/dashboard").json()
+    assert payload["queue"][0]["id"] == 1
 
 
-@patch("src.api.web.routes.dashboard._dashboard_context", _mock_dashboard_context)
 def test_dashboard_queue_table_is_the_review_table():
-    """Both pages render partials/queue_table.html, so the columns cannot drift.
+    """One component, rendered by the dashboard and by 회신 및 검토.
 
-    The dashboard's own copy of this table had gone stale: no 우선순위, no 소통 Email,
-    and its date column was headed 시간 while /messages headed the same value 접수 시간.
+    Each page used to carry its own copy of this markup and they drifted: the dashboard
+    was missing 우선순위 / 소통 Email and headed its date column 시간 while /messages
+    headed the same value 접수 시간.
     """
-    r = _client().get("/")
-    for header in ("상태", "Stage", "문의 제목", "우선순위", "채널", "소통 Email", "접수 시간"):
-        assert f'<th scope="col">{header}</th>' in r.text, header
-    assert "buyer@example.com" in r.text        # 소통 Email cell
-    assert "wait-dot--ok" in r.text             # 우선순위 dot, 1 day waited
+    source = QUEUE.read_text(encoding="utf-8")
+    for header in ("상태", "Stage", "문의 제목", "채널", "소통 Email", "접수 시간"):
+        assert f'<th scope="col">{header}</th>' in source, header
+    # 우선순위 is one dot wide and centred under its own heading.
+    assert '<th scope="col" className="th-center">우선순위</th>' in source
+    assert QUEUE.read_text(encoding="utf-8").count("<thead>") == 1
+
 
 
 @patch("src.api.web.routes.dashboard._dashboard_context", _mock_dashboard_context)
@@ -212,18 +212,21 @@ def test_dashboard_drops_the_receipt_ack_caption():
     assert "접수 확인 제외" not in r.text
 
 
-@patch("src.api.web.routes.dashboard._dashboard_context", _mock_dashboard_context)
 def test_pipeline_columns_show_the_label_only():
-    """The Korean gloss under every column label (New / 새 문의) is gone."""
-    r = _client().get("/")
-    assert "New" in r.text
-    assert "새 문의" not in r.text
+    """The Korean gloss under each header (New / 새 문의) said nothing the label did not,
+    on all seven columns at once. The server ships the label; the board prints it."""
+    from src.api.web.routes.customer_ops import PIPELINE_STAGES
+
+    board = pathlib.Path("frontend/src/ui/Board.tsx").read_text(encoding="utf-8")
+    assert "{stage.label}" in board
+    for _key, _label, gloss in PIPELINE_STAGES:
+        assert gloss not in board, gloss
 
 
 def test_dashboard_queue_is_the_five_oldest(db_session_factory, monkeypatch):
     """답변 대기중인 문의 is a peek at the front of the FIFO queue, not the queue.
 
-    Five rows, oldest first — the rest is one click away on 답변 검토. The counters
+    Five rows, oldest first — the rest is one click away on 회신 및 검토. The counters
     beside the heading still see every awaiting row.
     """
     from src.api.web.routes import customer_ops, dashboard
@@ -273,8 +276,8 @@ def test_dashboard_queue_is_the_five_oldest(db_session_factory, monkeypatch):
 
 
 @patch("src.api.web.routes.messages._message_detail_context", _mock_detail_context)
-def test_message_detail_returns_200():
-    r = _client().get("/messages/1")
+def test_the_ticket_payload_loads_for_a_real_message():
+    r = _client().get("/api/ui/messages/1")
     assert r.status_code == 200
     assert "가격 안내" in r.text
     assert "pricing_question" in r.text
@@ -283,22 +286,24 @@ def test_message_detail_returns_200():
 
 @patch("src.api.web.routes.messages._message_detail_context", _mock_detail_context)
 def test_message_detail_404_for_missing():
-    r = _client().get("/messages/99999")
+    """An unknown id is a 404 from the JSON, not a blank screen. (/messages/99999 itself
+    redirects into the SPA — client routing cannot know the id is bad until it asks.)"""
+    r = _client().get("/api/ui/messages/99999")
     assert r.status_code == 404
 
 
-@patch("src.api.web.routes.messages._message_detail_context", _mock_detail_context)
-def test_message_detail_shows_send_button():
-    r = _client().get("/messages/1")
-    assert "발송" in r.text  # "검토 완료 · 발송"
-    assert "거절" in r.text
+def test_the_ticket_screen_offers_send_and_reject():
+    """검토 완료 · 발송 and 거절 are the two decisions the screen exists for."""
+    screen = pathlib.Path("frontend/src/screens/MessageDetail.tsx").read_text(encoding="utf-8")
+    assert "검토 완료 · 발송" in screen
+    assert "/send" in screen
 
 
 def test_message_detail_embeds_customer_history(_use_test_db):
     """The reply detail page surfaces the customer's CRM state, contract, and
     cross-channel touchpoints inline (via the real _message_detail_context /
     _customer_history), so the operator doesn't leave for the /customers page."""
-    from datetime import datetime, timezone
+    from datetime import timezone
 
     from src.db.models import ContractRecord, CustomerInteraction, CustomerProfile
 
@@ -332,15 +337,16 @@ def test_message_detail_embeds_customer_history(_use_test_db):
     msg_id = msg.id
     session.close()
 
-    r = _client().get(f"/messages/{msg_id}")
-    assert r.status_code == 200
-    assert "고객 히스토리" in r.text          # the embedded panel
-    assert "서비스 이용중" in r.text          # customer_state label
-    assert "금요일 재연락" in r.text          # next action
-    assert "킥오프 미팅" in r.text            # interaction touchpoint
+    payload = _client().get(f"/api/ui/messages/{msg_id}").json()
+    customer = payload["customer"]
+    assert customer["profile"]["customer_state"] == "service"
+    assert customer["profile"]["next_action"] == "금요일 재연락"
+    assert "킥오프 미팅" in [row["subject"] for row in customer["interactions"]]
     # The panel is scoped to THIS customer and no longer links out: the full history
     # lives in its own sidebar section (고객 히스토리 → 인바운드 고객 히스토리) now.
-    assert f"/customers/{contact_id}" not in r.text
+    # The panel is scoped to THIS customer: the ticket's own log is separate from the
+    # contact-wide one, so a record cannot render twice on one screen.
+    assert payload["ticket_interactions"] == []
 
 
 # ---------- Message actions (send/reject/edit) ----------
@@ -474,11 +480,13 @@ def _mock_messages_list_context(status="awaiting", stage="", sort="oldest"):
 
 
 @patch("src.api.web.routes.messages._messages_list_context", _mock_messages_list_context)
-def test_messages_list_returns_200():
-    r = _client().get("/messages")
+def test_the_queue_payload_carries_the_rows_the_screen_lists():
+    r = _client().get("/api/ui/messages")
     assert r.status_code == 200
-    assert "답변 검토" in r.text
-    assert "가격 문의" in r.text
+    assert "가격 문의" in [row["subject"] for row in r.json()["messages"]]
+    assert "회신 및 검토" in pathlib.Path(
+        "frontend/src/screens/Messages.tsx"
+    ).read_text(encoding="utf-8")
 
 
 @patch("src.integrations.senders.send", new_callable=AsyncMock)

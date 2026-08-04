@@ -152,3 +152,57 @@ def test_no_hubspot_client_no_message():
 
     assert info["last_message"] == ""
     assert info.get("inbound_source") == "none"
+
+
+def test_reply_goes_to_the_address_on_the_ticket():
+    """The answer belongs to the ticket, so the ticket's own address wins.
+
+    A contact record can carry an older or personal address; HubSpot's
+    hs_all_associated_contact_emails is the one the inquiry arrived on. It is a list
+    when several contacts are associated, and the first entry is the recipient.
+    """
+    from src.integrations.hubspot import TicketDTO
+
+    hs = MagicMock()
+    _mock_hubspot_basic(hs)
+    hs.get_latest_form_submission.return_value = None
+    hs.get_latest_inbound_email.return_value = None
+    hs.get_latest_note.return_value = None
+    hs.get_ticket_sync.return_value = TicketDTO(
+        id="T-1",
+        subject="가격 문의",
+        content="얼마인가요?",
+        pipeline_stage="1",
+        contact_emails="buyer@bigcorp.com, assistant@bigcorp.com",
+    )
+
+    agent = _make_agent(hs)
+    info = agent._fetch_contact(_base_event(ticket_id="T-1"))
+
+    assert info["email"] == "buyer@bigcorp.com"      # not test@example.com from the contact
+    assert info["last_message"] == "얼마인가요?"
+
+
+def test_ticket_without_an_address_keeps_the_contact_one():
+    """Nothing on the ticket means nothing to prefer — do not blank the recipient."""
+    from src.integrations.hubspot import TicketDTO
+
+    hs = MagicMock()
+    _mock_hubspot_basic(hs)
+    hs.get_latest_form_submission.return_value = None
+    hs.get_latest_inbound_email.return_value = None
+    hs.get_latest_note.return_value = None
+    hs.get_ticket_sync.return_value = TicketDTO(id="T-2", subject="문의", content="본문")
+
+    agent = _make_agent(hs)
+    info = agent._fetch_contact(_base_event(ticket_id="T-2"))
+
+    assert info["email"] == "test@example.com"
+
+
+def test_ticket_properties_request_the_email_column():
+    """The reply address comes from this property list — a trim here would silently
+    send replies to the contact record's address again."""
+    from src.integrations.hubspot import HubSpotClient
+
+    assert "hs_all_associated_contact_emails" in HubSpotClient._TICKET_PROPERTIES

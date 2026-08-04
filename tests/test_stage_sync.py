@@ -323,3 +323,75 @@ def test_reconcile_survives_one_bad_ticket(db, stages, monkeypatch):
 
     with db() as session:
         assert session.query(Conversation).filter_by(hubspot_ticket_id=TICKET).one().stage == "won"
+
+
+# ---- A human answered in HubSpot while our draft was still waiting ----------------
+
+
+def _draft(db, status: str = "pending_approval", variant: str | None = None) -> int:
+    from src.db.models import Message
+
+    with db() as session:
+        conv = session.query(Conversation).filter_by(hubspot_ticket_id=TICKET).one()
+        msg = Message(
+            conversation_id=conv.id,
+            direction="outgoing",
+            channel="email",
+            subject="RE: 문의",
+            body="초안",
+            status=status,
+            prompt_variant=variant,
+        )
+        session.add(msg)
+        session.commit()
+        return msg.id
+
+
+def test_a_draft_is_retired_when_hubspot_moves_the_ticket_on(db, stages):
+    """The reason 발송 대기 shows rows whose Stage is not New.
+
+    Drafts are only written for New tickets. Seeing the ticket in a later stage means
+    someone already replied in HubSpot — real work carried on while sending was paused —
+    so asking the operator to send the draft would answer the customer twice.
+    """
+    from src.db.models import Message
+
+    draft_id = _draft(db)
+    assert stage_sync.sync_stage_from_hubspot(TICKET, STAGE_IDS["HUBSPOT_TICKET_STAGE_NEGOTIATION"])
+
+    with db() as session:
+        assert session.get(Message, draft_id).status == "superseded"
+
+
+def test_a_draft_survives_a_move_that_is_still_new(db, stages):
+    from src.db.models import Message
+
+    with db() as session:
+        conv = session.query(Conversation).filter_by(hubspot_ticket_id=TICKET).one()
+        conv.stage = "negotiation"
+        session.commit()
+
+    draft_id = _draft(db)
+    assert stage_sync.sync_stage_from_hubspot(TICKET, STAGE_IDS["HUBSPOT_TICKET_STAGE_NEW"]) == "new"
+
+    with db() as session:
+        assert session.get(Message, draft_id).status == "pending_approval"
+
+
+def test_a_draft_still_being_written_is_left_alone(db, stages):
+    """`drafting` is mid-flight in the inbound worker, which would write over this."""
+    from src.db.models import Message
+
+    draft_id = _draft(db, status="drafting")
+    stage_sync.sync_stage_from_hubspot(TICKET, STAGE_IDS["HUBSPOT_TICKET_STAGE_WON"])
+
+    with db() as session:
+        assert session.get(Message, draft_id).status == "drafting"
+
+
+def test_retired_drafts_leave_the_waiting_queue():
+    """`superseded` is finished work: out of 발송 대기, visible under 발송 완료."""
+    from src.api.web.routes.messages import LIST_STATUS_BUCKETS
+
+    assert "superseded" not in LIST_STATUS_BUCKETS["awaiting"]
+    assert "superseded" in LIST_STATUS_BUCKETS["sent"]
