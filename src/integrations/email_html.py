@@ -272,10 +272,15 @@ def branded_signature_html(signature_key: str | None) -> str | None:
 
 
 def _signature_candidates() -> list[str]:
-    """Known plain-text signature blocks (active templates + static fallback).
+    """Every plain-text signature block we might need to strip, longest first.
 
-    Longest first so an exact tail match is greedy. Used to strip the default
-    signature when a branded one replaces it.
+    Used when a branded HTML signature replaces the text one: the text block has to come
+    off the body or the mail carries two. Longest first so an exact tail match is greedy.
+
+    Sourced from the templates table, INCLUDING paused ones — a draft written last month
+    ends with the signature that was current then, and pausing a template must not make
+    its text unstrippable. A named person used to be appended here as a literal, which
+    only ever stripped that one person's block and went stale the day it changed.
     """
     cands: list[str] = []
     try:

@@ -76,10 +76,16 @@ def _company_rules_raw() -> str:
 
 
 def _current_signature() -> str:
-    """Web-editable signature body (DB) with a static fallback.
+    """The signature body the rules text is written around, from the database.
 
-    Read fresh on every call (cheap single-row query) so an edit in the web
-    console takes effect on the next draft without restarting the process.
+    Read fresh on every call (one cheap single-row query) so an edit in the console takes
+    effect on the next draft without restarting.
+
+    There is no hardcoded fallback. There used to be one — a named person, in the source —
+    which meant that a database hiccup, or simply deleting that template, put somebody's
+    name and address on outgoing mail with no way to change it but a deploy. Empty is the
+    honest answer to "what has the operator configured": the send path adds the branded
+    HTML signature separately, so nothing here is what actually signs the mail.
     """
     try:
         from ..db.email_templates import get_email_template
@@ -87,7 +93,7 @@ def _current_signature() -> str:
         body = get_email_template("signature_ko")
     except Exception:
         body = None
-    return (body or _DEFAULT_SIGNATURE).strip()
+    return (body or "").strip()
 
 
 def get_company_rules() -> str:

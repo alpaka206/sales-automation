@@ -43,6 +43,26 @@ def list_signature_templates() -> list[dict]:
         return []
 
 
+def all_text_signatures() -> list[str]:
+    """Every plain-text signature body ever configured, for stripping.
+
+    Not filtered by status: a draft written while a template was active still ends with
+    that block after it is paused, and it still has to come off when a branded HTML
+    signature replaces it.
+    """
+    try:
+        with SessionLocal() as session:
+            rows = (
+                session.query(EmailTemplate)
+                .filter(EmailTemplate.key.in_(("signature_ko", "signature_en")))
+                .all()
+            )
+            return [r.body.strip() for r in rows if (r.body or "").strip()]
+    except Exception:
+        logger.warning("Text signature lookup failed", exc_info=True)
+        return []
+
+
 def default_signature_key() -> str | None:
     """The signature a new draft is stamped with, as chosen in the console.
 
