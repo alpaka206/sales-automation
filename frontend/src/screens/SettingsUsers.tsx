@@ -4,6 +4,7 @@ import { Modal } from "../ui/Modal";
 import { getJSON, postForm } from "../lib/api";
 import { Icon } from "../ui/Icon";
 import { kst } from "../lib/format";
+import { DataTable } from "../ui/DataTable";
 
 type User = { email: string; name: string; role: string; approved: boolean; last_login_at: string | null };
 type Data = { approved_users: User[]; me_email: string; domain: string };
@@ -69,47 +70,48 @@ export function SettingsUsers() {
       </section>
 
       <div className="card card--flush">
-        <div className="table-wrap">
-          <table className="table">
-            <thead>
-              <tr><th scope="col">이메일</th><th scope="col">이름</th><th scope="col">권한</th>
-                  <th scope="col">마지막 로그인</th><th scope="col" /></tr>
-            </thead>
-            <tbody>
-              {data.approved_users.length === 0 ? (
-                <tr><td colSpan={5}><div className="empty"><div className="empty__text">승인된 사용자가 없습니다.</div></div></td></tr>
-              ) : (
-                data.approved_users.map((user) => (
-                  <tr key={user.email}>
-                    <td className="mono">{user.email}{user.email === data.me_email && <span className="tag" style={{ marginLeft: 6 }}>나</span>}</td>
-                    <td>{user.name || "-"}</td>
-                    <td><span className="tag">{user.role}</span></td>
-                    <td className="tnum td-subtle">{user.last_login_at ? kst(user.last_login_at) : "—"}</td>
-                    <td>
-                      {/* Never for your own row: the server refuses it anyway (an admin
-                          cannot lock themselves out), so offering the button would only
-                          be an error message waiting to happen. */}
-                      {user.email !== data.me_email && (
-                        <div className="row" style={{ gap: 6 }}>
-                          {user.role !== "admin" && (
-                            <button type="button" className="btn btn--subtle btn--sm"
-                                    onClick={() => void act(user.email, "make_admin")}>운영자로</button>
-                          )}
-                          {user.role !== "viewer" && (
-                            <button type="button" className="btn btn--subtle btn--sm"
-                                    onClick={() => void act(user.email, "make_viewer")}>조회 전용으로</button>
-                          )}
-                          <button type="button" className="btn btn--ghost btn--sm"
-                                  onClick={() => setRemoving(user.email)}>삭제</button>
-                        </div>
-                      )}
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
+        <DataTable
+          columns={[
+            {
+              label: "이메일",
+              width: "34%",
+              className: "mono",
+              cell: (user) => (
+                <>
+                  {user.email}
+                  {user.email === data.me_email && <span className="tag" style={{ marginLeft: 6 }}>나</span>}
+                </>
+              ),
+            },
+            { label: "이름", width: "18%", cell: (user) => user.name || "-" },
+            { label: "권한", width: "12%", cell: (user) => <span className="tag">{user.role}</span> },
+            { label: "마지막 로그인", width: "16%", className: "tnum td-subtle",
+              cell: (user) => (user.last_login_at ? kst(user.last_login_at) : "—") },
+            {
+              width: "20%",
+              // Never for your own row: the server refuses it anyway (an admin cannot
+              // lock themselves out), so offering the button would only be an error
+              // message waiting to happen.
+              cell: (user) => user.email === data.me_email ? null : (
+                <div className="row" style={{ gap: 6 }}>
+                  {user.role !== "admin" && (
+                    <button type="button" className="btn btn--subtle btn--sm"
+                            onClick={() => void act(user.email, "make_admin")}>운영자로</button>
+                  )}
+                  {user.role !== "viewer" && (
+                    <button type="button" className="btn btn--subtle btn--sm"
+                            onClick={() => void act(user.email, "make_viewer")}>조회 전용으로</button>
+                  )}
+                  <button type="button" className="btn btn--ghost btn--sm"
+                          onClick={() => setRemoving(user.email)}>삭제</button>
+                </div>
+              ),
+            },
+          ]}
+          rows={data.approved_users}
+          rowKey={(user) => user.email}
+          empty="승인된 사용자가 없습니다."
+        />
       </div>
 
       {/* Removal is not a role change: the row leaves the list entirely. */}

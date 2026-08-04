@@ -43,20 +43,13 @@ def _kst_day_start() -> datetime:
     return (kst_midnight - timedelta(hours=9)).replace(tzinfo=None)
 
 
-def _dashboard_context() -> dict:
-    """Awaiting-reply rows, their counters, and the pipeline board."""
-    from .customer_ops import (
-        MANUAL_LOG_STAGES,
-        PIPELINE_STAGES,
-        VALID_PIPELINE_STAGES,
-        _pipeline_rows,
-    )
+def _awaiting_counters() -> dict:
+    """오늘 받은 문의 and what is waiting on a human, by stage.
 
-    # The queue panel IS the 회신 및 검토 list — same query, same row shape, same table
-    # partial — sorted oldest-first and cut to _QUEUE_LIMIT. Building it here from a
-    # second, near-identical query is what let the two tables drift apart before.
-    queue = _messages_list_context(status="awaiting", stage="", sort="oldest")
-    recent_messages = queue["messages"][:_QUEUE_LIMIT]
+    Its own function because 전체 대시보드 shows the same four numbers as 문의 대시보드.
+    Two screens counting "검토 대기" with two queries is how they end up disagreeing.
+    """
+    from .customer_ops import VALID_PIPELINE_STAGES
 
     with SessionLocal() as session:
         stage_rows = session.execute(
@@ -84,6 +77,63 @@ def _dashboard_context() -> dict:
             )
             or 0
         )
+    return {
+        "received_today": received_today,
+        "awaiting_total": awaiting_total,
+        "awaiting_by_stage": awaiting_by_stage,
+    }
+
+
+def _overview_context() -> dict:
+    """전체 대시보드 — the roll-up above the groups.
+
+    Every number here belongs to a screen further in, and comes from that screen's own
+    builder: the counters from _awaiting_counters, the column sizes from _pipeline_rows,
+    the money from _contract_summary. limit=0 because this screen shows how big each
+    column is, never a card from it — the totals come from a separate COUNT either way.
+    """
+    from .customer_ops import (
+        CONTRACT_STATUS_LABELS,
+        PIPELINE_STAGES,
+        _contract_summary,
+        _pipeline_rows,
+    )
+
+    counters = _awaiting_counters()
+    _rows, stage_totals = _pipeline_rows(limit=0)
+    return {
+        "now": datetime.now(timezone.utc),
+        "counters": counters,
+        "stages": [
+            {"key": key, "label": korean, "total": stage_totals.get(key, 0),
+             "awaiting": counters["awaiting_by_stage"].get(key, 0)}
+            for key, _hubspot, korean in PIPELINE_STAGES
+        ],
+        "contracts": _contract_summary(),
+        "contract_status_labels": [
+            {"key": key, "label": label} for key, label in CONTRACT_STATUS_LABELS
+        ],
+    }
+
+
+def _dashboard_context() -> dict:
+    """Awaiting-reply rows, their counters, and the pipeline board."""
+    from .customer_ops import (
+        MANUAL_LOG_STAGES,
+        PIPELINE_STAGES,
+        _pipeline_rows,
+    )
+
+    # The queue panel IS the 회신 및 검토 list — same query, same row shape, same table
+    # partial — sorted oldest-first and cut to _QUEUE_LIMIT. Building it here from a
+    # second, near-identical query is what let the two tables drift apart before.
+    queue = _messages_list_context(status="awaiting", stage="", sort="oldest")
+    recent_messages = queue["messages"][:_QUEUE_LIMIT]
+
+    counters = _awaiting_counters()
+    awaiting_by_stage = counters["awaiting_by_stage"]
+    awaiting_total = counters["awaiting_total"]
+    received_today = counters["received_today"]
 
     # Capped per column, with the true per-stage totals alongside — the header must not
     # start under-reporting just because the column stopped rendering every card.

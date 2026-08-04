@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Link, useSearchParams } from "react-router-dom";
 import { getJSON } from "../lib/api";
 import { kst } from "../lib/format";
+import { DataTable } from "../ui/DataTable";
 
 type Row = {
   contact_id: number;
@@ -66,22 +67,26 @@ export function Customers() {
       </form>
 
       <div className="card card--flush">
-        <div className="table-wrap">
-          <table className="table table--fixed">
-            {/* Widths declared once, so the columns do not re-measure themselves against
-                whichever rows a filter leaves behind. */}
-            <colgroup>
-              <col style={{ width: "32%" }} />
-              <col style={{ width: "16%" }} />
-              <col style={{ width: "10%" }} />
-              <col style={{ width: "24%" }} />
-              <col style={{ width: "18%" }} />
-            </colgroup>
-            <thead>
-              <tr>
-                <th>고객</th>
-                <th>
-                  {/* The column that shows the stage is the one that filters by it. */}
+        <DataTable
+          columns={[
+            {
+              label: "고객",
+              width: "32%",
+              cell: (row) => (
+                <>
+                  {/* A real link, not a row onClick: that gave no keyboard access and no
+                      middle-click, and it swallowed clicks meant for the filter. */}
+                  <Link to={`/customers/${row.contact_id}`}>
+                    <strong>{row.company || row.name}</strong>
+                  </Link>
+                  <div className="t-xs t-subtle">{row.name} · {row.email || "-"}</div>
+                </>
+              ),
+            },
+            {
+              // The column that shows the stage is the one that filters by it.
+              label: (
+                <>
                   <label className="sr-only" htmlFor="stage-filter">파이프라인 단계로 보기</label>
                   <select
                     className="select select--inline"
@@ -94,50 +99,40 @@ export function Customers() {
                       <option key={option.key} value={option.key}>{option.label}</option>
                     ))}
                   </select>
-                </th>
-                <th>리드 온도</th>
-                <th>다음 액션</th>
-                <th>최근 활동</th>
-              </tr>
-            </thead>
-            <tbody>
-              {isPending || !data ? (
-                <tr><td colSpan={5}><div className="skeleton" style={{ height: 120 }} /></td></tr>
-              ) : data.rows.length === 0 ? (
-                <tr>
-                  <td colSpan={5}>
-                    <div className="empty"><div className="empty__text">조건에 맞는 고객이 없습니다.</div></div>
-                  </td>
-                </tr>
-              ) : (
-                data.rows.map((row) => (
-                  <tr key={row.contact_id} className="is-clickable">
-                    <td>
-                      {/* A real link, not a row onClick: that gave no keyboard access and
-                          no middle-click, and it swallowed clicks meant for the filter. */}
-                      <Link to={`/customers/${row.contact_id}`}>
-                        <strong>{row.company || row.name}</strong>
-                      </Link>
-                      <div className="t-xs t-subtle">{row.name} · {row.email || "-"}</div>
-                    </td>
-                    <td>{labels[row.stage] ?? row.stage}</td>
-                    <td>{row.temperature || "-"}</td>
-                    <td>
-                      <div>{row.next_action || "-"}</div>
-                      {row.next_action_at && (
-                        <div className="t-xs t-subtle tnum">{kst(row.next_action_at)}</div>
-                      )}
-                    </td>
-                    <td className="tnum t-subtle">
-                      {kst(row.last_activity)}
-                      <div className="t-xs">대화 {row.conversation_count}건</div>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
+                </>
+              ),
+              width: "16%",
+              cell: (row) => labels[row.stage] ?? row.stage,
+            },
+            { label: "리드 온도", width: "10%", cell: (row) => row.temperature || "-" },
+            {
+              label: "다음 액션",
+              width: "24%",
+              cell: (row) => (
+                <>
+                  <div>{row.next_action || "-"}</div>
+                  {row.next_action_at && (
+                    <div className="t-xs t-subtle tnum">{kst(row.next_action_at)}</div>
+                  )}
+                </>
+              ),
+            },
+            {
+              label: "최근 활동",
+              width: "18%",
+              className: "tnum t-subtle",
+              cell: (row) => (
+                <>
+                  {kst(row.last_activity)}
+                  <div className="t-xs">대화 {row.conversation_count}건</div>
+                </>
+              ),
+            },
+          ]}
+          rows={data?.rows ?? []}
+          rowKey={(row) => row.contact_id}
+          empty={isPending ? "불러오는 중…" : "조건에 맞는 고객이 없습니다."}
+        />
       </div>
     </>
   );

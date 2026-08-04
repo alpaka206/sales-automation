@@ -4,6 +4,7 @@ import { useState } from "react";
 import { getJSON, postForm } from "../lib/api";
 import { kst } from "../lib/format";
 import { Modal } from "../ui/Modal";
+import { DataTable } from "../ui/DataTable";
 
 // 복구 — the tab with work on it. Read-only lists plus the retry/resolve actions, which
 // post to the routes they always did so the retry logic stays server-side.
@@ -59,39 +60,37 @@ export function Recovery() {
         </div>
         <span className="tag tnum">{rows.length}</span>
       </div>
-      {rows.length === 0 ? (
-        <div className="empty"><div className="empty__text">처리할 항목이 없습니다.</div></div>
-      ) : (
-        <div className="table-wrap">
-          <table className="table">
-            <tbody>
-              {rows.map((row) => (
-                <tr key={row.id}>
-                  <td>
-                    <Link to={`/messages/${row.id}`}><strong className="t-sm">{row.subject || `메시지 #${row.id}`}</strong></Link>
-                    <div className="t-xs t-subtle">{row.company || row.to_address || "-"}</div>
-                    {row.error && <div className="t-xs" style={{ color: "var(--danger)" }}>{row.error}</div>}
-                  </td>
-                  <td className="tnum td-subtle" style={{ width: 150 }}>{kst(row.created_at)}</td>
-                  {actions && (
-                    <td style={{ width: 190 }}>
-                      <div className="row" style={{ gap: 6 }}>
-                        {actions(row).map((entry) => (
-                          <button key={entry.label} type="button"
-                                  className={`btn btn--sm ${entry.danger ? "btn--danger" : "btn--subtle"}`}
-                                  onClick={() => void act(entry)}>
-                            {entry.label}
-                          </button>
-                        ))}
-                      </div>
-                    </td>
-                  )}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+      <DataTable
+        columns={[
+          {
+            cell: (row) => (
+              <>
+                <Link to={`/messages/${row.id}`}><strong className="t-sm">{row.subject || `메시지 #${row.id}`}</strong></Link>
+                <div className="t-xs t-subtle">{row.company || row.to_address || "-"}</div>
+                {row.error && <div className="t-xs" style={{ color: "var(--danger)" }}>{row.error}</div>}
+              </>
+            ),
+          },
+          { width: "150px", className: "tnum td-subtle", cell: (row) => kst(row.created_at) },
+          ...(actions ? [{
+            width: "190px",
+            cell: (row: Msg) => (
+              <div className="row" style={{ gap: 6 }}>
+                {actions(row).map((entry) => (
+                  <button key={entry.label} type="button"
+                          className={`btn btn--sm ${entry.danger ? "btn--danger" : "btn--subtle"}`}
+                          onClick={() => void act(entry)}>
+                    {entry.label}
+                  </button>
+                ))}
+              </div>
+            ),
+          }] : []),
+        ]}
+        rows={rows}
+        rowKey={(row) => row.id}
+        empty="처리할 항목이 없습니다."
+      />
     </section>
   );
 
@@ -124,32 +123,32 @@ export function Recovery() {
           </div>
           <span className="tag tnum">{data.inbound_jobs.length}</span>
         </div>
-        {data.inbound_jobs.length === 0 ? (
-          <div className="empty"><div className="empty__text">처리할 항목이 없습니다.</div></div>
-        ) : (
-          <div className="table-wrap">
-            <table className="table">
-              <tbody>
-                {data.inbound_jobs.map((job) => (
-                  <tr key={job.id}>
-                    <td>
-                      <strong className="t-sm">티켓 #{job.ticket_id || job.id}</strong>
-                      <div className="t-xs t-subtle">시도 {job.attempts}회</div>
-                      {job.last_error && <div className="t-xs" style={{ color: "var(--danger)" }}>{job.last_error}</div>}
-                    </td>
-                    <td className="tnum td-subtle" style={{ width: 150 }}>{kst(job.updated_at)}</td>
-                    <td style={{ width: 110 }}>
-                      <button type="button" className="btn btn--subtle btn--sm"
-                              onClick={() => void act({ label: "처음부터 재처리", path: `/operations/recovery/inbound/${job.id}/retry` })}>
-                        처음부터 재처리
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
+        <DataTable
+          columns={[
+            {
+              cell: (job) => (
+                <>
+                  <strong className="t-sm">티켓 #{job.ticket_id || job.id}</strong>
+                  <div className="t-xs t-subtle">시도 {job.attempts}회</div>
+                  {job.last_error && <div className="t-xs" style={{ color: "var(--danger)" }}>{job.last_error}</div>}
+                </>
+              ),
+            },
+            { width: "150px", className: "tnum td-subtle", cell: (job) => kst(job.updated_at) },
+            {
+              width: "150px",
+              cell: (job) => (
+                <button type="button" className="btn btn--subtle btn--sm"
+                        onClick={() => void act({ label: "처음부터 재처리", path: `/operations/recovery/inbound/${job.id}/retry` })}>
+                  처음부터 재처리
+                </button>
+              ),
+            },
+          ]}
+          rows={data.inbound_jobs}
+          rowKey={(job) => job.id}
+          empty="처리할 항목이 없습니다."
+        />
       </section>
 
       {/* Confirming "not sent" queues a real send. It gets a dialog, not a browser

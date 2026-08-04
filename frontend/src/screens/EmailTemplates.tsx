@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
 import { getJSON, postForm } from "../lib/api";
 import { Icon } from "../ui/Icon";
+import { DataTable } from "../ui/DataTable";
 import { kst } from "../lib/format";
 import { PolicyDocs } from "./PolicyDocs";
 
@@ -184,25 +185,18 @@ export function EmailTemplates() {
         )}
       </div>
       <div className="card card--flush">
-        <div className="table-wrap">
-          <table className="table">
-            <thead><tr><th scope="col">템플릿 이름</th><th scope="col">언어</th><th scope="col">수정일</th></tr></thead>
-            <tbody>
-              {items.length === 0 ? (
-                <tr><td colSpan={3}><div className="empty"><div className="empty__text">템플릿이 없습니다</div></div></td></tr>
-              ) : (
-                items.map((item) => (
-                  <tr key={item.id} className="is-clickable"
-                      onClick={() => setParams({ kind, edit: String(item.id) }, { replace: true })}>
-                    <td style={{ fontWeight: 600 }}>{item.name}</td>
-                    <td><span className="tag">{item.language}</span></td>
-                    <td className="td-subtle tnum">{kst(item.updated_at, "md-hm") || "—"}</td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
+          <DataTable
+            columns={[
+              { label: "템플릿 이름", width: "56%", cell: (item) => <strong>{item.name}</strong> },
+              { label: "언어", width: "16%", cell: (item) => <span className="tag">{item.language}</span> },
+              { label: "수정일", width: "28%", className: "td-subtle tnum",
+                cell: (item) => kst(item.updated_at, "md-hm") || "—" },
+            ]}
+            rows={items}
+            rowKey={(item) => item.id}
+            empty="템플릿이 없습니다"
+            onRowClick={(item) => setParams({ kind, edit: String(item.id) }, { replace: true })}
+          />
       </div>
     </>
   );

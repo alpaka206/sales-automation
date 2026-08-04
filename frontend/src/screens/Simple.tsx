@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
 import { getJSON } from "../lib/api";
 import { Icon } from "../ui/Icon";
+import { DataTable } from "../ui/DataTable";
 import { Recovery } from "./Recovery";
 
 // The screens that are a sentence or an iframe. They were four near-identical Jinja
@@ -46,28 +47,18 @@ export function Logs() {
       </div>
       {tab === "recovery" ? <Recovery /> : (
       <div className="card card--flush">
-        {isPending || !data ? (
-          <div className="skeleton" style={{ height: 160 }} />
-        ) : (
-          <div className="table-wrap">
-            <table className="table">
-              <thead><tr><th scope="col">시각</th><th scope="col">구분</th><th scope="col">내용</th></tr></thead>
-              <tbody>
-                {data.rows.length === 0 ? (
-                  <tr><td colSpan={3}><div className="empty"><div className="empty__text">기록이 없습니다.</div></div></td></tr>
-                ) : (
-                  data.rows.map((row, index) => (
-                    <tr key={index}>
-                      <td className="tnum td-subtle">{String(row.ts).slice(0, 19).replace("T", " ")}</td>
-                      <td className="td-muted">{row.level} · {row.source}</td>
-                      <td>{row.message}</td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
-        )}
+        <DataTable
+          columns={[
+            { label: "시각", width: "20%", className: "tnum td-subtle",
+              cell: (row) => String(row.ts).slice(0, 19).replace("T", " ") },
+            { label: "구분", width: "22%", className: "td-muted",
+              cell: (row) => `${row.level} · ${row.source}` },
+            { label: "내용", width: "58%", cell: (row) => row.message },
+          ]}
+          rows={data?.rows ?? []}
+          rowKey={(_row, index) => index}
+          empty={isPending ? "불러오는 중…" : "기록이 없습니다."}
+        />
       </div>
       )}
     </>

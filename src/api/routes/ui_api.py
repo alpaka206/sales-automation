@@ -124,6 +124,29 @@ async def ui_dashboard(_request: Request):
     }
 
 
+@router.get("/api/ui/overview")
+async def ui_overview():
+    """전체 대시보드. A roll-up of screens that each own their own numbers."""
+    from .dashboard import _overview_context
+
+    return _overview_context()
+
+
+@router.get("/api/ui/contracts")
+async def ui_contracts(status: str = "", q: str = ""):
+    """수주 고객. The contract book, plus the summary the overview shows — same two
+    builders, so the money on one screen cannot disagree with the money on the other."""
+    from .customer_ops import CONTRACT_STATUS_LABELS, _contract_rows, _contract_summary
+
+    return {
+        "rows": _contract_rows(status=status, query=q),
+        "summary": _contract_summary(),
+        "status_options": [{"key": key, "label": label} for key, label in CONTRACT_STATUS_LABELS],
+        "filter_status": status,
+        "query": q,
+    }
+
+
 @router.get("/api/ui/messages")
 async def ui_messages(status: str = "awaiting", stage: str = "", sort: str = "oldest"):
     """회신 및 검토. Returned as built — the context is already plain dicts, and every

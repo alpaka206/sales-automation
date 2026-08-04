@@ -198,10 +198,25 @@ def test_dashboard_queue_table_is_the_review_table():
     """
     source = QUEUE.read_text(encoding="utf-8")
     for header in ("상태", "Stage", "문의 제목", "채널", "소통 Email", "접수 시간"):
-        assert f'<th scope="col">{header}</th>' in source, header
+        assert f'label: "{header}"' in source, header
     # 우선순위 is one dot wide and centred under its own heading.
-    assert '<th scope="col" className="th-center">우선순위</th>' in source
-    assert QUEUE.read_text(encoding="utf-8").count("<thead>") == 1
+    assert 'headClassName: "th-center"' in source
+
+
+def test_every_table_is_the_same_table():
+    """Six screens each declared their own table-wrap / table / thead / tbody and their
+    own copy of the 'nothing here' row. Two consequences beyond the duplication: a
+    colSpan that stops matching the columns above it, and column widths measured per
+    table — so two tables showing the SAME columns put them in different places, which
+    is exactly what 문의별 참고 and 항상 적용 did.
+    """
+    screens = list(pathlib.Path("frontend/src/screens").glob("*.tsx"))
+    screens += [path for path in pathlib.Path("frontend/src/ui").glob("*.tsx")
+                if path.name != "DataTable.tsx"]
+    offenders = [
+        str(path) for path in screens if "<table" in path.read_text(encoding="utf-8")
+    ]
+    assert offenders == []
 
 
 

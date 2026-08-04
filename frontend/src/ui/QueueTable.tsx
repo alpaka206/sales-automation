@@ -1,6 +1,7 @@
 import { Link } from "react-router-dom";
 import { Icon } from "./Icon";
 import { kst } from "../lib/format";
+import { DataTable } from "./DataTable";
 
 // The awaiting-reply table, defined ONCE — the port of partials/queue_table.html, for
 // the same reason that file exists: the dashboard and 회신 및 검토 render the same rows
@@ -57,58 +58,48 @@ export function QueueTable({
   emptyText: string;
 }) {
   return (
-    <div className="table-wrap">
-      <table className="table">
-        <thead>
-          <tr>
-            <th scope="col">상태</th>
-            <th scope="col">Stage</th>
-            <th scope="col">문의 제목</th>
-            {/* One dot wide, centred under its own heading. */}
-            <th scope="col" className="th-center">우선순위</th>
-            <th scope="col">채널</th>
-            <th scope="col">소통 Email</th>
-            <th scope="col">접수 시간</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.length === 0 ? (
-            <tr>
-              <td colSpan={7}>
-                <div className="empty">
-                  <div className="empty__icon"><Icon name="messages" size={24} /></div>
-                  <div className="empty__text">{emptyText}</div>
-                </div>
-              </td>
-            </tr>
-          ) : (
-            rows.map((row) => {
-              const [tone, label] = priority(now, row.waiting_since);
-              return (
-                <tr key={row.id} className="is-clickable">
-                  <td>
-                    <span className={`pill pill--${STATUS_TONE[row.status] ?? "neutral"} pill--sm`}>
-                      <span className="pill__dot" />
-                      {STATUS_LABELS[row.status] ?? row.status}
-                    </span>
-                  </td>
-                  <td className="td-muted">{stageLabels[row.stage] ?? row.stage}</td>
-                  <td className="truncate" style={{ maxWidth: 300 }}>
-                    <Link to={`/messages/${row.id}`}>{row.subject}</Link>
-                  </td>
-                  <td className="td-center">
-                    <span className={`wait-dot wait-dot--${tone}`} title={label} />
-                    <span className="sr-only">{label}</span>
-                  </td>
-                  <td className="td-muted">{row.channel}</td>
-                  <td className="td-subtle truncate mono" style={{ maxWidth: 190 }}>{row.email}</td>
-                  <td className="td-subtle tnum">{kst(row.received_at, "md-hm")}</td>
-                </tr>
-              );
-            })
-          )}
-        </tbody>
-      </table>
-    </div>
+    <DataTable
+      columns={[
+        {
+          label: "상태",
+          width: "11%",
+          cell: (row) => (
+            <span className={`pill pill--${STATUS_TONE[row.status] ?? "neutral"} pill--sm`}>
+              <span className="pill__dot" />
+              {STATUS_LABELS[row.status] ?? row.status}
+            </span>
+          ),
+        },
+        { label: "Stage", width: "11%", className: "td-muted",
+          cell: (row) => stageLabels[row.stage] ?? row.stage },
+        { label: "문의 제목", width: "30%", className: "truncate",
+          cell: (row) => <Link to={`/messages/${row.id}`}>{row.subject}</Link> },
+        {
+          // One dot wide, centred under its own heading.
+          label: "우선순위",
+          width: "9%",
+          headClassName: "th-center",
+          className: "td-center",
+          cell: (row) => {
+            const [tone, label] = priority(now, row.waiting_since);
+            return (
+              <>
+                <span className={`wait-dot wait-dot--${tone}`} title={label} />
+                <span className="sr-only">{label}</span>
+              </>
+            );
+          },
+        },
+        { label: "채널", width: "8%", className: "td-muted", cell: (row) => row.channel },
+        { label: "소통 Email", width: "19%", className: "td-subtle truncate mono",
+          cell: (row) => row.email },
+        { label: "접수 시간", width: "12%", className: "td-subtle tnum",
+          cell: (row) => kst(row.received_at, "md-hm") },
+      ]}
+      rows={rows}
+      rowKey={(row) => row.id}
+      empty={emptyText}
+      emptyIcon={<Icon name="messages" size={24} />}
+    />
   );
 }

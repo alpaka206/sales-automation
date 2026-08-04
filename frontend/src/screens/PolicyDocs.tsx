@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
 import { getJSON } from "../lib/api";
 import { Icon } from "../ui/Icon";
+import { DataTable, type Column } from "../ui/DataTable";
 import { kst } from "../lib/format";
 
 type Row = {
@@ -10,6 +11,33 @@ type Row = {
   last_synced_at: string | null; last_error: string | null; from_file: boolean;
 };
 type Data = { modes: { key: string; label: string }[]; rows: Row[] };
+
+// 분량 and 상태 were columns of their own; the length is on the document page and a
+// healthy document had nothing to say in a status column but "사용 중". What is worth
+// interrupting for — a failed sync serving a stale copy, or a document switched off —
+// says so under the name, where it is impossible to read past.
+const COLUMNS: Column<Row>[] = [
+  {
+    label: "문서",
+    width: "70%",
+    cell: (row) => (
+      <>
+        <strong>{row.title || row.label}</strong>
+        {row.from_file && <div className="t-xs t-subtle">파일에서 가져온 문서 (노션 미연결)</div>}
+        {row.last_error && (
+          <div className="t-xs" style={{ color: "var(--danger)" }}>
+            동기화 실패 — 이전 사본을 사용 중입니다
+          </div>
+        )}
+        {row.status !== "active" && (
+          <div className="t-xs t-subtle">중지됨 — 답변에 사용되지 않습니다</div>
+        )}
+      </>
+    ),
+  },
+  { label: "마지막 동기화", width: "30%", className: "tnum td-subtle",
+    cell: (row) => (row.last_synced_at ? kst(row.last_synced_at) : "—") },
+];
 
 export function PolicyDocs({ onBack }: { onBack?: () => void }) {
   const [params, setParams] = useSearchParams();
@@ -88,57 +116,27 @@ export function PolicyDocs({ onBack }: { onBack?: () => void }) {
       <div className="page-header">
         <div><h1 className="page-title">정책 문서</h1></div>
       </div>
-      {data.modes.map((mode) => {
-        const rows = data.rows.filter((row) => row.mode === mode.key);
-        return (
-          <section key={mode.key} className="mb-gap">
-            <div className="section-header table-heading">
-              <div className="section-header__l">
-                <span className="section-header__icon"><Icon name="file" size={16} /></span>
-                <div className="section-header__title">{mode.label}</div>
-              </div>
+      {data.modes.map((mode) => (
+        <section key={mode.key} className="mb-gap">
+          <div className="section-header table-heading">
+            <div className="section-header__l">
+              <span className="section-header__icon"><Icon name="file" size={16} /></span>
+              <div className="section-header__title">{mode.label}</div>
             </div>
-            <div className="card card--flush">
-              <div className="table-wrap">
-                <table className="table">
-                  <thead>
-                    <tr>
-                      <th scope="col">문서</th><th scope="col">분량</th>
-                      <th scope="col">마지막 동기화</th><th scope="col">상태</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {rows.length === 0 ? (
-                      <tr><td colSpan={4}><div className="empty"><div className="empty__text">등록된 문서가 없습니다.</div></div></td></tr>
-                    ) : (
-                      rows.map((row) => (
-                        <tr key={row.id} className="is-clickable"
-                            onClick={() => setParams({ doc: String(row.id) }, { replace: true })}>
-                          <td>
-                            <strong>{row.title || row.label}</strong>
-                            {row.from_file && <div className="t-xs t-subtle">파일에서 가져온 문서 (노션 미연결)</div>}
-                          </td>
-                          <td className="tnum td-subtle">{row.chars.toLocaleString()}자</td>
-                          <td className="tnum td-subtle">{row.last_synced_at ? kst(row.last_synced_at) : "—"}</td>
-                          <td>
-                            {row.last_error ? (
-                              <span className="pill pill--warn pill--sm"><span className="pill__dot" />동기화 실패</span>
-                            ) : row.status === "active" ? (
-                              <span className="pill pill--ok pill--sm"><span className="pill__dot" />사용 중</span>
-                            ) : (
-                              <span className="pill pill--neutral pill--sm"><span className="pill__dot" />중지됨</span>
-                            )}
-                          </td>
-                        </tr>
-                      ))
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          </section>
-        );
-      })}
+          </div>
+          <div className="card card--flush">
+            {/* The SAME columns object for both groups. Two tables measuring their own
+                widths put the same column in two different places. */}
+            <DataTable
+              columns={COLUMNS}
+              rows={data.rows.filter((row) => row.mode === mode.key)}
+              rowKey={(row) => row.id}
+              empty="등록된 문서가 없습니다."
+              onRowClick={(row) => setParams({ kind: "policy", doc: String(row.id) }, { replace: true })}
+            />
+          </div>
+        </section>
+      ))}
     </>
   );
 }
