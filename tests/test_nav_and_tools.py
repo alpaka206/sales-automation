@@ -332,3 +332,15 @@ def test_opening_a_template_costs_no_request_at_all():
     assert 'if (id !== "new" && !data) {' in TEMPLATES and "LoadingBlock" in TEMPLATES
     # And the shape is still derived from the key — the skeleton is the wait, not a guess.
     assert "ONE_LINE_FIELDS[data.key]" in TEMPLATES
+
+
+def test_a_one_line_field_is_not_trimmed_while_it_is_being_typed():
+    """담당자 이름 (영문) 에 스페이스를 칠 수 없었습니다.
+
+    onChange 에서 .trim() 을 걸어 두면 "Untae Bae" 를 치는 도중 "Untae " 가 "Untae" 로
+    잘려, 다음 글자가 붙어 버립니다. 값에 공백이 없는 URL 두 개에서는 티가 안 났고 이름에서
+    드러났습니다. 앞뒤 공백을 떼는 것은 맞지만, 다 치고 난 **저장할 때** 할 일입니다.
+    """
+    assert "onChange={(e) => setBody(e.target.value.trim())}" not in TEMPLATES
+    assert "const value = oneLine ? body.trim() : body;" in TEMPLATES
+    assert "body: value" in TEMPLATES

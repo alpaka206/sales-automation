@@ -67,17 +67,20 @@ function Editor({ id, data, siblings, onOpen, onDone }: {
 
   async function save() {
     setNote("저장 중…");
+    // 한 칸짜리 값은 앞뒤 공백이 의미 없습니다 — 붙여넣기로 딸려 온 것이 대부분입니다.
+    // 치는 동안이 아니라 여기서 한 번 다듬습니다.
+    const value = oneLine ? body.trim() : body;
     try {
       // Same routes the Jinja form uses: key derivation and the revision snapshot stay
       // on the server, in one place.
       if (id === "new") {
-        await postForm("/email-templates", { name, language, body });
+        await postForm("/email-templates", { name, language, body: value });
       } else {
         const response = await fetch(`/email-templates/${id}`, {
           method: "PUT",
           credentials: "same-origin",
           headers: { "Content-Type": "application/x-www-form-urlencoded" },
-          body: new URLSearchParams({ name, language, body }),
+          body: new URLSearchParams({ name, language, body: value }),
         });
         if (!response.ok) throw new Error(String(response.status));
       }
@@ -170,7 +173,9 @@ function Editor({ id, data, siblings, onOpen, onDone }: {
             <label className="field-label" htmlFor="et-link">{oneLine.label}</label>
             <input className={`input${oneLine.type === "url" ? " mono" : ""}`} id="et-link"
                    type={oneLine.type} value={body}
-                   onChange={(e) => setBody(e.target.value.trim())}
+                   // 타자마다 trim 하면 안 됩니다. "Untae Bae" 를 치는 도중 "Untae " 가
+                   // "Untae" 로 잘려 스페이스가 영영 안 들어갑니다. 다듬는 것은 저장할 때.
+                   onChange={(e) => setBody(e.target.value)}
                    placeholder={oneLine.placeholder} />
           </>
         ) : (
