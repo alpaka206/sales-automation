@@ -225,3 +225,39 @@ def test_an_english_inquiry_uses_the_english_template_instead_of_translating_the
 
     translate.assert_not_called()
     assert "Hi Jane, thanks." in persist.call_args[0][3]
+
+
+def test_the_acknowledgement_uses_the_fixed_subject_when_one_exists_for_that_language(
+    monkeypatch,
+):
+    """운영자의 결정: 접수확인만은 정해진 문구로 나갑니다.
+
+    대가는 알고 씁니다 — RE: 가 아니면 고객 메일함에서 원래 문의와 다른 대화로 뜹니다.
+    담당자의 상세 회신은 여전히 RE: 라 그쪽은 원래 스레드에 붙습니다.
+
+    언어가 정확히 맞는 행이 있을 때만입니다. 프랑스어 문의에 한국어 제목이 붙는 것은
+    제목이 없는 것보다 나쁘므로, 없으면 예전처럼 그 언어의 RE: 제목으로 떨어집니다.
+    """
+    from unittest.mock import patch
+
+    monkeypatch.setattr(settings, "INBOUND_AUTO_ACK_ENABLED", True)
+    rows = {
+        "auto_ack": "안녕하세요 {name}님",
+        "auto_ack_subject": "[Perso Dubbing] B2B 문의 접수가 완료되었습니다.",
+    }
+    with patch("src.db.email_templates.get_email_template", side_effect=lambda k, **kw: rows.get(k)):
+        from src.agents.inbound import InboundAgent
+
+        agent = InboundAgent(llm=MagicMock(), hubspot=None)
+        with patch.object(agent, "_persist_auto_ack", return_value=None) as persist:
+            agent._maybe_send_auto_ack(
+                {"full_name": "김", "subject": "가격 문의"}, conv_id=1, inquiry_lang="ko"
+            )
+            assert persist.call_args[0][2] == "[Perso Dubbing] B2B 문의 접수가 완료되었습니다."
+
+        # 프랑스어: 그 언어의 행이 없으므로 고객 제목을 이어받습니다.
+        with patch.object(agent, "_persist_auto_ack", return_value=None) as persist:
+            agent._maybe_send_auto_ack(
+                {"full_name": "Marie", "subject": "Une question"}, conv_id=1, inquiry_lang="fr"
+            )
+            assert persist.call_args[0][2] == "RE: Une question"

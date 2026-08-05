@@ -34,6 +34,9 @@ const ONE_LINE_FIELDS: Record<string, { label: string; type: string; placeholder
   // the token then stays visible in the draft so the operator sees it before 발송.
   sender_name: { label: "담당자 이름 (한국어)", type: "text", placeholder: "예: 배운태" },
   sender_name_en: { label: "담당자 이름 (영문)", type: "text", placeholder: "예: Untae Bae" },
+  // 비우면 "RE: 고객이 쓴 제목" 으로 돌아갑니다 — 그게 원래 스레드에 붙는 쪽입니다.
+  auto_ack_subject: { label: "메일 제목", type: "text", placeholder: "비우면 RE: 고객 제목" },
+  auto_ack_subject_en: { label: "메일 제목", type: "text", placeholder: "비우면 RE: 고객 제목" },
 };
 
 function Editor({ id, data, siblings, onOpen, onDone }: {

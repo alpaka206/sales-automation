@@ -1176,7 +1176,17 @@ class InboundAgent:
                     body = text_wash(ko_body)
                     final_lang = "ko"
 
-            subject = reply_subject(contact_info.get("subject"), target_code=lang)
+            # 접수확인만 고정 제목입니다. 정확히 그 언어의 행이 있을 때만 — 프랑스어
+            # 문의에 한국어 제목이 붙는 것은 제목이 없는 것보다 나쁩니다.
+            #
+            # 대가는 알고 씁니다: RE: 가 아니면 고객 메일함에서 원래 문의와 **다른 대화**로
+            # 뜹니다. 담당자의 상세 회신은 여전히 RE: 라 그쪽은 원래 스레드에 붙습니다.
+            fixed_subject = get_email_template(
+                "auto_ack_subject" if lang == "ko" else f"auto_ack_subject_{lang}"
+            )
+            subject = (fixed_subject or "").strip() or reply_subject(
+                contact_info.get("subject"), target_code=lang
+            )
             msg_id = self._persist_auto_ack(conv_id, contact_info, subject, body, final_lang, lang)
             if msg_id is not None:
                 self._dispatch_auto_ack(msg_id, conv_id)
