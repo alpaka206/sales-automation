@@ -11,7 +11,7 @@ import { PolicyDocs } from "./PolicyDocs";
 type Kind = { key: string; label: string; count: number; can_create: boolean; read_only: boolean };
 type Item = {
   id: number; key: string; base_key: string; name: string; language: string;
-  updated_at: string; kind: string; chars: number; is_default: boolean;
+  updated_at: string; kind: string; body: string; chars: number; is_default: boolean;
 };
 // 한 줄 = 한 템플릿. 언어가 여럿이면 그 안에서 고릅니다.
 type Group = { base: string; rows: Item[] };
@@ -21,10 +21,6 @@ const LANGUAGE_LABELS: Record<string, string> = { all: "전체", ko: "한국어"
 /** 이름에서 언어 꼬리표를 뗍니다 — "자동 접수확인 (영어)" 는 목록에서 "자동 접수확인". */
 const withoutLanguage = (name: string) => name.replace(/\s*[（(](전체|한국어|영어)[）)]\s*$/, "");
 type List = { kinds: Kind[]; items: Item[] };
-type Detail = {
-  id: number; key: string; name: string; language: string; body: string; kind: string;
-  is_default: boolean;
-};
 
 // Three rows hold a single value and nothing else: the booking calendar, the WhatsApp
 // number, and the name the Korean template introduces the writer by. A language, an HTML
@@ -40,19 +36,19 @@ const ONE_LINE_FIELDS: Record<string, { label: string; type: string; placeholder
   sender_name_en: { label: "담당자 이름 (영문)", type: "text", placeholder: "예: Untae Bae" },
 };
 
-function Editor({ id, siblings, onOpen, onDone }: {
+function Editor({ id, data, siblings, onOpen, onDone }: {
   id: number | "new";
+  // 목록이 이미 들고 있는 그 행입니다. 다시 받지 않습니다 — 서울에서 이 서비스까지 왕복이
+  // 200~370ms 이고(측정), 그게 바닥입니다: DB를 찌르는 /healthz 가 정적 파일과 같은 시간이
+  // 걸립니다. 거리가 값이지 쿼리가 값이 아닙니다. 행 몇 개에 가장 큰 본문이 1.1KB 라
+  // 목록에 실어 보내는 편이 싸고, 여는 순간 그려집니다.
+  data: Item | undefined;
   // 같은 템플릿의 다른 언어들. 목록에서 언어별로 줄을 나누는 대신 여기서 고릅니다.
   siblings: Item[];
   onOpen: (id: number) => void;
   onDone: () => void;
 }) {
   const queryClient = useQueryClient();
-  const { data } = useQuery({
-    queryKey: ["email-template", id],
-    queryFn: () => getJSON<Detail>(`/api/ui/email-templates/${id}`),
-    enabled: id !== "new",
-  });
   const [name, setName] = useState("");
   const [language, setLanguage] = useState("all");
   const [body, setBody] = useState("");
@@ -122,10 +118,9 @@ function Editor({ id, siblings, onOpen, onDone }: {
   const isDefault = Boolean(data?.is_default);
   const oneLine = data ? ONE_LINE_FIELDS[data.key] : undefined;
 
-  // Which form this row gets is decided by its key, and the key arrives with the row. So
-  // rendering before it lands means rendering the WRONG form: 미팅 예약 링크 opened as a
-  // 템플릿 이름 + 본문 editor and turned into a single field a moment later. A skeleton
-  // says "not yet" instead of saying something false and correcting itself.
+  // 목록을 거쳐 들어오면 data 가 이미 있으므로 이 스켈레톤은 보이지 않습니다. 주소를 직접
+  // 열어 목록이 아직 없을 때만 나옵니다 — 그때도 틀린 폼을 그리는 것보다는 낫습니다:
+  // 어떤 폼인지는 key 가 정하고, key 는 행과 함께 오기 때문입니다.
   const backChip = (
     <div style={{ marginBottom: 14 }}>
       <button type="button" className="chip" onClick={onDone}>
@@ -273,6 +268,7 @@ export function EmailTemplates() {
     return (
       <Editor
         id={edit === "new" ? "new" : Number(edit)}
+        data={editing}
         siblings={
           editing ? data.items.filter((item) => item.base_key === editing.base_key) : []
         }

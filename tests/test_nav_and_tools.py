@@ -310,17 +310,25 @@ def test_health_fails_when_the_console_cannot_be_served():
     assert broken.json() == {"ok": False, "database": True, "console": False}
 
 
-def test_the_editor_waits_instead_of_drawing_the_wrong_form():
+def test_opening_a_template_costs_no_request_at_all():
     """미팅 예약 링크 / 담당자 이름 opened as a 템플릿 이름 + 본문 editor and became a
     single field a moment later.
 
-    Which form a row gets is decided by its KEY, and the key arrives with the row — so
-    rendering before the fetch lands renders the wrong one, every time, for as long as the
-    request takes. Nothing was broken; the screen was answering a question it could not
-    answer yet. A skeleton says "not yet" instead of saying something false and correcting
-    itself in front of the operator.
+    Which form a row gets is decided by its KEY, and the key arrived with a SECOND request
+    — so for as long as that took, the screen drew the wrong form. The wait was the whole
+    problem, and it was never the database: /healthz touches Postgres and takes the same
+    as a static file, ~200-370 ms from Seoul, which is the distance to the service. So the
+    fix is not a faster query, it is not asking twice. A handful of rows whose largest body
+    is 1.1 KB ride along with the list, and the editor renders from what is already there.
+
+    The skeleton stays for the one case that has no list yet: opening the URL directly.
     """
-    assert 'if (id !== "new" && !data) {' in TEMPLATES
-    assert "LoadingBlock" in TEMPLATES
+    assert '"body": row.body or ""' in pathlib.Path("src/api/routes/ui_api.py").read_text(
+        encoding="utf-8"
+    )
+    # No per-template fetch left in the screen — the list is the only read.
+    assert "api/ui/email-templates/${" not in TEMPLATES
+    assert TEMPLATES.count("useQuery({") == 1
+    assert 'if (id !== "new" && !data) {' in TEMPLATES and "LoadingBlock" in TEMPLATES
     # And the shape is still derived from the key — the skeleton is the wait, not a guess.
     assert "ONE_LINE_FIELDS[data.key]" in TEMPLATES

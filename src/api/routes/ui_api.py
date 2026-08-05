@@ -478,7 +478,14 @@ def _base_key(key: str, all_keys: set[str]) -> str:
 
 @router.get("/api/ui/email-templates")
 def ui_email_templates():
-    """Grouped, not one flat list — and each group says what it is for."""
+    """Grouped, not one flat list — and each group says what it is for.
+
+    Bodies ride along. There are a handful of rows and the largest is a 1.1 KB signature,
+    while a second request costs a full round trip — measured at 200-370 ms from Seoul to
+    this service, and that is the FLOOR: /healthz, which touches Postgres, takes the same
+    as a static file, so the distance is the cost, not the query. Sending ~10 KB once
+    means opening a template is instant instead of "a form appears, then changes".
+    """
     from ...db.models import EmailTemplate
     from ...db.session import SessionLocal
 
@@ -501,6 +508,7 @@ def ui_email_templates():
                 # Which list entry this row sits under. Rows sharing one are the same
                 # template in different languages.
                 "base_key": _base_key(row.key, all_keys),
+                "body": row.body or "",
                 "chars": len(row.body or ""),
                 # Which signature a new draft starts with. A row, not a literal in
                 # inbound.py — and the screen is where it moves.
@@ -538,26 +546,6 @@ def quote_policy() -> dict:
     from ...common.quote_tiers import policy_client
 
     return policy_client()
-
-
-@router.get("/api/ui/email-templates/{template_id}")
-def ui_email_template(template_id: int):
-    from ...db.models import EmailTemplate
-    from ...db.session import SessionLocal
-
-    with SessionLocal() as session:
-        row = session.get(EmailTemplate, template_id)
-        if not row:
-            raise HTTPException(status_code=404, detail="템플릿을 찾을 수 없습니다")
-        return {
-            "id": row.id,
-            "key": row.key,
-            "name": row.name,
-            "language": row.language or "all",
-            "body": row.body,
-            "kind": _template_kind(row.key),
-            "is_default": bool(row.is_default),
-        }
 
 
 @router.get("/api/ui/policy-docs")
