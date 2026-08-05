@@ -251,32 +251,6 @@ def test_everything_saved_here_is_active(template_db):
         assert {row.status for row in session.query(EmailTemplate).all()} == {"active"}
 
 
-def test_a_second_language_can_be_added_under_the_same_key(template_db):
-    """"새로 만들기" outside the signature group means a language, not a new key. The send
-    path resolves by exact key, so a brand-new key is a row nothing can ever read — but a
-    second LANGUAGE is read the moment a customer writes in it. 접수확인 영어판이 이 경우고,
-    그전에는 한국어를 매번 기계번역해서 보냈습니다."""
-    from src.db.email_templates import get_email_template
-
-    with template_db() as session:
-        session.add(
-            EmailTemplate(key="auto_ack", name="자동 접수확인", language="ko", channel="email",
-                          status="active", version=1, body="안녕하세요 {name}님")
-        )
-        session.commit()
-        tpl_id = session.query(EmailTemplate).one().id
-
-    with TestClient(app) as client:
-        assert client.post(f"/email-templates/{tpl_id}/variant",
-                           data={"language": "en"}).status_code == 200
-        # 같은 언어를 두 번 만들면 lookup 이 둘 중 무엇을 고를지가 우연이 됩니다.
-        assert client.post(f"/email-templates/{tpl_id}/variant",
-                           data={"language": "en"}).status_code == 400
-
-    assert get_email_template("auto_ack_en") == "안녕하세요 {name}님"
-    assert get_email_template("auto_ack") == "안녕하세요 {name}님"
-
-
 def test_the_last_row_for_a_key_the_code_resolves_cannot_be_deleted(template_db):
     """지우면 기능이 없어지는 게 아니라, 여전히 일어나는 lookup 의 답이 없어집니다 —
     하드코딩된 문장으로 조용히 떨어지는 접수확인, 또는 {{MEETING_LINK}} 로 끝나는 회신."""
@@ -295,14 +269,15 @@ def test_the_last_row_for_a_key_the_code_resolves_cannot_be_deleted(template_db)
         assert session.query(EmailTemplate).count() == 1
 
 
-def test_a_language_variant_and_a_signature_both_delete_freely(template_db):
-    """변형은 다른 행이 여전히 lookup 에 답하고, 서명은 애초에 이름으로 찾지 않습니다."""
+def test_only_a_signature_deletes(template_db):
+    """Every other row is a key the code resolves by name — auto_ack_en and sender_name_en
+    included. Deleting one removes the answer to a lookup that still happens, and nothing
+    could put it back: the console creates signatures, not code references. 안 쓰려면
+    본문을 비웁니다 — 그건 보이고 되돌릴 수 있습니다."""
     with template_db() as session:
         session.add_all([
-            EmailTemplate(key="auto_ack", name="ko", language="ko", channel="email",
-                          status="active", version=1, body="가"),
-            EmailTemplate(key="auto_ack_en", name="en", language="en", channel="email",
-                          status="active", version=1, body="a"),
+            EmailTemplate(key="auto_ack_en", name="접수확인 영어", language="en",
+                          channel="email", status="active", version=1, body="Hi"),
             EmailTemplate(key=f"{SIGNATURE_KEY_PREFIX}x", name="서명", language="all",
                           channel="email", status="active", version=1, body="<p/>"),
         ])
@@ -310,7 +285,7 @@ def test_a_language_variant_and_a_signature_both_delete_freely(template_db):
         ids = {row.name: row.id for row in session.query(EmailTemplate).all()}
 
     with TestClient(app) as client:
-        assert client.delete(f"/email-templates/{ids['en']}").status_code == 200
+        assert client.delete(f"/email-templates/{ids['접수확인 영어']}").status_code == 400
         assert client.delete(f"/email-templates/{ids['서명']}").status_code == 200
     with template_db() as session:
-        assert [row.name for row in session.query(EmailTemplate).all()] == ["ko"]
+        assert [row.name for row in session.query(EmailTemplate).all()] == ["접수확인 영어"]

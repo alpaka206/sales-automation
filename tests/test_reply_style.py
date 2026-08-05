@@ -146,3 +146,26 @@ def test_an_unset_sender_name_leaves_the_token_where_it_can_be_seen():
 
     with patch("src.db.email_templates.get_email_template", return_value=""):
         assert apply_editable_tokens("이스트소프트 {{SENDER_NAME}}입니다") == "이스트소프트 {{SENDER_NAME}}입니다"
+
+
+def test_the_sender_name_follows_the_customers_language_not_the_drafts():
+    """"배운태" 와 "Untae Bae" 는 번역이 아니라 같은 사람의 두 표기입니다. 초안 본문은 검토용
+    으로 늘 한국어인데, 그 초안이 영어 고객에게 갈 것이면 처음부터 영문 표기가 들어가야
+    번역 단계가 그것을 건드리지 않습니다 — 아니면 모델이 매번 다르게 로마자로 바꿉니다."""
+    from src.llm.prompts import apply_editable_tokens
+
+    names = {"sender_name": "배운태", "sender_name_en": "Untae Bae"}
+    with patch("src.db.email_templates.get_email_template", side_effect=lambda k, **kw: names.get(k)):
+        assert apply_editable_tokens("{{SENDER_NAME}}", language="en") == "Untae Bae"
+        assert apply_editable_tokens("{{SENDER_NAME}}", language="ko") == "배운태"
+        # 언어를 모르면 한국어 표기 — 초안이 한국어라 그쪽이 덜 틀립니다.
+        assert apply_editable_tokens("{{SENDER_NAME}}") == "배운태"
+
+
+def test_an_empty_english_name_falls_back_rather_than_leaving_a_blank():
+    """영문 칸만 비어 있으면 한국어 표기라도 넣습니다. 둘 다 비어야 토큰이 남습니다."""
+    from src.llm.prompts import apply_editable_tokens
+
+    names = {"sender_name": "배운태", "sender_name_en": ""}
+    with patch("src.db.email_templates.get_email_template", side_effect=lambda k, **kw: names.get(k)):
+        assert apply_editable_tokens("{{SENDER_NAME}}", language="en") == "배운태"

@@ -135,8 +135,13 @@ _EDITABLE_TOKENS = {
     "{{SENDER_NAME}}": "sender_name",
 }
 
+# 이름은 번역할 대상이 아니라 표기가 둘인 것입니다: "배운태" 와 "Untae Bae". 한 칸만 두면
+# 둘 중 하나는 반드시 틀리고, 초안이 한국어로 쓰였다가 발송 전에 번역되는 구조라 모델이
+# 알아서 로마자로 바꾸게 됩니다 — 매번 다르게. 키에 접미사를 붙여 갈라 둡니다.
+_PER_LANGUAGE_TOKENS = {"{{SENDER_NAME}}"}
 
-def apply_editable_tokens(body: str) -> str:
+
+def apply_editable_tokens(body: str, language: str | None = None) -> str:
     """Replace the tokens in a drafted body with their web-editable values.
 
     A token whose row is missing or blank is left untouched rather than replaced with an
@@ -149,13 +154,22 @@ def apply_editable_tokens(body: str) -> str:
         return body
     from ..db.email_templates import get_email_template
 
+    # 고르는 기준은 본문의 언어가 아니라 **고객의 언어**입니다. 초안 본문은 검토용으로 항상
+    # 한국어인데, 그 초안이 영어 고객에게 갈 것이면 처음부터 영문 표기가 들어가야 번역
+    # 단계가 그것을 건드리지 않습니다.
+    english = bool(language) and not language.lower().startswith("ko")
     for token, key in _EDITABLE_TOKENS.items():
         if token not in body:
             continue
-        try:
-            value = (get_email_template(key) or "").strip()
-        except Exception:
-            value = ""
+        keys = [f"{key}_en", key] if english and token in _PER_LANGUAGE_TOKENS else [key]
+        value = ""
+        for candidate in keys:
+            try:
+                value = (get_email_template(candidate) or "").strip()
+            except Exception:
+                value = ""
+            if value:
+                break
         if value:
             body = body.replace(token, value)
     return body

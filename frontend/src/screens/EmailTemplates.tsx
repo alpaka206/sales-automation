@@ -24,9 +24,10 @@ type Detail = {
 const ONE_LINE_FIELDS: Record<string, { label: string; type: string; placeholder: string }> = {
   meeting_link: { label: "링크 주소", type: "url", placeholder: "https://…" },
   whatsapp_link: { label: "링크 주소", type: "url", placeholder: "https://…" },
-  // Empty is a real state, not a mistake: the token then stays visible in the draft so the
-  // operator sees it before 발송 rather than after.
-  sender_name: { label: "담당자 이름", type: "text", placeholder: "예: 배운태" },
+  // Two spellings of one person, not a translation. Empty is a real state, not a mistake:
+  // the token then stays visible in the draft so the operator sees it before 발송.
+  sender_name: { label: "담당자 이름 (한국어)", type: "text", placeholder: "예: 배운태" },
+  sender_name_en: { label: "담당자 이름 (영문)", type: "text", placeholder: "예: Untae Bae" },
 };
 
 function Editor({ id, onDone }: { id: number | "new"; onDone: () => void }) {
@@ -77,17 +78,6 @@ function Editor({ id, onDone }: { id: number | "new"; onDone: () => void }) {
     setNote("변경 중…");
     try {
       await postForm(`/email-templates/${id}/default`, {});
-      await queryClient.invalidateQueries();
-      onDone();
-    } catch (error) {
-      setNote(`실패: ${String(error)}`);
-    }
-  }
-
-  async function addLanguage(language: string) {
-    setNote("추가 중…");
-    try {
-      await postForm(`/email-templates/${id}/variant`, { language });
       await queryClient.invalidateQueries();
       onDone();
     } catch (error) {
@@ -154,9 +144,9 @@ function Editor({ id, onDone }: { id: number | "new"; onDone: () => void }) {
                   <label className="field-label" htmlFor="et-language">언어</label>
                   <select className="select" id="et-language" value={language}
                           onChange={(e) => setLanguage(e.target.value)}>
-                    <option value="all">all</option>
-                    <option value="ko">ko</option>
-                    <option value="en">en</option>
+                    <option value="all">전체</option>
+                    <option value="ko">한국어</option>
+                    <option value="en">영어</option>
                   </select>
                 </div>
               </div>
@@ -192,17 +182,7 @@ function Editor({ id, onDone }: { id: number | "new"; onDone: () => void }) {
               기본으로 지정
             </button>
           )}
-          {/* 언어 추가는 같은 key 의 다른 언어 행을 만듭니다. 새 key 는 만들 수 없습니다 —
-              발송 경로가 정확한 이름으로 찾으므로 아무것도 못 읽는 행이 됩니다. */}
-          {data && !isSignature && (
-            <select className="select" style={{ maxWidth: 150 }} value=""
-                    onChange={(e) => e.target.value && void addLanguage(e.target.value)}>
-              <option value="">언어 추가…</option>
-              <option value="ko">ko</option>
-              <option value="en">en</option>
-            </select>
-          )}
-          {data && (
+          {data && isSignature && (
             <button type="button" className="btn btn--ghost" onClick={() => void remove()}>
               <Icon name="x" size={15} /> 삭제
             </button>
@@ -216,7 +196,22 @@ function Editor({ id, onDone }: { id: number | "new"; onDone: () => void }) {
 
 export function EmailTemplates() {
   const [params, setParams] = useSearchParams();
+  const queryClient = useQueryClient();
+  const [listNote, setListNote] = useState<string | null>(null);
   const kind = params.get("kind");
+
+  async function removeTemplate(id: number) {
+    setListNote(null);
+    const response = await fetch(`/email-templates/${id}`, {
+      method: "DELETE", credentials: "same-origin",
+    });
+    // The server refuses the last row for a key the send path resolves, and says why.
+    if (!response.ok) {
+      setListNote((await response.text()).replace(/<[^>]*>/g, ""));
+      return;
+    }
+    await queryClient.invalidateQueries({ queryKey: ["email-templates"] });
+  }
   const edit = params.get("edit");
   const { data, isPending } = useQuery({
     queryKey: ["email-templates"],
@@ -306,9 +301,33 @@ export function EmailTemplates() {
                     {item.is_default && <span className="tag" style={{ marginLeft: 8 }}>기본</span>}
                   </>
                 ) },
-              { label: "언어", width: "16%", cell: (item) => <span className="tag">{item.language}</span> },
-              { label: "수정일", width: "28%", className: "td-subtle tnum",
-                cell: (item) => kst(item.updated_at, "md-hm") || "—" },
+              { label: "언어", width: "12%",
+                cell: (item) => (
+                  <span className="tag">
+                    {{ all: "전체", ko: "한국어", en: "영어" }[item.language] ?? item.language}
+                  </span>
+                ) },
+              // 연도까지. 이 열은 "얼마나 오래됐나" 를 보는 자리이고, 월·일만 있으면
+              // 작년 것과 올해 것이 같은 글자로 보입니다.
+              { label: "수정일", width: "24%", className: "td-subtle tnum",
+                cell: (item) => kst(item.updated_at) || "—" },
+              {
+                // 정책 문서 목록과 같은 자리. 줄을 클릭해도 열리지만, 지우려고 들어갔다
+                // 나오는 왕복이 없어야 합니다.
+                width: "12%",
+                cell: (item) => (
+                  <div className="row" style={{ gap: 6 }} onClick={(e) => e.stopPropagation()}>
+                    <button type="button" className="btn btn--subtle btn--sm"
+                            onClick={() => setParams({ kind, edit: String(item.id) })}>수정</button>
+                    {/* 서명만. 나머지는 코드가 이름으로 찾는 행이라 지우면 되돌릴 방법이
+                        없습니다 — 콘솔은 서명을 만들지 코드 참조를 만들지 못합니다. */}
+                    {kind === "signature" && (
+                      <button type="button" className="btn btn--ghost btn--sm"
+                              onClick={() => void removeTemplate(item.id)}>삭제</button>
+                    )}
+                  </div>
+                ),
+              },
             ]}
             rows={items}
             rowKey={(item) => item.id}
@@ -316,6 +335,7 @@ export function EmailTemplates() {
             onRowClick={(item) => setParams({ kind, edit: String(item.id) })}
           />
       </div>
+      {listNote && <div className="t-sm" style={{ marginTop: 12 }} role="status">{listNote}</div>}
     </>
   );
 }

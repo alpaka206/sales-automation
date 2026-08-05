@@ -838,7 +838,7 @@ class InboundAgent:
 
         # CODE GUARD 1b — links are substituted, never generated. Runs AFTER
         # ensure_korean: translation would happily rewrite a URL.
-        draft.body = apply_editable_tokens(draft.body)
+        draft.body = apply_editable_tokens(draft.body, language=inquiry_lang)
 
         # CODE GUARD 2 — the first reply must never state a price. Strip offending
         # lines deterministically and record it on the progress log.
