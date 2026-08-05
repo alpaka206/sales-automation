@@ -312,3 +312,20 @@ def test_approve_accepts_valid_token(client: TestClient, monkeypatch) -> None:
     # Reaches the approve() logic — 400 because msg 42 doesn't exist, not 403.
     assert r.status_code == 400
     assert "not found" in r.json()["detail"].lower()
+
+
+def test_the_connection_pool_does_not_pay_a_pacific_round_trip_to_check_itself():
+    """앱은 Oregon, DB 는 도쿄입니다 — 쿼리 하나가 태평양을 건넙니다.
+
+    2026-08-05 실측(서울 → 배포본, TTFB): 정적 파일 230~270ms, /healthz 630~880ms.
+    차이 400ms 가 왕복 두 번이고 그중 하나가 pool_pre_ping 의 "SELECT 1" 이었습니다.
+    옆방 DB 라면 공짜인 확인이 여기서는 매 요청 200ms 입니다.
+
+    유휴 커넥션이 끊겼는지 확인하던 일은 pool_recycle 이 왕복 없이 대신합니다. 되돌리려면
+    pool_pre_ping=True — 그 대가가 위의 200ms 이고, 진짜 해법은 같은 리전에 두는 것입니다.
+    """
+    import pathlib
+
+    source = pathlib.Path("src/db/session.py").read_text(encoding="utf-8")
+    assert "pool_recycle" in source
+    assert "pool_pre_ping=not _is_sqlite" not in source
