@@ -1,35 +1,23 @@
-"""Pull the registered Notion policy pages into this database.
+"""``policy_sources`` 의 사본을 초안이 읽는 테이블에 맞춰 두는 곳.
 
-Direction is one way: Notion → us. Nothing here writes to Notion, and nothing here can
-send mail or touch HubSpot, so it is unaffected by the pre-launch guard.
+한때 이 파일의 절반은 노션에서 페이지를 읽어 오는 코드였습니다. 그 경로가 전부 막혀서
+(토큰 발급 불가 · 쿠키 403 · Export zip 이 부모 한 장) 사람이 콘솔에 붙여넣게 되었고,
+읽어 오는 절반은 사라졌습니다. 남은 것은 **한 방향으로 밀어 넣는 일**뿐입니다:
 
-The contract that makes this safe to run on a timer: **a sync failure never removes
-policy**. Each row keeps the last copy that was read successfully, and a failure only
-writes ``last_error``. So a revoked token, an unshared page or a Notion outage degrades to
-"answers use yesterday's policy", never to "answers use no policy" — which is the failure
-mode that would put invented numbers in front of a customer.
+    policy_sources (원본)  ──▶  knowledge_documents (문서 라우터가 읽는 사본)
 
-``mode='knowledge'`` rows are additionally upserted into ``knowledge_documents``, the table
-the per-inquiry document router already reads, so registering a page is all it takes for
-the drafting prompt to start quoting it. ``mode='rules'`` rows are read straight out of
-``policy_sources`` by ``llm.prompts._rules_from_db``.
+``mode='knowledge'`` 행만 사본이 됩니다. ``mode='rules'`` 행은 ``llm.prompts._rules_from_db``
+가 ``policy_sources`` 에서 직접 읽으므로 사본이 필요 없습니다.
 
-노션 API 를 쓰지 않는 이유: docs/정책문서-동기화-설계.md
+노션에서 자동으로 못 가져오는 이유: docs/정책문서-동기화-설계.md
 """
 
 from __future__ import annotations
 
 import logging
 import re
-from collections.abc import Callable
-from datetime import datetime, timezone
-from typing import TYPE_CHECKING
-
 from ..db.models import KnowledgeDocument, PolicySource
 from ..db.session import SessionLocal
-
-if TYPE_CHECKING:
-    from ..integrations.notion import NotionPage
 
 logger = logging.getLogger(__name__)
 
@@ -39,13 +27,16 @@ _SUMMARY_CHARS = 400
 
 
 def _slug_for(source: PolicySource) -> str:
-    """Stable knowledge slug for a registered page.
+    """Stable knowledge slug for a document.
 
-    Derived from the page id, not the label: an operator renaming "가격 정책" to
-    "B2B 가격 정책" must update the same knowledge row, not orphan the old one and create
-    a second copy the router can then cite twice.
+    Derived from ``doc_key``, not the label: renaming "가격 정책" to "B2B 가격 정책" must
+    update the same knowledge row, not orphan the old one and leave a second copy the
+    router can then cite twice.
+
+    The ``notion-`` prefix is history, kept because changing it would orphan every row
+    already stored under it. It names nothing now.
     """
-    return f"notion-{source.notion_page_id[:12]}"
+    return f"notion-{source.doc_key[:12]}"
 
 
 def _summarize(markdown: str) -> str:
@@ -101,88 +92,3 @@ def refresh_knowledge_copy(source_id: int) -> None:
     from ..llm.knowledge import reset_cache
 
     reset_cache()
-
-
-def sync_policy_sources(
-    only_id: int | None = None,
-    fetcher: Callable[[str], "NotionPage"] | None = None,
-) -> dict[str, int]:
-    """Read every active registered page and refresh its stored copy.
-
-    Returns counts for the console: ``synced`` pages that changed or were read cleanly,
-    ``failed`` pages that kept their previous copy, ``skipped`` file-imported rows that
-    have no Notion URL yet.
-
-    ``fetcher`` takes a Notion URL and returns a rendered page. Nothing passes one today:
-    every alternative reader (browser cookie, Export zip, local runner) is gone, and the
-    only remaining automatic path is ``notion.fetch_page`` — which needs a token this
-    workspace cannot issue, so in practice this function no-ops and the console's pasted
-    copies stand. The seam stays because that token is the one condition that would make
-    all of this unnecessary; see docs/정책문서-동기화-설계.md §5.
-
-    Rows with no ``notion_url`` — i.e. everything pasted into the console — are skipped,
-    so a token appearing later refreshes the Notion-backed rows without touching them.
-    """
-    from ..integrations import notion
-
-    result = {"synced": 0, "failed": 0, "skipped": 0}
-    if fetcher is None:
-        if not notion.is_configured():
-            logger.info("Policy sync skipped: NOTION_TOKEN is not set.")
-            return result
-        fetcher = notion.fetch_page
-
-    with SessionLocal() as session:
-        query = session.query(PolicySource).filter(PolicySource.status == "active")
-        if only_id is not None:
-            query = query.filter(PolicySource.id == only_id)
-        sources = query.order_by(PolicySource.order_index, PolicySource.id).all()
-
-        for source in sources:
-            if not (source.notion_url or "").strip():
-                # Imported from a file and not yet pointed at Notion — leave its body be.
-                result["skipped"] += 1
-                continue
-            try:
-                page = fetcher(source.notion_url)
-            except Exception as exc:
-                source.last_error = str(exc)[:500]
-                result["failed"] += 1
-                logger.warning(
-                    "Policy sync failed for %s; keeping the copy from %s.",
-                    source.label,
-                    source.last_synced_at or "never",
-                    exc_info=True,
-                )
-                continue
-
-            if not page.markdown.strip():
-                # An empty render is far more likely to be a parsing problem than a
-                # genuinely empty policy page. Refusing it keeps the good copy.
-                source.last_error = "노션 페이지에서 읽어온 내용이 비어 있어 이전 사본을 유지했습니다."
-                result["failed"] += 1
-                continue
-
-            source.body = page.markdown
-            source.title = page.title
-            source.summary = _summarize(page.markdown)
-            source.last_synced_at = datetime.now(timezone.utc).replace(tzinfo=None)
-            source.last_error = None
-            # 파일이 원본으로 돌아왔습니다. 콘솔에서 고쳤던 표시를 지워야 화면이 "콘솔에서
-            # 수정함" 이라고 계속 말하지 않습니다 — 실제로는 지금 덮어썼으니까요.
-            source.edited_at = None
-            result["synced"] += 1
-
-            if source.mode == "knowledge":
-                _upsert_knowledge(session, source, page.title, page.markdown)
-
-        session.commit()
-
-    if result["synced"] or result["failed"]:
-        logger.info(
-            "Policy sync: %d synced, %d failed, %d skipped.",
-            result["synced"],
-            result["failed"],
-            result["skipped"],
-        )
-    return result

@@ -207,12 +207,6 @@ async def run_poller() -> None:
                 sync_pending_order_rows,
             )
 
-            from .policy_sync import sync_policy_sources
-
-            # Notion -> us. Read-only, and a failure keeps the previous copy, so this
-            # can share the poller tick without any risk to drafting.
-            await asyncio.to_thread(sync_policy_sources)
-
             await asyncio.to_thread(sync_pending_inbound_rows)
             await asyncio.to_thread(sync_pending_order_rows)
             await asyncio.to_thread(process_requested_sheet_sync)

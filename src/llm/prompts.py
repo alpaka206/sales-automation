@@ -6,7 +6,7 @@ code and belongs in the repo. Everything an operator or a policy owner rewrites 
 the database instead and is read per call, so an edit lands on the next draft:
 
 - the always-applied rules (tone, CS policy) — `policy_sources` rows, mode='rules',
-  synced from Notion;
+  written in the console;
 - the reply skeleton and the links it ends on — `email_templates` rows;
 - the email signature — the `signature_ko` row, injected at `{{__signature__}}`.
 
@@ -23,8 +23,8 @@ logger = logging.getLogger(__name__)
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PROMPTS_DIR = Path(__file__).resolve().parent / "prompts"
-# company_rules/ is gone: the always-applied policy is rows in `policy_sources`, synced
-# from Notion, seeded from src/db/seeds/policy/ by migration 0043.
+# company_rules/ is gone: the always-applied policy is rows in `policy_sources`, seeded
+# from src/db/seeds/policy/ by migration 0043 and edited on 정책 문서 since.
 
 _PLACEHOLDER = re.compile(r"\{\{\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\}\}")
 
@@ -38,11 +38,10 @@ def _rules_from_db() -> str:
     """The always-applied policy, from ``policy_sources`` (mode='rules').
 
     Read per call, not cached: the whole point of moving these out of the repo is that an
-    edit — in Notion, synced here — takes effect on the next draft. One indexed query
-    against a handful of rows is cheaper than the confusion of a stale cache.
+    edit in the console takes effect on the next draft. One indexed query against a
+    handful of rows is cheaper than the confusion of a stale cache.
 
-    Only the SYNCED COPY is read. A Notion outage cannot empty the rules, because nothing
-    here talks to Notion.
+    Nothing here reaches the network — the rows ARE the policy, not a cache of it.
     """
     try:
         from ..db.models import PolicySource

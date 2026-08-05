@@ -52,29 +52,21 @@ def _rows() -> list[dict]:
             {
                 "id": s.id,
                 "label": s.label,
-                "notion_url": s.notion_url,
                 "mode": s.mode,
                 "status": s.status,
                 "order_index": s.order_index,
                 "chars": len(s.body or ""),
                 "edited_at": s.edited_at,
-                "last_synced_at": s.last_synced_at,
-                "last_error": s.last_error,
-                # A file-imported row has no Notion page yet; the screen says so rather
-                # than showing it as a page that simply never synced.
-                "from_file": not (s.notion_url or "").strip(),
             }
             for s in sources
         ]
 
 
-def _page_id_for_pasted(title: str) -> str:
-    """노션에서 오지 않은 문서의 id. 제목에서 만들어 냅니다.
+def _doc_key(title: str) -> str:
+    """이 문서의 신원. 제목에서 만들어 냅니다.
 
-    ``notion_page_id`` 는 NOT NULL UNIQUE 이고 등록부의 신원입니다. 붙여넣어 만든 문서에는
-    노션 페이지가 없으므로 제목으로 만들되, **안정적으로** 만듭니다 — 같은 제목으로 다시
-    만들면 새 행이 아니라 충돌이 되어야, 같은 문서가 둘로 갈라져 라우터가 한 정책을 두 번
-    인용하는 일이 없습니다.
+    **안정적으로** 만드는 것이 요점입니다 — 같은 제목으로 다시 만들면 새 행이 아니라 충돌이
+    되어야, 같은 문서가 둘로 갈라져 라우터가 한 정책을 두 번 인용하는 일이 없습니다.
     """
     import hashlib
 
@@ -103,22 +95,17 @@ async def policy_docs_create(
     if mode not in _MODE_KEYS:
         mode = "knowledge"
 
-    page_id = _page_id_for_pasted(label)
+    key = _doc_key(label)
     with SessionLocal() as session:
         if (
-            session.query(PolicySource)
-            .filter(PolicySource.notion_page_id == page_id)
-            .one_or_none()
+            session.query(PolicySource).filter(PolicySource.doc_key == key).one_or_none()
             is not None
         ):
             raise HTTPException(status_code=400, detail="같은 이름의 문서가 이미 있습니다")
         source = PolicySource(
             label=label,
             title=label,
-            # 노션에서 오지 않았습니다. 빈 URL 이 곧 "동기화 대상 아님" 이라 업로드가
-            # 이 문서를 건드리지 않습니다.
-            notion_url="",
-            notion_page_id=page_id,
+            doc_key=key,
             mode=mode,
             body=body,
             edited_at=datetime.now(timezone.utc).replace(tzinfo=None),
@@ -195,20 +182,3 @@ async def policy_docs_toggle(source_id: int):
             source.status = "paused" if source.status == "active" else "active"
             session.commit()
     return RedirectResponse("/policy-docs", status_code=303)
-
-
-@router.post("/policy-docs/sync")
-async def policy_docs_sync():
-    """Read every registered page now, instead of waiting for the poller tick."""
-    import asyncio
-
-    from ...agents.policy_sync import sync_policy_sources
-
-    try:
-        result = await asyncio.to_thread(sync_policy_sources)
-    except Exception as exc:
-        logger.warning("Manual policy sync failed.", exc_info=True)
-        return RedirectResponse(f"/policy-docs?error={str(exc)[:150]}", status_code=303)
-    return RedirectResponse(
-        f"/policy-docs?synced={result['synced']}&failed={result['failed']}", status_code=303
-    )

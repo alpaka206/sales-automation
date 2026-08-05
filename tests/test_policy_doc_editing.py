@@ -1,8 +1,8 @@
-"""문서를 넣는 세 번째와 네 번째 길: 붙여넣기, 그리고 고치기.
+"""문서가 들어오는 유일한 길: 콘솔에 붙여넣기, 그리고 고치기.
 
-zip 드롭이 주된 경로인 이유는 문서를 만든 사람과 콘솔에 등록하는 사람이 같아야 하는 구조를
-피하기 위해서입니다(docs/정책문서-동기화-설계.md §3). 그건 그대로 두고, "한 문서만 고치겠다"
-와 "zip 만들기 귀찮다" 를 위해 두 길을 더 열었습니다.
+노션에서 자동으로 가져오는 경로는 전부 없앴습니다 — 통합 토큰 발급 불가, 쿠키는 403,
+Export zip 은 부모 페이지 한 장만 실어 옵니다(docs/정책문서-동기화-설계.md). 그래서 이
+콘솔이 정책 문서의 **원본**이고, 위쪽에 아무것도 없습니다.
 
 여기서 확인하는 것은 하나입니다: **콘솔에서 바꾼 것이 초안이 읽는 사본까지 간다.** 안 가면
 화면에는 새 내용이 보이는데 회신은 옛 내용으로 나가고, 그건 눈치챌 방법이 없습니다.
@@ -10,6 +10,7 @@ zip 드롭이 주된 경로인 이유는 문서를 만든 사람과 콘솔에 �
 
 from __future__ import annotations
 
+import pathlib
 from unittest.mock import patch
 
 import pytest
@@ -76,41 +77,21 @@ def test_editing_the_body_reaches_the_copy_the_draft_reads(policy_db):
         assert session.query(KnowledgeDocument).one().body == "새 내용"
 
 
-def test_a_console_edit_is_stamped_so_the_screen_can_say_it_will_be_overwritten(policy_db):
-    """노션에서 온 문서를 여기서 고치면 그 문서를 담은 zip 을 다시 올릴 때 되돌아갑니다.
-    덮어쓰는 것이 문제가 아니라 조용히 덮어쓰는 것이 문제라, 시각을 남깁니다."""
-    with policy_db() as session:
-        session.add(
-            PolicySource(
-                label="B2B 리드 대응 정책",
-                notion_url="https://www.notion.so/abc",
-                notion_page_id="a" * 32,
-                mode="knowledge",
-                body="노션에서 온 내용",
-            )
-        )
-        session.commit()
-        source_id = session.query(PolicySource).one().id
-
+def test_an_edit_is_stamped_because_it_is_the_only_date_this_document_has(policy_db):
+    """위에서 받아 오는 것이 없으므로 "마지막 동기화" 라는 값이 존재하지 않습니다. 화면이
+    보여줄 수 있는 유일한 날짜가 마지막으로 손댄 시각입니다."""
     with TestClient(app) as client:
-        assert client.put(f"/policy-docs/{source_id}", data={"body": "손으로 고친 내용"}).status_code == 200
+        source_id = _create(client, body="처음 내용")
+        assert client.put(f"/policy-docs/{source_id}", data={"body": "고친 내용"}).status_code == 200
 
     with policy_db() as session:
         assert session.get(PolicySource, source_id).edited_at is not None
 
 
-def test_a_pasted_document_is_not_touched_by_the_next_upload(policy_db):
-    """빈 notion_url 이 곧 "동기화 대상 아님" 입니다. 업로드가 이 문서를 건드리면
-    붙여넣은 내용이 파일에 없다는 이유로 사라집니다."""
-    from src.agents.policy_sync import sync_policy_sources
+def test_nothing_can_overwrite_a_document_behind_the_operators_back(policy_db):
+    """이 콘솔이 원본입니다. 노션에서 읽어 오는 경로가 하나라도 남아 있으면 "여기서 고쳤는데
+    다음 동기화가 되돌려 놓는" 상태가 다시 생깁니다."""
+    from src.agents import policy_sync
 
-    with TestClient(app) as client:
-        _create(client, body="여기서만 관리하는 문서")
-
-    def fetcher(_url):  # pragma: no cover - 호출되면 그 자체가 실패입니다
-        raise AssertionError("붙여넣은 문서를 읽으러 가면 안 됩니다")
-
-    result = sync_policy_sources(fetcher=fetcher)
-    assert result["skipped"] == 1
-    with policy_db() as session:
-        assert session.query(PolicySource).one().body == "여기서만 관리하는 문서"
+    assert not hasattr(policy_sync, "sync_policy_sources")
+    assert not pathlib.Path("src/integrations/notion.py").exists()

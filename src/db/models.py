@@ -330,12 +330,12 @@ class KnowledgeDocumentRevision(Base):
 
 
 class PolicySource(Base):
-    """A Notion page this console treats as policy, plus the last copy it read.
+    """정책·지식 문서 한 편. **원본이 여기 있습니다.**
 
-    The registry an operator maintains on 정책 문서: a label ("Business 플랜 정책") and a
-    Notion URL. Policy is owned in Notion, so the console never edits ``body`` — the sync
-    overwrites it from the page. Keeping the copy here is what makes a Notion outage a
-    non-event: drafting reads this row, never the network.
+    한동안 이 행은 노션 페이지를 가리키는 등록부였습니다. 노션에서 자동으로 받아 오는
+    경로가 전부 막혀(설계 문서 참고) 사람이 본문을 붙여넣게 되었으므로, 이제 이 행이
+    원본이고 위쪽에 아무것도 없습니다 — ``notion_url`` / ``last_synced_at`` /
+    ``last_error`` 는 0050 에서 지웠습니다.
 
     ``mode`` decides how the copy is used:
       ``rules``     — always applied, concatenated into the LLM system instruction
@@ -348,9 +348,10 @@ class PolicySource(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     label: Mapped[str] = mapped_column(String, nullable=False)
-    notion_url: Mapped[str] = mapped_column(Text, nullable=False)
-    # 32-hex, derived from the URL on save so a re-typed URL cannot create a duplicate.
-    notion_page_id: Mapped[str] = mapped_column(String, unique=True, nullable=False, index=True)
+    # 이 문서의 신원. 제목에서 만든 32-hex 해시(같은 제목을 두 번 만들면 새 행이 아니라
+    # 충돌이 되도록)이거나, 예전 파일 시드가 남긴 ``file:01_tone.md`` 입니다. 제목을 바꿔도
+    # 지식 문서 사본이 따라오도록 슬러그는 이 값에서 나옵니다.
+    doc_key: Mapped[str] = mapped_column(String, unique=True, nullable=False, index=True)
     mode: Mapped[str] = mapped_column(String, nullable=False, default="knowledge")
     # Ordering for mode='rules': the system instruction is read top to bottom.
     order_index: Mapped[int] = mapped_column(Integer, nullable=False, default=100)
@@ -362,10 +363,6 @@ class PolicySource(Base):
     body: Mapped[str | None] = mapped_column(Text, nullable=True)
     title: Mapped[str | None] = mapped_column(String, nullable=True)
     summary: Mapped[str | None] = mapped_column(Text, nullable=True)
-    last_synced_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    # Last failure, kept alongside the good copy so the screen can show "동기화 실패,
-    # 지난 사본 사용 중" instead of either hiding the problem or dropping the policy.
-    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=_utcnow, onupdate=_utcnow, nullable=False

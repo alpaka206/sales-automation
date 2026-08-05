@@ -19,7 +19,6 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
 from ...db.models import Contact, Conversation, CustomerProfile
-from ._shared import external_url
 
 router = APIRouter(tags=["ui-api"])
 
@@ -555,18 +554,11 @@ async def ui_policy_docs():
                     "id": row.id,
                     "label": row.label,
                     "title": row.title,
-                    # The screen renders this straight into an href, so a stored
-                    # "javascript:" would execute in the console. Sanitised here, once,
-                    # rather than in the component that happens to link it.
-                    "notion_url": external_url(row.notion_url),
                     "mode": row.mode,
                     "status": row.status,
                     "body": row.body,
                     "chars": len(row.body or ""),
                     "edited_at": row.edited_at,
-                    "last_synced_at": row.last_synced_at,
-                    "last_error": row.last_error,
-                    "from_file": not (row.notion_url or "").strip(),
                 }
                 for row in rows
             ],

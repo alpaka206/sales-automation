@@ -8,9 +8,8 @@ import { kst } from "../lib/format";
 import { Loading } from "../ui/Loading";
 
 type Row = {
-  id: number; label: string; title: string | null; notion_url: string; mode: string;
+  id: number; label: string; title: string | null; mode: string;
   status: string; body: string | null; chars: number; edited_at: string | null;
-  last_synced_at: string | null; last_error: string | null; from_file: boolean;
 };
 type Data = { modes: { key: string; label: string }[]; rows: Row[] };
 
@@ -35,22 +34,16 @@ const columns = (act: (path: string) => void): Column<Row>[] => [
     cell: (row) => (
       <>
         <strong>{row.title || row.label}</strong>
-        {row.from_file && <div className="t-xs t-subtle">콘솔에서 넣은 문서</div>}
-        {row.last_error && (
-          <div className="t-xs" style={{ color: "var(--danger)" }}>
-            동기화 실패 — 이전 사본을 사용 중입니다
-          </div>
-        )}
         {row.status !== "active" && (
           <div className="t-xs t-subtle">중지됨 — 답변에 사용되지 않습니다</div>
         )}
       </>
     ),
   },
-  // 동기화가 아니라 수정입니다 — 노션에서 자동으로 받아 오는 경로가 없어졌으므로, 이
-  // 문서가 마지막으로 손을 탄 시각이 유일하게 말이 되는 날짜입니다.
+  // 동기화가 아니라 수정입니다 — 위에서 받아 오는 것이 없으므로 이 문서가 마지막으로
+  // 손을 탄 시각이 유일하게 말이 되는 날짜입니다.
   { label: "수정", width: "18%", className: "tnum td-subtle",
-    cell: (row) => kst(row.edited_at || row.last_synced_at || "") || "—" },
+    cell: (row) => kst(row.edited_at || "") || "—" },
   {
     width: "12%",
     // Pausing keeps the registration and the synced copy; only 삭제 forgets the link.
@@ -191,20 +184,11 @@ export function PolicyDocs({ onBack }: { onBack?: () => void }) {
           <div>
             <h1 className="page-title">{doc.title || doc.label}</h1>
             <p className="page-sub">
-              {doc.edited_at
-                ? `수정 ${kst(doc.edited_at)}`
-                : doc.last_synced_at
-                  ? `마지막 동기화 ${kst(doc.last_synced_at)}`
-                  : "본문 없음"}
+              {doc.edited_at ? `수정 ${kst(doc.edited_at)}` : "본문 없음"}
               {" · "}{doc.chars.toLocaleString()}자
             </p>
           </div>
           <div className="row" style={{ gap: 8 }}>
-            {doc.notion_url && (
-              <a className="btn btn--subtle" href={doc.notion_url} target="_blank" rel="noopener noreferrer">
-                노션에서 열기
-              </a>
-            )}
             {!editing && (
               <button type="button" className="btn btn--subtle" onClick={() => setEditing(true)}>
                 <Icon name="edit" size={15} /> 수정
@@ -212,15 +196,6 @@ export function PolicyDocs({ onBack }: { onBack?: () => void }) {
             )}
           </div>
         </div>
-
-        {doc.last_error && (
-          <div className="banner banner--warn mb-gap">
-            <div>
-              <div className="banner__title">마지막 동기화 실패 — 이전 사본을 사용 중입니다</div>
-              <div className="banner__body">{doc.last_error}</div>
-            </div>
-          </div>
-        )}
 
         {editing ? (
           <EditDoc doc={doc} onDone={() => { setEditing(false); refresh(); }} />
@@ -246,9 +221,8 @@ export function PolicyDocs({ onBack }: { onBack?: () => void }) {
       </div>
       <div className="page-header">
         <div><h1 className="page-title">정책 문서</h1></div>
-        {/* 문서가 들어오는 유일한 길입니다. 노션 Export zip 드롭이 있었는데, 그 내보내기가
-            실어 오는 것이 부모 페이지 하나뿐이라 없앴습니다 — 표 안에서 링크로 가리키는
-            문서들은 zip 에 들어오지 않습니다. */}
+        {/* 문서가 들어오는 유일한 길입니다. 노션에서 받아 오는 경로는 전부 없앴습니다 —
+            토큰을 못 만들고, 쿠키는 403 이고, Export zip 은 부모 한 장만 실어 옵니다. */}
         <NewDoc modes={data.modes} onDone={refresh} />
       </div>
 

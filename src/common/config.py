@@ -191,17 +191,9 @@ class Settings(BaseSettings):
     # button: the app authenticates straight from env, so a fresh deploy or a reset
     # database needs no click. Treat it like a password.
     GOOGLE_SHEETS_OAUTH_REFRESH_TOKEN: str = ""
-    # ----- Notion (policy documents) -----
-    # Internal integration token, READ scope only. Policy (plans, credits, CS rules) is
-    # owned in Notion by the people who write it; this console syncs a copy so an edit
-    # there reaches the drafting prompt without a deploy. Empty = the sync is skipped and
-    # the last synced copy keeps being used.
-    # Each page must also be shared with the integration in Notion (page ··· → 연결).
-    NOTION_TOKEN: str = ""
-
-    # NOTION_TOKEN_V2 / NOTION_ACTIVE_USER_ID / NOTION_FILE_TOKEN 은 사라졌습니다. 브라우저
-    # 쿠키로 내보내기를 만들어 받아 오던 경로인데, 그 내보내기가 실어 오는 것이 부모 페이지
-    # 하나뿐이라 경로 자체를 없앴습니다 — docs/정책문서-동기화-설계.md §2⑤.
+    # 노션 설정은 전부 없어졌습니다. 정책·지식 문서는 콘솔에 직접 붙여넣습니다 —
+    # 자동으로 받아 올 방법이 없어서이고, 무엇을 시도했는지는
+    # docs/정책문서-동기화-설계.md 에 있습니다.
 
     # Display only — which account that refresh token belongs to, shown on /pipeline.
     GOOGLE_SHEETS_ACCOUNT_EMAIL: str = ""

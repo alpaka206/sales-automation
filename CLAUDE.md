@@ -18,21 +18,22 @@ PERSO Inbound is a FastAPI workflow for inbound inquiry handling and customer op
 - Personal email domains are never grouped as one company.
 - Existing conversation progress rows are append-only.
 
-- **정책·지식 문서는 노션에서 사람이 복사해 콘솔에 붙여넣는다. 자동 경로는 없다.**
-  `이메일 템플릿 → 정책 문서 → 직접 추가`(제목+본문), 그리고 어떤 문서든 `수정` 가능.
-  네 가지를 시도했고 전부 막혔다: 통합 토큰 발급 불가(`NOTION_TOKEN`은 영원히 비어 있다),
-  쿠키 경로는 `file.notion.com`에서 403, 로컬 스크립트는 사내망이 5432/6543을 막아 DB에
-  못 닿고, **Export zip은 부모 페이지 하나만 실어 온다** — 정책 페이지가 가리키는 문서
-  여덟 개는 자식이 아니라 링크라서 `Include subpages`로도 안 따라온다(2026-08-05 실측).
-  그래서 zip 드롭과 그걸 먹이던 장치(`notion_export.py`, `notion_session.py`,
-  `policy_push.py`, `api/policy_api.py`, `scripts/sync_notion_local.py`)는 전부 지웠다.
-  **"API로/zip으로 하면 될 텐데"로 바꾸기 전에 `docs/정책문서-동기화-설계.md` §5의 확인
-  절차를 돌려라** — 조건이 바뀌었으면 되돌리는 게 맞고, 안 바뀌었으면 그 문서에 왜 안
-  되는지가 실측과 함께 적혀 있다.
-  - 남겨 둔 자동 경로는 `notion.fetch_page` 하나뿐이다. 토큰이 생기면 환경변수만 넣으면
-    되고 코드 변경이 없다. `notion_url`이 빈 행(=붙여넣은 문서)은 동기화가 건너뛴다.
+- **정책·지식 문서의 원본은 이 콘솔이다. 노션에서 받아오는 코드는 하나도 없다.**
+  `이메일 템플릿 → 정책 문서 → 직접 추가`(제목+본문), 어떤 문서든 `수정` 가능. 다섯 가지를
+  시도했고 전부 막혔다 — 통합 토큰 발급 불가, 쿠키는 `file.notion.com`에서 403, 로컬
+  스크립트는 사내망이 5432/6543을 막아 DB에 못 닿고, URL만 등록하면 본문이 영원히 비고,
+  **Export zip은 부모 페이지 하나만 실어 온다**(정책 페이지가 가리키는 문서 여덟 개는
+  자식이 아니라 링크라서 `Include subpages`로도 안 따라온다 — 2026-08-05 실측).
+  그래서 `notion.py` · `notion_export.py` · `notion_session.py` · `policy_push.py` ·
+  `api/policy_api.py` · `scripts/sync_notion_local.py` · `sync_policy_sources` · `NOTION_*`
+  설정을 전부 지웠고, `policy_sources`에서 `notion_url`/`last_synced_at`/`last_error`도
+  뺐다(0050). 답할 수 없는 질문을 스키마에 남기면 다음 사람이 답을 찾으러 간다.
+  **되살리기 전에 `docs/정책문서-동기화-설계.md` §5를 돌려라** — 조건이 바뀌었으면 되돌리는
+  게 맞고, 안 바뀌었으면 그 문서에 왜 안 되는지가 실측과 함께 적혀 있다.
   - 본문 없는 등록은 만들 수 없다 — 문서를 만드는 화면이 본문을 같이 받는다. URL만 등록해
     두던 폼이 `body`가 영원히 빈 행을 만들었고, zip도 결과적으로 같은 일을 했다.
+  - 콘솔 편집은 `refresh_knowledge_copy`로 라우터가 읽는 사본까지 즉시 간다. 안 그러면
+    화면엔 새 내용, 회신은 옛 내용이 되고 눈치챌 방법이 없다.
 
 ## Stack
 
