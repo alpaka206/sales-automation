@@ -41,7 +41,7 @@ _CI = {
 }
 
 
-@patch("src.agents.inbound.select_relevant_docs", return_value="")
+@patch("src.agents.inbound.select_relevant_docs", return_value=("", None))
 def test_draft_is_forced_to_korean(_docs):
     # Model drafted in English → ensure_korean translates it; stored language = 'ko'.
     agent = _agent_with_draft(body="Hello, here are our plans.")
@@ -54,7 +54,7 @@ def test_draft_is_forced_to_korean(_docs):
     assert draft.body == "한국어로 번역된 본문"
 
 
-@patch("src.agents.inbound.select_relevant_docs", return_value="")
+@patch("src.agents.inbound.select_relevant_docs", return_value=("", None))
 def test_subject_is_re_customer_subject(_docs):
     agent = _agent_with_draft(body="안녕하세요, 플랜 안내드립니다.", lang="ko")
     cls = MagicMock()
@@ -65,7 +65,7 @@ def test_subject_is_re_customer_subject(_docs):
     assert draft.subject == "RE: Pricing for dubbing"
 
 
-@patch("src.agents.inbound.select_relevant_docs", return_value="")
+@patch("src.agents.inbound.select_relevant_docs", return_value=("", None))
 def test_subject_does_not_stack_re(_docs):
     ci = dict(_CI, subject="Re: Pricing for dubbing")
     agent = _agent_with_draft(body="안녕하세요.", lang="ko")
@@ -77,7 +77,7 @@ def test_subject_does_not_stack_re(_docs):
     assert draft.subject == "RE: Pricing for dubbing"
 
 
-@patch("src.agents.inbound.select_relevant_docs", return_value="")
+@patch("src.agents.inbound.select_relevant_docs", return_value=("", None))
 def test_first_reply_strips_prices(_docs):
     body = "플랜을 안내드립니다.\n- Creator 플랜 $29/월\n미팅에서 자세히 안내드릴게요."
     agent = _agent_with_draft(body=body, lang="ko")

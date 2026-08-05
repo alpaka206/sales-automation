@@ -10,7 +10,7 @@ import { Loading } from "../ui/Loading";
 type Row = {
   id: number; label: string; title: string | null; mode: string;
   body: string | null; chars: number;
-  effective_on: string | null; edited_at: string | null;
+  subject: string; effective_on: string | null; edited_at: string | null;
 };
 type Data = { modes: { key: string; label: string }[]; rows: Row[] };
 
@@ -59,6 +59,7 @@ function NewDoc({ modes, onDone }: { modes: { key: string; label: string }[]; on
   const [body, setBody] = useState("");
   const [mode, setMode] = useState("knowledge");
   const [effectiveOn, setEffectiveOn] = useState("");
+  const [subject, setSubject] = useState("");
   const [note, setNote] = useState<string | null>(null);
 
   if (!open) {
@@ -72,7 +73,9 @@ function NewDoc({ modes, onDone }: { modes: { key: string; label: string }[]; on
   async function save() {
     setNote("저장 중…");
     try {
-      await saveDoc("/policy-docs", "POST", { label, body, mode, effective_on: effectiveOn });
+      await saveDoc("/policy-docs", "POST", {
+        label, body, mode, effective_on: effectiveOn, subject,
+      });
       setOpen(false);
       setLabel("");
       setBody("");
@@ -103,6 +106,16 @@ function NewDoc({ modes, onDone }: { modes: { key: string; label: string }[]; on
         </div>
       </div>
 
+      {/* 이 문서를 근거로 회신할 때의 메일 제목. 본문 안에 "Subject: ..." 로 적으면 모델이
+          그 줄을 본문에 옮겨 적는 일이 생겨서 칸으로 뺐습니다. */}
+      <label className="field-label" htmlFor="pd-subject">
+        메일 제목 <span className="t-subtle">(비우면 RE: 고객이 쓴 제목)</span>
+      </label>
+      <input className="input" id="pd-subject" value={subject}
+             onChange={(e) => setSubject(e.target.value)}
+             placeholder="예: Next Steps on Your custom Perso Dubbing plan"
+             style={{ marginBottom: 12 }} />
+
       <label className="field-label" htmlFor="pd-body">본문</label>
       <textarea className="draft-textarea" id="pd-body" value={body}
                 onChange={(e) => setBody(e.target.value)} style={{ minHeight: 260 }}
@@ -123,12 +136,15 @@ function NewDoc({ modes, onDone }: { modes: { key: string; label: string }[]; on
 function EditDoc({ doc, onDone }: { doc: Row; onDone: () => void }) {
   const [body, setBody] = useState(doc.body || "");
   const [effectiveOn, setEffectiveOn] = useState(doc.effective_on || "");
+  const [subject, setSubject] = useState(doc.subject || "");
   const [note, setNote] = useState<string | null>(null);
 
   async function save() {
     setNote("저장 중…");
     try {
-      await saveDoc(`/policy-docs/${doc.id}`, "PUT", { body, effective_on: effectiveOn });
+      await saveDoc(`/policy-docs/${doc.id}`, "PUT", {
+        body, effective_on: effectiveOn, subject,
+      });
       setNote(null);
       onDone();
     } catch (error) {
@@ -139,6 +155,13 @@ function EditDoc({ doc, onDone }: { doc: Row; onDone: () => void }) {
   return (
     <>
       <div className="card">
+        <label className="field-label" htmlFor="pd-subject-edit">
+          메일 제목 <span className="t-subtle">(비우면 RE: 고객이 쓴 제목)</span>
+        </label>
+        <input className="input" id="pd-subject-edit" value={subject}
+               onChange={(e) => setSubject(e.target.value)}
+               placeholder="예: Next Steps on Your custom Perso Dubbing plan"
+               style={{ marginBottom: 12 }} />
         <label className="field-label" htmlFor="pd-eff-edit">기준일 <span className="t-subtle">(선택 · 비우면 저장한 날짜)</span></label>
         <input className="input" id="pd-eff-edit" type="date" value={effectiveOn}
                onChange={(e) => setEffectiveOn(e.target.value)} style={{ marginBottom: 12, maxWidth: 220 }} />

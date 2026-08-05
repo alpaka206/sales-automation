@@ -60,7 +60,7 @@ _EVENT = {
 }
 
 
-@patch("src.agents.inbound.select_relevant_docs", return_value="")
+@patch("src.agents.inbound.select_relevant_docs", return_value=("", None))
 @patch("src.integrations.senders.send", new_callable=AsyncMock)
 def test_auto_ack_sent_on_first_inbound(
     mock_send, _docs, db_session, db_session_factory, monkeypatch
@@ -91,7 +91,7 @@ def test_auto_ack_sent_on_first_inbound(
     assert detailed.status == "pending_approval"
 
 
-@patch("src.agents.inbound.select_relevant_docs", return_value="")
+@patch("src.agents.inbound.select_relevant_docs", return_value=("", None))
 @patch("src.integrations.senders.send", new_callable=AsyncMock)
 def test_auto_ack_not_duplicated(
     mock_send, _docs, db_session, db_session_factory, monkeypatch
@@ -141,7 +141,7 @@ def test_database_rejects_duplicate_auto_ack(db_session):
     db_session.rollback()
 
 
-@patch("src.agents.inbound.select_relevant_docs", return_value="")
+@patch("src.agents.inbound.select_relevant_docs", return_value=("", None))
 @patch("src.integrations.senders.send", new_callable=AsyncMock)
 def test_auto_ack_disabled(mock_send, _docs, db_session, monkeypatch):
     monkeypatch.setattr(settings, "INBOUND_AUTO_ACK_ENABLED", False)
@@ -153,7 +153,7 @@ def test_auto_ack_disabled(mock_send, _docs, db_session, monkeypatch):
     mock_send.assert_not_awaited()
 
 
-@patch("src.agents.inbound.select_relevant_docs", return_value="")
+@patch("src.agents.inbound.select_relevant_docs", return_value=("", None))
 def test_auto_ack_is_queued_before_sheet_write(_docs, db_session_factory, monkeypatch):
     monkeypatch.setattr(settings, "INBOUND_AUTO_ACK_ENABLED", True)
     order: list[str] = []
@@ -172,7 +172,7 @@ def test_auto_ack_is_queued_before_sheet_write(_docs, db_session_factory, monkey
 
 
 @patch("src.agents.inbound.notify_approval_once")
-@patch("src.agents.inbound.select_relevant_docs", return_value="")
+@patch("src.agents.inbound.select_relevant_docs", return_value=("", None))
 def test_detailed_reply_is_never_auto_approved(
     _docs, mock_notify, db_session, db_session_factory, monkeypatch
 ):
@@ -241,11 +241,12 @@ def test_the_acknowledgement_uses_the_fixed_subject_when_one_exists_for_that_lan
     from unittest.mock import patch
 
     monkeypatch.setattr(settings, "INBOUND_AUTO_ACK_ENABLED", True)
-    rows = {
-        "auto_ack": "안녕하세요 {name}님",
-        "auto_ack_subject": "[Perso Dubbing] B2B 문의 접수가 완료되었습니다.",
-    }
-    with patch("src.db.email_templates.get_email_template", side_effect=lambda k, **kw: rows.get(k)):
+    subjects = {"auto_ack": "[Perso Dubbing] B2B 문의 접수가 완료되었습니다."}
+    with (
+        patch("src.db.email_templates.get_email_template",
+              side_effect=lambda k, **kw: {"auto_ack": "안녕하세요 {name}님"}.get(k)),
+        patch("src.db.email_templates.get_email_subject", side_effect=subjects.get),
+    ):
         from src.agents.inbound import InboundAgent
 
         agent = InboundAgent(llm=MagicMock(), hubspot=None)

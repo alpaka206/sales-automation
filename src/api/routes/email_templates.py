@@ -106,6 +106,7 @@ async def email_templates_update(
     name: str = Form(""),
     language: str = Form("all"),
     body: str = Form(""),
+    subject: str = Form(""),
 ):
     """Update an email template, snapshotting the prior state into history.
 
@@ -131,6 +132,8 @@ async def email_templates_update(
         tpl.status = "active"
         tpl.version = (tpl.version or 1) + 1
         tpl.body = body
+        # 빈 문자열은 "제목 없음" 입니다 — 접수확인이 RE: 고객 제목으로 돌아갑니다.
+        tpl.subject = subject.strip() or None
         session.commit()
     # The version still increments — it orders the revision history — it is just not a
     # number anyone reads off a screen.

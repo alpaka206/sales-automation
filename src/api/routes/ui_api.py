@@ -509,6 +509,7 @@ def ui_email_templates():
                 # template in different languages.
                 "base_key": _base_key(row.key, all_keys),
                 "body": row.body or "",
+                "subject": row.subject or "",
                 "chars": len(row.body or ""),
                 # Which signature a new draft starts with. A row, not a literal in
                 # inbound.py — and the screen is where it moves.
@@ -576,6 +577,7 @@ def ui_policy_docs():
                     "mode": row.mode,
                     "body": row.body,
                     "chars": len(row.body or ""),
+                    "subject": row.subject or "",
                     "effective_on": row.effective_on,
                     "edited_at": row.edited_at,
                 }

@@ -11,7 +11,8 @@ import { PolicyDocs } from "./PolicyDocs";
 type Kind = { key: string; label: string; count: number; can_create: boolean; read_only: boolean };
 type Item = {
   id: number; key: string; base_key: string; name: string; language: string;
-  updated_at: string; kind: string; body: string; chars: number; is_default: boolean;
+  updated_at: string; kind: string; body: string; subject: string;
+  chars: number; is_default: boolean;
 };
 // 한 줄 = 한 템플릿. 언어가 여럿이면 그 안에서 고릅니다.
 type Group = { base: string; rows: Item[] };
@@ -34,10 +35,11 @@ const ONE_LINE_FIELDS: Record<string, { label: string; type: string; placeholder
   // the token then stays visible in the draft so the operator sees it before 발송.
   sender_name: { label: "담당자 이름 (한국어)", type: "text", placeholder: "예: 배운태" },
   sender_name_en: { label: "담당자 이름 (영문)", type: "text", placeholder: "예: Untae Bae" },
-  // 비우면 "RE: 고객이 쓴 제목" 으로 돌아갑니다 — 그게 원래 스레드에 붙는 쪽입니다.
-  auto_ack_subject: { label: "메일 제목", type: "text", placeholder: "비우면 RE: 고객 제목" },
-  auto_ack_subject_en: { label: "메일 제목", type: "text", placeholder: "비우면 RE: 고객 제목" },
 };
+
+// 제목이 있는 메일. 서명·링크·담당자 이름에는 제목이라는 것이 없고, 답변 메일 형식은
+// 뼈대일 뿐 메일이 아닙니다.
+const HAS_SUBJECT = new Set(["auto_ack", "auto_ack_en"]);
 
 function Editor({ id, data, siblings, onOpen, onDone }: {
   id: number | "new";
@@ -55,6 +57,7 @@ function Editor({ id, data, siblings, onOpen, onDone }: {
   const [name, setName] = useState("");
   const [language, setLanguage] = useState("all");
   const [body, setBody] = useState("");
+  const [subject, setSubject] = useState("");
   const [note, setNote] = useState("");
   // 미리보기는 **누른 순간의 본문**입니다. srcDoc 을 body 로 직접 묶어 두면 글자를 칠 때마다
   // iframe 이 문서를 통째로 다시 싣습니다 — 타자마다 리로드 한 번. 스냅샷으로 끊습니다.
@@ -66,6 +69,7 @@ function Editor({ id, data, siblings, onOpen, onDone }: {
     setName(data.name);
     setLanguage(data.language);
     setBody(data.body);
+    setSubject(data.subject);
   }
 
   async function save() {
@@ -83,7 +87,7 @@ function Editor({ id, data, siblings, onOpen, onDone }: {
           method: "PUT",
           credentials: "same-origin",
           headers: { "Content-Type": "application/x-www-form-urlencoded" },
-          body: new URLSearchParams({ name, language, body: value }),
+          body: new URLSearchParams({ name, language, body: value, subject }),
         });
         if (!response.ok) throw new Error(String(response.status));
       }
@@ -205,6 +209,17 @@ function Editor({ id, data, siblings, onOpen, onDone }: {
               </div>
             )}
 
+            {/* 제목과 본문은 한 메일의 두 부분입니다. 따로 두면 한 메일을 고치는 데 두
+                화면을 오가게 됩니다. */}
+            {data && HAS_SUBJECT.has(data.key) && (
+              <>
+                <label className="field-label" htmlFor="et-subject">메일 제목</label>
+                <input className="input" id="et-subject" value={subject}
+                       onChange={(e) => setSubject(e.target.value)}
+                       placeholder="비우면 RE: 고객이 쓴 제목"
+                       style={{ marginBottom: 14 }} />
+              </>
+            )}
             <label className="field-label" htmlFor="et-body">본문</label>
             <textarea className="draft-textarea" id="et-body" value={body}
                       onChange={(e) => setBody(e.target.value)} style={{ minHeight: 240 }} />

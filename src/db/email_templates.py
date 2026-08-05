@@ -113,6 +113,26 @@ def set_default_signature(key: str) -> None:
         session.commit()
 
 
+def get_email_subject(key: str) -> str | None:
+    """That template's mail subject, or None.
+
+    Its own lookup rather than a second return value from ``get_email_template``: every
+    other caller wants the body and nothing else, and the acknowledgement is the only
+    template that is a whole mail.
+    """
+    try:
+        with SessionLocal() as session:
+            row = (
+                session.query(EmailTemplate)
+                .filter(EmailTemplate.key == key, EmailTemplate.status == "active")
+                .first()
+            )
+            return (row.subject or "").strip() or None if row else None
+    except Exception:
+        logger.warning("Subject lookup failed for %s", key, exc_info=True)
+        return None
+
+
 def get_email_template(key: str, language: str | None = None) -> str | None:
     """Return the active template body for ``key``, or None if not found.
 

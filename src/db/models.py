@@ -356,6 +356,9 @@ class PolicySource(Base):
     # Ordering for mode='rules': the system instruction is read top to bottom.
     order_index: Mapped[int] = mapped_column(Integer, nullable=False, default=100)
     status: Mapped[str] = mapped_column(String, nullable=False, default="active")
+    # 이 문서를 근거로 회신할 때의 메일 제목. 비면 RE: 고객이 쓴 제목입니다. 본문 안에
+    # "Subject: ..." 로 적으면 모델이 그 줄을 본문에 옮겨 적는 일이 생겨서 열로 뺐습니다.
+    subject: Mapped[str | None] = mapped_column(Text, nullable=True)
     # 이 문서가 언제 기준인가. 적으면 그 값, 안 적으면 edited_at 이 대신합니다 — 오늘
     # 붙여넣은 넉 달 된 정책이 "최신"으로 보이지 않게 하는 것이 요점입니다. "YYYY-MM-DD".
     effective_on: Mapped[str | None] = mapped_column(String(10), nullable=True)
@@ -385,6 +388,9 @@ class EmailTemplate(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     key: Mapped[str] = mapped_column(String, unique=True, nullable=False, index=True)
+    # 메일 제목. 제목이 있는 것은 접수확인뿐입니다 — 서명·링크·담당자 이름에는 제목이라는
+    # 것이 없고, 답변 메일 형식은 뼈대일 뿐 메일이 아닙니다. 비면 RE: 고객 제목입니다.
+    subject: Mapped[str | None] = mapped_column(Text, nullable=True)
     name: Mapped[str] = mapped_column(String, nullable=False)
     language: Mapped[str] = mapped_column(String, nullable=False, default="all")
     channel: Mapped[str] = mapped_column(String, nullable=False, default="email")

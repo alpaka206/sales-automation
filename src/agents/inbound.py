@@ -798,7 +798,7 @@ class InboundAgent:
         """
         from ..llm.reply import ensure_korean
 
-        knowledge_docs = select_relevant_docs(
+        knowledge_docs, doc_subject = select_relevant_docs(
             inquiry=contact_info["last_message"],
             category=classification.category,
             scope="inbound",
@@ -806,6 +806,8 @@ class InboundAgent:
             # 한국어 문의에는 KR 문서, 그 외에는 ENG 문서. 기본 메일 템플릿이 두 벌이라
             # 언어를 안 가리면 두 벌이 같이 붙습니다.
             language=inquiry_lang,
+            # 그 문서가 메일 제목을 들고 있으면 같이 받습니다 — 아래 CODE GUARD 3 에서 씁니다.
+            with_subject=True,
         )
         first_reply = self._is_first_reply(conv_id)
         draft = self.llm.complete(
@@ -859,9 +861,14 @@ class InboundAgent:
                         f"첫 회신 금액 표기 {len(removed)}건 자동 제거됨 (규칙: 첫 메일 금액 금지).",
                     )
 
-        # CODE GUARD 3 — subject is "RE: <customer subject>" (or a localized generic
-        # when the inbound had none), with no stacked RE:. Never the raw model subject.
-        draft.subject = reply_subject(
+        # CODE GUARD 3 — the subject is decided HERE, never taken from the model: it is
+        # exactly the kind of short line a model invents, and then RE: stacks or the
+        # language flips.
+        #
+        # 근거로 쓴 정책 문서가 메일 제목을 들고 있으면 그것을 씁니다(견적·소개처럼 제목이
+        # 정해진 회신). 없으면 예전대로 "RE: <고객이 쓴 제목>" 이고, 그쪽이 고객 메일함에서
+        # 원래 스레드에 붙습니다. 어느 쪽이든 검토 화면에서 고칠 수 있습니다.
+        draft.subject = doc_subject or reply_subject(
             contact_info.get("subject"), target_code=contact_info.get("inquiry_language")
         )
         return draft
@@ -1149,7 +1156,7 @@ class InboundAgent:
         if not settings.INBOUND_AUTO_ACK_ENABLED:
             return
         try:
-            from ..db.email_templates import get_email_template
+            from ..db.email_templates import get_email_subject, get_email_template
             from ..llm.translate import translate_to
 
             name = (contact_info.get("full_name") or "").strip() or "고객님"
@@ -1181,9 +1188,7 @@ class InboundAgent:
             #
             # 대가는 알고 씁니다: RE: 가 아니면 고객 메일함에서 원래 문의와 **다른 대화**로
             # 뜹니다. 담당자의 상세 회신은 여전히 RE: 라 그쪽은 원래 스레드에 붙습니다.
-            fixed_subject = get_email_template(
-                "auto_ack_subject" if lang == "ko" else f"auto_ack_subject_{lang}"
-            )
+            fixed_subject = get_email_subject("auto_ack" if lang == "ko" else f"auto_ack_{lang}")
             subject = (fixed_subject or "").strip() or reply_subject(
                 contact_info.get("subject"), target_code=lang
             )

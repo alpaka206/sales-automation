@@ -28,8 +28,6 @@ Matching rules (category mode):
 from __future__ import annotations
 
 import logging
-from functools import lru_cache
-
 from pydantic import BaseModel
 
 from ..db.models import KnowledgeDocument
@@ -67,6 +65,28 @@ def _is_active(doc: KnowledgeDocument) -> bool:
     return (getattr(doc, "status", None) or "active") == "active"
 
 
+# 정책 문서가 들고 온 메일 제목은 ``tags`` 에 "subject:<제목>" 으로 실려 옵니다
+# (agents/policy_sync._tags_for). 여기서 다시 꺼냅니다.
+_SUBJECT_TAG = "subject:"
+
+
+def subject_from_docs(docs: list[KnowledgeDocument]) -> str | None:
+    """A mail subject carried by one of the documents the draft was written from.
+
+    Read in CODE, never asked of the model — the same reason CODE GUARD 3 exists. A
+    subject is exactly the kind of short line a model will happily invent, and then RE:
+    stacks or the language flips. The first document that has one wins; a document with
+    several cases (the four quote cases) keeps writing them inline in its body.
+    """
+    for doc in docs:
+        for tag in doc.tags or []:
+            if isinstance(tag, str) and tag.startswith(_SUBJECT_TAG):
+                subject = tag[len(_SUBJECT_TAG) :].strip()
+                if subject:
+                    return subject
+    return None
+
+
 def _format_docs(docs: list[KnowledgeDocument]) -> str:
     """Render selected documents as a prompt-ready block."""
     parts = [f"### {doc.title}\n{doc.body}" for doc in docs]
@@ -75,23 +95,23 @@ def _format_docs(docs: list[KnowledgeDocument]) -> str:
     return "## Relevant knowledge base documents\n\n" + "\n\n---\n\n".join(parts)
 
 
-@lru_cache(maxsize=64)
-def _load_from_db(category: str, scope: str) -> str:
-    """Query DB and format matching documents (category mode, cached)."""
+def _matching_docs(category: str, scope: str) -> list[KnowledgeDocument]:
+    """Category-mode matches. Not cached: the rows are few and a stale cache here is the
+    difference between yesterday's policy and today's."""
+    if not category:
+        return []
     session = SessionLocal()
     try:
         docs = session.query(KnowledgeDocument).order_by(KnowledgeDocument.title).all()
     finally:
         session.close()
-
-    matched = [
+    return [
         doc
         for doc in docs
         if _is_active(doc)
         and _category_matches(doc.categories, category)
         and _scope_matches(doc.scope, scope)
     ]
-    return _format_docs(matched)
 
 
 def reset_cache() -> None:
@@ -100,7 +120,6 @@ def reset_cache() -> None:
     Used by tests and by the web UI after a knowledge edit, so an operator who
     also edited a policy document doesn't keep seeing a stale copy until restart.
     """
-    _load_from_db.cache_clear()
     from .prompts import get_company_rules
 
     get_company_rules.cache_clear()
@@ -114,9 +133,7 @@ def load_relevant_docs(category: str, scope: str = "inbound") -> str:
     회신은 나가고, 그 회신이 볼 것이 소개 문서입니다. 문서를 빼앗으면 그 회신만 아무 근거
     없이 쓰이게 됩니다.
     """
-    if not category:
-        return ""
-    return _load_from_db(category, scope)
+    return _format_docs(_matching_docs(category, scope))
 
 
 # --------------------------------------------------------------------------- #
@@ -157,7 +174,8 @@ def select_relevant_docs(
     scope: str = "inbound",
     llm: object | None = None,
     language: str | None = None,
-) -> str:
+    with_subject: bool = False,
+):
     """어떤 문서를 보고 답할지 **모델이** 고릅니다.
 
     유형별로 볼 문서를 코드에 적지 않습니다. 정책은 바뀌고, 문서는 노션에서 이름이 바뀌고,
@@ -170,16 +188,23 @@ def select_relevant_docs(
     프롬프트가 바뀌지, 라우팅 표를 고치러 코드로 오지 않습니다.
 
     라우터가 실패하거나 아무것도 못 고르면 유형 매칭으로 떨어집니다.
+
+    ``with_subject=True`` 면 (본문, 그 문서들이 들고 온 메일 제목) 을 돌려줍니다. 제목이
+    필요한 곳은 초안 한 군데뿐이라 기본값은 예전 그대로 문자열입니다.
     """
     if not category:
-        return ""
+        return ("", None) if with_subject else ""
+
+    def done(docs: list[KnowledgeDocument] | None, formatted: str | None = None):
+        text = _format_docs(docs) if formatted is None else formatted
+        return (text, subject_from_docs(docs or [])) if with_subject else text
 
     if llm is None:
-        return load_relevant_docs(category, scope)
+        return done(_matching_docs(category, scope))
 
     candidates = _candidate_docs(scope)
     if not candidates:
-        return ""
+        return done([])
 
     index = _build_index(candidates)
     try:
@@ -197,12 +222,12 @@ def select_relevant_docs(
         wanted = {s.strip().lower() for s in (result.slugs or []) if s.strip()}
     except Exception:
         logger.warning("Doc router failed, falling back to category match.", exc_info=True)
-        return load_relevant_docs(category, scope)
+        return done(_matching_docs(category, scope))
 
     selected = [d for d in candidates if d.slug.lower() in wanted]
     if not selected:
         logger.info("Doc router selected nothing; falling back to category match.")
-        return load_relevant_docs(category, scope)
+        return done(_matching_docs(category, scope))
 
     logger.info(
         "Doc router selected %d/%d docs for category=%s: %s",
@@ -211,4 +236,4 @@ def select_relevant_docs(
         category,
         ", ".join(d.slug for d in selected),
     )
-    return _format_docs(selected)
+    return done(selected)

@@ -243,3 +243,30 @@ def test_router_ignores_archived_candidates(_db_backed_knowledge) -> None:
     out = knowledge.select_relevant_docs("price?", "pricing_question", llm=llm)
     assert "Live" in out
     assert "Old" not in out
+
+
+def test_a_document_can_carry_the_mail_subject_for_replies_written_from_it(
+    _db_backed_knowledge,
+) -> None:
+    """「기본 메일 템플릿 ENG」 같은 문서는 그 자체가 회신 한 통의 본보기입니다. 제목을 본문
+    안에 "Subject: ..." 로 적으면 모델이 그 줄을 본문에 옮겨 적어, 첫 줄이 "Subject: ..." 인
+    메일이 나갑니다. 그래서 문서의 칸으로 두고 **코드가** 꺼냅니다 — 제목은 모델이 지어내기
+    딱 좋은 자리이고, 지어내면 RE: 가 겹치거나 언어가 뒤집힙니다."""
+    _insert(
+        _db_backed_knowledge, title="기본 메일 템플릿 ENG", slug="intro",
+        categories=["purchase_inquiry"], body="Hey [Name],",
+        tags=["notion", "subject:Next Steps on Your custom Perso Dubbing plan"],
+    )
+    body, subject = knowledge.select_relevant_docs(
+        "tell me more", "purchase_inquiry", with_subject=True
+    )
+    assert "Hey [Name]," in body
+    assert subject == "Next Steps on Your custom Perso Dubbing plan"
+
+
+def test_a_document_with_no_subject_leaves_the_reply_on_re(_db_backed_knowledge) -> None:
+    """그쪽이 고객 메일함에서 원래 스레드에 붙습니다. 제목을 정한 문서만 그걸 벗어납니다."""
+    _insert(_db_backed_knowledge, title="크레딧", slug="credits",
+            categories=["credits"], body="1 credit/초")
+    _, subject = knowledge.select_relevant_docs("크레딧?", "credits", with_subject=True)
+    assert subject is None

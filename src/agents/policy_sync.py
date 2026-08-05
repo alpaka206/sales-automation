@@ -45,6 +45,19 @@ def _summarize(markdown: str) -> str:
     return text[:_SUMMARY_CHARS]
 
 
+# 메일 제목을 사본까지 나르는 방법. KnowledgeDocument 에 열을 하나 더 만드는 것보다 작고,
+# 라우터가 보는 인덱스에도 그대로 보입니다.
+SUBJECT_TAG = "subject:"
+
+
+def _tags_for(source: PolicySource) -> list[str]:
+    tags = ["notion"]
+    subject = (source.subject or "").strip()
+    if subject:
+        tags.append(f"{SUBJECT_TAG}{subject}")
+    return tags
+
+
 def _upsert_knowledge(session, source: PolicySource, title: str, markdown: str) -> None:
     slug = _slug_for(source)
     doc = session.query(KnowledgeDocument).filter(KnowledgeDocument.slug == slug).one_or_none()
@@ -58,11 +71,13 @@ def _upsert_knowledge(session, source: PolicySource, title: str, markdown: str) 
             summary=_summarize(markdown),
             author="notion-sync",
             categories=["policy"],
-            tags=["notion"],
+            tags=_tags_for(source),
         )
         session.add(doc)
         logger.info("Policy sync: created knowledge document %s", slug)
         return
+    # 제목은 본문이 그대로여도 따라가야 합니다 — 제목만 고친 경우가 바로 그 경우입니다.
+    doc.tags = _tags_for(source)
     if (doc.body or "") == markdown and doc.title == (title or source.label):
         return
     doc.title = title or source.label
