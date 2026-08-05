@@ -3,13 +3,13 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
 import { getJSON, postForm } from "../lib/api";
 import { Icon } from "../ui/Icon";
-import { DataTable } from "../ui/DataTable";
+import { DataTable, type Column } from "../ui/DataTable";
 import { kst } from "../lib/format";
 import { Loading } from "../ui/Loading";
 import { PolicyDocs } from "./PolicyDocs";
 
 type Kind = { key: string; label: string; count: number; can_create: boolean; read_only: boolean };
-type Item = { id: number; key: string; name: string; language: string; updated_at: string; kind: string; chars: number };
+type Item = { id: number; key: string; name: string; language: string; updated_at: string; kind: string; chars: number; is_default: boolean };
 type List = { kinds: Kind[]; items: Item[] };
 type Detail = { id: number; key: string; name: string; language: string; body: string; kind: string };
 
@@ -151,12 +151,18 @@ function Editor({ id, onDone }: { id: number | "new"; onDone: () => void }) {
 
 export function EmailTemplates() {
   const [params, setParams] = useSearchParams();
+  const queryClient = useQueryClient();
   const kind = params.get("kind");
   const edit = params.get("edit");
   const { data, isPending } = useQuery({
     queryKey: ["email-templates"],
     queryFn: () => getJSON<List>("/api/ui/email-templates"),
   });
+
+  async function setDefault(id: number) {
+    await postForm(`/email-templates/${id}/default`, {});
+    await queryClient.invalidateQueries({ queryKey: ["email-templates"] });
+  }
 
   if (edit) {
     return (
@@ -230,7 +236,23 @@ export function EmailTemplates() {
       <div className="card card--flush">
           <DataTable
             columns={[
-              { label: "템플릿 이름", width: "56%", cell: (item) => <strong>{item.name}</strong> },
+              { label: "템플릿 이름", width: kind === "signature" ? "40%" : "56%",
+                cell: (item) => <strong>{item.name}</strong> },
+              // Signatures only. It answers "which one gets used?", which is the question
+              // the list could not answer before — every row looked equally in play.
+              ...(kind === "signature"
+                ? [{
+                    label: "기본", width: "16%",
+                    cell: (item) => item.is_default ? (
+                      <span className="pill pill--ok pill--sm"><span className="pill__dot" />기본</span>
+                    ) : (
+                      <button type="button" className="btn btn--subtle btn--sm"
+                              onClick={(event) => { event.stopPropagation(); void setDefault(item.id); }}>
+                        기본으로
+                      </button>
+                    ),
+                  } as Column<Item>]
+                : []),
               { label: "언어", width: "16%", cell: (item) => <span className="tag">{item.language}</span> },
               { label: "수정일", width: "28%", className: "td-subtle tnum",
                 cell: (item) => kst(item.updated_at, "md-hm") || "—" },

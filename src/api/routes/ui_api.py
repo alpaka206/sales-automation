@@ -473,6 +473,9 @@ async def ui_email_templates():
                 "updated_at": row.updated_at,
                 "kind": _template_kind(row.key),
                 "chars": len(row.body or ""),
+                # Which signature a new draft starts with. A row, not a literal in
+                # inbound.py — and the screen is where it moves.
+                "is_default": bool(row.is_default),
             }
             for row in rows
         ]

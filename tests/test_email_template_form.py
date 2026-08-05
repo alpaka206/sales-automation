@@ -33,7 +33,11 @@ def template_db():
     )
     Base.metadata.create_all(engine)
     factory = sessionmaker(bind=engine, expire_on_commit=False)
-    with patch("src.api.routes.email_templates.SessionLocal", factory):
+    with (
+        patch("src.api.routes.email_templates.SessionLocal", factory),
+        # set_default_signature opens its own session — the read side of the same table.
+        patch("src.db.email_templates.SessionLocal", factory),
+    ):
         yield factory
 
 
@@ -119,6 +123,105 @@ def test_editing_cannot_move_the_key_or_blank_the_description(template_db):
         assert tpl.name == "접수확인 메일"
         assert tpl.body == "새 본문"
         assert tpl.version == 2
+
+
+def test_the_default_signature_moves_from_the_console(template_db):
+    """0046 turned "who signs the company's mail" into a row instead of a literal in
+    inbound.py — and then nothing ever called set_default_signature, so the flag stayed
+    on whoever the migration carried over and could only be moved with SQL."""
+    from src.db.email_templates import default_signature_key
+
+    with template_db() as session:
+        session.add_all(
+            [
+                EmailTemplate(key=f"{SIGNATURE_KEY_PREFIX}old", name="이전 담당자",
+                              language="all", channel="email", status="active",
+                              version=1, body="<p>old</p>", is_default=True),
+                EmailTemplate(key=f"{SIGNATURE_KEY_PREFIX}new", name="새 담당자",
+                              language="all", channel="email", status="active",
+                              version=1, body="<p>new</p>", is_default=False),
+            ]
+        )
+        session.commit()
+        new_id = session.query(EmailTemplate).filter_by(name="새 담당자").one().id
+
+    with TestClient(app) as client:
+        assert client.post(f"/email-templates/{new_id}/default").status_code == 200
+
+    assert default_signature_key() == f"{SIGNATURE_KEY_PREFIX}new"
+    with template_db() as session:
+        # Exactly one, or "the default" stops meaning anything.
+        assert [row.name for row in session.query(EmailTemplate).filter_by(is_default=True)] == [
+            "새 담당자"
+        ]
+
+
+def test_only_a_signature_can_be_made_the_default(template_db):
+    """The other rows are code references. Stamping a draft with the reply-format row
+    would put the model's own instructions in front of a customer."""
+    with template_db() as session:
+        session.add(
+            EmailTemplate(key="reply_format", name="답변 메일 형식", language="all",
+                          channel="email", status="active", version=1, body="1) 인사")
+        )
+        session.commit()
+        tpl_id = session.query(EmailTemplate).one().id
+
+    with TestClient(app) as client:
+        assert client.post(f"/email-templates/{tpl_id}/default").status_code == 400
+    with template_db() as session:
+        assert session.query(EmailTemplate).one().is_default is False
+
+
+def test_a_signature_typed_before_the_prefix_existed_is_re_keyed(tmp_path):
+    """The key used to be typed by hand, so a signature written then has no prefix — and
+    BOTH lookups that find signatures filter on that prefix. The row was invisible to the
+    compose screen's picker and to the default, i.e. a signature nothing could use, while
+    the console filed it under 이메일 템플릿 because the group is derived from the key too.
+
+    Rows the code resolves by exact name are left alone; everything else could only have
+    come from 새로 만들기, which creates signatures.
+    """
+    import importlib.util
+
+    from sqlalchemy import create_engine, text
+
+    spec = importlib.util.spec_from_file_location(
+        "m0048", "src/db/migrations/0048_console_signatures_get_the_prefix.py"
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'm.db'}")
+    Base.metadata.create_all(engine)
+    with engine.begin() as conn:
+        for key, name in (
+            ("baeuntae", "배운태"),          # typed by hand before 08-04
+            ("auto_ack", "자동 접수확인"),     # resolved by exact key
+            ("reply_format", "답변 메일 형식"),
+            (f"{SIGNATURE_KEY_PREFIX}hyeram", "이혜람"),
+        ):
+            conn.execute(
+                text(
+                    "INSERT INTO email_templates (key, name, language, channel, status, "
+                    "version, body, is_default, created_at, updated_at) "
+                    "VALUES (:k, :n, 'all', 'email', 'active', 1, '', 0, "
+                    "CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
+                ),
+                {"k": key, "n": name},
+            )
+
+    module.up(engine)
+
+    with engine.begin() as conn:
+        keys = {
+            row[1]: row[0]
+            for row in conn.execute(text("SELECT key, name FROM email_templates")).fetchall()
+        }
+    assert keys["배운태"] == f"{SIGNATURE_KEY_PREFIX}baeuntae"
+    assert keys["자동 접수확인"] == "auto_ack"
+    assert keys["답변 메일 형식"] == "reply_format"
+    assert keys["이혜람"] == f"{SIGNATURE_KEY_PREFIX}hyeram"
 
 
 def test_everything_saved_here_is_active(template_db):

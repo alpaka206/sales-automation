@@ -137,6 +137,37 @@ async def email_templates_update(
     return HTMLResponse('<div class="text-green-600 text-sm font-medium">저장 완료</div>')
 
 
+@router.post("/email-templates/{tpl_id}/default")
+async def email_templates_set_default(tpl_id: int):
+    """Choose the signature every new draft starts with.
+
+    0046 made this a row instead of a literal in ``inbound.py``, but nothing ever called
+    ``set_default_signature`` — so the flag stayed on whoever the migration carried over
+    and could not be moved without SQL. The console is where that decision belongs.
+
+    Signatures only: the other rows are code references the send path resolves by name,
+    and stamping a draft with the reply-format row would put the model's instructions in
+    front of a customer.
+    """
+    from ...db.email_templates import set_default_signature
+
+    with SessionLocal() as session:
+        tpl = session.get(EmailTemplate, tpl_id)
+        if not tpl:
+            return HTMLResponse(
+                '<div class="text-red-600 text-sm">템플릿을 찾을 수 없습니다</div>',
+                status_code=404,
+            )
+        if not (tpl.key or "").startswith(SIGNATURE_KEY_PREFIX):
+            return HTMLResponse(
+                '<div class="text-red-600 text-sm">서명만 기본으로 지정할 수 있습니다</div>',
+                status_code=400,
+            )
+        key = tpl.key
+    set_default_signature(key)
+    return HTMLResponse('<div class="text-green-600 text-sm font-medium">기본 서명 변경</div>')
+
+
 @router.delete("/email-templates/{tpl_id}")
 async def email_templates_delete(tpl_id: int, request: Request):
     """Delete an email template (keeps its revision history)."""
