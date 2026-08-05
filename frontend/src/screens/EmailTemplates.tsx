@@ -12,7 +12,7 @@ type Kind = { key: string; label: string; count: number; can_create: boolean; re
 type Item = {
   id: number; key: string; base_key: string; name: string; language: string;
   updated_at: string; kind: string; body: string; subject: string;
-  chars: number; is_default: boolean;
+  chars: number;
 };
 // 한 줄 = 한 템플릿. 언어가 여럿이면 그 안에서 고릅니다.
 type Group = { base: string; rows: Item[] };
@@ -96,17 +96,6 @@ function Editor({ id, data, siblings, onOpen, onDone }: {
     }
   }
 
-  async function makeDefault() {
-    setNote("변경 중…");
-    try {
-      await postForm(`/email-templates/${id}/default`, {});
-      await queryClient.invalidateQueries();
-      onDone();
-    } catch (error) {
-      setNote(`실패: ${String(error)}`);
-    }
-  }
-
   async function remove() {
     setNote("삭제 중…");
     try {
@@ -125,7 +114,6 @@ function Editor({ id, data, siblings, onOpen, onDone }: {
 
   // 새로 만들기 is only offered for signatures, so a new row is one.
   const isSignature = id === "new" || data?.kind === "signature";
-  const isDefault = Boolean(data?.is_default);
   const oneLine = data ? ONE_LINE_FIELDS[data.key] : undefined;
 
   // 목록을 거쳐 들어오면 data 가 이미 있으므로 이 스켈레톤은 보이지 않습니다. 주소를 직접
@@ -240,13 +228,6 @@ function Editor({ id, data, siblings, onOpen, onDone }: {
             <button type="button" className="btn btn--subtle"
                     onClick={() => setPreview((p) => (p === null ? body : null))}>
               <Icon name="file" size={15} /> 미리보기
-            </button>
-          )}
-          {/* 목록의 `기본으로` 버튼 대신 여기. 서명마다 한 줄씩 버튼이 서 있을 일이 아니라
-              그 서명을 열어 보고 정할 일입니다. */}
-          {data && isSignature && !isDefault && (
-            <button type="button" className="btn btn--subtle" onClick={() => void makeDefault()}>
-              기본으로 지정
             </button>
           )}
           {data && isSignature && (
@@ -377,17 +358,9 @@ export function EmailTemplates() {
       <div className="card card--flush">
           <DataTable
             columns={[
-              // 어느 것이 기본인지는 이름 옆 태그로 말합니다. 열을 따로 두면 서명마다 한
-              // 줄씩 버튼이 서 있게 되고, 정하는 일은 그 서명을 열어 보고 할 일입니다.
-              { label: "템플릿 이름", width: "52%",
-                cell: (g) => (
-                  <>
-                    <strong>{g.rows[0].name}</strong>
-                    {g.rows.some((r) => r.is_default) && (
-                      <span className="tag" style={{ marginLeft: 8 }}>기본</span>
-                    )}
-                  </>
-                ) },
+              // "기본" 표시는 없앴습니다: 어느 서명을 쓸지는 초안마다 고르는 것이고,
+              // 목록에 미리 정해 둔 하나를 표시하면 그게 강제인 것처럼 읽힙니다.
+              { label: "템플릿 이름", width: "52%", cell: (g) => <strong>{g.rows[0].name}</strong> },
               // 무엇이 있는지만. 어느 것을 고칠지는 열어서 정합니다.
               { label: "언어", width: "16%",
                 cell: (g) => (

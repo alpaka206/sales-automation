@@ -35,7 +35,7 @@ def template_db():
     factory = sessionmaker(bind=engine, expire_on_commit=False)
     with (
         patch("src.api.routes.email_templates.SessionLocal", factory),
-        # set_default_signature opens its own session — the read side of the same table.
+        # default_signature_key opens its own session — the read side of the same table.
         patch("src.db.email_templates.SessionLocal", factory),
     ):
         yield factory
@@ -125,52 +125,32 @@ def test_editing_cannot_move_the_key_or_blank_the_description(template_db):
         assert tpl.version == 2
 
 
-def test_the_default_signature_moves_from_the_console(template_db):
-    """0046 turned "who signs the company's mail" into a row instead of a literal in
-    inbound.py — and then nothing ever called set_default_signature, so the flag stayed
-    on whoever the migration carried over and could only be moved with SQL."""
+def test_a_new_draft_starts_on_the_first_signature(template_db):
+    """"기본 서명" 이라는 저장된 값은 없앴습니다(0060).
+
+    있던 것은 플래그 하나와, 그것이 하나뿐임을 보장하는 인덱스와, 옮기는 버튼과 라우트
+    였습니다 — 초안마다 이미 고를 수 있는 값을 위해서요. 규칙은 이제 "목록의 첫 번째" 이고,
+    실제로 어느 서명으로 나가는지는 그 건의 검토 화면에서 정합니다.
+    """
     from src.db.email_templates import default_signature_key
 
     with template_db() as session:
-        session.add_all(
-            [
-                EmailTemplate(key=f"{SIGNATURE_KEY_PREFIX}old", name="이전 담당자",
-                              language="all", channel="email", status="active",
-                              version=1, body="<p>old</p>", is_default=True),
-                EmailTemplate(key=f"{SIGNATURE_KEY_PREFIX}new", name="새 담당자",
-                              language="all", channel="email", status="active",
-                              version=1, body="<p>new</p>", is_default=False),
-            ]
-        )
+        session.add_all([
+            EmailTemplate(key=f"{SIGNATURE_KEY_PREFIX}b", name="B 담당자", language="all",
+                          channel="email", status="active", version=1, body="<p>b</p>"),
+            EmailTemplate(key=f"{SIGNATURE_KEY_PREFIX}a", name="A 담당자", language="all",
+                          channel="email", status="active", version=1, body="<p>a</p>"),
+        ])
         session.commit()
-        new_id = session.query(EmailTemplate).filter_by(name="새 담당자").one().id
 
-    with TestClient(app) as client:
-        assert client.post(f"/email-templates/{new_id}/default").status_code == 200
-
-    assert default_signature_key() == f"{SIGNATURE_KEY_PREFIX}new"
-    with template_db() as session:
-        # Exactly one, or "the default" stops meaning anything.
-        assert [row.name for row in session.query(EmailTemplate).filter_by(is_default=True)] == [
-            "새 담당자"
-        ]
+    assert default_signature_key() == f"{SIGNATURE_KEY_PREFIX}a"
 
 
-def test_only_a_signature_can_be_made_the_default(template_db):
-    """The other rows are code references. Stamping a draft with the reply-format row
-    would put the model's own instructions in front of a customer."""
-    with template_db() as session:
-        session.add(
-            EmailTemplate(key="reply_format", name="답변 메일 형식", language="all",
-                          channel="email", status="active", version=1, body="1) 인사")
-        )
-        session.commit()
-        tpl_id = session.query(EmailTemplate).one().id
+def test_with_no_signatures_a_draft_still_goes_out_signed(template_db):
+    """None 은 "서명 없음" 이 아닙니다 — 회사 규칙이 본문에 넣는 텍스트 서명이 남습니다."""
+    from src.db.email_templates import default_signature_key
 
-    with TestClient(app) as client:
-        assert client.post(f"/email-templates/{tpl_id}/default").status_code == 400
-    with template_db() as session:
-        assert session.query(EmailTemplate).one().is_default is False
+    assert default_signature_key() is None
 
 
 def test_a_signature_typed_before_the_prefix_existed_is_re_keyed(tmp_path):
@@ -204,8 +184,8 @@ def test_a_signature_typed_before_the_prefix_existed_is_re_keyed(tmp_path):
             conn.execute(
                 text(
                     "INSERT INTO email_templates (key, name, language, channel, status, "
-                    "version, body, is_default, created_at, updated_at) "
-                    "VALUES (:k, :n, 'all', 'email', 'active', 1, '', 0, "
+                    "version, body, created_at, updated_at) "
+                    "VALUES (:k, :n, 'all', 'email', 'active', 1, '', "
                     "CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
                 ),
                 {"k": key, "n": name},

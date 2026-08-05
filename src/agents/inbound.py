@@ -40,8 +40,9 @@ from .inbound_scoring import (  # noqa: F401 — re-exported for callers/tests
 
 logger = logging.getLogger(__name__)
 
+
 def _default_signature() -> str | None:
-    """Which signature a new draft carries — an operator's choice, read per draft.
+    """어느 서명으로 시작할지 — 목록의 첫 서명. 그 건에서 바꾸는 것은 검토 화면입니다.
 
     Imported here rather than at module load for the same reason every other template
     helper in this file is: the DB layer must not be pulled in before settings are.
@@ -49,6 +50,8 @@ def _default_signature() -> str | None:
     from ..db.email_templates import default_signature_key
 
     return default_signature_key()
+
+
 _DEFAULT_HUBSPOT = object()
 
 # Fallback acknowledgement body if the editable ``auto_ack`` template is missing.

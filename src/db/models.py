@@ -6,7 +6,6 @@ from datetime import datetime, timezone
 from decimal import Decimal
 
 from sqlalchemy import (
-    false as sa_false,
     Boolean,
     DateTime,
     Float,
@@ -397,16 +396,8 @@ class EmailTemplate(Base):
     body: Mapped[str] = mapped_column(Text, nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[str] = mapped_column(String, nullable=False, default="active")
-    # The signature every new draft is stamped with. A row, not a constant in
-    # src/agents/inbound.py — changing who signs the company's mail is an operator
-    # decision, and it used to need a code change (migration 0046). A partial unique
-    # index in the database keeps exactly one row true.
-    # server_default too, not just the Python default: the older migrations seed this
-    # table with raw INSERTs that name their own columns, and those cannot know about a
-    # column added later.
-    is_default: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, default=False, server_default=sa_false()
-    )
+    # ``is_default`` 는 0060 에서 지웠습니다. 어느 서명을 쓸지는 초안마다 검토 화면에서
+    # 고르고, 아무것도 안 고르면 회사 규칙의 텍스트 서명이 붙습니다.
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     author: Mapped[str | None] = mapped_column(String, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)

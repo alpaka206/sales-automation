@@ -64,14 +64,18 @@ def all_text_signatures() -> list[str]:
 
 
 def default_signature_key() -> str | None:
-    """The signature a new draft is stamped with, as chosen in the console.
+    """The signature a new draft starts on — **the first one in the list.**
 
-    Was a literal signature key, written twice into the inbound agent — so
-    the person who signs the company's mail could only be changed by editing Python.
+    There is no "default" flag any more (0060). There was one, and keeping it meant
+    storing which row is default, an index to guarantee only one is, and a button and a
+    route to move it — for a value the operator can already change on the draft itself.
 
-    Falls back to the first active signature when nothing is flagged, because a draft
-    with no signature at all is worse than one signed by whoever is left. Never raises:
-    None means "sign nothing", which the send path already handles.
+    So the rule is just "the first one", by the same ordering the console shows. Which
+    signature a mail actually goes out with stays a per-draft choice on the review screen;
+    this only decides where that choice starts.
+
+    Never raises: None means "no branded signature", which the send path already handles
+    by keeping the plain-text signature the company rules put in the body.
     """
     try:
         with SessionLocal() as session:
@@ -80,37 +84,14 @@ def default_signature_key() -> str | None:
                 .filter(
                     EmailTemplate.key.like(f"{SIGNATURE_KEY_PREFIX}%"),
                     EmailTemplate.status == "active",
-                    EmailTemplate.is_default.is_(True),
                 )
+                .order_by(EmailTemplate.language, EmailTemplate.name)
                 .first()
             )
-            if row is None:
-                row = (
-                    session.query(EmailTemplate)
-                    .filter(
-                        EmailTemplate.key.like(f"{SIGNATURE_KEY_PREFIX}%"),
-                        EmailTemplate.status == "active",
-                    )
-                    .order_by(EmailTemplate.language, EmailTemplate.name)
-                    .first()
-                )
             return row.key if row else None
     except Exception:
         logger.warning("Default signature lookup failed", exc_info=True)
         return None
-
-
-def set_default_signature(key: str) -> None:
-    """Move the default. One statement clears, one sets — the unique index in the
-    database is what actually guarantees a single default, not this ordering."""
-    with SessionLocal() as session:
-        session.query(EmailTemplate).filter(EmailTemplate.is_default.is_(True)).update(
-            {"is_default": False}
-        )
-        session.query(EmailTemplate).filter(EmailTemplate.key == key).update(
-            {"is_default": True}
-        )
-        session.commit()
 
 
 def get_email_subject(key: str) -> str | None:
