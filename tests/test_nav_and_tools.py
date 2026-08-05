@@ -308,3 +308,19 @@ def test_health_fails_when_the_console_cannot_be_served():
         shutil.move(str(moved), str(bundle))
     assert broken.status_code == 503
     assert broken.json() == {"ok": False, "database": True, "console": False}
+
+
+def test_the_editor_waits_instead_of_drawing_the_wrong_form():
+    """미팅 예약 링크 / 담당자 이름 opened as a 템플릿 이름 + 본문 editor and became a
+    single field a moment later.
+
+    Which form a row gets is decided by its KEY, and the key arrives with the row — so
+    rendering before the fetch lands renders the wrong one, every time, for as long as the
+    request takes. Nothing was broken; the screen was answering a question it could not
+    answer yet. A skeleton says "not yet" instead of saying something false and correcting
+    itself in front of the operator.
+    """
+    assert 'if (id !== "new" && !data) {' in TEMPLATES
+    assert "LoadingBlock" in TEMPLATES
+    # And the shape is still derived from the key — the skeleton is the wait, not a guess.
+    assert "ONE_LINE_FIELDS[data.key]" in TEMPLATES

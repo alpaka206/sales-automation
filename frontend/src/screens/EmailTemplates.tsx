@@ -5,7 +5,7 @@ import { getJSON, postForm } from "../lib/api";
 import { Icon } from "../ui/Icon";
 import { DataTable } from "../ui/DataTable";
 import { kst } from "../lib/format";
-import { Loading } from "../ui/Loading";
+import { Loading, LoadingBlock } from "../ui/Loading";
 import { PolicyDocs } from "./PolicyDocs";
 
 type Kind = { key: string; label: string; count: number; can_create: boolean; read_only: boolean };
@@ -122,15 +122,31 @@ function Editor({ id, siblings, onOpen, onDone }: {
   const isDefault = Boolean(data?.is_default);
   const oneLine = data ? ONE_LINE_FIELDS[data.key] : undefined;
 
+  // Which form this row gets is decided by its key, and the key arrives with the row. So
+  // rendering before it lands means rendering the WRONG form: 미팅 예약 링크 opened as a
+  // 템플릿 이름 + 본문 editor and turned into a single field a moment later. A skeleton
+  // says "not yet" instead of saying something false and correcting itself.
+  const backChip = (
+    <div style={{ marginBottom: 14 }}>
+      <button type="button" className="chip" onClick={onDone}>
+        <Icon name="chevron" size={14} /> 목록으로
+      </button>
+    </div>
+  );
+  if (id !== "new" && !data) {
+    return (
+      <>
+        {backChip}
+        <div className="card" style={{ maxWidth: 860 }}><LoadingBlock lines={6} /></div>
+      </>
+    );
+  }
+
   return (
     <>
       {/* Left, with the chevron — the same back affordance as every other screen. It sat
           on the right of the header here alone, which read as an action, not a way out. */}
-      <div style={{ marginBottom: 14 }}>
-        <button type="button" className="chip" onClick={onDone}>
-          <Icon name="chevron" size={14} /> 목록으로
-        </button>
-      </div>
+      {backChip}
       <div className="card" style={{ maxWidth: 860 }}>
         <div className="page-header">
           <div>
