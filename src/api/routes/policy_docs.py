@@ -41,27 +41,6 @@ MODES = (
 _MODE_KEYS = {key for key, _label in MODES}
 
 
-def _rows() -> list[dict]:
-    with SessionLocal() as session:
-        sources = (
-            session.query(PolicySource)
-            .order_by(PolicySource.mode, PolicySource.order_index, PolicySource.id)
-            .all()
-        )
-        return [
-            {
-                "id": s.id,
-                "label": s.label,
-                "mode": s.mode,
-                "order_index": s.order_index,
-                "chars": len(s.body or ""),
-                "effective_on": s.effective_on,
-                "edited_at": s.edited_at,
-            }
-            for s in sources
-        ]
-
-
 def _doc_key(title: str) -> str:
     """이 문서의 신원. 제목에서 만들어 냅니다.
 
