@@ -70,21 +70,42 @@ def _is_active(doc: KnowledgeDocument) -> bool:
 _SUBJECT_TAG = "subject:"
 
 
+def _subject_of(doc: KnowledgeDocument) -> str | None:
+    for tag in doc.tags or []:
+        if isinstance(tag, str) and tag.startswith(_SUBJECT_TAG):
+            return tag[len(_SUBJECT_TAG) :].strip() or None
+    return None
+
+
 def subject_from_docs(docs: list[KnowledgeDocument]) -> str | None:
     """A mail subject carried by one of the documents the draft was written from.
 
     Read in CODE, never asked of the model — the same reason CODE GUARD 3 exists. A
     subject is exactly the kind of short line a model will happily invent, and then RE:
-    stacks or the language flips. The first document that has one wins; a document with
-    several cases (the four quote cases) keeps writing them inline in its body.
+    stacks or the language flips.
+
+    **메일 제목은 메일 템플릿에만 채웁니다.** 지원 언어·크레딧 같은 근거 문서는 내용을
+    제공할 뿐 그 메일의 제목을 정하지 않습니다 — 그 문서들의 제목 칸은 비워 둡니다. 코드가
+    이름으로 "메일 템플릿" 을 알아보게 하지는 않았습니다: 문서 이름은 바뀌고, 이름을 조건에
+    넣으면 이름을 바꾸는 순간 조용히 끊깁니다(오늘만 두 번 지운 실패 방식입니다).
+
+    그래서 규칙은 "제목을 채운 문서가 정한다" 이고, 둘 이상이 채워져 있으면 **경고를 남기고**
+    첫 번째를 씁니다. 조용히 하나를 고르면 고객 메일함에 뜨는 제목이 문서 제목 알파벳순으로
+    정해지고, 왜 그런지 아무 데도 안 남습니다.
     """
-    for doc in docs:
-        for tag in doc.tags or []:
-            if isinstance(tag, str) and tag.startswith(_SUBJECT_TAG):
-                subject = tag[len(_SUBJECT_TAG) :].strip()
-                if subject:
-                    return subject
-    return None
+    with_subject = [(doc, _subject_of(doc)) for doc in docs]
+    carrying = [(doc, subject) for doc, subject in with_subject if subject]
+    if not carrying:
+        return None
+    if len(carrying) > 1:
+        logger.warning(
+            "%d documents carry a mail subject; using %s. 메일 제목은 메일 템플릿에만 "
+            "채우고 근거 문서(%s)는 비워 두세요.",
+            len(carrying),
+            carrying[0][0].title,
+            ", ".join(doc.title for doc, _ in carrying[1:]),
+        )
+    return carrying[0][1]
 
 
 def _format_docs(docs: list[KnowledgeDocument]) -> str:

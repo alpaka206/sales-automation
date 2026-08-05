@@ -270,3 +270,28 @@ def test_a_document_with_no_subject_leaves_the_reply_on_re(_db_backed_knowledge)
             categories=["credits"], body="1 credit/초")
     _, subject = knowledge.select_relevant_docs("크레딧?", "credits", with_subject=True)
     assert subject is None
+
+
+def test_two_documents_carrying_a_subject_is_logged_not_silently_resolved(
+    _db_backed_knowledge, caplog
+) -> None:
+    """메일 제목은 메일 템플릿에만 채웁니다 — 지원 언어·크레딧 같은 근거 문서는 내용을
+    제공할 뿐 그 메일의 제목을 정하지 않습니다.
+
+    코드가 이름으로 "메일 템플릿" 을 알아보게 하지는 않았습니다: 문서 이름은 바뀌고, 이름을
+    조건에 넣으면 이름을 바꾸는 순간 조용히 끊깁니다. 대신 둘 이상 채워져 있으면 경고를
+    남깁니다 — 조용히 하나를 고르면 고객 메일함에 뜨는 제목이 문서 제목 알파벳순으로 정해지고
+    왜 그런지 아무 데도 안 남습니다.
+    """
+    import logging
+
+    _insert(_db_backed_knowledge, title="A 템플릿", slug="a", categories=["credits"],
+            body="a", tags=["subject:From the template"])
+    _insert(_db_backed_knowledge, title="B 근거", slug="b", categories=["credits"],
+            body="b", tags=["subject:From the reference"])
+
+    with caplog.at_level(logging.WARNING, logger="src.llm.knowledge"):
+        _, subject = knowledge.select_relevant_docs("크레딧?", "credits", with_subject=True)
+
+    assert subject == "From the template"
+    assert "메일 제목은 메일 템플릿에만" in caplog.text
