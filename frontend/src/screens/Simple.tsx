@@ -14,7 +14,7 @@ export function Logs() {
   const { data, isPending } = useQuery({
     queryKey: ["logs"],
     queryFn: () => getJSON<Log>("/api/ui/logs"),
-    refetchInterval: 30_000,
+    refetchInterval: 60_000,
   });
   return (
     <>

@@ -30,20 +30,35 @@ export async function postForm(path: string, data: Record<string, string>) {
  * Reconnection is the browser's job (EventSource retries on its own). */
 export function listenForChanges(client: QueryClient) {
   const source = new EventSource("/api/ui/events", { withCredentials: true });
+  // 이벤트를 묶습니다. 한 번의 저장이 두 번의 재요청이 되고 있었습니다 — 쓴 탭은 스스로
+  // invalidate 하고, 곧이어 자기가 일으킨 SSE 이벤트를 받아 또 합니다. 연달아 쓰면 그만큼
+  // 늘어납니다. 왕복 하나가 200ms 인 환경에서는 그게 그대로 화면 지연입니다.
+  let pending: ReturnType<typeof setTimeout> | null = null;
   source.onmessage = () => {
-    void client.invalidateQueries();
+    if (pending) clearTimeout(pending);
+    pending = setTimeout(() => {
+      pending = null;
+      void client.invalidateQueries();
+    }, 300);
   };
-  return () => source.close();
+  return () => {
+    if (pending) clearTimeout(pending);
+    source.close();
+  };
 }
 
 export const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
       // The data behind these screens changes when a person does something, not on its
-      // own: serve it from cache, revalidate on focus. This is the "받아와서 cache" the
-      // full-page reloads were not doing.
+      // own: serve it from cache. This is the "받아와서 cache" the full-page reloads were
+      // not doing.
+      //
+      // 포커스 재요청은 껐습니다. 창을 다시 누를 때마다 화면에 떠 있는 모든 질의를 다시
+      // 받았는데, 그건 SSE 가 이미 하는 일입니다 — 서버에서 뭔가 바뀌면 그때 알려 옵니다.
+      // 알트탭 한 번이 재요청 한 묶음이 될 이유가 없고, 왕복 하나가 200ms 입니다.
       staleTime: 30_000,
-      refetchOnWindowFocus: true,
+      refetchOnWindowFocus: false,
       retry: 1,
     },
   },

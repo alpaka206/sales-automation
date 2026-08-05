@@ -26,7 +26,7 @@ export function Dashboard() {
     queryFn: () => getJSON<DashboardData>("/api/ui/dashboard"),
     // The queue used to be re-fetched by a 30s HTMX poll that swapped the whole panel.
     // Same cadence, but it revalidates data instead of replacing DOM.
-    refetchInterval: 30_000,
+    refetchInterval: 60_000,
   });
 
   if (error) return <div className="banner banner--warn"><div><div className="banner__title">불러오지 못했습니다</div><div className="banner__body">{String(error)}</div></div></div>;

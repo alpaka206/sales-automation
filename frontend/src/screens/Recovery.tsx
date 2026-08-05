@@ -28,7 +28,7 @@ export function Recovery() {
     queryKey: ["recovery"],
     queryFn: () => getJSON<Data>("/api/ui/recovery"),
     retry: false,
-    refetchInterval: 30_000,
+    refetchInterval: 60_000,
   });
 
   if (error) {

@@ -587,3 +587,40 @@ def test_the_stage_dropdown_is_only_on_the_screen_it_filters():
     assert "label: isFixedStage ? (" in customers
     # 필터 자체는 남아 있어야 합니다 — 리드 히스토리가 그것으로 좁힙니다.
     assert 'id="stage-filter"' in customers
+
+
+def test_the_console_does_not_ask_more_often_than_anything_can_change():
+    """왕복 하나가 200ms 인 배포(앱 Oregon · DB 도쿄)에서 재요청은 공짜가 아닙니다.
+
+    세 가지가 겹쳐 있었습니다:
+
+    - 포커스 재요청: 알트탭 한 번마다 화면에 뜬 질의를 전부 다시 받았습니다. SSE 가 이미
+      "서버에서 뭔가 바뀌었다" 를 알려 주므로 하는 일이 같습니다.
+    - 저장 한 번에 재요청 두 번: 쓴 탭이 스스로 invalidate 하고, 곧이어 자기가 일으킨 SSE
+      이벤트를 받아 또 했습니다.
+    - 15초 폴링: 사람 손 없이 바뀌는 것 중 가장 빠른 것이 HubSpot 폴러이고 주기가 600초
+      입니다. 15초마다 물어도 10분에 한 번 오는 것이 더 빨리 오지 않습니다.
+
+    폴링을 아예 없애지 않은 이유는 SSE 가 **HTTP 쓰기에만** 붙어 있기 때문입니다 — 백그라운드
+    작업은 요청이 아니라 알려 오지 않습니다. 그래서 느린 그물로 남깁니다.
+    """
+    import pathlib
+
+    api = pathlib.Path("frontend/src/lib/api.ts").read_text(encoding="utf-8")
+    assert "refetchOnWindowFocus: false" in api
+    assert "setTimeout(" in api and "clearTimeout(" in api, "SSE 이벤트를 묶지 않고 있습니다"
+
+    for screen in ("Messages", "Dashboard", "Recovery", "Simple"):
+        source = pathlib.Path(f"frontend/src/screens/{screen}.tsx").read_text(encoding="utf-8")
+        for faster in ("refetchInterval: 15_000", "refetchInterval: 30_000"):
+            assert faster not in source, f"{screen}: {faster}"
+
+
+def test_the_signature_preview_is_a_snapshot_not_a_live_mirror():
+    """srcDoc 을 본문 상태에 직접 묶으면 글자를 칠 때마다 iframe 이 문서를 통째로 다시
+    싣습니다 — 타자 한 번에 리로드 한 번. 누른 순간의 본문을 담아 둡니다."""
+    import pathlib
+
+    source = pathlib.Path("frontend/src/screens/EmailTemplates.tsx").read_text(encoding="utf-8")
+    assert "${preview}</body>" in source
+    assert "${body}</body>" not in source

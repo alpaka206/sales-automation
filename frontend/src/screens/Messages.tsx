@@ -35,8 +35,14 @@ export function Messages() {
     queryKey: ["messages", status, stage, sort],
     queryFn: () =>
       getJSON<MessagesData>(`/api/ui/messages?status=${status}&stage=${stage}&sort=${sort}`),
-    // The Jinja list polled itself every 15s; the cache revalidates on the same beat.
-    refetchInterval: 15_000,
+    // 폴링이 남아 있는 이유: SSE 는 **HTTP 쓰기**에만 붙어 있습니다(publish_changes_middleware).
+    // HubSpot 폴러·발송 워커 같은 백그라운드 작업은 요청이 아니라 알려 오지 않습니다.
+    //
+    // 그런데 사람 손 없이 바뀌는 것 중 가장 빠른 것이 그 HubSpot 폴러이고, 주기가 600초
+    // 입니다(INBOUND_POLL_INTERVAL_SECONDS). 화면을 15초마다 다시 받아도 10분에 한 번
+    // 오는 것을 더 빨리 오게 만들 수는 없습니다 — 왕복 하나가 200ms 인 환경에서 40배를
+    // 더 묻고 있었고, 그때마다 표가 흐려지고 스피너가 돌았습니다.
+    refetchInterval: 60_000,
     // A filter is a different cache key, so switching one used to blank the table while
     // the new rows loaded. Keep showing the rows that are there — dimmed, with the
     // spinner — instead of throwing away what the operator is reading.

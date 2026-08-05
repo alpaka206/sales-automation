@@ -53,7 +53,9 @@ function Editor({ id, data, siblings, onOpen, onDone }: {
   const [language, setLanguage] = useState("all");
   const [body, setBody] = useState("");
   const [note, setNote] = useState("");
-  const [preview, setPreview] = useState(false);
+  // 미리보기는 **누른 순간의 본문**입니다. srcDoc 을 body 로 직접 묶어 두면 글자를 칠 때마다
+  // iframe 이 문서를 통째로 다시 싣습니다 — 타자마다 리로드 한 번. 스냅샷으로 끊습니다.
+  const [preview, setPreview] = useState<string | null>(null);
   const [loadedId, setLoadedId] = useState<number | null>(null);
 
   if (data && loadedId !== data.id) {
@@ -199,9 +201,9 @@ function Editor({ id, data, siblings, onOpen, onDone }: {
             <textarea className="draft-textarea" id="et-body" value={body}
                       onChange={(e) => setBody(e.target.value)} style={{ minHeight: 240 }} />
 
-            {isSignature && preview && (
+            {isSignature && preview !== null && (
               <iframe title="템플릿 미리보기" sandbox=""
-                      srcDoc={`<body style="margin:0;padding:24px;background:#fff;font-family:'Pretendard Variable',Pretendard">${body}</body>`}
+                      srcDoc={`<body style="margin:0;padding:24px;background:#fff;font-family:'Pretendard Variable',Pretendard">${preview}</body>`}
                       style={{ width: "100%", height: 380, marginTop: 10, border: "1px solid var(--border)", borderRadius: 8, background: "#fff" }} />
             )}
           </>
@@ -214,7 +216,8 @@ function Editor({ id, data, siblings, onOpen, onDone }: {
             <Icon name="check" size={15} /> {id === "new" ? "생성" : "저장"}
           </button>
           {isSignature && (
-            <button type="button" className="btn btn--subtle" onClick={() => setPreview((p) => !p)}>
+            <button type="button" className="btn btn--subtle"
+                    onClick={() => setPreview((p) => (p === null ? body : null))}>
               <Icon name="file" size={15} /> 미리보기
             </button>
           )}
