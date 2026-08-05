@@ -19,8 +19,6 @@ type Group = { base: string; rows: Item[] };
 
 const LANGUAGE_LABELS: Record<string, string> = { all: "전체", ko: "한국어", en: "영어" };
 
-/** 이름에서 언어 꼬리표를 뗍니다 — "자동 접수확인 (영어)" 는 목록에서 "자동 접수확인". */
-const withoutLanguage = (name: string) => name.replace(/\s*[（(](전체|한국어|영어)[）)]\s*$/, "");
 type List = { kinds: Kind[]; items: Item[] };
 
 // Three rows hold a single value and nothing else: the booking calendar, the WhatsApp
@@ -158,7 +156,7 @@ function Editor({ id, data, siblings, onOpen, onDone }: {
         <div className="page-header">
           <div>
             <h1 className="page-title">
-              {id === "new" ? "새 서명 작성" : withoutLanguage(data?.name || "") || "편집"}
+              {id === "new" ? "새 서명 작성" : data?.name || "편집"}
             </h1>
           </div>
           {/* 언어가 하나뿐이면 고를 것이 없으므로 보이지 않습니다. */}
@@ -384,7 +382,7 @@ export function EmailTemplates() {
               { label: "템플릿 이름", width: "52%",
                 cell: (g) => (
                   <>
-                    <strong>{withoutLanguage(g.rows[0].name)}</strong>
+                    <strong>{g.rows[0].name}</strong>
                     {g.rows.some((r) => r.is_default) && (
                       <span className="tag" style={{ marginLeft: 8 }}>기본</span>
                     )}
