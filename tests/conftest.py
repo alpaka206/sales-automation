@@ -15,6 +15,14 @@ import tempfile
 # `setdefault` means an explicit override (CI secret, or `DATABASE_URL=...` on
 # the command line) still wins.
 _TEST_DB_PATH = os.path.join(tempfile.gettempdir(), f"sales_automation_test_{os.getpid()}.db")
+# Start from an empty file. The name carries a PID for parallel runs, and the OS reuses
+# PIDs — so a run can inherit a database left by a run from a week ago. ``create_all``
+# adds missing TABLES but never a missing COLUMN, so an inherited schema fails as
+# "no such column: conversations.inquiry_category" in tests that have nothing to do with
+# the column. That is what it looked like when it happened: thirteen unrelated failures
+# on a green commit, reproducible only on the machine whose PID happened to collide.
+if os.path.exists(_TEST_DB_PATH):
+    os.remove(_TEST_DB_PATH)
 os.environ.setdefault("DATABASE_URL", f"sqlite:///{_TEST_DB_PATH}")
 os.environ.setdefault("INTERNAL_API_TOKEN", "test-internal-token")
 # A dummy HubSpot token so HubSpotClient() constructs instead of raising

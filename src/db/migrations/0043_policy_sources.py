@@ -76,10 +76,21 @@ def up(engine: Engine) -> None:
         logger.info("0043: no company_rules/ folder to import (already migrated).")
         return
 
+    # The identity column was renamed to ``doc_key`` in 0050, and ``notion_url`` dropped
+    # there. On a database that already ran this migration none of that matters — it is
+    # recorded as applied and never runs again. It matters on a FRESH one: 0001 builds
+    # every table from today's models, so the CREATE above is skipped and this INSERT
+    # meets the post-0050 shape. An old migration has to survive the schema catching up
+    # to it, or a new environment cannot be created at all (CI creates one every run).
+    columns = {column["name"] for column in inspect(engine).get_columns("policy_sources")}
+    key_column = "doc_key" if "doc_key" in columns else "notion_page_id"
+    url_column = ", notion_url" if "notion_url" in columns else ""
+    url_value = ", ''" if "notion_url" in columns else ""
+
     with engine.begin() as conn:
         existing = {
             row[0]
-            for row in conn.execute(text("SELECT notion_page_id FROM policy_sources")).fetchall()
+            for row in conn.execute(text(f"SELECT {key_column} FROM policy_sources")).fetchall()
         }
         for order, path in enumerate(sorted(_RULES_DIR.glob("rule_*.md")), start=1):
             key = f"file:{path.name}"
@@ -87,9 +98,9 @@ def up(engine: Engine) -> None:
                 continue
             conn.execute(
                 text(
-                    "INSERT INTO policy_sources (label, notion_url, notion_page_id, mode, "
+                    f"INSERT INTO policy_sources (label{url_column}, {key_column}, mode, "
                     "order_index, status, body, title, created_at, updated_at) "
-                    "VALUES (:label, '', :key, 'rules', :order_index, 'active', :body, "
+                    f"VALUES (:label{url_value}, :key, 'rules', :order_index, 'active', :body, "
                     f":label, {ts_default}, {ts_default})"
                 ),
                 {
