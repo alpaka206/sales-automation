@@ -558,6 +558,7 @@ async def ui_policy_docs():
                     "status": row.status,
                     "body": row.body,
                     "chars": len(row.body or ""),
+                    "effective_on": row.effective_on,
                     "edited_at": row.edited_at,
                 }
                 for row in rows

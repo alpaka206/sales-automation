@@ -356,6 +356,9 @@ class PolicySource(Base):
     # Ordering for mode='rules': the system instruction is read top to bottom.
     order_index: Mapped[int] = mapped_column(Integer, nullable=False, default=100)
     status: Mapped[str] = mapped_column(String, nullable=False, default="active")
+    # 이 문서가 언제 기준인가. 적으면 그 값, 안 적으면 edited_at 이 대신합니다 — 오늘
+    # 붙여넣은 넉 달 된 정책이 "최신"으로 보이지 않게 하는 것이 요점입니다. "YYYY-MM-DD".
+    effective_on: Mapped[str | None] = mapped_column(String(10), nullable=True)
     # 콘솔에서 본문을 고친 시각. 다음 업로드가 파일 내용으로 되돌리므로, 화면이 그렇게
     # 말해 줄 수 있도록 남깁니다 (조용히 사라지는 것이 문제이지 덮어쓰는 것 자체가 아님).
     edited_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

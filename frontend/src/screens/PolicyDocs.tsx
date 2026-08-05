@@ -9,7 +9,8 @@ import { Loading } from "../ui/Loading";
 
 type Row = {
   id: number; label: string; title: string | null; mode: string;
-  status: string; body: string | null; chars: number; edited_at: string | null;
+  status: string; body: string | null; chars: number;
+  effective_on: string | null; edited_at: string | null;
 };
 type Data = { modes: { key: string; label: string }[]; rows: Row[] };
 
@@ -40,10 +41,10 @@ const columns = (act: (path: string) => void): Column<Row>[] => [
       </>
     ),
   },
-  // 동기화가 아니라 수정입니다 — 위에서 받아 오는 것이 없으므로 이 문서가 마지막으로
-  // 손을 탄 시각이 유일하게 말이 되는 날짜입니다.
-  { label: "수정", width: "18%", className: "tnum td-subtle",
-    cell: (row) => kst(row.edited_at || "") || "—" },
+  // 기준일이 있으면 그것, 없으면 마지막으로 손댄 시각. 오늘 붙여넣은 넉 달 된 정책이
+  // "최신" 으로 보이지 않게 하는 것이 요점이라, 둘 중 무엇을 보고 있는지도 적습니다.
+  { label: "기준", width: "18%", className: "tnum td-subtle",
+    cell: (row) => row.effective_on || kst(row.edited_at || "") || "—" },
   {
     width: "12%",
     // Pausing keeps the registration and the synced copy; only 삭제 forgets the link.
@@ -67,6 +68,7 @@ function NewDoc({ modes, onDone }: { modes: { key: string; label: string }[]; on
   const [label, setLabel] = useState("");
   const [body, setBody] = useState("");
   const [mode, setMode] = useState("knowledge");
+  const [effectiveOn, setEffectiveOn] = useState("");
   const [note, setNote] = useState<string | null>(null);
 
   if (!open) {
@@ -80,7 +82,7 @@ function NewDoc({ modes, onDone }: { modes: { key: string; label: string }[]; on
   async function save() {
     setNote("저장 중…");
     try {
-      await saveDoc("/policy-docs", "POST", { label, body, mode });
+      await saveDoc("/policy-docs", "POST", { label, body, mode, effective_on: effectiveOn });
       setOpen(false);
       setLabel("");
       setBody("");
@@ -97,11 +99,22 @@ function NewDoc({ modes, onDone }: { modes: { key: string; label: string }[]; on
       <input className="input" id="pd-label" value={label} onChange={(e) => setLabel(e.target.value)}
              placeholder="예: CS 문의 대응 가이드" style={{ marginBottom: 12 }} />
 
-      <label className="field-label" htmlFor="pd-mode">쓰임</label>
-      <select className="select" id="pd-mode" value={mode} onChange={(e) => setMode(e.target.value)}
-              style={{ marginBottom: 12 }}>
-        {modes.map((m) => <option key={m.key} value={m.key}>{m.label}</option>)}
-      </select>
+      <div className="grid grid-2" style={{ marginBottom: 12 }}>
+        <div>
+          <label className="field-label" htmlFor="pd-mode">쓰임</label>
+          <select className="select" id="pd-mode" value={mode} onChange={(e) => setMode(e.target.value)}>
+            {modes.map((m) => <option key={m.key} value={m.key}>{m.label}</option>)}
+          </select>
+        </div>
+        <div>
+          <label className="field-label" htmlFor="pd-eff">기준일 <span className="t-subtle">(선택)</span></label>
+          <input className="input" id="pd-eff" type="date" value={effectiveOn}
+                 onChange={(e) => setEffectiveOn(e.target.value)} />
+          <p className="t-xs t-subtle" style={{ marginTop: 4 }}>
+            문서 자체의 기준일. 비우면 저장한 날짜를 씁니다.
+          </p>
+        </div>
+      </div>
 
       <label className="field-label" htmlFor="pd-body">본문</label>
       <textarea className="draft-textarea" id="pd-body" value={body}
@@ -122,12 +135,13 @@ function NewDoc({ modes, onDone }: { modes: { key: string; label: string }[]; on
 /** 이미 있는 문서의 본문 고치기. */
 function EditDoc({ doc, onDone }: { doc: Row; onDone: () => void }) {
   const [body, setBody] = useState(doc.body || "");
+  const [effectiveOn, setEffectiveOn] = useState(doc.effective_on || "");
   const [note, setNote] = useState<string | null>(null);
 
   async function save() {
     setNote("저장 중…");
     try {
-      await saveDoc(`/policy-docs/${doc.id}`, "PUT", { body });
+      await saveDoc(`/policy-docs/${doc.id}`, "PUT", { body, effective_on: effectiveOn });
       setNote(null);
       onDone();
     } catch (error) {
@@ -138,6 +152,9 @@ function EditDoc({ doc, onDone }: { doc: Row; onDone: () => void }) {
   return (
     <>
       <div className="card">
+        <label className="field-label" htmlFor="pd-eff-edit">기준일 <span className="t-subtle">(선택 · 비우면 저장한 날짜)</span></label>
+        <input className="input" id="pd-eff-edit" type="date" value={effectiveOn}
+               onChange={(e) => setEffectiveOn(e.target.value)} style={{ marginBottom: 12, maxWidth: 220 }} />
         <textarea className="draft-textarea mono" value={body}
                   onChange={(e) => setBody(e.target.value)}
                   style={{ minHeight: 420, fontSize: 12.5, lineHeight: 1.7 }} />
@@ -184,7 +201,11 @@ export function PolicyDocs({ onBack }: { onBack?: () => void }) {
           <div>
             <h1 className="page-title">{doc.title || doc.label}</h1>
             <p className="page-sub">
-              {doc.edited_at ? `수정 ${kst(doc.edited_at)}` : "본문 없음"}
+              {doc.effective_on
+                ? `${doc.effective_on} 기준`
+                : doc.edited_at
+                  ? `수정 ${kst(doc.edited_at)}`
+                  : "본문 없음"}
               {" · "}{doc.chars.toLocaleString()}자
             </p>
           </div>

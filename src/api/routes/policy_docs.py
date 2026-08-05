@@ -56,6 +56,7 @@ def _rows() -> list[dict]:
                 "status": s.status,
                 "order_index": s.order_index,
                 "chars": len(s.body or ""),
+                "effective_on": s.effective_on,
                 "edited_at": s.edited_at,
             }
             for s in sources
@@ -79,6 +80,7 @@ async def policy_docs_create(
     label: str = Form(...),
     body: str = Form(""),
     mode: str = Form("knowledge"),
+    effective_on: str = Form(""),
 ):
     """제목과 본문을 붙여넣어 문서를 하나 만듭니다.
 
@@ -108,6 +110,7 @@ async def policy_docs_create(
             doc_key=key,
             mode=mode,
             body=body,
+            effective_on=effective_on.strip() or None,
             edited_at=datetime.now(timezone.utc).replace(tzinfo=None),
         )
         session.add(source)
@@ -125,6 +128,7 @@ async def policy_docs_update(
     label: str = Form(""),
     body: str = Form(""),
     mode: str = Form(""),
+    effective_on: str = Form(""),
 ):
     """본문을 고칩니다. 어떤 문서든 고칠 수 있습니다.
 
@@ -144,6 +148,8 @@ async def policy_docs_update(
             source.title = label.strip()
         if mode in _MODE_KEYS:
             source.mode = mode
+        # 빈 문자열은 "지운다" 로 읽습니다 — 그러면 edited_at 이 다시 날짜 역할을 합니다.
+        source.effective_on = effective_on.strip() or None
         if body.strip():
             source.body = body
             source.edited_at = datetime.now(timezone.utc).replace(tzinfo=None)

@@ -95,3 +95,27 @@ def test_nothing_can_overwrite_a_document_behind_the_operators_back(policy_db):
 
     assert not hasattr(policy_sync, "sync_policy_sources")
     assert not pathlib.Path("src/integrations/notion.py").exists()
+
+
+def test_a_document_can_say_when_it_is_effective_rather_than_when_it_was_pasted(policy_db):
+    """「크레딧 차감 정책 (26.04.28 기준)」을 오늘 붙여넣으면 저장 시각은 오늘입니다. 목록이
+    그것만 보여주면 넉 달 된 정책이 어제 손댄 최신 문서처럼 보이고, 그 차이가 "이 숫자 아직
+    맞나?" 를 물어볼지 말지를 가릅니다."""
+    with TestClient(app) as client:
+        source_id = _create(client, body="초 단위 차감", effective_on="2026-04-28")
+
+    with policy_db() as session:
+        assert session.get(PolicySource, source_id).effective_on == "2026-04-28"
+
+
+def test_clearing_the_effective_date_hands_the_column_back_to_the_save_time(policy_db):
+    """빈 값은 "안 적었다" 가 아니라 "지운다" 로 읽습니다 — 잘못 적은 날짜를 되돌릴 방법이
+    없으면, 틀린 기준일이 영원히 남습니다."""
+    with TestClient(app) as client:
+        source_id = _create(client, body="본문", effective_on="2026-04-28")
+        assert client.put(f"/policy-docs/{source_id}", data={"body": "본문2"}).status_code == 200
+
+    with policy_db() as session:
+        source = session.get(PolicySource, source_id)
+        assert source.effective_on is None
+        assert source.edited_at is not None
