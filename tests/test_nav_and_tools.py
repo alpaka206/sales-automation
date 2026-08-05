@@ -79,14 +79,22 @@ def test_opening_something_pushes_history_so_the_browser_back_button_returns_to_
     to back out of) and for the back buttons themselves. It is wrong for going INTO
     something, which is the one case that has to be undoable.
     """
-    for entering in (
-        "setParams({ kind: entry.key })",
-        'setParams({ kind, edit: "new" })',
-        "setParams({ kind, edit: String(item.id) })",
-    ):
-        assert entering in TEMPLATES, entering
     policy = pathlib.Path("frontend/src/screens/PolicyDocs.tsx").read_text(encoding="utf-8")
-    assert 'setParams({ kind: "policy", doc: String(row.id) })' in policy
+    # Every call that OPENS something, in both screens: none of them may replace.
+    opens = [
+        line.strip()
+        for source in (TEMPLATES, policy)
+        for line in source.split("\n")
+        if ("onRowClick" in line or "edit: " in line or "kind: entry.key" in line)
+        and "setParams(" in line
+    ]
+    assert len(opens) >= 4, opens
+    for line in opens:
+        # 언어를 바꿔 보는 것만 예외입니다: 같은 화면을 다르게 보는 것이지 들어간 것이
+        # 아니라, 뒤로가기가 언어를 되짚는 대신 목록으로 나가야 합니다.
+        if "onOpen" in line:
+            continue
+        assert "replace: true" not in line, line
 
 
 def test_the_way_back_out_of_the_editor_is_a_left_chip_like_every_other_screen():

@@ -9,7 +9,17 @@ import { Loading } from "../ui/Loading";
 import { PolicyDocs } from "./PolicyDocs";
 
 type Kind = { key: string; label: string; count: number; can_create: boolean; read_only: boolean };
-type Item = { id: number; key: string; name: string; language: string; updated_at: string; kind: string; chars: number; is_default: boolean };
+type Item = {
+  id: number; key: string; base_key: string; name: string; language: string;
+  updated_at: string; kind: string; chars: number; is_default: boolean;
+};
+// 한 줄 = 한 템플릿. 언어가 여럿이면 그 안에서 고릅니다.
+type Group = { base: string; rows: Item[] };
+
+const LANGUAGE_LABELS: Record<string, string> = { all: "전체", ko: "한국어", en: "영어" };
+
+/** 이름에서 언어 꼬리표를 뗍니다 — "자동 접수확인 (영어)" 는 목록에서 "자동 접수확인". */
+const withoutLanguage = (name: string) => name.replace(/\s*[（(](전체|한국어|영어)[）)]\s*$/, "");
 type List = { kinds: Kind[]; items: Item[] };
 type Detail = {
   id: number; key: string; name: string; language: string; body: string; kind: string;
@@ -30,7 +40,13 @@ const ONE_LINE_FIELDS: Record<string, { label: string; type: string; placeholder
   sender_name_en: { label: "담당자 이름 (영문)", type: "text", placeholder: "예: Untae Bae" },
 };
 
-function Editor({ id, onDone }: { id: number | "new"; onDone: () => void }) {
+function Editor({ id, siblings, onOpen, onDone }: {
+  id: number | "new";
+  // 같은 템플릿의 다른 언어들. 목록에서 언어별로 줄을 나누는 대신 여기서 고릅니다.
+  siblings: Item[];
+  onOpen: (id: number) => void;
+  onDone: () => void;
+}) {
   const queryClient = useQueryClient();
   const { data } = useQuery({
     queryKey: ["email-template", id],
@@ -117,7 +133,23 @@ function Editor({ id, onDone }: { id: number | "new"; onDone: () => void }) {
       </div>
       <div className="card" style={{ maxWidth: 860 }}>
         <div className="page-header">
-          <div><h1 className="page-title">{id === "new" ? "새 서명 작성" : data?.name || "편집"}</h1></div>
+          <div>
+            <h1 className="page-title">
+              {id === "new" ? "새 서명 작성" : withoutLanguage(data?.name || "") || "편집"}
+            </h1>
+          </div>
+          {/* 언어가 하나뿐이면 고를 것이 없으므로 보이지 않습니다. */}
+          {siblings.length > 1 && (
+            <div className="chip-row">
+              {siblings.map((row) => (
+                <button key={row.id} type="button"
+                        className={`chip${row.id === data?.id ? " is-active" : ""}`}
+                        onClick={() => onOpen(row.id)}>
+                  {LANGUAGE_LABELS[row.language] ?? row.language}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
 
         {oneLine ? (
@@ -218,16 +250,23 @@ export function EmailTemplates() {
     queryFn: () => getJSON<List>("/api/ui/email-templates"),
   });
 
+  if (isPending || !data) return <Loading columns={3} />;
+
   if (edit) {
+    const editing = data.items.find((item) => String(item.id) === edit);
     return (
       <Editor
         id={edit === "new" ? "new" : Number(edit)}
+        siblings={
+          editing ? data.items.filter((item) => item.base_key === editing.base_key) : []
+        }
+        // replace: 언어를 바꿔 보는 것은 들어간 것이 아니라 같은 화면을 다르게 보는 것이라,
+        // 뒤로가기가 언어를 되짚는 대신 목록으로 나가야 합니다.
+        onOpen={(next) => setParams({ kind: kind ?? "", edit: String(next) }, { replace: true })}
         onDone={() => setParams(kind ? { kind } : {}, { replace: true })}
       />
     );
   }
-
-  if (isPending || !data) return <Loading columns={3} />;
 
   // Top level: the kinds. Flat, the list mixed signatures with the bodies the send path
   // resolves by name, and nothing on screen said which was which.
@@ -269,6 +308,16 @@ export function EmailTemplates() {
 
   const group = data.kinds.find((entry) => entry.key === kind);
   const items = data.items.filter((item) => item.kind === kind);
+  // 언어가 다른 같은 템플릿은 한 줄로 모읍니다. 두 줄이면 두 가지로 읽힙니다.
+  const groups: Group[] = [];
+  for (const item of items) {
+    const found = groups.find((g) => g.base === item.base_key);
+    if (found) found.rows.push(item);
+    else groups.push({ base: item.base_key, rows: [item] });
+  }
+  for (const g of groups) {
+    g.rows.sort((a, b) => (a.key === g.base ? -1 : b.key === g.base ? 1 : 0));
+  }
   return (
     <>
       {/* 나가는 버튼과 만드는 버튼을 한 줄에. 각자 줄을 차지하면 세로로 두 줄이 더 붙고,
@@ -294,45 +343,48 @@ export function EmailTemplates() {
             columns={[
               // 어느 것이 기본인지는 이름 옆 태그로 말합니다. 열을 따로 두면 서명마다 한
               // 줄씩 버튼이 서 있게 되고, 정하는 일은 그 서명을 열어 보고 할 일입니다.
-              { label: "템플릿 이름", width: "56%",
-                cell: (item) => (
+              { label: "템플릿 이름", width: "52%",
+                cell: (g) => (
                   <>
-                    <strong>{item.name}</strong>
-                    {item.is_default && <span className="tag" style={{ marginLeft: 8 }}>기본</span>}
+                    <strong>{withoutLanguage(g.rows[0].name)}</strong>
+                    {g.rows.some((r) => r.is_default) && (
+                      <span className="tag" style={{ marginLeft: 8 }}>기본</span>
+                    )}
                   </>
                 ) },
-              { label: "언어", width: "12%",
-                cell: (item) => (
-                  <span className="tag">
-                    {{ all: "전체", ko: "한국어", en: "영어" }[item.language] ?? item.language}
+              // 무엇이 있는지만. 어느 것을 고칠지는 열어서 정합니다.
+              { label: "언어", width: "16%",
+                cell: (g) => (
+                  <span className="t-subtle t-xs">
+                    {g.rows.map((r) => LANGUAGE_LABELS[r.language] ?? r.language).join(" · ")}
                   </span>
                 ) },
               // 연도까지. 이 열은 "얼마나 오래됐나" 를 보는 자리이고, 월·일만 있으면
               // 작년 것과 올해 것이 같은 글자로 보입니다.
-              { label: "수정일", width: "24%", className: "td-subtle tnum",
-                cell: (item) => kst(item.updated_at) || "—" },
+              { label: "수정일", width: "20%", className: "td-subtle tnum",
+                cell: (g) => kst(g.rows[0].updated_at) || "—" },
               {
                 // 정책 문서 목록과 같은 자리. 줄을 클릭해도 열리지만, 지우려고 들어갔다
                 // 나오는 왕복이 없어야 합니다.
                 width: "12%",
-                cell: (item) => (
+                cell: (g) => (
                   <div className="row" style={{ gap: 6 }} onClick={(e) => e.stopPropagation()}>
                     <button type="button" className="btn btn--subtle btn--sm"
-                            onClick={() => setParams({ kind, edit: String(item.id) })}>수정</button>
+                            onClick={() => setParams({ kind, edit: String(g.rows[0].id) })}>수정</button>
                     {/* 서명만. 나머지는 코드가 이름으로 찾는 행이라 지우면 되돌릴 방법이
                         없습니다 — 콘솔은 서명을 만들지 코드 참조를 만들지 못합니다. */}
                     {kind === "signature" && (
                       <button type="button" className="btn btn--ghost btn--sm"
-                              onClick={() => void removeTemplate(item.id)}>삭제</button>
+                              onClick={() => void removeTemplate(g.rows[0].id)}>삭제</button>
                     )}
                   </div>
                 ),
               },
             ]}
-            rows={items}
-            rowKey={(item) => item.id}
+            rows={groups}
+            rowKey={(g) => g.base}
             empty="템플릿이 없습니다"
-            onRowClick={(item) => setParams({ kind, edit: String(item.id) })}
+            onRowClick={(g) => setParams({ kind, edit: String(g.rows[0].id) })}
           />
       </div>
       {listNote && <div className="t-sm" style={{ marginTop: 12 }} role="status">{listNote}</div>}

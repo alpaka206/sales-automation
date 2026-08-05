@@ -460,6 +460,22 @@ def _template_kind(key: str) -> str:
     return "signature" if key.startswith("signature_") else "template"
 
 
+def _base_key(key: str, all_keys: set[str]) -> str:
+    """The row this one is a language of, or itself.
+
+    ``auto_ack_en`` belongs under ``auto_ack``; the screen lists one entry and the
+    language is chosen inside it. Two rows in the list for one thing reads as two things.
+
+    Stripped ONLY when the shorter key actually exists. A signature named in Korean gets
+    the key ``signature_html_ko`` from ``_generate_key`` — nothing to do with language —
+    and blind suffix-stripping would file unrelated signatures under one entry.
+    """
+    import re
+
+    base = re.sub(r"_(ko|en|all)$", "", key)
+    return base if base != key and base in all_keys else key
+
+
 @router.get("/api/ui/email-templates")
 def ui_email_templates():
     """Grouped, not one flat list — and each group says what it is for."""
@@ -471,6 +487,7 @@ def ui_email_templates():
     with SessionLocal() as session:
         policy_count = session.query(PolicySource).count()
         rows = session.query(EmailTemplate).order_by(EmailTemplate.updated_at.desc()).all()
+        all_keys = {row.key for row in rows}
         items = [
             {
                 "id": row.id,
@@ -481,6 +498,9 @@ def ui_email_templates():
                 "language": row.language or "all",
                 "updated_at": row.updated_at,
                 "kind": _template_kind(row.key),
+                # Which list entry this row sits under. Rows sharing one are the same
+                # template in different languages.
+                "base_key": _base_key(row.key, all_keys),
                 "chars": len(row.body or ""),
                 # Which signature a new draft starts with. A row, not a literal in
                 # inbound.py — and the screen is where it moves.
