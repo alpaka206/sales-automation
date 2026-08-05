@@ -9,9 +9,14 @@ import { Loading } from "../ui/Loading";
 import { PolicyDocs } from "./PolicyDocs";
 
 type Kind = { key: string; label: string; count: number; can_create: boolean; read_only: boolean };
-type Item = { id: number; name: string; language: string; updated_at: string; kind: string; chars: number };
+type Item = { id: number; key: string; name: string; language: string; updated_at: string; kind: string; chars: number };
 type List = { kinds: Kind[]; items: Item[] };
-type Detail = { id: number; name: string; language: string; body: string; kind: string };
+type Detail = { id: number; key: string; name: string; language: string; body: string; kind: string };
+
+// Two rows hold a single URL and nothing else — the booking calendar and the WhatsApp
+// number the draft ends on. A language, an HTML preview and a 240px textarea are the
+// wrong questions to ask about a link, so those rows get one field.
+const LINK_KEYS = new Set(["meeting_link", "whatsapp_link"]);
 
 function Editor({ id, onDone }: { id: number | "new"; onDone: () => void }) {
   const queryClient = useQueryClient();
@@ -57,56 +62,90 @@ function Editor({ id, onDone }: { id: number | "new"; onDone: () => void }) {
     }
   }
 
+  // 새로 만들기 is only offered for signatures, so a new row is one.
+  const isSignature = id === "new" || data?.kind === "signature";
+  const isLink = data ? LINK_KEYS.has(data.key) : false;
+
   return (
-    <div className="card" style={{ maxWidth: 860 }}>
-      <div className="page-header">
-        <div><h1 className="page-title">{id === "new" ? "새 서명 작성" : "편집"}</h1></div>
-        <button type="button" className="btn btn--subtle" onClick={onDone}>목록으로</button>
+    <>
+      {/* Left, with the chevron — the same back affordance as every other screen. It sat
+          on the right of the header here alone, which read as an action, not a way out. */}
+      <div style={{ marginBottom: 14 }}>
+        <button type="button" className="chip" onClick={onDone}>
+          <Icon name="chevron" size={14} /> 목록으로
+        </button>
       </div>
-
-      {/* No 키 · 설명 · 상태 · 버전 field: none of them is a decision the operator makes,
-          and the key is a code reference the send path resolves. */}
-      <label className="field-label" htmlFor="et-name">템플릿 이름</label>
-      <input className="input" id="et-name" value={name} onChange={(e) => setName(e.target.value)}
-             placeholder="예: 기본 서명 (한국어)" required style={{ marginBottom: 14 }} />
-
-      <div className="grid grid-2" style={{ marginBottom: 14 }}>
-        <div>
-          <label className="field-label" htmlFor="et-language">언어</label>
-          <select className="select" id="et-language" value={language}
-                  onChange={(e) => setLanguage(e.target.value)}>
-            <option value="all">all</option>
-            <option value="ko">ko</option>
-            <option value="en">en</option>
-          </select>
+      <div className="card" style={{ maxWidth: 860 }}>
+        <div className="page-header">
+          <div><h1 className="page-title">{id === "new" ? "새 서명 작성" : data?.name || "편집"}</h1></div>
         </div>
-      </div>
 
-      <label className="field-label" htmlFor="et-body">
-        본문 <span className="t-subtle">({"{{변수}}"} 허용 · 서명은 HTML 그대로 붙여넣기)</span>
-      </label>
-      <textarea className="draft-textarea" id="et-body" value={body}
-                onChange={(e) => setBody(e.target.value)} style={{ minHeight: 240 }} />
+        {isLink ? (
+          <>
+            <label className="field-label" htmlFor="et-link">링크 주소</label>
+            <input className="input mono" id="et-link" type="url" value={body}
+                   onChange={(e) => setBody(e.target.value.trim())} placeholder="https://…" />
+            <p className="t-xs t-subtle" style={{ marginTop: 6 }}>
+              답변 본문의 토큰이 이 주소로 치환됩니다. 주소만 바꾸면 되고, 문구는
+              <strong> 답변 메일 형식</strong>에서 고칩니다.
+            </p>
+          </>
+        ) : (
+          <>
+            {/* No 키 · 설명 · 상태 · 버전 field: none of them is a decision the operator
+                makes, and the key is a code reference the send path resolves. */}
+            <label className="field-label" htmlFor="et-name">템플릿 이름</label>
+            <input className="input" id="et-name" value={name} onChange={(e) => setName(e.target.value)}
+                   placeholder="예: 기본 서명 (한국어)" required style={{ marginBottom: 14 }} />
 
-      <div className="row" style={{ gap: 10, marginTop: 8, alignItems: "center" }}>
-        <button type="button" className="btn btn--subtle btn--sm" onClick={() => setPreview((p) => !p)}>
-          <Icon name="file" size={14} /> 미리보기
-        </button>
-        <span className="t-xs t-subtle">HTML 서명은 미리보기로 실제 모양을 확인하세요.</span>
-      </div>
-      {preview && (
-        <iframe title="템플릿 미리보기" sandbox=""
-                srcDoc={`<body style="margin:0;padding:24px;background:#fff;font-family:'Pretendard Variable',Pretendard">${body}</body>`}
-                style={{ width: "100%", height: 380, marginTop: 10, border: "1px solid var(--border)", borderRadius: 8, background: "#fff" }} />
-      )}
+            {/* 언어 only for signatures: they are the only kind that exists once per
+                language. The other rows are 'all' and always will be. */}
+            {isSignature && (
+              <div className="grid grid-2" style={{ marginBottom: 14 }}>
+                <div>
+                  <label className="field-label" htmlFor="et-language">언어</label>
+                  <select className="select" id="et-language" value={language}
+                          onChange={(e) => setLanguage(e.target.value)}>
+                    <option value="all">all</option>
+                    <option value="ko">ko</option>
+                    <option value="en">en</option>
+                  </select>
+                </div>
+              </div>
+            )}
 
-      <div className="action-bar">
-        <button type="button" className="btn btn--primary" onClick={() => void save()}>
-          <Icon name="check" size={15} /> {id === "new" ? "생성" : "저장"}
-        </button>
+            <label className="field-label" htmlFor="et-body">
+              본문 <span className="t-subtle">({"{{변수}}"} 허용{isSignature ? " · 서명은 HTML 그대로 붙여넣기" : ""})</span>
+            </label>
+            <textarea className="draft-textarea" id="et-body" value={body}
+                      onChange={(e) => setBody(e.target.value)} style={{ minHeight: 240 }} />
+
+            {isSignature && (
+              <>
+                <div className="row" style={{ gap: 10, marginTop: 8, alignItems: "center" }}>
+                  <button type="button" className="btn btn--subtle btn--sm" onClick={() => setPreview((p) => !p)}>
+                    <Icon name="file" size={14} /> 미리보기
+                  </button>
+                  <span className="t-xs t-subtle">HTML 서명은 미리보기로 실제 모양을 확인하세요.</span>
+                </div>
+                {preview && (
+                  <iframe title="템플릿 미리보기" sandbox=""
+                          srcDoc={`<body style="margin:0;padding:24px;background:#fff;font-family:'Pretendard Variable',Pretendard">${body}</body>`}
+                          style={{ width: "100%", height: 380, marginTop: 10, border: "1px solid var(--border)", borderRadius: 8, background: "#fff" }} />
+                )}
+              </>
+            )}
+          </>
+        )}
+
+        <div className="action-bar">
+          <button type="button" className="btn btn--primary" onClick={() => void save()}>
+            <Icon name="check" size={15} /> {id === "new" ? "생성" : "저장"}
+          </button>
+        </div>
+        {note && <div className="t-sm" style={{ marginTop: 14 }} role="status">{note}</div>}
       </div>
-      {note && <div className="t-sm" style={{ marginTop: 14 }} role="status">{note}</div>}
-    </div>
+    </>
   );
 }
 
@@ -138,9 +177,12 @@ export function EmailTemplates() {
         <div className="page-header"><div><h1 className="page-title">이메일 템플릿</h1></div></div>
         <div className="stack" style={{ gap: 12 }}>
           {data.kinds.map((entry) => (
+            // Pushed, not replaced: going INTO something has to leave the list behind in
+            // history, or the browser's back button jumps out of the screen entirely.
+            // Replace stays on the back buttons and the filters below.
             <button key={entry.key} type="button" className="card is-clickable"
                     style={{ textAlign: "left", width: "100%" }}
-                    onClick={() => setParams({ kind: entry.key }, { replace: true })}>
+                    onClick={() => setParams({ kind: entry.key })}>
               <div className="row-between">
                 <div className="section-header__l">
                   <span className="section-header__icon">
@@ -180,7 +222,7 @@ export function EmailTemplates() {
         </div>
         {group?.can_create && (
           <button type="button" className="btn btn--primary"
-                  onClick={() => setParams({ kind, edit: "new" }, { replace: true })}>
+                  onClick={() => setParams({ kind, edit: "new" })}>
             <Icon name="plus" size={15} /> 새로 만들기
           </button>
         )}
@@ -196,7 +238,7 @@ export function EmailTemplates() {
             rows={items}
             rowKey={(item) => item.id}
             empty="템플릿이 없습니다"
-            onRowClick={(item) => setParams({ kind, edit: String(item.id) }, { replace: true })}
+            onRowClick={(item) => setParams({ kind, edit: String(item.id) })}
           />
       </div>
     </>

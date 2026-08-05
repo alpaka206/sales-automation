@@ -223,7 +223,9 @@ export function PolicyDocs({ onBack }: { onBack?: () => void }) {
               rows={data.rows.filter((row) => row.mode === mode.key)}
               rowKey={(row) => row.id}
               empty="등록된 문서가 없습니다."
-              onRowClick={(row) => setParams({ kind: "policy", doc: String(row.id) }, { replace: true })}
+              // Pushed: opening a document must leave the list in history so the
+              // browser's back button returns to it instead of leaving the screen.
+              onRowClick={(row) => setParams({ kind: "policy", doc: String(row.id) })}
             />
           </div>
         </section>

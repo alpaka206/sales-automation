@@ -51,6 +51,53 @@ def test_the_policy_text_is_read_only_but_the_list_is_managed_by_dropping_a_file
     assert "/toggle" in policy and "/delete" in policy
 
 
+TEMPLATES = pathlib.Path("frontend/src/screens/EmailTemplates.tsx").read_text(encoding="utf-8")
+
+
+def test_opening_something_pushes_history_so_the_browser_back_button_returns_to_the_list():
+    """Chrome's back button, not the in-app chip.
+
+    Drilling in used to call ``setParams(…, {replace: true})``, which OVERWRITES the
+    list's history entry. Back from a document then skipped the list and landed wherever
+    the operator had been before the screen — reported as "뒤로가기를 누르면 아예 다른
+    곳으로 갑니다".
+
+    Replace is still right for a FILTER (twenty chip clicks should not be twenty entries
+    to back out of) and for the back buttons themselves. It is wrong for going INTO
+    something, which is the one case that has to be undoable.
+    """
+    for entering in (
+        "setParams({ kind: entry.key })",
+        'setParams({ kind, edit: "new" })',
+        "setParams({ kind, edit: String(item.id) })",
+    ):
+        assert entering in TEMPLATES, entering
+    policy = pathlib.Path("frontend/src/screens/PolicyDocs.tsx").read_text(encoding="utf-8")
+    assert 'setParams({ kind: "policy", doc: String(row.id) })' in policy
+
+
+def test_the_way_back_out_of_the_editor_is_a_left_chip_like_every_other_screen():
+    """It was a button on the RIGHT of the header, where every other screen puts an
+    action — so the one control that leaves the page looked like one that changes it."""
+    assert 'className="btn btn--subtle" onClick={onDone}>목록으로' not in TEMPLATES
+    assert 'className="chip" onClick={onDone}' in TEMPLATES
+
+
+def test_a_row_that_holds_only_a_url_is_edited_as_a_url():
+    """미팅 예약 링크 / WhatsApp 링크 are one URL each. The full editor asked for a
+    language, offered an HTML preview and gave a 240px textarea — three questions that
+    have no answer for a link. 언어 stays only where it means something: a signature is
+    the one kind that exists once per language."""
+    assert "LINK_KEYS" in TEMPLATES
+    assert '"meeting_link"' in TEMPLATES and '"whatsapp_link"' in TEMPLATES
+    assert 'id="et-link"' in TEMPLATES and 'type="url"' in TEMPLATES
+    assert "{isSignature && (" in TEMPLATES
+
+    # The screen can only tell them apart if the API sends the key.
+    ui_api = pathlib.Path("src/api/routes/ui_api.py").read_text(encoding="utf-8")
+    assert '"key": row.key' in ui_api
+
+
 def test_sidebar_sections_are_the_ones_the_operator_asked_for():
     for title in ("인바운드 리드", "고객 관리", "인사이트", "활용 툴", "시스템"):
         assert f'title: "{title}"' in SHELL, title

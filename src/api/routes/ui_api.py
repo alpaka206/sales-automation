@@ -465,6 +465,9 @@ async def ui_email_templates():
         items = [
             {
                 "id": row.id,
+                # The key, because two of these rows hold nothing but a URL and the screen
+                # has to know that to stop asking for a language and an HTML preview.
+                "key": row.key,
                 "name": row.name,
                 "language": row.language or "all",
                 "updated_at": row.updated_at,
@@ -516,6 +519,7 @@ async def ui_email_template(template_id: int):
             raise HTTPException(status_code=404, detail="템플릿을 찾을 수 없습니다")
         return {
             "id": row.id,
+            "key": row.key,
             "name": row.name,
             "language": row.language or "all",
             "body": row.body,
