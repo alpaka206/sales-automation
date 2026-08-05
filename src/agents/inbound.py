@@ -28,7 +28,7 @@ from ..common.sheet_values import (
 )
 from ..llm.client import LLMClient
 from ..llm.knowledge import select_relevant_docs
-from ..llm.prompts import apply_link_tokens, get_reply_format
+from ..llm.prompts import apply_editable_tokens, get_reply_format
 from ._notify import notify_approval_once
 from .inbound_scoring import (  # noqa: F401 — re-exported for callers/tests
     _TARGET_COUNTRIES,
@@ -838,7 +838,7 @@ class InboundAgent:
 
         # CODE GUARD 1b — links are substituted, never generated. Runs AFTER
         # ensure_korean: translation would happily rewrite a URL.
-        draft.body = apply_link_tokens(draft.body)
+        draft.body = apply_editable_tokens(draft.body)
 
         # CODE GUARD 2 — the first reply must never state a price. Strip offending
         # lines deterministically and record it on the progress log.

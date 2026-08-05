@@ -13,10 +13,21 @@ type Item = { id: number; key: string; name: string; language: string; updated_a
 type List = { kinds: Kind[]; items: Item[] };
 type Detail = { id: number; key: string; name: string; language: string; body: string; kind: string };
 
-// Two rows hold a single URL and nothing else — the booking calendar and the WhatsApp
-// number the draft ends on. A language, an HTML preview and a 240px textarea are the
-// wrong questions to ask about a link, so those rows get one field.
-const LINK_KEYS = new Set(["meeting_link", "whatsapp_link"]);
+// Three rows hold a single value and nothing else: the booking calendar, the WhatsApp
+// number, and the name the Korean template introduces the writer by. A language, an HTML
+// preview and a 240px textarea are the wrong questions to ask about any of them, so they
+// get one field — the label says what goes in it.
+const ONE_LINE_FIELDS: Record<string, { label: string; type: string; hint: string }> = {
+  meeting_link: { label: "링크 주소", type: "url", hint: "답변 본문의 토큰이 이 주소로 치환됩니다." },
+  whatsapp_link: { label: "링크 주소", type: "url", hint: "답변 본문의 토큰이 이 주소로 치환됩니다." },
+  sender_name: {
+    label: "담당자 이름",
+    type: "text",
+    // Empty is a real state, not a mistake: the token then stays visible in the draft so
+    // the operator sees it before 발송 rather than after.
+    hint: "한국어 템플릿의 \"이스트소프트 OOO입니다\" 자리에 들어갑니다. 비워 두면 초안에 토큰이 그대로 남습니다.",
+  },
+};
 
 function Editor({ id, onDone }: { id: number | "new"; onDone: () => void }) {
   const queryClient = useQueryClient();
@@ -64,7 +75,7 @@ function Editor({ id, onDone }: { id: number | "new"; onDone: () => void }) {
 
   // 새로 만들기 is only offered for signatures, so a new row is one.
   const isSignature = id === "new" || data?.kind === "signature";
-  const isLink = data ? LINK_KEYS.has(data.key) : false;
+  const oneLine = data ? ONE_LINE_FIELDS[data.key] : undefined;
 
   return (
     <>
@@ -80,15 +91,14 @@ function Editor({ id, onDone }: { id: number | "new"; onDone: () => void }) {
           <div><h1 className="page-title">{id === "new" ? "새 서명 작성" : data?.name || "편집"}</h1></div>
         </div>
 
-        {isLink ? (
+        {oneLine ? (
           <>
-            <label className="field-label" htmlFor="et-link">링크 주소</label>
-            <input className="input mono" id="et-link" type="url" value={body}
-                   onChange={(e) => setBody(e.target.value.trim())} placeholder="https://…" />
-            <p className="t-xs t-subtle" style={{ marginTop: 6 }}>
-              답변 본문의 토큰이 이 주소로 치환됩니다. 주소만 바꾸면 되고, 문구는
-              <strong> 답변 메일 형식</strong>에서 고칩니다.
-            </p>
+            <label className="field-label" htmlFor="et-link">{oneLine.label}</label>
+            <input className={`input${oneLine.type === "url" ? " mono" : ""}`} id="et-link"
+                   type={oneLine.type} value={body}
+                   onChange={(e) => setBody(e.target.value.trim())}
+                   placeholder={oneLine.type === "url" ? "https://…" : "예: 배운태"} />
+            <p className="t-xs t-subtle" style={{ marginTop: 6 }}>{oneLine.hint}</p>
           </>
         ) : (
           <>

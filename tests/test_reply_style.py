@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from unittest.mock import patch
+
 from src.llm.prompts import load_prompt
 
 
@@ -87,11 +89,11 @@ def test_links_are_substituted_not_generated():
     from unittest.mock import patch
 
     from src.db.migrations import __name__ as _  # noqa: F401  (keeps import ordering honest)
-    from src.llm.prompts import apply_link_tokens
+    from src.llm.prompts import apply_editable_tokens
 
     values = {"meeting_link": "https://calendar.example/abc123", "whatsapp_link": "https://wa.me/1"}
     with patch("src.db.email_templates.get_email_template", side_effect=values.get):
-        out = apply_link_tokens("미팅 예약: {{MEETING_LINK}}\nWhatsApp: {{WHATSAPP}}")
+        out = apply_editable_tokens("미팅 예약: {{MEETING_LINK}}\nWhatsApp: {{WHATSAPP}}")
     assert out == "미팅 예약: https://calendar.example/abc123\nWhatsApp: https://wa.me/1"
 
 
@@ -99,19 +101,48 @@ def test_an_unset_link_stays_visible_instead_of_vanishing():
     """A blank would ship a sentence promising a link that is not there."""
     from unittest.mock import patch
 
-    from src.llm.prompts import apply_link_tokens
+    from src.llm.prompts import apply_editable_tokens
 
     with patch("src.db.email_templates.get_email_template", return_value=""):
-        assert apply_link_tokens("예약: {{MEETING_LINK}}") == "예약: {{MEETING_LINK}}"
+        assert apply_editable_tokens("예약: {{MEETING_LINK}}") == "예약: {{MEETING_LINK}}"
 
 
-def test_seeded_format_names_exactly_the_tokens_the_code_substitutes():
-    """A token in the skeleton that the code does not know ships to the customer raw."""
+def test_every_token_in_the_seeded_format_is_one_the_code_substitutes():
+    """A token in the skeleton that the code does not know ships to the customer raw.
+
+    One direction only. The code may know tokens the skeleton never mentions —
+    ``{{SENDER_NAME}}`` lives in the Korean policy document, not in the reply shape — and
+    that is not a defect; the defect is a token nothing can replace.
+    """
     import importlib
+    import re
 
-    from src.llm.prompts import _LINK_TOKENS
+    from src.llm.prompts import _EDITABLE_TOKENS
 
     seed = importlib.import_module("src.db.migrations.0042_reply_format_template")
-    for token in _LINK_TOKENS:
-        assert token in seed.REPLY_FORMAT, token
+    known = set(_EDITABLE_TOKENS)
+    # Upper-case tokens only: the skeleton also names {{reply_format}}-style prompt
+    # variables, which load_prompt fills in long before a body exists.
+    for token in re.findall(r"\{\{[A-Z_]+\}\}", seed.REPLY_FORMAT):
+        assert token in known, token
     assert seed.WHATSAPP_LINK.endswith("821054802261")
+
+
+def test_the_sender_name_is_one_row_not_a_name_typed_into_a_document():
+    """한국어 템플릿은 본문 첫 줄에서 쓰는 사람을 이름으로 소개합니다. 그 이름을 정책 문서에
+    박아 두면 담당자가 바뀔 때 고칠 곳이 서명과 문서 두 군데가 되고, 한쪽만 고치면 인사말과
+    서명이 서로 다른 사람을 가리키는 메일이 나갑니다. 링크 두 개와 같은 방식으로 다룹니다."""
+    from src.llm.prompts import _EDITABLE_TOKENS, apply_editable_tokens
+
+    assert _EDITABLE_TOKENS["{{SENDER_NAME}}"] == "sender_name"
+    with patch("src.db.email_templates.get_email_template", side_effect=lambda key, *a, **k:
+               {"sender_name": "배운태"}.get(key)):
+        assert apply_editable_tokens("이스트소프트 {{SENDER_NAME}}입니다") == "이스트소프트 배운태입니다"
+
+
+def test_an_unset_sender_name_leaves_the_token_where_it_can_be_seen():
+    """"이스트소프트 입니다" 는 읽는 순간 이미 나간 뒤입니다. 토큰은 발송 전에 눈에 띕니다."""
+    from src.llm.prompts import apply_editable_tokens
+
+    with patch("src.db.email_templates.get_email_template", return_value=""):
+        assert apply_editable_tokens("이스트소프트 {{SENDER_NAME}}입니다") == "이스트소프트 {{SENDER_NAME}}입니다"

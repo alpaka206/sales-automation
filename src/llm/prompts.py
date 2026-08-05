@@ -124,28 +124,32 @@ def get_reply_format() -> str:
     return (body or "").strip()
 
 
-# Tokens the model is told to emit verbatim, swapped for the real URLs afterwards. The
+# Tokens the model is told to emit verbatim, swapped for the real values afterwards. The
 # booking URL is ~120 characters of opaque base64 — exactly the kind of string a model
-# silently truncates or "tidies", and a broken booking link is a lost meeting.
-_LINK_TOKENS = {
+# silently truncates or "tidies", and a broken booking link is a lost meeting. The sender
+# name is here for a different reason: the KR template introduces the writer by name
+# ("이스트소프트 OOO입니다"), and a model asked to fill that in will invent one.
+_EDITABLE_TOKENS = {
     "{{MEETING_LINK}}": "meeting_link",
     "{{WHATSAPP}}": "whatsapp_link",
+    "{{SENDER_NAME}}": "sender_name",
 }
 
 
-def apply_link_tokens(body: str) -> str:
-    """Replace the link tokens in a drafted body with their web-editable values.
+def apply_editable_tokens(body: str) -> str:
+    """Replace the tokens in a drafted body with their web-editable values.
 
     A token whose row is missing or blank is left untouched rather than replaced with an
     empty string: a visible ``{{MEETING_LINK}}`` in the review screen tells the operator
     the link is unset, where a silent blank would ship as a sentence promising a link
-    that is not there.
+    that is not there. The same holds for ``{{SENDER_NAME}}`` — "이스트소프트 입니다" reads
+    as a bug, but it reads as a SENT bug, whereas the token gets noticed before 발송.
     """
     if not body:
         return body
     from ..db.email_templates import get_email_template
 
-    for token, key in _LINK_TOKENS.items():
+    for token, key in _EDITABLE_TOKENS.items():
         if token not in body:
             continue
         try:

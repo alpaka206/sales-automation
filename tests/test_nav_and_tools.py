@@ -87,14 +87,15 @@ def test_the_way_back_out_of_the_editor_is_a_left_chip_like_every_other_screen()
     assert 'className="chip" onClick={onDone}' in TEMPLATES
 
 
-def test_a_row_that_holds_only_a_url_is_edited_as_a_url():
-    """미팅 예약 링크 / WhatsApp 링크 are one URL each. The full editor asked for a
-    language, offered an HTML preview and gave a 240px textarea — three questions that
-    have no answer for a link. 언어 stays only where it means something: a signature is
-    the one kind that exists once per language."""
-    assert "LINK_KEYS" in TEMPLATES
-    assert '"meeting_link"' in TEMPLATES and '"whatsapp_link"' in TEMPLATES
-    assert 'id="et-link"' in TEMPLATES and 'type="url"' in TEMPLATES
+def test_a_row_that_holds_only_one_value_is_edited_as_one_field():
+    """미팅 예약 링크 / WhatsApp 링크 / 담당자 이름 hold one value each. The full editor
+    asked for a language, offered an HTML preview and gave a 240px textarea — three
+    questions that have no answer for any of them. 언어 stays only where it means
+    something: a signature is the one kind that exists once per language."""
+    assert "ONE_LINE_FIELDS" in TEMPLATES
+    for key in ("meeting_link:", "whatsapp_link:", "sender_name:"):
+        assert key in TEMPLATES, key
+    assert 'id="et-link"' in TEMPLATES and "type={oneLine.type}" in TEMPLATES
     assert "{isSignature && (" in TEMPLATES
 
     # The screen can only tell them apart if the API sends the key.
