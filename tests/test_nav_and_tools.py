@@ -49,8 +49,13 @@ def test_a_document_arrives_with_its_text_and_can_be_edited_here():
     Paste carries the text, so what the screen shows is what the draft reads.
     """
     policy = pathlib.Path("frontend/src/screens/PolicyDocs.tsx").read_text(encoding="utf-8")
-    assert "직접 추가" in policy and "<textarea" in policy
+    assert "새로 만들기" in policy and "<textarea" in policy
     assert "dropzone" not in policy and "upload-export" not in policy
+
+    # 만드는 폼과 고치는 폼은 같은 화면입니다. 따로 두면 같은 것을 두 모양으로 묻게 되고,
+    # 칸을 하나 더할 때 고칠 곳이 둘이 됩니다 — 실제로 메일 제목 칸이 그랬습니다.
+    assert policy.count("<textarea") == 1
+    assert 'doc: "new"' in policy
     assert not pathlib.Path("src/integrations/notion_export.py").exists()
 
     # 중지 is gone with the upstream it belonged to. It meant "keep the registration and
