@@ -51,8 +51,17 @@ def test_a_document_arrives_with_its_text_and_can_be_edited_here():
     policy = pathlib.Path("frontend/src/screens/PolicyDocs.tsx").read_text(encoding="utf-8")
     assert "직접 추가" in policy and "<textarea" in policy
     assert "dropzone" not in policy and "upload-export" not in policy
-    assert "/toggle" in policy and "/delete" in policy
     assert not pathlib.Path("src/integrations/notion_export.py").exists()
+
+    # 중지 is gone with the upstream it belonged to. It meant "keep the registration and
+    # the synced copy but stop using it" — a state that only made sense while a Notion
+    # page was the original. Nothing is kept for anything now: a document you will not use
+    # gets deleted. Leaving the button would leave a row that looks live and is not.
+    assert "/delete" in policy
+    assert "/toggle" not in policy
+    assert not pathlib.Path("src/api/routes/policy_docs.py").read_text(
+        encoding="utf-8"
+    ).count("policy-docs/{source_id}/toggle")
 
 
 TEMPLATES = pathlib.Path("frontend/src/screens/EmailTemplates.tsx").read_text(encoding="utf-8")

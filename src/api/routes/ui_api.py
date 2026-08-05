@@ -536,6 +536,7 @@ def ui_email_template(template_id: int):
             "language": row.language or "all",
             "body": row.body,
             "kind": _template_kind(row.key),
+            "is_default": bool(row.is_default),
         }
 
 
@@ -565,7 +566,6 @@ def ui_policy_docs():
                     "label": row.label,
                     "title": row.title,
                     "mode": row.mode,
-                    "status": row.status,
                     "body": row.body,
                     "chars": len(row.body or ""),
                     "effective_on": row.effective_on,

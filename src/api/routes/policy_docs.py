@@ -53,7 +53,6 @@ def _rows() -> list[dict]:
                 "id": s.id,
                 "label": s.label,
                 "mode": s.mode,
-                "status": s.status,
                 "order_index": s.order_index,
                 "chars": len(s.body or ""),
                 "effective_on": s.effective_on,
@@ -179,12 +178,3 @@ async def policy_docs_delete(source_id: int):
     return RedirectResponse("/policy-docs", status_code=303)
 
 
-@router.post("/policy-docs/{source_id}/toggle")
-async def policy_docs_toggle(source_id: int):
-    """Pause a document without losing its registration or its synced copy."""
-    with SessionLocal() as session:
-        source = session.get(PolicySource, source_id)
-        if source is not None:
-            source.status = "paused" if source.status == "active" else "active"
-            session.commit()
-    return RedirectResponse("/policy-docs", status_code=303)

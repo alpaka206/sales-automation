@@ -9,7 +9,7 @@ import { Loading } from "../ui/Loading";
 
 type Row = {
   id: number; label: string; title: string | null; mode: string;
-  status: string; body: string | null; chars: number;
+  body: string | null; chars: number;
   effective_on: string | null; edited_at: string | null;
 };
 type Data = { modes: { key: string; label: string }[]; rows: Row[] };
@@ -32,28 +32,18 @@ const columns = (act: (path: string) => void): Column<Row>[] => [
   {
     label: "문서",
     width: "70%",
-    cell: (row) => (
-      <>
-        <strong>{row.title || row.label}</strong>
-        {row.status !== "active" && (
-          <div className="t-xs t-subtle">중지됨 — 답변에 사용되지 않습니다</div>
-        )}
-      </>
-    ),
+    cell: (row) => <strong>{row.title || row.label}</strong>,
   },
   // 기준일이 있으면 그것, 없으면 마지막으로 손댄 시각. 오늘 붙여넣은 넉 달 된 정책이
   // "최신" 으로 보이지 않게 하는 것이 요점이라, 둘 중 무엇을 보고 있는지도 적습니다.
   { label: "기준", width: "18%", className: "tnum td-subtle",
     cell: (row) => row.effective_on || kst(row.edited_at || "") || "—" },
   {
+    // 중지는 없앴습니다: 노션이 원본이던 시절 "등록과 사본은 남기고 답변에만 안 쓴다" 는
+    // 상태였는데, 원본이 여기가 된 지금은 안 쓸 문서를 남겨 둘 이유가 없습니다.
     width: "12%",
-    // Pausing keeps the registration and the synced copy; only 삭제 forgets the link.
     cell: (row) => (
       <div className="row" style={{ gap: 6 }} onClick={(event) => event.stopPropagation()}>
-        <button type="button" className="btn btn--subtle btn--sm"
-                onClick={() => act(`/policy-docs/${row.id}/toggle`)}>
-          {row.status === "active" ? "중지" : "사용"}
-        </button>
         <button type="button" className="btn btn--ghost btn--sm"
                 onClick={() => act(`/policy-docs/${row.id}/delete`)}>삭제</button>
       </div>
@@ -107,12 +97,9 @@ function NewDoc({ modes, onDone }: { modes: { key: string; label: string }[]; on
           </select>
         </div>
         <div>
-          <label className="field-label" htmlFor="pd-eff">기준일 <span className="t-subtle">(선택)</span></label>
+          <label className="field-label" htmlFor="pd-eff">기준일 <span className="t-subtle">(비우면 저장한 날짜)</span></label>
           <input className="input" id="pd-eff" type="date" value={effectiveOn}
                  onChange={(e) => setEffectiveOn(e.target.value)} />
-          <p className="t-xs t-subtle" style={{ marginTop: 4 }}>
-            문서 자체의 기준일. 비우면 저장한 날짜를 씁니다.
-          </p>
         </div>
       </div>
 
@@ -234,17 +221,18 @@ export function PolicyDocs({ onBack }: { onBack?: () => void }) {
 
   return (
     <>
-      <div style={{ marginBottom: 14 }}>
+      {/* 나가는 버튼과 만드는 버튼을 한 줄에 — 이메일 템플릿 목록과 같은 배치입니다. */}
+      <div className="row-between" style={{ marginBottom: 14 }}>
         <button type="button" className="chip"
                 onClick={() => (onBack ? onBack() : setParams({}, { replace: true }))}>
           <Icon name="chevron" size={14} /> 이메일 템플릿
         </button>
-      </div>
-      <div className="page-header">
-        <div><h1 className="page-title">정책 문서</h1></div>
         {/* 문서가 들어오는 유일한 길입니다. 노션에서 받아 오는 경로는 전부 없앴습니다 —
             토큰을 못 만들고, 쿠키는 403 이고, Export zip 은 부모 한 장만 실어 옵니다. */}
         <NewDoc modes={data.modes} onDone={refresh} />
+      </div>
+      <div className="page-header">
+        <div><h1 className="page-title">정책 문서</h1></div>
       </div>
 
       {data.modes.map((mode) => (
