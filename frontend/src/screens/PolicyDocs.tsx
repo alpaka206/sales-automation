@@ -35,10 +35,7 @@ const columns = (act: (path: string) => void): Column<Row>[] => [
     cell: (row) => (
       <>
         <strong>{row.title || row.label}</strong>
-        {row.from_file && <div className="t-xs t-subtle">직접 넣은 문서 (노션 미연결)</div>}
-        {row.edited_at && !row.from_file && (
-          <div className="t-xs t-subtle">콘솔에서 수정함 — 같은 zip 을 다시 올리면 되돌아갑니다</div>
-        )}
+        {row.from_file && <div className="t-xs t-subtle">콘솔에서 넣은 문서</div>}
         {row.last_error && (
           <div className="t-xs" style={{ color: "var(--danger)" }}>
             동기화 실패 — 이전 사본을 사용 중입니다
@@ -50,8 +47,10 @@ const columns = (act: (path: string) => void): Column<Row>[] => [
       </>
     ),
   },
-  { label: "마지막 동기화", width: "18%", className: "tnum td-subtle",
-    cell: (row) => (row.last_synced_at ? kst(row.last_synced_at) : "—") },
+  // 동기화가 아니라 수정입니다 — 노션에서 자동으로 받아 오는 경로가 없어졌으므로, 이
+  // 문서가 마지막으로 손을 탄 시각이 유일하게 말이 되는 날짜입니다.
+  { label: "수정", width: "18%", className: "tnum td-subtle",
+    cell: (row) => kst(row.edited_at || row.last_synced_at || "") || "—" },
   {
     width: "12%",
     // Pausing keeps the registration and the synced copy; only 삭제 forgets the link.
@@ -68,74 +67,6 @@ const columns = (act: (path: string) => void): Column<Row>[] => [
   },
 ];
 
-
-/** 노션 Export zip 을 올려 등록된 문서를 한 번에 갱신합니다.
- *
- *  왜 업로드인가: 로컬 실행 스크립트는 노션에서 읽어 DB에 쓰는데, 사내망이 DB 포트를 막고
- *  있어 담당자 PC는 DB에 닿지 못합니다. 노션은 브라우저로만 되고 DB는 서버만 되니 양쪽을
- *  다 할 수 있는 기계가 없습니다. 파일로 옮기면 각 구간이 실제로 뚫려 있는 경로만 씁니다. */
-function UploadExport({ onDone }: { onDone: () => void }) {
-  const [busy, setBusy] = useState(false);
-  const [over, setOver] = useState(false);
-  const [note, setNote] = useState<string | null>(null);
-
-  async function upload(file: File) {
-    setBusy(true);
-    setNote(null);
-    try {
-      const body = new FormData();
-      body.append("export", file);
-      const response = await fetch("/policy-docs/upload-export", {
-        method: "POST", credentials: "same-origin", body,
-      });
-      const result = await response.json();
-      if (!response.ok) throw new Error(result.detail ?? response.status);
-      const added = result.added
-        ? ` · 새로 추가 ${result.added} (${(result.added_labels ?? []).join(", ")})`
-        : "";
-      setNote(`갱신 ${result.synced}${added}${result.failed ? ` · 실패 ${result.failed}` : ""}`);
-      onDone();
-    } catch (error) {
-      setNote(`실패: ${error instanceof Error ? error.message : String(error)}`);
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <div
-      className={`dropzone${over ? " is-over" : ""}${busy ? " is-busy" : ""}`}
-      onDragOver={(event) => { event.preventDefault(); setOver(true); }}
-      onDragLeave={() => setOver(false)}
-      onDrop={(event) => {
-        event.preventDefault();
-        setOver(false);
-        const file = event.dataTransfer.files?.[0];
-        if (file && !busy) void upload(file);
-      }}
-    >
-      <label style={{ cursor: busy ? "default" : "pointer", display: "block" }}>
-        <div className="row" style={{ gap: 8, justifyContent: "center" }}>
-          {busy ? <span className="spinner" /> : <Icon name="file" size={16} />}
-          <strong className="t-sm">
-            {busy ? "읽는 중…" : "노션 Export zip 을 여기에 끌어다 놓으세요"}
-          </strong>
-        </div>
-        <div className="t-xs t-subtle" style={{ marginTop: 4 }}>
-          클릭해서 고를 수도 있습니다 · zip 안의 문서는 <strong>전부</strong> 반영되고,
-          처음 보는 문서는 <strong>문의별 참고로 자동 추가</strong>됩니다
-        </div>
-        <input type="file" accept=".zip" hidden disabled={busy}
-               onChange={(event) => {
-                 const file = event.target.files?.[0];
-                 event.target.value = "";
-                 if (file) void upload(file);
-               }} />
-      </label>
-      {note && <div className="t-xs t-subtle" style={{ marginTop: 8 }}>{note}</div>}
-    </div>
-  );
-}
 
 /** 붙여넣어 문서 하나 만들기. zip 을 만들 일이 아닐 때의 경로입니다. */
 function NewDoc({ modes, onDone }: { modes: { key: string; label: string }[]; onDone: () => void }) {
@@ -213,20 +144,6 @@ function EditDoc({ doc, onDone }: { doc: Row; onDone: () => void }) {
 
   return (
     <>
-      {/* 노션에서 온 문서라면 다음 업로드가 이 편집을 되돌립니다. 막지 않고 말합니다 —
-          문제는 덮어쓰는 것이 아니라 조용히 덮어쓰는 것입니다. */}
-      {!doc.from_file && (
-        <div className="banner banner--warn mb-gap">
-          <span className="banner__icon"><Icon name="warn" size={18} /></span>
-          <div>
-            <div className="banner__title">이 문서의 원본은 노션입니다</div>
-            <div className="banner__body">
-              여기서 고쳐도 됩니다. 다만 이 문서가 담긴 Export zip 을 다시 올리면 파일 내용으로
-              돌아갑니다. 계속 남길 내용이면 노션에서 고치는 편이 안전합니다.
-            </div>
-          </div>
-        </div>
-      )}
       <div className="card">
         <textarea className="draft-textarea mono" value={body}
                   onChange={(e) => setBody(e.target.value)}
@@ -275,10 +192,10 @@ export function PolicyDocs({ onBack }: { onBack?: () => void }) {
             <h1 className="page-title">{doc.title || doc.label}</h1>
             <p className="page-sub">
               {doc.edited_at
-                ? `콘솔에서 수정 ${kst(doc.edited_at)}`
+                ? `수정 ${kst(doc.edited_at)}`
                 : doc.last_synced_at
                   ? `마지막 동기화 ${kst(doc.last_synced_at)}`
-                  : "아직 동기화하지 않았습니다"}
+                  : "본문 없음"}
               {" · "}{doc.chars.toLocaleString()}자
             </p>
           </div>
@@ -329,13 +246,12 @@ export function PolicyDocs({ onBack }: { onBack?: () => void }) {
       </div>
       <div className="page-header">
         <div><h1 className="page-title">정책 문서</h1></div>
-        {/* zip 을 만들 일이 아닐 때 — 한 문서를 붙여넣어 만듭니다. */}
+        {/* 문서가 들어오는 유일한 길입니다. 노션 Export zip 드롭이 있었는데, 그 내보내기가
+            실어 오는 것이 부모 페이지 하나뿐이라 없앴습니다 — 표 안에서 링크로 가리키는
+            문서들은 zip 에 들어오지 않습니다. */}
         <NewDoc modes={data.modes} onDone={refresh} />
       </div>
 
-      {/* 드롭이 주된 방법입니다. URL 을 하나씩 등록하게 하면 노션에서 문서를 만든 사람과
-          콘솔에 등록하는 사람이 같아야 하고, 한쪽만 하면 조용히 누락됩니다. */}
-      <UploadExport onDone={refresh} />
       {data.modes.map((mode) => (
         <section key={mode.key} className="mb-gap">
           <div className="section-header table-heading">

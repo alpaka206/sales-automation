@@ -199,18 +199,9 @@ class Settings(BaseSettings):
     # Each page must also be shared with the integration in Notion (page ··· → 연결).
     NOTION_TOKEN: str = ""
 
-    # The way in when the token above is unavailable — a company workspace where nobody
-    # can create an integration. ``token_v2`` is the cookie of a logged-in Notion session:
-    # a PERSONAL credential, so it belongs on the operator's machine and nowhere else.
-    # Read ONLY by scripts/sync_notion_local.py; no server code path may touch it, which
-    # tests/test_notion_local_sync.py asserts. Leave blank in every deployment.
-    NOTION_TOKEN_V2: str = ""
-    # Only when one browser session holds several Notion accounts.
-    NOTION_ACTIVE_USER_ID: str = ""
-    # 노션이 파일 다운로드를 별도 쿠키로 나눴습니다. token_v2 는 www.notion.so 의 API 에만
-    # 통하고, 내보내기 zip 이 놓이는 file.notion.com 은 이 쿠키를 봅니다. 없으면 내보내기
-    # 생성까지는 되고 다운로드에서 "Access denied" 가 납니다.
-    NOTION_FILE_TOKEN: str = ""
+    # NOTION_TOKEN_V2 / NOTION_ACTIVE_USER_ID / NOTION_FILE_TOKEN 은 사라졌습니다. 브라우저
+    # 쿠키로 내보내기를 만들어 받아 오던 경로인데, 그 내보내기가 실어 오는 것이 부모 페이지
+    # 하나뿐이라 경로 자체를 없앴습니다 — docs/정책문서-동기화-설계.md §2⑤.
 
     # Display only — which account that refresh token belongs to, shown on /pipeline.
     GOOGLE_SHEETS_ACCOUNT_EMAIL: str = ""

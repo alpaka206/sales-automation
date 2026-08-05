@@ -442,7 +442,7 @@ TEMPLATE_KINDS: tuple[tuple[str, str], ...] = (
     ("template", "이메일 템플릿"),
     # Read-only, and it lives here because an operator asking "what does the reply say?"
     # is asking about all three. Policy is owned in Notion and pulled in by
-    # scripts/sync_notion_local.py; editing a copy here would be undone by the next sync.
+    # a copy pasted from Notion; nothing overwrites it automatically any more.
     ("policy", "정책 문서"),
 )
 

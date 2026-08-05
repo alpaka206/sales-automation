@@ -2,7 +2,7 @@ r"""Seed the knowledge_documents table from the bundled Markdown files.
 
 The database is the source of truth for knowledge, not these files. They exist to give a
 fresh install something to answer with; after the first load, documents are edited in the
-console or refreshed from Notion (``scripts/sync_notion_local.py``).
+console (정책 문서 → 직접 추가).
 
 So this INSERTS what is missing and leaves what is already there alone. It used to upsert
 — re-running it overwrote every edit made since, which is exactly the failure mode of

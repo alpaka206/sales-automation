@@ -32,25 +32,27 @@ def test_policy_docs_is_a_category_not_a_sidebar_entry():
     assert 'kind === "policy"' in templates_screen
 
 
-def test_a_document_can_arrive_by_file_or_by_paste_and_can_be_edited_here():
-    """Three ways in, one place it lands.
+def test_a_document_arrives_with_its_text_and_can_be_edited_here():
+    """A document arrives WITH its body, and there is exactly one way in.
 
-    The body was read-only for a while, because a Notion page is the original and an edit
-    here is undone by the next upload of that page. That is still true — so the screen
-    SAYS it (``edited_at``, and a banner on a Notion-backed document) instead of refusing.
-    Silently losing an edit is the failure; being overwritten by the file you just
-    uploaded is the feature.
+    Two ways in were tried before and both are gone, for the same reason: they registered
+    a page that nothing could ever fill.
 
-    Registering a bare URL is still gone, and for the original reason: there is no Notion
-    API token on this workspace, so a registered URL had nothing that could ever fetch it
-    and sat empty forever. A document now arrives WITH its text — from the export, or
-    pasted.
+    - A bare Notion URL. No API token exists on this workspace, so the row sat empty
+      forever — and it really did, in production.
+    - A Notion Export zip. The export carries the page you exported and its DESCENDANTS.
+      This policy page references its documents as links to pages elsewhere in the
+      workspace, so the real export downloaded on 2026-08-05 held exactly one .md — the
+      parent — while the console reported a successful upload. See
+      docs/정책문서-동기화-설계.md §2⑤.
+
+    Paste carries the text, so what the screen shows is what the draft reads.
     """
     policy = pathlib.Path("frontend/src/screens/PolicyDocs.tsx").read_text(encoding="utf-8")
-    assert "dropzone" in policy and "upload-export" in policy
     assert "직접 추가" in policy and "<textarea" in policy
-    assert "이 문서의 원본은 노션입니다" in policy
+    assert "dropzone" not in policy and "upload-export" not in policy
     assert "/toggle" in policy and "/delete" in policy
+    assert not pathlib.Path("src/integrations/notion_export.py").exists()
 
 
 TEMPLATES = pathlib.Path("frontend/src/screens/EmailTemplates.tsx").read_text(encoding="utf-8")
