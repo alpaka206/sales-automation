@@ -168,9 +168,69 @@ async def email_templates_set_default(tpl_id: int):
     return HTMLResponse('<div class="text-green-600 text-sm font-medium">기본 서명 변경</div>')
 
 
+@router.post("/email-templates/{tpl_id}/variant")
+async def email_templates_add_language(tpl_id: int, request: Request, language: str = Form("")):
+    """Add another language for an existing template — ``auto_ack`` → ``auto_ack_en``.
+
+    This is what "새로 만들기" means outside the signature group. A brand-new key invented
+    here would be a row nothing can ever read, because the send path resolves templates by
+    exact name. A language SUFFIX on an existing key is different: the code looks for
+    exactly that (``signature_ko`` / ``signature_en`` are the same shape), so the row is
+    read the moment a customer writes in that language. 접수확인 영어판이 이 경우이고,
+    그전에는 한국어를 매번 기계번역해서 보냈습니다.
+
+    The body is copied from the source so the operator edits a real starting point instead
+    of an empty box, and it is theirs to rewrite — a copy is not a translation.
+    """
+    author = actor_name(request, fallback="") or "web"
+    language = language.strip().lower()
+    if language not in {"ko", "en", "all"}:
+        return HTMLResponse(
+            '<div class="text-red-600 text-sm">언어를 골라 주세요</div>', status_code=400
+        )
+    with SessionLocal() as session:
+        source = session.get(EmailTemplate, tpl_id)
+        if not source:
+            return HTMLResponse(
+                '<div class="text-red-600 text-sm">템플릿을 찾을 수 없습니다</div>',
+                status_code=404,
+            )
+        # Strip a suffix already there so "en" on auto_ack_en is a clash, not auto_ack_en_en.
+        base = re.sub(r"_(ko|en|all)$", "", source.key)
+        new_key = f"{base}_{language}"
+        if session.query(EmailTemplate).filter(EmailTemplate.key == new_key).first():
+            return HTMLResponse(
+                '<div class="text-red-600 text-sm">그 언어는 이미 있습니다</div>',
+                status_code=400,
+            )
+        created = EmailTemplate(
+            key=new_key,
+            name=f"{source.name} ({language})",
+            language=language,
+            channel="email",
+            status="active",
+            version=1,
+            author=author,
+            body=source.body,
+        )
+        session.add(created)
+        session.flush()
+        _snapshot_revision(session, created, change_note="created", edited_by=author)
+        session.commit()
+        return {"id": created.id}
+
+
 @router.delete("/email-templates/{tpl_id}")
 async def email_templates_delete(tpl_id: int, request: Request):
-    """Delete an email template (keeps its revision history)."""
+    """Delete an email template (keeps its revision history).
+
+    Refused when it is the LAST row for a key the code resolves by name. The send path
+    reads ``auto_ack`` / ``reply_format`` / the link rows by exact key; deleting the only
+    one does not remove a feature, it removes the answer to a lookup that still happens —
+    an acknowledgement that silently falls back to a hardcoded string, or a reply that
+    ends on a literal ``{{MEETING_LINK}}``. A language variant deletes freely, because
+    another row still answers the lookup.
+    """
     editor = actor_name(request, fallback="web") or "web"
     with SessionLocal() as session:
         tpl = session.get(EmailTemplate, tpl_id)
@@ -179,6 +239,19 @@ async def email_templates_delete(tpl_id: int, request: Request):
                 '<div class="text-red-600 text-sm">템플릿을 찾을 수 없습니다</div>',
                 status_code=404,
             )
+        if not (tpl.key or "").startswith(SIGNATURE_KEY_PREFIX):
+            # A language variant is safe to drop — the base key still answers the lookup.
+            base = re.sub(r"_(ko|en|all)$", "", tpl.key or "")
+            is_variant = base != tpl.key and bool(
+                session.query(EmailTemplate).filter(EmailTemplate.key == base).first()
+            )
+            if not is_variant:
+                return HTMLResponse(
+                    '<div class="text-red-600 text-sm">'
+                    "발송 경로가 이름으로 찾는 템플릿입니다. 마지막 하나는 지울 수 없고, "
+                    "쓰지 않으려면 내용을 비우세요.</div>",
+                    status_code=400,
+                )
         _snapshot_revision(session, tpl, change_note="deleted", edited_by=editor)
         session.delete(tpl)
         session.commit()

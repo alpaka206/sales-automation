@@ -198,3 +198,30 @@ def test_detailed_reply_is_never_auto_approved(
     assert db_session.query(Approval).filter_by(message_id=reply.id).count() == 0
     # And an operator is told there is something to review.
     mock_notify.assert_called_once()
+
+
+def test_an_english_inquiry_uses_the_english_template_instead_of_translating_the_korean(
+    monkeypatch,
+):
+    """The acknowledgement goes out with no human in front of it. Machine-translating the
+    Korean on every send is a Gemini call the customer waits through, and a sentence that
+    comes out slightly different every time — for the one mail that should be identical
+    every time. 0053 gives English its own row; other languages still translate."""
+    from unittest.mock import patch
+
+    monkeypatch.setattr(settings, "INBOUND_AUTO_ACK_ENABLED", True)
+    bodies = {"auto_ack": "안녕하세요 {name}님", "auto_ack_en": "Hi {name}, thanks."}
+    with (
+        patch("src.db.email_templates.get_email_template", side_effect=lambda k, **kw: bodies.get(k)),
+        patch("src.llm.translate.translate_to") as translate,
+    ):
+        from src.agents.inbound import InboundAgent
+
+        agent = InboundAgent(llm=MagicMock(), hubspot=None)
+        with patch.object(agent, "_persist_auto_ack", return_value=None) as persist:
+            agent._maybe_send_auto_ack(
+                {"full_name": "Jane", "subject": "Question"}, conv_id=1, inquiry_lang="en"
+            )
+
+    translate.assert_not_called()
+    assert "Hi Jane, thanks." in persist.call_args[0][3]

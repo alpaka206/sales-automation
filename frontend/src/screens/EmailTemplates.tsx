@@ -73,6 +73,33 @@ function Editor({ id, onDone }: { id: number | "new"; onDone: () => void }) {
     }
   }
 
+  async function addLanguage(language: string) {
+    setNote("추가 중…");
+    try {
+      await postForm(`/email-templates/${id}/variant`, { language });
+      await queryClient.invalidateQueries();
+      onDone();
+    } catch (error) {
+      setNote(`실패: ${String(error)}`);
+    }
+  }
+
+  async function remove() {
+    setNote("삭제 중…");
+    try {
+      const response = await fetch(`/email-templates/${id}`, {
+        method: "DELETE", credentials: "same-origin",
+      });
+      // The server refuses to delete the last row for a key the send path resolves, and
+      // says why — show that sentence rather than a status code.
+      if (!response.ok) throw new Error((await response.text()).replace(/<[^>]*>/g, ""));
+      await queryClient.invalidateQueries();
+      onDone();
+    } catch (error) {
+      setNote(`${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
   // 새로 만들기 is only offered for signatures, so a new row is one.
   const isSignature = id === "new" || data?.kind === "signature";
   const oneLine = data ? ONE_LINE_FIELDS[data.key] : undefined;
@@ -152,6 +179,21 @@ function Editor({ id, onDone }: { id: number | "new"; onDone: () => void }) {
           <button type="button" className="btn btn--primary" onClick={() => void save()}>
             <Icon name="check" size={15} /> {id === "new" ? "생성" : "저장"}
           </button>
+          {/* 언어 추가는 같은 key 의 다른 언어 행을 만듭니다. 새 key 는 만들 수 없습니다 —
+              발송 경로가 정확한 이름으로 찾으므로 아무것도 못 읽는 행이 됩니다. */}
+          {data && !isSignature && (
+            <select className="select" style={{ maxWidth: 150 }} value=""
+                    onChange={(e) => e.target.value && void addLanguage(e.target.value)}>
+              <option value="">언어 추가…</option>
+              <option value="ko">ko</option>
+              <option value="en">en</option>
+            </select>
+          )}
+          {data && (
+            <button type="button" className="btn btn--ghost" onClick={() => void remove()}>
+              <Icon name="x" size={15} /> 삭제
+            </button>
+          )}
         </div>
         {note && <div className="t-sm" style={{ marginTop: 14 }} role="status">{note}</div>}
       </div>

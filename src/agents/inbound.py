@@ -1153,18 +1153,28 @@ class InboundAgent:
             from ..llm.translate import translate_to
 
             name = (contact_info.get("full_name") or "").strip() or "고객님"
-            template = get_email_template("auto_ack", language="ko") or _DEFAULT_AUTO_ACK_KO
-            ko_body = template.replace("{name}", name)
-
             lang = (inquiry_lang or "ko").lower()
-            if lang != "ko":
-                translated = translate_to(ko_body, lang, llm=self.llm)
-                body = text_wash(translated) if translated else text_wash(ko_body)
-                # If translation failed we keep Korean rather than dropping the ack.
-                final_lang = lang if translated else "ko"
+
+            # A template WRITTEN in the inquiry's language beats one translated into it.
+            # This mail goes out with no human in front of it, so a machine translation is
+            # both a Gemini call the customer waits through and a sentence that comes out
+            # slightly different every time — for the one mail that should be identical
+            # every time. English has its own row (0053); other languages still translate.
+            native = get_email_template(f"auto_ack_{lang}") if lang != "ko" else None
+            if native:
+                body = text_wash(native.replace("{name}", name))
+                final_lang = lang
             else:
-                body = text_wash(ko_body)
-                final_lang = "ko"
+                template = get_email_template("auto_ack", language="ko") or _DEFAULT_AUTO_ACK_KO
+                ko_body = template.replace("{name}", name)
+                if lang != "ko":
+                    translated = translate_to(ko_body, lang, llm=self.llm)
+                    body = text_wash(translated) if translated else text_wash(ko_body)
+                    # If translation failed we keep Korean rather than dropping the ack.
+                    final_lang = lang if translated else "ko"
+                else:
+                    body = text_wash(ko_body)
+                    final_lang = "ko"
 
             subject = reply_subject(contact_info.get("subject"), target_code=lang)
             msg_id = self._persist_auto_ack(conv_id, contact_info, subject, body, final_lang, lang)

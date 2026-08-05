@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
 import { getJSON, postForm } from "../lib/api";
@@ -72,18 +72,21 @@ export function MessageDetail() {
   const [rejecting, setRejecting] = useState(false);
   const [reason, setReason] = useState("");
   const [showOrig, setShowOrig] = useState<Record<number, boolean>>({});
-  const loaded = useRef<number | null>(null);
+  const [loadedId, setLoadedId] = useState<number | null>(null);
 
   // Fill the editor once per message. Re-syncing on every refetch would overwrite what
   // the operator is typing while the queue revalidates underneath them.
-  useEffect(() => {
-    if (data && loaded.current !== data.msg.id) {
-      loaded.current = data.msg.id;
-      setSubject(data.msg.subject);
-      setBody(data.msg.body);
-      setSignature(data.msg.signature_key);
-    }
-  }, [data]);
+  //
+  // DURING render, not in an effect. An effect runs after the browser has painted, so the
+  // first frame showed an empty 제목/본문 and the text appeared a moment later — the page
+  // visibly changing after it had already loaded. Setting state while rendering makes
+  // React re-render before paint instead; nothing is ever shown empty.
+  if (data && loadedId !== data.msg.id) {
+    setLoadedId(data.msg.id);
+    setSubject(data.msg.subject);
+    setBody(data.msg.body);
+    setSignature(data.msg.signature_key);
+  }
 
   if (isPending || !data) return <LoadingBlock />;
 

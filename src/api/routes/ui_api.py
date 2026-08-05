@@ -1,5 +1,11 @@
 """JSON for the React screens.
 
+**Plain ``def``, not ``async def``.** These do blocking SQLAlchemy work and nothing else,
+and FastAPI runs a sync endpoint in its threadpool while an ``async`` one runs ON the event
+loop — so an ``async def`` that never awaits blocks every other request for the duration of
+its queries. They were all ``async def``; a single ticket open (~11 sequential round trips)
+held up the SSE stream and the queue poll behind it.
+
 Deliberately thin. Every one of these calls the SAME context builder the Jinja template
 renders, so a screen's data has one definition and the two front ends cannot disagree
 about what a row contains. When a screen is ported, its Jinja template goes; the builder
@@ -96,7 +102,7 @@ def _card(row: dict) -> dict:
 
 
 @router.get("/api/ui/dashboard")
-async def ui_dashboard(_request: Request):
+def ui_dashboard(_request: Request):
     from .dashboard import _dashboard_context
 
     context = _dashboard_context()
@@ -124,7 +130,7 @@ async def ui_dashboard(_request: Request):
 
 
 @router.get("/api/ui/overview")
-async def ui_overview():
+def ui_overview():
     """전체 대시보드. A roll-up of screens that each own their own numbers."""
     from .dashboard import _overview_context
 
@@ -132,7 +138,7 @@ async def ui_overview():
 
 
 @router.get("/api/ui/contracts")
-async def ui_contracts(status: str = "", q: str = ""):
+def ui_contracts(status: str = "", q: str = ""):
     """수주 고객. The contract book, plus the summary the overview shows — same two
     builders, so the money on one screen cannot disagree with the money on the other."""
     from .customer_ops import CONTRACT_STATUS_LABELS, _contract_rows, _contract_summary
@@ -147,7 +153,7 @@ async def ui_contracts(status: str = "", q: str = ""):
 
 
 @router.get("/api/ui/messages")
-async def ui_messages(status: str = "awaiting", stage: str = "", sort: str = "oldest"):
+def ui_messages(status: str = "awaiting", stage: str = "", sort: str = "oldest"):
     """회신 및 검토. Returned as built — the context is already plain dicts, and every
     filter value is allow-listed inside the builder, so nothing is validated twice."""
     from .messages import _messages_list_context
@@ -163,7 +169,11 @@ async def ui_message_detail(message_id: int):
     from .customer_ops import PIPELINE_STAGES
     from .messages import _message_detail_context, _translate_inbound_bubbles
 
-    context = _message_detail_context(message_id)
+    # In a thread, not on the event loop. One open costs ~11 sequential round trips to
+    # Postgres, and on the loop every other request — the SSE stream, the 15-second queue
+    # poll, another operator's screen — waits behind them. That is what "살짝 늦게 뜬다"
+    # was. It does not make this call faster; it stops it from slowing everything else.
+    context = await asyncio.to_thread(_message_detail_context, message_id)
     if not context:
         raise HTTPException(status_code=404, detail="메시지를 찾을 수 없습니다")
     await _translate_inbound_bubbles(context)
@@ -172,7 +182,7 @@ async def ui_message_detail(message_id: int):
 
 
 @router.get("/api/ui/customers")
-async def ui_customers(stage: str = "", q: str = ""):
+def ui_customers(stage: str = "", q: str = ""):
     """리드 히스토리. Same filtering the page does, applied to the same rows."""
     from .customer_ops import PIPELINE_STAGES, _customer_rows
 
@@ -236,7 +246,7 @@ def _lead(row: dict) -> dict:
 
 
 @router.get("/api/ui/operations")
-async def ui_operations(period: str = "month"):
+def ui_operations(period: str = "month"):
     """인사이트. The follow-up ladder and the renewal window, from the same builder the
     page renders — these numbers must not have a second definition."""
     from .customer_ops import _operations_context
@@ -272,7 +282,7 @@ async def ui_operations(period: str = "month"):
 
 
 @router.get("/api/ui/companies/{domain}")
-async def ui_company(domain: str):
+def ui_company(domain: str):
     """회사 상세. Personal domains are never grouped — the route already refuses, and
     this returns exactly what it decided rather than deciding again."""
     from .companies import company_context
@@ -295,7 +305,7 @@ async def ui_settings_users(request: Request):
 
 
 @router.get("/api/ui/recovery")
-async def ui_recovery(request: Request):
+def ui_recovery(request: Request):
     """복구 — the four durable failure lists the operations screen acts on.
 
     Same gate as the log rows beside it: this is the tab that offers 재시도 buttons.
@@ -343,7 +353,7 @@ async def ui_recovery(request: Request):
 
 
 @router.get("/api/ui/logs")
-async def ui_logs(request: Request, view: str = "all"):
+def ui_logs(request: Request, view: str = "all"):
     """운영 로그. Gated by the SAME function the page uses, not by a second one that
     happens to look similar — a JSON copy of a screen must not be the way around that
     screen's gate, and it must not refuse what the screen allows either.
@@ -358,7 +368,7 @@ async def ui_logs(request: Request, view: str = "all"):
 
 
 @router.get("/api/ui/customers/{contact_id}")
-async def ui_customer_detail(contact_id: int):
+def ui_customer_detail(contact_id: int):
     """고객 상세. The builder returns ORM rows; the screen needs their fields."""
     from .customer_ops import _customer_context
 
@@ -451,7 +461,7 @@ def _template_kind(key: str) -> str:
 
 
 @router.get("/api/ui/email-templates")
-async def ui_email_templates():
+def ui_email_templates():
     """Grouped, not one flat list — and each group says what it is for."""
     from ...db.models import EmailTemplate
     from ...db.session import SessionLocal
@@ -498,7 +508,7 @@ async def ui_email_templates():
 
 
 @router.get("/api/ui/quote-policy")
-async def quote_policy() -> dict:
+def quote_policy() -> dict:
     """The tier table the 견적 계산기 screen prices against.
 
     Behind the console's auth gate rather than on /static because the policy is internal
@@ -511,7 +521,7 @@ async def quote_policy() -> dict:
 
 
 @router.get("/api/ui/email-templates/{template_id}")
-async def ui_email_template(template_id: int):
+def ui_email_template(template_id: int):
     from ...db.models import EmailTemplate
     from ...db.session import SessionLocal
 
@@ -530,7 +540,7 @@ async def ui_email_template(template_id: int):
 
 
 @router.get("/api/ui/policy-docs")
-async def ui_policy_docs():
+def ui_policy_docs():
     """정책 문서 — 등록부 + 사본 + 그 문서를 어떤 문의에 쓸지.
 
     한동안 읽기 전용이었습니다: 원본이 노션이라 여기서 고치면 다음 동기화가 덮어쓴다는
@@ -567,7 +577,7 @@ async def ui_policy_docs():
 
 
 @router.get("/api/ui/pipeline/{stage}/cards")
-async def ui_pipeline_page(stage: str, offset: int = 0):
+def ui_pipeline_page(stage: str, offset: int = 0):
     """One more page of a column — the same paging the Jinja board scrolls into."""
     from .customer_ops import BOARD_CARDS_PER_STAGE, VALID_PIPELINE_STAGES, _pipeline_rows
 
