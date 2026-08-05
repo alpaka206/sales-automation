@@ -9,10 +9,24 @@ import { Loading } from "../ui/Loading";
 
 type Row = {
   id: number; label: string; title: string | null; notion_url: string; mode: string;
-  status: string; body: string | null; chars: number;
+  status: string; body: string | null; chars: number; edited_at: string | null;
   last_synced_at: string | null; last_error: string | null; from_file: boolean;
 };
 type Data = { modes: { key: string; label: string }[]; rows: Row[] };
+
+/** 제목과 본문을 form-encoded 로 보냅니다 — 업로드·토글·삭제와 같은 라우트 계열입니다. */
+async function saveDoc(path: string, method: string, fields: Record<string, string>) {
+  const response = await fetch(path, {
+    method,
+    credentials: "same-origin",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams(fields),
+  });
+  if (!response.ok) {
+    const detail = await response.json().catch(() => null);
+    throw new Error(detail?.detail ?? `${response.status}`);
+  }
+}
 
 const columns = (act: (path: string) => void): Column<Row>[] => [
   {
@@ -21,7 +35,10 @@ const columns = (act: (path: string) => void): Column<Row>[] => [
     cell: (row) => (
       <>
         <strong>{row.title || row.label}</strong>
-        {row.from_file && <div className="t-xs t-subtle">파일에서 가져온 문서 (노션 미연결)</div>}
+        {row.from_file && <div className="t-xs t-subtle">직접 넣은 문서 (노션 미연결)</div>}
+        {row.edited_at && !row.from_file && (
+          <div className="t-xs t-subtle">콘솔에서 수정함 — 같은 zip 을 다시 올리면 되돌아갑니다</div>
+        )}
         {row.last_error && (
           <div className="t-xs" style={{ color: "var(--danger)" }}>
             동기화 실패 — 이전 사본을 사용 중입니다
@@ -120,6 +137,112 @@ function UploadExport({ onDone }: { onDone: () => void }) {
   );
 }
 
+/** 붙여넣어 문서 하나 만들기. zip 을 만들 일이 아닐 때의 경로입니다. */
+function NewDoc({ modes, onDone }: { modes: { key: string; label: string }[]; onDone: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [label, setLabel] = useState("");
+  const [body, setBody] = useState("");
+  const [mode, setMode] = useState("knowledge");
+  const [note, setNote] = useState<string | null>(null);
+
+  if (!open) {
+    return (
+      <button type="button" className="btn btn--subtle btn--sm" onClick={() => setOpen(true)}>
+        <Icon name="plus" size={14} /> 직접 추가
+      </button>
+    );
+  }
+
+  async function save() {
+    setNote("저장 중…");
+    try {
+      await saveDoc("/policy-docs", "POST", { label, body, mode });
+      setOpen(false);
+      setLabel("");
+      setBody("");
+      setNote(null);
+      onDone();
+    } catch (error) {
+      setNote(`실패: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  return (
+    <div className="card mb-gap" style={{ maxWidth: 860 }}>
+      <label className="field-label" htmlFor="pd-label">문서 이름</label>
+      <input className="input" id="pd-label" value={label} onChange={(e) => setLabel(e.target.value)}
+             placeholder="예: CS 문의 대응 가이드" style={{ marginBottom: 12 }} />
+
+      <label className="field-label" htmlFor="pd-mode">쓰임</label>
+      <select className="select" id="pd-mode" value={mode} onChange={(e) => setMode(e.target.value)}
+              style={{ marginBottom: 12 }}>
+        {modes.map((m) => <option key={m.key} value={m.key}>{m.label}</option>)}
+      </select>
+
+      <label className="field-label" htmlFor="pd-body">본문</label>
+      <textarea className="draft-textarea" id="pd-body" value={body}
+                onChange={(e) => setBody(e.target.value)} style={{ minHeight: 260 }}
+                placeholder="노션에서 복사해 그대로 붙여넣으세요. 표와 목록은 그대로 읽힙니다." />
+
+      <div className="action-bar">
+        <button type="button" className="btn btn--primary" onClick={() => void save()}>
+          <Icon name="check" size={15} /> 만들기
+        </button>
+        <button type="button" className="btn btn--subtle" onClick={() => setOpen(false)}>취소</button>
+      </div>
+      {note && <div className="t-sm" style={{ marginTop: 12 }} role="status">{note}</div>}
+    </div>
+  );
+}
+
+/** 이미 있는 문서의 본문 고치기. */
+function EditDoc({ doc, onDone }: { doc: Row; onDone: () => void }) {
+  const [body, setBody] = useState(doc.body || "");
+  const [note, setNote] = useState<string | null>(null);
+
+  async function save() {
+    setNote("저장 중…");
+    try {
+      await saveDoc(`/policy-docs/${doc.id}`, "PUT", { body });
+      setNote(null);
+      onDone();
+    } catch (error) {
+      setNote(`실패: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  return (
+    <>
+      {/* 노션에서 온 문서라면 다음 업로드가 이 편집을 되돌립니다. 막지 않고 말합니다 —
+          문제는 덮어쓰는 것이 아니라 조용히 덮어쓰는 것입니다. */}
+      {!doc.from_file && (
+        <div className="banner banner--warn mb-gap">
+          <span className="banner__icon"><Icon name="warn" size={18} /></span>
+          <div>
+            <div className="banner__title">이 문서의 원본은 노션입니다</div>
+            <div className="banner__body">
+              여기서 고쳐도 됩니다. 다만 이 문서가 담긴 Export zip 을 다시 올리면 파일 내용으로
+              돌아갑니다. 계속 남길 내용이면 노션에서 고치는 편이 안전합니다.
+            </div>
+          </div>
+        </div>
+      )}
+      <div className="card">
+        <textarea className="draft-textarea mono" value={body}
+                  onChange={(e) => setBody(e.target.value)}
+                  style={{ minHeight: 420, fontSize: 12.5, lineHeight: 1.7 }} />
+        <div className="action-bar">
+          <button type="button" className="btn btn--primary" onClick={() => void save()}>
+            <Icon name="check" size={15} /> 저장
+          </button>
+          <button type="button" className="btn btn--subtle" onClick={onDone}>취소</button>
+        </div>
+        {note && <div className="t-sm" style={{ marginTop: 12 }} role="status">{note}</div>}
+      </div>
+    </>
+  );
+}
+
 export function PolicyDocs({ onBack }: { onBack?: () => void }) {
   const [params, setParams] = useSearchParams();
   const queryClient = useQueryClient();
@@ -129,6 +252,7 @@ export function PolicyDocs({ onBack }: { onBack?: () => void }) {
     refresh();
   };
   const open = params.get("doc");
+  const [editing, setEditing] = useState(false);
   const { data, isPending } = useQuery({
     queryKey: ["policy-docs"],
     queryFn: () => getJSON<Data>("/api/ui/policy-docs"),
@@ -150,26 +274,25 @@ export function PolicyDocs({ onBack }: { onBack?: () => void }) {
           <div>
             <h1 className="page-title">{doc.title || doc.label}</h1>
             <p className="page-sub">
-              {doc.last_synced_at ? `마지막 동기화 ${kst(doc.last_synced_at)}` : "아직 동기화하지 않았습니다"}
+              {doc.edited_at
+                ? `콘솔에서 수정 ${kst(doc.edited_at)}`
+                : doc.last_synced_at
+                  ? `마지막 동기화 ${kst(doc.last_synced_at)}`
+                  : "아직 동기화하지 않았습니다"}
               {" · "}{doc.chars.toLocaleString()}자
             </p>
           </div>
-          {doc.notion_url && (
-            <a className="btn btn--subtle" href={doc.notion_url} target="_blank" rel="noopener noreferrer">
-              노션에서 열기
-            </a>
-          )}
-        </div>
-
-        {/* Read-only, and the banner says why: editing here would create a second copy
-            that the next sync silently overwrites. */}
-        <div className="banner mb-gap">
-          <span className="banner__icon"><Icon name="shield" size={18} /></span>
-          <div>
-            <div className="banner__title">읽기 전용</div>
-            <div className="banner__body">
-              정책은 노션에서 수정하고 로컬 동기화로 가져옵니다. 여기서는 실제로 무엇이 들어와 있는지 확인만 합니다.
-            </div>
+          <div className="row" style={{ gap: 8 }}>
+            {doc.notion_url && (
+              <a className="btn btn--subtle" href={doc.notion_url} target="_blank" rel="noopener noreferrer">
+                노션에서 열기
+              </a>
+            )}
+            {!editing && (
+              <button type="button" className="btn btn--subtle" onClick={() => setEditing(true)}>
+                <Icon name="edit" size={15} /> 수정
+              </button>
+            )}
           </div>
         </div>
 
@@ -182,12 +305,16 @@ export function PolicyDocs({ onBack }: { onBack?: () => void }) {
           </div>
         )}
 
-        <div className="card">
-          <pre className="msg-body--inset mono"
-               style={{ fontSize: 12.5, whiteSpace: "pre-wrap", lineHeight: 1.7, overflow: "auto" }}>
-            {doc.body || "아직 내용을 가져오지 않았습니다."}
-          </pre>
-        </div>
+        {editing ? (
+          <EditDoc doc={doc} onDone={() => { setEditing(false); refresh(); }} />
+        ) : (
+          <div className="card">
+            <pre className="msg-body--inset mono"
+                 style={{ fontSize: 12.5, whiteSpace: "pre-wrap", lineHeight: 1.7, overflow: "auto" }}>
+              {doc.body || "아직 내용을 가져오지 않았습니다."}
+            </pre>
+          </div>
+        )}
       </>
     );
   }
@@ -202,6 +329,8 @@ export function PolicyDocs({ onBack }: { onBack?: () => void }) {
       </div>
       <div className="page-header">
         <div><h1 className="page-title">정책 문서</h1></div>
+        {/* zip 을 만들 일이 아닐 때 — 한 문서를 붙여넣어 만듭니다. */}
+        <NewDoc modes={data.modes} onDone={refresh} />
       </div>
 
       {/* 드롭이 주된 방법입니다. URL 을 하나씩 등록하게 하면 노션에서 문서를 만든 사람과

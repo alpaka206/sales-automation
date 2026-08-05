@@ -1,8 +1,17 @@
-"""정책 문서 — the operator's registry of Notion pages used as policy.
+"""정책 문서 — 초안이 읽는 문서의 등록부이자, 그 문서를 넣고 고치는 곳.
 
-The console does not edit policy; it points at where policy lives. So this screen is a
-list of (label, Notion URL, how it is used) plus a sync button, and the document body is
-read-only here — editing happens in Notion, which is the whole point of the feature.
+문서가 들어오는 길은 셋이고, 저장되는 곳은 하나입니다:
+
+    노션 Export zip 드롭   여러 문서를 한 번에. 원본은 노션
+    제목+본문 붙여넣기      한 문서를. 원본은 여기 (zip 을 만들 일이 아닐 때)
+    본문 편집              이미 있는 문서를
+
+한동안 본문이 읽기 전용이었습니다 — 원본이 노션이라 여기서 고치면 다음 업로드가 덮어쓰기
+때문입니다. 그건 지금도 사실이라, 막는 대신 ``edited_at`` 을 남겨 **화면이 그렇게 말합니다.**
+조용히 사라지는 것이 문제이지 덮어쓰는 것 자체가 문제는 아닙니다.
+
+어떤 문의에 어떤 문서를 쓸지는 여기서 정하지 않습니다. 모델이 문서 목록을 보고 고릅니다 —
+정책도 문서 이름도 바뀌므로, 그 매핑을 코드나 등록부에 굳히면 바뀔 때마다 조용히 끊깁니다.
 
 Every row shows when it was last read and, if the last read failed, what went wrong while
 still using the previous copy. An operator must be able to see "정책이 3일째 갱신되지
@@ -12,6 +21,7 @@ still using the previous copy. An operator must be able to see "정책이 3일�
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import RedirectResponse
@@ -51,6 +61,7 @@ def _rows() -> list[dict]:
                 "status": s.status,
                 "order_index": s.order_index,
                 "chars": len(s.body or ""),
+                "edited_at": s.edited_at,
                 "last_synced_at": s.last_synced_at,
                 "last_error": s.last_error,
                 # A file-imported row has no Notion page yet; the screen says so rather
@@ -61,43 +72,112 @@ def _rows() -> list[dict]:
         ]
 
 
+def _page_id_for_pasted(title: str) -> str:
+    """노션에서 오지 않은 문서의 id. 제목에서 만들어 냅니다.
+
+    ``notion_page_id`` 는 NOT NULL UNIQUE 이고 등록부의 신원입니다. 붙여넣어 만든 문서에는
+    노션 페이지가 없으므로 제목으로 만들되, **안정적으로** 만듭니다 — 같은 제목으로 다시
+    만들면 새 행이 아니라 충돌이 되어야, 같은 문서가 둘로 갈라져 라우터가 한 정책을 두 번
+    인용하는 일이 없습니다.
+    """
+    import hashlib
+
+    return hashlib.sha256(title.strip().lower().encode("utf-8")).hexdigest()[:32]
+
+
 @router.post("/policy-docs")
-async def policy_docs_add(
+async def policy_docs_create(
+    request: Request,
     label: str = Form(...),
-    notion_url: str = Form(...),
+    body: str = Form(""),
     mode: str = Form("knowledge"),
 ):
-    from ...integrations.notion import NotionError, page_id_from_url
+    """제목과 본문을 붙여넣어 문서를 하나 만듭니다.
+
+    zip 을 만들기 귀찮을 때의 경로입니다. 한때 여기 있던 "노션 URL 등록" 폼과는 다릅니다 —
+    그건 URL만 받고 본문을 가져올 수단이 없어서 영원히 빈 행을 만들었습니다(설계 문서 §2④).
+    이건 본문을 같이 받으므로 만든 즉시 초안이 읽을 수 있습니다.
+    """
+    if not admin_required(request):
+        raise HTTPException(status_code=403, detail="관리자만 접근할 수 있습니다.")
 
     label = label.strip()
-    notion_url = notion_url.strip()
-    if not label or not notion_url:
-        raise HTTPException(status_code=400, detail="이름과 노션 링크를 모두 입력해 주세요")
+    if not label:
+        raise HTTPException(status_code=400, detail="문서 이름을 입력해 주세요")
     if mode not in _MODE_KEYS:
         mode = "knowledge"
-    try:
-        page_id = page_id_from_url(notion_url)
-    except NotionError as exc:
-        return RedirectResponse(f"/policy-docs?error={exc}", status_code=303)
 
+    page_id = _page_id_for_pasted(label)
     with SessionLocal() as session:
-        existing = (
+        if (
             session.query(PolicySource)
             .filter(PolicySource.notion_page_id == page_id)
             .one_or_none()
+            is not None
+        ):
+            raise HTTPException(status_code=400, detail="같은 이름의 문서가 이미 있습니다")
+        source = PolicySource(
+            label=label,
+            title=label,
+            # 노션에서 오지 않았습니다. 빈 URL 이 곧 "동기화 대상 아님" 이라 업로드가
+            # 이 문서를 건드리지 않습니다.
+            notion_url="",
+            notion_page_id=page_id,
+            mode=mode,
+            body=body,
+            edited_at=datetime.now(timezone.utc).replace(tzinfo=None),
         )
-        if existing is not None:
-            # Same page registered twice would let the router cite one document as two.
-            return RedirectResponse(
-                "/policy-docs?error=이미 등록된 노션 페이지입니다", status_code=303
-            )
-        session.add(
-            PolicySource(
-                label=label, notion_url=notion_url, notion_page_id=page_id, mode=mode
-            )
-        )
+        session.add(source)
         session.commit()
-    return RedirectResponse("/policy-docs", status_code=303)
+        source_id = source.id
+
+    _publish(source_id)
+    return {"id": source_id}
+
+
+@router.put("/policy-docs/{source_id}")
+async def policy_docs_update(
+    source_id: int,
+    request: Request,
+    label: str = Form(""),
+    body: str = Form(""),
+    mode: str = Form(""),
+):
+    """본문을 고칩니다. 어떤 문서든 고칠 수 있습니다.
+
+    노션에서 온 문서를 여기서 고치면 **같은 문서를 다시 업로드하는 순간 파일 내용으로
+    돌아갑니다.** 그게 문제인 것이 아니라 조용히 그러는 것이 문제라서, ``edited_at`` 을
+    남기고 화면이 그렇게 말합니다. 노션이 원본인 문서는 노션에서 고치는 편이 낫습니다.
+    """
+    if not admin_required(request):
+        raise HTTPException(status_code=403, detail="관리자만 접근할 수 있습니다.")
+
+    with SessionLocal() as session:
+        source = session.get(PolicySource, source_id)
+        if source is None:
+            raise HTTPException(status_code=404, detail="문서를 찾을 수 없습니다")
+        if label.strip():
+            source.label = label.strip()
+            source.title = label.strip()
+        if mode in _MODE_KEYS:
+            source.mode = mode
+        if body.strip():
+            source.body = body
+            source.edited_at = datetime.now(timezone.utc).replace(tzinfo=None)
+        session.commit()
+
+    _publish(source_id)
+    return {"ok": True}
+
+
+def _publish(source_id: int) -> None:
+    """등록부에서 바뀐 것을 초안이 읽는 사본까지 밀어 넣습니다."""
+    from ...agents.policy_sync import refresh_knowledge_copy
+
+    try:
+        refresh_knowledge_copy(source_id)
+    except Exception:
+        logger.warning("Knowledge copy refresh failed for %s.", source_id, exc_info=True)
 
 
 @router.post("/policy-docs/{source_id}/delete")

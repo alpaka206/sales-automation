@@ -67,9 +67,12 @@ class Conversation(Base):
     # HubSpot ticket subject for rows created by the backfill. Renamed from ``topic`` in
     # migration 0041: that column held two unrelated things, an AI "문의 유형" category on
     # the inbound path and the ticket subject on the backfill path, and only the second
-    # was ever worth showing. The category is now transient — it still routes knowledge
-    # docs and adjusts the lead score inside one inbound run, but nothing stores it.
+    # was ever worth showing.
     inquiry_subject: Mapped[str | None] = mapped_column(String, nullable=True)
+    # 문의 유형 (src/common/inquiry.py). 0041 이후 한동안 저장하지 않았는데, 목록에서
+    # 채널("email" — 전부 같은 값) 대신 보여줄 것이 이것이고, 어떤 문의가 실제로 오는지도
+    # 이 열이 없으면 알 수 없습니다.
+    inquiry_category: Mapped[str | None] = mapped_column(String(32), nullable=True)
     stage: Mapped[str] = mapped_column(String, nullable=False, default="initial")
     last_outgoing_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     last_incoming_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
@@ -119,10 +122,6 @@ class Message(Base):
     # (migration 0045). None means "not translated yet", not "no translation needed".
     body_ko: Mapped[str | None] = mapped_column(Text, nullable=True)
     subject_ko: Mapped[str | None] = mapped_column(Text, nullable=True)
-    # Why this draft deserves a closer look than the rest. Every detailed reply already
-    # waits for a human; this says WHICH of them is the risky one (migration 0047).
-    # None is the normal case.
-    review_note: Mapped[str | None] = mapped_column(Text, nullable=True)
     # ``language`` = language the body is CURRENTLY in (a draft is "ko" until the
     # operator translates it). ``target_language`` = language it must be SENT in
     # (the inquiry's language); the send guard enforces body matches it.
@@ -356,6 +355,9 @@ class PolicySource(Base):
     # Ordering for mode='rules': the system instruction is read top to bottom.
     order_index: Mapped[int] = mapped_column(Integer, nullable=False, default=100)
     status: Mapped[str] = mapped_column(String, nullable=False, default="active")
+    # 콘솔에서 본문을 고친 시각. 다음 업로드가 파일 내용으로 되돌리므로, 화면이 그렇게
+    # 말해 줄 수 있도록 남깁니다 (조용히 사라지는 것이 문제이지 덮어쓰는 것 자체가 아님).
+    edited_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     # The synced copy. NULL until the first successful sync.
     body: Mapped[str | None] = mapped_column(Text, nullable=True)
     title: Mapped[str | None] = mapped_column(String, nullable=True)

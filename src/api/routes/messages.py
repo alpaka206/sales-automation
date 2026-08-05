@@ -16,6 +16,7 @@ from ...common.config import settings
 from ...common.subjects import strip_reply_prefixes
 from ...common.textwash import text_wash
 from ...db.conversation_history import add_progress
+from ...common.inquiry import CATEGORY_LABELS, UNQUALIFIED, category_label, is_unqualified
 from ...db.email_templates import list_signature_templates
 from ...db.models import (
     Contact,
@@ -224,7 +225,9 @@ def _message_detail_context(message_id: int) -> dict:
             ),
             "summary": conv.summary if conv else None,
             "customer_requests": conv.customer_requests if conv else None,
-            "review_note": msg.review_note,
+            "category": conv.inquiry_category if conv else None,
+            "category_label": category_label(conv.inquiry_category if conv else None),
+            "unqualified": is_unqualified(conv.inquiry_category if conv else None),
             "signatures": list_signature_templates(),
             "domain_history": domain_history,
             "ticket": {
@@ -563,6 +566,7 @@ def _messages_list_context(
             Message,
             Conversation.stage,
             Conversation.inquiry_subject,
+            Conversation.inquiry_category,
             Conversation.created_at,
             Conversation.last_incoming_at,
             Contact.email,
@@ -604,10 +608,10 @@ def _messages_list_context(
                 # column is 문의 제목, so the prefix we added comes back off. A "RE:"
                 # the CUSTOMER wrote is part of their subject and stays.
                 "subject": inquiry_subject or strip_reply_prefixes(msg.subject) or "(제목 없음)",
-                "channel": msg.channel,
+                # 채널 자리에 있던 값입니다. 전부 "email" 이라 아무 줄도 구분하지 못했고,
+                # 그 폭이 정작 궁금한 것 — 이게 무슨 문의인가 — 을 가리고 있었습니다.
+                "category": inquiry_category,
                 "email": email or "-",
-                # Why this one is riskier than the rest, when it is.
-                "review_note": msg.review_note,
                 # New chip → when the ticket arrived; Negotiating → when they last
                 # wrote back. Both already on the row, no extra query.
                 "received_at": (
@@ -617,7 +621,10 @@ def _messages_list_context(
                 # draft: it answers "how long have they been waiting?".
                 "waiting_since": last_incoming_at or conv_created,
             }
-            for msg, conv_stage, inquiry_subject, conv_created, last_incoming_at, email in rows
+            for (
+                msg, conv_stage, inquiry_subject, inquiry_category,
+                conv_created, last_incoming_at, email,
+            ) in rows
         ]
     return {
         "messages": messages,
@@ -639,6 +646,10 @@ def _messages_list_context(
         # Same label map as the board and the dashboard — the column must read
         # "New"/"Negotiating", not the raw stage key.
         "stage_labels": {key: label for key, label, _ in PIPELINE_STAGES},
+        # 유형 이름과 "세일즈 리드인가" 는 서버가 정합니다 — 분류기가 내는 키와 화면에
+        # 보이는 이름이 두 곳에 있으면 새 유형이 빈칸으로 나타납니다.
+        "category_labels": CATEGORY_LABELS,
+        "unqualified": sorted(UNQUALIFIED),
         "now": list_now().replace(tzinfo=None),
     }
 

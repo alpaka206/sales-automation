@@ -13,6 +13,7 @@ Inbound inquiry (verbatim):
 """
 
 Pre-computed category for this inquiry: {{category}}
+Language the customer wrote in: {{inquiry_language}}
 
 Available knowledge base documents (index only — bodies are not shown):
 {{doc_index}}
@@ -22,8 +23,14 @@ Task:
   specific inquiry. Judge by meaning, not just the category label.
 - Prefer precision over recall: pick the few documents that actually answer the
   question. Do not select a document just because it shares the category.
-- It is fine to select 0 documents if none are relevant (e.g. spam, or a generic
-  greeting). It is fine to select several if the inquiry spans topics.
+- When the same document exists in two languages (e.g. a KR and an ENG copy of the
+  reply template), take the one matching the customer's language: Korean inquiry → the
+  KR copy, everything else → the ENG copy. Never both — two copies of one template
+  leave no single form to follow.
+- A 영업·홍보 목적의 문의(spam) still gets a reply, so still pick the document that
+  introduces the product if one exists. Select 0 documents only when nothing in the
+  index bears on the inquiry at all.
+- It is fine to select several if the inquiry spans topics.
 - Use the exact `slug` values from the index.
 
 Return strict JSON only:

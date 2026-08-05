@@ -82,6 +82,27 @@ def _upsert_knowledge(session, source: PolicySource, title: str, markdown: str) 
     logger.info("Policy sync: updated knowledge document %s (v%d)", slug, doc.version)
 
 
+def refresh_knowledge_copy(source_id: int) -> None:
+    """콘솔에서 본문이나 유형을 바꾼 직후, 초안이 읽는 사본까지 그 자리에서 맞춥니다.
+
+    없으면 "콘솔에서 고쳤는데 다음 업로드 전까지 회신은 예전 내용으로 나가는" 상태가 됩니다 —
+    화면에는 바뀐 것이 보이므로 눈치채기 어려운 종류입니다.
+    """
+    with SessionLocal() as session:
+        source = session.get(PolicySource, source_id)
+        if source is None or source.mode != "knowledge":
+            return
+        body = (source.body or "").strip()
+        if not body:
+            return
+        _upsert_knowledge(session, source, source.title or source.label, source.body)
+        session.commit()
+
+    from ..llm.knowledge import reset_cache
+
+    reset_cache()
+
+
 # 한 번 올리는 zip 이 담을 만한 문서 수의 상한. 정책 페이지와 그 자식들은 수십 개면 넉넉하고,
 # 워크스페이스 전체를 통째로 내보낸 zip 이 실수로 올라왔을 때 등록부가 수백 줄로 불어나는
 # 것을 막습니다. 넘으면 아무것도 추가하지 않고 이유를 말합니다.
@@ -208,6 +229,9 @@ def sync_policy_sources(
             source.summary = _summarize(page.markdown)
             source.last_synced_at = datetime.now(timezone.utc).replace(tzinfo=None)
             source.last_error = None
+            # 파일이 원본으로 돌아왔습니다. 콘솔에서 고쳤던 표시를 지워야 화면이 "콘솔에서
+            # 수정함" 이라고 계속 말하지 않습니다 — 실제로는 지금 덮어썼으니까요.
+            source.edited_at = None
             result["synced"] += 1
 
             if source.mode == "knowledge":

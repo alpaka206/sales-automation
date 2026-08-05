@@ -114,7 +114,10 @@ def test_null_categories_defaults_to_all(_db_backed_knowledge) -> None:
     assert "General Info" in knowledge.load_relevant_docs("partnership")
 
 
-def test_spam_category_returns_empty(_db_backed_knowledge) -> None:
+def test_spam_still_gets_documents(_db_backed_knowledge) -> None:
+    """It used to short-circuit to "". The operator's rule is that a 영업·홍보 목적의
+    문의에도 회신은 나가고, 그 회신이 볼 것이 소개 문서입니다 — so taking the documents
+    away left exactly that one reply written from nothing."""
     _insert(
         _db_backed_knowledge,
         title="General",
@@ -122,7 +125,7 @@ def test_spam_category_returns_empty(_db_backed_knowledge) -> None:
         categories=["all"],
         body="Applies to everything.",
     )
-    assert knowledge.load_relevant_docs("spam") == ""
+    assert "General" in knowledge.load_relevant_docs("spam")
 
 
 def test_empty_db_returns_empty(_db_backed_knowledge) -> None:
@@ -222,9 +225,12 @@ def test_router_error_falls_back_to_category(_db_backed_knowledge) -> None:
     assert "Pricing" in out
 
 
-def test_router_spam_returns_empty(_db_backed_knowledge) -> None:
+def test_the_router_picks_documents_for_spam_too(_db_backed_knowledge) -> None:
+    """The router decides; spam is no longer refused at the door. Selecting nothing is
+    still its own call to make — the prompt says so — but it has to be a judgement about
+    this inquiry, not a rule that fires before the model sees it."""
     _insert(_db_backed_knowledge, title="X", slug="x", categories=["all"], body="b")
-    assert knowledge.select_relevant_docs("buy viagra", "spam", llm=_FakeLLM(["x"])) == ""
+    assert "X" in knowledge.select_relevant_docs("buy viagra", "spam", llm=_FakeLLM(["x"]))
 
 
 def test_router_ignores_archived_candidates(_db_backed_knowledge) -> None:

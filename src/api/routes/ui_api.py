@@ -107,10 +107,10 @@ async def ui_dashboard(_request: Request):
         "counters": {
             "received_today": context["received_today"],
             "awaiting_total": context["awaiting_total"],
-            "awaiting_new": context["awaiting_new"],
-            "awaiting_negotiation": context["awaiting_negotiation"],
         },
         "stage_labels": context["stage_labels"],
+        "category_labels": context["category_labels"],
+        "unqualified": context["unqualified"],
         "manual_log_stages": list(context["manual_log_stages"]),
         "stages": [
             {
@@ -532,12 +532,11 @@ async def ui_email_template(template_id: int):
 
 @router.get("/api/ui/policy-docs")
 async def ui_policy_docs():
-    """정책 문서 — registrations AND the synced copy.
+    """정책 문서 — 등록부 + 사본 + 그 문서를 어떤 문의에 쓸지.
 
-    Read-only on purpose: policy is owned in Notion and pulled in by
-    ``scripts/sync_notion_local.py``. What the screen was missing is the ability to SEE
-    what got pulled — without it the only way to check a document was to open Notion and
-    compare by eye, which is the manual copying this feature exists to remove.
+    한동안 읽기 전용이었습니다: 원본이 노션이라 여기서 고치면 다음 동기화가 덮어쓴다는
+    이유였고, 그건 지금도 사실입니다. 다만 zip 을 만들기 귀찮은 경우가 더 잦아서, 고치는
+    것을 막는 대신 **고친 사실을 화면이 말하도록** 바꿨습니다(``edited_at``).
     """
     from ...db.models import PolicySource
     from ...db.session import SessionLocal
@@ -564,6 +563,7 @@ async def ui_policy_docs():
                     "status": row.status,
                     "body": row.body,
                     "chars": len(row.body or ""),
+                    "edited_at": row.edited_at,
                     "last_synced_at": row.last_synced_at,
                     "last_error": row.last_error,
                     "from_file": not (row.notion_url or "").strip(),

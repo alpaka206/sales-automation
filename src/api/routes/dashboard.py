@@ -46,10 +46,19 @@ def _kst_day_start() -> datetime:
 def _awaiting_counters() -> dict:
     """오늘 받은 문의 and what is waiting on a human, by stage.
 
-    Its own function because 전체 대시보드 shows the same four numbers as 문의 대시보드.
+    Its own function because 전체 대시보드 shows the same numbers as 문의 대시보드.
     Two screens counting "검토 대기" with two queries is how they end up disagreeing.
+
+    ``awaiting_total`` counts **only the stages 회신 및 검토 actually lists.** It used to
+    sum every stage, so the dashboard said 6 while the list it links to held 1 — the five
+    others were drafts on tickets somebody had already answered in HubSpot, which that
+    list stopped showing. A counter that disagrees with the screen it opens is worse than
+    no counter: it sends the operator looking for work that is not there.
     """
     from .customer_ops import VALID_PIPELINE_STAGES
+    from .messages import LIST_STAGES
+
+    listed = set(LIST_STAGES["awaiting"])
 
     with SessionLocal() as session:
         stage_rows = session.execute(
@@ -64,8 +73,9 @@ def _awaiting_counters() -> dict:
         awaiting_by_stage = {stage: 0 for stage in _COUNTED_STAGES}
         awaiting_total = 0
         for stage, count in stage_rows:
-            awaiting_total += count
             key = stage if stage in VALID_PIPELINE_STAGES else "new"
+            if key in listed:
+                awaiting_total += count
             if key in awaiting_by_stage:
                 awaiting_by_stage[key] += count
 
@@ -131,7 +141,6 @@ def _dashboard_context() -> dict:
     recent_messages = queue["messages"][:_QUEUE_LIMIT]
 
     counters = _awaiting_counters()
-    awaiting_by_stage = counters["awaiting_by_stage"]
     awaiting_total = counters["awaiting_total"]
     received_today = counters["received_today"]
 
@@ -144,11 +153,15 @@ def _dashboard_context() -> dict:
 
     return {
         "recent_messages": recent_messages,
+        # 목록과 같은 표를 그리므로 유형 이름도 같은 곳에서 옵니다.
+        "category_labels": queue["category_labels"],
+        "unqualified": queue["unqualified"],
         # The shared queue table dates the 우선순위 dot against "now".
         "now": queue["now"],
+        # New/Negotiating 는 헤더에서 뺐습니다: 발송 대기가 New 만 보여주게 된 뒤로 ALL 과
+        # New 가 같은 수를 세게 되었고, 같은 수를 두 번 적는 칸이었습니다. 단계별 수는 바로
+        # 아래 보드의 각 열 머리에 그대로 있습니다.
         "awaiting_total": awaiting_total,
-        "awaiting_new": awaiting_by_stage["new"],
-        "awaiting_negotiation": awaiting_by_stage["negotiation"],
         "received_today": received_today,
         "stages": [
             {

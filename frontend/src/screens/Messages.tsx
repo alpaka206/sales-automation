@@ -11,6 +11,8 @@ type MessagesData = {
   filter_sort: string;
   stage_chips: [string, string][];
   stage_labels: Record<string, string>;
+  category_labels: Record<string, string>;
+  unqualified: string[];
   now: string;
 };
 
@@ -103,6 +105,8 @@ export function Messages() {
               rows={data.messages}
               now={data.now}
               stageLabels={data.stage_labels}
+              categoryLabels={data.category_labels}
+              unqualified={data.unqualified}
               emptyText="조건에 맞는 답변이 없습니다."
             />
           </Refreshing>

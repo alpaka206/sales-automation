@@ -11,11 +11,11 @@ export type QueueRow = {
   status: string;
   stage: string;
   subject: string;
-  channel: string;
+  // 채널 자리에 있던 값입니다. 전부 "email" 이라 한 줄도 구분하지 못했습니다.
+  category: string | null;
   email: string;
   received_at: string;
   waiting_since: string | null;
-  review_note?: string | null;
 };
 
 const STATUS_LABELS: Record<string, string> = {
@@ -51,13 +51,18 @@ export function QueueTable({
   rows,
   now,
   stageLabels,
+  categoryLabels = {},
+  unqualified = [],
   emptyText,
 }: {
   rows: QueueRow[];
   now: string;
   stageLabels: Record<string, string>;
+  categoryLabels?: Record<string, string>;
+  unqualified?: string[];
   emptyText: string;
 }) {
+  const notALead = new Set(unqualified);
   return (
     <DataTable
       columns={[
@@ -77,18 +82,9 @@ export function QueueTable({
           label: "문의 제목",
           width: "30%",
           cell: (row) => (
-            <>
-              <Link to={`/messages/${row.id}`} className="truncate" style={{ display: "block" }}>
-                {row.subject}
-              </Link>
-              {/* Not a second approval gate — every one of these waits for a human
-                  anyway. It says which one to open first. */}
-              {row.review_note && (
-                <span className="pill pill--warn pill--sm" title={row.review_note}>
-                  <span className="pill__dot" />검토 필요
-                </span>
-              )}
-            </>
+            <Link to={`/messages/${row.id}`} className="truncate" style={{ display: "block" }}>
+              {row.subject}
+            </Link>
           ),
         },
         {
@@ -107,7 +103,22 @@ export function QueueTable({
             );
           },
         },
-        { label: "채널", width: "8%", className: "td-muted", cell: (row) => row.channel },
+        {
+          // 채널이 있던 자리. 채널은 전부 "email" 이라 한 줄도 구분하지 못했고, 유형은
+          // 무엇을 먼저 열지를 말해 줍니다. UnQualified 는 세일즈 리드가 아니라는 뜻이지
+          // 회신을 안 한다는 뜻이 아닙니다 — CS 가이드/소개 문서로 나갑니다.
+          label: "문의 유형",
+          width: "13%",
+          className: "td-muted",
+          cell: (row) =>
+            row.category && notALead.has(row.category) ? (
+              <span className="pill pill--neutral pill--sm" title={categoryLabels[row.category]}>
+                <span className="pill__dot" />UnQualified
+              </span>
+            ) : (
+              (row.category && categoryLabels[row.category]) || row.category || "—"
+            ),
+        },
         { label: "소통 Email", width: "19%", className: "td-subtle truncate mono",
           cell: (row) => row.email },
         { label: "접수 시간", width: "12%", className: "td-subtle tnum",

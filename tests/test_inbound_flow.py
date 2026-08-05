@@ -117,6 +117,11 @@ def test_inbound_handle_creates_db_rows(db_session) -> None:
     assert result["channel"] == "email"
     assert result["score"] > 0
 
+    # 유형은 저장됩니다(0049). 목록이 채널 자리에 이것을 보여주고 — 채널은 전 행이 "email"
+    # 이라 아무것도 구분하지 못했습니다 — "검토 필요" 문구가 하던 일도 이쪽이 합니다.
+    conversation = db_session.query(Conversation).one()
+    assert conversation.inquiry_category == "purchase_inquiry"
+
     contacts = db_session.query(Contact).all()
     assert len(contacts) == 1
     assert contacts[0].normalized_email == "buyer@acme.co.kr"
@@ -421,8 +426,11 @@ def test_inbound_passes_knowledge_docs_to_draft(db_session) -> None:
     assert "Starter plan starts at 99k KRW." in draft_vars["knowledge_docs"]
 
 
-def test_inbound_omits_knowledge_for_spam(db_session) -> None:
-    """Spam classification must not pull any knowledge docs into the draft prompt."""
+def test_a_spam_classification_still_gets_documents(db_session) -> None:
+    """It used to be refused at the door. 영업·홍보 목적의 문의에도 회신은 나가고,
+    그 회신이 볼 것이 소개 문서입니다 — so the one reply written from no source at all
+    was exactly the one this rule produced. What to send is the operator's call on the
+    draft, not something decided by withholding the documents."""
     knowledge.reset_cache()
     doc = KnowledgeDocument(
         title="General",
@@ -460,4 +468,4 @@ def test_inbound_omits_knowledge_for_spam(db_session) -> None:
         )
 
     draft_call = next(c for c in llm.complete.call_args_list if "draft_reply" in c[0][0])
-    assert draft_call[0][1]["knowledge_docs"] == ""
+    assert "Always-on company info." in draft_call[0][1]["knowledge_docs"]

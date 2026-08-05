@@ -12,10 +12,10 @@ type DashboardData = {
   counters: {
     received_today: number;
     awaiting_total: number;
-    awaiting_new: number;
-    awaiting_negotiation: number;
   };
   stage_labels: Record<string, string>;
+  category_labels: Record<string, string>;
+  unqualified: string[];
   manual_log_stages: string[];
   stages: Stage[];
 };
@@ -45,9 +45,9 @@ export function Dashboard() {
           </div>
           <div className="queue-counters">
             <span><em>오늘 접수</em><b className="tnum">{c.received_today}</b></span>
+            {/* New/Negotiating 를 뺀 이유: 발송 대기가 New 만 보여주므로 ALL 이 곧 New
+                입니다. 같은 수를 세 칸에 적으면 다르다고 읽힙니다. */}
             <span><em>ALL</em><b className="tnum">{c.awaiting_total}</b></span>
-            <span><em>New</em><b className="tnum">{c.awaiting_new}</b></span>
-            <span><em>Negotiating</em><b className="tnum">{c.awaiting_negotiation}</b></span>
             <Link to="/messages" className="chip">전체 보기</Link>
           </div>
         </div>
@@ -55,6 +55,8 @@ export function Dashboard() {
           rows={data.queue}
           now={data.now}
           stageLabels={data.stage_labels}
+          categoryLabels={data.category_labels}
+          unqualified={data.unqualified}
           emptyText="답변을 기다리는 문의가 없습니다."
         />
       </section>

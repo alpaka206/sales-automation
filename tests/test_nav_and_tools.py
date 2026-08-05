@@ -32,22 +32,24 @@ def test_policy_docs_is_a_category_not_a_sidebar_entry():
     assert 'kind === "policy"' in templates_screen
 
 
-def test_the_policy_text_is_read_only_but_the_list_is_managed_by_dropping_a_file():
-    """The CONTENT is read-only — it is a copy pulled from Notion, so an edit here is
-    undone by the next upload. There is no editor for a document body.
+def test_a_document_can_arrive_by_file_or_by_paste_and_can_be_edited_here():
+    """Three ways in, one place it lands.
 
-    WHICH pages get pulled is decided by the file. Registering a URL by hand was offered
-    for a while and was dead on arrival: there is no Notion API token on this workspace,
-    so a registered URL had nothing that could ever fetch it and sat empty forever. The
-    export names its own pages, so dropping it registers what it contains.
+    The body was read-only for a while, because a Notion page is the original and an edit
+    here is undone by the next upload of that page. That is still true — so the screen
+    SAYS it (``edited_at``, and a banner on a Notion-backed document) instead of refusing.
+    Silently losing an edit is the failure; being overwritten by the file you just
+    uploaded is the feature.
 
-    Pausing and removing stay, because those are judgements a file cannot make.
+    Registering a bare URL is still gone, and for the original reason: there is no Notion
+    API token on this workspace, so a registered URL had nothing that could ever fetch it
+    and sat empty forever. A document now arrives WITH its text — from the export, or
+    pasted.
     """
     policy = pathlib.Path("frontend/src/screens/PolicyDocs.tsx").read_text(encoding="utf-8")
-    assert "읽기 전용" in policy
-    # No editor for the body: it is rendered in a <pre>, never a textarea.
-    assert "<textarea" not in policy
     assert "dropzone" in policy and "upload-export" in policy
+    assert "직접 추가" in policy and "<textarea" in policy
+    assert "이 문서의 원본은 노션입니다" in policy
     assert "/toggle" in policy and "/delete" in policy
 
 

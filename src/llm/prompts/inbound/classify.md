@@ -33,14 +33,16 @@ rest by meaning.
                   permissions, quality, max length, volume.
   languages       지원 언어. Whether a source/target language pair is dubbed.
   credits         크레딧 차감 방식. Usage, deduction rules, what happens on a failed job.
-  purchase_inquiry  전반적 소개 · 비즈니스 플랜 설명. What the service is, how it works,
-                  whether it could be adopted, B2B versus B2C.
+  purchase_inquiry  전반적 소개. What the service is, how it works, whether it could be
+                  adopted — a light first look.
+  business_plan   비즈니스 플랜 설명. Specifically about the B2B plan: what it is, how it
+                  compares to B2C, why a company would take it.
   partnership     Reseller, integration or joint-business proposals worth reviewing.
   recruiting      Job applications.
   other           A real inquiry that is none of the above.
 
 Return strict JSON only:
 {
-  "category": "support" | "spam" | "pricing_question" | "plan_features" | "languages" | "credits" | "purchase_inquiry" | "partnership" | "recruiting" | "other",
+  "category": "support" | "spam" | "pricing_question" | "plan_features" | "languages" | "credits" | "purchase_inquiry" | "business_plan" | "partnership" | "recruiting" | "other",
   "reasoning": "<one short sentence in the same language as the message>"
 }

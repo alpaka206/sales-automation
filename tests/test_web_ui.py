@@ -44,7 +44,7 @@ def _mock_dashboard_context():
                 "status": "pending_approval",
                 "stage": "new",
                 "subject": "가격 문의",
-                "channel": "email",
+                "category": "pricing_question",
                 "email": "buyer@example.com",
                 "received_at": datetime(2026, 1, 1, 12, 0),
                 "waiting_since": datetime(2026, 1, 1, 12, 0),
@@ -52,14 +52,14 @@ def _mock_dashboard_context():
         ],
         "now": datetime(2026, 1, 2, 12, 0),
         "awaiting_total": 7,
-        "awaiting_new": 4,
-        "awaiting_negotiation": 3,
         "received_today": 4,
         # The board renders below the queue; an empty board is enough for these tests.
         # `total` is the column's real size, which the header shows even when the column
         # renders only its first page.
         "stages": [{"key": "new", "label": "New", "rows": [], "total": 0}],
         "stage_labels": {"new": "New"},
+        "category_labels": {"pricing_question": "견적·가격", "spam": "영업·홍보"},
+        "unqualified": ["spam", "support", "recruiting"],
         "manual_log_stages": ("meeting_link_sent", "negotiation"),
     }
 
@@ -150,14 +150,20 @@ def test_the_shell_loads_the_korean_ui_font():
 
 @patch("src.api.routes.dashboard._dashboard_context", _mock_dashboard_context)
 def test_dashboard_shows_queue_counters():
-    """The five KPI cards became four inline counters beside the queue heading."""
+    """Two numbers, not four.
+
+    ALL used to sum every stage while the list it links to shows New only, so the header
+    said 6 and the screen behind it held 1 — the other five were drafts on tickets
+    somebody had already answered in HubSpot. Counting the same rows the list counts
+    makes ALL and New the same number, and two counters saying one thing read as two
+    different things. The per-stage numbers are on the board's column headers below.
+    """
     counters = _client().get("/api/ui/dashboard").json()["counters"]
-    assert set(counters) == {
-        "received_today", "awaiting_total", "awaiting_new", "awaiting_negotiation",
-    }
+    assert set(counters) == {"received_today", "awaiting_total"}
     screen = pathlib.Path("frontend/src/screens/Dashboard.tsx").read_text(encoding="utf-8")
-    for label in ("답변 대기중인 문의", "오늘 접수", "ALL", "New", "Negotiating"):
+    for label in ("답변 대기중인 문의", "오늘 접수", "ALL"):
         assert label in screen, label
+    assert "awaiting_negotiation" not in screen
 
 
 @patch("src.api.routes.dashboard._dashboard_context", _mock_dashboard_context)
@@ -176,11 +182,20 @@ def test_dashboard_json_carries_the_board():
     ).read_text(encoding="utf-8")
 
 
-def test_dashboard_no_longer_shows_inquiry_type():
-    """문의 유형 is retired: the panel, the column, and the stored value are all gone."""
-    for screen in ("Dashboard.tsx", "MessageDetail.tsx"):
-        source = pathlib.Path(f"frontend/src/screens/{screen}").read_text(encoding="utf-8")
-        assert "문의 유형" not in source, screen
+def test_the_queue_shows_the_inquiry_type_where_the_channel_used_to_be():
+    """채널 was "email" on every row — a column that separated nothing, taking the width
+    of the thing the operator actually wants at a glance. 문의 유형 is stored again for
+    this (0049); it also replaced the 검토 필요 flag, because "CS 문의" or "영업·홍보"
+    says which one to open first far more precisely than "확인이 필요합니다" did.
+
+    UnQualified means "not a sales lead", not "do not reply" — those still get an answer,
+    from the CS guide or the intro document.
+    """
+    source = QUEUE.read_text(encoding="utf-8")
+    assert 'label: "문의 유형"' in source
+    assert 'label: "채널"' not in source
+    assert "UnQualified" in source
+    assert "검토 필요" not in source
 
 
 @patch("src.api.routes.dashboard._dashboard_context", _mock_dashboard_context)
@@ -197,7 +212,7 @@ def test_dashboard_queue_table_is_the_review_table():
     headed the same value 접수 시간.
     """
     source = QUEUE.read_text(encoding="utf-8")
-    for header in ("상태", "Stage", "문의 제목", "채널", "소통 Email", "접수 시간"):
+    for header in ("상태", "Stage", "문의 제목", "문의 유형", "소통 Email", "접수 시간"):
         assert f'label: "{header}"' in source, header
     # 우선순위 is one dot wide and centred under its own heading.
     assert 'headClassName: "th-center"' in source
@@ -243,6 +258,48 @@ def test_pipeline_columns_show_the_label_only():
     assert "{stage.label}" in board
     for _key, _label, gloss in PIPELINE_STAGES:
         assert gloss not in board, gloss
+
+
+def test_the_all_counter_counts_the_rows_the_list_it_opens_holds(db_session_factory, monkeypatch):
+    """ALL said 6, 회신 및 검토 held 1.
+
+    The counter summed every stage while the list shows New only — the other five were
+    drafts on tickets somebody had already answered in HubSpot, which is exactly why the
+    list stopped showing them. A number that disagrees with the screen it links to sends
+    the operator looking for work that is not there, so it counts the same rows.
+    """
+    from src.api.routes import customer_ops, dashboard
+    from src.api.routes import messages as messages_route
+    from src.api.routes.dashboard import _awaiting_counters
+    from src.api.routes.messages import _messages_list_context
+
+    for module in (dashboard, messages_route, customer_ops):
+        monkeypatch.setattr(module, "SessionLocal", db_session_factory)
+
+    with db_session_factory() as session:
+        contact = Contact(normalized_email="c@example.com", email="c@example.com", full_name="C")
+        session.add(contact)
+        session.flush()
+        # One still New, one already moved on in HubSpot with our draft left behind.
+        for stage in ("new", "meeting_link_sent"):
+            conv = Conversation(contact_id=contact.id, stage=stage, inquiry_subject=stage)
+            session.add(conv)
+            session.flush()
+            session.add(
+                Message(
+                    conversation_id=conv.id,
+                    direction="outgoing",
+                    channel="email",
+                    subject="RE: 문의",
+                    body="draft",
+                    status="pending_approval",
+                )
+            )
+        session.commit()
+
+    listed = _messages_list_context(status="awaiting", stage="", sort="oldest")["messages"]
+    assert len(listed) == 1
+    assert _awaiting_counters()["awaiting_total"] == len(listed)
 
 
 def test_dashboard_queue_is_the_five_oldest(db_session_factory, monkeypatch):

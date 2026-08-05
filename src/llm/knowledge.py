@@ -20,7 +20,9 @@ Matching rules (category mode):
 - ``scope`` filtering: ``"inbound"`` matches docs with scope ``inbound`` or
   ``both``. ``scope="both"`` matches everything.
 - Only ``status == "active"`` documents are ever returned.
-- Spam category always returns empty string.
+
+어떤 문의에 어떤 문서를 붙일지는 **코드에 없습니다.** 모델이 목록을 보고 고릅니다 — 정책은
+바뀌고 문서 이름도 바뀌므로, 매핑을 코드에 굳히면 그때마다 아무 흔적 없이 끊깁니다.
 """
 
 from __future__ import annotations
@@ -108,9 +110,11 @@ def load_relevant_docs(category: str, scope: str = "inbound") -> str:
     """
     Return a formatted string of all knowledge documents matching *category* and *scope*.
 
-    Empty string if no documents match or if category is spam.
+    ``spam`` used to short-circuit to "". It no longer does: 영업·홍보 목적의 문의에도
+    회신은 나가고, 그 회신이 볼 것이 소개 문서입니다. 문서를 빼앗으면 그 회신만 아무 근거
+    없이 쓰이게 됩니다.
     """
-    if not category or category.lower() == "spam":
+    if not category:
         return ""
     return _load_from_db(category, scope)
 
@@ -152,17 +156,22 @@ def select_relevant_docs(
     category: str,
     scope: str = "inbound",
     llm: object | None = None,
+    language: str | None = None,
 ) -> str:
-    """
-    Use the LLM to pick the knowledge documents most relevant to *inquiry*.
+    """어떤 문서를 보고 답할지 **모델이** 고릅니다.
 
-    Falls back to deterministic category matching when:
-      - the category is spam (→ ""),
-      - no ``llm`` is provided,
-      - there are no candidate documents,
-      - the router errors or selects nothing valid.
+    유형별로 볼 문서를 코드에 적지 않습니다. 정책은 바뀌고, 문서는 노션에서 이름이 바뀌고,
+    새 문서는 아무 코드도 모르는 채로 들어옵니다 — 매핑을 코드에 굳히면 그때마다 조용히
+    끊깁니다. 대신 모델에게 문서 목록(제목·요약·태그)과 문의를 주고 고르게 합니다.
+
+    ``category`` 는 힌트로 넘어가고, ``language`` 도 마찬가지입니다: 같은 문서가 KR/ENG 두
+    벌로 있으면 문의 언어에 맞는 쪽만 고르라고 프롬프트가 말합니다(둘 다 넣으면 따라야 할
+    형식이 두 개가 됩니다). 규칙이 프롬프트에 있다는 것이 요점입니다 — 정책이 바뀌면 문서와
+    프롬프트가 바뀌지, 라우팅 표를 고치러 코드로 오지 않습니다.
+
+    라우터가 실패하거나 아무것도 못 고르면 유형 매칭으로 떨어집니다.
     """
-    if not category or category.lower() == "spam":
+    if not category:
         return ""
 
     if llm is None:
@@ -179,6 +188,7 @@ def select_relevant_docs(
             {
                 "inquiry": (inquiry or "").strip() or "(no message body)",
                 "category": category,
+                "inquiry_language": (language or "unknown"),
                 "doc_index": index,
             },
             schema=SelectDocsResult,

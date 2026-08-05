@@ -26,7 +26,9 @@ type Bubble = {
 };
 type Detail = {
   thread: Bubble[];
-  review_note: string | null;
+  category: string | null;
+  category_label: string;
+  unqualified: boolean;
   progress: {
     kind: string; detail: string; created_at: string;
     channel: string | null; handler: string | null;
@@ -150,18 +152,6 @@ export function MessageDetail() {
         <div className="banner banner--info mb-gap" role="status">
           <span className="banner__icon"><Icon name="sparkles" size={18} /></span>
           <div><div className="banner__title">답변 작성 중</div></div>
-        </div>
-      )}
-
-      {/* Above the draft, not beside it: the operator is about to read the reply and
-          press 발송, and the reason to be careful has to arrive before the reading does. */}
-      {data.review_note && isPendingApproval && (
-        <div className="banner banner--warn mb-gap" role="status">
-          <span className="banner__icon"><Icon name="warn" size={18} /></span>
-          <div>
-            <div className="banner__title">검토 필요</div>
-            <div className="banner__body">{data.review_note}</div>
-          </div>
         </div>
       )}
 
