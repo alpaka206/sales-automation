@@ -206,3 +206,45 @@ def test_a_refused_sign_in_says_why_without_putting_the_account_in_the_url():
     # Query strings reach proxy and access logs, so no _deny message may carry the email.
     source = inspect.getsource(auth_callback)
     assert "_deny" in source and "{email" not in source
+
+
+def test_the_access_screen_returns_a_list_not_a_500():
+    """이 화면은 한동안 500 이었고, 프런트가 모든 실패를 "관리자만 접근할 수 있습니다" 로
+    그려서 관리자에게 권한이 없다고 말했습니다. 원인은 사라진 함수를 부르는 import 였습니다.
+
+    그래서 여기서 확인하는 것은 권한이 아니라 **200 과 화면이 읽는 모양**입니다.
+    """
+    from fastapi.testclient import TestClient
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from sqlalchemy.pool import StaticPool
+
+    from src.api.main import app
+    from src.db.base import Base
+    from src.db.models import User
+
+    engine = create_engine(
+        "sqlite:///:memory:", connect_args={"check_same_thread": False}, poolclass=StaticPool
+    )
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine, expire_on_commit=False)
+    with factory() as session:
+        session.add_all([
+            User(email="admin@estsoft.com", name="관리자", role="admin", approved=True),
+            # legacy 'member': normalize_role 이 admin 으로 풉니다. 화면은 실제로 적용되는
+            # 권한을 보여야 합니다 — 'member' 라고 적으면 조회 전용처럼 읽힙니다.
+            User(email="legacy@estsoft.com", name="옛 계정", role="member", approved=True),
+            User(email="pending@estsoft.com", name="대기", role="admin", approved=False),
+        ])
+        session.commit()
+
+    # 라우트가 호출 시점에 ...db.session 에서 가져오므로 거기를 갈아 끼웁니다.
+    with patch("src.db.session.SessionLocal", factory):
+        with TestClient(app) as client:
+            response = client.get("/api/ui/settings/users")
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert {"approved_users", "me_email", "domain"} <= set(body)
+    emails = {u["email"]: u["role"] for u in body["approved_users"]}
+    assert emails == {"admin@estsoft.com": "admin", "legacy@estsoft.com": "admin"}

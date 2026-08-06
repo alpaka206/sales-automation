@@ -291,17 +291,50 @@ def ui_company(domain: str):
 
 
 @router.get("/api/ui/settings/users")
-async def ui_settings_users(request: Request):
+def ui_settings_users(request: Request):
     """접근 승인. Gated by admin_required, the one gate — the same function every other
-    admin screen uses, so which module a route imports from stops deciding who gets in."""
-    from ..auth import admin_required
+    admin screen uses, so which module a route imports from stops deciding who gets in.
+
+    이 화면은 한동안 아예 열리지 않았습니다. 여기서 ``settings_page.settings_users`` 를
+    불러 그 템플릿 context 를 JSON 으로 바꿔 쓰고 있었는데, 템플릿이 사라질 때 그 함수도
+    같이 사라졌습니다 — 남은 import 는 ImportError, 즉 **500** 이었습니다. 그런데 화면은
+    실패를 전부 "관리자만 접근할 수 있습니다" 로 그렸기 때문에, 관리자로 로그인한 사람에게
+    권한이 없다고 말하는 화면이 됐습니다. 목록을 여기서 직접 만듭니다: 지울 함수도, 맞춰야
+    할 context 모양도 없습니다.
+    """
+    from ...common.config import settings as app_settings
+    from ...db.models import User
+    from ...db.session import SessionLocal
+    from ..auth import admin_required, normalize_role, session_user
 
     if not admin_required(request):
         raise HTTPException(status_code=403, detail="관리자만 접근할 수 있습니다.")
-    from .settings_page import settings_users
 
-    response = await settings_users(request)
-    return {key: value for key, value in response.context.items() if key != "request"}
+    me = session_user(request) or {}
+    with SessionLocal() as session:
+        rows = (
+            session.query(User)
+            .filter(User.approved.is_(True))
+            .order_by(User.email)
+            .all()
+        )
+        users = [
+            {
+                "email": user.email,
+                "name": user.name or "",
+                # 저장된 값이 아니라 **실제로 적용되는** 권한입니다. legacy 'member' 행은
+                # 전체 접근으로 풀리는데, 화면이 'member' 라고 적으면 조회 전용처럼 읽힙니다.
+                "role": normalize_role(user.role),
+                "approved": bool(user.approved),
+                "last_login_at": user.last_login_at,
+            }
+            for user in rows
+        ]
+    return {
+        "approved_users": users,
+        "me_email": me.get("email", ""),
+        "domain": (app_settings.ALLOWED_EMAIL_DOMAIN or "").lower().strip(),
+    }
 
 
 @router.get("/api/ui/recovery")

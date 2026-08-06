@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Modal } from "../ui/Modal";
-import { getJSON, postForm } from "../lib/api";
+import { getJSON, postForm, HttpError } from "../lib/api";
 import { Icon } from "../ui/Icon";
 import { kst } from "../lib/format";
 import { DataTable } from "../ui/DataTable";
@@ -19,13 +19,20 @@ export function SettingsUsers() {
     retry: false,
   });
 
-  // Admin-only, and the gate lives on the server. A 403 is the answer, not a bug.
+  // Admin-only, and the gate lives on the server. 403 is the answer, not a bug —
+  // 하지만 그 외의 실패까지 같은 문장으로 그리면, 서버가 터졌을 때 관리자에게 권한이
+  // 없다고 말하게 됩니다. 실제로 그랬습니다: 이 화면은 500 을 내면서 "관리자만 접근할 수
+  // 있습니다" 를 띄우고 있었고, 그래서 아무도 원인을 못 봤습니다.
   if (error) {
+    const denied = error instanceof HttpError && error.status === 403;
     return (
       <div className="card" style={{ maxWidth: 520 }}>
         <div className="empty">
           <div className="empty__icon"><Icon name="shield" size={24} /></div>
-          <div className="empty__text">관리자만 접근할 수 있습니다.</div>
+          <div className="empty__text">
+            {denied ? "관리자만 접근할 수 있습니다." : "목록을 불러오지 못했습니다."}
+          </div>
+          {!denied && <div className="t-xs t-subtle">{error.message}</div>}
         </div>
       </div>
     );
@@ -62,9 +69,11 @@ export function SettingsUsers() {
         <form className="row" style={{ gap: 10 }} onSubmit={(event) => void submit(event, "/settings/users/add")}>
           <input className="input" name="username" placeholder="이름" />
           <input className="input" name="email" placeholder="이메일" required />
+          {/* 권한은 둘뿐입니다. "member" 를 고르면 normalize_role 이 admin 으로 풀어서,
+              조회 전용을 주려던 사람에게 전체 접근이 나갔습니다. 아래 버튼과 같은 말로. */}
           <select className="select" name="role" style={{ width: 140 }}>
-            <option value="member">member</option>
-            <option value="admin">admin</option>
+            <option value="admin">운영자</option>
+            <option value="viewer">조회 전용</option>
           </select>
           <button className="btn btn--primary" type="submit"><Icon name="plus" size={15} /> 추가</button>
         </form>

@@ -3,9 +3,18 @@
 // for what a screen shows, not a parallel API that drifts from it.
 import { QueryClient } from "@tanstack/react-query";
 
+/** 상태 코드를 달고 던집니다. "권한 없음"과 "서버가 터졌다"를 화면이 구분할 수 있어야
+ *  합니다 — 구분하지 못해서, 500 을 내던 접근 승인 화면이 관리자에게 권한이 없다고
+ *  말하고 있었습니다. */
+export class HttpError extends Error {
+  constructor(readonly status: number, path: string) {
+    super(`${status} ${path}`);
+  }
+}
+
 export async function getJSON<T>(path: string): Promise<T> {
   const response = await fetch(path, { credentials: "same-origin" });
-  if (!response.ok) throw new Error(`${response.status} ${path}`);
+  if (!response.ok) throw new HttpError(response.status, path);
   return response.json();
 }
 
