@@ -617,10 +617,16 @@ def test_the_console_does_not_ask_more_often_than_anything_can_change():
 
 
 def test_the_signature_preview_is_a_snapshot_not_a_live_mirror():
-    """srcDoc 을 본문 상태에 직접 묶으면 글자를 칠 때마다 iframe 이 문서를 통째로 다시
-    싣습니다 — 타자 한 번에 리로드 한 번. 누른 순간의 본문을 담아 둡니다."""
+    """미리보기는 늘 켜져 있지만 srcDoc 은 여전히 스냅샷입니다.
+
+    본문 상태에 직접 묶으면 글자를 칠 때마다 iframe 이 문서를 통째로 다시 싣습니다 —
+    타자 한 번에 리로드 한 번. 타자가 멎으면 따라오게 하되(디바운스), 묶지는 않습니다.
+    타이머는 반드시 정리해야 합니다: 안 그러면 글자 수만큼 타이머가 쌓입니다.
+    """
     import pathlib
 
     source = pathlib.Path("frontend/src/screens/EmailTemplates.tsx").read_text(encoding="utf-8")
     assert "${preview}</body>" in source
     assert "${body}</body>" not in source
+    assert "setTimeout(() => setPreview(body)" in source
+    assert "clearTimeout(timer)" in source

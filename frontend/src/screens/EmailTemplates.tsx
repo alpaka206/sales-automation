@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
 import { getJSON, postForm } from "../lib/api";
@@ -57,10 +57,16 @@ function Editor({ id, data, siblings, onOpen, onDone }: {
   const [body, setBody] = useState("");
   const [subject, setSubject] = useState("");
   const [note, setNote] = useState("");
-  // 미리보기는 **누른 순간의 본문**입니다. srcDoc 을 body 로 직접 묶어 두면 글자를 칠 때마다
-  // iframe 이 문서를 통째로 다시 싣습니다 — 타자마다 리로드 한 번. 스냅샷으로 끊습니다.
-  const [preview, setPreview] = useState<string | null>(null);
+  // 미리보기는 늘 켜져 있고 타자가 멎으면 따라옵니다. 그래도 **스냅샷**입니다: srcDoc 을
+  // body 에 직접 묶으면 글자 하나에 iframe 이 문서를 통째로 다시 싣습니다 — 타자 한 번에
+  // 리로드 한 번. 누르는 대신 250ms 를 기다릴 뿐, 끊어 두는 것은 그대로입니다.
+  const [preview, setPreview] = useState("");
   const [loadedId, setLoadedId] = useState<number | null>(null);
+
+  useEffect(() => {
+    const timer = setTimeout(() => setPreview(body), 250);
+    return () => clearTimeout(timer);
+  }, [body]);
 
   if (data && loadedId !== data.id) {
     setLoadedId(data.id);
@@ -199,30 +205,33 @@ function Editor({ id, data, siblings, onOpen, onDone }: {
                        style={{ marginBottom: 14 }} />
               </>
             )}
-            <label className="field-label" htmlFor="et-body">본문</label>
-            <textarea className="draft-textarea" id="et-body" value={body}
-                      onChange={(e) => setBody(e.target.value)} style={{ minHeight: 240 }} />
-
-            {canPreview && preview !== null && (
-              <iframe title="템플릿 미리보기" sandbox=""
-                      srcDoc={`<body style="margin:0;padding:24px;background:#fff;font-family:'Pretendard Variable',Pretendard">${preview}</body>`}
-                      style={{ width: "100%", height: 380, marginTop: 10, border: "1px solid var(--border)", borderRadius: 8, background: "#fff" }} />
-            )}
+            {/* 나란히. 미리보기가 본문 **아래**에 붙으면 그만큼 세로가 밀리는데, 이 화면을
+                보는 노트북은 세로가 640px 남짓입니다. 옆에 두면 늘 켜 두어도 높이가 그대로고,
+                고치는 곳과 결과가 한눈에 들어옵니다. */}
+            <div className={canPreview ? "grid grid-2" : undefined}>
+              <div>
+                <label className="field-label" htmlFor="et-body">본문</label>
+                <textarea className="draft-textarea" id="et-body" value={body}
+                          onChange={(e) => setBody(e.target.value)} style={{ minHeight: 260 }} />
+              </div>
+              {canPreview && (
+                <div>
+                  <span className="field-label">미리보기</span>
+                  <iframe title="템플릿 미리보기" sandbox=""
+                          srcDoc={`<body style="margin:0;padding:16px;background:#fff;font-family:'Pretendard Variable',Pretendard">${preview}</body>`}
+                          style={{ width: "100%", height: 260, border: "1px solid var(--border)", borderRadius: 8, background: "#fff" }} />
+                </div>
+              )}
+            </div>
           </>
         )}
 
-        {/* 이 화면에서 할 수 있는 일은 전부 이 한 줄입니다. 미리보기가 본문 아래에 따로
-            있으면 그만큼 세로가 밀리고, 이 화면을 보는 노트북은 세로가 640px 남짓입니다. */}
-        <div className="action-bar">
+        {/* 이 화면에서 할 수 있는 일은 전부 이 한 줄입니다. 미리보기 버튼은 없앴습니다 —
+            켜고 끄는 것이 아니라 옆에 늘 있습니다. */}
+        <div className="action-bar" style={{ marginTop: 14 }}>
           <button type="button" className="btn btn--primary" onClick={() => void save()}>
             <Icon name="check" size={15} /> {id === "new" ? "생성" : "저장"}
           </button>
-          {canPreview && (
-            <button type="button" className="btn btn--subtle"
-                    onClick={() => setPreview((p) => (p === null ? body : null))}>
-              <Icon name="file" size={15} /> 미리보기
-            </button>
-          )}
           {data && isSignature && (
             <button type="button" className="btn btn--ghost" onClick={() => void remove()}>
               <Icon name="x" size={15} /> 삭제
