@@ -407,3 +407,21 @@
 @media (max-width: 1240px) {
   .won .detail-head { padding-left: 54px; padding-right: 54px; }
 }
+
+/* 계약 폼이 든 모달만. 콘솔의 기본 모달은 확인 문구 한두 줄을 담는 크기(640px)라, 3열
+ * 30여 칸짜리 폼에는 좁습니다. 그렇다고 모든 모달을 넓히면 "정말 삭제할까요?" 도 같이
+ * 넓어집니다 — `:has()` 로 이 폼이 든 것만 고릅니다.
+ *
+ * 그리고 저장 버튼을 아래에 붙여 둡니다. 폼이 화면보다 길어 모달 안에서 스크롤되는데,
+ * 버튼이 같이 흘러가면 다 채우고 나서 끝까지 내려야 저장할 수 있습니다. */
+.modal--wide:has(> .won) {
+  max-width: 880px;
+}
+.modal--wide:has(> .won) .modal__actions {
+  position: sticky;
+  bottom: -20px;
+  background: var(--surface);
+  padding: 12px 0;
+  margin-top: 8px;
+  border-top: 1px solid var(--border);
+}

@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { getJSON, postForm } from "../../lib/api";
 import { SubmitButton, useAction } from "../../ui/ActionButton";
+import { Modal } from "../../ui/Modal";
 import { Field } from "./WonNew";
 import { type Contract, type ListData, type Row, n, num } from "./shared";
 
@@ -29,6 +30,9 @@ const empty = {
   revenue_from: "", renewal_plan: "", memo: "",
 };
 type Draft = typeof empty;
+
+// 제출 버튼이 모달 푸터에 있어서 폼을 id 로 가리킵니다.
+const FORM_ID = "won-contract-form";
 
 const addMonths = (iso: string, months: number): string => {
   if (!iso) return "";
@@ -135,30 +139,40 @@ export function WonContractForm() {
     }
   });
 
-  if (!data || !list || !draft) return <div className="won"><div className="page">불러오는 중…</div></div>;
+  if (!data || !list || !draft) {
+    return <Modal title="계약 정보" onClose={() => navigate(`/won-customers/${clientId}`)}>
+             <div className="won"><p className="note-box">불러오는 중…</p></div>
+           </Modal>;
+  }
 
   const contracts = data.contracts ?? [];
   const prev = contracts.length ? contracts[contracts.length - 1] : undefined;
   const seq = editing ? contracts.find((c) => String(c.id) === contractId)?.seq : contracts.length + 1;
   const options = list.options;
 
-  return (
-    <div className="won">
-      <div className="page">
-        <div className="page-head">
-          <div>
-            <h1 className="page-title">{editing ? "계약 수정" : prev ? "계약 추가" : "계약 정보 입력"}</h1>
-            <p className="page-sub">
-              {prev && !editing
-                ? "Client ID는 그대로 유지되고, 계약만 별도 히스토리로 쌓입니다."
-                : "이 고객의 계약 정보입니다."}
-            </p>
-          </div>
-          <button className="btn" type="button"
-                  onClick={() => navigate(`/won-customers/${clientId}`)}>← 고객 상세</button>
-        </div>
+  const back = () => navigate(`/won-customers/${clientId}`);
 
-        <form className="sec" onSubmit={save}>
+  return (
+    // 목업처럼 상세 위에 뜨는 대화상자입니다. 콘솔에 이미 있는 Modal 을 씁니다 — 포커스
+    // 트랩·Escape·배경 스크롤 잠금이 거기 한 벌 있고, 목업의 자체 모달을 옮기면 그게 두
+    // 벌이 됩니다. 제출 버튼은 푸터(본문 밖)에 있으므로 `form` 속성으로 폼을 가리킵니다.
+    <Modal
+      title={editing ? "계약 수정" : prev ? "계약 추가" : "계약 정보 입력"}
+      description={
+        prev && !editing
+          ? "Client ID는 그대로 유지되고, 계약만 별도 히스토리로 쌓입니다."
+          : "이 고객의 계약 정보입니다."
+      }
+      wide
+      onClose={back}
+      actions={
+        <SubmitButton busy={saving} pending="저장 중" form={FORM_ID}>
+          {editing ? "저장" : "계약 등록"}
+        </SubmitButton>
+      }
+    >
+      <div className="won">
+        <form id={FORM_ID} onSubmit={save}>
           <div className="idbox">
             <div>
               <div className="field-label">{editing ? "수정하는 계약" : "추가되는 계약"}</div>
@@ -325,15 +339,10 @@ export function WonContractForm() {
             </div>
           </div>
 
-          <div className="modal-foot" style={{ marginTop: 18 }}>
-            <button className="btn" type="button"
-                    onClick={() => navigate(`/won-customers/${clientId}`)}>취소</button>
-            <SubmitButton busy={saving} pending="저장 중">{editing ? "저장" : "계약 등록"}</SubmitButton>
-          </div>
           {note && <div className="note-box" role="status">{note}</div>}
         </form>
       </div>
-    </div>
+    </Modal>
   );
 }
 

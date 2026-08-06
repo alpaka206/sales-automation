@@ -44,15 +44,18 @@ export function SubmitButton({
   className = "btn btn--primary",
   children,
   style,
+  form,
 }: {
   busy: boolean;
   pending?: string;
   className?: string;
   children: ReactNode;
   style?: React.CSSProperties;
+  /** 폼 **밖**에 놓인 제출 버튼이 그 폼을 가리킵니다 — 모달은 푸터가 본문 밖입니다. */
+  form?: string;
 }) {
   return (
-    <button type="submit" className={className} style={style}
+    <button type="submit" className={className} style={style} form={form}
             disabled={busy} aria-busy={busy || undefined}>
       {busy ? (
         <>

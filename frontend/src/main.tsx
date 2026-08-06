@@ -20,7 +20,6 @@ import { Overview } from "./screens/Overview";
 import { WonCustomers } from "./screens/won/WonCustomers";
 import { WonCustomerDetail } from "./screens/won/WonCustomerDetail";
 import { WonNew } from "./screens/won/WonNew";
-import { WonContractForm } from "./screens/won/WonContractForm";
 import { Quotation } from "./screens/Quotation";
 import { ContractDoc } from "./screens/ContractDoc";
 import { SignIn } from "./screens/SignIn";
@@ -68,8 +67,11 @@ function mountConsole() {
             <Route path="won-customers" element={<WonCustomers />} />
             <Route path="won-customers/new" element={<WonNew />} />
             <Route path="won-customers/:clientId" element={<WonCustomerDetail />} />
-            <Route path="won-customers/:clientId/contracts/new" element={<WonContractForm />} />
-            <Route path="won-customers/:clientId/contracts/:contractId" element={<WonContractForm />} />
+            {/* 계약 폼은 모달입니다 — 뒤에 상세가 남아 있어야 어느 고객의 계약인지가
+                보입니다. 그래서 같은 화면을 그리고, 상세가 경로를 보고 모달을 엽니다.
+                주소는 그대로라 새로고침해도 열려 있고 뒤로가기로 닫힙니다. */}
+            <Route path="won-customers/:clientId/contracts/new" element={<WonCustomerDetail />} />
+            <Route path="won-customers/:clientId/contracts/:contractId" element={<WonCustomerDetail />} />
             <Route path="tools/quotation" element={<Quotation />} />
             <Route path="tools/contract" element={<ContractDoc />} />
           </Route>

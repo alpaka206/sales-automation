@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useNavigate, useParams } from "react-router-dom";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { getJSON, postForm } from "../../lib/api";
 import { useAction } from "../../ui/ActionButton";
 import { Confirm } from "./Confirm";
+import { WonContractForm } from "./WonContractForm";
 import {
   type Claim, type Contract, type Grant, type ListData, type Options, type Payment, type Row,
   dueClass, dueText, fmt, initials, money, n, num,
@@ -31,6 +32,9 @@ const AVATAR_COLORS = ["#0F766E", "#B45309", "#3730A3", "#B42318", "#026AA2", "#
 export function WonCustomerDetail() {
   const { clientId } = useParams();
   const navigate = useNavigate();
+  // 계약 폼은 이 화면 위의 모달입니다. 주소로 판단하므로 새로고침해도 열려 있고,
+  // 뒤로가기가 곧 닫기입니다 — 모달을 상태로만 들면 둘 다 안 됩니다.
+  const contractRoute = useLocation().pathname.includes("/contracts");
   const queryClient = useQueryClient();
   const { data } = useQuery({
     queryKey: ["won-customer", clientId],
@@ -287,6 +291,8 @@ export function WonCustomerDetail() {
           {!(data.comms ?? []).length && <div className="board-empty">기록이 없습니다.</div>}
         </Section>
       </div>
+
+      {contractRoute && <WonContractForm />}
     </div>
   );
 }
