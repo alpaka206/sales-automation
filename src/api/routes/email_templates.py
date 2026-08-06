@@ -21,19 +21,20 @@ from ...db.session import SessionLocal
 router = APIRouter(tags=["web"])
 
 
-def _generate_key(session, name: str, language: str) -> str:
+def _generate_key(session, name: str) -> str:
     """Derive a unique storage key from the name, so the operator never types one.
 
-    The key is a code reference: ``auto_ack``, ``signature_ko`` and the reply-format row
-    are fetched by exact key from the send path, and the compose screen's signature picker
-    lists everything under ``signature_html_``. Those rows already exist and are only ever
+    The key is a code reference: ``auto_ack``, the reply-format row and the two links are
+    fetched by exact key from the send path, and the review screen's signature picker
+    lists everything under ``signature_``. Those rows already exist and are only ever
     edited — so a template CREATED here can be reached by exactly one thing, that picker,
     and it gets the prefix that puts it there. A key with any other shape would produce a
     row nothing in the app can ever read.
     """
     base = re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_")
-    # A Korean name romanizes to nothing; fall back to the language it is written for.
-    base = base or (language if language and language != "all" else "custom")
+    # A Korean name romanizes to nothing. The key is never shown or typed, so the counter
+    # below is the whole answer — there is no language to fall back to any more.
+    base = base or "custom"
     candidate = f"{SIGNATURE_KEY_PREFIX}{base}"[:100]
     suffix = 2
     while session.query(EmailTemplate).filter_by(key=candidate).first():
@@ -64,13 +65,14 @@ def _snapshot_revision(session, tpl: EmailTemplate, change_note: str, edited_by:
 async def email_templates_create(
     request: Request,
     name: str = Form(""),
-    language: str = Form("all"),
     body: str = Form(""),
 ):
-    """Create a new email template and record its first revision.
+    """Create a signature and record its first revision.
 
-    The key is derived from the name (see ``_generate_key``) rather than asked for, and
-    the status is always ``active`` — see the note on the update handler.
+    The key is derived from the name (see ``_generate_key``) rather than asked for, the
+    status is always ``active`` — see the note on the update handler — and the language is
+    always ``all``: nothing matches a signature to a language, the operator picks one on
+    the draft, so asking was a question with no consequence.
     """
     author = actor_name(request, fallback="") or "web"
     if not name.strip():
@@ -80,9 +82,9 @@ async def email_templates_create(
         )
     with SessionLocal() as session:
         tpl = EmailTemplate(
-            key=_generate_key(session, name.strip(), language.strip()),
+            key=_generate_key(session, name.strip()),
             name=name.strip(),
-            language=language.strip() or "all",
+            language="all",
             channel="email",
             status="active",
             version=1,
@@ -115,6 +117,12 @@ async def email_templates_update(
     nothing ever displayed; and only ``active`` rows are ever read, so draft/archived
     described a template that exists and does nothing. Saving revives a dormant row
     rather than leaving it unreachable now that nothing can set the value back.
+
+    ``language`` is still posted — ``auto_ack`` and ``auto_ack_en`` really are one mail in
+    two languages — but a SIGNATURE is pinned to ``all`` no matter what arrives. The screen
+    stopped asking (0063), so anything posted for one is a stale value from a form that no
+    longer has that field, and writing it back would resurrect a column the operator can
+    neither see nor change.
     """
     author = actor_name(request, fallback="") or "web"
     with SessionLocal() as session:
@@ -128,7 +136,8 @@ async def email_templates_update(
         _snapshot_revision(session, tpl, change_note="edited", edited_by=author)
         if name.strip():
             tpl.name = name.strip()
-        tpl.language = language.strip() or "all"
+        is_signature = (tpl.key or "").startswith(SIGNATURE_KEY_PREFIX)
+        tpl.language = "all" if is_signature else (language.strip() or "all")
         tpl.status = "active"
         tpl.version = (tpl.version or 1) + 1
         tpl.body = body
@@ -144,11 +153,15 @@ async def email_templates_update(
 async def email_templates_delete(tpl_id: int, request: Request):
     """Delete a SIGNATURE (keeps its revision history). Nothing else deletes.
 
-    Every other row is a key the code resolves by name — ``auto_ack``, ``auto_ack_en``,
-    ``reply_format``, the two links, the two sender names. Deleting one does not remove a
-    feature, it removes the answer to a lookup that still happens: an acknowledgement that
-    silently falls back to a hardcoded string, a reply ending on a literal
-    ``{{MEETING_LINK}}``, an English mail introducing the writer as "배운태".
+    EVERY signature deletes now, including ``signature_ko``/``signature_en``: since 0061
+    no code reads a signature by name — the operator picks one on the draft and presses
+    발송 — so a signature is data, and data you cannot delete is a bug in the screen.
+
+    Every other row is still a key the code resolves by name — ``auto_ack``,
+    ``auto_ack_en``, ``reply_format``, the two links, the two sender names. Deleting one
+    does not remove a feature, it removes the answer to a lookup that still happens: an
+    acknowledgement that silently falls back to a hardcoded string, a reply ending on a
+    literal ``{{MEETING_LINK}}``, an English mail introducing the writer as "배운태".
 
     And nothing could put it back — the console creates signatures, not code references.
     Not using one means clearing its body, which is visible and reversible.

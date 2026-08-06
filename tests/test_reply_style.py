@@ -47,6 +47,69 @@ def test_company_rules_allow_polite_requests_and_one_cta() -> None:
     assert "말씀해 주세요" in seed
     assert "메일 하나의 CTA는 하나만" in seed
     assert "선호 채널" in seed
+    # 서명은 사람이 고릅니다 — 규칙이 모델에게 본문에 쓰라고 시키면 안 됩니다.
+    assert "{{__signature__}}" not in seed
+    assert "본문에 서명을 쓰지 않습니다" in seed
+
+
+def test_0061_takes_the_signature_out_of_a_live_rule_document():
+    """살아 있는 규칙 문서를 씨앗 파일과 같은 문장으로 만듭니다.
+
+    안 걷어내면 프롬프트에 ``{{__signature__}}`` 이라는 글자와 "아래 서명을 그대로
+    붙이세요" 가 그대로 들어가고, 모델은 붙일 것이 없으니 서명을 지어냅니다.
+    """
+    import importlib.util
+
+    from sqlalchemy import create_engine, text
+
+    from src.db.models import Base
+
+    spec = importlib.util.spec_from_file_location(
+        "m0061", "src/db/migrations/0061_the_signature_is_picked_not_written.py"
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    before = (
+        "# 톤 & 시그니처 (공통)\n\n"
+        "## 본문 구조\n\n"
+        "6. 감사 인사와 서명\n\n"
+        "## 시그니처 (본문 마지막에 그대로 붙이기 — 변형 금지)\n\n"
+        "아래 서명을 본문 마지막에 그대로 붙이세요. 이 서명은 **이메일 템플릿(signature_ko)**"
+        " 에서 수정되며, 아래 값이 자동 주입됩니다.\n\n"
+        "```\n{{__signature__}}\n```\n\n"
+        "## 변수 치환 검증\n\n"
+        "- 본문이나 시그니처에 `{{ }}`, `{var}` 같은 placeholder 가 남아 있으면 발송 X.\n"
+        "- 시그니처는 위 블록을 **그대로 복사**. 회사명·역할·메일주소 절대 변형 금지.\n"
+    )
+
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO policy_sources (label, doc_key, mode, order_index, status, "
+                "body, created_at, updated_at) VALUES ('rule_01_tone', "
+                "'file:rule_01_tone.md', 'rules', 10, 'active', :body, "
+                "CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
+            ),
+            {"body": before},
+        )
+
+    module.up(engine)
+    module.up(engine)  # 두 번 돌려도 같아야 합니다 — 첫 판이 찾을 것을 없애 두었으므로.
+
+    with engine.begin() as conn:
+        after = conn.execute(text("SELECT body FROM policy_sources")).scalar_one()
+
+    assert "{{__signature__}}" not in after
+    assert "그대로 복사" not in after
+    assert "# 톤 (공통)" in after
+    assert "6. 감사 인사 (서명은 쓰지 않습니다" in after
+    assert "본문에 서명을 쓰지 않습니다" in after
+    # 뒤에 오는 절은 그대로 있어야 합니다 — 지운 것은 시그니처 절 하나입니다.
+    assert "## 변수 치환 검증" in after
+    assert "- 본문에 `{{ }}`, `{var}` 같은 placeholder" in after
 
 
 def test_translation_prompt_preserves_dash_bullets() -> None:

@@ -35,7 +35,7 @@ type Detail = {
   }[];
   summary: string | null;
   customer_requests: string | null;
-  signatures: { key: string; name: string; language: string }[];
+  signatures: { key: string; name: string }[];
   ticket: {
     id: number | null; ticket_id: string | null; stage: string | null;
     inquiry_subject: string | null; inquiry_language: string | null; client_id: number | null;
@@ -177,18 +177,16 @@ export function MessageDetail() {
                     <textarea className="draft-textarea" id="msg-body" value={body}
                               onChange={(e) => setBody(e.target.value)} />
 
-                    <label className="field-label" htmlFor="msg-signature" style={{ marginTop: 12 }}>
-                      서명 <span className="t-subtle">(브랜드 서명을 고르면 발송 시 기존 텍스트 서명을 대체합니다)</span>
-                    </label>
+                    {/* 골라야 붙습니다. 예전에는 여기에 "기본 (텍스트 서명)" 이 하나 더
+                        있었는데, 그건 모델이 본문에 써 넣은 서명을 그대로 두라는 뜻이었습니다
+                        — 고르지 않아도 서명이 붙던 자리입니다. 이제 없습니다. */}
+                    <label className="field-label" htmlFor="msg-signature" style={{ marginTop: 12 }}>서명</label>
                     <select className="select" id="msg-signature" value={signature}
                             onChange={(e) => setSignature(e.target.value)} style={{ marginBottom: 12 }}>
-                      <option value="">기본 (텍스트 서명)</option>
+                      <option value="">서명 없음</option>
                       {data.signatures.map((s) => (
-                        <option key={s.key} value={s.key}>
-                          {s.name}{s.language && s.language !== "all" ? ` · ${s.language}` : ""}
-                        </option>
+                        <option key={s.key} value={s.key}>{s.name}</option>
                       ))}
-                      <option value="none">서명 없음</option>
                     </select>
 
                     <div className="action-bar">

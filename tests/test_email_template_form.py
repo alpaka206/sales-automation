@@ -1,10 +1,11 @@
 """이메일 템플릿 — what the screen asks for, and what it must not.
 
 The form had four fields the operator could not act on: a key that is a code reference
-(the send path resolves ``auto_ack`` / ``signature_ko`` / the reply-format row by exact
-key, so moving one silently unhooks a template from the app), a description nothing ever
-displayed, and a change memo that only reached a history line. What is left is the name,
-the language, the status, and the body.
+(the send path resolves ``auto_ack`` / the reply-format row by exact key, so moving one
+silently unhooks a template from the app), a description nothing ever displayed, and a
+change memo that only reached a history line. 언어 joined them for signatures in 0061 —
+nothing matches a signature to a language, the operator picks one on the draft. What is
+left is the name and the body.
 """
 
 from __future__ import annotations
@@ -55,32 +56,36 @@ def test_creating_a_template_needs_no_key(template_db):
     with TestClient(app) as client:
         response = client.post(
             "/email-templates",
-            data={"name": "Sales signature", "language": "en", "body": "<p>PERSO</p>"},
+            data={"name": "Sales signature", "body": "<p>PERSO</p>"},
         )
     assert response.status_code == 200
     with template_db() as session:
         tpl = session.query(EmailTemplate).one()
-        # The prefix is not decoration: the compose screen's signature picker is the only
+        # The prefix is not decoration: the review screen's signature picker is the only
         # thing that can reach a template created here, and it looks for exactly this.
         assert tpl.key == f"{SIGNATURE_KEY_PREFIX}sales_signature"
         assert tpl.name == "Sales signature"
 
 
 def test_a_korean_name_still_produces_a_usable_key(template_db):
-    """It romanizes to nothing, so the language stands in — the key is never empty."""
+    """It romanizes to nothing, so a stand-in does — the key is never empty. It used to be
+    the language; signatures do not have one any more, and the key is never shown."""
     with TestClient(app) as client:
-        client.post("/email-templates", data={"name": "기본 서명", "language": "ko"})
+        client.post("/email-templates", data={"name": "기본 서명"})
     with template_db() as session:
-        assert session.query(EmailTemplate).one().key == f"{SIGNATURE_KEY_PREFIX}ko"
+        row = session.query(EmailTemplate).one()
+        assert row.key == f"{SIGNATURE_KEY_PREFIX}custom"
+        # 언어를 묻지 않으므로 서명은 언제나 '전체' 입니다.
+        assert row.language == "all"
 
 
 def test_two_templates_with_the_same_name_do_not_collide(template_db):
     with TestClient(app) as client:
-        client.post("/email-templates", data={"name": "기본 서명", "language": "ko"})
-        client.post("/email-templates", data={"name": "기본 서명", "language": "ko"})
+        client.post("/email-templates", data={"name": "기본 서명"})
+        client.post("/email-templates", data={"name": "기본 서명"})
     with template_db() as session:
         keys = sorted(row.key for row in session.query(EmailTemplate).all())
-    assert keys == [f"{SIGNATURE_KEY_PREFIX}ko", f"{SIGNATURE_KEY_PREFIX}ko_2"]
+    assert keys == [f"{SIGNATURE_KEY_PREFIX}custom", f"{SIGNATURE_KEY_PREFIX}custom_2"]
 
 
 def test_a_name_with_no_body_is_refused(template_db):
@@ -146,8 +151,9 @@ def test_a_new_draft_starts_on_the_first_signature(template_db):
     assert default_signature_key() == f"{SIGNATURE_KEY_PREFIX}a"
 
 
-def test_with_no_signatures_a_draft_still_goes_out_signed(template_db):
-    """None 은 "서명 없음" 이 아닙니다 — 회사 규칙이 본문에 넣는 텍스트 서명이 남습니다."""
+def test_with_no_signatures_a_draft_starts_unsigned(template_db):
+    """None 은 이제 정말 "서명 없음" 입니다. 예전에는 회사 규칙이 본문에 넣어 둔 텍스트
+    서명을 뜻했고, 그래서 아무것도 안 고른 메일에도 이름이 붙어 나갔습니다 (0061)."""
     from src.db.email_templates import default_signature_key
 
     assert default_signature_key() is None
@@ -161,6 +167,10 @@ def test_a_signature_typed_before_the_prefix_existed_is_re_keyed(tmp_path):
 
     Rows the code resolves by exact name are left alone; everything else could only have
     come from 새로 만들기, which creates signatures.
+
+    ``signature_html_`` is spelled out rather than taken from the constant: 0048 wrote that
+    prefix, and it stays written even though 새로 만들기 has since dropped the ``html_``
+    (0061). A migration's assertion has to describe the past, not today's constant.
     """
     import importlib.util
 
@@ -179,7 +189,7 @@ def test_a_signature_typed_before_the_prefix_existed_is_re_keyed(tmp_path):
             ("baeuntae", "배운태"),          # typed by hand before 08-04
             ("auto_ack", "자동 접수확인"),     # resolved by exact key
             ("reply_format", "답변 메일 형식"),
-            (f"{SIGNATURE_KEY_PREFIX}hyeram", "이혜람"),
+            ("signature_html_hyeram", "이혜람"),
         ):
             conn.execute(
                 text(
@@ -198,10 +208,43 @@ def test_a_signature_typed_before_the_prefix_existed_is_re_keyed(tmp_path):
             row[1]: row[0]
             for row in conn.execute(text("SELECT key, name FROM email_templates")).fetchall()
         }
-    assert keys["배운태"] == f"{SIGNATURE_KEY_PREFIX}baeuntae"
+    assert keys["배운태"] == "signature_html_baeuntae"
     assert keys["자동 접수확인"] == "auto_ack"
     assert keys["답변 메일 형식"] == "reply_format"
-    assert keys["이혜람"] == f"{SIGNATURE_KEY_PREFIX}hyeram"
+    assert keys["이혜람"] == "signature_html_hyeram"
+
+
+def test_a_signature_cannot_keep_a_language(template_db):
+    """화면이 안 묻는데 폼이 옛 값을 실어 보내면, 아무도 못 보고 못 바꾸는 값이 되살아납니다.
+    ``auto_ack`` 은 다릅니다 — 그건 정말 한 메일의 두 언어입니다."""
+    with template_db() as session:
+        session.add_all([
+            EmailTemplate(key="signature_ko", name="서명", language="ko", channel="email",
+                          status="active", version=1, body="김규원"),
+            EmailTemplate(key="auto_ack_en", name="접수확인 영어", language="en",
+                          channel="email", status="active", version=1, body="Hi"),
+        ])
+        session.commit()
+        ids = {row.key: row.id for row in session.query(EmailTemplate).all()}
+
+    with TestClient(app) as client:
+        client.put(f"/email-templates/{ids['signature_ko']}",
+                   data={"name": "서명", "language": "ko", "body": "김규원"})
+        client.put(f"/email-templates/{ids['auto_ack_en']}",
+                   data={"name": "접수확인 영어", "language": "en", "body": "Hi"})
+    with template_db() as session:
+        langs = {row.key: row.language for row in session.query(EmailTemplate).all()}
+    assert langs == {"signature_ko": "all", "auto_ack_en": "en"}
+
+
+def test_a_signature_never_groups_under_another_row(template_db):
+    """언어별 묶음은 ``auto_ack`` / ``auto_ack_en`` 을 한 줄로 보이게 하는 장치입니다.
+    서명 둘은 그냥 서명 둘이고, 묶으면 '전체' 라고 적힌 언어 칩이 두 개 뜹니다."""
+    from src.api.routes.ui_api import _base_key
+
+    keys = {"signature_x", "signature_x_en", "auto_ack", "auto_ack_en"}
+    assert _base_key("signature_x_en", keys) == "signature_x_en"
+    assert _base_key("auto_ack_en", keys) == "auto_ack"
 
 
 def test_everything_saved_here_is_active(template_db):
@@ -249,15 +292,21 @@ def test_the_last_row_for_a_key_the_code_resolves_cannot_be_deleted(template_db)
         assert session.query(EmailTemplate).count() == 1
 
 
-def test_only_a_signature_deletes(template_db):
+def test_every_signature_deletes_and_nothing_else_does(template_db):
     """Every other row is a key the code resolves by name — auto_ack_en and sender_name_en
     included. Deleting one removes the answer to a lookup that still happens, and nothing
     could put it back: the console creates signatures, not code references. 안 쓰려면
-    본문을 비웁니다 — 그건 보이고 되돌릴 수 있습니다."""
+    본문을 비웁니다 — 그건 보이고 되돌릴 수 있습니다.
+
+    ``signature_ko`` is in here on purpose. It WAS such a key — the prompt injected it into
+    every draft — so the screen showed it under 서명 and then refused to delete it, which
+    is the worst of both. Nothing reads it now, so it goes (0061)."""
     with template_db() as session:
         session.add_all([
             EmailTemplate(key="auto_ack_en", name="접수확인 영어", language="en",
                           channel="email", status="active", version=1, body="Hi"),
+            EmailTemplate(key="signature_ko", name="서명 (한국어)", language="ko",
+                          channel="email", status="active", version=1, body="김규원"),
             EmailTemplate(key=f"{SIGNATURE_KEY_PREFIX}x", name="서명", language="all",
                           channel="email", status="active", version=1, body="<p/>"),
         ])
@@ -266,6 +315,7 @@ def test_only_a_signature_deletes(template_db):
 
     with TestClient(app) as client:
         assert client.delete(f"/email-templates/{ids['접수확인 영어']}").status_code == 400
+        assert client.delete(f"/email-templates/{ids['서명 (한국어)']}").status_code == 200
         assert client.delete(f"/email-templates/{ids['서명']}").status_code == 200
     with template_db() as session:
         assert [row.name for row in session.query(EmailTemplate).all()] == ["접수확인 영어"]

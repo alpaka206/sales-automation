@@ -11,17 +11,27 @@ import logging
 from .models import EmailTemplate
 from .session import SessionLocal
 
-# Branded HTML signatures are keyed with this prefix so the compose-screen picker
-# can discover them generically (no hard-coded ko/en list).
 logger = logging.getLogger(__name__)
 
-SIGNATURE_KEY_PREFIX = "signature_html_"
+# 서명은 이 접두사 하나로 알아봅니다 — 목록의 서명 묶음, 검토 화면의 고르개, 지울 수 있는
+# 행이 전부 같은 집합입니다. 예전에는 ``signature_html_`` (고르개) 와 ``signature_`` (목록)
+# 두 가지였고, 그래서 화면에는 서명으로 보이는데 고를 수는 없는 행이 존재했습니다.
+SIGNATURE_KEY_PREFIX = "signature_"
+
+# 접수확인 아래에 붙는 것. 서명이 아니라 로고 한 줄이고, 그래서 접두사 밖에 있습니다 —
+# 검토 화면의 서명 고르개에 나오면 안 됩니다. 붙는 자리와 방법은 서명과 같습니다
+# (``messages.signature_key`` → ``branded_signature_html``): 본문 아래 붙는 블록이라는
+# 뜻의 열이지, 서명 전용 열이 아닙니다.
+AUTO_ACK_FOOTER_KEY = "auto_ack_footer"
 
 
 def list_signature_templates() -> list[dict]:
-    """Active branded HTML signature templates, for the compose-screen picker.
+    """Active signature templates, for the review screen's picker.
 
-    Returns ``[{"key", "name", "language"}, ...]`` ordered by language then name.
+    Returns ``[{"key", "name"}, ...]`` ordered by name. No language: nothing matches a
+    signature to a language — the operator picks one on the draft — and a column only the
+    list could show is a question with no answer.
+
     Never raises — a DB hiccup yields an empty list so the page still renders.
     """
     try:
@@ -33,33 +43,11 @@ def list_signature_templates() -> list[dict]:
                     EmailTemplate.status == "active",
                     EmailTemplate.channel == "email",
                 )
-                .order_by(EmailTemplate.language, EmailTemplate.name)
+                .order_by(EmailTemplate.name)
                 .all()
             )
-            return [
-                {"key": r.key, "name": r.name, "language": r.language or "all"} for r in rows
-            ]
+            return [{"key": r.key, "name": r.name} for r in rows]
     except Exception:
-        return []
-
-
-def all_text_signatures() -> list[str]:
-    """Every plain-text signature body ever configured, for stripping.
-
-    Not filtered by status: a draft written while a template was active still ends with
-    that block after it is paused, and it still has to come off when a branded HTML
-    signature replaces it.
-    """
-    try:
-        with SessionLocal() as session:
-            rows = (
-                session.query(EmailTemplate)
-                .filter(EmailTemplate.key.in_(("signature_ko", "signature_en")))
-                .all()
-            )
-            return [r.body.strip() for r in rows if (r.body or "").strip()]
-    except Exception:
-        logger.warning("Text signature lookup failed", exc_info=True)
         return []
 
 
@@ -74,8 +62,8 @@ def default_signature_key() -> str | None:
     signature a mail actually goes out with stays a per-draft choice on the review screen;
     this only decides where that choice starts.
 
-    Never raises: None means "no branded signature", which the send path already handles
-    by keeping the plain-text signature the company rules put in the body.
+    Never raises: None means the mail goes out unsigned, which is a real answer now that
+    nothing writes a signature into the body behind the operator's back (0061).
     """
     try:
         with SessionLocal() as session:
@@ -85,7 +73,7 @@ def default_signature_key() -> str | None:
                     EmailTemplate.key.like(f"{SIGNATURE_KEY_PREFIX}%"),
                     EmailTemplate.status == "active",
                 )
-                .order_by(EmailTemplate.language, EmailTemplate.name)
+                .order_by(EmailTemplate.name)
                 .first()
             )
             return row.key if row else None

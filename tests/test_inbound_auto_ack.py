@@ -83,6 +83,12 @@ def test_auto_ack_sent_on_first_inbound(
     assert ack.target_language == "en"
     assert ack.language == "en"
     assert ack.body == "We received your message and will reply within 24 hours."
+    # 접수확인 아래에 붙는 것은 로고이지 서명이 아닙니다 (0062). 아직 아무도 읽지 않은
+    # 메일에 담당자 이름을 붙이면 그 사람이 쓴 것으로 읽히는데, 답은 며칠 뒤 다른 사람이
+    # 쓸 수도 있습니다. 서명은 사람이 검토하고 발송을 누르는 첫 답변부터입니다.
+    from src.db.email_templates import AUTO_ACK_FOOTER_KEY
+
+    assert ack.signature_key == AUTO_ACK_FOOTER_KEY
     detailed = (
         db_session.query(Message)
         .filter(Message.direction == "outgoing", Message.prompt_variant.is_(None))

@@ -7,8 +7,13 @@ the database instead and is read per call, so an edit lands on the next draft:
 
 - the always-applied rules (tone, CS policy) — `policy_sources` rows, mode='rules',
   written in the console;
-- the reply skeleton and the links it ends on — `email_templates` rows;
-- the email signature — the `signature_ko` row, injected at `{{__signature__}}`.
+- the reply skeleton and the links it ends on — `email_templates` rows.
+
+The signature is NOT here. It used to be injected into the rules at `{{__signature__}}`,
+which made the model write somebody's name and address into the body — and then the send
+path needed a second machine to take it back off when the operator picked a different
+one. The operator picks the signature on the draft and presses 발송; it is attached to the
+mail at that point (0061).
 
 Placeholders use Jinja-style `{{ var_name }}`.
 """
@@ -27,11 +32,6 @@ PROMPTS_DIR = Path(__file__).resolve().parent / "prompts"
 # from src/db/seeds/policy/ by migration 0043 and edited on 정책 문서 since.
 
 _PLACEHOLDER = re.compile(r"\{\{\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\}\}")
-
-# Token inside the rules text, replaced at load time with the web-editable
-# email signature (DB-backed). Lets ops edit the outgoing signature from the web
-# console without a redeploy. See src/db/email_templates.py + routes/email_templates.py.
-_SIGNATURE_TOKEN = "{{__signature__}}"
 
 
 def _rules_from_db() -> str:
@@ -65,41 +65,12 @@ def _rules_from_db() -> str:
     return "\n\n".join(parts)
 
 
-def _company_rules_raw() -> str:
+def get_company_rules() -> str:
     """The always-applied policy, with the section header the prompts refer to."""
     body = _rules_from_db()
     if not body:
         return ""
     return "## Company rules (must follow)\n\n" + body
-
-
-def _current_signature() -> str:
-    """The signature body the rules text is written around, from the database.
-
-    Read fresh on every call (one cheap single-row query) so an edit in the console takes
-    effect on the next draft without restarting.
-
-    There is no hardcoded fallback. There used to be one — a named person, in the source —
-    which meant that a database hiccup, or simply deleting that template, put somebody's
-    name and address on outgoing mail with no way to change it but a deploy. Empty is the
-    honest answer to "what has the operator configured": the send path adds the branded
-    HTML signature separately, so nothing here is what actually signs the mail.
-    """
-    try:
-        from ..db.email_templates import get_email_template
-
-        body = get_email_template("signature_ko")
-    except Exception:
-        body = None
-    return (body or "").strip()
-
-
-def get_company_rules() -> str:
-    """Company rules with the live email signature injected into the placeholder."""
-    raw = _company_rules_raw()
-    if not raw:
-        return ""
-    return raw.replace(_SIGNATURE_TOKEN, _current_signature())
 
 
 # The shape every reply must take — opening, middle, closing — as opposed to what it

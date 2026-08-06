@@ -200,17 +200,6 @@ async def send(message: Message) -> None:
         enforce_send_language(message)
         enforce_first_reply_no_price(message)
 
-    # When a branded HTML signature (or "none") is selected, strip the LLM's
-    # default text signature so it doesn't render twice.
-    from ..email_html import strip_known_signature, strips_text_signature
-
-    if (
-        message.direction == "outgoing"
-        and isinstance(message.body, str)
-        and strips_text_signature(getattr(message, "signature_key", None))
-    ):
-        message.body = strip_known_signature(message.body)
-
     # SMTP is the only delivery channel; HubSpot receives a timeline copy afterwards.
     await asyncio.to_thread(send_smtp, message)
     logger.info("Message %d sent via smtp.", message.id)

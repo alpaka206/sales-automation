@@ -68,20 +68,15 @@ _MAX_EDIT_SUBJECT_LEN = 300
 
 
 def _clean_signature_key(value: str | None) -> str | None:
-    """Normalize a posted signature choice to a stored value.
+    """The posted signature choice, or None for 서명 없음.
 
-    Returns None for the default text signature, ``"none"`` for no signature, or a
-    valid active branded-signature key. Unknown values fall back to None (default)
-    so a stale/forged key can never select an arbitrary template.
+    Anything that is not an active signature — the empty option, a stale ``"none"`` from
+    when 기본 텍스트 서명 was a third choice, a forged key — becomes None, so a bad value
+    can never select an arbitrary template. There is nothing to distinguish any more:
+    "no signature" is what None means now that nothing writes one into the body.
     """
     v = (value or "").strip()
-    if v in ("", "default", "text"):
-        return None
-    if v == "none":
-        return "none"
-    if v in {s["key"] for s in list_signature_templates()}:
-        return v
-    return None
+    return v if v in {s["key"] for s in list_signature_templates()} else None
 
 
 def _message_detail_context(message_id: int) -> dict:

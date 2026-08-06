@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
 import { getJSON, postForm } from "../lib/api";
 import { Icon } from "../ui/Icon";
-import { DataTable } from "../ui/DataTable";
+import { DataTable, type Column } from "../ui/DataTable";
 import { kst } from "../lib/format";
 import { Loading, LoadingBlock } from "../ui/Loading";
 import { PolicyDocs } from "./PolicyDocs";
@@ -79,7 +79,8 @@ function Editor({ id, data, siblings, onOpen, onDone }: {
       // Same routes the Jinja form uses: key derivation and the revision snapshot stay
       // on the server, in one place.
       if (id === "new") {
-        await postForm("/email-templates", { name, language, body: value });
+        // 새로 만들 수 있는 것은 서명뿐이고, 서명에는 언어가 없습니다.
+        await postForm("/email-templates", { name, body: value });
       } else {
         const response = await fetch(`/email-templates/${id}`, {
           method: "PUT",
@@ -115,6 +116,9 @@ function Editor({ id, data, siblings, onOpen, onDone }: {
   // 새로 만들기 is only offered for signatures, so a new row is one.
   const isSignature = id === "new" || data?.kind === "signature";
   const oneLine = data ? ONE_LINE_FIELDS[data.key] : undefined;
+  // 미리보기는 태그가 있으면 나옵니다. 서명만 볼 수 있게 해 두었더니 접수확인 하단 로고를
+  // 고치는 사람은 테스트 메일을 보내 보는 수밖에 없었습니다 — HTML 인 행이 서명만은 아닙니다.
+  const canPreview = isSignature || /<\w/.test(body);
 
   // 목록을 거쳐 들어오면 data 가 이미 있으므로 이 스켈레톤은 보이지 않습니다. 주소를 직접
   // 열어 목록이 아직 없을 때만 나옵니다 — 그때도 틀린 폼을 그리는 것보다는 낫습니다:
@@ -174,26 +178,15 @@ function Editor({ id, data, siblings, onOpen, onDone }: {
         ) : (
           <>
             {/* No 키 · 설명 · 상태 · 버전 field: none of them is a decision the operator
-                makes, and the key is a code reference the send path resolves. */}
+                makes, and the key is a code reference the send path resolves. The
+                placeholder names a person, not a language — 서명에 언어라는 것이 없습니다. */}
             <label className="field-label" htmlFor="et-name">템플릿 이름</label>
             <input className="input" id="et-name" value={name} onChange={(e) => setName(e.target.value)}
-                   placeholder="예: 기본 서명 (한국어)" required style={{ marginBottom: 14 }} />
+                   placeholder="예: 배운태 (Perso Dubbing)" required style={{ marginBottom: 14 }} />
 
-            {/* 언어 only for signatures: they are the only kind that exists once per
-                language. The other rows are 'all' and always will be. */}
-            {isSignature && (
-              <div className="grid grid-2" style={{ marginBottom: 14 }}>
-                <div>
-                  <label className="field-label" htmlFor="et-language">언어</label>
-                  <select className="select" id="et-language" value={language}
-                          onChange={(e) => setLanguage(e.target.value)}>
-                    <option value="all">전체</option>
-                    <option value="ko">한국어</option>
-                    <option value="en">영어</option>
-                  </select>
-                </div>
-              </div>
-            )}
+            {/* 서명에는 언어 칸이 없습니다. 어떤 코드도 언어로 서명을 고르지 않고 —
+                고르는 것은 사람입니다 — 그래서 그 칸은 아무 데도 가 닿지 않는 질문이었습니다.
+                다른 행들은 'all' 이거나 auto_ack 처럼 처음부터 언어별로 존재합니다. */}
 
             {/* 제목과 본문은 한 메일의 두 부분입니다. 따로 두면 한 메일을 고치는 데 두
                 화면을 오가게 됩니다. */}
@@ -210,7 +203,7 @@ function Editor({ id, data, siblings, onOpen, onDone }: {
             <textarea className="draft-textarea" id="et-body" value={body}
                       onChange={(e) => setBody(e.target.value)} style={{ minHeight: 240 }} />
 
-            {isSignature && preview !== null && (
+            {canPreview && preview !== null && (
               <iframe title="템플릿 미리보기" sandbox=""
                       srcDoc={`<body style="margin:0;padding:24px;background:#fff;font-family:'Pretendard Variable',Pretendard">${preview}</body>`}
                       style={{ width: "100%", height: 380, marginTop: 10, border: "1px solid var(--border)", borderRadius: 8, background: "#fff" }} />
@@ -224,7 +217,7 @@ function Editor({ id, data, siblings, onOpen, onDone }: {
           <button type="button" className="btn btn--primary" onClick={() => void save()}>
             <Icon name="check" size={15} /> {id === "new" ? "생성" : "저장"}
           </button>
-          {isSignature && (
+          {canPreview && (
             <button type="button" className="btn btn--subtle"
                     onClick={() => setPreview((p) => (p === null ? body : null))}>
               <Icon name="file" size={15} /> 미리보기
@@ -335,6 +328,42 @@ export function EmailTemplates() {
   for (const g of groups) {
     g.rows.sort((a, b) => (a.key === g.base ? -1 : b.key === g.base ? 1 : 0));
   }
+  const columns: Column<Group>[] = [
+    // "기본" 표시는 없앴습니다: 어느 서명을 쓸지는 초안마다 고르는 것이고, 목록에 미리
+    // 정해 둔 하나를 표시하면 그게 강제인 것처럼 읽힙니다.
+    { label: "템플릿 이름", width: kind === "signature" ? "68%" : "52%",
+      cell: (g) => <strong>{g.rows[0].name}</strong> },
+    // 무엇이 있는지만. 어느 것을 고칠지는 열어서 정합니다. 서명에는 언어라는 것이 없으므로
+    // (고르는 것은 사람입니다) 그 묶음에서는 이 칸 자체를 뺍니다.
+    ...(kind === "signature" ? [] : [{ label: "언어", width: "16%",
+      cell: (g: Group) => (
+        <span className="t-subtle t-xs">
+          {g.rows.map((r) => LANGUAGE_LABELS[r.language] ?? r.language).join(" · ")}
+        </span>
+      ) }]),
+    // 연도까지. 이 열은 "얼마나 오래됐나" 를 보는 자리이고, 월·일만 있으면 작년 것과 올해
+    // 것이 같은 글자로 보입니다.
+    { label: "수정일", width: "20%", className: "td-subtle tnum",
+      cell: (g) => kst(g.rows[0].updated_at) || "—" },
+    {
+      // 정책 문서 목록과 같은 자리. 줄을 클릭해도 열리지만, 지우려고 들어갔다 나오는
+      // 왕복이 없어야 합니다.
+      width: "12%",
+      cell: (g) => (
+        <div className="row" style={{ gap: 6 }} onClick={(e) => e.stopPropagation()}>
+          <button type="button" className="btn btn--subtle btn--sm"
+                  onClick={() => setParams({ kind, edit: String(g.rows[0].id) })}>수정</button>
+          {/* 서명만. 나머지는 코드가 이름으로 찾는 행이라 지우면 되돌릴 방법이 없습니다 —
+              콘솔은 서명을 만들지 코드 참조를 만들지 못합니다. */}
+          {kind === "signature" && (
+            <button type="button" className="btn btn--ghost btn--sm"
+                    onClick={() => void removeTemplate(g.rows[0].id)}>삭제</button>
+          )}
+        </div>
+      ),
+    },
+  ];
+
   return (
     <>
       {/* 나가는 버튼과 만드는 버튼을 한 줄에. 각자 줄을 차지하면 세로로 두 줄이 더 붙고,
@@ -357,39 +386,7 @@ export function EmailTemplates() {
       </div>
       <div className="card card--flush">
           <DataTable
-            columns={[
-              // "기본" 표시는 없앴습니다: 어느 서명을 쓸지는 초안마다 고르는 것이고,
-              // 목록에 미리 정해 둔 하나를 표시하면 그게 강제인 것처럼 읽힙니다.
-              { label: "템플릿 이름", width: "52%", cell: (g) => <strong>{g.rows[0].name}</strong> },
-              // 무엇이 있는지만. 어느 것을 고칠지는 열어서 정합니다.
-              { label: "언어", width: "16%",
-                cell: (g) => (
-                  <span className="t-subtle t-xs">
-                    {g.rows.map((r) => LANGUAGE_LABELS[r.language] ?? r.language).join(" · ")}
-                  </span>
-                ) },
-              // 연도까지. 이 열은 "얼마나 오래됐나" 를 보는 자리이고, 월·일만 있으면
-              // 작년 것과 올해 것이 같은 글자로 보입니다.
-              { label: "수정일", width: "20%", className: "td-subtle tnum",
-                cell: (g) => kst(g.rows[0].updated_at) || "—" },
-              {
-                // 정책 문서 목록과 같은 자리. 줄을 클릭해도 열리지만, 지우려고 들어갔다
-                // 나오는 왕복이 없어야 합니다.
-                width: "12%",
-                cell: (g) => (
-                  <div className="row" style={{ gap: 6 }} onClick={(e) => e.stopPropagation()}>
-                    <button type="button" className="btn btn--subtle btn--sm"
-                            onClick={() => setParams({ kind, edit: String(g.rows[0].id) })}>수정</button>
-                    {/* 서명만. 나머지는 코드가 이름으로 찾는 행이라 지우면 되돌릴 방법이
-                        없습니다 — 콘솔은 서명을 만들지 코드 참조를 만들지 못합니다. */}
-                    {kind === "signature" && (
-                      <button type="button" className="btn btn--ghost btn--sm"
-                              onClick={() => void removeTemplate(g.rows[0].id)}>삭제</button>
-                    )}
-                  </div>
-                ),
-              },
-            ]}
+            columns={columns}
             rows={groups}
             rowKey={(g) => g.base}
             empty="템플릿이 없습니다"

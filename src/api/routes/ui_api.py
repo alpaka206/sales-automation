@@ -457,7 +457,9 @@ TEMPLATE_KINDS: tuple[tuple[str, str], ...] = (
 
 
 def _template_kind(key: str) -> str:
-    return "signature" if key.startswith("signature_") else "template"
+    from ...db.email_templates import SIGNATURE_KEY_PREFIX
+
+    return "signature" if key.startswith(SIGNATURE_KEY_PREFIX) else "template"
 
 
 def _base_key(key: str, all_keys: set[str]) -> str:
@@ -466,12 +468,20 @@ def _base_key(key: str, all_keys: set[str]) -> str:
     ``auto_ack_en`` belongs under ``auto_ack``; the screen lists one entry and the
     language is chosen inside it. Two rows in the list for one thing reads as two things.
 
-    Stripped ONLY when the shorter key actually exists. A signature named in Korean gets
-    the key ``signature_html_ko`` from ``_generate_key`` — nothing to do with language —
-    and blind suffix-stripping would file unrelated signatures under one entry.
+    Signatures never group. They have no language at all (0063) — the operator picks one
+    on the draft — so two of them are two signatures, whatever their keys end in. A
+    signature named "x" and one named "x en" would otherwise land under one entry with a
+    language switcher offering 전체 twice.
+
+    Otherwise stripped ONLY when the shorter key actually exists, so an unrelated row
+    ending in ``_en`` keeps its own entry.
     """
     import re
 
+    from ...db.email_templates import SIGNATURE_KEY_PREFIX
+
+    if key.startswith(SIGNATURE_KEY_PREFIX):
+        return key
     base = re.sub(r"_(ko|en|all)$", "", key)
     return base if base != key and base in all_keys else key
 

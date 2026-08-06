@@ -1,5 +1,10 @@
-"""Tests for branded signature rendering, text-signature stripping, and the
-0022 migration that seeds branded signature templates + adds messages.signature_key.
+"""Tests for signature rendering and the 0022 migration that seeds signature
+templates + adds messages.signature_key.
+
+Nothing strips a signature out of a body any more. It used to: the prompt wrote one INTO
+the body (``{{__signature__}}``), so picking a different one on the review screen meant
+finding that text again and cutting it back off. The operator picks, the send path
+attaches — one direction, no undo machinery (0061).
 """
 
 from __future__ import annotations
@@ -13,13 +18,10 @@ import src.db.email_templates as et
 from src.integrations.email_html import (
     branded_signature_html,
     sanitize_email_html,
-    strip_known_signature,
-    strips_text_signature,
     to_html_email,
 )
 
 _KO_SIG = "김규원\nPERSO AI | Intern (Developer Relations)\ndevrel.365@gmail.com"
-_EN_SIG = "Kyuwon Kim\nPERSO AI | Intern (Developer Relations)\ndevrel.365@gmail.com"
 
 
 @pytest.fixture()
@@ -27,86 +29,78 @@ def fake_templates(monkeypatch):
     """Stub get_email_template so signature lookups don't touch the real DB."""
     table = {
         "signature_ko": _KO_SIG,
-        "signature_en": _EN_SIG,
         "signature_html_ko": "<table id='sig-ko'><tr><td>브랜드 서명 카드</td></tr></table>",
-        "signature_html_en": "<table id='sig-en'><tr><td>Branded card</td></tr></table>",
     }
 
     def _get(key, language=None):
         return table.get(key)
 
     monkeypatch.setattr(et, "get_email_template", _get)
-    # The strip list comes from the templates table as a whole now, not from two named
-    # keys — a signature paused last month still has to be strippable off an old draft.
-    monkeypatch.setattr(
-        et, "all_text_signatures", lambda: [table["signature_ko"], table["signature_en"]]
-    )
     return table
 
 
 # ---------------------------------------------------------------------------
-# strips_text_signature / branded_signature_html semantics
+# branded_signature_html semantics
 # ---------------------------------------------------------------------------
-
-
-@pytest.mark.parametrize(
-    "key,expected",
-    [
-        (None, False),
-        ("", False),
-        ("default", False),
-        ("text", False),
-        ("none", True),
-        ("signature_html_ko", True),
-        (object(), False),  # non-str (e.g. a mock) must never trigger a strip
-    ],
-)
-def test_strips_text_signature(key, expected):
-    assert strips_text_signature(key) is expected
 
 
 def test_branded_signature_html_returns_card(fake_templates):
     assert "sig-ko" in branded_signature_html("signature_html_ko")
 
 
-@pytest.mark.parametrize("key", [None, "", "default", "none", object()])
+@pytest.mark.parametrize("key", [None, "", "none", "default", object()])
 def test_branded_signature_html_none_cases(key, fake_templates):
+    """"none" and "default" were the two extra choices the picker used to carry. Old rows
+    still hold them, and no template answers to either — so they mean 서명 없음."""
     assert branded_signature_html(key) is None
 
 
+def test_a_plain_text_signature_keeps_its_line_breaks(fake_templates):
+    """서명을 HTML 로 쓸 이유는 없습니다 — 세 줄로 치면 세 줄이어야 합니다."""
+    html = to_html_email("본문.", signature_html=_KO_SIG)
+    assert "김규원<br>" in html
+    assert "devrel.365@gmail.com" in html
+
+
 # ---------------------------------------------------------------------------
-# strip_known_signature
+# 0062: the auto-ack's footer is a logo, and it has to survive the sanitizer
 # ---------------------------------------------------------------------------
 
 
-def test_strip_exact_korean_signature(fake_templates):
-    body = f"안녕하세요.\n\n문의 주신 내용 확인했습니다.\n\n감사합니다.\n{_KO_SIG}"
-    out = strip_known_signature(body)
-    assert "김규원" not in out
-    assert "devrel.365@gmail.com" not in out
-    assert "감사합니다" not in out  # the trailing closing line is removed too
-    assert "문의 주신 내용 확인했습니다." in out
+def test_the_auto_ack_footer_is_seeded_under_the_key_the_ack_asks_for():
+    """접수확인이 찾는 키와 마이그레이션이 넣는 키가 다르면 로고는 조용히 안 붙습니다 —
+    없는 템플릿은 None 이 되고, 메일은 그냥 나갑니다."""
+    from src.db.email_templates import AUTO_ACK_FOOTER_KEY
+    from src.db.models import Base
+
+    module = importlib.import_module("src.db.migrations.0062_auto_ack_footer_logo")
+
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    module.up(engine)
+    module.up(engine)  # idempotent — 두 번째가 행을 하나 더 만들면 안 됩니다.
+
+    with engine.connect() as conn:
+        rows = conn.execute(
+            text("SELECT key, body FROM email_templates WHERE key = :k"),
+            {"k": AUTO_ACK_FOOTER_KEY},
+        ).all()
+    assert len(rows) == 1
+    assert "perso.ai/dubbing" in rows[0][1]
 
 
-def test_strip_via_email_anchor_when_translated(fake_templates):
-    # A translated signature: the prose differs from the templates, but the email
-    # address survives translation and anchors the cut.
-    body = (
-        "Hello.\n\nThanks for reaching out.\n\n"
-        "ありがとうございます。\nKyuwon Kim\nPERSO AI\ndevrel.365@gmail.com"
-    )
-    out = strip_known_signature(body)
-    assert "devrel.365@gmail.com" not in out
-    assert "Thanks for reaching out." in out
+def test_the_logo_survives_the_email_sanitizer():
+    """허용 목록이 <img> 의 src 나 <a> 의 href 를 떨어뜨리면 접수확인 아래가 빈 칸이 됩니다."""
+    module = importlib.import_module("src.db.migrations.0062_auto_ack_footer_logo")
 
-
-def test_strip_noop_when_no_signature(fake_templates):
-    body = "그냥 본문입니다.\n\n두 번째 문단."
-    assert strip_known_signature(body) == body
-
-
-def test_strip_handles_empty(fake_templates):
-    assert strip_known_signature("") == ""
+    html = to_html_email("접수했습니다.", signature_html=module._BODY)
+    assert 'href="https://perso.ai/dubbing"' in html
+    assert "framerusercontent.com" in html
+    assert 'alt="Perso Dubbing"' in html
+    assert 'height="28"' in html
+    # &amp; 로 다시 이스케이프되어야 합니다 — 파서가 속성값의 문자 참조를 풀어 놓습니다.
+    assert "width=1752&amp;height=279" in html
+    assert html.index("접수했습니다") < html.index("framerusercontent")
 
 
 # ---------------------------------------------------------------------------

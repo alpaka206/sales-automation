@@ -44,12 +44,26 @@ logger = logging.getLogger(__name__)
 def _default_signature() -> str | None:
     """어느 서명으로 시작할지 — 목록의 첫 서명. 그 건에서 바꾸는 것은 검토 화면입니다.
 
+    **답변 초안에만** 씁니다. 접수확인에는 ``_auto_ack_footer`` 가 갑니다.
+
     Imported here rather than at module load for the same reason every other template
     helper in this file is: the DB layer must not be pulled in before settings are.
     """
     from ..db.email_templates import default_signature_key
 
     return default_signature_key()
+
+
+def _auto_ack_footer() -> str:
+    """접수확인 아래에 붙는 것 — 서명이 아니라 로고 한 줄 (0062).
+
+    접수확인은 "받았습니다" 한 문장이고 아직 아무도 읽지 않은 메일입니다. 담당자 서명을
+    붙이면 그 사람이 쓴 메일로 읽히는데, 정작 답은 며칠 뒤에 다른 사람이 쓸 수도 있습니다.
+    서명은 사람이 검토하고 발송을 누르는 첫 답변부터입니다.
+    """
+    from ..db.email_templates import AUTO_ACK_FOOTER_KEY
+
+    return AUTO_ACK_FOOTER_KEY
 
 
 _DEFAULT_HUBSPOT = object()
@@ -1244,7 +1258,7 @@ class InboundAgent:
                 target_language=target_language,
                 status="approved",
                 prompt_variant="auto_ack",
-                signature_key=_default_signature(),
+                signature_key=_auto_ack_footer(),
                 approved_by="auto_ack",
                 approved_at=datetime.now(timezone.utc),
                 draft_provider=settings.LLM_PROVIDER,

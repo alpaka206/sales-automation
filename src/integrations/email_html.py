@@ -214,20 +214,17 @@ def _render_paragraph(para: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Branded HTML signatures (operator-selected, attached at send/preview time).
+# Signatures (operator-selected, attached at send/preview time).
 #
-# The LLM writes a small plain-text signature into the draft body. When the
-# operator picks a *branded* HTML signature on the approval screen, that text
-# signature is stripped (so it doesn't appear twice) and the branded card is
-# rendered into the HTML email below the reply body. The card lives
-# in the editable email_templates store (keys: signature_html_ko / _en), so it
-# is never hard-coded here.
+# The operator picks a signature on the review screen and presses 발송; the chosen
+# body is rendered into the HTML email below the reply. Nothing writes a signature
+# into the draft body any more (0061) — that used to happen in the prompt, which is
+# why there was a second machine here to take it back off when the operator picked
+# a different one. The card lives in the editable email_templates store, so it is
+# never hard-coded here.
 # ---------------------------------------------------------------------------
 
-# signature_key values that mean "keep the default plain-text signature".
-_TEXT_SIG_KEYS = {None, "", "default", "text"}
-
-# A branded card is wrapped with a thin divider so it reads as a signature block.
+# A signature is wrapped with a thin divider so it reads as a signature block.
 _SIGNATURE_WRAP = (
     '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
     'style="border-collapse:collapse;margin:20px 0 0;"><tr>'
@@ -235,32 +232,15 @@ _SIGNATURE_WRAP = (
     "</tr></table>"
 )
 
-# Closing lines the LLM appends right above the signature ("감사합니다." etc.).
-_CLOSING_RE = re.compile(
-    r"\n*[ \t]*(감사합니다\.?|고맙습니다\.?|Best regards,?|Kind regards,?|"
-    r"Warm regards,?|Sincerely,?|Thank you\.?|Thanks,?|Regards,?)[ \t]*$",
-    re.IGNORECASE,
-)
-_EMAIL_IN_SIG_RE = re.compile(r"[\w.+-]+@[\w.-]+\.\w{2,}")
-
-
-def strips_text_signature(signature_key: str | None) -> bool:
-    """True when the chosen signature replaces the default text signature.
-
-    Branded keys (signature_html_*) and the explicit ``"none"`` both mean "do not
-    keep the LLM's plain-text signature"; the empty/``default`` keys keep it.
-    """
-    return isinstance(signature_key, str) and signature_key not in _TEXT_SIG_KEYS
-
 
 def branded_signature_html(signature_key: str | None) -> str | None:
-    """Return the active branded signature card HTML for a branded key, else None.
+    """The chosen signature's body, or None for 서명 없음.
 
-    ``"none"`` (no signature) and the text-signature keys return None. A missing
-    or inactive template also returns None so the email still goes out (just
-    without a card) rather than failing.
+    A missing or inactive template also returns None so the email still goes out (just
+    unsigned) rather than failing — which also covers the stored ``"none"`` that older
+    drafts carry, since no template answers to that key.
     """
-    if not isinstance(signature_key, str) or signature_key in _TEXT_SIG_KEYS or signature_key == "none":
+    if not isinstance(signature_key, str) or not signature_key:
         return None
     try:
         from ..db.email_templates import get_email_template
@@ -269,69 +249,6 @@ def branded_signature_html(signature_key: str | None) -> str | None:
     except Exception:
         body = None
     return (body or "").strip() or None
-
-
-def _signature_candidates() -> list[str]:
-    """Every plain-text signature block we might need to strip, longest first.
-
-    Used when a branded HTML signature replaces the text one: the text block has to come
-    off the body or the mail carries two. Longest first so an exact tail match is greedy.
-
-    Sourced from the templates table, INCLUDING paused ones — a draft written last month
-    ends with the signature that was current then, and pausing a template must not make
-    its text unstrippable. A named person used to be appended here as a literal, which
-    only ever stripped that one person's block and went stale the day it changed.
-    """
-    cands: list[str] = []
-    try:
-        from ..db.email_templates import all_text_signatures
-
-        cands.extend(all_text_signatures())
-    except Exception:
-        pass
-    seen: set[str] = set()
-    out: list[str] = []
-    for cand in sorted(cands, key=len, reverse=True):
-        if cand and cand not in seen:
-            seen.add(cand)
-            out.append(cand)
-    return out
-
-
-def strip_known_signature(body: str) -> str:
-    """Remove a trailing default text-signature block from ``body``.
-
-    Called when a branded HTML signature replaces it. Best-effort and designed to
-    run on the reply body before the HTML signature is appended:
-
-    1. Exact tail match against an active signature template — perfect for the
-       common untranslated Korean draft.
-    2. Fallback: anchor on the signature's email address, which survives
-       translation (proper nouns are preserved), and cut the trailing block.
-
-    Returns ``body`` unchanged if nothing matches, so it can never corrupt a body
-    that has no recognizable signature.
-    """
-    if not body or not body.strip():
-        return body
-    text = body.rstrip()
-    for cand in _signature_candidates():
-        if text.endswith(cand):
-            head = text[: len(text) - len(cand)]
-            return _CLOSING_RE.sub("", head.rstrip()).rstrip()
-    # Fallback: anchor on the signature email address (preserved across translation).
-    emails = {
-        m.group(0).lower() for cand in _signature_candidates() for m in _EMAIL_IN_SIG_RE.finditer(cand)
-    }
-    low = text.lower()
-    cut_at = max((low.rfind(e) for e in emails), default=-1)
-    if cut_at == -1:
-        return body
-    blank = text.rfind("\n\n", 0, cut_at)
-    start = blank if blank != -1 else text.rfind("\n", 0, cut_at)
-    if start == -1:
-        return body
-    return _CLOSING_RE.sub("", text[:start].rstrip()).rstrip()
 
 
 def _content_fragments(text: str) -> tuple[list[str], list[str]]:
@@ -359,9 +276,12 @@ def to_html_email(text: str, signature_html: str | None = None) -> str:
             if paras[i].lstrip().startswith("---"):
                 insert_at = i
                 break
+        # Same treatment as the body: HTML passes through the sanitizer, plain text gets
+        # its line breaks. A signature typed as three lines in 새로 만들기 used to arrive
+        # as one run-on line, and nothing on the screen said why.
         rendered.insert(
             insert_at,
-            _SIGNATURE_WRAP.replace("@@SIG@@", sanitize_email_html(signature_html)),
+            _SIGNATURE_WRAP.replace("@@SIG@@", "\n".join(_content_fragments(signature_html)[0])),
         )
 
     content = "\n".join(rendered) or "<p></p>"
