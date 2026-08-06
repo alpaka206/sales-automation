@@ -94,8 +94,11 @@ export function Customers() {
               // 리드 히스토리에서는 이 컬럼이 곧 필터입니다 — 단계를 보여주는 열이 단계로
               // 거르는 열이기도 한 것. 협상중 고객에서는 뺍니다: 그 화면은 이미 한 단계만
               // 보는 화면이라, 여기 드롭다운이 있으면 이 행의 단계를 바꾸는 것처럼 보입니다.
+              // 열린 목록에서도 무엇을 고르는 중인지 보이도록 `Stage(…)` 한 모양으로 씁니다.
+              // 예전에는 "파이프라인 · 전체" 다음에 "New", "Negotiating" 이 이어져서, 접혀
+              // 있을 때 그 글자가 열 이름인지 고른 값인지 알 수 없었습니다.
               label: isFixedStage ? (
-                "파이프라인"
+                `Stage(${labels[stage] ?? stage})`
               ) : (
                 <>
                   <label className="sr-only" htmlFor="stage-filter">파이프라인 단계로 보기</label>
@@ -105,9 +108,9 @@ export function Customers() {
                     value={stage}
                     onChange={(event) => setParams({ stage: event.target.value, q }, { replace: true })}
                   >
-                    <option value="">파이프라인 · 전체</option>
+                    <option value="">Stage(전체)</option>
                     {data?.stage_options.map((option) => (
-                      <option key={option.key} value={option.key}>{option.label}</option>
+                      <option key={option.key} value={option.key}>Stage({option.label})</option>
                     ))}
                   </select>
                 </>
