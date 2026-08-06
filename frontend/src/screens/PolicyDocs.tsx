@@ -4,6 +4,7 @@ import { useSearchParams } from "react-router-dom";
 import { getJSON } from "../lib/api";
 import { Icon } from "../ui/Icon";
 import { DataTable, type Column } from "../ui/DataTable";
+import { ActionButton } from "../ui/ActionButton";
 import { kst } from "../lib/format";
 import { Loading } from "../ui/Loading";
 
@@ -56,7 +57,7 @@ function DocEditor({ doc, modes, onDone }: {
   const [note, setNote] = useState<string | null>(null);
 
   async function save() {
-    setNote("저장 중…");
+    setNote(null);
     try {
       const fields = { label, mode, subject, usage_note: usageNote, effective_on: effectiveOn, body };
       if (doc) await send(`/policy-docs/${doc.id}`, "PUT", fields);
@@ -69,7 +70,7 @@ function DocEditor({ doc, modes, onDone }: {
 
   async function remove() {
     if (!doc) return;
-    setNote("삭제 중…");
+    setNote(null);
     try {
       await send(`/policy-docs/${doc.id}/delete`, "POST");
       onDone();
@@ -155,13 +156,14 @@ function DocEditor({ doc, modes, onDone }: {
                   placeholder="노션에서 복사해 그대로 붙여넣으세요. 표와 목록은 그대로 읽힙니다." />
 
         <div className="action-bar">
-          <button type="button" className="btn btn--primary" onClick={() => void save()}>
+          <ActionButton className="btn btn--primary" pending={doc ? "저장 중" : "만드는 중"}
+                        onClick={save}>
             <Icon name="check" size={15} /> {doc ? "저장" : "만들기"}
-          </button>
+          </ActionButton>
           {doc && (
-            <button type="button" className="btn btn--ghost" onClick={() => void remove()}>
+            <ActionButton className="btn btn--ghost" pending="삭제 중" onClick={remove}>
               <Icon name="x" size={15} /> 삭제
-            </button>
+            </ActionButton>
           )}
         </div>
         {note && <div className="t-sm" style={{ marginTop: 12 }} role="status">{note}</div>}

@@ -2,6 +2,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
 import { getJSON, postForm } from "../lib/api";
 import { Icon } from "../ui/Icon";
+import { SubmitButton, useAction } from "../ui/ActionButton";
 import { kst } from "../lib/format";
 import { InteractionForm, InteractionItem, type Interaction } from "../ui/InteractionForm";
 import { LoadingBlock } from "../ui/Loading";
@@ -64,6 +65,11 @@ export function CustomerDetail() {
     await postForm(path, Object.fromEntries(new FormData(form) as never) as Record<string, string>);
     await refresh();
   }
+
+  const [syncHubspot, syncing] = useAction((event: React.FormEvent<HTMLFormElement>) =>
+    submit(event, `/customers/${contact.id}/sync`));
+  const [saveProfile, savingProfile] = useAction((event: React.FormEvent<HTMLFormElement>) =>
+    submit(event, `/customers/${contact.id}/profile`));
 
   const contractFields = (contract?: Contract) => (
     <>
@@ -142,8 +148,10 @@ export function CustomerDetail() {
           <p className="page-sub">{contact.full_name} · {contact.email || "-"} · {contact.phone || "전화번호 없음"}</p>
         </div>
         {contact.hubspot_contact_id && (
-          <form onSubmit={(event) => void submit(event, `/customers/${contact.id}/sync`)}>
-            <button className="btn btn--subtle" type="submit"><Icon name="refresh" size={15} /> HubSpot 동기화</button>
+          <form onSubmit={syncHubspot}>
+            <SubmitButton busy={syncing} pending="동기화 중" className="btn btn--subtle">
+              <Icon name="refresh" size={15} /> HubSpot 동기화
+            </SubmitButton>
           </form>
         )}
       </div>
@@ -152,7 +160,7 @@ export function CustomerDetail() {
         <div className="stack">
           <section className="card">
             <div className="section-header"><div className="section-header__title">고객 상태 · 다음 액션</div></div>
-            <form className="profile-grid" onSubmit={(event) => void submit(event, `/customers/${contact.id}/profile`)}>
+            <form className="profile-grid" onSubmit={saveProfile}>
               <label><span className="field-label">고객 구분</span>
                 <select className="select" name="customer_state" defaultValue={profile?.customer_state ?? "negotiation"}>
                   {STATES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
@@ -195,7 +203,7 @@ export function CustomerDetail() {
                 <span className="t-xs t-subtle">
                   {profile?.last_synced_at ? `마지막 HubSpot 동기화 ${kst(profile.last_synced_at)}` : "아직 수동 동기화하지 않았습니다."}
                 </span>
-                <button className="btn btn--primary" type="submit">저장</button>
+                <SubmitButton busy={savingProfile}>저장</SubmitButton>
               </div>
             </form>
           </section>
@@ -262,20 +270,15 @@ export function CustomerDetail() {
                   </button>
                 </details>
                 <details className="copy-block"><summary>계약 수정</summary>
-                  <form className="stack" style={{ marginTop: 12, gap: 10 }}
-                        onSubmit={(event) => void submit(event, `/customers/${contact.id}/contracts/${contract.id}`)}>
-                    {contractFields(contract)}
-                    <button className="btn btn--primary" type="submit">수정 저장</button>
-                  </form>
+                  <ContractForm
+                    action={`/customers/${contact.id}/contracts/${contract.id}`}
+                    submit={submit} label="수정 저장">{contractFields(contract)}</ContractForm>
                 </details>
               </div>
             ))}
             <details className="copy-block" style={{ marginTop: 14 }}><summary>계약 추가</summary>
-              <form className="stack" style={{ marginTop: 12, gap: 10 }}
-                    onSubmit={(event) => void submit(event, `/customers/${contact.id}/contracts`)}>
-                {contractFields()}
-                <button className="btn btn--primary" type="submit">계약 저장</button>
-              </form>
+              <ContractForm action={`/customers/${contact.id}/contracts`}
+                            submit={submit} label="계약 저장">{contractFields()}</ContractForm>
             </details>
           </section>
 
@@ -293,5 +296,22 @@ export function CustomerDetail() {
         </aside>
       </div>
     </>
+  );
+}
+
+/** 계약 하나짜리 폼. 목록 안에서 여러 번 그려지고, 저장 중 표시는 **누른 그 폼**에만
+ *  떠야 하므로 상태를 각자 듭니다. */
+function ContractForm({ action, submit, label, children }: {
+  action: string;
+  submit: (event: React.FormEvent<HTMLFormElement>, path: string) => Promise<void>;
+  label: string;
+  children: React.ReactNode;
+}) {
+  const [run, busy] = useAction((event: React.FormEvent<HTMLFormElement>) => submit(event, action));
+  return (
+    <form className="stack" style={{ marginTop: 12, gap: 10 }} onSubmit={run}>
+      {children}
+      <SubmitButton busy={busy}>{label}</SubmitButton>
+    </form>
   );
 }

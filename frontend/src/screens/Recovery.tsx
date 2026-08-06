@@ -5,6 +5,7 @@ import { getJSON, postForm } from "../lib/api";
 import { kst } from "../lib/format";
 import { Modal } from "../ui/Modal";
 import { DataTable } from "../ui/DataTable";
+import { ActionButton } from "../ui/ActionButton";
 import { Loading } from "../ui/Loading";
 
 // 복구 — the tab with work on it. Read-only lists plus the retry/resolve actions, which
@@ -105,11 +106,11 @@ export function Recovery() {
             cell: (row: Msg) => (
               <div className="row" style={{ gap: 6 }}>
                 {actions(row).map((entry) => (
-                  <button key={entry.label} type="button"
-                          className={`btn btn--sm ${entry.danger ? "btn--danger" : "btn--subtle"}`}
-                          onClick={() => void act(entry)}>
+                  <ActionButton key={entry.label} pending="처리 중"
+                                className={`btn btn--sm ${entry.danger ? "btn--danger" : "btn--subtle"}`}
+                                onClick={() => act(entry)}>
                     {entry.label}
-                  </button>
+                  </ActionButton>
                 ))}
               </div>
             ),
@@ -152,8 +153,9 @@ export function Recovery() {
                   }
                   return `${summary} · 정리할 항목 없음`;
                 })}>
-          {busy === "/operations/recovery/hubspot-sync" && <span className="spinner" style={{ marginRight: 6 }} />}
-          HubSpot 최신화
+          {busy === "/operations/recovery/hubspot-sync"
+            ? <><span className="spinner" role="status" /> 확인 중</>
+            : "HubSpot 최신화"}
         </button>
         <button type="button" className="btn btn--subtle btn--sm" disabled={busy !== null}
                 onClick={() => setPending({
@@ -214,10 +216,10 @@ export function Recovery() {
             {
               width: "150px",
               cell: (job) => (
-                <button type="button" className="btn btn--subtle btn--sm"
-                        onClick={() => void act({ label: "처음부터 재처리", path: `/operations/recovery/inbound/${job.id}/retry` })}>
+                <ActionButton className="btn btn--subtle btn--sm" pending="재처리 중"
+                              onClick={() => act({ label: "처음부터 재처리", path: `/operations/recovery/inbound/${job.id}/retry` })}>
                   처음부터 재처리
-                </button>
+                </ActionButton>
               ),
             },
           ]}
@@ -233,9 +235,10 @@ export function Recovery() {
         <Modal title={pending.label} description={pending.confirm}
                onClose={() => setPending(null)}
                actions={
-                 <button type="button" className="btn btn--danger" onClick={() => void run(pending)}>
+                 <ActionButton className="btn btn--danger" pending="처리 중"
+                               onClick={() => run(pending)}>
                    {pending.label}
-                 </button>
+                 </ActionButton>
                } />
       )}
     </>

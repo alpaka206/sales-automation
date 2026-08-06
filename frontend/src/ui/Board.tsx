@@ -4,6 +4,7 @@ import { Link } from "react-router-dom";
 import { getJSON, postForm } from "../lib/api";
 import { kst } from "../lib/format";
 import { Icon } from "./Icon";
+import { ActionButton } from "./ActionButton";
 import { Modal } from "./Modal";
 import { InteractionForm } from "./InteractionForm";
 import { SyncBanner, syncStateFrom, type SyncState } from "./SyncBanner";
@@ -150,14 +151,14 @@ export function Board({ stages, manualLogStages }: { stages: Stage[]; manualLogS
                   </article>
                 ))}
                 {cards.length < stage.total && (
-                  <button
-                    type="button"
+                  <ActionButton
                     className="kanban-more btn btn--subtle btn--sm"
                     style={{ width: "100%" }}
-                    onClick={() => void loadMore(stage, cards.length)}
+                    pending="불러오는 중"
+                    onClick={() => loadMore(stage, cards.length)}
                   >
                     {stage.total - cards.length}건 더 보기
-                  </button>
+                  </ActionButton>
                 )}
               </div>
             </section>

@@ -6,6 +6,7 @@ import { kst } from "../lib/format";
 import { Icon } from "../ui/Icon";
 import { channelLabel } from "../ui/InteractionForm";
 import { Modal } from "../ui/Modal";
+import { ActionButton, useAction } from "../ui/ActionButton";
 import { InteractionForm, InteractionItem, type Interaction } from "../ui/InteractionForm";
 import { LoadingBlock } from "../ui/Loading";
 
@@ -94,8 +95,10 @@ export function MessageDetail() {
   const isPendingApproval = msg.status === "pending_approval";
   const canTranslate = !!msg.target_language && msg.target_language !== "ko";
 
+  // 되는 동안의 상태는 누른 버튼이 말합니다(ActionButton). 여기 남는 것은 결과뿐입니다 —
+  // 진행 표시가 버튼과 다른 자리에 있으면 눌린 건지 몰라 한 번 더 누르게 됩니다.
   async function act(path: string, extra: Record<string, string> = {}) {
-    setNote("처리 중…");
+    setNote("");
     try {
       await postForm(path, { subject, body, signature_key: signature, ...extra });
       setNote("완료되었습니다.");
@@ -106,7 +109,7 @@ export function MessageDetail() {
   }
 
   async function translate() {
-    setNote("번역 중…");
+    setNote("");
     const response = await fetch(`/messages/${msg.id}/translate`, {
       method: "POST",
       credentials: "same-origin",
@@ -119,6 +122,17 @@ export function MessageDetail() {
     if (result.subject !== undefined) setSubject(result.subject);
     setNote(result.translated ? `번역됨 → ${result.language}` : "번역할 내용이 없습니다.");
   }
+
+  const [saveContact, savingContact] = useAction(async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    await postForm(
+      `/contacts/${contact?.id}/edit`,
+      Object.fromEntries(new FormData(form) as never) as Record<string, string>,
+    );
+    setNote("연락처를 저장했습니다.");
+    await queryClient.invalidateQueries({ queryKey: ["message", id] });
+  });
 
   async function openPreview() {
     const response = await fetch("/messages/preview", {
@@ -191,21 +205,21 @@ export function MessageDetail() {
 
                     <div className="action-bar">
                       {canTranslate && (
-                        <button type="button" className="btn btn--subtle" onClick={() => void translate()}>
+                        <ActionButton className="btn btn--subtle" pending="번역 중" onClick={translate}>
                           <Icon name="translate" size={15} /> 번역하기 ({msg.target_language})
-                        </button>
+                        </ActionButton>
                       )}
                       <button type="button" className="btn btn--ok"
                               aria-haspopup="dialog" onClick={() => setConfirmSend(true)}>
                         <Icon name="check" size={15} /> 검토 완료 · 발송
                       </button>
-                      <button type="button" className="btn btn--subtle" onClick={() => void openPreview()}>
+                      <ActionButton className="btn btn--subtle" pending="여는 중" onClick={openPreview}>
                         <Icon name="file" size={15} /> 미리보기
-                      </button>
-                      <button type="button" className="btn btn--subtle"
-                              onClick={() => void act(`/messages/${msg.id}/edit`)}>
+                      </ActionButton>
+                      <ActionButton className="btn btn--subtle" pending="저장 중"
+                                    onClick={() => act(`/messages/${msg.id}/edit`)}>
                         <Icon name="edit" size={15} /> 저장
-                      </button>
+                      </ActionButton>
                       <button type="button" className="btn btn--danger"
                               aria-haspopup="dialog" onClick={() => setRejecting(true)}>
                         <Icon name="x" size={15} /> 거절
@@ -356,16 +370,7 @@ export function MessageDetail() {
               </dl>
               {/* What the operator learns mid-conversation goes here — it is the only
                   place a gmail/unverified contact gets a company name at all. */}
-              <form onSubmit={async (event) => {
-                event.preventDefault();
-                const form = event.currentTarget;
-                await postForm(
-                  `/contacts/${contact.id}/edit`,
-                  Object.fromEntries(new FormData(form) as never) as Record<string, string>,
-                );
-                setNote("연락처를 저장했습니다.");
-                await queryClient.invalidateQueries({ queryKey: ["message", id] });
-              }}>
+              <form onSubmit={saveContact}>
                 <label className="field-label" htmlFor="c-company">회사</label>
                 <input className="input" id="c-company" name="company"
                        defaultValue={contact.company ?? ""} style={{ marginBottom: 10 }} />
@@ -373,8 +378,10 @@ export function MessageDetail() {
                 <textarea className="textarea" id="c-role" name="role_description" rows={3}
                           defaultValue={contact.role_description ?? ""}
                           placeholder="이 고객·회사가 어떤 일을 하는지 (대화하며 알게 된 내용 포함). gmail·미확인이어도 입력해 저장됩니다." />
-                <button className="btn btn--subtle btn--sm" type="submit" style={{ marginTop: 10 }}>
-                  <Icon name="check" size={14} /> 연락처 저장
+                <button className="btn btn--subtle btn--sm" type="submit" style={{ marginTop: 10 }}
+                        disabled={savingContact} aria-busy={savingContact || undefined}>
+                  {savingContact ? <><span className="spinner" role="status" /> 저장 중</>
+                                 : <><Icon name="check" size={14} /> 연락처 저장</>}
                 </button>
               </form>
             </div>
@@ -420,10 +427,12 @@ export function MessageDetail() {
           }
           onClose={() => setConfirmSend(false)}
           actions={
-            <button type="button" className="btn btn--ok"
-                    onClick={() => { setConfirmSend(false); void act(`/messages/${msg.id}/send`); }}>
+            // 끝난 뒤에 닫습니다. 먼저 닫으면 "발송 중" 을 볼 자리가 사라지고, 발송은
+            // 되돌릴 수 없는 동작이라 그 몇 초가 한 번 더 누르게 만드는 구간입니다.
+            <ActionButton className="btn btn--ok" pending="발송 중"
+                          onClick={() => act(`/messages/${msg.id}/send`).then(() => setConfirmSend(false))}>
               <Icon name="check" size={15} /> 검토 완료 · 발송
-            </button>
+            </ActionButton>
           }
         />
       )}

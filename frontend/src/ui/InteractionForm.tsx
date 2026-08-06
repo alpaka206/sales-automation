@@ -1,4 +1,5 @@
 import { postForm } from "../lib/api";
+import { SubmitButton, useAction } from "./ActionButton";
 
 // The 소통·미팅 기록 form, defined ONCE — the port of partials/interaction_form.html.
 // After the first reply the thread leaves HubSpot and the customer answers wherever they
@@ -41,10 +42,7 @@ export function InteractionForm({
   conversationId?: number | null;
   onSaved: () => void;
 }) {
-  return (
-    <form
-      className="record-form"
-      onSubmit={async (event) => {
+  const [save, saving] = useAction(async (event: React.FormEvent<HTMLFormElement>) => {
         event.preventDefault();
         const form = event.currentTarget;
         const data = Object.fromEntries(new FormData(form) as never) as Record<string, string>;
@@ -56,8 +54,10 @@ export function InteractionForm({
         });
         form.reset();
         onSaved();
-      }}
-    >
+  });
+
+  return (
+    <form className="record-form" onSubmit={save}>
       <label><span className="field-label">채널</span>
         <select className="select" name="channel">
           {CHANNELS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
@@ -86,7 +86,7 @@ export function InteractionForm({
       </label>
       <div className="quick-form__wide row-between">
         <span className="t-xs t-subtle">일시를 비우면 지금 시각으로 기록됩니다.</span>
-        <button className="btn btn--primary" type="submit">기록 저장</button>
+        <SubmitButton busy={saving}>기록 저장</SubmitButton>
       </div>
     </form>
   );

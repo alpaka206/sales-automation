@@ -630,3 +630,28 @@ def test_the_signature_preview_is_a_snapshot_not_a_live_mirror():
     assert "${body}</body>" not in source
     assert "setTimeout(() => setPreview(body)" in source
     assert "clearTimeout(timer)" in source
+
+
+def test_a_button_that_waits_says_so_on_itself():
+    """누른 버튼이 말합니다 — 카드 아래 "저장 중…" 이 아니라.
+
+    반응이 누른 자리와 다른 곳에 있으면 눌린 건지 알 수 없어서 한 번 더 누르게 되고, 두 번째
+    클릭은 같은 요청을 하나 더 보냅니다. 승인·발송에서는 그게 두 번 나가는 것과 같습니다.
+
+    그래서 **쓰기를 하는 화면**은 진행 표시를 그 자리에 들고 있어야 합니다: 공용 헬퍼
+    (ui/ActionButton) 를 쓰거나, 자기 버튼에 spinner 를 직접 그리거나.
+    """
+    import pathlib
+
+    silent: list[str] = []
+    for path in sorted(pathlib.Path("frontend/src").rglob("*.tsx")):
+        source = path.read_text(encoding="utf-8")
+        writes = "postForm(" in source or any(
+            f'method: "{verb}"' in source for verb in ("POST", "PUT", "DELETE")
+        )
+        if not writes:
+            continue
+        if "ActionButton" in source or 'className="spinner"' in source:
+            continue
+        silent.append(path.as_posix())
+    assert silent == [], f"진행 표시가 없는 쓰기 화면: {silent}"

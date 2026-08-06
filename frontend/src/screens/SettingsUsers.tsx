@@ -5,6 +5,7 @@ import { getJSON, postForm, HttpError } from "../lib/api";
 import { Icon } from "../ui/Icon";
 import { kst } from "../lib/format";
 import { DataTable } from "../ui/DataTable";
+import { ActionButton, useAction } from "../ui/ActionButton";
 import { Loading } from "../ui/Loading";
 
 type User = { email: string; name: string; role: string; approved: boolean; last_login_at: string | null };
@@ -52,30 +53,37 @@ export function SettingsUsers() {
     await queryClient.invalidateQueries({ queryKey: ["settings-users"] });
   }
 
+  const [addUser, adding] = useAction((event: React.FormEvent<HTMLFormElement>) =>
+    submit(event, "/settings/users/add"));
+
   return (
     <>
       <div className="page-header">
-        <div>
-          <h1 className="page-title">접근 승인</h1>
-          <p className="page-sub">
-            여기에 주소를 추가하는 것이 곧 권한 부여입니다 — 신청 대기열은 없습니다.
-            {data.domain && ` 허용 도메인: ${data.domain}`}
-          </p>
-        </div>
+        <div><h1 className="page-title">접근 승인</h1></div>
       </div>
 
       <section className="card mb-gap" style={{ maxWidth: 720 }}>
         <div className="section-label" style={{ marginBottom: 12 }}>사용자 추가</div>
-        <form className="row" style={{ gap: 10 }} onSubmit={(event) => void submit(event, "/settings/users/add")}>
-          <input className="input" name="username" placeholder="이름" />
-          <input className="input" name="email" placeholder="이메일" required />
+        <form className="row" style={{ gap: 10 }} onSubmit={addUser}>
+          {/* 도메인은 고정입니다 — 서버가 붙입니다. 칸을 둘로 두면 "이름" 이 실제로는
+              메일 아이디였고, 도메인은 화면 위 안내문에만 적혀 있었습니다. */}
+          <div className="row" style={{ gap: 4, flex: 1, minWidth: 0 }}>
+            <input className="input mono" name="username" placeholder="메일 아이디"
+                   required style={{ flex: 1, minWidth: 0 }} />
+            {data.domain && (
+              <span className="t-subtle mono" style={{ whiteSpace: "nowrap" }}>@{data.domain}</span>
+            )}
+          </div>
           {/* 권한은 둘뿐입니다. "member" 를 고르면 normalize_role 이 admin 으로 풀어서,
               조회 전용을 주려던 사람에게 전체 접근이 나갔습니다. 아래 버튼과 같은 말로. */}
           <select className="select" name="role" style={{ width: 140 }}>
             <option value="admin">운영자</option>
             <option value="viewer">조회 전용</option>
           </select>
-          <button className="btn btn--primary" type="submit"><Icon name="plus" size={15} /> 추가</button>
+          <button className="btn btn--primary" type="submit" disabled={adding} aria-busy={adding || undefined}>
+            {adding ? <><span className="spinner" role="status" /> 추가 중</>
+                    : <><Icon name="plus" size={15} /> 추가</>}
+          </button>
         </form>
       </section>
 
@@ -105,12 +113,12 @@ export function SettingsUsers() {
               cell: (user) => user.email === data.me_email ? null : (
                 <div className="row" style={{ gap: 6 }}>
                   {user.role !== "admin" && (
-                    <button type="button" className="btn btn--subtle btn--sm"
-                            onClick={() => void act(user.email, "make_admin")}>운영자로</button>
+                    <ActionButton className="btn btn--subtle btn--sm" pending="바꾸는 중"
+                                  onClick={() => act(user.email, "make_admin")}>운영자로</ActionButton>
                   )}
                   {user.role !== "viewer" && (
-                    <button type="button" className="btn btn--subtle btn--sm"
-                            onClick={() => void act(user.email, "make_viewer")}>조회 전용으로</button>
+                    <ActionButton className="btn btn--subtle btn--sm" pending="바꾸는 중"
+                                  onClick={() => act(user.email, "make_viewer")}>조회 전용으로</ActionButton>
                   )}
                   <button type="button" className="btn btn--ghost btn--sm"
                           onClick={() => setRemoving(user.email)}>삭제</button>
@@ -131,10 +139,12 @@ export function SettingsUsers() {
           description={`${removing} 의 접근 권한을 삭제하시겠습니까? 목록에서 완전히 제거됩니다.`}
           onClose={() => setRemoving(null)}
           actions={
-            <button type="button" className="btn btn--danger"
-                    onClick={() => { void act(removing, "revoke"); setRemoving(null); }}>
+            // 모달은 끝난 뒤에 닫습니다. 먼저 닫으면 "삭제 중" 을 볼 자리가 사라지고,
+            // 실패해도 목록만 그대로인 채 아무 말이 없습니다.
+            <ActionButton className="btn btn--danger" pending="삭제 중"
+                          onClick={() => act(removing, "revoke").then(() => setRemoving(null))}>
               삭제
-            </button>
+            </ActionButton>
           }
         />
       )}

@@ -4,6 +4,7 @@ import { useSearchParams } from "react-router-dom";
 import { getJSON, postForm } from "../lib/api";
 import { Icon } from "../ui/Icon";
 import { DataTable, type Column } from "../ui/DataTable";
+import { ActionButton } from "../ui/ActionButton";
 import { kst } from "../lib/format";
 import { Loading, LoadingBlock } from "../ui/Loading";
 import { PolicyDocs } from "./PolicyDocs";
@@ -56,7 +57,7 @@ function Editor({ id, data, siblings, onOpen, onDone }: {
   const [language, setLanguage] = useState("all");
   const [body, setBody] = useState("");
   const [subject, setSubject] = useState("");
-  const [note, setNote] = useState("");
+  const [note, setNote] = useState<string | null>("");
   // 미리보기는 늘 켜져 있고 타자가 멎으면 따라옵니다. 그래도 **스냅샷**입니다: srcDoc 을
   // body 에 직접 묶으면 글자 하나에 iframe 이 문서를 통째로 다시 싣습니다 — 타자 한 번에
   // 리로드 한 번. 누르는 대신 250ms 를 기다릴 뿐, 끊어 두는 것은 그대로입니다.
@@ -77,7 +78,7 @@ function Editor({ id, data, siblings, onOpen, onDone }: {
   }
 
   async function save() {
-    setNote("저장 중…");
+    setNote(null);
     // 한 칸짜리 값은 앞뒤 공백이 의미 없습니다 — 붙여넣기로 딸려 온 것이 대부분입니다.
     // 치는 동안이 아니라 여기서 한 번 다듬습니다.
     const value = oneLine ? body.trim() : body;
@@ -104,7 +105,7 @@ function Editor({ id, data, siblings, onOpen, onDone }: {
   }
 
   async function remove() {
-    setNote("삭제 중…");
+    setNote(null);
     try {
       const response = await fetch(`/email-templates/${id}`, {
         method: "DELETE", credentials: "same-origin",
@@ -229,13 +230,14 @@ function Editor({ id, data, siblings, onOpen, onDone }: {
         {/* 이 화면에서 할 수 있는 일은 전부 이 한 줄입니다. 미리보기 버튼은 없앴습니다 —
             켜고 끄는 것이 아니라 옆에 늘 있습니다. */}
         <div className="action-bar" style={{ marginTop: 14 }}>
-          <button type="button" className="btn btn--primary" onClick={() => void save()}>
+          <ActionButton className="btn btn--primary" pending={id === "new" ? "만드는 중" : "저장 중"}
+                        onClick={save}>
             <Icon name="check" size={15} /> {id === "new" ? "생성" : "저장"}
-          </button>
+          </ActionButton>
           {data && isSignature && (
-            <button type="button" className="btn btn--ghost" onClick={() => void remove()}>
+            <ActionButton className="btn btn--ghost" pending="삭제 중" onClick={remove}>
               <Icon name="x" size={15} /> 삭제
-            </button>
+            </ActionButton>
           )}
         </div>
         {note && <div className="t-sm" style={{ marginTop: 14 }} role="status">{note}</div>}
@@ -365,8 +367,8 @@ export function EmailTemplates() {
           {/* 서명만. 나머지는 코드가 이름으로 찾는 행이라 지우면 되돌릴 방법이 없습니다 —
               콘솔은 서명을 만들지 코드 참조를 만들지 못합니다. */}
           {kind === "signature" && (
-            <button type="button" className="btn btn--ghost btn--sm"
-                    onClick={() => void removeTemplate(g.rows[0].id)}>삭제</button>
+            <ActionButton className="btn btn--ghost btn--sm" pending="삭제 중"
+                          onClick={() => removeTemplate(g.rows[0].id)}>삭제</ActionButton>
           )}
         </div>
       ),
