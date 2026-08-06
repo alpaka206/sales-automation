@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useParams } from "react-router-dom";
 import { getJSON, postForm } from "../../lib/api";
@@ -46,6 +46,52 @@ export function WonCustomerDetail() {
   const [showAll, setShowAll] = useState(false);
   const [commFilter, setCommFilter] = useState<"all" | "nego" | number>("all");
 
+  // 액션 보드가 `/won-customers/2102#sec-care` 로 보냅니다. 브라우저의 기본 앵커 이동은
+  // 소용이 없습니다 — 그 시점에 섹션이 아직 그려지지 않았습니다. 데이터가 온 **뒤에**
+  // 한 번 내려갑니다. 훅은 아래 early return 보다 위에 있어야 합니다(#310).
+  useEffect(() => {
+    if (!data) return;
+    const id = window.location.hash.slice(1);
+    if (!id) return;
+    // 렌더 직후에는 아직 레이아웃이 잡히기 전이라, 다음 프레임에 찾습니다.
+    const timer = setTimeout(
+      () => document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" }),
+      60,
+    );
+    return () => clearTimeout(timer);
+  }, [data]);
+
+  // 지금 보고 있는 섹션. 8개가 한 화면에 이어져 있어서 스크롤하다 보면 어디쯤인지 놓칩니다.
+  //
+  // IntersectionObserver 를 쓰는 이유: scroll 이벤트로 위치를 계산하면 스크롤할 때마다 8개
+  // 섹션의 좌표를 다시 재게 됩니다. 관찰자는 화면에 들어오고 나갈 때만 부릅니다.
+  //
+  // `rootMargin` 위쪽이 큰 이유는 머리글이 sticky 라서입니다 — 그 아래로 들어온 섹션은
+  // 가려져 있는데도 "보인다" 고 나옵니다. 화면 위쪽 1/4 을 감지선으로 씁니다.
+  const [section, setSection] = useState<string>(SECTIONS[0][0]);
+  useEffect(() => {
+    if (!data) return;
+    const seen = new Map<string, number>();
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) seen.set(entry.target.id, entry.intersectionRatio);
+        // 가장 많이 보이는 섹션. 동률이면 위쪽 섹션이 이깁니다(SECTIONS 순서).
+        let best = "", ratio = 0;
+        for (const [id] of SECTIONS) {
+          const value = seen.get(id) ?? 0;
+          if (value > ratio) { best = id; ratio = value; }
+        }
+        if (best) setSection(best);
+      },
+      { rootMargin: "-150px 0px -55% 0px", threshold: [0, 0.25, 0.5, 1] },
+    );
+    for (const [id] of SECTIONS) {
+      const element = document.getElementById(id);
+      if (element) observer.observe(element);
+    }
+    return () => observer.disconnect();
+  }, [data]);
+
   const refresh = () => queryClient.invalidateQueries();
 
   if (!data) return <div className="won"><div className="page">불러오는 중…</div></div>;
@@ -65,7 +111,13 @@ export function WonCustomerDetail() {
           }}>{initials(data.company)}</div>
           <div>
             <h1 className="dh-title">{data.company}</h1>
-            <div className="dh-sub">ID {data.client_id} · {data.customer_type} · {data.owner || "담당 미지정"}</div>
+            {/* 이 줄은 "이 고객이 누구인가" 를 한 줄로 말합니다. 담당자 이름은 뺐습니다 —
+                바로 아래 기본 정보 섹션에 있고, 여기서는 고객을 분류하는 값이 먼저입니다. */}
+            <div className="dh-sub">
+              {["Client ID " + data.client_id, data.customer_type,
+                data.industry, data.country, data.department]
+                .map((part) => part || "—").join(" · ")}
+            </div>
           </div>
           <div className="dh-right">
             <button className="btn btn-sm btn-primary" type="button"
@@ -83,7 +135,8 @@ export function WonCustomerDetail() {
         </div>
         <div className="secnav">
           {SECTIONS.map(([id, label]) => (
-            <button key={id} type="button"
+            <button key={id} type="button" className={section === id ? "is-on" : undefined}
+                    aria-current={section === id ? "true" : undefined}
                     onClick={() => document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" })}>
               {label}
             </button>
@@ -372,6 +425,12 @@ function BasicSection({ client, contracts, options, onDone }: {
   );
 }
 
+/** 섹션 하나. 내용은 `.panel` 안에 들어갑니다.
+ *
+ * 목업이 각 섹션 내용을 흰 카드(테두리 + 라운드 + 여백)로 감싸는데, 그 래퍼가 빠져 있어서
+ * 값들이 배경 위에 그냥 떠 있었습니다. 8개 섹션이 한 화면에 이어지는 구조라 카드가 없으면
+ * 어디서 어디까지가 한 섹션인지 눈으로 끊기지 않습니다 — 제목 글자 크기만으로는 부족합니다.
+ */
 function Section({ id, title, right, children }: {
   id: string; title: string; right?: React.ReactNode; children: React.ReactNode;
 }) {
@@ -381,7 +440,7 @@ function Section({ id, title, right, children }: {
         <h2 className="sec-title">{title}</h2>
         <div className="sec-actions">{right}</div>
       </div>
-      {children}
+      <div className="panel">{children}</div>
     </section>
   );
 }
