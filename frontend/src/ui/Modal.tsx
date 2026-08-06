@@ -61,8 +61,23 @@ export function Modal({
     };
   }, [onClose]);
 
+  // 배경을 **누르고 뗀** 것이 둘 다 배경일 때만 닫습니다.
+  //
+  // click 하나로 판단하면, 누른 곳과 뗀 곳이 다를 때 브라우저가 그 둘의 공통 조상에 click 을
+  // 보내는 성질 때문에 엉뚱하게 닫힙니다 — 여는 버튼을 누른 손이 모달이 뜬 자리에서 떼지면
+  // 열리자마자 닫혔습니다("번쩍 했다가 사라져"). 본문 안에서 글자를 드래그하다 배경에서
+  // 떼는 경우도 같습니다.
+  const downOnScrim = useRef(false);
+
   return (
-    <div className="modal-overlay is-open" onClick={(e) => e.target === e.currentTarget && onClose()}>
+    <div
+      className="modal-overlay is-open"
+      onMouseDown={(e) => { downOnScrim.current = e.target === e.currentTarget; }}
+      onClick={(e) => {
+        if (e.target === e.currentTarget && downOnScrim.current) onClose();
+        downOnScrim.current = false;
+      }}
+    >
       <div
         ref={dialog}
         className={`modal${wide ? " modal--wide" : ""}`}

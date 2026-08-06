@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { getJSON, postForm } from "../../lib/api";
@@ -63,6 +63,15 @@ export function WonContractForm() {
   const [creditRounds, setCreditRounds] = useState("1");
   const [note, setNote] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
+
+  // useCallback 인 이유: Modal 의 keydown 효과가 `[onClose]` 에 걸려 있어서, 매 렌더
+  // 새 함수를 주면 리스너를 떼었다 붙이며 **포커스를 여는 버튼으로 되돌립니다**. 폼에
+  // 글자를 칠 때마다 포커스가 튑니다.
+  const back = useCallback(
+    () => navigate(`/won-customers/${clientId}`),
+    [navigate, clientId],
+  );
+
 
   // 첫 렌더에서 한 번만 채웁니다. 이후 다시 채우면 타이핑 중인 값이 되돌아갑니다.
   if (data && list && !loaded) {
@@ -140,7 +149,7 @@ export function WonContractForm() {
   });
 
   if (!data || !list || !draft) {
-    return <Modal title="계약 정보" onClose={() => navigate(`/won-customers/${clientId}`)}>
+    return <Modal title="계약 정보" onClose={back}>
              <div className="won"><p className="note-box">불러오는 중…</p></div>
            </Modal>;
   }
@@ -149,8 +158,6 @@ export function WonContractForm() {
   const prev = contracts.length ? contracts[contracts.length - 1] : undefined;
   const seq = editing ? contracts.find((c) => String(c.id) === contractId)?.seq : contracts.length + 1;
   const options = list.options;
-
-  const back = () => navigate(`/won-customers/${clientId}`);
 
   return (
     // 목업처럼 상세 위에 뜨는 대화상자입니다. 콘솔에 이미 있는 Modal 을 씁니다 — 포커스

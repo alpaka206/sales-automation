@@ -699,3 +699,23 @@ def test_no_hook_is_called_after_an_early_return():
             elif returned and hook.match(line):
                 offenders.append(f"{path.as_posix()}:{number} ({name}) {line.strip()[:60]}")
     assert not offenders, "early return 뒤의 훅: " + " / ".join(offenders)
+
+
+def test_a_modal_closes_only_when_the_scrim_is_pressed_and_released():
+    """열자마자 닫히는 것을 막습니다.
+
+    click 하나로 판단하면, 누른 곳과 뗀 곳이 다를 때 브라우저가 **그 둘의 공통 조상**에
+    click 을 보내는 성질 때문에 엉뚱하게 닫힙니다. 여는 버튼을 누른 손이 모달이 뜬 자리에서
+    떼지면 열리자마자 닫혔습니다 — "번쩍 했다가 사라져". 본문에서 글자를 드래그하다 배경에서
+    떼는 경우도 같습니다.
+
+    누르고 뗀 것이 **둘 다** 배경일 때만 닫습니다.
+    """
+    import pathlib
+
+    modal = pathlib.Path("frontend/src/ui/Modal.tsx").read_text(encoding="utf-8")
+    assert "onMouseDown" in modal
+    assert "downOnScrim" in modal
+    assert "downOnScrim.current" in modal
+    # click 만 보고 닫던 옛 모양이 돌아오면 안 됩니다.
+    assert "onClick={(e) => e.target === e.currentTarget && onClose()}" not in modal
