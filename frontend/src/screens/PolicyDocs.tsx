@@ -113,26 +113,40 @@ function DocEditor({ doc, modes, onDone }: {
         </div>
 
         {/* 이 문서를 근거로 회신할 때의 메일 제목. 본문 안에 "Subject: ..." 로 적으면 모델이
-            그 줄을 본문에 옮겨 적어 첫 줄이 "Subject: ..." 인 메일이 나갑니다. */}
-        <label className="field-label" htmlFor="pd-subject">
-          메일 제목 <span className="t-subtle">(비우면 RE: 고객이 쓴 제목)</span>
-        </label>
-        <input className="input" id="pd-subject" value={subject}
-               onChange={(e) => setSubject(e.target.value)}
-               placeholder="예: Next Steps on Your custom Perso Dubbing plan"
-               style={{ marginBottom: 12 }} />
+            그 줄을 본문에 옮겨 적어 첫 줄이 "Subject: ..." 인 메일이 나갑니다.
 
-        {/* 문서를 고르는 것은 모델이고, 모델이 보는 것은 본문이 아니라 인덱스 한 줄입니다.
+            아래 "언제 쓰는가" 와 함께 문의별 참고에만 묻습니다: 둘 다 라우터에 넘어가는 사본에만
+            실리는 값이라, 항상 적용 문서에서는 채워도 아무 데도 가 닿지 않습니다. */}
+        {mode === "knowledge" && (
+          <>
+            <label className="field-label" htmlFor="pd-subject">
+              메일 제목 <span className="t-subtle">(비우면 RE: 고객이 쓴 제목)</span>
+            </label>
+            <input className="input" id="pd-subject" value={subject}
+                   onChange={(e) => setSubject(e.target.value)}
+                   placeholder="예: Next Steps on Your custom Perso Dubbing plan"
+                   style={{ marginBottom: 12 }} />
+          </>
+        )}
+
+        {/* 문의별 참고에만 묻습니다. 항상 적용 문서는 라우터를 거치지 않고 무조건 들어가므로,
+            "언제 쓰는가" 는 그쪽에 답이 없는 질문입니다.
+
+            문서를 고르는 것은 모델이고, 모델이 보는 것은 본문이 아니라 인덱스 한 줄입니다.
             비우면 본문 앞 400자가 그 자리에 들어갑니다 — 바로 표로 시작하는 문서는 그래서
             안 골라졌습니다. 본문 맨 위에 적어 두던 방식은 노션에서 다시 붙여넣을 때마다
             날아갔습니다. */}
-        <label className="field-label" htmlFor="pd-usage">
-          언제 쓰는가 <span className="t-subtle">(AI가 이 문서를 고를 때 읽는 설명. 비우면 본문 앞부분)</span>
-        </label>
-        <textarea className="draft-textarea" id="pd-usage" value={usageNote}
-                  onChange={(e) => setUsageNote(e.target.value)}
-                  style={{ minHeight: 72, marginBottom: 12 }}
-                  placeholder="예: Quote, Price, pricing, cost, estimate, 추천 플랜 등 가격·견적·플랜 추천을 직접 묻는 문의에 씁니다." />
+        {mode === "knowledge" && (
+          <>
+            <label className="field-label" htmlFor="pd-usage">
+              언제 쓰는가 <span className="t-subtle">(AI가 이 문서를 고를 때 읽는 설명. 비우면 본문 앞부분)</span>
+            </label>
+            <textarea className="draft-textarea" id="pd-usage" value={usageNote}
+                      onChange={(e) => setUsageNote(e.target.value)}
+                      style={{ minHeight: 72, marginBottom: 12 }}
+                      placeholder="예: Quote, Price, pricing, cost, estimate, 추천 플랜 등 가격·견적·플랜 추천을 직접 묻는 문의에 씁니다." />
+          </>
+        )}
 
         <label className="field-label" htmlFor="pd-body">본문</label>
         <textarea className="draft-textarea mono" id="pd-body" value={body}
