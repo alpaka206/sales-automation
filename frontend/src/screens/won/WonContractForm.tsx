@@ -5,7 +5,7 @@ import { getJSON, postForm } from "../../lib/api";
 import { SubmitButton, useAction } from "../../ui/ActionButton";
 import { Modal } from "../../ui/Modal";
 import { Field } from "./WonNew";
-import { type Contract, type ListData, type Row, n, num } from "./shared";
+import { type Contract, type ListData, type Row, addMonths, n, num } from "./shared";
 
 /** 계약 정보 입력 — 추가와 수정이 같은 폼입니다.
  *
@@ -38,13 +38,6 @@ type Draft = typeof empty;
 
 // 제출 버튼이 모달 푸터에 있어서 폼을 id 로 가리킵니다.
 const FORM_ID = "won-contract-form";
-
-const addMonths = (iso: string, months: number): string => {
-  if (!iso) return "";
-  const [y, m, d] = iso.split("-").map(Number);
-  const at = new Date(y, m - 1 + months, d);
-  return `${at.getFullYear()}-${String(at.getMonth() + 1).padStart(2, "0")}-${String(at.getDate()).padStart(2, "0")}`;
-};
 
 export function WonContractForm() {
   const { clientId, contractId } = useParams();

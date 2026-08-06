@@ -135,3 +135,13 @@ export const statusTone = (status: string): string =>
 
 export const planTone = (plan: string | null): string =>
   plan === "Enterprise" ? "ent" : "biz";
+
+/** n개월 뒤 같은 날. 그 달에 그 날이 없으면 말일 — 서버의 `_add_months` 와 같은 규칙입니다.
+ *  매출 인식 막대가 쓰고, 계약 폼의 기본 종료일이 씁니다. */
+export const addMonths = (iso: string, months: number): string => {
+  if (!iso) return "";
+  const [y, m, d] = iso.split("-").map(Number);
+  const last = new Date(y, m - 1 + months + 1, 0).getDate();
+  const at = new Date(y, m - 1 + months, Math.min(d, last));
+  return `${at.getFullYear()}-${String(at.getMonth() + 1).padStart(2, "0")}-${String(at.getDate()).padStart(2, "0")}`;
+};

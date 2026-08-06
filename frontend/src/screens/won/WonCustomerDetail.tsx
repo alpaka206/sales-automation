@@ -7,14 +7,21 @@ import { Confirm } from "./Confirm";
 import { WonContractForm } from "./WonContractForm";
 import {
   type Claim, type Contract, type Grant, type ListData, type Options, type Payment, type Row,
-  dueClass, dueText, fmt, initials, money, n, num,
+  addMonths, dday, dueClass, fmt, initials, money, n, num, planTone, statusTone,
 } from "./shared";
 
-/** 수주 고객 상세 — 목업의 8개 섹션.
+/** 수주 고객 상세 — 목업(`수주관리목업_0806.html` 의 `detailHTML`)의 8개 섹션 그대로.
  *
- * 계약 선택 드롭다운이 이 화면의 축입니다. 고객은 하나이고 계약이 여럿이라, 3~7번 섹션은
- * 전부 "지금 고른 계약" 의 내용입니다. 8번 소통 히스토리만 고객 단위로 쌓입니다 — 협상
- * 단계 대화가 계약보다 먼저 있기 때문입니다.
+ * **계약 선택 드롭다운이 이 화면의 축입니다.** 고객은 하나이고 계약이 여럿이라, 2~5·7번
+ * 섹션은 전부 "지금 고른 계약" 의 내용이고 고르는 순간 함께 바뀝니다.
+ *
+ * 계약을 따라가지 **않는** 것이 둘입니다:
+ *
+ * - **6번 클레임 / 히스토리** — 고객이 겪은 일이지 계약 회차의 일이 아닙니다. 1차 때 난
+ *   품질 이슈는 2차를 보고 있어도 그 고객의 이력입니다. 저장은 계약에 딸려 있고(어느 계약
+ *   기간에 일어났는지가 정보라서), 보여줄 때만 전부 모읍니다 — 어느 차수 건인지 뱃지로
+ *   적습니다. 같은 섹션의 갱신 계획·비고는 반대로 계약의 값이라 따라갑니다.
+ * - **8번 소통 히스토리** — 협상 단계 대화가 계약보다 먼저 쌓이고 그대로 이어집니다(0065).
  */
 const SECTIONS: [string, string][] = [
   ["sec-basic", "고객 기본 정보"],
@@ -28,6 +35,14 @@ const SECTIONS: [string, string][] = [
 ];
 
 const AVATAR_COLORS = ["#0F766E", "#B45309", "#3730A3", "#B42318", "#026AA2", "#4B5563"];
+const CLAIM_PROGRESS = ["접수", "조치 진행 중", "조치 완료"];
+
+/** 목업의 `statusTag` / `dealTag` / `planTag`. */
+const Tag = ({ tone, children }: { tone: string; children: React.ReactNode }) =>
+  <span className={`tag ${tone}`}>{children}</span>;
+
+const stateTone = (state: string) =>
+  state === "진행 중" ? "st-live" : state === "세팅중" ? "st-setup" : "st-stop";
 
 export function WonCustomerDetail() {
   const { clientId } = useParams();
@@ -49,6 +64,7 @@ export function WonCustomerDetail() {
   const [pickedSeq, setPickedSeq] = useState<number | null>(null);
   const [showAll, setShowAll] = useState(false);
   const [commFilter, setCommFilter] = useState<"all" | "nego" | number>("all");
+  const [addingComm, setAddingComm] = useState(false);
 
   // 액션 보드가 `/won-customers/2102#sec-care` 로 보냅니다. 브라우저의 기본 앵커 이동은
   // 소용이 없습니다 — 그 시점에 섹션이 아직 그려지지 않았습니다. 데이터가 온 **뒤에**
@@ -104,6 +120,7 @@ export function WonCustomerDetail() {
   const contracts = data.contracts ?? [];
   const current =
     contracts.find((c) => c.seq === pickedSeq) ?? data.active ?? contracts[contracts.length - 1] ?? null;
+  const comms = data.comms ?? [];
 
   return (
     <div className="won">
@@ -130,12 +147,12 @@ export function WonCustomerDetail() {
           </div>
         </div>
         <div className="dh-tags">
-          <span className={`tag ${data.plan_status === "사용중" ? "st-live" : data.plan_status === "세팅중" ? "st-setup" : "st-stop"}`}>
-            {data.plan_status}
-          </span>
-          {data.setup_count > 0 && <span className="tag st-setup">세팅중 계약 {data.setup_count}</span>}
-          {data.open_claims > 0 && <span className="tag risk">미처리 {data.open_claims}</span>}
-          {current && <span className={`tag ${current.deal_type === "MRR" ? "d-mrr" : "d-poc"}`}>{current.deal_type}</span>}
+          <Tag tone={statusTone(data.plan_status)}>{data.plan_status}</Tag>
+          {current && <Tag tone={current.deal_type === "MRR" ? "d-mrr" : "d-poc"}>{current.deal_type}</Tag>}
+          {current?.plan && <Tag tone={`plan-${planTone(current.plan)}`}>{current.plan}</Tag>}
+          <Tag tone="neutral">{current ? current.label : "계약 없음"}</Tag>
+          {data.setup_count > 0 && <Tag tone="st-setup">세팅중 계약 {data.setup_count}건</Tag>}
+          {data.open_claims > 0 && <Tag tone="risk">미처리 {data.open_claims}건</Tag>}
         </div>
         <div className="secnav">
           {SECTIONS.map(([id, label]) => (
@@ -149,150 +166,155 @@ export function WonCustomerDetail() {
       </div>
 
       <div className="detail-body">
-        <BasicSection client={data} contracts={contracts} options={list?.options}
-                      onDone={refresh} />
+        <BasicSection client={data} contracts={contracts} options={list?.options} onDone={refresh} />
 
-        <Section id="sec-contract" title="계약 및 결제 정보"
-                 right={
-                   <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                     <select className="select" value={current?.seq ?? ""}
-                             onChange={(event) => setPickedSeq(Number(event.target.value))}>
-                       {contracts.map((c) => (
-                         <option key={c.seq} value={c.seq}>{c.label} · {c.state}</option>
-                       ))}
-                     </select>
-                     <button className="btn btn-sm" type="button" onClick={() => setShowAll(!showAll)}>
-                       {showAll ? "접기" : "전체 계약 내역"}
-                     </button>
-                     {current && (
-                       <button className="btn btn-sm" type="button"
-                               onClick={() => navigate(`/won-customers/${data.client_id}/contracts/${current.id}`)}>
-                         수정
-                       </button>
-                     )}
-                   </div>
-                 }>
-          {!current ? (
-            <div className="board-empty">등록된 계약이 없습니다. 위의 <b>+ 계약 추가</b>로 시작하세요.</div>
-          ) : (
-            <>
-              <div className="field-grid c3">
-                <KV k="수주 유형" v={current.deal_type} />
-                <KV k="Ticket ID" v={current.ticket_id || "인바운드 연동 없음"} />
-                <KV k="계약기간" v={`${fmt(current.starts_on)} – ${fmt(current.ends_on)} (${current.months}개월)`} />
-                <KV k="계약서 유형" v={(current.doc_types || []).join(" + ") || "—"} />
-                <KV k="계약 크레딧" v={`${num(current.credits)} 크레딧`} />
-                <KV k="총 계약금액 (VAT 포함)" v={money(current.amount_incl_vat, current.currency)} />
-                <KV k="공급가 (VAT 제외)" v={money(current.amount_excl_vat, current.currency)} />
-                <KV k="분당 단가" v={current.unit_price ? money(current.unit_price, current.unit_currency || current.currency) : "—"} />
-                <KV k="결제 수단" v={current.payment_method} />
-                <KV k="결제 방식" v={`${current.payment_type || "—"}${current.installments ? ` · ${current.installments}회` : ""}`} />
-                <KV k="최초 결제일" v={fmt(current.first_payment_on)} />
-                <KV k="Billing Email" v={current.billing_email} />
+        {!current ? (
+          <section className="sec" id="sec-contract">
+            <div className="sec-head">
+              <span className="sec-num">2</span><span className="sec-title">계약 및 결제 정보</span>
+            </div>
+            <div className="empty">
+              <strong>등록된 계약이 없습니다</strong>
+              계약 · 결제 · 플랜 · 크레딧 정보는 지금 추가할 수 있습니다.
+              <div style={{ marginTop: 14 }}>
+                <button className="btn btn-primary" type="button"
+                        onClick={() => navigate(`/won-customers/${data.client_id}/contracts/new`)}>
+                  계약 정보 입력
+                </button>
               </div>
-              {current.note && <p className="note-box">{current.note}</p>}
-              {showAll && (
-                <div className="table-wrap" style={{ marginTop: 14 }}>
-                  <table>
-                    <thead><tr>
-                      <th>계약</th><th>상태</th><th>수주 유형</th><th>계약기간</th>
-                      <th>플랜</th><th>총 계약금액</th><th>계약 크레딧</th>
-                    </tr></thead>
-                    <tbody>
-                      {contracts.map((c) => (
-                        <tr key={c.seq} onClick={() => { setPickedSeq(c.seq); setShowAll(false); }}>
-                          <td>{c.label}</td>
-                          <td><span className="tag neutral">{c.state}</span></td>
-                          <td>{c.deal_type}</td>
-                          <td className="nowrap">{fmt(c.starts_on)} – {fmt(c.ends_on)}</td>
-                          <td>{c.plan || "—"}</td>
-                          <td className="nowrap">{money(c.amount_incl_vat, c.currency)}</td>
-                          <td className="nowrap">{num(c.credits)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </>
-          )}
-        </Section>
-
-        {current && (
+            </div>
+          </section>
+        ) : (
           <>
-            <Section id="sec-plan" title="Perso 계정 및 플랜">
-              <div className="field-grid c3">
-                <KV k="플랜" v={current.plan} />
-                <KV k="플랜명" v={current.plan_name} />
-                <KV k="Perso Email" v={current.perso_email} />
-                <KV k="플랜 시작일" v={fmt(current.plan_starts_on)} />
-                <KV k="플랜 만료일" v={fmt(current.plan_ends_on)} />
-                <KV k="잔여일수" v={current.plan_days_left === null ? "—" : `${current.plan_days_left}일`} />
-                <KV k="Account Invitation Limit" v={current.invite_limit?.toString()} />
-                <KV k="Queue limit" v={current.queue_limit?.toString()} />
-                <KV k="Concurrent Jobs" v={current.concurrent_jobs?.toString()} />
-                <KV k="Space 개수" v={current.space_count?.toString()} />
-                <KV k="space_seq" v={current.space_seq} />
-              </div>
-            </Section>
-
+            <ContractSection
+              client={data} contracts={contracts} current={current} today={today}
+              showAll={showAll} onToggleAll={() => setShowAll(!showAll)}
+              onPick={(seq) => { setPickedSeq(seq); setShowAll(false); }}
+            />
+            <PlanSection contract={current} />
             <CreditSection contract={current} today={today} onDone={refresh} />
             <PaySection contract={current} today={today} onDone={refresh} />
-            <CareSection contract={current} onDone={refresh} />
-
-            <Section id="sec-revenue" title="매출 관리">
-              <div className="stat-row">
-                <Stat label="계약 종류" value={current.deal_type} />
-                <Stat label="총 계약 금액 (VAT 포함)" value={money(current.amount_incl_vat, current.currency)} />
-                <Stat label="월간 매출 (VAT 포함)"
-                      value={current.deal_type === "MRR"
-                        ? `${money(current.monthly_revenue, current.currency)} / 월`
-                        : "결제월에 일시 인식"} />
-                <Stat label="매출 인식 시작 월"
-                      value={`${current.revenue_from || "—"} ${current.revenue_from_set ? "(직접 지정)" : "(계약 시작월)"}`} />
-              </div>
-            </Section>
+            <CareSection contracts={contracts} current={current} onDone={refresh} />
+            <RevenueSection contract={current} today={today} />
           </>
         )}
 
-        <Section id="sec-comm" title="소통 히스토리"
-                 right={<span className="muted">고객 단위 · 전체 계약 통합</span>}>
-          {data.contact_id && (
-            <CommForm contactId={data.contact_id} contracts={contracts} onDone={refresh} />
-          )}
-          <div className="chips" style={{ marginBottom: 12 }}>
-            <button type="button" className={`chip${commFilter === "all" ? " is-on" : ""}`}
-                    onClick={() => setCommFilter("all")}>전체</button>
-            <button type="button" className={`chip${commFilter === "nego" ? " is-on" : ""}`}
-                    onClick={() => setCommFilter("nego")}>협상 단계 (계약 전)</button>
-            {contracts.map((c) => (
-              <button key={c.seq} type="button" className={`chip${commFilter === c.seq ? " is-on" : ""}`}
-                      onClick={() => setCommFilter(c.seq)}>{c.label}</button>
-            ))}
-          </div>
-          {(data.comms ?? [])
-            .filter((item) =>
-              commFilter === "all" ? true
-              : commFilter === "nego" ? !item.contract_seq
-              : item.contract_seq === commFilter)
-            .map((item) => (
-              <div key={item.id} className="tl-item">
-                <div className="tl-meta">
-                  <span className="mono">{fmt(item.happened_at?.slice(0, 10))}</span>
-                    <span className="tag neutral">{item.channel}</span>
-                    {item.handler && <span className="muted">{item.handler}</span>}
-                    {item.contract_seq
-                      ? <span className="tag blue">{item.contract_seq}차 계약</span>
-                      : <span className="tag neutral">협상 단계</span>}
-                </div>
-                <div className="tl-text">{item.subject ? `${item.subject} — ` : ""}{item.summary}</div>
+        {/* 8 소통 히스토리 — 고객 단위. 계약을 골라도 바뀌지 않습니다. */}
+        <section className="sec" id="sec-comm">
+          <div className="sec-head">
+            <span className="sec-num">8</span><span className="sec-title">소통 히스토리</span>
+            <Tag tone="neutral">고객 단위 · 전체 계약 통합</Tag>
+            <div className="sec-actions">
+              <div className="chips">
+                <Chip on={commFilter === "all"} onClick={() => setCommFilter("all")}
+                      count={comms.length}>전체</Chip>
+                <Chip on={commFilter === "nego"} onClick={() => setCommFilter("nego")}
+                      count={comms.filter((x) => !x.contract_seq).length}>협상 단계</Chip>
+                {contracts.slice().reverse().map((c) => (
+                  <Chip key={c.seq} on={commFilter === c.seq} onClick={() => setCommFilter(c.seq)}
+                        count={comms.filter((x) => x.contract_seq === c.seq).length}>{c.seq}차</Chip>
+                ))}
               </div>
-            ))}
-          {!(data.comms ?? []).length && <div className="board-empty">기록이 없습니다.</div>}
-        </Section>
+              {data.contact_id && (
+                <button className="btn btn-sm btn-primary" type="button"
+                        onClick={() => setAddingComm(!addingComm)}>+ 소통 등록</button>
+              )}
+            </div>
+          </div>
+          <div className="panel">
+            {addingComm && data.contact_id && (
+              <CommForm contactId={data.contact_id} contracts={contracts}
+                        onCancel={() => setAddingComm(false)}
+                        onDone={() => { setAddingComm(false); refresh(); }} />
+            )}
+            {(() => {
+              const rows = comms.filter((item) =>
+                commFilter === "all" ? true
+                : commFilter === "nego" ? !item.contract_seq
+                : item.contract_seq === commFilter);
+              if (!rows.length) {
+                return <div className="board-empty">
+                  {commFilter === "all"
+                    ? "등록된 소통 내역이 없습니다. + 소통 등록으로 기록하세요."
+                    : "이 구분에 해당하는 소통 내역이 없습니다."}
+                </div>;
+              }
+              return (
+                <div className="timeline">
+                  {rows.map((item, index) => (
+                    <div key={item.id} className={`tl-item${index === 0 ? " mark" : ""}`}>
+                      <div className="tl-meta">
+                        <Tag tone="blue">{item.channel}</Tag>
+                        {fmt(item.happened_at?.slice(0, 10))}
+                        <span>·</span>
+                        {item.handler || "—"}
+                        <span style={{ marginLeft: 4 }}>
+                          <Tag tone={item.contract_seq ? "neutral" : "st-setup"}>
+                            {item.contract_seq ? `${item.contract_seq}차 계약` : "협상 단계"}
+                          </Tag>
+                        </span>
+                      </div>
+                      <div className="tl-text">{item.subject ? `${item.subject} — ` : ""}{item.summary}</div>
+                    </div>
+                  ))}
+                </div>
+              );
+            })()}
+          </div>
+        </section>
       </div>
 
       {contractRoute && <WonContractForm />}
+    </div>
+  );
+}
+
+function Chip({ on, count, onClick, children }: {
+  on: boolean; count: number; onClick: () => void; children: React.ReactNode;
+}) {
+  return (
+    <button type="button" className={`chip btn-sm${on ? " is-on" : ""}`} onClick={onClick}>
+      {children}<span className="count">{count}</span>
+    </button>
+  );
+}
+
+/** 섹션 하나. 목업의 번호 뱃지 · 제목 · 오른쪽 액션 · 흰 카드. */
+function Section({ num: number, id, title, right, children, plain }: {
+  num: number; id: string; title: string;
+  right?: React.ReactNode; children: React.ReactNode;
+  /** 내용이 스스로 패널을 여러 개 그리는 섹션(크레딧·결제·클레임). */
+  plain?: boolean;
+}) {
+  return (
+    <section className="sec" id={id}>
+      <div className="sec-head">
+        <span className="sec-num">{number}</span>
+        <span className="sec-title">{title}</span>
+        {right && <div className="sec-actions">{right}</div>}
+      </div>
+      {plain ? children : <div className="panel">{children}</div>}
+    </section>
+  );
+}
+
+function KV({ k, v, span }: { k: string; v: React.ReactNode; span?: number }) {
+  return (
+    <div style={span ? { gridColumn: `span ${span}` } : undefined}>
+      <div className="field-label">{k}</div>
+      <div className="field-value">{v || "—"}</div>
+    </div>
+  );
+}
+
+function Stat({ label, value, sub, tone }: {
+  label: string; value: React.ReactNode; sub?: string; tone?: string;
+}) {
+  return (
+    <div>
+      <div className="stat-label">{label}</div>
+      <div className="stat-value" style={tone ? { color: tone } : undefined}>{value}</div>
+      {sub && <div style={{ fontSize: 11.5, color: "var(--faint)", marginTop: 2 }}>{sub}</div>}
     </div>
   );
 }
@@ -331,35 +353,42 @@ function BasicSection({ client, contracts, options, onDone }: {
     onDone();
   });
 
-  const tickets =
-    contracts.filter((c) => c.ticket_id).map((c) => `${c.seq}차 ${c.ticket_id}`).join(" · ")
-    || "연동 없음";
+  // 티켓은 계약이 들고 있습니다 — 몇 차 계약의 티켓인지까지 적어야 쓸모가 있습니다.
+  const tickets = contracts.filter((c) => c.ticket_id);
 
   if (!editing) {
     return (
-      <Section id="sec-basic" title="고객 기본 정보"
+      <Section num={1} id="sec-basic" title="고객 기본 정보"
                right={<button className="btn btn-sm" type="button"
                               onClick={() => setEditing(true)}>편집</button>}>
-        <div className="field-grid c3">
+        <div className="field-grid">
           <KV k="고객사" v={client.company} />
           <KV k="산업 분야" v={client.industry} />
           <KV k="국가" v={client.country} />
           <KV k="담당부서" v={client.department} />
-          <KV k="Client ID" v={String(client.client_id)} />
-          <KV k="고객 종류" v={client.customer_type} />
+          <KV k="Client ID" v={<span className="mono">{client.client_id}</span>} />
+          <KV k="고객 종류" v={<Tag tone="blue">{client.customer_type}</Tag>} />
+          <KV k="연동 티켓 (계약별)" span={2} v={
+            tickets.length
+              ? tickets.map((c) => (
+                  <span key={c.seq} style={{ marginRight: 5 }}>
+                    <Tag tone="blue">{c.ticket_id} <span style={{ opacity: .7 }}>{c.seq}차</span></Tag>
+                  </span>
+                ))
+              : <span className="muted">연동 없음</span>
+          } />
+          <KV k="담당" v={client.owner} />
           <KV k="고객 담당자" v={client.contact_name} />
           <KV k="고객 연락처" v={client.contact_info} />
-          <KV k="최초 수주일" v={fmt(client.first_won_on)} />
-          <KV k="플랜 상태" v={client.plan_status} />
-          <KV k="담당" v={client.owner} />
-          <KV k="연동 티켓 (계약별)" v={tickets} />
+          <KV k="최초 수주일" v={<span className="mono">{fmt(client.first_won_on)}</span>} />
+          <KV k="플랜 상태" v={<Tag tone={statusTone(client.plan_status)}>{client.plan_status}</Tag>} />
         </div>
       </Section>
     );
   }
 
   return (
-    <Section id="sec-basic" title="고객 기본 정보">
+    <Section num={1} id="sec-basic" title="고객 기본 정보">
       <div className="form-grid3">
         <div>
           <label className="form-label">고객사</label>
@@ -419,7 +448,10 @@ function BasicSection({ client, contracts, options, onDone }: {
         </div>
         <div>
           <label className="form-label">연동 티켓 (계약별)</label>
-          <div className="field-value">{tickets} <span className="muted">(계약에서 고침)</span></div>
+          <div className="field-value">
+            {tickets.map((c) => `${c.seq}차 ${c.ticket_id}`).join(" · ") || "연동 없음"}{" "}
+            <span className="muted">(계약에서 고침)</span>
+          </div>
         </div>
       </div>
       <div className="modal-foot" style={{ marginTop: 14 }}>
@@ -431,41 +463,141 @@ function BasicSection({ client, contracts, options, onDone }: {
   );
 }
 
-/** 섹션 하나. 내용은 `.panel` 안에 들어갑니다.
+/** 2 계약 및 결제 정보 — 이 화면의 축.
  *
- * 목업이 각 섹션 내용을 흰 카드(테두리 + 라운드 + 여백)로 감싸는데, 그 래퍼가 빠져 있어서
- * 값들이 배경 위에 그냥 떠 있었습니다. 8개 섹션이 한 화면에 이어지는 구조라 카드가 없으면
- * 어디서 어디까지가 한 섹션인지 눈으로 끊기지 않습니다 — 제목 글자 크기만으로는 부족합니다.
+ * 오른쪽 액션이 넷입니다(목업 그대로): 계약 고르개 · 전체 계약 내역 접기/펴기 · 계약 추가 ·
+ * 편집. 고르개를 바꾸면 이 아래 3·4·5·7번이 그 계약의 값으로 함께 바뀝니다.
  */
-function Section({ id, title, right, children }: {
-  id: string; title: string; right?: React.ReactNode; children: React.ReactNode;
+function ContractSection({ client, contracts, current, today, showAll, onToggleAll, onPick }: {
+  client: Row; contracts: Contract[]; current: Contract; today: string;
+  showAll: boolean; onToggleAll: () => void; onPick: (seq: number) => void;
 }) {
+  const navigate = useNavigate();
+  const docs = current.doc_types || [];
   return (
-    <section className="sec" id={id}>
+    <section className="sec" id="sec-contract">
       <div className="sec-head">
-        <h2 className="sec-title">{title}</h2>
-        <div className="sec-actions">{right}</div>
+        <span className="sec-num">2</span><span className="sec-title">계약 및 결제 정보</span>
+        <div className="sec-actions">
+          <select className="sel-pill" value={current.seq}
+                  onChange={(event) => onPick(Number(event.target.value))}>
+            {contracts.slice().reverse().map((c) => (
+              <option key={c.seq} value={c.seq}>
+                {c.label} · {fmt(c.starts_on)}–{fmt(c.ends_on)} · {c.state}
+              </option>
+            ))}
+          </select>
+          <button className={`btn btn-sm${showAll ? " btn-ghost" : ""}`} type="button" onClick={onToggleAll}>
+            전체 계약 내역 {contracts.length}건 {showAll ? "▲" : "▼"}
+          </button>
+          <button className="btn btn-sm" type="button"
+                  onClick={() => navigate(`/won-customers/${client.client_id}/contracts/new`)}>+ 계약 추가</button>
+          <button className="btn btn-sm" type="button"
+                  onClick={() => navigate(`/won-customers/${client.client_id}/contracts/${current.id}`)}>편집</button>
+        </div>
       </div>
-      <div className="panel">{children}</div>
+
+      {showAll && (
+        <div className="panel" style={{ marginBottom: 10, background: "var(--bg-soft)" }}>
+          <div className="sub-head">
+            <span className="sub-title">전체 계약 내역</span>
+            <span className="sub-count">{contracts.length}건</span>
+            <button className="btn btn-sm btn-ghost" type="button" style={{ marginLeft: "auto" }}
+                    onClick={() => navigate(`/won-customers/${client.client_id}/contracts/new`)}>+ 계약 추가</button>
+          </div>
+          <div className="table-wrap">
+            <table className="mini">
+              <thead><tr>
+                <th>계약</th><th>상태</th><th>수주 유형</th><th>계약기간</th><th>플랜</th>
+                <th className="num">총 계약금액</th><th className="num">계약 크레딧</th><th />
+              </tr></thead>
+              <tbody>
+                {contracts.slice().reverse().map((c) => (
+                  <tr key={c.seq}>
+                    <td>{c.label}</td>
+                    <td><Tag tone={stateTone(c.state)}>{c.state}</Tag></td>
+                    <td><Tag tone={c.deal_type === "MRR" ? "d-mrr" : "d-poc"}>{c.deal_type}</Tag></td>
+                    <td className="mono nowrap">{fmt(c.starts_on)} – {fmt(c.ends_on)}</td>
+                    <td>{c.plan ? <Tag tone={`plan-${planTone(c.plan)}`}>{c.plan}</Tag> : "—"}</td>
+                    <td className="num nowrap">{money(c.amount_incl_vat, c.currency)}</td>
+                    <td className="num">{num(c.credits)}</td>
+                    <td style={{ textAlign: "right" }}>
+                      <button className="btn btn-sm btn-ghost" type="button"
+                              disabled={c.seq === current.seq}
+                              onClick={() => onPick(c.seq)}>
+                        {c.seq === current.seq ? "보는 중" : "열기"}
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      <div className="panel">
+        <div className="field-grid">
+          <KV k="수주 유형" v={<Tag tone={current.deal_type === "MRR" ? "d-mrr" : "d-poc"}>{current.deal_type}</Tag>} />
+          <KV k="Ticket ID" v={current.ticket_id
+            ? <><Tag tone="blue">{current.ticket_id}</Tag> <span className="muted" style={{ fontSize: 12 }}>인바운드 연동</span></>
+            : <span className="muted">연동 없음</span>} />
+          <KV k="계약기간" v={<span className="mono">
+            {current.starts_on} – {current.ends_on} <span className="muted">({current.months}개월)</span>
+          </span>} />
+          <KV k="계약서 유형" span={2} v={docs.length
+            ? docs.map((t) => <span key={t} style={{ marginRight: 4 }}><Tag tone="neutral">{t}</Tag></span>)
+            : "—"} />
+          <KV k="계약 크레딧" v={<span className="mono">
+            {num(current.credits)} <span className="muted">= {num(Math.round((current.credits ?? 0) / 60))}분 · 공급가 기준</span>
+          </span>} />
+          <KV k="총 계약금액 (VAT 포함)" v={<span className="mono">
+            {money(current.amount_incl_vat, current.currency)} <span className="muted">{current.currency}</span>
+          </span>} />
+          <KV k="공급가 (VAT 제외)" v={<span className="mono">
+            {money(current.amount_excl_vat, current.currency)}{" "}
+            <span className="muted">{current.currency === "KRW" ? "VAT 10% 제외" : "VAT 해당 없음"}</span>
+          </span>} />
+          <KV k="분당 단가" v={current.unit_price ? <span className="mono">
+            {money(current.unit_price, current.unit_currency || current.currency)}{" "}
+            <span className="muted">{current.unit_currency || current.currency}</span>
+          </span> : "—"} />
+          <KV k="결제 수단" v={current.payment_method} />
+          <KV k="결제 방식" v={<>
+            {current.payment_type || "—"}
+            {current.payment_type === "할부" && <span className="muted"> {current.payments.length}회</span>}
+          </>} />
+          <KV k="최초 결제일" v={<span className="mono">{fmt(current.first_payment_on)}</span>} />
+          <KV k="Billing Email" v={current.billing_email} />
+          <KV k="계약 비고" span={2} v={current.note} />
+        </div>
+      </div>
+      {/* 오늘 기준 상태를 아래 섹션들이 함께 씁니다. */}
+      <span hidden data-today={today} />
     </section>
   );
 }
 
-function KV({ k, v }: { k: string; v: string | null | undefined }) {
+function PlanSection({ contract }: { contract: Contract }) {
   return (
-    <div>
-      <div className="field-label">{k}</div>
-      <div className="field-value">{v || "—"}</div>
-    </div>
-  );
-}
-
-function Stat({ label, value }: { label: string; value: string }) {
-  return (
-    <div>
-      <div className="stat-label">{label}</div>
-      <div className="stat-value">{value}</div>
-    </div>
+    <Section num={3} id="sec-plan" title="Perso 계정 및 플랜">
+      <div className="field-grid">
+        <KV k="플랜" v={contract.plan ? <Tag tone={`plan-${planTone(contract.plan)}`}>{contract.plan}</Tag> : "—"} />
+        <KV k="플랜명" v={contract.plan_name} />
+        <KV k="Perso Email" v={contract.perso_email} />
+        <KV k="잔여일수" v={<span className="mono">
+          {contract.plan_days_left === null ? "—"
+            : contract.plan_days_left > 0 ? `${contract.plan_days_left}일` : "만료"}
+        </span>} />
+        <KV k="플랜 시작일" v={<span className="mono">{contract.plan_starts_on || "—"}</span>} />
+        <KV k="플랜 만료일" v={<span className="mono">{contract.plan_ends_on || "—"}</span>} />
+        <KV k="Account Invitation Limit" v={<span className="mono">{contract.invite_limit ?? "—"}</span>} />
+        <KV k="Queue limit" v={<span className="mono">{contract.queue_limit ?? "—"}</span>} />
+        <KV k="Concurrent Jobs" v={<span className="mono">{contract.concurrent_jobs ?? "—"}</span>} />
+        <KV k="Space 개수" v={<span className="mono">{contract.space_count ?? "—"}</span>} />
+        <KV k="space_seq" v={<span className="mono">{contract.space_seq || "—"}</span>} />
+      </div>
+    </Section>
   );
 }
 
@@ -474,14 +606,16 @@ function CreditSection({ contract, today, onDone }: {
 }) {
   const done = contract.credit_grants.filter((g) => g.done);
   const pending = contract.credit_grants.filter((g) => !g.done);
+  const total = contract.credit_grants.length;
   // 계약 크레딧 대비 지급 진행률. 100%를 넘을 수 있습니다 — 테스트·보상 지급은 계약분
   // 밖이라, 넘은 것이 곧 오류는 아닙니다. 그래서 자르지 않고 그대로 보여 줍니다.
   const percent = contract.credits
     ? Math.round((contract.granted_credits / contract.credits) * 100)
     : 0;
+  const left = (contract.credits ?? 0) - contract.granted_credits;
 
   const [ask, setAsk] = useState<Grant | null>(null);
-  const [editing, setEditing] = useState<Grant | null>(null);
+  const [editing, setEditing] = useState<number | null>(null);
   const [adding, setAdding] = useState(false);
 
   async function save(id: number, fields: Record<string, string>) {
@@ -489,55 +623,108 @@ function CreditSection({ contract, today, onDone }: {
     onDone();
   }
 
+  const row = (grant: Grant, mode: "pending" | "done") =>
+    editing === grant.no ? (
+      <GrantEdit key={grant.id} grant={grant} total={total}
+                 onCancel={() => setEditing(null)}
+                 onRevert={grant.done ? () => { setEditing(null); setAsk(grant); } : undefined}
+                 onSave={(fields) => save(grant.id, fields).then(() => setEditing(null))} />
+    ) : mode === "pending" ? (
+      <tr key={grant.id} className="pending">
+        <td className="mono">{grant.no}/{total}</td>
+        <td className="mono">
+          {fmt(grant.grant_on)} <span className={dueClass(grant.grant_on, today) || undefined}
+                                      style={{ color: "var(--faint)" }}>{dday(grant.grant_on, today)}</span>
+          {grant.memo && <div className="memo-line">{grant.memo}</div>}
+        </td>
+        <td className="num">{num(grant.amount)}</td>
+        <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
+          <button className="btn btn-sm btn-ghost" type="button" onClick={() => setEditing(grant.no)}>수정</button>{" "}
+          <button className="btn btn-sm" type="button" onClick={() => setAsk(grant)}>지급 완료</button>
+        </td>
+      </tr>
+    ) : (
+      <tr key={grant.id}>
+        <td className="mono">{grant.no}/{total}</td>
+        <td className="mono">{fmt(grant.grant_on)}
+          {grant.memo && <div className="memo-line">{grant.memo}</div>}
+        </td>
+        <td className="num">{num(grant.amount)}</td>
+        <td style={{ whiteSpace: "nowrap" }}>
+          {grant.granted_by || "—"}{" "}
+          <button className="btn btn-sm btn-ghost" type="button" onClick={() => setEditing(grant.no)}>수정</button>
+        </td>
+      </tr>
+    );
+
   return (
-    <Section id="sec-credit" title="크레딧 지급 현황"
+    <Section num={4} id="sec-credit" title="크레딧 지급 현황" plain
              right={<button className="btn btn-sm" type="button"
-                            onClick={() => setAdding(!adding)}>+ 지급 회차</button>}>
-      <div className="stat-row">
-        <Stat label="계약 크레딧" value={num(contract.credits)} />
-        <Stat label="누적 지급 크레딧" value={num(contract.granted_credits)} />
-        <Stat label="다음 지급일" value={contract.next_credit_on ? dueText(contract.next_credit_on, today) : "완료"} />
-        <Stat label="지급 진행률" value={`${percent}%`} />
-        <Stat label="잔여 지급 회차" value={`${pending.length}회`} />
+                            onClick={() => setAdding(!adding)}>+ 지급 회차 추가</button>}>
+      <div className="panel">
+        <div className="meter">
+          <div className="meter-head">
+            <div>
+              <div className="field-label">누적 지급 크레딧</div>
+              <div className="meter-num">
+                {num(contract.granted_credits)}{" "}
+                <span style={{ fontSize: 13, fontWeight: 600, color: "var(--muted)" }}>
+                  / {num(contract.credits)}
+                </span>
+              </div>
+            </div>
+            <div className="meter-note">
+              {percent}% · {done.length}/{total}회차 · {num(Math.round(contract.granted_credits / 60))}분 지급
+            </div>
+          </div>
+          <div className="meter-track">
+            <div className="meter-fill" style={{ width: `${Math.min(percent, 100)}%` }} />
+          </div>
+        </div>
+        <div className="stat-row">
+          <Stat label="다음 지급일" value={contract.next_credit_on ? fmt(contract.next_credit_on) : "—"} />
+          <Stat label="다음 지급 크레딧" value={contract.next_credit_amount ? num(contract.next_credit_amount) : "—"} />
+          <Stat label="잔여 지급 회차" value={`${pending.length}회`} />
+          <Stat label={left < 0 ? "계약 외 추가 지급" : "잔여 크레딧"} value={num(Math.abs(left))}
+                tone={left < 0 ? "var(--amber-fg)" : undefined} />
+        </div>
       </div>
 
       {adding && (
-        <GrantForm contract={contract} onDone={() => { setAdding(false); onDone(); }} />
+        <div className="panel">
+          <GrantForm contract={contract} onCancel={() => setAdding(false)}
+                     onDone={() => { setAdding(false); onDone(); }} />
+        </div>
       )}
 
-      <div className="form-sec">지급 예정</div>
-      {pending.map((grant) => (
-        editing?.id === grant.id
-          ? <GrantEdit key={grant.id} grant={grant}
-                       onCancel={() => setEditing(null)}
-                       onSave={(fields) => save(grant.id, fields).then(() => setEditing(null))} />
-          : (
-            <div key={grant.id} className="list-row">
-              <span className="mono">{grant.no}/{grant.total}</span>
-              <span className={dueClass(grant.grant_on, today)}>{fmt(grant.grant_on)}</span>
-              <span>{num(grant.amount)} 크레딧</span>
-              {grant.memo && <span className="muted">{grant.memo}</span>}
-              <button className="btn btn-sm" type="button" onClick={() => setEditing(grant)}>수정</button>
-              <button className="btn btn-sm btn-primary" type="button" onClick={() => setAsk(grant)}>
-                지급 완료
-              </button>
-            </div>
-          )
-      ))}
-      {!pending.length && <div className="board-empty">지급 예정 회차가 없습니다.</div>}
-
-      <div className="form-sec">지급 완료</div>
-      {done.map((grant) => (
-        <div key={grant.id} className="list-row">
-          <span className="mono">{grant.no}/{grant.total}</span>
-          <span>{fmt(grant.grant_on)}</span>
-          <span>{num(grant.amount)} 크레딧</span>
-          <span className="muted">{grant.granted_by || "—"}</span>
-          {grant.memo && <span className="muted">{grant.memo}</span>}
-          <button className="btn btn-sm" type="button" onClick={() => setAsk(grant)}>지급 취소</button>
+      <div className="split-2" style={{ marginTop: 10 }}>
+        <div className="panel">
+          <div className="sub-head">
+            <span className="sub-title">지급 예정</span><span className="sub-count">{pending.length}건</span>
+          </div>
+          {pending.length ? (
+            <div className="table-wrap"><table className="mini">
+              <thead><tr>
+                <th>회차</th><th>지급 예정일</th><th className="num">크레딧</th><th style={{ width: 96 }} />
+              </tr></thead>
+              <tbody>{pending.map((g) => row(g, "pending"))}</tbody>
+            </table></div>
+          ) : <div className="board-empty">지급 예정 회차가 없습니다.</div>}
         </div>
-      ))}
-      {!done.length && <div className="board-empty">아직 지급 내역이 없습니다.</div>}
+        <div className="panel">
+          <div className="sub-head">
+            <span className="sub-title">지급 완료</span><span className="sub-count">{done.length}건</span>
+          </div>
+          {done.length ? (
+            <div className="table-wrap"><table className="mini">
+              <thead><tr>
+                <th>회차</th><th>지급 날짜</th><th className="num">크레딧</th><th>지급자</th>
+              </tr></thead>
+              <tbody>{done.slice().reverse().map((g) => row(g, "done"))}</tbody>
+            </table></div>
+          ) : <div className="board-empty">아직 지급 내역이 없습니다.</div>}
+        </div>
+      </div>
 
       {ask && (
         <Confirm
@@ -563,7 +750,9 @@ function CreditSection({ contract, today, onDone }: {
 }
 
 /** 지급 회차 추가. 전체 회차 수는 서버가 다시 셉니다 — 화면이 세면 두 값이 갈라집니다. */
-function GrantForm({ contract, onDone }: { contract: Contract; onDone: () => void }) {
+function GrantForm({ contract, onDone, onCancel }: {
+  contract: Contract; onDone: () => void; onCancel: () => void;
+}) {
   const [when, setWhen] = useState("");
   const [amount, setAmount] = useState("");
   const [memo, setMemo] = useState("");
@@ -575,37 +764,77 @@ function GrantForm({ contract, onDone }: { contract: Contract; onDone: () => voi
     onDone();
   });
   return (
-    <div className="list-row">
-      <input className="inp" type="date" value={when} onChange={(e) => setWhen(e.target.value)} />
-      <input className="inp" type="number" placeholder="크레딧" value={amount}
-             onChange={(e) => setAmount(e.target.value)} />
-      <input className="inp" placeholder="메모 (space_seq별 지급량 등)" value={memo}
-             onChange={(e) => setMemo(e.target.value)} />
-      <button className="btn btn-sm btn-primary" type="button" disabled={adding}
-              onClick={() => add()}>{adding ? "추가 중" : "추가"}</button>
-    </div>
+    <>
+      <div className="form-row" style={{ gridTemplateColumns: "1fr 1fr" }}>
+        <div>
+          <label className="form-label">지급 날짜</label>
+          <input className="inp" type="date" value={when} onChange={(e) => setWhen(e.target.value)} />
+        </div>
+        <div>
+          <label className="form-label">지급 크레딧</label>
+          <input className="inp" type="number" value={amount} onChange={(e) => setAmount(e.target.value)} />
+        </div>
+      </div>
+      <div style={{ marginTop: 8 }}>
+        <label className="form-label">메모</label>
+        <input className="inp" value={memo} onChange={(e) => setMemo(e.target.value)}
+               placeholder="예: 471203 40,000 / 471204 30,000 / 471205 20,000" />
+      </div>
+      <div style={{ display: "flex", gap: 7, justifyContent: "flex-end", marginTop: 9 }}>
+        <button className="btn btn-sm" type="button" onClick={onCancel}>취소</button>
+        <button className="btn btn-sm btn-primary" type="button" disabled={adding}
+                onClick={() => add()}>{adding ? "추가 중" : "추가"}</button>
+      </div>
+    </>
   );
 }
 
-function GrantEdit({ grant, onSave, onCancel }: {
-  grant: Grant;
+/** 목업의 `editRow` — 행 자리에서 그대로 펴지는 편집 폼. */
+function GrantEdit({ grant, total, onSave, onCancel, onRevert }: {
+  grant: Grant; total: number;
   onSave: (fields: Record<string, string>) => void;
   onCancel: () => void;
+  onRevert?: () => void;
 }) {
   const [when, setWhen] = useState(grant.grant_on ?? "");
   const [amount, setAmount] = useState(String(grant.amount ?? ""));
   const [by, setBy] = useState(grant.granted_by ?? "");
   const [memo, setMemo] = useState(grant.memo ?? "");
   return (
-    <div className="list-row">
-      <input className="inp" type="date" value={when} onChange={(e) => setWhen(e.target.value)} />
-      <input className="inp" type="number" value={amount} onChange={(e) => setAmount(e.target.value)} />
-      <input className="inp" placeholder="지급자" value={by} onChange={(e) => setBy(e.target.value)} />
-      <input className="inp" placeholder="메모" value={memo} onChange={(e) => setMemo(e.target.value)} />
-      <button className="btn btn-sm btn-primary" type="button"
-              onClick={() => onSave({ grant_on: when, amount, granted_by: by, memo })}>저장</button>
-      <button className="btn btn-sm" type="button" onClick={onCancel}>취소</button>
-    </div>
+    <tr className="pending">
+      <td className="mono">{grant.no}/{total}</td>
+      <td colSpan={3}>
+        <div className="form-row" style={{ gridTemplateColumns: grant.done ? "1fr 1fr 1fr" : "1fr 1fr" }}>
+          <div>
+            <label className="form-label">지급 날짜</label>
+            <input className="inp" type="date" value={when} onChange={(e) => setWhen(e.target.value)} />
+          </div>
+          <div>
+            <label className="form-label">지급 크레딧</label>
+            <input className="inp" type="number" value={amount} onChange={(e) => setAmount(e.target.value)} />
+          </div>
+          {grant.done && (
+            <div>
+              <label className="form-label">지급자</label>
+              <input className="inp" value={by} onChange={(e) => setBy(e.target.value)} />
+            </div>
+          )}
+        </div>
+        <div style={{ marginTop: 8 }}>
+          <label className="form-label">메모</label>
+          <input className="inp" value={memo} onChange={(e) => setMemo(e.target.value)} />
+        </div>
+        <div style={{ display: "flex", gap: 7, justifyContent: "flex-end", marginTop: 9 }}>
+          {onRevert && (
+            <button className="btn btn-sm" type="button" style={{ marginRight: "auto", color: "var(--red-fg)" }}
+                    onClick={onRevert}>지급 취소</button>
+          )}
+          <button className="btn btn-sm" type="button" onClick={onCancel}>취소</button>
+          <button className="btn btn-sm btn-primary" type="button"
+                  onClick={() => onSave({ grant_on: when, amount, granted_by: by, memo })}>저장</button>
+        </div>
+      </td>
+    </tr>
   );
 }
 
@@ -615,10 +844,9 @@ function PaySection({ contract, today, onDone }: {
   const paid = contract.payments.filter((p) => p.done);
   const total = n(contract.amount_incl_vat);
   // 수금율은 **항상 계약 통화 기준**입니다. 환율 환산은 대시보드의 예상 MRR 에서만 씁니다.
-  const percent = total ? Math.min(100, Math.round((n(contract.collected) / total) * 100)) : 0;
+  const percent = total ? Math.round((n(contract.collected) / total) * 100) : 0;
 
   const [ask, setAsk] = useState<Payment | null>(null);
-  const [editing, setEditing] = useState<Payment | null>(null);
 
   async function save(id: number, fields: Record<string, string>) {
     await postForm(`/won-customers/payments/${id}`, fields);
@@ -626,58 +854,64 @@ function PaySection({ contract, today, onDone }: {
   }
 
   return (
-    <Section id="sec-pay" title="결제 현황">
-      <div className="stat-row">
-        <Stat label="수금율 (VAT 포함)" value={`${percent}%`} />
-        <Stat label="총 계약 금액 (VAT 포함)" value={money(contract.amount_incl_vat, contract.currency)} />
-        <Stat label="수금 완료 금액 (VAT 포함)" value={money(contract.collected, contract.currency)} />
-        <Stat label="잔여 금액 (VAT 포함)" value={money(total - n(contract.collected), contract.currency)} />
-        <Stat label="다음 결제일" value={contract.next_pay_on ? dueText(contract.next_pay_on, today) : "완료"} />
-        <Stat label="분납 완료" value={`${paid.length} / ${contract.payments.length}`} />
+    <Section num={5} id="sec-pay" title="결제 현황" plain>
+      <div className="panel">
+        <div className="meter">
+          <div className="meter-head">
+            <div>
+              <div className="field-label">수금율</div>
+              <div className="meter-num">{percent}%</div>
+            </div>
+            <div className="meter-note">
+              {money(contract.collected, contract.currency)} / {money(contract.amount_incl_vat, contract.currency)}{" "}
+              <span style={{ color: "var(--faint)" }}>(VAT 포함)</span>
+            </div>
+          </div>
+          <div className="meter-track">
+            <div className={`meter-fill${percent < 100 ? " amber" : ""}`}
+                 style={{ width: `${Math.min(percent, 100)}%` }} />
+          </div>
+        </div>
+        <div className="stat-row">
+          <Stat label="총 계약 금액 (VAT 포함)" value={money(contract.amount_incl_vat, contract.currency)}
+                sub={`공급가 ${money(contract.amount_excl_vat, contract.currency)}`} />
+          <Stat label="수금 완료 금액 (VAT 포함)" value={money(contract.collected, contract.currency)} />
+          <Stat label="잔여 금액 (VAT 포함)" value={money(total - n(contract.collected), contract.currency)} />
+          <Stat label="다음 결제일" value={contract.next_pay_on ? fmt(contract.next_pay_on) : "완료"} />
+        </div>
+        <div className="stat-row" style={{ borderTop: "none", paddingTop: 0, marginTop: 12 }}>
+          <Stat label="총 분납 횟수" value={`${contract.payments.length}회`} />
+          <Stat label="분납 완료" value={`${paid.length}회`} />
+          <Stat label="잔여 분납" value={`${contract.payments.length - paid.length}회`} />
+          <Stat label="결제 수단" value={
+            <span style={{ fontSize: 14 }}>{contract.payment_method || "—"} · {contract.payment_type || "—"}</span>
+          } />
+        </div>
       </div>
-      <div className="form-sec">결제 히스토리</div>
-      <div className="table-wrap">
-        <table>
-          <thead><tr>
-            <th>분납 차수</th><th>입금 날짜</th><th>금액</th><th>적용 환율</th><th>상태</th><th />
-          </tr></thead>
-          <tbody>
-            {contract.payments.map((payment) => (
-              editing?.id === payment.id ? (
-                <tr key={payment.id}>
-                  <td>{payment.no}/{payment.total}</td>
-                  <td colSpan={5}>
-                    <PayEdit payment={payment}
-                             onCancel={() => setEditing(null)}
-                             onSave={(fields) => save(payment.id, fields).then(() => setEditing(null))} />
-                  </td>
-                </tr>
-              ) : (
-                <tr key={payment.id}>
-                  <td>{payment.no}/{payment.total}</td>
-                  <td className={dueClass(payment.paid_on, today)}>{fmt(payment.paid_on)}</td>
-                  <td className="nowrap">{money(payment.amount, contract.currency)}</td>
-                  <td className="nowrap">
-                    {payment.fx_rate ? `${num(Number(payment.fx_rate))} (${fmt(payment.fx_on)})` : "—"}
-                  </td>
-                  <td>
-                    <span className={`tag ${payment.done ? "d-mrr" : "neutral"}`}>
-                      {payment.done ? "입금 완료" : "입금 전"}
-                    </span>
-                  </td>
-                  <td>
-                    <div style={{ display: "flex", gap: 6 }}>
-                      <button className="btn btn-sm" type="button" onClick={() => setEditing(payment)}>수정</button>
-                      <button className="btn btn-sm" type="button" onClick={() => setAsk(payment)}>
-                        {payment.done ? "입금 전으로" : "입금 완료"}
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              )
-            ))}
-          </tbody>
-        </table>
+
+      <div className="panel">
+        <div className="sub-head">
+          <span className="sub-title">결제 히스토리</span>
+          <span className="sub-count">{contract.payments.length}건</span>
+          <span style={{ marginLeft: "auto", fontSize: 12, color: "var(--faint)" }}>
+            입금 확인 후 상태를 바꾸면 수금율에 바로 반영됩니다
+          </span>
+        </div>
+        <div className="table-wrap">
+          <table className="mini">
+            <thead><tr>
+              <th>분납 차수</th><th style={{ width: 190 }}>입금 날짜</th>
+              <th className="num">금액</th><th>적용 환율</th><th style={{ width: 130 }}>상태</th>
+            </tr></thead>
+            <tbody>
+              {contract.payments.map((payment) => (
+                <PayRow key={payment.id} payment={payment} currency={contract.currency} today={today}
+                        onAsk={() => setAsk(payment)}
+                        onSave={(fields) => save(payment.id, fields)} />
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
 
       {ask && (
@@ -703,87 +937,142 @@ function PaySection({ contract, today, onDone }: {
   );
 }
 
-function PayEdit({ payment, onSave, onCancel }: {
-  payment: Payment;
-  onSave: (fields: Record<string, string>) => void;
-  onCancel: () => void;
+/** 목업처럼 날짜와 금액을 **그 칸에서 바로** 고칩니다 — 수정 버튼을 거치지 않습니다.
+ *
+ * 상태만 확인 창을 거칩니다: 수금율과 다음 결제일이 그 자리에서 달라지고, 입금 완료로
+ * 넘길 때는 그 날짜의 환율까지 함께 박히기 때문입니다(노션 §6).
+ */
+function PayRow({ payment, currency, today, onAsk, onSave }: {
+  payment: Payment; currency: string; today: string;
+  onAsk: () => void; onSave: (fields: Record<string, string>) => Promise<void>;
 }) {
   const [when, setWhen] = useState(payment.paid_on ?? "");
-  const [amount, setAmount] = useState(String(payment.amount ?? ""));
-  const [rate, setRate] = useState(String(payment.fx_rate ?? ""));
+  // 금액은 **읽을 때는 목업처럼 ₩1,722,600**, 고칠 때는 숫자입니다. type="number" 로 두면
+  // 표에 자릿수 구분 없는 날숫자가 남아 다른 금액 칸과 따로 놉니다.
+  const [amount, setAmount] = useState(money(payment.amount, currency));
+  const overdue = !payment.done && dueClass(payment.paid_on, today) === "over";
+  const raw = (text: string) => text.replace(/[^0-9.-]/g, "");
   return (
-    <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-      <input className="inp" type="date" value={when} onChange={(e) => setWhen(e.target.value)} />
-      <input className="inp" type="number" value={amount} onChange={(e) => setAmount(e.target.value)} />
-      {/* 비워 두면 입금 완료 처리할 때 그 날짜의 환율을 자동으로 채웁니다. */}
-      <input className="inp" type="number" step="0.0001" placeholder="적용 환율 (비우면 자동)"
-             value={rate} onChange={(e) => setRate(e.target.value)} />
-      <button className="btn btn-sm btn-primary" type="button"
-              onClick={() => onSave({ paid_on: when, amount, fx_rate: rate })}>저장</button>
-      <button className="btn btn-sm" type="button" onClick={onCancel}>취소</button>
-    </div>
+    <tr className={payment.done ? undefined : "pending"}>
+      <td className="mono">{payment.no}/{payment.total}차</td>
+      <td>
+        <input type="date" className="cell-inp" value={when}
+               onChange={(e) => setWhen(e.target.value)}
+               onBlur={() => when !== payment.paid_on && onSave({ paid_on: when })} />
+        {overdue && (
+          <div className="memo-line" style={{ color: "var(--red-fg)" }}>
+            {fmt(payment.paid_on)} · {dday(payment.paid_on, today)}
+          </div>
+        )}
+      </td>
+      <td className="num">
+        <input className="cell-inp" inputMode="decimal" style={{ textAlign: "right" }} value={amount}
+               onFocus={() => setAmount(raw(amount))}
+               onChange={(e) => setAmount(e.target.value)}
+               onBlur={() => {
+                 const next = raw(amount);
+                 setAmount(money(next, currency));
+                 if (next !== String(payment.amount ?? "")) void onSave({ amount: next });
+               }} />
+      </td>
+      <td className="mono nowrap">
+        {payment.fx_rate ? `${num(Number(payment.fx_rate))} (${fmt(payment.fx_on)})` : "—"}
+      </td>
+      <td>
+        <select className={`pay-sel${payment.done ? " is-done" : ""}`} value={payment.done ? "1" : "0"}
+                onChange={onAsk}>
+          <option value="1">입금 완료</option>
+          <option value="0">입금 전</option>
+        </select>
+      </td>
+    </tr>
   );
 }
 
-function CareSection({ contract, onDone }: { contract: Contract; onDone: () => void }) {
+/** 6 클레임 / 히스토리 — **계약을 골라도 바뀌지 않습니다.**
+ *
+ * 고객이 겪은 일이지 계약 회차의 일이 아닙니다. 1차 때 난 품질 이슈는 2차를 보고 있어도
+ * 그 고객의 이력입니다. 저장은 계약에 딸려 있고(어느 계약 기간의 일인지가 정보라서),
+ * 보여줄 때만 전부 모아 어느 차수 건인지 뱃지로 적습니다. 새로 등록하는 것은 지금 고른
+ * 계약에 붙습니다.
+ *
+ * 같은 섹션의 갱신 계획 · 사용 중단 이유 · 비고는 반대로 **계약의 값**이라 따라갑니다 —
+ * 2차의 갱신 계획과 1차의 갱신 계획은 다른 이야기입니다.
+ */
+function CareSection({ contracts, current, onDone }: {
+  contracts: Contract[]; current: Contract; onDone: () => void;
+}) {
   const [adding, setAdding] = useState(false);
-  const [kind, setKind] = useState("");
-  const [when, setWhen] = useState("");
-  const [comp, setComp] = useState("");
   const [removing, setRemoving] = useState<Claim | null>(null);
-  const [editing, setEditing] = useState<Claim | null>(null);
+  const [editing, setEditing] = useState<number | null>(null);
 
-  const [add, addBusy] = useAction(async () => {
-    if (!kind.trim()) return;
-    await postForm(`/won-customers/contracts/${contract.id}/claims`, {
-      kind, happened_on: when, compensation: comp, progress: "접수",
-    });
-    setKind(""); setWhen(""); setComp(""); setAdding(false);
-    onDone();
-  });
+  const all = contracts
+    .slice().reverse()
+    .flatMap((c) => c.claims.map((claim) => ({ claim, seq: c.seq })));
+
   async function save(id: number, fields: Record<string, string>) {
     await postForm(`/won-customers/claims/${id}`, fields);
     onDone();
   }
 
   return (
-    <Section id="sec-care" title="고객 클레임 / 히스토리"
+    <Section num={6} id="sec-care" title="고객 클레임 / 히스토리" plain
              right={<button className="btn btn-sm" type="button"
-                            onClick={() => setAdding(!adding)}>+ 등록</button>}>
-      {adding && (
-        <div className="list-row">
-          <input className="inp" placeholder="클레임/히스토리 종류 (예: 품질 이슈, 신기능 TEST)"
-                 value={kind} onChange={(e) => setKind(e.target.value)} />
-          <input className="inp" type="date" value={when} onChange={(e) => setWhen(e.target.value)} />
-          <input className="inp" placeholder="보상 종류 (예: 크레딧 보상 3,000)"
-                 value={comp} onChange={(e) => setComp(e.target.value)} />
-          <button className="btn btn-sm btn-primary" type="button" disabled={addBusy}
-                  onClick={() => add()}>{addBusy ? "등록 중" : "등록"}</button>
+                            onClick={() => setAdding(!adding)}>+ 항목 등록</button>}>
+      <div className="panel">
+        <div className="sub-head">
+          <span className="sub-title">클레임 / 히스토리</span>
+          <span className="sub-count">{all.length}건 · 전체 계약 통합</span>
         </div>
-      )}
-      {contract.claims.map((claim) => (
-        editing?.id === claim.id ? (
-          <ClaimEdit key={claim.id} claim={claim}
-                     onCancel={() => setEditing(null)}
-                     onSave={(fields) => save(claim.id, fields).then(() => setEditing(null))} />
-        ) : (
-          <div key={claim.id} className="list-row">
-            <span className="mono">{fmt(claim.happened_on)}</span>
-            <span>{claim.kind}</span>
-            {claim.compensation && <span className="muted">{claim.compensation}</span>}
-            <span className={`tag ${claim.progress === "조치 완료" ? "d-mrr" : "risk"}`}>
-              {claim.progress}
-            </span>
-            {claim.action_on && <span className="muted">조치 {fmt(claim.action_on)}</span>}
-            <button className="btn btn-sm" type="button" onClick={() => setEditing(claim)}>수정</button>
-            <button className="btn btn-sm btn-ghost" type="button"
-                    onClick={() => setRemoving(claim)}>삭제</button>
+        {adding && (
+          <ClaimForm contract={current} onCancel={() => setAdding(false)}
+                     onDone={() => { setAdding(false); onDone(); }} />
+        )}
+        {all.length ? (
+          <div className="table-wrap">
+            <table className="mini">
+              <thead><tr>
+                <th>클레임/히스토리 종류</th><th>계약</th><th>발생 날짜</th><th>보상 종류</th>
+                <th>조치 진행상황</th><th>조치 날짜</th><th style={{ width: 96 }} />
+              </tr></thead>
+              <tbody>
+                {all.map(({ claim, seq }) => (
+                  editing === claim.id ? (
+                    <ClaimEdit key={claim.id} claim={claim}
+                               onCancel={() => setEditing(null)}
+                               onDelete={() => { setEditing(null); setRemoving(claim); }}
+                               onSave={(fields) => save(claim.id, fields).then(() => setEditing(null))} />
+                  ) : (
+                    <tr key={claim.id}>
+                      <td>{claim.kind}</td>
+                      <td><Tag tone="neutral">{seq}차</Tag></td>
+                      <td className="mono">{fmt(claim.happened_on)}</td>
+                      <td>{claim.compensation || "—"}</td>
+                      <td><Tag tone={claim.progress === "조치 완료" ? "st-live"
+                                     : claim.progress === "접수" ? "neutral" : "st-setup"}>
+                        {claim.progress}
+                      </Tag></td>
+                      <td className="mono">{claim.action_on ? fmt(claim.action_on) : "—"}</td>
+                      <td style={{ textAlign: "right" }}>
+                        <button className="btn btn-sm btn-ghost" type="button"
+                                onClick={() => setEditing(claim.id)}>수정</button>
+                      </td>
+                    </tr>
+                  )
+                ))}
+              </tbody>
+            </table>
           </div>
-        )
-      ))}
-      {!contract.claims.length && <div className="board-empty">등록된 클레임·히스토리가 없습니다.</div>}
+        ) : <div className="board-empty">등록된 클레임·히스토리가 없습니다.</div>}
+      </div>
 
-      <ContractNotes contract={contract} onDone={onDone} />
+      <div className="split-2" style={{ marginTop: 10 }}>
+        {/* `key` 가 계약 id 인 이유: 아래 셋은 계약의 값인데, 컴포넌트가 그것을 `useState` 의
+            **초기값**으로 받습니다. 계약을 바꿔도 React 는 같은 자리의 같은 컴포넌트를
+            재사용하므로 초기값은 다시 안 읽힙니다 — 1차를 골랐는데 2차의 갱신 계획이 남아
+            있고, 그대로 저장을 누르면 1차에 2차의 값이 덮입니다. key 가 바뀌면 새로 답니다. */}
+        <ContractNotes key={current.id} contract={current} onDone={onDone} />
+      </div>
 
       {removing && (
         <Confirm
@@ -806,10 +1095,62 @@ function CareSection({ contract, onDone }: { contract: Contract; onDone: () => v
   );
 }
 
-function ClaimEdit({ claim, onSave, onCancel }: {
+function ClaimForm({ contract, onDone, onCancel }: {
+  contract: Contract; onDone: () => void; onCancel: () => void;
+}) {
+  const today = new Date().toISOString().slice(0, 10);
+  const [kind, setKind] = useState("");
+  const [when, setWhen] = useState(today);
+  const [comp, setComp] = useState("");
+  const [progress, setProgress] = useState(CLAIM_PROGRESS[0]);
+  const [add, adding] = useAction(async () => {
+    if (!kind.trim()) return;
+    await postForm(`/won-customers/contracts/${contract.id}/claims`, {
+      kind, happened_on: when, compensation: comp, progress,
+    });
+    onDone();
+  });
+  return (
+    <div style={{ padding: "4px 0 14px", borderBottom: "1px solid var(--line-soft)", marginBottom: 10 }}>
+      <div className="form-row">
+        <div>
+          <label className="form-label">클레임/히스토리 종류</label>
+          <input className="inp" value={kind} onChange={(e) => setKind(e.target.value)}
+                 placeholder="예: 품질 이슈, 신기능 TEST" />
+        </div>
+        <div>
+          <label className="form-label">발생 날짜</label>
+          <input className="inp" type="date" value={when} onChange={(e) => setWhen(e.target.value)} />
+        </div>
+        <div>
+          <label className="form-label">보상 종류</label>
+          <input className="inp" value={comp} onChange={(e) => setComp(e.target.value)}
+                 placeholder="예: 크레딧 보상" />
+        </div>
+        <div>
+          <label className="form-label">조치 진행상황</label>
+          <select className="inp" value={progress} onChange={(e) => setProgress(e.target.value)}>
+            {CLAIM_PROGRESS.map((item) => <option key={item}>{item}</option>)}
+          </select>
+        </div>
+      </div>
+      <div style={{ fontSize: 12, color: "var(--faint)", marginTop: 8 }}>
+        지금 보고 있는 <b>{contract.label}</b> 에 붙습니다.
+      </div>
+      <div style={{ display: "flex", gap: 7, justifyContent: "flex-end", marginTop: 10 }}>
+        <button className="btn btn-sm" type="button" onClick={onCancel}>취소</button>
+        <button className="btn btn-sm btn-primary" type="button" disabled={adding}
+                onClick={() => add()}>{adding ? "등록 중" : "등록"}</button>
+      </div>
+    </div>
+  );
+}
+
+function ClaimEdit({ claim, onSave, onCancel, onDelete }: {
   claim: Claim;
   onSave: (fields: Record<string, string>) => void;
   onCancel: () => void;
+  onDelete: () => void;
 }) {
   const [kind, setKind] = useState(claim.kind);
   const [when, setWhen] = useState(claim.happened_on ?? "");
@@ -817,19 +1158,42 @@ function ClaimEdit({ claim, onSave, onCancel }: {
   const [progress, setProgress] = useState(claim.progress);
   const [actionOn, setActionOn] = useState(claim.action_on ?? "");
   return (
-    <div className="list-row">
-      <input className="inp" value={kind} onChange={(e) => setKind(e.target.value)} />
-      <input className="inp" type="date" value={when} onChange={(e) => setWhen(e.target.value)} />
-      <input className="inp" placeholder="보상 종류" value={comp} onChange={(e) => setComp(e.target.value)} />
-      <select className="inp" value={progress} onChange={(e) => setProgress(e.target.value)}>
-        {["접수", "조치 진행 중", "조치 완료"].map((item) => <option key={item}>{item}</option>)}
-      </select>
-      <input className="inp" type="date" value={actionOn} onChange={(e) => setActionOn(e.target.value)} />
-      <button className="btn btn-sm btn-primary" type="button"
-              onClick={() => onSave({ kind, happened_on: when, compensation: comp,
-                                      progress, action_on: actionOn })}>저장</button>
-      <button className="btn btn-sm" type="button" onClick={onCancel}>취소</button>
-    </div>
+    <tr className="pending">
+      <td colSpan={7}>
+        <div className="form-row">
+          <div>
+            <label className="form-label">클레임/히스토리 종류</label>
+            <input className="inp" value={kind} onChange={(e) => setKind(e.target.value)} />
+          </div>
+          <div>
+            <label className="form-label">발생 날짜</label>
+            <input className="inp" type="date" value={when} onChange={(e) => setWhen(e.target.value)} />
+          </div>
+          <div>
+            <label className="form-label">보상 종류</label>
+            <input className="inp" value={comp} onChange={(e) => setComp(e.target.value)} />
+          </div>
+          <div>
+            <label className="form-label">조치 진행상황</label>
+            <select className="inp" value={progress} onChange={(e) => setProgress(e.target.value)}>
+              {CLAIM_PROGRESS.map((item) => <option key={item}>{item}</option>)}
+            </select>
+          </div>
+        </div>
+        <div style={{ marginTop: 8, maxWidth: 220 }}>
+          <label className="form-label">조치 날짜</label>
+          <input className="inp" type="date" value={actionOn} onChange={(e) => setActionOn(e.target.value)} />
+        </div>
+        <div style={{ display: "flex", gap: 7, justifyContent: "flex-end", marginTop: 9 }}>
+          <button className="btn btn-sm" type="button" style={{ marginRight: "auto", color: "var(--red-fg)" }}
+                  onClick={onDelete}>삭제</button>
+          <button className="btn btn-sm" type="button" onClick={onCancel}>취소</button>
+          <button className="btn btn-sm btn-primary" type="button"
+                  onClick={() => onSave({ kind, happened_on: when, compensation: comp,
+                                          progress, action_on: actionOn })}>저장</button>
+        </div>
+      </td>
+    </tr>
   );
 }
 
@@ -848,40 +1212,103 @@ function ContractNotes({ contract, onDone }: { contract: Contract; onDone: () =>
   });
   return (
     <>
-      <div className="form-sec">갱신 계획 · 비고</div>
-      <div className="form-grid3">
+      <div className="panel">
+        <div className="sub-head">
+          <span className="sub-title">갱신 계획</span>
+          <span className="sub-count">{contract.label} · 다음 계약 의향</span>
+        </div>
         <div>
-          <label className="form-label">갱신 계획</label>
-          <select className="inp" value={renewal} onChange={(e) => setRenewal(e.target.value)}>
-            {["", "갱신 예정", "협의 중", "미정", "본계약 검토 중", "갱신 안함", "갱신 완료"]
+          <div className="field-label">갱신 계획</div>
+          <select className="inp" style={{ marginTop: 5 }} value={renewal}
+                  onChange={(e) => setRenewal(e.target.value)}>
+            {["", "갱신 예정", "협의 중", "갱신 완료", "미정", "본계약 검토 중", "갱신 안함"]
               .map((item) => <option key={item} value={item}>{item || "—"}</option>)}
           </select>
         </div>
-        <div>
-          <label className="form-label">사용 중단 이유</label>
-          <input className="inp" value={stop} onChange={(e) => setStop(e.target.value)} />
-        </div>
-        <div>
-          <label className="form-label">비고</label>
-          <input className="inp" value={memo} onChange={(e) => setMemo(e.target.value)} />
+        <div style={{ marginTop: 14 }}>
+          <div className="field-label">사용 중단 이유</div>
+          <textarea className="inp" rows={2} style={{ marginTop: 5 }} value={stop}
+                    onChange={(e) => setStop(e.target.value)}
+                    placeholder="갱신 안함 / 사용 중단 시 입력" />
         </div>
       </div>
-      <div className="modal-foot" style={{ marginTop: 12 }}>
-        <button className="btn btn-sm btn-primary" type="button" disabled={saving}
-                onClick={() => save()}>{saving ? "저장 중" : "저장"}</button>
+      <div className="panel">
+        <div className="sub-head"><span className="sub-title">비고</span></div>
+        <textarea className="inp" rows={5} value={memo} onChange={(e) => setMemo(e.target.value)}
+                  placeholder="기타 메모" />
+        <div style={{ textAlign: "right", marginTop: 8 }}>
+          <button className="btn btn-sm" type="button" disabled={saving}
+                  onClick={() => save()}>{saving ? "저장 중" : "저장"}</button>
+        </div>
       </div>
     </>
   );
 }
 
+/** 7 매출 관리. 막대는 인식 시작월부터 최대 12개월 — 지난 달은 채워집니다. */
+function RevenueSection({ contract, today }: { contract: Contract; today: string }) {
+  const mrr = contract.deal_type === "MRR";
+  const months = contract.months || 1;
+  const base = contract.revenue_from ? `${contract.revenue_from}-01` : contract.starts_on || today;
+  const bars = mrr
+    ? Array.from({ length: Math.min(months, 12) }, (_, i) => {
+        const month = addMonths(base, i);
+        return { key: month, on: month.slice(0, 7) <= today.slice(0, 7), height: "70%",
+                 label: `${month.slice(5, 7)}월` };
+      })
+    : contract.payments.map((p) => ({
+        key: `p${p.id}`, on: p.done, height: p.done ? "90%" : "20%",
+        label: p.paid_on ? `${p.paid_on.slice(5, 7)}월` : "—",
+      }));
+
+  return (
+    <Section num={7} id="sec-revenue" title="매출 관리">
+      <div className="field-grid">
+        <KV k="계약 종류" v={<Tag tone={mrr ? "d-mrr" : "d-poc"}>{contract.deal_type}</Tag>} />
+        <KV k="총 계약 금액 (VAT 포함)"
+            v={<span className="mono">{money(contract.amount_incl_vat, contract.currency)}</span>} />
+        <KV k="월간 매출 (VAT 포함)" v={<span className="mono">
+          {mrr ? <>{money(contract.monthly_revenue, contract.currency)} <span className="muted">/ 월</span></>
+               : <span className="muted">결제월에 일시 인식</span>}
+        </span>} />
+        <KV k="월간 매출 (공급가 기준)" v={<span className="mono">
+          {mrr ? <>{money(n(contract.amount_excl_vat) / months, contract.currency)} <span className="muted">/ 월</span></>
+               : <span className="muted">결제월에 일시 인식</span>}
+        </span>} />
+        <KV k="매출 인식 시작 월" v={<span className="mono">
+          {!mrr ? <span className="muted">결제월 기준</span>
+            : <>{(contract.revenue_from || "").replace("-", ".")}{" "}
+                <span className="muted">{contract.revenue_from_set ? "(직접 지정)" : "(계약 시작월)"}</span></>}
+        </span>} />
+      </div>
+      <div style={{ marginTop: 14, paddingTop: 14, borderTop: "1px solid var(--line-soft)" }}>
+        <div className="field-label">
+          {mrr
+            ? `${base.slice(0, 7).replace("-", ".")}부터 ${months}개월 인식 · VAT 포함 총액 ÷ ${months} = ${money(contract.monthly_revenue, contract.currency)}`
+            : "결제가 발생한 달에 전액 인식"}
+        </div>
+        <div className="revbar">
+          {bars.map((bar) => (
+            <div className="col" key={bar.key}>
+              <div className={`b${bar.on ? " on" : ""}`} style={{ height: bar.height }} />
+              <div className="l">{bar.label}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </Section>
+  );
+}
+
 /** 소통 히스토리 등록 — **고객 단위**입니다. 계약 차수를 비우면 협상 단계(계약 전) 기록이고,
  *  그래서 계약이 하나도 없는 고객에게도 쓸 수 있습니다. */
-export function CommForm({ contactId, contracts, onDone }: {
-  contactId: number; contracts: Contract[]; onDone: () => void;
+export function CommForm({ contactId, contracts, onDone, onCancel }: {
+  contactId: number; contracts: Contract[]; onDone: () => void; onCancel?: () => void;
 }) {
+  const today = new Date().toISOString().slice(0, 10);
   const [channel, setChannel] = useState("email");
   const [handler, setHandler] = useState("");
-  const [when, setWhen] = useState("");
+  const [when, setWhen] = useState(today);
   const [seq, setSeq] = useState("");
   const [summary, setSummary] = useState("");
   const [add, adding] = useAction(async () => {
@@ -889,41 +1316,46 @@ export function CommForm({ contactId, contracts, onDone }: {
     await postForm(`/customers/${contactId}/interactions`, {
       channel, handler, happened_at: when, contract_seq: seq, summary,
     });
-    setSummary(""); setHandler(""); setWhen(""); setSeq("");
+    setSummary(""); setHandler(""); setSeq("");
     onDone();
   });
   return (
-    <div className="form-grid3" style={{ marginBottom: 14 }}>
-      <div>
-        <label className="form-label">소통 플랫폼</label>
-        <select className="inp" value={channel} onChange={(e) => setChannel(e.target.value)}>
-          {[["email", "메일"], ["phone", "전화"], ["whatsapp", "WhatsApp"],
-            ["meeting", "미팅"], ["sms", "문자"], ["manual", "기타"]].map(([value, label]) => (
-            <option key={value} value={value}>{label}</option>
-          ))}
-        </select>
+    <div style={{ paddingBottom: 16, marginBottom: 14, borderBottom: "1px solid var(--line-soft)" }}>
+      <div className="form-row">
+        <div>
+          <label className="form-label">소통 플랫폼</label>
+          <select className="inp" value={channel} onChange={(e) => setChannel(e.target.value)}>
+            {[["email", "메일"], ["phone", "전화"], ["whatsapp", "왓츠앱"],
+              ["meeting", "미팅"], ["sms", "문자"], ["manual", "기타"]].map(([value, label]) => (
+              <option key={value} value={value}>{label}</option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label className="form-label">날짜</label>
+          <input className="inp" type="date" value={when} onChange={(e) => setWhen(e.target.value)} />
+        </div>
+        <div>
+          <label className="form-label">담당자</label>
+          <input className="inp" value={handler} onChange={(e) => setHandler(e.target.value)} />
+        </div>
+        <div>
+          <label className="form-label">관련 계약</label>
+          <select className="inp" value={seq} onChange={(e) => setSeq(e.target.value)}>
+            <option value="">협상 단계 (계약 전)</option>
+            {contracts.slice().reverse().map((c) => (
+              <option key={c.seq} value={c.seq}>{c.label}</option>
+            ))}
+          </select>
+        </div>
       </div>
-      <div>
-        <label className="form-label">담당자</label>
-        <input className="inp" value={handler} onChange={(e) => setHandler(e.target.value)} />
-      </div>
-      <div>
-        <label className="form-label">날짜</label>
-        <input className="inp" type="datetime-local" value={when} onChange={(e) => setWhen(e.target.value)} />
-      </div>
-      <div>
-        <label className="form-label">관련 계약</label>
-        <select className="inp" value={seq} onChange={(e) => setSeq(e.target.value)}>
-          <option value="">협상 단계 (계약 전)</option>
-          {contracts.map((c) => <option key={c.seq} value={c.seq}>{c.label}</option>)}
-        </select>
-      </div>
-      <div style={{ gridColumn: "span 2" }}>
+      <div style={{ marginTop: 10 }}>
         <label className="form-label">소통 내용 및 메모</label>
-        <input className="inp" value={summary} onChange={(e) => setSummary(e.target.value)}
-               placeholder="오간 내용을 한 번에 정리해 적어주세요." />
+        <textarea className="inp" rows={3} value={summary} onChange={(e) => setSummary(e.target.value)}
+                  placeholder="어떤 내용을 주고받았는지 기록" />
       </div>
-      <div className="modal-foot" style={{ gridColumn: "span 3" }}>
+      <div style={{ display: "flex", gap: 7, justifyContent: "flex-end", marginTop: 10 }}>
+        {onCancel && <button className="btn btn-sm" type="button" onClick={onCancel}>취소</button>}
         <button className="btn btn-sm btn-primary" type="button" disabled={adding}
                 onClick={() => add()}>{adding ? "등록 중" : "등록"}</button>
       </div>

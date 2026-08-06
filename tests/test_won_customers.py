@@ -319,3 +319,34 @@ def test_the_mockup_css_does_not_claim_the_console_button_variants():
         if not any(prop in body for prop in looks):
             continue
         assert "btn--" in selector, selector
+
+
+def test_the_claim_list_does_not_follow_the_contract_selector():
+    """계약을 고르면 그 아래가 전부 바뀝니다 — **클레임만 빼고**.
+
+    클레임은 고객이 겪은 일이지 계약 회차의 일이 아닙니다. 1차 때 난 품질 이슈는 2차를 보고
+    있어도 그 고객의 이력이고, 계약을 바꿀 때마다 사라지면 "이 고객이 무슨 일을 겪었나" 를
+    회차마다 눌러 봐야 합니다. 저장은 계약에 딸려 있습니다(어느 계약 기간의 일인지가
+    정보라서) — 보여줄 때만 전부 모으고, 어느 차수 건인지 뱃지로 적습니다.
+
+    같은 섹션의 갱신 계획·비고는 반대로 계약의 값이라 따라갑니다.
+    """
+    import pathlib
+
+    screen = pathlib.Path("frontend/src/screens/won/WonCustomerDetail.tsx").read_text(encoding="utf-8")
+    # 클레임 섹션은 **계약 목록 전체**를 받습니다. `current` 하나만 받으면 따라가게 됩니다.
+    assert "<CareSection contracts={contracts} current={current}" in screen
+    assert "contracts\n    .slice().reverse()\n    .flatMap((c) => c.claims" in screen
+
+
+def test_the_contract_notes_remount_when_the_contract_changes():
+    """계약의 값을 `useState` 의 **초기값**으로 받는 컴포넌트는 key 를 달아야 합니다.
+
+    React 는 같은 자리의 같은 컴포넌트를 재사용하므로 초기값을 다시 읽지 않습니다. 1차를
+    골랐는데 갱신 계획·비고에 2차의 값이 남아 있었고, 그 상태로 저장을 누르면 1차 계약에
+    2차의 값이 덮입니다 — 화면에는 저장됐다고 나옵니다.
+    """
+    import pathlib
+
+    screen = pathlib.Path("frontend/src/screens/won/WonCustomerDetail.tsx").read_text(encoding="utf-8")
+    assert "<ContractNotes key={current.id}" in screen
