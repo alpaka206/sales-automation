@@ -54,9 +54,6 @@ export function CustomerDetail() {
   });
   const refresh = () => queryClient.invalidateQueries();
 
-  if (isPending || !data) return <LoadingBlock />;
-  const { contact, profile } = data;
-
   // Every write goes to the route the Jinja form posts to: the stage sync, the sheet
   // mirror and the contract validation all stay server-side, in one copy.
   async function submit(event: React.FormEvent<HTMLFormElement>, path: string) {
@@ -66,10 +63,16 @@ export function CustomerDetail() {
     await refresh();
   }
 
+  // 훅은 아래 early return 보다 **위**에서 부릅니다. 아래에 두면 로딩 렌더에서는 건너뛰고
+  // 데이터가 온 렌더에서는 부르게 되어, 훅 수가 달라졌다고 React 가 터집니다(#310).
+  // 그래서 경로도 data 가 없을 수 있다는 전제로 씁니다.
   const [syncHubspot, syncing] = useAction((event: React.FormEvent<HTMLFormElement>) =>
-    submit(event, `/customers/${contact.id}/sync`));
+    submit(event, `/customers/${data?.contact.id}/sync`));
   const [saveProfile, savingProfile] = useAction((event: React.FormEvent<HTMLFormElement>) =>
-    submit(event, `/customers/${contact.id}/profile`));
+    submit(event, `/customers/${data?.contact.id}/profile`));
+
+  if (isPending || !data) return <LoadingBlock />;
+  const { contact, profile } = data;
 
   const contractFields = (contract?: Contract) => (
     <>

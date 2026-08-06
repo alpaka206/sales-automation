@@ -655,3 +655,47 @@ def test_a_button_that_waits_says_so_on_itself():
             continue
         silent.append(path.as_posix())
     assert silent == [], f"진행 표시가 없는 쓰기 화면: {silent}"
+
+
+def test_no_hook_is_called_after_an_early_return():
+    """React 훅은 렌더마다 **같은 순서로 같은 수**만큼 불려야 합니다.
+
+    early return 아래에 훅을 두면 로딩 렌더에서는 건너뛰고 데이터가 온 렌더에서는 부르게
+    되어, React 가 "훅 수가 달라졌다"(#310) 로 터집니다 — 그 화면이 통째로 안 뜹니다.
+    빌드는 이걸 못 잡고, 실제로 접근 승인 화면이 그렇게 죽은 채 배포됐습니다.
+
+    "컴포넌트 본문의 return" 만 셉니다: 들여쓰기 2칸짜리 return, 그리고 2칸짜리 ``if (`` 블록
+    안의 4칸짜리 return. 콜백 안의 ``if (!tier) return;`` 은 컴포넌트를 끝내지 않으므로
+    세지 않습니다 — 그것까지 세면 멀쩡한 화면이 걸립니다.
+    """
+    import pathlib
+    import re
+
+    component = re.compile(r"^(?:export )?function ([A-Z]\w*)\(")
+    hook = re.compile(r"^ {2}(?:const .*= )?use[A-Z]\w*\(")
+    guard_open = re.compile(r"^ {2}(?:\} else )?if \(.*\{\s*$")
+    return_2 = re.compile(r"^ {2}(?:if \(.*\) )?return")
+    return_4 = re.compile(r"^ {4}return")
+
+    offenders: list[str] = []
+    for path in sorted(pathlib.Path("frontend/src").rglob("*.tsx")):
+        name, returned, in_guard = None, False, False
+        for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            match = component.match(line)
+            if match:
+                name, returned, in_guard = match.group(1), False, False
+                continue
+            if name is None:
+                continue
+            if line.startswith("}"):  # 함수가 끝났습니다
+                name, returned, in_guard = None, False, False
+                continue
+            if guard_open.match(line):
+                in_guard = True
+            elif line.startswith("  }"):
+                in_guard = False
+            if return_2.match(line) or (in_guard and return_4.match(line)):
+                returned = True
+            elif returned and hook.match(line):
+                offenders.append(f"{path.as_posix()}:{number} ({name}) {line.strip()[:60]}")
+    assert not offenders, "early return 뒤의 훅: " + " / ".join(offenders)

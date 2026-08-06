@@ -20,6 +20,25 @@ export function SettingsUsers() {
     retry: false,
   });
 
+  async function act(email: string, action: string) {
+    await postForm(`/settings/users/${encodeURIComponent(email)}`, { action });
+    await queryClient.invalidateQueries({ queryKey: ["settings-users"] });
+  }
+
+  // 훅은 아래 early return 보다 **위**에 있어야 합니다. 로딩 중에는 return 이 먼저 걸려
+  // 훅 하나를 건너뛰고, 데이터가 오면 하나 더 부르게 되어 React 가 렌더마다 훅 수가 다르다고
+  // 터집니다(#310). 화면이 통째로 안 뜹니다.
+  const [addUser, adding] = useAction(async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    await postForm(
+      "/settings/users/add",
+      Object.fromEntries(new FormData(form) as never) as Record<string, string>,
+    );
+    form.reset();
+    await queryClient.invalidateQueries({ queryKey: ["settings-users"] });
+  });
+
   // Admin-only, and the gate lives on the server. 403 is the answer, not a bug —
   // 하지만 그 외의 실패까지 같은 문장으로 그리면, 서버가 터졌을 때 관리자에게 권한이
   // 없다고 말하게 됩니다. 실제로 그랬습니다: 이 화면은 500 을 내면서 "관리자만 접근할 수
@@ -39,22 +58,6 @@ export function SettingsUsers() {
     );
   }
   if (isPending || !data) return <Loading columns={5} />;
-
-  async function act(email: string, action: string) {
-    await postForm(`/settings/users/${encodeURIComponent(email)}`, { action });
-    await queryClient.invalidateQueries({ queryKey: ["settings-users"] });
-  }
-
-  async function submit(event: React.FormEvent<HTMLFormElement>, path: string) {
-    event.preventDefault();
-    const form = event.currentTarget;
-    await postForm(path, Object.fromEntries(new FormData(form) as never) as Record<string, string>);
-    form.reset();
-    await queryClient.invalidateQueries({ queryKey: ["settings-users"] });
-  }
-
-  const [addUser, adding] = useAction((event: React.FormEvent<HTMLFormElement>) =>
-    submit(event, "/settings/users/add"));
 
   return (
     <>

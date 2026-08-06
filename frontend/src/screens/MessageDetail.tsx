@@ -75,6 +75,20 @@ export function MessageDetail() {
   const [showOrig, setShowOrig] = useState<Record<number, boolean>>({});
   const [loadedId, setLoadedId] = useState<number | null>(null);
 
+  // 훅은 아래 early return 보다 **위**에서 부릅니다. 아래에 두면 로딩 렌더에서는 건너뛰고
+  // 데이터가 온 렌더에서는 부르게 되어, 훅 수가 달라졌다고 React 가 터집니다(#310) — 화면이
+  // 통째로 안 뜹니다. 그래서 data 가 아직 없을 수 있다는 전제로 씁니다.
+  const [saveContact, savingContact] = useAction(async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    await postForm(
+      `/contacts/${data?.contact?.id}/edit`,
+      Object.fromEntries(new FormData(form) as never) as Record<string, string>,
+    );
+    setNote("연락처를 저장했습니다.");
+    await queryClient.invalidateQueries({ queryKey: ["message", id] });
+  });
+
   // Fill the editor once per message. Re-syncing on every refetch would overwrite what
   // the operator is typing while the queue revalidates underneath them.
   //
@@ -122,17 +136,6 @@ export function MessageDetail() {
     if (result.subject !== undefined) setSubject(result.subject);
     setNote(result.translated ? `번역됨 → ${result.language}` : "번역할 내용이 없습니다.");
   }
-
-  const [saveContact, savingContact] = useAction(async (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    const form = event.currentTarget;
-    await postForm(
-      `/contacts/${contact?.id}/edit`,
-      Object.fromEntries(new FormData(form) as never) as Record<string, string>,
-    );
-    setNote("연락처를 저장했습니다.");
-    await queryClient.invalidateQueries({ queryKey: ["message", id] });
-  });
 
   async function openPreview() {
     const response = await fetch("/messages/preview", {
