@@ -678,15 +678,10 @@ async def message_translate(
         cur_body = cur_body or msg.body or ""
         cur_subject = subject.strip() or (msg.subject or "")
 
-        # Persist the signature choice; when a branded signature replaces the text
-        # one, strip the text signature BEFORE translating so it never gets carried
-        # (translated) into the outgoing body.
-        from ...integrations.email_html import strip_known_signature, strips_text_signature
-
-        sig_key = _clean_signature_key(signature_key)
-        msg.signature_key = sig_key
-        if strips_text_signature(sig_key):
-            cur_body = strip_known_signature(cur_body)
+        # 서명 선택만 저장합니다. 본문에서 서명을 떼어내던 코드가 여기 있었는데, 이제
+        # 모델이 본문에 서명을 쓰지 않으므로 뗄 것이 없습니다(0061). 서명은 발송할 때
+        # 본문 아래로 붙습니다.
+        msg.signature_key = _clean_signature_key(signature_key)
 
         # Decide from the BODY's actual language, not the (possibly stale) msg.language
         # flag — so re-editing the draft back to Korean and pressing 번역하기 again
@@ -799,18 +794,12 @@ async def message_preview(body: str = Form(""), signature_key: str = Form("")):
 
     Stateless: takes the (possibly edited) textarea content + the chosen signature
     and returns the same styled HTML the send path attaches, so the approver sees
-    the real look, including a branded signature replacing the text one.
+    the real look.
     """
-    from ...integrations.email_html import (
-        branded_signature_html,
-        strip_known_signature,
-        strips_text_signature,
-        to_html_email,
-    )
+    from ...integrations.email_html import branded_signature_html, to_html_email
 
     key = _clean_signature_key(signature_key)
-    rendered_body = strip_known_signature(body) if strips_text_signature(key) else body
-    return HTMLResponse(to_html_email(rendered_body, signature_html=branded_signature_html(key)))
+    return HTMLResponse(to_html_email(body, signature_html=branded_signature_html(key)))
 
 
 @router.post("/messages/{message_id}/reject")
