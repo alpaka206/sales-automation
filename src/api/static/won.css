@@ -22,8 +22,8 @@
 .won button, .won input, .won select, .won textarea {font-family:inherit;font-size:inherit;color:inherit;}
 .won button {cursor:pointer;}
 .won :focus-visible {outline:2px solid var(--teal-600);outline-offset:2px;border-radius:4px;}
-.won /* Sidebar */
-  .side {width:250px;flex:none;background:var(--bg-side);border-right:1px solid var(--line);
+/* Sidebar */
+.won .side {width:250px;flex:none;background:var(--bg-side);border-right:1px solid var(--line);
     padding:16px 13px 32px;display:flex;flex-direction:column;gap:2px;position:sticky;top:0;height:100vh;overflow-y:auto;}
 .won .page {padding:30px 36px 80px;max-width:1720px;}
 .won .crumb {font-size:12.5px;color:var(--faint);margin-bottom:7px;}
@@ -38,8 +38,8 @@
 .won .btn-sm {padding:5px 10px;font-size:12.5px;border-radius:6px;}
 .won .btn-ghost {border-color:transparent;background:none;color:var(--teal-700);font-weight:600;}
 .won .btn-ghost:hover {background:var(--teal-25);}
-.won /* KPI */
-  .kpi-row {display:grid;grid-template-columns:1.8fr 1fr 1fr;gap:14px;margin-top:22px;}
+/* KPI */
+.won .kpi-row {display:grid;grid-template-columns:1.8fr 1fr 1fr;gap:14px;margin-top:22px;}
 .won .kpi-flex {display:flex;align-items:stretch;flex:1;margin-top:6px;}
 .won .kpi-main {flex:1;padding-right:26px;display:flex;align-items:center;}
 .won .kpi-main .kpi-value {margin-top:0;}
@@ -76,8 +76,8 @@
 .won .dot {width:7px;height:7px;border-radius:50%;display:inline-block;flex:none;}
 .won .dot.warn {background:#E4A11B;}
 .won .dot.danger {background:#D9534F;}
-.won /* Action board */
-  .board {display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-top:14px;}
+/* Action board */
+.won .board {display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-top:14px;}
 .won .board-card {border:1px solid var(--line);border-radius:12px;background:#fff;overflow:hidden;}
 .won .board-head {display:flex;align-items:center;gap:8px;padding:14px 17px;border-bottom:1px solid var(--line-soft);}
 .won .board-title {font-size:13.5px;font-weight:700;}
@@ -93,8 +93,8 @@
 .won .board-when.due {color:var(--amber-fg);font-weight:600;}
 .won .board-when.over {color:var(--red-fg);font-weight:700;}
 .won .board-empty {padding:18px 15px;font-size:12.5px;color:var(--faint);}
-.won /* 수주 전환 대기 */
-  .intake {border:1px solid #FCE7B2;border-radius:12px;background:#FFFCF5;margin-top:14px;overflow:hidden;}
+/* 수주 전환 대기 */
+.won .intake {border:1px solid #FCE7B2;border-radius:12px;background:#FFFCF5;margin-top:14px;overflow:hidden;}
 .won .intake-head {display:flex;align-items:center;gap:9px;padding:14px 18px;border-bottom:1px solid #FCE7B2;}
 .won .intake-title {font-size:13.5px;font-weight:700;color:#7A4E0B;}
 .won .intake-sub {font-size:12px;color:#9A6A1B;}
@@ -108,8 +108,8 @@
 .won .intake-match {font-size:12.5px;padding:8px 11px;border-radius:8px;background:var(--teal-25);color:var(--teal-700);font-weight:500;}
 .won .intake-match.new {background:var(--bg-soft);color:var(--muted);font-weight:400;}
 .won .intake-actions {display:flex;gap:7px;margin-top:2px;}
-.won /* Toolbar */
-  .toolbar {display:flex;align-items:center;gap:10px;margin-top:30px;flex-wrap:wrap;padding-bottom:14px;border-bottom:1px solid var(--line);}
+/* Toolbar */
+.won .toolbar {display:flex;align-items:center;gap:10px;margin-top:30px;flex-wrap:wrap;padding-bottom:14px;border-bottom:1px solid var(--line);}
 .won .search {position:relative;flex:1;min-width:240px;max-width:360px;}
 .won .search svg {position:absolute;left:12px;top:50%;transform:translateY(-50%);color:var(--faint);}
 .won .search input {width:100%;padding:9px 12px 9px 35px;border:1px solid var(--line);border-radius:8px;font-size:14px;}
@@ -122,8 +122,8 @@
 .won .divider-v {width:1px;height:22px;background:var(--line);}
 .won .select {border:1px solid var(--line);border-radius:8px;padding:8px 11px;background:#fff;font-size:13.5px;color:var(--ink-2);}
 .won .result-count {margin-left:auto;font-size:13.5px;color:var(--faint);font-variant-numeric:tabular-nums;}
-.won /* Table */
-  .table-wrap {overflow-x:auto;}
+/* Table */
+.won .table-wrap {overflow-x:auto;}
 .won table {width:100%;border-collapse:collapse;min-width:1240px;}
 .won thead th {text-align:left;font-size:12.5px;font-weight:600;color:var(--muted);padding:14px 13px;border-bottom:1px solid var(--line);white-space:nowrap;}
 .won tbody tr {border-bottom:1px solid var(--line-soft);cursor:pointer;}
@@ -161,8 +161,8 @@
 .won .tag.risk {background:var(--red-bg);color:var(--red-fg);}
 .won .empty {padding:60px 20px;text-align:center;color:var(--muted);}
 .won .empty strong {display:block;color:var(--ink);font-size:15px;margin-bottom:6px;}
-.won /* Detail */
-  .detail-head {position:sticky;top:0;background:#fff;z-index:10;border-bottom:1px solid var(--line);padding:22px 36px 0;}
+/* Detail */
+.won .detail-head {position:sticky;top:0;background:#fff;z-index:10;border-bottom:1px solid var(--line);padding:22px 36px 0;}
 .won .dh-top {display:flex;align-items:flex-start;gap:14px;flex-wrap:wrap;}
 .won .dh-title {font-size:22px;font-weight:700;letter-spacing:-.025em;margin:0;}
 .won .dh-sub {font-size:13px;color:var(--faint);margin-top:4px;}
@@ -235,8 +235,8 @@
 .won .revbar .b {width:100%;background:var(--teal-50);border-radius:3px 3px 0 0;}
 .won .revbar .b.on {background:var(--teal-600);}
 .won .revbar .l {font-size:10px;color:var(--faint);}
-.won /* Modal */
-  .scrim {position:fixed;inset:0;background:rgba(17,24,39,.35);opacity:0;pointer-events:none;transition:opacity .18s;z-index:60;}
+/* Modal */
+.won .scrim {position:fixed;inset:0;background:rgba(17,24,39,.35);opacity:0;pointer-events:none;transition:opacity .18s;z-index:60;}
 .won .scrim.is-open {opacity:1;pointer-events:auto;}
 .won .modal {position:fixed;top:50%;left:50%;transform:translate(-50%,-48%) scale(.98);opacity:0;pointer-events:none;
     width:620px;max-width:calc(100vw - 32px);max-height:86vh;background:#fff;border-radius:14px;box-shadow:var(--shadow);
@@ -319,7 +319,6 @@
  * -------------------------------------------------------------------------- */
 .won .select { width: auto; height: auto; border-radius: 8px; }
 .won .btn { width: auto; }
-.won .search input { width: 100%; height: auto; border: 0; background: transparent; padding: 0; }
 .won .fx-row input { width: 72px; }
 .won .form-row input, .won .form-row .select { width: 100%; }
 .won table { width: 100%; }

@@ -63,7 +63,7 @@ export type ListData = {
   today: string;
   rows: Row[];
   pending: { id: number; ticket_id: string; company: string | null; client_id: number | null;
-             won_type: string | null; won_on: string | null }[];
+             won_type: string; next_seq: number; known: boolean; won_on: string | null }[];
   boards: {
     credit: { client_id: number; company: string; on: string; amount: number | null;
               no: number | null; total: number | null }[];
@@ -104,12 +104,23 @@ export const dueClass = (value: string | null | undefined, today: string): strin
   return left <= 7 ? "due" : "";
 };
 
+/** 며칠 남았나만. `D-6` / `D-DAY` / `D+3`(지남).
+ *
+ * 날짜가 이미 옆에 있는 자리에서 씁니다 — `26.08.12` 를 적어 놓고 다시 `26.08.12 · 6일 뒤`
+ * 라고 쓰면 같은 날짜가 두 번입니다. 훑는 화면에서 두 번 읽히는 글자는 그만큼 느립니다.
+ */
+export const dday = (value: string | null | undefined, today: string): string => {
+  const left = daysUntil(value, today);
+  if (left === null) return "—";
+  if (left === 0) return "D-DAY";
+  return left < 0 ? `D+${-left}` : `D-${left}`;
+};
+
+/** 날짜와 D-day 를 함께. 날짜가 그 자리에만 있는 곳(액션 보드)에서 씁니다. */
 export const dueText = (value: string | null | undefined, today: string): string => {
   const left = daysUntil(value, today);
   if (left === null) return "—";
-  if (left < 0) return `${fmt(value)} · ${-left}일 지남`;
-  if (left === 0) return `${fmt(value)} · 오늘`;
-  return `${fmt(value)} · ${left}일 뒤`;
+  return `${fmt(value)} · ${dday(value, today)}`;
 };
 
 /** 목록 정렬: 손이 가야 하는 것이 위로. 세팅중 → 사용중 → 사용 중단. */

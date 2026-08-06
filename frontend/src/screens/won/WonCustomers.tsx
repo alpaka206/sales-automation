@@ -5,7 +5,7 @@ import { getJSON, postForm } from "../../lib/api";
 import { ActionButton } from "../../ui/ActionButton";
 import {
   type ListData, type Row,
-  STATUS_ORDER, dueClass, dueText, daysUntil, fmt, initials, money, n, num,
+  STATUS_ORDER, daysUntil, dday, dueClass, dueText, fmt, initials, money, n, num,
   planTone, statusTone,
 } from "./shared";
 
@@ -244,11 +244,17 @@ export function WonCustomers() {
                 <div key={item.id} className="intake-card">
                   <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
                     <div className="intake-co">{item.company || "고객사 미확인"}</div>
-                    {item.won_type && <span className="tag neutral">{item.won_type}</span>}
+                    {/* 그 고객 아래 계약이 이미 있으면 재계약입니다. 우리 장부가 아는
+                        사실이라 HubSpot 의 Won type 을 읽지 않습니다. */}
+                    <span className={`tag ${item.won_type === "Renewal" ? "blue" : "neutral"}`}>
+                      {item.won_type}
+                    </span>
                     <span className="intake-date">Won {fmt(item.won_on)}</span>
                   </div>
-                  <div className={`intake-match${item.client_id ? "" : " new"}`}>
-                    {item.client_id ? `ID ${item.client_id} → 계약 추가` : "Client ID 없음 → 새 고객"}
+                  <div className={`intake-match${item.known ? "" : " new"}`}>
+                    {item.client_id
+                      ? `${item.company || "고객사 미확인"} (ID ${item.client_id}) → ${item.next_seq}차 계약`
+                      : "Client ID 없음 → 새 고객으로 등록"}
                   </div>
                   <div className="intake-actions">
                     <button className="btn btn-sm btn-primary" type="button"
@@ -389,7 +395,9 @@ function RowView({ row, rows, index, today, onOpen }: {
           {contract ? `${fmt(contract.starts_on)} – ${fmt(contract.ends_on)}` : "—"}
           {contract && (
             <span className={`sub ${endLeft !== null && endLeft >= 0 && endLeft <= 60 ? "due" : ""}`}>
-              {endLeft !== null && endLeft < 0 ? "만료됨" : `만료 ${dueText(contract.ends_on, today)}`}
+              {/* 종료일은 바로 위 줄에 있습니다. "만료" 라는 말도 계약 기간 칸에서는
+                  군더더기라, 남은 날짜만 적습니다. 지난 계약은 D+ 로 나옵니다. */}
+              {dday(contract.ends_on, today)}
             </span>
           )}
         </td>
@@ -399,7 +407,7 @@ function RowView({ row, rows, index, today, onOpen }: {
             <span className={`sub ${dueClass(contract.next_credit_on, today)}`}>
               {num(contract.next_credit_amount)} 크레딧
               {contract.next_credit_no ? ` · ${contract.next_credit_no}/${contract.next_credit_total}회차` : ""}
-              {" · "}{dueText(contract.next_credit_on, today)}
+              {" · "}{dday(contract.next_credit_on, today)}
             </span>
           )}
         </td>
@@ -409,7 +417,7 @@ function RowView({ row, rows, index, today, onOpen }: {
             <span className={`sub ${dueClass(contract.next_pay_on, today)}`}>
               {money(contract.next_pay_amount, contract.currency)}
               {contract.next_pay_no ? ` · ${contract.next_pay_no}/${contract.next_pay_total}회차` : ""}
-              {" · "}{dueText(contract.next_pay_on, today)}
+              {" · "}{dday(contract.next_pay_on, today)}
             </span>
           )}
         </td>
