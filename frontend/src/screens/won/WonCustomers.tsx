@@ -155,8 +155,14 @@ export function WonCustomers() {
                   값인지 같이 보여 줍니다 — 그게 숫자를 설명하는 유일한 단서입니다. */}
               <div className="fx-row">
                 적용 환율 <b>{num(Math.round(rate))}</b> 원 / USD
-                <span style={{ color: "var(--faint)", marginLeft: 6 }}>
-                  {data.fx_on ? `${fmt(data.fx_on)} 고시` : "설정값"}
+                {/* 한국에서 낮에 보면 거의 항상 어제 날짜입니다 — ECB 가 유럽 오후에
+                    하루 한 번 내기 때문입니다. 그래서 "오늘" 이라고 쓰지 않고 실제
+                    고시일을 적습니다. */}
+                <span style={{ color: "var(--faint)", marginLeft: 6 }}
+                      title={data.fx_on
+                        ? "ECB 기준환율은 유럽 시간 오후에 하루 한 번 고시되어, 한국에서는 낮에 전일자 값이 보입니다."
+                        : "환율을 가져오지 못해 설정값을 씁니다."}>
+                  {data.fx_on ? `${fmt(data.fx_on)} 고시 기준` : "설정값"}
                 </span>
               </div>
             </div>
