@@ -47,18 +47,29 @@ export function Recovery() {
     else await run(action);
   }
 
+  // 확인 창은 **끝난 뒤에** 닫습니다. 먼저 닫으면 "처리 중" 을 볼 자리가 사라지고, 실패해도
+  // 목록만 그대로인 채 아무 말이 없습니다 — 아무것도 안 누른 것과 구분이 안 됩니다.
+  // 여기 오는 것들은 재발송·티켓 삭제라 그 구분이 중요합니다.
   async function run(action: Action) {
-    setPending(null);
     if (action.path.endsWith("/clear-failures")) {
       await sync(action.path, {}, (r) => `발송 실패 ${r.cleared}건 정리됨`);
+      setPending(null);
       return;
     }
     if (action.path.endsWith("/hubspot-sync")) {
       await sync(action.path, action.body ?? {}, (r) =>
         `삭제 ${r.deleted}건 · 초안 정리 ${r.retired}건`);
+      setPending(null);
       return;
     }
-    await postForm(action.path, action.body ?? {});
+    try {
+      await postForm(action.path, action.body ?? {});
+      setNote(null);
+      setPending(null);
+    } catch (error) {
+      // 창은 열어 둡니다. 왜 실패했는지 읽고 다시 누를 수 있어야 합니다.
+      setNote(`실패: ${error instanceof Error ? error.message : String(error)}`);
+    }
     await queryClient.invalidateQueries({ queryKey: ["recovery"] });
   }
 
@@ -232,7 +243,17 @@ export function Recovery() {
       {/* Confirming "not sent" queues a real send. It gets a dialog, not a browser
           confirm() — the old page used confirm(), which blocks the whole tab. */}
       {pending && (
-        <Modal title={pending.label} description={pending.confirm}
+        <Modal title={pending.label}
+               description={
+                 <>
+                   {pending.confirm}
+                   {note?.startsWith("실패") && (
+                     <div className="t-xs" style={{ marginTop: 8, color: "var(--danger)" }} role="status">
+                       {note}
+                     </div>
+                   )}
+                 </>
+               }
                onClose={() => setPending(null)}
                actions={
                  <ActionButton className="btn btn--danger" pending="처리 중"

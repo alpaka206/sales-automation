@@ -719,3 +719,23 @@ def test_a_modal_closes_only_when_the_scrim_is_pressed_and_released():
     assert "downOnScrim.current" in modal
     # click 만 보고 닫던 옛 모양이 돌아오면 안 됩니다.
     assert "onClick={(e) => e.target === e.currentTarget && onClose()}" not in modal
+
+
+def test_typing_in_a_modal_blocks_the_accidental_close():
+    """스치듯 누른 Escape 하나에 다 쓴 폼이 사라지면 안 됩니다.
+
+    계약 폼은 칸이 서른 개가 넘고, 닫기가 곧 라우트 이동이라 되돌릴 방법이 없습니다. 소통
+    기록 폼은 값을 DOM 에만 들고 있어 더합니다. `취소` 버튼은 언제나 닫습니다 — 그건 실수로
+    누르는 자리가 아닙니다.
+
+    기준이 **입력 이벤트**인 이유: 값 비교(`value !== defaultValue`)를 먼저 썼는데, React 가
+    제어 입력의 value 속성까지 갱신해서 늘 "안 고쳐졌다" 가 되고, 반대로 `select` 는
+    `selected` 속성을 안 달아 갓 연 폼의 드롭다운 일곱 개가 전부 "고쳐졌다" 가 됩니다.
+    """
+    import pathlib
+
+    modal = pathlib.Path("frontend/src/ui/Modal.tsx").read_text(encoding="utf-8")
+    assert "onInput" in modal
+    assert "typed.current" in modal
+    # 확인 창(입력칸 없음)은 여전히 Escape 로 닫혀야 하므로, 기본값은 닫는 쪽입니다.
+    assert "const typed = useRef(false);" in modal

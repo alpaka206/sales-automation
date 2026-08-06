@@ -744,7 +744,12 @@ body.show-translation .has-ko .msg-ko { display: block; }
 /* A form, not a confirmation — 440px puts one field per line. */
 .modal--wide { max-width: 640px; max-height: calc(100dvh - 48px); overflow-y: auto; }
 .modal__title { font-size: 16px; font-weight: 800; letter-spacing: -.02em; }
-.modal__body { font-size: 13px; color: var(--text-muted); margin-top: 8px; line-height: 1.6; }
+/* pre-line: 확인 문구는 여러 문단짜리가 있습니다(복구 화면의 파괴적 작업 경고). 없으면
+   
+
+ 이 공백 하나로 뭉쳐 한 덩어리가 되고, 무엇을 지우는지가 그 안에 묻힙니다. */
+.modal__body { font-size: 13px; color: var(--text-muted); margin-top: 8px; line-height: 1.6;
+               white-space: pre-line; }
 .modal__actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; }
 
 /* Checkbox */

@@ -144,6 +144,11 @@ export function MessageDetail() {
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({ body, signature_key: signature }),
     });
+    // 실패 응답을 그대로 넣으면 「이메일 미리보기」 라는 제목 아래 오류 페이지가 메일처럼
+    // 그려집니다 — 운영자는 그걸 고객에게 나갈 본문으로 읽습니다.
+    if (!response.ok) {
+      throw new Error(`미리보기를 만들지 못했습니다 (${response.status}).`);
+    }
     setPreview(await response.text());
   }
 
@@ -446,14 +451,14 @@ export function MessageDetail() {
           description="거절하면 발송 대기에서 빠집니다. 사유는 처리경과에 남습니다."
           onClose={() => setRejecting(false)}
           actions={
-            <button type="button" className="btn btn--danger"
-                    onClick={() => {
-                      setRejecting(false);
-                      void act(`/messages/${msg.id}/reject`, { reason });
-                      setReason("");
-                    }}>
+            // 발송 모달과 같은 순서입니다 — 끝난 뒤에 닫습니다. 먼저 닫으면 "거절 중" 을
+            // 볼 자리가 사라지고, 실패해도 목록만 그대로인 채 아무 말이 없습니다. 맨 버튼일
+            // 때는 연타가 그대로 요청 두 번이기도 했습니다.
+            <ActionButton className="btn btn--danger" pending="거절 중"
+                          onClick={() => act(`/messages/${msg.id}/reject`, { reason })
+                            .then(() => { setRejecting(false); setReason(""); })}>
               거절 확정
-            </button>
+            </ActionButton>
           }
         >
           <label className="field-label" htmlFor="reject-reason" style={{ marginTop: 12 }}>거절 사유</label>

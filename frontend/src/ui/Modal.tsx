@@ -29,6 +29,28 @@ export function Modal({
   const close = useRef(onClose);
   close.current = onClose;
 
+  /** 뭔가 적어 넣은 폼이 들어 있으면 Escape 와 배경 클릭으로는 닫지 않습니다.
+   *
+   * 계약 폼은 칸이 서른 개가 넘고, 닫기가 곧 라우트 이동이라 되돌릴 방법이 없습니다.
+   * 소통 기록 폼은 값을 DOM 에만 들고 있어 더합니다 — 스치듯 누른 Escape 하나에 다 쓴
+   * 내용이 말없이 사라집니다. `취소` 버튼은 언제나 닫습니다: 그건 실수로 누르는 자리가
+   * 아니고, 그 버튼을 눌렀다면 정말 버리겠다는 뜻입니다.
+   *
+   * 기준은 **이 창 안에서 한 번이라도 입력했는가** 하나뿐입니다. 값을 비교하는 방법
+   * (`value !== defaultValue`)을 먼저 썼는데 안 됩니다: React 는 제어 입력의 `value`
+   * **속성**까지 같이 갱신해서 `defaultValue` 가 늘 따라오고, `select` 는 반대로
+   * `selected` 속성을 안 달아 갓 연 폼의 드롭다운이 전부 "고쳐졌다" 로 잡힙니다.
+   * 입력 이벤트 하나면 제어·비제어 폼 양쪽에서 똑같이 맞습니다. */
+  const typed = useRef(false);
+
+  const closeUnlessDirty = () => {
+    if (!typed.current) close.current();
+  };
+  // 아래 효과는 마운트 때 한 번만 돕니다. 그 안의 Escape 처리도 **지금** 의 판단을 써야
+  // 하므로 ref 로 넘깁니다.
+  const closeDirtyAware = useRef(closeUnlessDirty);
+  closeDirtyAware.current = closeUnlessDirty;
+
   useEffect(() => {
     opener.current = document.activeElement;
     document.body.classList.add("modal-open");
@@ -37,7 +59,10 @@ export function Modal({
     const focusable = () =>
       Array.from(
         dialog.current?.querySelectorAll<HTMLElement>(
-          'a[href],button:not([disabled]),textarea:not([disabled]),input:not([disabled]),select:not([disabled]),[tabindex]:not([tabindex="-1"])',
+          // iframe 이 들어 있는 이유: 이메일 미리보기 모달은 내용이 iframe 하나뿐입니다.
+          // 빼 두면 걸리는 것이 아래 `취소` 버튼 하나라 first === last 가 되고, Tab 이
+          // 매번 그 버튼으로 되돌아옵니다 — 60vh 보다 긴 메일은 키보드로 볼 수 없습니다.
+          'a[href],button:not([disabled]),textarea:not([disabled]),input:not([disabled]),select:not([disabled]),iframe,[tabindex]:not([tabindex="-1"])',
         ) ?? [],
       ).filter((element) => element.offsetParent !== null);
     (focusable()[0] ?? dialog.current)?.focus();
@@ -45,7 +70,7 @@ export function Modal({
     function onKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") {
         event.preventDefault();
-        close.current();
+        closeDirtyAware.current();
         return;
       }
       if (event.key !== "Tab") return;
@@ -82,12 +107,13 @@ export function Modal({
       className="modal-overlay is-open"
       onMouseDown={(e) => { downOnScrim.current = e.target === e.currentTarget; }}
       onClick={(e) => {
-        if (e.target === e.currentTarget && downOnScrim.current) close.current();
+        if (e.target === e.currentTarget && downOnScrim.current) closeUnlessDirty();
         downOnScrim.current = false;
       }}
     >
       <div
         ref={dialog}
+        onInput={() => { typed.current = true; }}
         className={`modal${wide ? " modal--wide" : ""}`}
         role="dialog"
         aria-modal="true"
