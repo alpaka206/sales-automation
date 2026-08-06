@@ -130,6 +130,16 @@ class Settings(BaseSettings):
     # Requires SMTP_USERNAME/SMTP_PASSWORD. Leave EMPTY in production.
     SEND_OVERRIDE_EMAIL: str = ""
 
+    # ----- 수주 고객 -----
+    # 한국수출입은행 OpenAPI 인증키. 있으면 결제 등록·입금 완료 시 그 날짜의 매매기준율을
+    # 자동으로 채웁니다. 없으면 운영자가 직접 넣고, 값은 어느 쪽이든 결제 행에 남습니다 —
+    # 조회 실패가 저장을 막으면 안 됩니다.
+    KOREAEXIM_API_KEY: str = ""
+    # 예상 MRR 카드가 USD 계약을 원화로 환산할 때 쓰는 환율. **한 사람이 바꾸면 모두가 같은
+    # 숫자를 봅니다** — 화면마다 다른 환율이면 두 사람이 다른 MRR 을 보고 회의에 들어옵니다.
+    # 과거 입금액은 이 값을 쓰지 않습니다(결제 행에 그날 환율이 박혀 있습니다).
+    MRR_FX_RATE: float = 1380.0
+
     # ----- Approval -----
     SLACK_ENABLED: bool = False
     APPROVAL_CHANNEL: Literal["slack", "none"] = "none"

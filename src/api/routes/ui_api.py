@@ -644,3 +644,257 @@ def ui_pipeline_page(stage: str, offset: int = 0):
         "next_offset": offset + len(rows),
         "has_more": offset + len(rows) < totals.get(stage, 0),
     }
+
+
+# --------------------------------------------------------------------------- #
+# 수주 고객
+#
+# 목록과 상세를 **한 번에** 보냅니다. 상세는 8개 섹션이 한 화면에 다 있고 각각이 별도
+# 요청이면 열 때마다 왕복이 여덟 번인데, 서울에서 이 서비스까지 왕복이 200~370ms 입니다.
+# 계약 하나가 1KB 남짓이라 통째로 실어 보내는 편이 싸고, 여는 순간 그려집니다.
+#
+# 파생값(다음 지급일·수금율·월간 매출·고객 종류…)은 저장하지 않고 여기서 계산합니다.
+# 저장해 두면 원본이 바뀌었는데 파생값은 안 바뀐 행이 생기고, 그건 화면에 안 보입니다.
+# --------------------------------------------------------------------------- #
+def _won_contract(contract, today) -> dict:
+    from ...common import won
+
+    grants = contract.credit_grants
+    payments = contract.payments
+    next_grant = won.next_credit_grant(contract)
+    next_pay = won.next_payment(contract)
+    return {
+        "id": contract.id,
+        "seq": contract.seq,
+        "label": f"{contract.seq}차 계약",
+        "state": won.contract_state(contract, today),
+        "ticket_id": contract.ticket_id,
+        "deal_type": contract.deal_type,
+        "starts_on": contract.starts_on,
+        "ends_on": contract.ends_on,
+        "months": won.months_between(contract.starts_on, contract.ends_on),
+        "doc_types": contract.doc_types or [],
+        "credits": contract.credits,
+        "currency": contract.currency,
+        "amount_incl_vat": contract.amount_incl_vat,
+        "amount_excl_vat": contract.amount_excl_vat,
+        "unit_price": contract.unit_price,
+        "unit_currency": contract.unit_currency,
+        "unit_fx_rate": contract.unit_fx_rate,
+        "payment_method": contract.payment_method,
+        "payment_type": contract.payment_type,
+        "installments": contract.installments,
+        "first_payment_on": contract.first_payment_on,
+        "billing_email": contract.billing_email,
+        "note": contract.note,
+        "renewal_plan": contract.renewal_plan,
+        "stop_reason": contract.stop_reason,
+        "memo": contract.memo,
+        "revenue_from": won.revenue_start_month(contract),
+        "revenue_from_set": bool(contract.revenue_from),
+        "monthly_revenue": won.monthly_revenue(contract),
+        "plan": contract.plan,
+        "plan_name": contract.plan_name,
+        "perso_email": contract.perso_email,
+        "plan_starts_on": contract.plan_starts_on,
+        "plan_ends_on": contract.plan_ends_on,
+        "plan_days_left": (
+            (won.parse_date(contract.plan_ends_on) - today).days
+            if won.parse_date(contract.plan_ends_on)
+            else None
+        ),
+        "invite_limit": contract.invite_limit,
+        "queue_limit": contract.queue_limit,
+        "concurrent_jobs": contract.concurrent_jobs,
+        "space_count": contract.space_count,
+        "space_seq": contract.space_seq,
+        "granted_credits": won.granted_credits(contract),
+        "collected": won.collected(contract),
+        "next_credit_on": next_grant.grant_on if next_grant else None,
+        "next_credit_amount": next_grant.amount if next_grant else None,
+        "next_pay_on": next_pay.paid_on if next_pay else None,
+        "next_pay_amount": next_pay.amount if next_pay else None,
+        "credit_grants": [
+            {
+                "id": g.id, "no": g.no, "total": g.total, "grant_on": g.grant_on,
+                "amount": g.amount, "granted_by": g.granted_by, "done": g.done, "memo": g.memo,
+            }
+            for g in grants
+        ],
+        "payments": [
+            {
+                "id": p.id, "no": p.no, "total": p.total, "paid_on": p.paid_on,
+                "amount": p.amount, "done": p.done,
+                "fx_rate": p.fx_rate, "fx_on": p.fx_on,
+            }
+            for p in payments
+        ],
+        "claims": [
+            {
+                "id": c.id, "kind": c.kind, "happened_on": c.happened_on,
+                "compensation": c.compensation, "progress": c.progress, "action_on": c.action_on,
+            }
+            for c in contract.claims
+        ],
+    }
+
+
+def _won_client(client, today, *, full: bool) -> dict:
+    from ...common import won
+
+    active = won.active_contract(client, today)
+    upcoming = won.upcoming_contracts(client, today)
+    payload = {
+        "client_id": client.client_id,
+        "company": client.company,
+        "customer_type": won.client_type(client.client_id),
+        "industry": client.industry,
+        "country": client.country,
+        "department": client.department,
+        "contact_name": client.contact_name,
+        "contact_info": client.contact_info,
+        "first_won_on": client.first_won_on,
+        "plan_status": client.plan_status,
+        "owner": client.owner,
+        "contact_id": client.contact_id,
+        "setup_count": len(upcoming),
+        "open_claims": len(won.open_claims(client)),
+        "active": _won_contract(active, today) if active else None,
+    }
+    if full:
+        payload["contracts"] = [_won_contract(c, today) for c in client.contracts]
+    else:
+        # 목록은 진행 중 계약 하나만 씁니다. 전체 차수는 상세에서.
+        payload["contract_count"] = len(client.contracts)
+    return payload
+
+
+@router.get("/api/ui/won-customers")
+def ui_won_customers():
+    """수주 고객 목록 + 요약 카드 + 액션 보드 + 수주 전환 대기 — 한 화면이라 한 번에."""
+    from datetime import date
+
+    from ...common import won
+    from ...common.config import settings as app_settings
+    from ...db.models import Client, PendingWon
+    from ...db.session import SessionLocal
+    from sqlalchemy.orm import selectinload
+
+    today = date.today()
+    with SessionLocal() as session:
+        clients = (
+            session.query(Client)
+            .options(selectinload(Client.contracts))
+            .order_by(Client.company)
+            .all()
+        )
+        rows = [_won_client(client, today, full=False) for client in clients]
+        pending = (
+            session.query(PendingWon)
+            .filter(PendingWon.status == "pending")
+            .order_by(PendingWon.created_at.desc())
+            .all()
+        )
+        waiting = [
+            {
+                "id": p.id, "ticket_id": p.ticket_id, "company": p.company,
+                "client_id": p.client_id, "won_type": p.won_type, "won_on": p.won_on,
+            }
+            for p in pending
+        ]
+
+    # 액션 보드 세 개. 목록을 한 번 더 도는 대신 위에서 만든 payload 를 그대로 씁니다.
+    credit_due, pay_due, claims_open = [], [], []
+    for row in rows:
+        active = row["active"]
+        if row["plan_status"] == "사용 중단" or not active:
+            continue
+        if active["next_credit_on"]:
+            credit_due.append({
+                "client_id": row["client_id"], "company": row["company"],
+                "on": active["next_credit_on"], "amount": active["next_credit_amount"],
+            })
+        if active["next_pay_on"]:
+            pay_due.append({
+                "client_id": row["client_id"], "company": row["company"],
+                "on": active["next_pay_on"], "amount": active["next_pay_amount"],
+                "currency": active["currency"],
+            })
+        for claim in active["claims"]:
+            if claim["progress"] != "조치 완료":
+                claims_open.append({
+                    "client_id": row["client_id"], "company": row["company"],
+                    "kind": claim["kind"], "on": claim["happened_on"],
+                    "progress": claim["progress"],
+                })
+    credit_due.sort(key=lambda x: x["on"] or "9999")
+    pay_due.sort(key=lambda x: x["on"] or "9999")
+
+    return {
+        "today": today.isoformat(),
+        "rows": rows,
+        "pending": waiting,
+        "boards": {"credit": credit_due, "payment": pay_due, "claim": claims_open},
+        # 예상 MRR 환산에 쓰는 환율. 한 사람이 바꾸면 모두가 같은 숫자를 봅니다.
+        "fx_rate": app_settings.MRR_FX_RATE,
+        "options": {
+            "industries": list(won.INDUSTRIES),
+            "plans": list(won.PLANS),
+            "plan_statuses": list(won.PLAN_STATUSES),
+            "deal_types": list(won.DEAL_TYPES),
+            "doc_types": list(won.DOC_TYPES),
+            "renewal_plans": list(won.RENEWAL_PLANS),
+            "claim_progress": list(won.CLAIM_PROGRESS),
+            "payment_methods": list(won.PAYMENT_METHODS),
+            "payment_types": list(won.PAYMENT_TYPES),
+            "currencies": list(won.CURRENCIES),
+            "customer_types": list(won.ALLOCATABLE_BANDS),
+            "departments": ["GTM", "Interactive", "AX"],
+        },
+    }
+
+
+@router.get("/api/ui/won-customers/{client_id}")
+def ui_won_customer(client_id: int):
+    """고객 하나 — 계약 전체와 그 아래 회차까지. 소통 히스토리는 고객 단위입니다."""
+    from datetime import date
+
+    from sqlalchemy.orm import selectinload
+
+    from ...db.models import Client, ClientContract, CustomerInteraction
+    from ...db.session import SessionLocal
+
+    today = date.today()
+    with SessionLocal() as session:
+        client = (
+            session.query(Client)
+            .options(
+                selectinload(Client.contracts).selectinload(ClientContract.credit_grants),
+                selectinload(Client.contracts).selectinload(ClientContract.payments),
+                selectinload(Client.contracts).selectinload(ClientContract.claims),
+            )
+            .filter(Client.client_id == client_id)
+            .one_or_none()
+        )
+        if client is None:
+            raise HTTPException(status_code=404, detail="고객을 찾을 수 없습니다")
+        payload = _won_client(client, today, full=True)
+        # 협상 단계 대화까지 한 타임라인에 쌓입니다 — 계약이 생기기 전 기록이 여기 있습니다.
+        comms = []
+        if client.contact_id:
+            comms = (
+                session.query(CustomerInteraction)
+                .filter(CustomerInteraction.contact_id == client.contact_id)
+                .order_by(CustomerInteraction.happened_at.desc())
+                .limit(200)
+                .all()
+            )
+        payload["comms"] = [
+            {
+                "id": item.id, "channel": item.channel, "handler": item.handler,
+                "subject": item.subject, "summary": item.summary,
+                "happened_at": item.happened_at, "contract_seq": item.contract_seq,
+            }
+            for item in comms
+        ]
+    return payload

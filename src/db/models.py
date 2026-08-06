@@ -509,6 +509,9 @@ class CustomerInteraction(Base):
     context: Mapped[str | None] = mapped_column(Text, nullable=True)
     external_id: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
     artifact_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # 수주 고객의 몇 차 계약에 대한 기록인지. 비어 있으면 협상 단계(계약 전) 기록입니다 —
+    # 이 타임라인은 고객 단위라 계약보다 먼저 시작합니다.
+    contract_seq: Mapped[int | None] = mapped_column(Integer, nullable=True)
     happened_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
 
@@ -592,3 +595,224 @@ class User(Base):
     approved: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+# --------------------------------------------------------------------------- #
+# 수주 고객 — 고객(Client) 하나 아래 계약이 쌓이는 장부
+#
+# ``Contact`` 는 **이메일 신원**이라 이 자리에 못 씁니다. Outbound·Interactive·AX 고객은
+# 문의를 보낸 적이 없어 이메일도 티켓도 없고, 반대로 한 회사에 담당자가 여럿이면 Contact 는
+# 여럿인데 고객은 하나입니다. 그래서 ``Client`` 가 따로 있고, 인바운드 고객만 Contact 를
+# 가리킵니다.
+#
+# 계약에 딸린 것(플랜·크레딧·결제·클레임)은 ``Client ID + 계약 차수`` 로 묶입니다. 소통
+# 히스토리만 예외로 **고객 단위**인데, 협상 단계 대화가 계약보다 먼저 쌓이기 때문입니다 —
+# 그래서 새 테이블을 만들지 않고 기존 ``CustomerInteraction`` 을 그대로 씁니다.
+# --------------------------------------------------------------------------- #
+class Client(Base):
+    """수주 고객 한 곳. 재계약해도 이 행은 그대로입니다."""
+
+    __tablename__ = "clients"
+
+    # 화면과 시트가 함께 쓰는 번호 그대로가 기본 키입니다. 번호대가 곧 고객 종류라
+    # (1000 Inbound / 2000 GTM Outbound / 3000 Interactive / 4000 AX / 9000 레거시),
+    # 종류는 **저장하지 않고** 이 값에서 파생합니다 — 두 군데 두면 서로 달라집니다.
+    client_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=False)
+    company: Mapped[str] = mapped_column(String(255), nullable=False)
+    industry: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    country: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    department: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    # 고객사 **측** 담당자입니다. 우리 쪽 담당은 ``owner``.
+    contact_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    contact_info: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    first_won_on: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    # 사용중 / 세팅중 / 사용 중단. 활성 고객 = 사용중 + 세팅중.
+    plan_status: Mapped[str] = mapped_column(String(16), nullable=False, default="세팅중")
+    owner: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    # 인바운드 고객만 채워집니다. 나머지는 NULL 이 정상입니다.
+    contact_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("contacts.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=_utcnow, onupdate=_utcnow, nullable=False
+    )
+
+    contracts: Mapped[list["ClientContract"]] = relationship(
+        back_populates="client", cascade="all, delete-orphan", order_by="ClientContract.seq"
+    )
+
+
+class ClientContract(Base):
+    """계약 한 건. 재계약은 새 고객이 아니라 같은 고객의 다음 차수입니다.
+
+    Perso 계정·플랜은 계약과 1:1 이라 여기 같이 둡니다. 시트에서 탭이 갈려 있는 것은
+    스프레드시트 사정이지 관계가 아닙니다 — 테이블을 나누면 항상 붙어 다니는 조인이 하나
+    늘 뿐입니다.
+    """
+
+    __tablename__ = "client_contracts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    client_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("clients.client_id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    seq: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    # 인바운드로 들어온 계약에만 붙습니다. 1차는 티켓이 있고 2차는 없는 것이 정상입니다.
+    ticket_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    deal_type: Mapped[str] = mapped_column(String(8), nullable=False, default="MRR")
+    starts_on: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    ends_on: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    # 복수 선택입니다. 화면에서 " + " 로 이어 보여주고 저장은 배열로 — 문자열로 저장하면
+    # "직접 계약 / DocuSign + 세금계산서 발행" 을 다시 쪼개야 필터가 됩니다.
+    doc_types: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    credits: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    currency: Mapped[str] = mapped_column(String(8), nullable=False, default="KRW")
+    # 금액은 둘 다 저장합니다. 라벨에 VAT 포함/제외를 반드시 적는 것이 운영자의 규칙이고,
+    # VAT 가 면제·별도인 계약이 있어 공급가는 자동 계산하지 않습니다.
+    amount_incl_vat: Mapped[Decimal | None] = mapped_column(Numeric(18, 2), nullable=True)
+    amount_excl_vat: Mapped[Decimal | None] = mapped_column(Numeric(18, 2), nullable=True)
+    unit_price: Mapped[Decimal | None] = mapped_column(Numeric(12, 4), nullable=True)
+    # 계약 통화와 달라도 됩니다 — 원화 계약인데 단가는 USD 로 매기는 경우가 흔합니다.
+    unit_currency: Mapped[str | None] = mapped_column(String(8), nullable=True)
+    # 크레딧을 공급가÷단가×60 으로 계산할 때 쓴 환율. 계약 시점 값이라 오늘 환율로 다시
+    # 계산하면 숫자가 달라집니다 — 계산에 쓴 값을 계약에 박아 둡니다.
+    unit_fx_rate: Mapped[Decimal | None] = mapped_column(Numeric(12, 4), nullable=True)
+    payment_method: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    payment_type: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    installments: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    first_payment_on: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    billing_email: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    renewal_plan: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    stop_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    memo: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # YYYY-MM. 비우면 계약 시작월부터 인식합니다 (MRR 만 해당).
+    revenue_from: Mapped[str | None] = mapped_column(String(7), nullable=True)
+
+    # --- Perso 계정 · 플랜 (계약과 1:1) ---
+    plan: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    plan_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    perso_email: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    plan_starts_on: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    plan_ends_on: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    invite_limit: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    queue_limit: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    concurrent_jobs: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    space_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    space_seq: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=_utcnow, onupdate=_utcnow, nullable=False
+    )
+
+    client: Mapped["Client"] = relationship(back_populates="contracts")
+    credit_grants: Mapped[list["ContractCreditGrant"]] = relationship(
+        back_populates="contract",
+        cascade="all, delete-orphan",
+        order_by="ContractCreditGrant.no",
+    )
+    payments: Mapped[list["ContractPayment"]] = relationship(
+        back_populates="contract",
+        cascade="all, delete-orphan",
+        order_by="ContractPayment.no",
+    )
+    claims: Mapped[list["ContractClaim"]] = relationship(
+        back_populates="contract",
+        cascade="all, delete-orphan",
+        order_by="ContractClaim.happened_on",
+    )
+
+    __table_args__ = (
+        # 같은 고객에 같은 차수가 둘 있으면 어느 것이 2차인지 화면이 못 정합니다.
+        Index("ux_client_contract_seq", "client_id", "seq", unique=True),
+    )
+
+
+class ContractCreditGrant(Base):
+    """크레딧 지급 회차. 계약 크레딧과 **별개**입니다 — 테스트·보상으로 계약분을 넘길 수 있습니다."""
+
+    __tablename__ = "contract_credit_grants"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    contract_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("client_contracts.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    no: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    total: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    # 예정일이기도 하고 실제 지급일이기도 합니다. 미지급 중 가장 빠른 날 = 다음 지급일.
+    grant_on: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    amount: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    granted_by: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    done: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    memo: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    contract: Mapped["ClientContract"] = relationship(back_populates="credit_grants")
+
+
+class ContractPayment(Base):
+    """분납 회차 하나."""
+
+    __tablename__ = "contract_payments"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    contract_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("client_contracts.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    no: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    total: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    paid_on: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    amount: Mapped[Decimal | None] = mapped_column(Numeric(18, 2), nullable=True)
+    done: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # **그 날의** 환율을 행에 박아 둡니다. 오늘 환율로 과거 입금을 다시 환산하면 지난달
+    # 매출이 이번 달에 바뀝니다. 주말·공휴일 입금은 직전 영업일(보통 금요일) 고시가입니다.
+    fx_rate: Mapped[Decimal | None] = mapped_column(Numeric(12, 4), nullable=True)
+    fx_on: Mapped[str | None] = mapped_column(String(10), nullable=True)
+
+    contract: Mapped["ClientContract"] = relationship(back_populates="payments")
+
+
+class ContractClaim(Base):
+    """클레임·히스토리. 불만만이 아니라 협업·테스트 같은 특이사항도 여기 쌓입니다."""
+
+    __tablename__ = "contract_claims"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    contract_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("client_contracts.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    kind: Mapped[str] = mapped_column(String(200), nullable=False)
+    happened_on: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    compensation: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    progress: Mapped[str] = mapped_column(String(32), nullable=False, default="접수")
+    action_on: Mapped[str | None] = mapped_column(String(10), nullable=True)
+
+    contract: Mapped["ClientContract"] = relationship(back_populates="claims")
+
+
+class PendingWon(Base):
+    """수주 전환 대기 — Won 으로 바뀐 티켓이 쌓이는 곳.
+
+    바로 고객 목록에 넣지 않는 이유: 계약 정보가 없는 행이 요약 카드의 활성 고객 수와 예상
+    MRR 을 오염시킵니다. 그리고 Won → Negotiating 롤백은 여기서 내리면 끝입니다.
+    """
+
+    __tablename__ = "pending_won"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    ticket_id: Mapped[str] = mapped_column(String(64), nullable=False, unique=True, index=True)
+    company: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # 티켓에 물려 있던 Client ID. 인바운드 문의 시점에 발급되므로 보통 이미 있습니다.
+    client_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    conversation_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("conversations.id", ondelete="SET NULL"), nullable=True
+    )
+    # HubSpot 파이프라인의 PoC / Contract / Renewal. 수주 유형(MRR/PoC)은 이 값에서
+    # 자동으로 정하지 않고 담당자가 고릅니다 — Contract·Renewal 이 둘 다 MRR 이라
+    # 되묻지 않으면 틀린 채로 굳습니다.
+    won_type: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    won_on: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    # pending / done / dismissed
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="pending")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)

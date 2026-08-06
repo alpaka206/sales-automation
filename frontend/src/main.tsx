@@ -17,7 +17,8 @@ import { SettingsUsers } from "./screens/SettingsUsers";
 import { Logs } from "./screens/Simple";
 import { QuoteCalculator } from "./screens/QuoteCalculator";
 import { Overview } from "./screens/Overview";
-import { Contracts } from "./screens/Contracts";
+import { WonCustomers } from "./screens/won/WonCustomers";
+import { WonCustomerDetail } from "./screens/won/WonCustomerDetail";
 import { Quotation } from "./screens/Quotation";
 import { ContractDoc } from "./screens/ContractDoc";
 import { SignIn } from "./screens/SignIn";
@@ -61,7 +62,9 @@ function mountConsole() {
             <Route path="logs" element={<Logs />} />
             <Route path="tools/quote-calculator" element={<QuoteCalculator />} />
             <Route path="overview" element={<Overview />} />
-            <Route path="outbound-history" element={<Contracts />} />
+            <Route path="outbound-history" element={<WonCustomers />} />
+            <Route path="won-customers" element={<WonCustomers />} />
+            <Route path="won-customers/:clientId" element={<WonCustomerDetail />} />
             <Route path="tools/quotation" element={<Quotation />} />
             <Route path="tools/contract" element={<ContractDoc />} />
           </Route>

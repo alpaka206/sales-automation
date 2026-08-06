@@ -22,6 +22,7 @@ from . import (
     recovery,
     settings_page,
     ui_api,
+    won_customers,
 )
 
 router = APIRouter(tags=["web"])
@@ -37,6 +38,7 @@ for _module in (
     policy_docs,
     settings_page,
     logs,
+    won_customers,
     ui_api,
     legacy_redirects,
 ):

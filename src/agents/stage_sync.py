@@ -18,6 +18,7 @@ ticket) is ``customer_ops._sync_stage``, which does go through ``guard_external_
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timezone
 
 from ..db.conversation_history import add_progress
 from ..db.models import Contact, Conversation, CustomerProfile
@@ -210,6 +211,11 @@ def sync_stage_from_hubspot(
             session=session,
         )
         retired = _retire_superseded_drafts(session, conv.id, local_stage)
+        # Won 으로 넘어온 건은 수주 전환 대기에 쌓습니다. 여기 다는 이유: 웹훅도 10분
+        # 폴러도 수동 최신화도 전부 이 함수를 거칩니다. 감지 지점을 세 군데 두면 하나가
+        # 조용히 빠집니다.
+        if local_stage == WON_STAGE:
+            _enqueue_pending_won(session, conv, sheet_client_id)
         session.commit()
 
     logger.info(
@@ -219,3 +225,44 @@ def sync_stage_from_hubspot(
     # After the commit, so a Sheets failure can never roll back the local move.
     _mirror_stage_to_sheet(sheet_client_id, local_stage, str(ticket_id))
     return local_stage
+
+
+# 파이프라인이 여기 오면 수주입니다. 로컬 단계 이름이고, HubSpot 쪽 id 는 설정에 있습니다.
+WON_STAGE = "won"
+
+
+def _enqueue_pending_won(session, conv, sheet_client_id: int | None) -> None:
+    """Won 티켓을 수주 전환 대기에 올립니다 — 계약 정보는 사람이 채웁니다.
+
+    바로 수주 고객으로 만들지 않는 이유: 금액도 기간도 없는 고객이 활성 고객 수와 예상
+    MRR 을 오염시킵니다. 그리고 Won → Negotiating 롤백은 대기에서 내리면 끝입니다.
+
+    같은 티켓이 두 번 와도 한 줄입니다(ticket_id UNIQUE). 이미 처리해서 ``done`` 이 된
+    티켓은 되살리지 않습니다 — 계약을 등록한 뒤 폴러가 그 티켓을 또 훑으면 대기 목록에
+    유령이 돌아옵니다.
+    """
+    from ..db.models import PendingWon
+
+    ticket_id = str(conv.hubspot_ticket_id or "").strip()
+    if not ticket_id:
+        return
+    existing = (
+        session.query(PendingWon).filter(PendingWon.ticket_id == ticket_id).one_or_none()
+    )
+    if existing is not None:
+        return
+    contact = session.get(Contact, conv.contact_id) if conv.contact_id else None
+    session.add(
+        PendingWon(
+            ticket_id=ticket_id,
+            company=(contact.company if contact else None) or (contact.full_name if contact else None),
+            client_id=sheet_client_id,
+            conversation_id=conv.id,
+            # 수주 유형(MRR/PoC)은 담당자가 고릅니다. HubSpot 의 Won type 은 읽지
+            # 않습니다 — 그 속성이 이 파이프라인에 있는지 확인되지 않았고, 없는 값을
+            # 추측해 채우면 PoC 였던 건이 MRR 로 굳습니다.
+            won_type=None,
+            won_on=datetime.now(timezone.utc).date().isoformat(),
+        )
+    )
+    logger.info("수주 전환 대기에 추가: ticket=%s client=%s", ticket_id, sheet_client_id)

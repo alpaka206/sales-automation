@@ -25,7 +25,7 @@ const SECTIONS: Section[] = [
     items: [
       { to: "/customers?stage=negotiation", label: "협상중 고객", icon: "flame" },
       { to: "/customers", label: "리드 히스토리", icon: "users", end: true, mobileLabel: "고객" },
-      { to: "/outbound-history", label: "수주 고객", icon: "globe" },
+      { to: "/won-customers", label: "수주 고객", icon: "globe" },
     ],
   },
   {
