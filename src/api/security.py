@@ -23,6 +23,9 @@ WEB_UI_PREFIXES = (
     "/logs", "/static", "/auth", "/tools", "/customers", "/operations",
     "/pipeline", "/companies", "/contacts", "/outbound-history",
     "/integrations",
+    # 수주 고객. 화면이 세션 쿠키로 부르는 브라우저 경로입니다 — 여기 없으면 토큰을
+    # 요구해서, 로그인한 운영자가 "invalid or missing token" 을 받습니다.
+    "/won-customers",
     # The React screens: served from /app, reading /api/ui with the operator's
     # session cookie. Browser paths, not token-authenticated JSON API routes.
     "/app", "/api/ui",

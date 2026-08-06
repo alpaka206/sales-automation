@@ -180,3 +180,43 @@ def test_won_lands_in_the_waiting_list_once(factory, monkeypatch):
     with factory() as session:
         rows = session.query(PendingWon).all()
         assert [(r.ticket_id, r.client_id, r.status) for r in rows] == [("T-1", 1108, "pending")]
+
+
+def test_the_console_can_actually_reach_the_write_routes():
+    """`/won-customers` 는 화면이 세션 쿠키로 부르는 브라우저 경로입니다.
+
+    security 의 목록에 없으면 토큰을 요구해서, 로그인한 운영자가 "invalid or missing
+    token" 을 받습니다 — 실제로 그렇게 막혀 있었고, 화면에는 저장 실패로만 보입니다.
+    """
+    from src.api.security import is_web_ui_path
+
+    for path in ("/won-customers", "/won-customers/2102/contracts", "/api/ui/won-customers"):
+        assert is_web_ui_path(path), path
+
+
+def test_credit_rounds_add_up_to_the_contract(factory):
+    """회차로 나눌 때 나머지는 **마지막 회차**에 붙습니다.
+
+    회차마다 반올림하면 합계가 계약 크레딧과 어긋나는데, 그 차이는 화면 어디에도 안 보이고
+    "누적 지급 = 계약 크레딧" 이라는 검증만 조용히 실패합니다.
+    """
+    from src.api.routes.won_customers import _seed_schedules
+
+    with factory() as session:
+        session.add(Client(client_id=2103, company="테스트"))
+        contract = ClientContract(
+            client_id=2103, seq=1, starts_on="2026-08-01", ends_on="2027-08-01",
+            amount_incl_vat=11_000_000, installments=4, first_payment_on="2026-08-01",
+            credits=240_817,
+        )
+        session.add(contract)
+        session.flush()
+        _seed_schedules(session, contract, credit_rounds=3)
+        session.commit()
+
+        grants = sorted(contract.credit_grants, key=lambda g: g.no)
+        assert [g.amount for g in grants] == [80_272, 80_272, 80_273]
+        assert sum(g.amount for g in grants) == 240_817
+        assert [g.grant_on for g in grants] == ["2026-08-01", "2026-09-01", "2026-10-01"]
+        # 분납은 총액을 나눈 값. 합계가 총 계약금액이어야 합니다.
+        assert sum(float(p.amount) for p in contract.payments) == 11_000_000

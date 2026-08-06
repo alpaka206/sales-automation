@@ -208,13 +208,13 @@ async def create_contract(client_id: int, request: Request):
         _fill_contract(contract, form)
         session.add(contract)
         session.flush()
-        _seed_schedules(session, contract)
+        _seed_schedules(session, contract, credit_rounds=_int(form.get("credit_rounds")) or 1)
         session.commit()
         contract_id = contract.id
     return {"id": contract_id, "seq": seq}
 
 
-def _seed_schedules(session, contract: ClientContract) -> None:
+def _seed_schedules(session, contract: ClientContract, credit_rounds: int = 1) -> None:
     """분납·크레딧 회차를 미리 깔아 둡니다 — 빈 목록이면 다음 결제일이 안 나옵니다.
 
     금액은 총액을 회차로 나눈 값이고, 날짜는 최초 결제일부터 한 달 간격입니다. 실제 일정이
@@ -234,16 +234,24 @@ def _seed_schedules(session, contract: ClientContract) -> None:
                 contract_id=contract.id, no=index + 1, total=count, paid_on=when, amount=per
             )
         )
+    # 크레딧도 같은 이유로 회차를 깔아 둡니다. 나눗셈의 나머지는 **마지막 회차**에 붙입니다 —
+    # 회차마다 반올림하면 합계가 계약 크레딧과 어긋나고, 그 차이는 화면에서 안 보입니다.
+    rounds = max(1, credit_rounds)
     credits = contract.credits or 0
-    session.add(
-        ContractCreditGrant(
-            contract_id=contract.id,
-            no=1,
-            total=1,
-            grant_on=contract.starts_on,
-            amount=credits or None,
+    per = credits // rounds if credits else 0
+    base_credit = contract.starts_on
+    start_date = date.fromisoformat(base_credit) if base_credit else None
+    for index in range(rounds):
+        amount = per if index < rounds - 1 else credits - per * (rounds - 1)
+        session.add(
+            ContractCreditGrant(
+                contract_id=contract.id,
+                no=index + 1,
+                total=rounds,
+                grant_on=_add_months(start_date, index).isoformat() if start_date else None,
+                amount=amount or None,
+            )
         )
-    )
 
 
 def _add_months(base: date, months: int) -> date:
@@ -399,7 +407,7 @@ def _fill_fx(payment: ContractPayment) -> None:
         logger.warning("환율 조회 실패 (payment=%s).", payment.id, exc_info=True)
         return
     if found:
-        payment.fx_rate, payment.fx_on = found
+        payment.fx_rate, payment.fx_on, _source = found
 
 
 # --------------------------------------------------------------------------- #
@@ -479,3 +487,97 @@ async def dismiss_pending(pending_id: int):
             pending.status = "dismissed"
             session.commit()
     return {"ok": True}
+
+
+# --------------------------------------------------------------------------- #
+# 내보내기
+# --------------------------------------------------------------------------- #
+@router.get("/won-customers/export.csv")
+def export_csv():
+    """수주 고객 전체를 계약 한 건당 한 줄로.
+
+    시트로 옮겨 붙이는 것이 목적이라 **계산된 값도 같이** 내보냅니다(계약 개월수·월간
+    매출·누적 지급·수금 완료). 시트에서 다시 수식을 짜면 두 곳의 숫자가 갈라집니다.
+
+    BOM 을 붙입니다 — 없으면 Excel 이 UTF-8 을 저는 코드페이지로 읽어 한글이 깨집니다.
+    """
+    import csv
+    import io
+    from datetime import date
+
+    from fastapi.responses import StreamingResponse
+    from sqlalchemy.orm import selectinload
+
+    from ...common import won
+
+    today = date.today()
+    buffer = io.StringIO()
+    writer = csv.writer(buffer)
+    writer.writerow([
+        "Client ID", "고객사", "고객 종류", "산업 분야", "국가", "담당부서",
+        "고객 담당자", "고객 연락처", "최초 수주일", "플랜 상태", "담당",
+        "계약 차수", "계약 상태", "Ticket ID", "수주 유형",
+        "계약 시작일", "계약 종료일", "계약 개월수", "계약서 유형",
+        "계약 크레딧", "누적 지급 크레딧", "통화",
+        "총 계약금액 (VAT 포함)", "공급가 (VAT 제외)", "수금 완료 금액", "수금율",
+        "분당 단가", "분당 단가 통화", "적용 환율",
+        "결제 수단", "결제 방식", "총 분납 횟수", "최초 결제일", "Billing Email",
+        "월간 매출 (VAT 포함)", "매출 인식 시작 월",
+        "플랜", "플랜명", "Perso Email", "Space 개수", "space_seq",
+        "다음 크레딧 지급일", "다음 결제일", "갱신 계획", "미처리 클레임",
+    ])
+    with SessionLocal() as session:
+        clients = (
+            session.query(Client)
+            .options(
+                selectinload(Client.contracts).selectinload(ClientContract.credit_grants),
+                selectinload(Client.contracts).selectinload(ClientContract.payments),
+                selectinload(Client.contracts).selectinload(ClientContract.claims),
+            )
+            .order_by(Client.client_id)
+            .all()
+        )
+        for client in clients:
+            base = [
+                client.client_id, client.company, won.client_type(client.client_id),
+                client.industry, client.country, client.department,
+                client.contact_name, client.contact_info, client.first_won_on,
+                client.plan_status, client.owner,
+            ]
+            if not client.contracts:
+                # 계약이 아직 없는 고객도 한 줄 나갑니다 — 빠지면 명단이 아닙니다.
+                writer.writerow(base + [""] * 33)
+                continue
+            for contract in client.contracts:
+                total = float(contract.amount_incl_vat or 0)
+                paid = float(won.collected(contract))
+                grant = won.next_credit_grant(contract)
+                payment = won.next_payment(contract)
+                writer.writerow(base + [
+                    contract.seq, won.contract_state(contract, today), contract.ticket_id,
+                    contract.deal_type, contract.starts_on, contract.ends_on,
+                    won.months_between(contract.starts_on, contract.ends_on),
+                    " + ".join(contract.doc_types or []),
+                    contract.credits, won.granted_credits(contract), contract.currency,
+                    contract.amount_incl_vat, contract.amount_excl_vat, paid,
+                    f"{(paid / total * 100):.1f}%" if total else "",
+                    contract.unit_price, contract.unit_currency, contract.unit_fx_rate,
+                    contract.payment_method, contract.payment_type, contract.installments,
+                    contract.first_payment_on, contract.billing_email,
+                    round(float(won.monthly_revenue(contract))),
+                    won.revenue_start_month(contract),
+                    contract.plan, contract.plan_name, contract.perso_email,
+                    contract.space_count, contract.space_seq,
+                    grant.grant_on if grant else "",
+                    payment.paid_on if payment else "",
+                    contract.renewal_plan,
+                    sum(1 for c in contract.claims if c.progress != "조치 완료"),
+                ])
+
+    body = "﻿" + buffer.getvalue()
+    stamp = today.isoformat()
+    return StreamingResponse(
+        iter([body]),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="won-customers-{stamp}.csv"'},
+    )

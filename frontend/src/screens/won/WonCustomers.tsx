@@ -116,7 +116,8 @@ export function WonCustomers() {
         <div className="page-head">
           <div><h1 className="page-title">수주 고객</h1></div>
           <div style={{ display: "flex", gap: 8 }}>
-            <button className="btn" type="button" onClick={() => open(0)}>CSV 내보내기</button>
+            {/* 브라우저의 다운로드가 기능 전부입니다 — fetch 로 돌리면 Save As 를 다시 짜게 됩니다. */}
+            <a className="btn" href="/won-customers/export.csv">CSV 내보내기</a>
             <button className="btn btn-primary" type="button"
                     onClick={() => navigate("/won-customers/new")}>+ 수주 고객 추가</button>
           </div>

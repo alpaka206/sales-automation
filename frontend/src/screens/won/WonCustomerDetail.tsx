@@ -115,6 +115,12 @@ export function WonCustomerDetail() {
                      <button className="btn btn-sm" type="button" onClick={() => setShowAll(!showAll)}>
                        {showAll ? "접기" : "전체 계약 내역"}
                      </button>
+                     {current && (
+                       <button className="btn btn-sm" type="button"
+                               onClick={() => navigate(`/won-customers/${data.client_id}/contracts/${current.id}`)}>
+                         수정
+                       </button>
+                     )}
                    </div>
                  }>
           {!current ? (
@@ -135,7 +141,7 @@ export function WonCustomerDetail() {
                 <KV k="최초 결제일" v={fmt(current.first_payment_on)} />
                 <KV k="Billing Email" v={current.billing_email} />
               </div>
-              {current.note && <p className="note">{current.note}</p>}
+              {current.note && <p className="note-box">{current.note}</p>}
               {showAll && (
                 <div className="table-wrap" style={{ marginTop: 14 }}>
                   <table>
@@ -218,18 +224,16 @@ export function WonCustomerDetail() {
               : commFilter === "nego" ? !item.contract_seq
               : item.contract_seq === commFilter)
             .map((item) => (
-              <div key={item.id} className="tl-row">
-                <div className="tl-when">{fmt(item.happened_at?.slice(0, 10))}</div>
-                <div>
-                  <div className="tl-head">
+              <div key={item.id} className="tl-item">
+                <div className="tl-meta">
+                  <span className="mono">{fmt(item.happened_at?.slice(0, 10))}</span>
                     <span className="tag neutral">{item.channel}</span>
                     {item.handler && <span className="muted">{item.handler}</span>}
                     {item.contract_seq
                       ? <span className="tag blue">{item.contract_seq}차 계약</span>
                       : <span className="tag neutral">협상 단계</span>}
-                  </div>
-                  <div className="tl-text">{item.subject ? `${item.subject} — ` : ""}{item.summary}</div>
                 </div>
+                <div className="tl-text">{item.subject ? `${item.subject} — ` : ""}{item.summary}</div>
               </div>
             ))}
           {!(data.comms ?? []).length && <div className="board-empty">기록이 없습니다.</div>}
@@ -246,7 +250,7 @@ function Section({ id, title, right, children }: {
     <section className="sec" id={id}>
       <div className="sec-head">
         <h2 className="sec-title">{title}</h2>
-        {right}
+        <div className="sec-actions">{right}</div>
       </div>
       {children}
     </section>
@@ -255,18 +259,18 @@ function Section({ id, title, right, children }: {
 
 function KV({ k, v }: { k: string; v: string | null | undefined }) {
   return (
-    <div className="kv">
-      <div className="kv-k">{k}</div>
-      <div className="kv-v">{v || "—"}</div>
+    <div>
+      <div className="field-label">{k}</div>
+      <div className="field-value">{v || "—"}</div>
     </div>
   );
 }
 
 function Stat({ label, value }: { label: string; value: string }) {
   return (
-    <div className="stat">
-      <div className="stat-lab">{label}</div>
-      <div className="stat-val">{value}</div>
+    <div>
+      <div className="stat-label">{label}</div>
+      <div className="stat-value">{value}</div>
     </div>
   );
 }
@@ -276,7 +280,11 @@ function CreditSection({ contract, today, onDone }: {
 }) {
   const done = contract.credit_grants.filter((g) => g.done);
   const pending = contract.credit_grants.filter((g) => !g.done);
-  const percent = contract.credits ? Math.min(100, Math.round((contract.granted_credits / contract.credits) * 100)) : 0;
+  // 계약 크레딧 대비 지급 진행률. 100%를 넘을 수 있습니다 — 테스트·보상 지급은 계약분
+  // 밖이라, 넘은 것이 곧 오류는 아닙니다. 그래서 자르지 않고 그대로 보여 줍니다.
+  const percent = contract.credits
+    ? Math.round((contract.granted_credits / contract.credits) * 100)
+    : 0;
 
   async function toggle(id: number, next: boolean) {
     await postForm(`/won-customers/credits/${id}`, { done: String(next) });
@@ -289,12 +297,12 @@ function CreditSection({ contract, today, onDone }: {
         <Stat label="계약 크레딧" value={num(contract.credits)} />
         <Stat label="누적 지급 크레딧" value={num(contract.granted_credits)} />
         <Stat label="다음 지급일" value={contract.next_credit_on ? dueText(contract.next_credit_on, today) : "완료"} />
+        <Stat label="지급 진행률" value={`${percent}%`} />
         <Stat label="잔여 지급 회차" value={`${pending.length}회`} />
       </div>
-      <div className="bar"><i style={{ width: `${percent}%` }} /></div>
-      <div className="sub-head">지급 예정</div>
+      <div className="form-sec">지급 예정</div>
       {pending.map((grant) => (
-        <div key={grant.id} className="row-item">
+        <div key={grant.id} className="form-row">
           <span className="no">{grant.no}/{grant.total}</span>
           <span className={`when ${dueClass(grant.grant_on, today)}`}>{fmt(grant.grant_on)}</span>
           <span className="amt">{num(grant.amount)} 크레딧</span>
@@ -304,9 +312,9 @@ function CreditSection({ contract, today, onDone }: {
         </div>
       ))}
       {!pending.length && <div className="board-empty">지급 예정 회차가 없습니다.</div>}
-      <div className="sub-head">지급 완료</div>
+      <div className="form-sec">지급 완료</div>
       {done.map((grant) => (
-        <div key={grant.id} className="row-item">
+        <div key={grant.id} className="form-row">
           <span className="no">{grant.no}/{grant.total}</span>
           <span className="when">{fmt(grant.grant_on)}</span>
           <span className="amt">{num(grant.amount)} 크레딧</span>
@@ -326,6 +334,7 @@ function PaySection({ contract, today, onDone }: {
 }) {
   const paid = contract.payments.filter((p) => p.done);
   const total = n(contract.amount_incl_vat);
+  // 수금율은 **항상 계약 통화 기준**입니다. 환율 환산은 대시보드의 예상 MRR 에서만 씁니다.
   const percent = total ? Math.min(100, Math.round((n(contract.collected) / total) * 100)) : 0;
 
   async function toggle(id: number, next: boolean) {
@@ -343,8 +352,7 @@ function PaySection({ contract, today, onDone }: {
         <Stat label="다음 결제일" value={contract.next_pay_on ? dueText(contract.next_pay_on, today) : "완료"} />
         <Stat label="분납 완료" value={`${paid.length} / ${contract.payments.length}`} />
       </div>
-      <div className="bar"><i style={{ width: `${percent}%` }} /></div>
-      <div className="sub-head">결제 히스토리</div>
+      <div className="form-sec">결제 히스토리</div>
       <div className="table-wrap">
         <table>
           <thead><tr>
@@ -413,7 +421,7 @@ function CareSection({ contract, onDone }: { contract: Contract; onDone: () => v
         </div>
       )}
       {contract.claims.map((claim) => (
-        <div key={claim.id} className="row-item">
+        <div key={claim.id} className="form-row">
           <span className="when">{fmt(claim.happened_on)}</span>
           <span className="amt">{claim.kind}</span>
           {claim.compensation && <span className="muted">{claim.compensation}</span>}
