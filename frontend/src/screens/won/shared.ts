@@ -35,7 +35,9 @@ export type Contract = {
   space_count: number | null; space_seq: string | null;
   granted_credits: number; collected: Money;
   next_credit_on: string | null; next_credit_amount: number | null;
+  next_credit_no: number | null; next_credit_total: number | null;
   next_pay_on: string | null; next_pay_amount: Money;
+  next_pay_no: number | null; next_pay_total: number | null;
   credit_grants: Grant[]; payments: Payment[]; claims: Claim[];
 };
 export type Row = {
@@ -63,8 +65,10 @@ export type ListData = {
   pending: { id: number; ticket_id: string; company: string | null; client_id: number | null;
              won_type: string | null; won_on: string | null }[];
   boards: {
-    credit: { client_id: number; company: string; on: string; amount: number | null }[];
-    payment: { client_id: number; company: string; on: string; amount: Money; currency: string }[];
+    credit: { client_id: number; company: string; on: string; amount: number | null;
+              no: number | null; total: number | null }[];
+    payment: { client_id: number; company: string; on: string; amount: Money; currency: string;
+               no: number | null; total: number | null }[];
     claim: { client_id: number; company: string; kind: string; on: string | null; progress: string }[];
   };
   fx_rate: number;

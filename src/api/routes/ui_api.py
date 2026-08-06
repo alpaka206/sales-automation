@@ -712,8 +712,14 @@ def _won_contract(contract, today) -> dict:
         "collected": won.collected(contract),
         "next_credit_on": next_grant.grant_on if next_grant else None,
         "next_credit_amount": next_grant.amount if next_grant else None,
+        # 몇 번째 회차인지. 액션 보드가 "1,800 크레딧" 만 보여 주면 그게 마지막 회차인지
+        # 열두 번 중 두 번째인지 알 수 없어서, 열어 봐야 판단이 됩니다.
+        "next_credit_no": next_grant.no if next_grant else None,
+        "next_credit_total": next_grant.total if next_grant else None,
         "next_pay_on": next_pay.paid_on if next_pay else None,
         "next_pay_amount": next_pay.amount if next_pay else None,
+        "next_pay_no": next_pay.no if next_pay else None,
+        "next_pay_total": next_pay.total if next_pay else None,
         "credit_grants": [
             {
                 "id": g.id, "no": g.no, "total": g.total, "grant_on": g.grant_on,
@@ -818,11 +824,13 @@ def ui_won_customers():
             credit_due.append({
                 "client_id": row["client_id"], "company": row["company"],
                 "on": active["next_credit_on"], "amount": active["next_credit_amount"],
+                "no": active["next_credit_no"], "total": active["next_credit_total"],
             })
         if active["next_pay_on"]:
             pay_due.append({
                 "client_id": row["client_id"], "company": row["company"],
                 "on": active["next_pay_on"], "amount": active["next_pay_amount"],
+                "no": active["next_pay_no"], "total": active["next_pay_total"],
                 "currency": active["currency"],
             })
         for claim in active["claims"]:

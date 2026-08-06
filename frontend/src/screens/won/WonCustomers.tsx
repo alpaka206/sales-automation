@@ -33,6 +33,11 @@ function DealTag({ deal }: { deal: string | null }) {
 const AVATAR_COLORS = ["#0F766E", "#B45309", "#3730A3", "#B42318", "#026AA2", "#4B5563"];
 const avatarColor = (id: number) => AVATAR_COLORS[id % AVATAR_COLORS.length];
 
+// "1,800 크레딧" 만 보이면 그게 마지막 회차인지 열두 번 중 두 번째인지 알 수 없습니다 —
+// 열어 봐야 판단이 되는 것을 목록에서 끝내려고 회차를 앞에 붙입니다.
+const round = (item: { no: number | null; total: number | null }) =>
+  item.no ? `${item.no}/${item.total}회차 · ` : "";
+
 export function WonCustomers() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -189,7 +194,7 @@ export function WonCustomers() {
                       onClick={() => open(item.client_id, "sec-credit")}>
                 <div style={{ minWidth: 0 }}>
                   <div className="board-name">{item.company}</div>
-                  <div className="board-meta">{num(item.amount)} 크레딧</div>
+                  <div className="board-meta">{round(item)}{num(item.amount)} 크레딧</div>
                 </div>
                 <span className={`board-when ${dueClass(item.on, today)}`}>{dueText(item.on, today)}</span>
               </button>
@@ -202,7 +207,7 @@ export function WonCustomers() {
                       onClick={() => open(item.client_id, "sec-pay")}>
                 <div style={{ minWidth: 0 }}>
                   <div className="board-name">{item.company}</div>
-                  <div className="board-meta">{money(item.amount, item.currency)}</div>
+                  <div className="board-meta">{round(item)}{money(item.amount, item.currency)}</div>
                 </div>
                 <span className={`board-when ${dueClass(item.on, today)}`}>{dueText(item.on, today)}</span>
               </button>
@@ -391,6 +396,7 @@ function RowView({ row, rows, index, today, onOpen }: {
           {contract?.next_credit_on ? fmt(contract.next_credit_on) : <span className="muted">완료</span>}
           {contract?.next_credit_on && (
             <span className={`sub ${dueClass(contract.next_credit_on, today)}`}>
+              {contract.next_credit_no ? `${contract.next_credit_no}/${contract.next_credit_total}회차 · ` : ""}
               {num(contract.next_credit_amount)} 크레딧 · {dueText(contract.next_credit_on, today)}
             </span>
           )}
@@ -399,6 +405,7 @@ function RowView({ row, rows, index, today, onOpen }: {
           {contract?.next_pay_on ? fmt(contract.next_pay_on) : <span className="muted">완료</span>}
           {contract?.next_pay_on && (
             <span className={`sub ${dueClass(contract.next_pay_on, today)}`}>
+              {contract.next_pay_no ? `${contract.next_pay_no}/${contract.next_pay_total}회차 · ` : ""}
               {money(contract.next_pay_amount, contract.currency)} · {dueText(contract.next_pay_on, today)}
             </span>
           )}
