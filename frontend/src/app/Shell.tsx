@@ -59,9 +59,19 @@ function NavItem({ entry, pending }: { entry: Entry; pending?: number }) {
   const location = useLocation();
   // 협상중 고객 and 리드 히스토리 are the same path; only the query separates them, and
   // NavLink compares paths alone — so the active test is made here.
+  //
+  // 하위 경로도 같은 화면입니다: `/won-customers/2102` 에서 상세를 보고 있어도 왼쪽 nav 는
+  // 수주 고객을 가리켜야 합니다. 정확 일치만 보면 상세로 들어가는 순간 사이드바가 아무
+  // 데도 강조하지 않아서, 내가 어느 화면에 있는지가 사라집니다.
+  //
+  // `/` 를 따로 예외 처리하지 않습니다: 접두사를 `path + "/"` 로 보므로 루트는 `"//"` 가
+  // 되어 어디에도 안 걸리고, 결국 정확 일치로만 켜집니다. 형제 경로도 안전합니다 —
+  // `/won-customers` 는 `/customers/` 로 시작하지 않습니다.
   const [path, query] = entry.to.split("?");
+  const onPath =
+    location.pathname === path || location.pathname.startsWith(path + "/");
   const active =
-    location.pathname === path &&
+    onPath &&
     (query ? location.search.includes(query) : !location.search.includes("stage=negotiation"));
   return (
     <NavLink

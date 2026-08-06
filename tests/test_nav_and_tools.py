@@ -356,3 +356,34 @@ def test_a_one_line_field_is_not_trimmed_while_it_is_being_typed():
     assert "onChange={(e) => setBody(e.target.value.trim())}" not in TEMPLATES
     assert "const value = oneLine ? body.trim() : body;" in TEMPLATES
     assert "body: value" in TEMPLATES
+
+
+def test_the_sidebar_stays_lit_on_a_detail_page():
+    """상세로 들어가도 왼쪽 nav 는 그 화면을 가리켜야 합니다.
+
+    정확 일치만 보면 `/won-customers/2102` 에서 사이드바가 아무 데도 강조하지 않아,
+    내가 어느 화면에 있는지가 사라집니다. 그렇다고 접두사로만 보면 `/` 가 모든 경로의
+    앞부분이라 문의 대시보드가 항상 켜집니다.
+
+    규칙은 "정확히 같거나, `path + '/'` 로 시작" 하나입니다. 루트는 `"//"` 가 되어 어디에도
+    안 걸리고, 형제 경로도 안전합니다 — `/won-customers` 는 `/customers/` 로 시작하지
+    않습니다. 그 두 성질이 이 한 줄에 같이 걸려 있어서 여기서 고정합니다.
+    """
+    source = SHELL
+
+    assert 'location.pathname.startsWith(path + "/")' in source
+    assert "location.pathname === path ||" in source
+
+    def on_path(path: str, pathname: str) -> bool:
+        return pathname == path or pathname.startswith(path + "/")
+
+    assert on_path("/won-customers", "/won-customers")
+    assert on_path("/won-customers", "/won-customers/2102")
+    assert on_path("/won-customers", "/won-customers/2102/contracts/new")
+    assert on_path("/customers", "/customers/17")
+    # 루트는 정확 일치일 때만.
+    assert on_path("/", "/")
+    assert not on_path("/", "/won-customers")
+    # 형제 경로가 서로를 켜면 안 됩니다.
+    assert not on_path("/customers", "/won-customers")
+    assert not on_path("/won-customers", "/customers")
