@@ -347,3 +347,11 @@
 .won .list-row .mono { color: var(--faint); min-width: 34px; }
 .won .list-row .grow { flex: 1; }
 .won .list-row .inp { width: auto; min-width: 120px; }
+
+/* 페이지 제목("수주 고객")은 **보이지 않는 것이 맞습니다.** console.css 가 모든 화면에서
+ * 시각적으로 감춥니다 — 사이드바의 강조된 항목과 같은 말이라서요. 화면에서 지우지 않고
+ * clip 으로 감추는 이유는 스크린 리더가 읽어야 하기 때문이고, 수주 화면도 같은 규칙을
+ * 따릅니다. 목업의 `.page-title` 글자 크기 규칙은 그래서 적용되지 않습니다.
+ *
+ * 되살리려면 여기서 position/width/height/clip 을 되돌리면 되는데, 그러면 이 화면만 제목이
+ * 있고 나머지는 없는 콘솔이 됩니다. */

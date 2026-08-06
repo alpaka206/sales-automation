@@ -145,7 +145,6 @@ export function WonContractForm() {
   return (
     <div className="won">
       <div className="page">
-        <div className="crumb">고객 관리 / 수주 고객 / {data.company}</div>
         <div className="page-head">
           <div>
             <h1 className="page-title">{editing ? "계약 수정" : prev ? "계약 추가" : "계약 정보 입력"}</h1>

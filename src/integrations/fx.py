@@ -123,3 +123,23 @@ def usd_krw_on(day: date | str) -> tuple[Decimal, str, str] | None:
         if found:
             return found
     return _frankfurter(target)
+
+
+# 오늘 환율은 화면을 열 때마다 필요합니다. 목록 한 번에 외부 호출 한 번이면 목록이 그
+# 응답만큼 느려지므로, **날짜별로 한 번만** 부르고 그 값을 재사용합니다. 프로세스 메모리라
+# 재시작하면 다시 부르는데, 하루에 한 번이면 충분합니다.
+_today_cache: dict[str, tuple[Decimal, str, str] | None] = {}
+
+
+def usd_krw_today() -> tuple[Decimal, str, str] | None:
+    """예상 MRR 이 USD 계약을 원화로 환산할 때 쓰는 값.
+
+    운영자가 손으로 적던 칸을 대신합니다. 손으로 적으면 두 사람이 다른 숫자를 보고 회의에
+    들어가고, 아무도 그 값이 언제 것인지 모릅니다. 실제 고시일을 같이 돌려주는 이유입니다.
+
+    **과거 입금액에는 쓰지 않습니다** — 그건 결제 행에 그날 환율이 박혀 있습니다.
+    """
+    key = date.today().isoformat()
+    if key not in _today_cache:
+        _today_cache[key] = usd_krw_on(date.today())
+    return _today_cache[key]

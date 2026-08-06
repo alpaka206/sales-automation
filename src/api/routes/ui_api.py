@@ -778,9 +778,14 @@ def ui_won_customers():
     from ...common.config import settings as app_settings
     from ...db.models import Client, PendingWon
     from ...db.session import SessionLocal
+    from ...integrations.fx import usd_krw_today
     from sqlalchemy.orm import selectinload
 
     today = date.today()
+    try:
+        fx = usd_krw_today()
+    except Exception:  # 환율을 못 가져와도 목록은 떠야 합니다
+        fx = None
     with SessionLocal() as session:
         clients = (
             session.query(Client)
@@ -835,8 +840,12 @@ def ui_won_customers():
         "rows": rows,
         "pending": waiting,
         "boards": {"credit": credit_due, "payment": pay_due, "claim": claims_open},
-        # 예상 MRR 환산에 쓰는 환율. 한 사람이 바꾸면 모두가 같은 숫자를 봅니다.
-        "fx_rate": app_settings.MRR_FX_RATE,
+        # 예상 MRR 환산에 쓰는 환율. **오늘 고시가를 가져옵니다** — 손으로 적던 칸이
+        # 있었는데, 그러면 두 사람이 다른 숫자를 보고 회의에 들어가고 그 값이 언제
+        # 것인지 아무도 모릅니다. 못 가져오면 설정값으로 떨어집니다.
+        "fx_rate": float(fx[0]) if fx else app_settings.MRR_FX_RATE,
+        "fx_on": fx[1] if fx else None,
+        "fx_source": fx[2] if fx else "설정값",
         "options": {
             "industries": list(won.INDUSTRIES),
             "plans": list(won.PLANS),

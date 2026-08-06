@@ -114,7 +114,6 @@ export function WonNew() {
   return (
     <div className="won">
       <div className="page">
-        <div className="crumb">고객 관리 / 수주 고객 / 추가</div>
         <div className="page-head">
           <div>
             <h1 className="page-title">수주 고객 추가</h1>

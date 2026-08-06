@@ -68,6 +68,8 @@ export type ListData = {
     claim: { client_id: number; company: string; kind: string; on: string | null; progress: string }[];
   };
   fx_rate: number;
+  fx_on: string | null;
+  fx_source: string;
   options: Options;
 };
 

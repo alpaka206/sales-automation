@@ -48,10 +48,9 @@ export function WonCustomers() {
   const [type, setType] = useState("all");
   const [dept, setDept] = useState("all");
   const [view, setView] = useState<"" | "활성" | "갱신임박">("");
-  const [fx, setFx] = useState<number | null>(null);
 
   const today = data?.today ?? new Date().toISOString().slice(0, 10);
-  const rate = fx ?? data?.fx_rate ?? 1380;
+  const rate = data?.fx_rate ?? 1380;
 
   const rows = useMemo(() => {
     const all = data?.rows ?? [];
@@ -112,7 +111,6 @@ export function WonCustomers() {
   return (
     <div className="won">
       <div className="page">
-        <div className="crumb">고객 관리 / 수주 고객</div>
         <div className="page-head">
           <div><h1 className="page-title">수주 고객</h1></div>
           <div style={{ display: "flex", gap: 8 }}>
@@ -152,10 +150,14 @@ export function WonCustomers() {
                 <i>KRW</i><b>{money(mrrKrw)}</b>
                 <i>USD</i><b>{money(mrrUsd, "USD")}</b>
               </div>
+              {/* 손으로 적던 칸이었습니다. 이제 오늘 고시가를 가져오므로 적을 이유가
+                  없고, 적게 두면 두 사람이 다른 환율로 다른 MRR 을 봅니다. 어느 날짜의
+                  값인지 같이 보여 줍니다 — 그게 숫자를 설명하는 유일한 단서입니다. */}
               <div className="fx-row">
-                적용 환율{" "}
-                <input type="number" value={rate} step={1}
-                       onChange={(event) => setFx(Number(event.target.value) || 0)} /> 원 / USD
+                적용 환율 <b>{num(Math.round(rate))}</b> 원 / USD
+                <span style={{ color: "var(--faint)", marginLeft: 6 }}>
+                  {data.fx_on ? `${fmt(data.fx_on)} 고시` : "설정값"}
+                </span>
               </div>
             </div>
           </div>
