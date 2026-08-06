@@ -197,6 +197,10 @@ def _fill_contract(contract: ClientContract, form: dict) -> None:
         contract.doc_types = [part.strip() for part in raw.split("|") if part.strip()] or None
     contract.deal_type = contract.deal_type or "MRR"
     contract.currency = contract.currency or "KRW"
+    # 플랜 기간은 계약기간과 같습니다 — 폼이 묻지 않고 그렇게 저장한다고 적어 둡니다.
+    # 다르게 둘 일이 생기면 그때 칸을 만드는 편이, 늘 같은 값을 두 번 받는 것보다 낫습니다.
+    contract.plan_starts_on = contract.plan_starts_on or contract.starts_on
+    contract.plan_ends_on = contract.plan_ends_on or contract.ends_on
     _apply_credits(contract)
 
 
@@ -211,15 +215,29 @@ async def create_contract(client_id: int, request: Request):
         seq = max((c.seq for c in client.contracts), default=0) + 1
         contract = ClientContract(client_id=client_id, seq=seq)
         _fill_contract(contract, form)
+        # 목업의 「저장 후 플랜 상태」. 계약이 아니라 **고객**의 값이라 여기서 씁니다 —
+        # 첫 계약을 넣는 순간이 세팅중에서 사용중으로 넘어가는 순간이기도 합니다.
+        if _text(form.get("plan_status")):
+            client.plan_status = _text(form.get("plan_status"))
         session.add(contract)
         session.flush()
-        _seed_schedules(session, contract, credit_rounds=_int(form.get("credit_rounds")) or 1)
+        _seed_schedules(
+            session,
+            contract,
+            credit_rounds=_int(form.get("credit_rounds")) or 1,
+            first_credit_on=_text(form.get("first_credit_on")),
+        )
         session.commit()
         contract_id = contract.id
     return {"id": contract_id, "seq": seq}
 
 
-def _seed_schedules(session, contract: ClientContract, credit_rounds: int = 1) -> None:
+def _seed_schedules(
+    session,
+    contract: ClientContract,
+    credit_rounds: int = 1,
+    first_credit_on: str = "",
+) -> None:
     """분납·크레딧 회차를 미리 깔아 둡니다 — 빈 목록이면 다음 결제일이 안 나옵니다.
 
     금액은 총액을 회차로 나눈 값이고, 날짜는 최초 결제일부터 한 달 간격입니다. 실제 일정이
@@ -244,7 +262,9 @@ def _seed_schedules(session, contract: ClientContract, credit_rounds: int = 1) -
     rounds = max(1, credit_rounds)
     credits = contract.credits or 0
     per = credits // rounds if credits else 0
-    base_credit = contract.starts_on
+    # 첫 지급일은 폼이 받습니다. 계약 시작일과 다른 계약이 흔합니다 — 세팅 기간을 두고
+    # 다음 달 1일부터 주는 식으로. 안 주면 예전처럼 계약 시작일부터입니다.
+    base_credit = first_credit_on or contract.starts_on
     start_date = date.fromisoformat(base_credit) if base_credit else None
     for index in range(rounds):
         amount = per if index < rounds - 1 else credits - per * (rounds - 1)
@@ -279,6 +299,8 @@ async def update_contract(contract_id: int, request: Request):
     with SessionLocal() as session:
         contract = _get_contract(session, contract_id)
         _fill_contract(contract, form)
+        if _text(form.get("plan_status")):
+            contract.client.plan_status = _text(form.get("plan_status"))
         session.commit()
     return {"ok": True}
 

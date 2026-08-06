@@ -9,10 +9,15 @@ import { type Contract, type ListData, type Row, n, num } from "./shared";
 
 /** 계약 정보 입력 — 추가와 수정이 같은 폼입니다.
  *
- * 목업의 계약 모달 그대로이되 두 곳이 다릅니다:
+ * **목업(`수주관리목업_0806.html` 의 `renderContractModal`)과 절 순서·칸·문구를 맞춥니다.**
+ * 머리·본문·바닥의 모양도 목업의 `.modal-head/.modal-body/.modal-foot` 을 따릅니다 — 다만
+ * 그 대화상자를 다시 만들지는 않고, 콘솔의 `Modal` 에 그 옷만 입힙니다(`won.css` 끝).
  *
- * - **계약 크레딧을 입력받지 않습니다.** 공급가 ÷ 분당 단가 × 60 으로 계산해 옆에 보여 줍니다.
- *   운영자의 시트에서 그 값이 손으로 들어가다 보니 계약마다 계산 기준이 달랐습니다.
+ * 목업과 **다른 곳은 두 군데뿐**이고, 둘 다 운영자가 그렇게 하라고 한 것입니다:
+ *
+ * - **계약 크레딧을 입력받지 않습니다.** 목업은 손으로 적는 칸인데, 공급가 ÷ 분당 단가 × 60
+ *   으로 계산해 같은 자리에 보여 줍니다. 시트에서 손으로 들어가다 보니 계약마다 계산 기준이
+ *   달랐습니다. 그래서 **공급가 (VAT 제외)** 칸이 하나 늘었습니다 — 목업에는 없습니다.
  * - **통화가 다르면 환율을 받습니다.** 원화 계약에 USD 단가를 매기는 경우가 흔한데, 그때
  *   쓴 환율이 없으면 크레딧을 계산할 수 없고 나중에 오늘 환율로 다시 계산하면 값이 바뀝니다.
  *
@@ -60,7 +65,10 @@ export function WonContractForm() {
   const [draft, setDraft] = useState<Draft | null>(null);
   const [docTypes, setDocTypes] = useState<string[]>([]);
   const [copyPrev, setCopyPrev] = useState(true);
-  const [creditRounds, setCreditRounds] = useState("1");
+  const [creditRounds, setCreditRounds] = useState("12");
+  const [firstCreditOn, setFirstCreditOn] = useState("");
+  // 목업의 「저장 후 플랜 상태」. 계약이 아니라 **고객**의 값이라 별도로 보냅니다.
+  const [planStatus, setPlanStatus] = useState("");
   const [note, setNote] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
 
@@ -81,9 +89,12 @@ export function WonContractForm() {
     const prev = contracts.length ? contracts[contracts.length - 1] : undefined;
     const pending = params.get("pending");
     const pendingTicket = list.pending.find((p) => String(p.id) === pending)?.ticket_id ?? "";
+    setPlanStatus(data.plan_status || "");
     if (target) {
       setDraft(fromContract(target));
       setDocTypes(target.doc_types || []);
+      setCreditRounds(String(target.credit_grants?.length || 12));
+      setFirstCreditOn(target.credit_grants?.[0]?.grant_on || target.starts_on || "");
     } else {
       const start = prev?.ends_on || new Date().toISOString().slice(0, 10);
       setDraft({
@@ -96,6 +107,7 @@ export function WonContractForm() {
         plan_name: prev?.plan_name || data.company,
       });
       setDocTypes(prev && copyPrev ? prev.doc_types || [] : []);
+      setFirstCreditOn(start);
     }
   }
 
@@ -134,6 +146,8 @@ export function WonContractForm() {
       ...draft,
       doc_types: docTypes.join("|"),
       credit_rounds: creditRounds,
+      first_credit_on: firstCreditOn,
+      plan_status: planStatus,
     };
     try {
       if (editing) {
@@ -149,7 +163,7 @@ export function WonContractForm() {
   });
 
   if (!data || !list || !draft) {
-    return <Modal title="계약 정보" onClose={back}>
+    return <Modal key="loading" title="계약 정보" onClose={back}>
              <div className="won"><p className="note-box">불러오는 중…</p></div>
            </Modal>;
   }
@@ -164,18 +178,31 @@ export function WonContractForm() {
     // 트랩·Escape·배경 스크롤 잠금이 거기 한 벌 있고, 목업의 자체 모달을 옮기면 그게 두
     // 벌이 됩니다. 제출 버튼은 푸터(본문 밖)에 있으므로 `form` 속성으로 폼을 가리킵니다.
     <Modal
+      key="form"
       title={editing ? "계약 수정" : prev ? "계약 추가" : "계약 정보 입력"}
       description={
-        prev && !editing
-          ? "Client ID는 그대로 유지되고, 계약만 별도 히스토리로 쌓입니다."
-          : "이 고객의 계약 정보입니다."
+        editing
+          ? "이 계약의 정보를 고칩니다."
+          : prev
+            ? "기존 고객에 새 계약을 추가합니다. Client ID는 그대로 유지되고, 계약만 별도 히스토리로 쌓입니다."
+            : "이 고객의 첫 계약 정보를 입력합니다."
       }
       wide
       onClose={back}
       actions={
-        <SubmitButton busy={saving} pending="저장 중" form={FORM_ID}>
-          {editing ? "저장" : "계약 등록"}
-        </SubmitButton>
+        <>
+          {/* 버튼 옆입니다. 본문만 스크롤하므로 폼 끝에 두면 화면 밖에 그려지고, 누른
+              사람은 아무 일도 안 일어난 줄 압니다. */}
+          {note && (
+            <span className="t-xs" role="status"
+                  style={{ marginRight: "auto", alignSelf: "center", color: "var(--danger)" }}>
+              {note}
+            </span>
+          )}
+          <SubmitButton busy={saving} pending="저장 중" form={FORM_ID}>
+            {editing ? "저장" : "계약 저장"}
+          </SubmitButton>
+        </>
       }
     >
       <div className="won">
@@ -187,21 +214,26 @@ export function WonContractForm() {
             </div>
             <div style={{ fontSize: 12.5, color: "var(--muted)", borderLeft: "1px solid #CFE2DF", paddingLeft: 12 }}>
               {data.company} · Client ID <b>{data.client_id}</b> (유지)<br />
-              기존 계약 {contracts.length}건
+              기존 계약 {contracts.length}건 · 저장 시 최신 계약으로 노출
             </div>
           </div>
 
           {prev && !editing && (
-            <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 13, cursor: "pointer" }}>
-              <input type="checkbox" checked={copyPrev}
-                     onChange={(e) => {
-                       setCopyPrev(e.target.checked);
-                       setDraft((c) => c ? { ...c, ...(e.target.checked ? carryOver(prev) : emptyCarry()) } : c);
-                       setDocTypes(e.target.checked ? prev.doc_types || [] : []);
-                     }} />
-              이전 계약({prev.label})의 플랜 · 결제 · 계정 설정 불러오기
-              <span style={{ color: "var(--faint)" }}>금액 · 크레딧 · 기간은 새로 입력합니다.</span>
-            </label>
+            <>
+              <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 13,
+                              marginBottom: 4, cursor: "pointer" }}>
+                <input type="checkbox" checked={copyPrev}
+                       onChange={(e) => {
+                         setCopyPrev(e.target.checked);
+                         setDraft((c) => c ? { ...c, ...(e.target.checked ? carryOver(prev) : emptyCarry()) } : c);
+                         setDocTypes(e.target.checked ? prev.doc_types || [] : []);
+                       }} />
+                이전 계약({prev.label})의 플랜 · 결제 · 계정 설정 불러오기
+              </label>
+              <div style={{ fontSize: 12, color: "var(--faint)", marginBottom: 6, paddingLeft: 22 }}>
+                금액 · 크레딧 · 기간은 새로 입력합니다.
+              </div>
+            </>
           )}
 
           <div className="form-sec">계약</div>
@@ -216,11 +248,26 @@ export function WonContractForm() {
             <Field label="계약 종료일" required>
               <input className="inp" type="date" value={draft.ends_on} onChange={(e) => set("ends_on", e.target.value)} />
             </Field>
+            {/* 목업대로 읽기 전용입니다. 티켓은 수주 전환 대기에서 따라오는 값이라, 여기서
+                손으로 고치면 어느 문의에서 온 계약인지가 조용히 틀어집니다. */}
             <Field label="Ticket ID">
-              <input className="inp" value={draft.ticket_id} onChange={(e) => set("ticket_id", e.target.value)}
-                     placeholder="인바운드 건만 연동" />
+              <input className="inp" value={draft.ticket_id} readOnly
+                     style={{ background: "var(--bg-soft)", color: "var(--muted)" }}
+                     placeholder="인바운드 건만 자동 연동" />
             </Field>
-            <div style={{ gridColumn: "span 2" }}>
+            {/* 목업에서는 손으로 적는 칸이었습니다. 같은 자리에 계산값을 놓습니다 —
+                공급가 ÷ 분당 단가 × 60. 아래 힌트도 목업 그대로 「1분 = 60크레딧」. */}
+            <Field label="계약 크레딧" required>
+              <div className="inp" aria-readonly="true"
+                   style={{ background: "var(--bg-soft)", color: credits === null ? "var(--faint)" : "var(--ink)",
+                            fontVariantNumeric: "tabular-nums" }}>
+                {credits === null ? "공급가 · 분당 단가 입력 시 계산" : num(credits)}
+              </div>
+              <div style={{ fontSize: 11.5, color: "var(--faint)", marginTop: 4 }}>
+                1분 = 60크레딧{credits === null ? "" : ` · ${num(Math.round(credits / 60))}분`}
+              </div>
+            </Field>
+            <div style={{ gridColumn: "span 3" }}>
               <label className="form-label">계약서 유형 <span style={{ color: "var(--faint)" }}>(복수 선택)</span></label>
               <div style={{ display: "flex", flexWrap: "wrap", gap: 14, padding: "7px 0 2px" }}>
                 {options.doc_types.map((item) => (
@@ -237,23 +284,25 @@ export function WonContractForm() {
 
           <div className="form-sec">금액</div>
           <div className="form-grid3">
-            <Field label="통화" required>
+            <Field label="통화">
               <Sel value={draft.currency} onChange={(v) => set("currency", v)} options={options.currencies} />
             </Field>
-            <Field label="총 계약금액 (VAT 포함)" required>
+            <div style={{ gridColumn: "span 2" }}>
+              <label className="form-label">총 계약금액 (VAT 포함) <span className="req">*</span></label>
               <input className="inp" type="number" value={draft.amount_incl_vat}
-                     onChange={(e) => set("amount_incl_vat", e.target.value)} />
+                     onChange={(e) => set("amount_incl_vat", e.target.value)} placeholder="예: 22000000" />
+            </div>
+            <Field label="분당 단가 통화">
+              <Sel value={draft.unit_currency} onChange={(v) => set("unit_currency", v)} options={options.currencies} />
             </Field>
+            <Field label="분당 단가">
+              <input className="inp" type="number" step="0.01" value={draft.unit_price}
+                     onChange={(e) => set("unit_price", e.target.value)} />
+            </Field>
+            {/* 목업에 없는 칸입니다 — 크레딧을 계산하려면 VAT 를 뺀 금액이 필요합니다. */}
             <Field label="공급가 (VAT 제외)" required>
               <input className="inp" type="number" value={draft.amount_excl_vat}
                      onChange={(e) => set("amount_excl_vat", e.target.value)} />
-            </Field>
-            <Field label="분당 단가" required>
-              <input className="inp" type="number" step="0.0001" value={draft.unit_price}
-                     onChange={(e) => set("unit_price", e.target.value)} />
-            </Field>
-            <Field label="분당 단가 통화">
-              <Sel value={draft.unit_currency} onChange={(v) => set("unit_currency", v)} options={options.currencies} />
             </Field>
             {draft.unit_currency !== draft.currency && (
               <Field label="적용 환율" required>
@@ -265,13 +314,6 @@ export function WonContractForm() {
                 </div>
               </Field>
             )}
-            <div style={{ gridColumn: "span 3" }}>
-              <div className="note-box">
-                <b>계약 크레딧 {credits === null ? "—" : `${num(credits)} 크레딧`}</b>
-                {credits !== null && ` (${num(Math.round(credits / 60))}분)`}
-                {" · "}공급가 ÷ 분당 단가 × 60 으로 계산합니다. 1분 = 60크레딧.
-              </div>
-            </div>
           </div>
 
           <div className="form-sec">결제</div>
@@ -291,16 +333,42 @@ export function WonContractForm() {
               <input className="inp" type="date" value={draft.first_payment_on}
                      onChange={(e) => set("first_payment_on", e.target.value)} />
             </Field>
-            <Field label="크레딧 지급 회차 수">
+            <div style={{ gridColumn: "span 2" }}>
+              <label className="form-label">Billing Email</label>
+              <input className="inp" value={draft.billing_email} placeholder="예: ap@company.com"
+                     onChange={(e) => set("billing_email", e.target.value)} />
+            </div>
+          </div>
+
+          <div className="form-sec">크레딧 지급</div>
+          <div className="form-grid3">
+            <Field label="총 지급 회차">
               <input className="inp" type="number" min={1} value={creditRounds}
                      onChange={(e) => setCreditRounds(e.target.value)} disabled={editing} />
             </Field>
-            <Field label="Billing Email">
-              <input className="inp" value={draft.billing_email} onChange={(e) => set("billing_email", e.target.value)} />
+            <Field label="첫 지급 예정일">
+              <input className="inp" type="date" value={firstCreditOn}
+                     onChange={(e) => setFirstCreditOn(e.target.value)} disabled={editing} />
+            </Field>
+            <div style={{ display: "flex", alignItems: "flex-end", fontSize: 12, color: "var(--faint)" }}>
+              {editing
+                ? "회차는 크레딧 지급 섹션에서 고칩니다."
+                : "회차별 크레딧은 균등 분배로 자동 생성됩니다."}
+            </div>
+          </div>
+
+          <div className="form-sec">매출 인식</div>
+          <div className="form-grid3">
+            <Field label="매출 인식 시작 월">
+              <input className="inp" type="month" value={draft.revenue_from}
+                     onChange={(e) => set("revenue_from", e.target.value)} />
+              <div style={{ fontSize: 11.5, color: "var(--faint)", marginTop: 4 }}>
+                비우면 계약 시작월부터 인식합니다. (MRR만 적용)
+              </div>
             </Field>
           </div>
 
-          <div className="form-sec">Perso 계정 · 플랜</div>
+          <div className="form-sec">Perso 계정 및 플랜</div>
           <div className="form-grid3">
             <Field label="플랜">
               <Sel value={draft.plan} onChange={(v) => set("plan", v)} options={options.plans} />
@@ -329,24 +397,22 @@ export function WonContractForm() {
                      placeholder="여러 개면 쉼표로" />
             </div>
           </div>
+          <div className="note-box">플랜 시작일 · 만료일은 계약기간과 동일하게 저장됩니다.</div>
 
           <div className="form-sec">기타</div>
-          <div className="form-grid3">
-            <Field label="매출 인식 시작 월">
-              <input className="inp" placeholder="YYYY-MM (비우면 계약 시작월)"
-                     value={draft.revenue_from} onChange={(e) => set("revenue_from", e.target.value)} />
-            </Field>
-            <Field label="갱신 계획">
-              <Sel value={draft.renewal_plan} onChange={(v) => set("renewal_plan", v)}
-                   options={["", ...options.renewal_plans]} />
-            </Field>
-            <div style={{ gridColumn: "span 3" }}>
-              <label className="form-label">계약 비고</label>
-              <input className="inp" value={draft.note} onChange={(e) => set("note", e.target.value)} />
+          <div>
+            <label className="form-label">계약 비고</label>
+            <textarea className="inp" rows={2} value={draft.note}
+                      onChange={(e) => set("note", e.target.value)}
+                      placeholder="갱신 조건, 협의 내용 등" />
+          </div>
+          <div style={{ marginTop: 14 }}>
+            <label className="form-label">저장 후 플랜 상태</label>
+            <div style={{ maxWidth: 220 }}>
+              <Sel value={planStatus} onChange={setPlanStatus} options={options.plan_statuses} />
             </div>
           </div>
 
-          {note && <div className="note-box" role="status">{note}</div>}
         </form>
       </div>
     </Modal>

@@ -258,3 +258,64 @@ def test_the_mockup_css_does_not_own_a_modal_of_its_own():
     hijacks = re.findall(r"^\.won \.modal(?![\w-])[^{]*\{", css, re.MULTILINE)
     assert not hijacks, hijacks
     assert ".scrim" not in css
+
+
+def test_the_first_credit_date_is_the_form_s_not_the_contract_start(factory):
+    """크레딧 첫 지급일은 폼이 받습니다 — 계약 시작일과 다른 계약이 흔합니다.
+
+    세팅 기간을 두고 다음 달 1일부터 주는 식입니다. 계약 시작일에 묶어 두면 운영자가 회차를
+    전부 열어 날짜를 하나씩 고쳐야 하고, 목업에도 「첫 지급 예정일」 칸이 있습니다.
+    """
+    from src.api.routes.won_customers import _seed_schedules
+
+    with factory() as session:
+        session.add(Client(client_id=2104, company="테스트"))
+        contract = ClientContract(
+            client_id=2104, seq=1, starts_on="2026-08-01", ends_on="2027-08-01",
+            amount_incl_vat=1_200_000, installments=1, first_payment_on="2026-08-01",
+            credits=1200,
+        )
+        session.add(contract)
+        session.flush()
+        _seed_schedules(session, contract, credit_rounds=3, first_credit_on="2026-09-15")
+        session.commit()
+
+        grants = sorted(contract.credit_grants, key=lambda g: g.no)
+        assert [g.grant_on for g in grants] == ["2026-09-15", "2026-10-15", "2026-11-15"]
+
+        # 안 주면 예전대로 계약 시작일부터입니다.
+        other = ClientContract(
+            client_id=2104, seq=2, starts_on="2026-08-01", ends_on="2027-08-01", credits=100,
+        )
+        session.add(other)
+        session.flush()
+        _seed_schedules(session, other, credit_rounds=2)
+        assert sorted(g.grant_on for g in other.credit_grants) == ["2026-08-01", "2026-09-01"]
+
+
+def test_the_mockup_css_does_not_claim_the_console_button_variants():
+    """목업의 일반 버튼 규칙이 `btn--danger` 같은 **콘솔 변형**까지 가져가면 안 됩니다.
+
+    `.won button`(0,1,1)·`.won .btn`(0,2,0) 이 `.btn--danger`(0,1,0) 를 특이도로 이겨서,
+    `.won` 안에서 연 확인 창의 `삭제` 가 `취소` 와 배경·글자색·테두리·굵기까지 똑같은 흰
+    버튼이 됐습니다 — 되돌릴 수 없는 동작에서 빨간색이 사라집니다. 목업 버튼은 줄표가
+    하나(`btn-primary`)고 콘솔은 둘(`btn--primary`)이라, 줄표 둘을 빼면 서로 안 겹칩니다.
+
+    `.won .modal` 이 공용 모달을 숨겼던 것과 같은 부류입니다 —
+    [[test_the_mockup_css_does_not_own_a_modal_of_its_own]] 을 함께 보세요.
+    """
+    import pathlib
+    import re
+
+    css = pathlib.Path("src/api/static/won.css").read_text(encoding="utf-8")
+    css = re.sub(r"/\*.*?\*/", "", css, flags=re.DOTALL)
+    # 변형이 정하는 것 — 이 넷 중 하나라도 건드리면 변형이 안 보입니다. `cursor` 나 `width`
+    # 처럼 색과 무관한 속성까지 막으면, 목업이 버튼에 아무 규칙도 못 쓰게 됩니다.
+    looks = ("background", "color", "border", "font-weight")
+    for rule in re.findall(r"([^{}]+)\{([^{}]*)\}", css):
+        selector, body = rule[0].strip(), rule[1]
+        if not re.match(r"^\.won (button|\.btn)(?![\w-])", selector):
+            continue
+        if not any(prop in body for prop in looks):
+            continue
+        assert "btn--" in selector, selector
