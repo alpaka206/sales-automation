@@ -236,3 +236,25 @@ def test_every_write_route_answers_post():
         if methods <= {"GET", "HEAD"}:
             continue  # CSV 내보내기
         assert methods == {"POST"}, (route.path, methods)
+
+
+def test_the_mockup_css_does_not_own_a_modal_of_its_own():
+    """모달 껍데기는 콘솔의 `Modal` 한 곳에서만 그립니다.
+
+    목업에는 `.scrim` + `.modal.is-open` 이라는 제 나름의 모달이 있었습니다. 포팅하면서
+    같이 들어왔는데, `.won` 안에서 콘솔 모달을 열면 그 규칙이 그대로 물었습니다 — 공용
+    `Modal` 은 `is-open` 을 **배경**에 붙이므로 `.won .modal` 은 `.is-open` 없이 남고,
+    `opacity:0; pointer-events:none` 이 됩니다. DOM 에는 있는데 화면에는 없고, 클릭도
+    안 먹습니다. 계약 추가가 "번쩍 했다가 사라지던" 것이 이것이었습니다.
+
+    안쪽 모양(`.modal-head` · `.modal-body` · `.modal-foot`)은 목업 것을 그대로 씁니다.
+    """
+    import pathlib
+    import re
+
+    css = pathlib.Path("src/api/static/won.css").read_text(encoding="utf-8")
+    css = re.sub(r"/\*.*?\*/", "", css, flags=re.DOTALL)  # 왜 지웠는지 적어 둔 주석은 빼고
+    # `.won .modal-body` 같은 안쪽 규칙은 두고, `.modal` 자체를 잡는 선택자만 막습니다.
+    hijacks = re.findall(r"^\.won \.modal(?![\w-])[^{]*\{", css, re.MULTILINE)
+    assert not hijacks, hijacks
+    assert ".scrim" not in css

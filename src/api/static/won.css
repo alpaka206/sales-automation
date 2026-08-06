@@ -235,14 +235,12 @@
 .won .revbar .b {width:100%;background:var(--teal-50);border-radius:3px 3px 0 0;}
 .won .revbar .b.on {background:var(--teal-600);}
 .won .revbar .l {font-size:10px;color:var(--faint);}
-/* Modal */
-.won .scrim {position:fixed;inset:0;background:rgba(17,24,39,.35);opacity:0;pointer-events:none;transition:opacity .18s;z-index:60;}
-.won .scrim.is-open {opacity:1;pointer-events:auto;}
-.won .modal {position:fixed;top:50%;left:50%;transform:translate(-50%,-48%) scale(.98);opacity:0;pointer-events:none;
-    width:620px;max-width:calc(100vw - 32px);max-height:86vh;background:#fff;border-radius:14px;box-shadow:var(--shadow);
-    z-index:70;display:flex;flex-direction:column;transition:opacity .18s, transform .18s;}
-.won .modal.is-open {opacity:1;pointer-events:auto;transform:translate(-50%,-50%) scale(1);}
-.won .modal.wide {width:760px;}
+/* Modal — 껍데기는 콘솔의 `Modal` 이 그립니다. 여기 남은 것은 그 **안**의 모양뿐.
+ *
+ * 목업에는 `.scrim` + `.modal.is-open` 이라는 제 나름의 모달이 있었는데, 그 규칙이
+ * `.won` 안에서 열린 콘솔 모달을 그대로 물었습니다 — 공용 `Modal` 은 `is-open` 을
+ * **배경**에 붙이므로 `.won .modal` 은 `.is-open` 없이 남아 `opacity:0` 이 됩니다.
+ * DOM 에는 있는데 화면에는 없었습니다. 안 쓰는 구현이라 지웁니다. */
 .won .form-sec {font-size:11.5px;font-weight:700;color:var(--muted);letter-spacing:.04em;text-transform:uppercase;
     margin:22px 0 10px;padding-top:16px;border-top:1px solid var(--line-soft);}
 .won .form-sec:first-child {margin-top:0;padding-top:0;border-top:none;}
