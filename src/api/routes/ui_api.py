@@ -587,6 +587,8 @@ def ui_policy_docs():
                     "body": row.body,
                     "chars": len(row.body or ""),
                     "subject": row.subject or "",
+                    # 라우터가 이 문서를 고를 때 읽는 한 줄. 비면 본문 앞부분이 대신합니다.
+                    "usage_note": row.usage_note or "",
                     "effective_on": row.effective_on,
                     "edited_at": row.edited_at,
                 }

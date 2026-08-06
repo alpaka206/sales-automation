@@ -45,6 +45,16 @@ def _summarize(markdown: str) -> str:
     return text[:_SUMMARY_CHARS]
 
 
+def _summary_for(source: PolicySource, markdown: str) -> str:
+    """라우터가 읽을 한 줄 — 사람이 적은 "언제 쓰는가" 가 있으면 그것.
+
+    없으면 예전처럼 본문 앞부분을 자릅니다. 본문 첫 문단이 용도를 설명하는 문서라면 그것도
+    맞는 답이고, 그렇지 않은 문서(바로 표로 시작하는 것들)는 이 칸을 채워야 골라집니다.
+    """
+    note = (source.usage_note or "").strip()
+    return note[:_SUMMARY_CHARS] if note else _summarize(markdown)
+
+
 # 메일 제목을 사본까지 나르는 방법. KnowledgeDocument 에 열을 하나 더 만드는 것보다 작고,
 # 라우터가 보는 인덱스에도 그대로 보입니다.
 SUBJECT_TAG = "subject:"
@@ -68,21 +78,32 @@ def _upsert_knowledge(session, source: PolicySource, title: str, markdown: str) 
             body=markdown,
             scope="inbound",
             status="active",
-            summary=_summarize(markdown),
+            summary=_summary_for(source, markdown),
             author="notion-sync",
-            categories=["policy"],
+            # "all" — 유형 하나가 아니라 **모든** 유형에 후보라는 뜻입니다. 예전에는
+            # "policy" 였는데, 그건 문의 유형(sales/support/spam…) 어디와도 안 맞습니다.
+            # 평소엔 모델이 골라 주니 티가 안 나지만, 라우터가 실패해서 유형 매칭으로
+            # 떨어지는 순간 후보가 0개가 되어 **문서 없이** 답을 씁니다 — 로그 한 줄만 남고.
+            categories=["all"],
             tags=_tags_for(source),
         )
         session.add(doc)
         logger.info("Policy sync: created knowledge document %s", slug)
         return
-    # 제목은 본문이 그대로여도 따라가야 합니다 — 제목만 고친 경우가 바로 그 경우입니다.
+    # 제목과 요약은 본문이 그대로여도 따라가야 합니다 — 제목만 고친 경우, 그리고 "언제
+    # 쓰는가" 만 고친 경우가 바로 그 경우입니다. 요약은 라우터가 읽는 유일한 설명이라, 안
+    # 따라가면 화면에는 새 용도가 보이는데 문서는 계속 안 골라집니다.
     doc.tags = _tags_for(source)
-    if (doc.body or "") == markdown and doc.title == (title or source.label):
+    summary = _summary_for(source, markdown)
+    if (
+        (doc.body or "") == markdown
+        and doc.title == (title or source.label)
+        and (doc.summary or "") == summary
+    ):
         return
     doc.title = title or source.label
     doc.body = markdown
-    doc.summary = _summarize(markdown)
+    doc.summary = summary
     doc.status = "active"
     doc.version = (doc.version or 1) + 1
     logger.info("Policy sync: updated knowledge document %s (v%d)", slug, doc.version)

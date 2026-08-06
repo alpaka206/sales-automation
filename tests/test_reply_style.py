@@ -25,11 +25,30 @@ def test_draft_prompt_requires_scannable_plain_text_layout() -> None:
         include_rules=False,
     )
 
-    assert "한 줄에는 한 문장 또는 한 가지 요점만" in prompt
-    assert "각 줄을 정확히 `- `로 시작" in prompt
-    assert "다음 행동은 회신, 미팅, 결제, 자료 전달 중" in prompt
     assert "이전 대화 맥락" in prompt
     assert "이전 문의가 있습니다." in prompt
+    # 이 초안에만 해당하는 것은 여기 남습니다.
+    assert "**한국어로만** 작성합니다" in prompt
+
+
+def test_the_layout_rules_live_in_exactly_one_place():
+    """줄바꿈·불릿·톤 규칙이 프롬프트 파일과 정책 문서 양쪽에 있으면, 운영자가 콘솔에서 고친
+    쪽과 배포해야 바뀌는 쪽이 조용히 어긋납니다. 콘솔이 이깁니다 — 고칠 수 있는 쪽이라서.
+
+    이 테스트가 하는 일은 "같은 규칙이 두 군데 있지 않다" 하나뿐입니다.
+    """
+    import pathlib
+
+    prompt = pathlib.Path("src/llm/prompts/inbound/draft_reply.md").read_text(encoding="utf-8")
+    seed = pathlib.Path(
+        "src/db/seeds/policy/rule_01_common_principles.md"
+    ).read_text(encoding="utf-8")
+
+    for rule in ("한 줄에는 한 문장", "불릿", "이모지", "CTA"):
+        assert rule in seed, rule
+        assert rule not in prompt, rule
+    # 서명은 어느 쪽에도 없습니다 — 사람이 발송할 때 고릅니다.
+    assert "서명" not in prompt
 
 
 def test_company_rules_allow_polite_requests_and_one_cta() -> None:
@@ -42,14 +61,18 @@ def test_company_rules_allow_polite_requests_and_one_cta() -> None:
     """
     import pathlib
 
-    seed = pathlib.Path("src/db/seeds/policy/rule_01_tone.md").read_text(encoding="utf-8")
+    seed = pathlib.Path(
+        "src/db/seeds/policy/rule_01_common_principles.md"
+    ).read_text(encoding="utf-8")
 
     assert "말씀해 주세요" in seed
-    assert "메일 하나의 CTA는 하나만" in seed
+    assert "다음 행동(CTA)은 하나입니다" in seed
     assert "선호 채널" in seed
     # 서명은 사람이 고릅니다 — 규칙이 모델에게 본문에 쓰라고 시키면 안 됩니다.
     assert "{{__signature__}}" not in seed
     assert "본문에 서명을 쓰지 않습니다" in seed
+    # 가격 숫자는 코드 상수와 문서가 같은 말을 해야 합니다. 예전에는 정반대였습니다.
+    assert "가격 숫자를 회신에 쓰지 않습니다" in seed
 
 
 def test_0061_takes_the_signature_out_of_a_live_rule_document():
@@ -110,6 +133,51 @@ def test_0061_takes_the_signature_out_of_a_live_rule_document():
     # 뒤에 오는 절은 그대로 있어야 합니다 — 지운 것은 시그니처 절 하나입니다.
     assert "## 변수 치환 검증" in after
     assert "- 본문에 `{{ }}`, `{var}` 같은 placeholder" in after
+
+
+def test_the_router_reads_the_usage_note_when_one_is_written():
+    """문서를 고르는 것은 모델이고, 모델이 보는 것은 본문이 아니라 인덱스의 summary 한 줄입니다.
+
+    그래서 "언제 쓰는가" 칸이 그 자리에 들어가야 합니다. 안 들어가면 화면에는 용도가 보이는데
+    문서는 계속 안 골라지고, 그 이유는 아무 데도 안 보입니다. 비워 두면 예전처럼 본문 앞부분.
+    """
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+
+    from src.agents.policy_sync import _upsert_knowledge
+    from src.db.models import Base, KnowledgeDocument, PolicySource
+
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine)
+
+    with factory() as session:
+        written = PolicySource(
+            label="견적 및 맞춤형 플랜 안내", doc_key="k-quote", mode="knowledge",
+            body="| 케이스 | 문구 |\n|---|---|\n| 1 | ... |",
+            usage_note="Quote, Price, pricing, cost, estimate 등 가격·견적을 직접 묻는 문의에 씁니다.",
+        )
+        blank = PolicySource(
+            label="지원 언어", doc_key="k-lang", mode="knowledge",
+            body="지원 언어 목록입니다. 한국어, 영어, 일본어…",
+        )
+        session.add_all([written, blank])
+        session.flush()
+        for source in (written, blank):
+            _upsert_knowledge(session, source, source.label, source.body)
+        session.commit()
+
+        docs = {d.slug: d for d in session.query(KnowledgeDocument).all()}
+        summaries = {d.title: d.summary for d in docs.values()}
+
+    assert summaries["견적 및 맞춤형 플랜 안내"].startswith("Quote, Price")
+    # 표로 시작하는 문서였습니다 — 칸이 없었으면 요약이 "| 케이스 | 문구 |" 였습니다.
+    assert "케이스" not in summaries["견적 및 맞춤형 플랜 안내"]
+    assert summaries["지원 언어"].startswith("지원 언어 목록입니다")
+
+    # 라우터가 실패해 유형 매칭으로 떨어져도 후보로 남아야 합니다. "policy" 는 어떤 문의
+    # 유형과도 안 맞아서, 그 순간 문서 0개로 답을 쓰게 했습니다.
+    assert all(doc.categories == ["all"] for doc in docs.values())
 
 
 def test_translation_prompt_preserves_dash_bullets() -> None:

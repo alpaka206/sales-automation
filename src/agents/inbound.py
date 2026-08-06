@@ -88,10 +88,10 @@ _PRICING_RULE_FIRST = (
     "제안하세요."
 )
 _PRICING_RULE_NORMAL = (
-    "가격·플랜 문의면 고객 사용 사례에 맞는 플랜을 추천하고 지식 베이스에 있는 실제 "
-    "금액을 명시하세요(1~3개). 엔터프라이즈 신호(대규모 조직·다수 시트·보안/계약 요건·"
-    "대량 사용)가 있을 때만 엔터프라이즈와 영업 미팅을 권하세요. 지식 베이스에 없는 "
-    "금액은 절대 만들지 마세요."
+    "가격·플랜 문의면 고객 사용 사례에 맞는 플랜을 **추천**하되, 단가나 구체적인 금액 "
+    "숫자는 본문에 쓰지 마세요. 참고 문서에 금액표가 있어도 그 숫자는 어느 플랜을 권할지 "
+    "판단하는 용도이지 옮겨 적는 값이 아닙니다. 금액은 미팅·채팅에서 개별 안내하겠다고 "
+    "쓰세요."
 )
 
 # Kept for compatibility with older extensions/tests; durable queue keys now
@@ -217,6 +217,20 @@ class InboundAgent:
             resume_message_id=resume_message_id,
             inbound_job_id=event.get("_inbound_job_id"),
         )
+
+        # 이 대화에는 이미 회신이 있습니다. 자동 초안은 첫 회신 한 번뿐이고, 이후는 사람이
+        # 직접 등록합니다. 고객 문의는 위에서 이미 기록됐으므로 화면에는 그대로 보입니다.
+        if message_id is None:
+            logger.info(
+                "Inbound recorded without a draft — conv %s already has a reply. "
+                "이후 회신은 사람이 등록합니다.",
+                conv_id,
+            )
+            return {
+                "message_id": None,
+                "status": "skipped_reply_exists",
+                "object_id": contact_info.get("object_id"),
+            }
 
         # Immediate acknowledgement on the FIRST inbound of a thread. Goes out
         # without approval, in the inquiry language, and never changes ticket/draft
@@ -898,13 +912,18 @@ class InboundAgent:
         *,
         resume_message_id: int | None = None,
         inbound_job_id: int | None = None,
-    ) -> tuple[int, int, bool]:
+    ) -> tuple[int | None, int, bool]:
         """Persist the inquiry and a drafting reply placeholder before the AI draft.
 
         Returns ``(reply_message_id, conversation_id, is_first_inbound)``. The
         card appears on the site immediately as "작성중"; _finalize_draft fills it in
         once the reply is ready. ``is_first_inbound`` is True when this is the very
         first inbound message in the thread (drives the immediate auto-ack).
+
+        ``reply_message_id`` is **None** when this thread already has a reply of its own:
+        the automatic draft is the first reply only, and everything after it is registered
+        by a person. The customer's message and the progress entry are still written — the
+        thread stays complete, it just does not grow a second draft nobody asked for.
         """
         session = SessionLocal()
         try:
@@ -1066,13 +1085,39 @@ class InboundAgent:
 
             to_addr = email or None
             msg = session.get(Message, resume_message_id) if resume_message_id else None
-            if not (
+            resumable = bool(
                 msg
                 and msg.conversation_id == conv.id
                 and msg.direction == "outgoing"
                 and msg.prompt_variant != "auto_ack"
                 and msg.status in {"drafting", "draft_failed"}
-            ):
+            )
+            # 자동 초안은 **한 대화에 하나**입니다. 두 번째 문의부터는 사람이 직접 회신을
+            # 등록합니다 — 운영자의 결정입니다.
+            #
+            # 조건이 "두 번째 inbound" 가 아니라 "이미 회신 줄기가 있다" 인 이유: 티켓 하나에
+            # 이벤트가 여러 번 옵니다(웹훅 + 10분 폴러 + 티켓 변경). 고객이 두 번 썼을 때만
+            # 막으면, 같은 첫 문의가 다시 들어와 초안이 하나 더 생깁니다. 접수확인은 회신이
+            # 아니므로 세지 않습니다.
+            #
+            # resumable 이 먼저입니다: 죽은 durable job 이 자기 초안을 이어 쓰는 것은 두 번째
+            # 초안이 아니라 같은 초안입니다.
+            if not resumable:
+                prior_reply = (
+                    session.query(Message.id)
+                    .filter(
+                        Message.conversation_id == conv.id,
+                        Message.direction == "outgoing",
+                        (Message.prompt_variant.is_(None))
+                        | (Message.prompt_variant != "auto_ack"),
+                    )
+                    .first()
+                    is not None
+                )
+                if prior_reply:
+                    session.commit()  # 고객 문의와 진행 기록은 남깁니다.
+                    return None, conv.id, False
+            if not resumable:
                 msg = Message(
                     conversation_id=conv.id,
                     direction="outgoing",

@@ -11,7 +11,7 @@ type Mode = { key: string; label: string };
 type Row = {
   id: number; label: string; title: string | null; mode: string;
   body: string | null; chars: number;
-  subject: string; effective_on: string | null; edited_at: string | null;
+  subject: string; usage_note: string; effective_on: string | null; edited_at: string | null;
 };
 type Data = { modes: Mode[]; rows: Row[] };
 
@@ -50,6 +50,7 @@ function DocEditor({ doc, modes, onDone }: {
   const [label, setLabel] = useState(doc?.title || doc?.label || "");
   const [mode, setMode] = useState(doc?.mode || "knowledge");
   const [subject, setSubject] = useState(doc?.subject || "");
+  const [usageNote, setUsageNote] = useState(doc?.usage_note || "");
   const [effectiveOn, setEffectiveOn] = useState(doc?.effective_on || "");
   const [body, setBody] = useState(doc?.body || "");
   const [note, setNote] = useState<string | null>(null);
@@ -57,7 +58,7 @@ function DocEditor({ doc, modes, onDone }: {
   async function save() {
     setNote("저장 중…");
     try {
-      const fields = { label, mode, subject, effective_on: effectiveOn, body };
+      const fields = { label, mode, subject, usage_note: usageNote, effective_on: effectiveOn, body };
       if (doc) await send(`/policy-docs/${doc.id}`, "PUT", fields);
       else await send("/policy-docs", "POST", fields);
       onDone();
@@ -120,6 +121,18 @@ function DocEditor({ doc, modes, onDone }: {
                onChange={(e) => setSubject(e.target.value)}
                placeholder="예: Next Steps on Your custom Perso Dubbing plan"
                style={{ marginBottom: 12 }} />
+
+        {/* 문서를 고르는 것은 모델이고, 모델이 보는 것은 본문이 아니라 인덱스 한 줄입니다.
+            비우면 본문 앞 400자가 그 자리에 들어갑니다 — 바로 표로 시작하는 문서는 그래서
+            안 골라졌습니다. 본문 맨 위에 적어 두던 방식은 노션에서 다시 붙여넣을 때마다
+            날아갔습니다. */}
+        <label className="field-label" htmlFor="pd-usage">
+          언제 쓰는가 <span className="t-subtle">(AI가 이 문서를 고를 때 읽는 설명. 비우면 본문 앞부분)</span>
+        </label>
+        <textarea className="draft-textarea" id="pd-usage" value={usageNote}
+                  onChange={(e) => setUsageNote(e.target.value)}
+                  style={{ minHeight: 72, marginBottom: 12 }}
+                  placeholder="예: Quote, Price, pricing, cost, estimate, 추천 플랜 등 가격·견적·플랜 추천을 직접 묻는 문의에 씁니다." />
 
         <label className="field-label" htmlFor="pd-body">본문</label>
         <textarea className="draft-textarea mono" id="pd-body" value={body}

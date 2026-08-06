@@ -54,7 +54,11 @@ def test_a_document_arrives_with_its_text_and_can_be_edited_here():
 
     # 만드는 폼과 고치는 폼은 같은 화면입니다. 따로 두면 같은 것을 두 모양으로 묻게 되고,
     # 칸을 하나 더할 때 고칠 곳이 둘이 됩니다 — 실제로 메일 제목 칸이 그랬습니다.
-    assert policy.count("<textarea") == 1
+    # (본문 칸이 하나라는 것으로 셉니다. 폼 안의 textarea 는 그 뒤로 늘었습니다.)
+    assert policy.count('id="pd-body"') == 1
+    # 라우터가 이 문서를 고를 때 읽는 한 줄. 본문 맨 위에 적어 두면 노션에서 다시 붙여넣을
+    # 때마다 날아갑니다.
+    assert 'id="pd-usage"' in policy
     assert 'doc: "new"' in policy
     assert not pathlib.Path("src/integrations/notion_export.py").exists()
 

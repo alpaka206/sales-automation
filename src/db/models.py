@@ -358,6 +358,11 @@ class PolicySource(Base):
     # 이 문서를 근거로 회신할 때의 메일 제목. 비면 RE: 고객이 쓴 제목입니다. 본문 안에
     # "Subject: ..." 로 적으면 모델이 그 줄을 본문에 옮겨 적는 일이 생겨서 열로 뺐습니다.
     subject: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # **언제 이 문서를 쓰는가.** 문서를 고르는 것은 모델이고, 모델이 볼 수 있는 것은 본문이
+    # 아니라 인덱스 한 줄(slug·title·categories·tags·summary)입니다. 이 칸을 채우면 그것이
+    # 그 요약이 되고, 비우면 예전처럼 본문 앞부분이 잘려 들어갑니다. 본문 맨 위에 용도를 적어
+    # 두던 방식은 노션에서 다시 붙여넣을 때마다 그 줄이 날아갔습니다.
+    usage_note: Mapped[str | None] = mapped_column(Text, nullable=True)
     # 이 문서가 언제 기준인가. 적으면 그 값, 안 적으면 edited_at 이 대신합니다 — 오늘
     # 붙여넣은 넉 달 된 정책이 "최신"으로 보이지 않게 하는 것이 요점입니다. "YYYY-MM-DD".
     effective_on: Mapped[str | None] = mapped_column(String(10), nullable=True)

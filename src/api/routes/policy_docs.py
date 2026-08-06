@@ -60,6 +60,7 @@ async def policy_docs_create(
     mode: str = Form("knowledge"),
     effective_on: str = Form(""),
     subject: str = Form(""),
+    usage_note: str = Form(""),
 ):
     """제목과 본문을 붙여넣어 문서를 하나 만듭니다.
 
@@ -90,6 +91,7 @@ async def policy_docs_create(
             mode=mode,
             body=body,
             subject=subject.strip() or None,
+            usage_note=usage_note.strip() or None,
             effective_on=effective_on.strip() or None,
             edited_at=datetime.now(timezone.utc).replace(tzinfo=None),
         )
@@ -110,6 +112,7 @@ async def policy_docs_update(
     mode: str = Form(""),
     effective_on: str = Form(""),
     subject: str = Form(""),
+    usage_note: str = Form(""),
 ):
     """본문을 고칩니다. 어떤 문서든 고칠 수 있습니다.
 
@@ -132,6 +135,7 @@ async def policy_docs_update(
         # 빈 문자열은 "지운다" 로 읽습니다 — 그러면 edited_at 이 다시 날짜 역할을 합니다.
         source.effective_on = effective_on.strip() or None
         source.subject = subject.strip() or None
+        source.usage_note = usage_note.strip() or None
         if body.strip():
             source.body = body
             source.edited_at = datetime.now(timezone.utc).replace(tzinfo=None)

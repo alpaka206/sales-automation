@@ -271,7 +271,13 @@ def test_later_contact_reply_marks_latest_sent_message_answered(db_session) -> N
 
     assert second is not None
     assert db_session.get(Message, first["message_id"]).replied is True
-    assert db_session.query(Message).filter_by(direction="outgoing").count() == 2
+    # 자동 초안은 첫 회신 한 번뿐입니다 (0064 시점의 운영자 결정). 두 번째 고객 메시지는
+    # 기록되고 첫 회신을 "답변됨" 으로 표시하지만, 초안을 하나 더 만들지 않습니다 — 그
+    # 이후 회신은 사람이 직접 등록합니다.
+    assert second["status"] == "skipped_reply_exists"
+    assert second["message_id"] is None
+    assert db_session.query(Message).filter_by(direction="outgoing").count() == 1
+    assert db_session.query(Message).filter_by(direction="inbound").count() == 2
 
 
 def test_test_sent_reply_is_marked_answered_in_safe_mode(db_session) -> None:
