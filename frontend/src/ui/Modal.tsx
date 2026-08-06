@@ -21,6 +21,14 @@ export function Modal({
   const dialog = useRef<HTMLDivElement>(null);
   const opener = useRef<Element | null>(null);
 
+  // 닫기는 **ref 로** 듭니다. 아래 효과가 `[onClose]` 에 걸려 있으면, 매 렌더 새 함수를 주는
+  // 호출부(대부분 그렇습니다)에서 효과가 계속 풀렸다 다시 걸립니다. 풀릴 때 정리 코드가
+  // 포커스를 여는 버튼으로 되돌리므로 — 폼에 글자를 칠 때마다 포커스가 튑니다. 호출부마다
+  // useCallback 으로 감싸 달라고 하면 언젠가 한 곳이 빠지고, 그때 증상은 여기가 아니라
+  // 그 화면에서 나타납니다.
+  const close = useRef(onClose);
+  close.current = onClose;
+
   useEffect(() => {
     opener.current = document.activeElement;
     document.body.classList.add("modal-open");
@@ -37,7 +45,7 @@ export function Modal({
     function onKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") {
         event.preventDefault();
-        onClose();
+        close.current();
         return;
       }
       if (event.key !== "Tab") return;
@@ -59,7 +67,7 @@ export function Modal({
       document.body.classList.remove("modal-open");
       (opener.current as HTMLElement | null)?.focus?.();
     };
-  }, [onClose]);
+  }, []);
 
   // 배경을 **누르고 뗀** 것이 둘 다 배경일 때만 닫습니다.
   //
@@ -74,7 +82,7 @@ export function Modal({
       className="modal-overlay is-open"
       onMouseDown={(e) => { downOnScrim.current = e.target === e.currentTarget; }}
       onClick={(e) => {
-        if (e.target === e.currentTarget && downOnScrim.current) onClose();
+        if (e.target === e.currentTarget && downOnScrim.current) close.current();
         downOnScrim.current = false;
       }}
     >
