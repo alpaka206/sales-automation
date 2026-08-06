@@ -350,3 +350,35 @@ def test_the_contract_notes_remount_when_the_contract_changes():
 
     screen = pathlib.Path("frontend/src/screens/won/WonCustomerDetail.tsx").read_text(encoding="utf-8")
     assert "<ContractNotes key={current.id}" in screen
+
+
+def test_the_list_screen_keeps_the_mockups_thresholds_and_wording():
+    """목록의 임계값·문구는 목업(`수주관리목업_0806.html`)에서 온 것입니다.
+
+    눈에 안 보이는 숫자라 조용히 어긋납니다. 실제로 어긋나 있었습니다:
+
+    - **임박 강조는 14일**입니다(`dueClass`). 7일로 좁히면 다음 주에 할 일이 회색으로
+      묻혀, 월요일에 한 번 훑는 화면이 못 됩니다.
+    - **지난 것은 `3일 지연`** 이라 씁니다(`dday`). `D+3` 과 `D-3` 은 부호 하나 차이라
+      훑을 때 뒤집혀 읽힙니다.
+    - **같은 상태 안에서는 종료일이 빠른 순**입니다. 가나다순은 손이 먼저 가야 하는 것을
+      알려주지 않습니다.
+    - **검색은 담당부서·고객 종류까지** 봅니다. 힌트에 안 적혀 있어도 "GTM" 이나
+      "Inbound" 로 찾는 사람은 반드시 있고, 안 걸리면 목록이 빈 것처럼 보입니다.
+
+    환율 줄만 일부러 다릅니다 — 목업은 손으로 적는 칸이고, 여기는 조회한 값과 실제
+    고시일을 적습니다(그렇지 않으면 두 사람이 다른 환율로 다른 MRR 을 봅니다).
+    """
+    import pathlib
+
+    shared = pathlib.Path("frontend/src/screens/won/shared.ts").read_text(encoding="utf-8")
+    assert "left <= 14 ? \"due\"" in shared
+    assert '`${-left}일 지연`' in shared
+    assert '"오늘"' in shared
+
+    screen = pathlib.Path("frontend/src/screens/won/WonCustomers.tsx").read_text(encoding="utf-8")
+    assert "row.department, row.customer_type" in screen
+    assert 'a.active?.ends_on ?? "9999-12-31"' in screen
+    # 환율은 조회값 — 손으로 적는 칸으로 되돌리면 안 됩니다.
+    assert 'fx_on' in screen
+    assert 'id="fxInput"' not in screen

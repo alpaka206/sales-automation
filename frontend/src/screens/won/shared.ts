@@ -96,24 +96,28 @@ export const daysUntil = (value: string | null | undefined, today: string): numb
   return Math.round((Date.parse(value) - Date.parse(today)) / 86400000);
 };
 
-/** 며칠 남았나 — 지났으면 빨강, 7일 이내면 주황. 목업의 `dueClass`. */
+/** 며칠 남았나 — 지났으면 빨강, **14일** 이내면 주황. 목업의 `dueClass` 그대로입니다.
+ *  7일로 좁히면 다음 주에 할 일이 회색으로 묻혀, 월요일에 몰아서 보는 화면이 못 됩니다. */
 export const dueClass = (value: string | null | undefined, today: string): string => {
   const left = daysUntil(value, today);
   if (left === null) return "";
   if (left < 0) return "over";
-  return left <= 7 ? "due" : "";
+  return left <= 14 ? "due" : "";
 };
 
-/** 며칠 남았나만. `D-6` / `D-DAY` / `D+3`(지남).
+/** 며칠 남았나만. `D-6` / `오늘` / `3일 지연`. 목업의 `dueText` 그대로입니다.
  *
  * 날짜가 이미 옆에 있는 자리에서 씁니다 — `26.08.12` 를 적어 놓고 다시 `26.08.12 · 6일 뒤`
  * 라고 쓰면 같은 날짜가 두 번입니다. 훑는 화면에서 두 번 읽히는 글자는 그만큼 느립니다.
+ *
+ * 지난 것을 `D+3` 이 아니라 `3일 지연` 이라 쓰는 이유: `D-3` 과 `D+3` 은 부호 하나 차이라
+ * 훑을 때 뒤집혀 읽힙니다. 늦은 건은 글자가 달라야 눈에 걸립니다.
  */
 export const dday = (value: string | null | undefined, today: string): string => {
   const left = daysUntil(value, today);
   if (left === null) return "—";
-  if (left === 0) return "D-DAY";
-  return left < 0 ? `D+${-left}` : `D-${left}`;
+  if (left === 0) return "오늘";
+  return left < 0 ? `${-left}일 지연` : `D-${left}`;
 };
 
 /** 날짜와 D-day 를 함께. 날짜가 그 자리에만 있는 곳(액션 보드)에서 씁니다. */

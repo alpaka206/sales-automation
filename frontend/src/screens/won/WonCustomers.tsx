@@ -33,11 +33,37 @@ function DealTag({ deal }: { deal: string | null }) {
 const AVATAR_COLORS = ["#0F766E", "#B45309", "#3730A3", "#B42318", "#026AA2", "#4B5563"];
 const avatarColor = (id: number) => AVATAR_COLORS[id % AVATAR_COLORS.length];
 
+/** 목업의 인라인 SVG 그대로. 콘솔의 `Icon` 을 쓰지 않는 이유는 won.css 와 같습니다 —
+ *  획 두께(1.9~2)가 달라서, 섞으면 이 화면만 다른 굵기의 아이콘이 섞입니다. */
+const GLYPHS: Record<string, string> = {
+  person: '<path d="M16 19a4 4 0 0 0-8 0"/><circle cx="12" cy="10" r="3"/>',
+  trend: '<path d="M3 17l6-6 4 4 7-7"/><path d="M14 8h6v6"/>',
+  clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+  card: '<rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20"/>',
+  alert: '<path d="M12 9v4M12 17h.01"/><circle cx="12" cy="12" r="9"/>',
+  inbound: '<path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M4 20h16"/>',
+  search: '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>',
+  plus: '<path d="M12 5v14"/><path d="M5 12h14"/>',
+};
+function G({ name, size = 14, stroke = "currentColor", width = 2 }: {
+  name: keyof typeof GLYPHS; size?: number; stroke?: string; width?: number;
+}) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={stroke}
+         strokeWidth={width} aria-hidden="true"
+         dangerouslySetInnerHTML={{ __html: GLYPHS[name] }} />
+  );
+}
+
+/** 목업의 `man()` — 범례는 만원 단위입니다. 카드의 큰 숫자가 이미 원 단위라, 그 아래
+ *  통화별 내역까지 자릿수를 다 적으면 어느 쪽이 합계인지 한눈에 안 갈립니다. */
+const man = (value: number) => `₩${Math.round(value / 10000).toLocaleString("en-US")}만`;
+
 // "1,800 크레딧" 만 보이면 그게 마지막 회차인지 열두 번 중 두 번째인지 알 수 없습니다 —
 // 열어 봐야 판단이 되는 것을 목록에서 끝내려고 회차를 같이 적습니다. 금액 **뒤**입니다:
 // 훑을 때 먼저 읽는 것은 얼마인가이고, 몇 번째인가는 그 다음입니다.
-const round = (item: { no: number | null; total: number | null }) =>
-  item.no ? ` · ${item.no}/${item.total}회차` : "";
+const round = (item: { no: number | null; total: number | null }, unit = "회차") =>
+  item.no ? ` · ${item.no}/${item.total}${unit}` : "";
 
 export function WonCustomers() {
   const navigate = useNavigate();
@@ -64,6 +90,8 @@ export function WonCustomers() {
     const filtered = all.filter((row) => {
       if (view === "활성" && row.plan_status === "사용 중단") return false;
       if (view === "갱신임박") {
+        // 사용 중단은 갱신 대상이 아닙니다 — 세지도, 목록에 넣지도 않습니다.
+        if (row.plan_status === "사용 중단") return false;
         const left = daysUntil(row.active?.ends_on, today);
         if (left === null || left < 0 || left > 60) return false;
       }
@@ -73,17 +101,20 @@ export function WonCustomers() {
       if (type !== "all" && row.customer_type !== type) return false;
       if (dept !== "all" && row.department !== dept) return false;
       if (query) {
-        const hay = [row.company, row.client_id, row.industry, row.country]
-          .join(" ").toLowerCase();
+        // 담당부서·고객 종류까지 봅니다. 힌트에 안 적혀 있어도 "GTM" 이나 "Inbound" 로
+        // 찾는 사람은 반드시 있고, 안 걸리면 목록이 빈 것처럼 보입니다.
+        const hay = [row.company, row.client_id, row.industry, row.country,
+                     row.department, row.customer_type].join(" ").toLowerCase();
         if (!hay.includes(query)) return false;
       }
       return true;
     });
-    // 세팅중 → 사용중 → 사용 중단. 손이 가야 하는 것이 위입니다.
+    // 세팅중 → 사용중 → 사용 중단, 같은 상태 안에서는 **계약 종료일이 빠른 순**.
+    // 손이 먼저 가야 하는 것이 위입니다 — 가나다순은 그걸 알려주지 않습니다.
     return filtered.sort(
       (a, b) =>
         (STATUS_ORDER[a.plan_status] ?? 9) - (STATUS_ORDER[b.plan_status] ?? 9) ||
-        a.company.localeCompare(b.company),
+        (a.active?.ends_on ?? "9999-12-31").localeCompare(b.active?.ends_on ?? "9999-12-31"),
     );
   }, [data, search, deal, status, plan, type, dept, view, today]);
 
@@ -101,10 +132,12 @@ export function WonCustomers() {
   const mrrUsd = activeRows
     .filter((r) => r.active?.currency === "USD")
     .reduce((sum, r) => sum + n(r.active?.monthly_revenue), 0);
-  const renewing = data.rows.filter((r) => {
-    const left = daysUntil(r.active?.ends_on, today);
-    return left !== null && left >= 0 && left <= 60;
-  });
+  const renewing = activeRows
+    .filter((r) => {
+      const left = daysUntil(r.active?.ends_on, today);
+      return left !== null && left >= 0 && left <= 60;
+    })
+    .sort((a, b) => (a.active?.ends_on ?? "").localeCompare(b.active?.ends_on ?? ""));
 
   const open = (clientId: number, section?: string) =>
     navigate(`/won-customers/${clientId}${section ? `#${section}` : ""}`);
@@ -123,14 +156,16 @@ export function WonCustomers() {
             {/* 브라우저의 다운로드가 기능 전부입니다 — fetch 로 돌리면 Save As 를 다시 짜게 됩니다. */}
             <a className="btn" href="/won-customers/export.csv">CSV 내보내기</a>
             <button className="btn btn-primary" type="button"
-                    onClick={() => navigate("/won-customers/new")}>+ 수주 고객 추가</button>
+                    onClick={() => navigate("/won-customers/new")}>
+              <G name="plus" size={15} /> 수주 고객 추가
+            </button>
           </div>
         </div>
 
         <div className="kpi-row">
           <button className={`kpi wide${view === "활성" ? " is-on" : ""}`} type="button"
                   onClick={() => setView(view === "활성" ? "" : "활성")}>
-            <div className="kpi-label">활성 고객</div>
+            <div className="kpi-label"><G name="person" /> 활성 고객</div>
             <div className="kpi-flex">
               <div className="kpi-main">
                 <div className="kpi-value"><span>{live + setup}</span><span className="unit">곳</span></div>
@@ -149,12 +184,12 @@ export function WonCustomers() {
           </button>
 
           <div className="kpi">
-            <div className="kpi-label">이번달 예상 MRR <span style={{ color: "var(--faint)" }}>(VAT 포함)</span></div>
+            <div className="kpi-label"><G name="trend" /> 이번달 예상 MRR <span style={{ color: "var(--faint)" }}>(VAT 포함)</span></div>
             <div className="kpi-value money">{money(mrrKrw + mrrUsd * rate)}</div>
             <div className="kpi-tail">
               <div className="kpi-legend">
-                <i>KRW</i><b>{money(mrrKrw)}</b>
-                <i>USD</i><b>{money(mrrUsd, "USD")}</b>
+                <i>KRW 계약 <b>{man(mrrKrw)}</b></i>
+                <i>USD 계약 <b>{money(mrrUsd, "USD")}</b></i>
               </div>
               {/* 손으로 적던 칸이었습니다. 이제 오늘 고시가를 가져오므로 적을 이유가
                   없고, 적게 두면 두 사람이 다른 환율로 다른 MRR 을 봅니다. 어느 날짜의
@@ -176,20 +211,25 @@ export function WonCustomers() {
 
           <button className={`kpi${view === "갱신임박" ? " is-on" : ""}`} type="button"
                   onClick={() => setView(view === "갱신임박" ? "" : "갱신임박")}>
-            <div className="kpi-label">갱신 임박 고객</div>
+            <div className="kpi-label"><G name="clock" /> 갱신 임박 고객</div>
             <div className="kpi-value"><span>{renewing.length}</span><span className="unit">곳</span></div>
             <div className="kpi-tail">
               <div className="kpi-chips">
-                {renewing.slice(0, 3).map((row) => (
-                  <span key={row.client_id} className="mini-chip">{row.company}</span>
-                ))}
+                {renewing.length ? renewing.slice(0, 3).map((row) => (
+                  <span key={row.client_id} className="mini-chip">
+                    {row.company.length > 9 ? `${row.company.slice(0, 9)}…` : row.company}{" "}
+                    {dday(row.active?.ends_on, today)}
+                  </span>
+                )) : <span className="mini-chip calm">만료 60일 이내 없음</span>}
               </div>
             </div>
           </button>
         </div>
 
         <div className="board">
-          <Board title="크레딧 지급 예정" count={data.boards.credit.length}>
+          <Board title="크레딧 지급 예정" count={data.boards.credit.length}
+                 icon={<G name="clock" size={15} stroke="var(--teal-600)" width={1.9} />}
+                 warn={data.boards.credit.some((x) => (daysUntil(x.on, today) ?? 99) <= 7)}>
             {data.boards.credit.slice(0, 4).map((item) => (
               <button key={`${item.client_id}-${item.on}`} className="board-row" type="button"
                       onClick={() => open(item.client_id, "sec-credit")}>
@@ -202,20 +242,23 @@ export function WonCustomers() {
             ))}
             {!data.boards.credit.length && <div className="board-empty">확인할 항목이 없습니다.</div>}
           </Board>
-          <Board title="결제 예정" count={data.boards.payment.length}>
+          <Board title="결제 예정" count={data.boards.payment.length}
+                 icon={<G name="card" size={15} stroke="var(--teal-600)" width={1.9} />}
+                 warn={data.boards.payment.some((x) => (daysUntil(x.on, today) ?? 99) <= 7)}>
             {data.boards.payment.slice(0, 4).map((item) => (
               <button key={`${item.client_id}-${item.on}`} className="board-row" type="button"
                       onClick={() => open(item.client_id, "sec-pay")}>
                 <div style={{ minWidth: 0 }}>
                   <div className="board-name">{item.company}</div>
-                  <div className="board-meta">{money(item.amount, item.currency)}{round(item)}</div>
+                  <div className="board-meta">{money(item.amount, item.currency)}{round(item, "차 분납")}</div>
                 </div>
                 <span className={`board-when ${dueClass(item.on, today)}`}>{dueText(item.on, today)}</span>
               </button>
             ))}
             {!data.boards.payment.length && <div className="board-empty">확인할 항목이 없습니다.</div>}
           </Board>
-          <Board title="미처리 클레임 · 히스토리" count={data.boards.claim.length} risk>
+          <Board title="미처리 클레임 · 히스토리" count={data.boards.claim.length} risk
+                 icon={<G name="alert" size={15} stroke="var(--red-fg)" width={1.9} />}>
             {data.boards.claim.slice(0, 4).map((item, index) => (
               <button key={index} className="board-row" type="button"
                       onClick={() => open(item.client_id, "sec-care")}>
@@ -233,6 +276,7 @@ export function WonCustomers() {
         {data.pending.length > 0 && (
           <div className="intake">
             <div className="intake-head">
+              <G name="inbound" size={16} stroke="#B45309" />
               <div>
                 <div className="intake-title">수주 전환 대기</div>
                 <div className="intake-sub">계약 정보를 입력해야 고객 목록에 등록됩니다.</div>
@@ -272,6 +316,7 @@ export function WonCustomers() {
 
         <div className="toolbar">
           <div className="search">
+            <G name="search" size={15} width={1.9} />
             <input type="text" value={search} onChange={(e) => setSearch(e.target.value)}
                    placeholder="고객사, Client ID, 산업, 국가 검색" />
           </div>
@@ -287,7 +332,7 @@ export function WonCustomers() {
           <Select value={type} onChange={setType} all="고객 종류 전체"
                   options={[...data.options.customer_types, "2025 Inbound"]} />
           <Select value={dept} onChange={setDept} all="담당부서 전체" options={data.options.departments} />
-          <span className="result-count">{rows.length}곳</span>
+          <span className="result-count">{rows.length}곳 / 전체 {data.rows.length}곳</span>
         </div>
 
         <div className="table-wrap">
@@ -323,14 +368,18 @@ export function WonCustomers() {
   );
 }
 
-function Board({ title, count, risk, children }: {
-  title: string; count: number; risk?: boolean; children: React.ReactNode;
+function Board({ title, count, risk, warn, icon, children }: {
+  title: string; count: number; risk?: boolean; warn?: boolean;
+  icon: React.ReactNode; children: React.ReactNode;
 }) {
   return (
     <div className="board-card">
       <div className="board-head">
+        {icon}
         <span className="board-title">{title}</span>
-        <span className={`board-count${risk && count ? " risk" : ""}`}>{count}</span>
+        {/* 목업의 규칙: 7일 안에 걸린 것이 하나라도 있으면 건수에 색이 붙습니다 —
+            숫자만으로는 "네 건" 이 급한 넷인지 다음 달 넷인지 구별되지 않습니다. */}
+        <span className={`board-count${risk && count ? " risk" : warn ? " warn" : ""}`}>{count}</span>
       </div>
       <div>{children}</div>
     </div>
@@ -374,14 +423,7 @@ function RowView({ row, rows, index, today, onOpen }: {
               {initials(row.company)}
             </div>
             <div>
-              <div className="co-name">
-                {row.company}
-                {row.setup_count > 0 && (
-                  <span className="tag st-setup" style={{ marginLeft: 6 }}>
-                    세팅중 계약 {row.setup_count}
-                  </span>
-                )}
-              </div>
+              <div className="co-name">{row.company}</div>
               <div className="co-id">ID {row.client_id} · {row.customer_type}</div>
             </div>
           </div>
@@ -412,11 +454,11 @@ function RowView({ row, rows, index, today, onOpen }: {
           )}
         </td>
         <td className="datecell">
-          {contract?.next_pay_on ? fmt(contract.next_pay_on) : <span className="muted">완료</span>}
+          {contract?.next_pay_on ? fmt(contract.next_pay_on) : <span className="muted">수금 완료</span>}
           {contract?.next_pay_on && (
             <span className={`sub ${dueClass(contract.next_pay_on, today)}`}>
               {money(contract.next_pay_amount, contract.currency)}
-              {contract.next_pay_no ? ` · ${contract.next_pay_no}/${contract.next_pay_total}회차` : ""}
+              {contract.next_pay_no ? ` · ${contract.next_pay_no}/${contract.next_pay_total}차 분납` : ""}
               {" · "}{dday(contract.next_pay_on, today)}
             </span>
           )}
