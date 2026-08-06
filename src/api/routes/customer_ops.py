@@ -681,6 +681,7 @@ async def interaction_add(
     artifact_url: str = Form(""),
     happened_at: str = Form(""),
     conversation_id: str = Form(""),
+    contract_seq: str = Form(""),
     redirect_to: str = Form(""),
 ):
     """Record one manual touchpoint — email, WhatsApp, phone, SMS, meeting.
@@ -722,6 +723,9 @@ async def interaction_add(
                 context=context.strip() or None,
                 artifact_url=artifact_url.strip() or None,
                 happened_at=_parse_dt(happened_at) or datetime.now(timezone.utc),
+                # 수주 고객의 몇 차 계약에 대한 기록인지. 비면 협상 단계(계약 전)이고,
+                # 이 타임라인은 고객 단위라 계약보다 먼저 시작합니다.
+                contract_seq=int(contract_seq) if contract_seq.strip().isdigit() else None,
             )
         )
         if channel == "meeting":

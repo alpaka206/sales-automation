@@ -323,3 +323,27 @@
 .won .fx-row input { width: 72px; }
 .won .form-row input, .won .form-row .select { width: 100%; }
 .won table { width: 100%; }
+
+/* 확인 창의 "무엇이 바뀌는가" 표. 목업은 이 자리를 자체 confirm 박스로 그렸는데, 이 콘솔은
+ * 접근성 있는 Modal 이 이미 하나 있어서 그 안에 표만 넣습니다 — 다이얼로그를 두 벌 두면
+ * 포커스 트랩과 Escape 처리가 두 벌이 됩니다. */
+.won .confirm-rows { margin: 6px 0 10px; }
+.won .confirm-row {
+  display: flex; justify-content: space-between; gap: 16px;
+  padding: 7px 0; border-bottom: 1px solid var(--line-soft); font-size: 13px;
+}
+.won .confirm-row:last-child { border-bottom: 0; }
+.won .confirm-row .l { color: var(--muted); }
+.won .confirm-row .v { font-weight: 600; font-variant-numeric: tabular-nums; }
+
+/* 회차 한 줄. 목업의 `.form-row` 는 4열 **폼 그리드**라(라벨+입력 짝) 목록 행에는 맞지
+ * 않습니다 — 값 하나가 한 칸씩 차지해서 버튼이 다음 줄로 밀렸습니다. 목록 행은 내용
+ * 크기대로 흐르고 버튼만 오른쪽에 붙어야 합니다. */
+.won .list-row {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  padding: 9px 0; border-bottom: 1px solid var(--line-soft); font-size: 13px;
+}
+.won .list-row:last-of-type { border-bottom: 0; }
+.won .list-row .mono { color: var(--faint); min-width: 34px; }
+.won .list-row .grow { flex: 1; }
+.won .list-row .inp { width: auto; min-width: 120px; }

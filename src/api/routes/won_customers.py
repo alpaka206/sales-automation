@@ -9,6 +9,11 @@
   운영자가 직접 넣을 수 있고, 조회 실패가 저장을 막으면 안 됩니다.
 - 계약 차수는 받지 않고 그 고객의 마지막 차수 + 1 입니다.
 
+쓰기는 **전부 POST** 입니다. 콘솔의 쓰기 헬퍼(``postForm``)가 POST 하나만 보내는데 라우트가
+PUT 이면 405 가 나고, 화면에는 "저장이 안 된다" 로만 보입니다 — 실제로 크레딧 지급 완료가
+그렇게 막혀 있었습니다. 동사를 둘 두면 어느 쪽인지 매번 확인해야 하고, 그 확인을 한 번
+빠뜨리면 같은 일이 반복됩니다.
+
 계약 삭제는 없습니다. 지워야 할 계약은 실수로 만든 것뿐인데, 그건 값을 고치면 되고 — 지우면
 거기 딸린 결제·크레딧 기록이 같이 사라집니다.
 """
@@ -130,7 +135,7 @@ async def create_client(
     return {"client_id": given}
 
 
-@router.put("/won-customers/{client_id}")
+@router.post("/won-customers/{client_id}")
 async def update_client(
     client_id: int,
     company: str = Form(""),
@@ -268,7 +273,7 @@ def _add_months(base: date, months: int) -> date:
     return date(year, month, min(base.day, calendar.monthrange(year, month)[1]))
 
 
-@router.put("/won-customers/contracts/{contract_id}")
+@router.post("/won-customers/contracts/{contract_id}")
 async def update_contract(contract_id: int, request: Request):
     form = dict(await request.form())
     with SessionLocal() as session:
@@ -309,7 +314,7 @@ async def add_credit_grant(
     return {"ok": True}
 
 
-@router.put("/won-customers/credits/{grant_id}")
+@router.post("/won-customers/credits/{grant_id}")
 async def update_credit_grant(
     grant_id: int,
     request: Request,
@@ -366,7 +371,7 @@ async def add_payment(
     return {"ok": True}
 
 
-@router.put("/won-customers/payments/{payment_id}")
+@router.post("/won-customers/payments/{payment_id}")
 async def update_payment(
     payment_id: int,
     paid_on: str = Form(""),
@@ -436,7 +441,7 @@ async def add_claim(
     return {"ok": True}
 
 
-@router.put("/won-customers/claims/{claim_id}")
+@router.post("/won-customers/claims/{claim_id}")
 async def update_claim(
     claim_id: int,
     kind: str = Form(""),

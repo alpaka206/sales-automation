@@ -220,3 +220,19 @@ def test_credit_rounds_add_up_to_the_contract(factory):
         assert [g.grant_on for g in grants] == ["2026-08-01", "2026-09-01", "2026-10-01"]
         # 분납은 총액을 나눈 값. 합계가 총 계약금액이어야 합니다.
         assert sum(float(p.amount) for p in contract.payments) == 11_000_000
+
+
+def test_every_write_route_answers_post():
+    """콘솔의 쓰기 헬퍼는 POST 하나만 보냅니다.
+
+    라우트가 PUT 이면 405 가 나고 화면에는 "저장이 안 된다" 로만 보입니다 — 크레딧 지급
+    완료가 실제로 그렇게 막혀 있었습니다. 동사를 둘 두면 어느 쪽인지 매번 확인해야 하고,
+    그 확인을 한 번 빠뜨리면 같은 일이 반복됩니다.
+    """
+    from src.api.routes import won_customers
+
+    for route in won_customers.router.routes:
+        methods = set(getattr(route, "methods", ()))
+        if methods <= {"GET", "HEAD"}:
+            continue  # CSV 내보내기
+        assert methods == {"POST"}, (route.path, methods)

@@ -2,9 +2,10 @@ import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useParams } from "react-router-dom";
 import { getJSON, postForm } from "../../lib/api";
-import { ActionButton } from "../../ui/ActionButton";
+import { useAction } from "../../ui/ActionButton";
+import { Confirm } from "./Confirm";
 import {
-  type Contract, type Row,
+  type Claim, type Contract, type Grant, type Payment, type Row,
   dueClass, dueText, fmt, initials, money, n, num,
 } from "./shared";
 
@@ -208,6 +209,9 @@ export function WonCustomerDetail() {
 
         <Section id="sec-comm" title="소통 히스토리"
                  right={<span className="muted">고객 단위 · 전체 계약 통합</span>}>
+          {data.contact_id && (
+            <CommForm contactId={data.contact_id} contracts={contracts} onDone={refresh} />
+          )}
           <div className="chips" style={{ marginBottom: 12 }}>
             <button type="button" className={`chip${commFilter === "all" ? " is-on" : ""}`}
                     onClick={() => setCommFilter("all")}>전체</button>
@@ -286,13 +290,19 @@ function CreditSection({ contract, today, onDone }: {
     ? Math.round((contract.granted_credits / contract.credits) * 100)
     : 0;
 
-  async function toggle(id: number, next: boolean) {
-    await postForm(`/won-customers/credits/${id}`, { done: String(next) });
+  const [ask, setAsk] = useState<Grant | null>(null);
+  const [editing, setEditing] = useState<Grant | null>(null);
+  const [adding, setAdding] = useState(false);
+
+  async function save(id: number, fields: Record<string, string>) {
+    await postForm(`/won-customers/credits/${id}`, fields);
     onDone();
   }
 
   return (
-    <Section id="sec-credit" title="크레딧 지급 현황">
+    <Section id="sec-credit" title="크레딧 지급 현황"
+             right={<button className="btn btn-sm" type="button"
+                            onClick={() => setAdding(!adding)}>+ 지급 회차</button>}>
       <div className="stat-row">
         <Stat label="계약 크레딧" value={num(contract.credits)} />
         <Stat label="누적 지급 크레딧" value={num(contract.granted_credits)} />
@@ -300,32 +310,112 @@ function CreditSection({ contract, today, onDone }: {
         <Stat label="지급 진행률" value={`${percent}%`} />
         <Stat label="잔여 지급 회차" value={`${pending.length}회`} />
       </div>
+
+      {adding && (
+        <GrantForm contract={contract} onDone={() => { setAdding(false); onDone(); }} />
+      )}
+
       <div className="form-sec">지급 예정</div>
       {pending.map((grant) => (
-        <div key={grant.id} className="form-row">
-          <span className="no">{grant.no}/{grant.total}</span>
-          <span className={`when ${dueClass(grant.grant_on, today)}`}>{fmt(grant.grant_on)}</span>
-          <span className="amt">{num(grant.amount)} 크레딧</span>
-          {grant.memo && <span className="muted">{grant.memo}</span>}
-          <ActionButton className="btn btn-sm btn-primary" pending="처리 중"
-                        onClick={() => toggle(grant.id, true)}>지급 완료</ActionButton>
-        </div>
+        editing?.id === grant.id
+          ? <GrantEdit key={grant.id} grant={grant}
+                       onCancel={() => setEditing(null)}
+                       onSave={(fields) => save(grant.id, fields).then(() => setEditing(null))} />
+          : (
+            <div key={grant.id} className="list-row">
+              <span className="mono">{grant.no}/{grant.total}</span>
+              <span className={dueClass(grant.grant_on, today)}>{fmt(grant.grant_on)}</span>
+              <span>{num(grant.amount)} 크레딧</span>
+              {grant.memo && <span className="muted">{grant.memo}</span>}
+              <button className="btn btn-sm" type="button" onClick={() => setEditing(grant)}>수정</button>
+              <button className="btn btn-sm btn-primary" type="button" onClick={() => setAsk(grant)}>
+                지급 완료
+              </button>
+            </div>
+          )
       ))}
       {!pending.length && <div className="board-empty">지급 예정 회차가 없습니다.</div>}
+
       <div className="form-sec">지급 완료</div>
       {done.map((grant) => (
-        <div key={grant.id} className="form-row">
-          <span className="no">{grant.no}/{grant.total}</span>
-          <span className="when">{fmt(grant.grant_on)}</span>
-          <span className="amt">{num(grant.amount)} 크레딧</span>
+        <div key={grant.id} className="list-row">
+          <span className="mono">{grant.no}/{grant.total}</span>
+          <span>{fmt(grant.grant_on)}</span>
+          <span>{num(grant.amount)} 크레딧</span>
           <span className="muted">{grant.granted_by || "—"}</span>
           {grant.memo && <span className="muted">{grant.memo}</span>}
-          <ActionButton className="btn btn-sm" pending="처리 중"
-                        onClick={() => toggle(grant.id, false)}>지급 취소</ActionButton>
+          <button className="btn btn-sm" type="button" onClick={() => setAsk(grant)}>지급 취소</button>
         </div>
       ))}
       {!done.length && <div className="board-empty">아직 지급 내역이 없습니다.</div>}
+
+      {ask && (
+        <Confirm
+          title={ask.done ? "크레딧 지급을 취소합니다" : "크레딧 지급을 완료로 표시합니다"}
+          rows={[
+            ["회차", `${ask.no}/${ask.total}`],
+            ["지급 날짜", fmt(ask.grant_on)],
+            ["크레딧", `${num(ask.amount)} 크레딧`],
+            ["누적 지급", `${num(contract.granted_credits)} → ${num(
+              contract.granted_credits + (ask.done ? -(ask.amount ?? 0) : (ask.amount ?? 0)))}`],
+          ]}
+          note={ask.done
+            ? "지급자 이름도 함께 지워집니다. 누적 지급 크레딧과 다음 지급일이 바로 갱신됩니다."
+            : "누적 지급 크레딧과 다음 지급일이 바로 갱신됩니다."}
+          okLabel={ask.done ? "지급 취소" : "지급 완료"}
+          danger={ask.done}
+          onOk={() => save(ask.id, { done: String(!ask.done) })}
+          onClose={() => setAsk(null)}
+        />
+      )}
     </Section>
+  );
+}
+
+/** 지급 회차 추가. 전체 회차 수는 서버가 다시 셉니다 — 화면이 세면 두 값이 갈라집니다. */
+function GrantForm({ contract, onDone }: { contract: Contract; onDone: () => void }) {
+  const [when, setWhen] = useState("");
+  const [amount, setAmount] = useState("");
+  const [memo, setMemo] = useState("");
+  const [add, adding] = useAction(async () => {
+    if (!amount.trim()) return;
+    await postForm(`/won-customers/contracts/${contract.id}/credits`, {
+      grant_on: when, amount, memo,
+    });
+    onDone();
+  });
+  return (
+    <div className="list-row">
+      <input className="inp" type="date" value={when} onChange={(e) => setWhen(e.target.value)} />
+      <input className="inp" type="number" placeholder="크레딧" value={amount}
+             onChange={(e) => setAmount(e.target.value)} />
+      <input className="inp" placeholder="메모 (space_seq별 지급량 등)" value={memo}
+             onChange={(e) => setMemo(e.target.value)} />
+      <button className="btn btn-sm btn-primary" type="button" disabled={adding}
+              onClick={() => add()}>{adding ? "추가 중" : "추가"}</button>
+    </div>
+  );
+}
+
+function GrantEdit({ grant, onSave, onCancel }: {
+  grant: Grant;
+  onSave: (fields: Record<string, string>) => void;
+  onCancel: () => void;
+}) {
+  const [when, setWhen] = useState(grant.grant_on ?? "");
+  const [amount, setAmount] = useState(String(grant.amount ?? ""));
+  const [by, setBy] = useState(grant.granted_by ?? "");
+  const [memo, setMemo] = useState(grant.memo ?? "");
+  return (
+    <div className="list-row">
+      <input className="inp" type="date" value={when} onChange={(e) => setWhen(e.target.value)} />
+      <input className="inp" type="number" value={amount} onChange={(e) => setAmount(e.target.value)} />
+      <input className="inp" placeholder="지급자" value={by} onChange={(e) => setBy(e.target.value)} />
+      <input className="inp" placeholder="메모" value={memo} onChange={(e) => setMemo(e.target.value)} />
+      <button className="btn btn-sm btn-primary" type="button"
+              onClick={() => onSave({ grant_on: when, amount, granted_by: by, memo })}>저장</button>
+      <button className="btn btn-sm" type="button" onClick={onCancel}>취소</button>
+    </div>
   );
 }
 
@@ -337,8 +427,11 @@ function PaySection({ contract, today, onDone }: {
   // 수금율은 **항상 계약 통화 기준**입니다. 환율 환산은 대시보드의 예상 MRR 에서만 씁니다.
   const percent = total ? Math.min(100, Math.round((n(contract.collected) / total) * 100)) : 0;
 
-  async function toggle(id: number, next: boolean) {
-    await postForm(`/won-customers/payments/${id}`, { done: String(next) });
+  const [ask, setAsk] = useState<Payment | null>(null);
+  const [editing, setEditing] = useState<Payment | null>(null);
+
+  async function save(id: number, fields: Record<string, string>) {
+    await postForm(`/won-customers/payments/${id}`, fields);
     onDone();
   }
 
@@ -360,30 +453,85 @@ function PaySection({ contract, today, onDone }: {
           </tr></thead>
           <tbody>
             {contract.payments.map((payment) => (
-              <tr key={payment.id}>
-                <td>{payment.no}/{payment.total}</td>
-                <td className={dueClass(payment.paid_on, today)}>{fmt(payment.paid_on)}</td>
-                <td className="nowrap">{money(payment.amount, contract.currency)}</td>
-                <td className="nowrap">
-                  {payment.fx_rate ? `${num(Number(payment.fx_rate))} (${fmt(payment.fx_on)})` : "—"}
-                </td>
-                <td>
-                  <span className={`tag ${payment.done ? "d-mrr" : "neutral"}`}>
-                    {payment.done ? "입금 완료" : "입금 전"}
-                  </span>
-                </td>
-                <td>
-                  <ActionButton className="btn btn-sm" pending="처리 중"
-                                onClick={() => toggle(payment.id, !payment.done)}>
-                    {payment.done ? "입금 전으로" : "입금 완료"}
-                  </ActionButton>
-                </td>
-              </tr>
+              editing?.id === payment.id ? (
+                <tr key={payment.id}>
+                  <td>{payment.no}/{payment.total}</td>
+                  <td colSpan={5}>
+                    <PayEdit payment={payment}
+                             onCancel={() => setEditing(null)}
+                             onSave={(fields) => save(payment.id, fields).then(() => setEditing(null))} />
+                  </td>
+                </tr>
+              ) : (
+                <tr key={payment.id}>
+                  <td>{payment.no}/{payment.total}</td>
+                  <td className={dueClass(payment.paid_on, today)}>{fmt(payment.paid_on)}</td>
+                  <td className="nowrap">{money(payment.amount, contract.currency)}</td>
+                  <td className="nowrap">
+                    {payment.fx_rate ? `${num(Number(payment.fx_rate))} (${fmt(payment.fx_on)})` : "—"}
+                  </td>
+                  <td>
+                    <span className={`tag ${payment.done ? "d-mrr" : "neutral"}`}>
+                      {payment.done ? "입금 완료" : "입금 전"}
+                    </span>
+                  </td>
+                  <td>
+                    <div style={{ display: "flex", gap: 6 }}>
+                      <button className="btn btn-sm" type="button" onClick={() => setEditing(payment)}>수정</button>
+                      <button className="btn btn-sm" type="button" onClick={() => setAsk(payment)}>
+                        {payment.done ? "입금 전으로" : "입금 완료"}
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              )
             ))}
           </tbody>
         </table>
       </div>
+
+      {ask && (
+        <Confirm
+          title={ask.done ? "입금 전으로 되돌립니다" : "입금 완료로 표시합니다"}
+          rows={[
+            ["분납 차수", `${ask.no}/${ask.total}`],
+            ["입금 날짜", fmt(ask.paid_on)],
+            ["금액", money(ask.amount, contract.currency)],
+            ["수금 완료", `${money(contract.collected, contract.currency)} → ${money(
+              n(contract.collected) + (ask.done ? -n(ask.amount) : n(ask.amount)), contract.currency)}`],
+          ]}
+          note={ask.done
+            ? "수금율과 다음 결제일이 바로 갱신됩니다."
+            : "수금율과 다음 결제일이 바로 갱신됩니다. 그 날짜의 환율이 함께 저장됩니다 — 나중에 오늘 환율로 다시 환산하지 않기 위해서입니다."}
+          okLabel={ask.done ? "입금 전으로" : "입금 완료"}
+          danger={ask.done}
+          onOk={() => save(ask.id, { done: String(!ask.done) })}
+          onClose={() => setAsk(null)}
+        />
+      )}
     </Section>
+  );
+}
+
+function PayEdit({ payment, onSave, onCancel }: {
+  payment: Payment;
+  onSave: (fields: Record<string, string>) => void;
+  onCancel: () => void;
+}) {
+  const [when, setWhen] = useState(payment.paid_on ?? "");
+  const [amount, setAmount] = useState(String(payment.amount ?? ""));
+  const [rate, setRate] = useState(String(payment.fx_rate ?? ""));
+  return (
+    <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+      <input className="inp" type="date" value={when} onChange={(e) => setWhen(e.target.value)} />
+      <input className="inp" type="number" value={amount} onChange={(e) => setAmount(e.target.value)} />
+      {/* 비워 두면 입금 완료 처리할 때 그 날짜의 환율을 자동으로 채웁니다. */}
+      <input className="inp" type="number" step="0.0001" placeholder="적용 환율 (비우면 자동)"
+             value={rate} onChange={(e) => setRate(e.target.value)} />
+      <button className="btn btn-sm btn-primary" type="button"
+              onClick={() => onSave({ paid_on: when, amount, fx_rate: rate })}>저장</button>
+      <button className="btn btn-sm" type="button" onClick={onCancel}>취소</button>
+    </div>
   );
 }
 
@@ -391,55 +539,204 @@ function CareSection({ contract, onDone }: { contract: Contract; onDone: () => v
   const [adding, setAdding] = useState(false);
   const [kind, setKind] = useState("");
   const [when, setWhen] = useState("");
+  const [comp, setComp] = useState("");
+  const [removing, setRemoving] = useState<Claim | null>(null);
+  const [editing, setEditing] = useState<Claim | null>(null);
 
-  async function add() {
+  const [add, addBusy] = useAction(async () => {
     if (!kind.trim()) return;
     await postForm(`/won-customers/contracts/${contract.id}/claims`, {
-      kind, happened_on: when, progress: "접수",
+      kind, happened_on: when, compensation: comp, progress: "접수",
     });
-    setKind(""); setWhen(""); setAdding(false);
+    setKind(""); setWhen(""); setComp(""); setAdding(false);
     onDone();
-  }
-  async function setProgress(id: number, progress: string) {
-    await postForm(`/won-customers/claims/${id}`, { progress });
-    onDone();
-  }
-  async function remove(id: number) {
-    await postForm(`/won-customers/claims/${id}/delete`, {});
+  });
+  async function save(id: number, fields: Record<string, string>) {
+    await postForm(`/won-customers/claims/${id}`, fields);
     onDone();
   }
 
   return (
     <Section id="sec-care" title="고객 클레임 / 히스토리"
-             right={<button className="btn btn-sm" type="button" onClick={() => setAdding(!adding)}>+ 등록</button>}>
+             right={<button className="btn btn-sm" type="button"
+                            onClick={() => setAdding(!adding)}>+ 등록</button>}>
       {adding && (
-        <div className="form-row">
-          <input className="select" placeholder="클레임/히스토리 종류"
+        <div className="list-row">
+          <input className="inp" placeholder="클레임/히스토리 종류 (예: 품질 이슈, 신기능 TEST)"
                  value={kind} onChange={(e) => setKind(e.target.value)} />
-          <input className="select" type="date" value={when} onChange={(e) => setWhen(e.target.value)} />
-          <ActionButton className="btn btn-sm btn-primary" pending="등록 중" onClick={add}>등록</ActionButton>
+          <input className="inp" type="date" value={when} onChange={(e) => setWhen(e.target.value)} />
+          <input className="inp" placeholder="보상 종류 (예: 크레딧 보상 3,000)"
+                 value={comp} onChange={(e) => setComp(e.target.value)} />
+          <button className="btn btn-sm btn-primary" type="button" disabled={addBusy}
+                  onClick={() => add()}>{addBusy ? "등록 중" : "등록"}</button>
         </div>
       )}
       {contract.claims.map((claim) => (
-        <div key={claim.id} className="form-row">
-          <span className="when">{fmt(claim.happened_on)}</span>
-          <span className="amt">{claim.kind}</span>
-          {claim.compensation && <span className="muted">{claim.compensation}</span>}
-          <span className={`tag ${claim.progress === "조치 완료" ? "d-mrr" : "risk"}`}>{claim.progress}</span>
-          {claim.progress !== "조치 완료" && (
-            <ActionButton className="btn btn-sm" pending="처리 중"
-                          onClick={() => setProgress(claim.id, "조치 완료")}>조치 완료</ActionButton>
-          )}
-          <ActionButton className="btn btn-sm btn-ghost" pending="삭제 중"
-                        onClick={() => remove(claim.id)}>삭제</ActionButton>
-        </div>
+        editing?.id === claim.id ? (
+          <ClaimEdit key={claim.id} claim={claim}
+                     onCancel={() => setEditing(null)}
+                     onSave={(fields) => save(claim.id, fields).then(() => setEditing(null))} />
+        ) : (
+          <div key={claim.id} className="list-row">
+            <span className="mono">{fmt(claim.happened_on)}</span>
+            <span>{claim.kind}</span>
+            {claim.compensation && <span className="muted">{claim.compensation}</span>}
+            <span className={`tag ${claim.progress === "조치 완료" ? "d-mrr" : "risk"}`}>
+              {claim.progress}
+            </span>
+            {claim.action_on && <span className="muted">조치 {fmt(claim.action_on)}</span>}
+            <button className="btn btn-sm" type="button" onClick={() => setEditing(claim)}>수정</button>
+            <button className="btn btn-sm btn-ghost" type="button"
+                    onClick={() => setRemoving(claim)}>삭제</button>
+          </div>
+        )
       ))}
       {!contract.claims.length && <div className="board-empty">등록된 클레임·히스토리가 없습니다.</div>}
-      <div className="field-grid" style={{ marginTop: 14 }}>
-        <KV k="갱신 계획" v={contract.renewal_plan} />
-        <KV k="사용 중단 이유" v={contract.stop_reason} />
-        <KV k="비고" v={contract.memo} />
-      </div>
+
+      <ContractNotes contract={contract} onDone={onDone} />
+
+      {removing && (
+        <Confirm
+          title="클레임 · 히스토리를 삭제합니다"
+          rows={[
+            ["종류", removing.kind],
+            ["발생 날짜", fmt(removing.happened_on)],
+            ["진행상황", removing.progress],
+          ]}
+          note="되돌릴 수 없습니다. 미처리 건이면 목록 상단의 카운트에서도 빠집니다."
+          okLabel="삭제" danger
+          onOk={async () => {
+            await postForm(`/won-customers/claims/${removing.id}/delete`, {});
+            onDone();
+          }}
+          onClose={() => setRemoving(null)}
+        />
+      )}
     </Section>
+  );
+}
+
+function ClaimEdit({ claim, onSave, onCancel }: {
+  claim: Claim;
+  onSave: (fields: Record<string, string>) => void;
+  onCancel: () => void;
+}) {
+  const [kind, setKind] = useState(claim.kind);
+  const [when, setWhen] = useState(claim.happened_on ?? "");
+  const [comp, setComp] = useState(claim.compensation ?? "");
+  const [progress, setProgress] = useState(claim.progress);
+  const [actionOn, setActionOn] = useState(claim.action_on ?? "");
+  return (
+    <div className="list-row">
+      <input className="inp" value={kind} onChange={(e) => setKind(e.target.value)} />
+      <input className="inp" type="date" value={when} onChange={(e) => setWhen(e.target.value)} />
+      <input className="inp" placeholder="보상 종류" value={comp} onChange={(e) => setComp(e.target.value)} />
+      <select className="inp" value={progress} onChange={(e) => setProgress(e.target.value)}>
+        {["접수", "조치 진행 중", "조치 완료"].map((item) => <option key={item}>{item}</option>)}
+      </select>
+      <input className="inp" type="date" value={actionOn} onChange={(e) => setActionOn(e.target.value)} />
+      <button className="btn btn-sm btn-primary" type="button"
+              onClick={() => onSave({ kind, happened_on: when, compensation: comp,
+                                      progress, action_on: actionOn })}>저장</button>
+      <button className="btn btn-sm" type="button" onClick={onCancel}>취소</button>
+    </div>
+  );
+}
+
+/** 갱신 계획 · 사용 중단 이유 · 비고. 다시 고치면 그만인 값이라 확인 창을 붙이지 않습니다.
+ *
+ * 확인 창이 흔해지면 아무도 안 읽습니다. 붙이는 자리는 파생 수치가 같이 움직이는 값뿐입니다. */
+function ContractNotes({ contract, onDone }: { contract: Contract; onDone: () => void }) {
+  const [renewal, setRenewal] = useState(contract.renewal_plan ?? "");
+  const [stop, setStop] = useState(contract.stop_reason ?? "");
+  const [memo, setMemo] = useState(contract.memo ?? "");
+  const [save, saving] = useAction(async () => {
+    await postForm(`/won-customers/contracts/${contract.id}`, {
+      renewal_plan: renewal, stop_reason: stop, memo,
+    });
+    onDone();
+  });
+  return (
+    <>
+      <div className="form-sec">갱신 계획 · 비고</div>
+      <div className="form-grid3">
+        <div>
+          <label className="form-label">갱신 계획</label>
+          <select className="inp" value={renewal} onChange={(e) => setRenewal(e.target.value)}>
+            {["", "갱신 예정", "협의 중", "미정", "본계약 검토 중", "갱신 안함", "갱신 완료"]
+              .map((item) => <option key={item} value={item}>{item || "—"}</option>)}
+          </select>
+        </div>
+        <div>
+          <label className="form-label">사용 중단 이유</label>
+          <input className="inp" value={stop} onChange={(e) => setStop(e.target.value)} />
+        </div>
+        <div>
+          <label className="form-label">비고</label>
+          <input className="inp" value={memo} onChange={(e) => setMemo(e.target.value)} />
+        </div>
+      </div>
+      <div className="modal-foot" style={{ marginTop: 12 }}>
+        <button className="btn btn-sm btn-primary" type="button" disabled={saving}
+                onClick={() => save()}>{saving ? "저장 중" : "저장"}</button>
+      </div>
+    </>
+  );
+}
+
+/** 소통 히스토리 등록 — **고객 단위**입니다. 계약 차수를 비우면 협상 단계(계약 전) 기록이고,
+ *  그래서 계약이 하나도 없는 고객에게도 쓸 수 있습니다. */
+export function CommForm({ contactId, contracts, onDone }: {
+  contactId: number; contracts: Contract[]; onDone: () => void;
+}) {
+  const [channel, setChannel] = useState("email");
+  const [handler, setHandler] = useState("");
+  const [when, setWhen] = useState("");
+  const [seq, setSeq] = useState("");
+  const [summary, setSummary] = useState("");
+  const [add, adding] = useAction(async () => {
+    if (!summary.trim()) return;
+    await postForm(`/customers/${contactId}/interactions`, {
+      channel, handler, happened_at: when, contract_seq: seq, summary,
+    });
+    setSummary(""); setHandler(""); setWhen(""); setSeq("");
+    onDone();
+  });
+  return (
+    <div className="form-grid3" style={{ marginBottom: 14 }}>
+      <div>
+        <label className="form-label">소통 플랫폼</label>
+        <select className="inp" value={channel} onChange={(e) => setChannel(e.target.value)}>
+          {[["email", "메일"], ["phone", "전화"], ["whatsapp", "WhatsApp"],
+            ["meeting", "미팅"], ["sms", "문자"], ["manual", "기타"]].map(([value, label]) => (
+            <option key={value} value={value}>{label}</option>
+          ))}
+        </select>
+      </div>
+      <div>
+        <label className="form-label">담당자</label>
+        <input className="inp" value={handler} onChange={(e) => setHandler(e.target.value)} />
+      </div>
+      <div>
+        <label className="form-label">날짜</label>
+        <input className="inp" type="datetime-local" value={when} onChange={(e) => setWhen(e.target.value)} />
+      </div>
+      <div>
+        <label className="form-label">관련 계약</label>
+        <select className="inp" value={seq} onChange={(e) => setSeq(e.target.value)}>
+          <option value="">협상 단계 (계약 전)</option>
+          {contracts.map((c) => <option key={c.seq} value={c.seq}>{c.label}</option>)}
+        </select>
+      </div>
+      <div style={{ gridColumn: "span 2" }}>
+        <label className="form-label">소통 내용 및 메모</label>
+        <input className="inp" value={summary} onChange={(e) => setSummary(e.target.value)}
+               placeholder="오간 내용을 한 번에 정리해 적어주세요." />
+      </div>
+      <div className="modal-foot" style={{ gridColumn: "span 3" }}>
+        <button className="btn btn-sm btn-primary" type="button" disabled={adding}
+                onClick={() => add()}>{adding ? "등록 중" : "등록"}</button>
+      </div>
+    </div>
   );
 }

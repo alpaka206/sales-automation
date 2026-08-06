@@ -124,11 +124,7 @@ export function WonContractForm() {
     };
     try {
       if (editing) {
-        await fetch(`/won-customers/contracts/${contractId}`, {
-          method: "PUT", credentials: "same-origin",
-          headers: { "Content-Type": "application/x-www-form-urlencoded" },
-          body: new URLSearchParams(body),
-        }).then((response) => { if (!response.ok) throw new Error(String(response.status)); });
+        await postForm(`/won-customers/contracts/${contractId}`, body);
       } else {
         await postForm(`/won-customers/${clientId}/contracts`, body);
       }
