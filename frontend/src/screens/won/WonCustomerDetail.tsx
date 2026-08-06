@@ -5,7 +5,7 @@ import { getJSON, postForm } from "../../lib/api";
 import { useAction } from "../../ui/ActionButton";
 import { Confirm } from "./Confirm";
 import {
-  type Claim, type Contract, type Grant, type Payment, type Row,
+  type Claim, type Contract, type Grant, type ListData, type Options, type Payment, type Row,
   dueClass, dueText, fmt, initials, money, n, num,
 } from "./shared";
 
@@ -35,6 +35,12 @@ export function WonCustomerDetail() {
   const { data } = useQuery({
     queryKey: ["won-customer", clientId],
     queryFn: () => getJSON<Row & { comms: NonNullable<Row["comms"]> }>(`/api/ui/won-customers/${clientId}`),
+  });
+  // 선택지(산업·플랜 상태·담당부서)는 목록 payload 가 이미 들고 있습니다. 같은 쿼리 키라
+  // 캐시에서 나오고, 이 화면 때문에 왕복이 하나 더 생기지 않습니다.
+  const { data: list } = useQuery({
+    queryKey: ["won-customers"],
+    queryFn: () => getJSON<ListData>("/api/ui/won-customers"),
   });
   const [pickedSeq, setPickedSeq] = useState<number | null>(null);
   const [showAll, setShowAll] = useState(false);
@@ -86,23 +92,8 @@ export function WonCustomerDetail() {
       </div>
 
       <div className="detail-body">
-        <Section id="sec-basic" title="고객 기본 정보">
-          <div className="field-grid c3">
-            <KV k="고객사" v={data.company} />
-            <KV k="산업 분야" v={data.industry} />
-            <KV k="국가" v={data.country} />
-            <KV k="담당부서" v={data.department} />
-            <KV k="Client ID" v={String(data.client_id)} />
-            <KV k="고객 종류" v={data.customer_type} />
-            <KV k="고객 담당자" v={data.contact_name} />
-            <KV k="고객 연락처" v={data.contact_info} />
-            <KV k="최초 수주일" v={fmt(data.first_won_on)} />
-            <KV k="플랜 상태" v={data.plan_status} />
-            <KV k="담당" v={data.owner} />
-            <KV k="연동 티켓 (계약별)"
-                v={contracts.filter((c) => c.ticket_id).map((c) => `${c.seq}차 ${c.ticket_id}`).join(" · ") || "연동 없음"} />
-          </div>
-        </Section>
+        <BasicSection client={data} contracts={contracts} options={list?.options}
+                      onDone={refresh} />
 
         <Section id="sec-contract" title="계약 및 결제 정보"
                  right={
@@ -244,6 +235,140 @@ export function WonCustomerDetail() {
         </Section>
       </div>
     </div>
+  );
+}
+
+/** 고객 기본 정보 — 읽기와 편집이 같은 자리에서 바뀝니다.
+ *
+ * 편집할 수 없는 세 칸이 있습니다. **Client ID** 는 고객의 신원이라 바꾸면 계약·크레딧·
+ * 소통 히스토리가 통째로 남의 것이 됩니다. **고객 종류** 는 그 번호대에서 파생되는 값이고,
+ * **연동 티켓** 은 계약이 들고 있는 것이라 계약 폼에서 고칩니다. 세 칸은 편집 중에도 그대로
+ * 보여 줍니다 — 사라지면 "왜 없지" 를 확인하러 나갔다 와야 합니다.
+ */
+function BasicSection({ client, contracts, options, onDone }: {
+  client: Row;
+  contracts: Contract[];
+  options: Options | undefined;
+  onDone: () => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [form, setForm] = useState({
+    company: client.company,
+    industry: client.industry ?? "",
+    country: client.country ?? "",
+    department: client.department ?? "",
+    contact_name: client.contact_name ?? "",
+    contact_info: client.contact_info ?? "",
+    first_won_on: client.first_won_on ?? "",
+    plan_status: client.plan_status,
+    owner: client.owner ?? "",
+  });
+  const set = (key: keyof typeof form, value: string) =>
+    setForm((current) => ({ ...current, [key]: value }));
+
+  const [save, saving] = useAction(async () => {
+    await postForm(`/won-customers/${client.client_id}`, form);
+    setEditing(false);
+    onDone();
+  });
+
+  const tickets =
+    contracts.filter((c) => c.ticket_id).map((c) => `${c.seq}차 ${c.ticket_id}`).join(" · ")
+    || "연동 없음";
+
+  if (!editing) {
+    return (
+      <Section id="sec-basic" title="고객 기본 정보"
+               right={<button className="btn btn-sm" type="button"
+                              onClick={() => setEditing(true)}>편집</button>}>
+        <div className="field-grid c3">
+          <KV k="고객사" v={client.company} />
+          <KV k="산업 분야" v={client.industry} />
+          <KV k="국가" v={client.country} />
+          <KV k="담당부서" v={client.department} />
+          <KV k="Client ID" v={String(client.client_id)} />
+          <KV k="고객 종류" v={client.customer_type} />
+          <KV k="고객 담당자" v={client.contact_name} />
+          <KV k="고객 연락처" v={client.contact_info} />
+          <KV k="최초 수주일" v={fmt(client.first_won_on)} />
+          <KV k="플랜 상태" v={client.plan_status} />
+          <KV k="담당" v={client.owner} />
+          <KV k="연동 티켓 (계약별)" v={tickets} />
+        </div>
+      </Section>
+    );
+  }
+
+  return (
+    <Section id="sec-basic" title="고객 기본 정보">
+      <div className="form-grid3">
+        <div>
+          <label className="form-label">고객사</label>
+          <input className="inp" value={form.company} onChange={(e) => set("company", e.target.value)} />
+        </div>
+        <div>
+          <label className="form-label">산업 분야</label>
+          {/* 목록에 없으면 직접 입력합니다 — 운영자가 시트에서 쓰던 방식 그대로. */}
+          <input className="inp" list="won-industries" value={form.industry}
+                 onChange={(e) => set("industry", e.target.value)} />
+          <datalist id="won-industries">
+            {(options?.industries ?? []).map((item) => <option key={item} value={item} />)}
+          </datalist>
+        </div>
+        <div>
+          <label className="form-label">국가</label>
+          <input className="inp" value={form.country} onChange={(e) => set("country", e.target.value)} />
+        </div>
+        <div>
+          <label className="form-label">담당부서</label>
+          <select className="inp" value={form.department} onChange={(e) => set("department", e.target.value)}>
+            {["", ...(options?.departments ?? [])].map((item) => (
+              <option key={item} value={item}>{item || "—"}</option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label className="form-label">Client ID</label>
+          <div className="field-value">{client.client_id} <span className="muted">(바꿀 수 없음)</span></div>
+        </div>
+        <div>
+          <label className="form-label">고객 종류</label>
+          <div className="field-value">{client.customer_type} <span className="muted">(번호대에서 파생)</span></div>
+        </div>
+        <div>
+          <label className="form-label">고객 담당자</label>
+          <input className="inp" value={form.contact_name} onChange={(e) => set("contact_name", e.target.value)} />
+        </div>
+        <div>
+          <label className="form-label">고객 연락처</label>
+          <input className="inp" value={form.contact_info} onChange={(e) => set("contact_info", e.target.value)} />
+        </div>
+        <div>
+          <label className="form-label">최초 수주일</label>
+          <input className="inp" type="date" value={form.first_won_on}
+                 onChange={(e) => set("first_won_on", e.target.value)} />
+        </div>
+        <div>
+          <label className="form-label">플랜 상태</label>
+          <select className="inp" value={form.plan_status} onChange={(e) => set("plan_status", e.target.value)}>
+            {(options?.plan_statuses ?? []).map((item) => <option key={item}>{item}</option>)}
+          </select>
+        </div>
+        <div>
+          <label className="form-label">담당</label>
+          <input className="inp" value={form.owner} onChange={(e) => set("owner", e.target.value)} />
+        </div>
+        <div>
+          <label className="form-label">연동 티켓 (계약별)</label>
+          <div className="field-value">{tickets} <span className="muted">(계약에서 고침)</span></div>
+        </div>
+      </div>
+      <div className="modal-foot" style={{ marginTop: 14 }}>
+        <button className="btn btn-sm" type="button" onClick={() => setEditing(false)}>취소</button>
+        <button className="btn btn-sm btn-primary" type="button" disabled={saving}
+                onClick={() => save()}>{saving ? "저장 중" : "저장"}</button>
+      </div>
+    </Section>
   );
 }
 
