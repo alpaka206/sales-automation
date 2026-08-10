@@ -64,12 +64,23 @@ def waiting_draft():
         session.commit()
 
 
+GONE_TICKET = "99999999"
+
+
 def _hubspot_says_gone(monkeypatch):
-    """Every ticket lookup 404s, the way a deleted one does — and the way an id from
-    another portal, or one we recorded wrong, also does."""
+    """This one ticket is missing, the way a deleted one is — and the way an id from
+    another portal, or one we recorded wrong, also is.
+
+    Only this one: both the batch check and the per-ticket lookup answer for whatever
+    else the shared test database happens to hold, and "everything is gone" would have
+    the confirmed pass delete the other tests' rows along with ours.
+    """
     from src.agents import hubspot_reconcile
 
     class Gone:
+        def existing_ticket_ids_sync(self, ticket_ids):
+            return {str(t) for t in ticket_ids} - {GONE_TICKET}
+
         def get_ticket_sync(self, ticket_id):
             request = httpx.Request("GET", f"https://api.hubspot.com/tickets/{ticket_id}")
             raise httpx.HTTPStatusError(
@@ -188,6 +199,9 @@ def test_an_auth_failure_is_not_a_deleted_ticket(monkeypatch, waiting_draft):
     from src.agents import hubspot_reconcile
 
     class Unauthorized:
+        def existing_ticket_ids_sync(self, ticket_ids):
+            raise RuntimeError("tickets batch read failed (401)")
+
         def get_ticket_sync(self, ticket_id):
             request = httpx.Request("GET", "https://api.hubspot.com/tickets/1")
             raise httpx.HTTPStatusError(
@@ -204,19 +218,47 @@ def test_an_auth_failure_is_not_a_deleted_ticket(monkeypatch, waiting_draft):
     assert report["retired"] == 0
 
 
-def test_it_only_looks_at_threads_still_holding_an_answer(monkeypatch, waiting_draft):
-    """A thread we already replied to can be out of date without anyone being asked to do
-    the wrong thing. Checking every ticket we ever saw would be a lot of API calls to
-    learn nothing actionable."""
-    from src.agents.hubspot_reconcile import _open_ticket_ids
+def test_only_threads_holding_an_answer_are_asked_about_their_stage(monkeypatch, waiting_draft):
+    """A thread we already replied to can be out of date about its STAGE without anyone
+    being asked to do the wrong thing, and the poller sweeps those anyway. Existence is
+    the other half and is checked for everything — see the test below."""
+    from src.agents.hubspot_reconcile import _all_ticket_ids, _open_ticket_ids
 
     _contact_id, conversation_id, message_id = waiting_draft
-    assert (conversation_id, "99999999") in _open_ticket_ids()
+    assert (conversation_id, GONE_TICKET) in _open_ticket_ids()
 
     with SessionLocal() as session:
         session.get(Message, message_id).status = "sent"
         session.commit()
-    assert (conversation_id, "99999999") not in _open_ticket_ids()
+    assert (conversation_id, GONE_TICKET) not in _open_ticket_ids()
+    assert (conversation_id, GONE_TICKET) in _all_ticket_ids()
+
+
+def test_a_deleted_ticket_leaves_the_board_with_no_draft_to_find_it_by(
+    monkeypatch, waiting_draft
+):
+    """The one the operator hit: a ticket deleted in HubSpot kept its card on the
+    파이프라인 board.
+
+    Three things look for absence and none of them covered this. The deletion webhook
+    fires once — if it was never subscribed to, or never arrived, it never comes again.
+    The 10-minute poller sweeps the tickets HubSpot HAS, so a ticket it no longer has
+    appears in no sweep. And 최신화 asked only about threads holding an unsent draft,
+    which an answered 협상중 or Won card has none of.
+    """
+    from src.agents import hubspot_reconcile
+
+    _contact_id, conversation_id, message_id = waiting_draft
+    with SessionLocal() as session:
+        session.get(Message, message_id).status = "sent"
+        session.commit()
+
+    _hubspot_says_gone(monkeypatch)
+    report = hubspot_reconcile.reconcile_with_hubspot(apply=True)
+
+    assert report["deleted"] == 1
+    with SessionLocal() as session:
+        assert session.get(Conversation, conversation_id) is None
 
 
 def test_a_thread_past_new_has_its_draft_retired_not_deleted(monkeypatch, waiting_draft):
@@ -229,6 +271,9 @@ def test_a_thread_past_new_has_its_draft_retired_not_deleted(monkeypatch, waitin
     from src.agents import hubspot_reconcile
 
     class Negotiating:
+        def existing_ticket_ids_sync(self, ticket_ids):
+            return {str(t) for t in ticket_ids}
+
         def get_ticket_sync(self, ticket_id):
             class Ticket:
                 id = ticket_id

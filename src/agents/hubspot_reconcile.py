@@ -5,8 +5,10 @@ run, so two states drift and nothing notices:
 
   * a ticket answered or moved in HubSpot while we still hold an unsent draft — the
     operator is asked to send a reply the customer already received
-  * a ticket DELETED in HubSpot — nothing in the poller looks for absence, so our draft
-    waits forever for a thread that no longer exists
+  * a ticket DELETED in HubSpot — nothing in the poller looks for absence, so the thread
+    stays on the board and its draft waits forever for a ticket that no longer exists.
+    The deletion webhook fires once; if it was never subscribed or never arrived, this
+    is the only thing that ever notices.
 
 Both are read-mostly against HubSpot: the only writes are to our own tables, and every
 one of them retires a draft rather than sending anything.
@@ -40,6 +42,25 @@ def _open_ticket_ids() -> list[tuple[int, str]]:
                 Message.status.in_(_UNSENT),
             )
             .distinct()
+            .all()
+        )
+    return [(conv_id, str(ticket_id)) for conv_id, ticket_id in rows if ticket_id]
+
+
+def _all_ticket_ids() -> list[tuple[int, str]]:
+    """(conversation id, ticket id) for every thread we hold a HubSpot ticket for.
+
+    Wider than :func:`_open_ticket_ids` on purpose, and only for the existence check.
+    A thread that was already answered still draws a card on the board, so a ticket
+    deleted in HubSpot stayed there forever: the deletion webhook is the only thing
+    that ever hears about absence, the poller sweeps tickets HubSpot HAS, and 최신화
+    used to ask only about threads with an unsent draft — which a 협상중 or Won card
+    has none of.
+    """
+    with SessionLocal() as session:
+        rows = (
+            session.query(Conversation.id, Conversation.hubspot_ticket_id)
+            .filter(Conversation.hubspot_ticket_id.is_not(None))
             .all()
         )
     return [(conv_id, str(ticket_id)) for conv_id, ticket_id in rows if ticket_id]
@@ -130,10 +151,12 @@ def _retire_drafts(conversation_id: int, local_stage: str) -> int:
 def reconcile_with_hubspot(*, apply: bool = False) -> dict:
     """Realign every thread we are still holding an answer for. Returns a small report.
 
-    Deliberately narrow: it looks only at conversations with an unsent draft, because
-    those are the ones where being out of date costs something. A thread we already
-    replied to can be wrong about its stage without anyone being asked to do the wrong
-    thing, and the poller sweeps those anyway.
+    Two different widths, and the difference is the point. **Existence** is checked for
+    every ticket we hold: a deleted ticket has to leave the board too, and a card there
+    has no draft to be found by. **Stage and stale drafts** stay narrow — only threads
+    with an unsent draft, because those are the ones where being out of date costs
+    something. A thread we already replied to can be wrong about its stage without
+    anyone being asked to do the wrong thing, and the poller sweeps those anyway.
 
     ``apply=False`` is the default ON PURPOSE, and it matters more now that the second
     pass DELETES rather than retires. A stage move is reversible and gets applied either
@@ -163,10 +186,38 @@ def reconcile_with_hubspot(*, apply: bool = False) -> dict:
     except Exception:
         logger.exception("Stage sweep failed during manual reconcile")
 
+    # Absence, across every ticket we hold — one batch read per hundred, so asking about
+    # the whole board costs about what asking about the draft queue used to. A batch that
+    # fails raises, and then we report nothing deleted: "the token expired" must never be
+    # read as "they are all gone".
+    gone: set[int] = set()
+    held = _all_ticket_ids()
+    checked_in_batch = False
+    try:
+        alive = client.existing_ticket_ids_sync([ticket_id for _cid, ticket_id in held])
+    except Exception:
+        logger.exception("Ticket existence check failed; skipping the deletion pass")
+    else:
+        # 확인 N건 counts threads, not calls, and this pass already covered every one of
+        # them — the loop below re-visits a subset and must not count them twice.
+        checked_in_batch = True
+        report["checked"] = len(held)
+        for conversation_id, ticket_id in held:
+            if ticket_id in alive:
+                continue
+            gone.add(conversation_id)
+            report["deleted"] += 1
+            if apply:
+                delete_conversation(conversation_id, ticket_id)
+                report["retired"] += 1
+
     # Then the part no sweep can do: ask about the tickets we are still waiting on, one
-    # at a time, including the ones HubSpot no longer has.
+    # at a time — their stage, and the drafts that stage has already answered.
     for conversation_id, ticket_id in _open_ticket_ids():
-        report["checked"] += 1
+        if conversation_id in gone:
+            continue
+        if not checked_in_batch:
+            report["checked"] += 1
         try:
             ticket = client.get_ticket_sync(ticket_id)
         except httpx.HTTPStatusError as exc:

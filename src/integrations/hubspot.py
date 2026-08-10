@@ -476,6 +476,41 @@ class HubSpotClient:
                     )
         return out
 
+    def existing_ticket_ids_sync(self, ticket_ids: list[str]) -> set[str]:
+        """Which of these ticket ids HubSpot still has, in 100-id batches.
+
+        Absence is the answer we are after, so this returns ids rather than tickets:
+        a batch read answers "is it gone?" for a hundred tickets in one call, where
+        ``get_ticket_sync`` answers it for one and needs a 404 to do it. HubSpot
+        returns 207 with the survivors and leaves the rest out — deleted tickets are
+        archived, and an archived object is absent from a plain read.
+
+        Raises rather than returning a short set when a batch fails: a caller that
+        deletes what is missing must never read "the token expired" as "all gone".
+        """
+        found: set[str] = set()
+        unique = list(dict.fromkeys(str(t) for t in ticket_ids if t))
+        if not unique:
+            return found
+        headers = {"Authorization": f"Bearer {self.token}"}
+        with httpx.Client(headers=headers, timeout=60.0) as client:
+            for start in range(0, len(unique), 100):
+                if start:
+                    time.sleep(_BULK_PACE_SECONDS)
+                chunk = unique[start : start + 100]
+                r = _sync_request_with_retries(
+                    client,
+                    "POST",
+                    f"{BASE_URL}/crm/v3/objects/tickets/batch/read",
+                    json={"properties": ["hs_object_id"], "inputs": [{"id": t} for t in chunk]},
+                )
+                if r.status_code not in (200, 207):
+                    raise HubSpotAPIError(
+                        f"tickets batch read failed ({r.status_code}): {r.text[:200]}"
+                    )
+                found.update(str(item["id"]) for item in r.json().get("results", []))
+        return found
+
     def get_recent_emails_sync(self, contact_id: str, limit: int = 5) -> list[EngagementDTO]:
         """Fetch recent email engagements with content for a contact (sync)."""
         headers = {"Authorization": f"Bearer {self.token}"}
