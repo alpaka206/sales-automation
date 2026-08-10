@@ -251,6 +251,18 @@ def test_a_card_opens_the_ticket_it_stands_for(log_db):
     assert ids["won_message"] in links
 
 
+def test_a_card_is_titled_with_the_ticket_name(log_db):
+    """Not the company: this customer has two open inquiries, and the company name is
+    the same word on both cards."""
+    _factory, _ids = log_db
+    with TestClient(app) as client:
+        board = client.get("/api/ui/dashboard").json()
+    assert {card["subject"] for stage in board["stages"] for card in stage["cards"]} == {
+        "작년 계약 건",
+        "더빙 단가 문의",
+    }
+
+
 def test_the_card_carries_the_workbook_client_id(log_db):
     """The number the operator matches against the Inbound DB sheet (e.g. 1330)."""
     _factory, ids = log_db

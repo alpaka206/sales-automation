@@ -12,6 +12,7 @@ import { SyncBanner, syncStateFrom, type SyncState } from "./SyncBanner";
 export type Card = {
   conversation_id: number;
   ticket_id: string | null;
+  subject: string | null;
   contact_id: number;
   company: string | null;
   name: string;
@@ -129,8 +130,13 @@ export function Board({ stages, manualLogStages }: { stages: Stage[]; manualLogS
                         : `/customers/${card.contact_id}`}
                       draggable={false}
                     >
-                      <strong>{card.company || card.name}</strong>
-                      <span>{card.name} · {card.country || "국가 미확인"}</span>
+                      {/* 제목은 티켓 이름입니다. 회사 이름이었는데, 한 회사가 문의를
+                          여러 건 넣으면 카드 제목이 전부 같은 글자가 됩니다. */}
+                      <strong>{card.subject || "(제목 없음)"}</strong>
+                      <span>
+                        {[card.company, card.name].filter(Boolean).join(" · ")}
+                        {" · "}{card.country || "국가 미확인"}
+                      </span>
                       <small>{card.email || "-"}</small>
                       <small>문의 #{card.ticket_id || card.conversation_id} · Client ID {card.client_id ?? "—"}</small>
                       <small>{kst(card.last_activity, "md-hm")}</small>
