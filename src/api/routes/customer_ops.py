@@ -691,6 +691,63 @@ def _linked_conversation(session, raw: str, contact_id: int) -> Conversation | N
     return conversation
 
 
+# The console's channel keys spelled for a person reading HubSpot. The console's own
+# copy is frontend/src/ui/InteractionForm.tsx — this one exists because a note saying
+# "manual" or "kakao" tells the reader nothing, and the two drifting apart costs one
+# slightly different word in a note, which is cheaper than a round trip to fetch labels.
+_CHANNEL_LABELS = {
+    "email": "이메일", "whatsapp": "WhatsApp", "phone": "전화", "sms": "문자",
+    "kakao": "카카오톡", "meeting": "미팅", "hubspot": "HubSpot",
+    "invoice": "Invoice", "contract": "계약", "manual": "메모",
+}
+
+
+async def _log_interaction_to_hubspot(
+    hubspot_contact_id: str | None,
+    hubspot_ticket_id: str | None,
+    *,
+    channel: str,
+    handler: str,
+    subject: str,
+    summary: str,
+    happened_at: datetime,
+) -> None:
+    """Copy one 소통 기록 onto the HubSpot timeline. Best effort, and deliberately so.
+
+    The record is committed before this runs and this console stays the place the
+    post-발송 history lives. The copy is for whoever opens the contact in HubSpot: without
+    it a customer we have been talking to for a month reads there as one nobody has
+    touched since the first reply. So a HubSpot failure is a log line — a CRM copy must
+    never be able to lose the record it is a copy of.
+
+    Nothing is written for a contact HubSpot does not have (sheet-imported ones): there
+    is no timeline to write to, and inventing a contact to hold a note is not this
+    function's call to make.
+    """
+    if not hubspot_contact_id:
+        return
+    head = f"[{_CHANNEL_LABELS.get(channel, channel)}]"
+    if subject:
+        head = f"{head} {subject}"
+    if handler:
+        head = f"{head} · 담당 {handler}"
+    try:
+        from ...integrations.hubspot import HubSpotClient
+
+        await HubSpotClient().create_interaction_note(
+            hubspot_contact_id,
+            f"{head}\n\n{summary}",
+            happened_at=happened_at,
+            ticket_id=hubspot_ticket_id,
+        )
+    except Exception:
+        logger.warning(
+            "소통 기록은 저장됐지만 HubSpot 타임라인에 남기지 못했습니다 (contact %s).",
+            hubspot_contact_id,
+            exc_info=True,
+        )
+
+
 @router.post("/customers/{contact_id}/interactions")
 async def interaction_add(
     contact_id: int,
@@ -729,10 +786,16 @@ async def interaction_add(
     # session, applied after the commit — _set_* open their own sessions.
     advance_conversation_id: int | None = None
     advance_contact = False
+    # Read inside the session, used after it closes — see _log_interaction_to_hubspot.
+    hubspot_contact_id: str | None = None
+    hubspot_ticket_id: str | None = None
     with SessionLocal() as session:
-        if not session.get(Contact, contact_id):
+        contact = session.get(Contact, contact_id)
+        if not contact:
             raise HTTPException(status_code=404, detail="고객을 찾을 수 없습니다")
+        hubspot_contact_id = contact.hubspot_contact_id
         conversation = _linked_conversation(session, conversation_id, contact_id)
+        hubspot_ticket_id = conversation.hubspot_ticket_id if conversation else None
         session.add(
             CustomerInteraction(
                 contact_id=contact_id,
@@ -775,6 +838,16 @@ async def interaction_add(
                     session.add(profile)
                     advance_contact = True
         session.commit()
+
+    await _log_interaction_to_hubspot(
+        hubspot_contact_id,
+        hubspot_ticket_id,
+        channel=channel,
+        handler=handler.strip(),
+        subject=subject.strip(),
+        summary=summary.strip(),
+        happened_at=_parse_dt(happened_at) or datetime.now(timezone.utc),
+    )
 
     if advance_conversation_id is not None:
         ticket_id, _contact_id, sheet_client_id = _set_conversation_stage(
@@ -966,6 +1039,10 @@ def _sync_hubspot(contact_id: int) -> int:
     client = HubSpotClient()
     dto = client.get_contact_sync(hubspot_id)
     emails = client.get_recent_emails_sync(hubspot_id, limit=20)
+    # Calls, meetings and messages somebody logged in HubSpot by hand. Without these the
+    # 리드 히스토리 screen — the one that claims to hold everything — silently omits every
+    # touchpoint that happened on the other side.
+    logged = client.get_logged_engagements_sync(hubspot_id, limit=20)
     deals = client.get_associated_deals_sync(hubspot_id)
     note = client.get_latest_note(hubspot_id)
     inserted = 0
@@ -998,6 +1075,27 @@ def _sync_hubspot(contact_id: int) -> int:
                         summary=email.body or email.subject or "HubSpot 이메일",
                         external_id=external_id,
                         happened_at=email.timestamp or datetime.now(timezone.utc),
+                    )
+                )
+                inserted += 1
+        for hubspot_channel, engagement in logged:
+            external_id = f"hubspot:{engagement.id}"
+            exists = session.scalar(
+                select(CustomerInteraction.id).where(CustomerInteraction.external_id == external_id)
+            )
+            if not exists:
+                session.add(
+                    CustomerInteraction(
+                        contact_id=contact_id,
+                        channel=hubspot_channel,
+                        # `note` is this table's "no direction" — a logged call says
+                        # nothing about who dialled, and the form stopped asking for
+                        # the same reason.
+                        direction="note",
+                        subject=engagement.subject,
+                        summary=engagement.body or engagement.subject or "HubSpot 기록",
+                        external_id=external_id,
+                        happened_at=engagement.timestamp or datetime.now(timezone.utc),
                     )
                 )
                 inserted += 1

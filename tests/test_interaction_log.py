@@ -237,6 +237,73 @@ def test_the_board_shows_the_button_only_on_those_stages(log_db):
         assert ("data-log-conv" in column) is (stage in MANUAL_LOG_STAGES), stage
 
 
+# ---------- the HubSpot copy ----------
+
+
+def _hubspot_notes(monkeypatch, *, fails: bool = False) -> list[dict]:
+    """Capture what would be written to the contact's HubSpot timeline."""
+    written: list[dict] = []
+
+    class Client:
+        async def create_interaction_note(self, contact_id, body, happened_at=None, ticket_id=None):
+            if fails:
+                raise RuntimeError("HubSpot 500")
+            written.append({"contact_id": contact_id, "body": body, "ticket_id": ticket_id})
+            return "note-1"
+
+    monkeypatch.setattr("src.integrations.hubspot.HubSpotClient", lambda: Client())
+    return written
+
+
+def test_a_record_reaches_the_hubspot_timeline_with_its_ticket(log_db, monkeypatch):
+    """Somebody else opens this contact in HubSpot. Without the copy, a customer we have
+    been talking to for weeks reads there as one nobody touched after the first reply.
+
+    It carries the channel and who handled it, and hangs off the TICKET when the record
+    was filed against one — on the contact alone, the 문의 it belongs to shows nothing.
+    """
+    factory, ids = log_db
+    with factory() as session:
+        session.get(Contact, ids["contact"]).hubspot_contact_id = "hs-42"
+        session.get(Conversation, ids["negotiating"]).hubspot_ticket_id = "T-99"
+        session.commit()
+    written = _hubspot_notes(monkeypatch)
+
+    with TestClient(app) as client:
+        _post(
+            client,
+            ids["contact"],
+            channel="phone",
+            handler="박세일",
+            summary="전화로 단가 재확인.",
+            conversation_id=str(ids["negotiating"]),
+        )
+
+    assert len(written) == 1
+    assert written[0]["contact_id"] == "hs-42"
+    assert written[0]["ticket_id"] == "T-99"
+    assert "[전화]" in written[0]["body"]
+    assert "담당 박세일" in written[0]["body"]
+    assert "전화로 단가 재확인." in written[0]["body"]
+
+
+def test_a_hubspot_failure_never_loses_the_record(log_db, monkeypatch):
+    """The copy is best effort in the only direction that matters. The record is ours;
+    HubSpot gets a copy of it, and a copy must never be able to take the original."""
+    factory, ids = log_db
+    with factory() as session:
+        session.get(Contact, ids["contact"]).hubspot_contact_id = "hs-42"
+        session.commit()
+    _hubspot_notes(monkeypatch, fails=True)
+
+    with TestClient(app) as client:
+        response = _post(client, ids["contact"], summary="HubSpot 이 죽어 있던 날의 기록")
+
+    assert response.status_code == 303
+    with factory() as session:
+        assert session.query(CustomerInteraction).count() == 1
+
+
 # ---------- the card opens its own ticket ----------
 
 

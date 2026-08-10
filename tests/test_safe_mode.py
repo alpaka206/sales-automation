@@ -189,6 +189,14 @@ def test_hubspot_timeline_email_blocked(safe):
         asyncio.run(HubSpotClient().create_email_engagement("123", "subj", "body"))
 
 
+def test_hubspot_interaction_note_blocked(safe):
+    """소통 기록의 HubSpot 사본. 기록 자체는 우리 DB 에 남고, 이 통로만 막힙니다."""
+    from src.integrations.hubspot import HubSpotClient
+
+    with pytest.raises(ExternalWriteBlocked):
+        asyncio.run(HubSpotClient().create_interaction_note("123", "전화로 단가 재확인"))
+
+
 def test_move_ticket_stage_after_send_never_writes(safe):
     """The post-send helper swallows the block and reports failure, never writing."""
     from src.integrations.hubspot import move_ticket_stage_after_send

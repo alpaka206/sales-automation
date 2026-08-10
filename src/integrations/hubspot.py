@@ -511,6 +511,64 @@ class HubSpotClient:
                 found.update(str(item["id"]) for item in r.json().get("results", []))
         return found
 
+    async def create_interaction_note(
+        self,
+        contact_id: str,
+        body: str,
+        happened_at: datetime | None = None,
+        ticket_id: str | None = None,
+    ) -> str:
+        """Put one 소통 기록 on the contact's HubSpot timeline, as a note.
+
+        A note, and ONE object type for all ten of the console's channels — not
+        hs_call / hs_meeting / hs_communication. What the operator files is a whole
+        exchange summarized once ("전화로 단가 재확인, 검토 후 회신하기로"), which is
+        not what a call object's duration, direction and status columns are for; the
+        channel goes on the note's first line instead. Three more object types buy
+        HubSpot-side REPORTING on calls, and nothing at all for reading the timeline —
+        so they can earn their own path on the day somebody asks to filter by it.
+
+        Associations use the v4 default endpoint, so no association type id is spelled
+        out here and none can be spelled wrong.
+        """
+        guard_external_write("hubspot:create_interaction_note")
+        http = await self._http()
+        ts = int((happened_at or datetime.now(timezone.utc)).timestamp() * 1000)
+        r = await http.post(
+            "/crm/v3/objects/notes",
+            json={
+                "properties": {
+                    "hs_timestamp": str(ts),
+                    "hubspot_owner_id": settings.HUBSPOT_OWNER_ID or None,
+                    "hs_note_body": body,
+                }
+            },
+        )
+        r.raise_for_status()
+        note_id = r.json()["id"]
+
+        link = await http.put(
+            f"/crm/v4/objects/notes/{note_id}/associations/default/contacts/{contact_id}"
+        )
+        link.raise_for_status()
+
+        if ticket_id:
+            # Best effort, same as the email engagement: the note already exists and is
+            # worth keeping even if it ends up on the contact timeline only.
+            try:
+                ticket_link = await http.put(
+                    f"/crm/v4/objects/notes/{note_id}/associations/default/tickets/{ticket_id}"
+                )
+                ticket_link.raise_for_status()
+            except Exception:
+                logger.warning(
+                    "Note %s was logged but could not be attached to ticket %s.",
+                    note_id, ticket_id, exc_info=True,
+                )
+
+        logger.info("Logged interaction note %s for contact %s", note_id, contact_id)
+        return note_id
+
     def get_recent_emails_sync(self, contact_id: str, limit: int = 5) -> list[EngagementDTO]:
         """Fetch recent email engagements with content for a contact (sync)."""
         headers = {"Authorization": f"Bearer {self.token}"}
@@ -555,6 +613,73 @@ class HubSpotClient:
                     )
                 )
         return engagements
+
+    # What a person logs in HubSpot by hand, per object type: (channel we file it under,
+    # title property, body property, time property). Emails are NOT here — they have
+    # their own reader above, and this app writes them.
+    _LOGGED_ENGAGEMENTS = {
+        "calls": ("phone", "hs_call_title", "hs_call_body", "hs_timestamp"),
+        "meetings": ("meeting", "hs_meeting_title", "hs_meeting_body", "hs_meeting_start_time"),
+        "communications": ("manual", None, "hs_communication_body", "hs_timestamp"),
+    }
+
+    def get_logged_engagements_sync(
+        self, contact_id: str, limit: int = 20
+    ) -> list[tuple[str, EngagementDTO]]:
+        """(channel, engagement) for the calls, meetings and messages logged in HubSpot.
+
+        The other half of the history. Somebody presses "Log a call" in HubSpot and this
+        console showed nothing — and the 리드 히스토리 screen is the one that claims to
+        hold everything, so a missing record reads as "no contact since", not as "look
+        somewhere else".
+
+        One bad object type must not cost the other two: HubSpot returns 400 for a type
+        the portal does not have enabled, and this is a background sync.
+        """
+        out: list[tuple[str, EngagementDTO]] = []
+        headers = {"Authorization": f"Bearer {self.token}"}
+        with httpx.Client(headers=headers, timeout=30.0) as client:
+            for object_type, (channel, title_prop, body_prop, time_prop) in (
+                self._LOGGED_ENGAGEMENTS.items()
+            ):
+                try:
+                    r = client.get(
+                        f"{BASE_URL}/crm/v3/objects/contacts/{contact_id}"
+                        f"/associations/{object_type}",
+                        params={"limit": limit},
+                    )
+                    if r.status_code != 200:
+                        continue
+                    props = ",".join(p for p in (title_prop, body_prop, time_prop) if p)
+                    for item in r.json().get("results", []):
+                        object_id = str(item.get("id", ""))
+                        if not object_id:
+                            continue
+                        detail = client.get(
+                            f"{BASE_URL}/crm/v3/objects/{object_type}/{object_id}",
+                            params={"properties": props},
+                        )
+                        if detail.status_code != 200:
+                            continue
+                        p = detail.json().get("properties", {}) or {}
+                        raw_time = p.get(time_prop) or p.get("hs_timestamp")
+                        out.append((
+                            channel,
+                            EngagementDTO(
+                                id=f"{object_type}:{object_id}",
+                                type=object_type,
+                                subject=_html_to_text(p.get(title_prop)) if title_prop else None,
+                                body=_html_to_text(p.get(body_prop)),
+                                timestamp=(
+                                    datetime.fromisoformat(raw_time) if raw_time else None
+                                ),
+                            ),
+                        ))
+                except Exception:
+                    logger.warning(
+                        "Could not read %s for contact %s", object_type, contact_id, exc_info=True
+                    )
+        return out
 
     def get_latest_form_submission(self, contact_id: str) -> str | None:
         """Fetch the most recent form submission text for a contact."""
