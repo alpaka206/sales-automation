@@ -517,6 +517,23 @@ async def dismiss_pending(pending_id: int):
 
 
 # --------------------------------------------------------------------------- #
+# 시트 → DB (한 번만 쓰는 방향)
+# --------------------------------------------------------------------------- #
+# 경로가 ``/won-customers`` 밖에 있는 것은 일부러입니다. 그 접두사는 브라우저 세션 쿠키로
+# 열리는데, 이건 사람이 화면에서 누르는 것이 아니라 밖에서 한 번 부르는 작업이라
+# ``X-Internal-Token`` 문을 지나야 합니다(main.py 의 인증 미들웨어).
+#
+# 왜 라우트가 필요했나: 값이 시트에만 있는 상태에서 DB 를 처음 채워야 하는데, 사내망이
+# Postgres 포트를 막고 Render 무료 플랜은 셸도 일회성 작업도 안 됩니다. 배포본에서 코드를
+# 돌릴 수 있는 통로가 HTTP 뿐이었습니다. 자연키로 맞추므로 여러 번 불러도 안전합니다.
+@router.post("/internal/won-customers/import-from-sheet")
+async def import_from_sheet_route(write: str = Form("")):
+    from ...agents.sheet_to_db import import_from_sheet
+
+    return import_from_sheet(write=write == "true")
+
+
+# --------------------------------------------------------------------------- #
 # 내보내기
 # --------------------------------------------------------------------------- #
 @router.get("/won-customers/export.csv")
