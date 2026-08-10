@@ -213,8 +213,6 @@ class Settings(BaseSettings):
     # LIVE_SHEETS_WRITES is on.
     GOOGLE_SHEETS_SPREADSHEET_ID: str = "1NWdn-rH3BdfRPCldglDnQnAl4IFmP9LnRkDkGBdmGRo"
     GOOGLE_SHEETS_INBOUND_TAB: str = "Inbound DB"
-    # Reference-only, and absent from the current workbook. Blank hides it on /pipeline.
-    GOOGLE_SHEETS_QUALITY_TAB: str = ""
     GOOGLE_SHEETS_ORDERS_TAB: str = "수주 DB"
 
     # ----- Domain enrichment -----

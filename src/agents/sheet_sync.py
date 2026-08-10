@@ -10,7 +10,15 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 
 from .inbound_scoring import _normalize_email
-from ..db.models import Contact, ContractRecord, Conversation, CustomerProfile, Event, Message
+from ..db.models import (
+    Client,
+    Contact,
+    ContractRecord,
+    Conversation,
+    CustomerProfile,
+    Event,
+    Message,
+)
 from ..common.sheet_values import country_in_korean, normalise_plan
 from ..db.session import SessionLocal
 from ..integrations.google_sheets import (
@@ -636,6 +644,12 @@ def sync_pending_inbound_rows(limit: int = 50) -> int:
                 continue
             when = inbound.created_at
             qualification = (profile.qualification if profile else None) or "MQL"
+            # 고객사 이름·산업·국가는 「고객 기본 정보」가 원본입니다. 그 Client ID 가 이미
+            # 수주 고객이면 거기 적힌 철자를 씁니다 — 같은 회사가 세 번 문의해도 서울대학교 /
+            # 서울대 / SNU 로 갈라지지 않도록. 시트 수식으로는 이걸 못 합니다: Inbound DB 가
+            # 고객 기본 정보를 조회하면 그 반대 방향과 순환 참조가 되고, 조회가 빈 리드
+            # 153건은 이름을 잃습니다. 값으로 쓰면 둘 다 없습니다.
+            master = session.get(Client, reserved_client_id) if reserved_client_id else None
             record = {
                 # The key belongs to this inquiry, not the contact. Reusing a
                 # contact's first Client ID would overwrite an older inquiry.
@@ -645,12 +659,15 @@ def sync_pending_inbound_rows(limit: int = 50) -> int:
                 "deal_stage": "New",
                 "deal_stage_detail": "Inquiry",
                 "pipeline": qualification,
-                "company": contact.company or "알 수 없음",
+                "company": (master.company if master else None) or contact.company or "알 수 없음",
                 "full_name": contact.full_name,
                 "phone": contact.phone or "알 수 없음",
                 "email": contact.email or "",
-                "country": country_in_korean(contact.country),
-                "company_type": (profile.industry if profile else None) or "확인 안 됨",
+                "country": (master.country if master else None)
+                or country_in_korean(contact.country),
+                "company_type": (master.industry if master else None)
+                or (profile.industry if profile else None)
+                or "확인 안 됨",
                 "channel": "허브스팟" if contact.hubspot_contact_id else inbound.channel,
                 "plan": normalise_plan(profile.current_plan if profile else None),
                 "user_seq": profile.user_seq if profile else "",

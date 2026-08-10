@@ -90,6 +90,8 @@ def test_append_matches_real_inbound_headers_and_allocates_1000_id(monkeypatch):
     store = {
         "existing_header": [["Cluent ID", "영업방향", "문의 날짜", "Deal Stage", "Contact Email"]],
         "client_values": [["1335"], ["9005"], ["not-a-number"]],
+        # 회사 행이 이미 있으면 고객 기본 정보에는 아무것도 추가하지 않는다.
+        "range_values": {"'고객 기본 정보'!A2:A": [["1336"]]},
     }
     monkeypatch.setattr(gs, "_build_service", lambda: _FakeService(store))
 
@@ -198,6 +200,8 @@ def test_inbound_retry_upserts_existing_client_id_without_duplicate(monkeypatch)
     }
     monkeypatch.setattr(gs, "_build_service", lambda: _FakeService(store))
 
+    store.setdefault("range_values", {})["'고객 기본 정보'!A2:A"] = [["1336"]]
+
     result = gs.append_inbound_row(
         {
             "client_id": 1336,
@@ -220,6 +224,7 @@ def test_allocated_inbound_id_is_rechecked_before_append(monkeypatch):
             "'Inbound DB'!A2:A": [["1335"]],
             # Simulate another process appending 1336 after max-ID allocation.
             "'Inbound DB'!A2:D": [["1336", "2026-07-18", "New", "other@example.com"]],
+            "'고객 기본 정보'!A2:A": [["1336"]],
         },
     }
     monkeypatch.setattr(gs, "_build_service", lambda: _FakeService(store))
@@ -401,3 +406,36 @@ def test_the_formula_branches_match_the_operators_rule():
     assert '"N/A","MQL"' in formula
     assert '"엔터프라이즈","재계약"' in formula
     assert formula.endswith('"PQL"))')
+
+
+def test_a_new_company_gets_a_registry_row_before_its_inquiry_is_written(monkeypatch):
+    """고객사 이름은 「고객 기본 정보」가 원본이고, Inbound DB 는 그걸 조회한다.
+
+    조회는 대상이 있어야 값을 준다. 새 회사의 첫 문의는 회사 행도 그때 처음 생기므로,
+    문의 행보다 **먼저** 회사 행을 만든다 — 순서가 뒤집히면 그 회사만 이름이 빈다.
+    """
+    _configure(monkeypatch)
+    store = {
+        "existing_header": [["Cluent ID", "문의 날짜", "Company Name", "IP Country"]],
+        "client_values": [["1335"]],
+    }
+    monkeypatch.setattr(gs, "_build_service", lambda: _FakeService(store))
+
+    gs.append_inbound_row(
+        {
+            "inquiry_date": "2026-07-18",
+            "company": "새로운 회사",
+            "country": "한국",
+            "company_type": "기업",
+            "email": "buyer@corp.com",
+        }
+    )
+
+    registry, inquiry = store["appended"]
+    assert registry[:1] + registry[2:8] == [
+        1336, "새로운 회사", "", "기업", "한국", "GTM", "2026-07-18"
+    ]
+    assert inquiry[0] == 1336
+    # 문의 행의 고객사·국가는 값이 아니라 그 회사 행을 가리키는 조회다.
+    formulas = [entry["values"][0][0] for entry in store["batch"]["data"]]
+    assert any("'고객 기본 정보'!$A:$J" in formula for formula in formulas)

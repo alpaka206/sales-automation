@@ -347,6 +347,16 @@ async def publish_changes_middleware(request: Request, call_next):
             publish(request.url.path)
         except Exception:  # pragma: no cover - a broadcast must never undo a saved write
             logger.warning("change broadcast failed", exc_info=True)
+        # 영업 워크북의 수주 고객 탭도 같은 이유로 여기서 맞춥니다. 고객·계약·크레딧·입금·
+        # 클레임을 저장하는 라우트가 열한 개이고, 소통 히스토리는 또 다른 파일에 있습니다 —
+        # 각각에 한 줄씩 넣으면 다음에 생기는 라우트가 조용히 빠집니다.
+        if request.url.path.startswith(("/won-customers", "/customers/")):
+            from ..agents.won_sheets import schedule_sync
+
+            try:
+                schedule_sync()
+            except Exception:  # pragma: no cover - 시트가 죽어도 저장은 끝난 뒤입니다
+                logger.warning("won sheet sync could not be scheduled", exc_info=True)
     return response
 
 

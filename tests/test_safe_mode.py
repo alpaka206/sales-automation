@@ -217,6 +217,24 @@ def test_sheets_writes_enabled_when_live(live, monkeypatch):
     assert google_sheets.writes_enabled() is True
 
 
+def test_won_customer_mirror_is_blocked_in_safe_mode(safe, monkeypatch):
+    """수주 고객 탭 동기화도 같은 문 뒤에 있습니다.
+
+    이 경로는 콘솔의 아무 저장에나 붙어 있어서(main.publish_changes_middleware) 안전 모드
+    에서 조용히 통과하면 테스트 고객이 공용 워크북에 그대로 쌓입니다. 서비스는 만들기 전에
+    막혀야 합니다 — is_configured() 는 참인 채로 검사합니다.
+    """
+    from src.agents import won_sheets
+    from src.integrations import google_sheets
+
+    monkeypatch.setattr(google_sheets, "is_configured", lambda: True)
+    monkeypatch.setattr(
+        google_sheets, "_build_service", lambda: pytest.fail("safe mode built a Sheets client")
+    )
+    with pytest.raises(ExternalWriteBlocked):
+        won_sheets.sync_won_sheets()
+
+
 def test_env_refresh_token_does_not_bypass_safe_mode(safe, monkeypatch):
     """A .env-supplied Google account connects the workbook but must not unblock it.
 

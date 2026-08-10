@@ -322,6 +322,90 @@ def _pipeline_formula(header: _SheetHeader, row: int) -> str | None:
     return f'=IF({cell}="N/A","MQL",IF({cell}="엔터프라이즈","재계약","PQL"))'
 
 
+# 고객사·기업 종류·국가는 「고객 기본 정보」가 원본이다. 문의 행마다 값을 다시 적으면 같은
+# 회사가 세 번 문의했을 때 서울대학교 / 서울대 / SNU 로 갈라지고, 고쳐도 한 행만 고쳐진다.
+# 그래서 이 세 칸은 Client ID 로 그 탭을 조회한다 — 거기서 한 번 고치면 전부 따라 바뀐다.
+#
+# ARRAYFORMULA 를 쓰지 않는 이유: 이 탭은 앱이 행을 append 하는데, 배열이 채워야 할 자리에
+# 값이 들어오면 열 전체가 #REF! 로 깨진다. 그래서 행마다 한 칸씩 쓴다.
+# 조회가 비면 빈칸이 되므로, 회사 행이 없을 수 있는 경우에는 부르지 않는다.
+_REGISTRY_TAB = "고객 기본 정보"
+_REGISTRY_COLUMNS = {"company": 3, "company_type": 5, "country": 6}
+
+
+def _ensure_registry_row(service, record: dict) -> None:
+    """그 Client ID 의 회사 행이 고객 기본 정보에 없으면 만든다.
+
+    조회는 대상이 있어야 값을 준다. 새 회사의 첫 문의는 회사 행도 그때 처음 생기므로,
+    문의 행을 쓰기 **전에** 여기서 만든다. 이미 있으면 손대지 않는다 — 운영자가 고쳐 둔
+    이름을 문의 한 번에 되돌리면 안 된다.
+    """
+    from ..common.won import DEPARTMENT_BY_TYPE, client_type
+
+    client_id = record.get("client_id")
+    if not client_id:
+        return
+    spreadsheet_id = settings.GOOGLE_SHEETS_SPREADSHEET_ID.strip()
+    known = (
+        service.spreadsheets()
+        .values()
+        .get(spreadsheetId=spreadsheet_id, range=f"'{_REGISTRY_TAB}'!A2:A")
+        .execute()
+        .get("values")
+        or []
+    )
+    target = str(client_id).replace(",", "").strip()
+    if any(row and str(row[0]).replace(",", "").strip() == target for row in known):
+        return
+    service.spreadsheets().values().append(
+        spreadsheetId=spreadsheet_id,
+        range=f"'{_REGISTRY_TAB}'!A1",
+        valueInputOption="RAW",
+        insertDataOption="INSERT_ROWS",
+        body={
+            "values": [
+                [
+                    client_id,
+                    "",  # 고객 종류는 수식이다
+                    record.get("company") or "",
+                    "",  # Website URL 은 시트가 원본이라 비워 둔다
+                    record.get("company_type") or "",
+                    record.get("country") or "",
+                    DEPARTMENT_BY_TYPE.get(client_type(int(client_id)), ""),
+                    record.get("inquiry_date") or "",
+                ]
+            ]
+        },
+    ).execute()
+    logger.info("고객 기본 정보에 회사 행을 만들었습니다 (client_id=%s).", client_id)
+
+
+def _write_registry_formulas(service, tab: str, header: _SheetHeader, row: int) -> None:
+    """방금 쓴 행의 고객사·기업 종류·국가를 고객 기본 정보 조회로 바꾼다."""
+    lookup = _header_lookup(dict.fromkeys(_REGISTRY_COLUMNS, ""))
+    data = []
+    for index, cell in enumerate(header.values):
+        key = _key_for_header(cell, lookup)
+        column = _REGISTRY_COLUMNS.get(key or "")
+        if column is None:
+            continue
+        data.append(
+            {
+                "range": f"'{tab}'!{_column_letter(index)}{row}",
+                "values": [
+                    [
+                        f"=IFERROR(VLOOKUP($A{row},'{_REGISTRY_TAB}'!$A:$J,{column},FALSE),\"\")"
+                    ]
+                ],
+            }
+        )
+    if data:
+        service.spreadsheets().values().batchUpdate(
+            spreadsheetId=settings.GOOGLE_SHEETS_SPREADSHEET_ID.strip(),
+            body={"valueInputOption": "USER_ENTERED", "data": data},
+        ).execute()
+
+
 def _write_pipeline_formula(service, tab: str, header: _SheetHeader, row: int) -> None:
     """Put the formula in Pipeline for a row that was just written.
 
@@ -418,6 +502,7 @@ def _append_existing_tab(
     *,
     allocate_client_id: bool = False,
     dedup_keys: tuple[str, ...] = (),
+    registry: bool = False,
 ) -> SheetWriteResult:
     if not writes_enabled():
         raise GoogleSheetsError("Google Sheets credentials are not configured.")
@@ -431,11 +516,15 @@ def _append_existing_tab(
         if allocate_client_id and not client_id:
             client_id = _next_inbound_client_id(service, tab, header)
             payload["client_id"] = client_id
+        if registry:
+            _ensure_registry_row(service, payload)
         if dedup_keys:
             existing_row = _existing_row_for_keys(service, tab, header, payload, dedup_keys)
             if existing_row:
                 _update_existing_nonempty_cells(service, tab, header, existing_row, payload)
                 _write_pipeline_formula(service, tab, header, existing_row)
+                if registry:
+                    _write_registry_formulas(service, tab, header, existing_row)
                 return SheetWriteResult(
                     row=existing_row,
                     client_id=int(client_id) if client_id else None,
@@ -458,6 +547,8 @@ def _append_existing_tab(
         appended = _row_number(response)
         if appended:
             _write_pipeline_formula(service, tab, header, appended)
+            if registry:
+                _write_registry_formulas(service, tab, header, appended)
     return SheetWriteResult(row=appended, client_id=int(client_id) if client_id else None)
 
 
@@ -467,6 +558,7 @@ def append_inbound_row(record: dict) -> SheetWriteResult:
         settings.GOOGLE_SHEETS_INBOUND_TAB.strip() or "Inbound DB",
         allocate_client_id=True,
         dedup_keys=("client_id",),
+        registry=True,
     )
 
 
