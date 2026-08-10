@@ -263,6 +263,22 @@ def test_a_card_is_titled_with_the_ticket_name(log_db):
     }
 
 
+def test_a_nameless_ticket_is_titled_from_its_own_mail(log_db):
+    """Threads that predate the ticket-name column, and ones whose creating event
+    carried no subject, still have the mail. Same fallback as 회신 및 검토, RE: and all —
+    two screens naming one ticket differently is two tickets to read."""
+    factory, ids = log_db
+    with factory() as session:
+        session.query(Conversation).filter_by(id=ids["negotiating"]).update(
+            {"inquiry_subject": None}
+        )
+        session.commit()
+    with TestClient(app) as client:
+        board = client.get("/api/ui/dashboard").json()
+    titles = {card["subject"] for stage in board["stages"] for card in stage["cards"]}
+    assert titles == {"작년 계약 건", "더빙 단가 문의"}   # the RE: of our own reply comes off
+
+
 def test_the_card_carries_the_workbook_client_id(log_db):
     """The number the operator matches against the Inbound DB sheet (e.g. 1330)."""
     _factory, ids = log_db

@@ -90,8 +90,9 @@ def _card(row: dict) -> dict:
         "ticket_id": conversation.hubspot_ticket_id,
         # The ticket's name — the customer's own subject line. It is what the card is
         # titled with: one company files several inquiries, and the company name is
-        # the same on all of them.
-        "subject": conversation.inquiry_subject,
+        # the same on all of them. Chosen in _pipeline_rows, beside the message it
+        # can fall back to.
+        "subject": row["subject"],
         "contact_id": contact.id,
         "company": contact.company,
         "name": contact.full_name,

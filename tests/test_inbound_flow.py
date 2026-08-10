@@ -149,6 +149,30 @@ def test_inbound_handle_creates_db_rows(db_session) -> None:
     assert conversations[0].inquiry_subject == "Bulk dubbing quote"
 
 
+def test_a_nameless_ticket_takes_the_subject_a_later_event_brings(db_session) -> None:
+    """One ticket produces several events — webhook, poller, ticket change. The subject
+    used to be written by the Conversation constructor only, so whichever event happened
+    to create the row decided the ticket name forever: if that one carried none (a
+    HubSpot ticket fetch that failed, a contact-only webhook), the board showed
+    "(제목 없음)" for a ticket every later event knew the name of."""
+    with patch("src.agents.inbound.SessionLocal", return_value=db_session):
+        agent = InboundAgent(llm=_mock_llm(), hubspot=None)
+        base = {
+            "object_id": "hs-late-subject",
+            "email": "buyer@nameless.co.kr",
+            "full_name": "Kim Buyer",
+            "ticket_id": "T-late-subject",
+            "last_message": "안녕하세요, 문의드립니다.",
+        }
+        agent._persist_placeholder({**base, "subject": ""}, "email", "ko")
+        conversation = db_session.query(Conversation).one()
+        assert conversation.inquiry_subject is None
+
+        agent._persist_placeholder({**base, "subject": "더빙 단가 문의"}, "email", "ko")
+
+    assert db_session.query(Conversation).one().inquiry_subject == "더빙 단가 문의"
+
+
 def test_personal_domain_not_stored(db_session) -> None:
     """Personal/free-email senders (gmail) must not get a company domain — otherwise
     unrelated customers would be grouped and their history cross-exposed."""

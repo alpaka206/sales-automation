@@ -17,6 +17,7 @@ from sqlalchemy import func, select
 
 from ...agents.stage_sync import customer_state_for
 from ...common.config import settings
+from ...common.subjects import strip_reply_prefixes
 from ...db.models import (
     Contact,
     ContractRecord,
@@ -397,6 +398,20 @@ def _pipeline_rows(
             if conversation_ids
             else {}
         )
+        # Its subject, for the cards whose conversation has no ticket name of its own.
+        # Fetched separately rather than selected beside the max(): a bare column next to
+        # an aggregate is a SQLite-only liberty, and this has to run on PostgreSQL too.
+        subjects = (
+            dict(
+                session.execute(
+                    select(Message.id, Message.subject).where(
+                        Message.id.in_(list(latest_message.values()))
+                    )
+                ).all()
+            )
+            if latest_message
+            else {}
+        )
 
     rows: list[dict] = []
     for conversation, contact, profile in loaded:
@@ -417,6 +432,13 @@ def _pipeline_rows(
                 # ticket whose mail was never ingested); the card falls back to the
                 # customer page then.
                 "link_message_id": latest_message.get(conversation.id),
+                # 카드 제목. 회신 및 검토 목록과 같은 식으로 고릅니다 — 티켓 이름이 없으면
+                # 그 티켓의 마지막 메일 제목에서 우리가 붙인 "RE:" 를 떼어 씁니다. 두 화면이
+                # 같은 티켓을 다른 이름으로 부르면 같은 건인 줄 모릅니다. 시트에서 들여온
+                # 문의는 메일이 없어서 여기서도 비고, 그때만 "(제목 없음)" 이 뜹니다.
+                "subject": conversation.inquiry_subject
+                or strip_reply_prefixes(subjects.get(latest_message.get(conversation.id)))
+                or None,
                 # Latest of the three, for the same reason as _customer_rows: `incoming
                 # or outgoing` dated a card by the customer's message even when our reply
                 # was newer.

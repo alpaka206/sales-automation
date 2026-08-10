@@ -988,6 +988,10 @@ class InboundAgent:
                     )
                 )
 
+            # The customer's own subject line = the ticket name. Captured at ingest; it
+            # used to be left None here and filled with the AI category later.
+            inbound_subject = (contact_info.get("subject") or "").strip() or None
+
             # Ticket-based inbound: one ticket = one inquiry = one conversation.
             ticket_id = contact_info.get("ticket_id")
             if ticket_id:
@@ -995,9 +999,7 @@ class InboundAgent:
                 if not conv:
                     conv = Conversation(
                         contact_id=contact.id,
-                        # The customer's own subject line, captured at ingest. It used to
-                        # be left None here and filled with the AI category later.
-                        inquiry_subject=(contact_info.get("subject") or "").strip() or None,
+                        inquiry_subject=inbound_subject,
                         stage="new",
                         hubspot_ticket_id=ticket_id,
                         inquiry_language=inquiry_lang,
@@ -1013,7 +1015,7 @@ class InboundAgent:
                 if not conv:
                     conv = Conversation(
                         contact_id=contact.id,
-                        inquiry_subject=(contact_info.get("subject") or "").strip() or None,
+                        inquiry_subject=inbound_subject,
                         stage="new",
                         inquiry_language=inquiry_lang,
                     )
@@ -1023,6 +1025,12 @@ class InboundAgent:
             # The thread language is set from the first inbound and kept stable.
             if not conv.inquiry_language and inquiry_lang:
                 conv.inquiry_language = inquiry_lang
+            # Same repair for the ticket name. It used to be written by the constructor
+            # only, so a row created by an event that carried no subject — a ticket fetch
+            # that failed, a contact-only webhook — stayed nameless forever even though
+            # every later event for that ticket had it. One ticket gets several events.
+            if not conv.inquiry_subject and inbound_subject:
+                conv.inquiry_subject = inbound_subject
 
             # First inbound in the thread? (count BEFORE inserting this one.)
             prior_inbound = (
@@ -1032,10 +1040,9 @@ class InboundAgent:
             )
             is_first_inbound = prior_inbound == 0
 
-            # Snapshot the inbound body + subject so the approval UI shows what we're
-            # replying to (subject kept separate — fixes "가끔 제목만 오더라").
+            # Snapshot the inbound body so the approval UI shows what we're replying to
+            # (the subject is kept separate — fixes "가끔 제목만 오더라").
             inbound_body = (contact_info.get("last_message") or "").strip()
-            inbound_subject = (contact_info.get("subject") or "").strip() or None
             # A durable retry of the same HubSpot ticket may replace a failed
             # draft, but it must not append the customer's inquiry a second time.
             if inbound_body and (not ticket_id or is_first_inbound):
