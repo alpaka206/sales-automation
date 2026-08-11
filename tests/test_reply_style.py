@@ -345,3 +345,42 @@ def test_the_meeting_and_whatsapp_links_are_per_language():
         # 검토 화면에 토큰이 보이는 편이 낫습니다.
         assert apply_editable_tokens("{{WHATSAPP}}", "ko") == "{{WHATSAPP}}"
         assert apply_editable_tokens("{{WHATSAPP}}", "en") == 행["whatsapp_link_en"]
+
+
+def test_the_language_rows_exist_because_nothing_else_can_make_them():
+    """위 두 테스트가 읽는 ``*_en`` 행은 콘솔에서 만들 수 없습니다 — 「추가」는 ``signature_``
+    접두사가 붙은 행만 만듭니다. 심는 곳이 마이그레이션 하나뿐이라, 그게 실제로 심는지를
+    여기서 확인합니다. 안 그러면 코드는 영문 행을 찾는데 DB 에는 영영 없습니다."""
+    import importlib
+
+    from sqlalchemy import create_engine, text
+
+    from src.db.models import EmailTemplate, EmailTemplateRevision
+
+    engine = create_engine("sqlite:///:memory:")
+    for model in (EmailTemplate, EmailTemplateRevision):
+        model.__table__.create(engine)
+    importlib.import_module("src.db.migrations.0042_reply_format_template").up(engine)
+    importlib.import_module("src.db.migrations.0069_links_are_words_not_urls").up(engine)
+
+    with engine.begin() as conn:
+        행 = dict(conn.execute(text("SELECT key, body FROM email_templates")).fetchall())
+
+    # 링크는 주소가 아니라 글자로 나갑니다 — 주소는 그대로 남습니다.
+    assert 행["meeting_link"].startswith("[미팅 링크](https://calendar.google.com/")
+    assert 행["meeting_link_en"].startswith("[Calendly](https://calendar.google.com/")
+    assert 행["whatsapp_link_en"] == "[WhatsApp](https://wa.me/821054802261)"
+    # 국문 서식에서 WhatsApp 이 빠지고, 영문 서식은 그것을 그대로 들고 갑니다.
+    assert "{{WHATSAPP}}" not in 행["reply_format"]
+    assert "{{WHATSAPP}}" in 행["reply_format_en"]
+    assert "미팅 예약: {{MEETING_LINK}}" not in 행["reply_format"]
+    assert "{{MEETING_LINK}}" in 행["reply_format"]
+    # 토큰을 그대로 출력하라는 주의 문장에도 {{WHATSAPP}} 가 있었습니다. 그 줄까지 지우면
+    # 120자 예약 주소를 모델이 "정리" 하지 못하게 막던 지시가 같이 사라집니다.
+    assert "절대 바꾸거나 풀어쓰지 말고" in 행["reply_format"]
+
+    # 두 번 돌아도 같습니다 — 이미 표기가 붙은 행을 다시 감싸지 않습니다.
+    importlib.import_module("src.db.migrations.0069_links_are_words_not_urls").up(engine)
+    with engine.begin() as conn:
+        다시 = dict(conn.execute(text("SELECT key, body FROM email_templates")).fetchall())
+    assert 다시 == 행
