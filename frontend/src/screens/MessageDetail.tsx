@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useLayoutEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
 import { getJSON, postForm } from "../lib/api";
@@ -55,6 +55,16 @@ type Detail = {
   manual_log_stages: string[];
 };
 
+/** 편집기 도구 → 본문 표기. `email_html._inline` 이 읽는 것과 **같은 넷**입니다.
+ *  여기에 하나 더하면 그쪽 렌더러에도 더해야 합니다 — 안 그러면 화면에만 있는 표기가 되고,
+ *  고객은 별표를 그대로 받습니다. */
+const MARKS: [string, [string, string], string][] = [
+  ["굵게", ["**", "**"], "고른 글자를 굵게 (**글자**)"],
+  ["기울임", ["*", "*"], "고른 글자를 기울임 (*글자*)"],
+  ["밑줄", ["__", "__"], "고른 글자에 밑줄 (__글자__)"],
+  ["링크", ["[", "](https://)"], "고른 글자를 링크 글자로 ([글자](주소)) — 주소를 채워 주세요"],
+];
+
 export function MessageDetail() {
   const { id } = useParams();
   const queryClient = useQueryClient();
@@ -77,6 +87,8 @@ export function MessageDetail() {
   const [showOrig, setShowOrig] = useState<Record<number, boolean>>({});
   const [loadedId, setLoadedId] = useState<number | null>(null);
   const [logging, setLogging] = useState(false);
+  // 서식을 씌운 뒤 되돌려 놓을 선택 범위. 상태로 두는 이유는 아래 효과 참고.
+  const [pendingSel, setPendingSel] = useState<[number, number] | null>(null);
 
   // 훅은 아래 early return 보다 **위**에서 부릅니다. 아래에 두면 로딩 렌더에서는 건너뛰고
   // 데이터가 온 렌더에서는 부르게 되어, 훅 수가 달라졌다고 React 가 터집니다(#310) — 화면이
@@ -105,6 +117,29 @@ export function MessageDetail() {
     setBody(data.msg.body);
     setSignature(data.msg.signature_key);
   }
+
+  /** 본문에서 고른 글자를 표기로 감쌉니다. 아무것도 안 골랐으면 커서 자리에 껍데기만
+   *  넣고 그 안에 커서를 둡니다 — 표기를 외우지 않아도 쓸 수 있게. */
+  function wrapSelection([before, after]: [string, string]) {
+    const field = document.getElementById("msg-body") as HTMLTextAreaElement | null;
+    if (!field) return;
+    const { selectionStart: from, selectionEnd: to } = field;
+    const picked = body.slice(from, to);
+    setBody(body.slice(0, from) + before + picked + after + body.slice(to));
+    setPendingSel([from + before.length, from + before.length + picked.length]);
+  }
+
+  // 선택 복원은 **커밋 뒤**에 해야 합니다. 제어된 textarea 는 React 가 value 를 다시 넣을
+  // 때 선택이 끝으로 풀리는데, requestAnimationFrame 으로 미루면 그 둘의 순서가 React 의
+  // 스케줄링에 달립니다 — 실제로 풀린 채 남았습니다. useLayoutEffect 는 커밋 직후·그리기
+  // 직전이라 순서가 보장됩니다. 씌운 글자가 그대로 골라져 있어야 굵게 → 기울임처럼 잇습니다.
+  useLayoutEffect(() => {
+    if (!pendingSel) return;
+    const field = document.getElementById("msg-body") as HTMLTextAreaElement | null;
+    field?.focus();
+    field?.setSelectionRange(pendingSel[0], pendingSel[1]);
+    setPendingSel(null);
+  }, [pendingSel]);
 
   if (isPending || !data) return <LoadingBlock />;
 
@@ -201,7 +236,25 @@ export function MessageDetail() {
                     <label className="field-label" htmlFor="msg-subject">제목</label>
                     <input className="input" id="msg-subject" value={subject}
                            onChange={(e) => setSubject(e.target.value)} style={{ marginBottom: 12 }} />
-                    <label className="field-label" htmlFor="msg-body">본문</label>
+                    <div className="draft-body-head">
+                      <label className="field-label" htmlFor="msg-body">본문</label>
+                      {/* 고른 글자를 표기로 감쌉니다. WYSIWYG 이 아닌 이유: 이 칸의 글자가
+                          그대로 메일이 되는 것이 이 화면의 전제입니다(모델이 쓰고, 번역이
+                          지나가고, 사람이 고칩니다). 숨은 서식을 들고 있으면 그 셋이 서로
+                          모르는 상태가 되고, 화면과 나간 메일이 갈립니다. */}
+                      <div className="draft-tools">
+                        {MARKS.map(([label, wrap, title]) => (
+                          <button key={label} type="button" className="draft-tool" title={title}
+                                  style={label === "기울임" ? { fontStyle: "italic" }
+                                       : label === "굵게" ? { fontWeight: 700 }
+                                       : label === "밑줄" ? { textDecoration: "underline" } : undefined}
+                                  onMouseDown={(e) => e.preventDefault()}
+                                  onClick={() => wrapSelection(wrap)}>
+                            {label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
                     <textarea className="draft-textarea" id="msg-body" value={body}
                               onChange={(e) => setBody(e.target.value)} />
 

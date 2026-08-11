@@ -163,12 +163,60 @@ _SHELL = (
 )
 
 
-def _linkify(escaped_text: str) -> str:
-    """Wrap bare URLs in anchor tags (operates on already-HTML-escaped text)."""
-    return _URL_RE.sub(
-        lambda m: f'<a href="{m.group(1)}" style="color:#2563eb;">{m.group(1)}</a>',
-        escaped_text,
+# 본문에서 쓸 수 있는 표기는 이 넷뿐입니다. 마크다운 전체가 아니라 **부분집합**인 것이
+# 요점입니다 — 검토 화면은 그냥 textarea 라, 운영자가 화면에서 보는 글자와 고객이 받는 메일이
+# 최대한 같아야 합니다. 표기가 늘수록 그 둘이 벌어집니다.
+#
+# 링크에 라벨이 필요해서 시작했습니다. 예약 URL 은 120자짜리 base64 라, 맨 URL 을 그대로
+# 앵커로 만들면 메일 본문 한복판에 그 덩어리가 그대로 실립니다.
+_MD_LINK_RE = re.compile(r"\[([^\]\n]+)\]\((https?://[^\s)]+)\)")
+# 겹친 것(`***`)을 **먼저** 잡습니다. 안 그러면 굵게 규칙이 별 세 개 중 둘만 먹고 남은
+# 하나를 기울임이 가져가면서 `<strong><em>x</strong></em>` 처럼 태그가 어긋납니다.
+_BOLD_ITALIC_RE = re.compile(r"\*\*\*(?=\S)([^*<>]+?)(?<=\S)\*\*\*")
+_BOLD_RE = re.compile(r"\*\*(?=\S)([^*]+?)(?<=\S)\*\*")
+_UNDERLINE_RE = re.compile(r"__(?=\S)([^_]+?)(?<=\S)__")
+# 안쪽에 `<`·`>` 를 두지 않는 이유: 앞 단계가 만든 태그를 가로질러 열고 닫으면 어긋납니다.
+_ITALIC_RE = re.compile(r"(?<!\*)\*(?=\S)([^*<>\n]+?)(?<=\S)\*(?!\*)")
+_HOLD = "\x00%d\x00"
+
+
+def _inline(escaped_text: str) -> str:
+    """링크·굵게·기울임·밑줄. **이미 HTML escape 된 글자**에 대고 씁니다.
+
+    순서가 중요합니다. 마크다운 링크를 먼저 꺼내 자리표시자로 빼 두지 않으면, 그 뒤의 맨
+    URL 처리가 방금 만든 `<a href="...">` 안의 주소를 다시 링크로 감싸 태그가 겹칩니다.
+    """
+    held: list[str] = []
+
+    def _hold(html: str) -> str:
+        held.append(html)
+        return _HOLD % (len(held) - 1)
+
+    def _link(match: re.Match) -> str:
+        label, url = match.group(1), match.group(2)
+        # href 는 sanitizer 와 같은 잣대로 봅니다 — 표기 하나 늘렸다고 javascript: 가
+        # 들어올 구멍을 만들 수는 없습니다.
+        if not _safe_url(_html.unescape(url)):
+            return match.group(0)
+        return _hold(f'<a href="{url}" style="color:#2563eb;">{label}</a>')
+
+    text = _MD_LINK_RE.sub(_link, escaped_text)
+    text = _URL_RE.sub(
+        lambda m: _hold(f'<a href="{m.group(1)}" style="color:#2563eb;">{m.group(1)}</a>'),
+        text,
     )
+    text = _BOLD_ITALIC_RE.sub(lambda m: f"<strong><em>{m.group(1)}</em></strong>", text)
+    text = _BOLD_RE.sub(lambda m: f"<strong>{m.group(1)}</strong>", text)
+    text = _UNDERLINE_RE.sub(lambda m: f"<u>{m.group(1)}</u>", text)
+    text = _ITALIC_RE.sub(lambda m: f"<em>{m.group(1)}</em>", text)
+    for index, html in enumerate(held):
+        text = text.replace(_HOLD % index, html)
+    return text
+
+
+def _linkify(escaped_text: str) -> str:
+    """예전 이름. 부르는 곳이 남아 있어 남겨 둡니다 — 하는 일은 `_inline` 입니다."""
+    return _inline(escaped_text)
 
 
 _BULLET_RE = re.compile(r"^\s*-\s+(.*)$")

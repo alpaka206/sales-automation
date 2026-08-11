@@ -189,3 +189,63 @@ def test_migration_0022_seeds_and_is_idempotent():
     assert set(rows) == {"signature_html_ko", "signature_html_en"}
     assert "Perso" in rows["signature_html_ko"]
     assert rows["signature_html_en"].strip()  # non-empty seeded body
+
+
+# ----- 본문 표기: 링크 라벨과 굵게·기울임·밑줄 -----
+
+
+def test_a_labelled_link_keeps_its_label_not_the_url():
+    """예약 주소는 120자짜리 base64 입니다. 맨 URL 을 그대로 앵커로 만들면 그 덩어리가
+    메일 본문 한복판에 그대로 실립니다."""
+    from src.integrations.email_html import to_html_email
+
+    html = to_html_email("[미팅 링크](https://cal.example/AcZssZ3woViQ906eyzcO97gG4oZPCyESiCL7x)")
+    assert 'href="https://cal.example/AcZssZ3woViQ906eyzcO97gG4oZPCyESiCL7x"' in html
+    assert ">미팅 링크</a>" in html
+    assert ">https://cal.example" not in html      # 주소가 글자로 보이면 안 됩니다
+
+
+def test_bold_italic_underline_render():
+    from src.integrations.email_html import to_html_email
+
+    html = to_html_email("**굵게** *기울임* __밑줄__")
+    assert "<strong>굵게</strong>" in html
+    assert "<em>기울임</em>" in html
+    assert "<u>밑줄</u>" in html
+
+
+def test_a_bare_url_still_becomes_a_link():
+    """표기를 안 쓴 본문도 예전 그대로 동작해야 합니다."""
+    from src.integrations.email_html import to_html_email
+
+    assert '<a href="https://perso.ai"' in to_html_email("https://perso.ai 를 보세요")
+
+
+def test_the_markup_cannot_smuggle_a_dangerous_link():
+    """표기 하나 늘렸다고 javascript: 가 들어올 구멍을 만들 수는 없습니다."""
+    from src.integrations.email_html import to_html_email
+
+    for 위험 in ("[누르기](javascript:alert(1))", "[누르기](data:text/html,x)"):
+        html = to_html_email(위험)
+        assert 'href="javascript:' not in html and 'href="data:' not in html
+    # 라벨 안의 태그는 글자로 남습니다.
+    assert "<b>" not in to_html_email("[<b>라벨</b>](https://perso.ai)")
+
+
+def test_overlapping_marks_do_not_cross_tags():
+    """`***x***` 는 굵게+기울임입니다. 겹친 것을 먼저 안 잡으면 굵게 규칙이 별 셋 중 둘만
+    먹고 남은 하나를 기울임이 가져가면서 `<strong><em>x</strong></em>` 가 나옵니다."""
+    from src.integrations.email_html import to_html_email
+
+    html = to_html_email("***겹침***")
+    assert "<strong><em>겹침</em></strong>" in html
+    assert "</strong></em>" not in html          # 어긋난 닫힘
+
+
+def test_a_stray_star_is_left_alone():
+    """곱셈 기호와 문장 부호를 서식으로 읽으면 안 됩니다."""
+    from src.integrations.email_html import to_html_email
+
+    for 그대로 in ("2 * 3 = 6", "별 하나 * 둘 ** 은 그대로"):
+        html = to_html_email(그대로)
+        assert "<em>" not in html and "<strong>" not in html, 그대로

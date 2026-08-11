@@ -686,6 +686,16 @@ a.kpi:hover { border-color: var(--accent); }
 .draft-textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-ring); }
 .draft-textarea[readonly] { background: var(--surface-2); color: var(--text-muted); }
 
+/* 본문 라벨과 서식 도구가 한 줄에. 도구는 라벨 높이에 맞춰 오른쪽 끝으로 붙습니다. */
+.draft-body-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.draft-tools { display: flex; gap: 4px; margin-bottom: 6px; }
+.draft-tool {
+  padding: 3px 9px; font-size: 12px; line-height: 1.5; color: var(--text-muted);
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-sm);
+  cursor: pointer;
+}
+.draft-tool:hover { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+
 .ko-block__label {
   display: inline-flex; align-items: center; gap: 6px;
   font-size: 11.5px; font-weight: 700; color: var(--reply); margin-bottom: 6px;
