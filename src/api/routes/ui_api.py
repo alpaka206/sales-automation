@@ -686,11 +686,12 @@ def _won_contract(contract, today) -> dict:
         "doc_types": contract.doc_types or [],
         "credits": contract.credits,
         "currency": contract.currency,
-        "amount_incl_vat": contract.amount_incl_vat,
-        "amount_excl_vat": contract.amount_excl_vat,
-        "unit_price": contract.unit_price,
-        "unit_currency": contract.unit_currency,
-        "unit_fx_rate": contract.unit_fx_rate,
+        # 금액은 통화가 정한 한 칸만 저장되고 나머지는 계산입니다: 원화는 공급가를 받아
+        # 총액을 +10% 로, 그 외는 총액을 받고 공급가 칸이 없습니다. 분당 단가도 계산값
+        # 입니다 — 금액 ÷ (크레딧 ÷ 60).
+        "amount_incl_vat": won.total_amount(contract),
+        "amount_excl_vat": won.billing_amount(contract) if won.is_krw(contract) else None,
+        "unit_price": won.unit_price(contract),
         "payment_method": contract.payment_method,
         "payment_type": contract.payment_type,
         "installments": contract.installments,

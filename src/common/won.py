@@ -23,17 +23,17 @@ CLIENT_ID_BANDS: tuple[tuple[int, str], ...] = (
     (4000, "AX"),
     (3000, "Interactive"),
     (2000, "GTM Outbound"),
-    (1000, "Inbound"),
+    (1000, "GTM Inbound"),
 )
 # 신규 발급이 가능한 종류. 9000번대는 레거시라 새로 만들지 않습니다.
 ALLOCATABLE_BANDS: dict[str, int] = {
-    "Inbound": 1000,
+    "GTM Inbound": 1000,
     "GTM Outbound": 2000,
     "Interactive": 3000,
     "AX": 4000,
 }
 DEPARTMENT_BY_TYPE: dict[str, str] = {
-    "Inbound": "GTM",
+    "GTM Inbound": "GTM",
     "GTM Outbound": "GTM",
     "Interactive": "Interactive",
     "AX": "AX",
@@ -191,35 +191,58 @@ def _decimal(value) -> Decimal | None:
         return None
 
 
-def contract_credits(
-    amount_excl_vat, unit_price, currency: str, unit_currency: str | None, fx_rate
-) -> int | None:
-    """계약 크레딧 = 공급가 ÷ 분당 단가 × 60.
+# 원화 계약의 부가세. 총액 = 공급가 + 10% 이고, 그래서 원화 계약은 총액을 받지 않습니다.
+VAT_RATE = Decimal("0.1")
 
-    통화가 다르면 환율이 필요합니다 — 원화 계약인데 단가는 USD 로 매기는 경우가 흔합니다.
-    그 환율은 **계약 시점 값**이라 계약 행에 박아 둡니다: 오늘 환율로 다시 계산하면 작년
-    계약의 크레딧이 오늘 바뀝니다.
 
-    환산은 단가를 계약 통화로 옮기는 방향입니다. KRW 계약 + USD 단가면 단가 × 환율.
+def is_krw(contract) -> bool:
+    return (getattr(contract, "currency", None) or "KRW").upper() == "KRW"
+
+
+def billing_amount(contract) -> Decimal | None:
+    """분당 단가가 기준으로 삼는 금액.
+
+    원화 계약은 **공급가(VAT 제외)**, 그 외 통화는 **총액**입니다. 국내 계약서는 공급가로
+    적히고 부가세가 따로 붙지만, 해외 계약에는 그 부가세가 없어 총액이 곧 대금입니다.
+    받는 칸이 통화마다 하나뿐인 이유가 이것입니다 — 둘 다 받으면 어느 쪽이 기준인지가
+    계약마다 달라집니다.
     """
-    supply, unit = _decimal(amount_excl_vat), _decimal(unit_price)
-    if not supply or not unit or unit <= 0:
+    return _decimal(contract.amount_excl_vat if is_krw(contract) else contract.amount_incl_vat)
+
+
+def total_amount(contract) -> Decimal | None:
+    """VAT 포함 총액. 원화 계약은 공급가에 10% 를 더해 **계산합니다**(입력 칸이 없습니다)."""
+    if not is_krw(contract):
+        return _decimal(contract.amount_incl_vat)
+    supply = _decimal(contract.amount_excl_vat)
+    return supply * (1 + VAT_RATE) if supply else None
+
+
+def unit_price(contract) -> Decimal | None:
+    """분당 단가 = 기준 금액 ÷ (계약 크레딧 ÷ 60). **계산값입니다 — 저장하지 않습니다.**
+
+    방향이 뒤집혔습니다. 예전에는 단가를 받아 크레딧을 계산했는데(크레딧 = 공급가 ÷ 단가
+    × 60), 계약서에 적히는 것은 금액과 크레딧이고 단가는 그 둘에서 나오는 값입니다. 단가를
+    받으면 반올림한 단가로 계산한 크레딧이 계약서의 크레딧과 어긋납니다.
+
+    운영자 시트의 실제 계약으로 검산하면 같은 숫자가 나옵니다:
+    1,566,000원 ÷ (64,800 ÷ 60) = 1,450원/분.
+
+    소수점은 남깁니다 — 20,000,000 ÷ (456,120 ÷ 60) 처럼 딱 떨어지지 않는 계약이 흔하고,
+    반올림한 단가는 되짚어 곱했을 때 금액이 안 맞습니다.
+    """
+    amount = billing_amount(contract)
+    credits = contract.credits
+    if not amount or not credits or credits <= 0:
         return None
-    unit_cur = (unit_currency or currency or "KRW").upper()
-    cur = (currency or "KRW").upper()
-    if unit_cur != cur:
-        rate = _decimal(fx_rate)
-        if not rate or rate <= 0:
-            return None
-        unit = unit * rate if unit_cur == "USD" else unit / rate
-    return int((supply / unit) * CREDITS_PER_MINUTE)
+    return amount / (Decimal(credits) / CREDITS_PER_MINUTE)
 
 
 def monthly_revenue(contract) -> Decimal:
     """월간 매출 — MRR 은 VAT 포함 총액 ÷ 개월수, PoC 는 0 (결제월에 전액 인식)."""
     if contract is None or contract.deal_type != "MRR":
         return Decimal(0)
-    amount = _decimal(contract.amount_incl_vat)
+    amount = total_amount(contract)
     if not amount:
         return Decimal(0)
     return amount / months_between(contract.starts_on, contract.ends_on)

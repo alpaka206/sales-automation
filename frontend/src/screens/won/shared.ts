@@ -24,7 +24,8 @@ export type Contract = {
   starts_on: string | null; ends_on: string | null; months: number;
   doc_types: string[]; credits: number | null; currency: string;
   amount_incl_vat: Money; amount_excl_vat: Money;
-  unit_price: Money; unit_currency: string | null; unit_fx_rate: Money;
+  /** 계산값 — 금액 ÷ (계약 크레딧 ÷ 60). 통화는 계약 통화입니다. */
+  unit_price: Money;
   payment_method: string | null; payment_type: string | null; installments: number | null;
   first_payment_on: string | null; billing_email: string | null; note: string | null;
   renewal_plan: string | null; stop_reason: string | null; memo: string | null;

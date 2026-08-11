@@ -26,8 +26,7 @@ import { type Contract, type ListData, type Row, addMonths, n, num } from "./sha
  */
 const empty = {
   deal_type: "MRR", starts_on: "", ends_on: "", ticket_id: "",
-  currency: "KRW", amount_incl_vat: "", amount_excl_vat: "",
-  unit_price: "", unit_currency: "USD", unit_fx_rate: "",
+  currency: "KRW", amount_incl_vat: "", amount_excl_vat: "", credits: "",
   payment_method: "계좌이체", payment_type: "일시불", installments: "1",
   first_payment_on: "", billing_email: "", note: "",
   plan: "Business Tier 1", plan_name: "", perso_email: "",
@@ -115,18 +114,25 @@ export function WonContractForm() {
     return "사용중";
   })();
 
-  // 화면에서 미리 보여 주는 계산값. 저장할 때 서버가 같은 식으로 다시 계산합니다.
-  const credits = (() => {
-    if (!draft) return null;
-    const supply = n(draft.amount_excl_vat);
-    let unit = n(draft.unit_price);
-    if (!supply || !unit) return null;
-    if (draft.unit_currency !== draft.currency) {
-      const rate = n(draft.unit_fx_rate);
-      if (!rate) return null;
-      unit = draft.unit_currency === "USD" ? unit * rate : unit / rate;
-    }
-    return Math.floor((supply / unit) * 60);
+  // 화면에서 미리 보여 주는 계산값. 저장할 때 서버가 같은 식으로 다시 계산합니다
+  // (won.total_amount / won.unit_price) — 두 곳에 식이 있는 게 아니라, 화면은 사람이
+  // 숫자를 넣는 동안 결과를 보여 줄 뿐입니다.
+  const krw = (draft?.currency ?? "KRW") === "KRW";
+
+  /** 분당 단가가 기준으로 삼는 금액 — 원화는 공급가, 그 외는 총액. */
+  const billing = draft ? n(krw ? draft.amount_excl_vat : draft.amount_incl_vat) : 0;
+
+  /** 원화 계약의 VAT 포함 총액 = 공급가 + 10%. 입력 칸이 아니라 계산입니다. */
+  const totalInclVat = krw && billing ? Math.round(billing * 1.1) : null;
+
+  /** 분당 단가 = 기준 금액 ÷ (계약 크레딧 ÷ 60). 소수점은 남깁니다 — 반올림한 단가는
+   *  되짚어 곱했을 때 금액이 안 맞습니다. */
+  const unitPrice = (() => {
+    const credits = draft ? n(draft.credits) : 0;
+    if (!billing || !credits) return null;
+    const value = billing / (credits / 60);
+    // 딱 떨어지면 정수로, 아니면 소수 넷째 자리까지(행이 Numeric(12,4) 였던 정밀도).
+    return Number.isInteger(value) ? String(value) : String(Number(value.toFixed(4)));
   })();
 
   const [save, saving] = useAction(async (event: React.FormEvent<HTMLFormElement>) => {
@@ -136,23 +142,14 @@ export function WonContractForm() {
     if (!draft.starts_on || !draft.ends_on || draft.ends_on <= draft.starts_on) {
       setNote("계약 시작일과 종료일을 확인해 주세요."); return;
     }
-    // 공급가만 필수입니다. 크레딧이 공급가 ÷ 분당 단가 × 60 이라 이것 없이는 계약이
-    // 성립하지 않습니다. VAT 포함 총액은 선택입니다 — 뒤에 적히거나 아예 없는 계약이
-    // 있습니다. 다만 예상 MRR 은 총액 ÷ 개월수라, 비워 두면 그 계약은 MRR 에 0 으로 잡힙니다.
-    if (!n(draft.amount_excl_vat)) {
-      setNote("공급가 (VAT 제외) 를 입력해 주세요."); return;
-    }
-    // 무엇을 채워야 하는지 **정확히** 말합니다. 예전에는 "분당 단가와, 통화가 다르면
-    // 적용 환율" 이라고만 했는데, 정작 그 환율 칸은 통화가 다를 때만 보였습니다. 그래서
-    // 분당 단가만 고치고 저장을 누른 사람 눈에는 아무 일도 안 일어난 것으로 보였습니다.
-    if (credits === null) {
-      const needsRate = draft.unit_currency !== draft.currency && !n(draft.unit_fx_rate);
-      setNote(
-        needsRate
-          ? `적용 환율을 넣어 주세요 — 단가는 ${draft.unit_currency}, 계약은 ${draft.currency} 입니다.`
-          : "분당 단가를 넣어 주세요 — 계약 크레딧이 공급가 ÷ 분당 단가 × 60 입니다.",
-      );
+    // 통화가 정한 금액 칸과 계약 크레딧, 둘만 필수입니다. 분당 단가는 그 둘에서
+    // 나오는 계산값이라 받지 않습니다.
+    if (!billing) {
+      setNote(krw ? "공급가 (VAT 제외) 를 입력해 주세요." : `총 계약금액을 입력해 주세요 (${draft.currency}).`);
       return;
+    }
+    if (!n(draft.credits)) {
+      setNote("계약 크레딧을 입력해 주세요 — 분당 단가가 여기서 나옵니다."); return;
     }
     const body: Record<string, string> = {
       ...draft,
@@ -266,17 +263,12 @@ export function WonContractForm() {
                      style={{ background: "var(--bg-soft)", color: "var(--muted)" }}
                      placeholder="인바운드 건만 자동 연동" />
             </Field>
-            {/* 목업에서는 손으로 적는 칸이었습니다. 같은 자리에 계산값을 놓습니다 —
-                공급가 ÷ 분당 단가 × 60. 아래 힌트도 목업 그대로 「1분 = 60크레딧」. */}
+            {/* 목업대로 손으로 적는 칸입니다. 계약서에 적히는 것이 금액과 크레딧이고,
+                분당 단가가 그 둘에서 나옵니다 — 한동안 반대로 두었는데, 그러면 반올림한
+                단가로 계산한 크레딧이 계약서의 크레딧과 어긋났습니다. */}
             <Field label="계약 크레딧" required>
-              <div className="inp" aria-readonly="true"
-                   style={{ background: "var(--bg-soft)", color: credits === null ? "var(--faint)" : "var(--ink)",
-                            fontVariantNumeric: "tabular-nums" }}>
-                {credits === null ? "공급가 · 분당 단가 입력 시 계산" : num(credits)}
-              </div>
-              <div style={{ fontSize: 11.5, color: "var(--faint)", marginTop: 4 }}>
-                1분 = 60크레딧{credits === null ? "" : ` · ${num(Math.round(credits / 60))}분`}
-              </div>
+              <input className="inp" type="number" value={draft.credits}
+                     onChange={(e) => set("credits", e.target.value)} placeholder="예: 64800" />
             </Field>
             <div style={{ gridColumn: "span 3" }}>
               <label className="form-label">계약서 유형 <span style={{ color: "var(--faint)" }}>(복수 선택)</span></label>
@@ -298,41 +290,43 @@ export function WonContractForm() {
             <Field label="통화">
               <Sel value={draft.currency} onChange={(v) => set("currency", v)} options={options.currencies} />
             </Field>
-            {/* 선택입니다. 필수는 공급가 쪽 — 크레딧이 거기서 나옵니다. 다만 예상 MRR 은
-                이 값 ÷ 개월수라, 비워 두면 그 계약은 MRR 에 잡히지 않는다고 적어 둡니다. */}
-            <div style={{ gridColumn: "span 2" }}>
-              <label className="form-label">총 계약금액 (VAT 포함)</label>
-              <input className="inp" type="number" value={draft.amount_incl_vat}
-                     onChange={(e) => set("amount_incl_vat", e.target.value)} placeholder="예: 22000000" />
-              <div style={{ fontSize: 11.5, color: "var(--faint)", marginTop: 4 }}>
-                비우면 이 계약은 예상 MRR 에 잡히지 않습니다 (MRR = 총액 ÷ 개월수).
+            {/* 통화가 어느 칸을 받는지 정합니다. 원화 계약은 계약서가 공급가로 적히고
+                부가세가 따로 붙으므로 공급가를 받고 총액은 +10% 로 계산합니다. 해외
+                계약에는 그 부가세가 없어 총액이 곧 대금이라 총액만 받습니다. 둘 다 받으면
+                분당 단가가 어느 쪽 기준인지 계약마다 달라집니다. */}
+            {krw ? (
+              <>
+                <Field label="공급가 (VAT 제외)" required>
+                  <input className="inp" type="number" value={draft.amount_excl_vat}
+                         onChange={(e) => set("amount_excl_vat", e.target.value)}
+                         placeholder="예: 10000000" />
+                </Field>
+                <Field label="총 계약금액 (VAT 포함)">
+                  <div className="inp" aria-readonly="true"
+                       style={{ background: "var(--bg-soft)", fontVariantNumeric: "tabular-nums",
+                                color: totalInclVat === null ? "var(--faint)" : "var(--ink)" }}>
+                    {totalInclVat === null ? "공급가 입력 시 계산" : num(totalInclVat)}
+                  </div>
+                </Field>
+              </>
+            ) : (
+              <div style={{ gridColumn: "span 2" }}>
+                <label className="form-label">총 계약금액 (VAT 포함) <span className="req">*</span></label>
+                <input className="inp" type="number" value={draft.amount_incl_vat}
+                       onChange={(e) => set("amount_incl_vat", e.target.value)} placeholder="예: 20000" />
+                <div style={{ fontSize: 11.5, color: "var(--faint)", marginTop: 4 }}>
+                  {draft.currency} 계약은 총액만 받습니다 — 공급가 칸이 없습니다.
+                </div>
               </div>
-            </div>
-            <Field label="분당 단가 통화">
-              <Sel value={draft.unit_currency} onChange={(v) => set("unit_currency", v)} options={options.currencies} />
-            </Field>
+            )}
+            {/* 계산값입니다. 계약서에 적히는 것은 금액과 크레딧이고 단가는 그 둘에서
+                나옵니다 — 소수점은 남깁니다. 반올림한 단가는 되짚어 곱했을 때 금액이
+                안 맞습니다. */}
             <Field label="분당 단가">
-              <input className="inp" type="number" step="0.01" value={draft.unit_price}
-                     onChange={(e) => set("unit_price", e.target.value)} />
-            </Field>
-            {/* 목업에 없는 칸입니다 — 크레딧을 계산하려면 VAT 를 뺀 금액이 필요합니다. */}
-            <Field label="공급가 (VAT 제외)" required>
-              <input className="inp" type="number" value={draft.amount_excl_vat}
-                     onChange={(e) => set("amount_excl_vat", e.target.value)} />
-            </Field>
-            {/* **항상 보입니다.** 통화가 다를 때만 나타나던 칸이었는데, 그래서 분당 단가만
-                고치고 저장을 누르면 크레딧을 계산할 수 없어 저장이 막히는데 정작 막은 칸은
-                화면에 없었습니다. 그리고 **어디서도 값을 가져오지 않습니다** — 오늘 환율을
-                넣으면 지난 계약의 크레딧이 오늘 값으로 바뀌고, 직전 계약에서 물려받으면
-                남의 시점 환율이 이 계약에 박힙니다. 쓴 사람이 직접 적습니다. */}
-            <Field label="적용 환율" required={draft.unit_currency !== draft.currency}>
-              <input className="inp" type="number" step="0.0001" value={draft.unit_fx_rate}
-                     onChange={(e) => set("unit_fx_rate", e.target.value)}
-                     placeholder="계약 시점 환율을 직접 입력" />
-              <div style={{ fontSize: 11.5, color: "var(--faint)", marginTop: 4 }}>
-                {draft.unit_currency === draft.currency
-                  ? `단가와 계약이 같은 통화(${draft.currency})라 환산이 없습니다.`
-                  : `단가 ${draft.unit_currency} → 계약 ${draft.currency}. 계약에 저장되고, 나중에 오늘 환율로 다시 계산하지 않습니다.`}
+              <div className="inp" aria-readonly="true"
+                   style={{ background: "var(--bg-soft)", fontVariantNumeric: "tabular-nums",
+                            color: unitPrice === null ? "var(--faint)" : "var(--ink)" }}>
+                {unitPrice === null ? "금액 · 크레딧 입력 시 계산" : `${unitPrice} ${draft.currency}`}
               </div>
             </Field>
           </div>
@@ -461,7 +455,6 @@ const str = (value: unknown) => (value === null || value === undefined ? "" : St
 function carryOver(prev: Contract) {
   return {
     deal_type: prev.deal_type, currency: prev.currency,
-    unit_price: str(prev.unit_price), unit_currency: str(prev.unit_currency),
     payment_method: str(prev.payment_method), payment_type: str(prev.payment_type),
     installments: str(prev.installments ?? 1), billing_email: str(prev.billing_email),
     plan: str(prev.plan), plan_name: str(prev.plan_name), perso_email: str(prev.perso_email),
@@ -478,8 +471,7 @@ function fromContract(contract: Contract): Draft {
     deal_type: contract.deal_type, starts_on: str(contract.starts_on), ends_on: str(contract.ends_on),
     ticket_id: str(contract.ticket_id), currency: contract.currency,
     amount_incl_vat: str(contract.amount_incl_vat), amount_excl_vat: str(contract.amount_excl_vat),
-    unit_price: str(contract.unit_price), unit_currency: str(contract.unit_currency) || "USD",
-    unit_fx_rate: str(contract.unit_fx_rate),
+    credits: str(contract.credits),
     payment_method: str(contract.payment_method), payment_type: str(contract.payment_type),
     installments: str(contract.installments ?? 1), first_payment_on: str(contract.first_payment_on),
     billing_email: str(contract.billing_email), note: str(contract.note),

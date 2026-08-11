@@ -667,18 +667,16 @@ class ClientContract(Base):
     # 복수 선택입니다. 화면에서 " + " 로 이어 보여주고 저장은 배열로 — 문자열로 저장하면
     # "직접 계약 / DocuSign + 세금계산서 발행" 을 다시 쪼개야 필터가 됩니다.
     doc_types: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    # 계약 크레딧은 **입력**입니다. 계약서에 적히는 것이 금액과 크레딧이고, 분당 단가가
+    # 그 둘에서 나옵니다(`won.unit_price`). 방향이 반대였던 시절에는 반올림한 단가로
+    # 계산한 크레딧이 계약서의 크레딧과 어긋났습니다(이관 0068).
     credits: Mapped[int | None] = mapped_column(Integer, nullable=True)
     currency: Mapped[str] = mapped_column(String(8), nullable=False, default="KRW")
-    # 금액은 둘 다 저장합니다. 라벨에 VAT 포함/제외를 반드시 적는 것이 운영자의 규칙이고,
-    # VAT 가 면제·별도인 계약이 있어 공급가는 자동 계산하지 않습니다.
+    # **통화마다 채워지는 칸은 하나뿐입니다.** 원화 계약은 공급가만 받고 총액은 +10% 로
+    # 계산하고(`won.total_amount`), 그 외 통화는 부가세가 없어 총액만 받습니다. 둘 다
+    # 채우면 어느 쪽이 기준인지가 계약마다 달라집니다 — 저장 경로가 안 쓰는 쪽을 비웁니다.
     amount_incl_vat: Mapped[Decimal | None] = mapped_column(Numeric(18, 2), nullable=True)
     amount_excl_vat: Mapped[Decimal | None] = mapped_column(Numeric(18, 2), nullable=True)
-    unit_price: Mapped[Decimal | None] = mapped_column(Numeric(12, 4), nullable=True)
-    # 계약 통화와 달라도 됩니다 — 원화 계약인데 단가는 USD 로 매기는 경우가 흔합니다.
-    unit_currency: Mapped[str | None] = mapped_column(String(8), nullable=True)
-    # 크레딧을 공급가÷단가×60 으로 계산할 때 쓴 환율. 계약 시점 값이라 오늘 환율로 다시
-    # 계산하면 숫자가 달라집니다 — 계산에 쓴 값을 계약에 박아 둡니다.
-    unit_fx_rate: Mapped[Decimal | None] = mapped_column(Numeric(12, 4), nullable=True)
     payment_method: Mapped[str | None] = mapped_column(String(32), nullable=True)
     payment_type: Mapped[str | None] = mapped_column(String(16), nullable=True)
     installments: Mapped[int | None] = mapped_column(Integer, nullable=True)

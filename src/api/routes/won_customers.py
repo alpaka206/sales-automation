@@ -3,8 +3,10 @@
 읽기는 ``ui_api`` 에 있습니다. 이 파일은 화면이 값을 바꿀 때 부르는 곳이고, 여기 있는 규칙은
 전부 "저장하기 전에 한 번 더 계산한다" 입니다:
 
-- 크레딧은 입력받지 않고 **공급가 ÷ 분당 단가 × 60** 으로 계산합니다. 통화가 다르면 그때 쓴
-  환율을 계약 행에 같이 박습니다 — 오늘 환율로 다시 계산하면 작년 계약의 크레딧이 바뀝니다.
+- **금액과 크레딧을 받고, 분당 단가는 계산합니다**(`won.unit_price`). 계약서에 적히는 것이
+  그 둘이라서요. 방향이 반대였던 시절에는 반올림한 단가로 계산한 크레딧이 계약서의 크레딧과
+  어긋났습니다.
+- 통화가 쓰는 금액 칸은 하나뿐입니다: 원화는 공급가(총액은 +10% 로 계산), 그 외는 총액.
 - 결제 회차를 입금 완료로 바꿀 때 **그 날짜의 환율**을 채웁니다. 조회에 실패하면 비워 둡니다;
   운영자가 직접 넣을 수 있고, 조회 실패가 저장을 막으면 안 됩니다.
 - 계약 차수는 받지 않고 그 고객의 마지막 차수 + 1 입니다.
@@ -26,10 +28,10 @@ from datetime import date
 from fastapi import APIRouter, Form, HTTPException, Request
 
 from ...agents.client_ids import next_client_id
+from ...common import won
 from ...common.won import (
     ALLOCATABLE_BANDS,
     DEPARTMENT_BY_TYPE,
-    contract_credits,
 )
 from ...db.models import (
     Client,
@@ -74,15 +76,17 @@ def _get_contract(session, contract_id: int) -> ClientContract:
     return contract
 
 
-def _apply_credits(contract: ClientContract) -> None:
-    """계약 크레딧을 다시 계산해 넣습니다. 공급가·단가·환율이 바뀔 때마다 부릅니다."""
-    contract.credits = contract_credits(
-        contract.amount_excl_vat,
-        contract.unit_price,
-        contract.currency,
-        contract.unit_currency,
-        contract.unit_fx_rate,
-    )
+def _one_amount_per_currency(contract: ClientContract) -> None:
+    """통화가 쓰지 않는 금액 칸을 비웁니다.
+
+    원화 계약은 공급가만 받고 총액은 거기에 10% 를 더해 계산합니다(`won.total_amount`).
+    그 외 통화는 부가세가 없어 총액만 받고 공급가 칸이 없습니다. 안 쓰는 쪽에 옛 값이
+    남아 있으면, 통화를 바꾼 계약에서 화면이 계산한 값과 행에 든 값이 갈라집니다.
+    """
+    if won.is_krw(contract):
+        contract.amount_incl_vat = None
+    else:
+        contract.amount_excl_vat = None
 
 
 # --------------------------------------------------------------------------- #
@@ -170,10 +174,14 @@ _CONTRACT_FIELDS = (
     "ticket_id", "deal_type", "starts_on", "ends_on", "currency", "payment_method",
     "payment_type", "first_payment_on", "billing_email", "note", "renewal_plan",
     "stop_reason", "memo", "revenue_from", "plan", "plan_name", "perso_email",
-    "plan_starts_on", "plan_ends_on", "space_seq", "unit_currency",
+    "plan_starts_on", "plan_ends_on", "space_seq",
 )
-_CONTRACT_INTS = ("installments", "invite_limit", "queue_limit", "concurrent_jobs", "space_count")
-_CONTRACT_DECIMALS = ("amount_incl_vat", "amount_excl_vat", "unit_price", "unit_fx_rate")
+# credits 가 여기 있는 이유: 계약 크레딧은 이제 **입력**입니다. 계약서에 적히는 것이
+# 금액과 크레딧이고, 분당 단가가 그 둘에서 나옵니다(won.unit_price).
+_CONTRACT_INTS = (
+    "credits", "installments", "invite_limit", "queue_limit", "concurrent_jobs", "space_count",
+)
+_CONTRACT_DECIMALS = ("amount_incl_vat", "amount_excl_vat")
 
 
 def _fill_contract(contract: ClientContract, form: dict) -> None:
@@ -197,7 +205,7 @@ def _fill_contract(contract: ClientContract, form: dict) -> None:
     # 다르게 둘 일이 생기면 그때 칸을 만드는 편이, 늘 같은 값을 두 번 받는 것보다 낫습니다.
     contract.plan_starts_on = contract.plan_starts_on or contract.starts_on
     contract.plan_ends_on = contract.plan_ends_on or contract.ends_on
-    _apply_credits(contract)
+    _one_amount_per_currency(contract)
 
 
 @router.post("/won-customers/{client_id}/contracts")
@@ -243,7 +251,7 @@ def _seed_schedules(
     count = max(1, contract.installments or 1)
     start = contract.first_payment_on or contract.starts_on
     base = date.fromisoformat(start) if start else None
-    total = Decimal(str(contract.amount_incl_vat or 0))
+    total = won.total_amount(contract) or Decimal(0)
     per = (total / count) if total else None
     for index in range(count):
         when = _add_months(base, index).isoformat() if base else None
@@ -557,7 +565,7 @@ def export_csv():
         "계약 시작일", "계약 종료일", "계약 개월수", "계약서 유형",
         "계약 크레딧", "누적 지급 크레딧", "통화",
         "총 계약금액 (VAT 포함)", "공급가 (VAT 제외)", "수금 완료 금액", "수금율",
-        "분당 단가", "분당 단가 통화", "적용 환율",
+        "분당 단가",
         "결제 수단", "결제 방식", "총 분납 횟수", "최초 결제일", "Billing Email",
         "월간 매출 (VAT 포함)", "매출 인식 시작 월",
         "플랜", "플랜명", "Perso Email", "Space 개수", "space_seq",
@@ -583,10 +591,10 @@ def export_csv():
             ]
             if not client.contracts:
                 # 계약이 아직 없는 고객도 한 줄 나갑니다 — 빠지면 명단이 아닙니다.
-                writer.writerow(base + [""] * 33)
+                writer.writerow(base + [""] * 32)   # 머리글 43 − 고객 11
                 continue
             for contract in client.contracts:
-                total = float(contract.amount_incl_vat or 0)
+                total = float(won.total_amount(contract) or 0)
                 paid = float(won.collected(contract))
                 grant = won.next_credit_grant(contract)
                 payment = won.next_payment(contract)
@@ -596,9 +604,9 @@ def export_csv():
                     won.months_between(contract.starts_on, contract.ends_on),
                     " + ".join(contract.doc_types or []),
                     contract.credits, won.granted_credits(contract), contract.currency,
-                    contract.amount_incl_vat, contract.amount_excl_vat, paid,
+                    won.total_amount(contract), won.billing_amount(contract), paid,
                     f"{(paid / total * 100):.1f}%" if total else "",
-                    contract.unit_price, contract.unit_currency, contract.unit_fx_rate,
+                    won.unit_price(contract),
                     contract.payment_method, contract.payment_type, contract.installments,
                     contract.first_payment_on, contract.billing_email,
                     round(float(won.monthly_revenue(contract))),

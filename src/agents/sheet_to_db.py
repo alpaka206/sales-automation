@@ -157,9 +157,8 @@ def import_from_sheet(write: bool = True) -> dict:
             contract.currency = cell(r, "K") or "KRW"
             contract.amount_incl_vat = num(cell(r, "L"))
             contract.amount_excl_vat = num(cell(r, "M"))
-            contract.unit_currency = text(cell(r, "N"))
-            contract.unit_price = num(cell(r, "O"))
-            contract.unit_fx_rate = num(cell(r, "P"))
+            # N(단가 통화)·O(분당 단가)·P(환율)은 읽지 않습니다 — 단가는 금액과 크레딧
+            # 에서 나오는 계산값이고, 나머지 둘은 없어진 칸입니다.
             contract.payment_method = text(cell(r, "Q"))
             contract.payment_type = text(cell(r, "R"))
             contract.installments = whole(cell(r, "S"))

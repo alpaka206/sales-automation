@@ -18,7 +18,7 @@ import { type ListData, fmt } from "./shared";
  * 세로 640px 짜리 노트북에서 버튼이 화면 밖으로 나갑니다.
  */
 const TYPE_NOTE: Record<string, string> = {
-  "Inbound": "HubSpot 티켓과 연동되는 인바운드 문의 고객",
+  "GTM Inbound": "HubSpot 티켓과 연동되는 인바운드 문의 고객",
   "GTM Outbound": "GTM 팀이 직접 발굴한 고객",
   "Interactive": "Interactive 팀 고객",
   "AX": "AX 팀 고객",
@@ -72,7 +72,7 @@ export function WonNew() {
           return;
         }
         const created = await postForm("/won-customers", {
-          customer_type: "Inbound",
+          customer_type: "GTM Inbound",
           company: item.company || "고객사 미확인",
           client_id: item.client_id ? String(item.client_id) : "",
         }).then((response) => response.json());

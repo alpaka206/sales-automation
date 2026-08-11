@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 from datetime import date
+from decimal import Decimal
 
 import pytest
 from sqlalchemy import create_engine
@@ -34,26 +35,55 @@ def factory():
 # --------------------------------------------------------------------------- #
 # 크레딧 — 운영자의 시트와 같은 숫자가 나와야 합니다
 # --------------------------------------------------------------------------- #
-def test_credits_match_the_operators_own_sheet():
-    """실제 계약 두 건으로 검산합니다.
+def test_unit_price_matches_the_operators_own_sheet():
+    """실제 계약 두 건으로 검산합니다 — 방향이 뒤집혔습니다.
 
-    집나간 햄지: 공급가 1,566,000원 ÷ 1,450원/분 × 60 = 64,800 크레딧 — 시트와 정확히 같습니다.
+    받는 것은 금액과 크레딧이고, 분당 단가가 그 둘에서 나옵니다: 금액 ÷ (크레딧 ÷ 60).
+    예전에는 단가를 받아 크레딧을 계산했는데, 반올림한 단가로 계산한 크레딧이 계약서의
+    크레딧과 어긋났습니다.
 
-    서울대학교는 통화가 갈립니다(원화 계약, USD 단가). 시트의 456,120 크레딧이 나오려면
-    환율이 **1,503.36** 이어야 합니다 — 계약 시점의 값이고, 오늘 값이 아닙니다. 그래서
-    계약 행에 박아 둡니다: 1,503 으로 반올림만 해도 456,230 이 되어 110 크레딧(약 2분)이
-    어긋나고, 오늘 환율(1,380)로 계산하면 아예 다른 숫자가 됩니다.
+    집나간 햄지: 공급가 1,566,000원 · 64,800 크레딧 → 1,450원/분. 시트와 같습니다.
+    서울대학교: 20,000,000원 · 456,120 크레딧 → 2,631.xx 원/분 — 딱 떨어지지 않으므로
+    소수점을 남깁니다. 반올림하면 되짚어 곱했을 때 금액이 안 맞습니다.
     """
-    assert won.contract_credits(1_566_000, 1450, "KRW", "KRW", None) == 64_800
-    assert won.contract_credits(20_000_000, "1.75", "KRW", "USD", "1503.3637") == 456_120
-    assert won.contract_credits(20_000_000, "1.75", "KRW", "USD", 1503) == 456_230
-    # 환율이 없으면 계산하지 않습니다. 0 이나 추정값을 넣으면 틀린 크레딧이 조용히 저장됩니다.
-    assert won.contract_credits(20_000_000, 1.75, "KRW", "USD", None) is None
+    krw = ClientContract(
+        client_id=1, seq=1, currency="KRW", amount_excl_vat=1_566_000, credits=64_800
+    )
+    assert won.unit_price(krw) == Decimal("1450")
+
+    seoul = ClientContract(
+        client_id=2, seq=1, currency="KRW", amount_excl_vat=20_000_000, credits=456_120
+    )
+    assert round(float(won.unit_price(seoul)), 2) == 2630.89
+
+    # USD 계약은 총액이 기준입니다 — 부가세가 없어 총액이 곧 대금입니다.
+    usd = ClientContract(
+        client_id=3, seq=1, currency="USD", amount_incl_vat=20_000, credits=60_000
+    )
+    assert won.unit_price(usd) == Decimal("20")
+
+    # 크레딧이 없으면 계산하지 않습니다. 0 을 넣으면 나눗셈이 터집니다.
+    assert won.unit_price(ClientContract(client_id=4, seq=1, currency="KRW",
+                                         amount_excl_vat=1_000_000, credits=None)) is None
+    assert won.unit_price(ClientContract(client_id=5, seq=1, currency="KRW",
+                                         amount_excl_vat=None, credits=100)) is None
+
+
+def test_the_total_is_the_supply_plus_vat_for_krw_only():
+    """원화 계약은 공급가만 받고 총액은 +10% 로 계산합니다 — 입력 칸이 없습니다.
+    그 외 통화는 부가세가 없어 총액만 받고 공급가 칸이 없습니다."""
+    krw = ClientContract(client_id=1, seq=1, currency="KRW", amount_excl_vat=10_000_000)
+    assert won.total_amount(krw) == Decimal("11000000.0")
+    assert won.billing_amount(krw) == Decimal("10000000")
+
+    usd = ClientContract(client_id=2, seq=1, currency="USD", amount_incl_vat=20_000)
+    assert won.total_amount(usd) == Decimal("20000")
+    assert won.billing_amount(usd) == Decimal("20000")
 
 
 def test_customer_type_comes_from_the_id_band():
     """고객 종류를 따로 저장하지 않는 이유 — 번호대가 곧 종류이고, 둘을 저장하면 어긋납니다."""
-    assert won.client_type(1108) == "Inbound"
+    assert won.client_type(1108) == "GTM Inbound"
     assert won.client_type(2102) == "GTM Outbound"
     assert won.client_type(3001) == "Interactive"
     assert won.client_type(4001) == "AX"
@@ -64,7 +94,9 @@ def test_monthly_revenue_matches_the_sheet():
     """MRR = VAT 포함 총액 ÷ 계약 개월수. PoC 는 결제월에 전액이라 월간 매출이 없습니다."""
     contract = ClientContract(
         client_id=1, seq=1, deal_type="MRR",
-        starts_on="2026-06-25", ends_on="2027-06-25", amount_incl_vat=22_000_000,
+        starts_on="2026-06-25", ends_on="2027-06-25",
+        # 원화 계약이라 공급가만 저장됩니다 — 총액 22,000,000 은 여기에 10% 를 더한 값.
+        currency="KRW", amount_excl_vat=20_000_000,
     )
     assert won.months_between(contract.starts_on, contract.ends_on) == 12
     assert round(float(won.monthly_revenue(contract))) == 1_833_333
@@ -206,7 +238,8 @@ def test_credit_rounds_add_up_to_the_contract(factory):
         session.add(Client(client_id=2103, company="테스트"))
         contract = ClientContract(
             client_id=2103, seq=1, starts_on="2026-08-01", ends_on="2027-08-01",
-            amount_incl_vat=11_000_000, installments=4, first_payment_on="2026-08-01",
+            currency="KRW", amount_excl_vat=10_000_000,   # 총액 11,000,000 은 계산값
+            installments=4, first_payment_on="2026-08-01",
             credits=240_817,
         )
         session.add(contract)
@@ -384,49 +417,55 @@ def test_the_list_screen_keeps_the_mockups_thresholds_and_wording():
     assert 'id="fxInput"' not in screen
 
 
-def test_the_supply_price_is_required_and_the_total_is_not():
-    """크레딧이 공급가 ÷ 분당 단가 × 60 이라 공급가 없이는 계약이 성립하지 않습니다.
-    VAT 포함 총액은 뒤에 적히거나 아예 없는 계약이 있어 선택입니다 — 대신 그 계약은
-    예상 MRR(= 총액 ÷ 개월수)에 0 으로 잡힌다고 폼이 말해 줍니다."""
+def test_the_form_asks_for_the_amount_the_currency_uses():
+    """통화가 어느 칸을 받는지 정합니다 — 원화는 공급가, 그 외는 총액. 둘 다 받으면
+    분당 단가가 어느 쪽 기준인지 계약마다 달라집니다."""
     import pathlib
 
     form = pathlib.Path("frontend/src/screens/won/WonContractForm.tsx").read_text(encoding="utf-8")
 
-    assert '<label className="form-label">총 계약금액 (VAT 포함)</label>' in form, "총액에 * 가 남아 있습니다"
     assert '<Field label="공급가 (VAT 제외)" required>' in form
-    assert "예상 MRR 에 잡히지 않습니다" in form
-    # 저장을 막는 조건에서 총액이 빠져야 합니다.
+    # 원화면 총액 칸은 읽기 전용 계산값, USD 면 총액이 입력이고 공급가 칸이 없습니다.
+    assert '{totalInclVat === null ? "공급가 입력 시 계산" : num(totalInclVat)}' in form
+    assert '<label className="form-label">총 계약금액 (VAT 포함) <span className="req">*</span></label>' in form
+    # 저장을 막는 조건은 통화가 정한 금액과 크레딧, 둘뿐입니다.
     guard = form[form.index("const [save, saving]") : form.index("const body: Record")]
-    assert "amount_excl_vat" in guard
-    assert "amount_incl_vat" not in guard
+    assert "billing" in guard and "draft.credits" in guard
+    assert "unit_price" not in guard
 
 
-def test_the_applied_rate_is_typed_in_never_inherited():
-    """계약에 박히는 환율은 **그 계약을 맺을 때 쓴 값**입니다. 직전 계약에서 물려받으면
-    남의 시점 환율이 이 계약의 크레딧을 정합니다. 그리고 칸은 항상 보입니다 — 통화가
-    다를 때만 나타나던 시절에는, 분당 단가만 고치고 저장을 눌러도 크레딧을 계산할 수
-    없어 막히는데 정작 막은 칸이 화면에 없었습니다."""
+def test_the_unit_price_is_shown_not_typed():
+    """분당 단가는 계산값입니다. 입력 칸으로 두면 반올림한 단가로 계산한 크레딧이
+    계약서의 크레딧과 어긋납니다 — 그래서 방향을 뒤집었습니다."""
     import pathlib
 
+    from src.db.models import ClientContract
+
     form = pathlib.Path("frontend/src/screens/won/WonContractForm.tsx").read_text(encoding="utf-8")
+    assert 'set("unit_price"' not in form          # 입력하지 않습니다
+    assert 'set("credits"' in form                 # 크레딧은 입력합니다
+    # 단가 통화·적용 환율 칸은 사라졌습니다.
+    assert "unit_currency" not in form
+    assert "unit_fx_rate" not in form
 
-    carry = form[form.index("function carryOver") : form.index("const emptyCarry")]
-    assert "unit_fx_rate" not in carry, "재계약이 직전 계약의 환율을 물려받고 있습니다"
-    assert 'draft.unit_currency !== draft.currency && (\n              <Field label="적용 환율"' not in form
-    assert '<Field label="적용 환율" required={draft.unit_currency !== draft.currency}>' in form
+    # 행에도 없습니다 — 계산값을 저장하면 갈라집니다.
+    columns = {c.name for c in ClientContract.__table__.columns}
+    assert "unit_price" not in columns
+    assert "unit_currency" not in columns
+    assert "unit_fx_rate" not in columns
 
 
-def test_a_contract_without_a_total_still_has_credits_and_no_mrr():
-    """총액을 비운 계약도 크레딧은 계산됩니다(공급가에서 나오므로). MRR 만 0 입니다."""
-    from types import SimpleNamespace
+def test_the_sheet_gets_the_computed_amounts():
+    """시트 O(분당 단가)·L(총액)도 계산값이 나가고, 없어진 칸(N·P)은 비웁니다."""
+    import pathlib
 
-    from src.common.won import contract_credits, monthly_revenue
-
-    assert contract_credits(10_000_000, 500, "KRW", "KRW", None) == 1_200_000
-    contract = SimpleNamespace(
-        deal_type="MRR", amount_incl_vat=None, starts_on="2026-08-11", ends_on="2027-08-11"
-    )
-    assert monthly_revenue(contract) == 0
+    source = pathlib.Path("src/agents/won_sheets.py").read_text(encoding="utf-8")
+    assert '"O": _num(won.unit_price(contract))' in source
+    assert '"L": _num(won.total_amount(contract))' in source
+    assert '"N": "",' in source and '"P": "",' in source
+    # 시트에서 거꾸로 읽어 오지도 않습니다.
+    importer = pathlib.Path("src/agents/sheet_to_db.py").read_text(encoding="utf-8")
+    assert "contract.unit_price" not in importer
 
 
 # ----- 플랜 상태는 계약 기간이 정합니다 — 저장하지 않습니다 -----

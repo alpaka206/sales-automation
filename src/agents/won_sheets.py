@@ -143,10 +143,14 @@ def _contract_row(contract: ClientContract) -> _Row:
             "F": _date(contract.starts_on),
             "G": _date(contract.ends_on),
             "J": _num(contract.credits),
-            "L": _num(contract.amount_incl_vat),
+            # 화면과 같은 값이 나갑니다. 총액은 원화면 공급가+10%, 분당 단가는 금액을
+            # 크레딧에서 나눈 계산값입니다 — 저장된 열이 아닙니다.
+            "L": _num(won.total_amount(contract)),
             "M": _num(contract.amount_excl_vat),
-            "O": _num(contract.unit_price),
-            "P": _num(contract.unit_fx_rate),
+            "O": _num(won.unit_price(contract)),
+            # P(적용 환율)·N(분당 단가 통화)은 없어진 칸입니다. 옛 값이 남아 있으면 지금
+            # 단가와 앞뒤가 안 맞으므로 비웁니다.
+            "P": "",
             "S": _num(contract.installments),
             "T": _date(contract.first_payment_on),
             "AE": _date(contract.plan_starts_on),
@@ -161,7 +165,7 @@ def _contract_row(contract: ClientContract) -> _Row:
             "E": _text(contract.deal_type),
             "I": " + ".join(contract.doc_types or []),
             "K": _text(contract.currency),
-            "N": _text(contract.unit_currency),
+            "N": "",
             "Q": _text(contract.payment_method),
             "R": _text(contract.payment_type),
             "U": _text(contract.billing_email),
