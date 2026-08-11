@@ -206,15 +206,30 @@ def billing_amount(contract) -> Decimal | None:
     적히고 부가세가 따로 붙지만, 해외 계약에는 그 부가세가 없어 총액이 곧 대금입니다.
     받는 칸이 통화마다 하나뿐인 이유가 이것입니다 — 둘 다 받으면 어느 쪽이 기준인지가
     계약마다 달라집니다.
+
+    **총액만 있는 옛 원화 계약은 거기서 공급가를 되짚습니다.** 공급가를 받기로 하기 전의
+    행들은 총액만 채워져 있어서, 그대로 두면 화면의 공급가 칸이 비고 — 필수 칸이라 —
+    그 계약은 플랜 하나 고치는 것조차 저장이 막혔습니다. 총액 = 공급가 + 10% 의 정확한
+    역이라 값을 지어내는 것이 아니고, 다음 저장 때 공급가로 자리를 옮겨 앉습니다.
     """
-    return _decimal(contract.amount_excl_vat if is_krw(contract) else contract.amount_incl_vat)
-
-
-def total_amount(contract) -> Decimal | None:
-    """VAT 포함 총액. 원화 계약은 공급가에 10% 를 더해 **계산합니다**(입력 칸이 없습니다)."""
     if not is_krw(contract):
         return _decimal(contract.amount_incl_vat)
     supply = _decimal(contract.amount_excl_vat)
+    if supply is not None:
+        return supply
+    total = _decimal(contract.amount_incl_vat)
+    return total / (1 + VAT_RATE) if total else None
+
+
+def total_amount(contract) -> Decimal | None:
+    """VAT 포함 총액. 원화 계약은 공급가에 10% 를 더해 **계산합니다**(입력 칸이 없습니다).
+
+    총액만 있는 옛 계약도 같은 답이 나옵니다: `billing_amount` 가 총액에서 공급가를
+    되짚고, 여기서 다시 10% 를 더하면 원래 총액입니다.
+    """
+    if not is_krw(contract):
+        return _decimal(contract.amount_incl_vat)
+    supply = billing_amount(contract)
     return supply * (1 + VAT_RATE) if supply else None
 
 

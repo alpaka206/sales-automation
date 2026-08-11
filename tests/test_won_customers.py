@@ -534,3 +534,25 @@ def test_the_sheet_gets_the_same_status_the_screen_shows():
     # 시트에서 거꾸로 읽어 오지도 않습니다 — 손으로 적힌 옛 값이 날짜를 이기면 안 됩니다.
     importer = pathlib.Path("src/agents/sheet_to_db.py").read_text(encoding="utf-8")
     assert "client.plan_status" not in importer
+
+
+def test_an_old_krw_contract_with_only_a_total_still_opens_and_saves():
+    """공급가를 받기로 하기 전의 원화 계약은 **총액만** 채워져 있습니다.
+
+    그대로 두면 화면의 공급가 칸이 비고, 필수 칸이라 그 계약은 플랜 하나 고치는 것조차
+    저장이 막힙니다 — 요청이 아예 안 나가고, 누른 사람에게는 "플랜이 적용이 안 된다" 로만
+    보입니다. 총액 = 공급가 + 10% 의 정확한 역이라 되짚어도 값을 지어내지 않습니다.
+    """
+    old = ClientContract(
+        client_id=1, seq=1, currency="KRW", amount_incl_vat=1_722_600, credits=64_800
+    )
+    assert won.billing_amount(old) == Decimal("1566000")
+    assert won.total_amount(old) == Decimal("1722600")     # 되짚어도 원래 총액
+    assert won.unit_price(old) == Decimal("1450")          # 시트와 같은 단가
+
+    # 공급가가 있으면 그쪽이 원본입니다 — 되짚기는 없을 때만.
+    both = ClientContract(
+        client_id=2, seq=1, currency="KRW",
+        amount_excl_vat=1_000_000, amount_incl_vat=9_999_999, credits=60_000,
+    )
+    assert won.billing_amount(both) == Decimal("1000000")
