@@ -28,12 +28,8 @@ export async function postForm(path: string, data: Record<string, string>) {
     body: new URLSearchParams(data),
   });
   if (!response.ok) throw new Error(`${response.status} ${path}`);
-  lastLocalWrite = Date.now();
   return response;
 }
-
-/** 이 탭이 마지막으로 쓴 시각. 아래 SSE 처리가 자기 메아리를 무시하는 데 씁니다. */
-let lastLocalWrite = 0;
 
 /** Re-read what is on screen whenever the server says something changed.
  *
@@ -48,15 +44,13 @@ export function listenForChanges(client: QueryClient) {
   // 늘어납니다. 왕복 하나가 200ms 인 환경에서는 그게 그대로 화면 지연입니다.
   let pending: ReturnType<typeof setTimeout> | null = null;
   source.onmessage = () => {
-    // **자기 메아리는 버립니다.** 쓴 탭은 그 자리에서 스스로 invalidate 하는데, 서버가
-    // 모든 non-GET 에 대해 토픽을 뿌리므로 300ms 뒤 자기가 일으킨 이벤트가 돌아와 한 번
-    // 더 합니다. 그냥 두 번이 아닙니다: React Query 는 재요청을 겹치면 앞의 것을 취소하고
-    // 다시 걸어서, 첫 요청은 이미 나간 채로 답만 버려집니다. 쓰기 한 번이 화면 전체를
-    // 두 번 받아 오는 값이 됩니다.
-    //
-    // 다른 탭·다른 운영자는 영향이 없습니다 — 그쪽은 lastLocalWrite 를 건드린 적이 없어
-    // 예전과 똑같이 받습니다. 이 줄이 막는 것은 "내가 방금 한 일" 뿐입니다.
-    if (Date.now() - lastLocalWrite < 1000) return;
+    // 여기서 "내가 방금 쓴 것의 메아리" 를 시간으로 걸러 보려던 적이 있습니다. 두 가지가
+    // 틀렸습니다. 첫째, 이 이벤트에는 **누가 썼는지가 없습니다**(토픽은 경로뿐) — 그래서
+    // 남의 저장까지 같이 버려지고, 되받을 길이 없는 화면이 있습니다(포커스 재요청은 꺼져
+    // 있고 대부분 폴링도 없습니다). 둘째, 정작 자기 메아리를 못 막습니다: 보드의 쓰기는
+    // 303 → 302 를 따라가느라 응답이 세 홉 뒤에 끝나는데 서버는 첫 핸들러가 끝날 때 이미
+    // 알리므로, 창을 열기 전에 메아리가 지나갑니다. 제대로 하려면 서버가 쓴 탭을 토픽에
+    // 실어 보내야 하고, 그건 아끼는 왕복 하나가 감당할 크기가 아닙니다.
     if (pending) clearTimeout(pending);
     pending = setTimeout(() => {
       pending = null;

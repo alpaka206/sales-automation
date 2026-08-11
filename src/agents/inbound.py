@@ -1466,8 +1466,13 @@ def cache_korean_inquiries(limit: int = 20, conversation_id: int | None = None) 
     한도만큼(옛 행과 그때 실패한 것을 조금씩 메웁니다). 어느 쪽도 결과를 기다리는 사람이
     없습니다.
 
-    실패해도 원문을 넣어 둡니다. 비워 두면 폴러가 그 행을 영원히 다시 집어 모델을 계속
-    부릅니다 — 고칠 방법은 검토 화면의 `번역하기` 가 이미 있습니다.
+    **모델이 안 되면 비워 둡니다.** ``to_korean`` 은 실패해도 예외를 던지지 않고 빈 문자열을
+    돌려주므로(translate.py), 그 자리에 원문을 넣으면 영어가 「한국어 번역」이라는 이름을 달고
+    행에 굳고 폴러는 그 행을 다시 집지 않습니다 — 되돌릴 방법이 없습니다(검토 화면의
+    `번역하기` 는 **회신 초안**을 보낼 언어로 바꾸는 버튼이라 고객 문의에는 안 닿습니다).
+    NULL 은 "아직 안 옮겼다" 하나만 뜻하게 두고, 다음 순회에 다시 집히게 합니다. 영원히
+    도는 것은 아닙니다: 이미 한국어거나 글자가 없는 본문은 아래 else 로 빠져 값이 채워지고,
+    남는 것은 진짜 모델 장애뿐이라 10분에 ``limit`` 건으로 묶여 있습니다.
     """
     from ..llm.translate import needs_korean, to_korean
 
@@ -1484,11 +1489,11 @@ def cache_korean_inquiries(limit: int = 20, conversation_id: int | None = None) 
         for row in rows:
             try:
                 body = row.body or ""
-                row.body_ko = (to_korean(body) or body) if needs_korean(body) else body
+                row.body_ko = (to_korean(body) or None) if needs_korean(body) else body
                 subject = row.subject
                 if subject and row.subject_ko is None:
                     row.subject_ko = (
-                        (to_korean(subject) or subject) if needs_korean(subject) else subject
+                        (to_korean(subject) or None) if needs_korean(subject) else subject
                     )
                 done += 1
             except Exception:

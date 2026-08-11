@@ -177,3 +177,28 @@ def test_opening_a_ticket_never_reaches_the_model():
     for path in ("src/api/routes/messages.py", "src/api/routes/ui_api.py"):
         source = pathlib.Path(path).read_text(encoding="utf-8")
         assert "to_korean" not in source, path
+
+
+def test_a_model_failure_leaves_it_retryable(inbound_db, monkeypatch):
+    """모델이 안 되면 **비워 둡니다.**
+
+    `to_korean` 은 실패해도 예외를 던지지 않고 빈 문자열을 돌려줍니다. 그 자리에 원문을
+    넣으면 영어가 「한국어 번역」이라는 이름을 달고 행에 굳고, 폴러는 그 행을 다시 집지
+    않습니다 — 되돌릴 방법이 없습니다. 검토 화면의 `번역하기` 는 회신 초안을 보낼 언어로
+    바꾸는 버튼이라 고객 문의에는 닿지 않습니다.
+    """
+    from src.agents.inbound import cache_korean_inquiries
+    from src.db.models import Message
+
+    monkeypatch.setattr("src.llm.translate.to_korean", lambda *a, **kw: "")   # 모델 장애
+    mid = _seed(inbound_db, direction="inbound", body=ENGLISH)
+
+    cache_korean_inquiries()
+    with inbound_db() as session:
+        assert session.get(Message, mid).body_ko is None      # 원문이 굳지 않았다
+
+    # 모델이 돌아오면 다음 순회가 같은 행을 집어 채웁니다.
+    monkeypatch.setattr("src.llm.translate.to_korean", lambda *a, **kw: "이제 번역됩니다.")
+    assert cache_korean_inquiries() == 1
+    with inbound_db() as session:
+        assert session.get(Message, mid).body_ko == "이제 번역됩니다."

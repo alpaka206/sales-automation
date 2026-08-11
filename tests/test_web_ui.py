@@ -739,3 +739,30 @@ def test_typing_in_a_modal_blocks_the_accidental_close():
     assert "typed.current" in modal
     # 확인 창(입력칸 없음)은 여전히 Escape 로 닫혀야 하므로, 기본값은 닫는 쪽입니다.
     assert "const typed = useRef(false);" in modal
+
+
+def test_the_board_move_answers_where_the_banner_can_read_it():
+    """보드는 응답의 **최종 주소**에서 ?sync 를 읽습니다(SyncBanner.syncStateFrom).
+
+    `/?sync=ok` 로 보내면 legacy_redirects 가 `/app` 으로 한 번 더 넘기면서 쿼리를
+    떨어뜨려, 성공했을 때 배너가 한 번도 뜨지 않았습니다 — 운영자가 본 것은 요청이
+    실패했을 때의 "partial" 뿐이었습니다.
+    """
+    from src.api.routes import customer_ops
+
+    assert customer_ops._BOARD_REDIRECT.startswith("/app?sync=")
+    # 그 주소가 정말 최종인지: 다시 넘기는 표에 /app 이 없어야 합니다.
+    from src.api.routes.legacy_redirects import _MOVED
+
+    assert not any(src == "/app" for src, _dst in _MOVED)
+
+
+def test_the_event_stream_never_drops_someone_elses_change():
+    """SSE 이벤트에는 누가 썼는지가 없습니다(토픽은 경로뿐). 시간으로 자기 메아리를
+    걸러 내려 하면 남의 저장까지 같이 버려지고, 포커스 재요청이 꺼져 있어 되받을 길이
+    없는 화면이 있습니다."""
+    import pathlib
+
+    api = pathlib.Path("frontend/src/lib/api.ts").read_text(encoding="utf-8")
+    source = api[api.index("source.onmessage") :]
+    assert "lastLocalWrite" not in source

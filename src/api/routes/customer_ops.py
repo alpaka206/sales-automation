@@ -1174,11 +1174,20 @@ async def pipeline_board_redirect():
     return RedirectResponse("/", status_code=308)
 
 
+# 보드가 이 응답의 **최종 주소**에서 ?sync 를 읽습니다(SyncBanner.syncStateFrom). 그래서
+# 목적지가 `/app` 이어야 합니다: `/` 로 보내면 legacy_redirects 가 `/app` 으로 한 번 더
+# 넘기면서 쿼리를 떨어뜨려, 성공했을 때 배너가 **한 번도 뜬 적이 없었습니다** — 운영자가
+# 본 것은 catch 로 들어가는 "partial" 뿐이었습니다. 왕복 두 번도 같이 없어집니다.
+_BOARD_REDIRECT = "/app?sync={sync}#stage-{stage}"
+
+
 @router.post("/pipeline/{contact_id}/stage")
 async def pipeline_stage_move(contact_id: int, stage: str = Form(...)):
     ticket_id, sheet_client_id = _set_local_stage(contact_id, stage)
     result = await _sync_stage(ticket_id, stage, contact_id, sheet_client_id)
-    return RedirectResponse(f"/?sync={_sync_state(result)}#stage-{stage}", status_code=303)
+    return RedirectResponse(
+        _BOARD_REDIRECT.format(sync=_sync_state(result), stage=stage), status_code=303
+    )
 
 
 @router.post("/pipeline/conversations/{conversation_id}/stage")
@@ -1187,7 +1196,9 @@ async def pipeline_inquiry_stage_move(conversation_id: int, stage: str = Form(..
     HubSpot and the workbook follow, and the ?sync flag says which of them actually did."""
     ticket_id, contact_id, sheet_client_id = _set_conversation_stage(conversation_id, stage)
     result = await _sync_stage(ticket_id, stage, contact_id, sheet_client_id)
-    return RedirectResponse(f"/?sync={_sync_state(result)}#stage-{stage}", status_code=303)
+    return RedirectResponse(
+        _BOARD_REDIRECT.format(sync=_sync_state(result), stage=stage), status_code=303
+    )
 
 
 @router.post("/pipeline/backfill")

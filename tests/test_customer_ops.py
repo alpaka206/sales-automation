@@ -421,7 +421,11 @@ def test_board_move_in_safe_mode_reports_local_not_a_failure(
             follow_redirects=False,
         )
     assert moved.status_code == 303
-    assert moved.headers["location"] == "/?sync=local#stage-won"
+    # `/app`, not `/`. 보드는 이 응답의 **최종 주소**에서 ?sync 를 읽는데, `/` 로 보내면
+    # legacy_redirects 가 `/app` 으로 한 번 더 넘기면서 쿼리를 떨어뜨립니다 — 그래서
+    # 배너가 성공했을 때 한 번도 뜨지 않았습니다. 이 테스트가 못 잡은 이유는
+    # follow_redirects=False 라 그 두 번째 홉을 따라가지 않기 때문입니다.
+    assert moved.headers["location"] == "/app?sync=local#stage-won"
     # The local move still sticks — that is the half that must never depend on HubSpot.
     with customer_db() as session:
         assert session.get(Conversation, conversation_id).stage == "won"
