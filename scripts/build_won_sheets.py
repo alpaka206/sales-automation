@@ -123,7 +123,7 @@ def sum_by_contract(tab: str, total: str, extra: str = "") -> str:
 
 CHOICES = [
     ["고객 종류", "산업 분야", "담당부서", "플랜 상태", "수주 유형", "계약서 유형", "통화", "결제 수단", "결제 방식", "플랜", "갱신 계획", "크레딧 상태", "결제 상태", "클레임 진행상황"],
-    ["Inbound", "크리에이터(개인)", "GTM", "사용중", "MRR", "해당 없음", "KRW", "Stripe", "일시불", "Business Tier 1", "갱신 예정", "지급 완료", "입금 완료", "접수"],
+    ["GTM Inbound", "크리에이터(개인)", "GTM", "사용중", "MRR", "해당 없음", "KRW", "Stripe", "일시불", "Business Tier 1", "갱신 예정", "지급 완료", "입금 완료", "접수"],
     ["GTM Outbound", "교육", "Interactive", "세팅중", "PoC", "직접 계약 / DocuSign", "USD", "포트원", "할부", "Business Tier 2", "협의 중", "지급 예정", "입금 전", "조치 진행 중"],
     ["Interactive", "MCN", "AX", "사용 중단", "", "결제 시 약관 및 협의 내용 동의", "", "계좌이체", "", "Business Tier 3", "미정", "", "", "조치 완료"],
     ["AX", "의료", "", "", "", "세금계산서 발행", "", "", "", "Enterprise", "본계약 검토 중", "", "", ""],
@@ -175,7 +175,7 @@ TABS: list[dict] = [
             "B": _array(
                 'IF(ISNUMBER($A$2:$A),IFERROR(IFS($A$2:$A>=9000,"2025 Inbound",'
                 '$A$2:$A>=4000,"AX",$A$2:$A>=3000,"Interactive",'
-                '$A$2:$A>=2000,"GTM Outbound",$A$2:$A>=1000,"Inbound"),""),"")'
+                '$A$2:$A>=2000,"GTM Outbound",$A$2:$A>=1000,"GTM Inbound"),""),"")'
             ),
             "G": _array(
                 'IF($B$2:$B="","",IF(($B$2:$B="Interactive")+($B$2:$B="AX"),$B$2:$B,"GTM"))'
@@ -961,5 +961,59 @@ def build() -> None:
     print(f"https://docs.google.com/spreadsheets/d/{SPREADSHEET_ID}/edit")
 
 
+def refresh_derived() -> None:
+    """이미 쓰고 있는 워크북의 **수식과 드롭다운만** 다시 씁니다. 데이터는 안 건드립니다.
+
+    파생 열은 시트 안의 ARRAYFORMULA 이고 드롭다운은 규칙 안에 값을 들고 있어서, 파이썬
+    쪽 표를 고쳐도 살아 있는 시트는 예전 값을 그대로 씁니다 — 고객 종류를 Inbound 에서
+    GTM Inbound 로 바꿨을 때 실제로 그랬습니다. ``--replace`` 는 탭을 지우고 다시 만드는
+    것이라 손으로 채운 칸까지 날아갑니다.
+
+    열당 한 칸(2행)만 쓰면 열 전체가 다시 계산되므로, 기존 행도 그 자리에서 같이 바뀝니다.
+    """
+    service = gs._build_service()
+    sheets = service.spreadsheets()
+    meta = sheets.get(spreadsheetId=SPREADSHEET_ID).execute()
+    ids = {s["properties"]["title"]: s["properties"]["sheetId"] for s in meta["sheets"]}
+
+    data, requests = [], []
+    for tab in TABS:
+        title = tab["title"]
+        if title not in ids:
+            print(f"  '{title}': 워크북에 없어 건너뜁니다.")
+            continue
+        for letter, formula in (tab.get("array") or {}).items():
+            data.append({"range": f"'{title}'!{letter}2", "values": [[formula]]})
+        for letter, name in (tab.get("dv") or {}).items():
+            requests.append({
+                "setDataValidation": {
+                    "range": {
+                        "sheetId": ids[title], "startRowIndex": 1,
+                        "startColumnIndex": idx(letter), "endColumnIndex": idx(letter) + 1,
+                    },
+                    "rule": {
+                        "condition": {
+                            "type": "ONE_OF_LIST",
+                            "values": [{"userEnteredValue": v} for v in choices(name)],
+                        },
+                        "showCustomUi": True, "strict": False,
+                    },
+                }
+            })
+
+    if data:
+        sheets.values().batchUpdate(
+            spreadsheetId=SPREADSHEET_ID,
+            body={"valueInputOption": "USER_ENTERED", "data": data},
+        ).execute()
+    if requests:
+        sheets.batchUpdate(spreadsheetId=SPREADSHEET_ID, body={"requests": requests}).execute()
+    print(f"수식 {len(data)}칸 · 드롭다운 {len(requests)}열을 다시 썼습니다.")
+    print(f"https://docs.google.com/spreadsheets/d/{SPREADSHEET_ID}/edit")
+
+
 if __name__ == "__main__":
-    build()
+    if "--refresh-derived" in sys.argv:
+        refresh_derived()
+    else:
+        build()

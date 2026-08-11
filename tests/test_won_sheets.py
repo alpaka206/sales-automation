@@ -119,3 +119,22 @@ def test_rows_past_the_formula_block_are_reported_not_silently_dropped():
     plan = plan_tab(CLIENTS, {}, rows, set())
 
     assert plan.dropped == len(rows) - (won_sheets.MAX_ROW - 1)
+
+
+def test_the_sheet_formula_calls_the_1000_band_gtm_inbound():
+    """시트의 고객 종류는 **시트 안의 ARRAYFORMULA** 라, 파이썬 표만 고치면 살아 있는
+    워크북은 예전 이름을 그대로 씁니다. 두 곳이 같은 말을 하는지 여기서 봅니다."""
+    import sys
+
+    sys.argv = ["x"]
+    from scripts.build_won_sheets import TABS, choices
+
+    from src.common.won import CLIENT_ID_BANDS
+
+    registry = next(tab for tab in TABS if tab["title"] == "고객 기본 정보")
+    formula = registry["array"]["B"]
+    for floor, label in CLIENT_ID_BANDS:
+        assert f'$A$2:$A>={floor},"{label}"' in formula, (floor, label)
+
+    # 드롭다운도 같은 목록입니다 — 규칙 안에 값을 들고 있어서 따로 고쳐야 합니다.
+    assert set(choices("고객 종류")) == {label for _floor, label in CLIENT_ID_BANDS}
