@@ -114,22 +114,36 @@ def _mirror_stage_to_sheet(client_id: int | None, stage: str, ticket_id: str) ->
 
 
 # Draft states that a HubSpot-side answer makes pointless. ``drafting`` is deliberately
-# absent: that row is mid-flight in the inbound worker, which would write over this.
-_SUPERSEDABLE = ("pending_approval", "draft_failed", "send_failed")
+# absent: that row is mid-flight in the inbound worker, which would write over this — it
+# lands here anyway the moment ``_finalize_draft`` stamps its terminal status, which is
+# why that function calls this one. ``approved`` IS here: the send worker claims a row on
+# status alone, so it was the one unsent state that could still mail a customer after the
+# ticket had moved on.
+_SUPERSEDABLE = ("pending_approval", "approved", "draft_failed", "send_failed")
+
+# "New 를 벗어났다" 는 **매핑된 파이프라인 단계**일 때뿐입니다. 모델 기본값인 "initial",
+# None, 뜻을 모르는 값은 단계가 움직인 것이 아닙니다 — `!= "new"` 로 세면 아직 아무도 손대지
+# 않은 티켓의 초안까지 종료됩니다.
+_PAST_NEW = frozenset(LOCAL_STAGE_TO_SETTING) - {"new"}
 
 
 def _retire_superseded_drafts(session, conversation_id: int, local_stage: str) -> int:
-    """Close drafts that a human already answered in HubSpot. Returns how many.
+    """Close drafts that the ticket has already moved past. Returns how many.
 
-    Drafts are written for New tickets. When such a ticket turns up in a later stage it
-    means someone replied in HubSpot while we were still holding an unsent draft — real
-    work carried on during the pre-launch pause. Leaving the draft in 발송 대기 asks the
-    operator to send an answer the customer has already received, and it is exactly why
-    the queue shows rows whose Stage is not New.
+    Drafts are written for New tickets. When the ticket is in a later stage it means the
+    inquiry was answered another way — someone replied in HubSpot, the operator dragged
+    the card after a call, the meeting link went out. Leaving the draft in 발송 대기 asks
+    the operator to send an answer the customer already has, and it is exactly why the
+    queue used to show rows whose Stage is not New.
+
+    **이 함수가 초안을 종료하는 유일한 곳입니다.** 단계를 옮기는 쪽(HubSpot 동기화, 콘솔
+    보드, 워크북·백필 가져오기)과 초안을 완성하는 쪽(``_finalize_draft``)이 전부 여기로
+    옵니다 — 화면·집계·발송이 모두 ``Message.status`` 하나만 보므로, 여기서 한 번 종료하면
+    나머지는 따라옵니다.
     """
     from ..db.models import Message
 
-    if local_stage == "new":
+    if local_stage not in _PAST_NEW:
         return 0
     drafts = (
         session.query(Message)
@@ -137,6 +151,11 @@ def _retire_superseded_drafts(session, conversation_id: int, local_stage: str) -
             Message.conversation_id == conversation_id,
             Message.direction == "outgoing",
             Message.status.in_(_SUPERSEDABLE),
+            # 접수확인은 초안이 아닙니다. 사람이 검토하는 회신이 아니라 문의를 받았다는
+            # 자동 응답이고, ``approved`` 로 발송 큐에 들어가 있습니다 — 여기서 걸러 내지
+            # 않으면 단계 한 번 옮기는 것이 아직 안 나간 고객 접수확인을 취소합니다.
+            # 목록·집계·검토 화면이 전부 두는 것과 같은 조건입니다.
+            (Message.prompt_variant.is_(None)) | (Message.prompt_variant != "auto_ack"),
         )
         .all()
     )
@@ -148,8 +167,10 @@ def _retire_superseded_drafts(session, conversation_id: int, local_stage: str) -
             # Its own kind: 처리 경과 hides the routine "draft" entries, and a draft
             # retired out from under the operator is the opposite of routine.
             "draft_retired",
-            f"HubSpot에서 단계가 {local_stage}(으)로 이동해 대기 중이던 초안 "
-            f"{len(drafts)}건을 종료 처리했습니다. 이미 답변이 나간 문의입니다.",
+            # 어디서 옮겼는지는 적지 않습니다 — 바로 위에 그 단계 이동 기록이 있고,
+            # 이제 옮기는 곳이 HubSpot 만이 아닙니다(콘솔 보드·워크북·백필).
+            f"단계가 {local_stage}(으)로 이동해 대기 중이던 초안 {len(drafts)}건을 "
+            f"종료 처리했습니다. 이미 답변이 나간 문의입니다.",
             session=session,
         )
     return len(drafts)
@@ -185,6 +206,11 @@ def sync_stage_from_hubspot(
         if conv is None:
             return None
         if conv.stage == local_stage:
+            # 단계는 그대로여도 초안은 그 사이에 생겼을 수 있습니다: 작성 중이던 초안이
+            # 단계가 옮겨진 **뒤에** 완성되면, 그 대화에는 다시 아무 변화도 오지 않습니다.
+            # 여기서 한 번 더 훑지 않으면 그 초안은 영영 발송 대기로 남습니다.
+            if _retire_superseded_drafts(session, conv.id, local_stage):
+                session.commit()
             return None
 
         previous = conv.stage

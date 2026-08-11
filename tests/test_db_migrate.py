@@ -332,3 +332,78 @@ class TestConversationInquirySubject:
         migration.up(mem_engine)
 
         assert self._subjects(mem_engine) == [None, "Bulk dubbing quote", None, None]
+
+
+class TestRetireDraftsPastNew:
+    """0066 — 이관 전에 이미 갇힌 초안 정리.
+
+    지금부터는 단계를 옮기는 곳이 전부 초안을 닫습니다. 옮겨진 지 오래된 티켓에는 아무도
+    다시 오지 않으므로(10분 폴러의 stage reconcile 은 HubSpot 에서 최근에 바뀐 티켓만
+    훑습니다) 그 전에 남은 것은 이 이관이 한 번 치웁니다.
+    """
+
+    MODULE = "src.db.migrations.0066_retire_drafts_past_new"
+
+    # (대화 단계, 방향, 상태, prompt_variant) — id 는 순서대로 1번부터 매겨집니다.
+    ROWS = [
+        ("new", "outgoing", "pending_approval", None),  # 아직 New — 검토해서 보낼 답
+        ("meeting_link_sent", "outgoing", "pending_approval", None),  # 갇힌 초안
+        ("won", "outgoing", "approved", None),  # 워커가 집어 가 나갈 뻔한 것
+        ("meeting_link_sent", "outgoing", "sent", None),  # 이미 나간 답
+        ("meeting_link_sent", "outgoing", "drafting", None),  # 워커가 쓰는 중
+        ("initial", "outgoing", "pending_approval", None),  # 매핑에 없는 단계
+        ("meeting_link_sent", "inbound", "received", None),  # 고객 문의
+        ("won", "outgoing", "approved", "auto_ack"),  # 접수확인 — 초안이 아닙니다
+    ]
+
+    def _seed(self, engine):
+        from sqlalchemy.orm import Session
+
+        from src.db.base import Base
+        from src.db.models import Contact, Conversation, Message
+
+        Base.metadata.create_all(engine)
+        with Session(engine) as session:
+            contact = Contact(normalized_email="buyer@example.com", full_name="Buyer")
+            session.add(contact)
+            session.flush()
+            for stage, direction, status, variant in self.ROWS:
+                conversation = Conversation(contact_id=contact.id, stage=stage)
+                session.add(conversation)
+                session.flush()
+                session.add(
+                    Message(
+                        conversation_id=conversation.id,
+                        direction=direction,
+                        channel="email",
+                        body="",
+                        status=status,
+                        prompt_variant=variant,
+                    )
+                )
+            session.commit()
+
+    def _statuses(self, engine):
+        with engine.connect() as conn:
+            return conn.execute(text("SELECT status FROM messages ORDER BY id")).scalars().all()
+
+    def test_skips_when_tables_do_not_exist(self, mem_engine):
+        importlib.import_module(self.MODULE).up(mem_engine)
+
+        assert "messages" not in inspect(mem_engine).get_table_names()
+
+    def test_retires_only_unsent_drafts_on_tickets_past_new(self, mem_engine):
+        self._seed(mem_engine)
+
+        importlib.import_module(self.MODULE).up(mem_engine)
+
+        assert self._statuses(mem_engine) == [
+            "pending_approval",  # 아직 New — 검토해서 보낼 답입니다
+            "superseded",
+            "superseded",
+            "sent",
+            "drafting",  # 워커가 끝내면서 같은 판정을 합니다
+            "pending_approval",  # "initial" 은 단계가 옮겨진 것이 아닙니다
+            "received",
+            "approved",  # 접수확인은 그대로 나갑니다
+        ]

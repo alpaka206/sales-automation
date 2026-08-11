@@ -37,6 +37,7 @@ from .inbound_scoring import (  # noqa: F401 — re-exported for callers/tests
     _domain_from_email,
     _normalize_email,
 )
+from .stage_sync import _retire_superseded_drafts
 
 logger = logging.getLogger(__name__)
 
@@ -269,7 +270,7 @@ class InboundAgent:
 
             score = self._score(contact_info, classification.category)
             draft = self._draft_reply(contact_info, classification, score, conv_id, inquiry_lang)
-            self._finalize_draft(
+            awaiting_review = self._finalize_draft(
                 message_id, contact_info, classification, score, draft, conv_id, inquiry_lang
             )
         except Exception:
@@ -281,26 +282,29 @@ class InboundAgent:
         # from the append-only progress log). Never breaks the pipeline.
         self._update_summary(conv_id, contact_info)
 
-        # Unconditional: the draft is always pending_approval now, so there is always
-        # someone to notify. The old `if auto_approved: dispatch else: notify` fork is
-        # gone with the auto-approval branch.
-        try:
-            notify_approval_once(
-                message_id=message_id,
-                subject=draft.subject,
-                body_snippet=draft.body,
-                score=score,
-                category=classification.category,
-                title="새 인바운드 문의 — 회신 검토 요청",
-                inquiry=contact_info.get("last_message"),
-                contact_name=contact_info.get("full_name"),
-                contact_company=contact_info.get("company"),
-                contact_email=contact_info.get("email"),
-            )
-        except Exception:
-            logger.warning(
-                "Approval notification failed for message %d.", message_id, exc_info=True
-            )
+        # The draft is always pending_approval now — the old `if auto_approved: dispatch
+        # else: notify` fork went with the auto-approval branch. The one exception is a
+        # draft that finished after its ticket had already moved on: it was closed in
+        # _finalize_draft, and asking a human to review a closed draft is worse than
+        # saying nothing.
+        if awaiting_review:
+            try:
+                notify_approval_once(
+                    message_id=message_id,
+                    subject=draft.subject,
+                    body_snippet=draft.body,
+                    score=score,
+                    category=classification.category,
+                    title="새 인바운드 문의 — 회신 검토 요청",
+                    inquiry=contact_info.get("last_message"),
+                    contact_name=contact_info.get("full_name"),
+                    contact_company=contact_info.get("company"),
+                    contact_email=contact_info.get("email"),
+                )
+            except Exception:
+                logger.warning(
+                    "Approval notification failed for message %d.", message_id, exc_info=True
+                )
 
         # A webhook-processed ticket must also be marked for the polling fallback;
         # otherwise the next poll can treat the same HubSpot ticket as unseen.
@@ -1180,7 +1184,13 @@ class InboundAgent:
         conv_id: int | None = None,
         inquiry_lang: str | None = None,
     ) -> bool:
-        """Finalize the draft and return whether score-based auto-approval applied."""
+        """Finalize the draft. Returns whether it is actually waiting for a human.
+
+        False means the ticket moved past New while we were writing (미팅 링크 발송,
+        HubSpot 에서의 답변, 콘솔 보드 이동) and the finished draft was closed on the
+        spot instead of being put in 발송 대기. That is the one window the stage gates
+        cannot cover: ``handle()`` checked the stage minutes ago, at ingest.
+        """
         session = SessionLocal()
         try:
             msg = session.get(Message, message_id)
@@ -1208,8 +1218,14 @@ class InboundAgent:
                     contact.score = score
                 # No progress entry: "초안 작성 완료. 검토 대기." is exactly what the
                 # pending_approval status already says, on the same screen.
+
+            # 초안을 쓰는 동안 단계가 움직였으면 여기서 바로 종료합니다. flush 가 먼저인
+            # 이유: SessionLocal 은 autoflush=False 라, 위에서 준 pending_approval 이
+            # DB 에 없으면 아래 조회가 이 행을 못 봅니다.
+            session.flush()
+            retired = bool(conv and _retire_superseded_drafts(session, conv.id, conv.stage))
             session.commit()
-            return False
+            return not retired
         finally:
             session.close()
 

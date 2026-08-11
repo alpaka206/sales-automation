@@ -15,7 +15,7 @@ from fastapi import APIRouter, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import func, select
 
-from ...agents.stage_sync import customer_state_for
+from ...agents.stage_sync import _retire_superseded_drafts, customer_state_for
 from ...common.config import settings
 from ...common.subjects import strip_reply_prefixes
 from ...db.models import (
@@ -179,6 +179,9 @@ def _set_local_stage(contact_id: int, stage: str) -> tuple[str | None, int | Non
         ).scalar_one_or_none()
         if latest_conversation:
             latest_conversation.stage = stage
+            # 단계를 옮기는 순간 대기 중이던 초안은 늦은 답이 됩니다. HubSpot 에서 옮겼을
+            # 때와 같은 처리를, 콘솔에서 옮겼을 때도 합니다.
+            _retire_superseded_drafts(session, latest_conversation.id, stage)
         # Capture primitives while the session is open — expire_on_commit=True in
         # production detaches these instances after the `with` block, so reading
         # them in the return tuple would raise DetachedInstanceError.
@@ -467,6 +470,7 @@ def _set_conversation_stage(conversation_id: int, stage: str) -> tuple[str | Non
         if not contact:
             raise HTTPException(status_code=404, detail="고객을 찾을 수 없습니다")
         conversation.stage = stage
+        _retire_superseded_drafts(session, conversation.id, stage)
         latest_id = session.scalar(
             select(Conversation.id)
             .where(Conversation.contact_id == contact.id)
@@ -630,6 +634,17 @@ async def customer_profile_save(
         profile.lost_reason = lost_reason.strip() or None
         profile.source = source.strip() or None
         profile.notes = notes.strip() or None
+        # 파이프라인 단계를 옮기는 **세 번째** 폼입니다(보드 카드 둘이 앞의 둘). 여기서도
+        # 대기 중이던 초안은 늦은 답이 됩니다. 티켓이 있는 문의는 이 아래 _sync_stage 가
+        # HubSpot 을 움직여 폴러가 돌아오지만, 티켓이 없는 문의(연락처만으로 들어온 건)는
+        # 돌아올 길이 없어서 여기서 안 닫으면 영영 발송 대기에 남습니다.
+        latest = session.scalar(
+            select(Conversation)
+            .where(Conversation.contact_id == contact_id)
+            .order_by(Conversation.created_at.desc())
+        )
+        if latest:
+            _retire_superseded_drafts(session, latest.id, pipeline_stage)
         latest_ticket = (
             session.execute(
                 select(Conversation)

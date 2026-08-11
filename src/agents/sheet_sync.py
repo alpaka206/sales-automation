@@ -10,6 +10,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 
 from .inbound_scoring import _normalize_email
+from .stage_sync import _retire_superseded_drafts
 from ..db.models import (
     Client,
     Contact,
@@ -348,6 +349,14 @@ def _import_inbound_records(records: list[dict]) -> int:
                 # email contact, but never downgrade a known stage on schema drift.
                 conversation.contact_id = contact.id
                 if stage is not None:
+                    # 워크북에서 읽어 온 단계도 단계입니다. **바뀔 때만** 닫는 이유는
+                    # hubspot_backfill 과 같습니다: 이 루프는 행마다 도는데 여러 행이 한
+                    # Client ID 를 가리킬 수 있고, SessionLocal 이 autoflush=False 라
+                    # 두 번째 조회도 아직 pending_approval 인 그 행을 그대로 찾아 옵니다
+                    # — 종료 기록만 문의 하나에 여러 줄이 됩니다. id 가 없는 것은 방금
+                    # 이 루프가 만든 행이라 초안이 있을 수 없습니다.
+                    if conversation.id and conversation.stage != stage:
+                        _retire_superseded_drafts(session, conversation.id, stage)
                     conversation.stage = stage
                 conversation.sheet_inbound_row = conversation.sheet_inbound_row or _sheet_int(
                     record.get("_row")

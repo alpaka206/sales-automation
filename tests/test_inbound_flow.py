@@ -149,6 +149,42 @@ def test_inbound_handle_creates_db_rows(db_session) -> None:
     assert conversations[0].inquiry_subject == "Bulk dubbing quote"
 
 
+def test_a_draft_that_finishes_after_the_ticket_moved_is_closed_on_the_spot(db_session) -> None:
+    """미팅 링크가 나가는 동안 쓰이고 있던 초안.
+
+    handle() 의 단계 확인은 **접수 시점 한 번**뿐인데 초안 작성은 몇 분이 걸립니다. 그 사이에
+    단계가 옮겨지면(미팅 링크 발송, HubSpot 에서의 답장, 콘솔 보드 이동) 완성된 초안은 늦은
+    답입니다. 발송 대기에 올리지도, 검토 요청을 보내지도 않습니다 — 그리고 이 대화에는 다시
+    아무 이벤트도 오지 않으므로, 여기서 안 닫으면 아무도 안 닫습니다.
+    """
+    real_draft_reply = InboundAgent._draft_reply
+
+    def move_the_stage_while_drafting(self, contact_info, classification, score, conv_id, lang):
+        draft = real_draft_reply(self, contact_info, classification, score, conv_id, lang)
+        conversation = db_session.get(Conversation, conv_id)
+        conversation.stage = "meeting_link_sent"
+        db_session.commit()
+        return draft
+
+    with patch("src.agents.inbound.SessionLocal", return_value=db_session), patch.object(
+        InboundAgent, "_draft_reply", move_the_stage_while_drafting
+    ), patch("src.agents.inbound.notify_approval_once") as notify:
+        result = InboundAgent(llm=_mock_llm(), hubspot=None).handle(
+            {
+                "object_id": "hs-race",
+                "email": "buyer@acme.co.kr",
+                "full_name": "Kim Buyer",
+                "company": "Acme Corp",
+                "last_message": "We want to purchase your product.",
+                "subject": "Bulk dubbing quote",
+            }
+        )
+
+    reply = db_session.get(Message, result["message_id"])
+    assert reply.status == "superseded"
+    notify.assert_not_called()
+
+
 def test_a_nameless_ticket_takes_the_subject_a_later_event_brings(db_session) -> None:
     """One ticket produces several events — webhook, poller, ticket change. The subject
     used to be written by the Conversation constructor only, so whichever event happened

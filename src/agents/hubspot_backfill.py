@@ -39,7 +39,7 @@ from ..common.domains import is_personal_domain
 from ..db.models import Contact, Conversation, CustomerProfile, Event
 from ..db.session import SessionLocal
 from ..integrations.hubspot import HubSpotClient, HubSpotNotConfigured
-from .stage_sync import local_stage_for
+from .stage_sync import _retire_superseded_drafts, local_stage_for
 
 logger = logging.getLogger(__name__)
 
@@ -216,6 +216,10 @@ def backfill_b2b_pipeline(pipeline: str = B2B_PIPELINE_ID) -> dict:
                 created_convs += 1
             elif conv.stage != stage:
                 conv.stage = stage
+                # 백필이 옮긴 단계도 단계입니다. 이 티켓은 최근에 바뀐 것이 아니라서
+                # 10분 폴러의 stage reconcile(최근 변경분만 훑습니다)이 다시 오지
+                # 않습니다 — 여기서 안 닫으면 그 초안은 계속 발송 대기에 남습니다.
+                _retire_superseded_drafts(session, conv.id, stage)
                 updated_convs += 1
 
             profile = session.get(CustomerProfile, contact.id)

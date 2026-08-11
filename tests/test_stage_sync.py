@@ -395,3 +395,113 @@ def test_retired_drafts_leave_the_waiting_queue():
 
     assert "superseded" not in LIST_STATUS_BUCKETS["awaiting"]
     assert "superseded" in LIST_STATUS_BUCKETS["sent"]
+
+
+def test_an_approved_draft_is_retired_too(db, stages):
+    """발송 워커는 status 만 보고 집어 갑니다 — 승인만 되고 아직 안 나간 회신을 남겨 두면,
+    단계가 옮겨진 뒤에도 고객에게 메일이 갑니다."""
+    from src.db.models import Message
+
+    draft_id = _draft(db, status="approved")
+    stage_sync.sync_stage_from_hubspot(TICKET, STAGE_IDS["HUBSPOT_TICKET_STAGE_AFTER_SEND"])
+
+    with db() as session:
+        assert session.get(Message, draft_id).status == "superseded"
+
+
+def test_a_queued_receipt_acknowledgement_is_never_retired(db, stages):
+    """접수확인은 초안이 아닙니다.
+
+    사람이 검토하는 회신이 아니라 "문의 잘 받았습니다" 자동 응답이고, ``approved`` 로 발송
+    큐에 앉아 있습니다. 단계 한 번 옮기는 것이 아직 안 나간 고객 접수확인을 취소하면, 고객은
+    아무 답도 못 받습니다.
+    """
+    from src.db.models import Message
+
+    ack_id = _draft(db, status="approved", variant="auto_ack")
+    stage_sync.sync_stage_from_hubspot(TICKET, STAGE_IDS["HUBSPOT_TICKET_STAGE_NEGOTIATION"])
+
+    with db() as session:
+        assert session.get(Message, ack_id).status == "approved"
+
+
+def test_a_draft_that_lands_after_the_move_is_retired_without_another_move(db, stages):
+    """단계는 이미 옮겨져 있고, 그 뒤에 초안이 생긴 경우.
+
+    초안 작성은 몇 분이 걸립니다. 그 사이에 미팅 링크가 나가면 단계 이동은 이미 지나갔고,
+    그 대화에는 다시 아무 이벤트도 오지 않습니다. 단계가 '바뀔 때만' 훑으면 이 초안은
+    영영 발송 대기에 남습니다.
+    """
+    from src.db.models import Message
+
+    with db() as session:
+        conv = session.query(Conversation).filter_by(hubspot_ticket_id=TICKET).one()
+        conv.stage = "meeting_link_sent"
+        session.commit()
+
+    draft_id = _draft(db)
+    # 같은 단계를 다시 알려 옵니다 — 이동이 아니므로 반환값은 None 입니다.
+    assert (
+        stage_sync.sync_stage_from_hubspot(TICKET, STAGE_IDS["HUBSPOT_TICKET_STAGE_AFTER_SEND"])
+        is None
+    )
+
+    with db() as session:
+        assert session.get(Message, draft_id).status == "superseded"
+
+
+def test_an_unmapped_stage_is_not_past_new(db, stages):
+    """모델 기본값 "initial" 은 '단계가 옮겨졌다' 가 아닙니다 — `!= "new"` 로 세면 아직
+    아무도 손대지 않은 티켓의 초안까지 종료됩니다."""
+    from src.db.models import Message
+
+    draft_id = _draft(db)
+    with db() as session:
+        conv = session.query(Conversation).filter_by(hubspot_ticket_id=TICKET).one()
+        assert stage_sync._retire_superseded_drafts(session, conv.id, "initial") == 0
+        session.commit()
+
+    with db() as session:
+        assert session.get(Message, draft_id).status == "pending_approval"
+
+
+def test_a_stage_moved_in_the_console_retires_the_draft(monkeypatch):
+    """보드에서 카드를 옮기는 것도 단계 이동입니다. HubSpot 을 거치지 않는 경로라
+    stage_sync 가 다시 오지 않고, 10분 폴러의 stage reconcile 은 HubSpot 에서 **최근에
+    바뀐** 티켓만 훑습니다."""
+    from sqlalchemy.pool import StaticPool
+
+    from src.api.routes import customer_ops
+    from src.db.base import Base
+    from src.db.models import Message
+
+    engine = create_engine(
+        "sqlite:///:memory:", connect_args={"check_same_thread": False}, poolclass=StaticPool
+    )
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine, expire_on_commit=False)
+    monkeypatch.setattr(customer_ops, "SessionLocal", factory)
+
+    with factory() as session:
+        contact = Contact(normalized_email="board@example.com", full_name="Board")
+        session.add(contact)
+        session.flush()
+        conv = Conversation(contact_id=contact.id, stage="new")
+        session.add(conv)
+        session.flush()
+        draft = Message(
+            conversation_id=conv.id,
+            direction="outgoing",
+            channel="email",
+            subject="RE: 문의",
+            body="초안",
+            status="pending_approval",
+        )
+        session.add(draft)
+        session.commit()
+        conv_id, draft_id = conv.id, draft.id
+
+    customer_ops._set_conversation_stage(conv_id, "meeting_link_sent")
+
+    with factory() as session:
+        assert session.get(Message, draft_id).status == "superseded"
