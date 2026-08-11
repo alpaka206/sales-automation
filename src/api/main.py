@@ -15,6 +15,7 @@ from pathlib import Path
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.gzip import GZipMiddleware
 
 from ..agents.approval import ApprovalError, approve, reject
 from ..common.config import settings
@@ -392,6 +393,16 @@ async def security_headers_middleware(request: Request, call_next):
     if request.url.scheme == "https" or settings.PUBLIC_BASE_URL.startswith("https://"):
         response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
     return response
+
+
+# 콘솔은 매번 589KB 를 압축 없이 받아 왔습니다(번들 486KB + CSS 두 벌). gzip 으로 161KB 가
+# 되고, /api/ui/* 의 JSON 본문도 같이 줄어듭니다 — 이 서비스는 앱과 DB 가 다른 대륙에 있어
+# 바이트 수가 그대로 체감 속도입니다.
+#
+# 이 자리인 이유: 나중에 더한 미들웨어가 바깥쪽입니다. 여기 두면 conditional_get 이 ETag 를
+# 계산한 **뒤에** 압축하므로, 압축을 받는 브라우저와 아닌 브라우저가 같은 ETag 를 씁니다.
+# SSE(text/event-stream)는 starlette 이 알아서 제외하므로 /api/ui/events 는 그대로입니다.
+app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 
 # ---------- Health ----------
