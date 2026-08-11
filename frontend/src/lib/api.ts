@@ -28,8 +28,12 @@ export async function postForm(path: string, data: Record<string, string>) {
     body: new URLSearchParams(data),
   });
   if (!response.ok) throw new Error(`${response.status} ${path}`);
+  lastLocalWrite = Date.now();
   return response;
 }
+
+/** 이 탭이 마지막으로 쓴 시각. 아래 SSE 처리가 자기 메아리를 무시하는 데 씁니다. */
+let lastLocalWrite = 0;
 
 /** Re-read what is on screen whenever the server says something changed.
  *
@@ -44,6 +48,15 @@ export function listenForChanges(client: QueryClient) {
   // 늘어납니다. 왕복 하나가 200ms 인 환경에서는 그게 그대로 화면 지연입니다.
   let pending: ReturnType<typeof setTimeout> | null = null;
   source.onmessage = () => {
+    // **자기 메아리는 버립니다.** 쓴 탭은 그 자리에서 스스로 invalidate 하는데, 서버가
+    // 모든 non-GET 에 대해 토픽을 뿌리므로 300ms 뒤 자기가 일으킨 이벤트가 돌아와 한 번
+    // 더 합니다. 그냥 두 번이 아닙니다: React Query 는 재요청을 겹치면 앞의 것을 취소하고
+    // 다시 걸어서, 첫 요청은 이미 나간 채로 답만 버려집니다. 쓰기 한 번이 화면 전체를
+    // 두 번 받아 오는 값이 됩니다.
+    //
+    // 다른 탭·다른 운영자는 영향이 없습니다 — 그쪽은 lastLocalWrite 를 건드린 적이 없어
+    // 예전과 똑같이 받습니다. 이 줄이 막는 것은 "내가 방금 한 일" 뿐입니다.
+    if (Date.now() - lastLocalWrite < 1000) return;
     if (pending) clearTimeout(pending);
     pending = setTimeout(() => {
       pending = null;

@@ -413,7 +413,6 @@ a.kpi:hover { border-color: var(--accent); }
    그냥 없어졌다 — 옮길 것이 눈에 안 보이니 드래그가 사라진 것처럼 보인다.
    자리를 지키므로 열이 중간에 다시 흐르지도 않는다. */
 .pipeline-card.is-dragging { opacity: .35; }
-.kanban.is-saving { pointer-events: none; opacity: .7; }
 /* No bottom margin: it was the gap under a per-card stage <select> that no longer
    exists, and on a fixed-height column that dead strip costs cards on screen. */
 .pipeline-card > a { display: block; color: inherit; text-decoration: none; }

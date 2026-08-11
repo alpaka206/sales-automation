@@ -27,6 +27,24 @@ export type Stage = { key: string; label: string; total: number; cards: Card[] }
 
 type Page = { cards: Card[]; next_offset: number; has_more: boolean };
 
+/** 카드 한 장을 다른 열로 옮긴 결과. 열 머리의 수(total)도 같이 맞춘다 — 카드는 옮겨졌는데
+ *  숫자만 그대로면 서버 답이 오기 전까지 둘이 어긋나 보인다. */
+function withCardMoved(stages: Stage[], card: Card, to: string): Stage[] {
+  return stages.map((column) => {
+    if (column.key === card.stage) {
+      return {
+        ...column,
+        total: Math.max(column.total - 1, 0),
+        cards: column.cards.filter((c) => c.conversation_id !== card.conversation_id),
+      };
+    }
+    if (column.key === to) {
+      return { ...column, total: column.total + 1, cards: [{ ...card, stage: to }, ...column.cards] };
+    }
+    return column;
+  });
+}
+
 export function Board({ stages, manualLogStages }: { stages: Stage[]; manualLogStages: string[] }) {
   const queryClient = useQueryClient();
   // Pages fetched by "더 보기", kept beside the query data: the query owns the first
@@ -34,13 +52,21 @@ export function Board({ stages, manualLogStages }: { stages: Stage[]; manualLogS
   const [extra, setExtra] = useState<Record<string, Card[]>>({});
   const [dragging, setDragging] = useState<Card | null>(null);
   const [over, setOver] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
   const [sync, setSync] = useState<SyncState>(null);
   const [logging, setLogging] = useState<Card | null>(null);
 
   async function move(card: Card, stage: string) {
     if (card.stage === stage) return;      // a no-op drop skips the write entirely
-    setSaving(true);
+    // 놓는 순간 카드를 옮깁니다. 이 POST 는 우리 DB 를 쓴 뒤 HubSpot 티켓과 워크북까지
+    // 갔다 오므로 초 단위로 걸리는데, 그 동안 카드가 원래 자리에 그대로 있으면 드롭이
+    // 안 먹은 것처럼 보이고 한참 뒤에 혼자 움직인다. 서버가 지는 쪽은 없다 —
+    // _set_conversation_stage 가 로컬 이동을 먼저 커밋하고, HubSpot·워크북은 그 뒤에
+    // 따라가되 그쪽이 안 되어도 되돌리지 않는다. 그래서 여기서 미리 그려도 어긋나지 않는다.
+    const previous = queryClient.getQueryData<{ stages: Stage[] }>(["dashboard"]);
+    queryClient.setQueryData(["dashboard"], (old?: { stages: Stage[] }) =>
+      old ? { ...old, stages: withCardMoved(old.stages, card, stage) } : old,
+    );
+    setExtra({});   // 「더 보기」로 받아 둔 쪽에 있던 카드였다면 그쪽에서도 사라져야 한다
     try {
       const response = await postForm(
         `/pipeline/conversations/${card.conversation_id}/stage`,
@@ -49,12 +75,13 @@ export function Board({ stages, manualLogStages }: { stages: Stage[]; manualLogS
       // The handler redirects to /?sync=ok|partial|local. Whether HubSpot and the sales
       // workbook took the move is the part worth saying, and it is only said here.
       setSync(syncStateFrom(response));
-      setExtra({});
-      await queryClient.invalidateQueries();
+      // 이 화면 것만. 키 없이 부르면 앱이 캐시해 둔 모든 질의가 무효가 되고, 왕복 하나가
+      // 200ms 인 환경에서는 카드 한 장 옮긴 값으로 화면 전체를 다시 받는다.
+      await queryClient.invalidateQueries({ queryKey: ["dashboard"] });
     } catch {
+      // 저장이 안 되면 있던 자리로 되돌린다 — 화면에만 옮겨진 채로 두면 옮겼다고 믿게 된다.
+      if (previous) queryClient.setQueryData(["dashboard"], previous);
       setSync("partial");
-    } finally {
-      setSaving(false);
     }
   }
 
@@ -66,7 +93,11 @@ export function Board({ stages, manualLogStages }: { stages: Stage[]; manualLogS
   return (
     <>
       <SyncBanner state={sync} onDismiss={() => setSync(null)} />
-      <div className={`kanban${saving ? " is-saving" : ""}`}>
+      {/* 저장하는 동안 보드를 흐리게 하고 클릭을 막던 클래스가 있었습니다. 카드가 이미
+          옮겨져 보이는데 화면만 몇 초 얼어 있는 셈이라 앞뒤가 안 맞았습니다 — 기다릴 것이
+          없으면 기다리는 표시도 없어야 합니다. HubSpot·워크북이 받았는지는 위 배너가
+          늦게라도 말해 줍니다. */}
+      <div className="kanban">
         {stages.map((stage) => {
           const cards = [...stage.cards, ...(extra[stage.key] ?? [])];
           const canLog = manualLogStages.includes(stage.key);
