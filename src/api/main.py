@@ -167,7 +167,17 @@ def spa_document(status_code: int = 200) -> FileResponse:
             status_code=503,
             detail="React 콘솔이 아직 빌드되지 않았습니다: frontend/ 에서 npm run build",
         )
-    return FileResponse(_SPA_INDEX, media_type="text/html", status_code=status_code)
+    response = FileResponse(_SPA_INDEX, media_type="text/html", status_code=status_code)
+    # **이 문서만은 캐시하면 안 된다.** 하는 일이 "지금 번들 파일 이름"을 알려주는 것뿐인데,
+    # 빌드마다 그 이름의 해시가 바뀐다. 브라우저가 옛 문서를 들고 있으면 이미 지워진 파일을
+    # 달라고 해서 404 를 받고, 콘솔이 **빈 화면**이 된다 — 배포할 때마다 강력 새로고침을
+    # 해야 했던 이유다. 아래 security_headers_middleware 가 /static 에 같은 헤더를 붙이면서
+    # 정작 문서를 빠뜨렸고, 문서는 /app 이라 그 조건에 걸리지 않았다.
+    #
+    # 여기 다는 이유: auth.py 도 같은 문서를 내보낸다. 라우트마다 붙이면 언젠가 한 곳이 빠진다.
+    # no-cache 는 "캐시 금지" 가 아니라 "쓰기 전에 물어보라" 이므로 304 는 그대로 된다.
+    response.headers["Cache-Control"] = "no-cache"
+    return response
 
 
 @app.get("/app", include_in_schema=False)
@@ -363,11 +373,17 @@ async def publish_changes_middleware(request: Request, call_next):
 @app.middleware("http")
 async def security_headers_middleware(request: Request, call_next):
     response = await call_next(request)
+    # 빌드 산출물은 파일 이름에 내용 해시가 박혀 있습니다(Vite). 내용이 바뀌면 이름이
+    # 바뀌므로 옛 파일을 계속 쓸 위험이 없고, 그래서 영구 캐시가 안전합니다 — 매번 보내던
+    # 조건부 요청 두 번이 사라집니다. 이름이 고정된 console.css / won.css / tokens.css 는
+    # 아래 no-cache 쪽에 그대로 남습니다: 그건 제자리에서 고치는 파일입니다.
+    if request.url.path.startswith("/static/app/assets/"):
+        response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
     # StaticFiles sends only etag/last-modified, so Chrome heuristically caches the
     # console's CSS/JS and keeps serving the old copy after a UI change — a UI edit then
     # looks like it did nothing until someone hard-reloads. no-cache still allows a 304,
     # it just forbids using the cached copy without asking.
-    if request.url.path.startswith("/static"):
+    elif request.url.path.startswith("/static"):
         response.headers["Cache-Control"] = "no-cache"
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "SAMEORIGIN"
