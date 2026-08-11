@@ -796,6 +796,7 @@ def ui_won_customers():
     from ...common.config import settings as app_settings
     from ...db.models import Client, ClientContract, PendingWon
     from ...db.session import SessionLocal
+    from ...integrations.fx import last_error as fx_error
     from ...integrations.fx import usd_krw_today
     from sqlalchemy.orm import selectinload
 
@@ -890,6 +891,9 @@ def ui_won_customers():
         "fx_rate": float(fx[0]) if fx else app_settings.MRR_FX_RATE,
         "fx_on": fx[1] if fx else None,
         "fx_source": fx[2] if fx else "설정값",
+        # 왜 못 가져왔는지. 이유가 없으면 「설정값」이 막다른 길이 됩니다 —
+        # 망 문제인지 응답이 바뀐 것인지 아무도 모르고, 매번 코드를 열어야 합니다.
+        "fx_error": None if fx else fx_error(),
         "options": {
             "industries": list(won.INDUSTRIES),
             "plans": list(won.PLANS),

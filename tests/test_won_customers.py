@@ -603,3 +603,37 @@ def test_the_registry_append_never_writes_into_a_formula_column():
     block = source[source.index("_REGISTRY_TAB}'!A1"):]
     block = block[: block.index(").execute()")]
     assert "DEPARTMENT_BY_TYPE" not in block, "담당부서(G)는 수식 열입니다 — 값을 쓰면 안 됩니다"
+
+
+def test_a_failed_rate_lookup_is_retried_not_frozen_for_the_day(monkeypatch):
+    """조회 실패를 하루치 캐시에 넣으면 아침에 한 번 삐끗한 것이 그날 내내 「설정값」이
+    되고, 프로세스를 재시작하기 전까지 안 풀립니다. 실패하는 이유는 대개 그때뿐인 것
+    (콜드 스타트·타임아웃)이라 조금 있다 다시 물어야 합니다."""
+    from decimal import Decimal
+
+    from src.integrations import fx
+
+    monkeypatch.setattr(fx, "_today_cache", {})
+    monkeypatch.setattr(fx, "_last_attempt", 0.0)
+    monkeypatch.setattr(fx, "_last_error", None)
+
+    호출 = []
+
+    def 실패(day):
+        호출.append(day)
+        fx._remember_error("Frankfurter", day, ConnectionError("망 끊김"))
+        return None
+
+    monkeypatch.setattr(fx, "usd_krw_on", 실패)
+    assert fx.usd_krw_today() is None
+    assert fx.last_error() and "망 끊김" in fx.last_error()
+
+    # 곧바로 다시 부르면 외부를 또 때리지는 않습니다 — 안 되는 날 매 요청이 8초씩 밀립니다.
+    assert fx.usd_krw_today() is None
+    assert len(호출) == 1
+
+    # 재시도 간격이 지나면 다시 물어보고, 성공하면 그 값이 그날의 값이 됩니다.
+    monkeypatch.setattr(fx, "_last_attempt", 0.0)
+    monkeypatch.setattr(fx, "usd_krw_on", lambda day: (Decimal("1416.62"), "2026-08-10", "ecb"))
+    assert fx.usd_krw_today() == (Decimal("1416.62"), "2026-08-10", "ecb")
+    assert fx.last_error() is None          # 성공하면 이유를 지웁니다

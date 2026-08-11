@@ -202,7 +202,10 @@ export function WonCustomers() {
                 <span style={{ color: "var(--faint)", marginLeft: 6 }}
                       title={data.fx_on
                         ? "ECB 기준환율은 유럽 시간 오후에 하루 한 번 고시되어, 한국에서는 낮에 전일자 값이 보입니다."
-                        : "환율을 가져오지 못해 설정값을 씁니다."}>
+                        : `환율을 가져오지 못해 설정값을 씁니다. 10분 뒤 다시 시도합니다.${
+                            data.fx_error ? `
+
+마지막 실패: ${data.fx_error}` : ""}`}>
                   {data.fx_on ? `${fmt(data.fx_on)} 고시 기준` : "설정값"}
                 </span>
               </div>

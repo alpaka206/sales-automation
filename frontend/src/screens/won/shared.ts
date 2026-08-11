@@ -75,6 +75,8 @@ export type ListData = {
   fx_rate: number;
   fx_on: string | null;
   fx_source: string;
+  /** 못 가져왔을 때 왜 — 「설정값」 옆 툴팁에 그대로 적습니다. */
+  fx_error: string | null;
   options: Options;
 };
 
