@@ -32,7 +32,7 @@ export function Quotation() {
   const { data: policy } = useQuery<Policy>({
     queryKey: ["quote-policy"],
     queryFn: () => getJSON("/api/ui/quote-policy"),
-    staleTime: Infinity,
+    staleTime: "static",   // 가격표입니다. QuoteCalculator 쪽 주석 참고.
   });
 
   const [company, setCompany] = useState("");

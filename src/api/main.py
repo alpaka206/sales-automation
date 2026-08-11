@@ -351,6 +351,11 @@ async def publish_changes_middleware(request: Request, call_next):
     routinely changes what a different screen shows.
     """
     response = await call_next(request)
+    # 아무것도 안 바꾸는 POST 가 둘 있습니다. 미리보기는 순수 렌더링이고, 번역은 이 초안
+    # 하나의 본문만 건드리는데 그 화면은 응답을 그 자리에서 받아 씁니다. 여기서 알리면
+    # 미리보기 창 한 번 여는 것이 열려 있는 모든 콘솔의 화면을 다시 받게 만듭니다.
+    if request.url.path == "/messages/preview" or request.url.path.endswith("/translate"):
+        return response
     if request.method != "GET" and response.status_code < 400:
         from .routes.ui_api import publish
 

@@ -15,6 +15,9 @@ export function Logs() {
     queryKey: ["logs"],
     queryFn: () => getJSON<Log>("/api/ui/logs"),
     refetchInterval: 60_000,
+    // 기본 탭은 복구입니다. 그런데 로그는 탭과 상관없이 받아 왔고 1분마다 다시 받았습니다 —
+    // 아무도 안 보는 표를 위해 페이지를 열 때마다 요청이 하나 더, 분당 하나 더 나갔습니다.
+    enabled: tab === "all",
   });
   return (
     <>

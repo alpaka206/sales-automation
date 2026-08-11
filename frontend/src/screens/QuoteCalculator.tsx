@@ -124,7 +124,10 @@ export function QuoteCalculator() {
   const { data: policy } = useQuery<Policy>({
     queryKey: ["quote-policy"],
     queryFn: () => getJSON("/api/ui/quote-policy"),
-    staleTime: Infinity,   // a price list, not live data
+    // a price list, not live data. "static" 이지 Infinity 가 아닙니다 — Infinity 는
+    // "안 오래된다" 일 뿐이라 다른 화면의 저장 하나가 무효화를 걸면 같이 다시 받습니다.
+    // "static" 은 그 대상에서 아예 빠집니다.
+    staleTime: "static",
   });
 
   const [lang, setLang] = useState<Lang>("en");
