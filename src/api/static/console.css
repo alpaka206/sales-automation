@@ -577,6 +577,15 @@ a.kpi:hover { border-color: var(--accent); }
 .grid-4 { grid-template-columns: repeat(4, minmax(0,1fr)); }
 .grid-5 { grid-template-columns: repeat(5, minmax(0,1fr)); }
 .split { display: grid; grid-template-columns: minmax(0,1fr) 320px; gap: var(--gap); align-items: start; }
+/* 화면에 맞추는 페이지(.main--fit)에서는 두 열이 **따로** 스크롤합니다.
+   한 덩어리로 스크롤하던 때는 오른쪽 요약·처리 경과를 읽으려고 내리면 왼쪽 초안이 같이
+   위로 사라졌고, 본문을 고치려면 다시 올려야 했습니다. 운영자 화면은 세로 640px 남짓이라
+   그 왕복이 잦습니다. overscroll-behavior 는 한쪽 끝에 닿았을 때 스크롤이 페이지로
+   넘어가 다른 열까지 움직이는 것을 막습니다. */
+.main--fit .split { flex: 1 1 auto; min-height: 0; align-items: stretch; }
+.main--fit .split > * {
+  min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding-right: 4px;
+}
 .stack { display: flex; flex-direction: column; gap: var(--gap); }
 .row { display: flex; align-items: center; gap: 10px; }
 .row-between { display: flex; align-items: center; justify-content: space-between; gap: 12px; }

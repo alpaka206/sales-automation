@@ -149,9 +149,15 @@ export function Shell({ pending }: { pending?: number }) {
         <div className="content">
           {/* main--fit is the dashboard's scroll model: the board fills exactly the space
               the queue leaves instead of running past the fold. It was a Jinja block
-              (`main_class`); here the one screen that wants it says so. */}
+              (`main_class`); here the screens that want it say so.
+              티켓 세부 내역도 같은 모델입니다 — 초안과 요약이 각자 스크롤하려면 둘을 감싼
+              틀이 화면 높이에 묶여 있어야 합니다. */}
           <main
-            className={`main${location.pathname === "/" ? " main--fit" : ""}`}
+            className={`main${
+              location.pathname === "/" || /^\/messages\/\d+$/.test(location.pathname)
+                ? " main--fit"
+                : ""
+            }`}
             id="main"
             tabIndex={-1}
           >
