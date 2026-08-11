@@ -382,3 +382,48 @@ def test_the_list_screen_keeps_the_mockups_thresholds_and_wording():
     # 환율은 조회값 — 손으로 적는 칸으로 되돌리면 안 됩니다.
     assert 'fx_on' in screen
     assert 'id="fxInput"' not in screen
+
+
+def test_the_supply_price_is_required_and_the_total_is_not():
+    """크레딧이 공급가 ÷ 분당 단가 × 60 이라 공급가 없이는 계약이 성립하지 않습니다.
+    VAT 포함 총액은 뒤에 적히거나 아예 없는 계약이 있어 선택입니다 — 대신 그 계약은
+    예상 MRR(= 총액 ÷ 개월수)에 0 으로 잡힌다고 폼이 말해 줍니다."""
+    import pathlib
+
+    form = pathlib.Path("frontend/src/screens/won/WonContractForm.tsx").read_text(encoding="utf-8")
+
+    assert '<label className="form-label">총 계약금액 (VAT 포함)</label>' in form, "총액에 * 가 남아 있습니다"
+    assert '<Field label="공급가 (VAT 제외)" required>' in form
+    assert "예상 MRR 에 잡히지 않습니다" in form
+    # 저장을 막는 조건에서 총액이 빠져야 합니다.
+    guard = form[form.index("const [save, saving]") : form.index("const body: Record")]
+    assert "amount_excl_vat" in guard
+    assert "amount_incl_vat" not in guard
+
+
+def test_the_applied_rate_is_typed_in_never_inherited():
+    """계약에 박히는 환율은 **그 계약을 맺을 때 쓴 값**입니다. 직전 계약에서 물려받으면
+    남의 시점 환율이 이 계약의 크레딧을 정합니다. 그리고 칸은 항상 보입니다 — 통화가
+    다를 때만 나타나던 시절에는, 분당 단가만 고치고 저장을 눌러도 크레딧을 계산할 수
+    없어 막히는데 정작 막은 칸이 화면에 없었습니다."""
+    import pathlib
+
+    form = pathlib.Path("frontend/src/screens/won/WonContractForm.tsx").read_text(encoding="utf-8")
+
+    carry = form[form.index("function carryOver") : form.index("const emptyCarry")]
+    assert "unit_fx_rate" not in carry, "재계약이 직전 계약의 환율을 물려받고 있습니다"
+    assert 'draft.unit_currency !== draft.currency && (\n              <Field label="적용 환율"' not in form
+    assert '<Field label="적용 환율" required={draft.unit_currency !== draft.currency}>' in form
+
+
+def test_a_contract_without_a_total_still_has_credits_and_no_mrr():
+    """총액을 비운 계약도 크레딧은 계산됩니다(공급가에서 나오므로). MRR 만 0 입니다."""
+    from types import SimpleNamespace
+
+    from src.common.won import contract_credits, monthly_revenue
+
+    assert contract_credits(10_000_000, 500, "KRW", "KRW", None) == 1_200_000
+    contract = SimpleNamespace(
+        deal_type="MRR", amount_incl_vat=None, starts_on="2026-08-11", ends_on="2027-08-11"
+    )
+    assert monthly_revenue(contract) == 0

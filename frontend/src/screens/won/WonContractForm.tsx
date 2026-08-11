@@ -128,11 +128,22 @@ export function WonContractForm() {
     if (!draft.starts_on || !draft.ends_on || draft.ends_on <= draft.starts_on) {
       setNote("계약 시작일과 종료일을 확인해 주세요."); return;
     }
-    if (!n(draft.amount_incl_vat) || !n(draft.amount_excl_vat)) {
-      setNote("총 계약금액과 공급가를 입력해 주세요."); return;
+    // 공급가만 필수입니다. 크레딧이 공급가 ÷ 분당 단가 × 60 이라 이것 없이는 계약이
+    // 성립하지 않습니다. VAT 포함 총액은 선택입니다 — 뒤에 적히거나 아예 없는 계약이
+    // 있습니다. 다만 예상 MRR 은 총액 ÷ 개월수라, 비워 두면 그 계약은 MRR 에 0 으로 잡힙니다.
+    if (!n(draft.amount_excl_vat)) {
+      setNote("공급가 (VAT 제외) 를 입력해 주세요."); return;
     }
+    // 무엇을 채워야 하는지 **정확히** 말합니다. 예전에는 "분당 단가와, 통화가 다르면
+    // 적용 환율" 이라고만 했는데, 정작 그 환율 칸은 통화가 다를 때만 보였습니다. 그래서
+    // 분당 단가만 고치고 저장을 누른 사람 눈에는 아무 일도 안 일어난 것으로 보였습니다.
     if (credits === null) {
-      setNote("계약 크레딧을 계산할 수 없습니다 — 분당 단가와, 통화가 다르면 적용 환율을 넣어 주세요.");
+      const needsRate = draft.unit_currency !== draft.currency && !n(draft.unit_fx_rate);
+      setNote(
+        needsRate
+          ? `적용 환율을 넣어 주세요 — 단가는 ${draft.unit_currency}, 계약은 ${draft.currency} 입니다.`
+          : "분당 단가를 넣어 주세요 — 계약 크레딧이 공급가 ÷ 분당 단가 × 60 입니다.",
+      );
       return;
     }
     const body: Record<string, string> = {
@@ -280,10 +291,15 @@ export function WonContractForm() {
             <Field label="통화">
               <Sel value={draft.currency} onChange={(v) => set("currency", v)} options={options.currencies} />
             </Field>
+            {/* 선택입니다. 필수는 공급가 쪽 — 크레딧이 거기서 나옵니다. 다만 예상 MRR 은
+                이 값 ÷ 개월수라, 비워 두면 그 계약은 MRR 에 잡히지 않는다고 적어 둡니다. */}
             <div style={{ gridColumn: "span 2" }}>
-              <label className="form-label">총 계약금액 (VAT 포함) <span className="req">*</span></label>
+              <label className="form-label">총 계약금액 (VAT 포함)</label>
               <input className="inp" type="number" value={draft.amount_incl_vat}
                      onChange={(e) => set("amount_incl_vat", e.target.value)} placeholder="예: 22000000" />
+              <div style={{ fontSize: 11.5, color: "var(--faint)", marginTop: 4 }}>
+                비우면 이 계약은 예상 MRR 에 잡히지 않습니다 (MRR = 총액 ÷ 개월수).
+              </div>
             </div>
             <Field label="분당 단가 통화">
               <Sel value={draft.unit_currency} onChange={(v) => set("unit_currency", v)} options={options.currencies} />
@@ -297,16 +313,21 @@ export function WonContractForm() {
               <input className="inp" type="number" value={draft.amount_excl_vat}
                      onChange={(e) => set("amount_excl_vat", e.target.value)} />
             </Field>
-            {draft.unit_currency !== draft.currency && (
-              <Field label="적용 환율" required>
-                <input className="inp" type="number" step="0.0001" value={draft.unit_fx_rate}
-                       onChange={(e) => set("unit_fx_rate", e.target.value)}
-                       placeholder="계약 시점 환율" />
-                <div style={{ fontSize: 11.5, color: "var(--faint)", marginTop: 4 }}>
-                  계약에 저장됩니다 — 나중에 오늘 환율로 다시 계산하지 않습니다.
-                </div>
-              </Field>
-            )}
+            {/* **항상 보입니다.** 통화가 다를 때만 나타나던 칸이었는데, 그래서 분당 단가만
+                고치고 저장을 누르면 크레딧을 계산할 수 없어 저장이 막히는데 정작 막은 칸은
+                화면에 없었습니다. 그리고 **어디서도 값을 가져오지 않습니다** — 오늘 환율을
+                넣으면 지난 계약의 크레딧이 오늘 값으로 바뀌고, 직전 계약에서 물려받으면
+                남의 시점 환율이 이 계약에 박힙니다. 쓴 사람이 직접 적습니다. */}
+            <Field label="적용 환율" required={draft.unit_currency !== draft.currency}>
+              <input className="inp" type="number" step="0.0001" value={draft.unit_fx_rate}
+                     onChange={(e) => set("unit_fx_rate", e.target.value)}
+                     placeholder="계약 시점 환율을 직접 입력" />
+              <div style={{ fontSize: 11.5, color: "var(--faint)", marginTop: 4 }}>
+                {draft.unit_currency === draft.currency
+                  ? `단가와 계약이 같은 통화(${draft.currency})라 환산이 없습니다.`
+                  : `단가 ${draft.unit_currency} → 계약 ${draft.currency}. 계약에 저장되고, 나중에 오늘 환율로 다시 계산하지 않습니다.`}
+              </div>
+            </Field>
           </div>
 
           <div className="form-sec">결제</div>
@@ -424,12 +445,14 @@ function Sel({ value, onChange, options }: {
 
 const str = (value: unknown) => (value === null || value === undefined ? "" : String(value));
 
-/** 재계약이 물려받는 것 — 플랜·단가·결제 방식·계정 한도. 금액·기간은 새로 씁니다. */
+/** 재계약이 물려받는 것 — 플랜·단가·결제 방식·계정 한도. 금액·기간은 새로 씁니다.
+ *
+ * **환율은 물려받지 않습니다.** 그건 직전 계약을 맺던 날의 값이라, 새 계약에 그대로
+ * 박히면 이번 계약의 크레딧이 남의 시점 환율로 계산됩니다. 쓴 사람이 직접 적습니다. */
 function carryOver(prev: Contract) {
   return {
     deal_type: prev.deal_type, currency: prev.currency,
     unit_price: str(prev.unit_price), unit_currency: str(prev.unit_currency),
-    unit_fx_rate: str(prev.unit_fx_rate),
     payment_method: str(prev.payment_method), payment_type: str(prev.payment_type),
     installments: str(prev.installments ?? 1), billing_email: str(prev.billing_email),
     plan: str(prev.plan), plan_name: str(prev.plan_name), perso_email: str(prev.perso_email),
