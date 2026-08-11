@@ -340,7 +340,6 @@ def _ensure_registry_row(service, record: dict) -> None:
     문의 행을 쓰기 **전에** 여기서 만든다. 이미 있으면 손대지 않는다 — 운영자가 고쳐 둔
     이름을 문의 한 번에 되돌리면 안 된다.
     """
-    from ..common.won import DEPARTMENT_BY_TYPE, client_type
 
     client_id = record.get("client_id")
     if not client_id:
@@ -371,7 +370,12 @@ def _ensure_registry_row(service, record: dict) -> None:
                     "",  # Website URL 은 시트가 원본이라 비워 둔다
                     record.get("company_type") or "",
                     record.get("country") or "",
-                    DEPARTMENT_BY_TYPE.get(client_type(int(client_id)), ""),
+                    # 담당부서도 수식이다 — 바로 위 고객 종류(B)와 같다. 값으로 쓰면
+                    # 「배열 결과가 데이터를 덮어쓰게 되어」 G열 전체가 #REF! 가 되고,
+                    # 그 뒤로 그 열은 아무 행도 계산하지 않는다. 이 칸이 값이었던 것은
+                    # 순서 때문이다: 이 append 를 쓸 때 G 는 아직 손으로 적는 칸이었고,
+                    # 나중에 워크북을 지으면서 수식 열이 됐다(build_won_sheets.py 의 array.G).
+                    "",
                     record.get("inquiry_date") or "",
                 ]
             ]

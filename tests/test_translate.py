@@ -202,3 +202,37 @@ def test_a_model_failure_leaves_it_retryable(inbound_db, monkeypatch):
     assert cache_korean_inquiries() == 1
     with inbound_db() as session:
         assert session.get(Message, mid).body_ko == "이제 번역됩니다."
+
+
+def test_choosing_no_signature_and_sending_straight_away_removes_it(inbound_db, monkeypatch):
+    """「서명 없음」을 고르고 곧장 `발송` 을 누르면 서명이 붙어 나갔습니다.
+
+    서명은 None 이 곧 「서명 없음」인데 `approve()` 의 기본값도 None 이라, "안 넘겼다" 와
+    "없음으로 정했다" 가 같은 값이었습니다. 그래서 초안이 만들어질 때 달린 기본 서명이
+    그대로 남았습니다. 같은 폼의 `저장`·`번역하기` 는 직접 대입이라 지워졌고 — 한 번
+    경유하면 지워지고 곧장 발송하면 안 지워지는, 눈에 안 보이는 차이였습니다.
+    """
+    from src.agents import approval
+    from src.db.models import Message
+
+    monkeypatch.setattr(approval, "SessionLocal", inbound_db)
+    mid = _seed(inbound_db, direction="outgoing", body="본문")
+    with inbound_db() as session:
+        msg = session.get(Message, mid)
+        msg.status = "pending_approval"
+        msg.signature_key = "signature_hyeram"      # 초안이 달고 태어난 기본 서명
+        session.commit()
+
+    approval.approve(mid, approver="test", signature_key=None)   # 「서명 없음」
+    with inbound_db() as session:
+        assert session.get(Message, mid).signature_key is None
+
+    # 안 넘기면 그대로 둡니다 — 서명을 다루지 않는 호출자가 지우면 안 됩니다.
+    with inbound_db() as session:
+        msg = session.get(Message, mid)
+        msg.status = "pending_approval"
+        msg.signature_key = "signature_hyeram"
+        session.commit()
+    approval.approve(mid, approver="test")
+    with inbound_db() as session:
+        assert session.get(Message, mid).signature_key == "signature_hyeram"

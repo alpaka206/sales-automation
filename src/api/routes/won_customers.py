@@ -77,15 +77,25 @@ def _get_contract(session, contract_id: int) -> ClientContract:
 
 
 def _one_amount_per_currency(contract: ClientContract) -> None:
-    """통화가 쓰지 않는 금액 칸을 비웁니다.
+    """통화가 쓰지 않는 금액 칸을 비웁니다 — **쓰는 쪽에 값이 있을 때만.**
 
     원화 계약은 공급가만 받고 총액은 거기에 10% 를 더해 계산합니다(`won.total_amount`).
     그 외 통화는 부가세가 없어 총액만 받고 공급가 칸이 없습니다. 안 쓰는 쪽에 옛 값이
     남아 있으면, 통화를 바꾼 계약에서 화면이 계산한 값과 행에 든 값이 갈라집니다.
+
+    **조건이 붙어 있는 이유는 데이터가 사라졌기 때문입니다.** 이 라우트에는 계약 전체를
+    보내는 폼만 오는 것이 아닙니다 — 「갱신 계획·사용 중단 이유·비고」 패널은 세 칸만
+    보냅니다(`WonCustomerDetail.tsx` 의 `ContractNotes`). 그때 금액은 폼에 없어 행의
+    값이 그대로 남는데, 조건 없이 반대쪽을 비우면 **총액만 있던 옛 원화 계약은 비고 한 줄
+    저장에 금액이 통째로 사라집니다.** 되돌릴 방법이 없습니다.
+
+    쓰는 쪽에 값이 있을 때만 반대쪽을 지우면, 옛 계약은 다음번에 금액을 실제로 채워
+    저장할 때 제자리를 찾습니다.
     """
     if won.is_krw(contract):
-        contract.amount_incl_vat = None
-    else:
+        if contract.amount_excl_vat is not None:
+            contract.amount_incl_vat = None
+    elif contract.amount_incl_vat is not None:
         contract.amount_excl_vat = None
 
 

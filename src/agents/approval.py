@@ -20,6 +20,13 @@ class ApprovalError(RuntimeError):
     pass
 
 
+# "안 넘겼다" 와 "없음으로 정했다" 를 가릅니다. 서명은 None 이 곧 「서명 없음」이라, 기본값을
+# None 으로 두면 그 둘이 같은 값이 되어 **운영자가 고른 「서명 없음」이 무시됐습니다** —
+# 초안이 만들어질 때 달린 기본 서명이 그대로 붙어 나갔습니다. 같은 폼의 `저장`·`번역하기`는
+# 직접 대입이라 지워졌고, 그래서 한 번 경유하면 지워지고 곧장 발송하면 안 지워졌습니다.
+_UNSET: object = object()
+
+
 def make_approval_token(message_id: int) -> str:
     """Generate an HMAC-SHA256 token binding a message_id to the install secret.
 
@@ -53,9 +60,13 @@ def approve(
     edited_body: str | None = None,
     *,
     edited_subject: str | None = None,
-    signature_key: str | None = None,
+    signature_key: str | None | object = _UNSET,
 ) -> Message:
-    """Atomically freeze the operator-reviewed message and approve it."""
+    """Atomically freeze the operator-reviewed message and approve it.
+
+    ``signature_key`` 를 안 넘기면 행의 값을 그대로 둡니다. **넘기면 그 값으로 씁니다 —
+    None 이어도.** None 은 「서명 없음」이고, 그것도 운영자가 고른 것입니다.
+    """
     session = SessionLocal()
     try:
         values: dict[str, object] = {
@@ -67,7 +78,7 @@ def approve(
             values["body"] = edited_body
         if edited_subject is not None:
             values["subject"] = edited_subject
-        if signature_key is not None:
+        if signature_key is not _UNSET:
             values["signature_key"] = signature_key
 
         result = session.execute(

@@ -432,8 +432,11 @@ def test_a_new_company_gets_a_registry_row_before_its_inquiry_is_written(monkeyp
     )
 
     registry, inquiry = store["appended"]
+    # 담당부서(G)가 "" 인 것은 빠뜨린 게 아니라 **수식 열이기 때문**입니다. 바로 옆
+    # 고객 종류(B)와 같습니다 — 값으로 쓰면 「배열 결과가 데이터를 덮어쓰게 되어」
+    # 그 열 전체가 #REF! 가 되고, 그 뒤로 아무 행도 계산하지 않습니다.
     assert registry[:1] + registry[2:8] == [
-        1336, "새로운 회사", "", "기업", "한국", "GTM", "2026-07-18"
+        1336, "새로운 회사", "", "기업", "한국", "", "2026-07-18"
     ]
     assert inquiry[0] == 1336
     # 문의 행의 고객사·국가는 값이 아니라 그 회사 행을 가리키는 조회다.

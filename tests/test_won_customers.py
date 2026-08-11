@@ -556,3 +556,50 @@ def test_an_old_krw_contract_with_only_a_total_still_opens_and_saves():
         amount_excl_vat=1_000_000, amount_incl_vat=9_999_999, credits=60_000,
     )
     assert won.billing_amount(both) == Decimal("1000000")
+
+
+def test_saving_only_the_notes_never_erases_the_money(factory):
+    """이 라우트에는 계약 전체 폼만 오는 게 아닙니다.
+
+    「갱신 계획·사용 중단 이유·비고」 패널은 세 칸만 보냅니다(ContractNotes). 그때 통화가
+    안 쓰는 금액 칸을 조건 없이 비우면, **총액만 있던 옛 원화 계약은 비고 한 줄 저장에
+    금액이 통째로 사라집니다** — 되돌릴 방법이 없습니다.
+    """
+    from src.api.routes.won_customers import _fill_contract
+
+    옛계약 = ClientContract(client_id=1, seq=1, currency="KRW",
+                          amount_incl_vat=1_722_600, credits=64_800)
+    _fill_contract(옛계약, {"memo": "통화만 해 봄"})
+    assert 옛계약.amount_incl_vat == 1_722_600, "비고 저장에 금액이 사라졌습니다"
+    assert won.total_amount(옛계약) == Decimal("1722600")
+    assert won.unit_price(옛계약) == Decimal("1450")
+
+    # 쓰는 쪽에 값이 있으면 반대쪽은 지웁니다 — 둘이 갈라지면 안 되므로.
+    정상 = ClientContract(client_id=2, seq=1, currency="KRW",
+                         amount_excl_vat=1_566_000, amount_incl_vat=9_999_999)
+    _fill_contract(정상, {"memo": "x"})
+    assert 정상.amount_incl_vat is None
+    assert 정상.amount_excl_vat == 1_566_000
+
+
+def test_the_registry_append_never_writes_into_a_formula_column():
+    """「고객 기본 정보」의 고객 종류(B)와 담당부서(G)는 둘 다 ARRAYFORMULA 열입니다.
+
+    값으로 쓰면 「배열 결과가 데이터를 덮어쓰게 되어」 그 열 전체가 #REF! 가 되고, 그
+    뒤로는 아무 행도 계산하지 않습니다. B 는 비우면서 G 에는 값을 넣고 있었습니다 —
+    이 append 를 쓸 때 G 는 아직 손으로 적는 칸이었기 때문입니다.
+    """
+    import pathlib
+    import sys
+
+    sys.argv = ["x"]
+    from scripts.build_won_sheets import TABS
+
+    registry = next(tab for tab in TABS if tab["title"] == "고객 기본 정보")
+    수식열 = set(registry["array"])
+    assert 수식열 == {"B", "G"}, "수식 열이 바뀌었으면 아래 append 도 같이 봐야 합니다"
+
+    source = pathlib.Path("src/integrations/google_sheets.py").read_text(encoding="utf-8")
+    block = source[source.index("_REGISTRY_TAB}'!A1"):]
+    block = block[: block.index(").execute()")]
+    assert "DEPARTMENT_BY_TYPE" not in block, "담당부서(G)는 수식 열입니다 — 값을 쓰면 안 됩니다"
