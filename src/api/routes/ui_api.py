@@ -770,7 +770,8 @@ def _won_client(client, today, *, full: bool) -> dict:
         "contact_name": client.contact_name,
         "contact_info": client.contact_info,
         "first_won_on": client.first_won_on,
-        "plan_status": client.plan_status,
+        # 계약 기간에서 나옵니다 — 저장하지 않습니다(won.plan_status).
+        "plan_status": won.plan_status(client, today),
         "owner": client.owner,
         "contact_id": client.contact_id,
         "setup_count": len(upcoming),

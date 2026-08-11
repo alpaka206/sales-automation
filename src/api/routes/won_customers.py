@@ -127,7 +127,6 @@ async def create_client(
                 contact_name=_text(contact_name),
                 contact_info=_text(contact_info),
                 first_won_on=_text(first_won_on) or date.today().isoformat(),
-                plan_status="세팅중",
                 owner=_text(owner) or actor_name(request, fallback="") or None,
             )
         )
@@ -145,7 +144,6 @@ async def update_client(
     contact_name: str = Form(""),
     contact_info: str = Form(""),
     first_won_on: str = Form(""),
-    plan_status: str = Form(""),
     owner: str = Form(""),
 ):
     with SessionLocal() as session:
@@ -160,8 +158,6 @@ async def update_client(
         client.contact_name = _text(contact_name)
         client.contact_info = _text(contact_info)
         client.first_won_on = _text(first_won_on)
-        if plan_status.strip():
-            client.plan_status = plan_status.strip()
         client.owner = _text(owner)
         session.commit()
     return {"ok": True}
@@ -215,10 +211,9 @@ async def create_contract(client_id: int, request: Request):
         seq = max((c.seq for c in client.contracts), default=0) + 1
         contract = ClientContract(client_id=client_id, seq=seq)
         _fill_contract(contract, form)
-        # 목업의 「저장 후 플랜 상태」. 계약이 아니라 **고객**의 값이라 여기서 씁니다 —
-        # 첫 계약을 넣는 순간이 세팅중에서 사용중으로 넘어가는 순간이기도 합니다.
-        if _text(form.get("plan_status")):
-            client.plan_status = _text(form.get("plan_status"))
+        # 「저장 후 플랜 상태」 칸이 여기 있었습니다. 이제 플랜 상태는 계약 기간에서
+        # 나오므로(won.plan_status), 첫 계약을 넣는 순간이 곧 세팅중에서 사용중으로
+        # 넘어가는 순간입니다 — 따로 고를 것이 없습니다.
         session.add(contract)
         session.flush()
         _seed_schedules(
@@ -299,8 +294,6 @@ async def update_contract(contract_id: int, request: Request):
     with SessionLocal() as session:
         contract = _get_contract(session, contract_id)
         _fill_contract(contract, form)
-        if _text(form.get("plan_status")):
-            contract.client.plan_status = _text(form.get("plan_status"))
         session.commit()
     return {"ok": True}
 
@@ -586,7 +579,7 @@ def export_csv():
                 client.client_id, client.company, won.client_type(client.client_id),
                 client.industry, client.country, client.department,
                 client.contact_name, client.contact_info, client.first_won_on,
-                client.plan_status, client.owner,
+                won.plan_status(client, today), client.owner,
             ]
             if not client.contracts:
                 # 계약이 아직 없는 고객도 한 줄 나갑니다 — 빠지면 명단이 아닙니다.

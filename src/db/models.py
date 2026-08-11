@@ -626,8 +626,9 @@ class Client(Base):
     contact_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
     contact_info: Mapped[str | None] = mapped_column(String(255), nullable=True)
     first_won_on: Mapped[str | None] = mapped_column(String(10), nullable=True)
-    # 사용중 / 세팅중 / 사용 중단. 활성 고객 = 사용중 + 세팅중.
-    plan_status: Mapped[str] = mapped_column(String(16), nullable=False, default="세팅중")
+    # 플랜 상태(사용중 / 세팅중 / 사용 중단)는 **열이 아닙니다.** 계약 기간에서 나옵니다 —
+    # `won.plan_status`. 저장해 두던 시절에는 계약이 끝나도 누가 손으로 바꿔 주기 전까지
+    # 「사용중」이 남았고, 시트에도 그 값이 그대로 실려 나갔습니다(이관 0067).
     owner: Mapped[str | None] = mapped_column(String(120), nullable=True)
     # 인바운드 고객만 채워집니다. 나머지는 NULL 이 정상입니다.
     contact_id: Mapped[int | None] = mapped_column(

@@ -128,7 +128,9 @@ def import_from_sheet(write: bool = True) -> dict:
             client.country = text(cell(r, "F"))
             client.department = text(cell(r, "G"))
             client.first_won_on = text(cell(r, "I"))
-            client.plan_status = cell(r, "J") or "세팅중"
+            # J열(플랜 상태)은 읽지 않습니다 — 계약 기간에서 나오는 값이라 우리가 계산해
+            # 시트로 **내보내는** 쪽입니다(won.plan_status → won_sheets). 여기서 읽어 두면
+            # 시트에 손으로 적힌 옛 값이 계약 날짜를 이깁니다.
             client.owner = owner.get(cell(r, "A"), (0, None))[1]
             client.contact_id = client.contact_id or linkable.get(client_id)
             session.add(client)

@@ -341,7 +341,6 @@ function BasicSection({ client, contracts, options, onDone }: {
     contact_name: client.contact_name ?? "",
     contact_info: client.contact_info ?? "",
     first_won_on: client.first_won_on ?? "",
-    plan_status: client.plan_status,
     owner: client.owner ?? "",
   });
   const set = (key: keyof typeof form, value: string) =>
@@ -436,11 +435,18 @@ function BasicSection({ client, contracts, options, onDone }: {
           <input className="inp" type="date" value={form.first_won_on}
                  onChange={(e) => set("first_won_on", e.target.value)} />
         </div>
+        {/* 고르개가 아니라 읽기 전용입니다. 플랜 상태는 계약 기간이 정합니다 — 여기서
+            손으로 바꿔 두면 계약이 끝난 뒤에도 「사용중」이 남습니다. 바꾸려면 계약의
+            기간을 고쳐야 하고, 그게 사실과 맞는 유일한 방법입니다. */}
         <div>
           <label className="form-label">플랜 상태</label>
-          <select className="inp" value={form.plan_status} onChange={(e) => set("plan_status", e.target.value)}>
-            {(options?.plan_statuses ?? []).map((item) => <option key={item}>{item}</option>)}
-          </select>
+          <div className="inp" aria-readonly="true"
+               style={{ background: "var(--bg-soft)", color: "var(--muted)" }}>
+            {client.plan_status}
+          </div>
+          <div style={{ fontSize: 11.5, color: "var(--faint)", marginTop: 4 }}>
+            계약 기간에서 자동으로 정해집니다.
+          </div>
         </div>
         <div>
           <label className="form-label">담당</label>

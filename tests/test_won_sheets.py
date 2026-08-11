@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+from datetime import date, timedelta
 from types import SimpleNamespace
 
 from src.agents import won_sheets
@@ -28,7 +29,14 @@ def _client(client_id: int, company: str = "서울대학교"):
         contact_name="유명준",
         contact_info="ghldtjd119@snu.ac.kr",
         first_won_on="2026-05-19",
-        plan_status="사용중",
+        # 플랜 상태는 저장된 값이 아니라 계약 기간에서 나옵니다(won.plan_status). 기간 안인
+        # 계약 하나를 주면 시트 J열이 「사용중」이 됩니다.
+        contracts=[
+            SimpleNamespace(
+                starts_on=(date.today() - timedelta(days=30)).isoformat(),
+                ends_on=(date.today() + timedelta(days=300)).isoformat(),
+            )
+        ],
         owner="이혜람",
     )
 

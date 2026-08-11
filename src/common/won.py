@@ -110,6 +110,36 @@ def contract_state(contract, today: date | None = None) -> str:
     return "진행 중"
 
 
+def plan_status(client, today: date | None = None) -> str:
+    """플랜 상태 — **계약 기간이 정합니다.** 저장하지 않습니다.
+
+    오늘이 어느 계약 기간 안에 들면 사용중, 아직 시작하지 않았거나 날짜가 덜 적힌 계약이
+    있으면 세팅중, 있는 계약이 전부 지났으면 사용 중단입니다. 계약이 아직 하나도 없는
+    고객(수주 전환만 된 상태)도 세팅중입니다 — 앞으로 채울 것이 있다는 뜻이므로.
+
+    저장하지 않는 이유는 고객 종류를 저장하지 않는 이유와 같습니다: 날짜에서 나오는 값을
+    따로 들고 있으면 반드시 어긋나고, 어긋난 뒤에는 어느 쪽이 맞는지 아무도 모릅니다.
+    계약이 끝나도 누가 손으로 바꿔 주기 전까지 「사용중」으로 남아 있던 것이 그 증상입니다.
+
+    ``contract_state`` 를 그대로 쓰지 않는 이유: 그쪽은 날짜가 없으면 「진행 중」으로 읽습니다
+    (계약 하나를 놓고 보는 화면이라 그게 맞습니다). 여기서 날짜가 덜 적힌 계약은 아직 쓰는
+    중이라는 뜻이라 세팅중이어야 합니다.
+    """
+    today = today or date.today()
+    contracts = list(client.contracts or ())
+    if not contracts:
+        return "세팅중"
+    pending = False
+    for contract in contracts:
+        start, end = parse_date(contract.starts_on), parse_date(contract.ends_on)
+        if end and end < today:
+            continue                       # 지난 계약
+        if start and start <= today and end:
+            return "사용중"                 # 오늘이 기간 안
+        pending = True                     # 시작 전이거나 날짜가 덜 적힌 계약
+    return "세팅중" if pending else "사용 중단"
+
+
 def active_contract(client, today: date | None = None):
     """화면이 기본으로 여는 계약 — 오늘이 기간에 든 것, 없으면 가장 최근 차수."""
     today = today or date.today()

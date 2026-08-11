@@ -60,8 +60,6 @@ export function WonContractForm() {
   const [copyPrev, setCopyPrev] = useState(true);
   const [creditRounds, setCreditRounds] = useState("12");
   const [firstCreditOn, setFirstCreditOn] = useState("");
-  // 목업의 「저장 후 플랜 상태」. 계약이 아니라 **고객**의 값이라 별도로 보냅니다.
-  const [planStatus, setPlanStatus] = useState("");
   const [note, setNote] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
 
@@ -82,7 +80,6 @@ export function WonContractForm() {
     const prev = contracts.length ? contracts[contracts.length - 1] : undefined;
     const pending = params.get("pending");
     const pendingTicket = list.pending.find((p) => String(p.id) === pending)?.ticket_id ?? "";
-    setPlanStatus(data.plan_status || "");
     if (target) {
       setDraft(fromContract(target));
       setDocTypes(target.doc_types || []);
@@ -106,6 +103,17 @@ export function WonContractForm() {
 
   const set = (key: keyof Draft, value: string) =>
     setDraft((current) => (current ? { ...current, [key]: value } : current));
+
+  // 저장하면 플랜 상태가 무엇이 될지. 서버의 won.plan_status 와 같은 규칙을 이 계약 하나에
+  // 적용한 것입니다 — 고르는 칸이 없어진 자리에, 날짜가 무슨 뜻인지 대신 적어 줍니다.
+  const planPreview = (() => {
+    if (!draft) return "세팅중";
+    const today = new Date().toISOString().slice(0, 10);
+    if (!draft.starts_on || !draft.ends_on) return "세팅중";
+    if (draft.ends_on < today) return "사용 중단";
+    if (draft.starts_on > today) return "세팅중";
+    return "사용중";
+  })();
 
   // 화면에서 미리 보여 주는 계산값. 저장할 때 서버가 같은 식으로 다시 계산합니다.
   const credits = (() => {
@@ -151,7 +159,6 @@ export function WonContractForm() {
       doc_types: docTypes.join("|"),
       credit_rounds: creditRounds,
       first_credit_on: firstCreditOn,
-      plan_status: planStatus,
     };
     try {
       if (editing) {
@@ -420,11 +427,13 @@ export function WonContractForm() {
                       onChange={(e) => set("note", e.target.value)}
                       placeholder="갱신 조건, 협의 내용 등" />
           </div>
-          <div style={{ marginTop: 14 }}>
-            <label className="form-label">저장 후 플랜 상태</label>
-            <div style={{ maxWidth: 220 }}>
-              <Sel value={planStatus} onChange={setPlanStatus} options={options.plan_statuses} />
-            </div>
+          {/* 「저장 후 플랜 상태」 고르개가 여기 있었습니다. 플랜 상태는 이제 계약 기간이
+              정합니다 — 이 폼에 적는 시작일·종료일이 곧 그 값입니다. 고르개를 남겨 두면
+              사람이 고른 값과 날짜가 말하는 값이 갈라지고, 그때 어느 쪽이 맞는지 아무도
+              모릅니다. 아래 줄이 지금 무엇이 될지 미리 말해 줍니다. */}
+          <div className="note-box" style={{ marginTop: 14 }}>
+            플랜 상태는 계약 기간에서 정해집니다 — 이 계약은 저장하면{" "}
+            <b>{planPreview}</b> 입니다.
           </div>
 
         </form>

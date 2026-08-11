@@ -427,3 +427,71 @@ def test_a_contract_without_a_total_still_has_credits_and_no_mrr():
         deal_type="MRR", amount_incl_vat=None, starts_on="2026-08-11", ends_on="2027-08-11"
     )
     assert monthly_revenue(contract) == 0
+
+
+# ----- 플랜 상태는 계약 기간이 정합니다 — 저장하지 않습니다 -----
+
+
+def _client_with(*periods, today=None):
+    """(시작일, 종료일) 쌍으로 계약을 단 고객. None 은 날짜가 덜 적힌 계약입니다."""
+    from types import SimpleNamespace
+
+    return SimpleNamespace(contracts=[
+        SimpleNamespace(starts_on=start, ends_on=end) for start, end in periods
+    ])
+
+
+def test_plan_status_follows_the_contract_dates():
+    from datetime import date
+
+    from src.common.won import plan_status
+
+    today = date(2026, 8, 11)
+    running = ("2026-08-01", "2027-08-01")
+    ended = ("2024-01-01", "2025-01-01")
+    upcoming = ("2026-12-01", "2027-12-01")
+
+    # 계약 기간이 끝나면 손대지 않아도 사용 중단으로 갑니다 — 이것이 요구의 핵심입니다.
+    assert plan_status(_client_with(ended), today) == "사용 중단"
+    assert plan_status(_client_with(running), today) == "사용중"
+    # 추가된 계약이 있으면 세팅중. 지난 계약이 같이 있어도 마찬가지입니다.
+    assert plan_status(_client_with(upcoming), today) == "세팅중"
+    assert plan_status(_client_with(ended, upcoming), today) == "세팅중"
+    # 진행 중인 계약이 하나라도 있으면 사용중이 이깁니다.
+    assert plan_status(_client_with(running, upcoming), today) == "사용중"
+    # 날짜가 덜 적힌 계약("작성중")도 세팅중입니다 — contract_state 와 다른 점입니다.
+    assert plan_status(_client_with((None, None)), today) == "세팅중"
+    assert plan_status(_client_with(("2026-08-01", None)), today) == "세팅중"
+    # 계약이 아직 없는 고객(수주 전환만 된 상태)도 세팅중.
+    assert plan_status(_client_with(), today) == "세팅중"
+
+
+def test_plan_status_is_not_stored_anywhere():
+    """열로 들고 있으면 반드시 어긋납니다 — 계약이 끝나도 「사용중」이 남던 것이 그 증상입니다.
+    고객 종류를 저장하지 않는 것과 같은 이유입니다."""
+    import pathlib
+
+    from src.db.models import Client
+
+    assert "plan_status" not in {c.name for c in Client.__table__.columns}
+
+    # 화면에도 고르개가 없어야 합니다 — 사람이 고른 값과 날짜가 말하는 값이 갈라집니다.
+    for path in (
+        "frontend/src/screens/won/WonCustomerDetail.tsx",
+        "frontend/src/screens/won/WonContractForm.tsx",
+    ):
+        source = pathlib.Path(path).read_text(encoding="utf-8")
+        assert 'set("plan_status"' not in source, path
+        assert "onChange={setPlanStatus}" not in source, path
+
+
+def test_the_sheet_gets_the_same_status_the_screen_shows():
+    """시트 J열도 같은 함수에서 나옵니다. 저장된 값을 싣던 시절에는 계약이 끝나도 시트가
+    「사용중」인 채였습니다."""
+    import pathlib
+
+    source = pathlib.Path("src/agents/won_sheets.py").read_text(encoding="utf-8")
+    assert '"J": _text(won.plan_status(client))' in source
+    # 시트에서 거꾸로 읽어 오지도 않습니다 — 손으로 적힌 옛 값이 날짜를 이기면 안 됩니다.
+    importer = pathlib.Path("src/agents/sheet_to_db.py").read_text(encoding="utf-8")
+    assert "client.plan_status" not in importer

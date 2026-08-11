@@ -127,7 +127,9 @@ def _client_row(client: Client) -> _Row:
             "C": _text(client.company),
             "E": _text(client.industry),
             "F": _text(client.country),
-            "J": _text(client.plan_status),
+            # 화면과 같은 값이 시트에도 갑니다 — 계약 기간에서 나옵니다. 저장된 값을
+            # 싣던 시절에는 계약이 끝나도 시트가 「사용중」인 채였습니다.
+            "J": _text(won.plan_status(client)),
         },
     )
 
