@@ -1,4 +1,4 @@
-import { useLayoutEffect, useState } from "react";
+import { useLayoutEffect, useState, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
 import { getJSON, postForm } from "../lib/api";
@@ -57,12 +57,16 @@ type Detail = {
 
 /** 편집기 도구 → 본문 표기. `email_html._inline` 이 읽는 것과 **같은 넷**입니다.
  *  여기에 하나 더하면 그쪽 렌더러에도 더해야 합니다 — 안 그러면 화면에만 있는 표기가 되고,
- *  고객은 별표를 그대로 받습니다. */
-const MARKS: [string, [string, string], string][] = [
-  ["굵게", ["**", "**"], "고른 글자를 굵게 (**글자**)"],
-  ["기울임", ["*", "*"], "고른 글자를 기울임 (*글자*)"],
-  ["밑줄", ["__", "__"], "고른 글자에 밑줄 (__글자__)"],
-  ["링크", ["[", "](https://)"], "고른 글자를 링크 글자로 ([글자](주소)) — 주소를 채워 주세요"],
+ *  고객은 별표를 그대로 받습니다.
+ *
+ *  버튼에 글자 대신 그 서식이 걸린 **표시**를 씁니다(B·I·U·고리). 메일 편집기에서 늘 보던
+ *  자리·모양이라 읽지 않아도 무엇인지 압니다. */
+const MARKS: { key: string; mark: ReactNode; wrap: [string, string]; title: string }[] = [
+  { key: "b", mark: <b>B</b>, wrap: ["**", "**"], title: "굵게 (**글자**)" },
+  { key: "i", mark: <i style={{ fontFamily: "Georgia,serif" }}>I</i>, wrap: ["*", "*"], title: "기울임 (*글자*)" },
+  { key: "u", mark: <u>U</u>, wrap: ["__", "__"], title: "밑줄 (__글자__)" },
+  { key: "a", mark: <Icon name="link" size={14} />, wrap: ["[", "](https://)"],
+    title: "링크 ([글자](주소)) — 고른 글자가 링크 글자가 됩니다" },
 ];
 
 export function MessageDetail() {
@@ -236,27 +240,29 @@ export function MessageDetail() {
                     <label className="field-label" htmlFor="msg-subject">제목</label>
                     <input className="input" id="msg-subject" value={subject}
                            onChange={(e) => setSubject(e.target.value)} style={{ marginBottom: 12 }} />
-                    <div className="draft-body-head">
-                      <label className="field-label" htmlFor="msg-body">본문</label>
-                      {/* 고른 글자를 표기로 감쌉니다. WYSIWYG 이 아닌 이유: 이 칸의 글자가
-                          그대로 메일이 되는 것이 이 화면의 전제입니다(모델이 쓰고, 번역이
-                          지나가고, 사람이 고칩니다). 숨은 서식을 들고 있으면 그 셋이 서로
-                          모르는 상태가 되고, 화면과 나간 메일이 갈립니다. */}
+                    <label className="field-label" htmlFor="msg-body">본문</label>
+                    {/* 도구는 메일 편집기처럼 **본문 상자 안쪽 아래**입니다 — 글자를 고른
+                        손이 곧바로 닿는 자리. 상자 테두리는 이 wrapper 가 그리고 textarea 는
+                        테두리를 벗습니다(안에 든 것처럼 보이도록).
+
+                        WYSIWYG 이 아닌 이유: 이 칸의 글자가 그대로 메일이 되는 것이 이 화면의
+                        전제입니다(모델이 쓰고, 번역이 지나가고, 사람이 고칩니다). 숨은 서식을
+                        들고 있으면 그 셋이 서로 모르는 상태가 되고, 화면과 나간 메일이 갈립니다. */}
+                    <div className="draft-editor">
+                      <textarea className="draft-textarea" id="msg-body" value={body}
+                                onChange={(e) => setBody(e.target.value)} />
                       <div className="draft-tools">
-                        {MARKS.map(([label, wrap, title]) => (
-                          <button key={label} type="button" className="draft-tool" title={title}
-                                  style={label === "기울임" ? { fontStyle: "italic" }
-                                       : label === "굵게" ? { fontWeight: 700 }
-                                       : label === "밑줄" ? { textDecoration: "underline" } : undefined}
+                        {MARKS.map(({ key, mark, wrap, title }) => (
+                          <button key={key} type="button" className="draft-tool"
+                                  title={title} aria-label={title}
+                                  /* 누르는 순간 본문의 선택이 풀리면 감쌀 것이 없어집니다. */
                                   onMouseDown={(e) => e.preventDefault()}
                                   onClick={() => wrapSelection(wrap)}>
-                            {label}
+                            {mark}
                           </button>
                         ))}
                       </div>
                     </div>
-                    <textarea className="draft-textarea" id="msg-body" value={body}
-                              onChange={(e) => setBody(e.target.value)} />
 
                     {/* 골라야 붙습니다. 예전에는 여기에 "기본 (텍스트 서명)" 이 하나 더
                         있었는데, 그건 모델이 본문에 써 넣은 서명을 그대로 두라는 뜻이었습니다

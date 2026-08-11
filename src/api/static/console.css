@@ -695,15 +695,29 @@ a.kpi:hover { border-color: var(--accent); }
 .draft-textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-ring); }
 .draft-textarea[readonly] { background: var(--surface-2); color: var(--text-muted); }
 
-/* 본문 라벨과 서식 도구가 한 줄에. 도구는 라벨 높이에 맞춰 오른쪽 끝으로 붙습니다. */
-.draft-body-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.draft-tools { display: flex; gap: 4px; margin-bottom: 6px; }
-.draft-tool {
-  padding: 3px 9px; font-size: 12px; line-height: 1.5; color: var(--text-muted);
-  background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-sm);
-  cursor: pointer;
+/* 본문 편집기: 테두리는 이 상자가 그리고, 도구는 그 **안쪽 아래**에 띠로 붙습니다 —
+   메일 편집기에서 늘 보던 자리입니다. textarea 는 테두리를 벗어 상자에 든 것처럼 보이게
+   합니다(`.draft-textarea` 자체는 다른 화면 셋이 같이 쓰므로 건드리지 않습니다). */
+.draft-editor {
+  border: 1px solid var(--border); border-radius: var(--r-md);
+  background: var(--surface); overflow: hidden;
 }
-.draft-tool:hover { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+.draft-editor:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-ring); }
+.draft-editor .draft-textarea {
+  border: 0; border-radius: 0; display: block; min-height: 300px;
+}
+.draft-editor .draft-textarea:focus { box-shadow: none; }
+.draft-tools {
+  display: flex; gap: 2px; padding: 5px 8px;
+  border-top: 1px solid var(--border); background: var(--surface-2);
+}
+.draft-tool {
+  display: grid; place-items: center; width: 28px; height: 26px; padding: 0;
+  font-size: 13px; line-height: 1; color: var(--text-muted);
+  background: transparent; border: 0; border-radius: var(--r-sm); cursor: pointer;
+}
+.draft-tool:hover { background: var(--surface-3); color: var(--text); }
+.draft-tool:active { background: var(--accent-soft); color: var(--accent); }
 
 .ko-block__label {
   display: inline-flex; align-items: center; gap: 6px;
