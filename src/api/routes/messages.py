@@ -29,7 +29,7 @@ from ...db.models import (
     Message,
 )
 from ...db.session import SessionLocal
-from ...llm.translate import is_mostly_korean, needs_korean, to_korean, translate_to
+from ...llm.translate import is_mostly_korean, needs_korean, translate_to
 from ..auth import actor_name
 from ._shared import esc
 
@@ -443,63 +443,19 @@ def _domain_history(session, domain: str, exclude_conv_id: int | None = None) ->
     return {"domain": domain, "total": len(convs), "rows": out}
 
 
-async def _translate_inbound_bubbles(ctx: dict) -> None:
-    """Fill in the Korean for inbound bubbles, translating only what is missing.
-
-    The operator sees Korean without clicking, which is worth waiting for ONCE. It used
-    to be waited for on every open: the only cache was a dict in process memory, and
-    Render's free plan empties that every time the service sleeps. A three-bubble English
-    thread meant six Gemini calls and 1.8 seconds before the ticket appeared.
-
-    A message body never changes, so its translation never changes — it is stored on the
-    row now (migration 0045). Anything already translated is a column read; only genuinely
-    new text reaches the model, and the result is written back so nobody waits for it
-    twice. Each blocking call still runs in a thread so the event loop stays responsive.
-    """
-    items = [t for t in ctx.get("thread", []) if t.get("needs_ko")]
-    if not items:
-        return
-
-    async def _tx(item: dict) -> dict | None:
-        """Returns what to persist, or None when nothing new was translated."""
-        fresh: dict = {}
-        if item.get("body_ko") is None:
-            if needs_korean(item["body"]):
-                translated = await asyncio.to_thread(to_korean, item["body"])
-                item["body_ko"] = translated or None
-                if translated:
-                    fresh["body_ko"] = translated
-            else:
-                # Already Korean: show it as-is rather than round-tripping it.
-                item["body_ko"] = item["body"]
-        subject = item.get("subject")
-        if subject and item.get("subject_ko") is None:
-            if needs_korean(subject):
-                translated = await asyncio.to_thread(to_korean, subject)
-                item["subject_ko"] = translated or None
-                if translated:
-                    fresh["subject_ko"] = translated
-            else:
-                item["subject_ko"] = subject
-        return {"id": item["id"], **fresh} if fresh else None
-
-    written = [row for row in await asyncio.gather(*(_tx(t) for t in items)) if row]
-    if not written:
-        return
-    # Best effort: a failure here costs one repeated translation, never the page.
-    try:
-        with SessionLocal() as session:
-            for row in written:
-                message = session.get(Message, row["id"])
-                if message is None:
-                    continue
-                if "body_ko" in row:
-                    message.body_ko = row["body_ko"]
-                if "subject_ko" in row:
-                    message.subject_ko = row["subject_ko"]
-            session.commit()
-    except Exception:
-        logger.warning("Could not store Korean translations", exc_info=True)
+# 여기 있던 `_translate_inbound_bubbles` 는 지웠습니다. **화면을 여는 길에는 모델이 없습니다.**
+#
+# 고객 문의를 한국어로 옮기는 일은 접수할 때 한 번 하고 행에 넣어 둡니다
+# (`inbound.cache_korean_inquiries`). 그 함수가 유일한 자리입니다. 열 때 하면 그 티켓을
+# 처음 여는 사람이 매번 Gemini 를 기다렸다가 화면을 보고, 번역이 한 번 실패하면 그 티켓은
+# 영원히 느려집니다 — 답을 쓰려고 여는 창인데 말입니다.
+#
+# 회신 초안은 여기서 손대지 않습니다. 초안은 원래 한국어로 쓰이고, 보낼 언어로 바꾸는 것은
+# 운영자가 검토 화면에서 `번역하기` 를 누를 때뿐입니다. 미리 해 둘 것은 **한국어가 아닌
+# 고객 문의** 하나뿐입니다.
+#
+# 아직 안 채워진 옛 행은 화면이 원문을 그대로 보여 주고(`body_ko || body`), 10분 폴러가
+# 조금씩 채웁니다.
 
 
 # The two status buckets the operator reviews. "발송대기" is everything a human still

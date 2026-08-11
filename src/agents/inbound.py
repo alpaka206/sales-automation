@@ -244,6 +244,15 @@ class InboundAgent:
         # AI drafting may take time or fail, but the inbound itself must never wait.
         self._mirror_new_inbound_to_sheet(contact_info, channel, message_id, conv_id)
 
+        # 한국어가 아닌 문의를 지금 옮겨 둡니다 — 접수확인이 나간 뒤이고, 아래 초안 작성이
+        # 어차피 모델을 더 오래 쓰므로 여기 한 번이 늘어나도 고객이 기다리는 시간은 그대로
+        # 입니다. 운영자가 이 티켓을 열 때는 이미 행에 들어 있습니다.
+        try:
+            cache_korean_inquiries(conversation_id=conv_id)
+        except Exception:
+            # 못 옮겨도 파이프라인은 갑니다. 화면은 원문을 보여 주고 폴러가 다시 집습니다.
+            logger.warning("문의 번역을 미리 해 두지 못했습니다 (conv=%s)", conv_id, exc_info=True)
+
         # History, deal, and domain research is useful for the detailed draft but
         # must never delay the immediate receipt acknowledgement above.
         self._enrich_draft_context(contact_info)
@@ -1440,3 +1449,51 @@ class InboundAgent:
                     session.commit()
         except Exception:
             logger.warning("Could not mark draft %s failed", message_id, exc_info=True)
+
+
+def cache_korean_inquiries(limit: int = 20, conversation_id: int | None = None) -> int:
+    """한국어가 아닌 **고객 문의**를 한국어로 옮겨 행에 넣어 둡니다. 처리한 건수를 돌려줍니다.
+
+    번역을 미리 해 두는 것은 이것 하나뿐입니다. 회신 초안은 원래 한국어로 쓰이고, 보낼
+    언어로 바꾸는 것은 운영자가 검토 화면에서 `번역하기` 를 누를 때입니다 — 미리 할 이유가
+    없고, 운영자가 고친 본문을 번역해야 하므로 미리 할 수도 없습니다.
+
+    **화면을 여는 길에서는 절대 부르지 않습니다.** 예전에는 티켓을 열 때 번역했는데, 그러면
+    그 티켓을 처음 여는 사람이 말풍선마다 모델을 기다렸다가 화면을 봤습니다(영어 세 줄이면
+    여섯 번). 답을 쓰려고 여는 창에서 할 일이 아닙니다.
+
+    두 곳에서 부릅니다: 접수 직후 그 대화만(``conversation_id``), 그리고 10분 폴러가
+    한도만큼(옛 행과 그때 실패한 것을 조금씩 메웁니다). 어느 쪽도 결과를 기다리는 사람이
+    없습니다.
+
+    실패해도 원문을 넣어 둡니다. 비워 두면 폴러가 그 행을 영원히 다시 집어 모델을 계속
+    부릅니다 — 고칠 방법은 검토 화면의 `번역하기` 가 이미 있습니다.
+    """
+    from ..llm.translate import needs_korean, to_korean
+
+    with SessionLocal() as session:
+        query = session.query(Message).filter(
+            Message.direction == "inbound",
+            Message.body_ko.is_(None),
+        )
+        if conversation_id is not None:
+            query = query.filter(Message.conversation_id == conversation_id)
+        rows = query.order_by(Message.id.desc()).limit(limit).all()
+
+        done = 0
+        for row in rows:
+            try:
+                body = row.body or ""
+                row.body_ko = (to_korean(body) or body) if needs_korean(body) else body
+                subject = row.subject
+                if subject and row.subject_ko is None:
+                    row.subject_ko = (
+                        (to_korean(subject) or subject) if needs_korean(subject) else subject
+                    )
+                done += 1
+            except Exception:
+                # 한 건이 막혀도 나머지는 채웁니다. 다음 순회에서 다시 집힙니다.
+                logger.warning("문의 번역 실패 (msg=%s)", row.id, exc_info=True)
+        if done:
+            session.commit()
+    return done

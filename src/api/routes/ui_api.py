@@ -168,11 +168,14 @@ def ui_messages(status: str = "awaiting", stage: str = "", sort: str = "oldest")
 
 @router.get("/api/ui/messages/{message_id}")
 async def ui_message_detail(message_id: int):
-    """티켓 세부 내역. The builder already returns plain dicts — including the Korean
-    translations it fills in concurrently — so this adds nothing but the stage labels the
-    route adds for the template."""
+    """티켓 세부 내역. 읽기만 합니다 — 이 경로에는 모델 호출이 없습니다.
+
+    한국어 번역은 접수할 때 이미 행에 들어가 있습니다(`inbound.cache_korean_inquiries`).
+    여기서 번역하던 코드가 있었는데, 그러면 그 티켓을 처음 여는 사람이 매번 Gemini 를
+    기다렸다가 화면을 봤습니다. 아직 안 채워진 옛 행은 화면이 원문을 그대로 보여 줍니다.
+    """
     from .customer_ops import MANUAL_LOG_STAGES, PIPELINE_STAGES
-    from .messages import _message_detail_context, _translate_inbound_bubbles
+    from .messages import _message_detail_context
 
     # In a thread, not on the event loop. One open costs ~11 sequential round trips to
     # Postgres, and on the loop every other request — the SSE stream, the 15-second queue
@@ -181,7 +184,6 @@ async def ui_message_detail(message_id: int):
     context = await asyncio.to_thread(_message_detail_context, message_id)
     if not context:
         raise HTTPException(status_code=404, detail="메시지를 찾을 수 없습니다")
-    await _translate_inbound_bubbles(context)
     context["stage_labels"] = {key: label for key, label, _ in PIPELINE_STAGES}
     # 어느 단계에서 소통 기록을 남길 수 있는지. 보드의 + 버튼이 쓰는 것과 같은 목록을
     # 같은 곳에서 보냅니다 — 화면마다 "New 는 빼고" 를 따로 적으면 언젠가 어긋납니다.

@@ -198,6 +198,11 @@ async def run_poller() -> None:
             )
             await asyncio.to_thread(poll_tickets_once)
             await asyncio.to_thread(reconcile_ticket_stages_once)
+            # 접수 때 못 채운 문의 번역을 조금씩 메웁니다 — 이 기능이 생기기 전의 옛 행과,
+            # 그때 모델이 안 되던 건입니다. 기다리는 사람이 없는 자리라 여기 둡니다.
+            from .inbound import cache_korean_inquiries
+
+            await asyncio.to_thread(cache_korean_inquiries)
             from .hubspot_backfill import process_requested_hubspot_backfill
 
             await asyncio.to_thread(process_requested_hubspot_backfill)
