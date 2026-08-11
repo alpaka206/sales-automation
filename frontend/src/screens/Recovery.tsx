@@ -143,9 +143,13 @@ export function Recovery() {
             pass — those are just agreeing with what HubSpot already shows. */}
         <button type="button" className="btn btn--subtle btn--sm" disabled={busy !== null}
                 onClick={() => void sync("/operations/recovery/hubspot-sync", {}, (r) => {
-                  if (r.error) return r.error;
+                  // 아무것도 못 돈 경우(설정 없음)만 이유 한 줄로 끝냅니다. 삭제 검사만
+                  // 건너뛴 경우는 나머지 결과를 그대로 보여주고 이유를 뒤에 붙입니다 —
+                  // 못 본 것을 「정리할 항목 없음」으로 읽으면 안 됩니다.
+                  if (r.error && !r.checked && !r.swept) return r.error;
                   const moved = r.moved + r.swept;
-                  const summary = `확인 ${r.checked}건 · 단계 정정 ${moved}`;
+                  const summary = `확인 ${r.checked}건 · 단계 정정 ${moved}`
+                    + (r.error ? ` · ⚠ ${r.error}` : "");
                   if (r.deleted > 0 || r.stale > 0) {
                     setPending({
                       label: "정리",

@@ -487,6 +487,14 @@ class HubSpotClient:
 
         Raises rather than returning a short set when a batch fails: a caller that
         deletes what is missing must never read "the token expired" as "all gone".
+
+        **404 is the exception, and it is the case this exists for.** HubSpot does not
+        always answer a partially-missing batch with 207 — it can refuse the whole read
+        with 404 ("Could not get some TICKET objects, they may be deleted"), which is
+        precisely the answer we were asking for. Treating that as a failed batch skipped
+        the deletion pass every time there was something to delete, so a deleted ticket
+        stayed on the board no matter how often 최신화 was pressed. That chunk is asked
+        again one at a time, where a 404 is unambiguous.
         """
         found: set[str] = set()
         unique = list(dict.fromkeys(str(t) for t in ticket_ids if t))
@@ -504,12 +512,34 @@ class HubSpotClient:
                     f"{BASE_URL}/crm/v3/objects/tickets/batch/read",
                     json={"properties": ["hs_object_id"], "inputs": [{"id": t} for t in chunk]},
                 )
+                if r.status_code == 404:
+                    found.update(self._existing_one_by_one(client, chunk))
+                    continue
                 if r.status_code not in (200, 207):
                     raise HubSpotAPIError(
                         f"tickets batch read failed ({r.status_code}): {r.text[:200]}"
                     )
                 found.update(str(item["id"]) for item in r.json().get("results", []))
         return found
+
+    def _existing_one_by_one(self, client: httpx.Client, ticket_ids: list[str]) -> set[str]:
+        """Which of these exist, one GET each. The slow path behind a refused batch.
+
+        Only 404/410 counts as absent. Anything else raises — a chunk that fails because
+        of the token must not come back as "these hundred are gone".
+        """
+        alive: set[str] = set()
+        for ticket_id in ticket_ids:
+            r = _sync_request_with_retries(
+                client, "GET", f"{BASE_URL}/crm/v3/objects/tickets/{ticket_id}"
+            )
+            if r.status_code == 200:
+                alive.add(str(ticket_id))
+            elif r.status_code not in (404, 410):
+                raise HubSpotAPIError(
+                    f"ticket {ticket_id} existence check failed ({r.status_code}): {r.text[:200]}"
+                )
+        return alive
 
     async def create_interaction_note(
         self,

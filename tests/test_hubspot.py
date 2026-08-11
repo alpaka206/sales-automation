@@ -250,3 +250,44 @@ def test_contacts_batch_read_retries_a_429(client: HubSpotClient, monkeypatch) -
 
     assert route.call_count == 2
     assert got["c1"].email == "a@b.com"
+
+
+@respx.mock
+def test_a_partly_missing_batch_answered_with_207_keeps_the_survivors(
+    client: HubSpotClient,
+) -> None:
+    """지워진 티켓은 결과에서 빠집니다 — 삭제된 객체는 보관함으로 가고, 평범한 읽기는
+    보관된 것을 안 돌려줍니다."""
+    respx.post(f"{BASE_URL}/crm/v3/objects/tickets/batch/read").mock(
+        return_value=httpx.Response(207, json={"results": [{"id": "1"}]})
+    )
+
+    assert client.existing_ticket_ids_sync(["1", "2"]) == {"1"}
+
+
+@respx.mock
+def test_a_batch_refused_with_404_is_asked_again_one_at_a_time(client: HubSpotClient) -> None:
+    """HubSpot 이 부분 실패를 늘 207 로 주지는 않습니다 — 통째로 404 로 거절하기도 하고,
+    그게 바로 우리가 물어본 답입니다. 「배치 실패」로 읽으면 지울 게 있을 때마다 삭제
+    검사를 건너뛰어서, 지워진 티켓이 최신화를 몇 번 눌러도 화면에 남았습니다."""
+    respx.post(f"{BASE_URL}/crm/v3/objects/tickets/batch/read").mock(
+        return_value=httpx.Response(404, json={"message": "Could not get some TICKET objects"})
+    )
+    respx.get(f"{BASE_URL}/crm/v3/objects/tickets/1").mock(return_value=httpx.Response(200))
+    respx.get(f"{BASE_URL}/crm/v3/objects/tickets/2").mock(return_value=httpx.Response(404))
+
+    assert client.existing_ticket_ids_sync(["1", "2"]) == {"1"}
+
+
+@respx.mock
+def test_a_token_failure_is_never_read_as_all_gone(client: HubSpotClient, monkeypatch) -> None:
+    """단건으로 물어봐도 401 은 「없다」가 아닙니다. 여기서 빈 집합을 돌려주면 확인 한 번에
+    보드가 통째로 지워집니다."""
+    monkeypatch.setattr("src.integrations.hubspot.time.sleep", lambda *_: None)
+    respx.post(f"{BASE_URL}/crm/v3/objects/tickets/batch/read").mock(
+        return_value=httpx.Response(404, json={"message": "nope"})
+    )
+    respx.get(f"{BASE_URL}/crm/v3/objects/tickets/1").mock(return_value=httpx.Response(401))
+
+    with pytest.raises(HubSpotAPIError):
+        client.existing_ticket_ids_sync(["1"])

@@ -195,8 +195,11 @@ def reconcile_with_hubspot(*, apply: bool = False) -> dict:
     checked_in_batch = False
     try:
         alive = client.existing_ticket_ids_sync([ticket_id for _cid, ticket_id in held])
-    except Exception:
+    except Exception as exc:
         logger.exception("Ticket existence check failed; skipping the deletion pass")
+        # 화면에 적습니다. 조용히 건너뛰면 「정리할 항목 없음」이 두 가지 뜻을 갖습니다 —
+        # 정말 없는 것과, 보지 못한 것. 운영자에게는 그 둘이 똑같이 보였습니다.
+        report["error"] = f"삭제 검사를 건너뛰었습니다 — {type(exc).__name__}: {exc}"[:200]
     else:
         # 확인 N건 counts threads, not calls, and this pass already covered every one of
         # them — the loop below re-visits a subset and must not count them twice.

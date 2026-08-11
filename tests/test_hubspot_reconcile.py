@@ -216,6 +216,9 @@ def test_an_auth_failure_is_not_a_deleted_ticket(monkeypatch, waiting_draft):
 
     assert report["deleted"] == 0
     assert report["retired"] == 0
+    # 그리고 **왜** 아무것도 안 나왔는지 화면에 적힙니다. 조용히 건너뛰면 「정리할 항목
+    # 없음」이 정말 없는 것과 보지 못한 것 두 가지를 뜻하고, 운영자에게는 똑같이 보입니다.
+    assert report["error"] and "401" in report["error"]
 
 
 def test_only_threads_holding_an_answer_are_asked_about_their_stage(monkeypatch, waiting_draft):
