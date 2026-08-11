@@ -171,7 +171,7 @@ async def ui_message_detail(message_id: int):
     """티켓 세부 내역. The builder already returns plain dicts — including the Korean
     translations it fills in concurrently — so this adds nothing but the stage labels the
     route adds for the template."""
-    from .customer_ops import PIPELINE_STAGES
+    from .customer_ops import MANUAL_LOG_STAGES, PIPELINE_STAGES
     from .messages import _message_detail_context, _translate_inbound_bubbles
 
     # In a thread, not on the event loop. One open costs ~11 sequential round trips to
@@ -183,6 +183,9 @@ async def ui_message_detail(message_id: int):
         raise HTTPException(status_code=404, detail="메시지를 찾을 수 없습니다")
     await _translate_inbound_bubbles(context)
     context["stage_labels"] = {key: label for key, label, _ in PIPELINE_STAGES}
+    # 어느 단계에서 소통 기록을 남길 수 있는지. 보드의 + 버튼이 쓰는 것과 같은 목록을
+    # 같은 곳에서 보냅니다 — 화면마다 "New 는 빼고" 를 따로 적으면 언젠가 어긋납니다.
+    context["manual_log_stages"] = list(MANUAL_LOG_STAGES)
     return context
 
 

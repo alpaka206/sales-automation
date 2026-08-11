@@ -51,6 +51,8 @@ type Detail = {
   contact: { id: number; name: string; email: string | null; company: string | null; domain: string | null; role_description: string | null } | null;
   customer: { has_any?: boolean; profile: Record<string, unknown> | null; interactions: Interaction[] } | null;
   stage_labels: Record<string, string>;
+  /** 소통 기록을 남길 수 있는 단계 — 보드의 + 버튼과 같은 목록, 같은 출처. */
+  manual_log_stages: string[];
 };
 
 export function MessageDetail() {
@@ -74,6 +76,7 @@ export function MessageDetail() {
   const [reason, setReason] = useState("");
   const [showOrig, setShowOrig] = useState<Record<number, boolean>>({});
   const [loadedId, setLoadedId] = useState<number | null>(null);
+  const [logging, setLogging] = useState(false);
 
   // 훅은 아래 early return 보다 **위**에서 부릅니다. 아래에 두면 로딩 렌더에서는 건너뛰고
   // 데이터가 온 렌더에서는 부르게 되어, 훅 수가 달라졌다고 React 가 터집니다(#310) — 화면이
@@ -107,6 +110,9 @@ export function MessageDetail() {
 
   const { msg, ticket, contact } = data;
   const isPendingApproval = msg.status === "pending_approval";
+  // 보드가 어느 열에 + 를 그릴지 정하는 것과 **같은 목록**입니다. 서버가 주므로
+  // 단계 이름이 바뀌어도 두 화면이 어긋나지 않습니다.
+  const canLog = !!ticket.stage && data.manual_log_stages.includes(ticket.stage);
   const canTranslate = !!msg.target_language && msg.target_language !== "ko";
 
   // 되는 동안의 상태는 누른 버튼이 말합니다(ActionButton). 여기 남는 것은 결과뿐입니다 —
@@ -283,8 +289,16 @@ export function MessageDetail() {
           </div>
 
           {/* This ticket's manual touchpoints — everything after the first reply happens
-              off HubSpot, so the operator types it in and the ticket keeps one history. */}
-          {ticket.id && contact && (
+              off HubSpot, so the operator types it in and the ticket keeps one history.
+
+              폼은 펼쳐 두지 않고 `추가하기` → 모달입니다. 이 화면의 일은 초안을 읽고
+              보내는 것이고, 서른 줄짜리 입력 폼이 그 사이에 늘 끼어 있을 이유가 없습니다.
+              문의 대시보드 카드의 + 버튼이 띄우는 것과 같은 모달·같은 폼입니다.
+
+              단계가 아직 New 면 버튼도 없습니다. 검토할 초안이 있다는 것 자체가 아직
+              아무 답도 안 나갔다는 뜻이라 적을 소통이 없습니다 — 보드에서 New 열에만
+              + 버튼이 없는 것과 같은 규칙이고, 목록도 서버가 주는 같은 것을 씁니다. */}
+          {ticket.id && contact && (canLog || data.ticket_interactions.length > 0) && (
             <div className="card" id="log">
               <div className="section-header" style={{ marginBottom: 12 }}>
                 <div className="section-header__l">
@@ -294,13 +308,18 @@ export function MessageDetail() {
                     <div className="section-header__sub">이 문의에 대해 이메일·WhatsApp·전화·문자로 오간 내용</div>
                   </div>
                 </div>
+                {canLog && (
+                  <button
+                    type="button"
+                    className="btn btn--subtle btn--sm"
+                    aria-haspopup="dialog"
+                    onClick={() => setLogging(true)}
+                  >
+                    <Icon name="plus" size={14} /> 추가하기
+                  </button>
+                )}
               </div>
-              <InteractionForm
-                contactId={contact.id}
-                conversationId={ticket.id}
-                onSaved={() => void queryClient.invalidateQueries({ queryKey: ["message", id] })}
-              />
-              <div className="history-list" style={{ marginTop: 16 }}>
+              <div className="history-list">
                 {data.ticket_interactions.length === 0 ? (
                   <div className="empty"><div className="empty__text">아직 기록이 없습니다. 회신 이후의 연락은 여기에 남겨주세요.</div></div>
                 ) : (
@@ -474,6 +493,27 @@ export function MessageDetail() {
           <iframe title="이메일 미리보기" sandbox="" srcDoc={preview}
                   style={{ width: "100%", height: "60vh", border: "1px solid var(--border)",
                            borderRadius: 8, background: "#fff" }} />
+        </Modal>
+      )}
+
+      {/* 보드 카드의 + 가 띄우는 것과 같은 모달, 같은 폼입니다. */}
+      {logging && ticket.id && contact && (
+        <Modal
+          title="소통 기록 추가"
+          description={`${contact.company || contact.name} · 이 문의에 대해 오간 연락을 남깁니다.`}
+          wide
+          onClose={() => setLogging(false)}
+        >
+          <div style={{ marginTop: 16 }}>
+            <InteractionForm
+              contactId={contact.id}
+              conversationId={ticket.id}
+              onSaved={() => {
+                setLogging(false);
+                void queryClient.invalidateQueries({ queryKey: ["message", id] });
+              }}
+            />
+          </div>
         </Modal>
       )}
     </>
