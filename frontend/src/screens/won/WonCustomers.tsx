@@ -5,7 +5,7 @@ import { getJSON, postForm } from "../../lib/api";
 import { ActionButton } from "../../ui/ActionButton";
 import {
   type ListData, type Row,
-  STATUS_ORDER, daysUntil, dday, dueClass, dueText, fmt, initials, money, n, num,
+  STATUS_ORDER, daysUntil, dday, dueClass, dueText, fmt, initials, money, num,
   planTone, statusTone,
 } from "./shared";
 
@@ -125,13 +125,12 @@ export function WonCustomers() {
   const activeRows = data.rows.filter((r) => r.plan_status !== "사용 중단" && r.active);
   const mrrCount = activeRows.filter((r) => r.active?.deal_type === "MRR").length;
   const pocCount = activeRows.filter((r) => r.active?.deal_type === "PoC").length;
-  // KRW·USD 계약을 각 통화 그대로 더한 뒤, 원화 환산만 카드 숫자에 씁니다.
-  const mrrKrw = activeRows
-    .filter((r) => r.active?.currency === "KRW")
-    .reduce((sum, r) => sum + n(r.active?.monthly_revenue), 0);
-  const mrrUsd = activeRows
-    .filter((r) => r.active?.currency === "USD")
-    .reduce((sum, r) => sum + n(r.active?.monthly_revenue), 0);
+  // 「이번달 예상 MRR」은 **서버가 결제일로 계산해서** 통화별로 내려줍니다. 여기서 행을
+  // 걸러 더하면 그 필터가 곧 정의가 됩니다 — 실제로 플랜 상태로 거르고 있었고, 그래서
+  // 세팅중·사용 중단 고객의 이번 달 결제가 통째로 빠졌습니다. 행에는 활성 계약 하나만
+  // 실려 있다는 문제도 있었습니다(고객의 다른 계약에 이번 달 회차가 있어도 안 잡힘).
+  const mrrKrw = data.month_revenue?.KRW ?? 0;
+  const mrrUsd = data.month_revenue?.USD ?? 0;
   const renewing = activeRows
     .filter((r) => {
       const left = daysUntil(r.active?.ends_on, today);

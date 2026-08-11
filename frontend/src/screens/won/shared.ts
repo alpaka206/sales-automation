@@ -77,6 +77,10 @@ export type ListData = {
   fx_source: string;
   /** 못 가져왔을 때 왜 — 「설정값」 옆 툴팁에 그대로 적습니다. */
   fx_error: string | null;
+  /** 이번 달(YYYY-MM). 카드가 「이번달」이라고 말하는 그 달입니다. */
+  month: string;
+  /** 통화별 이번 달 예상 금액 — **서버가 결제일로 계산합니다.** */
+  month_revenue: Record<string, number>;
   options: Options;
 };
 

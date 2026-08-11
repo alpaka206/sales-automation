@@ -792,6 +792,8 @@ def ui_won_customers():
     """수주 고객 목록 + 요약 카드 + 액션 보드 + 수주 전환 대기 — 한 화면이라 한 번에."""
     from datetime import date
 
+    from decimal import Decimal
+
     from ...common import won
     from ...common.config import settings as app_settings
     from ...db.models import Client, ClientContract, PendingWon
@@ -805,6 +807,8 @@ def ui_won_customers():
         fx = usd_krw_today()
     except Exception:  # 환율을 못 가져와도 목록은 떠야 합니다
         fx = None
+    month = today.strftime("%Y-%m")
+    month_revenue: dict[str, Decimal] = {}
     with SessionLocal() as session:
         clients = (
             session.query(Client)
@@ -824,6 +828,12 @@ def ui_won_customers():
             .all()
         )
         rows = [_won_client(client, today, full=False) for client in clients]
+        for client in clients:
+            for contract in client.contracts:
+                amount = won.revenue_in_month(contract, month)
+                if amount:
+                    code = (contract.currency or "KRW").upper()
+                    month_revenue[code] = month_revenue.get(code, Decimal(0)) + amount
         pending = (
             session.query(PendingWon)
             .filter(PendingWon.status == "pending")
@@ -894,6 +904,13 @@ def ui_won_customers():
         # 왜 못 가져왔는지. 이유가 없으면 「설정값」이 막다른 길이 됩니다 —
         # 망 문제인지 응답이 바뀐 것인지 아무도 모르고, 매번 코드를 열어야 합니다.
         "fx_error": None if fx else fx_error(),
+        # 「이번달 예상 MRR」. **결제일이 정합니다** — 계약 기간에 균등 배분하지 않습니다.
+        # 여기서 통화별로 합쳐 내려보내는 이유가 둘입니다: 화면이 행을 걸러 더하면 그
+        # 필터가 곧 정의가 되고(실제로 플랜 상태로 거르고 있었습니다 — 세팅중·사용 중단
+        # 고객의 이번 달 결제가 통째로 빠졌습니다), 고객의 **모든** 계약을 봐야 하는데
+        # 행에는 활성 계약 하나만 실려 있습니다.
+        "month": month,
+        "month_revenue": {code: float(total) for code, total in month_revenue.items()},
         "options": {
             "industries": list(won.INDUSTRIES),
             "plans": list(won.PLANS),
