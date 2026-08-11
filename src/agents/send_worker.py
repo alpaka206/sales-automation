@@ -178,6 +178,7 @@ async def _send_one(message_id: int) -> bool:
     from ..integrations.senders.smtp import (
         SMTPDeliveryUnknown,
         SMTPPermanentError,
+        SMTPSendingDisabled,
         SMTPTransientError,
     )
 
@@ -198,34 +199,53 @@ async def _send_one(message_id: int) -> bool:
         last_exc: Exception | None = None
         for attempt in range(SEND_TRANSIENT_MAX_RETRIES):
             try:
-                await send(msg)
+                # 메일만 막는 스위치(safe_mode.EMAIL_SENDING_ENABLED)는 **실패가 아닙니다.**
+                # "이번 건은 보내지 않는다" 이고, 운영자가 검토 완료·발송을 누른 뒤에 일어나야
+                # 하는 나머지 — 단계 이동, HubSpot 티켓, 워크북 — 은 전부 그대로 일어납니다.
+                # 여기서 안 잡으면 SMTPPermanentError 로 떨어져 send_failed 가 되고, 누른
+                # 사람 눈에는 아무것도 안 된 것으로 보입니다.
+                #
+                # 고객 타임라인에 "답장했다" 기록은 남지 않습니다: senders.send() 가 SMTP
+                # **뒤에** 타임라인을 쓰는데, 여기서 예외가 그 앞에서 났기 때문입니다. 나가지
+                # 않은 메일이 나간 것처럼 기록되면 안 됩니다.
+                delivered = True
+                try:
+                    await send(msg)
+                except SMTPSendingDisabled:
+                    delivered = False
+                    logger.info(
+                        "메일 발송이 코드에서 꺼져 있어 %d 번은 보내지 않았습니다. "
+                        "단계 이동과 HubSpot·워크북 동기화는 그대로 진행합니다.",
+                        message_id,
+                    )
+
                 from ..common.safe_mode import resolve_send_override
 
-                # Non-empty in safe mode (forced ronald@…) → status "test_sent" and
-                # post-send HubSpot/Sheets bookkeeping is skipped, same as an
-                # explicit SEND_OVERRIDE_EMAIL.
-                test_mode = bool(resolve_send_override())
+                # "sent" 는 고객에게 정말 간 것뿐입니다. 테스트 주소로 돌렸거나 아예 보내지
+                # 않은 건은 test_sent — 화면에서 구분되고 발송률 집계도 흐리지 않습니다.
+                test_mode = bool(resolve_send_override()) or not delivered
                 msg.status = "test_sent" if test_mode else "sent"
                 msg.send_claimed_at = None
                 msg.sent_at = datetime.now(timezone.utc)
 
-                # Local bookkeeping records OUR activity and is always written, including
-                # in safe mode. Gating it on `not test_mode` used to leave last_outgoing_at
-                # and stage permanently unset pre-launch (safe mode always forces an
-                # override address), which silently emptied every "no reply for N days"
-                # and pipeline view. External side effects stay guarded — the HubSpot /
-                # Sheets writes below still run only when `not test_mode`.
                 conv = session.get(Conversation, msg.conversation_id)
                 if conv:
                     conv.last_outgoing_at = msg.sent_at
                     if msg.prompt_variant != "auto_ack":
                         conv.stage = "meeting_link_sent"
-                if msg.prompt_variant == "auto_ack" or test_mode:
+                if msg.prompt_variant == "auto_ack":
                     msg.post_send_synced_at = msg.sent_at
                 session.commit()
-                _record_send()
+                if delivered:
+                    # 발송 한도는 SMTP 를 실제로 쓴 것만 셉니다. 안 보낸 건까지 세면 아무도
+                    # 메일을 못 받는 동안 워커가 스스로 속도를 늦춥니다.
+                    _record_send()
 
-                if msg.prompt_variant != "auto_ack" and not test_mode:
+                # 발송 이후 처리는 test_mode 와 무관하게 돕니다. 예전에는 `not test_mode`
+                # 였는데, FORCE_TEST_RECIPIENT 가 켜져 있는 한 test_mode 는 **항상** 참이라
+                # HubSpot 티켓도 워크북도 영영 움직이지 않았습니다. 각 목적지는 아래에서
+                # guard_external_write 가 따로 막습니다 — 여기서 두 번 막을 일이 아닙니다.
+                if msg.prompt_variant != "auto_ack":
                     try:
                         await _post_send_bookkeeping(session, msg, conv, message_id)
                     except Exception:

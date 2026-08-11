@@ -63,6 +63,14 @@ PRELAUNCH_TEST_RECIPIENT = "ronald@estsoft.com"
 #                          address (the lowest chokepoint, below the reroute, so it
 #                          catches callers that bypass senders.send()). True = SMTP
 #                          delivery happens.
+#                          블록은 **실패가 아닙니다.** 운영자가 검토 완료·발송을 누르면
+#                          메일만 안 나가고 나머지는 전부 그대로 일어납니다 — 단계가
+#                          답변 발송으로 옮겨지고 HubSpot 티켓과 워크북도 따라갑니다
+#                          (send_worker._send_one 이 SMTPSendingDisabled 를 잡습니다).
+#                          행은 `sent` 가 아니라 `test_sent` 로 남습니다: 고객에게 정말
+#                          간 것만 `sent` 여야 합니다. 고객 타임라인에 "답장했다" 기록도
+#                          남지 않습니다 — senders.send() 가 SMTP **뒤에** 쓰기 때문에
+#                          거기까지 가지 못합니다.
 #   FORCE_TEST_RECIPIENT   True = every message goes to PRELAUNCH_TEST_RECIPIENT and
 #                          nowhere else. SEND_OVERRIDE_EMAIL is IGNORED while this is
 #                          on — the operator's instruction is "ronald@estsoft.com 으로만",

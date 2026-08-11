@@ -449,8 +449,15 @@ def test_no_send_switch_covers_the_report_emailer(no_send, monkeypatch):
     assert opened == [], "report emailer opened SMTP despite the no-send switch"
 
 
-def test_no_send_switch_marks_message_failed_not_sent(no_send, monkeypatch):
-    """A blocked send must never leave the row looking delivered."""
+def test_no_send_switch_does_everything_except_the_mail(no_send, monkeypatch):
+    """메일만 막고, 나머지는 전부 그대로 — 운영자의 요구입니다.
+
+    검토 완료·발송을 누르면 메일은 나가지 않지만 단계는 옮겨지고 HubSpot·워크북 동기화도
+    돕니다. 예전에는 no-send 스위치가 SMTPPermanentError 로 떨어져 `send_failed` 가 됐고,
+    누른 사람 눈에는 아무 일도 안 일어난 것으로 보였습니다.
+
+    상태는 `sent` 가 아니라 `test_sent` 입니다: 고객에게 정말 간 것만 `sent` 여야 합니다.
+    """
     import asyncio
 
     from sqlalchemy import create_engine
@@ -487,13 +494,19 @@ def test_no_send_switch_marks_message_failed_not_sent(no_send, monkeypatch):
     session.commit()
     mid = msg.id
 
+    from unittest.mock import AsyncMock
+
+    bookkeeping = AsyncMock()
+    monkeypatch.setattr(send_worker, "_post_send_bookkeeping", bookkeeping)
+
     send_worker._claim_ready_id()
-    assert asyncio.run(send_worker._send_one(mid)) is False
+    assert asyncio.run(send_worker._send_one(mid)) is True
 
     session.expire_all()
     stored = session.get(Message, mid)
-    assert stored.status == "send_failed"
-    assert stored.sent_at is None
+    assert stored.status == "test_sent"                       # 나간 적 없으니 sent 는 아닙니다
+    assert stored.conversation.stage == "meeting_link_sent"   # 단계는 옮겨집니다
+    bookkeeping.assert_awaited_once()                         # HubSpot·워크북도 돕니다
     session.close()
 
 
@@ -505,7 +518,12 @@ def test_no_send_switch_marks_message_failed_not_sent(no_send, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_safe_mode_still_records_local_send_bookkeeping(safe, monkeypatch):
-    """test_sent must still stamp last_outgoing_at/stage — but skip HubSpot & Sheets."""
+    """test_sent must still stamp last_outgoing_at/stage, and still run the sync.
+
+    발송 이후 처리를 `not test_mode` 로 막던 시절이 있었는데, FORCE_TEST_RECIPIENT 가 켜져
+    있는 한 test_mode 는 **항상** 참이라 HubSpot 티켓도 워크북도 영영 움직이지 않았습니다.
+    목적지별 차단은 guard_external_write 가 각자 합니다 — 여기서 두 번 막을 일이 아닙니다.
+    """
     from unittest.mock import AsyncMock
 
     from sqlalchemy import create_engine
@@ -546,7 +564,7 @@ async def test_safe_mode_still_records_local_send_bookkeeping(safe, monkeypatch)
     assert stored.status == "test_sent"          # safe mode marker
     assert stored.conversation.last_outgoing_at is not None   # the regression
     assert stored.conversation.stage == "meeting_link_sent"   # the regression
-    bookkeeping.assert_not_awaited()             # external writes still blocked
+    bookkeeping.assert_awaited_once()            # 각 목적지는 guard_external_write 가 막습니다
     session.close()
 
 
