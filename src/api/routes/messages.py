@@ -257,14 +257,11 @@ def _message_detail_context(message_id: int) -> dict:
                         "artifact_url": it.artifact_url,
                         "happened_at": it.happened_at,
                     }
-                    for it in session.execute(
-                        select(CustomerInteraction)
-                        .where(CustomerInteraction.conversation_id == conv.id)
-                        .order_by(
-                            CustomerInteraction.happened_at.desc(),
-                            CustomerInteraction.id.desc(),
-                        )
-                    ).scalars()
+                    # 위에서 이미 읽어 둔 같은 행들입니다(오래된 순). 여기서 최신순으로
+                    # 한 번 더 SELECT 하고 있었는데, 조건도 같고 세션도 같아 결과가 같습니다
+                    # — 뒤집기만 하면 됩니다. 왕복 하나가 200ms 인 데다 이 화면이 제일 자주
+                    # 열립니다.
+                    for it in reversed(interaction_rows)
                 ]
                 if conv
                 else []
