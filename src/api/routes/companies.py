@@ -8,6 +8,7 @@ summary and append-only processing log. Linked from the message detail sidebar.
 from __future__ import annotations
 
 import logging
+from collections import defaultdict
 
 from fastapi import APIRouter
 from sqlalchemy import func, select
@@ -84,19 +85,23 @@ def company_context(domain: str) -> dict:
                 if conv_ids
                 else {}
             )
-            for cv, ct in rows:
-                prog = (
-                    session.execute(
-                        select(ConversationProgress)
-                        .where(ConversationProgress.conversation_id == cv.id)
-                        .order_by(
-                            ConversationProgress.created_at.asc(),
-                            ConversationProgress.id.asc(),
-                        )
+            # 진행 기록도 한 번에 읽어 회의별로 나눕니다. 바로 위 두 질의는 이미 그렇게
+            # 하고 있었는데 이것만 루프 안에 있어서, 티켓 25개짜리 회사 하나를 여는 데
+            # 질의가 29번 나갔습니다 — 왕복 하나가 200ms 인 환경에서 그건 6초입니다.
+            progress_by_conv: dict[int, list[ConversationProgress]] = defaultdict(list)
+            if conv_ids:
+                for row in session.execute(
+                    select(ConversationProgress)
+                    .where(ConversationProgress.conversation_id.in_(conv_ids))
+                    .order_by(
+                        ConversationProgress.created_at.asc(),
+                        ConversationProgress.id.asc(),
                     )
-                    .scalars()
-                    .all()
-                )
+                ).scalars():
+                    progress_by_conv[row.conversation_id].append(row)
+
+            for cv, ct in rows:
+                prog = progress_by_conv.get(cv.id, [])
                 conversations.append(
                     {
                         "conversation_id": cv.id,

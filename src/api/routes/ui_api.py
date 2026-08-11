@@ -790,7 +790,7 @@ def ui_won_customers():
 
     from ...common import won
     from ...common.config import settings as app_settings
-    from ...db.models import Client, PendingWon
+    from ...db.models import Client, ClientContract, PendingWon
     from ...db.session import SessionLocal
     from ...integrations.fx import usd_krw_today
     from sqlalchemy.orm import selectinload
@@ -803,7 +803,18 @@ def ui_won_customers():
     with SessionLocal() as session:
         clients = (
             session.query(Client)
-            .options(selectinload(Client.contracts))
+            .options(
+                # 계약만 미리 읽고 그 **아래**는 안 읽었습니다. 그런데 `_won_client` 이
+                # 부르는 `won.open_claims` 는 계약마다 클레임을 훑고, 활성 계약 하나는
+                # 크레딧 회차·결제 회차·클레임을 전부 만집니다 — 그래서 고객 40 · 계약
+                # 80 짜리 장부 하나를 그리는 데 쿼리가 163 번 나갔습니다(실측). 왕복
+                # 하나가 200ms 인 환경에서 그건 30초입니다. 아래 상세 라우트가 이미
+                # 쓰고 있던 것과 같은 옵션이고, 같은 것을 두 번 적기보다 계약이 늘수록
+                # 나빠지는 쪽을 막는 게 먼저입니다: 163 → 6, 결과는 한 글자도 다르지 않습니다.
+                selectinload(Client.contracts).selectinload(ClientContract.credit_grants),
+                selectinload(Client.contracts).selectinload(ClientContract.payments),
+                selectinload(Client.contracts).selectinload(ClientContract.claims),
+            )
             .order_by(Client.company)
             .all()
         )
