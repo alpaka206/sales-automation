@@ -1,6 +1,6 @@
 import { useCallback, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { getJSON, postForm } from "../../lib/api";
 import { SubmitButton, useAction } from "../../ui/ActionButton";
 import { Modal } from "../../ui/Modal";
@@ -41,6 +41,7 @@ const FORM_ID = "won-contract-form";
 export function WonContractForm() {
   const { clientId, contractId } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
   const queryClient = useQueryClient();
   const [params] = useSearchParams();
   const editing = Boolean(contractId);
@@ -65,9 +66,21 @@ export function WonContractForm() {
   // useCallback 인 이유: Modal 의 keydown 효과가 `[onClose]` 에 걸려 있어서, 매 렌더
   // 새 함수를 주면 리스너를 떼었다 붙이며 **포커스를 여는 버튼으로 되돌립니다**. 폼에
   // 글자를 칠 때마다 포커스가 튑니다.
+  //
+  // 닫기는 **히스토리를 되돌립니다**(push 가 아니라). 이 모달은 주소를 가진 화면이라 열 때
+  // 히스토리에 한 칸이 쌓이는데, 닫을 때 상세로 다시 push 하면 그 칸이 남습니다. 그러면
+  // 상세에서 뒤로가기를 눌렀을 때 목록이 아니라 **모달이 다시 열립니다** — 누르는 사람은
+  // 목록으로 갈 줄 알았고, 창이 안 닫히는 것처럼 보입니다.
+  //
+  // `location.key === "default"` 는 이 주소가 이 세션의 첫 칸이라는 뜻입니다(모달 URL 을
+  // 직접 열었거나 새로고침). 그때는 되돌릴 칸이 없으므로 상세로 바꿔 칩니다 — replace 라
+  // 여기서도 모달 칸이 남지 않습니다.
   const back = useCallback(
-    () => navigate(`/won-customers/${clientId}`),
-    [navigate, clientId],
+    () => {
+      if (location.key !== "default") navigate(-1);
+      else navigate(`/won-customers/${clientId}`, { replace: true });
+    },
+    [navigate, location.key, clientId],
   );
 
 
@@ -164,7 +177,7 @@ export function WonContractForm() {
         await postForm(`/won-customers/${clientId}/contracts`, body);
       }
       await queryClient.invalidateQueries();
-      navigate(`/won-customers/${clientId}`);
+      back();
     } catch (error) {
       setNote(error instanceof Error ? error.message : String(error));
     }
