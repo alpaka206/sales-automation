@@ -407,14 +407,12 @@ a.kpi:hover { border-color: var(--accent); }
 /* position: relative is the containing block for the corner 소통 기록 button. */
 .pipeline-card { position: relative; padding: 13px; margin-bottom: 9px; border: 1px solid var(--border); background: var(--surface); box-shadow: var(--shadow-sm); cursor: grab; }
 .pipeline-card:active { cursor: grabbing; }
-/* The card is hidden, not faded, while it is being dragged: the drag image IS the
-   card box, so leaving a solid copy behind reads as two cards. */
-.pipeline-card.is-dragging { display: none; }
-/* Stands in for the card at its own height so the columns do not reflow mid-drag. */
-.kanban-card-placeholder {
-  margin-bottom: 9px; border: 1px dashed var(--accent);
-  background: var(--accent-soft); pointer-events: none;
-}
+/* 끌고 있는 카드는 **흐려질 뿐 사라지지 않는다.** 전에는 `display: none` 이었다: 그때는
+   빈 자리를 대신 채우는 `.kanban-card-placeholder` 가 같이 있었는데, React 로 옮기면서
+   그 요소를 아무도 그리지 않게 되었고 규칙만 남았다. 그래서 카드를 잡는 순간 카드가
+   그냥 없어졌다 — 옮길 것이 눈에 안 보이니 드래그가 사라진 것처럼 보인다.
+   자리를 지키므로 열이 중간에 다시 흐르지도 않는다. */
+.pipeline-card.is-dragging { opacity: .35; }
 .kanban.is-saving { pointer-events: none; opacity: .7; }
 /* No bottom margin: it was the gap under a per-card stage <select> that no longer
    exists, and on a fixed-height column that dead strip costs cards on screen. */
