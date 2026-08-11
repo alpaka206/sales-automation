@@ -79,20 +79,30 @@ def get_company_rules() -> str:
 _REPLY_FORMAT_KEY = "reply_format"
 
 
-def get_reply_format() -> str:
+def get_reply_format(language: str | None = None) -> str:
     """The web-editable reply skeleton, or '' when the operator has not set one.
 
     Read fresh on every draft (one indexed single-row query) so an edit in the console
     applies to the very next reply — the lru_cache on the rules file is exactly the
     behaviour we do not want here.
+
+    **국문과 영문은 다른 서식입니다.** 접미사 없는 행이 국문이고, 영문 문의는 ``_en`` 행을
+    먼저 봅니다(``auto_ack`` / ``auto_ack_en`` 과 같은 규칙). 한 벌만 두었더니 국문 문의에
+    영문용 문장이 그대로 따라왔습니다 — WhatsApp 안내가 한국어 회신에 붙은 것이 그것입니다.
+    영문 행이 없으면 국문 행으로 떨어집니다: 서식이 아예 없는 것보다는 낫습니다.
     """
     try:
         from ..db.email_templates import get_email_template
 
-        body = get_email_template(_REPLY_FORMAT_KEY)
+        english = bool(language) and not language.lower().startswith("ko")
+        keys = [f"{_REPLY_FORMAT_KEY}_en", _REPLY_FORMAT_KEY] if english else [_REPLY_FORMAT_KEY]
+        for key in keys:
+            body = (get_email_template(key) or "").strip()
+            if body:
+                return body
     except Exception:  # a template outage must never block drafting
         return ""
-    return (body or "").strip()
+    return ""
 
 
 # Tokens the model is told to emit verbatim, swapped for the real values afterwards. The
@@ -109,7 +119,11 @@ _EDITABLE_TOKENS = {
 # 이름은 번역할 대상이 아니라 표기가 둘인 것입니다: "배운태" 와 "Untae Bae". 한 칸만 두면
 # 둘 중 하나는 반드시 틀리고, 초안이 한국어로 쓰였다가 발송 전에 번역되는 구조라 모델이
 # 알아서 로마자로 바꾸게 됩니다 — 매번 다르게. 키에 접미사를 붙여 갈라 둡니다.
-_PER_LANGUAGE_TOKENS = {"{{SENDER_NAME}}"}
+# 링크도 언어마다 다릅니다. 주소가 달라서가 아니라 **표기가 달라서**입니다: 국문은
+# 「미팅 링크」 라는 글자에 걸고, 영문은 `Calendly` · `WhatsApp` 각각에 겁니다. 행에
+# `[미팅 링크](https://…)` 처럼 적어 두면 렌더러가 앵커로 만듭니다 — 맨 URL 을 그대로
+# 실으면 120자 base64 예약 주소가 본문 한복판에 그대로 보입니다.
+_PER_LANGUAGE_TOKENS = {"{{SENDER_NAME}}", "{{MEETING_LINK}}", "{{WHATSAPP}}"}
 
 
 def apply_editable_tokens(body: str, language: str | None = None) -> str:

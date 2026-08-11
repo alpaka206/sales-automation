@@ -300,3 +300,48 @@ def test_an_empty_english_name_falls_back_rather_than_leaving_a_blank():
     names = {"sender_name": "배운태", "sender_name_en": ""}
     with patch("src.db.email_templates.get_email_template", side_effect=lambda k, **kw: names.get(k)):
         assert apply_editable_tokens("{{SENDER_NAME}}", language="en") == "배운태"
+
+
+# ----- 국문과 영문은 다른 서식·다른 링크 표기 -----
+
+
+def test_the_reply_skeleton_is_per_language():
+    """한 벌만 두었더니 국문 문의에 영문용 문장이 그대로 따라왔습니다 — 한국어 회신에
+    WhatsApp 안내가 붙은 것이 그것입니다. auto_ack / auto_ack_en 과 같은 규칙입니다."""
+    from unittest.mock import patch
+
+    from src.llm.prompts import get_reply_format
+
+    행 = {"reply_format": "국문 뼈대", "reply_format_en": "EN skeleton"}
+    with patch("src.db.email_templates.get_email_template", side_effect=행.get):
+        assert get_reply_format("ko") == "국문 뼈대"
+        assert get_reply_format(None) == "국문 뼈대"
+        assert get_reply_format("en") == "EN skeleton"
+        assert get_reply_format("ja") == "EN skeleton"     # 국문이 아니면 영문 쪽
+
+    # 영문 행이 없으면 국문으로 떨어집니다 — 서식이 아예 없는 것보다 낫습니다.
+    with patch("src.db.email_templates.get_email_template", side_effect={"reply_format": "국문만"}.get):
+        assert get_reply_format("en") == "국문만"
+
+
+def test_the_meeting_and_whatsapp_links_are_per_language():
+    """주소가 달라서가 아니라 **표기가 달라서**입니다. 국문은 「미팅 링크」 한 줄이고
+    WhatsApp 이 없으며, 영문은 Calendly · WhatsApp 각각의 글자에 겁니다."""
+    from unittest.mock import patch
+
+    from src.llm.prompts import _PER_LANGUAGE_TOKENS, apply_editable_tokens
+
+    assert {"{{MEETING_LINK}}", "{{WHATSAPP}}"} <= _PER_LANGUAGE_TOKENS
+
+    행 = {
+        "meeting_link": "[미팅 링크](https://cal.example/kr)",
+        "meeting_link_en": "[Calendly](https://cal.example/en)",
+        "whatsapp_link_en": "[WhatsApp](https://wa.me/1)",
+    }
+    with patch("src.db.email_templates.get_email_template", side_effect=행.get):
+        assert apply_editable_tokens("{{MEETING_LINK}}", "ko") == 행["meeting_link"]
+        assert apply_editable_tokens("{{MEETING_LINK}}", "en") == 행["meeting_link_en"]
+        # 국문 행이 없는 토큰은 치환하지 않고 그대로 둡니다 — 빈칸으로 나가는 것보다
+        # 검토 화면에 토큰이 보이는 편이 낫습니다.
+        assert apply_editable_tokens("{{WHATSAPP}}", "ko") == "{{WHATSAPP}}"
+        assert apply_editable_tokens("{{WHATSAPP}}", "en") == 행["whatsapp_link_en"]

@@ -871,7 +871,7 @@ class InboundAgent:
                 "pricing_rule": _PRICING_RULE_FIRST if first_reply else _PRICING_RULE_NORMAL,
                 # The reply SHAPE (opening / middle / closing), edited in the console.
                 # Read per draft, so a change there lands on the next reply.
-                "reply_format": get_reply_format(),
+                "reply_format": get_reply_format(inquiry_lang),
             },
             schema=DraftResult,
             tier="pro",
