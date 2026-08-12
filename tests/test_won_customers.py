@@ -639,7 +639,7 @@ def test_a_failed_rate_lookup_is_retried_not_frozen_for_the_day(monkeypatch):
     assert fx.last_error() is None          # 성공하면 이유를 지웁니다
 
 
-# ----- 이번달 예상 MRR — 결제일이 정한다 -----
+# ----- 이번달 예상 MRR — 계약 기간이 정한다 -----
 
 
 def _계약(deal="MRR", currency="KRW", 회차=(), **kw):
@@ -654,25 +654,38 @@ def _계약(deal="MRR", currency="KRW", 회차=(), **kw):
     return c
 
 
-def test_this_months_revenue_is_decided_by_the_payment_dates():
-    """카드는 「이번 달에 들어올 돈」입니다 — 계약 기간에 균등 배분하지 않습니다.
+def test_this_months_revenue_is_decided_by_the_contract_period():
+    """계약 금액 ÷ 계약 개월수. 결제를 어떻게 받았는지는 안 봅니다.
 
-    12개월 계약을 1월에 일시불로 받았으면 1월에 전액이고 2월부터는 0 입니다. 예전에는
-    총액 ÷ 개월수를 매달 똑같이 넣어서, 결제가 없는 달에도 숫자가 잡혔습니다.
+    한동안 결제일이 정하게 뒀는데, 그러면 12개월 계약을 1월에 일시불로 받은 고객이 2월부터
+    카드에서 사라집니다 — 매달 쓰고 있는데도요.
     """
     이번달 = "2026-08"
+    한달치 = Decimal("1100000")            # 13,200,000 ÷ 12
 
     일시불 = _계약(회차=[("2026-01-15", 13_200_000)], amount_excl_vat=12_000_000)
-    assert won.revenue_in_month(일시불, 이번달) == 0
-    assert won.revenue_in_month(일시불, "2026-01") == 13_200_000
+    assert won.revenue_in_month(일시불, 이번달) == 한달치
+    assert won.revenue_in_month(일시불, "2026-01") == 한달치
 
     분할 = _계약(회차=[("2026-02-15", 6_600_000), ("2026-08-20", 6_600_000)],
                amount_excl_vat=12_000_000)
-    assert won.revenue_in_month(분할, 이번달) == 6_600_000     # 아직 입금 전이어도 「예상」
+    assert won.revenue_in_month(분할, 이번달) == 한달치      # 회차를 어떻게 나눴든 같습니다
 
-    두회차 = _계약(회차=[("2026-08-05", 3_300_000), ("2026-08-25", 3_300_000)],
-                amount_excl_vat=12_000_000)
-    assert won.revenue_in_month(두회차, 이번달) == 6_600_000    # 한 달에 둘이면 더합니다
+    회차없음 = _계약(회차=[], amount_excl_vat=12_000_000)
+    assert won.revenue_in_month(회차없음, 이번달) == 한달치
+
+
+def test_only_the_months_inside_the_contract_period_count():
+    """기간 밖은 0 입니다 — 안 그러면 끝난 계약이 영원히 이번 달 매출에 남습니다."""
+    계약 = _계약(회차=[], amount_excl_vat=12_000_000)       # 2026-01 ~ 2026-12
+    assert won.revenue_in_month(계약, "2025-12") == 0
+    assert won.revenue_in_month(계약, "2026-12") == Decimal("1100000")
+    assert won.revenue_in_month(계약, "2027-01") == 0
+
+    # 인식 시작월을 직접 지정하면 거기서부터 셉니다.
+    늦게 = _계약(회차=[], amount_excl_vat=12_000_000, revenue_from="2026-03")
+    assert won.revenue_in_month(늦게, "2026-01") == 0
+    assert won.revenue_in_month(늦게, "2027-02") == Decimal("1100000")
 
 
 def test_a_poc_lands_whole_in_the_month_of_its_first_payment():
@@ -689,19 +702,24 @@ def test_a_poc_lands_whole_in_the_month_of_its_first_payment():
     assert won.revenue_in_month(첫회차가_지난달, 이번달) == 0
 
 
-def test_no_payment_rows_means_nothing_is_counted():
-    """회차가 있어야 잡힙니다. 회차를 안 만든 계약이 안 잡히는 것이 곧 만들라는 신호입니다.
-    날짜만 잡아 두고 금액은 나중에 넣는 회차도 있어서, 금액이 없으면 0 입니다."""
-    assert won.revenue_in_month(_계약(회차=[], amount_excl_vat=12_000_000), "2026-08") == 0
-    금액없음 = _계약(회차=[("2026-08-10", None)], amount_excl_vat=12_000_000)
+def test_a_contract_with_no_amount_or_no_period_is_counted_as_nothing():
+    """금액이나 기간이 덜 적힌 계약은 0 입니다 — 채우라는 신호입니다."""
+    금액없음 = _계약(회차=[])
     assert won.revenue_in_month(금액없음, "2026-08") == 0
+
+    기간없음 = _계약(회차=[], amount_excl_vat=12_000_000)
+    기간없음.starts_on = 기간없음.ends_on = None
+    assert won.revenue_in_month(기간없음, "2026-08") == 0
+
+    # PoC 는 그대로 회차가 정합니다 — 균등 배분할 정기 매출이 아닙니다.
+    assert won.revenue_in_month(_계약(deal="PoC", 회차=[], amount_excl_vat=5_000_000), "2026-08") == 0
 
 
 def test_the_card_does_not_filter_by_plan_status():
-    """세팅중이든 사용 중단이든 **이번 달에 결제가 있으면** 이번 달 돈입니다.
+    """세팅중이든 사용 중단이든 **이번 달이 계약 기간 안이면** 이번 달 돈입니다.
 
-    화면이 행을 걸러 더하던 시절에는 그 필터가 곧 정의였습니다 — 끝난 계약의 마지막
-    분납이 이번 달에 남아 있어도 카드에서 통째로 빠졌습니다.
+    화면이 행을 걸러 더하던 시절에는 그 필터가 곧 정의였습니다 — 이번 달에 시작한
+    세팅중 계약이 카드에서 통째로 빠졌습니다.
     """
     import pathlib
 

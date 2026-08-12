@@ -125,10 +125,10 @@ export function WonCustomers() {
   const activeRows = data.rows.filter((r) => r.plan_status !== "사용 중단" && r.active);
   const mrrCount = activeRows.filter((r) => r.active?.deal_type === "MRR").length;
   const pocCount = activeRows.filter((r) => r.active?.deal_type === "PoC").length;
-  // 「이번달 예상 MRR」은 **서버가 결제일로 계산해서** 통화별로 내려줍니다. 여기서 행을
-  // 걸러 더하면 그 필터가 곧 정의가 됩니다 — 실제로 플랜 상태로 거르고 있었고, 그래서
-  // 세팅중·사용 중단 고객의 이번 달 결제가 통째로 빠졌습니다. 행에는 활성 계약 하나만
-  // 실려 있다는 문제도 있었습니다(고객의 다른 계약에 이번 달 회차가 있어도 안 잡힘).
+  // 「이번달 예상 MRR」은 **서버가 계약 기간으로 계산해서**(계약 금액 ÷ 개월수) 통화별로
+  // 내려줍니다. 여기서 행을 걸러 더하면 그 필터가 곧 정의가 됩니다 — 실제로 플랜 상태로
+  // 거르고 있었고, 그래서 세팅중 고객이 통째로 빠졌습니다. 행에는 활성 계약 하나만
+  // 실려 있다는 문제도 있었습니다(고객의 다른 계약이 돌고 있어도 안 잡힘).
   const mrrKrw = data.month_revenue?.KRW ?? 0;
   const mrrUsd = data.month_revenue?.USD ?? 0;
   const renewing = activeRows

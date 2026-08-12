@@ -253,33 +253,48 @@ def unit_price(contract) -> Decimal | None:
     return amount / (Decimal(credits) / CREDITS_PER_MINUTE)
 
 
+def _month_no(month: str | None) -> int | None:
+    """``YYYY-MM`` → 통산 월 번호. 두 달 사이가 몇 달인지 빼기 한 번으로 나옵니다."""
+    try:
+        year, mon = str(month).split("-")[:2]
+        return int(year) * 12 + int(mon) - 1
+    except (ValueError, AttributeError):
+        return None
+
+
 def revenue_in_month(contract, month: str) -> Decimal:
     """그 달에 잡히는 금액 — 「이번달 예상 MRR」 카드가 더하는 값.
 
-    **결제일이 정합니다.** 계약 기간에 균등 배분하지 않습니다. 12개월 계약을 1월에 일시불로
-    받았으면 1월에 전액이고 2월부터는 0 입니다 — 카드가 「이번 달에 들어올 돈」을 뜻하기
-    때문입니다. 균등 배분(`monthly_revenue`)은 회계식 인식이라 상세 화면에 따로 있습니다.
+    **계약 기간이 정합니다. 결제 방식은 안 봅니다.** 계약 금액 ÷ 계약 개월수를 인식 기간의
+    매달에 똑같이 넣습니다 — 일시불이든 분납이든, 회차를 몇 개로 쪼갰든 같은 값입니다.
+    한동안 결제일이 정하게 뒀는데(그 달에 잡힌 회차 금액의 합), 그러면 12개월 계약을 1월에
+    일시불로 받은 고객이 2월부터 카드에서 사라집니다. 매달 서비스를 쓰고 있는데도요.
+    상세 화면의 「월간 매출」(`monthly_revenue`)과 같은 값이 되고, 그게 맞습니다 —
+    한 계약의 한 달치 매출이 화면마다 다르면 안 됩니다.
 
-    - **MRR**: 그 달에 잡힌 결제 회차 금액의 합. 아직 입금 전이어도 셉니다 — 「예상」이라서.
-    - **PoC**: **첫 회차**가 그 달이면 계약 전액, 아니면 0. 분할로 받아도 쪼개지 않습니다.
-    - **회차가 없으면 0.** 회차를 안 만든 계약은 안 잡히고, 그게 회차를 만들라는 신호입니다.
-      금액을 아직 안 적은 회차도 0 입니다 — 날짜만 잡아 두고 금액은 나중에 넣기도 합니다.
+    - **MRR**: 인식 시작월부터 계약 개월수만큼, 매달 총액 ÷ 개월수.
+    - **PoC**: 그대로 **첫 회차**가 그 달이면 계약 전액, 아니면 0. 상세 화면이 「결제월에
+      일시 인식」이라고 적어 두는 그것이고, 정기 매출이 아니라 균등 배분할 기간이 없습니다.
+    - 기간이나 금액이 덜 적힌 계약은 0 입니다.
 
-    플랜 상태는 보지 않습니다. 세팅중이든 사용 중단이든 **이번 달에 결제가 있으면** 이번 달
-    돈입니다 — 끝난 계약의 마지막 분납이 이번 달에 남아 있는 경우가 그렇습니다.
+    플랜 상태는 보지 않습니다. 세팅중이든 사용 중단이든 **이번 달이 계약 기간 안이면**
+    이번 달 돈입니다.
     """
-    payments = list(getattr(contract, "payments", None) or ())
-    if not payments:
-        return Decimal(0)
     if contract.deal_type == "PoC":
+        payments = list(getattr(contract, "payments", None) or ())
+        if not payments:
+            return Decimal(0)
         first = min(payments, key=lambda p: (p.paid_on or "9999-99-99", p.no))
         if (first.paid_on or "").startswith(month):
             return total_amount(contract) or Decimal(0)
         return Decimal(0)
-    return sum(
-        (_decimal(p.amount) or Decimal(0) for p in payments if (p.paid_on or "").startswith(month)),
-        Decimal(0),
-    )
+
+    asked, start = _month_no(month), _month_no(revenue_start_month(contract))
+    if asked is None or start is None:
+        return Decimal(0)
+    if not 0 <= asked - start < months_between(contract.starts_on, contract.ends_on):
+        return Decimal(0)
+    return monthly_revenue(contract)
 
 
 def monthly_revenue(contract) -> Decimal:
