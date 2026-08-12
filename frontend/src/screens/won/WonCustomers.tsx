@@ -183,7 +183,9 @@ export function WonCustomers() {
           </button>
 
           <div className="kpi">
-            <div className="kpi-label"><G name="trend" /> 이번달 예상 MRR <span style={{ color: "var(--faint)" }}>(VAT 포함)</span></div>
+            {/* GTM 이라고 적혀 있어야 합니다. 서버가 담당부서로 거르는데 화면이 말하지
+                않으면, 아래 목록을 더한 값과 안 맞을 때 어느 쪽이 틀린 건지 알 수 없습니다. */}
+            <div className="kpi-label"><G name="trend" /> 이번달 예상 MRR <span style={{ color: "var(--faint)" }}>(GTM · VAT 포함)</span></div>
             <div className="kpi-value money">{money(mrrKrw + mrrUsd * rate)}</div>
             <div className="kpi-tail">
               <div className="kpi-legend">
@@ -341,15 +343,18 @@ export function WonCustomers() {
           <table>
             <thead>
               <tr>
-                <th style={{ width: "19%" }}>고객사</th>
-                <th style={{ width: "9%" }}>산업 분야</th>
+                <th style={{ width: "17%" }}>고객사</th>
+                <th style={{ width: "8%" }}>산업 분야</th>
                 <th style={{ width: "7%" }}>국가</th>
                 <th style={{ width: "8%" }}>플랜 상태</th>
-                <th style={{ width: "11%" }}>플랜</th>
+                <th style={{ width: "9%" }}>플랜</th>
                 <th style={{ width: "7%" }}>수주 유형</th>
-                <th style={{ width: "15%" }}>계약 기간</th>
-                <th style={{ width: "12%" }}>다음 크레딧 지급</th>
-                <th style={{ width: "12%" }}>다음 결제</th>
+                {/* MRR 은 계약 금액 ÷ 개월수, PoC 는 첫 결제가 이번 달일 때만 전액.
+                    부서와 무관하게 모든 행에 나옵니다 — 위 카드만 GTM 으로 거릅니다. */}
+                <th style={{ width: "10%" }}>이번달 매출</th>
+                <th style={{ width: "12%" }}>계약 기간</th>
+                <th style={{ width: "11%" }}>다음 크레딧 지급</th>
+                <th style={{ width: "11%" }}>다음 결제</th>
               </tr>
             </thead>
             <tbody>
@@ -408,7 +413,7 @@ function RowView({ row, rows, index, today, onOpen }: {
   const groupHead =
     index === 0 || rows[index - 1].plan_status !== row.plan_status ? (
       <tr className="group-row">
-        <td colSpan={9}>
+        <td colSpan={10}>
           {row.plan_status} · {rows.filter((r) => r.plan_status === row.plan_status).length}곳
         </td>
       </tr>
@@ -435,6 +440,15 @@ function RowView({ row, rows, index, today, onOpen }: {
         <td><StatusTag status={row.plan_status} /></td>
         <td><PlanTag plan={contract?.plan ?? null} /></td>
         <td><DealTag deal={contract?.deal_type ?? null} /></td>
+        {/* 통화는 안 섞습니다. 환산은 위 카드가 오늘 고시가로 한 번만 하고, 행마다 다시
+            하면 같은 화면에 서로 다른 환율이 생깁니다. 두 통화를 다 쓰는 고객은 두 줄. */}
+        <td className="datecell">
+          {Object.keys(row.month_revenue).length === 0
+            ? <span className="muted">—</span>
+            : Object.entries(row.month_revenue).map(([code, amount]) => (
+                <div key={code}>{money(amount, code)}</div>
+              ))}
+        </td>
         <td className="datecell">
           {contract ? `${fmt(contract.starts_on)} – ${fmt(contract.ends_on)}` : "—"}
           {contract && (

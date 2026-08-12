@@ -77,6 +77,18 @@ def client_type(client_id: int | None) -> str:
     return "—"
 
 
+def department(client) -> str:
+    """담당부서 — 적어 둔 값이 있으면 그것, 없으면 번호대에서.
+
+    열은 사람이 고칠 수 있고(Interactive 고객을 GTM 이 넘겨받는 일이 있습니다) 그때는 적은
+    값이 맞습니다. 다만 비어 있는 행이 있어서, 그것만 보면 매출 집계에서 조용히 빠집니다 —
+    비면 종류에서 되짚습니다. 둘 중 하나로 못 정하면 종류를 저장하지 않는다는 원칙(0065)과
+    반대로 가거나, 안 채운 칸 하나가 돈을 지우거나 둘 중 하나입니다.
+    """
+    stored = (getattr(client, "department", None) or "").strip()
+    return stored or DEPARTMENT_BY_TYPE.get(client_type(client.client_id), "")
+
+
 def parse_date(value: str | None) -> date | None:
     """``YYYY-MM-DD`` 만 받습니다. 형식이 틀리면 None — 화면이 '—' 로 그립니다."""
     if not value:

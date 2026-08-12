@@ -727,3 +727,80 @@ def test_the_card_does_not_filter_by_plan_status():
     카드 = screen[screen.index("const mrrKrw") : screen.index("const renewing")]
     assert "data.month_revenue" in 카드
     assert "plan_status" not in 카드 and "activeRows" not in 카드
+
+
+def test_the_card_counts_gtm_only():
+    """Interactive 와 AX 는 각자 매출을 따로 봅니다. 셋을 한 숫자로 더하면 그 카드는 아무
+    팀의 숫자도 아닙니다.
+
+    담당부서는 사람이 고칠 수 있는 열이라 그 값이 먼저지만, **비어 있으면 번호대에서
+    되짚습니다** — 안 채운 칸 하나가 매출을 조용히 지우면 안 됩니다.
+    """
+    from src.db.models import Client
+
+    gtm = Client(client_id=1001, company="인바운드 고객")
+    outbound = Client(client_id=2001, company="아웃바운드 고객")
+    interactive = Client(client_id=3001, company="인터랙티브 고객")
+    ax = Client(client_id=4001, company="AX 고객")
+    assert [won.department(c) for c in (gtm, outbound, interactive, ax)] == [
+        "GTM", "GTM", "Interactive", "AX"
+    ]
+
+    # 넘겨받은 고객: 적어 둔 값이 번호대를 이깁니다.
+    interactive.department = "GTM"
+    assert won.department(interactive) == "GTM"
+
+
+def test_the_card_says_it_is_gtm_only():
+    """거른 숫자에 그렇다고 안 적으면, 아래 목록을 더한 값과 안 맞을 때 어느 쪽이 틀린
+    건지 알 수 없습니다."""
+    import pathlib
+
+    screen = pathlib.Path("frontend/src/screens/won/WonCustomers.tsx").read_text(encoding="utf-8")
+    # 주석이 아니라 화면에 그려지는 라벨을 봅니다.
+    label = screen[screen.index('<G name="trend" /> 이번달 예상 MRR'):][:160]
+    assert "GTM" in label
+
+
+def test_the_row_shows_what_this_customer_added_this_month():
+    """목록의 「이번달 매출」 칸 — 위 카드가 더하는 그 값입니다.
+
+    **계약 전부를 훑습니다.** 행에 실리는 계약은 활성 하나뿐이라, 그것만 보면 한 고객의
+    다른 계약이 이번 달에 돌고 있어도 안 잡힙니다.
+    """
+    from datetime import date
+
+    from src.api.routes.ui_api import _won_client
+
+    today = date(2026, 8, 12)
+    client = Client(client_id=1001, company="두 계약 고객")
+    client.contracts = [
+        # 12개월 · 총액 13,200,000 → 매달 1,100,000
+        ClientContract(client_id=1001, seq=1, deal_type="MRR", currency="KRW",
+                       starts_on="2026-01-01", ends_on="2026-12-31",
+                       amount_excl_vat=12_000_000),
+        # 첫 결제가 이번 달인 PoC → 전액. 쪼개지 않습니다.
+        ClientContract(client_id=1001, seq=2, deal_type="PoC", currency="KRW",
+                       starts_on="2026-08-01", ends_on="2026-09-30",
+                       amount_excl_vat=1_000_000,
+                       payments=[ContractPayment(no=1, total=1, paid_on="2026-08-10",
+                                                 amount=1_100_000)]),
+    ]
+    for contract in client.contracts:
+        contract.credit_grants, contract.claims = [], []
+        contract.payments = list(contract.payments or [])
+
+    row = _won_client(client, today, full=False)
+    assert row["month_revenue"] == {"KRW": Decimal("2200000.0")}   # 1,100,000 + 1,100,000
+
+    # 지난달이 첫 결제인 PoC 는 이번 달에 0 — MRR 한 건만 남습니다.
+    client.contracts[1].payments[0].paid_on = "2026-07-10"
+    assert _won_client(client, today, full=False)["month_revenue"] == {"KRW": Decimal("1100000.0")}
+
+    # 통화는 안 섞습니다 — 환산은 카드가 오늘 고시가로 한 번만 합니다.
+    client.contracts[1].currency = "USD"
+    client.contracts[1].amount_incl_vat = 5_000
+    client.contracts[1].payments[0].paid_on = "2026-08-10"
+    assert _won_client(client, today, full=False)["month_revenue"] == {
+        "KRW": Decimal("1100000.0"), "USD": Decimal("5000"),
+    }

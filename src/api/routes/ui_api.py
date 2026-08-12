@@ -772,10 +772,23 @@ def _won_contract(contract, today) -> dict:
 
 
 def _won_client(client, today, *, full: bool) -> dict:
+    from decimal import Decimal
+
     from ...common import won
 
     active = won.active_contract(client, today)
     upcoming = won.upcoming_contracts(client, today)
+    # 이번 달에 이 고객이 얹은 금액 — 목록의 「이번달 매출」 칸이자, 위 카드가 더하는 값.
+    # **계약 전부를 훑습니다.** 행에 실리는 계약은 활성 하나뿐이라, 그것만 보면 한 고객의
+    # 다른 계약이 돌고 있어도 안 잡힙니다. 통화는 안 섞습니다: 환산은 카드가 오늘 고시가로
+    # 한 번만 하고, 행마다 다시 하면 같은 화면에 서로 다른 환율이 생깁니다.
+    month = today.strftime("%Y-%m")
+    month_revenue: dict[str, Decimal] = {}
+    for contract in client.contracts:
+        amount = won.revenue_in_month(contract, month)
+        if amount:
+            code = (contract.currency or "KRW").upper()
+            month_revenue[code] = month_revenue.get(code, Decimal(0)) + amount
     payload = {
         "client_id": client.client_id,
         "company": client.company,
@@ -793,6 +806,7 @@ def _won_client(client, today, *, full: bool) -> dict:
         "setup_count": len(upcoming),
         "open_claims": len(won.open_claims(client)),
         "active": _won_contract(active, today) if active else None,
+        "month_revenue": month_revenue,
     }
     if full:
         payload["contracts"] = [_won_contract(c, today) for c in client.contracts]
@@ -843,12 +857,17 @@ def ui_won_customers():
             .all()
         )
         rows = [_won_client(client, today, full=False) for client in clients]
-        for client in clients:
-            for contract in client.contracts:
-                amount = won.revenue_in_month(contract, month)
-                if amount:
-                    code = (contract.currency or "KRW").upper()
-                    month_revenue[code] = month_revenue.get(code, Decimal(0)) + amount
+        # 카드는 **행이 이미 들고 있는 값**을 더합니다. 따로 세면 목록의 「이번달 매출」 칸과
+        # 카드가 언젠가 어긋나고, 어긋난 뒤에는 어느 쪽이 맞는지 아무도 모릅니다.
+        #
+        # 더하는 것은 **GTM 담당 고객만**입니다. Interactive 와 AX 는 각자 매출을 따로 보고,
+        # 셋을 한 숫자로 더하면 그 카드는 아무 팀의 숫자도 아니게 됩니다. 칸은 부서와 무관하게
+        # 모든 행에 나옵니다 — 카드 라벨이 GTM 이라고 말하는 이유가 그것입니다.
+        for client, row in zip(clients, rows):
+            if won.department(client) != "GTM":
+                continue
+            for code, amount in row["month_revenue"].items():
+                month_revenue[code] = month_revenue.get(code, Decimal(0)) + amount
         pending = (
             session.query(PendingWon)
             .filter(PendingWon.status == "pending")

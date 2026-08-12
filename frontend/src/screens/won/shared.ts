@@ -47,6 +47,8 @@ export type Row = {
   contact_name: string | null; contact_info: string | null;
   first_won_on: string | null; plan_status: string; owner: string | null;
   contact_id: number | null; setup_count: number; open_claims: number;
+  /** 이번 달에 이 고객이 얹은 금액, 통화별. 계약 **전부**를 더한 값입니다. */
+  month_revenue: Record<string, number>;
   active: Contract | null; contract_count?: number; contracts?: Contract[];
   comms?: Comm[];
 };
