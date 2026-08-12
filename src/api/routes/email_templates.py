@@ -17,6 +17,7 @@ from ..auth import actor_name
 from ...db.email_templates import SIGNATURE_KEY_PREFIX
 from ...db.models import EmailTemplate, EmailTemplateRevision
 from ...db.session import SessionLocal
+from ...db.soft_delete import DELETED, utcnow
 
 router = APIRouter(tags=["web"])
 
@@ -151,7 +152,12 @@ async def email_templates_update(
 
 @router.delete("/email-templates/{tpl_id}")
 async def email_templates_delete(tpl_id: int, request: Request):
-    """Delete a SIGNATURE (keeps its revision history). Nothing else deletes.
+    """Delete a SIGNATURE — 일주일 동안 되돌릴 수 있습니다. Nothing else deletes.
+
+    행을 지우지 않습니다. ``status='deleted'`` 로 바꾸고 ``deleted_at`` 을 박으면 읽는 쪽은
+    전부 ``status='active'`` 만 보므로 발송·고르개에서 즉시 빠지고, 목록에는 흐리게 남아
+    되돌릴 수 있습니다. 일주일 뒤 청소됩니다 — src/db/soft_delete.py.
+
 
     EVERY signature deletes now, including ``signature_ko``/``signature_en``: since 0061
     no code reads a signature by name — the operator picks one on the draft and presses
@@ -182,11 +188,30 @@ async def email_templates_delete(tpl_id: int, request: Request):
                 status_code=400,
             )
         _snapshot_revision(session, tpl, change_note="deleted", edited_by=editor)
-        session.delete(tpl)
+        tpl.status = DELETED
+        tpl.deleted_at = utcnow()
         session.commit()
     return HTMLResponse(
         '<div class="text-orange-600 text-sm font-medium">삭제 완료</div>'
         '<script>setTimeout(()=>location.href="/email-templates",500)</script>'
     )
+
+
+@router.post("/email-templates/{tpl_id}/restore")
+async def email_templates_restore(tpl_id: int, request: Request):
+    """되돌리기. 보관 기간 안이면 지우기 전 그대로 돌아옵니다."""
+    editor = actor_name(request, fallback="web") or "web"
+    with SessionLocal() as session:
+        tpl = session.get(EmailTemplate, tpl_id)
+        if not tpl:
+            return HTMLResponse(
+                '<div class="text-red-600 text-sm">보관 기간이 지나 이미 사라졌습니다</div>',
+                status_code=404,
+            )
+        tpl.status = "active"
+        tpl.deleted_at = None
+        _snapshot_revision(session, tpl, change_note="restored", edited_by=editor)
+        session.commit()
+    return HTMLResponse('<div class="text-green-600 text-sm font-medium">되돌렸습니다</div>')
 
 

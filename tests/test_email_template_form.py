@@ -38,6 +38,8 @@ def template_db():
         patch("src.api.routes.email_templates.SessionLocal", factory),
         # default_signature_key opens its own session — the read side of the same table.
         patch("src.db.email_templates.SessionLocal", factory),
+        # 휴지통 비우기도 자기 세션을 엽니다.
+        patch("src.db.soft_delete.SessionLocal", factory),
     ):
         yield factory
 
@@ -318,4 +320,79 @@ def test_every_signature_deletes_and_nothing_else_does(template_db):
         assert client.delete(f"/email-templates/{ids['서명 (한국어)']}").status_code == 200
         assert client.delete(f"/email-templates/{ids['서명']}").status_code == 200
     with template_db() as session:
-        assert [row.name for row in session.query(EmailTemplate).all()] == ["접수확인 영어"]
+        # 행은 남습니다 — 지운 것은 일주일 동안 되돌릴 수 있습니다(0070). 발송 경로가
+        # 보는 것은 status 이고, 읽는 쪽은 전부 이미 'active' 만 봅니다.
+        alive = [row.name for row in session.query(EmailTemplate)
+                 if row.status == "active"]
+        assert alive == ["접수확인 영어"]
+        gone = session.query(EmailTemplate).filter_by(status="deleted").all()
+        assert {row.name for row in gone} == {"서명 (한국어)", "서명"}
+        assert all(row.deleted_at is not None for row in gone)
+
+
+def test_a_deleted_signature_is_gone_from_the_send_path_at_once(template_db):
+    """되돌릴 수 있다는 것이 아직 쓰인다는 뜻이면 안 됩니다. 지운 서명이 검토 화면의
+    고르개에 남아 있으면, 지웠다고 생각한 서명으로 메일이 나갑니다."""
+    from src.db.email_templates import list_signature_templates
+
+    with template_db() as session:
+        session.add(EmailTemplate(key=f"{SIGNATURE_KEY_PREFIX}y", name="지울 서명",
+                                  language="all", channel="email", status="active",
+                                  version=1, body="<p/>"))
+        session.commit()
+        tpl_id = session.query(EmailTemplate).filter_by(name="지울 서명").one().id
+
+    assert "지울 서명" in {s["name"] for s in list_signature_templates()}
+    with TestClient(app) as client:
+        assert client.delete(f"/email-templates/{tpl_id}").status_code == 200
+        assert "지울 서명" not in {s["name"] for s in list_signature_templates()}
+        # 되돌리면 그대로 돌아옵니다.
+        assert client.post(f"/email-templates/{tpl_id}/restore").status_code == 200
+    assert "지울 서명" in {s["name"] for s in list_signature_templates()}
+
+
+def test_the_bin_empties_after_a_week(template_db):
+    """일주일이 지나면 진짜로 사라집니다 — 목록을 읽을 때 청소합니다."""
+    from datetime import timedelta
+
+    from src.db.soft_delete import RETENTION_DAYS, days_left, purge_expired, utcnow
+
+    with template_db() as session:
+        session.add_all([
+            EmailTemplate(key=f"{SIGNATURE_KEY_PREFIX}fresh", name="어제 지움", language="all",
+                          channel="email", status="deleted", version=1, body="a",
+                          deleted_at=utcnow() - timedelta(days=1)),
+            EmailTemplate(key=f"{SIGNATURE_KEY_PREFIX}stale", name="열흘 전 지움", language="all",
+                          channel="email", status="deleted", version=1, body="b",
+                          deleted_at=utcnow() - timedelta(days=RETENTION_DAYS + 3)),
+        ])
+        session.commit()
+
+    assert purge_expired() == 1
+    with template_db() as session:
+        assert [row.name for row in session.query(EmailTemplate)] == ["어제 지움"]
+        # 「N일 후 완전 삭제」는 올림입니다. 반나절 남은 것을 0일이라 쓰면 이미 지난
+        # 것처럼 읽히는데, 그 사이에도 되돌릴 수 있습니다.
+        assert days_left(session.query(EmailTemplate).one().deleted_at) == RETENTION_DAYS - 1
+
+
+def test_deleting_needs_the_sentence_typed_out_not_a_click():
+    """확인이 클릭 한 번이면 두 번째부터는 읽지 않습니다 — 손이 기억하는 동작이 됩니다.
+    문장을 옮겨 적는 동안에는 무엇을 지우는지 읽게 됩니다.
+
+    화면 소스로 확인합니다. 이 규칙이 사는 곳은 서버가 아니라 이 창 하나이고(서버는 되돌릴
+    수 있게 만드는 쪽을 맡습니다), 그래서 창이 사라지면 규칙도 같이 사라집니다.
+    """
+    dialog = pathlib.Path("frontend/src/ui/DeleteDialog.tsx").read_text(encoding="utf-8")
+    assert 'DELETE_PHRASE = "이 문서를 삭제하겠습니다."' in dialog
+    assert "typed.trim() === DELETE_PHRASE" in dialog
+    assert "disabled={!ok}" in dialog, "문장이 맞기 전에는 삭제 버튼이 눌리면 안 됩니다"
+
+    # 그리고 지우는 화면 둘 다 그 창을 지납니다 — 한쪽만 지나면 나머지가 옛날 그대로입니다.
+    for screen in ("frontend/src/screens/EmailTemplates.tsx",
+                   "frontend/src/screens/PolicyDocs.tsx"):
+        source = pathlib.Path(screen).read_text(encoding="utf-8")
+        assert "DeleteDialog" in source, screen
+        # 휴지통은 오른쪽 끝. 저장 옆에 나란히 두면 둘이 같은 무게로 보입니다.
+        assert 'className="action-bar row-between"' in source, screen
+        assert 'name="trash"' in source, screen

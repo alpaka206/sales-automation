@@ -157,11 +157,54 @@ def _publish(source_id: int) -> None:
 
 @router.post("/policy-docs/{source_id}/delete")
 async def policy_docs_delete(source_id: int):
+    """지웁니다 — 일주일 동안 되돌릴 수 있습니다.
+
+    행을 지우지 않는 이유는 이 화면에서 지운 문서 하나가 실제로 사라져 봤기 때문입니다.
+    「항상 적용」 규칙은 DB 어디에도 사본이 없어서, 저장소의 씨앗 파일에서 **원본**을 다시
+    넣는 것이 최선이었습니다 — 그 사이 콘솔에서 고친 내용은 돌아오지 않았습니다.
+
+    ``mode='rules'`` 는 ``_rules_from_db`` 가 ``status='active'`` 만 읽으므로 그것으로 끝이고,
+    ``mode='knowledge'`` 는 초안이 읽는 **사본**까지 같이 재워야 합니다. 안 그러면 지운
+    문서를 라우터가 계속 인용합니다 — 하드 삭제 시절에도 그랬습니다(사본은 안 지웠으니까).
+    """
+    from ...db.soft_delete import DELETED, utcnow
+
     with SessionLocal() as session:
         source = session.get(PolicySource, source_id)
         if source is not None:
-            session.delete(source)
+            source.status = DELETED
+            source.deleted_at = utcnow()
+            _set_knowledge_status(session, source, "archived")
             session.commit()
     return RedirectResponse("/policy-docs", status_code=303)
+
+
+@router.post("/policy-docs/{source_id}/restore")
+async def policy_docs_restore(source_id: int):
+    """되돌리기. 사본도 같이 깨웁니다."""
+    with SessionLocal() as session:
+        source = session.get(PolicySource, source_id)
+        if source is None:
+            raise HTTPException(status_code=404, detail="보관 기간이 지나 이미 사라졌습니다")
+        source.status = "active"
+        source.deleted_at = None
+        _set_knowledge_status(session, source, "active")
+        session.commit()
+    _publish(source_id)
+    return {"ok": True}
+
+
+def _set_knowledge_status(session, source: PolicySource, status: str) -> None:
+    """초안이 읽는 사본을 재우거나 깨웁니다. 「문의별 참고」에만 사본이 있습니다."""
+    from ...agents.policy_sync import _slug_for
+    from ...db.models import KnowledgeDocument
+
+    doc = (
+        session.query(KnowledgeDocument)
+        .filter(KnowledgeDocument.slug == _slug_for(source))
+        .one_or_none()
+    )
+    if doc is not None:
+        doc.status = status
 
 

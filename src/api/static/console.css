@@ -261,6 +261,12 @@
 .btn--ghost:hover   { background: var(--surface-3); }
 .btn--subtle  { background: var(--surface-2); color: var(--text); border-color: var(--border); }
 .btn--subtle:hover  { background: var(--surface-3); }
+/* 아이콘 하나짜리 버튼. 정사각형이라 글자 버튼 옆에서도 폭이 흔들리지 않습니다. */
+.btn--icon { width: 38px; padding: 0; }
+.btn--icon.btn--sm { width: 32px; }
+/* 삭제. 평소에는 흐린 테두리만 — 저장 버튼과 같은 무게로 보이면 안 됩니다 — 얹으면 붉게. */
+.btn--danger-ghost { background: transparent; color: var(--text-subtle); border-color: var(--border); }
+.btn--danger-ghost:hover { background: var(--danger-soft); color: var(--danger); border-color: transparent; }
 .btn:disabled, .btn.is-disabled { opacity: .5; pointer-events: none; }
 .btn:active { transform: scale(.98); }
 

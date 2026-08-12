@@ -119,3 +119,45 @@ def test_clearing_the_effective_date_hands_the_column_back_to_the_save_time(poli
         source = session.get(PolicySource, source_id)
         assert source.effective_on is None
         assert source.edited_at is not None
+
+
+def test_a_deleted_document_is_recoverable_for_a_week(policy_db):
+    """운영자가 「항상 적용」 규칙 하나를 실수로 지웠고 되돌릴 방법이 없었습니다 — 그
+    종류는 DB 어디에도 사본이 없어서, 저장소의 씨앗 파일에서 **원본**을 다시 넣는 것이
+    최선이었고 그 사이 콘솔에서 고친 내용은 돌아오지 않았습니다.
+
+    이제 행은 남고 ``status`` 만 바뀝니다. 읽는 쪽(``_rules_from_db``)은 이미
+    ``status='active'`` 만 보므로 지운 즉시 초안에서 빠지는 것은 그대로입니다.
+    """
+    from src.llm.prompts import _rules_from_db
+
+    # _rules_from_db 는 자기 안에서 src.db.session 을 import 합니다.
+    with TestClient(app) as client, patch("src.db.session.SessionLocal", policy_db):
+        source_id = _create(client, body="본문", mode="rules")
+        assert "CS 문의 대응 가이드" in _rules_from_db()
+
+        assert client.post(f"/policy-docs/{source_id}/delete").status_code == 200
+        assert _rules_from_db() == "", "지운 규칙이 프롬프트에 남으면 지운 것이 아닙니다"
+        with policy_db() as session:
+            source = session.get(PolicySource, source_id)
+            assert source is not None and source.deleted_at is not None
+
+        assert client.post(f"/policy-docs/{source_id}/restore").status_code == 200
+        assert "CS 문의 대응 가이드" in _rules_from_db()
+
+
+def test_deleting_a_reference_document_also_stops_the_router_citing_it(policy_db):
+    """「문의별 참고」는 초안이 읽는 **사본**이 따로 있습니다. 등록부만 지우면 화면에서는
+    사라졌는데 라우터는 계속 인용합니다 — 하드 삭제 시절이 그랬습니다."""
+    with TestClient(app) as client:
+        source_id = _create(client, body="환불은 영업일 5~10일", mode="knowledge")
+        with policy_db() as session:
+            assert session.query(KnowledgeDocument).one().status == "active"
+
+        assert client.post(f"/policy-docs/{source_id}/delete").status_code == 200
+        with policy_db() as session:
+            assert session.query(KnowledgeDocument).one().status != "active"
+
+        assert client.post(f"/policy-docs/{source_id}/restore").status_code == 200
+        with policy_db() as session:
+            assert session.query(KnowledgeDocument).one().status == "active"

@@ -7,12 +7,15 @@ import { DataTable, type Column } from "../ui/DataTable";
 import { ActionButton } from "../ui/ActionButton";
 import { kst } from "../lib/format";
 import { Loading } from "../ui/Loading";
+import { DeleteDialog } from "../ui/DeleteDialog";
 
 type Mode = { key: string; label: string };
 type Row = {
   id: number; label: string; title: string | null; mode: string;
   body: string | null; chars: number;
   subject: string; usage_note: string; effective_on: string | null; edited_at: string | null;
+  // 지운 문서도 목록에 옵니다 — 흐리게, 일주일 동안.
+  deleted: boolean; days_left: number | null;
 };
 type Data = { modes: Mode[]; rows: Row[] };
 
@@ -30,12 +33,28 @@ async function send(path: string, method: string, fields: Record<string, string>
   }
 }
 
-const columns: Column<Row>[] = [
-  { label: "문서", width: "70%", cell: (row) => <strong>{row.title || row.label}</strong> },
+/** 같은 columns 객체를 두 묶음이 씁니다 — 표 둘이 각자 폭을 재면 같은 열이 다른 자리에
+ *  섭니다. 되돌리기 버튼 하나 때문에 함수가 되었을 뿐, 여전히 한 벌입니다. */
+const buildColumns = (onRestore: (id: number) => Promise<void>): Column<Row>[] => [
+  { label: "문서", width: "70%", cell: (row) => (
+      <>
+        <strong className={row.deleted ? "t-subtle" : undefined}>{row.title || row.label}</strong>
+        {row.deleted && (
+          <div className="t-xs" style={{ color: "var(--danger)" }}>
+            삭제됨 · {row.days_left}일 후 완전 삭제
+          </div>
+        )}
+      </>
+    ) },
   // 기준일이 있으면 그것, 없으면 마지막으로 손댄 시각. 오늘 붙여넣은 넉 달 된 정책이
   // "최신" 으로 보이지 않게 하는 것이 요점입니다.
   { label: "기준", width: "18%", className: "tnum td-subtle",
-    cell: (row) => row.effective_on || kst(row.edited_at || "") || "—" },
+    cell: (row) => row.deleted ? (
+      <div onClick={(e) => e.stopPropagation()}>
+        <ActionButton className="btn btn--subtle btn--sm" pending="되돌리는 중"
+                      onClick={() => onRestore(row.id)}>되돌리기</ActionButton>
+      </div>
+    ) : row.effective_on || kst(row.edited_at || "") || "—" },
 ];
 
 /** 문서 하나 — 만들 때도 고칠 때도 이 화면입니다.
@@ -55,6 +74,7 @@ function DocEditor({ doc, modes, onDone }: {
   const [effectiveOn, setEffectiveOn] = useState(doc?.effective_on || "");
   const [body, setBody] = useState(doc?.body || "");
   const [note, setNote] = useState<string | null>(null);
+  const [confirming, setConfirming] = useState(false);
 
   async function save() {
     setNote(null);
@@ -155,19 +175,26 @@ function DocEditor({ doc, modes, onDone }: {
                   style={{ minHeight: 420, fontSize: 12.5, lineHeight: 1.7 }}
                   placeholder="노션에서 복사해 그대로 붙여넣으세요. 표와 목록은 그대로 읽힙니다." />
 
-        <div className="action-bar">
+        {/* 저장은 왼쪽, 삭제는 오른쪽 끝에 휴지통 하나 — 이메일 템플릿과 같은 배치입니다.
+            나란히 두면 둘이 같은 무게로 보입니다. */}
+        <div className="action-bar row-between">
           <ActionButton className="btn btn--primary" pending={doc ? "저장 중" : "만드는 중"}
                         onClick={save}>
             <Icon name="check" size={15} /> {doc ? "저장" : "만들기"}
           </ActionButton>
-          {doc && (
-            <ActionButton className="btn btn--ghost" pending="삭제 중" onClick={remove}>
-              <Icon name="x" size={15} /> 삭제
-            </ActionButton>
+          {doc && !doc.deleted && (
+            <button type="button" className="btn btn--icon btn--danger-ghost"
+                    title="삭제" aria-label="삭제" onClick={() => setConfirming(true)}>
+              <Icon name="trash" size={16} />
+            </button>
           )}
         </div>
         {note && <div className="t-sm" style={{ marginTop: 12 }} role="status">{note}</div>}
       </div>
+      {confirming && doc && (
+        <DeleteDialog name={doc.title || doc.label}
+                      onCancel={() => setConfirming(false)} onConfirm={remove} />
+      )}
     </>
   );
 }
@@ -179,6 +206,11 @@ export function PolicyDocs({ onBack }: { onBack?: () => void }) {
   const { data, isPending } = useQuery({
     queryKey: ["policy-docs"],
     queryFn: () => getJSON<Data>("/api/ui/policy-docs"),
+  });
+
+  const columns = buildColumns(async (id) => {
+    await send(`/policy-docs/${id}/restore`, "POST");
+    await queryClient.invalidateQueries({ queryKey: ["policy-docs"] });
   });
 
   if (isPending || !data) return <Loading columns={2} />;

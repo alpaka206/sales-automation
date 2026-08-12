@@ -373,6 +373,10 @@ class PolicySource(Base):
     body: Mapped[str | None] = mapped_column(Text, nullable=True)
     title: Mapped[str | None] = mapped_column(String, nullable=True)
     summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # 지운 시각. 지우면 행이 사라지는 대신 ``status='deleted'`` 가 되고 여기 시각이 박히며,
+    # 목록에 일주일 남았다가 청소됩니다 — 읽는 쪽은 전부 이미 ``status='active'`` 만 보므로
+    # 이 한 칸으로 "언제까지 되돌릴 수 있나" 가 정해집니다. src/db/soft_delete.py
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=_utcnow, onupdate=_utcnow, nullable=False
@@ -405,6 +409,8 @@ class EmailTemplate(Base):
     # 고르고, 아무것도 안 고르면 회사 규칙의 텍스트 서명이 붙습니다.
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     author: Mapped[str | None] = mapped_column(String, nullable=True)
+    # 지운 시각 — PolicySource 와 같은 뜻입니다. src/db/soft_delete.py
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=_utcnow, onupdate=_utcnow, nullable=False

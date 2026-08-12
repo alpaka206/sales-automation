@@ -7,6 +7,7 @@ import { DataTable, type Column } from "../ui/DataTable";
 import { ActionButton } from "../ui/ActionButton";
 import { kst } from "../lib/format";
 import { Loading, LoadingBlock } from "../ui/Loading";
+import { DeleteDialog } from "../ui/DeleteDialog";
 import { PolicyDocs } from "./PolicyDocs";
 
 type Kind = { key: string; label: string; count: number; can_create: boolean; read_only: boolean };
@@ -14,6 +15,8 @@ type Item = {
   id: number; key: string; base_key: string; name: string; language: string;
   updated_at: string; kind: string; body: string; subject: string;
   chars: number;
+  // 지운 행도 목록에 옵니다 — 흐리게, 「N일 후 완전 삭제」와 되돌리기와 함께.
+  deleted: boolean; days_left: number | null;
 };
 // 한 줄 = 한 템플릿. 언어가 여럿이면 그 안에서 고릅니다.
 type Group = { base: string; rows: Item[] };
@@ -63,6 +66,7 @@ function Editor({ id, data, siblings, onOpen, onDone }: {
   // 리로드 한 번. 누르는 대신 250ms 를 기다릴 뿐, 끊어 두는 것은 그대로입니다.
   const [preview, setPreview] = useState("");
   const [loadedId, setLoadedId] = useState<number | null>(null);
+  const [confirming, setConfirming] = useState(false);
 
   useEffect(() => {
     const timer = setTimeout(() => setPreview(body), 250);
@@ -227,21 +231,25 @@ function Editor({ id, data, siblings, onOpen, onDone }: {
           </>
         )}
 
-        {/* 이 화면에서 할 수 있는 일은 전부 이 한 줄입니다. 미리보기 버튼은 없앴습니다 —
-            켜고 끄는 것이 아니라 옆에 늘 있습니다. */}
-        <div className="action-bar" style={{ marginTop: 14 }}>
+        {/* 저장은 왼쪽, 삭제는 **오른쪽 끝에 휴지통 하나**. 나란히 두면 둘이 같은 무게로
+            보이고, 실제로 저장을 누르려다 삭제를 누른 사람이 있었습니다. */}
+        <div className="action-bar row-between" style={{ marginTop: 14 }}>
           <ActionButton className="btn btn--primary" pending={id === "new" ? "만드는 중" : "저장 중"}
                         onClick={save}>
             <Icon name="check" size={15} /> {id === "new" ? "생성" : "저장"}
           </ActionButton>
           {data && isSignature && (
-            <ActionButton className="btn btn--ghost" pending="삭제 중" onClick={remove}>
-              <Icon name="x" size={15} /> 삭제
-            </ActionButton>
+            <button type="button" className="btn btn--icon btn--danger-ghost"
+                    title="삭제" aria-label="삭제" onClick={() => setConfirming(true)}>
+              <Icon name="trash" size={16} />
+            </button>
           )}
         </div>
         {note && <div className="t-sm" style={{ marginTop: 14 }} role="status">{note}</div>}
       </div>
+      {confirming && data && (
+        <DeleteDialog name={data.name} onCancel={() => setConfirming(false)} onConfirm={remove} />
+      )}
     </>
   );
 }
@@ -252,12 +260,11 @@ export function EmailTemplates() {
   const [listNote, setListNote] = useState<string | null>(null);
   const kind = params.get("kind");
 
-  async function removeTemplate(id: number) {
+  async function restoreTemplate(id: number) {
     setListNote(null);
-    const response = await fetch(`/email-templates/${id}`, {
-      method: "DELETE", credentials: "same-origin",
+    const response = await fetch(`/email-templates/${id}/restore`, {
+      method: "POST", credentials: "same-origin",
     });
-    // The server refuses the last row for a key the send path resolves, and says why.
     if (!response.ok) {
       setListNote((await response.text()).replace(/<[^>]*>/g, ""));
       return;
@@ -343,7 +350,16 @@ export function EmailTemplates() {
     // "기본" 표시는 없앴습니다: 어느 서명을 쓸지는 초안마다 고르는 것이고, 목록에 미리
     // 정해 둔 하나를 표시하면 그게 강제인 것처럼 읽힙니다.
     { label: "템플릿 이름", width: kind === "signature" ? "68%" : "52%",
-      cell: (g) => <strong>{g.rows[0].name}</strong> },
+      cell: (g) => (
+        <>
+          <strong className={g.rows[0].deleted ? "t-subtle" : undefined}>{g.rows[0].name}</strong>
+          {g.rows[0].deleted && (
+            <div className="t-xs" style={{ color: "var(--danger)" }}>
+              삭제됨 · {g.rows[0].days_left}일 후 완전 삭제
+            </div>
+          )}
+        </>
+      ) },
     // 무엇이 있는지만. 어느 것을 고칠지는 열어서 정합니다. 서명에는 언어라는 것이 없으므로
     // (고르는 것은 사람입니다) 그 묶음에서는 이 칸 자체를 뺍니다.
     ...(kind === "signature" ? [] : [{ label: "언어", width: "16%",
@@ -362,13 +378,15 @@ export function EmailTemplates() {
       width: "12%",
       cell: (g) => (
         <div className="row" style={{ gap: 6 }} onClick={(e) => e.stopPropagation()}>
-          <button type="button" className="btn btn--subtle btn--sm"
-                  onClick={() => setParams({ kind, edit: String(g.rows[0].id) })}>수정</button>
-          {/* 서명만. 나머지는 코드가 이름으로 찾는 행이라 지우면 되돌릴 방법이 없습니다 —
-              콘솔은 서명을 만들지 코드 참조를 만들지 못합니다. */}
-          {kind === "signature" && (
-            <ActionButton className="btn btn--ghost btn--sm" pending="삭제 중"
-                          onClick={() => removeTemplate(g.rows[0].id)}>삭제</ActionButton>
+          {/* 삭제 버튼은 여기 없습니다. 열어서 지웁니다 — 확인 창이 문장을 옮겨 적으라고
+              하는데, 무엇을 지우는지 안 보고 옮겨 적는 것은 확인이 아닙니다. 되돌리기는
+              반대로 목록에 있습니다: 되돌리는 데는 망설일 이유가 없습니다. */}
+          {g.rows[0].deleted ? (
+            <ActionButton className="btn btn--subtle btn--sm" pending="되돌리는 중"
+                          onClick={() => restoreTemplate(g.rows[0].id)}>되돌리기</ActionButton>
+          ) : (
+            <button type="button" className="btn btn--subtle btn--sm"
+                    onClick={() => setParams({ kind, edit: String(g.rows[0].id) })}>수정</button>
           )}
         </div>
       ),

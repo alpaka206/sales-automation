@@ -541,11 +541,17 @@ def ui_email_templates():
     """
     from ...db.models import EmailTemplate
     from ...db.session import SessionLocal
+    from ...db.soft_delete import DELETED, days_left, purge_expired
 
     from ...db.models import PolicySource
 
+    # 보관 기간이 지난 것은 여기서 사라집니다. 스케줄러를 하나 더 두는 것보다 작고, 휴지통은
+    # 아무도 안 볼 때 비어 있을 필요가 없습니다.
+    purge_expired()
     with SessionLocal() as session:
-        policy_count = session.query(PolicySource).count()
+        policy_count = (
+            session.query(PolicySource).filter(PolicySource.status != DELETED).count()
+        )
         rows = session.query(EmailTemplate).order_by(EmailTemplate.updated_at.desc()).all()
         all_keys = {row.key for row in rows}
         items = [
@@ -564,6 +570,10 @@ def ui_email_templates():
                 "body": row.body or "",
                 "subject": row.subject or "",
                 "chars": len(row.body or ""),
+                # 지운 행도 목록에 실립니다 — 흐리게, 「N일 후 완전 삭제」와 되돌리기 버튼과
+                # 함께. 발송 경로는 이미 status='active' 만 읽으므로 여기 실려도 안전합니다.
+                "deleted": row.status == DELETED,
+                "days_left": days_left(row.deleted_at) if row.status == DELETED else None,
                 # Which signature a new draft starts with. A row, not a literal in
                 # inbound.py — and the screen is where it moves.
             }
@@ -575,7 +585,7 @@ def ui_email_templates():
                 "key": key,
                 "label": label,
                 "count": policy_count if key == "policy"
-                else sum(1 for item in items if item["kind"] == key),
+                else sum(1 for item in items if item["kind"] == key and not item["deleted"]),
                 # New rows are only reachable as signatures: the send path resolves the
                 # other kind by exact name, so a template created here would be a row
                 # nothing can ever read. Editing the existing ones is the point.
@@ -611,8 +621,10 @@ def ui_policy_docs():
     """
     from ...db.models import PolicySource
     from ...db.session import SessionLocal
+    from ...db.soft_delete import DELETED, days_left, purge_expired
     from .policy_docs import MODES
 
+    purge_expired()
     with SessionLocal() as session:
         rows = (
             session.query(PolicySource)
@@ -634,6 +646,9 @@ def ui_policy_docs():
                     "usage_note": row.usage_note or "",
                     "effective_on": row.effective_on,
                     "edited_at": row.edited_at,
+                    # 지운 문서도 실립니다 — 흐리게, 되돌리기와 함께 일주일.
+                    "deleted": row.status == DELETED,
+                    "days_left": days_left(row.deleted_at) if row.status == DELETED else None,
                 }
                 for row in rows
             ],
