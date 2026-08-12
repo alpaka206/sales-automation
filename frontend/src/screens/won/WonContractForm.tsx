@@ -143,9 +143,9 @@ export function WonContractForm() {
   const unitPrice = (() => {
     const credits = draft ? n(draft.credits) : 0;
     if (!billing || !credits) return null;
-    const value = billing / (credits / 60);
-    // 딱 떨어지면 정수로, 아니면 소수 넷째 자리까지(행이 Numeric(12,4) 였던 정밀도).
-    return Number.isInteger(value) ? String(value) : String(Number(value.toFixed(4)));
+    // 소수 둘째 자리. 상세 화면의 「분당 단가」와 같은 자릿수여야 합니다 — 만드는 화면과
+    // 보는 화면이 같은 계약을 다른 숫자로 보여 주면, 어느 쪽이 저장된 값인지 알 수 없습니다.
+    return (billing / (credits / 60)).toFixed(2);
   })();
 
   const [save, saving] = useAction(async (event: React.FormEvent<HTMLFormElement>) => {

@@ -567,7 +567,7 @@ function ContractSection({ client, contracts, current, today, showAll, onToggleA
           {/* 계산값입니다 — 금액 ÷ (계약 크레딧 ÷ 60). 단가 통화 칸은 없어졌습니다:
               단가는 언제나 계약 통화입니다. */}
           <KV k="분당 단가" v={current.unit_price ? <span className="mono">
-            {money(current.unit_price, current.currency)}{" "}
+            {money(current.unit_price, current.currency, 2)}{" "}
             <span className="muted">{current.currency}</span>
           </span> : "—"} />
           <KV k="결제 수단" v={current.payment_method} />

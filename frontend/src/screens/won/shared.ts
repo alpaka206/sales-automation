@@ -89,9 +89,17 @@ export type ListData = {
 export const n = (value: Money | number | null | undefined): number =>
   value === null || value === undefined || value === "" ? 0 : Number(value);
 
-/** 목업과 같은 표기: 통화 기호 + 천 단위 쉼표, 소수점 없음. */
-export const money = (value: Money, currency = "KRW"): string =>
-  (currency === "USD" ? "$" : "₩") + Math.round(n(value)).toLocaleString("en-US");
+/** 목업과 같은 표기: 통화 기호 + 천 단위 쉼표, 기본은 소수점 없음.
+ *
+ * `decimals` 는 **분당 단가**를 위한 것입니다. 계약 금액은 원 단위까지가 전부라 소수점이
+ * 군더더기지만, 단가는 금액 ÷ (크레딧 ÷ 60) 이라 딱 떨어지는 쪽이 드뭅니다 — 2,630.89 를
+ * 2,631 로 반올림해 보여 주면, 그 값을 다시 곱해 본 사람이 계약서의 금액과 안 맞는다고
+ * 생각합니다. 실제 계산은 늘 온전한 값으로 하고 여기서는 표기만 자릅니다. */
+export const money = (value: Money, currency = "KRW", decimals = 0): string =>
+  (currency === "USD" ? "$" : "₩") +
+  n(value).toLocaleString("en-US", {
+    minimumFractionDigits: decimals, maximumFractionDigits: decimals,
+  });
 
 export const num = (value: number | null | undefined): string =>
   Number(value ?? 0).toLocaleString("en-US");
