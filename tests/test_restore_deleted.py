@@ -20,7 +20,9 @@ from scripts.restore_deleted import (
     _deleted_templates,
     _orphan_knowledge,
     _restore_policy_doc,
+    _restore_rule,
     _restore_template,
+    _rule_seeds,
 )
 
 
@@ -88,6 +90,36 @@ def test_a_deleted_policy_doc_comes_back_from_the_copy(지운_정책문서):
         assert source.body == "사본 본문" and source.mode == "knowledge"
         assert source.subject == "안내"        # 제목은 태그에서 되짚습니다
         assert 지운_정책문서 not in _orphan_knowledge(session)
+
+
+def test_an_always_applied_rule_comes_back_from_its_seed_file():
+    """DB 사본이 없는 대신 씨앗 파일이 저장소에 있습니다 — 0043 이 처음 넣은 그 텍스트."""
+    from src.llm.prompts import get_company_rules
+
+    seeds = _rule_seeds()
+    path = seeds["rule_01_common_principles.md"]
+    key = f"file:{path.name}"
+    with SessionLocal() as session:
+        session.query(PolicySource).filter_by(doc_key=key).delete()
+        session.commit()
+    try:
+        with SessionLocal() as session:
+            _restore_rule(session, path)
+        with SessionLocal() as session:
+            source = session.query(PolicySource).filter_by(doc_key=key).one()
+            assert source.mode == "rules"
+            # 제목 줄은 label 로 올라갑니다 — 안 그러면 프롬프트에 제목이 두 번 들어갑니다.
+            assert source.label == "공통 원칙 및 가드레일"
+            assert not source.body.startswith("#")
+            # 캐시가 없으므로 복원 즉시 다음 초안이 읽습니다.
+            assert "공통 원칙 및 가드레일" in get_company_rules()
+
+            with pytest.raises(SystemExit):
+                _restore_rule(session, path)     # 이미 있는 것을 두 번 넣지 않습니다
+    finally:
+        with SessionLocal() as session:
+            session.query(PolicySource).filter_by(doc_key=key).delete()
+            session.commit()
 
 
 def test_a_renamed_copy_is_refused_rather_than_split_in_two(지운_정책문서):
