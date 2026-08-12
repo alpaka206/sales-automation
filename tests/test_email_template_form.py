@@ -376,6 +376,35 @@ def test_the_bin_empties_after_a_week(template_db):
         assert days_left(session.query(EmailTemplate).one().deleted_at) == RETENTION_DAYS - 1
 
 
+def test_the_history_of_a_purged_template_goes_with_it(template_db):
+    """개정 이력도 같이 갑니다. 안 그러면 「7일 뒤 사라진다」가 사실이 아닙니다 — 화면에서만
+    없어지고 본문은 그대로 남아, 일부러 흘려보낸 것을 누군가 되살릴 수 있습니다.
+
+    **지금 살아 있는 템플릿의 이력은 그대로 둡니다.** 그쪽은 되돌리기의 재료입니다.
+    """
+    from src.db.models import EmailTemplateRevision
+    from src.db.soft_delete import purge_expired
+
+    with template_db() as session:
+        session.add(EmailTemplate(key=f"{SIGNATURE_KEY_PREFIX}live", name="쓰는 서명",
+                                  language="all", channel="email", status="active",
+                                  version=1, body="살아 있음"))
+        session.flush()
+        live_id = session.query(EmailTemplate).one().id
+        session.add_all([
+            EmailTemplateRevision(template_id=live_id, key=f"{SIGNATURE_KEY_PREFIX}live",
+                                  name="쓰는 서명", body="옛 본문", change_note="edited"),
+            # 하드 삭제 시절에 남은 고아 — 가리키는 템플릿이 없습니다.
+            EmailTemplateRevision(template_id=9999, key="signature_hyeram", name="퇴사자 서명",
+                                  body="<table/>", change_note="deleted"),
+        ])
+        session.commit()
+
+    purge_expired()
+    with template_db() as session:
+        assert [r.name for r in session.query(EmailTemplateRevision)] == ["쓰는 서명"]
+
+
 def test_deleting_needs_the_sentence_typed_out_not_a_click():
     """확인이 클릭 한 번이면 두 번째부터는 읽지 않습니다 — 손이 기억하는 동작이 됩니다.
     문장을 옮겨 적는 동안에는 무엇을 지우는지 읽게 됩니다.

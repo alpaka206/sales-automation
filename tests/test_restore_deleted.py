@@ -1,60 +1,25 @@
-"""scripts/restore_deleted.py — 실수로 지운 것을 되살립니다.
+"""scripts/restore_deleted.py — 7일이 지난 뒤에도 되살릴 데가 남아 있는 두 가지.
 
-지우는 화면은 둘인데 남는 것이 서로 다릅니다. 여기서 고정하는 것은 그 **차이**입니다:
-서명은 스냅샷에서, 「문의별 참고」 정책 문서는 초안이 읽는 사본에서 돌아오고, 「항상 적용」
-정책 문서는 돌아올 곳이 없습니다. 셋을 한 화면에서 지우니까 셋이 같아 보입니다.
+이메일 템플릿은 여기 없습니다. 콘솔의 7일 휴지통이 그 일을 하고, 그 뒤에는 개정 이력까지
+같이 청소됩니다 — 7일이 지나면 정말 없어진다는 것이 그 기능의 전부라서, 뒷문을 하나 더 두면
+운영자가 일부러 흘려보낸 것이 되살아납니다. 그 청소는 tests/test_email_template_form.py 가
+고정합니다.
+
+여기 남은 둘은 휴지통이 아니라 **다른 목적의 사본**이 우연히 남는 경우입니다.
 """
 
 from __future__ import annotations
 
 import pytest
 
-from src.db.models import (
-    EmailTemplate,
-    EmailTemplateRevision,
-    KnowledgeDocument,
-    PolicySource,
-)
+from src.db.models import KnowledgeDocument, PolicySource
 from src.db.session import SessionLocal
 from scripts.restore_deleted import (
-    _deleted_templates,
     _orphan_knowledge,
     _restore_policy_doc,
     _restore_rule,
-    _restore_template,
     _rule_seeds,
 )
-
-
-@pytest.fixture
-def 지운_서명():
-    """콘솔의 삭제 라우트가 남기는 그대로 — 행은 없고 스냅샷만 있습니다."""
-    with SessionLocal() as session:
-        session.add(
-            EmailTemplateRevision(
-                template_id=9999, key="signature_톤앤매너", name="톤앤 매너",
-                body="지워진 본문", change_note="deleted", edited_by="운영자",
-            )
-        )
-        session.commit()
-    yield "signature_톤앤매너"
-    with SessionLocal() as session:
-        session.query(EmailTemplateRevision).filter_by(key="signature_톤앤매너").delete()
-        session.query(EmailTemplate).filter_by(key="signature_톤앤매너").delete()
-        session.commit()
-
-
-def test_a_deleted_signature_comes_back_whole(지운_서명):
-    with SessionLocal() as session:
-        되살릴것 = _deleted_templates(session)
-        assert 지운_서명 in 되살릴것
-        _restore_template(session, 되살릴것[지운_서명])
-
-    with SessionLocal() as session:
-        tpl = session.query(EmailTemplate).filter_by(key=지운_서명).one()
-        assert tpl.name == "톤앤 매너" and tpl.body == "지워진 본문"
-        # 되살린 것은 목록에서 빠져야 합니다. id 로 찾으면 새 id 가 붙어서 영원히 남습니다.
-        assert 지운_서명 not in _deleted_templates(session)
 
 
 @pytest.fixture

@@ -19,8 +19,9 @@ import math
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import delete as sql_delete
+from sqlalchemy import select
 
-from .models import EmailTemplate, PolicySource
+from .models import EmailTemplate, EmailTemplateRevision, PolicySource
 from .session import SessionLocal
 
 RETENTION_DAYS = 7
@@ -45,8 +46,16 @@ def days_left(deleted_at: datetime | None) -> int:
 def purge_expired() -> int:
     """보관 기간이 지난 것을 진짜로 지웁니다. 목록 라우트가 부릅니다.
 
-    이메일 템플릿의 개정 이력(``email_template_revisions``)은 남습니다 — 행과 달리 그쪽은
-    append-only 이고, 지운 본문을 마지막으로 들고 있는 곳입니다.
+    개정 이력도 같이 갑니다(``email_template_revisions``). 한동안 이력만 남겨 뒀는데, 그러면
+    「7일 뒤 사라진다」가 사실이 아닙니다 — 화면에서는 없어졌는데 본문은 그대로 남아 있고,
+    ``scripts/restore_deleted.py`` 가 그것을 계속 "되살릴 수 있음" 으로 보여 줍니다. 운영자가
+    일부러 흘려보낸 것을 되살릴 수 있으면 그건 휴지통이 아니라 서랍입니다.
+
+    지금 살아 있는 템플릿의 이력은 그대로 둡니다 — 그쪽은 되돌리기의 재료입니다. 기준은 하나,
+    **가리키는 템플릿이 없는 이력**. 하드 삭제 시절에 남은 고아 행들도 여기서 정리됩니다.
+
+    정책 문서의 사본(``knowledge_documents``)은 건드리지 않습니다. 그 표에는 다른 경로로
+    들어온 문서도 있어서, 짝을 못 찾은 것을 지우는 규칙이 초안이 읽는 문서를 지울 수 있습니다.
     """
     cutoff = utcnow() - timedelta(days=RETENTION_DAYS)
     removed = 0
@@ -60,5 +69,14 @@ def purge_expired() -> int:
                 )
             )
             removed += result.rowcount or 0
+        # 위에서 방금 지운 것과, 전에 하드 삭제로 사라진 것 모두.
+        session.execute(
+            sql_delete(EmailTemplateRevision).where(
+                EmailTemplateRevision.template_id.is_not(None),
+                ~select(EmailTemplate.id)
+                .where(EmailTemplate.id == EmailTemplateRevision.template_id)
+                .exists(),
+            )
+        )
         session.commit()
     return removed

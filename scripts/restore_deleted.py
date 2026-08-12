@@ -1,23 +1,22 @@
-"""콘솔에서 실수로 지운 이메일 템플릿·정책 문서를 되살립니다.
+"""보관 기간이 지난 뒤에도 되살릴 데가 남아 있는 두 가지.
 
-지우는 화면은 둘인데 남는 것이 서로 달라서, 되살리는 방법도 다릅니다:
+**이메일 템플릿은 여기 없습니다.** 콘솔이 7일 휴지통을 들고 있고(0070), 그 안에서는 목록의
+「되돌리기」가, 그 뒤에는 아무것도 되살리지 않습니다 — 개정 이력까지 같이 청소하기 때문입니다
+(``soft_delete.purge_expired``). 7일이 지나면 정말 없어진다는 것이 그 기능의 전부라, 여기에
+뒷문을 하나 더 두면 운영자가 일부러 흘려보낸 것이 되살아납니다.
 
-  이메일 템플릿(서명)  삭제 직전 본문이 ``email_template_revisions`` 에 통째로 남습니다
-                       (``change_note='deleted'``). 온전히 복원됩니다.
-  정책 문서 · 문의별 참고  등록부 행은 지워지지만 초안이 읽는 **사본**
-                       (``knowledge_documents``)은 남습니다 — 삭제 라우트가 사본을 안
-                       건드립니다. 그 사본에서 되살립니다.
+남은 두 가지는 휴지통이 아니라 **다른 목적의 사본**이 우연히 남는 경우입니다:
+
+  정책 문서 · 문의별 참고  초안이 읽는 사본(``knowledge_documents``)은 등록부와 수명이
+                       다릅니다. 그 사본에서 등록부 행을 되짚습니다.
   정책 문서 · 항상 적용  DB 에는 사본이 없습니다(``mode='rules'`` 는 등록부에서 직접
                        읽힙니다). 대신 **씨앗 파일이 저장소에 있습니다** —
                        ``src/db/seeds/policy/rule_*.md``, 마이그레이션 0043 이 처음
                        넣은 그 텍스트입니다. 그 뒤 콘솔에서 고친 것은 여기 없으니
                        되살아나는 것은 **원본**이고, 화면에서 한 번 훑어야 합니다.
 
-되살릴 화면은 만들지 않았습니다. 실수로 지우는 일이 드물고, 화면 하나는 영원히 도는
-코드입니다 — 필요할 때 한 번 실행하는 편이 쌉니다.
-
     python scripts/restore_deleted.py                     # 되살릴 수 있는 것 목록
-    python scripts/restore_deleted.py <key 또는 slug>      # 하나 되살리기
+    python scripts/restore_deleted.py <slug>              # 사본에서 정책 문서 되살리기
     python scripts/restore_deleted.py rule_01_tone.md      # 씨앗 파일에서 규칙 되살리기
 
 사내망에서는 DB(5432/6543)가 막혀 있습니다. 서버 셸이나 망 밖에서 실행하세요.
@@ -30,29 +29,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from src.db.models import (  # noqa: E402
-    EmailTemplate,
-    EmailTemplateRevision,
-    KnowledgeDocument,
-    PolicySource,
-)
+from src.db.models import KnowledgeDocument, PolicySource  # noqa: E402
 from src.db.session import SessionLocal  # noqa: E402
-
-
-def _deleted_templates(session) -> dict[str, EmailTemplateRevision]:
-    """지워진 템플릿의 key → 마지막 스냅샷.
-
-    key 로 찾습니다. 되살린 행은 id 가 새로 붙어서, template_id 로 찾으면 한 번 되살린
-    것이 목록에 영원히 남습니다.
-    """
-    live = {key for (key,) in session.query(EmailTemplate.key)}
-    latest: dict[str, EmailTemplateRevision] = {}
-    for rev in session.query(EmailTemplateRevision).order_by(EmailTemplateRevision.id):
-        if rev.key in live:
-            continue
-        # 마지막 스냅샷이 곧 삭제 직전 상태입니다 — 삭제가 마지막 스냅샷을 남깁니다.
-        latest[rev.key] = rev
-    return latest
 
 
 def _orphan_knowledge(session) -> dict[str, KnowledgeDocument]:
@@ -110,17 +88,6 @@ def _restore_rule(session, path: Path) -> str:
     )
 
 
-def _restore_template(session, rev: EmailTemplateRevision) -> str:
-    session.add(
-        EmailTemplate(
-            key=rev.key, name=rev.name, language=rev.language, channel=rev.channel,
-            body=rev.body, description=rev.description, status=rev.status or "active",
-        )
-    )
-    session.commit()
-    return f"이메일 템플릿 복원: {rev.name} ({rev.key})"
-
-
 def _restore_policy_doc(session, doc: KnowledgeDocument) -> str:
     """사본에서 등록부 행을 다시 만듭니다.
 
@@ -154,19 +121,14 @@ def _restore_policy_doc(session, doc: KnowledgeDocument) -> str:
 def main() -> None:
     wanted = sys.argv[1] if len(sys.argv) > 1 else None
     with SessionLocal() as session:
-        templates = _deleted_templates(session)
         docs = _orphan_knowledge(session)
-
         seeds = _rule_seeds()
 
         if wanted is None:
-            print("되살릴 수 있는 이메일 템플릿:")
-            for key, rev in templates.items() or ():
-                print(f"  {key:40} {rev.name}  ({rev.edited_by} 삭제)")
-            print("\n되살릴 수 있는 정책 문서(문의별 참고):")
+            print("되살릴 수 있는 정책 문서(문의별 참고):")
             for slug, doc in docs.items() or ():
                 print(f"  {slug:40} {doc.title}")
-            if not templates and not docs:
+            if not docs:
                 print("  없습니다.")
 
             # 지금 등록된 것과 씨앗 파일을 **나란히** 보여 줍니다. "없어진 것" 으로 계산해서
@@ -185,9 +147,7 @@ def main() -> None:
                 print(f"  {name:40} {first}")
             return
 
-        if wanted in templates:
-            print(_restore_template(session, templates[wanted]))
-        elif wanted in docs:
+        if wanted in docs:
             print(_restore_policy_doc(session, docs[wanted]))
         elif wanted in seeds:
             print(_restore_rule(session, seeds[wanted]))
