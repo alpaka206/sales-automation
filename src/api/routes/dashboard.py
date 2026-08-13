@@ -14,7 +14,7 @@ from sqlalchemy import func, select
 
 from ...db.models import Conversation, Message
 from ...db.session import SessionLocal
-from .messages import LIST_STATUS_BUCKETS, _messages_list_context, list_now
+from .messages import LIST_STATUS_BUCKETS, _messages_list_context
 
 router = APIRouter(tags=["web"])
 
@@ -93,37 +93,6 @@ def _awaiting_counters() -> dict:
         "awaiting_by_stage": awaiting_by_stage,
     }
 
-
-def _overview_context() -> dict:
-    """전체 대시보드 — the roll-up above the groups.
-
-    Every number here belongs to a screen further in, and comes from that screen's own
-    builder: the counters from _awaiting_counters, the column sizes from _pipeline_rows,
-    the money from _contract_summary. limit=0 because this screen shows how big each
-    column is, never a card from it — the totals come from a separate COUNT either way.
-    """
-    from .customer_ops import (
-        CONTRACT_STATUS_LABELS,
-        PIPELINE_STAGES,
-        _contract_summary,
-        _pipeline_rows,
-    )
-
-    counters = _awaiting_counters()
-    _rows, stage_totals = _pipeline_rows(limit=0)
-    return {
-        "now": list_now(),
-        "counters": counters,
-        "stages": [
-            {"key": key, "label": korean, "total": stage_totals.get(key, 0),
-             "awaiting": counters["awaiting_by_stage"].get(key, 0)}
-            for key, _hubspot, korean in PIPELINE_STAGES
-        ],
-        "contracts": _contract_summary(),
-        "contract_status_labels": [
-            {"key": key, "label": label} for key, label in CONTRACT_STATUS_LABELS
-        ],
-    }
 
 
 def _dashboard_context() -> dict:

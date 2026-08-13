@@ -64,6 +64,8 @@ export type Options = {
   doc_types: string[]; renewal_plans: string[];
   payment_methods: string[]; payment_types: string[]; currencies: string[];
   customer_types: string[]; departments: string[];
+  /** 「전체」의 이름 — 부서가 아니라 셋을 합친 묶음이고, 서버가 보낸 키와 같아야 합니다. */
+  all_departments: string;
 };
 export type ListData = {
   today: string;
@@ -83,8 +85,10 @@ export type ListData = {
   fx_error: string | null;
   /** 이번 달(YYYY-MM). 카드가 「이번달」이라고 말하는 그 달입니다. */
   month: string;
-  /** 통화별 이번 달 예상 금액 — **서버가 결제일로 계산합니다.** */
-  month_revenue: Record<string, number>;
+  /** 담당부서 → 통화 → 이번 달 예상 금액. **서버가 계약 기간으로 계산합니다.**
+   *  「전체」 묶음도 서버가 같이 만듭니다 — 화면이 부서별 값을 다시 더하면 그 덧셈이
+   *  두 곳에 생깁니다. */
+  month_revenue: Record<string, Record<string, number>>;
   options: Options;
 };
 

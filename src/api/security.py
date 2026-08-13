@@ -19,8 +19,8 @@ API_SKIP_PATHS = ("/healthz", "/favicon.ico")
 LOCAL_DOC_PATHS = ("/docs", "/redoc", "/openapi.json")
 # Browser-facing web UI route prefixes (vs JSON API / webhooks).
 WEB_UI_PREFIXES = (
-    "/", "/overview", "/messages", "/email-templates", "/policy-docs", "/settings",
-    "/logs", "/static", "/auth", "/tools", "/customers", "/operations",
+    "/", "/messages", "/email-templates", "/policy-docs", "/settings",
+    "/logs", "/static", "/auth", "/customers", "/operations",
     "/pipeline", "/companies", "/contacts", "/outbound-history",
     "/integrations",
     # 수주 고객. 화면이 세션 쿠키로 부르는 브라우저 경로입니다 — 여기 없으면 토큰을

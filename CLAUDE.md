@@ -116,10 +116,11 @@ exempt from the auth gate, so React can draw it before a session exists).
   writes `src/api/static/app/`, which is gitignored and shipped via
   `[tool.setuptools.package-data]`. Skip it and `/app` answers 503. The Dockerfile's node
   stage does this itself, so `docker build` needs no prior step.
-- **`npm --prefix frontend test`** replays 1,512 quotes the pre-React calculator
-  rendered against `src/lib/quote.ts`. `frontend/test/quote.golden.json` is not a fixture
-  to refresh: a failure means the console now quotes a different price than the
-  calculator the sales team has been using.
+- **견적 계산기·견적서·계약서, 그리고 전체 대시보드·리드 추이는 지웠습니다** (2026-08-13,
+  운영자 지시 "앞으로 안 씀"). 화면·라우트·리다이렉트·`src/lib/quote.ts`·`quote_tiers.py`,
+  그리고 그 계산을 지키던 1,512행짜리 golden 코퍼스(`frontend/test/quote.golden.json`)까지
+  전부입니다. 되살릴 일이 생기면 **git 이력에서 그 파일들을 그대로 꺼내라** — 특히 golden
+  은 React 포팅 전 계산기가 실제로 뽑은 값을 캡처한 것이라 다시 만들 수 없습니다.
 - **Styling is `static/console.css`**, linked rather than bundled — one copy of the design
   for the SPA and for the sign-in pages. There is no CSS framework.
 - **Reads go through `/api/ui/*`**, which calls the SAME context builders the templates

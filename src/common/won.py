@@ -32,6 +32,10 @@ ALLOCATABLE_BANDS: dict[str, int] = {
     "Interactive": 3000,
     "AX": 4000,
 }
+# 담당부서 — 수주 고객 화면의 고르개가 쓰는 목록이자, 예상 MRR 을 나누는 단위입니다.
+# 「전체」는 부서가 아니라 그 셋을 합친 묶음의 이름이라 따로 둡니다.
+DEPARTMENTS: tuple[str, ...] = ("GTM", "Interactive", "AX")
+ALL_DEPARTMENTS = "전체"
 DEPARTMENT_BY_TYPE: dict[str, str] = {
     "GTM Inbound": "GTM",
     "GTM Outbound": "GTM",

@@ -78,7 +78,9 @@ export function WonCustomers() {
   const [status, setStatus] = useState("all");
   const [plan, setPlan] = useState("all");
   const [type, setType] = useState("all");
-  const [dept, setDept] = useState("all");
+  // **기본은 GTM 입니다.** 이 화면을 매일 여는 쪽이 GTM 이고, 「전체」로 두면 위 카드가
+  // 세 팀을 합친 — 아무 팀의 것도 아닌 — 숫자로 시작합니다.
+  const [dept, setDept] = useState("GTM");
   const [view, setView] = useState<"" | "활성" | "갱신임박">("");
 
   const today = data?.today ?? new Date().toISOString().slice(0, 10);
@@ -88,11 +90,9 @@ export function WonCustomers() {
     const all = data?.rows ?? [];
     const query = search.trim().toLowerCase();
     const filtered = all.filter((row) => {
-      // 카드가 센 것과 **같은 조건**입니다. 카드가 GTM 만 세는데 눌렀을 때 전부가 뜨면,
-      // 「12곳」이라고 적힌 버튼이 20줄짜리 표를 엽니다.
-      if (view === "활성" && (row.plan_status === "사용 중단" || row.department !== "GTM")) {
-        return false;
-      }
+      // 담당부서는 화면 맨 위 고르개가 거릅니다 — 카드도 목록도 같은 값을 봅니다.
+      if (dept !== "all" && row.department !== dept) return false;
+      if (view === "활성" && row.plan_status === "사용 중단") return false;
       if (view === "갱신임박") {
         // 사용 중단은 갱신 대상이 아닙니다 — 세지도, 목록에 넣지도 않습니다.
         if (row.plan_status === "사용 중단") return false;
@@ -103,7 +103,6 @@ export function WonCustomers() {
       if (status !== "all" && row.plan_status !== status) return false;
       if (plan !== "all" && row.active?.plan !== plan) return false;
       if (type !== "all" && row.customer_type !== type) return false;
-      if (dept !== "all" && row.department !== dept) return false;
       if (query) {
         // **사람으로 찾습니다.** 산업 분야·국가는 뺐습니다 — 그 둘은 바로 위 필터가
         // 하는 일이고, 검색어에 섞이면 "교육" 한 단어가 교육 산업 고객 전부를 끌고
@@ -128,23 +127,23 @@ export function WonCustomers() {
 
   if (!data) return <div className="won"><div className="page">불러오는 중…</div></div>;
 
-  // 「활성 고객」 카드는 **GTM 담당 고객만** 셉니다 — 바로 옆 예상 MRR 이 GTM 만 더하는
-  // 것과 같은 기준입니다. 둘이 다른 모집단을 쓰면 "고객 12곳에 MRR 3천만원" 이 어느 팀의
-  // 숫자도 아니게 되고, 그걸 눈치챌 방법이 화면에 없습니다. 아래 목록과 갱신 임박은
-  // 부서와 무관하게 전부 보여 줍니다(담당부서 필터가 따로 있습니다).
-  const gtm = data.rows.filter((r) => r.department === "GTM");
-  const live = gtm.filter((r) => r.plan_status === "사용중").length;
-  const setup = gtm.filter((r) => r.plan_status === "세팅중").length;
-  const gtmActive = gtm.filter((r) => r.plan_status !== "사용 중단" && r.active);
-  const mrrCount = gtmActive.filter((r) => r.active?.deal_type === "MRR").length;
-  const pocCount = gtmActive.filter((r) => r.active?.deal_type === "PoC").length;
-  const activeRows = data.rows.filter((r) => r.plan_status !== "사용 중단" && r.active);
-  // 「이번달 예상 MRR」은 **서버가 계약 기간으로 계산해서**(계약 금액 ÷ 개월수) 통화별로
-  // 내려줍니다. 여기서 행을 걸러 더하면 그 필터가 곧 정의가 됩니다 — 실제로 플랜 상태로
-  // 거르고 있었고, 그래서 세팅중 고객이 통째로 빠졌습니다. 행에는 활성 계약 하나만
+  // **화면 위의 담당부서 고르개가 이 화면의 모집단입니다** — 카드도 목록도 같은 값을 봅니다.
+  // 둘이 다른 모집단을 쓰면 "고객 12곳에 MRR 3천만원" 이 어느 팀의 숫자도 아니게 되고,
+  // 그걸 눈치챌 방법이 화면에 없습니다.
+  const scoped = dept === "all" ? data.rows : data.rows.filter((r) => r.department === dept);
+  const deptLabel = dept === "all" ? data.options.all_departments : dept;
+  const live = scoped.filter((r) => r.plan_status === "사용중").length;
+  const setup = scoped.filter((r) => r.plan_status === "세팅중").length;
+  const activeRows = scoped.filter((r) => r.plan_status !== "사용 중단" && r.active);
+  const mrrCount = activeRows.filter((r) => r.active?.deal_type === "MRR").length;
+  const pocCount = activeRows.filter((r) => r.active?.deal_type === "PoC").length;
+  // 「이번달 예상 MRR」은 **서버가 계약 기간으로 계산해서**(계약 금액 ÷ 개월수) 담당부서별·
+  // 통화별로 내려줍니다. 여기서 행을 걸러 더하면 그 필터가 곧 정의가 됩니다 — 실제로 플랜
+  // 상태로 거르고 있었고, 그래서 세팅중 고객이 통째로 빠졌습니다. 행에는 활성 계약 하나만
   // 실려 있다는 문제도 있었습니다(고객의 다른 계약이 돌고 있어도 안 잡힘).
-  const mrrKrw = data.month_revenue?.KRW ?? 0;
-  const mrrUsd = data.month_revenue?.USD ?? 0;
+  const mrr = data.month_revenue?.[deptLabel] ?? {};
+  const mrrKrw = mrr.KRW ?? 0;
+  const mrrUsd = mrr.USD ?? 0;
   const renewing = activeRows
     .filter((r) => {
       const left = daysUntil(r.active?.ends_on, today);
@@ -165,7 +164,17 @@ export function WonCustomers() {
       <div className="page">
         <div className="page-head">
           <div><h1 className="page-title">수주 고객</h1></div>
-          <div style={{ display: "flex", gap: 8 }}>
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            {/* **이 화면의 축입니다.** 아래 필터들과 달리 목록만 거르는 것이 아니라 위 카드
+                둘의 모집단까지 정하므로, 그것들 사이가 아니라 제목 옆에 있습니다. */}
+            <label className="sr-only" htmlFor="won-dept">담당부서</label>
+            <select className="select" id="won-dept" value={dept}
+                    onChange={(event) => setDept(event.target.value)}>
+              <option value="all">담당부서 {data.options.all_departments}</option>
+              {data.options.departments.map((item) => (
+                <option key={item} value={item}>{item}</option>
+              ))}
+            </select>
             {/* 브라우저의 다운로드가 기능 전부입니다 — fetch 로 돌리면 Save As 를 다시 짜게 됩니다. */}
             <a className="btn" href="/won-customers/export.csv">CSV 내보내기</a>
             <button className="btn btn-primary" type="button"
@@ -179,7 +188,7 @@ export function WonCustomers() {
           <button className={`kpi wide${view === "활성" ? " is-on" : ""}`} type="button"
                   onClick={() => setView(view === "활성" ? "" : "활성")}>
             <div className="kpi-label">
-              <G name="person" /> 활성 고객 <span style={{ color: "var(--faint)" }}>(GTM)</span>
+              <G name="person" /> 활성 고객 <span style={{ color: "var(--faint)" }}>({deptLabel})</span>
             </div>
             <div className="kpi-flex">
               <div className="kpi-main">
@@ -201,7 +210,7 @@ export function WonCustomers() {
           <div className="kpi">
             {/* GTM 이라고 적혀 있어야 합니다. 서버가 담당부서로 거르는데 화면이 말하지
                 않으면, 아래 목록을 더한 값과 안 맞을 때 어느 쪽이 틀린 건지 알 수 없습니다. */}
-            <div className="kpi-label"><G name="trend" /> 이번달 예상 MRR <span style={{ color: "var(--faint)" }}>(GTM · VAT 포함 · USD)</span></div>
+            <div className="kpi-label"><G name="trend" /> 이번달 예상 MRR <span style={{ color: "var(--faint)" }}>({deptLabel} · VAT 포함 · USD)</span></div>
             {/* **합계 통화가 USD 입니다.** 원화 계약을 오늘 고시가로 환산해 더합니다 —
                 이 팀이 보고하는 단위가 달러이고, 그 자리에서 다시 나누던 계산을 화면이
                 합니다. 계약마다의 금액은 아래 표에서 계약 통화 그대로 봅니다. */}
@@ -340,7 +349,6 @@ export function WonCustomers() {
           <Select value={plan} onChange={setPlan} all="플랜 전체" options={data.options.plans} />
           <Select value={type} onChange={setType} all="고객 종류 전체"
                   options={[...data.options.customer_types, "2025 Inbound"]} />
-          <Select value={dept} onChange={setDept} all="담당부서 전체" options={data.options.departments} />
           <span className="result-count">{rows.length}곳 / 전체 {data.rows.length}곳</span>
         </div>
 

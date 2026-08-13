@@ -27,7 +27,6 @@ router = APIRouter(tags=["web"])
 # declaration order, so the parameterised ones come after their literal siblings.
 _MOVED: tuple[tuple[str, str], ...] = (
     ("/", "/app"),
-    ("/overview", "/app/overview"),
     ("/messages", "/app/messages"),
     ("/customers", "/app/customers"),
     ("/email-templates", "/app/email-templates"),
@@ -37,10 +36,6 @@ _MOVED: tuple[tuple[str, str], ...] = (
     ("/logs", "/app/logs"),
     ("/settings/users", "/app/settings/users"),
     ("/outbound-history", "/app/outbound-history"),
-    ("/tools/quote-calculator/app", "/app/tools/quote-calculator"),
-    ("/tools/quote-calculator", "/app/tools/quote-calculator"),
-    ("/tools/quotation", "/app/tools/quotation"),
-    ("/tools/contract", "/app/tools/contract"),
 )
 
 

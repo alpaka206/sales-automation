@@ -117,53 +117,16 @@ def test_filtering_and_search_narrow_the_same_rows(book):
     assert _contract_rows(query="존재하지 않는 회사") == []
 
 
-def test_the_overview_never_disagrees_with_the_screen_it_summarises(book):
-    """Its numbers come from the detail screens' own builders. An overview that reports a
-    different 검토 대기 than 회신 및 검토 is worse than no overview."""
-    from src.api.routes.dashboard import _dashboard_context, _overview_context
-
-    overview = _overview_context()
-    dashboard = _dashboard_context()
-
-    assert overview["counters"]["awaiting_total"] == dashboard["awaiting_total"]
-    assert overview["counters"]["received_today"] == dashboard["received_today"]
-    assert [stage["total"] for stage in overview["stages"]] == [
-        stage["total"] for stage in dashboard["stages"]
-    ]
-    assert overview["contracts"] == _contract_summary()
-
-
-def test_the_overview_does_not_load_the_board_it_only_counts():
-    """It shows how big each column is and never a card from it. Loading the cards was
-    the cost the dashboard was rewritten to stop paying."""
-    from src.api.routes import dashboard
-
-    seen: dict = {}
-
-    def spy(**kwargs):
-        seen.update(kwargs)
-        return [], {}
-
-    original = dashboard._pipeline_rows if hasattr(dashboard, "_pipeline_rows") else None
-    assert original is None  # imported inside the function, so patch where it lives
-    from src.api.routes import customer_ops
-
-    real = customer_ops._pipeline_rows
-    customer_ops._pipeline_rows = spy
-    try:
-        dashboard._overview_context()
-    finally:
-        customer_ops._pipeline_rows = real
-    assert seen == {"limit": 0}
-
-
-def test_both_screens_are_served(book):
+def test_the_contract_book_is_served(book):
+    """전체 대시보드(`/api/ui/overview`)는 지웠습니다 — 각 화면의 숫자를 모아 보여 주기만
+    하는 자리라 아무도 안 봤습니다(운영자 지시). 남은 것은 계약 장부 하나입니다."""
     with TestClient(app) as client:
         contracts = client.get("/api/ui/contracts")
-        overview = client.get("/api/ui/overview")
+        gone = client.get("/api/ui/overview")
     assert contracts.status_code == 200
-    assert overview.status_code == 200
     assert len(contracts.json()["rows"]) >= 4
-    assert set(overview.json()) == {
-        "now", "counters", "stages", "contracts", "contract_status_labels",
-    }
+    assert gone.status_code == 404
+
+    from src.api.routes import dashboard
+
+    assert not hasattr(dashboard, "_overview_context")

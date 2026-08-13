@@ -15,13 +15,9 @@ import { Operations } from "./screens/Operations";
 import { CompanyDetail } from "./screens/CompanyDetail";
 import { SettingsUsers } from "./screens/SettingsUsers";
 import { Logs } from "./screens/Simple";
-import { QuoteCalculator } from "./screens/QuoteCalculator";
-import { Overview } from "./screens/Overview";
 import { WonCustomers } from "./screens/won/WonCustomers";
 import { WonCustomerDetail } from "./screens/won/WonCustomerDetail";
 import { WonNew } from "./screens/won/WonNew";
-import { Quotation } from "./screens/Quotation";
-import { ContractDoc } from "./screens/ContractDoc";
 import { SignIn } from "./screens/SignIn";
 
 const root = createRoot(document.getElementById("root")!);
@@ -66,8 +62,6 @@ function mountConsole() {
             <Route path="companies/:domain" element={<CompanyDetail />} />
             <Route path="settings/users" element={<SettingsUsers />} />
             <Route path="logs" element={<Logs />} />
-            <Route path="tools/quote-calculator" element={<QuoteCalculator />} />
-            <Route path="overview" element={<Overview />} />
             <Route path="outbound-history" element={<WonCustomers />} />
             <Route path="won-customers" element={<WonCustomers />} />
             <Route path="won-customers/new" element={<WonNew />} />
@@ -77,8 +71,6 @@ function mountConsole() {
                 주소는 그대로라 새로고침해도 열려 있고 뒤로가기로 닫힙니다. */}
             <Route path="won-customers/:clientId/contracts/new" element={<WonCustomerDetail />} />
             <Route path="won-customers/:clientId/contracts/:contractId" element={<WonCustomerDetail />} />
-            <Route path="tools/quotation" element={<Quotation />} />
-            <Route path="tools/contract" element={<ContractDoc />} />
           </Route>
         </Routes>
       </BrowserRouter>

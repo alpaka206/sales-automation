@@ -33,18 +33,10 @@ const SECTIONS: Section[] = [
   {
     title: "인사이트",
     icon: "bolt",
+    // 문의 수·국가별 막대를 그리던 항목이 하나 더 있었는데 안 보는 화면이라 지웠습니다.
+    // 남은 것은 손이 가야 하는 목록뿐이고, 그래서 그 페이지가 곧 고객 인사이트입니다.
     items: [
-      { to: "/operations", label: "리드 추이", icon: "globe", mobileLabel: "인사이트" },
-      { to: "/operations#updates", label: "고객 인사이트", icon: "bell" },
-    ],
-  },
-  {
-    title: "활용 툴",
-    icon: "briefcase",
-    items: [
-      { to: "/tools/quote-calculator", label: "견적 계산기", icon: "sliders" },
-      { to: "/tools/quotation", label: "견적서", icon: "file" },
-      { to: "/tools/contract", label: "계약서", icon: "file" },
+      { to: "/operations", label: "고객 인사이트", icon: "bell", mobileLabel: "인사이트" },
     ],
   },
   {
@@ -115,17 +107,9 @@ export function Shell({ pending }: { pending?: number }) {
               <Icon name="panel" size={17} />
             </button>
           </div>
+          {/* 섹션 밖에 링크가 하나 더 있었습니다 — 각 화면의 숫자를 모아 보여 주기만 하는
+              자리라 안 보게 되었고, `/overview` 와 함께 지웠습니다. */}
           <nav className="sidebar__nav" aria-label="주요 메뉴">
-            <NavLink
-              to="/overview"
-              className={({ isActive }) =>
-                `nav-item nav-item--mobile-primary${isActive ? " is-active" : ""}`
-              }
-            >
-              <Icon name="dashboard" size={17} />
-              <span className="nav-item__label">전체 대시보드</span>
-              <span className="nav-item__mobile-label">전체</span>
-            </NavLink>
             {SECTIONS.map((section) => {
               const current = section.items.some((item) =>
                 location.pathname.startsWith(item.to.split("?")[0].replace(/^\/$/, "/@never")),

@@ -743,7 +743,7 @@ def test_the_card_does_not_filter_by_plan_status():
     import pathlib
 
     screen = pathlib.Path("frontend/src/screens/won/WonCustomers.tsx").read_text(encoding="utf-8")
-    카드 = screen[screen.index("const mrrKrw") : screen.index("const renewing")]
+    카드 = screen[screen.index("const mrr = ") : screen.index("const renewing")]
     assert "data.month_revenue" in 카드
     assert "plan_status" not in 카드 and "activeRows" not in 카드
 
@@ -770,15 +770,24 @@ def test_the_card_counts_gtm_only():
     assert won.department(interactive) == "GTM"
 
 
-def test_the_card_says_it_is_gtm_only():
-    """거른 숫자에 그렇다고 안 적으면, 아래 목록을 더한 값과 안 맞을 때 어느 쪽이 틀린
-    건지 알 수 없습니다."""
+def test_the_cards_say_which_department_they_counted():
+    """거른 숫자에 무엇으로 걸렀는지 안 적으면, 아래 목록을 더한 값과 안 맞을 때 어느 쪽이
+    틀린 건지 알 수 없습니다. 이제 담당부서 고르개가 그 값을 정하므로 **고른 값**을 적습니다.
+
+    카드 둘이 **같은 모집단**이어야 합니다: 「고객 12곳에 MRR 3천만원」이 서로 다른 팀의
+    숫자면 그 문장은 아무 뜻이 없습니다.
+    """
     import pathlib
 
     screen = pathlib.Path("frontend/src/screens/won/WonCustomers.tsx").read_text(encoding="utf-8")
-    # 주석이 아니라 화면에 그려지는 라벨을 봅니다.
-    label = screen[screen.index('<G name="trend" /> 이번달 예상 MRR'):][:160]
-    assert "GTM" in label
+    for anchor in ('<G name="person" /> 활성 고객', '<G name="trend" /> 이번달 예상 MRR'):
+        label = screen[screen.index(anchor):][:180]
+        assert "{deptLabel}" in label, anchor
+    # 기본값은 GTM 입니다 — 이 화면을 매일 여는 쪽이고, 「전체」로 두면 세 팀을 합친
+    # 숫자로 시작합니다.
+    assert 'useState("GTM")' in screen
+    # 고르개는 CSV 내보내기 왼쪽, 즉 아래 필터들이 아니라 제목 옆입니다.
+    assert screen.index('id="won-dept"') < screen.index("/won-customers/export.csv")
 
 
 def test_the_row_shows_what_this_customer_added_this_month():

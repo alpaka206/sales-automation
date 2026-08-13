@@ -142,13 +142,6 @@ def ui_dashboard(_request: Request):
     }
 
 
-@router.get("/api/ui/overview")
-def ui_overview():
-    """전체 대시보드. A roll-up of screens that each own their own numbers."""
-    from .dashboard import _overview_context
-
-    return _overview_context()
-
 
 @router.get("/api/ui/contracts")
 def ui_contracts(status: str = "", q: str = ""):
@@ -292,21 +285,17 @@ def _lead(row: dict) -> dict:
 
 
 @router.get("/api/ui/operations")
-def ui_operations(period: str = "month"):
-    """인사이트. The follow-up ladder and the renewal window, from the same builder the
-    page renders — these numbers must not have a second definition."""
+def ui_operations():
+    """고객 인사이트. The follow-up ladder and the renewal window, from the same builder the
+    page renders — these numbers must not have a second definition.
+
+    「리드 추이」의 기간별 집계는 화면과 함께 지웠습니다. ``period`` 인자도 같이 사라졌으니
+    옛 주소(`?period=year`)로 와도 그냥 무시됩니다.
+    """
     from .customer_ops import _operations_context
 
-    context = _operations_context(period)
+    context = _operations_context()
     return {
-        "period": context["period"],
-        "chart": context["chart"],
-        "line_points": context["line_points"],
-        "country_rows": context["country_rows"],
-        "inbound_total": context["inbound_total"],
-        "inbound_in_period": context["inbound_in_period"],
-        "qualified_count": context["qualified_count"],
-        "average_score": context["average_score"],
         "follow_up_days": context["follow_up_days"],
         "lists": {
             key: [_lead(row) for row in context[key]]
@@ -634,18 +623,6 @@ def ui_email_templates():
     }
 
 
-@router.get("/api/ui/quote-policy")
-def quote_policy() -> dict:
-    """The tier table the 견적 계산기 screen prices against.
-
-    Behind the console's auth gate rather than on /static because the policy is internal
-    sales data — `tier_to_client_dict` already strips contribution margin, and the gate
-    keeps the rest of it off the public mount.
-    """
-    from ...common.quote_tiers import policy_client
-
-    return policy_client()
-
 
 @router.get("/api/ui/policy-docs")
 def ui_policy_docs():
@@ -879,7 +856,8 @@ def ui_won_customers():
     except Exception:  # 환율을 못 가져와도 목록은 떠야 합니다
         fx = None
     month = today.strftime("%Y-%m")
-    month_revenue: dict[str, Decimal] = {}
+    # 담당부서 → 통화 → 이번 달 금액.
+    month_revenue: dict[str, dict[str, Decimal]] = {}
     with SessionLocal() as session:
         clients = (
             session.query(Client)
@@ -914,14 +892,15 @@ def ui_won_customers():
         # 카드는 **행이 이미 들고 있는 값**을 더합니다. 따로 세면 목록의 「이번달 매출」 칸과
         # 카드가 언젠가 어긋나고, 어긋난 뒤에는 어느 쪽이 맞는지 아무도 모릅니다.
         #
-        # 더하는 것은 **GTM 담당 고객만**입니다. Interactive 와 AX 는 각자 매출을 따로 보고,
-        # 셋을 한 숫자로 더하면 그 카드는 아무 팀의 숫자도 아니게 됩니다. 칸은 부서와 무관하게
-        # 모든 행에 나옵니다 — 카드 라벨이 GTM 이라고 말하는 이유가 그것입니다.
+        # **부서별로 나눠서** 더합니다. Interactive 와 AX 는 각자 매출을 따로 보므로, 셋을
+        # 한 숫자로 더한 카드는 아무 팀의 숫자도 아닙니다 — 화면 위의 담당부서 고르개가 어느
+        # 묶음을 볼지 정하고, 그 고르개가 목록도 같이 거릅니다. 「전체」도 여기서 같이 만듭니다:
+        # 화면이 부서별 값을 다시 더하면 그 덧셈이 두 곳에 생깁니다.
         for client, row in zip(clients, rows):
-            if won.department(client) != "GTM":
-                continue
-            for code, amount in row["month_revenue"].items():
-                month_revenue[code] = month_revenue.get(code, Decimal(0)) + amount
+            for bucket in (won.department(client) or "미지정", won.ALL_DEPARTMENTS):
+                totals = month_revenue.setdefault(bucket, {})
+                for code, amount in row["month_revenue"].items():
+                    totals[code] = totals.get(code, Decimal(0)) + amount
         pending = (
             session.query(PendingWon)
             .filter(PendingWon.status == "pending")
@@ -985,13 +964,16 @@ def ui_won_customers():
         # 왜 못 가져왔는지. 이유가 없으면 「설정값」이 막다른 길이 됩니다 —
         # 망 문제인지 응답이 바뀐 것인지 아무도 모르고, 매번 코드를 열어야 합니다.
         "fx_error": None if fx else fx_error(),
-        # 「이번달 예상 MRR」. **결제일이 정합니다** — 계약 기간에 균등 배분하지 않습니다.
+        # 「이번달 예상 MRR」, 담당부서별. **결제일이 정합니다** — 계약 기간에 균등 배분하지 않습니다.
         # 여기서 통화별로 합쳐 내려보내는 이유가 둘입니다: 화면이 행을 걸러 더하면 그
         # 필터가 곧 정의가 되고(실제로 플랜 상태로 거르고 있었습니다 — 세팅중·사용 중단
         # 고객의 이번 달 결제가 통째로 빠졌습니다), 고객의 **모든** 계약을 봐야 하는데
         # 행에는 활성 계약 하나만 실려 있습니다.
         "month": month,
-        "month_revenue": {code: float(total) for code, total in month_revenue.items()},
+        "month_revenue": {
+            bucket: {code: float(total) for code, total in totals.items()}
+            for bucket, totals in month_revenue.items()
+        },
         "options": {
             "industries": list(won.INDUSTRIES),
             "plans": list(won.PLANS),
@@ -1003,7 +985,10 @@ def ui_won_customers():
             "payment_types": list(won.PAYMENT_TYPES),
             "currencies": list(won.CURRENCIES),
             "customer_types": list(won.ALLOCATABLE_BANDS),
-            "departments": ["GTM", "Interactive", "AX"],
+            "departments": list(won.DEPARTMENTS),
+            # 「전체」는 부서가 아니라 그 셋을 합친 묶음입니다 — 화면이 그 이름을 지어내면
+            # 서버가 보낸 키와 어긋납니다.
+            "all_departments": won.ALL_DEPARTMENTS,
         },
     }
 

@@ -6,7 +6,6 @@ import asyncio
 import hashlib
 import hmac
 import logging
-from collections import Counter
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from urllib.parse import quote
@@ -1546,120 +1545,17 @@ def _contract_summary() -> dict:
     }
 
 
-def _month_start(value: datetime, months_back: int) -> datetime:
-    month_index = value.year * 12 + value.month - 1 - months_back
-    return datetime(month_index // 12, month_index % 12 + 1, 1)
 
+def _operations_context() -> dict:
+    """고객 인사이트 — 손이 가야 하는 고객 목록들.
 
-def _bucket_key(value: datetime, period: str):
-    if period == "year":
-        return value.year
-    if period == "month":
-        return value.year, value.month
-    return value.date()
+    Extracted from the route so the React screen reads the same numbers — a second copy
+    of this arithmetic is a second set of answers to 몇 건이냐.
 
-
-def _inbound_analytics(period: str) -> dict:
-    now = datetime.now(timezone.utc).replace(tzinfo=None)
-    if period == "year":
-        starts = [datetime(now.year - offset, 1, 1) for offset in range(4, -1, -1)]
-        labels = [str(value.year) for value in starts]
-    elif period == "month":
-        starts = [_month_start(now, offset) for offset in range(11, -1, -1)]
-        labels = [value.strftime("%y.%m") for value in starts]
-    else:
-        period = "day"
-        today = datetime(now.year, now.month, now.day)
-        starts = [today - timedelta(days=offset) for offset in range(29, -1, -1)]
-        labels = [value.strftime("%m/%d") for value in starts]
-
-    start = starts[0]
-    keys = [_bucket_key(value, period) for value in starts]
-    index = {key: idx for idx, key in enumerate(keys)}
-    counts = [0 for _ in starts]
-    countries: list[Counter[str]] = [Counter() for _ in starts]
-    scores: list[int] = []
-    before = 0
-    with SessionLocal() as session:
-        records = session.execute(
-            select(Message.created_at, Message.score_snapshot, Contact.country, Contact.score)
-            .join(Conversation, Message.conversation_id == Conversation.id)
-            .join(Contact, Conversation.contact_id == Contact.id)
-            .where(Message.direction == "inbound")
-        ).all()
-
-    for created_at, score_snapshot, country, contact_score in records:
-        created = _naive(created_at)
-        if not created or created < start:
-            before += 1
-            continue
-        idx = index.get(_bucket_key(created, period))
-        if idx is None or created > now:
-            continue
-        counts[idx] += 1
-        countries[idx][(country or "국가 미확인").strip() or "국가 미확인"] += 1
-        score = score_snapshot if score_snapshot is not None else contact_score
-        if score is not None:
-            scores.append(int(score))
-
-    cumulative: list[int] = []
-    running = before
-    for count in counts:
-        running += count
-        cumulative.append(running)
-
-    max_count = max(counts, default=0) or 1
-    max_cumulative = max(cumulative, default=0) or 1
-    chart = []
-    for idx, (label, count, total) in enumerate(zip(labels, counts, cumulative, strict=True)):
-        x = 0 if len(starts) == 1 else idx * 1000 / (len(starts) - 1)
-        y = 230 - (total / max_cumulative * 205)
-        chart.append(
-            {
-                "label": label,
-                "count": count,
-                "total": total,
-                "bar_height": round(count / max_count * 100, 2),
-                "x": round(x, 2),
-                "y": round(y, 2),
-                "show_label": period != "day" or idx % 5 == 0 or idx == len(starts) - 1,
-            }
-        )
-
-    country_totals: Counter[str] = Counter()
-    for bucket in countries:
-        country_totals.update(bucket)
-    country_rows = []
-    largest_country = max(country_totals.values(), default=0) or 1
-    for country, total in country_totals.most_common():
-        country_rows.append(
-            {
-                "country": country,
-                "total": total,
-                "share": round(total / max(sum(counts), 1) * 100, 1),
-                "width": round(total / largest_country * 100, 1),
-                "trend": [bucket.get(country, 0) for bucket in countries],
-            }
-        )
-
-    return {
-        "period": period,
-        "chart": chart,
-        "line_points": " ".join(f'{point["x"]},{point["y"]}' for point in chart),
-        "country_rows": country_rows,
-        "inbound_in_period": sum(counts),
-        "inbound_total": cumulative[-1] if cumulative else 0,
-        "average_score": round(sum(scores) / len(scores), 1) if scores else None,
-        "qualified_count": sum(score >= 70 for score in scores),
-    }
-
-
-def _operations_context(period: str) -> dict:
-    """인사이트. Extracted from the route so the React screen reads the same numbers —
-    a second copy of this arithmetic is a second set of answers to 몇 건이냐."""
-    if period not in {"day", "month", "year"}:
-        period = "month"
-    analytics = _inbound_analytics(period)
+    「리드 추이」(기간별 문의 수 막대 · 국가별 비중 · 평균 점수)가 여기서 같이 나왔습니다.
+    보는 사람이 없어 화면과 함께 지웠습니다 — 화면에서만 빼면 매 요청마다 아무도 안 읽는
+    집계가 계속 돕니다(대화 전체를 훑는 계산이었습니다).
+    """
     rows = _customer_rows()
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     stale_before = now - timedelta(days=14)
@@ -1728,7 +1624,6 @@ def _operations_context(period: str) -> dict:
         and (not row["profile"] or (row["profile"].current_plan or "").lower() not in {"business", "enterprise"})
     ]
     return {
-            **analytics,
             "stale": stale,
             "missing_reply": missing_reply,
             "due_reminder_1": due_reminder_1,

@@ -171,19 +171,10 @@ flowchart TB
 있습니다. 다음 사람은 반드시 틀린 쪽을 고칩니다. 「이 둘 중 무엇이 은퇴 중이고 무엇이 원본인가」
 는 코드만으로 판정할 수 없어 **운영자에게 물어야 할 질문**입니다.
 
-### 견적 계산기·견적서·계약서 세 화면의 가격 정책
+### 견적 계산기·견적서·계약서는 이제 없습니다
 
-`src/common/quote_tiers.py`(136줄) · `QuoteCalculator.tsx`(396줄) · `Quotation.tsx`(222줄) ·
-`ContractDoc.tsx`(140줄). 07 은 golden 파일 잠금과 `staleTime: "static"` 만 다룹니다. 정작
-**정책 자체가 왜 그 모양인지**는 `quote_tiers.py:1-21` 의 docstring 에만 있습니다 — 손으로 적는
-것은 기본 사실(주기·가격·크레딧)뿐이고 고객이 행동할 수 있는 숫자는 전부 파생, `cm`(공헌이익)은
-인증된 라우트인데도 일부러 payload 에서 뺌, `LIP_MULT = 3`(립싱크는 크레딧 3배).
-그리고 `KRW_PER_USD = 1500`(`quote_tiers.py:32`)은 04 의 `MRR_FX_RATE = 1380` 과 다른 숫자인데
-**두 값이 왜 달라도 되는지 적은 문서가 없습니다**(하나는 티어 카드의 ₩ 표시용 고정값, 다른
-하나는 환율 조회 실패 시의 바닥값 — 확인 필요: 운영자가 이 둘이 다른 것을 아는지).
+2026-08-13 에 운영자 지시로 세 화면과 `src/common/quote_tiers.py` · `frontend/src/lib/quote.ts` · golden 코퍼스까지 지웠습니다. 되살릴 일이 생기면 git 이력에서 꺼내십시오 — 07 의 해당 절에 이유가 적혀 있습니다.
 
-**왜 위험한가**: 영업팀이 고객에게 부르는 가격입니다. 04·05·06 이 다루는 값들과 달리 이건
-계약 전에 나갑니다.
 
 ### Slack 승인 알림의 중복 방지와 재시도
 
@@ -264,7 +255,7 @@ refresh token 을 읽게 되자 `pytest` 가 픽스처 행을 실제 워크북�
   07·08 이 이 화면들이 지나는 공통 규칙(캐시·인증·publish)을 이미 덮습니다.
 - **운영 지표 화면**(`customer_ops._inbound_analytics:1463` · `_operations_context:1558` ·
   `_contract_summary:1400`). 기간 버킷팅과 집계 기준이 안 적혔지만 읽기 전용이고, 틀려도 메일이
-  나가거나 데이터가 지워지지 않습니다. 07 이 "전체 대시보드는 자기 데이터가 없다 — 요약이 요약
+  나가거나 데이터가 지워지지 않습니다. 07 이 "요약 화면은 자기 데이터가 없다 — 요약이 요약
   대상과 어긋나면 없느니만 못하다" 는 원칙을 이미 적었습니다.
 - **`frontend/src/ui/DataTable.tsx` · `QueueTable.tsx` · `screens/PolicyDocs.tsx` ·
   `CompanyDetail.tsx` · `won/Confirm.tsx`.** 07 의 공통 규칙(훅 순서, 편집기 초기값, Modal,

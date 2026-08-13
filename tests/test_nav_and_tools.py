@@ -133,7 +133,8 @@ def test_a_row_that_holds_only_one_value_is_edited_as_one_field():
 
 
 def test_sidebar_sections_are_the_ones_the_operator_asked_for():
-    for title in ("인바운드 리드", "고객 관리", "인사이트", "활용 툴", "시스템"):
+    # 「활용 툴」(견적 계산기·견적서·계약서)은 통째로 지웠습니다 — 앞으로 안 씁니다.
+    for title in ("인바운드 리드", "고객 관리", "인사이트", "시스템"):
         assert f'title: "{title}"' in SHELL, title
     # 파이프라인 연동관리 was a section with one entry; the board moved onto the dashboard.
     assert "파이프라인 연동관리" not in SHELL
@@ -152,24 +153,25 @@ def test_every_renamed_entry_lost_its_old_wording():
         ("인바운드 회신", "인바운드 리드"),
         ("답변 검토", "회신 및 검토"),
         ("답변 템플릿", "이메일 템플릿"),
-        ("문의·국가 추이", "리드 추이"),
         ("업데이트 필요 고객", "고객 인사이트"),
         ("인바운드 고객 히스토리", "리드 히스토리"),
         ("아웃바운드 고객 히스토리", "수주 고객"),
     ):
         assert new in SHELL, new
         assert old not in SHELL, old
-    for retired in ("인바운드 답장", "이메일 답변 설정", "고객 히스토리", "이메일 규칙"):
+    # 완전히 없어진 것들 — 다시 들어오면 이 테스트가 잡습니다(운영자 지시로 지웠습니다).
+    for retired in (
+        "인바운드 답장", "이메일 답변 설정", "고객 히스토리", "이메일 규칙",
+        "리드 추이", "전체 대시보드", "활용 툴", "견적 계산기", "견적서", "계약서",
+    ):
         assert retired not in SHELL, retired
 
 
-def test_overview_sits_above_the_first_section():
-    """전체 대시보드 is the whole-business view: first entry, outside every section.
-
-    Compared in the JSX, not against the SECTIONS constant — that constant is declared at
-    the top of the file and rendered below this link.
-    """
-    assert SHELL.index('to="/overview"') < SHELL.index("{SECTIONS.map(")
+def test_the_sidebar_is_only_sections_now():
+    """섹션 밖에 「전체 대시보드」 링크가 하나 더 있었습니다. 각 화면의 숫자를 모아 보여
+    주기만 하는 자리라 안 보게 되어 지웠고(운영자 지시), 이제 사이드바는 섹션뿐입니다."""
+    assert 'to="/overview"' not in SHELL
+    assert "{SECTIONS.map(" in SHELL
 
 
 def test_customer_section_lists_negotiating_first():
@@ -192,9 +194,19 @@ def test_every_screen_has_a_route():
     for path in (
         "messages", "messages/:id", "customers", "customers/:id", "email-templates",
         "operations", "companies/:domain", "settings/users", "logs",
-        "tools/quote-calculator", "overview", "outbound-history",
+        "outbound-history", "tickets/:conversationId",
     ):
         assert f'path="{path}"' in ROUTES, path
+
+
+def test_the_retired_screens_have_no_route_left():
+    """전체 대시보드·활용 툴 셋은 화면·라우트·리다이렉트까지 지웠습니다(운영자 지시).
+
+    라우트만 남기면 옛 북마크가 빈 화면을 열고, 그게 "고장났다" 로 보입니다 — 없는 주소는
+    없다고 하는 편이 낫습니다.
+    """
+    for path in ("overview", "tools/quote-calculator", "tools/quotation", "tools/contract"):
+        assert f'path="{path}"' not in ROUTES, path
 
 
 # ---- the old URLs still work -------------------------------------------------------
@@ -215,9 +227,7 @@ def test_the_old_page_urls_redirect_to_their_replacement():
         "/operations": "/app/operations",
         "/logs": "/app/logs",
         "/settings/users": "/app/settings/users",
-        "/overview": "/app/overview",
         "/outbound-history": "/app/outbound-history",
-        "/tools/quote-calculator": "/app/tools/quote-calculator",
     }
     with TestClient(app) as client:
         for old, new in moved.items():
@@ -253,27 +263,6 @@ def test_the_spa_serves_every_screen_route():
             assert client.get(path).status_code == 200, path
 
 
-def test_the_calculator_document_url_lands_on_the_screen_that_replaced_it():
-    """It used to be an HTML document in an iframe; it is a React screen now."""
-    with TestClient(app) as client:
-        response = client.get("/tools/quote-calculator/app", follow_redirects=False)
-    assert response.status_code == 302
-    assert response.headers["location"] == "/app/tools/quote-calculator"
-
-
-def test_the_quote_calculator_keeps_its_pricing_out_of_the_public_mount():
-    """The tier policy carries internal margin data, so the screen fetches it from
-    /api/ui behind the auth gate — never from /static, which is served to anyone."""
-    from src.common.quote_tiers import policy_client
-
-    assert not pathlib.Path("src/api/static/quote_calculator_app.html").exists()
-    prices = {str(t["krw"]) for t in policy_client()["tiers"]}
-    published = " ".join(
-        path.read_text(encoding="utf-8", errors="ignore")
-        for path in pathlib.Path("src/api/static").rglob("*")
-        if path.is_file() and path.suffix in {".js", ".html", ".css"}
-    )
-    assert not (prices & set(published.split())), "tier prices reached the public mount"
 
 
 def test_no_html_template_is_left_to_render():

@@ -491,11 +491,11 @@ export function MessageDetail() {
           )}
 
           <div className="card">
-            <div className="section-label" style={{ marginBottom: 12 }}>티켓 / 대화</div>
+            <div className="section-label" style={{ marginBottom: 12 }}>티켓 정보</div>
             <dl className="info-list">
               <div className="info-row"><dt>티켓</dt><dd className="mono">{ticket.ticket_id ? `#${ticket.ticket_id}` : "— (없음)"}</dd></div>
               <div className="info-row"><dt>Client ID</dt><dd className="tnum">{ticket.client_id ?? "미동기화"}</dd></div>
-              {ticket.stage && <div className="info-row"><dt>단계</dt><dd>{data.stage_labels[ticket.stage] ?? ticket.stage}</dd></div>}
+              {ticket.stage && <div className="info-row"><dt>Stage</dt><dd>{data.stage_labels[ticket.stage] ?? ticket.stage}</dd></div>}
               {/* Won 과 Lost 일 때만 나옵니다 — 왜 이겼나 / 왜 졌나는 결말이 난 건에만
                   있는 정보입니다. 보드 카드에도 같은 고르개가 있고, 값 목록과 「지금
                   단계의 값인가」 판단은 둘 다 서버에서 옵니다. 여기 둔 이유: 이 화면에서
@@ -521,7 +521,7 @@ export function MessageDetail() {
 
           {contact && (
             <div className="card">
-              <div className="section-label" style={{ marginBottom: 12 }}>연락처 정보 (편집 가능)</div>
+              <div className="section-label" style={{ marginBottom: 12 }}>연락처 정보</div>
               <dl className="info-list" style={{ marginBottom: 12 }}>
                 <div className="info-row"><dt>이름</dt><dd>{contact.name}</dd></div>
                 {contact.email && (

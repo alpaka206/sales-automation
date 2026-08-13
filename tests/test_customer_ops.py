@@ -533,10 +533,13 @@ def test_pipeline_keeps_each_inquiry_stage_and_only_latest_updates_profile(
         assert profile.customer_state == "negotiation"
 
 
-def test_insights_show_volume_and_country(customer_db, customer_id) -> None:
+def test_insights_are_the_lists_not_the_charts(customer_db, customer_id) -> None:
+    """「리드 추이」(기간별 문의 수 · 국가별 비중 · 평균 점수)는 화면과 함께 지웠습니다.
+
+    보는 사람이 없었고, 화면에서만 빼면 매 요청마다 아무도 안 읽는 집계가 계속 돕니다 —
+    대화 전체를 훑는 계산이었습니다. 남은 것은 손이 가야 하는 고객 목록들입니다.
+    """
     with customer_db() as session:
-        contact = session.get(Contact, customer_id)
-        contact.country = "Korea"
         conversation = session.query(Conversation).filter_by(contact_id=customer_id).one()
         session.add(
             Message(
@@ -545,16 +548,18 @@ def test_insights_show_volume_and_country(customer_db, customer_id) -> None:
                 channel="email",
                 body="pricing inquiry",
                 status="received",
-                score_snapshot=82,
             )
         )
         session.commit()
     with TestClient(app) as client:
+        # 옛 주소로 와도 그냥 무시됩니다 — period 인자가 사라졌습니다.
         payload = client.get("/api/ui/operations?period=day").json()
-    assert payload["period"] == "day"
-    assert payload["chart"]                                   # the volume series
-    assert "Korea" in [row["country"] for row in payload["country_rows"]]
-    assert payload["qualified_count"] >= 0                    # the 70점 이상 counter
+    assert set(payload) == {"follow_up_days", "lists", "renewals"}
+    assert "missing_reply" in payload["lists"]
+
+    from src.api.routes import customer_ops
+
+    assert not hasattr(customer_ops, "_inbound_analytics")
 
 
 def test_contract_can_be_corrected_without_duplicate(customer_db, customer_id) -> None:

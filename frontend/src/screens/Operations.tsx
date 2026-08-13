@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { getJSON } from "../lib/api";
 import { kst } from "../lib/format";
 import { LoadingBlock } from "../ui/Loading";
@@ -10,18 +10,10 @@ type Lead = {
   next_action: string | null; last_activity: string;
 };
 type Data = {
-  period: string;
-  chart: { label: string; count: number; bar_height: number; show_label: boolean }[];
-  line_points: string;
-  country_rows: { country: string; count: number; share: number }[];
-  inbound_total: number; inbound_in_period: number;
-  qualified_count: number; average_score: number;
   follow_up_days: { reminder_1: number; reminder_2: number; unqualified: number };
   lists: Record<string, Lead[]>;
   renewals: { contact_id: number; company: string; plan: string | null; amount: number | null; currency: string; expires_at: string }[];
 };
-
-const PERIODS: [string, string][] = [["day", "일"], ["month", "월"], ["year", "년"]];
 
 function LeadList({ title, hint, rows }: { title: string; hint: string; rows: Lead[] }) {
   return (
@@ -56,78 +48,27 @@ function LeadList({ title, hint, rows }: { title: string; hint: string; rows: Le
   );
 }
 
+/** 고객 인사이트 — 손이 가야 하는 고객 목록들.
+ *
+ * 위에 「리드 추이」(기간 스위치 · 문의 추이 막대 · 국가별)가 있었습니다. 보는 사람이
+ * 없어서 지웠고(운영자 지시), 서버도 그 값을 더 이상 계산하지 않습니다 — 화면에서만
+ * 빼면 매 요청마다 아무도 안 읽는 집계가 계속 돕니다.
+ */
 export function Operations() {
-  const [params, setParams] = useSearchParams();
-  const period = params.get("period") ?? "month";
   const { data, isPending } = useQuery({
-    queryKey: ["operations", period],
-    queryFn: () => getJSON<Data>(`/api/ui/operations?period=${period}`),
+    queryKey: ["operations"],
+    queryFn: () => getJSON<Data>("/api/ui/operations"),
   });
 
   if (isPending || !data) return <LoadingBlock />;
   const days = data.follow_up_days;
-  const maxCount = Math.max(1, ...data.chart.map((point) => point.count));
 
   return (
     <>
       <div className="page-header">
-        <div><h1 className="page-title">리드 추이</h1></div>
-        <div className="period-switch">
-          {PERIODS.map(([value, label]) => (
-            <a key={value} href="#" className={period === value ? "is-active" : ""}
-               onClick={(event) => { event.preventDefault(); setParams({ period: value }, { replace: true }); }}>
-              {label}
-            </a>
-          ))}
-        </div>
+        <div><h1 className="page-title">고객 인사이트</h1></div>
       </div>
 
-      <div className="grid grid-2 mb-gap" style={{ gap: "var(--gap)" }}>
-        <section className="card">
-          <div className="section-label" style={{ marginBottom: 12 }}>문의 추이</div>
-          {/* Bars from the counts the server already computed — no chart library for
-              seven rectangles. */}
-          <div className="row" style={{ alignItems: "flex-end", gap: 6, height: 140 }}>
-            {data.chart.map((point, index) => (
-              <div key={index} style={{ flex: 1, textAlign: "center" }}>
-                <div title={`${point.label} · ${point.count}건`}
-                     style={{ height: `${(point.count / maxCount) * 110}px`, background: "var(--accent)",
-                              borderRadius: 3, minHeight: point.count ? 3 : 1, opacity: point.count ? 1 : 0.25 }} />
-                <div className="t-xs t-subtle" style={{ marginTop: 6 }}>{point.show_label ? point.label : ""}</div>
-              </div>
-            ))}
-          </div>
-          <dl className="info-list" style={{ marginTop: 12 }}>
-            <div className="info-row"><dt>기간 내 문의</dt><dd className="tnum">{data.inbound_in_period}건</dd></div>
-            <div className="info-row"><dt>전체 문의</dt><dd className="tnum">{data.inbound_total}건</dd></div>
-            <div className="info-row"><dt>유효 리드</dt><dd className="tnum">{data.qualified_count}건</dd></div>
-            <div className="info-row"><dt>평균 점수</dt><dd className="tnum">{data.average_score}</dd></div>
-          </dl>
-        </section>
-
-        <section className="card">
-          <div className="section-label" style={{ marginBottom: 12 }}>국가별</div>
-          <div className="stack" style={{ gap: 8 }}>
-            {data.country_rows.length === 0 ? (
-              <div className="empty"><div className="empty__text">데이터가 없습니다.</div></div>
-            ) : (
-              data.country_rows.map((row) => (
-                <div key={row.country}>
-                  <div className="row-between t-sm">
-                    <span>{row.country}</span>
-                    <span className="tnum t-subtle">{row.count}건 · {row.share}%</span>
-                  </div>
-                  <div style={{ height: 6, background: "var(--surface-3)", borderRadius: 99, marginTop: 4 }}>
-                    <div style={{ width: `${row.share}%`, height: "100%", background: "var(--accent)", borderRadius: 99 }} />
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
-        </section>
-      </div>
-
-      <h2 className="section-label" id="updates" style={{ marginBottom: 12 }}>고객 인사이트</h2>
       <div className="insight-grid" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(320px,1fr))", gap: "var(--gap)" }}>
         <LeadList title="회신 없이 오래된 문의" hint="14일 이상 조용한 스레드" rows={data.lists.stale} />
         <LeadList title="답변이 안 나간 문의" hint="접수됐지만 회신 기록이 없습니다" rows={data.lists.missing_reply} />
