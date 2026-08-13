@@ -480,7 +480,10 @@ LIST_STAGES: dict[str, tuple[str, ...]] = {
     # (InboundAgent.handle returns "skipped_not_new" for any other stage), so a
     # Negotiating chip here could only ever return an empty table.
     "awaiting": ("new",),
-    "sent": ("meeting_link_sent", "negotiation", "reminder_sent", "won", "closed_lost", "closed"),
+    "sent": (
+        "meeting_link_sent", "negotiation", "reminder_sent",
+        "won", "closed_lost", "no_response", "closed",
+    ),
 }
 LIST_SORTS = ("oldest", "newest")
 

@@ -173,8 +173,12 @@ def test_overview_sits_above_the_first_section():
 
 
 def test_customer_section_lists_negotiating_first():
-    """협상중 고객 → 리드 히스토리 → 수주 고객, narrowest slice first."""
-    assert SHELL.index("협상중 고객") < SHELL.index("리드 히스토리") < SHELL.index("수주 고객")
+    """협상중 고객 → 수주 고객 → 리드 히스토리 — 손이 가는 순서입니다.
+
+    리드 히스토리가 맨 아래인 이유: 지나간 리드 전부를 담은 목록이라 매일 여는 화면이
+    아닙니다. 위 둘은 오늘 일이 있는 고객입니다.
+    """
+    assert SHELL.index("협상중 고객") < SHELL.index("수주 고객") < SHELL.index("리드 히스토리")
     assert 'to: "/customers?stage=negotiation"' in SHELL
 
 

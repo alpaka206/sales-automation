@@ -88,7 +88,11 @@ export function WonCustomers() {
     const all = data?.rows ?? [];
     const query = search.trim().toLowerCase();
     const filtered = all.filter((row) => {
-      if (view === "활성" && row.plan_status === "사용 중단") return false;
+      // 카드가 센 것과 **같은 조건**입니다. 카드가 GTM 만 세는데 눌렀을 때 전부가 뜨면,
+      // 「12곳」이라고 적힌 버튼이 20줄짜리 표를 엽니다.
+      if (view === "활성" && (row.plan_status === "사용 중단" || row.department !== "GTM")) {
+        return false;
+      }
       if (view === "갱신임박") {
         // 사용 중단은 갱신 대상이 아닙니다 — 세지도, 목록에 넣지도 않습니다.
         if (row.plan_status === "사용 중단") return false;
@@ -101,10 +105,14 @@ export function WonCustomers() {
       if (type !== "all" && row.customer_type !== type) return false;
       if (dept !== "all" && row.department !== dept) return false;
       if (query) {
-        // 담당부서·고객 종류까지 봅니다. 힌트에 안 적혀 있어도 "GTM" 이나 "Inbound" 로
-        // 찾는 사람은 반드시 있고, 안 걸리면 목록이 빈 것처럼 보입니다.
-        const hay = [row.company, row.client_id, row.industry, row.country,
-                     row.department, row.customer_type].join(" ").toLowerCase();
+        // **사람으로 찾습니다.** 산업 분야·국가는 뺐습니다 — 그 둘은 바로 위 필터가
+        // 하는 일이고, 검색어에 섞이면 "교육" 한 단어가 교육 산업 고객 전부를 끌고
+        // 옵니다. 대신 이메일과 전화번호가 들어옵니다: 클레임이나 결제 문의는 회사
+        // 이름이 아니라 메일 주소로 기억되는 일이 흔합니다. 담당부서·고객 종류는
+        // 남습니다 — "GTM" 이나 "Inbound" 로 찾는 사람이 반드시 있습니다.
+        const hay = [row.company, row.client_id, row.contact_name, row.contact_info,
+                     row.email, row.phone, row.department, row.customer_type]
+          .join(" ").toLowerCase();
         if (!hay.includes(query)) return false;
       }
       return true;
@@ -120,11 +128,17 @@ export function WonCustomers() {
 
   if (!data) return <div className="won"><div className="page">불러오는 중…</div></div>;
 
-  const live = data.rows.filter((r) => r.plan_status === "사용중").length;
-  const setup = data.rows.filter((r) => r.plan_status === "세팅중").length;
+  // 「활성 고객」 카드는 **GTM 담당 고객만** 셉니다 — 바로 옆 예상 MRR 이 GTM 만 더하는
+  // 것과 같은 기준입니다. 둘이 다른 모집단을 쓰면 "고객 12곳에 MRR 3천만원" 이 어느 팀의
+  // 숫자도 아니게 되고, 그걸 눈치챌 방법이 화면에 없습니다. 아래 목록과 갱신 임박은
+  // 부서와 무관하게 전부 보여 줍니다(담당부서 필터가 따로 있습니다).
+  const gtm = data.rows.filter((r) => r.department === "GTM");
+  const live = gtm.filter((r) => r.plan_status === "사용중").length;
+  const setup = gtm.filter((r) => r.plan_status === "세팅중").length;
+  const gtmActive = gtm.filter((r) => r.plan_status !== "사용 중단" && r.active);
+  const mrrCount = gtmActive.filter((r) => r.active?.deal_type === "MRR").length;
+  const pocCount = gtmActive.filter((r) => r.active?.deal_type === "PoC").length;
   const activeRows = data.rows.filter((r) => r.plan_status !== "사용 중단" && r.active);
-  const mrrCount = activeRows.filter((r) => r.active?.deal_type === "MRR").length;
-  const pocCount = activeRows.filter((r) => r.active?.deal_type === "PoC").length;
   // 「이번달 예상 MRR」은 **서버가 계약 기간으로 계산해서**(계약 금액 ÷ 개월수) 통화별로
   // 내려줍니다. 여기서 행을 걸러 더하면 그 필터가 곧 정의가 됩니다 — 실제로 플랜 상태로
   // 거르고 있었고, 그래서 세팅중 고객이 통째로 빠졌습니다. 행에는 활성 계약 하나만
@@ -164,7 +178,9 @@ export function WonCustomers() {
         <div className="kpi-row">
           <button className={`kpi wide${view === "활성" ? " is-on" : ""}`} type="button"
                   onClick={() => setView(view === "활성" ? "" : "활성")}>
-            <div className="kpi-label"><G name="person" /> 활성 고객</div>
+            <div className="kpi-label">
+              <G name="person" /> 활성 고객 <span style={{ color: "var(--faint)" }}>(GTM)</span>
+            </div>
             <div className="kpi-flex">
               <div className="kpi-main">
                 <div className="kpi-value"><span>{live + setup}</span><span className="unit">곳</span></div>
@@ -185,8 +201,11 @@ export function WonCustomers() {
           <div className="kpi">
             {/* GTM 이라고 적혀 있어야 합니다. 서버가 담당부서로 거르는데 화면이 말하지
                 않으면, 아래 목록을 더한 값과 안 맞을 때 어느 쪽이 틀린 건지 알 수 없습니다. */}
-            <div className="kpi-label"><G name="trend" /> 이번달 예상 MRR <span style={{ color: "var(--faint)" }}>(GTM · VAT 포함)</span></div>
-            <div className="kpi-value money">{money(mrrKrw + mrrUsd * rate)}</div>
+            <div className="kpi-label"><G name="trend" /> 이번달 예상 MRR <span style={{ color: "var(--faint)" }}>(GTM · VAT 포함 · USD)</span></div>
+            {/* **합계 통화가 USD 입니다.** 원화 계약을 오늘 고시가로 환산해 더합니다 —
+                이 팀이 보고하는 단위가 달러이고, 그 자리에서 다시 나누던 계산을 화면이
+                합니다. 계약마다의 금액은 아래 표에서 계약 통화 그대로 봅니다. */}
+            <div className="kpi-value money">{money(mrrUsd + (rate ? mrrKrw / rate : 0), "USD")}</div>
             <div className="kpi-tail">
               <div className="kpi-legend">
                 <i>KRW 계약 <b>{man(mrrKrw)}</b></i>
@@ -261,7 +280,7 @@ export function WonCustomers() {
             ))}
             {!data.boards.payment.length && <div className="board-empty">확인할 항목이 없습니다.</div>}
           </Board>
-          <Board title="미처리 클레임 · 히스토리" count={data.boards.claim.length} risk
+          <Board title="미처리 클레임" count={data.boards.claim.length} risk
                  icon={<G name="alert" size={15} stroke="var(--red-fg)" width={1.9} />}>
             {data.boards.claim.slice(0, 4).map((item, index) => (
               <button key={index} className="board-row" type="button"
@@ -322,7 +341,7 @@ export function WonCustomers() {
           <div className="search">
             <G name="search" size={15} width={1.9} />
             <input type="text" value={search} onChange={(e) => setSearch(e.target.value)}
-                   placeholder="고객사, Client ID, 산업, 국가 검색" />
+                   placeholder="고객사, Client ID, 담당자, 이메일, 전화번호 검색" />
           </div>
           <div className="chips">
             {["all", "MRR", "PoC"].map((key) => (

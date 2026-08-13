@@ -81,8 +81,12 @@ export function QueueTable({
         {
           label: "문의 제목",
           width: "30%",
+          // 링크지만 **글자처럼 보입니다**(link--plain). 이 표는 모든 행이 링크라, 밑줄이
+          // 강조가 아니라 배경 무늬가 됩니다 — 제목이 길수록 파란 줄이 화면을 가로지릅니다.
+          // 여는 방법은 표의 행 전체가 이미 알려 줍니다.
           cell: (row) => (
-            <Link to={`/messages/${row.id}`} className="truncate" style={{ display: "block" }}>
+            <Link to={`/messages/${row.id}`} className="truncate link--plain"
+                  style={{ display: "block" }}>
               {row.subject}
             </Link>
           ),

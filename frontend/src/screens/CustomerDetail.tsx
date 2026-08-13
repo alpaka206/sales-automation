@@ -29,10 +29,6 @@ type Data = {
   same_company: { id: number; full_name: string; email: string | null }[];
 };
 
-const STATES: [string, string][] = [
-  ["negotiation", "Negotiation"], ["service", "서비스 이용중"],
-  ["pool", "기존 고객 Pool"], ["lost", "Lost"],
-];
 const CONTRACT_STATUSES: [string, string][] = [
   ["draft", "초안"], ["sent", "계약서 발송"], ["contracted", "계약 확정"],
   ["active", "서비스 이용"], ["expired", "종료"], ["cancelled", "취소"],
@@ -163,11 +159,12 @@ export function CustomerDetail() {
         <div className="stack">
           <section className="card">
             <div className="section-header"><div className="section-header__title">고객 상태 · 다음 액션</div></div>
+            {/* 「고객 구분」 칸이 있었습니다(Negotiation / 서비스 이용중 / 기존 고객 Pool /
+                Lost). 손으로 고르는 값인데 **바로 옆 파이프라인 단계에서 그대로 나오는
+                값**이라, 둘이 어긋난 고객이 생겼습니다 — Won 인데 Negotiation 인 행.
+                이제 저장할 때 서버가 단계에서 정합니다(customer_state_for), 보드에서
+                카드를 옮겼을 때와 같은 규칙으로. */}
             <form className="profile-grid" onSubmit={saveProfile}>
-              <label><span className="field-label">고객 구분</span>
-                <select className="select" name="customer_state" defaultValue={profile?.customer_state ?? "negotiation"}>
-                  {STATES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-                </select></label>
               <label><span className="field-label">파이프라인</span>
                 <select className="select" name="pipeline_stage" defaultValue={profile?.pipeline_stage ?? "new"}>
                   {data.stage_options.map((option) => (
@@ -279,10 +276,10 @@ export function CustomerDetail() {
                 </details>
               </div>
             ))}
-            <details className="copy-block" style={{ marginTop: 14 }}><summary>계약 추가</summary>
-              <ContractForm action={`/customers/${contact.id}/contracts`}
-                            submit={submit} label="계약 저장">{contractFields()}</ContractForm>
-            </details>
+            {/* 「계약 추가」가 여기 있었습니다. 계약을 만드는 곳은 **수주 고객 화면 하나**
+                입니다: 그쪽은 차수·크레딧 회차·분납·환율까지 함께 세우는데, 여기서 만든
+                계약은 그것들이 전부 빈 채로 생겨서 수주 장부에서는 보이지도 않았습니다.
+                이미 있는 계약을 고치는 것은 남깁니다 — 이 화면에서 보고 있던 값입니다. */}
           </section>
 
           {data.same_company.length > 0 && (

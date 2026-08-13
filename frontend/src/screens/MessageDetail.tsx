@@ -91,6 +91,8 @@ export function MessageDetail() {
   const [showOrig, setShowOrig] = useState<Record<number, boolean>>({});
   const [loadedId, setLoadedId] = useState<number | null>(null);
   const [logging, setLogging] = useState(false);
+  /** 방금 저장한 티켓 정보 — 확인 창이 무엇이 저장됐는지 그대로 보여 줍니다. */
+  const [savedContact, setSavedContact] = useState<Record<string, string> | null>(null);
   // 서식을 씌운 뒤 되돌려 놓을 선택 범위. 상태로 두는 이유는 아래 효과 참고.
   const [pendingSel, setPendingSel] = useState<[number, number] | null>(null);
 
@@ -100,11 +102,12 @@ export function MessageDetail() {
   const [saveContact, savingContact] = useAction(async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const form = event.currentTarget;
-    await postForm(
-      `/contacts/${data?.contact?.id}/edit`,
-      Object.fromEntries(new FormData(form) as never) as Record<string, string>,
-    );
-    setNote("연락처를 저장했습니다.");
+    const fields = Object.fromEntries(new FormData(form) as never) as Record<string, string>;
+    await postForm(`/contacts/${data?.contact?.id}/edit`, fields);
+    // **저장했다는 말이 보이는 자리에 뜹니다.** 예전에는 `note` 한 줄이었는데, 그 줄은
+    // 검토 중인 초안 안에만 그려집니다 — 이미 발송된 티켓에서는 저장을 눌러도 화면이
+    // 아무 말도 하지 않았고, 정말 저장됐는지는 새로고침해야 알 수 있었습니다.
+    setSavedContact(fields);
     await queryClient.invalidateQueries({ queryKey: ["message", id] });
   });
 
@@ -552,6 +555,28 @@ export function MessageDetail() {
           <iframe title="이메일 미리보기" sandbox="" srcDoc={preview}
                   style={{ width: "100%", height: "60vh", border: "1px solid var(--border)",
                            borderRadius: 8, background: "#fff" }} />
+        </Modal>
+      )}
+
+      {savedContact && (
+        <Modal
+          title="티켓 정보를 저장했습니다"
+          description="아래 내용으로 이 고객의 연락처가 갱신되었습니다."
+          onClose={() => setSavedContact(null)}
+          actions={
+            <button type="button" className="btn btn--ok" onClick={() => setSavedContact(null)}>
+              확인
+            </button>
+          }
+        >
+          <dl className="info-list" style={{ marginTop: 12 }}>
+            <div className="info-row"><dt>회사</dt>
+              <dd>{savedContact.company?.trim() || "—"}</dd></div>
+            <div className="info-row"><dt>하는 일 / 메모</dt>
+              <dd style={{ whiteSpace: "pre-line" }}>
+                {savedContact.role_description?.trim() || "—"}
+              </dd></div>
+          </dl>
         </Modal>
       )}
 

@@ -625,8 +625,12 @@ def append_order_row(record: dict) -> SheetWriteResult:
 # the sales team already uses in those columns may appear here — writing a new token
 # would pollute a column the team filters on. "won" inherits ("Won", "Closed Won") from
 # the retired contracted/onboarding/active keys (migration 0040).
-# reminder_sent and closed have no workbook vocabulary yet, so update_inbound_stage
-# leaves the sheet untouched for them, exactly as it did before the trim.
+# reminder_sent, no_response and closed(=Not a Fit) have no workbook vocabulary yet, so
+# update_inbound_stage leaves the sheet untouched for them, exactly as it did before the trim.
+#
+# **HubSpot 이 단계 이름을 바꿔도 여기 글자는 안 바뀝니다.** 파이프라인에서 Meeting link
+# sent 가 Qualified 가 되었지만, 이 열은 영업팀이 필터로 쓰는 시트의 값 목록이라 없는 말을
+# 쓰면 그 행이 어느 필터에도 안 걸립니다. 시트에 Qualified 가 생기면 그때 여기를 바꿉니다.
 _STAGE_VALUES = {
     "new": ("New", "Inquiry"),
     "meeting_link_sent": ("Meeting Link Sent", "Inquiry"),
@@ -673,8 +677,8 @@ def update_inbound_stage(client_id: int | None, stage: str, pipeline: str | None
     if not client_id or not writes_enabled():
         return False
     if stage not in _STAGE_VALUES:
-        # The board has seven stages; the workbook's Deal Stage column has words for five
-        # of them (reminder_sent and closed have none). Silence here meant the sheet kept
+        # The board has eight stages; the workbook's Deal Stage column has words for five
+        # of them (reminder_sent, no_response and closed have none). Silence here meant the sheet kept
         # its old stage with nothing to show anyone why — say it in the log at least.
         logger.warning(
             "Google Sheets has no Deal Stage wording for local stage '%s' — the workbook "

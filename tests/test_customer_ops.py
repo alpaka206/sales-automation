@@ -15,6 +15,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from src.api.main import app
+from src.common.config import settings
 from src.db.base import Base
 from src.db.models import (
     Contact,
@@ -455,10 +456,10 @@ def test_board_move_finds_the_sheet_row_on_the_contact(customer_db, customer_id)
 def test_the_workbook_has_no_wording_for_two_board_stages() -> None:
     """A KNOWN gap, pinned so it cannot be mistaken for working.
 
-    The board has seven stages; the workbook's Deal Stage column has words for five. Moving
-    a card to Reminder Sent or Closed updates this database and HubSpot but leaves the
-    sheet on its previous stage (the write logs a warning and reports failure, so it shows
-    up as 동기화 실패 rather than silence). Fixing it needs the two values the sales team
+    The board has eight stages; the workbook's Deal Stage column has words for five. Moving
+    a card to Reminder Sent, No Response or Not a Fit updates this database and HubSpot but
+    leaves the sheet on its previous stage (the write logs a warning and reports failure, so
+    it shows up as 동기화 실패 rather than silence). Fixing it needs the values the sales team
     actually uses in that column — invented wording would corrupt their filters. When they
     are added here, delete this test.
     """
@@ -466,7 +467,7 @@ def test_the_workbook_has_no_wording_for_two_board_stages() -> None:
     from src.integrations.google_sheets import _STAGE_VALUES
 
     missing = [key for key, _label, _description in PIPELINE_STAGES if key not in _STAGE_VALUES]
-    assert missing == ["reminder_sent", "closed"]
+    assert missing == ["reminder_sent", "no_response", "closed"]
 
 
 def test_pipeline_cards_have_no_stage_dropdown(customer_db, customer_id) -> None:
@@ -475,13 +476,18 @@ def test_pipeline_cards_have_no_stage_dropdown(customer_db, customer_id) -> None
     The per-card 단계 변경 <select> is gone: it repeated the drop target and took a third
     of the card. The POST it submitted to stays — the drop handler calls it — and so does
     the 파이프라인 select on the customer page, which writes the profile projection.
+
+    카드에 고르개가 하나 있기는 합니다 — Won/Lost 의 **Deal Detail**. 그건 단계를 옮기지
+    않고 그 단계 안의 세부 구분만 정합니다. 그래서 세는 방식으로 못 박습니다: 하나까지는
+    되고, 둘째가 생기면 그게 무엇인지 여기서 다시 설명해야 합니다.
     """
     with TestClient(app) as client:
         board = client.get("/api/ui/dashboard").json()
     assert any(stage["cards"] for stage in board["stages"])   # the board has cards
     # Dropping is the only way to move a card: no per-card stage <select> anywhere.
     source = pathlib.Path("frontend/src/ui/Board.tsx").read_text(encoding="utf-8")
-    assert "<select" not in source
+    assert source.count("<select") == 1
+    assert "pipeline-card__deal" in source
     assert "단계 변경" not in source
 
 
@@ -626,3 +632,122 @@ def test_0037_migration_links_only_unambiguous_legacy_contracts() -> None:
         ).all()
     assert rows == [(100, 10, 1336), (200, None, None)]
     assert isinstance(ContractRecord.__table__.c.amount.type, Numeric)
+
+
+# --------------------------------------------------------------------------- #
+# Deal Detail — Won 과 Lost 에만 있는 세부 구분
+# --------------------------------------------------------------------------- #
+def test_deal_detail_belongs_to_won_and_lost_only(customer_db, customer_id) -> None:
+    """왜 이겼나 / 왜 졌나는 **결말이 난 건에만** 있는 정보입니다.
+
+    다른 단계에서도 붙일 수 있으면 협의 중인 티켓에 "Went dark" 가 달린 카드가 생기고,
+    그 값은 아무 뜻이 없습니다. 어느 목록의 값인지는 그때의 단계가 정합니다 — Won 카드에
+    Lost 사유를 붙일 수 있으면 두 목록을 나눠 둔 이유가 없어집니다.
+    """
+    with customer_db() as session:
+        conversation_id = session.query(Conversation).filter_by(contact_id=customer_id).one().id
+
+    with TestClient(app) as client:
+        path = f"/pipeline/conversations/{conversation_id}/deal-detail"
+        # 아직 New 라 붙일 것이 없습니다.
+        assert client.post(path, data={"detail": "Contract"}).status_code == 400
+
+        client.post(f"/pipeline/conversations/{conversation_id}/stage", data={"stage": "won"})
+        assert client.post(path, data={"detail": "Went dark"}).status_code == 400   # Lost 사유
+        assert client.post(path, data={"detail": "Contract"}).status_code == 200
+
+    with customer_db() as session:
+        assert session.get(Conversation, conversation_id).deal_detail == "Contract"
+
+
+def test_a_deal_detail_from_another_stage_is_not_drawn(customer_db, customer_id) -> None:
+    """Won 에서 고른 값이 Lost 카드에 Lost 사유인 척 붙으면 안 됩니다.
+
+    지우지는 않습니다 — 되돌아오면 그때 고른 값이 그대로 맞습니다. 화면에 내려보낼 때만
+    지금 단계의 목록에 있는지 봅니다.
+    """
+    from src.api.routes.customer_ops import DEAL_DETAILS
+
+    assert set(DEAL_DETAILS) == {"won", "closed_lost"}
+
+    with customer_db() as session:
+        conversation_id = session.query(Conversation).filter_by(contact_id=customer_id).one().id
+
+    with TestClient(app) as client:
+        client.post(f"/pipeline/conversations/{conversation_id}/stage", data={"stage": "won"})
+        client.post(
+            f"/pipeline/conversations/{conversation_id}/deal-detail", data={"detail": "Contract"}
+        )
+        cards = client.get("/api/ui/pipeline/won/cards").json()["cards"]
+        assert [card["deal_detail"] for card in cards] == ["Contract"]
+
+        client.post(
+            f"/pipeline/conversations/{conversation_id}/stage", data={"stage": "closed_lost"}
+        )
+        cards = client.get("/api/ui/pipeline/closed_lost/cards").json()["cards"]
+        assert [card["deal_detail"] for card in cards] == [None]
+
+    # 행에는 남아 있습니다.
+    with customer_db() as session:
+        assert session.get(Conversation, conversation_id).deal_detail == "Contract"
+
+
+def test_the_board_gets_its_deal_detail_options_from_the_server(customer_db, customer_id) -> None:
+    """값 목록이 화면과 검증 두 곳에 따로 적히면, 라우트가 거절하는 값이 고르개에 들어
+    있는 상태가 생깁니다."""
+    from src.api.routes.customer_ops import LOST_REASONS, WON_TYPES
+
+    with TestClient(app) as client:
+        options = client.get("/api/ui/dashboard").json()["deal_details"]
+    assert options == {"won": list(WON_TYPES), "closed_lost": list(LOST_REASONS)}
+
+
+# --------------------------------------------------------------------------- #
+# HubSpot 동기화 버튼 — 티켓 단계까지 가져옵니다
+# --------------------------------------------------------------------------- #
+def test_the_sync_button_pulls_the_ticket_stage(customer_db, customer_id) -> None:
+    """버튼이 컨택 속성·메일·딜만 가져오고 **티켓 단계는 한 번도 읽지 않았습니다.**
+
+    그래서 HubSpot 에서 Lost 로 옮긴 티켓이 이 화면에서는 예전 단계 그대로였고, 눌러도
+    아무 일이 없었습니다 — 10분 폴러는 **최근에 바뀐** 티켓만 훑으므로, 그 창이 지나면
+    고칠 방법이 없었습니다.
+
+    쓰는 곳은 ``stage_sync.sync_stage_from_hubspot`` 하나여야 합니다: 여기서 stage 를
+    직접 쓰면 초안 종료·프로필 상태·워크북 반영이 이 경로에서만 빠집니다.
+    """
+    from unittest.mock import MagicMock
+
+    from src.api.routes.customer_ops import _sync_ticket_stages
+
+    with customer_db() as session:
+        conversation = session.query(Conversation).filter_by(contact_id=customer_id).one()
+        conversation.hubspot_ticket_id = "4200777"
+        session.commit()
+
+    client = MagicMock()
+    client.get_ticket_sync.return_value = MagicMock(pipeline_stage="1172180246")   # Lost
+    with patch("src.agents.stage_sync.SessionLocal", customer_db), patch.object(
+        settings, "HUBSPOT_TICKET_STAGE_CLOSED_LOST", "1172180246"
+    ):
+        assert _sync_ticket_stages(client, customer_id) == 1
+
+    client.get_ticket_sync.assert_called_once_with("4200777")
+    with customer_db() as session:
+        assert session.query(Conversation).one().stage == "closed_lost"
+        assert session.get(CustomerProfile, customer_id).customer_state == "lost"
+
+
+def test_a_dead_ticket_does_not_break_the_rest_of_the_sync(customer_db, customer_id) -> None:
+    """지워졌거나 못 읽은 티켓 하나가 나머지 동기화를 통째로 실패시키면 안 됩니다."""
+    from unittest.mock import MagicMock
+
+    from src.api.routes.customer_ops import _sync_ticket_stages
+
+    with customer_db() as session:
+        session.query(Conversation).filter_by(contact_id=customer_id).one().hubspot_ticket_id = "1"
+        session.commit()
+
+    client = MagicMock()
+    client.get_ticket_sync.side_effect = RuntimeError("404")
+    with patch("src.agents.stage_sync.SessionLocal", customer_db):
+        assert _sync_ticket_stages(client, customer_id) == 0

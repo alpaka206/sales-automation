@@ -30,14 +30,21 @@ logger = logging.getLogger(__name__)
 # Ordered like the pipeline. Kept here (not in customer_ops) because both the web
 # routes and the background agents need it, and importing a routes module from an
 # agent would be a circular import.
+#
+# **키는 우리 것이고, 화면에 보이는 이름은 HubSpot 것입니다.** 둘은 따로 움직입니다:
+# "Meeting link sent" 는 "Qualified" 로, "Closed" 는 "Not a Fit" 으로 이름만 바뀌었고
+# stage id 는 그대로입니다. 그래서 여기 키도 그대로 둡니다 — 키를 따라 바꾸면 대화·프로필
+# 두 테이블의 값을 옮기는 마이그레이션이 필요하고, 다음에 이름이 또 바뀌면 그걸 또 합니다.
+# 사람이 읽는 이름은 ``customer_ops.PIPELINE_STAGES`` 한 곳에만 있습니다.
 LOCAL_STAGE_TO_SETTING: dict[str, str] = {
     "new": "HUBSPOT_TICKET_STAGE_NEW",
-    "meeting_link_sent": "HUBSPOT_TICKET_STAGE_AFTER_SEND",
+    "meeting_link_sent": "HUBSPOT_TICKET_STAGE_AFTER_SEND",       # 화면 이름: Qualified
     "negotiation": "HUBSPOT_TICKET_STAGE_NEGOTIATION",
     "reminder_sent": "HUBSPOT_TICKET_STAGE_REMINDER_SENT",
     "won": "HUBSPOT_TICKET_STAGE_WON",
     "closed_lost": "HUBSPOT_TICKET_STAGE_CLOSED_LOST",
-    "closed": "HUBSPOT_TICKET_STAGE_CLOSED",
+    "no_response": "HUBSPOT_TICKET_STAGE_NO_RESPONSE",
+    "closed": "HUBSPOT_TICKET_STAGE_CLOSED",                      # 화면 이름: Not a Fit
 }
 
 # Local stages that imply the customer relationship has moved on. THE one copy of this
@@ -47,6 +54,8 @@ LOCAL_STAGE_TO_SETTING: dict[str, str] = {
 STATE_FOR_STAGE: dict[str, str] = {
     "won": "service",
     "closed_lost": "lost",
+    # No Response 도 끝난 문의입니다 — 답이 없어 끝났을 뿐, 아직 협상 중인 건이 아닙니다.
+    "no_response": "lost",
     "closed": "lost",
 }
 

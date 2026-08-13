@@ -83,8 +83,15 @@ os.environ["GOOGLE_SHEETS_SPREADSHEET_ID"] = ""
 # live account from someone's `pytest`. With no stage id configured, _stage_id() returns
 # "" and the call is never made. Tests that need them set them explicitly (the `stages`
 # fixtures in test_stage_sync.py / test_hubspot_backfill.py).
+#
+# **EVERY alias has to be here, not just the attribute name.** These are env var names,
+# and config.py accepts several spellings per stage (a HubSpot rename leaves the id
+# alone, so the old name stays valid) — blanking one spelling while the developer's .env
+# carries another lets a real stage id through. test_safe_mode's
+# test_pytest_can_never_move_a_real_hubspot_ticket is what catches a missed one.
 for _stage_var in (
     "HUBSPOT_TICKET_STAGE_NEW",
+    "HUBSPOT_TICKET_STAGE_QUALIFIED",
     "HUBSPOT_TICKET_STAGE_MEETING_LINK_SENT",
     "HUBSPOT_TICKET_STAGE_AFTER_SEND",
     "HUBSPOT_TICKET_STAGE_NEGOTIATING",
@@ -93,7 +100,10 @@ for _stage_var in (
     "HUBSPOT_TICKET_STAGE_WON",
     "HUBSPOT_TICKET_STAGE_LOST",
     "HUBSPOT_TICKET_STAGE_CLOSED_LOST",
+    "HUBSPOT_TICKET_STAGE_NO_RESPONSE",
+    "HUBSPOT_TICKET_STAGE_NOT_A_FIT",
     "HUBSPOT_TICKET_STAGE_CLOSED",
+    "HUBSPOT_TICKET_STAGE_UNQUALIFIED",
 ):
     os.environ[_stage_var] = ""
 

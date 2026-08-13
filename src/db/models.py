@@ -73,6 +73,11 @@ class Conversation(Base):
     # 이 열이 없으면 알 수 없습니다.
     inquiry_category: Mapped[str | None] = mapped_column(String(32), nullable=True)
     stage: Mapped[str] = mapped_column(String, nullable=False, default="initial")
+    # Won Type(PoC/Contract/Renewal) 또는 Lost Reason 여섯 가지. **한 열입니다** — 한
+    # 문의가 동시에 이기고 지지는 않으므로, 어느 목록의 값인지는 그때의 ``stage`` 가
+    # 정합니다(`customer_ops.DEAL_DETAILS`). 열을 둘로 나누면 Won 이었다가 Lost 가 된
+    # 티켓에 두 값이 남고, 어느 쪽이 지금 값인지 행만 봐서는 알 수 없습니다.
+    deal_detail: Mapped[str | None] = mapped_column(String(32), nullable=True)
     last_outgoing_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     last_incoming_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     hubspot_ticket_id: Mapped[str | None] = mapped_column(
@@ -683,6 +688,12 @@ class ClientContract(Base):
     # 채우면 어느 쪽이 기준인지가 계약마다 달라집니다 — 저장 경로가 안 쓰는 쪽을 비웁니다.
     amount_incl_vat: Mapped[Decimal | None] = mapped_column(Numeric(18, 2), nullable=True)
     amount_excl_vat: Mapped[Decimal | None] = mapped_column(Numeric(18, 2), nullable=True)
+    # **원화 계약에서만 뜻이 있습니다:** 계약서에 적힌 금액이 VAT 포함인가. 계약서마다
+    # 다르게 적히는데(공급가 + 부가세 별기 / 총액 일괄), 어느 쪽인지 모르면 분당 단가가
+    # 계약마다 10% 씩 달라집니다. 켜면 받은 금액이 곧 총액이자 단가의 기준이고, 끄면
+    # 예전과 같이 공급가를 받아 총액을 +10% 로 계산합니다. 다른 통화는 부가세가 없어
+    # 이 값을 보지 않습니다 — 총액만 받습니다.
+    vat_included: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     payment_method: Mapped[str | None] = mapped_column(String(32), nullable=True)
     payment_type: Mapped[str | None] = mapped_column(String(16), nullable=True)
     installments: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -789,7 +800,13 @@ class ContractClaim(Base):
     )
     kind: Mapped[str] = mapped_column(String(200), nullable=False)
     happened_on: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    # 화면 이름은 「조치 방식」입니다. 열 이름을 안 바꾼 이유: 값이 그대로이고, 이름만
+    # 바꾸려고 마이그레이션으로 열을 옮기면 그 사이에 쓴 행이 어느 쪽에 있는지 모릅니다.
     compensation: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    # 클레임이 들어온 연락처. 고객 기본 정보의 연락처와 **다를 수 있어서** 따로 답니다 —
+    # 등록된 담당자가 아니라 실무자가 항의 메일을 보내는 일이 흔하고, 그 사람에게 답을
+    # 해야 합니다. 폼은 기본값으로 등록된 연락처를 채워 두되 고칠 수 있습니다.
+    contact_info: Mapped[str | None] = mapped_column(String(255), nullable=True)
     progress: Mapped[str] = mapped_column(String(32), nullable=False, default="접수")
     action_on: Mapped[str | None] = mapped_column(String(10), nullable=True)
 

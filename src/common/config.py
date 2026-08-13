@@ -46,11 +46,14 @@ class Settings(BaseSettings):
     HUBSPOT_OWNER_ID: str = ""
     HUBSPOT_WEBHOOK_SECRET: str = ""
     # ----- [B2B] AI Dubbing ticket pipeline stage ids -----
-    # The env names below mirror the stage labels in HubSpot (New / Meeting link sent /
-    # Negotiating / Reminder Sent / Won / Lost / Closed). The older internal names are
-    # kept as aliases so an existing .env or Render dashboard keeps working — same
-    # pattern as HUBSPOT_ACCESS_TOKEN above. Find an id in HubSpot Settings → Objects →
-    # Tickets → Pipelines (click a stage → copy id), or run scripts/list_ticket_stages.py.
+    # The env names below mirror the stage labels in HubSpot (New / Qualified /
+    # Negotiating / Reminder Sent / Won / Lost / Not a Fit / No Response). Stages get
+    # RENAMED in HubSpot without changing their id — "Meeting link sent" became
+    # "Qualified" and "Closed" became "Not a Fit" — so every former spelling stays as an
+    # alias: an existing .env or Render dashboard keeps working, and the id behind it is
+    # the same row either way. Same pattern as HUBSPOT_ACCESS_TOKEN above. Find an id in
+    # HubSpot Settings → Objects → Tickets → Pipelines (click a stage → copy id), or run
+    # scripts/list_ticket_stages.py.
     #
     # Only tickets in this stage are treated as new inbound inquiries. Empty keeps the
     # existing "all newly-created tickets" behavior.
@@ -59,7 +62,9 @@ class Settings(BaseSettings):
     HUBSPOT_TICKET_STAGE_AFTER_SEND: str = Field(
         default="",
         validation_alias=AliasChoices(
-            "HUBSPOT_TICKET_STAGE_MEETING_LINK_SENT", "HUBSPOT_TICKET_STAGE_AFTER_SEND"
+            "HUBSPOT_TICKET_STAGE_QUALIFIED",
+            "HUBSPOT_TICKET_STAGE_MEETING_LINK_SENT",
+            "HUBSPOT_TICKET_STAGE_AFTER_SEND",
         ),
     )
     HUBSPOT_TICKET_STAGE_NEGOTIATION: str = Field(
@@ -78,14 +83,20 @@ class Settings(BaseSettings):
     # (pydantic's extra="ignore" silently drops anything undeclared).
     HUBSPOT_TICKET_STAGE_REMINDER_SENT: str = ""
     HUBSPOT_TICKET_STAGE_WON: str = ""
-    # "Unqualified" is being converted to a closed stage on the HubSpot side.
+    # 지금 이름은 "Not a Fit" 입니다. 예전 이름("Closed", 그 전엔 "Unqualified")이 alias 로
+    # 남아 있는 것은 id 가 그대로이기 때문입니다 — HubSpot 에서 이름만 바뀌었습니다.
     HUBSPOT_TICKET_STAGE_CLOSED: str = Field(
         default="",
         validation_alias=AliasChoices(
-            "HUBSPOT_TICKET_STAGE_CLOSED", "HUBSPOT_TICKET_STAGE_UNQUALIFIED"
+            "HUBSPOT_TICKET_STAGE_NOT_A_FIT",
+            "HUBSPOT_TICKET_STAGE_CLOSED",
+            "HUBSPOT_TICKET_STAGE_UNQUALIFIED",
         ),
     )
-    # These seven are the whole pipeline. FOLLOW_UP_NEEDED / CONTRACTED / ONBOARDING /
+    # 새로 생긴 단계 — 응답이 아예 없어 끝난 문의. 별칭이 없는 유일한 단계입니다(이름을
+    # 바꾼 것이 아니라 없던 것이 생겼으므로).
+    HUBSPOT_TICKET_STAGE_NO_RESPONSE: str = ""
+    # These eight are the whole pipeline. FOLLOW_UP_NEEDED / CONTRACTED / ONBOARDING /
     # ACTIVE were retired in migration 0040 — do not redeclare them without a matching
     # HubSpot stage and an entry in stage_sync.LOCAL_STAGE_TO_SETTING.
     # Set to true ONLY if the HubSpot account has a custom `inbound_status`

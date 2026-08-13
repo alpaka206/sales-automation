@@ -29,6 +29,7 @@ STAGE_IDS = {
     "HUBSPOT_TICKET_STAGE_REMINDER_SENT": "1196621584",
     "HUBSPOT_TICKET_STAGE_WON": "1196772135",
     "HUBSPOT_TICKET_STAGE_CLOSED_LOST": "1172180246",
+    "HUBSPOT_TICKET_STAGE_NO_RESPONSE": "4142303959",
     "HUBSPOT_TICKET_STAGE_CLOSED": "1404814097",
 }
 
@@ -59,7 +60,7 @@ def db(monkeypatch):
 
 
 def test_every_pipeline_stage_is_mapped(stages):
-    """All 7 stages of [B2B] AI Dubbing must resolve — an unmapped one is invisible."""
+    """All 8 stages of [B2B] AI Dubbing must resolve — an unmapped one is invisible."""
     expected = {
         "1172180243": "new",
         "1193842435": "meeting_link_sent",
@@ -67,13 +68,19 @@ def test_every_pipeline_stage_is_mapped(stages):
         "1196621584": "reminder_sent",
         "1196772135": "won",
         "1172180246": "closed_lost",
+        "4142303959": "no_response",
         "1404814097": "closed",
     }
     assert stage_sync.stage_id_to_local() == expected
 
 
-def test_board_columns_are_exactly_the_seven_stages_in_flow_order():
-    """The board's column order IS this tuple — nothing else defines it."""
+def test_board_columns_are_exactly_the_eight_stages_in_flow_order():
+    """The board's column order IS this tuple — nothing else defines it.
+
+    **키와 이름은 따로 움직입니다.** HubSpot 이 단계 이름을 바꿔도(Meeting link sent →
+    Qualified, Closed → Not a Fit) stage id 는 그대로라, 로컬 키도 그대로 두고 이 튜플의
+    이름만 바꿉니다 — 옮겨야 할 행이 없습니다. 두 목록을 따로 적어 두는 이유입니다.
+    """
     from src.api.routes.customer_ops import PIPELINE_STAGES
 
     assert [key for key, _, _ in PIPELINE_STAGES] == [
@@ -83,16 +90,18 @@ def test_board_columns_are_exactly_the_seven_stages_in_flow_order():
         "reminder_sent",
         "won",
         "closed_lost",
+        "no_response",
         "closed",
     ]
     assert [label for _, label, _ in PIPELINE_STAGES] == [
         "New",
-        "Meeting Link Sent",
+        "Qualified",
         "Negotiating",
         "Reminder Sent",
         "Won",
         "Lost",
-        "Closed",
+        "No Response",
+        "Not a Fit",
     ]
 
 
@@ -505,3 +514,25 @@ def test_a_stage_moved_in_the_console_retires_the_draft(monkeypatch):
 
     with factory() as session:
         assert session.get(Message, draft_id).status == "superseded"
+
+
+def test_the_deploy_blueprint_carries_every_stage_id():
+    """**배포본이 보는 것은 `.env` 가 아니라 이 파일들입니다.**
+
+    단계 하나의 id 가 비면 `stage_id_to_local()` 이 그 id 를 건너뜁니다. 그러면 HubSpot 에서
+    그 단계로 옮긴 티켓이 콘솔에 안 보이고(대기 중이던 초안도 안 닫힙니다), 반대로 콘솔에서
+    그 열로 옮기면 HubSpot 이 안 따라오는데 — `_sync_stage` 가 빈 stage id 를 「시도 안 함」
+    으로 돌려주므로 — 배너가 성공으로 보입니다. 조용히 틀리는 쪽입니다.
+
+    실제로 `No Response` 를 추가할 때 `.env`(gitignore 됨)에만 적혀 있었습니다. 이름만 있고
+    값을 못 찾는 일이 다시 없도록, 여기서 **여덟 개 전부**를 두 파일에서 확인합니다.
+
+    이름은 여러 철자가 허용되므로(단계는 id 를 둔 채 이름만 바뀝니다) 철자가 아니라 **id 가
+    적혀 있는지**를 봅니다.
+    """
+    import pathlib
+
+    for name in ("render.yaml", ".env.example"):
+        text = pathlib.Path(name).read_text(encoding="utf-8")
+        missing = [stage_id for stage_id in STAGE_IDS.values() if stage_id not in text]
+        assert not missing, f"{name} 에 stage id 가 빠졌습니다: {missing}"

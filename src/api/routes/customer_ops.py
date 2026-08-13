@@ -37,16 +37,39 @@ GOOGLE_SHEETS_STATE_COOKIE = "perso_sheets_oauth_state"
 # or src/agents/stage_sync.py cannot record where a ticket actually is.
 # Legacy keys (follow_up_needed, contracted, onboarding, active) were retired in
 # migration 0040; nothing may reintroduce them without a HubSpot stage to match.
+#
+# **이 튜플의 두 번째 칸이 파이프라인 이름의 유일한 출처입니다.** HubSpot 이 단계 이름을
+# 바꾸면 여기만 바꿉니다 — stage id 도 로컬 키도 그대로이고, 화면·목록·칩이 전부 여기를
+# 읽습니다. 그래서 `meeting_link_sent` 는 Qualified 로, `closed` 는 Not a Fit 으로 보입니다:
+# 이름만 바뀐 같은 단계라 예전 티켓이 저절로 새 이름 아래로 모입니다(옮길 것이 없습니다).
 PIPELINE_STAGES: tuple[tuple[str, str, str], ...] = (
     ("new", "New", "새 문의"),
-    ("meeting_link_sent", "Meeting Link Sent", "답변 발송"),
+    ("meeting_link_sent", "Qualified", "답변 발송"),
     ("negotiation", "Negotiating", "협의 중"),
     ("reminder_sent", "Reminder Sent", "리마인더 발송"),
     ("won", "Won", "계약 성사"),
     ("closed_lost", "Lost", "실패"),
-    ("closed", "Closed", "협상 전 종료"),
+    ("no_response", "No Response", "무응답 종료"),
+    ("closed", "Not a Fit", "부적합 종료"),
 )
 VALID_PIPELINE_STAGES = {stage for stage, _, _ in PIPELINE_STAGES}
+
+# ----- Deal Detail — Won 과 Lost 에만 있는 세부 구분 -----
+# 두 단계뿐인 이유가 곧 정의입니다: 왜 이겼나(Won Type)와 왜 졌나(Lost Reason)는 결말이
+# 난 건에만 있는 정보이고, 나머지 단계에는 채울 답이 없습니다. 그래서 보드 카드의 고르개도
+# 이 두 열에서만 그려집니다 — 나머지 열에 두면 아무도 안 고르는 빈 칸이 됩니다.
+WON_TYPES: tuple[str, ...] = ("PoC", "Contract", "Renewal")
+LOST_REASONS: tuple[str, ...] = (
+    "Price",
+    # 진 것이 아니라 우리 다른 플랜으로 간 건입니다. 승률을 셀 때 이 값을 분모에서 빼는
+    # 것은 **사람이 합니다** — 이 콘솔에는 승률을 세는 곳이 없습니다.
+    "Use other plan",
+    "Competitor",
+    "Product Gap",
+    "No decision",
+    "Went dark",
+)
+DEAL_DETAILS: dict[str, tuple[str, ...]] = {"won": WON_TYPES, "closed_lost": LOST_REASONS}
 CONTRACT_STATUSES = {"draft", "sent", "contracted", "active", "expired", "cancelled"}
 # In the order a contract moves through them, with the words the 수주 고객 screen shows.
 CONTRACT_STATUS_LABELS: tuple[tuple[str, str], ...] = (
@@ -600,7 +623,6 @@ def _customer_context(contact_id: int) -> dict | None:
 @router.post("/customers/{contact_id}/profile")
 async def customer_profile_save(
     contact_id: int,
-    customer_state: str = Form("negotiation"),
     pipeline_stage: str = Form("new"),
     lead_temperature: str = Form(""),
     next_action: str = Form(""),
@@ -613,17 +635,19 @@ async def customer_profile_save(
     source: str = Form(""),
     notes: str = Form(""),
 ):
-    valid_states = {"negotiation", "service", "pool", "lost"}
-    if customer_state not in valid_states or pipeline_stage not in VALID_PIPELINE_STAGES:
-        raise HTTPException(status_code=400, detail="지원하지 않는 고객 상태 또는 파이프라인 단계입니다")
+    if pipeline_stage not in VALID_PIPELINE_STAGES:
+        raise HTTPException(status_code=400, detail="지원하지 않는 파이프라인 단계입니다")
     with SessionLocal() as session:
         contact = session.get(Contact, contact_id)
         if not contact:
             raise HTTPException(status_code=404, detail="고객을 찾을 수 없습니다")
         profile = session.get(CustomerProfile, contact_id) or CustomerProfile(contact_id=contact_id)
         session.add(profile)
-        profile.customer_state = customer_state
         profile.pipeline_stage = pipeline_stage
+        # 「고객 구분」 칸이 화면에서 없어졌습니다 — 손으로 고르던 값인데, 단계에서 그대로
+        # 나오는 값이라 둘이 어긋난 행이 생겼습니다(Won 인데 Negotiation 인 고객). 이제
+        # 보드 드롭·HubSpot 동기화·워크북이 쓰는 것과 **같은 규칙**으로 여기서도 정합니다.
+        profile.customer_state = customer_state_for(pipeline_stage, profile.customer_state)
         profile.lead_temperature = lead_temperature.strip() or None
         profile.next_action = next_action.strip() or None
         profile.next_action_at = _parse_dt(next_action_at)
@@ -1042,6 +1066,43 @@ async def contract_update(
     return RedirectResponse(f"/customers/{contact_id}#contracts", status_code=303)
 
 
+def _sync_ticket_stages(client, contact_id: int) -> int:
+    """이 고객의 티켓 단계를 HubSpot 에서 다시 읽어 옵니다. 바뀐 건수를 돌려줍니다.
+
+    「HubSpot 동기화」 버튼이 컨택 속성·메일·통화·딜·메모만 가져오고 **티켓 단계는 한 번도
+    읽지 않았습니다.** 그래서 HubSpot 에서 Lost 로 옮긴 티켓이 이 화면에서는 예전 단계
+    그대로였고, 눌러도 아무 일이 없었습니다 — 10분 폴러가 그 티켓을 다시 훑기 전까지는
+    고칠 방법도 없었습니다(폴러는 **최근에 바뀐** 티켓만 봅니다).
+
+    쓰는 곳은 ``stage_sync.sync_stage_from_hubspot`` 하나입니다. 여기서 conv.stage 를 직접
+    쓰면 초안 종료·프로필 상태·워크북 반영이 이 경로에서만 빠집니다.
+    """
+    from ...agents.stage_sync import sync_stage_from_hubspot
+
+    with SessionLocal() as session:
+        tickets = [
+            str(ticket_id)
+            for (ticket_id,) in session.execute(
+                select(Conversation.hubspot_ticket_id).where(
+                    Conversation.contact_id == contact_id,
+                    Conversation.hubspot_ticket_id.isnot(None),
+                )
+            )
+            if ticket_id
+        ]
+    moved = 0
+    for ticket_id in tickets:
+        try:
+            ticket = client.get_ticket_sync(ticket_id)
+        except Exception:
+            # 지워졌거나 못 읽은 티켓 하나가 나머지 동기화를 통째로 실패시키면 안 됩니다.
+            logger.warning("티켓 %s 단계를 읽지 못했습니다", ticket_id, exc_info=True)
+            continue
+        if sync_stage_from_hubspot(ticket_id, ticket.pipeline_stage, source="manual-sync"):
+            moved += 1
+    return moved
+
+
 def _sync_hubspot(contact_id: int) -> int:
     from ...integrations.hubspot import HubSpotClient
 
@@ -1150,6 +1211,9 @@ def _sync_hubspot(contact_id: int) -> int:
                 )
                 inserted += 1
         session.commit()
+    # 커밋 뒤입니다 — 단계 반영은 자기 세션에서 커밋하고, 실패해도 위에서 가져온 것을
+    # 되돌리지 않습니다.
+    _sync_ticket_stages(client, contact_id)
     return inserted
 
 
@@ -1199,6 +1263,29 @@ async def pipeline_inquiry_stage_move(conversation_id: int, stage: str = Form(..
     return RedirectResponse(
         _BOARD_REDIRECT.format(sync=_sync_state(result), stage=stage), status_code=303
     )
+
+
+@router.post("/pipeline/conversations/{conversation_id}/deal-detail")
+async def pipeline_deal_detail(conversation_id: int, detail: str = Form("")):
+    """Won Type / Lost Reason 을 그 문의에 붙입니다. 우리 DB 에만 씁니다.
+
+    HubSpot 으로 보내지 않는 이유: 그 파이프라인에 대응하는 속성이 있는지 확인되지 않았고,
+    없는 속성에 쓰면 요청마다 400 이 납니다. 값이 어느 목록에서 왔는지는 **그 문의의 현재
+    단계**가 정합니다 — Won 카드에 Lost 사유를 붙일 수 있으면 그 값은 아무 뜻이 없습니다.
+    """
+    with SessionLocal() as session:
+        conversation = session.get(Conversation, conversation_id)
+        if not conversation:
+            raise HTTPException(status_code=404, detail="문의를 찾을 수 없습니다")
+        allowed = DEAL_DETAILS.get(conversation.stage or "", ())
+        if not allowed:
+            raise HTTPException(status_code=400, detail="이 단계에는 Deal Detail 이 없습니다")
+        value = detail.strip()
+        if value and value not in allowed:
+            raise HTTPException(status_code=400, detail="지원하지 않는 Deal Detail 값입니다")
+        conversation.deal_detail = value or None
+        session.commit()
+    return {"ok": True}
 
 
 @router.post("/pipeline/backfill")

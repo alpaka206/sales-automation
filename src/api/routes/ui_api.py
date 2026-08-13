@@ -82,6 +82,8 @@ async def ui_events(request: Request) -> StreamingResponse:
 
 def _card(row: dict) -> dict:
     """A board row's ORM objects flattened to what a card actually draws."""
+    from .customer_ops import DEAL_DETAILS
+
     conversation: Conversation = row["conversation"]
     contact: Contact = row["contact"]
     profile: CustomerProfile | None = row["profile"]
@@ -102,16 +104,29 @@ def _card(row: dict) -> dict:
         "link_message_id": row["link_message_id"],
         "last_activity": row["last_activity"],
         "stage": row["stage"],
+        # Won Type / Lost Reason. **지금 단계의 목록에 있는 값일 때만** 실어 보냅니다:
+        # Won 에서 고른 "Contract" 를 그 카드가 Lost 로 옮겨진 뒤에도 그리면, Lost 사유
+        # 자리에 Won 값이 붙은 카드가 됩니다. 값은 지우지 않으므로 되돌아오면 다시 뜹니다.
+        "deal_detail": (
+            conversation.deal_detail
+            if conversation.deal_detail in DEAL_DETAILS.get(row["stage"], ())
+            else None
+        ),
         "temperature": profile.lead_temperature if profile else None,
     }
 
 
 @router.get("/api/ui/dashboard")
 def ui_dashboard(_request: Request):
+    from .customer_ops import DEAL_DETAILS
     from .dashboard import _dashboard_context
 
     context = _dashboard_context()
     return {
+        # 어느 열에 Deal Detail 고르개가 붙는지, 거기 무엇을 고를 수 있는지. 서버가 주므로
+        # 값 목록이 화면과 검증 두 곳에 따로 적히지 않습니다 — 라우트가 거절하는 값이
+        # 고르개에 들어 있는 상태가 생기지 않습니다.
+        "deal_details": {stage: list(values) for stage, values in DEAL_DETAILS.items()},
         "queue": context["recent_messages"],
         "now": context["now"],
         "counters": {
@@ -705,7 +720,12 @@ def _won_contract(contract, today) -> dict:
         # 총액을 +10% 로, 그 외는 총액을 받고 공급가 칸이 없습니다. 분당 단가도 계산값
         # 입니다 — 금액 ÷ (크레딧 ÷ 60).
         "amount_incl_vat": won.total_amount(contract),
-        "amount_excl_vat": won.billing_amount(contract) if won.is_krw(contract) else None,
+        # 총액으로 적힌 계약도 채웁니다(총액 ÷ 1.1). 워크북의 공급가 열이 회계가 합계를
+        # 내는 칸이라 비면 그 행만 빠지고, 화면과 시트가 같은 값이어야 합니다.
+        "amount_excl_vat": won.supply_amount(contract),
+        # 원화 계약이 총액으로 적혔는가. 편집 폼이 어느 칸을 그릴지 정하고, 상세 화면이
+        # 「VAT 포함」인지 「공급가 + 10%」인지 적는 근거입니다.
+        "vat_included": won.vat_included(contract),
         "unit_price": won.unit_price(contract),
         "payment_method": contract.payment_method,
         "payment_type": contract.payment_type,
@@ -764,14 +784,15 @@ def _won_contract(contract, today) -> dict:
         "claims": [
             {
                 "id": c.id, "kind": c.kind, "happened_on": c.happened_on,
-                "compensation": c.compensation, "progress": c.progress, "action_on": c.action_on,
+                "compensation": c.compensation, "contact_info": c.contact_info,
+                "progress": c.progress, "action_on": c.action_on,
             }
             for c in contract.claims
         ],
     }
 
 
-def _won_client(client, today, *, full: bool) -> dict:
+def _won_client(client, today, *, full: bool, contact=None) -> dict:
     from decimal import Decimal
 
     from ...common import won
@@ -795,9 +816,18 @@ def _won_client(client, today, *, full: bool) -> dict:
         "customer_type": won.client_type(client.client_id),
         "industry": client.industry,
         "country": client.country,
-        "department": client.department,
+        # **적어 둔 값이 없으면 번호대에서 되짚습니다**(won.department) — 요약 카드와
+        # 예상 MRR 이 GTM 만 더할 때 쓰는 것과 같은 함수입니다. 여기서 원본 열을 그대로
+        # 내려보내던 시절에는, 부서 칸이 빈 고객이 카드에는 잡히고 담당부서 필터에는
+        # 안 걸렸습니다 — 같은 화면의 두 숫자가 서로 다른 정의를 쓴 것입니다.
+        "department": won.department(client),
         "contact_name": client.contact_name,
         "contact_info": client.contact_info,
+        # 연결된 인바운드 연락처의 이메일·전화. 목록 검색이 씁니다 — 클레임이나 결제
+        # 문의는 회사 이름이 아니라 메일 주소로 기억되는 일이 흔합니다. 아웃바운드·
+        # Interactive·AX 고객은 연락처가 없어 비는 것이 정상입니다.
+        "email": getattr(contact, "email", None),
+        "phone": getattr(contact, "phone", None),
         "first_won_on": client.first_won_on,
         # 계약 기간에서 나옵니다 — 저장하지 않습니다(won.plan_status).
         "plan_status": won.plan_status(client, today),
@@ -856,7 +886,21 @@ def ui_won_customers():
             .order_by(Client.company)
             .all()
         )
-        rows = [_won_client(client, today, full=False) for client in clients]
+        # 연락처는 한 번에 읽습니다 — 고객마다 한 번씩 읽으면 목록 하나에 쿼리가 고객 수만큼
+        # 늘어납니다(위 selectinload 를 단 것과 같은 이유).
+        contact_ids = {client.contact_id for client in clients if client.contact_id}
+        contacts = (
+            {
+                contact.id: contact
+                for contact in session.query(Contact).filter(Contact.id.in_(contact_ids))
+            }
+            if contact_ids
+            else {}
+        )
+        rows = [
+            _won_client(client, today, full=False, contact=contacts.get(client.contact_id))
+            for client in clients
+        ]
         # 카드는 **행이 이미 들고 있는 값**을 더합니다. 따로 세면 목록의 「이번달 매출」 칸과
         # 카드가 언젠가 어긋나고, 어긋난 뒤에는 어느 쪽이 맞는지 아무도 모릅니다.
         #
@@ -986,7 +1030,12 @@ def ui_won_customer(client_id: int):
         )
         if client is None:
             raise HTTPException(status_code=404, detail="고객을 찾을 수 없습니다")
-        payload = _won_client(client, today, full=True)
+        payload = _won_client(
+            client,
+            today,
+            full=True,
+            contact=session.get(Contact, client.contact_id) if client.contact_id else None,
+        )
         # 협상 단계 대화까지 한 타임라인에 쌓입니다 — 계약이 생기기 전 기록이 여기 있습니다.
         comms = []
         if client.contact_id:

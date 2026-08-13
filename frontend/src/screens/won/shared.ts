@@ -15,7 +15,11 @@ export type Payment = {
   amount: Money; done: boolean; fx_rate: Money; fx_on: string | null;
 };
 export type Claim = {
-  id: number; kind: string; happened_on: string | null; compensation: string | null;
+  id: number; kind: string; happened_on: string | null;
+  /** 화면 이름은 「조치 방식」. 열 이름은 값이 그대로라 바꾸지 않았습니다. */
+  compensation: string | null;
+  /** 클레임이 들어온 연락처 — 고객 기본 정보의 연락처와 다를 수 있습니다. */
+  contact_info: string | null;
   progress: string; action_on: string | null;
 };
 export type Contract = {
@@ -24,6 +28,9 @@ export type Contract = {
   starts_on: string | null; ends_on: string | null; months: number;
   doc_types: string[]; credits: number | null; currency: string;
   amount_incl_vat: Money; amount_excl_vat: Money;
+  /** 원화 계약이 **VAT 포함 금액으로 적혔는가.** 그 외 통화에서는 늘 false 입니다 —
+   *  부가세가 없어 총액이 곧 대금이라 고를 것이 없습니다. */
+  vat_included: boolean;
   /** 계산값 — 금액 ÷ (계약 크레딧 ÷ 60). 통화는 계약 통화입니다. */
   unit_price: Money;
   payment_method: string | null; payment_type: string | null; installments: number | null;
@@ -43,8 +50,12 @@ export type Contract = {
 };
 export type Row = {
   client_id: number; company: string; customer_type: string;
-  industry: string | null; country: string | null; department: string | null;
+  industry: string | null; country: string | null;
+  /** 적어 둔 값이 없으면 Client ID 번호대에서 되짚은 값 — 서버가 정합니다(won.department). */
+  department: string | null;
   contact_name: string | null; contact_info: string | null;
+  /** 연결된 인바운드 연락처의 것. 목록 검색이 씁니다. 아웃바운드 고객은 비어 있습니다. */
+  email: string | null; phone: string | null;
   first_won_on: string | null; plan_status: string; owner: string | null;
   contact_id: number | null; setup_count: number; open_claims: number;
   /** 이번 달에 이 고객이 얹은 금액, 통화별. 계약 **전부**를 더한 값입니다. */

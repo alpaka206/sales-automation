@@ -146,7 +146,9 @@ def _contract_row(contract: ClientContract) -> _Row:
             # 화면과 같은 값이 나갑니다. 총액은 원화면 공급가+10%, 분당 단가는 금액을
             # 크레딧에서 나눈 계산값입니다 — 저장된 열이 아닙니다.
             "L": _num(won.total_amount(contract)),
-            "M": _num(contract.amount_excl_vat),
+            # 공급가는 총액으로 적힌 계약에서도 채웁니다(총액 ÷ 1.1) — 회계가 합계를
+            # 내는 열이라 비면 그 행만 조용히 빠집니다. 화면과 같은 값입니다.
+            "M": _num(won.supply_amount(contract)),
             "O": _num(won.unit_price(contract)),
             # P(적용 환율)·N(분당 단가 통화)은 없어진 칸입니다. 옛 값이 남아 있으면 지금
             # 단가와 앞뒤가 안 맞으므로 비웁니다.

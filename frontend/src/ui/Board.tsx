@@ -22,6 +22,8 @@ export type Card = {
   link_message_id: number | null;
   last_activity: string;
   stage: string;
+  /** Won Type 또는 Lost Reason. 그 단계의 목록에 있는 값일 때만 서버가 실어 보냅니다. */
+  deal_detail: string | null;
 };
 export type Stage = { key: string; label: string; total: number; cards: Card[] };
 
@@ -45,7 +47,13 @@ function withCardMoved(stages: Stage[], card: Card, to: string): Stage[] {
   });
 }
 
-export function Board({ stages, manualLogStages }: { stages: Stage[]; manualLogStages: string[] }) {
+export function Board({ stages, manualLogStages, dealDetails = {} }: {
+  stages: Stage[];
+  manualLogStages: string[];
+  /** 단계 → 고를 수 있는 Deal Detail. 서버가 줍니다 — 라우트가 거절하는 값이 고르개에
+   *  들어 있는 상태가 생기지 않도록, 목록은 한 곳에만 있습니다. */
+  dealDetails?: Record<string, string[]>;
+}) {
   const queryClient = useQueryClient();
   // Pages fetched by "더 보기", kept beside the query data: the query owns the first
   // page, this owns what the operator asked for on top of it.
@@ -85,6 +93,37 @@ export function Board({ stages, manualLogStages }: { stages: Stage[]; manualLogS
     }
   }
 
+  /** Won Type / Lost Reason 을 고른 순간 카드에 반영합니다. 단계 이동과 같은 이유로
+   *  먼저 그립니다 — 왕복이 끝날 때까지 태그가 안 바뀌면 안 눌린 것처럼 보입니다.
+   *
+   *  **질의 캐시와 `extra` 를 둘 다 고칩니다.** 「더 보기」로 받은 카드는 질의가 아니라 이
+   *  컴포넌트의 상태에 있어서, 캐시만 고치면 그쪽 카드는 고른 값이 안 붙습니다 — 그리고
+   *  단계 이동처럼 `extra` 를 비울 수도 없습니다: 태그 하나 고르자고 펼쳐 둔 카드가 전부
+   *  접히면, 옮긴 것도 아닌데 목록이 사라진 것으로 보입니다. */
+  async function setDealDetail(card: Card, detail: string) {
+    const tagged = (c: Card) =>
+      c.conversation_id === card.conversation_id ? { ...c, deal_detail: detail || null } : c;
+    const previous = queryClient.getQueryData<{ stages: Stage[] }>(["dashboard"]);
+    const previousExtra = extra;
+    queryClient.setQueryData(["dashboard"], (old?: { stages: Stage[] }) =>
+      old
+        ? { ...old, stages: old.stages.map((column) => ({ ...column, cards: column.cards.map(tagged) })) }
+        : old,
+    );
+    setExtra((current) =>
+      Object.fromEntries(Object.entries(current).map(([key, cards]) => [key, cards.map(tagged)])),
+    );
+    try {
+      await postForm(`/pipeline/conversations/${card.conversation_id}/deal-detail`, { detail });
+      await queryClient.invalidateQueries({ queryKey: ["dashboard"] });
+    } catch {
+      // 저장이 안 되면 있던 값으로 되돌립니다 — 화면에만 붙은 태그는 붙었다고 믿게 됩니다.
+      if (previous) queryClient.setQueryData(["dashboard"], previous);
+      setExtra(previousExtra);
+      setSync("partial");
+    }
+  }
+
   async function loadMore(stage: Stage, loaded: number) {
     const page = await getJSON<Page>(`/api/ui/pipeline/${stage.key}/cards?offset=${loaded}`);
     setExtra((prev) => ({ ...prev, [stage.key]: [...(prev[stage.key] ?? []), ...page.cards] }));
@@ -101,6 +140,9 @@ export function Board({ stages, manualLogStages }: { stages: Stage[]; manualLogS
         {stages.map((stage) => {
           const cards = [...stage.cards, ...(extra[stage.key] ?? [])];
           const canLog = manualLogStages.includes(stage.key);
+          // Won 과 Lost 에만 있습니다 — 왜 이겼나 / 왜 졌나는 결말이 난 건에만 있는
+          // 정보라, 나머지 열에 두면 아무도 안 고르는 빈 칸이 됩니다.
+          const details = dealDetails[stage.key];
           return (
             <section key={stage.key} className="kanban-column" id={`stage-${stage.key}`}>
               <header className="kanban-column__header">
@@ -136,6 +178,8 @@ export function Board({ stages, manualLogStages }: { stages: Stage[]; manualLogS
                   <article
                     key={card.conversation_id}
                     className={`pipeline-card${canLog ? " pipeline-card--logged" : ""}${
+                      details ? " pipeline-card--deal" : ""
+                    }${
                       dragging?.conversation_id === card.conversation_id ? " is-dragging" : ""
                     }`}
                     draggable
@@ -172,18 +216,48 @@ export function Board({ stages, manualLogStages }: { stages: Stage[]; manualLogS
                       <small>문의 #{card.ticket_id || card.conversation_id} · Client ID {card.client_id ?? "—"}</small>
                       <small>{kst(card.last_activity, "md-hm")}</small>
                     </Link>
-                    {canLog && (
-                      <button
-                        type="button"
-                        className="pipeline-card__log"
-                        draggable={false}
-                        title="소통 기록 추가"
-                        aria-label="소통 기록 추가"
-                        aria-haspopup="dialog"
-                        onClick={() => setLogging(card)}
-                      >
-                        <Icon name="plus" size={14} />
-                      </button>
+                    {(details || canLog) && (
+                      <div className="pipeline-card__tools">
+                        {/* 목업 그대로: 제목 옆의 태그입니다. 태그가 곧 고르개인 이유는
+                            이 화면에서 값을 정하는 사람과 읽는 사람이 같기 때문입니다 —
+                            읽으려고 카드를 열고 고치려고 또 여는 것이 아니라, 보이는
+                            자리에서 바꿉니다. `select` 를 쓰므로 키보드로도 됩니다.
+                            드래그는 막습니다: 열려던 목록이 카드를 끌고 갑니다. */}
+                        {details && (
+                          <select
+                            className={`pipeline-card__deal${
+                              card.deal_detail
+                                ? ` pipeline-card__deal--${stage.key === "won" ? "won" : "lost"}`
+                                : ""
+                            }`}
+                            draggable={false}
+                            value={card.deal_detail ?? ""}
+                            title={stage.key === "won" ? "Won Type" : "Lost Reason"}
+                            aria-label={`Deal Detail — ${card.subject || "이 문의"}`}
+                            onMouseDown={(event) => event.stopPropagation()}
+                            onDragStart={(event) => { event.preventDefault(); event.stopPropagation(); }}
+                            onChange={(event) => void setDealDetail(card, event.target.value)}
+                          >
+                            <option value="">Deal Detail</option>
+                            {details.map((option) => (
+                              <option key={option} value={option}>{option}</option>
+                            ))}
+                          </select>
+                        )}
+                        {canLog && (
+                          <button
+                            type="button"
+                            className="pipeline-card__log"
+                            draggable={false}
+                            title="소통 기록 추가"
+                            aria-label="소통 기록 추가"
+                            aria-haspopup="dialog"
+                            onClick={() => setLogging(card)}
+                          >
+                            <Icon name="plus" size={14} />
+                          </button>
+                        )}
+                      </div>
                     )}
                   </article>
                 ))}

@@ -17,6 +17,8 @@ type DashboardData = {
   category_labels: Record<string, string>;
   unqualified: string[];
   manual_log_stages: string[];
+  /** 단계 → 그 단계에서 고를 수 있는 Deal Detail. Won 과 Lost 만 있습니다. */
+  deal_details: Record<string, string[]>;
   stages: Stage[];
 };
 
@@ -68,7 +70,8 @@ export function Dashboard() {
         </div>
       </div>
 
-      <Board stages={data.stages} manualLogStages={data.manual_log_stages} />
+      <Board stages={data.stages} manualLogStages={data.manual_log_stages}
+             dealDetails={data.deal_details} />
     </>
   );
 }

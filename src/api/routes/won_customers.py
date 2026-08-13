@@ -77,11 +77,13 @@ def _get_contract(session, contract_id: int) -> ClientContract:
 
 
 def _one_amount_per_currency(contract: ClientContract) -> None:
-    """통화가 쓰지 않는 금액 칸을 비웁니다 — **쓰는 쪽에 값이 있을 때만.**
+    """계약이 쓰지 않는 금액 칸을 비웁니다 — **쓰는 쪽에 값이 있을 때만.**
 
-    원화 계약은 공급가만 받고 총액은 거기에 10% 를 더해 계산합니다(`won.total_amount`).
-    그 외 통화는 부가세가 없어 총액만 받고 공급가 칸이 없습니다. 안 쓰는 쪽에 옛 값이
-    남아 있으면, 통화를 바꾼 계약에서 화면이 계산한 값과 행에 든 값이 갈라집니다.
+    어느 칸을 쓰는지는 통화와 「VAT 포함/제외」가 함께 정합니다: VAT 제외로 적힌 원화
+    계약만 공급가를 받고 총액을 +10% 로 계산하며(`won.total_amount`), 나머지(총액으로
+    적힌 원화 계약, 그리고 부가세가 없는 그 외 통화)는 총액만 받습니다. 안 쓰는 쪽에 옛
+    값이 남아 있으면, 통화나 기준을 바꾼 계약에서 화면이 계산한 값과 행에 든 값이
+    갈라집니다.
 
     **조건이 붙어 있는 이유는 데이터가 사라졌기 때문입니다.** 이 라우트에는 계약 전체를
     보내는 폼만 오는 것이 아닙니다 — 「갱신 계획·사용 중단 이유·비고」 패널은 세 칸만
@@ -92,7 +94,7 @@ def _one_amount_per_currency(contract: ClientContract) -> None:
     쓰는 쪽에 값이 있을 때만 반대쪽을 지우면, 옛 계약은 다음번에 금액을 실제로 채워
     저장할 때 제자리를 찾습니다.
     """
-    if won.is_krw(contract):
+    if won.is_krw(contract) and not won.vat_included(contract):
         if contract.amount_excl_vat is not None:
             contract.amount_incl_vat = None
     elif contract.amount_incl_vat is not None:
@@ -204,6 +206,12 @@ def _fill_contract(contract: ClientContract, form: dict) -> None:
     for name in _CONTRACT_DECIMALS:
         if name in form:
             setattr(contract, name, _number(form.get(name)))
+    # 금액 칸과 **같이** 와야 합니다. 안 그러면 「비고 한 줄」만 보내는 폼이 기준을
+    # 뒤집습니다(그 폼은 금액을 안 보냅니다 — `_one_amount_per_currency` 의 주석 참고).
+    if "vat_included" in form:
+        contract.vat_included = str(form.get("vat_included") or "").strip().lower() in {
+            "1", "true", "on", "yes",
+        }
     if "doc_types" in form:
         # 복수 선택. 화면은 " + " 로 이어 보여주지만 저장은 배열입니다 — 문자열로 두면
         # "직접 계약 / DocuSign + 세금계산서 발행" 을 다시 쪼개야 필터가 됩니다.
@@ -457,16 +465,21 @@ async def add_claim(
     kind: str = Form(...),
     happened_on: str = Form(""),
     compensation: str = Form(""),
+    contact_info: str = Form(""),
     progress: str = Form("접수"),
 ):
     with SessionLocal() as session:
-        _get_contract(session, contract_id)
+        contract = _get_contract(session, contract_id)
         session.add(
             ContractClaim(
                 contract_id=contract_id,
                 kind=kind.strip(),
                 happened_on=_text(happened_on) or date.today().isoformat(),
                 compensation=_text(compensation),
+                # 폼이 등록된 연락처를 채워 보내지만, 비워서 보내는 것도 됩니다. 그때는
+                # 고객 기본 정보의 연락처가 그 시점의 답입니다 — 클레임을 열 때마다
+                # 다른 화면으로 확인하러 가지 않도록 행에 박아 둡니다.
+                contact_info=_text(contact_info) or (contract.client.contact_info or None),
                 progress=progress.strip() or "접수",
             )
         )
@@ -480,6 +493,7 @@ async def update_claim(
     kind: str = Form(""),
     happened_on: str = Form(""),
     compensation: str = Form(""),
+    contact_info: str = Form(""),
     progress: str = Form(""),
     action_on: str = Form(""),
 ):
@@ -491,6 +505,7 @@ async def update_claim(
             claim.kind = kind.strip()
         claim.happened_on = _text(happened_on) or claim.happened_on
         claim.compensation = _text(compensation)
+        claim.contact_info = _text(contact_info)
         if progress.strip():
             claim.progress = progress.strip()
             # 조치 완료로 바꿨는데 날짜가 없으면 오늘입니다. 완료인데 날짜가 빈 행은
@@ -614,7 +629,12 @@ def export_csv():
                     won.months_between(contract.starts_on, contract.ends_on),
                     " + ".join(contract.doc_types or []),
                     contract.credits, won.granted_credits(contract), contract.currency,
-                    won.total_amount(contract), won.billing_amount(contract), paid,
+                    # 공급가는 `supply_amount` 입니다 — `billing_amount` 는 **계약서에
+                    # 적힌 금액**이라, VAT 포함으로 적힌 원화 계약에서는 총액을 돌려줍니다.
+                    # 그 값을 「공급가 (VAT 제외)」 칸에 넣으면 과세표준이 10% 부풀고, 옆
+                    # 칸의 총액이 그럴듯해서 아무도 눈치채지 못합니다. 화면·워크북과 같은
+                    # 값이어야 합니다.
+                    won.total_amount(contract), won.supply_amount(contract), paid,
                     f"{(paid / total * 100):.1f}%" if total else "",
                     won.unit_price(contract),
                     contract.payment_method, contract.payment_type, contract.installments,

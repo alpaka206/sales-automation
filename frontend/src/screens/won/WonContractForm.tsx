@@ -26,7 +26,8 @@ import { type Contract, type ListData, type Row, addMonths, n, num } from "./sha
  */
 const empty = {
   deal_type: "MRR", starts_on: "", ends_on: "", ticket_id: "",
-  currency: "KRW", amount_incl_vat: "", amount_excl_vat: "", credits: "",
+  // 원화 계약이 VAT 포함으로 적혔는가. 폼은 문자열만 나르므로 "1" / "" 입니다.
+  currency: "KRW", vat_included: "", amount_incl_vat: "", amount_excl_vat: "", credits: "",
   payment_method: "계좌이체", payment_type: "일시불", installments: "1",
   first_payment_on: "", billing_email: "", note: "",
   plan: "Business Tier 1", plan_name: "", perso_email: "",
@@ -131,12 +132,17 @@ export function WonContractForm() {
   // (won.total_amount / won.unit_price) — 두 곳에 식이 있는 게 아니라, 화면은 사람이
   // 숫자를 넣는 동안 결과를 보여 줄 뿐입니다.
   const krw = (draft?.currency ?? "KRW") === "KRW";
+  /** 원화 계약이 **총액으로 적혔는가.** 그 외 통화는 부가세가 없어 늘 총액입니다. */
+  const inclusive = krw && draft?.vat_included === "1";
 
-  /** 분당 단가가 기준으로 삼는 금액 — 원화는 공급가, 그 외는 총액. */
-  const billing = draft ? n(krw ? draft.amount_excl_vat : draft.amount_incl_vat) : 0;
+  /** 분당 단가가 기준으로 삼는 금액 — 계약서에 적힌 그 금액입니다. VAT 제외로 적힌 원화
+   *  계약만 공급가 칸을 쓰고, 나머지는 총액 칸입니다. 서버의 `won.billing_amount` 와 같은
+   *  갈래이고, 저장할 때 서버가 다시 계산합니다. */
+  const billing = draft ? n(krw && !inclusive ? draft.amount_excl_vat : draft.amount_incl_vat) : 0;
 
-  /** 원화 계약의 VAT 포함 총액 = 공급가 + 10%. 입력 칸이 아니라 계산입니다. */
-  const totalInclVat = krw && billing ? Math.round(billing * 1.1) : null;
+  /** VAT 제외로 적힌 원화 계약의 총액 = 공급가 + 10%. 입력 칸이 아니라 계산입니다.
+   *  총액으로 적힌 계약은 받은 값이 곧 총액이라 더할 것이 없습니다. */
+  const totalInclVat = krw && !inclusive && billing ? Math.round(billing * 1.1) : null;
 
   /** 분당 단가 = 기준 금액 ÷ (계약 크레딧 ÷ 60). 소수점은 남깁니다 — 반올림한 단가는
    *  되짚어 곱했을 때 금액이 안 맞습니다. */
@@ -158,7 +164,11 @@ export function WonContractForm() {
     // 통화가 정한 금액 칸과 계약 크레딧, 둘만 필수입니다. 분당 단가는 그 둘에서
     // 나오는 계산값이라 받지 않습니다.
     if (!billing) {
-      setNote(krw ? "공급가 (VAT 제외) 를 입력해 주세요." : `총 계약금액을 입력해 주세요 (${draft.currency}).`);
+      setNote(
+        krw && !inclusive
+          ? "공급가 (VAT 제외) 를 입력해 주세요."
+          : `총 계약금액을 입력해 주세요 (${draft.currency}).`,
+      );
       return;
     }
     if (!n(draft.credits)) {
@@ -303,24 +313,43 @@ export function WonContractForm() {
             <Field label="통화">
               <Sel value={draft.currency} onChange={(v) => set("currency", v)} options={options.currencies} />
             </Field>
-            {/* 통화가 어느 칸을 받는지 정합니다. 원화 계약은 계약서가 공급가로 적히고
-                부가세가 따로 붙으므로 공급가를 받고 총액은 +10% 로 계산합니다. 해외
-                계약에는 그 부가세가 없어 총액이 곧 대금이라 총액만 받습니다. 둘 다 받으면
-                분당 단가가 어느 쪽 기준인지 계약마다 달라집니다. */}
+            {/* **어느 칸을 받는지는 통화와 「금액 기준」이 함께 정합니다.** 국내 계약서는
+                공급가로 적히고 부가세가 따로 붙는 것이 흔하지만, 총액으로 적히는 계약도
+                있습니다 — 그것을 공급가 칸에 넣으면 분당 단가가 10% 낮게 나오고 화면
+                어디에도 그게 보이지 않습니다. 해외 계약에는 부가세가 없어 총액이 곧
+                대금이라 고를 것이 없습니다. 어느 쪽이든 채우는 칸은 하나입니다: 둘 다
+                받으면 분당 단가가 어느 쪽 기준인지 계약마다 달라집니다. */}
             {krw ? (
               <>
-                <Field label="공급가 (VAT 제외)" required>
-                  <input className="inp" type="number" value={draft.amount_excl_vat}
-                         onChange={(e) => set("amount_excl_vat", e.target.value)}
-                         placeholder="예: 10000000" />
+                <Field label="계약 금액 기준">
+                  <select className="inp" value={draft.vat_included}
+                          onChange={(e) => set("vat_included", e.target.value)}>
+                    <option value="">VAT 제외 (공급가로 적힘)</option>
+                    <option value="1">VAT 포함 (총액으로 적힘)</option>
+                  </select>
                 </Field>
-                <Field label="총 계약금액 (VAT 포함)">
-                  <div className="inp" aria-readonly="true"
-                       style={{ background: "var(--bg-soft)", fontVariantNumeric: "tabular-nums",
-                                color: totalInclVat === null ? "var(--faint)" : "var(--ink)" }}>
-                    {totalInclVat === null ? "공급가 입력 시 계산" : num(totalInclVat)}
-                  </div>
-                </Field>
+                {inclusive ? (
+                  <Field label="총 계약금액 (VAT 포함)" required>
+                    <input className="inp" type="number" value={draft.amount_incl_vat}
+                           onChange={(e) => set("amount_incl_vat", e.target.value)}
+                           placeholder="예: 11000000" />
+                  </Field>
+                ) : (
+                  <>
+                    <Field label="공급가 (VAT 제외)" required>
+                      <input className="inp" type="number" value={draft.amount_excl_vat}
+                             onChange={(e) => set("amount_excl_vat", e.target.value)}
+                             placeholder="예: 10000000" />
+                    </Field>
+                    <Field label="총 계약금액 (VAT 포함)">
+                      <div className="inp" aria-readonly="true"
+                           style={{ background: "var(--bg-soft)", fontVariantNumeric: "tabular-nums",
+                                    color: totalInclVat === null ? "var(--faint)" : "var(--ink)" }}>
+                        {totalInclVat === null ? "공급가 입력 시 계산" : num(totalInclVat)}
+                      </div>
+                    </Field>
+                  </>
+                )}
               </>
             ) : (
               <div style={{ gridColumn: "span 2" }}>
@@ -468,6 +497,10 @@ const str = (value: unknown) => (value === null || value === undefined ? "" : St
 function carryOver(prev: Contract) {
   return {
     deal_type: prev.deal_type, currency: prev.currency,
+    // 통화를 물려받으면 「VAT 포함/제외」도 물려받아야 합니다 — 같은 고객의 다음 차수
+    // 계약서는 같은 방식으로 적힙니다. 통화만 따라오고 기준은 초기화되면, 총액으로 적힌
+    // 계약이 공급가 칸으로 들어가 단가가 10% 낮아집니다.
+    vat_included: prev.vat_included ? "1" : "",
     payment_method: str(prev.payment_method), payment_type: str(prev.payment_type),
     installments: str(prev.installments ?? 1), billing_email: str(prev.billing_email),
     plan: str(prev.plan), plan_name: str(prev.plan_name), perso_email: str(prev.perso_email),
@@ -483,6 +516,7 @@ function fromContract(contract: Contract): Draft {
   return {
     deal_type: contract.deal_type, starts_on: str(contract.starts_on), ends_on: str(contract.ends_on),
     ticket_id: str(contract.ticket_id), currency: contract.currency,
+    vat_included: contract.vat_included ? "1" : "",
     amount_incl_vat: str(contract.amount_incl_vat), amount_excl_vat: str(contract.amount_excl_vat),
     credits: str(contract.credits),
     payment_method: str(contract.payment_method), payment_type: str(contract.payment_type),

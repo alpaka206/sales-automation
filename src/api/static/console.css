@@ -426,19 +426,44 @@ a.kpi:hover { border-color: var(--accent); }
 .pipeline-card > a strong { font-size: 13px; }
 .pipeline-card > a span { margin-top: 5px; color: var(--text-muted); font-size: 11.5px; }
 .pipeline-card > a small { margin-top: 3px; color: var(--text-subtle); font-size: 10.5px; }
-/* 소통 기록 (+) — only on cards past 답변 발송, and pinned to the corner rather than
-   given a row: a column is a fixed-height scroller, so a line per card costs cards on
-   screen. Out of flow, so it adds no height at all. */
-.pipeline-card__log {
+/* The card's corner controls — Deal Detail and 소통 기록 (+). Pinned to the corner rather
+   than given a row: a column is a fixed-height scroller, so a line per card costs cards on
+   screen. Out of flow, so they add no height at all. */
+.pipeline-card__tools {
   position: absolute; top: 7px; right: 7px; z-index: 1;
+  display: flex; align-items: center; gap: 6px;
+}
+.pipeline-card__log {
   display: grid; place-items: center; width: 24px; height: 24px; padding: 0;
   border: 1px solid var(--border); border-radius: var(--r-full); background: var(--surface-2);
   color: var(--text-subtle); cursor: pointer;
 }
 .pipeline-card__log:hover { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
-/* Keeps a long company name from running under the button. Carried by a modifier on the
+/* Won Type / Lost Reason. It is a tag AND the control that sets it — on this screen the
+   person who reads the value is the person who decides it, so opening the card to read it
+   and opening it again to change it would be the same trip twice. `appearance: none`
+   drops the native arrow: at 10.5px the arrow is wider than the word beside it. */
+.pipeline-card__deal {
+  appearance: none; -webkit-appearance: none;
+  max-width: 104px; height: 22px; padding: 0 8px;
+  border: 1px solid var(--border); border-radius: var(--r-full);
+  background: var(--surface-2); color: var(--text-subtle);
+  font-family: inherit; font-size: 10.5px; font-weight: 700; line-height: 1;
+  text-overflow: ellipsis; cursor: pointer;
+}
+.pipeline-card__deal:hover { border-color: var(--accent); }
+.pipeline-card__deal--won { border-color: var(--ok-soft); background: var(--ok-soft); color: var(--ok); }
+.pipeline-card__deal--lost { border-color: var(--danger-soft); background: var(--danger-soft); color: var(--danger); }
+/* Keeps a long subject from running under the corner controls. Carried by modifiers on the
    card rather than :has(), so it does not depend on the browser's selector support. */
 .pipeline-card--logged > a strong { padding-right: 26px; }
+.pipeline-card--deal > a strong { padding-right: 110px; }
+.pipeline-card--deal.pipeline-card--logged > a strong { padding-right: 140px; }
+/* A link that has to read as text. Whole-table-of-links columns (문의 제목) get no visual
+   benefit from an underline — every row has one, so it stops marking anything and just
+   draws a rule across the page. */
+.link--plain { color: inherit; text-decoration: none; }
+.link--plain:hover { text-decoration: underline; }
 .kanban-empty { padding: 24px 12px; border: 1px dashed var(--border-strong); color: var(--text-subtle); font-size: 11px; text-align: center; }
 /* The bottom-of-column sentinel. It has to occupy real height or it can never be
    "revealed" by scrolling, and it replaces itself with the page it fetched. */

@@ -804,3 +804,154 @@ def test_the_row_shows_what_this_customer_added_this_month():
     assert _won_client(client, today, full=False)["month_revenue"] == {
         "KRW": Decimal("1100000.0"), "USD": Decimal("5000"),
     }
+
+
+# --------------------------------------------------------------------------- #
+# VAT — 계약서가 총액으로 적히는 원화 계약
+# --------------------------------------------------------------------------- #
+def test_a_krw_contract_written_as_a_total_keeps_that_total():
+    """**계약서에 적힌 금액이 기준입니다.** 원화 계약이 늘 공급가로 적히지는 않습니다.
+
+    총액으로 적힌 계약을 공급가 칸에 넣으면 총액이 10% 부풀고 분당 단가가 10% 낮게
+    나오는데, 화면 어디에도 그게 보이지 않습니다 — 그래서 어느 쪽인지를 행에 박아 둡니다.
+
+    같은 금액을 두 기준으로 넣어 비교합니다: 11,000,000 을 총액으로 적으면 총액도 단가
+    기준도 그대로 11,000,000 이고, 공급가로 적으면 총액이 12,100,000 이 됩니다.
+    """
+    total = ClientContract(
+        client_id=1, seq=1, currency="KRW", vat_included=True,
+        amount_incl_vat=11_000_000, credits=60_000,
+    )
+    assert won.billing_amount(total) == Decimal("11000000")
+    assert won.total_amount(total) == Decimal("11000000")
+    assert won.unit_price(total) == Decimal("11000")
+
+    supply = ClientContract(
+        client_id=2, seq=1, currency="KRW", vat_included=False,
+        amount_excl_vat=11_000_000, credits=60_000,
+    )
+    assert won.total_amount(supply) == Decimal("12100000.0")
+    assert won.unit_price(supply) == Decimal("11000")
+
+
+def test_a_foreign_contract_never_reads_the_vat_flag():
+    """해외 계약에는 부가세가 없어 총액이 곧 대금입니다 — 고를 것이 없습니다.
+
+    통화와 함께 보지 않으면, 원화였다가 USD 로 바꾼 계약에 남은 플래그가 조용히 따라
+    붙습니다. `vat_included()` 가 통화까지 보는 이유입니다.
+    """
+    usd = ClientContract(
+        client_id=1, seq=1, currency="USD", vat_included=True,
+        amount_incl_vat=20_000, credits=60_000,
+    )
+    assert won.vat_included(usd) is False
+    assert won.total_amount(usd) == Decimal("20000")
+    assert won.unit_price(usd) == Decimal("20")
+
+
+def test_the_mrr_is_always_the_vat_inclusive_total():
+    """기준이 무엇이든 예상 MRR 이 더하는 값은 **VAT 포함 총액** 하나입니다.
+
+    같은 총액 22,000,000 짜리 12개월 계약을 두 기준으로 적어도 월간 매출은 같아야 합니다 —
+    다르면 그 카드의 숫자가 계약을 어떻게 입력했느냐에 따라 달라집니다.
+    """
+    written_as_total = ClientContract(
+        client_id=1, seq=1, deal_type="MRR", currency="KRW", vat_included=True,
+        starts_on="2026-01-01", ends_on="2027-01-01", amount_incl_vat=22_000_000,
+    )
+    written_as_supply = ClientContract(
+        client_id=2, seq=1, deal_type="MRR", currency="KRW", vat_included=False,
+        starts_on="2026-01-01", ends_on="2027-01-01", amount_excl_vat=20_000_000,
+    )
+    assert won.monthly_revenue(written_as_total) == won.monthly_revenue(written_as_supply)
+
+
+def test_the_form_lets_the_operator_pick_the_vat_basis():
+    """고르개가 없으면 총액으로 적힌 계약을 넣을 방법이 공급가 칸뿐입니다."""
+    import pathlib
+
+    form = pathlib.Path("frontend/src/screens/won/WonContractForm.tsx").read_text(encoding="utf-8")
+    assert '<Field label="계약 금액 기준">' in form
+    assert 'VAT 제외 (공급가로 적힘)' in form
+    assert 'VAT 포함 (총액으로 적힘)' in form
+    # 고른 기준이 어느 칸을 그릴지 정합니다 — 둘 다 그리면 어느 쪽이 기준인지 모릅니다.
+    assert "const inclusive = krw && draft?.vat_included ===" in form
+
+
+def test_the_claim_form_asks_who_complained():
+    """클레임을 보낸 사람은 등록된 담당자와 다를 수 있습니다 — 답은 그 사람에게 갑니다."""
+    import pathlib
+
+    from src.db.models import ContractClaim
+
+    assert "contact_info" in {c.name for c in ContractClaim.__table__.columns}
+    screen = pathlib.Path(
+        "frontend/src/screens/won/WonCustomerDetail.tsx"
+    ).read_text(encoding="utf-8")
+    assert '<label className="form-label">고객 연락처</label>' in screen
+    # 「보상 종류」가 아니라 「조치 방식」입니다 — 크레딧 보상만 조치인 것이 아닙니다.
+    assert "보상 종류" not in screen
+    assert '<label className="form-label">조치 방식</label>' in screen
+    # 섹션 이름에서 「히스토리」가 빠졌습니다. 소통 히스토리는 따로 있는 다른 섹션입니다.
+    assert '["sec-care", "클레임"],' in screen
+
+
+def test_the_supply_price_is_filled_even_when_the_contract_is_written_as_a_total():
+    """워크북의 공급가 열은 회계가 합계를 내는 칸입니다 — 비면 그 행만 조용히 빠집니다.
+
+    계약서에 그 숫자가 없더라도 국내 거래의 공급가는 총액에서 정확히 나옵니다. 화면도 같은
+    값을 보여 주되 「역산」이라고 적습니다 — 시트와 화면이 다른 값이면 안 됩니다.
+    """
+    total = ClientContract(
+        client_id=1, seq=1, currency="KRW", vat_included=True, amount_incl_vat=11_000_000,
+    )
+    assert won.supply_amount(total) == Decimal("10000000")
+
+    supply = ClientContract(
+        client_id=2, seq=1, currency="KRW", vat_included=False, amount_excl_vat=10_000_000,
+    )
+    assert won.supply_amount(supply) == Decimal("10000000")
+
+    # 해외 계약에는 공급가가 없습니다 — 총액이 곧 대금입니다.
+    usd = ClientContract(client_id=3, seq=1, currency="USD", amount_incl_vat=20_000)
+    assert won.supply_amount(usd) is None
+
+
+def test_the_csv_supply_column_is_the_supply_price_not_the_written_amount(factory):
+    """CSV 의 「공급가 (VAT 제외)」 칸은 `supply_amount` 여야 합니다.
+
+    `billing_amount` 는 **계약서에 적힌 금액**이라, VAT 포함으로 적힌 원화 계약에서는 총액을
+    돌려줍니다. 그 값을 공급가 칸에 넣으면 과세표준이 10% 부풀고, 바로 옆 총액 칸이 그럴듯해서
+    아무도 눈치채지 못합니다. 이 CSV 는 영업 시트에 붙여 넣으라고 있는 것이라 그대로 퍼집니다.
+    """
+    import csv
+    import io
+    from unittest.mock import patch
+
+    from src.api.routes import won_customers
+
+    with factory() as session:
+        session.add(Client(client_id=1108, company="총액으로 적힌 고객"))
+        session.flush()
+        session.add(ClientContract(
+            client_id=1108, seq=1, deal_type="MRR", currency="KRW", vat_included=True,
+            starts_on="2026-01-01", ends_on="2027-01-01",
+            amount_incl_vat=11_000_000, credits=60_000,
+        ))
+        session.commit()
+
+    from fastapi.testclient import TestClient
+
+    from src.api.main import app
+
+    with patch.object(won_customers, "SessionLocal", factory), TestClient(app) as client:
+        body = client.get("/won-customers/export.csv").content.decode("utf-8-sig")
+
+    rows = list(csv.reader(io.StringIO(body)))
+    header, row = rows[0], rows[1]
+    total = row[header.index("총 계약금액 (VAT 포함)")]
+    supply = row[header.index("공급가 (VAT 제외)")]
+    assert float(total) == 11_000_000
+    assert float(supply) == 10_000_000
+    # 분당 단가는 **적힌 금액** 기준입니다 — 총액으로 적혔으면 총액에서 나옵니다.
+    assert float(row[header.index("분당 단가")]) == 11_000

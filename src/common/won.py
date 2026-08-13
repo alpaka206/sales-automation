@@ -211,20 +211,34 @@ def is_krw(contract) -> bool:
     return (getattr(contract, "currency", None) or "KRW").upper() == "KRW"
 
 
-def billing_amount(contract) -> Decimal | None:
-    """분당 단가가 기준으로 삼는 금액.
+def vat_included(contract) -> bool:
+    """원화 계약이 **VAT 포함 금액으로 적혔는가.** 그 외 통화에서는 늘 거짓입니다.
 
-    원화 계약은 **공급가(VAT 제외)**, 그 외 통화는 **총액**입니다. 국내 계약서는 공급가로
-    적히고 부가세가 따로 붙지만, 해외 계약에는 그 부가세가 없어 총액이 곧 대금입니다.
-    받는 칸이 통화마다 하나뿐인 이유가 이것입니다 — 둘 다 받으면 어느 쪽이 기준인지가
-    계약마다 달라집니다.
+    해외 계약에는 부가세가 없어 총액이 곧 대금이고, 그래서 고를 것이 없습니다 — 이 값을
+    통화와 함께 보지 않으면 USD 계약이 「VAT 제외」로 저장돼 총액이 10% 부풀 수 있습니다.
+    """
+    return is_krw(contract) and bool(getattr(contract, "vat_included", False))
+
+
+def billing_amount(contract) -> Decimal | None:
+    """분당 단가가 기준으로 삼는 금액. **계약서에 적힌 그 금액입니다.**
+
+    - 그 외 통화: **총액**. 해외 계약에는 부가세가 없어 총액이 곧 대금입니다.
+    - 원화 · VAT 포함으로 적힌 계약: **그 총액 그대로.** 10% 를 빼지 않습니다 — 계약서가
+      총액으로 적혀 있으면 단가도 그 금액에서 나옵니다.
+    - 원화 · VAT 제외로 적힌 계약: **공급가.** 총액은 여기에 10% 를 더해 계산합니다.
+
+    한동안 원화는 공급가 하나만 받았습니다. 그런데 계약서가 늘 공급가로 적히지는 않아서,
+    총액으로 적힌 계약을 그 칸에 넣으면 분당 단가가 10% 낮게 나왔고 화면 어디에도 그게
+    보이지 않았습니다. 받는 칸이 통화·기준마다 하나뿐인 것은 그대로입니다 — 둘 다 받으면
+    어느 쪽이 기준인지가 계약마다 달라집니다.
 
     **총액만 있는 옛 원화 계약은 거기서 공급가를 되짚습니다.** 공급가를 받기로 하기 전의
     행들은 총액만 채워져 있어서, 그대로 두면 화면의 공급가 칸이 비고 — 필수 칸이라 —
     그 계약은 플랜 하나 고치는 것조차 저장이 막혔습니다. 총액 = 공급가 + 10% 의 정확한
     역이라 값을 지어내는 것이 아니고, 다음 저장 때 공급가로 자리를 옮겨 앉습니다.
     """
-    if not is_krw(contract):
+    if not is_krw(contract) or vat_included(contract):
         return _decimal(contract.amount_incl_vat)
     supply = _decimal(contract.amount_excl_vat)
     if supply is not None:
@@ -234,15 +248,34 @@ def billing_amount(contract) -> Decimal | None:
 
 
 def total_amount(contract) -> Decimal | None:
-    """VAT 포함 총액. 원화 계약은 공급가에 10% 를 더해 **계산합니다**(입력 칸이 없습니다).
+    """VAT 포함 총액 — 예상 MRR 이 더하는 값은 **언제나 이것**입니다.
+
+    VAT 제외로 적힌 원화 계약만 공급가에 10% 를 더해 **계산합니다**(입력 칸이 없습니다).
+    총액으로 적힌 계약은 받은 값이 그대로 총액이라 더할 것이 없습니다.
 
     총액만 있는 옛 계약도 같은 답이 나옵니다: `billing_amount` 가 총액에서 공급가를
     되짚고, 여기서 다시 10% 를 더하면 원래 총액입니다.
     """
-    if not is_krw(contract):
+    if not is_krw(contract) or vat_included(contract):
         return _decimal(contract.amount_incl_vat)
     supply = billing_amount(contract)
     return supply * (1 + VAT_RATE) if supply else None
+
+
+def supply_amount(contract) -> Decimal | None:
+    """VAT 제외 금액. 원화 계약에만 있습니다 — 그 외 통화는 부가세가 없습니다.
+
+    총액으로 적힌 계약은 **총액 ÷ 1.1 로 되짚습니다.** 계약서에 그 숫자가 없더라도 국내
+    거래의 공급가는 총액에서 정확히 나오는 값이고, 워크북의 공급가 열은 회계가 채우는
+    칸이라 비면 그 행만 합계에서 빠집니다. 화면도 같은 값을 보여 주되 「총액에서 역산」
+    이라고 적습니다 — 계약서에 적힌 금액과 계산한 금액을 같은 얼굴로 두지 않기 위해서.
+    """
+    if not is_krw(contract):
+        return None
+    if vat_included(contract):
+        total = _decimal(contract.amount_incl_vat)
+        return total / (1 + VAT_RATE) if total else None
+    return billing_amount(contract)
 
 
 def unit_price(contract) -> Decimal | None:

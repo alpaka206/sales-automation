@@ -17,7 +17,7 @@ import {
  *
  * 계약을 따라가지 **않는** 것이 둘입니다:
  *
- * - **6번 클레임 / 히스토리** — 고객이 겪은 일이지 계약 회차의 일이 아닙니다. 1차 때 난
+ * - **6번 클레임** — 고객이 겪은 일이지 계약 회차의 일이 아닙니다. 1차 때 난
  *   품질 이슈는 2차를 보고 있어도 그 고객의 이력입니다. 저장은 계약에 딸려 있고(어느 계약
  *   기간에 일어났는지가 정보라서), 보여줄 때만 전부 모읍니다 — 어느 차수 건인지 뱃지로
  *   적습니다. 같은 섹션의 갱신 계획·비고는 반대로 계약의 값이라 따라갑니다.
@@ -29,7 +29,7 @@ const SECTIONS: [string, string][] = [
   ["sec-plan", "Perso 계정 · 플랜"],
   ["sec-credit", "크레딧 지급"],
   ["sec-pay", "결제 현황"],
-  ["sec-care", "클레임 / 히스토리"],
+  ["sec-care", "클레임"],
   ["sec-revenue", "매출 관리"],
   ["sec-comm", "소통 히스토리"],
 ];
@@ -194,7 +194,8 @@ export function WonCustomerDetail() {
             <PlanSection contract={current} />
             <CreditSection contract={current} today={today} onDone={refresh} />
             <PaySection contract={current} today={today} onDone={refresh} />
-            <CareSection contracts={contracts} current={current} onDone={refresh} />
+            <CareSection contracts={contracts} current={current} onDone={refresh}
+                         defaultContact={data.contact_info ?? ""} />
             <RevenueSection contract={current} today={today} />
           </>
         )}
@@ -345,12 +346,30 @@ function BasicSection({ client, contracts, options, onDone }: {
   });
   const set = (key: keyof typeof form, value: string) =>
     setForm((current) => ({ ...current, [key]: value }));
+  const [confirming, setConfirming] = useState(false);
 
   const [save, saving] = useAction(async () => {
     await postForm(`/won-customers/${client.client_id}`, form);
     setEditing(false);
+    setConfirming(false);
     onDone();
   });
+
+  // 저장 전에 한 번 더 묻습니다 — **바뀐 칸만** 보여 주면서. 고객사 이름은 워크북의
+  // 계약·회차·클레임 네 탭과 Inbound DB 가 Client ID 로 조회해 가는 값이고, 담당부서는
+  // 요약 카드와 예상 MRR 이 GTM 만 더할 때 쓰는 값입니다 — 한 글자 잘못 고치면 이 화면
+  // 밖의 숫자가 조용히 달라집니다. 바뀐 것이 없으면 물을 것도 없어 바로 닫습니다.
+  const LABELS: Record<keyof typeof form, string> = {
+    company: "고객사", industry: "산업 분야", country: "국가", department: "담당부서",
+    contact_name: "고객 담당자", contact_info: "고객 연락처",
+    first_won_on: "최초 수주일", owner: "담당",
+  };
+  const changed = (Object.keys(form) as (keyof typeof form)[])
+    .filter((key) => form[key] !== ((client[key as keyof Row] as string | null) ?? ""))
+    .map((key): [string, string] => [
+      LABELS[key],
+      `${(client[key as keyof Row] as string | null) || "—"} → ${form[key] || "—"}`,
+    ]);
 
   // 티켓은 계약이 들고 있습니다 — 몇 차 계약의 티켓인지까지 적어야 쓸모가 있습니다.
   const tickets = contracts.filter((c) => c.ticket_id);
@@ -463,8 +482,21 @@ function BasicSection({ client, contracts, options, onDone }: {
       <div className="modal-foot" style={{ marginTop: 14 }}>
         <button className="btn btn-sm" type="button" onClick={() => setEditing(false)}>취소</button>
         <button className="btn btn-sm btn-primary" type="button" disabled={saving}
-                onClick={() => save()}>{saving ? "저장 중" : "저장"}</button>
+                onClick={() => (changed.length ? setConfirming(true) : setEditing(false))}>
+          {saving ? "저장 중" : "저장"}
+        </button>
       </div>
+
+      {confirming && (
+        <Confirm
+          title="고객 정보를 이렇게 바꿉니다"
+          rows={changed}
+          note="고객사 이름과 담당부서는 워크북의 다른 탭과 요약 카드가 조회해 가는 값입니다."
+          okLabel="저장"
+          onOk={() => save()}
+          onClose={() => setConfirming(false)}
+        />
+      )}
     </Section>
   );
 }
@@ -555,14 +587,29 @@ function ContractSection({ client, contracts, current, today, showAll, onToggleA
             ? docs.map((t) => <span key={t} style={{ marginRight: 4 }}><Tag tone="neutral">{t}</Tag></span>)
             : "—"} />
           <KV k="계약 크레딧" v={<span className="mono">
-            {num(current.credits)} <span className="muted">= {num(Math.round((current.credits ?? 0) / 60))}분 · 공급가 기준</span>
+            {num(current.credits)}{" "}
+            <span className="muted">
+              = {num(Math.round((current.credits ?? 0) / 60))}분 ·{" "}
+              {current.vat_included ? "VAT 포함 금액 기준" : "공급가 기준"}
+            </span>
           </span>} />
           <KV k="총 계약금액 (VAT 포함)" v={<span className="mono">
             {money(current.amount_incl_vat, current.currency)} <span className="muted">{current.currency}</span>
           </span>} />
+          {/* 총액으로 적힌 계약도 숫자를 보여 주되(총액 ÷ 1.1) **역산이라고 적습니다** —
+              계약서에 적힌 금액과 계산한 금액이 같은 얼굴이면 안 됩니다. 워크북의 공급가
+              열과 같은 값입니다: 비워 두면 회계가 합계를 내는 칸에서 그 행만 빠집니다. */}
           <KV k="공급가 (VAT 제외)" v={<span className="mono">
-            {money(current.amount_excl_vat, current.currency)}{" "}
-            <span className="muted">{current.currency === "KRW" ? "VAT 10% 제외" : "VAT 해당 없음"}</span>
+            {current.currency !== "KRW" ? (
+              <span className="muted">VAT 해당 없음</span>
+            ) : (
+              <>
+                {money(current.amount_excl_vat, current.currency)}{" "}
+                <span className="muted">
+                  {current.vat_included ? "총액에서 역산" : "VAT 10% 제외"}
+                </span>
+              </>
+            )}
           </span>} />
           {/* 계산값입니다 — 금액 ÷ (계약 크레딧 ÷ 60). 단가 통화 칸은 없어졌습니다:
               단가는 언제나 계약 통화입니다. */}
@@ -882,7 +929,10 @@ function PaySection({ contract, today, onDone }: {
         </div>
         <div className="stat-row">
           <Stat label="총 계약 금액 (VAT 포함)" value={money(contract.amount_incl_vat, contract.currency)}
-                sub={`공급가 ${money(contract.amount_excl_vat, contract.currency)}`} />
+                sub={contract.currency !== "KRW"
+                  ? "VAT 해당 없음"
+                  : `공급가 ${money(contract.amount_excl_vat, contract.currency)}${
+                      contract.vat_included ? " (역산)" : ""}`} />
           <Stat label="수금 완료 금액 (VAT 포함)" value={money(contract.collected, contract.currency)} />
           <Stat label="잔여 금액 (VAT 포함)" value={money(total - n(contract.collected), contract.currency)} />
           <Stat label="다음 결제일" value={contract.next_pay_on ? fmt(contract.next_pay_on) : "완료"} />
@@ -997,7 +1047,7 @@ function PayRow({ payment, currency, today, onAsk, onSave }: {
   );
 }
 
-/** 6 클레임 / 히스토리 — **계약을 골라도 바뀌지 않습니다.**
+/** 6 클레임 — **계약을 골라도 바뀌지 않습니다.**
  *
  * 고객이 겪은 일이지 계약 회차의 일이 아닙니다. 1차 때 난 품질 이슈는 2차를 보고 있어도
  * 그 고객의 이력입니다. 저장은 계약에 딸려 있고(어느 계약 기간의 일인지가 정보라서),
@@ -1007,8 +1057,11 @@ function PayRow({ payment, currency, today, onAsk, onSave }: {
  * 같은 섹션의 갱신 계획 · 사용 중단 이유 · 비고는 반대로 **계약의 값**이라 따라갑니다 —
  * 2차의 갱신 계획과 1차의 갱신 계획은 다른 이야기입니다.
  */
-function CareSection({ contracts, current, onDone }: {
+function CareSection({ contracts, current, onDone, defaultContact }: {
   contracts: Contract[]; current: Contract; onDone: () => void;
+  /** 고객 기본 정보의 연락처. 등록 폼의 **기본값**일 뿐이라 고칠 수 있습니다 — 클레임은
+   *  등록된 담당자가 아니라 실무자가 보내는 일이 흔하고, 답은 그 사람에게 갑니다. */
+  defaultContact: string;
 }) {
   const [adding, setAdding] = useState(false);
   const [removing, setRemoving] = useState<Claim | null>(null);
@@ -1024,23 +1077,24 @@ function CareSection({ contracts, current, onDone }: {
   }
 
   return (
-    <Section num={6} id="sec-care" title="고객 클레임 / 히스토리" plain
+    <Section num={6} id="sec-care" title="고객 클레임" plain
              right={<button className="btn btn-sm" type="button"
                             onClick={() => setAdding(!adding)}>+ 항목 등록</button>}>
       <div className="panel">
         <div className="sub-head">
-          <span className="sub-title">클레임 / 히스토리</span>
+          <span className="sub-title">클레임</span>
           <span className="sub-count">{all.length}건 · 전체 계약 통합</span>
         </div>
         {adding && (
-          <ClaimForm contract={current} onCancel={() => setAdding(false)}
+          <ClaimForm contract={current} defaultContact={defaultContact}
+                     onCancel={() => setAdding(false)}
                      onDone={() => { setAdding(false); onDone(); }} />
         )}
         {all.length ? (
           <div className="table-wrap">
             <table className="mini">
               <thead><tr>
-                <th>클레임/히스토리 종류</th><th>계약</th><th>발생 날짜</th><th>보상 종류</th>
+                <th>클레임 종류</th><th>계약</th><th>발생 날짜</th><th>고객 연락처</th><th>조치 방식</th>
                 <th>조치 진행상황</th><th>조치 날짜</th><th style={{ width: 96 }} />
               </tr></thead>
               <tbody>
@@ -1055,6 +1109,7 @@ function CareSection({ contracts, current, onDone }: {
                       <td>{claim.kind}</td>
                       <td><Tag tone="neutral">{seq}차</Tag></td>
                       <td className="mono">{fmt(claim.happened_on)}</td>
+                      <td className="mono">{claim.contact_info || "—"}</td>
                       <td>{claim.compensation || "—"}</td>
                       <td><Tag tone={claim.progress === "조치 완료" ? "st-live"
                                      : claim.progress === "접수" ? "neutral" : "st-setup"}>
@@ -1071,7 +1126,7 @@ function CareSection({ contracts, current, onDone }: {
               </tbody>
             </table>
           </div>
-        ) : <div className="board-empty">등록된 클레임·히스토리가 없습니다.</div>}
+        ) : <div className="board-empty">등록된 클레임이 없습니다.</div>}
       </div>
 
       <div className="split-2" style={{ marginTop: 10 }}>
@@ -1084,7 +1139,7 @@ function CareSection({ contracts, current, onDone }: {
 
       {removing && (
         <Confirm
-          title="클레임 · 히스토리를 삭제합니다"
+          title="클레임을 삭제합니다"
           rows={[
             ["종류", removing.kind],
             ["발생 날짜", fmt(removing.happened_on)],
@@ -1103,18 +1158,21 @@ function CareSection({ contracts, current, onDone }: {
   );
 }
 
-function ClaimForm({ contract, onDone, onCancel }: {
-  contract: Contract; onDone: () => void; onCancel: () => void;
+function ClaimForm({ contract, defaultContact, onDone, onCancel }: {
+  contract: Contract; defaultContact: string; onDone: () => void; onCancel: () => void;
 }) {
   const today = new Date().toISOString().slice(0, 10);
   const [kind, setKind] = useState("");
   const [when, setWhen] = useState(today);
   const [comp, setComp] = useState("");
+  // 등록된 연락처로 시작하되 고칠 수 있습니다 — 채워 두지 않으면 매번 다른 화면으로
+  // 확인하러 가고, 고정해 두면 실제로 항의한 사람의 연락처가 어디에도 안 남습니다.
+  const [contact, setContact] = useState(defaultContact);
   const [progress, setProgress] = useState(CLAIM_PROGRESS[0]);
   const [add, adding] = useAction(async () => {
     if (!kind.trim()) return;
     await postForm(`/won-customers/contracts/${contract.id}/claims`, {
-      kind, happened_on: when, compensation: comp, progress,
+      kind, happened_on: when, compensation: comp, contact_info: contact, progress,
     });
     onDone();
   });
@@ -1122,7 +1180,7 @@ function ClaimForm({ contract, onDone, onCancel }: {
     <div style={{ padding: "4px 0 14px", borderBottom: "1px solid var(--line-soft)", marginBottom: 10 }}>
       <div className="form-row">
         <div>
-          <label className="form-label">클레임/히스토리 종류</label>
+          <label className="form-label">클레임 종류</label>
           <input className="inp" value={kind} onChange={(e) => setKind(e.target.value)}
                  placeholder="예: 품질 이슈, 신기능 TEST" />
         </div>
@@ -1131,9 +1189,14 @@ function ClaimForm({ contract, onDone, onCancel }: {
           <input className="inp" type="date" value={when} onChange={(e) => setWhen(e.target.value)} />
         </div>
         <div>
-          <label className="form-label">보상 종류</label>
+          <label className="form-label">고객 연락처</label>
+          <input className="inp" value={contact} onChange={(e) => setContact(e.target.value)}
+                 placeholder="클레임이 들어온 메일·전화" />
+        </div>
+        <div>
+          <label className="form-label">조치 방식</label>
           <input className="inp" value={comp} onChange={(e) => setComp(e.target.value)}
-                 placeholder="예: 크레딧 보상" />
+                 placeholder="예: 크레딧 보상, 재작업" />
         </div>
         <div>
           <label className="form-label">조치 진행상황</label>
@@ -1163,14 +1226,15 @@ function ClaimEdit({ claim, onSave, onCancel, onDelete }: {
   const [kind, setKind] = useState(claim.kind);
   const [when, setWhen] = useState(claim.happened_on ?? "");
   const [comp, setComp] = useState(claim.compensation ?? "");
+  const [contact, setContact] = useState(claim.contact_info ?? "");
   const [progress, setProgress] = useState(claim.progress);
   const [actionOn, setActionOn] = useState(claim.action_on ?? "");
   return (
     <tr className="pending">
-      <td colSpan={7}>
+      <td colSpan={8}>
         <div className="form-row">
           <div>
-            <label className="form-label">클레임/히스토리 종류</label>
+            <label className="form-label">클레임 종류</label>
             <input className="inp" value={kind} onChange={(e) => setKind(e.target.value)} />
           </div>
           <div>
@@ -1178,7 +1242,11 @@ function ClaimEdit({ claim, onSave, onCancel, onDelete }: {
             <input className="inp" type="date" value={when} onChange={(e) => setWhen(e.target.value)} />
           </div>
           <div>
-            <label className="form-label">보상 종류</label>
+            <label className="form-label">고객 연락처</label>
+            <input className="inp" value={contact} onChange={(e) => setContact(e.target.value)} />
+          </div>
+          <div>
+            <label className="form-label">조치 방식</label>
             <input className="inp" value={comp} onChange={(e) => setComp(e.target.value)} />
           </div>
           <div>
@@ -1198,7 +1266,8 @@ function ClaimEdit({ claim, onSave, onCancel, onDelete }: {
           <button className="btn btn-sm" type="button" onClick={onCancel}>취소</button>
           <button className="btn btn-sm btn-primary" type="button"
                   onClick={() => onSave({ kind, happened_on: when, compensation: comp,
-                                          progress, action_on: actionOn })}>저장</button>
+                                          contact_info: contact, progress,
+                                          action_on: actionOn })}>저장</button>
         </div>
       </td>
     </tr>

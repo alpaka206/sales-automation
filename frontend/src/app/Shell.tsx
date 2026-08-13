@@ -22,10 +22,12 @@ const SECTIONS: Section[] = [
   {
     title: "고객 관리",
     icon: "users",
+    // 손이 가는 순서입니다: 지금 협상 중인 곳 → 이미 수주한 곳 → 지나간 리드 전부.
+    // 맨 아래 것은 지나간 리드까지 전부 담은 목록이라 매일 여는 화면이 아닙니다.
     items: [
       { to: "/customers?stage=negotiation", label: "협상중 고객", icon: "flame" },
-      { to: "/customers", label: "리드 히스토리", icon: "users", end: true, mobileLabel: "고객" },
       { to: "/won-customers", label: "수주 고객", icon: "globe" },
+      { to: "/customers", label: "리드 히스토리", icon: "users", end: true, mobileLabel: "고객" },
     ],
   },
   {
