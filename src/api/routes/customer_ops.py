@@ -70,6 +70,18 @@ LOST_REASONS: tuple[str, ...] = (
     "Went dark",
 )
 DEAL_DETAILS: dict[str, tuple[str, ...]] = {"won": WON_TYPES, "closed_lost": LOST_REASONS}
+
+
+def visible_deal_detail(stage: str | None, value: str | None) -> str | None:
+    """화면에 내려보낼 Deal Detail — **지금 단계의 목록에 있는 값일 때만.**
+
+    Won 에서 고른 "Contract" 를 그 카드가 Lost 로 옮겨진 뒤에도 그리면, Lost 사유 자리에
+    Won 값이 붙은 카드가 됩니다. 값은 지우지 않으므로 되돌아오면 다시 뜹니다.
+
+    보드 카드와 티켓 세부 내역이 같은 값을 보여야 해서 여기 한 곳에 둡니다 — 두 화면이
+    각자 판단하면, 한쪽만 고쳤을 때 같은 문의가 두 자리에서 다르게 보입니다.
+    """
+    return value if value and value in DEAL_DETAILS.get(stage or "", ()) else None
 CONTRACT_STATUSES = {"draft", "sent", "contracted", "active", "expired", "cancelled"}
 # In the order a contract moves through them, with the words the 수주 고객 screen shows.
 CONTRACT_STATUS_LABELS: tuple[tuple[str, str], ...] = (

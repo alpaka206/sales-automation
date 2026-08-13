@@ -82,7 +82,7 @@ async def ui_events(request: Request) -> StreamingResponse:
 
 def _card(row: dict) -> dict:
     """A board row's ORM objects flattened to what a card actually draws."""
-    from .customer_ops import DEAL_DETAILS
+    from .customer_ops import visible_deal_detail
 
     conversation: Conversation = row["conversation"]
     contact: Contact = row["contact"]
@@ -104,14 +104,8 @@ def _card(row: dict) -> dict:
         "link_message_id": row["link_message_id"],
         "last_activity": row["last_activity"],
         "stage": row["stage"],
-        # Won Type / Lost Reason. **지금 단계의 목록에 있는 값일 때만** 실어 보냅니다:
-        # Won 에서 고른 "Contract" 를 그 카드가 Lost 로 옮겨진 뒤에도 그리면, Lost 사유
-        # 자리에 Won 값이 붙은 카드가 됩니다. 값은 지우지 않으므로 되돌아오면 다시 뜹니다.
-        "deal_detail": (
-            conversation.deal_detail
-            if conversation.deal_detail in DEAL_DETAILS.get(row["stage"], ())
-            else None
-        ),
+        # Won Type / Lost Reason. 티켓 세부 내역과 같은 판단을 같은 곳에서 합니다.
+        "deal_detail": visible_deal_detail(row["stage"], conversation.deal_detail),
         "temperature": profile.lead_temperature if profile else None,
     }
 
@@ -189,7 +183,7 @@ async def ui_message_detail(message_id: int):
     여기서 번역하던 코드가 있었는데, 그러면 그 티켓을 처음 여는 사람이 매번 Gemini 를
     기다렸다가 화면을 봤습니다. 아직 안 채워진 옛 행은 화면이 원문을 그대로 보여 줍니다.
     """
-    from .customer_ops import MANUAL_LOG_STAGES, PIPELINE_STAGES
+    from .customer_ops import DEAL_DETAILS, MANUAL_LOG_STAGES, PIPELINE_STAGES
     from .messages import _message_detail_context
 
     # In a thread, not on the event loop. One open costs ~11 sequential round trips to
@@ -203,6 +197,10 @@ async def ui_message_detail(message_id: int):
     # 어느 단계에서 소통 기록을 남길 수 있는지. 보드의 + 버튼이 쓰는 것과 같은 목록을
     # 같은 곳에서 보냅니다 — 화면마다 "New 는 빼고" 를 따로 적으면 언젠가 어긋납니다.
     context["manual_log_stages"] = list(MANUAL_LOG_STAGES)
+    # 보드 카드가 쓰는 것과 **같은 목록**입니다. 티켓 세부 내역에서도 Won Type / Lost
+    # Reason 을 고칠 수 있어야 하고 — 카드를 찾으러 대시보드로 나갔다 오지 않도록 —
+    # 고르개가 두 화면에 있으니 값 목록은 더더욱 한 곳에서 와야 합니다.
+    context["deal_details"] = {stage: list(values) for stage, values in DEAL_DETAILS.items()}
     return context
 
 

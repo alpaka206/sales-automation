@@ -702,6 +702,48 @@ def test_the_board_gets_its_deal_detail_options_from_the_server(customer_db, cus
     assert options == {"won": list(WON_TYPES), "closed_lost": list(LOST_REASONS)}
 
 
+def test_the_ticket_page_shows_the_same_deal_detail_as_the_board(customer_db, customer_id) -> None:
+    """보드 카드와 티켓 세부 내역 **둘 다**에서 고칠 수 있어야 합니다.
+
+    대화를 다 읽고 결론을 내리는 곳은 티켓 화면인데, 그걸 적으려면 대시보드로 나가 그 카드를
+    찾아야 했습니다. 고르개가 두 자리에 생기는 만큼 값 목록도 「지금 단계의 값인가」 판단도
+    한 곳(`visible_deal_detail`)에서 와야 합니다 — 각자 판단하면 같은 문의가 두 화면에서
+    다르게 보이고, 어느 쪽이 저장된 값인지 알 방법이 없습니다.
+    """
+    from src.api.routes.customer_ops import LOST_REASONS, WON_TYPES
+
+    with customer_db() as session:
+        conversation = session.query(Conversation).filter_by(contact_id=customer_id).one()
+        conversation_id = conversation.id
+        message = Message(
+            conversation_id=conversation_id, direction="outgoing", channel="email",
+            body="답변", status="sent",
+        )
+        session.add(message)
+        session.commit()
+        message_id = message.id
+
+    # 티켓 세부 내역은 messages.py 의 세션을 씁니다 — 이 픽스처는 customer_ops 것만 겁니다.
+    with TestClient(app) as client, patch(
+        "src.api.routes.messages.SessionLocal", customer_db
+    ):
+        client.post(f"/pipeline/conversations/{conversation_id}/stage", data={"stage": "won"})
+        client.post(
+            f"/pipeline/conversations/{conversation_id}/deal-detail", data={"detail": "Renewal"}
+        )
+        detail = client.get(f"/api/ui/messages/{message_id}").json()
+        assert detail["ticket"]["deal_detail"] == "Renewal"
+        assert detail["deal_details"] == {
+            "won": list(WON_TYPES), "closed_lost": list(LOST_REASONS)
+        }
+
+        # 단계가 옮겨지면 그 값은 이 단계의 것이 아닙니다 — 카드에서와 똑같이 안 보입니다.
+        client.post(
+            f"/pipeline/conversations/{conversation_id}/stage", data={"stage": "negotiation"}
+        )
+        assert client.get(f"/api/ui/messages/{message_id}").json()["ticket"]["deal_detail"] is None
+
+
 # --------------------------------------------------------------------------- #
 # HubSpot 동기화 버튼 — 티켓 단계까지 가져옵니다
 # --------------------------------------------------------------------------- #

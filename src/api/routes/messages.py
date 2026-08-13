@@ -81,6 +81,8 @@ def _clean_signature_key(value: str | None) -> str | None:
 
 def _message_detail_context(message_id: int) -> dict:
     """Load a single message with its related customer data."""
+    from .customer_ops import visible_deal_detail
+
     with SessionLocal() as session:
         msg = (
             session.execute(
@@ -229,6 +231,12 @@ def _message_detail_context(message_id: int) -> dict:
                 "id": conv.id if conv else None,
                 "ticket_id": conv.hubspot_ticket_id if conv else None,
                 "stage": conv.stage if conv else None,
+                # Won Type / Lost Reason. 보드 카드와 **같은 값·같은 규칙**입니다: 지금
+                # 단계의 목록에 없는 값은 안 내려보냅니다(Won 에서 고른 값이 Lost 사유
+                # 자리에 붙으면 안 됩니다). 값 자체는 지우지 않으므로 되돌아오면 다시 뜹니다.
+                "deal_detail": visible_deal_detail(
+                    conv.stage if conv else None, conv.deal_detail if conv else None
+                ),
                 "inquiry_subject": conv.inquiry_subject if conv else None,
                 "inquiry_language": conv.inquiry_language if conv else None,
                 # The Inbound DB workbook's stable key for this inquiry (e.g. 1330).

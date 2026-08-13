@@ -39,6 +39,8 @@ type Detail = {
   signatures: { key: string; name: string }[];
   ticket: {
     id: number | null; ticket_id: string | null; stage: string | null;
+    /** Won Type / Lost Reason. 보드 카드와 같은 값 — 지금 단계의 목록에 있을 때만 옵니다. */
+    deal_detail: string | null;
     inquiry_subject: string | null; inquiry_language: string | null; client_id: number | null;
   };
   ticket_interactions: Interaction[];
@@ -53,6 +55,8 @@ type Detail = {
   stage_labels: Record<string, string>;
   /** 소통 기록을 남길 수 있는 단계 — 보드의 + 버튼과 같은 목록, 같은 출처. */
   manual_log_stages: string[];
+  /** 단계 → 고를 수 있는 Deal Detail. Won 과 Lost 만 있습니다 — 보드와 같은 출처. */
+  deal_details: Record<string, string[]>;
 };
 
 /** 편집기 도구 → 본문 표기. `email_html._inline` 이 읽는 것과 **같은 넷**입니다.
@@ -91,8 +95,10 @@ export function MessageDetail() {
   const [showOrig, setShowOrig] = useState<Record<number, boolean>>({});
   const [loadedId, setLoadedId] = useState<number | null>(null);
   const [logging, setLogging] = useState(false);
-  /** 방금 저장한 티켓 정보 — 확인 창이 무엇이 저장됐는지 그대로 보여 줍니다. */
-  const [savedContact, setSavedContact] = useState<Record<string, string> | null>(null);
+  /** 이 화면의 확인 창 하나. 오른쪽 칸의 저장은 **검토 중인 초안 밖**에서 일어나는데,
+   *  결과를 적던 `note` 는 그 초안 안에서만 그려집니다 — 이미 답이 나간 티켓에서는 눌러도
+   *  화면이 아무 말도 하지 않았습니다. 성공도 실패도 여기로 옵니다. */
+  const [notice, setNotice] = useState<{ title: string; body: ReactNode } | null>(null);
   // 서식을 씌운 뒤 되돌려 놓을 선택 범위. 상태로 두는 이유는 아래 효과 참고.
   const [pendingSel, setPendingSel] = useState<[number, number] | null>(null);
 
@@ -104,10 +110,17 @@ export function MessageDetail() {
     const form = event.currentTarget;
     const fields = Object.fromEntries(new FormData(form) as never) as Record<string, string>;
     await postForm(`/contacts/${data?.contact?.id}/edit`, fields);
-    // **저장했다는 말이 보이는 자리에 뜹니다.** 예전에는 `note` 한 줄이었는데, 그 줄은
-    // 검토 중인 초안 안에만 그려집니다 — 이미 발송된 티켓에서는 저장을 눌러도 화면이
-    // 아무 말도 하지 않았고, 정말 저장됐는지는 새로고침해야 알 수 있었습니다.
-    setSavedContact(fields);
+    setNotice({
+      title: "티켓 정보를 저장했습니다",
+      body: (
+        <dl className="info-list" style={{ marginTop: 12 }}>
+          <div className="info-row"><dt>회사</dt>
+            <dd>{fields.company?.trim() || "—"}</dd></div>
+          <div className="info-row"><dt>하는 일 / 메모</dt>
+            <dd style={{ whiteSpace: "pre-line" }}>{fields.role_description?.trim() || "—"}</dd></div>
+        </dl>
+      ),
+    });
     await queryClient.invalidateQueries({ queryKey: ["message", id] });
   });
 
@@ -156,6 +169,23 @@ export function MessageDetail() {
   // 단계 이름이 바뀌어도 두 화면이 어긋나지 않습니다.
   const canLog = !!ticket.stage && data.manual_log_stages.includes(ticket.stage);
   const canTranslate = !!msg.target_language && msg.target_language !== "ko";
+  // Won 과 Lost 에만 있습니다. 목록도 「이 단계에 고르개가 붙는가」도 서버가 정합니다 —
+  // 보드 카드와 같은 출처라 두 화면이 다른 값을 내놓을 수 없습니다.
+  const dealOptions = ticket.stage ? data.deal_details[ticket.stage] : undefined;
+
+  /** 고른 값을 그 자리에서 저장합니다. 저장 버튼을 따로 두지 않는 이유는 보드 카드와
+   *  같습니다 — 값 하나짜리 고르개에 저장 버튼이 붙으면, 고르고 안 누른 상태가 생깁니다. */
+  async function saveDealDetail(detail: string) {
+    try {
+      await postForm(`/pipeline/conversations/${ticket.id}/deal-detail`, { detail });
+      await queryClient.invalidateQueries({ queryKey: ["message", id] });
+    } catch (error) {
+      // 실패하면 말합니다. 조용히 두면 고른 값이 화면에만 남아 저장된 것으로 읽힙니다 —
+      // 다시 받아 오므로 고르개는 저장된 값으로 되돌아갑니다.
+      setNotice({ title: "Deal Detail 을 저장하지 못했습니다", body: String(error) });
+      await queryClient.invalidateQueries({ queryKey: ["message", id] });
+    }
+  }
 
   // 되는 동안의 상태는 누른 버튼이 말합니다(ActionButton). 여기 남는 것은 결과뿐입니다 —
   // 진행 표시가 버튼과 다른 자리에 있으면 눌린 건지 몰라 한 번 더 누르게 됩니다.
@@ -438,6 +468,24 @@ export function MessageDetail() {
               <div className="info-row"><dt>티켓</dt><dd className="mono">{ticket.ticket_id ? `#${ticket.ticket_id}` : "— (없음)"}</dd></div>
               <div className="info-row"><dt>Client ID</dt><dd className="tnum">{ticket.client_id ?? "미동기화"}</dd></div>
               {ticket.stage && <div className="info-row"><dt>단계</dt><dd>{data.stage_labels[ticket.stage] ?? ticket.stage}</dd></div>}
+              {/* Won 과 Lost 일 때만 나옵니다 — 왜 이겼나 / 왜 졌나는 결말이 난 건에만
+                  있는 정보입니다. 보드 카드에도 같은 고르개가 있고, 값 목록과 「지금
+                  단계의 값인가」 판단은 둘 다 서버에서 옵니다. 여기 둔 이유: 이 화면에서
+                  대화를 다 읽고 결론을 내리는데, 그걸 적으려고 대시보드로 나가 카드를
+                  찾아야 했습니다. */}
+              {dealOptions && (
+                <div className="info-row"><dt>Deal Detail</dt>
+                  <dd>
+                    <select className="select select--inline" value={ticket.deal_detail ?? ""}
+                            aria-label={ticket.stage === "won" ? "Won Type" : "Lost Reason"}
+                            onChange={(event) => void saveDealDetail(event.target.value)}>
+                      <option value="">선택 안 함</option>
+                      {dealOptions.map((option) => (
+                        <option key={option} value={option}>{option}</option>
+                      ))}
+                    </select>
+                  </dd></div>
+              )}
               {ticket.inquiry_subject && <div className="info-row"><dt>문의 제목</dt><dd>{ticket.inquiry_subject}</dd></div>}
               <div className="info-row"><dt>메시지</dt><dd className="tnum">{data.thread.length}건</dd></div>
             </dl>
@@ -558,25 +606,17 @@ export function MessageDetail() {
         </Modal>
       )}
 
-      {savedContact && (
+      {notice && (
         <Modal
-          title="티켓 정보를 저장했습니다"
-          description="아래 내용으로 이 고객의 연락처가 갱신되었습니다."
-          onClose={() => setSavedContact(null)}
+          title={notice.title}
+          onClose={() => setNotice(null)}
           actions={
-            <button type="button" className="btn btn--ok" onClick={() => setSavedContact(null)}>
+            <button type="button" className="btn btn--ok" onClick={() => setNotice(null)}>
               확인
             </button>
           }
         >
-          <dl className="info-list" style={{ marginTop: 12 }}>
-            <div className="info-row"><dt>회사</dt>
-              <dd>{savedContact.company?.trim() || "—"}</dd></div>
-            <div className="info-row"><dt>하는 일 / 메모</dt>
-              <dd style={{ whiteSpace: "pre-line" }}>
-                {savedContact.role_description?.trim() || "—"}
-              </dd></div>
-          </dl>
+          {notice.body}
         </Modal>
       )}
 
