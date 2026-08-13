@@ -156,7 +156,8 @@ export function Shell({ pending }: { pending?: number }) {
               틀이 화면 높이에 묶여 있어야 합니다. */}
           <main
             className={`main${
-              location.pathname === "/" || /^\/messages\/\d+$/.test(location.pathname)
+              location.pathname === "/" ||
+              /^\/(messages|tickets)\/\d+$/.test(location.pathname)
                 ? " main--fit"
                 : ""
             }`}

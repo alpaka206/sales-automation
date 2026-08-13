@@ -372,10 +372,16 @@ def test_message_detail_404_for_missing():
 
 
 def test_the_ticket_screen_offers_send_and_reject():
-    """검토 완료 · 발송 and 거절 are the two decisions the screen exists for."""
+    """검토 완료 · 발송 and 거절 are the two decisions the screen exists for.
+
+    주소는 `act()` 한 곳에서 만듭니다 — 이 화면은 메일이 없는 티켓(HubSpot 에서 들여온 것)
+    으로도 열리므로, 그 주소를 쓰는 곳마다 `msg` 가 있는지 확인하는 대신 한 곳에서 걸러냅니다.
+    """
     screen = pathlib.Path("frontend/src/screens/MessageDetail.tsx").read_text(encoding="utf-8")
     assert "검토 완료 · 발송" in screen
-    assert "/send" in screen
+    assert 'act("send")' in screen
+    assert 'act("reject"' in screen
+    assert "`/messages/${msg.id}/${action}`" in screen
 
 
 def test_message_detail_embeds_customer_history(_use_test_db):

@@ -36,7 +36,6 @@ from ...common.won import (
 from ...db.models import (
     Client,
     ClientContract,
-    ContractClaim,
     ContractCreditGrant,
     ContractPayment,
     PendingWon,
@@ -457,78 +456,6 @@ def _fill_fx(payment: ContractPayment) -> None:
 
 
 # --------------------------------------------------------------------------- #
-# 클레임 · 히스토리
-# --------------------------------------------------------------------------- #
-@router.post("/won-customers/contracts/{contract_id}/claims")
-async def add_claim(
-    contract_id: int,
-    kind: str = Form(...),
-    happened_on: str = Form(""),
-    compensation: str = Form(""),
-    contact_info: str = Form(""),
-    progress: str = Form("접수"),
-):
-    with SessionLocal() as session:
-        contract = _get_contract(session, contract_id)
-        session.add(
-            ContractClaim(
-                contract_id=contract_id,
-                kind=kind.strip(),
-                happened_on=_text(happened_on) or date.today().isoformat(),
-                compensation=_text(compensation),
-                # 폼이 등록된 연락처를 채워 보내지만, 비워서 보내는 것도 됩니다. 그때는
-                # 고객 기본 정보의 연락처가 그 시점의 답입니다 — 클레임을 열 때마다
-                # 다른 화면으로 확인하러 가지 않도록 행에 박아 둡니다.
-                contact_info=_text(contact_info) or (contract.client.contact_info or None),
-                progress=progress.strip() or "접수",
-            )
-        )
-        session.commit()
-    return {"ok": True}
-
-
-@router.post("/won-customers/claims/{claim_id}")
-async def update_claim(
-    claim_id: int,
-    kind: str = Form(""),
-    happened_on: str = Form(""),
-    compensation: str = Form(""),
-    contact_info: str = Form(""),
-    progress: str = Form(""),
-    action_on: str = Form(""),
-):
-    with SessionLocal() as session:
-        claim = session.get(ContractClaim, claim_id)
-        if claim is None:
-            raise HTTPException(status_code=404, detail="클레임을 찾을 수 없습니다")
-        if kind.strip():
-            claim.kind = kind.strip()
-        claim.happened_on = _text(happened_on) or claim.happened_on
-        claim.compensation = _text(compensation)
-        claim.contact_info = _text(contact_info)
-        if progress.strip():
-            claim.progress = progress.strip()
-            # 조치 완료로 바꿨는데 날짜가 없으면 오늘입니다. 완료인데 날짜가 빈 행은
-            # "언제 끝났나" 에 답이 없습니다.
-            if claim.progress == "조치 완료" and not (_text(action_on) or claim.action_on):
-                claim.action_on = date.today().isoformat()
-        if action_on.strip():
-            claim.action_on = action_on.strip()
-        session.commit()
-    return {"ok": True}
-
-
-@router.post("/won-customers/claims/{claim_id}/delete")
-async def delete_claim(claim_id: int):
-    with SessionLocal() as session:
-        claim = session.get(ContractClaim, claim_id)
-        if claim is not None:
-            session.delete(claim)
-            session.commit()
-    return {"ok": True}
-
-
-# --------------------------------------------------------------------------- #
 # 수주 전환 대기
 # --------------------------------------------------------------------------- #
 @router.post("/won-customers/pending/{pending_id}/dismiss")
@@ -594,7 +521,7 @@ def export_csv():
         "결제 수단", "결제 방식", "총 분납 횟수", "최초 결제일", "Billing Email",
         "월간 매출 (VAT 포함)", "매출 인식 시작 월",
         "플랜", "플랜명", "Perso Email", "Space 개수", "space_seq",
-        "다음 크레딧 지급일", "다음 결제일", "갱신 계획", "미처리 클레임",
+        "다음 크레딧 지급일", "다음 결제일", "갱신 계획",
     ])
     with SessionLocal() as session:
         clients = (
@@ -602,7 +529,6 @@ def export_csv():
             .options(
                 selectinload(Client.contracts).selectinload(ClientContract.credit_grants),
                 selectinload(Client.contracts).selectinload(ClientContract.payments),
-                selectinload(Client.contracts).selectinload(ClientContract.claims),
             )
             .order_by(Client.client_id)
             .all()
@@ -616,7 +542,7 @@ def export_csv():
             ]
             if not client.contracts:
                 # 계약이 아직 없는 고객도 한 줄 나갑니다 — 빠지면 명단이 아닙니다.
-                writer.writerow(base + [""] * 32)   # 머리글 43 − 고객 11
+                writer.writerow(base + [""] * 31)   # 머리글 42 − 고객 11
                 continue
             for contract in client.contracts:
                 total = float(won.total_amount(contract) or 0)
@@ -646,7 +572,6 @@ def export_csv():
                     grant.grant_on if grant else "",
                     payment.paid_on if payment else "",
                     contract.renewal_plan,
-                    sum(1 for c in contract.claims if c.progress != "조치 완료"),
                 ])
 
     body = "﻿" + buffer.getvalue()

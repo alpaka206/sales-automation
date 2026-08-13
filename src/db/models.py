@@ -734,11 +734,6 @@ class ClientContract(Base):
         cascade="all, delete-orphan",
         order_by="ContractPayment.no",
     )
-    claims: Mapped[list["ContractClaim"]] = relationship(
-        back_populates="contract",
-        cascade="all, delete-orphan",
-        order_by="ContractClaim.happened_on",
-    )
 
     __table_args__ = (
         # 같은 고객에 같은 차수가 둘 있으면 어느 것이 2차인지 화면이 못 정합니다.
@@ -788,29 +783,6 @@ class ContractPayment(Base):
 
     contract: Mapped["ClientContract"] = relationship(back_populates="payments")
 
-
-class ContractClaim(Base):
-    """클레임·히스토리. 불만만이 아니라 협업·테스트 같은 특이사항도 여기 쌓입니다."""
-
-    __tablename__ = "contract_claims"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    contract_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("client_contracts.id", ondelete="CASCADE"), nullable=False, index=True
-    )
-    kind: Mapped[str] = mapped_column(String(200), nullable=False)
-    happened_on: Mapped[str | None] = mapped_column(String(10), nullable=True)
-    # 화면 이름은 「조치 방식」입니다. 열 이름을 안 바꾼 이유: 값이 그대로이고, 이름만
-    # 바꾸려고 마이그레이션으로 열을 옮기면 그 사이에 쓴 행이 어느 쪽에 있는지 모릅니다.
-    compensation: Mapped[str | None] = mapped_column(String(200), nullable=True)
-    # 클레임이 들어온 연락처. 고객 기본 정보의 연락처와 **다를 수 있어서** 따로 답니다 —
-    # 등록된 담당자가 아니라 실무자가 항의 메일을 보내는 일이 흔하고, 그 사람에게 답을
-    # 해야 합니다. 폼은 기본값으로 등록된 연락처를 채워 두되 고칠 수 있습니다.
-    contact_info: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    progress: Mapped[str] = mapped_column(String(32), nullable=False, default="접수")
-    action_on: Mapped[str | None] = mapped_column(String(10), nullable=True)
-
-    contract: Mapped["ClientContract"] = relationship(back_populates="claims")
 
 
 class PendingWon(Base):

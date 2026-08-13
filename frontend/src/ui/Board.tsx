@@ -19,7 +19,6 @@ export type Card = {
   email: string | null;
   country: string | null;
   client_id: number | null;
-  link_message_id: number | null;
   last_activity: string;
   stage: string;
   /** Won Type 또는 Lost Reason. 그 단계의 목록에 있는 값일 때만 서버가 실어 보냅니다. */
@@ -199,12 +198,13 @@ export function Board({ stages, manualLogStages, dealDetails = {} }: {
                     }}
                     onDragEnd={() => { setDragging(null); setOver(null); }}
                   >
-                    <Link
-                      to={card.link_message_id
-                        ? `/messages/${card.link_message_id}`
-                        : `/customers/${card.contact_id}`}
-                      draggable={false}
-                    >
+                    {/* **언제나 티켓으로 들어갑니다.** 예전에는 메일 행이 있는 카드만
+                        티켓으로 가고 나머지는 고객 페이지로 빠졌는데, 메일이 없는 것은
+                        HubSpot 에서 들여온 티켓 — 즉 Won·Lost 카드 대부분 — 이었습니다.
+                        Deal Detail 도 소통 기록도 티켓의 값이라, 그 카드만 정작 아무것도
+                        못 고치는 자리로 갔습니다. 고객 히스토리는 티켓 화면에서 한 번 더
+                        눌러 갑니다. */}
+                    <Link to={`/tickets/${card.conversation_id}`} draggable={false}>
                       {/* 제목은 티켓 이름입니다. 회사 이름이었는데, 한 회사가 문의를
                           여러 건 넣으면 카드 제목이 전부 같은 글자가 됩니다. */}
                       <strong>{card.subject || "(제목 없음)"}</strong>

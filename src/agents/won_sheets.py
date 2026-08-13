@@ -9,7 +9,7 @@
 됩니다. 한동안 「동기화 키」 열을 따로 뒀는데, 자연키가 이미 안정적이어서 하는 일이 없었습니다.
 
 **콘솔에 있는 고객의 행은 콘솔 것입니다.** 그 Client ID 의 행 중 콘솔이 들고 오지 않은 것은
-지워진 항목(클레임 등)이므로 비웁니다. 콘솔에 없는 Client ID 의 행은 손으로 쓴 것이라
+지워진 항목이므로 비웁니다. 콘솔에 없는 Client ID 의 행은 손으로 쓴 것이라
 건드리지 않고, 나중에 그 고객이 콘솔에 생기면 그 행을 이어받습니다 — 안 그러면 운영자가
 먼저 채워 둔 서울대학교가 두 줄이 됩니다.
 
@@ -85,12 +85,14 @@ CONTRACTS = _Tab(
 # 전부 고쳐야 하는 값이었고, 실제로 어긋나 있었습니다.
 CREDITS = _Tab("크레딧 지급 현황", ("A", "C", "D"), tuple("ACDFGHIJ"))
 PAYMENTS = _Tab("결제 현황", ("A", "C", "D"), tuple("ACDFGH"))
-CLAIMS = _Tab("클레임 · 히스토리", ("A", "C", "D", "E"), tuple("ACDEFGH"))
 # 소통 히스토리 탭은 콘솔이 쓰지 않습니다. 내보낼 수 있는 것은 Contact 가 있는 고객,
 # 즉 인바운드뿐인데 그 사람들의 타임라인은 콘솔 화면에 이미 있습니다. 정작 그 탭이
 # 필요한 쪽(LG전자·외교부처럼 Contact 가 없는 고객)은 내보낼 것이 아예 없습니다.
 # 그래서 그 탭은 손으로 적는 자리로 남깁니다.
-TABS = (CLIENTS, CONTRACTS, CREDITS, PAYMENTS, CLAIMS)
+# 클레임 탭도 콘솔이 쓰지 않습니다 — 그 기능을 콘솔에서 뺐습니다. 시트의 탭은 그대로
+# 남고, 손으로 적는 자리가 됩니다(소통 히스토리 탭과 같은 처지).
+TABS = (CLIENTS, CONTRACTS, CREDITS, PAYMENTS)
+
 
 def _date(value: object) -> str:
     """``YYYY-MM-DD`` 만 통과시킵니다. 시트에 진짜 날짜로 들어가야 뺄셈이 됩니다."""
@@ -216,24 +218,6 @@ def _payment_row(contract: ClientContract, payment) -> _Row:
     )
 
 
-def _claim_row(contract: ClientContract, claim) -> _Row:
-    return _Row(
-        natural=_natural(
-            contract.client_id, contract.seq, claim.kind, _date(claim.happened_on)
-        ),
-        entered={
-            "A": contract.client_id,
-            "C": contract.seq,
-            "E": _date(claim.happened_on),
-            "H": _date(claim.action_on),
-        },
-        raw={
-            "D": _text(claim.kind),
-            "F": _text(claim.compensation),
-            "G": _text(claim.progress),
-        },
-    )
-
 
 def collect_rows() -> tuple[dict[str, list[_Row]], set[str]]:
     """DB 한 번 읽어 탭별 행 목록과 콘솔이 아는 Client ID 로. 이 함수만 DB 를 압니다."""
@@ -244,7 +228,6 @@ def collect_rows() -> tuple[dict[str, list[_Row]], set[str]]:
             .options(
                 selectinload(Client.contracts).selectinload(ClientContract.credit_grants),
                 selectinload(Client.contracts).selectinload(ClientContract.payments),
-                selectinload(Client.contracts).selectinload(ClientContract.claims),
             )
             .order_by(Client.client_id)
         ).all()
@@ -256,8 +239,6 @@ def collect_rows() -> tuple[dict[str, list[_Row]], set[str]]:
                     rows[CREDITS.title].append(_credit_row(contract, grant))
                 for payment in sorted(contract.payments, key=lambda p: (p.no, p.id)):
                     rows[PAYMENTS.title].append(_payment_row(contract, payment))
-                for claim in sorted(contract.claims, key=lambda c: c.id):
-                    rows[CLAIMS.title].append(_claim_row(contract, claim))
         managed = {str(c.client_id) for c in clients}
     return rows, managed
 

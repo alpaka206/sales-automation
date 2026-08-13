@@ -6,7 +6,7 @@ import { useAction } from "../../ui/ActionButton";
 import { Confirm } from "./Confirm";
 import { WonContractForm } from "./WonContractForm";
 import {
-  type Claim, type Contract, type Grant, type ListData, type Options, type Payment, type Row,
+  type Contract, type Grant, type ListData, type Options, type Payment, type Row,
   addMonths, dday, dueClass, fmt, initials, money, n, num, planTone, statusTone,
 } from "./shared";
 
@@ -15,13 +15,8 @@ import {
  * **계약 선택 드롭다운이 이 화면의 축입니다.** 고객은 하나이고 계약이 여럿이라, 2~5·7번
  * 섹션은 전부 "지금 고른 계약" 의 내용이고 고르는 순간 함께 바뀝니다.
  *
- * 계약을 따라가지 **않는** 것이 둘입니다:
- *
- * - **6번 클레임** — 고객이 겪은 일이지 계약 회차의 일이 아닙니다. 1차 때 난
- *   품질 이슈는 2차를 보고 있어도 그 고객의 이력입니다. 저장은 계약에 딸려 있고(어느 계약
- *   기간에 일어났는지가 정보라서), 보여줄 때만 전부 모읍니다 — 어느 차수 건인지 뱃지로
- *   적습니다. 같은 섹션의 갱신 계획·비고는 반대로 계약의 값이라 따라갑니다.
- * - **8번 소통 히스토리** — 협상 단계 대화가 계약보다 먼저 쌓이고 그대로 이어집니다(0065).
+ * 계약을 따라가지 **않는** 것은 **8번 소통 히스토리** 하나입니다 — 협상 단계 대화가 계약보다
+ * 먼저 쌓이고 그대로 이어집니다(0065).
  */
 const SECTIONS: [string, string][] = [
   ["sec-basic", "고객 기본 정보"],
@@ -29,13 +24,12 @@ const SECTIONS: [string, string][] = [
   ["sec-plan", "Perso 계정 · 플랜"],
   ["sec-credit", "크레딧 지급"],
   ["sec-pay", "결제 현황"],
-  ["sec-care", "클레임"],
+  ["sec-care", "갱신 · 비고"],
   ["sec-revenue", "매출 관리"],
   ["sec-comm", "소통 히스토리"],
 ];
 
 const AVATAR_COLORS = ["#0F766E", "#B45309", "#3730A3", "#B42318", "#026AA2", "#4B5563"];
-const CLAIM_PROGRESS = ["접수", "조치 진행 중", "조치 완료"];
 
 /** 목업의 `statusTag` / `dealTag` / `planTag`. */
 const Tag = ({ tone, children }: { tone: string; children: React.ReactNode }) =>
@@ -152,7 +146,6 @@ export function WonCustomerDetail() {
           {current?.plan && <Tag tone={`plan-${planTone(current.plan)}`}>{current.plan}</Tag>}
           <Tag tone="neutral">{current ? current.label : "계약 없음"}</Tag>
           {data.setup_count > 0 && <Tag tone="st-setup">세팅중 계약 {data.setup_count}건</Tag>}
-          {data.open_claims > 0 && <Tag tone="risk">미처리 {data.open_claims}건</Tag>}
         </div>
         <div className="secnav">
           {SECTIONS.map(([id, label]) => (
@@ -194,8 +187,7 @@ export function WonCustomerDetail() {
             <PlanSection contract={current} />
             <CreditSection contract={current} today={today} onDone={refresh} />
             <PaySection contract={current} today={today} onDone={refresh} />
-            <CareSection contracts={contracts} current={current} onDone={refresh}
-                         defaultContact={data.contact_info ?? ""} />
+            <CareSection current={current} onDone={refresh} />
             <RevenueSection contract={current} today={today} />
           </>
         )}
@@ -284,7 +276,7 @@ function Chip({ on, count, onClick, children }: {
 function Section({ num: number, id, title, right, children, plain }: {
   num: number; id: string; title: string;
   right?: React.ReactNode; children: React.ReactNode;
-  /** 내용이 스스로 패널을 여러 개 그리는 섹션(크레딧·결제·클레임). */
+  /** 내용이 스스로 패널을 여러 개 그리는 섹션(크레딧·결제). */
   plain?: boolean;
 }) {
   return (
@@ -356,7 +348,7 @@ function BasicSection({ client, contracts, options, onDone }: {
   });
 
   // 저장 전에 한 번 더 묻습니다 — **바뀐 칸만** 보여 주면서. 고객사 이름은 워크북의
-  // 계약·회차·클레임 네 탭과 Inbound DB 가 Client ID 로 조회해 가는 값이고, 담당부서는
+  // 계약·회차 탭과 Inbound DB 가 Client ID 로 조회해 가는 값이고, 담당부서는
   // 요약 카드와 예상 MRR 이 GTM 만 더할 때 쓰는 값입니다 — 한 글자 잘못 고치면 이 화면
   // 밖의 숫자가 조용히 달라집니다. 바뀐 것이 없으면 물을 것도 없어 바로 닫습니다.
   const LABELS: Record<keyof typeof form, string> = {
@@ -1047,232 +1039,28 @@ function PayRow({ payment, currency, today, onAsk, onSave }: {
   );
 }
 
-/** 6 클레임 — **계약을 골라도 바뀌지 않습니다.**
+/** 6 갱신 · 비고 — 지금 고른 계약의 값입니다.
  *
- * 고객이 겪은 일이지 계약 회차의 일이 아닙니다. 1차 때 난 품질 이슈는 2차를 보고 있어도
- * 그 고객의 이력입니다. 저장은 계약에 딸려 있고(어느 계약 기간의 일인지가 정보라서),
- * 보여줄 때만 전부 모아 어느 차수 건인지 뱃지로 적습니다. 새로 등록하는 것은 지금 고른
- * 계약에 붙습니다.
+ * 2차의 갱신 계획과 1차의 갱신 계획은 다른 이야기라 계약 고르개를 따라갑니다.
  *
- * 같은 섹션의 갱신 계획 · 사용 중단 이유 · 비고는 반대로 **계약의 값**이라 따라갑니다 —
- * 2차의 갱신 계획과 1차의 갱신 계획은 다른 이야기입니다.
+ * 여기 「고객 클레임」 표가 있었습니다. 클레임은 콘솔에서 관리하지 않기로 해서 화면·라우트·
+ * 테이블까지 전부 지웠습니다(마이그레이션 0072). 섹션 번호는 그대로 둡니다 — 뒤 번호를
+ * 당기면 운영자가 외운 자리와 액션 보드의 앵커가 같이 어긋납니다.
  */
-function CareSection({ contracts, current, onDone, defaultContact }: {
-  contracts: Contract[]; current: Contract; onDone: () => void;
-  /** 고객 기본 정보의 연락처. 등록 폼의 **기본값**일 뿐이라 고칠 수 있습니다 — 클레임은
-   *  등록된 담당자가 아니라 실무자가 보내는 일이 흔하고, 답은 그 사람에게 갑니다. */
-  defaultContact: string;
-}) {
-  const [adding, setAdding] = useState(false);
-  const [removing, setRemoving] = useState<Claim | null>(null);
-  const [editing, setEditing] = useState<number | null>(null);
-
-  const all = contracts
-    .slice().reverse()
-    .flatMap((c) => c.claims.map((claim) => ({ claim, seq: c.seq })));
-
-  async function save(id: number, fields: Record<string, string>) {
-    await postForm(`/won-customers/claims/${id}`, fields);
-    onDone();
-  }
-
+function CareSection({ current, onDone }: { current: Contract; onDone: () => void }) {
   return (
-    <Section num={6} id="sec-care" title="고객 클레임" plain
-             right={<button className="btn btn-sm" type="button"
-                            onClick={() => setAdding(!adding)}>+ 항목 등록</button>}>
-      <div className="panel">
-        <div className="sub-head">
-          <span className="sub-title">클레임</span>
-          <span className="sub-count">{all.length}건 · 전체 계약 통합</span>
-        </div>
-        {adding && (
-          <ClaimForm contract={current} defaultContact={defaultContact}
-                     onCancel={() => setAdding(false)}
-                     onDone={() => { setAdding(false); onDone(); }} />
-        )}
-        {all.length ? (
-          <div className="table-wrap">
-            <table className="mini">
-              <thead><tr>
-                <th>클레임 종류</th><th>계약</th><th>발생 날짜</th><th>고객 연락처</th><th>조치 방식</th>
-                <th>조치 진행상황</th><th>조치 날짜</th><th style={{ width: 96 }} />
-              </tr></thead>
-              <tbody>
-                {all.map(({ claim, seq }) => (
-                  editing === claim.id ? (
-                    <ClaimEdit key={claim.id} claim={claim}
-                               onCancel={() => setEditing(null)}
-                               onDelete={() => { setEditing(null); setRemoving(claim); }}
-                               onSave={(fields) => save(claim.id, fields).then(() => setEditing(null))} />
-                  ) : (
-                    <tr key={claim.id}>
-                      <td>{claim.kind}</td>
-                      <td><Tag tone="neutral">{seq}차</Tag></td>
-                      <td className="mono">{fmt(claim.happened_on)}</td>
-                      <td className="mono">{claim.contact_info || "—"}</td>
-                      <td>{claim.compensation || "—"}</td>
-                      <td><Tag tone={claim.progress === "조치 완료" ? "st-live"
-                                     : claim.progress === "접수" ? "neutral" : "st-setup"}>
-                        {claim.progress}
-                      </Tag></td>
-                      <td className="mono">{claim.action_on ? fmt(claim.action_on) : "—"}</td>
-                      <td style={{ textAlign: "right" }}>
-                        <button className="btn btn-sm btn-ghost" type="button"
-                                onClick={() => setEditing(claim.id)}>수정</button>
-                      </td>
-                    </tr>
-                  )
-                ))}
-              </tbody>
-            </table>
-          </div>
-        ) : <div className="board-empty">등록된 클레임이 없습니다.</div>}
-      </div>
-
-      <div className="split-2" style={{ marginTop: 10 }}>
+    <Section num={6} id="sec-care" title="갱신 · 비고" plain>
+      <div className="split-2">
         {/* `key` 가 계약 id 인 이유: 아래 셋은 계약의 값인데, 컴포넌트가 그것을 `useState` 의
             **초기값**으로 받습니다. 계약을 바꿔도 React 는 같은 자리의 같은 컴포넌트를
             재사용하므로 초기값은 다시 안 읽힙니다 — 1차를 골랐는데 2차의 갱신 계획이 남아
             있고, 그대로 저장을 누르면 1차에 2차의 값이 덮입니다. key 가 바뀌면 새로 답니다. */}
         <ContractNotes key={current.id} contract={current} onDone={onDone} />
       </div>
-
-      {removing && (
-        <Confirm
-          title="클레임을 삭제합니다"
-          rows={[
-            ["종류", removing.kind],
-            ["발생 날짜", fmt(removing.happened_on)],
-            ["진행상황", removing.progress],
-          ]}
-          note="되돌릴 수 없습니다. 미처리 건이면 목록 상단의 카운트에서도 빠집니다."
-          okLabel="삭제" danger
-          onOk={async () => {
-            await postForm(`/won-customers/claims/${removing.id}/delete`, {});
-            onDone();
-          }}
-          onClose={() => setRemoving(null)}
-        />
-      )}
     </Section>
   );
 }
 
-function ClaimForm({ contract, defaultContact, onDone, onCancel }: {
-  contract: Contract; defaultContact: string; onDone: () => void; onCancel: () => void;
-}) {
-  const today = new Date().toISOString().slice(0, 10);
-  const [kind, setKind] = useState("");
-  const [when, setWhen] = useState(today);
-  const [comp, setComp] = useState("");
-  // 등록된 연락처로 시작하되 고칠 수 있습니다 — 채워 두지 않으면 매번 다른 화면으로
-  // 확인하러 가고, 고정해 두면 실제로 항의한 사람의 연락처가 어디에도 안 남습니다.
-  const [contact, setContact] = useState(defaultContact);
-  const [progress, setProgress] = useState(CLAIM_PROGRESS[0]);
-  const [add, adding] = useAction(async () => {
-    if (!kind.trim()) return;
-    await postForm(`/won-customers/contracts/${contract.id}/claims`, {
-      kind, happened_on: when, compensation: comp, contact_info: contact, progress,
-    });
-    onDone();
-  });
-  return (
-    <div style={{ padding: "4px 0 14px", borderBottom: "1px solid var(--line-soft)", marginBottom: 10 }}>
-      <div className="form-row">
-        <div>
-          <label className="form-label">클레임 종류</label>
-          <input className="inp" value={kind} onChange={(e) => setKind(e.target.value)}
-                 placeholder="예: 품질 이슈, 신기능 TEST" />
-        </div>
-        <div>
-          <label className="form-label">발생 날짜</label>
-          <input className="inp" type="date" value={when} onChange={(e) => setWhen(e.target.value)} />
-        </div>
-        <div>
-          <label className="form-label">고객 연락처</label>
-          <input className="inp" value={contact} onChange={(e) => setContact(e.target.value)}
-                 placeholder="클레임이 들어온 메일·전화" />
-        </div>
-        <div>
-          <label className="form-label">조치 방식</label>
-          <input className="inp" value={comp} onChange={(e) => setComp(e.target.value)}
-                 placeholder="예: 크레딧 보상, 재작업" />
-        </div>
-        <div>
-          <label className="form-label">조치 진행상황</label>
-          <select className="inp" value={progress} onChange={(e) => setProgress(e.target.value)}>
-            {CLAIM_PROGRESS.map((item) => <option key={item}>{item}</option>)}
-          </select>
-        </div>
-      </div>
-      <div style={{ fontSize: 12, color: "var(--faint)", marginTop: 8 }}>
-        지금 보고 있는 <b>{contract.label}</b> 에 붙습니다.
-      </div>
-      <div style={{ display: "flex", gap: 7, justifyContent: "flex-end", marginTop: 10 }}>
-        <button className="btn btn-sm" type="button" onClick={onCancel}>취소</button>
-        <button className="btn btn-sm btn-primary" type="button" disabled={adding}
-                onClick={() => add()}>{adding ? "등록 중" : "등록"}</button>
-      </div>
-    </div>
-  );
-}
-
-function ClaimEdit({ claim, onSave, onCancel, onDelete }: {
-  claim: Claim;
-  onSave: (fields: Record<string, string>) => void;
-  onCancel: () => void;
-  onDelete: () => void;
-}) {
-  const [kind, setKind] = useState(claim.kind);
-  const [when, setWhen] = useState(claim.happened_on ?? "");
-  const [comp, setComp] = useState(claim.compensation ?? "");
-  const [contact, setContact] = useState(claim.contact_info ?? "");
-  const [progress, setProgress] = useState(claim.progress);
-  const [actionOn, setActionOn] = useState(claim.action_on ?? "");
-  return (
-    <tr className="pending">
-      <td colSpan={8}>
-        <div className="form-row">
-          <div>
-            <label className="form-label">클레임 종류</label>
-            <input className="inp" value={kind} onChange={(e) => setKind(e.target.value)} />
-          </div>
-          <div>
-            <label className="form-label">발생 날짜</label>
-            <input className="inp" type="date" value={when} onChange={(e) => setWhen(e.target.value)} />
-          </div>
-          <div>
-            <label className="form-label">고객 연락처</label>
-            <input className="inp" value={contact} onChange={(e) => setContact(e.target.value)} />
-          </div>
-          <div>
-            <label className="form-label">조치 방식</label>
-            <input className="inp" value={comp} onChange={(e) => setComp(e.target.value)} />
-          </div>
-          <div>
-            <label className="form-label">조치 진행상황</label>
-            <select className="inp" value={progress} onChange={(e) => setProgress(e.target.value)}>
-              {CLAIM_PROGRESS.map((item) => <option key={item}>{item}</option>)}
-            </select>
-          </div>
-        </div>
-        <div style={{ marginTop: 8, maxWidth: 220 }}>
-          <label className="form-label">조치 날짜</label>
-          <input className="inp" type="date" value={actionOn} onChange={(e) => setActionOn(e.target.value)} />
-        </div>
-        <div style={{ display: "flex", gap: 7, justifyContent: "flex-end", marginTop: 9 }}>
-          <button className="btn btn-sm" type="button" style={{ marginRight: "auto", color: "var(--red-fg)" }}
-                  onClick={onDelete}>삭제</button>
-          <button className="btn btn-sm" type="button" onClick={onCancel}>취소</button>
-          <button className="btn btn-sm btn-primary" type="button"
-                  onClick={() => onSave({ kind, happened_on: when, compensation: comp,
-                                          contact_info: contact, progress,
-                                          action_on: actionOn })}>저장</button>
-        </div>
-      </td>
-    </tr>
-  );
-}
 
 /** 갱신 계획 · 사용 중단 이유 · 비고. 다시 고치면 그만인 값이라 확인 창을 붙이지 않습니다.
  *

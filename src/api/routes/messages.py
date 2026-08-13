@@ -79,26 +79,63 @@ def _clean_signature_key(value: str | None) -> str | None:
     return v if v in {s["key"] for s in list_signature_templates()} else None
 
 
-def _message_detail_context(message_id: int) -> dict:
-    """Load a single message with its related customer data."""
+def _message_detail_context(
+    message_id: int | None = None, *, conversation_id: int | None = None
+) -> dict:
+    """Load one ticket with its related customer data. **메일이 없어도 열립니다.**
+
+    두 가지 방법으로 부릅니다:
+
+    - ``message_id`` — 회신 및 검토 목록에서 그 초안을 열 때. 그 메일이 화면의 「현재」 글이
+      되고, 검토 중이면 편집기가 그 자리에 그려집니다.
+    - ``conversation_id`` — 보드 카드에서 티켓을 열 때. 그 대화의 마지막 메일이 현재 글이고,
+      **메일이 하나도 없으면 그대로 없는 채로** 티켓 정보·Deal Detail·소통 기록만 그립니다.
+
+    뒤엣것이 필요한 이유: ``hubspot_backfill`` 은 티켓에서 대화만 만들고 메일 행은 만들지
+    않습니다. HubSpot 에서 들여온 Won·Lost 티켓이 전부 그렇고, 그래서 보드에서 그 카드를
+    누르면 티켓이 아니라 **고객 페이지**로 빠졌습니다 — Deal Detail 은 티켓의 값인데 티켓을
+    열 방법이 없었던 셈입니다.
+    """
     from .customer_ops import visible_deal_detail
 
     with SessionLocal() as session:
-        msg = (
-            session.execute(
-                select(Message)
-                .options(
-                    joinedload(Message.conversation).joinedload(Conversation.contact),
+        msg = None
+        if message_id is not None:
+            msg = (
+                session.execute(
+                    select(Message)
+                    .options(
+                        joinedload(Message.conversation).joinedload(Conversation.contact),
+                    )
+                    .where(Message.id == message_id)
                 )
-                .where(Message.id == message_id)
+                .unique()
+                .scalar_one_or_none()
             )
-            .unique()
-            .scalar_one_or_none()
-        )
-        if not msg:
-            return {}
+            if not msg:
+                return {}
+            conv = msg.conversation
+        else:
+            conv = (
+                session.execute(
+                    select(Conversation)
+                    .options(joinedload(Conversation.contact))
+                    .where(Conversation.id == conversation_id)
+                )
+                .unique()
+                .scalar_one_or_none()
+            )
+            if conv is None:
+                return {}
+            # 마지막 메일이 「현재」 글입니다. 그것이 검토 대기 중인 초안이면 편집기가
+            # 열리는데, 보드에서 눌러 들어온 사람에게도 그게 맞는 화면입니다.
+            msg = session.scalars(
+                select(Message)
+                .where(Message.conversation_id == conv.id)
+                .order_by(Message.id.desc())
+                .limit(1)
+            ).first()
 
-        conv = msg.conversation
         contact = conv.contact if conv else None
 
         thread_rows = []
@@ -200,7 +237,7 @@ def _message_detail_context(message_id: int) -> dict:
                 "to_address": tm.to_address,
                 "created_at": tm.created_at,
                 "sent_at": tm.sent_at,
-                "is_current": tm.id == msg.id,
+                "is_current": msg is not None and tm.id == msg.id,
             }
             for tm in thread_rows
         ]
@@ -274,6 +311,8 @@ def _message_detail_context(message_id: int) -> dict:
                 if conv
                 else []
             ),
+            # 메일이 하나도 없는 티켓은 `None` 입니다 — HubSpot 에서 들여온 티켓이 그렇고,
+            # 그때 화면은 초안 편집기와 발송 정보 칸을 아예 그리지 않습니다.
             "msg": {
                 "id": msg.id,
                 "status": msg.status,
@@ -293,7 +332,9 @@ def _message_detail_context(message_id: int) -> dict:
                 "scheduled_at": msg.scheduled_at,
                 "sent_at": msg.sent_at,
                 "created_at": msg.created_at,
-            },
+            }
+            if msg is not None
+            else None,
             "contact": (
                 {
                     "id": contact.id,

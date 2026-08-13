@@ -101,7 +101,6 @@ def _card(row: dict) -> dict:
         "email": contact.email,
         "country": contact.country,
         "client_id": row["client_id"],
-        "link_message_id": row["link_message_id"],
         "last_activity": row["last_activity"],
         "stage": row["stage"],
         # Won Type / Lost Reason. 티켓 세부 내역과 같은 판단을 같은 곳에서 합니다.
@@ -183,7 +182,6 @@ async def ui_message_detail(message_id: int):
     여기서 번역하던 코드가 있었는데, 그러면 그 티켓을 처음 여는 사람이 매번 Gemini 를
     기다렸다가 화면을 봤습니다. 아직 안 채워진 옛 행은 화면이 원문을 그대로 보여 줍니다.
     """
-    from .customer_ops import DEAL_DETAILS, MANUAL_LOG_STAGES, PIPELINE_STAGES
     from .messages import _message_detail_context
 
     # In a thread, not on the event loop. One open costs ~11 sequential round trips to
@@ -191,8 +189,33 @@ async def ui_message_detail(message_id: int):
     # poll, another operator's screen — waits behind them. That is what "살짝 늦게 뜬다"
     # was. It does not make this call faster; it stops it from slowing everything else.
     context = await asyncio.to_thread(_message_detail_context, message_id)
+    return _ticket_screen(context, "메시지를 찾을 수 없습니다")
+
+
+@router.get("/api/ui/tickets/{conversation_id}")
+async def ui_ticket_detail(conversation_id: int):
+    """같은 화면을 **대화(티켓) 기준**으로 엽니다 — 보드 카드가 이 길로 들어옵니다.
+
+    메일이 하나도 없는 티켓이 있습니다: ``hubspot_backfill`` 은 티켓에서 대화만 만들고 메일
+    행은 만들지 않아서, HubSpot 에서 들여온 Won·Lost 티켓이 전부 그렇습니다. 그 카드를
+    누르면 예전에는 고객 페이지로 빠졌는데, Deal Detail 은 **티켓의 값**이라 정작 그것을
+    고칠 화면이 없었습니다. 여기로 오면 메일이 없어도 티켓 정보와 Deal Detail 과 소통
+    기록은 그대로 있습니다.
+    """
+    from .messages import _message_detail_context
+
+    context = await asyncio.to_thread(
+        _message_detail_context, None, conversation_id=conversation_id
+    )
+    return _ticket_screen(context, "티켓을 찾을 수 없습니다")
+
+
+def _ticket_screen(context: dict, not_found: str) -> dict:
+    """두 진입점이 함께 얹는 것 — 단계 이름·소통 기록 가능 단계·Deal Detail 목록."""
+    from .customer_ops import DEAL_DETAILS, MANUAL_LOG_STAGES, PIPELINE_STAGES
+
     if not context:
-        raise HTTPException(status_code=404, detail="메시지를 찾을 수 없습니다")
+        raise HTTPException(status_code=404, detail=not_found)
     context["stage_labels"] = {key: label for key, label, _ in PIPELINE_STAGES}
     # 어느 단계에서 소통 기록을 남길 수 있는지. 보드의 + 버튼이 쓰는 것과 같은 목록을
     # 같은 곳에서 보냅니다 — 화면마다 "New 는 빼고" 를 따로 적으면 언젠가 어긋납니다.
@@ -779,14 +802,6 @@ def _won_contract(contract, today) -> dict:
             }
             for p in payments
         ],
-        "claims": [
-            {
-                "id": c.id, "kind": c.kind, "happened_on": c.happened_on,
-                "compensation": c.compensation, "contact_info": c.contact_info,
-                "progress": c.progress, "action_on": c.action_on,
-            }
-            for c in contract.claims
-        ],
     }
 
 
@@ -832,7 +847,6 @@ def _won_client(client, today, *, full: bool, contact=None) -> dict:
         "owner": client.owner,
         "contact_id": client.contact_id,
         "setup_count": len(upcoming),
-        "open_claims": len(won.open_claims(client)),
         "active": _won_contract(active, today) if active else None,
         "month_revenue": month_revenue,
     }
@@ -870,16 +884,14 @@ def ui_won_customers():
         clients = (
             session.query(Client)
             .options(
-                # 계약만 미리 읽고 그 **아래**는 안 읽었습니다. 그런데 `_won_client` 이
-                # 부르는 `won.open_claims` 는 계약마다 클레임을 훑고, 활성 계약 하나는
-                # 크레딧 회차·결제 회차·클레임을 전부 만집니다 — 그래서 고객 40 · 계약
-                # 80 짜리 장부 하나를 그리는 데 쿼리가 163 번 나갔습니다(실측). 왕복
-                # 하나가 200ms 인 환경에서 그건 30초입니다. 아래 상세 라우트가 이미
-                # 쓰고 있던 것과 같은 옵션이고, 같은 것을 두 번 적기보다 계약이 늘수록
-                # 나빠지는 쪽을 막는 게 먼저입니다: 163 → 6, 결과는 한 글자도 다르지 않습니다.
+                # 계약만 미리 읽고 그 **아래**는 안 읽었습니다. 그런데 활성 계약 하나는
+                # 크레딧 회차와 결제 회차를 전부 만집니다 — 그래서 고객 40 · 계약 80 짜리
+                # 장부 하나를 그리는 데 쿼리가 163 번 나갔습니다(실측). 왕복 하나가 200ms
+                # 인 환경에서 그건 30초입니다. 아래 상세 라우트가 이미 쓰고 있던 것과 같은
+                # 옵션이고, 같은 것을 두 번 적기보다 계약이 늘수록 나빠지는 쪽을 막는 게
+                # 먼저입니다: 163 → 6, 결과는 한 글자도 다르지 않습니다.
                 selectinload(Client.contracts).selectinload(ClientContract.credit_grants),
                 selectinload(Client.contracts).selectinload(ClientContract.payments),
-                selectinload(Client.contracts).selectinload(ClientContract.claims),
             )
             .order_by(Client.company)
             .all()
@@ -937,8 +949,8 @@ def ui_won_customers():
                 "won_on": item.won_on,
             })
 
-    # 액션 보드 세 개. 목록을 한 번 더 도는 대신 위에서 만든 payload 를 그대로 씁니다.
-    credit_due, pay_due, claims_open = [], [], []
+    # 액션 보드 둘. 목록을 한 번 더 도는 대신 위에서 만든 payload 를 그대로 씁니다.
+    credit_due, pay_due = [], []
     for row in rows:
         active = row["active"]
         if row["plan_status"] == "사용 중단" or not active:
@@ -956,13 +968,6 @@ def ui_won_customers():
                 "no": active["next_pay_no"], "total": active["next_pay_total"],
                 "currency": active["currency"],
             })
-        for claim in active["claims"]:
-            if claim["progress"] != "조치 완료":
-                claims_open.append({
-                    "client_id": row["client_id"], "company": row["company"],
-                    "kind": claim["kind"], "on": claim["happened_on"],
-                    "progress": claim["progress"],
-                })
     credit_due.sort(key=lambda x: x["on"] or "9999")
     pay_due.sort(key=lambda x: x["on"] or "9999")
 
@@ -970,7 +975,7 @@ def ui_won_customers():
         "today": today.isoformat(),
         "rows": rows,
         "pending": waiting,
-        "boards": {"credit": credit_due, "payment": pay_due, "claim": claims_open},
+        "boards": {"credit": credit_due, "payment": pay_due},
         # 예상 MRR 환산에 쓰는 환율. **오늘 고시가를 가져옵니다** — 손으로 적던 칸이
         # 있었는데, 그러면 두 사람이 다른 숫자를 보고 회의에 들어가고 그 값이 언제
         # 것인지 아무도 모릅니다. 못 가져오면 설정값으로 떨어집니다.
@@ -994,7 +999,6 @@ def ui_won_customers():
             "deal_types": list(won.DEAL_TYPES),
             "doc_types": list(won.DOC_TYPES),
             "renewal_plans": list(won.RENEWAL_PLANS),
-            "claim_progress": list(won.CLAIM_PROGRESS),
             "payment_methods": list(won.PAYMENT_METHODS),
             "payment_types": list(won.PAYMENT_TYPES),
             "currencies": list(won.CURRENCIES),
@@ -1021,7 +1025,6 @@ def ui_won_customer(client_id: int):
             .options(
                 selectinload(Client.contracts).selectinload(ClientContract.credit_grants),
                 selectinload(Client.contracts).selectinload(ClientContract.payments),
-                selectinload(Client.contracts).selectinload(ClientContract.claims),
             )
             .filter(Client.client_id == client_id)
             .one_or_none()

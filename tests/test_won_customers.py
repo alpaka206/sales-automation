@@ -354,22 +354,41 @@ def test_the_mockup_css_does_not_claim_the_console_button_variants():
         assert "btn--" in selector, selector
 
 
-def test_the_claim_list_does_not_follow_the_contract_selector():
-    """계약을 고르면 그 아래가 전부 바뀝니다 — **클레임만 빼고**.
+def test_the_console_does_not_manage_claims_at_all():
+    """클레임은 콘솔 밖에서 관리합니다(운영자 지시, 2026-08-13).
 
-    클레임은 고객이 겪은 일이지 계약 회차의 일이 아닙니다. 1차 때 난 품질 이슈는 2차를 보고
-    있어도 그 고객의 이력이고, 계약을 바꿀 때마다 사라지면 "이 고객이 무슨 일을 겪었나" 를
-    회차마다 눌러 봐야 합니다. 저장은 계약에 딸려 있습니다(어느 계약 기간의 일인지가
-    정보라서) — 보여줄 때만 전부 모으고, 어느 차수 건인지 뱃지로 적습니다.
-
-    같은 섹션의 갱신 계획·비고는 반대로 계약의 값이라 따라갑니다.
+    화면만 숨기면 아무도 안 보는데 계속 동기화되는 테이블이 남고, 다음 사람이 열어 보고
+    "이건 왜 비어 있지" 를 확인하러 갑니다. 그래서 표·라우트·파생값·시트 동기화·테이블까지
+    전부 지웠습니다(마이그레이션 0072). **시트의 탭은 그대로 둡니다** — 시트는 운영자의
+    것이고, 콘솔이 안 건드리므로 손으로 적는 자리로 남습니다.
     """
     import pathlib
 
+    from src.common import won
+    from src.db import models
+
+    assert not hasattr(models, "ContractClaim")
+    assert not hasattr(won, "open_claims")
+    assert not hasattr(won, "CLAIM_PROGRESS")
+    assert "claims" not in {r.key for r in models.ClientContract.__mapper__.relationships}
+
+    for name in (
+        "frontend/src/screens/won/WonCustomerDetail.tsx",
+        "frontend/src/screens/won/WonCustomers.tsx",
+        "frontend/src/screens/won/shared.ts",
+        "src/api/routes/won_customers.py",
+        "src/api/routes/ui_api.py",
+    ):
+        source = pathlib.Path(name).read_text(encoding="utf-8")
+        # 주석에 "지웠다" 고 적는 것은 되므로, 코드가 쓰는 이름만 봅니다.
+        assert "ContractClaim" not in source, name
+        assert "open_claims" not in source, name
+        assert "contract.claims" not in source, name
+
+    # 그 자리는 갱신 계획·비고가 이어받습니다 — 클레임이 아니라 계약의 값이었습니다.
     screen = pathlib.Path("frontend/src/screens/won/WonCustomerDetail.tsx").read_text(encoding="utf-8")
-    # 클레임 섹션은 **계약 목록 전체**를 받습니다. `current` 하나만 받으면 따라가게 됩니다.
-    assert "<CareSection contracts={contracts} current={current}" in screen
-    assert "contracts\n    .slice().reverse()\n    .flatMap((c) => c.claims" in screen
+    assert '["sec-care", "갱신 · 비고"]' in screen
+    assert "<CareSection current={current} onDone={refresh} />" in screen
 
 
 def test_the_contract_notes_remount_when_the_contract_changes():
@@ -877,23 +896,6 @@ def test_the_form_lets_the_operator_pick_the_vat_basis():
     # 고른 기준이 어느 칸을 그릴지 정합니다 — 둘 다 그리면 어느 쪽이 기준인지 모릅니다.
     assert "const inclusive = krw && draft?.vat_included ===" in form
 
-
-def test_the_claim_form_asks_who_complained():
-    """클레임을 보낸 사람은 등록된 담당자와 다를 수 있습니다 — 답은 그 사람에게 갑니다."""
-    import pathlib
-
-    from src.db.models import ContractClaim
-
-    assert "contact_info" in {c.name for c in ContractClaim.__table__.columns}
-    screen = pathlib.Path(
-        "frontend/src/screens/won/WonCustomerDetail.tsx"
-    ).read_text(encoding="utf-8")
-    assert '<label className="form-label">고객 연락처</label>' in screen
-    # 「보상 종류」가 아니라 「조치 방식」입니다 — 크레딧 보상만 조치인 것이 아닙니다.
-    assert "보상 종류" not in screen
-    assert '<label className="form-label">조치 방식</label>' in screen
-    # 섹션 이름에서 「히스토리」가 빠졌습니다. 소통 히스토리는 따로 있는 다른 섹션입니다.
-    assert '["sec-care", "클레임"],' in screen
 
 
 def test_the_supply_price_is_filled_even_when_the_contract_is_written_as_a_total():

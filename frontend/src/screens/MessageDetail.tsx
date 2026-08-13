@@ -44,12 +44,13 @@ type Detail = {
     inquiry_subject: string | null; inquiry_language: string | null; client_id: number | null;
   };
   ticket_interactions: Interaction[];
+  /** 메일이 하나도 없는 티켓은 `null` 입니다 — HubSpot 에서 들여온 티켓이 그렇습니다. */
   msg: {
     id: number; status: string; subject: string; body: string; channel: string;
     language: string | null; target_language: string | null; signature_key: string;
     to_address: string; score_snapshot: number | null; created_at: string;
     sent_at: string | null; scheduled_at: string | null; category: string | null;
-  };
+  } | null;
   contact: { id: number; name: string; email: string | null; company: string | null; domain: string | null; role_description: string | null } | null;
   customer: { has_any?: boolean; profile: Record<string, unknown> | null; interactions: Interaction[] } | null;
   stage_labels: Record<string, string>;
@@ -74,14 +75,19 @@ const MARKS: { key: string; mark: ReactNode; wrap: [string, string]; title: stri
 ];
 
 export function MessageDetail() {
-  const { id } = useParams();
+  // 같은 화면에 문이 둘입니다. `/messages/:id` 는 회신 및 검토 목록에서 **그 초안**을 열 때,
+  // `/tickets/:conversationId` 는 보드 카드에서 **티켓**을 열 때 — 뒤엣것은 메일이 하나도
+  // 없는 티켓(HubSpot 에서 들여온 것)도 엽니다. 질의 키가 둘을 가릅니다.
+  const { id, conversationId } = useParams();
+  const key = conversationId ? ["ticket", conversationId] : ["message", id];
+  const path = conversationId ? `/api/ui/tickets/${conversationId}` : `/api/ui/messages/${id}`;
   const queryClient = useQueryClient();
   const { data, isPending } = useQuery({
-    queryKey: ["message", id],
-    queryFn: () => getJSON<Detail>(`/api/ui/messages/${id}`),
+    queryKey: key,
+    queryFn: () => getJSON<Detail>(path),
     // The draft may still be being written; the Jinja page polled every 4s for that.
     refetchInterval: (query) =>
-      (query.state.data as Detail | undefined)?.msg.status === "drafting" ? 4_000 : false,
+      (query.state.data as Detail | undefined)?.msg?.status === "drafting" ? 4_000 : false,
   });
 
   const [subject, setSubject] = useState("");
@@ -121,7 +127,7 @@ export function MessageDetail() {
         </dl>
       ),
     });
-    await queryClient.invalidateQueries({ queryKey: ["message", id] });
+    await queryClient.invalidateQueries({ queryKey: key });
   });
 
   // Fill the editor once per message. Re-syncing on every refetch would overwrite what
@@ -131,7 +137,7 @@ export function MessageDetail() {
   // first frame showed an empty 제목/본문 and the text appeared a moment later — the page
   // visibly changing after it had already loaded. Setting state while rendering makes
   // React re-render before paint instead; nothing is ever shown empty.
-  if (data && loadedId !== data.msg.id) {
+  if (data?.msg && loadedId !== data.msg.id) {
     setLoadedId(data.msg.id);
     setSubject(data.msg.subject);
     setBody(data.msg.body);
@@ -164,11 +170,11 @@ export function MessageDetail() {
   if (isPending || !data) return <LoadingBlock />;
 
   const { msg, ticket, contact } = data;
-  const isPendingApproval = msg.status === "pending_approval";
+  const isPendingApproval = msg?.status === "pending_approval";
   // 보드가 어느 열에 + 를 그릴지 정하는 것과 **같은 목록**입니다. 서버가 주므로
   // 단계 이름이 바뀌어도 두 화면이 어긋나지 않습니다.
   const canLog = !!ticket.stage && data.manual_log_stages.includes(ticket.stage);
-  const canTranslate = !!msg.target_language && msg.target_language !== "ko";
+  const canTranslate = !!msg?.target_language && msg.target_language !== "ko";
   // Won 과 Lost 에만 있습니다. 목록도 「이 단계에 고르개가 붙는가」도 서버가 정합니다 —
   // 보드 카드와 같은 출처라 두 화면이 다른 값을 내놓을 수 없습니다.
   const dealOptions = ticket.stage ? data.deal_details[ticket.stage] : undefined;
@@ -178,21 +184,22 @@ export function MessageDetail() {
   async function saveDealDetail(detail: string) {
     try {
       await postForm(`/pipeline/conversations/${ticket.id}/deal-detail`, { detail });
-      await queryClient.invalidateQueries({ queryKey: ["message", id] });
+      await queryClient.invalidateQueries({ queryKey: key });
     } catch (error) {
       // 실패하면 말합니다. 조용히 두면 고른 값이 화면에만 남아 저장된 것으로 읽힙니다 —
       // 다시 받아 오므로 고르개는 저장된 값으로 되돌아갑니다.
       setNotice({ title: "Deal Detail 을 저장하지 못했습니다", body: String(error) });
-      await queryClient.invalidateQueries({ queryKey: ["message", id] });
+      await queryClient.invalidateQueries({ queryKey: key });
     }
   }
 
   // 되는 동안의 상태는 누른 버튼이 말합니다(ActionButton). 여기 남는 것은 결과뿐입니다 —
   // 진행 표시가 버튼과 다른 자리에 있으면 눌린 건지 몰라 한 번 더 누르게 됩니다.
-  async function act(path: string, extra: Record<string, string> = {}) {
+  async function act(action: string, extra: Record<string, string> = {}) {
+    if (!msg) return;
     setNote("");
     try {
-      await postForm(path, { subject, body, signature_key: signature, ...extra });
+      await postForm(`/messages/${msg.id}/${action}`, { subject, body, signature_key: signature, ...extra });
       setNote("완료되었습니다.");
       await queryClient.invalidateQueries();
     } catch (error) {
@@ -201,6 +208,7 @@ export function MessageDetail() {
   }
 
   async function translate() {
+    if (!msg) return;
     setNote("");
     const response = await fetch(`/messages/${msg.id}/translate`, {
       method: "POST",
@@ -232,8 +240,18 @@ export function MessageDetail() {
 
   return (
     <>
-      <div style={{ marginBottom: 14 }}>
-        <Link to="/messages" className="chip"><Icon name="chevron" size={14} /> 회신 및 검토 목록</Link>
+      {/* 나가는 문 둘. 왼쪽은 온 곳으로, 오른쪽은 **이 고객의 히스토리**입니다 —
+          보드에서 티켓으로 들어오게 바뀌었으니, 고객 단위로 보고 싶을 때 갈 곳이
+          여기 있어야 합니다. Deal Detail·소통 기록은 티켓의 값이라 이 화면이 먼저입니다. */}
+      <div className="row-between" style={{ marginBottom: 14 }}>
+        <Link to={conversationId ? "/" : "/messages"} className="chip">
+          <Icon name="chevron" size={14} /> {conversationId ? "문의 대시보드" : "회신 및 검토 목록"}
+        </Link>
+        {contact && (
+          <Link to={`/customers/${contact.id}`} className="chip">
+            <Icon name="users" size={14} /> 이 고객 히스토리
+          </Link>
+        )}
       </div>
 
       <div className="page-header">
@@ -247,11 +265,13 @@ export function MessageDetail() {
               <span className="tag"><Icon name="translate" size={13} /> 문의 언어 · {ticket.inquiry_language}</span>
             )}
           </div>
-          <h1 className="page-title" style={{ marginTop: 10 }}>문의와 답변 · #{msg.id}</h1>
+          <h1 className="page-title" style={{ marginTop: 10 }}>
+            문의와 답변{ticket.inquiry_subject ? ` · ${ticket.inquiry_subject}` : ""}
+          </h1>
         </div>
       </div>
 
-      {msg.status === "drafting" && (
+      {msg?.status === "drafting" && (
         <div className="banner banner--info mb-gap" role="status">
           <span className="banner__icon"><Icon name="sparkles" size={18} /></span>
           <div><div className="banner__title">답변 작성 중</div></div>
@@ -261,6 +281,14 @@ export function MessageDetail() {
       <div className="split">
         <div className="stack">
           <div className="thread__meta"><Icon name="clock" size={14} /> 진행 기록 · {data.thread.length}건</div>
+          {data.thread.length === 0 && (
+            <div className="empty">
+              <div className="empty__text">
+                이 티켓에는 이 콘솔이 주고받은 메일이 없습니다 — HubSpot 에서 들여온
+                티켓입니다. 오간 연락은 아래 소통 기록에 남겨주세요.
+              </div>
+            </div>
+          )}
           <div className="thread">
             {data.thread.map((bubble) => {
               if (bubble.is_current && isPendingApproval) {
@@ -323,7 +351,7 @@ export function MessageDetail() {
                         <Icon name="file" size={15} /> 미리보기
                       </ActionButton>
                       <ActionButton className="btn btn--subtle" pending="저장 중"
-                                    onClick={() => act(`/messages/${msg.id}/edit`)}>
+                                    onClick={() => act("edit")}>
                         <Icon name="edit" size={15} /> 저장
                       </ActionButton>
                       <button type="button" className="btn btn--danger"
@@ -524,6 +552,7 @@ export function MessageDetail() {
             </div>
           )}
 
+          {msg && (
           <div className="card">
             <div className="section-label" style={{ marginBottom: 12 }}>발송 정보</div>
             <dl className="info-list">
@@ -534,6 +563,7 @@ export function MessageDetail() {
               {msg.sent_at && <div className="info-row"><dt>발송</dt><dd className="tnum">{kst(msg.sent_at)}</dd></div>}
             </dl>
           </div>
+          )}
 
           {data.customer?.interactions && data.customer.interactions.length > 0 && (
             <div className="card">
@@ -548,7 +578,7 @@ export function MessageDetail() {
         </div>
       </div>
 
-      {confirmSend && (
+      {confirmSend && msg && (
         <Modal
           title="발송하시겠습니까?"
           description={
@@ -567,14 +597,14 @@ export function MessageDetail() {
             // 끝난 뒤에 닫습니다. 먼저 닫으면 "발송 중" 을 볼 자리가 사라지고, 발송은
             // 되돌릴 수 없는 동작이라 그 몇 초가 한 번 더 누르게 만드는 구간입니다.
             <ActionButton className="btn btn--ok" pending="발송 중"
-                          onClick={() => act(`/messages/${msg.id}/send`).then(() => setConfirmSend(false))}>
+                          onClick={() => act("send").then(() => setConfirmSend(false))}>
               <Icon name="check" size={15} /> 검토 완료 · 발송
             </ActionButton>
           }
         />
       )}
 
-      {rejecting && (
+      {rejecting && msg && (
         <Modal
           title="이 초안을 거절합니다"
           description="거절하면 발송 대기에서 빠집니다. 사유는 처리경과에 남습니다."
@@ -584,7 +614,7 @@ export function MessageDetail() {
             // 볼 자리가 사라지고, 실패해도 목록만 그대로인 채 아무 말이 없습니다. 맨 버튼일
             // 때는 연타가 그대로 요청 두 번이기도 했습니다.
             <ActionButton className="btn btn--danger" pending="거절 중"
-                          onClick={() => act(`/messages/${msg.id}/reject`, { reason })
+                          onClick={() => act("reject", { reason })
                             .then(() => { setRejecting(false); setReason(""); })}>
               거절 확정
             </ActionButton>
@@ -634,7 +664,7 @@ export function MessageDetail() {
               conversationId={ticket.id}
               onSaved={() => {
                 setLogging(false);
-                void queryClient.invalidateQueries({ queryKey: ["message", id] });
+                void queryClient.invalidateQueries({ queryKey: key });
               }}
             />
           </div>

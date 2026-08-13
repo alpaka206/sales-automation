@@ -15,7 +15,6 @@ type Data = {
     conversation_id: number; contact_name: string; contact_email: string | null;
     ticket_id: string | null; inquiry_subject: string | null; summary: string | null;
     customer_requests: string | null; message_count: number; last_activity: string;
-    link_message_id: number | null;
     progress: { kind: string; detail: string; created_at: string }[];
   }[];
 };
@@ -80,12 +79,12 @@ export function CompanyDetail() {
                     <div className="t-sm" style={{ lineHeight: 1.6, whiteSpace: "pre-line" }}>{conversation.customer_requests}</div>
                   </div>
                 )}
-                {conversation.link_message_id && (
-                  <Link className="btn btn--subtle btn--sm" style={{ marginTop: 10 }}
-                        to={`/messages/${conversation.link_message_id}`}>
-                    <Icon name="chevron" size={14} /> 티켓 세부 내역
-                  </Link>
-                )}
+                {/* 대화 기준으로 엽니다 — 메일이 하나도 없는 티켓(HubSpot 에서 들여온
+                    것)에서는 이 버튼이 아예 안 떴습니다. */}
+                <Link className="btn btn--subtle btn--sm" style={{ marginTop: 10 }}
+                      to={`/tickets/${conversation.conversation_id}`}>
+                  <Icon name="chevron" size={14} /> 티켓 세부 내역
+                </Link>
               </section>
             ))
           )}

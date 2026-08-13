@@ -53,6 +53,11 @@ function mountConsole() {
             <Route index element={<Dashboard />} />
             <Route path="messages" element={<Messages />} />
             <Route path="messages/:id" element={<MessageDetail />} />
+            {/* 같은 화면을 **티켓(대화) 기준**으로 엽니다. 보드 카드가 이 길로 들어옵니다:
+                HubSpot 에서 들여온 티켓에는 메일 행이 없어서 `/messages/:id` 로는 열 수
+                없고, 그래서 예전에는 그 카드가 고객 페이지로 빠졌습니다 — Deal Detail 은
+                티켓의 값인데 티켓을 열 방법이 없었던 셈입니다. */}
+            <Route path="tickets/:conversationId" element={<MessageDetail />} />
             <Route path="customers" element={<Customers />} />
             <Route path="customers/:id" element={<CustomerDetail />} />
             <Route path="email-templates" element={<EmailTemplates />} />

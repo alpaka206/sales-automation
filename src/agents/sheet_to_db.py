@@ -25,7 +25,6 @@ from ..db.models import (
     Client,
     ClientContract,
     Contact,
-    ContractClaim,
     ContractCreditGrant,
     ContractPayment,
 )
@@ -39,7 +38,6 @@ CONTRACTS_TAB = "계약 및 결제 정보"
 CREDITS_TAB = "크레딧 지급 현황"
 PAYMENTS_TAB = "결제 현황"
 
-CLAIMS_TAB = "클레임 · 히스토리"
 
 
 def text(value: object) -> str | None:
@@ -89,7 +87,6 @@ def import_from_sheet(write: bool = True) -> dict:
     contracts = read(sheets, CONTRACTS_TAB, "AM")
     credits = read(sheets, CREDITS_TAB, "J")
     payments = read(sheets, PAYMENTS_TAB, "H")
-    claims = read(sheets, CLAIMS_TAB, "H")
 
     # 계약이 있거나 최초 수주일이 적힌 회사만 고객이 된다.
     with_contract = {cell(r, "A") for r in contracts}
@@ -110,11 +107,10 @@ def import_from_sheet(write: bool = True) -> dict:
             "contract": len(contracts),
             "credit": len(credits),
             "payment": len(payments),
-            "claim": len(claims),
             "dry_run": 1,
         }
 
-    counts = dict.fromkeys(("client", "contract", "credit", "payment", "claim"), 0)
+    counts = dict.fromkeys(("client", "contract", "credit", "payment"), 0)
     with SessionLocal() as session:
         linkable = {
             c.sheet_client_id: c.id
@@ -229,23 +225,6 @@ def import_from_sheet(write: bool = True) -> dict:
             session.add(payment)
             counts["payment"] += 1
 
-        for r in claims:
-            contract = by_key.get((int(cell(r, "A")), whole(cell(r, "C")) or 1))
-            if contract is None:
-                continue
-            kind, happened = cell(r, "D"), text(cell(r, "E"))
-            claim = session.scalars(
-                select(ContractClaim).where(
-                    ContractClaim.contract_id == contract.id,
-                    ContractClaim.kind == kind,
-                    ContractClaim.happened_on == happened,
-                )
-            ).first() or ContractClaim(contract_id=contract.id, kind=kind, happened_on=happened)
-            claim.compensation = text(cell(r, "F"))
-            claim.progress = cell(r, "G") or "접수"
-            claim.action_on = text(cell(r, "H"))
-            session.add(claim)
-            counts["claim"] += 1
 
         session.commit()
 

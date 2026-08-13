@@ -14,14 +14,6 @@ export type Payment = {
   id: number; no: number; total: number; paid_on: string | null;
   amount: Money; done: boolean; fx_rate: Money; fx_on: string | null;
 };
-export type Claim = {
-  id: number; kind: string; happened_on: string | null;
-  /** 화면 이름은 「조치 방식」. 열 이름은 값이 그대로라 바꾸지 않았습니다. */
-  compensation: string | null;
-  /** 클레임이 들어온 연락처 — 고객 기본 정보의 연락처와 다를 수 있습니다. */
-  contact_info: string | null;
-  progress: string; action_on: string | null;
-};
 export type Contract = {
   id: number; seq: number; label: string; state: string;
   ticket_id: string | null; deal_type: string;
@@ -46,7 +38,7 @@ export type Contract = {
   next_credit_no: number | null; next_credit_total: number | null;
   next_pay_on: string | null; next_pay_amount: Money;
   next_pay_no: number | null; next_pay_total: number | null;
-  credit_grants: Grant[]; payments: Payment[]; claims: Claim[];
+  credit_grants: Grant[]; payments: Payment[];
 };
 export type Row = {
   client_id: number; company: string; customer_type: string;
@@ -57,7 +49,7 @@ export type Row = {
   /** 연결된 인바운드 연락처의 것. 목록 검색이 씁니다. 아웃바운드 고객은 비어 있습니다. */
   email: string | null; phone: string | null;
   first_won_on: string | null; plan_status: string; owner: string | null;
-  contact_id: number | null; setup_count: number; open_claims: number;
+  contact_id: number | null; setup_count: number;
   /** 이번 달에 이 고객이 얹은 금액, 통화별. 계약 **전부**를 더한 값입니다. */
   month_revenue: Record<string, number>;
   active: Contract | null; contract_count?: number; contracts?: Contract[];
@@ -69,7 +61,7 @@ export type Comm = {
 };
 export type Options = {
   industries: string[]; plans: string[]; plan_statuses: string[]; deal_types: string[];
-  doc_types: string[]; renewal_plans: string[]; claim_progress: string[];
+  doc_types: string[]; renewal_plans: string[];
   payment_methods: string[]; payment_types: string[]; currencies: string[];
   customer_types: string[]; departments: string[];
 };
@@ -83,7 +75,6 @@ export type ListData = {
               no: number | null; total: number | null }[];
     payment: { client_id: number; company: string; on: string; amount: Money; currency: string;
                no: number | null; total: number | null }[];
-    claim: { client_id: number; company: string; kind: string; on: string | null; progress: string }[];
   };
   fx_rate: number;
   fx_on: string | null;

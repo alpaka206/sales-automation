@@ -280,20 +280,6 @@ export function WonCustomers() {
             ))}
             {!data.boards.payment.length && <div className="board-empty">확인할 항목이 없습니다.</div>}
           </Board>
-          <Board title="미처리 클레임" count={data.boards.claim.length} risk
-                 icon={<G name="alert" size={15} stroke="var(--red-fg)" width={1.9} />}>
-            {data.boards.claim.slice(0, 4).map((item, index) => (
-              <button key={index} className="board-row" type="button"
-                      onClick={() => open(item.client_id, "sec-care")}>
-                <div style={{ minWidth: 0 }}>
-                  <div className="board-name">{item.company}</div>
-                  <div className="board-meta">{item.kind} · {item.progress}</div>
-                </div>
-                <span className="board-when">{fmt(item.on)}</span>
-              </button>
-            ))}
-            {!data.boards.claim.length && <div className="board-empty">확인할 항목이 없습니다.</div>}
-          </Board>
         </div>
 
         {data.pending.length > 0 && (

@@ -54,7 +54,6 @@ DOC_TYPES = (
     "세금계산서 발행",
 )
 RENEWAL_PLANS = ("갱신 예정", "협의 중", "미정", "본계약 검토 중", "갱신 안함", "갱신 완료")
-CLAIM_PROGRESS = ("접수", "조치 진행 중", "조치 완료")
 PAYMENT_METHODS = ("Stripe", "포트원", "계좌이체")
 PAYMENT_TYPES = ("일시불", "할부")
 CURRENCIES = ("KRW", "USD")
@@ -183,15 +182,6 @@ def next_payment(contract):
     pending = [p for p in contract.payments if not p.done]
     return min(pending, key=lambda p: (p.paid_on or "9999", p.no), default=None)
 
-
-def open_claims(client) -> list:
-    """조치 완료가 아닌 것 전부. '접수'와 '조치 진행 중'은 둘 다 아직 안 끝난 것입니다."""
-    return [
-        claim
-        for contract in client.contracts
-        for claim in contract.claims
-        if claim.progress != "조치 완료"
-    ]
 
 
 def _decimal(value) -> Decimal | None:

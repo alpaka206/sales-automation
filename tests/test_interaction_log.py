@@ -9,6 +9,7 @@ card), and what they produce has to end up on the right ticket.
 
 from __future__ import annotations
 
+import pathlib
 from datetime import datetime, timedelta
 from unittest.mock import patch
 
@@ -309,13 +310,48 @@ def test_a_hubspot_failure_never_loses_the_record(log_db, monkeypatch):
 
 def test_a_card_opens_the_ticket_it_stands_for(log_db):
     """Not the customer page: for a repeat customer that is a different thing, and the
-    card is one inquiry."""
+    card is one inquiry.
+
+    **대화 id 로 엽니다(`/tickets/:id`).** 예전에는 그 티켓의 마지막 메일 id 를 실어
+    보내고 그것이 없으면 고객 페이지로 보냈는데, 메일이 없는 티켓은 `hubspot_backfill`
+    이 만든 것 — 즉 HubSpot 에서 들여온 Won·Lost 티켓 — 이었습니다. Deal Detail 도 소통
+    기록도 티켓의 값이라, 하필 그 카드만 아무것도 못 고치는 자리로 갔습니다.
+    """
     _factory, ids = log_db
     with TestClient(app) as client:
         board = client.get("/api/ui/dashboard").json()
-    links = {card["link_message_id"] for stage in board["stages"] for card in stage["cards"]}
-    assert ids["negotiating_message"] in links
-    assert ids["won_message"] in links
+    cards = [card for stage in board["stages"] for card in stage["cards"]]
+    assert {card["conversation_id"] for card in cards} >= {
+        ids["negotiating"], ids["won"]
+    }
+    # 메일 id 는 더 이상 카드에 실리지 않습니다 — 그것이 없으면 갈 곳이 없던 값입니다.
+    assert all("link_message_id" not in card for card in cards)
+    source = pathlib.Path("frontend/src/ui/Board.tsx").read_text(encoding="utf-8")
+    assert "to={`/tickets/${card.conversation_id}`}" in source
+
+
+def test_a_ticket_with_no_mail_still_opens(log_db):
+    """HubSpot 에서 들여온 티켓에는 메일 행이 없습니다(`hubspot_backfill` 은 대화만 만듭니다).
+
+    그래도 티켓 화면은 떠야 합니다 — 그 화면에만 Deal Detail 고르개와 소통 기록이 있고,
+    Won·Lost 로 넘어온 티켓이 대부분 이 모양입니다. 초안 편집기와 발송 정보는 안 그립니다.
+    """
+    factory, ids = log_db
+    with factory() as session:
+        contact = session.query(Contact).first()
+        bare = Conversation(contact_id=contact.id, stage="won", hubspot_ticket_id="4200999")
+        session.add(bare)
+        session.commit()
+        bare_id = bare.id
+
+    with TestClient(app) as client, patch("src.api.routes.messages.SessionLocal", factory):
+        detail = client.get(f"/api/ui/tickets/{bare_id}").json()
+    assert detail["msg"] is None                 # 편집기·발송 정보가 그려지지 않는 근거
+    assert detail["thread"] == []
+    assert detail["ticket"]["id"] == bare_id
+    assert detail["ticket"]["ticket_id"] == "4200999"
+    assert "won" in detail["deal_details"]       # Deal Detail 은 여기서 고칩니다
+    assert ids                                    # 픽스처가 만든 것들은 그대로
 
 
 def test_a_card_is_titled_with_the_ticket_name(log_db):
