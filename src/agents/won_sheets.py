@@ -77,9 +77,10 @@ CLIENTS = _Tab("고객 기본 정보", ("A",), tuple("ACEFIJ"))
 CONTRACTS = _Tab(
     "계약 및 결제 정보", ("A", "C"),
     ("A", "C", "D", "E", "F", "G", "I", "J", "K", "L", "M", "N", "O", "P", "Q", "R", "S",
-     "T", "U", "V", "W", "X", "Y", "Z",
+     "T", "U", "V", "Z",
      "AB", "AC", "AD", "AE", "AF", "AH", "AI", "AJ", "AK", "AL"),
-    # AM(담당)은 콘솔에 없는 칸이라 시트가 원본입니다 — 콘솔이 안 건드립니다.
+    # AM(담당), 그리고 W~Y(갱신 계획·사용 중단 이유·비고 메모)는 콘솔에 없는 칸이라
+    # 시트가 원본입니다 — 콘솔이 안 건드립니다.
 )
 # E(전체 회차)는 그 계약의 행 수라 시트가 셉니다 — 회차를 더할 때마다 앞선 행을
 # 전부 고쳐야 하는 값이었고, 실제로 어긋나 있었습니다.
@@ -174,9 +175,9 @@ def _contract_row(contract: ClientContract) -> _Row:
             "R": _text(contract.payment_type),
             "U": _text(contract.billing_email),
             "V": _text(contract.note),
-            "W": _text(contract.renewal_plan),
-            "X": _text(contract.stop_reason),
-            "Y": _text(contract.memo),
+            # W(갱신 계획)·X(사용 중단 이유)·Y(비고 메모)는 콘솔에서 없어진 칸입니다
+            # (이관 0073). 시트의 열은 그대로 두고 콘솔이 안 건드립니다 — 손으로 적는
+            # 자리가 됩니다(소통 히스토리·클레임 탭과 같은 처지).
             "Z": _text(contract.revenue_from),
             "AB": _text(contract.plan),
             "AC": _text(contract.plan_name),

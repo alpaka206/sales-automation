@@ -84,11 +84,12 @@ def _one_amount_per_currency(contract: ClientContract) -> None:
     값이 남아 있으면, 통화나 기준을 바꾼 계약에서 화면이 계산한 값과 행에 든 값이
     갈라집니다.
 
-    **조건이 붙어 있는 이유는 데이터가 사라졌기 때문입니다.** 이 라우트에는 계약 전체를
-    보내는 폼만 오는 것이 아닙니다 — 「갱신 계획·사용 중단 이유·비고」 패널은 세 칸만
-    보냅니다(`WonCustomerDetail.tsx` 의 `ContractNotes`). 그때 금액은 폼에 없어 행의
-    값이 그대로 남는데, 조건 없이 반대쪽을 비우면 **총액만 있던 옛 원화 계약은 비고 한 줄
-    저장에 금액이 통째로 사라집니다.** 되돌릴 방법이 없습니다.
+    **조건이 붙어 있는 이유는 데이터가 사라졌기 때문입니다.** 이 라우트는 폼에 온 칸만
+    건드리므로(`_fill_contract` 의 `if name in form`) 몇 칸만 보내는 폼도 받습니다.
+    실제로 「갱신 계획·사용 중단 이유·비고」 패널이 세 칸만 보냈고, 그때 금액은 폼에 없어
+    행의 값이 그대로 남는데 조건 없이 반대쪽을 비우니 **총액만 있던 옛 원화 계약은 비고
+    한 줄 저장에 금액이 통째로 사라졌습니다.** 되돌릴 방법이 없습니다. 그 패널은 이제
+    없지만(이관 0073) 조건은 남깁니다 — 부분 폼은 한 줄이면 다시 생깁니다.
 
     쓰는 쪽에 값이 있을 때만 반대쪽을 지우면, 옛 계약은 다음번에 금액을 실제로 채워
     저장할 때 제자리를 찾습니다.
@@ -183,8 +184,8 @@ async def update_client(
 # --------------------------------------------------------------------------- #
 _CONTRACT_FIELDS = (
     "ticket_id", "deal_type", "starts_on", "ends_on", "currency", "payment_method",
-    "payment_type", "first_payment_on", "billing_email", "note", "renewal_plan",
-    "stop_reason", "memo", "revenue_from", "plan", "plan_name", "perso_email",
+    "payment_type", "first_payment_on", "billing_email", "note",
+    "revenue_from", "plan", "plan_name", "perso_email",
     "plan_starts_on", "plan_ends_on", "space_seq",
 )
 # credits 가 여기 있는 이유: 계약 크레딧은 이제 **입력**입니다. 계약서에 적히는 것이
@@ -521,7 +522,7 @@ def export_csv():
         "결제 수단", "결제 방식", "총 분납 횟수", "최초 결제일", "Billing Email",
         "월간 매출 (VAT 포함)", "매출 인식 시작 월",
         "플랜", "플랜명", "Perso Email", "Space 개수", "space_seq",
-        "다음 크레딧 지급일", "다음 결제일", "갱신 계획",
+        "다음 크레딧 지급일", "다음 결제일",
     ])
     with SessionLocal() as session:
         clients = (
@@ -542,7 +543,7 @@ def export_csv():
             ]
             if not client.contracts:
                 # 계약이 아직 없는 고객도 한 줄 나갑니다 — 빠지면 명단이 아닙니다.
-                writer.writerow(base + [""] * 31)   # 머리글 42 − 고객 11
+                writer.writerow(base + [""] * 30)   # 머리글 41 − 고객 11
                 continue
             for contract in client.contracts:
                 total = float(won.total_amount(contract) or 0)
@@ -571,7 +572,6 @@ def export_csv():
                     contract.space_count, contract.space_seq,
                     grant.grant_on if grant else "",
                     payment.paid_on if payment else "",
-                    contract.renewal_plan,
                 ])
 
     body = "﻿" + buffer.getvalue()

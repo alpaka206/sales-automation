@@ -161,9 +161,8 @@ def import_from_sheet(write: bool = True) -> dict:
             contract.first_payment_on = text(cell(r, "T"))
             contract.billing_email = text(cell(r, "U"))
             contract.note = text(cell(r, "V"))
-            contract.renewal_plan = text(cell(r, "W"))
-            contract.stop_reason = text(cell(r, "X"))
-            contract.memo = text(cell(r, "Y"))
+            # W(갱신 계획)·X(사용 중단 이유)·Y(비고 메모)는 읽지 않습니다 — 콘솔에서
+            # 없어진 칸이라 담을 열이 없습니다(이관 0073).
             contract.revenue_from = text(cell(r, "Z"))
             contract.plan = text(cell(r, "AB"))
             contract.plan_name = text(cell(r, "AC"))

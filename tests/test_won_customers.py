@@ -385,23 +385,41 @@ def test_the_console_does_not_manage_claims_at_all():
         assert "open_claims" not in source, name
         assert "contract.claims" not in source, name
 
-    # 그 자리는 갱신 계획·비고가 이어받습니다 — 클레임이 아니라 계약의 값이었습니다.
-    screen = pathlib.Path("frontend/src/screens/won/WonCustomerDetail.tsx").read_text(encoding="utf-8")
-    assert '["sec-care", "갱신 · 비고"]' in screen
-    assert "<CareSection current={current} onDone={refresh} />" in screen
 
+def test_the_console_does_not_manage_renewal_notes_at_all():
+    """「갱신 · 비고」도 콘솔 밖으로 나갔습니다(운영자 지시, 2026-08-14 · 이관 0073).
 
-def test_the_contract_notes_remount_when_the_contract_changes():
-    """계약의 값을 `useState` 의 **초기값**으로 받는 컴포넌트는 key 를 달아야 합니다.
-
-    React 는 같은 자리의 같은 컴포넌트를 재사용하므로 초기값을 다시 읽지 않습니다. 1차를
-    골랐는데 갱신 계획·비고에 2차의 값이 남아 있었고, 그 상태로 저장을 누르면 1차 계약에
-    2차의 값이 덮입니다 — 화면에는 저장됐다고 나옵니다.
+    클레임과 같은 이유입니다 — 화면만 지우면 아무도 안 보는데 계속 동기화되는 열이 남습니다.
+    그래서 패널·라우트 필드·CSV 열·선택지·시트 동기화·모델 열까지 전부 지웠습니다.
+    **워크북의 W·X·Y 열은 그대로 둡니다** — 콘솔이 안 건드리므로 손으로 적는 자리가 됩니다.
+    그래서 `owned` 에서도 빠져야 합니다: 남겨 두면 콘솔이 지운 고객의 행에서 그 세 칸까지
+    같이 비웁니다.
     """
     import pathlib
 
-    screen = pathlib.Path("frontend/src/screens/won/WonCustomerDetail.tsx").read_text(encoding="utf-8")
-    assert "<ContractNotes key={current.id}" in screen
+    from src.agents.won_sheets import CONTRACTS
+    from src.common import won
+    from src.db import models
+
+    columns = set(models.ClientContract.__mapper__.columns.keys())
+    assert not columns & {"renewal_plan", "stop_reason", "memo"}
+    assert not hasattr(won, "RENEWAL_PLANS")
+    assert not set(CONTRACTS.owned) & {"W", "X", "Y"}
+
+    for name in (
+        "frontend/src/screens/won/WonCustomerDetail.tsx",
+        "frontend/src/screens/won/WonContractForm.tsx",
+        "frontend/src/screens/won/shared.ts",
+        "src/api/routes/won_customers.py",
+        "src/api/routes/ui_api.py",
+        "src/agents/sheet_to_db.py",
+    ):
+        source = pathlib.Path(name).read_text(encoding="utf-8")
+        # 주석에 "지웠다" 고 적는 것은 되므로, 코드가 쓰는 철자만 봅니다.
+        assert "contract.renewal_plan" not in source, name
+        assert "contract.stop_reason" not in source, name
+        assert "contract.memo" not in source, name
+        assert "sec-care" not in source, name
 
 
 def test_the_list_screen_keeps_the_mockups_thresholds_and_wording():
@@ -580,15 +598,16 @@ def test_an_old_krw_contract_with_only_a_total_still_opens_and_saves():
 def test_saving_only_the_notes_never_erases_the_money(factory):
     """이 라우트에는 계약 전체 폼만 오는 게 아닙니다.
 
-    「갱신 계획·사용 중단 이유·비고」 패널은 세 칸만 보냅니다(ContractNotes). 그때 통화가
-    안 쓰는 금액 칸을 조건 없이 비우면, **총액만 있던 옛 원화 계약은 비고 한 줄 저장에
-    금액이 통째로 사라집니다** — 되돌릴 방법이 없습니다.
+    `_fill_contract` 는 폼에 온 칸만 건드리므로(`if name in form`) 몇 칸만 보내는 폼도
+    받습니다. 실제로 「갱신 계획·사용 중단 이유·비고」 패널이 세 칸만 보냈고(0073 에서
+    없어졌습니다), 그때 통화가 안 쓰는 금액 칸을 조건 없이 비우니 **총액만 있던 옛 원화
+    계약은 비고 한 줄 저장에 금액이 통째로 사라졌습니다** — 되돌릴 방법이 없습니다.
     """
     from src.api.routes.won_customers import _fill_contract
 
     옛계약 = ClientContract(client_id=1, seq=1, currency="KRW",
                           amount_incl_vat=1_722_600, credits=64_800)
-    _fill_contract(옛계약, {"memo": "통화만 해 봄"})
+    _fill_contract(옛계약, {"note": "통화만 해 봄"})
     assert 옛계약.amount_incl_vat == 1_722_600, "비고 저장에 금액이 사라졌습니다"
     assert won.total_amount(옛계약) == Decimal("1722600")
     assert won.unit_price(옛계약) == Decimal("1450")
@@ -596,7 +615,7 @@ def test_saving_only_the_notes_never_erases_the_money(factory):
     # 쓰는 쪽에 값이 있으면 반대쪽은 지웁니다 — 둘이 갈라지면 안 되므로.
     정상 = ClientContract(client_id=2, seq=1, currency="KRW",
                          amount_excl_vat=1_566_000, amount_incl_vat=9_999_999)
-    _fill_contract(정상, {"memo": "x"})
+    _fill_contract(정상, {"note": "x"})
     assert 정상.amount_incl_vat is None
     assert 정상.amount_excl_vat == 1_566_000
 

@@ -27,7 +27,6 @@ export type Contract = {
   unit_price: Money;
   payment_method: string | null; payment_type: string | null; installments: number | null;
   first_payment_on: string | null; billing_email: string | null; note: string | null;
-  renewal_plan: string | null; stop_reason: string | null; memo: string | null;
   revenue_from: string | null; revenue_from_set: boolean; monthly_revenue: Money;
   plan: string | null; plan_name: string | null; perso_email: string | null;
   plan_starts_on: string | null; plan_ends_on: string | null; plan_days_left: number | null;
@@ -61,7 +60,7 @@ export type Comm = {
 };
 export type Options = {
   industries: string[]; plans: string[]; plan_statuses: string[]; deal_types: string[];
-  doc_types: string[]; renewal_plans: string[];
+  doc_types: string[];
   payment_methods: string[]; payment_types: string[]; currencies: string[];
   customer_types: string[]; departments: string[];
   /** 「전체」의 이름 — 부서가 아니라 셋을 합친 묶음이고, 서버가 보낸 키와 같아야 합니다. */

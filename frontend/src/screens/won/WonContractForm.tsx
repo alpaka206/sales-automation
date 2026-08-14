@@ -32,7 +32,7 @@ const empty = {
   first_payment_on: "", billing_email: "", note: "",
   plan: "Business Tier 1", plan_name: "", perso_email: "",
   invite_limit: "", queue_limit: "", concurrent_jobs: "", space_count: "", space_seq: "",
-  revenue_from: "", renewal_plan: "", memo: "",
+  revenue_from: "",
 };
 type Draft = typeof empty;
 
@@ -527,6 +527,5 @@ function fromContract(contract: Contract): Draft {
     concurrent_jobs: str(contract.concurrent_jobs), space_count: str(contract.space_count),
     space_seq: str(contract.space_seq),
     revenue_from: contract.revenue_from_set ? str(contract.revenue_from) : "",
-    renewal_plan: str(contract.renewal_plan), memo: str(contract.memo),
   };
 }

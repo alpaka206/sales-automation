@@ -700,9 +700,9 @@ class ClientContract(Base):
     first_payment_on: Mapped[str | None] = mapped_column(String(10), nullable=True)
     billing_email: Mapped[str | None] = mapped_column(String(255), nullable=True)
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
-    renewal_plan: Mapped[str | None] = mapped_column(String(32), nullable=True)
-    stop_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
-    memo: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # `renewal_plan` · `stop_reason` · `memo` 가 여기 있었습니다 — 상세 화면의 「갱신 · 비고」
+    # 패널이 쓰던 세 칸입니다. 콘솔에서 뺐고 열도 지웠습니다(이관 0073). 워크북의 그 세 열은
+    # 그대로 남아 손으로 적는 자리가 됩니다 — 시트는 운영자의 것입니다.
     # YYYY-MM. 비우면 계약 시작월부터 인식합니다 (MRR 만 해당).
     revenue_from: Mapped[str | None] = mapped_column(String(7), nullable=True)
 

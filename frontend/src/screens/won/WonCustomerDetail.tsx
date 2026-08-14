@@ -10,12 +10,13 @@ import {
   addMonths, dday, dueClass, fmt, initials, money, n, num, planTone, statusTone,
 } from "./shared";
 
-/** 수주 고객 상세 — 목업(`수주관리목업_0806.html` 의 `detailHTML`)의 8개 섹션 그대로.
+/** 수주 고객 상세 — 목업(`수주관리목업_0806.html` 의 `detailHTML`)의 섹션 그대로. 목업의
+ * 8개 중 「갱신 · 비고」가 빠져 일곱 개입니다(이관 0073).
  *
- * **계약 선택 드롭다운이 이 화면의 축입니다.** 고객은 하나이고 계약이 여럿이라, 2~5·7번
+ * **계약 선택 드롭다운이 이 화면의 축입니다.** 고객은 하나이고 계약이 여럿이라, 2~6번
  * 섹션은 전부 "지금 고른 계약" 의 내용이고 고르는 순간 함께 바뀝니다.
  *
- * 계약을 따라가지 **않는** 것은 **8번 소통 히스토리** 하나입니다 — 협상 단계 대화가 계약보다
+ * 계약을 따라가지 **않는** 것은 **7번 소통 히스토리** 하나입니다 — 협상 단계 대화가 계약보다
  * 먼저 쌓이고 그대로 이어집니다(0065).
  */
 const SECTIONS: [string, string][] = [
@@ -24,7 +25,6 @@ const SECTIONS: [string, string][] = [
   ["sec-plan", "Perso 계정 · 플랜"],
   ["sec-credit", "크레딧 지급"],
   ["sec-pay", "결제 현황"],
-  ["sec-care", "갱신 · 비고"],
   ["sec-revenue", "매출 관리"],
   ["sec-comm", "소통 히스토리"],
 ];
@@ -60,7 +60,7 @@ export function WonCustomerDetail() {
   const [commFilter, setCommFilter] = useState<"all" | "nego" | number>("all");
   const [addingComm, setAddingComm] = useState(false);
 
-  // 액션 보드가 `/won-customers/2102#sec-care` 로 보냅니다. 브라우저의 기본 앵커 이동은
+  // 액션 보드가 `/won-customers/2102#sec-credit` 로 보냅니다. 브라우저의 기본 앵커 이동은
   // 소용이 없습니다 — 그 시점에 섹션이 아직 그려지지 않았습니다. 데이터가 온 **뒤에**
   // 한 번 내려갑니다. 훅은 아래 early return 보다 위에 있어야 합니다(#310).
   useEffect(() => {
@@ -187,15 +187,14 @@ export function WonCustomerDetail() {
             <PlanSection contract={current} />
             <CreditSection contract={current} today={today} onDone={refresh} />
             <PaySection contract={current} today={today} onDone={refresh} />
-            <CareSection current={current} onDone={refresh} />
             <RevenueSection contract={current} today={today} />
           </>
         )}
 
-        {/* 8 소통 히스토리 — 고객 단위. 계약을 골라도 바뀌지 않습니다. */}
+        {/* 7 소통 히스토리 — 고객 단위. 계약을 골라도 바뀌지 않습니다. */}
         <section className="sec" id="sec-comm">
           <div className="sec-head">
-            <span className="sec-num">8</span><span className="sec-title">소통 히스토리</span>
+            <span className="sec-num">7</span><span className="sec-title">소통 히스토리</span>
             <Tag tone="neutral">고객 단위 · 전체 계약 통합</Tag>
             <div className="sec-actions">
               <div className="chips">
@@ -1039,78 +1038,14 @@ function PayRow({ payment, currency, today, onAsk, onSave }: {
   );
 }
 
-/** 6 갱신 · 비고 — 지금 고른 계약의 값입니다.
- *
- * 2차의 갱신 계획과 1차의 갱신 계획은 다른 이야기라 계약 고르개를 따라갑니다.
- *
- * 여기 「고객 클레임」 표가 있었습니다. 클레임은 콘솔에서 관리하지 않기로 해서 화면·라우트·
- * 테이블까지 전부 지웠습니다(마이그레이션 0072). 섹션 번호는 그대로 둡니다 — 뒤 번호를
- * 당기면 운영자가 외운 자리와 액션 보드의 앵커가 같이 어긋납니다.
- */
-function CareSection({ current, onDone }: { current: Contract; onDone: () => void }) {
-  return (
-    <Section num={6} id="sec-care" title="갱신 · 비고" plain>
-      <div className="split-2">
-        {/* `key` 가 계약 id 인 이유: 아래 셋은 계약의 값인데, 컴포넌트가 그것을 `useState` 의
-            **초기값**으로 받습니다. 계약을 바꿔도 React 는 같은 자리의 같은 컴포넌트를
-            재사용하므로 초기값은 다시 안 읽힙니다 — 1차를 골랐는데 2차의 갱신 계획이 남아
-            있고, 그대로 저장을 누르면 1차에 2차의 값이 덮입니다. key 가 바뀌면 새로 답니다. */}
-        <ContractNotes key={current.id} contract={current} onDone={onDone} />
-      </div>
-    </Section>
-  );
-}
+/* 6번은 「갱신 · 비고」였습니다 — 갱신 계획 · 사용 중단 이유 · 비고 세 칸을 계약에 저장하던
+   패널입니다. 운영자 지시(2026-08-14)로 화면도 열도 지웠습니다(이관 0073). 그 자리에는 그
+   전에 「고객 클레임」 표가 있었고, 그때는 섹션 번호를 비워 두었습니다. 이번에는 당깁니다 —
+   비워 두면 화면에 6이 없는 1·2·3·4·5·7·8 이 남고, 앵커로 오는 링크는 4·5번뿐이라
+   (`WonCustomers.tsx` 의 sec-credit·sec-pay) 번호를 당겨도 어긋나는 자리가 없습니다.
+   갱신 계획은 워크북의 열로만 남습니다 — 시트는 운영자의 것이라 콘솔이 안 건드립니다. */
 
-
-/** 갱신 계획 · 사용 중단 이유 · 비고. 다시 고치면 그만인 값이라 확인 창을 붙이지 않습니다.
- *
- * 확인 창이 흔해지면 아무도 안 읽습니다. 붙이는 자리는 파생 수치가 같이 움직이는 값뿐입니다. */
-function ContractNotes({ contract, onDone }: { contract: Contract; onDone: () => void }) {
-  const [renewal, setRenewal] = useState(contract.renewal_plan ?? "");
-  const [stop, setStop] = useState(contract.stop_reason ?? "");
-  const [memo, setMemo] = useState(contract.memo ?? "");
-  const [save, saving] = useAction(async () => {
-    await postForm(`/won-customers/contracts/${contract.id}`, {
-      renewal_plan: renewal, stop_reason: stop, memo,
-    });
-    onDone();
-  });
-  return (
-    <>
-      <div className="panel">
-        <div className="sub-head">
-          <span className="sub-title">갱신 계획</span>
-          <span className="sub-count">{contract.label} · 다음 계약 의향</span>
-        </div>
-        <div>
-          <div className="field-label">갱신 계획</div>
-          <select className="inp" style={{ marginTop: 5 }} value={renewal}
-                  onChange={(e) => setRenewal(e.target.value)}>
-            {["", "갱신 예정", "협의 중", "갱신 완료", "미정", "본계약 검토 중", "갱신 안함"]
-              .map((item) => <option key={item} value={item}>{item || "—"}</option>)}
-          </select>
-        </div>
-        <div style={{ marginTop: 14 }}>
-          <div className="field-label">사용 중단 이유</div>
-          <textarea className="inp" rows={2} style={{ marginTop: 5 }} value={stop}
-                    onChange={(e) => setStop(e.target.value)}
-                    placeholder="갱신 안함 / 사용 중단 시 입력" />
-        </div>
-      </div>
-      <div className="panel">
-        <div className="sub-head"><span className="sub-title">비고</span></div>
-        <textarea className="inp" rows={5} value={memo} onChange={(e) => setMemo(e.target.value)}
-                  placeholder="기타 메모" />
-        <div style={{ textAlign: "right", marginTop: 8 }}>
-          <button className="btn btn-sm" type="button" disabled={saving}
-                  onClick={() => save()}>{saving ? "저장 중" : "저장"}</button>
-        </div>
-      </div>
-    </>
-  );
-}
-
-/** 7 매출 관리. 막대는 인식 시작월부터 최대 12개월 — 지난 달은 채워집니다. */
+/** 6 매출 관리. 막대는 인식 시작월부터 최대 12개월 — 지난 달은 채워집니다. */
 function RevenueSection({ contract, today }: { contract: Contract; today: string }) {
   const mrr = contract.deal_type === "MRR";
   const months = contract.months || 1;
@@ -1127,7 +1062,7 @@ function RevenueSection({ contract, today }: { contract: Contract; today: string
       }));
 
   return (
-    <Section num={7} id="sec-revenue" title="매출 관리">
+    <Section num={6} id="sec-revenue" title="매출 관리">
       <div className="field-grid">
         <KV k="계약 종류" v={<Tag tone={mrr ? "d-mrr" : "d-poc"}>{contract.deal_type}</Tag>} />
         <KV k="총 계약 금액 (VAT 포함)"

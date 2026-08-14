@@ -57,7 +57,8 @@ DOC_TYPES = (
     "결제 시 약관 및 협의 내용 동의",
     "세금계산서 발행",
 )
-RENEWAL_PLANS = ("갱신 예정", "협의 중", "미정", "본계약 검토 중", "갱신 안함", "갱신 완료")
+# RENEWAL_PLANS 가 여기 있었습니다. 갱신 계획은 콘솔에서 뺐고(이관 0073), 남은 것은
+# 워크북의 드롭다운뿐이라 목록은 `scripts/build_won_sheets.py` 의 CHOICES 한 곳에 있습니다.
 PAYMENT_METHODS = ("Stripe", "포트원", "계좌이체")
 PAYMENT_TYPES = ("일시불", "할부")
 CURRENCIES = ("KRW", "USD")
