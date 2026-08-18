@@ -765,6 +765,48 @@ async def message_edit(
 _MAX_ROLE_DESC_LEN = 4000
 
 
+@router.post("/contacts/{contact_id}/hubspot-record")
+async def contact_hubspot_record_edit(contact_id: int, request: Request):
+    """티켓 세부 내역의 「플랜 정보」를 허브스팟 연락처에 되쓴다.
+
+    이 화면에서 유일하게 **허브스팟에 쓰는** 폼이다. 제품 쪽 연동이 100% 가 아니라 사람이
+    채워야 할 때가 있다는 운영자 판단으로 열었다.
+
+    막는 자리는 여기가 아니라 `update_record_fields` 안이다 — 안전 모드 확인을 라우트에
+    두면 다음 호출자(폴러·배치)가 그 앞을 안 지난다. 라우트가 하는 일은 그 예외를 화면이
+    읽을 수 있는 말로 바꾸는 것뿐이다.
+
+    폼 키는 우리 `Field.key`(`user_seq` …)이고 허브스팟 속성 이름은 서버가 다시 찾는다.
+    브라우저가 보낸 이름을 그대로 쓰면 콘솔에 닿은 누구든 남의 속성을 덮어쓸 수 있다.
+    """
+    from ...common.safe_mode import ExternalWriteBlocked
+    from ...integrations.hubspot_record import update_record_fields
+
+    with SessionLocal() as session:
+        contact = session.get(Contact, contact_id)
+        if not contact:
+            return JSONResponse({"error": "연락처를 찾을 수 없습니다"}, status_code=404)
+        hubspot_contact_id = contact.hubspot_contact_id
+    if not hubspot_contact_id:
+        return JSONResponse(
+            {"error": "이 고객은 허브스팟 연락처가 아니라 저장할 곳이 없습니다"},
+            status_code=400,
+        )
+
+    form = await request.form()
+    values = {key: str(value) for key, value in form.items()}
+    try:
+        await asyncio.to_thread(update_record_fields, hubspot_contact_id, values)
+    except ExternalWriteBlocked:
+        return JSONResponse(
+            {"error": "안전 모드라 허브스팟에 쓰지 않았습니다"}, status_code=409
+        )
+    except Exception as exc:  # noqa: BLE001 - 화면에 이유를 적어 주려고 넓게 잡는다
+        logger.warning("HubSpot record write failed for contact %s: %s", contact_id, exc)
+        return JSONResponse({"error": "허브스팟에 저장하지 못했습니다"}, status_code=502)
+    return JSONResponse({"ok": True})
+
+
 @router.post("/contacts/{contact_id}/edit")
 async def contact_edit(contact_id: int, company: str = Form(""), role_description: str = Form("")):
     """Save operator edits to a contact's company + "what they do" note.

@@ -151,8 +151,18 @@ exempt from the auth gate, so React can draw it before a session exists).
   받는다** — 같이 받으면 답을 읽는 일이 허브스팟 응답을 기다립니다.
   회사 이름은 일부러 안 가져옵니다: 연락처 정보 카드에 이미 **고칠 수 있는** 회사 칸이 있고,
   옆에 읽기 전용 사본을 세우면 둘 중 어느 것이 진짜인지 화면만 봐서는 알 수 없습니다.
-  **읽기 전용이라 `guard_external_write` 를 안 지납니다 — 면제가 아니라 쓰기가 없기
-  때문이고, 여기에 쓰기를 붙이는 순간 그 규칙이 돌아옵니다.**
+  - **플랜 다섯 칸은 콘솔에서 허브스팟으로 되씁니다** (2026-08-18, 운영자 지시 — 제품 쪽
+    연동이 100% 가 아니라 사람이 채워야 할 때가 있습니다). `update_record_fields` 가
+    `guard_external_write("hubspot:update_contact_record")` 를 **함수 첫 줄에서** 지납니다 —
+    라우트가 아니라 여기인 이유는 다음 호출자(폴러·배치)도 그 앞을 지나야 하기 때문입니다.
+    `tests/test_safe_mode.py::test_hubspot_record_write_blocked` 가 고정합니다.
+    **쓰기의 울타리는 `RECORD_FIELDS.editable` 한 칸입니다.** 화면이 보내는 것은 우리
+    `key`(`user_seq`)이고 허브스팟 속성 이름은 서버가 카탈로그에서 **다시** 찾습니다 —
+    브라우저가 보낸 이름을 그대로 썼다면 콘솔에 닿은 누구든 `email` 이나 `lifecyclestage`
+    를 덮어쓸 수 있었습니다. 「국가」는 허브스팟이 접속 IP 로 뽑는 값이라 안 열고, 빈 칸은
+    「모르겠다」가 아니라 「지워라」입니다(잘못 들어간 값을 되돌릴 길이 있어야 합니다).
+    저장 뒤에는 이 질의만 따로 무효화합니다 — 일괄 무효화에서는 일부러 빠져 있는데, 저쪽
+    값이 **정말로** 바뀐 것은 이때뿐이기 때문입니다.
 - **Styling is `static/console.css`**, linked rather than bundled — one copy of the design
   for the SPA and for the sign-in pages. There is no CSS framework.
 - **Reads go through `/api/ui/*`**, which calls the SAME context builders the templates

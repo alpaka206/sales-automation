@@ -31,9 +31,15 @@
 그룹을 그리기만 한다 — 「화면이 아는 목록은 서버가 준다」와 같은 이유로, 필드가 늘거나
 카드가 갈리는 일이 화면과 서버 두 곳에 적히면 반드시 어긋난다.
 
-읽기 전용이라 `guard_external_write` 는 지나지 않는다. 안전 모드는 쓰기만 막는다.
-**이 모듈에 쓰기를 추가한다면 그때는 반드시 `guard_external_write` 를 지나야 한다** —
-지금 안 지나는 것은 면제가 아니라 쓰기가 없기 때문이다.
+**플랜 필드는 되쓸 수 있다**(`update_record_fields`). 연동이 100% 가 아니라 사람이 채워야
+할 때가 있다는 운영자 판단이다. 쓰기이므로 `guard_external_write` 를 **가장 먼저** 지난다 —
+안전 모드에서는 네트워크에 닿기도 전에 막힌다.
+
+쓰기의 울타리는 `RECORD_FIELDS` 그 자체다. 화면이 보내는 것은 우리 `key`(`user_seq`)이고
+허브스팟 속성 이름은 서버가 카탈로그에서 다시 찾는다. 그래서 브라우저가 무슨 이름을 보내든
+`email` 이나 `lifecyclestage` 같은 남의 속성에는 닿지 않는다 — 목록에 있고 `editable=True`
+인 필드만 통과한다. 화면을 믿고 이름을 그대로 넘겼다면, 콘솔에 닿은 누구든 연락처의 아무
+속성이나 덮어쓸 수 있었다.
 """
 
 from __future__ import annotations
@@ -41,9 +47,11 @@ from __future__ import annotations
 import logging
 import re
 from functools import lru_cache
+from typing import NamedTuple
 
 import httpx
 
+from ..common.safe_mode import guard_external_write
 from .hubspot import BASE_URL, HubSpotNotConfigured, _require_token, _sync_request_with_retries
 
 logger = logging.getLogger(__name__)
@@ -63,28 +71,40 @@ GROUPS: tuple[tuple[str, str], ...] = (
     ("contact", "연락처 정보"),
 )
 
-# (그룹 키, 화면에 적을 라벨, 허브스팟에서 찾을 이름 후보)
+class Field(NamedTuple):
+    """한 줄. 네 이름이 각자 다른 일을 한다 — 합치면 하나를 고칠 때 나머지가 끊긴다.
+
+    - ``group``      : 어느 카드에 서는가 (`GROUPS` 의 키)
+    - ``key``        : 폼과 API 가 주고받는 **안정된 이름**. 화면 글자를 다듬어도 안 바뀐다.
+    - ``label``      : 화면에 적는 말. 운영자가 정한다.
+    - ``candidates`` : 허브스팟에서 집어낼 열쇠. 첫 번째가 포털 라벨이고 뒤는 대비책.
+    - ``editable``   : 콘솔에서 되쓸 수 있는가. **쓰기의 울타리가 이 칸이다.**
+    """
+
+    group: str
+    key: str
+    label: str
+    candidates: tuple[str, ...]
+    editable: bool = False
+
+
+# 순서가 곧 화면 순서다 — 운영자가 정한 대로 위에서 아래로 그려진다.
 #
-# **화면에 적는 말과 찾는 말은 다르다.** 가운데 칸은 운영자가 콘솔에서 읽고 싶어 하는
-# 글자이고(`플랜 (Plan)`), 오른쪽 칸은 허브스팟에서 그 속성을 집어내는 열쇠다(`plan`).
-# 둘을 한 칸으로 합치면 화면 글자를 다듬는 순간 조회가 끊긴다.
+# 플랜 다섯은 `editable=True`: 연동이 100% 가 아니라 사람이 채워야 할 때가 있다(운영자 판단).
+# 「국가」는 허브스팟이 접속 IP 로 스스로 뽑는 값이라 손으로 고칠 것이 아니고, 「전화번호」는
+# 연락처 정보 카드의 다른 칸들과 함께 다뤄야 해서 여기서는 읽기만 한다.
 #
-# 순서도 화면 순서다 — 운영자가 정한 대로 위에서 아래로 그려진다. 후보의 첫 번째는 허브스팟
-# 라벨이고, 뒤따르는 것은 그 라벨이 안 잡혔을 때의 대비책이다(기본 속성의 내부 이름이거나
-# 다른 철자). `user seq` 에 `user_seq` 를 덧붙이지 않는 이유는 `_norm` 이 둘을 이미 같은
-# 자로 재기 때문이다.
-#
-# 회사 이름은 넣지 않는다: 연락처 정보 카드에 이미 **고칠 수 있는** 회사 칸이 있고, 그건
-# gmail·미확인 고객이 회사 이름을 갖는 유일한 자리다. 옆에 읽기 전용 사본을 세우면 둘 중
-# 어느 것이 진짜인지 화면만 봐서는 알 수 없다.
-RECORD_FIELDS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
-    ("plan", "플랜 (Plan)", ("plan",)),
-    ("plan", "플랜 티어 (plan tier)", ("plan tier",)),
-    ("plan", "user seq", ("user seq",)),
-    ("plan", "space seq", ("space seq",)),
-    ("plan", "plan seq", ("plan seq",)),
-    ("contact", "국가 (IP Country)", ("ip country", "hs_ip_country", "ip")),
-    ("contact", "전화번호", ("전화번호", "phone number", "phone")),
+# 회사 이름은 아예 넣지 않는다: 연락처 정보 카드에 이미 **고칠 수 있는** 회사 칸이 있고, 그건
+# gmail·미확인 고객이 회사 이름을 갖는 유일한 자리다. 옆에 사본을 세우면 둘 중 어느 것이
+# 진짜인지 화면만 봐서는 알 수 없다.
+RECORD_FIELDS: tuple[Field, ...] = (
+    Field("plan", "plan", "플랜 (Plan)", ("plan",), editable=True),
+    Field("plan", "plan_tier", "플랜 티어 (plan tier)", ("plan tier",), editable=True),
+    Field("plan", "user_seq", "user seq", ("user seq",), editable=True),
+    Field("plan", "space_seq", "space seq", ("space seq",), editable=True),
+    Field("plan", "plan_seq", "plan seq", ("plan seq",), editable=True),
+    Field("contact", "ip_country", "국가 (IP Country)", ("ip country", "hs_ip_country", "ip")),
+    Field("contact", "phone", "전화번호", ("전화번호", "phone number", "phone")),
 )
 
 
@@ -124,11 +144,11 @@ def resolve_property_names(labels: dict[str, str]) -> dict[str, str]:
     """
     by_label, by_name = _index(labels)
     resolved: dict[str, str] = {}
-    for _key, field, candidates in RECORD_FIELDS:
-        for candidate in candidates:
+    for field in RECORD_FIELDS:
+        for candidate in field.candidates:
             found = by_label.get(_norm(candidate)) or by_name.get(_norm(candidate))
             if found:
-                resolved[field] = found
+                resolved[field.key] = found
                 break
     return resolved
 
@@ -145,20 +165,29 @@ def build_groups(properties: dict[str, object], resolved: dict[str, str]) -> lis
       조용히 빠지면 아무도 못 고친다.
     """
     rows_by_group: dict[str, list[dict]] = {}
-    for key, field, _candidates in RECORD_FIELDS:
-        name = resolved.get(field)
+    for field in RECORD_FIELDS:
+        name = resolved.get(field.key)
         if name is None:
-            rows_by_group.setdefault(key, []).append(
-                {"label": field, "value": None, "found": False}
+            rows_by_group.setdefault(field.group, []).append(
+                {"key": field.key, "label": field.label, "value": None,
+                 "found": False, "editable": False}
             )
             continue
         raw = properties.get(name)
         value = "" if raw is None else str(raw).strip()
-        rows_by_group.setdefault(key, []).append(
-            {"label": field, "value": value or None, "found": True}
+        rows_by_group.setdefault(field.group, []).append(
+            {"key": field.key, "label": field.label, "value": value or None,
+             "found": True, "editable": field.editable}
         )
+    # 카드의 `editable` 은 **못 찾은 필드를 뺀** 값이다: 허브스팟에 없는 속성은 쓸 수도 없으니
+    # 연필만 달아 두면 저장이 아무 일도 안 하고 성공한 척한다.
     return [
-        {"key": key, "title": title, "rows": rows_by_group[key]}
+        {
+            "key": key,
+            "title": title,
+            "rows": rows_by_group[key],
+            "editable": any(row["editable"] for row in rows_by_group[key]),
+        }
         for key, title in GROUPS
         if rows_by_group.get(key)
     ]
@@ -207,6 +236,44 @@ def _friendly_error(exc: Exception) -> str:
             "추가해 주세요."
         )
     return "허브스팟을 읽지 못했습니다."
+
+
+def update_record_fields(hubspot_contact_id: str, values: dict[str, str]) -> None:
+    """콘솔에서 고친 플랜 값을 허브스팟 연락처에 되쓴다.
+
+    **가장 먼저 `guard_external_write` 를 지난다.** 안전 모드에서는 네트워크에 닿기도 전에
+    `ExternalWriteBlocked` 로 끝난다. 막는 자리를 HTTP 호출 옆이 아니라 함수 입구에 두는
+    이유는, 다음에 재시도나 배치가 붙어도 그 앞을 지나게 하기 위해서다.
+
+    ``values`` 의 키는 우리 `Field.key` 다. 허브스팟 속성 이름은 여기서 카탈로그로 다시
+    찾는다 — 브라우저가 보낸 이름을 그대로 쓰면 콘솔에 닿은 누구든 `email` 이든
+    `lifecyclestage` 든 덮어쓸 수 있다. 목록에 있고 `editable` 인 것만 통과한다.
+
+    빈 문자열은 지우라는 뜻이라 그대로 보낸다(허브스팟에서 값이 비워진다). 쓸 것이 하나도
+    없으면 요청을 아예 내지 않는다.
+    """
+    guard_external_write("hubspot:update_contact_record")
+
+    writable = {field.key for field in RECORD_FIELDS if field.editable}
+    token = _require_token()
+    resolved = resolve_property_names(_property_labels(token))
+    properties = {
+        resolved[key]: (value or "").strip()
+        for key, value in values.items()
+        if key in writable and key in resolved
+    }
+    if not properties:
+        return
+
+    headers = {"Authorization": f"Bearer {token}"}
+    with httpx.Client(headers=headers, timeout=_TIMEOUT) as client:
+        response = _sync_request_with_retries(
+            client,
+            "PATCH",
+            f"{BASE_URL}/crm/v3/objects/contacts/{hubspot_contact_id}",
+            json={"properties": properties},
+        )
+    response.raise_for_status()
 
 
 def fetch_record_groups(hubspot_contact_id: str) -> dict:

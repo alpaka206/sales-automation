@@ -182,6 +182,18 @@ def test_hubspot_update_contact_blocked(safe):
         asyncio.run(HubSpotClient().update_contact("123", {"x": "y"}))
 
 
+def test_hubspot_record_write_blocked(safe):
+    """티켓 세부 내역의 「플랜 정보」 저장. 이 화면에서 유일하게 허브스팟에 쓰는 폼입니다.
+
+    막는 자리가 라우트가 아니라 `update_record_fields` 안이라서, 다음 호출자가 생겨도 그
+    앞을 지납니다. 안전 모드에서는 네트워크에 닿기 전에 끝나므로 토큰도 필요 없습니다.
+    """
+    from src.integrations.hubspot_record import update_record_fields
+
+    with pytest.raises(ExternalWriteBlocked):
+        update_record_fields("123", {"user_seq": "184920"})
+
+
 def test_hubspot_timeline_email_blocked(safe):
     from src.integrations.hubspot import HubSpotClient
 

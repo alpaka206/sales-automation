@@ -28,7 +28,24 @@ type Bubble = {
 /** 한 줄 = 운영자 표의 「필드」 하나. 값은 자유 입력이라 `truncate` 로 감쌉니다 —
  *  `.info-row` 는 flex 라 `plan-2026-kr-renewal` 같은 한 덩어리 글자가 320px 카드를
  *  뚫고 나갑니다. 옆의 이메일·수신자 줄이 같은 이유로 이미 그렇게 하고 있습니다. */
-function CompanyRow({ row }: { row: { label: string; value: string | null; found: boolean } }) {
+type RecordRow = {
+  key: string; label: string; value: string | null; found: boolean; editable: boolean;
+};
+
+function CompanyRow({ row, editing }: { row: RecordRow; editing?: boolean }) {
+  // 고칠 수 없는 줄은 수정 중에도 그냥 글자입니다 — 「국가」는 허브스팟이 접속 IP 로 뽑는
+  // 값이고, 못 찾은 필드는 쓸 대상 자체가 없습니다.
+  if (editing && row.editable) {
+    return (
+      <div className="info-row">
+        <dt><label htmlFor={`hs-${row.key}`}>{row.label}</label></dt>
+        <dd style={{ maxWidth: 168 }}>
+          <input className="input" id={`hs-${row.key}`} name={row.key}
+                 defaultValue={row.value ?? ""} style={{ height: 30, fontSize: 13 }} />
+        </dd>
+      </div>
+    );
+  }
   return (
     <div className="info-row">
       <dt>{row.label}</dt>
@@ -50,7 +67,10 @@ type HubSpotRecord = {
      *  입니다. 값이 빈 것은 `—` 로 서고(허브스팟 사이드바가 `--` 를 그리는 그 자리),
      *  못 찾은 것은 그렇다고 적습니다 — 앞엣것은 이 고객 이야기이고 뒤엣것은 설정
      *  이야기라, 화면에서 같아 보이면 안 됩니다. */
-    rows: { label: string; value: string | null; found: boolean }[];
+    rows: { key: string; label: string; value: string | null; found: boolean; editable: boolean }[];
+    /** 이 카드에 연필을 달까. 못 찾은 필드는 쓸 수도 없으므로 서버가 그것까지 빼고 셉니다 —
+     *  연필만 달아 두면 저장이 아무 일도 안 하고 성공한 척합니다. */
+    editable: boolean;
   }[];
   error: string | null;
 };
@@ -132,6 +152,7 @@ export function MessageDetail() {
   });
 
   const [editingContact, setEditingContact] = useState(false);
+  const [editingRecord, setEditingRecord] = useState<string | null>(null);
   const [subject, setSubject] = useState("");
   const [body, setBody] = useState("");
   const [signature, setSignature] = useState("");
@@ -171,6 +192,21 @@ export function MessageDetail() {
     });
     setEditingContact(false);
     await queryClient.invalidateQueries({ queryKey: key });
+  });
+
+  /** 플랜 값을 허브스팟에 되씁니다.
+   *
+   *  저장한 뒤 이 질의만 따로 무효화합니다 — 다른 저장들이 쓰는 일괄 무효화에서 허브스팟
+   *  패널은 일부러 빼 두었기 때문입니다(우리가 저장한다고 저쪽 값이 바뀌지 않는데, 같이
+   *  걸면 콘솔의 모든 저장이 열려 있는 티켓 탭마다 외부 왕복을 냅니다). 여기서는 저쪽 값이
+   *  **정말로** 바뀌었으므로 다시 읽는 것이 맞습니다. */
+  const [saveRecord, savingRecord] = useAction(async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const fields = Object.fromEntries(new FormData(event.currentTarget) as never) as Record<string, string>;
+    await postForm(`/contacts/${data?.contact?.id}/hubspot-record`, fields);
+    setEditingRecord(null);
+    setNotice({ title: "허브스팟에 저장했습니다", body: null });
+    await queryClient.invalidateQueries({ queryKey: ["hubspot-record", data?.contact?.id] });
   });
 
   // Fill the editor once per message. Re-syncing on every refetch would overwrite what
@@ -587,14 +623,43 @@ export function MessageDetail() {
 
           {hubspot?.groups
             ?.filter((group) => group.key !== "contact")
-            .map((group) => (
-              <div className="card" key={group.key}>
-                <div className="section-label" style={{ marginBottom: 12 }}>{group.title}</div>
-                <dl className="info-list">
-                  {group.rows.map((row) => <CompanyRow key={row.label} row={row} />)}
-                </dl>
-              </div>
-            ))}
+            .map((group) => {
+              const editing = editingRecord === group.key;
+              return (
+                <div className="card" key={group.key}>
+                  <div className="row-between" style={{ marginBottom: 12 }}>
+                    <div className="section-label">{group.title}</div>
+                    {group.editable && (
+                      <button type="button" className="btn btn--subtle btn--sm"
+                              onClick={() => setEditingRecord(editing ? null : group.key)}
+                              aria-pressed={editing}
+                              aria-label={editing ? `${group.title} 수정 취소` : `${group.title} 수정`}
+                              title={editing ? "수정 취소" : "수정"}>
+                        <Icon name={editing ? "x" : "edit"} size={14} />
+                      </button>
+                    )}
+                  </div>
+                  {/* 저장은 허브스팟 연락처로 갑니다 — 이 화면에서 유일하게 바깥으로 쓰는
+                      폼입니다. 제품 쪽 연동이 100% 가 아니라 사람이 채워야 할 때가 있어
+                      열었습니다(운영자 판단). 안전 모드는 서버가 봅니다. */}
+                  <form onSubmit={(event) => void saveRecord(event)}>
+                    <dl className="info-list">
+                      {group.rows.map((row) => (
+                        <CompanyRow key={row.key} row={row} editing={editing} />
+                      ))}
+                    </dl>
+                    {editing && (
+                      <button className="btn btn--subtle btn--sm" type="submit"
+                              style={{ marginTop: 12, width: "100%" }}
+                              disabled={savingRecord} aria-busy={savingRecord || undefined}>
+                        {savingRecord ? <><span className="spinner" role="status" /> 저장 중</>
+                                      : <><Icon name="check" size={14} /> 허브스팟에 저장</>}
+                      </button>
+                    )}
+                  </form>
+                </div>
+              );
+            })}
 
           {contact && (
             <div className="card">

@@ -41,6 +41,20 @@ LABELS = {
 }
 
 
+@pytest.fixture
+def live_writes(monkeypatch):
+    """쓰기 검사만 안전 모드를 엽니다.
+
+    `tests/conftest.py` 가 pytest 를 SAFE 로 고정하는데(그래야 개발자 `.env` 로 진짜 티켓이
+    움직이지 않습니다), 그러면 `update_record_fields` 가 첫 줄에서 막혀 울타리 자체를 못
+    봅니다. 막히는 것은 `tests/test_safe_mode.py` 가 따로 고정합니다.
+    """
+    from src.common import safe_mode
+
+    monkeypatch.setattr(safe_mode, "guard_external_write", lambda _label: None)
+    monkeypatch.setattr(hr, "guard_external_write", lambda _label: None)
+
+
 @pytest.fixture(autouse=True)
 def _no_catalog_cache_between_tests():
     hr._property_labels.cache_clear()
@@ -51,13 +65,13 @@ def _no_catalog_cache_between_tests():
 def test_properties_are_found_by_their_hubspot_label():
     """`user_seq_c` 를 코드가 알 리 없습니다. 아는 것은 라벨 `user seq` 뿐입니다."""
     assert hr.resolve_property_names(LABELS) == {
-        "플랜 (Plan)": "plan",
-        "플랜 티어 (plan tier)": "plan_tier_c",
-        "user seq": "user_seq_c",
-        "space seq": "space_seq_c",
-        "plan seq": "plan_seq_c",
-        "국가 (IP Country)": "hs_ip_country",
-        "전화번호": "phone",
+        "plan": "plan",
+        "plan_tier": "plan_tier_c",
+        "user_seq": "user_seq_c",
+        "space_seq": "space_seq_c",
+        "plan_seq": "plan_seq_c",
+        "ip_country": "hs_ip_country",
+        "phone": "phone",
     }
 
 
@@ -75,14 +89,17 @@ def test_fields_the_operator_did_not_ask_for_are_not_fetched():
 def test_the_screen_label_is_not_the_search_key():
     """화면에 적는 말과 허브스팟에서 찾는 말은 다릅니다.
 
-    운영자가 「플랜 (Plan)」이라고 읽고 싶어 해도 속성은 여전히 라벨 `Plan` 으로 찾습니다.
-    둘을 한 칸으로 합치면 화면 글자를 다듬는 순간 조회가 끊깁니다.
+    운영자가 「플랜 (Plan)」이라고 읽고 싶어 해도 속성은 여전히 라벨 `Plan` 으로 찾고, 폼과
+    API 는 또 다른 안정된 키 `plan` 으로 주고받습니다. 셋을 한 칸으로 합치면 화면 글자를
+    다듬는 순간 조회가 끊기거나 저장이 끊깁니다.
     """
-    assert hr.resolve_property_names({"plan": "Plan"}) == {"플랜 (Plan)": "plan"}
+    assert hr.resolve_property_names({"plan": "Plan"}) == {"plan": "plan"}
+    field = next(f for f in hr.RECORD_FIELDS if f.key == "plan")
+    assert (field.label, field.candidates) == ("플랜 (Plan)", ("plan",))
 
 
 def test_the_plan_card_is_drawn_in_the_order_the_operator_set():
-    assert [field for key, field, _ in hr.RECORD_FIELDS if key == "plan"] == [
+    assert [f.label for f in hr.RECORD_FIELDS if f.group == "plan"] == [
         "플랜 (Plan)", "플랜 티어 (plan tier)", "user seq", "space seq", "plan seq",
     ]
 
@@ -94,12 +111,12 @@ def test_the_label_beats_a_retired_property_that_shares_the_name():
     멀쩡히 있는데. 그래서 라벨 색인을 먼저 봅니다.
     """
     portal = dict(LABELS, user_seq="user seq (사용 안 함)")
-    assert hr.resolve_property_names(portal)["user seq"] == "user_seq_c"
+    assert hr.resolve_property_names(portal)["user_seq"] == "user_seq_c"
 
 
 def test_a_renamed_label_still_matches_by_internal_name():
     """라벨이 우리가 모르는 말로 바뀌어도 내부 이름이 그대로면 계속 잡힙니다."""
-    assert hr.resolve_property_names({"plan_tier": "요금제 등급"}) == {"플랜 티어 (plan tier)": "plan_tier"}
+    assert hr.resolve_property_names({"plan_tier": "요금제 등급"}) == {"plan_tier": "plan_tier"}
 
 
 def test_punctuation_and_casing_do_not_matter():
@@ -128,10 +145,14 @@ def test_the_record_becomes_the_card_and_the_fields_become_its_rows():
     assert all(row["found"] and row["value"] is None for row in groups[0]["rows"])
 
     assert groups[1]["title"] == "연락처 정보"
-    assert groups[1]["rows"] == [
-        {"label": "국가 (IP Country)", "value": "south korea", "found": True},
-        {"label": "전화번호", "value": "01043391407", "found": True},
+    assert [(row["label"], row["value"]) for row in groups[1]["rows"]] == [
+        ("국가 (IP Country)", "south korea"),
+        ("전화번호", "01043391407"),
     ]
+    # 플랜만 고칠 수 있습니다. 국가는 허브스팟이 IP 로 뽑는 값이고, 전화번호는 연락처 정보
+    # 카드의 다른 칸들과 함께 다뤄야 합니다 — 그래서 그 카드에는 연필이 안 붙습니다.
+    assert groups[0]["editable"] is True
+    assert groups[1]["editable"] is False
 
 
 def test_a_missing_property_says_so_instead_of_looking_empty():
@@ -140,13 +161,18 @@ def test_a_missing_property_says_so_instead_of_looking_empty():
     korean_portal = {"plan_c": "플랜", "user_seq_c": "유저 시퀀스", "phone": "Phone Number"}
     groups = hr.build_groups({"phone": "01000000000"}, hr.resolve_property_names(korean_portal))
 
-    plan_rows = {row["label"]: row for row in groups[0]["rows"]}
-    assert plan_rows["플랜 (Plan)"] == {"label": "플랜 (Plan)", "value": None, "found": False}
-    assert plan_rows["user seq"]["found"] is False
+    plan_rows = {row["key"]: row for row in groups[0]["rows"]}
+    assert plan_rows["plan"]["found"] is False
+    assert plan_rows["plan"]["value"] is None
+    assert plan_rows["user_seq"]["found"] is False
+    # 못 찾은 필드는 쓸 수도 없습니다 — 연필만 달아 두면 저장이 아무 일도 안 하고 성공한
+    # 척합니다.
+    assert plan_rows["plan"]["editable"] is False
+    assert groups[0]["editable"] is False
     # 찾은 것은 찾은 대로 섭니다 — 하나 못 찾았다고 카드가 통째로 죽지 않습니다.
-    contact_rows = {row["label"]: row for row in groups[1]["rows"]}
-    assert contact_rows["전화번호"] == {"label": "전화번호", "value": "01000000000", "found": True}
-    assert contact_rows["국가 (IP Country)"]["found"] is False
+    contact_rows = {row["key"]: row for row in groups[1]["rows"]}
+    assert contact_rows["phone"]["value"] == "01000000000"
+    assert contact_rows["ip_country"]["found"] is False
 
 
 def _raise(exc):
@@ -217,10 +243,85 @@ def test_the_happy_path_reads_the_contact_once_and_draws_both_cards(monkeypatch)
 
     assert result["error"] is None
     assert [group["title"] for group in result["groups"]] == ["플랜 정보", "연락처 정보"]
-    assert result["groups"][0]["rows"][0] == {"label": "플랜 (Plan)", "value": "Enterprise", "found": True}
+    assert result["groups"][0]["rows"][0] == {
+        "key": "plan", "label": "플랜 (Plan)", "value": "Enterprise",
+        "found": True, "editable": True,
+    }
     # 연결(association) 조회는 없습니다 — 이 값들은 Contact 에 있습니다.
     assert not any("associations" in url for url in calls)
     assert sum("objects/contacts" in url for url in calls) == 1
+
+
+def test_only_the_plan_fields_can_be_written(monkeypatch, live_writes):
+    """**쓰기의 울타리는 `RECORD_FIELDS` 다.**
+
+    화면이 보내는 것은 우리 키(`user_seq`)이고 허브스팟 속성 이름은 서버가 카탈로그에서 다시
+    찾습니다. 브라우저가 보낸 이름을 그대로 썼다면, 콘솔에 닿은 누구든 `email` 이나
+    `lifecyclestage` 를 덮어쓸 수 있었습니다. 읽기 전용 필드(국가·전화번호)도 안 나갑니다.
+    """
+    sent: dict = {}
+
+    def _fake(_client, method, url, **kwargs):
+        request = httpx.Request(method, url)
+        if url.endswith("/crm/v3/properties/contacts"):
+            body = {"results": [{"name": n, "label": label} for n, label in LABELS.items()]}
+            return httpx.Response(200, json=body, request=request)
+        sent["method"] = method
+        sent["properties"] = kwargs["json"]["properties"]
+        return httpx.Response(200, json={"id": "42"}, request=request)
+
+    monkeypatch.setattr(hr, "_sync_request_with_retries", _fake)
+
+    hr.update_record_fields("42", {
+        "user_seq": "184920",
+        "plan": "Pro",
+        "ip_country": "japan",        # 읽기 전용 — 허브스팟이 IP 로 뽑는 값입니다
+        "phone": "01000000000",       # 읽기 전용
+        "email": "attacker@example.com",   # 목록에 아예 없는 속성
+        "lifecyclestage": "customer",      # 〃
+    })
+
+    assert sent["method"] == "PATCH"
+    assert sent["properties"] == {"user_seq_c": "184920", "plan": "Pro"}
+
+
+def test_writing_nothing_writes_nothing(monkeypatch, live_writes):
+    """쓸 것이 하나도 없으면 요청을 아예 내지 않습니다 — 빈 PATCH 도 수정 시각을 바꿉니다."""
+    calls: list[str] = []
+
+    def _fake(_client, method, url, **_kw):
+        calls.append(f"{method} {url}")
+        request = httpx.Request(method, url)
+        if url.endswith("/crm/v3/properties/contacts"):
+            body = {"results": [{"name": n, "label": label} for n, label in LABELS.items()]}
+            return httpx.Response(200, json=body, request=request)
+        raise AssertionError("빈 저장인데 PATCH 가 나갔습니다")
+
+    monkeypatch.setattr(hr, "_sync_request_with_retries", _fake)
+
+    hr.update_record_fields("42", {"email": "nope@example.com"})
+
+    assert not any(call.startswith("PATCH") for call in calls)
+
+
+def test_an_empty_box_clears_the_value(monkeypatch, live_writes):
+    """빈 칸은 「모르겠다」가 아니라 「지워라」입니다 — 잘못 들어간 값을 되돌릴 길이
+    있어야 합니다."""
+    sent: dict = {}
+
+    def _fake(_client, method, url, **kwargs):
+        request = httpx.Request(method, url)
+        if url.endswith("/crm/v3/properties/contacts"):
+            body = {"results": [{"name": n, "label": label} for n, label in LABELS.items()]}
+            return httpx.Response(200, json=body, request=request)
+        sent.update(kwargs["json"]["properties"])
+        return httpx.Response(200, json={"id": "42"}, request=request)
+
+    monkeypatch.setattr(hr, "_sync_request_with_retries", _fake)
+
+    hr.update_record_fields("42", {"plan": "  "})
+
+    assert sent == {"plan": ""}
 
 
 def test_a_contact_without_a_hubspot_id_is_an_empty_panel_not_an_error():
