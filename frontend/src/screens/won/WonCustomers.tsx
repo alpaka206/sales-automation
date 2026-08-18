@@ -82,6 +82,10 @@ export function WonCustomers() {
   // 세 팀을 합친 — 아무 팀의 것도 아닌 — 숫자로 시작합니다.
   const [dept, setDept] = useState("GTM");
   const [view, setView] = useState<"" | "활성" | "갱신임박">("");
+  // 어느 지표를, 어느 통화로. **환산은 서버가 이미 두 통화로 해 두었습니다** — 화면이
+  // 다시 환산하면 같은 숫자가 화면마다 달라집니다.
+  const [metric, setMetric] = useState<"mrr" | "cash">("mrr");
+  const [unit, setUnit] = useState<"KRW" | "USD">("USD");
 
   const today = data?.today ?? new Date().toISOString().slice(0, 10);
   const rate = data?.fx_rate ?? 1380;
@@ -141,9 +145,12 @@ export function WonCustomers() {
   // 통화별로 내려줍니다. 여기서 행을 걸러 더하면 그 필터가 곧 정의가 됩니다 — 실제로 플랜
   // 상태로 거르고 있었고, 그래서 세팅중 고객이 통째로 빠졌습니다. 행에는 활성 계약 하나만
   // 실려 있다는 문제도 있었습니다(고객의 다른 계약이 돌고 있어도 안 잡힘).
-  const mrr = data.month_revenue?.[deptLabel] ?? {};
-  const mrrKrw = mrr.KRW ?? 0;
-  const mrrUsd = mrr.USD ?? 0;
+  const series = (metric === "mrr" ? data.mrr_months : data.cash_months)?.[deptLabel] ?? {};
+  const months = data.months ?? [];
+  const at = (month: string) => series[month]?.[unit] ?? 0;
+  const thisMonth = at(data.month);
+  // 막대 높이의 기준. 0 으로 나누지 않도록 최소 1 을 둡니다.
+  const peak = Math.max(1, ...months.map(at).map(Math.abs));
   const renewing = activeRows
     .filter((r) => {
       const left = daysUntil(r.active?.ends_on, today);
@@ -207,19 +214,50 @@ export function WonCustomers() {
             </div>
           </button>
 
-          <div className="kpi">
+          <div className="kpi kpi--wide">
             {/* GTM 이라고 적혀 있어야 합니다. 서버가 담당부서로 거르는데 화면이 말하지
                 않으면, 아래 목록을 더한 값과 안 맞을 때 어느 쪽이 틀린 건지 알 수 없습니다. */}
-            <div className="kpi-label"><G name="trend" /> 이번달 예상 MRR <span style={{ color: "var(--faint)" }}>({deptLabel} · VAT 포함 · USD)</span></div>
-            {/* **합계 통화가 USD 입니다.** 원화 계약을 오늘 고시가로 환산해 더합니다 —
-                이 팀이 보고하는 단위가 달러이고, 그 자리에서 다시 나누던 계산을 화면이
-                합니다. 계약마다의 금액은 아래 표에서 계약 통화 그대로 봅니다. */}
-            <div className="kpi-value money">{money(mrrUsd + (rate ? mrrKrw / rate : 0), "USD")}</div>
-            <div className="kpi-tail">
-              <div className="kpi-legend">
-                <i>KRW 계약 <b>{man(mrrKrw)}</b></i>
-                <i>USD 계약 <b>{money(mrrUsd, "USD")}</b></i>
+            <div className="kpi-head">
+              <div className="kpi-label">
+                <G name="trend" /> {metric === "mrr" ? "월별 MRR" : "월 매출"}
+                <span style={{ color: "var(--faint)" }}> ({deptLabel} · VAT 포함)</span>
               </div>
+              {/* 두 지표는 **다른 것을 셉니다**: MRR 은 플랜 기간에 균등 배분한 인식 매출,
+                  월 매출은 결제 회차가 잡힌 달에 통째로 얹는 현금흐름. 같은 계약이 두
+                  지표에서 다르게 보이는 것이 이 카드의 요점이라 나란히 둡니다. */}
+              <div className="seg">
+                <button type="button" className={metric === "mrr" ? "on" : ""}
+                        onClick={() => setMetric("mrr")}>예상 MRR</button>
+                <button type="button" className={metric === "cash" ? "on" : ""}
+                        onClick={() => setMetric("cash")}>월 매출</button>
+                <span className="seg-gap" />
+                <button type="button" className={unit === "KRW" ? "on" : ""}
+                        onClick={() => setUnit("KRW")}>KRW</button>
+                <button type="button" className={unit === "USD" ? "on" : ""}
+                        onClick={() => setUnit("USD")}>USD</button>
+              </div>
+            </div>
+            <div className="kpi-value money">{unit === "KRW" ? man(thisMonth) : money(thisMonth, "USD")}</div>
+            {/* 차트 라이브러리를 쓰지 않습니다 — 사각형 열두 개입니다. 음수(중도 해지
+                정산)는 아래로 자랍니다: 그 달 매출이 마이너스라는 것이 이 카드에서 가장
+                눈에 띄어야 하는 사건입니다. */}
+            <div className="mrr-bars" role="img"
+                 aria-label={`${metric === "mrr" ? "월별 예상 MRR" : "월별 매출"} ${months[0]} ~ ${months[months.length - 1]}`}>
+              {months.map((m) => {
+                const value = at(m);
+                const height = Math.round((Math.abs(value) / peak) * 46);
+                return (
+                  <div key={m} className={`mrr-bar${m === data.month ? " is-now" : ""}`}
+                       title={`${m} · ${unit === "KRW" ? man(value) : money(value, "USD")}`}>
+                    <span className="mrr-bar__track">
+                      <i className={value < 0 ? "neg" : ""} style={{ height: `${height}px` }} />
+                    </span>
+                    <em>{m.slice(5)}</em>
+                  </div>
+                );
+              })}
+            </div>
+            <div className="kpi-tail">
               {/* 손으로 적던 칸이었습니다. 이제 오늘 고시가를 가져오므로 적을 이유가
                   없고, 적게 두면 두 사람이 다른 환율로 다른 MRR 을 봅니다. 어느 날짜의
                   값인지 같이 보여 줍니다 — 그게 숫자를 설명하는 유일한 단서입니다. */}
@@ -241,7 +279,9 @@ export function WonCustomers() {
             </div>
           </div>
 
-          <button className={`kpi${view === "갱신임박" ? " is-on" : ""}`} type="button"
+        </div>
+
+        <button className={`kpi kpi--renew${view === "갱신임박" ? " is-on" : ""}`} type="button"
                   onClick={() => setView(view === "갱신임박" ? "" : "갱신임박")}>
             <div className="kpi-label"><G name="clock" /> 갱신 임박 고객</div>
             <div className="kpi-value"><span>{renewing.length}</span><span className="unit">곳</span></div>
@@ -255,8 +295,8 @@ export function WonCustomers() {
                 )) : <span className="mini-chip calm">만료 60일 이내 없음</span>}
               </div>
             </div>
-          </button>
-        </div>
+        </button>
+
 
         <div className="board">
           <Board title="크레딧 지급 예정" count={data.boards.credit.length}

@@ -20,6 +20,8 @@ routes the forms do, so the send guard, stage sync and safe-mode block stay in o
 from __future__ import annotations
 
 import asyncio
+from datetime import date
+from decimal import Decimal
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
@@ -850,6 +852,96 @@ def _won_client(client, today, *, full: bool, contact=None) -> dict:
     return payload
 
 
+def _recent_months(today: date, count: int) -> list[str]:
+    """이번 달로 끝나는 최근 ``count`` 개월, 오래된 것부터. ``YYYY-MM``."""
+    year, month = today.year, today.month
+    out: list[str] = []
+    for back in range(count - 1, -1, -1):
+        total = year * 12 + (month - 1) - back
+        out.append(f"{total // 12}-{total % 12 + 1:02d}")
+    return out
+
+
+def _both_currencies(amount: Decimal, code: str, rate: Decimal) -> dict[str, Decimal]:
+    """한 금액을 KRW·USD 두 통화로. 환율이 0 이면 환산하지 않습니다(0 나눗셈)."""
+    if code == "KRW":
+        return {"KRW": amount, "USD": amount / rate if rate else Decimal(0)}
+    return {"KRW": amount * rate, "USD": amount}
+
+
+def _contract_rate(contract, fallback: Decimal) -> Decimal:
+    """그 계약에 적용할 환율. **계약에 박힌 값이 먼저입니다** — 오늘 고시가로 과거를 다시
+    환산하면 마감한 달의 숫자가 오늘 환율에 따라 움직입니다."""
+    from ...common import won
+
+    return won._decimal(getattr(contract, "fx_rate", None)) or fallback
+
+
+def _mrr_cells(contract, months: list[str], fallback: Decimal) -> dict[str, dict[str, Decimal]]:
+    from ...common import won
+
+    code = (contract.currency or "KRW").upper()
+    rate = _contract_rate(contract, fallback)
+    cells: dict[str, dict[str, Decimal]] = {}
+    for month in months:
+        amount = won.revenue_in_month(contract, month)
+        if amount:
+            cells[month] = _both_currencies(amount, code, rate)
+    return cells
+
+
+def _cash_cells(contract, months: list[str], fallback: Decimal) -> dict[str, dict[str, Decimal]]:
+    """월 매출 — **결제 회차가 잡힌 달**에 그 회차 금액을 통째로. 현금흐름 관점입니다.
+
+    일시불이면 한 달에 전액, 할부면 회차마다 그 달에. MRR 처럼 기간에 나누지 않습니다 —
+    같은 계약이 두 지표에서 다르게 보이는 것이 이 화면의 요점입니다.
+
+    환율은 **그 회차에 박힌 값**이 먼저입니다(입금한 날의 고시가). 없으면 계약 환율, 그것도
+    없으면 오늘 고시가입니다.
+
+    날짜가 있는 회차는 아직 입금 전이어도 셉니다: 이 표는 「받은 돈」이 아니라 「그 달에
+    잡히는 매출」이고, 수금 여부는 상세 화면의 수금율이 따로 말합니다.
+    """
+    from ...common import won
+
+    code = (contract.currency or "KRW").upper()
+    wanted = set(months)
+    cells: dict[str, dict[str, Decimal]] = {}
+    for payment in getattr(contract, "payments", None) or ():
+        month = str(payment.paid_on or "")[:7]
+        amount = won._decimal(payment.amount)
+        if month not in wanted or not amount:
+            continue
+        rate = won._decimal(payment.fx_rate) or _contract_rate(contract, fallback)
+        cell = cells.setdefault(month, {"KRW": Decimal(0), "USD": Decimal(0)})
+        for currency, value in _both_currencies(amount, code, rate).items():
+            cell[currency] += value
+    return cells
+
+
+def _add_series(target: dict, buckets, months: list[str], cells: dict) -> None:
+    """계약 하나의 달별 금액을 담당부서 묶음에 더합니다. 「전체」도 여기서 같이 만듭니다 —
+    화면이 부서별 값을 다시 더하면 그 덧셈이 두 곳에 생깁니다."""
+    if not cells:
+        return
+    for bucket in buckets:
+        by_month = target.setdefault(bucket, {})
+        for month, amounts in cells.items():
+            cell = by_month.setdefault(month, {"KRW": Decimal(0), "USD": Decimal(0)})
+            for currency, value in amounts.items():
+                cell[currency] += value
+
+
+def _series_floats(series: dict) -> dict:
+    return {
+        bucket: {
+            month: {code: float(value) for code, value in amounts.items()}
+            for month, amounts in by_month.items()
+        }
+        for bucket, by_month in series.items()
+    }
+
+
 @router.get("/api/ui/won-customers")
 def ui_won_customers():
     """수주 고객 목록 + 요약 카드 + 액션 보드 + 수주 전환 대기 — 한 화면이라 한 번에."""
@@ -871,8 +963,13 @@ def ui_won_customers():
     except Exception:  # 환율을 못 가져와도 목록은 떠야 합니다
         fx = None
     month = today.strftime("%Y-%m")
-    # 담당부서 → 통화 → 이번 달 금액.
-    month_revenue: dict[str, dict[str, Decimal]] = {}
+    # 이번 달로 끝나는 **12개월**. MRR 은 한 달만 보면 늘었는지 줄었는지를 알 수 없어서,
+    # 카드가 옆으로 넓어진 자리에 이 구간을 펼칩니다.
+    months = _recent_months(today, 12)
+    # 담당부서 → 달 → 통화 → 금액. **두 통화 다 채웁니다** — 어느 쪽으로 볼지는 화면이
+    # 고르고, 환산은 여기서 계약마다 그 계약의 환율로 한 번만 합니다.
+    mrr_months: dict[str, dict[str, dict[str, Decimal]]] = {}
+    cash_months: dict[str, dict[str, dict[str, Decimal]]] = {}
     with SessionLocal() as session:
         clients = (
             session.query(Client)
@@ -911,11 +1008,12 @@ def ui_won_customers():
         # 한 숫자로 더한 카드는 아무 팀의 숫자도 아닙니다 — 화면 위의 담당부서 고르개가 어느
         # 묶음을 볼지 정하고, 그 고르개가 목록도 같이 거릅니다. 「전체」도 여기서 같이 만듭니다:
         # 화면이 부서별 값을 다시 더하면 그 덧셈이 두 곳에 생깁니다.
-        for client, row in zip(clients, rows):
-            for bucket in (won.department(client) or "미지정", won.ALL_DEPARTMENTS):
-                totals = month_revenue.setdefault(bucket, {})
-                for code, amount in row["month_revenue"].items():
-                    totals[code] = totals.get(code, Decimal(0)) + amount
+        today_rate = fx[0] if fx else Decimal(str(app_settings.MRR_FX_RATE))
+        for client in clients:
+            buckets = (won.department(client) or "미지정", won.ALL_DEPARTMENTS)
+            for contract in client.contracts:
+                _add_series(mrr_months, buckets, months, _mrr_cells(contract, months, today_rate))
+                _add_series(cash_months, buckets, months, _cash_cells(contract, months, today_rate))
         pending = (
             session.query(PendingWon)
             .filter(PendingWon.status == "pending")
@@ -979,16 +1077,25 @@ def ui_won_customers():
         # 왜 못 가져왔는지. 이유가 없으면 「설정값」이 막다른 길이 됩니다 —
         # 망 문제인지 응답이 바뀐 것인지 아무도 모르고, 매번 코드를 열어야 합니다.
         "fx_error": None if fx else fx_error(),
-        # 「이번달 예상 MRR」, 담당부서별. **결제일이 정합니다** — 계약 기간에 균등 배분하지 않습니다.
-        # 여기서 통화별로 합쳐 내려보내는 이유가 둘입니다: 화면이 행을 걸러 더하면 그
-        # 필터가 곧 정의가 되고(실제로 플랜 상태로 거르고 있었습니다 — 세팅중·사용 중단
-        # 고객의 이번 달 결제가 통째로 빠졌습니다), 고객의 **모든** 계약을 봐야 하는데
-        # 행에는 활성 계약 하나만 실려 있습니다.
+        # 「월별 MRR」과 「월 매출」, 담당부서별 · 달별 · 두 통화.
+        #
+        # **환산은 계약마다 그 계약의 환율로 합니다**(`client_contracts.fx_rate`). 오늘
+        # 고시가로 전부 환산하던 시절에는 같은 계약의 지난달 매출이 이번 달에 달라 보였고,
+        # 마감한 달의 숫자가 오늘 환율에 따라 움직였습니다. 계약에 환율이 없는 옛 행만
+        # 오늘 고시가로 떨어집니다.
+        #
+        # **두 지표는 다른 것을 셉니다.** `mrr` 은 플랜 기간에 균등 배분한 인식 매출이고,
+        # `cash` 는 결제 회차가 잡힌 달에 통째로 얹는 현금흐름입니다. 한 화면에 같이 두는
+        # 이유는 둘이 갈릴 때가 그 계약을 봐야 할 때이기 때문입니다.
+        #
+        # 화면이 행을 걸러 더하지 않게 여기서 다 계산합니다: 화면의 필터가 곧 정의가 되면
+        # 언젠가 정의가 둘이 됩니다(실제로 플랜 상태로 거르고 있었고, 그때 세팅중·사용
+        # 중단 고객이 통째로 빠졌습니다). 고객의 **모든** 계약을 봐야 하는데 행에는 활성
+        # 계약 하나만 실려 있는 것도 같은 이유입니다.
         "month": month,
-        "month_revenue": {
-            bucket: {code: float(total) for code, total in totals.items()}
-            for bucket, totals in month_revenue.items()
-        },
+        "months": months,
+        "mrr_months": _series_floats(mrr_months),
+        "cash_months": _series_floats(cash_months),
         "options": {
             "industries": list(won.INDUSTRIES),
             "plans": list(won.PLANS),

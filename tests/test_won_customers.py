@@ -819,9 +819,12 @@ def test_the_card_does_not_filter_by_plan_status():
     import pathlib
 
     screen = pathlib.Path("frontend/src/screens/won/WonCustomers.tsx").read_text(encoding="utf-8")
-    카드 = screen[screen.index("const mrr = ") : screen.index("const renewing")]
-    assert "data.month_revenue" in 카드
+    카드 = screen[screen.index("const series = ") : screen.index("const renewing")]
+    assert "data.mrr_months" in 카드 and "data.cash_months" in 카드
     assert "plan_status" not in 카드 and "activeRows" not in 카드
+    # 환산도 화면이 하지 않습니다 — 서버가 계약마다 그 계약의 환율로 두 통화를 다 채워
+    # 보냅니다. 화면이 다시 나누면 같은 숫자가 화면마다 달라집니다.
+    assert "fx_rate" not in 카드
 
 
 def test_the_card_counts_gtm_only():
@@ -856,8 +859,8 @@ def test_the_cards_say_which_department_they_counted():
     import pathlib
 
     screen = pathlib.Path("frontend/src/screens/won/WonCustomers.tsx").read_text(encoding="utf-8")
-    for anchor in ('<G name="person" /> 활성 고객', '<G name="trend" /> 이번달 예상 MRR'):
-        label = screen[screen.index(anchor):][:180]
+    for anchor in ('<G name="person" /> 활성 고객', '<G name="trend" /> {metric === "mrr"'):
+        label = screen[screen.index(anchor):][:240]
         assert "{deptLabel}" in label, anchor
     # 기본값은 GTM 입니다 — 이 화면을 매일 여는 쪽이고, 「전체」로 두면 세 팀을 합친
     # 숫자로 시작합니다.
@@ -1180,3 +1183,89 @@ def test_the_plan_ends_at_whichever_comes_first():
     assert won.plan_months(early) == won.plan_months(
         ClientContract(client_id=8, seq=1, plan_starts_on="2026-01-01", plan_ends_on="2026-12-31")
     )
+
+
+def test_the_series_converts_with_the_contracts_own_rate():
+    """환산은 **계약에 박힌 환율**로 합니다. 오늘 고시가로 과거를 다시 환산하면 마감한 달의
+    숫자가 오늘 환율에 따라 움직입니다 — 지난달 매출이 이번 달에 바뀝니다."""
+    from datetime import date
+
+    from src.api.routes.ui_api import _mrr_cells, _recent_months
+
+    contract = ClientContract(
+        client_id=1, seq=1, deal_type="MRR", currency="USD", vat_applicable=False,
+        amount_incl_vat=12_000, fx_rate=Decimal("1200"),
+        starts_on="2026-01-01", ends_on="2026-12-31",
+        plan_starts_on="2026-01-01", plan_ends_on="2026-12-31",
+    )
+    months = _recent_months(date(2026, 6, 15), 12)
+    assert months[-1] == "2026-06" and len(months) == 12
+
+    # 오늘 고시가가 1,400 이어도 이 계약은 1,200 을 씁니다.
+    cells = _mrr_cells(contract, months, Decimal("1400"))
+    assert cells["2026-06"]["USD"] == Decimal("1000")
+    assert cells["2026-06"]["KRW"] == Decimal("1200000"), "계약 환율 1,200 을 씁니다"
+
+
+def test_a_contract_with_no_rate_falls_back_to_todays():
+    """환율 칸이 생기기 전의 계약에는 박힌 값이 없습니다. 그때만 오늘 고시가입니다."""
+    from datetime import date
+
+    from src.api.routes.ui_api import _mrr_cells, _recent_months
+
+    옛계약 = ClientContract(
+        client_id=2, seq=1, deal_type="MRR", currency="USD", vat_applicable=False,
+        amount_incl_vat=12_000,
+        starts_on="2026-01-01", ends_on="2026-12-31",
+        plan_starts_on="2026-01-01", plan_ends_on="2026-12-31",
+    )
+    cells = _mrr_cells(옛계약, _recent_months(date(2026, 6, 15), 12), Decimal("1400"))
+    assert cells["2026-06"]["KRW"] == Decimal("1400000")
+
+
+def test_cash_lands_whole_in_the_month_of_each_instalment():
+    """월 매출은 **결제 회차가 잡힌 달**에 통째로 얹습니다 — MRR 처럼 기간에 나누지 않습니다.
+
+    같은 계약이 두 지표에서 다르게 보이는 것이 이 카드의 요점입니다: MRR 은 매달 100만씩
+    고르게, 월 매출은 결제한 달에 600만이 한 번에.
+    """
+    from datetime import date
+
+    from src.db.models import ContractPayment
+    from src.api.routes.ui_api import _cash_cells, _mrr_cells, _recent_months
+
+    contract = ClientContract(
+        client_id=3, seq=1, deal_type="MRR", currency="KRW", vat_applicable=True,
+        vat_included=True, amount_incl_vat=12_000_000,
+        starts_on="2026-01-01", ends_on="2026-12-31",
+        plan_starts_on="2026-01-01", plan_ends_on="2026-12-31",
+    )
+    contract.payments = [
+        ContractPayment(no=1, total=2, paid_on="2026-01-10", amount=Decimal("6000000"), done=True),
+        ContractPayment(no=2, total=2, paid_on="2026-07-10", amount=Decimal("6000000"), done=False),
+    ]
+    months = _recent_months(date(2026, 6, 15), 12)   # 2025-07 ~ 2026-06
+
+    cash = _cash_cells(contract, months, Decimal("1400"))
+    assert cash["2026-01"]["KRW"] == Decimal("6000000"), "1회차가 그 달에 통째로"
+    assert "2026-02" not in cash, "결제가 없는 달은 0 입니다"
+    assert "2026-07" not in cash, "이 창 밖의 회차는 안 셉니다"
+
+    mrr = _mrr_cells(contract, months, Decimal("1400"))
+    assert mrr["2026-01"]["KRW"] == Decimal("1000000"), "MRR 은 같은 달에도 한 달치뿐"
+
+
+def test_the_series_is_bucketed_per_department_and_a_total():
+    """「전체」도 서버가 같이 만듭니다 — 화면이 부서별 값을 다시 더하면 그 덧셈이 두 곳에
+    생기고, 언젠가 두 숫자가 갈라집니다."""
+    from src.api.routes.ui_api import _add_series
+
+    target: dict = {}
+    _add_series(target, ("GTM", won.ALL_DEPARTMENTS), ["2026-06"],
+                {"2026-06": {"KRW": Decimal("100"), "USD": Decimal("1")}})
+    _add_series(target, ("AX", won.ALL_DEPARTMENTS), ["2026-06"],
+                {"2026-06": {"KRW": Decimal("300"), "USD": Decimal("3")}})
+
+    assert target["GTM"]["2026-06"]["KRW"] == Decimal("100")
+    assert target["AX"]["2026-06"]["KRW"] == Decimal("300")
+    assert target[won.ALL_DEPARTMENTS]["2026-06"]["KRW"] == Decimal("400")

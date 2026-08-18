@@ -93,10 +93,19 @@ export type ListData = {
   fx_error: string | null;
   /** 이번 달(YYYY-MM). 카드가 「이번달」이라고 말하는 그 달입니다. */
   month: string;
-  /** 담당부서 → 통화 → 이번 달 예상 금액. **서버가 계약 기간으로 계산합니다.**
-   *  「전체」 묶음도 서버가 같이 만듭니다 — 화면이 부서별 값을 다시 더하면 그 덧셈이
-   *  두 곳에 생깁니다. */
-  month_revenue: Record<string, Record<string, number>>;
+  /** 이번 달로 끝나는 최근 12개월, 오래된 것부터. */
+  months: string[];
+  /** 담당부서 → 달 → 통화 → 금액.
+   *
+   *  `mrr_months` 는 **플랜 기간에 균등 배분한 인식 매출**이고, `cash_months` 는 결제 회차가
+   *  잡힌 달에 통째로 얹는 **현금흐름**입니다. 둘이 갈릴 때가 그 계약을 봐야 할 때라 한
+   *  화면에 같이 둡니다.
+   *
+   *  두 통화가 다 채워져 있습니다 — 환산은 서버가 **계약마다 그 계약의 환율로** 한 번만
+   *  합니다. 화면이 다시 환산하면 같은 숫자가 화면마다 달라집니다. 「전체」 묶음도 서버가
+   *  같이 만듭니다: 화면이 부서별 값을 다시 더하면 그 덧셈이 두 곳에 생깁니다. */
+  mrr_months: Record<string, Record<string, Record<string, number>>>;
+  cash_months: Record<string, Record<string, Record<string, number>>>;
   options: Options;
 };
 
