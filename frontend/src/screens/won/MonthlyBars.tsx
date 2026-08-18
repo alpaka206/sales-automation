@@ -32,11 +32,14 @@ function niceStep(span: number): number {
   return magnitude * 10;
 }
 
-export function MonthlyBars({ months, valueAt, format, now, negativeNote }: {
+export function MonthlyBars({ months, valueAt, format, formatTick, now, negativeNote }: {
   months: string[];
   valueAt: (month: string) => number;
-  /** 값을 사람이 읽는 글자로. 통화·단위는 부르는 쪽이 압니다. */
+  /** 값을 사람이 읽는 글자로 — 통화 기호까지. 툴팁과 직접 라벨이 씁니다. */
   format: (value: number) => string;
+  /** 축 눈금 — 통화 기호 없이. 기호는 큰 숫자와 고르개가 이미 말하고, 눈금마다 반복하면
+   *  격자보다 시끄러워집니다. 단위(만·억)는 축 전체가 하나여야 눈금끼리 비교됩니다. */
+  formatTick: (value: number) => string;
   /** 이번 달 — 눈금 글자만 굵어집니다. 색을 바꾸지 않는 이유: 색은 값의 성격을 말하지
    *  순서를 말하지 않습니다. 「이번 달」은 순서입니다. */
   now: string;
@@ -82,7 +85,7 @@ export function MonthlyBars({ months, valueAt, format, now, negativeNote }: {
             {/* 격자는 실선 1px, 배경에서 한 단계만 떨어진 회색. 점선은 데이터보다 시끄럽습니다. */}
             <line x1={PAD.left} x2={W - PAD.right} y1={y(tick)} y2={y(tick)}
                   className={tick === 0 ? "mbars__zero" : "mbars__grid"} />
-            <text x={PAD.left - 8} y={y(tick) + 3.5} className="mbars__tick">{format(tick)}</text>
+            <text x={PAD.left - 8} y={y(tick) + 3.5} className="mbars__tick">{formatTick(tick)}</text>
           </g>
         ))}
 

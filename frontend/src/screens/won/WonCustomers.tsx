@@ -6,8 +6,8 @@ import { ActionButton } from "../../ui/ActionButton";
 import { MonthlyBars } from "./MonthlyBars";
 import {
   type ListData, type Row,
-  STATUS_ORDER, daysUntil, dday, dueClass, dueText, fmt, initials, money, num,
-  planTone, statusTone,
+  STATUS_ORDER, amount, daysUntil, dday, dueClass, dueText, fmt, initials, money, num,
+  planTone, scaleFor, statusTone, tickLabel,
 } from "./shared";
 
 /** 수주 고객 목록 — 운영자가 준 HTML 목업을 그대로 옮긴 화면.
@@ -55,10 +55,6 @@ function G({ name, size = 14, stroke = "currentColor", width = 2 }: {
          dangerouslySetInnerHTML={{ __html: GLYPHS[name] }} />
   );
 }
-
-/** 목업의 `man()` — 범례는 만원 단위입니다. 카드의 큰 숫자가 이미 원 단위라, 그 아래
- *  통화별 내역까지 자릿수를 다 적으면 어느 쪽이 합계인지 한눈에 안 갈립니다. */
-const man = (value: number) => `₩${Math.round(value / 10000).toLocaleString("en-US")}만`;
 
 // "1,800 크레딧" 만 보이면 그게 마지막 회차인지 열두 번 중 두 번째인지 알 수 없습니다 —
 // 열어 봐야 판단이 되는 것을 목록에서 끝내려고 회차를 같이 적습니다. 금액 **뒤**입니다:
@@ -150,6 +146,9 @@ export function WonCustomers() {
   const months = data.months ?? [];
   const at = (month: string) => series[month]?.[unit] ?? 0;
   const thisMonth = at(data.month);
+  // **단위는 열두 달의 최댓값 하나로 정합니다.** 눈금마다 따로 접으면 50만 옆에 1,000만이
+  // 서고, 그러면 두 눈금을 비교하려고 자릿수를 세어야 합니다.
+  const scale = scaleFor(Math.max(...(data.months ?? []).map((m) => Math.abs(at(m))), 0), unit);
   const renewing = activeRows
     .filter((r) => {
       const left = daysUntil(r.active?.ends_on, today);
@@ -236,9 +235,10 @@ export function WonCustomers() {
                         onClick={() => setUnit("USD")}>USD</button>
               </div>
             </div>
-            <div className="kpi-value money">{unit === "KRW" ? man(thisMonth) : money(thisMonth, "USD")}</div>
+            <div className="kpi-value money">{amount(thisMonth, unit, scale)}</div>
             <MonthlyBars months={months} valueAt={at} now={data.month}
-                         format={(value) => (unit === "KRW" ? man(value) : money(value, "USD"))}
+                         format={(value) => amount(value, unit, scale)}
+                         formatTick={(value) => tickLabel(value, scale)}
                          negativeNote="중도 해지 정산" />
             <div className="kpi-tail">
               {/* 손으로 적던 칸이었습니다. 이제 오늘 고시가를 가져오므로 적을 이유가
@@ -397,7 +397,7 @@ export function WonCustomers() {
                 <th style={{ width: "7%" }}>수주 유형</th>
                 {/* MRR 은 계약 금액 ÷ 개월수, PoC 는 첫 결제가 이번 달일 때만 전액.
                     부서와 무관하게 모든 행에 나옵니다 — 위 카드만 GTM 으로 거릅니다. */}
-                <th style={{ width: "10%" }}>이번달 매출</th>
+                <th style={{ width: "10%" }} className="moneycell">이번달 매출</th>
                 <th style={{ width: "12%" }}>계약 기간</th>
                 <th style={{ width: "11%" }}>다음 크레딧 지급</th>
                 <th style={{ width: "11%" }}>다음 결제</th>
@@ -498,11 +498,11 @@ function RowView({ row, rows, index, today, onOpen }: {
         <td><DealTag deal={contract?.deal_type ?? null} /></td>
         {/* 통화는 안 섞습니다. 환산은 위 카드가 오늘 고시가로 한 번만 하고, 행마다 다시
             하면 같은 화면에 서로 다른 환율이 생깁니다. 두 통화를 다 쓰는 고객은 두 줄. */}
-        <td className="datecell">
+        <td className="datecell moneycell">
           {Object.keys(row.month_revenue).length === 0
             ? <span className="muted">—</span>
-            : Object.entries(row.month_revenue).map(([code, amount]) => (
-                <div key={code}>{money(amount, code)}</div>
+            : Object.entries(row.month_revenue).map(([code, value]) => (
+                <div key={code} title={money(value, code)}>{amount(value, code)}</div>
               ))}
         </td>
         <td className="datecell">

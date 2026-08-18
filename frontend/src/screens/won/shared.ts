@@ -124,6 +124,51 @@ export const money = (value: Money, currency = "KRW", decimals = 0): string =>
     minimumFractionDigits: decimals, maximumFractionDigits: decimals,
   });
 
+/** 금액을 읽히는 단위로. **단위는 한 번 정해 그 화면이 같이 씁니다.**
+ *
+ *  `man()` 한 줄이 하던 일이었는데(`₩{value/10000}만`), 세 군데서 어긋났습니다:
+ *  0 이 `₩0만` 으로, 음수가 `₩-940만` 으로(부호가 통화 기호 뒤), 그리고 같은 축에서 어떤
+ *  눈금은 50만·어떤 눈금은 1,000만이라 자릿수를 세어야 비교가 됐습니다.
+ *
+ *  기준을 **최댓값 하나**로 잡고 축 전체가 같은 단위를 쓰면 눈금이 서로 비교됩니다.
+ *  원화만 억·만으로 접습니다 — 달러에는 그런 단위가 없습니다. */
+export type Scale = { div: number; suffix: string };
+
+export const scaleFor = (peak: number, currency: string): Scale => {
+  if (currency !== "KRW") return { div: 1, suffix: "" };
+  const size = Math.abs(peak);
+  if (size >= 100_000_000) return { div: 100_000_000, suffix: "억" };
+  if (size >= 10_000) return { div: 10_000, suffix: "만" };
+  return { div: 1, suffix: "" };
+};
+
+/** 부호는 **통화 기호 앞**입니다. `₩-940만` 은 원화가 음수인 것처럼 읽힙니다. */
+const scaled = (value: number, scale: Scale): string => {
+  const size = Math.abs(value);
+  // **접을 수 없는 값은 접지 않습니다.** 5,000원을 `0.5만` 이라고 쓰면 접은 것이 아니라
+  // 읽기 어렵게 만든 것입니다 — 자릿수가 적어 원 단위가 이미 짧습니다.
+  if (size < scale.div) return size.toLocaleString("en-US");
+  const folded = size / scale.div;
+  // 한 자리 수만 소수 한 자리까지: `2.5억` 은 `250,000,000` 보다 읽히고 `3억` 보다 정확합니다.
+  const digits = folded < 10 ? 1 : 0;
+  return folded.toLocaleString("en-US", {
+    minimumFractionDigits: digits, maximumFractionDigits: digits,
+  }) + scale.suffix;
+};
+
+/** 통화 기호가 붙은 금액. 0 에는 단위를 안 붙입니다 — `₩0만` 은 금액이 아닙니다. */
+export const amount = (value: Money, currency = "KRW", scale?: Scale): string => {
+  const raw = n(value);
+  const symbol = currency === "USD" ? "$" : "₩";
+  if (!raw) return `${symbol}0`;
+  return `${raw < 0 ? "-" : ""}${symbol}${scaled(raw, scale ?? scaleFor(raw, currency))}`;
+};
+
+/** 축 눈금 — 통화 기호 없이. 기호는 큰 숫자와 고르개가 이미 말하고, 눈금마다 반복하면
+ *  격자보다 시끄러워집니다. */
+export const tickLabel = (value: number, scale: Scale): string =>
+  value === 0 ? "0" : `${value < 0 ? "-" : ""}${scaled(value, scale)}`;
+
 export const num = (value: number | null | undefined): string =>
   Number(value ?? 0).toLocaleString("en-US");
 
