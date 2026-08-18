@@ -281,22 +281,6 @@ export function WonCustomers() {
 
         </div>
 
-        <button className={`kpi kpi--renew${view === "갱신임박" ? " is-on" : ""}`} type="button"
-                  onClick={() => setView(view === "갱신임박" ? "" : "갱신임박")}>
-            <div className="kpi-label"><G name="clock" /> 갱신 임박 고객</div>
-            <div className="kpi-value"><span>{renewing.length}</span><span className="unit">곳</span></div>
-            <div className="kpi-tail">
-              <div className="kpi-chips">
-                {renewing.length ? renewing.slice(0, 3).map((row) => (
-                  <span key={row.client_id} className="mini-chip">
-                    {row.company.length > 9 ? `${row.company.slice(0, 9)}…` : row.company}{" "}
-                    {dday(row.active?.ends_on, today)}
-                  </span>
-                )) : <span className="mini-chip calm">만료 60일 이내 없음</span>}
-              </div>
-            </div>
-        </button>
-
 
         <div className="board">
           <Board title="크레딧 지급 예정" count={data.boards.credit.length}
@@ -328,6 +312,32 @@ export function WonCustomers() {
               </button>
             ))}
             {!data.boards.payment.length && <div className="board-empty">확인할 항목이 없습니다.</div>}
+          </Board>
+          {/* 보드 줄은 처음부터 3열이었고 한 칸이 비어 있었습니다. 갱신 임박은 크레딧·결제
+              예정과 같은 성격입니다 — 날짜가 다가와서 손이 가야 하는 목록. 같은 줄에 두면
+              「이번 주에 볼 것」이 한자리에 모입니다.
+
+              제목이 곧 필터입니다: 누르면 아래 목록이 갱신 임박만 남습니다. 예전 KPI 카드가
+              그 일을 했는데, 카드를 옮기면서 그 기능까지 사라지면 안 됩니다. 줄을 누르면
+              그 고객으로 들어갑니다 — 옆의 두 보드와 같습니다. */}
+          <Board title="갱신 임박 고객" count={renewing.length}
+                 icon={<G name="clock" size={15} stroke="var(--teal-600)" width={1.9} />}
+                 warn={renewing.some((r) => (daysUntil(r.active?.ends_on, today) ?? 99) <= 7)}
+                 on={view === "갱신임박"}
+                 onToggle={() => setView(view === "갱신임박" ? "" : "갱신임박")}>
+            {renewing.slice(0, 4).map((row) => (
+              <button key={row.client_id} className="board-row" type="button"
+                      onClick={() => open(row.client_id, "sec-contract")}>
+                <div style={{ minWidth: 0 }}>
+                  <div className="board-name">{row.company}</div>
+                  <div className="board-meta">{fmt(row.active?.ends_on)} 만료</div>
+                </div>
+                <span className={`board-when ${dueClass(row.active?.ends_on, today)}`}>
+                  {dday(row.active?.ends_on, today)}
+                </span>
+              </button>
+            ))}
+            {!renewing.length && <div className="board-empty">만료 60일 이내 없습니다.</div>}
           </Board>
         </div>
 
@@ -428,19 +438,29 @@ export function WonCustomers() {
   );
 }
 
-function Board({ title, count, risk, warn, icon, children }: {
+function Board({ title, count, risk, warn, icon, children, on, onToggle }: {
   title: string; count: number; risk?: boolean; warn?: boolean;
   icon: React.ReactNode; children: React.ReactNode;
+  /** 머리를 누르면 아래 목록을 그 묶음으로 거릅니다. 안 주면 머리는 그냥 제목입니다 —
+   *  크레딧·결제 예정은 거를 목록이 아니라서(그 둘은 회차이지 고객이 아닙니다). */
+  on?: boolean; onToggle?: () => void;
 }) {
+  const head = (
+    <>
+      {icon}
+      <span className="board-title">{title}</span>
+      {/* 목업의 규칙: 7일 안에 걸린 것이 하나라도 있으면 건수에 색이 붙습니다 —
+          숫자만으로는 "네 건" 이 급한 넷인지 다음 달 넷인지 구별되지 않습니다. */}
+      <span className={`board-count${risk && count ? " risk" : warn ? " warn" : ""}`}>{count}</span>
+    </>
+  );
   return (
-    <div className="board-card">
-      <div className="board-head">
-        {icon}
-        <span className="board-title">{title}</span>
-        {/* 목업의 규칙: 7일 안에 걸린 것이 하나라도 있으면 건수에 색이 붙습니다 —
-            숫자만으로는 "네 건" 이 급한 넷인지 다음 달 넷인지 구별되지 않습니다. */}
-        <span className={`board-count${risk && count ? " risk" : warn ? " warn" : ""}`}>{count}</span>
-      </div>
+    <div className={`board-card${on ? " is-on" : ""}`}>
+      {onToggle
+        ? <button type="button" className="board-head board-head--toggle"
+                  aria-pressed={on} onClick={onToggle}
+                  title={on ? "필터 해제" : "이 목록만 보기"}>{head}</button>
+        : <div className="board-head">{head}</div>}
       <div>{children}</div>
     </div>
   );

@@ -1269,3 +1269,24 @@ def test_the_series_is_bucketed_per_department_and_a_total():
     assert target["GTM"]["2026-06"]["KRW"] == Decimal("100")
     assert target["AX"]["2026-06"]["KRW"] == Decimal("300")
     assert target[won.ALL_DEPARTMENTS]["2026-06"]["KRW"] == Decimal("400")
+
+
+def test_the_renewal_list_sits_with_the_other_due_boards():
+    """갱신 임박은 크레딧·결제 예정과 같은 성격입니다 — 날짜가 다가와 손이 가야 하는 목록.
+
+    보드 줄은 처음부터 3열이었고 한 칸이 비어 있었습니다(won.css `.board`). KPI 줄에 있던
+    카드를 그 칸으로 옮기면 「이번 주에 볼 것」이 한자리에 모입니다(2026-08-18, 운영자 지시).
+
+    **제목이 곧 필터라는 것도 같이 옮겨야 합니다.** 예전 KPI 카드는 누르면 아래 목록이
+    갱신 임박만 남았습니다 — 카드를 옮기면서 그 기능이 사라지면 옮긴 것이 아니라 지운
+    것입니다.
+    """
+    import pathlib
+
+    screen = pathlib.Path("frontend/src/screens/won/WonCustomers.tsx").read_text(encoding="utf-8")
+    board = screen[screen.index('<div className="board">') : screen.index("{data.pending.length > 0")]
+    assert '<Board title="갱신 임박 고객"' in board, "보드 줄 안에 있어야 합니다"
+    assert 'setView(view === "갱신임박"' in board, "제목이 곧 필터입니다"
+    # KPI 줄에는 더 이상 없습니다.
+    kpis = screen[screen.index('<div className="kpi-row">') : screen.index('<div className="board">')]
+    assert "갱신 임박" not in kpis
