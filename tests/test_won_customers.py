@@ -1069,3 +1069,114 @@ def test_the_csv_supply_column_is_the_supply_price_not_the_written_amount(factor
     assert float(supply) == 10_000_000
     # 분당 단가는 **적힌 금액** 기준입니다 — 총액으로 적혔으면 총액에서 나옵니다.
     assert float(row[header.index("분당 단가")]) == 11_000
+
+
+def test_the_mrr_divisor_is_the_plan_period_not_the_contract_period():
+    """계약은 먼저 맺고 실제 사용은 늦게 시작하는 일이 흔합니다(운영자 확인).
+
+    계약 기간으로 나누면 아직 쓰지도 않는 달에 매출이 잡히고 정작 쓰는 달에는 덜 잡힙니다.
+    플랜 기간으로 나누면 **월별 합계가 총 계약금액과 정확히 맞습니다** — 그게 이 규칙을
+    고르는 이유입니다.
+    """
+    contract = ClientContract(
+        client_id=1, seq=1, deal_type="MRR", currency="KRW", vat_applicable=True,
+        vat_included=True, amount_incl_vat=12_000_000,
+        starts_on="2026-01-01", ends_on="2026-12-31",          # 계약 12개월
+        plan_starts_on="2026-03-01", plan_ends_on="2026-12-31",  # 플랜 10개월
+    )
+    assert won.plan_months(contract) == 10
+    assert won.monthly_revenue(contract) == Decimal("1200000")
+
+    months = [f"2026-{m:02d}" for m in range(1, 13)]
+    recognised = {m: won.revenue_in_month(contract, m) for m in months}
+    assert sum(recognised.values()) == Decimal("12000000"), "월별 합계가 총액과 맞아야 합니다"
+    # 인식은 플랜 시작월부터입니다 — 계약만 맺힌 1·2월은 0.
+    assert recognised["2026-01"] == 0 and recognised["2026-02"] == 0
+    assert recognised["2026-03"] == Decimal("1200000")
+
+
+def test_a_terminated_contract_stops_and_settles_in_that_month():
+    """중도 해지: 그 달에 `총액 − 예상 환불 − 이미 인식한 MRR` 을 한 번에 잡고 끝냅니다."""
+    contract = ClientContract(
+        client_id=2, seq=1, deal_type="MRR", currency="KRW", vat_applicable=True,
+        vat_included=True, amount_incl_vat=12_000_000, credits=120_000, credits_used=30_000,
+        starts_on="2026-01-01", ends_on="2026-12-31",
+        plan_starts_on="2026-01-01", plan_ends_on="2026-12-31",
+        terminated_on="2026-04-15",
+    )
+    # 남은 크레딧 90,000 / 120,000 = 0.75 → 환불 900만
+    assert won.expected_refund(contract) == Decimal("9000000")
+    # 1~3월에 100만씩 인식했으므로 정산 = 1,200 − 900 − 300 = 0
+    assert won.termination_adjustment(contract) == Decimal("0")
+
+    got = {m: won.revenue_in_month(contract, m) for m in [f"2026-{i:02d}" for i in range(1, 13)]}
+    assert got["2026-03"] == Decimal("1000000")
+    assert got["2026-04"] == Decimal("0"), "해지월은 정산액입니다"
+    assert got["2026-05"] == Decimal("0") and got["2026-12"] == Decimal("0")
+    # 실제로 번 돈(총액 − 환불)과 인식 합계가 같습니다.
+    assert sum(got.values()) == Decimal("12000000") - Decimal("9000000")
+
+
+def test_the_settlement_can_be_negative():
+    """이미 인식한 것이 실제로 번 돈보다 많으면 그 달 매출은 마이너스입니다.
+
+    지난달들을 소급해 고치는 대신 이번 달에 한 번에 털어냅니다 — 마감한 달의 숫자가 나중에
+    바뀌면 그 달 보고서가 전부 거짓이 됩니다.
+    """
+    contract = ClientContract(
+        client_id=3, seq=1, deal_type="MRR", currency="KRW", vat_applicable=True,
+        vat_included=True, amount_incl_vat=12_000_000, credits=120_000, credits_used=6_000,
+        starts_on="2026-01-01", ends_on="2026-12-31",
+        plan_starts_on="2026-01-01", plan_ends_on="2026-12-31",
+        terminated_on="2026-11-20",
+    )
+    # 거의 안 썼으니 환불이 큽니다: 114,000/120,000 = 0.95 → 1,140만
+    assert won.expected_refund(contract) == Decimal("11400000")
+    # 10개월치 1,000만을 이미 인식 → 1,200 − 1,140 − 1,000 = −940만
+    assert won.termination_adjustment(contract) == Decimal("-9400000")
+    assert won.revenue_in_month(contract, "2026-11") == Decimal("-9400000")
+
+
+def test_without_a_usage_number_we_stop_but_do_not_settle():
+    """크레딧 사용량이 비면 환불액을 모릅니다. 모르는 값으로 계산한 숫자를 매출이라고
+    적지 않습니다 — 인식만 멈춥니다."""
+    contract = ClientContract(
+        client_id=4, seq=1, deal_type="MRR", currency="KRW", vat_applicable=True,
+        vat_included=True, amount_incl_vat=12_000_000, credits=120_000,
+        starts_on="2026-01-01", ends_on="2026-12-31",
+        plan_starts_on="2026-01-01", plan_ends_on="2026-12-31",
+        terminated_on="2026-04-15",
+    )
+    assert contract.credits_used is None
+    assert won.expected_refund(contract) is None
+    assert won.termination_adjustment(contract) is None
+    # 해지월까지는 평소대로, 그 뒤로는 0.
+    assert won.revenue_in_month(contract, "2026-04") == Decimal("1000000")
+    assert won.revenue_in_month(contract, "2026-05") == Decimal("0")
+
+
+def test_using_more_credits_than_the_contract_refunds_nothing():
+    """음수 환불은 추가 청구인데, 그건 이 화면이 정할 일이 아닙니다."""
+    contract = ClientContract(
+        client_id=5, seq=1, deal_type="MRR", currency="KRW", vat_applicable=True,
+        vat_included=True, amount_incl_vat=1_000_000, credits=1_000, credits_used=1_500,
+        starts_on="2026-01-01", ends_on="2026-10-31",
+        plan_starts_on="2026-01-01", plan_ends_on="2026-10-31",
+        terminated_on="2026-05-10",
+    )
+    assert won.expected_refund(contract) == Decimal("0")
+
+
+def test_the_plan_ends_at_whichever_comes_first():
+    """플랜 만료일과 중도 해지일 중 **빠른 쪽**에서 끝납니다."""
+    early = ClientContract(client_id=6, seq=1, plan_starts_on="2026-01-01",
+                           plan_ends_on="2026-12-31", terminated_on="2026-06-30")
+    assert won.plan_period(early) == ("2026-01-01", "2026-06-30")
+    # 해지일이 만료일보다 뒤면 만료일이 이깁니다 — 이미 끝난 계약을 늘리지 않습니다.
+    late = ClientContract(client_id=7, seq=1, plan_starts_on="2026-01-01",
+                          plan_ends_on="2026-06-30", terminated_on="2026-12-31")
+    assert won.plan_period(late) == ("2026-01-01", "2026-06-30")
+    # 해지해도 **분모**는 플랜 만료일까지입니다 — 월 요금이 갑자기 오르면 안 됩니다.
+    assert won.plan_months(early) == won.plan_months(
+        ClientContract(client_id=8, seq=1, plan_starts_on="2026-01-01", plan_ends_on="2026-12-31")
+    )

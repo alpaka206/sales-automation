@@ -317,23 +317,107 @@ def _month_no(month: str | None) -> int | None:
         return None
 
 
+def plan_period(contract) -> tuple[str | None, str | None]:
+    """매출을 인식하는 기간 — **플랜 기준**입니다. `(시작, 끝)`.
+
+    계약 기간이 아니라 플랜 기간인 이유: 계약은 먼저 맺고 실제 사용은 늦게 시작하는 일이
+    흔합니다(운영자 확인). 계약 기간으로 나누면 아직 쓰지도 않는 달에 매출이 잡히고, 정작
+    쓰는 달에는 덜 잡힙니다.
+
+    끝은 **플랜 만료일과 중도 해지일 중 빠른 쪽**입니다. 해지한 계약이 남은 달의 MRR 을
+    계속 얹고 있던 것이 이 칸이 생긴 이유입니다.
+
+    플랜 날짜가 비면 계약 날짜로 떨어집니다 — 저장 경로가 둘을 같이 채우지만(`_fill_contract`),
+    그 전에 들어온 행과 워크북에서 온 행은 비어 있을 수 있습니다.
+    """
+    start = contract.plan_starts_on or contract.starts_on
+    end = contract.plan_ends_on or contract.ends_on
+    terminated = getattr(contract, "terminated_on", None)
+    if terminated and (not end or terminated < end):
+        end = terminated
+    return start, end
+
+
+def plan_months(contract) -> int:
+    """MRR 을 나누는 **분모**. 플랜 시작 ~ 플랜 만료(해지일 아님).
+
+    해지일로 자르지 않는 이유: 해지는 「월 요금이 얼마인가」를 바꾸는 사건이 아니라 「언제까지
+    받는가」를 바꾸는 사건입니다. 월 요금은 그대로 두고, 남은 몫은 해지월에 한 번에 정산합니다
+    (`termination_adjustment`). 분모까지 줄이면 해지한 계약의 월 요금이 갑자기 올라갑니다.
+    """
+    start = contract.plan_starts_on or contract.starts_on
+    end = contract.plan_ends_on or contract.ends_on
+    return months_between(start, end)
+
+
+def termination_month(contract) -> str | None:
+    """중도 해지가 잡히는 달. ``YYYY-MM``."""
+    terminated = getattr(contract, "terminated_on", None)
+    return str(terminated)[:7] if terminated else None
+
+
+def expected_refund(contract) -> Decimal | None:
+    """예상 환불 금액 = VAT 포함 총액 × (남은 크레딧 ÷ 계약 크레딧).
+
+    **크레딧 사용량이 비면 `None` 입니다 — 0 이 아닙니다.** 사용량을 아직 안 적은 계약에
+    0 을 넣으면 「하나도 안 썼으니 전액 환불」이 되어 해지월 매출이 통째로 음수가 됩니다.
+    모르는 값은 모른다고 두고, 그때는 정산을 하지 않습니다(`termination_adjustment`).
+
+    사용량이 계약 크레딧을 넘으면 환불은 0 입니다 — 음수 환불은 추가 청구인데, 그건 이
+    화면이 정할 일이 아닙니다.
+    """
+    used = getattr(contract, "credits_used", None)
+    credits = contract.credits
+    total = total_amount(contract)
+    if used is None or not credits or credits <= 0 or total is None:
+        return None
+    remaining = max(Decimal(credits) - Decimal(used), Decimal(0))
+    return total * (remaining / Decimal(credits))
+
+
+def termination_adjustment(contract) -> Decimal | None:
+    """해지월에 한 번에 잡히는 금액 = 총액 − 예상 환불 − **이미 인식한 MRR**.
+
+    실제로 번 돈(총액 − 환불)에서 그때까지 인식한 것을 뺀 나머지라, **음수일 수 있습니다** —
+    이미 인식한 것이 실제로 번 돈보다 많으면 그 달에 마이너스로 찍힙니다. 그게 맞습니다:
+    지난달들을 소급해 고치는 대신 이번 달에 한 번에 털어냅니다.
+
+    환불액을 모르면(`credits_used` 미입력) `None` 입니다. 그때는 정산 없이 인식만 멈춥니다 —
+    모르는 값으로 계산한 숫자를 매출이라고 적을 수는 없습니다.
+    """
+    refund = expected_refund(contract)
+    total = total_amount(contract)
+    if refund is None or total is None:
+        return None
+    start, term = _month_no(revenue_start_month(contract)), _month_no(termination_month(contract))
+    if start is None or term is None:
+        return None
+    # 해지월 **앞의** 달들만 셉니다 — 해지월 자체가 지금 계산하는 그 달입니다.
+    recognised_months = min(max(term - start, 0), plan_months(contract))
+    return total - refund - monthly_revenue(contract) * recognised_months
+
+
 def revenue_in_month(contract, month: str) -> Decimal:
     """그 달에 잡히는 금액 — 「이번달 예상 MRR」 카드가 더하는 값.
 
-    **계약 기간이 정합니다. 결제 방식은 안 봅니다.** 계약 금액 ÷ 계약 개월수를 인식 기간의
+    **플랜 기간이 정합니다. 결제 방식은 안 봅니다.** 계약 금액 ÷ 플랜 개월수를 인식 기간의
     매달에 똑같이 넣습니다 — 일시불이든 분납이든, 회차를 몇 개로 쪼갰든 같은 값입니다.
     한동안 결제일이 정하게 뒀는데(그 달에 잡힌 회차 금액의 합), 그러면 12개월 계약을 1월에
     일시불로 받은 고객이 2월부터 카드에서 사라집니다. 매달 서비스를 쓰고 있는데도요.
     상세 화면의 「월간 매출」(`monthly_revenue`)과 같은 값이 되고, 그게 맞습니다 —
     한 계약의 한 달치 매출이 화면마다 다르면 안 됩니다.
 
-    - **MRR**: 인식 시작월부터 계약 개월수만큼, 매달 총액 ÷ 개월수.
+    - **MRR**: 인식 시작월부터 **플랜 개월수**만큼, 매달 총액 ÷ 플랜 개월수.
+    - **중도 해지**: 해지월에 `총액 − 예상 환불 − 이미 인식한 MRR` 을 한 번에 잡고 그 뒤로는
+      0 입니다. 음수일 수 있습니다 — 이미 인식한 것이 실제로 번 돈보다 많으면 그렇습니다.
+      크레딧 사용량이 비어 환불액을 모르면 정산 없이 인식만 멈춥니다.
     - **PoC**: 그대로 **첫 회차**가 그 달이면 계약 전액, 아니면 0. 상세 화면이 「결제월에
       일시 인식」이라고 적어 두는 그것이고, 정기 매출이 아니라 균등 배분할 기간이 없습니다.
     - 기간이나 금액이 덜 적힌 계약은 0 입니다.
 
-    플랜 상태는 보지 않습니다. 세팅중이든 사용 중단이든 **이번 달이 계약 기간 안이면**
-    이번 달 돈입니다.
+    플랜 **상태**는 보지 않습니다. 세팅중이든 사용 중단이든 이번 달이 플랜 기간 안이면
+    이번 달 돈입니다 — 상태는 사람이 고치는 값이고 기간은 날짜라, 둘이 어긋날 때 날짜를
+    믿습니다.
     """
     if contract.deal_type == "PoC":
         payments = list(getattr(contract, "payments", None) or ())
@@ -347,28 +431,52 @@ def revenue_in_month(contract, month: str) -> Decimal:
     asked, start = _month_no(month), _month_no(revenue_start_month(contract))
     if asked is None or start is None:
         return Decimal(0)
-    if not 0 <= asked - start < months_between(contract.starts_on, contract.ends_on):
+    if asked < start:
+        return Decimal(0)
+
+    term = _month_no(termination_month(contract))
+    if term is not None and asked >= term:
+        if asked > term:
+            return Decimal(0)
+        # 해지월. 정산액을 모르면(사용량 미입력) 평소대로 한 달치만 잡고 멈춥니다 —
+        # 모르는 값으로 계산한 숫자를 매출이라고 적지 않습니다.
+        settled = termination_adjustment(contract)
+        if settled is not None:
+            return settled
+    if asked - start >= plan_months(contract):
         return Decimal(0)
     return monthly_revenue(contract)
 
 
 def monthly_revenue(contract) -> Decimal:
-    """월간 매출 — MRR 은 VAT 포함 총액 ÷ 개월수, PoC 는 0 (결제월에 전액 인식)."""
+    """월간 매출 — MRR 은 VAT 포함 총액 ÷ **플랜** 개월수, PoC 는 0 (결제월에 전액 인식).
+
+    계약 개월수가 아닌 이유는 `plan_period` 에 적혀 있습니다: 계약은 먼저 맺고 실제 사용은
+    늦게 시작하는 일이 흔합니다.
+    """
     if contract is None or contract.deal_type != "MRR":
         return Decimal(0)
     amount = total_amount(contract)
     if not amount:
         return Decimal(0)
-    return amount / months_between(contract.starts_on, contract.ends_on)
+    return amount / plan_months(contract)
 
 
 def revenue_start_month(contract) -> str | None:
-    """매출을 인식하기 시작하는 달. 지정이 없으면 계약 시작월."""
+    """매출을 인식하기 시작하는 달. 지정이 없으면 **플랜 시작월**.
+
+    계약 시작월이 아닌 이유는 `plan_period` 와 같습니다: 계약은 먼저 맺고 실제 사용은 늦게
+    시작하는 일이 흔합니다. 계약 시작월부터 인식하면 아직 쓰지도 않는 달에 매출이 잡히고,
+    분모는 플랜 개월수라 **월별 합계가 총액을 넘습니다** — 그때는 마지막 달이 잘려 나가서,
+    화면 어디에도 잘렸다는 표시가 없습니다.
+
+    ``revenue_from`` 은 그 위의 명시 지정이라 그대로 이깁니다.
+    """
     if contract is None:
         return None
     if contract.revenue_from:
         return contract.revenue_from
-    start = parse_date(contract.starts_on)
+    start = parse_date(plan_period(contract)[0])
     return f"{start.year}-{start.month:02d}" if start else None
 
 
