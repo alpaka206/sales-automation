@@ -454,18 +454,24 @@ def test_the_list_screen_keeps_the_mockups_thresholds_and_wording():
     assert 'id="fxInput"' not in screen
 
 
-def test_the_form_asks_for_the_amount_the_currency_uses():
-    """통화가 어느 칸을 받는지 정합니다 — 원화는 공급가, 그 외는 총액. 둘 다 받으면
-    분당 단가가 어느 쪽 기준인지 계약마다 달라집니다."""
+def test_the_form_asks_for_the_amount_the_vat_answer_uses():
+    """**부가세 해당 여부**가 어느 칸을 받는지 정합니다 — 통화가 아니라(이관 0075).
+
+    해당이면 포함·미포함 두 칸을 다 받고 한쪽을 적으면 다른 쪽이 따라옵니다: 계약서가 어느
+    쪽으로 적혀 있든 그 숫자를 그대로 넣을 수 있어야 합니다. 미해당이면 금액은 하나입니다.
+    """
     import pathlib
 
     form = pathlib.Path("frontend/src/screens/won/WonContractForm.tsx").read_text(encoding="utf-8")
 
-    assert '<Field label="공급가 (VAT 제외)" required>' in form
-    # 원화면 총액 칸은 읽기 전용 계산값, USD 면 총액이 입력이고 공급가 칸이 없습니다.
-    assert '{totalInclVat === null ? "공급가 입력 시 계산" : num(totalInclVat)}' in form
-    assert '<label className="form-label">총 계약금액 (VAT 포함) <span className="req">*</span></label>' in form
-    # 저장을 막는 조건은 통화가 정한 금액과 크레딧, 둘뿐입니다.
+    assert '<Field label="VAT 해당 여부">' in form
+    assert '<Field label="총 계약금액 (VAT 포함)" required>' in form
+    assert '<Field label="공급가 (VAT 미포함)" required>' in form
+    # 한쪽을 적으면 다른 쪽이 10% 로 따라옵니다.
+    assert 'setAmount("incl"' in form and 'setAmount("excl"' in form
+    # 미해당은 한 칸이고, 「VAT 포함」이라는 말을 쓰지 않습니다.
+    assert '<label className="form-label">계약금액 <span className="req">*</span></label>' in form
+    # 저장을 막는 조건은 금액과 크레딧, 둘뿐입니다.
     guard = form[form.index("const [save, saving]") : form.index("const body: Record")]
     assert "billing" in guard and "draft.credits" in guard
     assert "unit_price" not in guard
@@ -612,12 +618,63 @@ def test_saving_only_the_notes_never_erases_the_money(factory):
     assert won.total_amount(옛계약) == Decimal("1722600")
     assert won.unit_price(옛계약) == Decimal("1450")
 
-    # 쓰는 쪽에 값이 있으면 반대쪽은 지웁니다 — 둘이 갈라지면 안 되므로.
+    # **두 칸이 갈라진 채로 저장되지 않습니다.** 예전에는 반대쪽을 비웠고, 지금은 고른
+    # 기준에서 다시 계산합니다(이관 0075: VAT 해당 계약은 포함·미포함을 둘 다 보여 줍니다).
+    # 어느 쪽이든 결론은 같습니다 — 분당 단가와 총액이 서로 다른 금액에서 나오는 상태가
+    # 아예 없습니다. 여기서 9,999,999 는 손으로 한쪽만 고친 요청을 흉내 낸 값입니다.
     정상 = ClientContract(client_id=2, seq=1, currency="KRW",
                          amount_excl_vat=1_566_000, amount_incl_vat=9_999_999)
     _fill_contract(정상, {"note": "x"})
-    assert 정상.amount_incl_vat is None
     assert 정상.amount_excl_vat == 1_566_000
+    assert 정상.amount_incl_vat == Decimal("1722600.0"), "기준(공급가)에서 다시 계산합니다"
+
+
+def test_a_contract_with_no_vat_keeps_one_amount(factory):
+    """부가세가 없는 계약은 금액이 하나입니다 — 그 하나는 `amount_incl_vat` 에 삽니다.
+
+    「포함」이라는 이름이 남아 있는 것은 열 이름을 바꾸는 이관이 살아 있는 금액 열을
+    건드리는 일이기 때문입니다. 부가세가 없는 계약에서 그 이름은 그냥 「그 금액」입니다.
+    """
+    from src.api.routes.won_customers import _fill_contract
+
+    해외 = ClientContract(client_id=3, seq=1, currency="USD", credits=60_000)
+    _fill_contract(해외, {"vat_applicable": "", "amount_incl_vat": "20000"})
+
+    assert 해외.amount_incl_vat == Decimal("20000")
+    assert 해외.amount_excl_vat is None, "부가세가 없으면 공급가 칸은 비어 있습니다"
+    assert won.total_amount(해외) == Decimal("20000")
+    assert won.supply_amount(해외) is None
+
+
+def test_vat_applicability_is_the_customers_not_the_currencys(factory):
+    """국내 법인이면 USD 계약이어도 부가세가 붙고, 해외 고객이면 원화여도 안 붙습니다.
+
+    한동안 통화가 이 판단을 대신했습니다(`won.is_krw`). 대부분 맞지만 늘 맞지는 않아서
+    계약마다 고르는 칸이 되었습니다(이관 0075).
+    """
+    from src.api.routes.won_customers import _fill_contract
+
+    국내달러 = ClientContract(client_id=4, seq=1, currency="USD", credits=60_000)
+    _fill_contract(국내달러, {"vat_applicable": "1", "vat_included": "", "amount_excl_vat": "10000"})
+    assert won.vat_applicable(국내달러) is True
+    assert 국내달러.amount_incl_vat == Decimal("11000"), "USD 여도 10% 가 붙습니다"
+
+    해외원화 = ClientContract(client_id=5, seq=1, currency="KRW", credits=60_000)
+    _fill_contract(해외원화, {"vat_applicable": "", "amount_incl_vat": "1000000"})
+    assert won.vat_applicable(해외원화) is False
+    assert won.total_amount(해외원화) == Decimal("1000000"), "원화여도 10% 를 안 더합니다"
+
+
+def test_a_contract_written_before_the_column_existed_keeps_its_old_meaning(factory):
+    """`vat_applicable` 이 비어 있으면 옛 규칙으로 떨어집니다 — 원화면 해당.
+
+    이 칸이 생기기 전의 계약 수백 건에는 고른 값이 없습니다. 없는 것을 「미해당」으로 읽으면
+    그 원화 계약들의 총액이 한꺼번에 10% 내려앉습니다.
+    """
+    옛계약 = ClientContract(client_id=6, seq=1, currency="KRW", amount_excl_vat=1_000_000)
+    assert 옛계약.vat_applicable is None
+    assert won.vat_applicable(옛계약) is True
+    assert won.total_amount(옛계약) == Decimal("1100000")
 
 
 def test_the_registry_append_never_writes_into_a_formula_column():
@@ -913,16 +970,43 @@ def test_the_mrr_is_always_the_vat_inclusive_total():
     assert won.monthly_revenue(written_as_total) == won.monthly_revenue(written_as_supply)
 
 
-def test_the_form_lets_the_operator_pick_the_vat_basis():
-    """고르개가 없으면 총액으로 적힌 계약을 넣을 방법이 공급가 칸뿐입니다."""
+def test_the_form_lets_the_operator_pick_the_supply_basis():
+    """분당 단가가 어느 금액에서 나오는지는 사람이 고릅니다.
+
+    계약서가 총액으로 적힌 건과 공급가로 적힌 건이 둘 다 있어서, 고르지 않으면 같은 화면의
+    계약마다 단가가 10% 씩 달라집니다.
+    """
     import pathlib
 
     form = pathlib.Path("frontend/src/screens/won/WonContractForm.tsx").read_text(encoding="utf-8")
-    assert '<Field label="계약 금액 기준">' in form
-    assert 'VAT 제외 (공급가로 적힘)' in form
-    assert 'VAT 포함 (총액으로 적힘)' in form
-    # 고른 기준이 어느 칸을 그릴지 정합니다 — 둘 다 그리면 어느 쪽이 기준인지 모릅니다.
-    assert "const inclusive = krw && draft?.vat_included ===" in form
+    assert '<Field label="공급가 (분당단가 기준)">' in form
+    assert "VAT 미포함 금액으로" in form
+    assert "VAT 포함 금액으로" in form
+    # 고를 것이 있는지는 **부가세 해당 여부**가 정합니다 — 통화가 아니라.
+    assert "const inclusive = vatApplicable && draft?.vat_included ===" in form
+
+
+def test_the_form_asks_in_the_order_the_answers_depend_on():
+    """부가세 해당 여부 → 통화 → 환율 → 금액 → 공급가.
+
+    앞의 것이 뒤의 것을 정합니다: 해당 여부가 금액 칸을 한 개로 할지 두 개로 할지 정하고,
+    통화가 환율을 물어볼지 말지 정합니다. 순서가 뒤집히면 이미 적은 금액이 뒤늦게 바뀐
+    해당 여부 때문에 다른 뜻이 됩니다.
+    """
+    import pathlib
+
+    form = pathlib.Path("frontend/src/screens/won/WonContractForm.tsx").read_text(encoding="utf-8")
+    money = form[form.index('<div className="form-sec">금액</div>'):]
+    order = [
+        money.index('label="VAT 해당 여부"'),
+        money.index('label="통화"'),
+        money.index('label="환율 (선택)"'),
+        money.index('label="총 계약금액 (VAT 포함)"'),
+        money.index('label="공급가 (분당단가 기준)"'),
+    ]
+    assert order == sorted(order), "금액 구역의 칸 순서가 스펙과 다릅니다"
+    # 원화는 환산할 것이 없어 환율을 묻지 않습니다.
+    assert 'draft.currency !== "KRW" && (' in money
 
 
 

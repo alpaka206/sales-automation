@@ -20,9 +20,18 @@ export type Contract = {
   starts_on: string | null; ends_on: string | null; months: number;
   doc_types: string[]; credits: number | null; currency: string;
   amount_incl_vat: Money; amount_excl_vat: Money;
-  /** 원화 계약이 **VAT 포함 금액으로 적혔는가.** 그 외 통화에서는 늘 false 입니다 —
-   *  부가세가 없어 총액이 곧 대금이라 고를 것이 없습니다. */
+  /** **분당 단가의 기준이 VAT 포함 금액인가.** 화면의 「공급가 선택」이 고른 값입니다.
+   *  부가세가 없는 계약에는 고를 것이 없어 늘 false 입니다. */
   vat_included: boolean;
+  /** 부가세가 붙는 계약인가. **통화가 아니라 고객이 정합니다**(국내 법인이면 해당).
+   *  이 값이 폼의 금액 칸을 한 개로 할지 두 개로 할지 정합니다. */
+  vat_applicable: boolean;
+  /** 그 계약에 적용할 환율과 기준 날짜. 비어 있으면 저장할 때 계약일 고시가로 채웁니다. */
+  fx_rate: Money; fx_on: string | null;
+  /** 중도 해지일 — 플랜은 만료일과 이 날짜 중 빠른 쪽에서 끝납니다. */
+  terminated_on: string | null;
+  /** 크레딧 사용량. 수동 입력이라 비어 있는 것이 정상입니다. */
+  credits_used: number | null;
   /** 계산값 — 금액 ÷ (계약 크레딧 ÷ 60). 통화는 계약 통화입니다. */
   unit_price: Money;
   payment_method: string | null; payment_type: string | null; installments: number | null;

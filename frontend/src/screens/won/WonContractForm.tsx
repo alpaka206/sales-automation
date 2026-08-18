@@ -5,7 +5,7 @@ import { getJSON, postForm } from "../../lib/api";
 import { SubmitButton, useAction } from "../../ui/ActionButton";
 import { Modal } from "../../ui/Modal";
 import { Field } from "./WonNew";
-import { type Contract, type ListData, type Row, addMonths, n, num } from "./shared";
+import { type Contract, type ListData, type Row, addMonths, n } from "./shared";
 
 /** 계약 정보 입력 — 추가와 수정이 같은 폼입니다.
  *
@@ -26,8 +26,13 @@ import { type Contract, type ListData, type Row, addMonths, n, num } from "./sha
  */
 const empty = {
   deal_type: "MRR", starts_on: "", ends_on: "", ticket_id: "",
-  // 원화 계약이 VAT 포함으로 적혔는가. 폼은 문자열만 나르므로 "1" / "" 입니다.
+  // 부가세가 붙는 계약인가(국내 법인이면 해당). **통화가 아니라 고객이 정합니다** — 이 값이
+  // 금액 칸을 한 개 그릴지 두 개 그릴지 정합니다. 폼은 문자열만 나르므로 "1" / "" 입니다.
+  vat_applicable: "1",
+  // 분당 단가의 기준이 VAT 포함 금액인가 — 아래 「공급가」가 고르는 값입니다.
   currency: "KRW", vat_included: "", amount_incl_vat: "", amount_excl_vat: "", credits: "",
+  // 비워 두면 저장할 때 계약일 고시가로 채웁니다(`_fill_contract_fx`).
+  fx_rate: "", terminated_on: "", credits_used: "",
   payment_method: "계좌이체", payment_type: "일시불", installments: "1",
   first_payment_on: "", billing_email: "", note: "",
   plan: "Business Tier 1", plan_name: "", perso_email: "",
@@ -132,17 +137,28 @@ export function WonContractForm() {
   // (won.total_amount / won.unit_price) — 두 곳에 식이 있는 게 아니라, 화면은 사람이
   // 숫자를 넣는 동안 결과를 보여 줄 뿐입니다.
   const krw = (draft?.currency ?? "KRW") === "KRW";
+  // 부가세가 붙는 계약인가. **통화가 아니라 고객이 정합니다**(이관 0075).
+  const vatApplicable = draft?.vat_applicable === "1";
   /** 원화 계약이 **총액으로 적혔는가.** 그 외 통화는 부가세가 없어 늘 총액입니다. */
-  const inclusive = krw && draft?.vat_included === "1";
+  const inclusive = vatApplicable && draft?.vat_included === "1";
+
+  /** 한쪽을 적으면 다른 쪽이 10% 로 따라옵니다. 반올림은 소수 둘째 자리까지 — 원화는
+   *  정수로 떨어지고, 안 떨어지는 통화는 서버가 기준에서 다시 계산하므로 여기 값은
+   *  운영자가 눈으로 확인하는 용도입니다. */
+  function setAmount(which: "incl" | "excl", value: string) {
+    const round2 = (n: number) => String(Math.round(n * 100) / 100);
+    const typed = Number(value);
+    const partner = value.trim() === "" || !Number.isFinite(typed)
+      ? ""
+      : which === "incl" ? round2(typed / 1.1) : round2(typed * 1.1);
+    setDraft((d) => (d ? { ...d, [which === "incl" ? "amount_incl_vat" : "amount_excl_vat"]: value,
+                           [which === "incl" ? "amount_excl_vat" : "amount_incl_vat"]: partner } : d));
+  }
 
   /** 분당 단가가 기준으로 삼는 금액 — 계약서에 적힌 그 금액입니다. VAT 제외로 적힌 원화
    *  계약만 공급가 칸을 쓰고, 나머지는 총액 칸입니다. 서버의 `won.billing_amount` 와 같은
    *  갈래이고, 저장할 때 서버가 다시 계산합니다. */
-  const billing = draft ? n(krw && !inclusive ? draft.amount_excl_vat : draft.amount_incl_vat) : 0;
-
-  /** VAT 제외로 적힌 원화 계약의 총액 = 공급가 + 10%. 입력 칸이 아니라 계산입니다.
-   *  총액으로 적힌 계약은 받은 값이 곧 총액이라 더할 것이 없습니다. */
-  const totalInclVat = krw && !inclusive && billing ? Math.round(billing * 1.1) : null;
+  const billing = draft ? n(vatApplicable && !inclusive ? draft.amount_excl_vat : draft.amount_incl_vat) : 0;
 
   /** 분당 단가 = 기준 금액 ÷ (계약 크레딧 ÷ 60). 소수점은 남깁니다 — 반올림한 단가는
    *  되짚어 곱했을 때 금액이 안 맞습니다. */
@@ -279,6 +295,12 @@ export function WonContractForm() {
             <Field label="계약 종료일" required>
               <input className="inp" type="date" value={draft.ends_on} onChange={(e) => set("ends_on", e.target.value)} />
             </Field>
+            {/* **중도 해지일.** 플랜은 만료일과 이 날짜 중 빠른 쪽에서 끝납니다. 비어 있는
+                것이 보통이고, 적히는 순간 그 계약의 매출 인식이 거기서 멈춥니다. */}
+            <Field label="중도 해지일">
+              <input className="inp" type="date" value={draft.terminated_on}
+                     onChange={(e) => set("terminated_on", e.target.value)} />
+            </Field>
             {/* 목업대로 읽기 전용입니다. 티켓은 수주 전환 대기에서 따라오는 값이라, 여기서
                 손으로 고치면 어느 문의에서 온 계약인지가 조용히 틀어집니다. */}
             <Field label="Ticket ID">
@@ -292,6 +314,14 @@ export function WonContractForm() {
             <Field label="계약 크레딧" required>
               <input className="inp" type="number" value={draft.credits}
                      onChange={(e) => set("credits", e.target.value)} placeholder="예: 64800" />
+            </Field>
+            {/* **수동 입력입니다.** 제품 쪽에서 사용량을 가져오는 경로가 아직 없습니다. 비어
+                있으면 예상 환불 금액을 계산하지 않습니다 — 없는 값을 0 으로 두면 「하나도 안
+                썼으니 전액 환불」이 되어 해지월 매출이 통째로 음수가 됩니다. */}
+            <Field label="크레딧 사용량">
+              <input className="inp" type="number" value={draft.credits_used}
+                     onChange={(e) => set("credits_used", e.target.value)}
+                     placeholder="중도 해지 시 환불 계산에 씁니다" />
             </Field>
             <div style={{ gridColumn: "span 3" }}>
               <label className="form-label">계약서 유형 <span style={{ color: "var(--faint)" }}>(복수 선택)</span></label>
@@ -309,55 +339,69 @@ export function WonContractForm() {
           </div>
 
           <div className="form-sec">금액</div>
+          {/* 순서가 뜻을 갖습니다(운영자 지시): **부가세 해당 여부 → 통화 → 환율 → 금액 →
+              공급가.** 앞의 것이 뒤의 것을 정하기 때문입니다 — 해당 여부가 금액 칸을 한 개로
+              할지 두 개로 할지 정하고, 통화가 환율을 물어볼지 말지 정합니다. */}
           <div className="form-grid3">
+            <Field label="VAT 해당 여부">
+              <select className="inp" value={draft.vat_applicable}
+                      onChange={(e) => set("vat_applicable", e.target.value)}>
+                <option value="1">VAT 해당 (국내 법인 고객)</option>
+                <option value="">VAT 미해당 (그 외 고객)</option>
+              </select>
+            </Field>
             <Field label="통화">
               <Sel value={draft.currency} onChange={(v) => set("currency", v)} options={options.currencies} />
             </Field>
+            {/* 원화 계약은 환산할 것이 없어 묻지 않습니다. 비워 두면 저장할 때 계약일
+                고시가를 조회해 계약 행에 박아 둡니다 — 오늘 고시가로 환산하면 같은 계약의
+                지난달 매출이 이번 달에 달라 보입니다. */}
+            {draft.currency !== "KRW" && (
+              <Field label="환율 (선택)">
+                <input className="inp" type="number" value={draft.fx_rate}
+                       onChange={(e) => set("fx_rate", e.target.value)}
+                       placeholder="비우면 계약일 고시가" />
+              </Field>
+            )}
             {/* **어느 칸을 받는지는 통화와 「금액 기준」이 함께 정합니다.** 국내 계약서는
                 공급가로 적히고 부가세가 따로 붙는 것이 흔하지만, 총액으로 적히는 계약도
                 있습니다 — 그것을 공급가 칸에 넣으면 분당 단가가 10% 낮게 나오고 화면
                 어디에도 그게 보이지 않습니다. 해외 계약에는 부가세가 없어 총액이 곧
                 대금이라 고를 것이 없습니다. 어느 쪽이든 채우는 칸은 하나입니다: 둘 다
                 받으면 분당 단가가 어느 쪽 기준인지 계약마다 달라집니다. */}
-            {krw ? (
+            {/* **해당이면 칸이 둘입니다.** 한쪽을 적으면 다른 쪽이 10% 로 따라옵니다 —
+                계약서가 어느 쪽으로 적혀 있든 그 숫자를 그대로 넣을 수 있어야 합니다. 둘 다
+                고칠 수 있게 두되, 저장할 때 서버가 **공급가로 고른 쪽에서 다시 계산**하므로
+                두 값이 어긋난 채 저장되지는 않습니다. */}
+            {vatApplicable ? (
               <>
-                <Field label="계약 금액 기준">
+                <Field label="총 계약금액 (VAT 포함)" required>
+                  <input className="inp" type="number" value={draft.amount_incl_vat}
+                         onChange={(e) => setAmount("incl", e.target.value)}
+                         placeholder="예: 11000000" />
+                </Field>
+                <Field label="공급가 (VAT 미포함)" required>
+                  <input className="inp" type="number" value={draft.amount_excl_vat}
+                         onChange={(e) => setAmount("excl", e.target.value)}
+                         placeholder="예: 10000000" />
+                </Field>
+                {/* 분당 단가가 어느 금액에서 나오는지. 계약서가 총액으로 적힌 건과 공급가로
+                    적힌 건이 둘 다 있어서, 고르지 않으면 계약마다 단가가 10% 씩 달라집니다. */}
+                <Field label="공급가 (분당단가 기준)">
                   <select className="inp" value={draft.vat_included}
                           onChange={(e) => set("vat_included", e.target.value)}>
-                    <option value="">VAT 제외 (공급가로 적힘)</option>
-                    <option value="1">VAT 포함 (총액으로 적힘)</option>
+                    <option value="">VAT 미포함 금액으로</option>
+                    <option value="1">VAT 포함 금액으로</option>
                   </select>
                 </Field>
-                {inclusive ? (
-                  <Field label="총 계약금액 (VAT 포함)" required>
-                    <input className="inp" type="number" value={draft.amount_incl_vat}
-                           onChange={(e) => set("amount_incl_vat", e.target.value)}
-                           placeholder="예: 11000000" />
-                  </Field>
-                ) : (
-                  <>
-                    <Field label="공급가 (VAT 제외)" required>
-                      <input className="inp" type="number" value={draft.amount_excl_vat}
-                             onChange={(e) => set("amount_excl_vat", e.target.value)}
-                             placeholder="예: 10000000" />
-                    </Field>
-                    <Field label="총 계약금액 (VAT 포함)">
-                      <div className="inp" aria-readonly="true"
-                           style={{ background: "var(--bg-soft)", fontVariantNumeric: "tabular-nums",
-                                    color: totalInclVat === null ? "var(--faint)" : "var(--ink)" }}>
-                        {totalInclVat === null ? "공급가 입력 시 계산" : num(totalInclVat)}
-                      </div>
-                    </Field>
-                  </>
-                )}
               </>
             ) : (
               <div style={{ gridColumn: "span 2" }}>
-                <label className="form-label">총 계약금액 (VAT 포함) <span className="req">*</span></label>
+                <label className="form-label">계약금액 <span className="req">*</span></label>
                 <input className="inp" type="number" value={draft.amount_incl_vat}
                        onChange={(e) => set("amount_incl_vat", e.target.value)} placeholder="예: 20000" />
                 <div style={{ fontSize: 11.5, color: "var(--faint)", marginTop: 4 }}>
-                  {draft.currency} 계약은 총액만 받습니다 — 공급가 칸이 없습니다.
+                  VAT 미해당 — 금액은 하나이고, 그 금액이 분당단가 기준입니다.
                 </div>
               </div>
             )}
@@ -500,6 +544,7 @@ function carryOver(prev: Contract) {
     // 통화를 물려받으면 「VAT 포함/제외」도 물려받아야 합니다 — 같은 고객의 다음 차수
     // 계약서는 같은 방식으로 적힙니다. 통화만 따라오고 기준은 초기화되면, 총액으로 적힌
     // 계약이 공급가 칸으로 들어가 단가가 10% 낮아집니다.
+    vat_applicable: prev.vat_applicable ? "1" : "",
     vat_included: prev.vat_included ? "1" : "",
     payment_method: str(prev.payment_method), payment_type: str(prev.payment_type),
     installments: str(prev.installments ?? 1), billing_email: str(prev.billing_email),
@@ -516,7 +561,10 @@ function fromContract(contract: Contract): Draft {
   return {
     deal_type: contract.deal_type, starts_on: str(contract.starts_on), ends_on: str(contract.ends_on),
     ticket_id: str(contract.ticket_id), currency: contract.currency,
+    vat_applicable: contract.vat_applicable ? "1" : "",
     vat_included: contract.vat_included ? "1" : "",
+    fx_rate: str(contract.fx_rate), terminated_on: str(contract.terminated_on),
+    credits_used: str(contract.credits_used),
     amount_incl_vat: str(contract.amount_incl_vat), amount_excl_vat: str(contract.amount_excl_vat),
     credits: str(contract.credits),
     payment_method: str(contract.payment_method), payment_type: str(contract.payment_type),

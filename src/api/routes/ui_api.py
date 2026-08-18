@@ -731,9 +731,17 @@ def _won_contract(contract, today) -> dict:
         # 총액으로 적힌 계약도 채웁니다(총액 ÷ 1.1). 워크북의 공급가 열이 회계가 합계를
         # 내는 칸이라 비면 그 행만 빠지고, 화면과 시트가 같은 값이어야 합니다.
         "amount_excl_vat": won.supply_amount(contract),
-        # 원화 계약이 총액으로 적혔는가. 편집 폼이 어느 칸을 그릴지 정하고, 상세 화면이
-        # 「VAT 포함」인지 「공급가 + 10%」인지 적는 근거입니다.
+        # 분당 단가의 기준이 VAT 포함 금액인가 — 화면의 「공급가 선택」이 고른 값입니다.
         "vat_included": won.vat_included(contract),
+        # 부가세가 붙는 계약인가. **통화가 아니라 고객이 정합니다**(이관 0075). 폼이 금액
+        # 칸을 한 개 그릴지 두 개 그릴지가 여기서 갈립니다.
+        "vat_applicable": won.vat_applicable(contract),
+        # 그 계약에 적용할 환율과 기준 날짜. 비어 있으면 저장할 때 계약일 고시가로 채웁니다.
+        "fx_rate": contract.fx_rate,
+        "fx_on": contract.fx_on,
+        # 중도 해지일과 크레딧 사용량. 사용량은 수동 입력이라 비어 있는 것이 정상입니다.
+        "terminated_on": contract.terminated_on,
+        "credits_used": contract.credits_used,
         "unit_price": won.unit_price(contract),
         "payment_method": contract.payment_method,
         "payment_type": contract.payment_type,

@@ -75,7 +75,7 @@ def _get_contract(session, contract_id: int) -> ClientContract:
     return contract
 
 
-def _one_amount_per_currency(contract: ClientContract) -> None:
+def _settle_amounts(contract: ClientContract) -> None:
     """계약이 쓰지 않는 금액 칸을 비웁니다 — **쓰는 쪽에 값이 있을 때만.**
 
     어느 칸을 쓰는지는 통화와 「VAT 포함/제외」가 함께 정합니다: VAT 제외로 적힌 원화
@@ -94,11 +94,29 @@ def _one_amount_per_currency(contract: ClientContract) -> None:
     쓰는 쪽에 값이 있을 때만 반대쪽을 지우면, 옛 계약은 다음번에 금액을 실제로 채워
     저장할 때 제자리를 찾습니다.
     """
-    if won.is_krw(contract) and not won.vat_included(contract):
-        if contract.amount_excl_vat is not None:
-            contract.amount_incl_vat = None
-    elif contract.amount_incl_vat is not None:
-        contract.amount_excl_vat = None
+    if not won.vat_applicable(contract):
+        # 부가세가 없으면 금액은 하나입니다. 그 하나는 `amount_incl_vat` 에 삽니다 —
+        # `won.total_amount` 가 미해당 계약에서 읽는 칸이고, 「포함」이라는 이름은 부가세가
+        # 없는 계약에서는 그냥 「그 금액」이라는 뜻입니다.
+        if contract.amount_incl_vat is None and contract.amount_excl_vat is not None:
+            contract.amount_incl_vat = contract.amount_excl_vat
+        if contract.amount_incl_vat is not None:
+            contract.amount_excl_vat = None
+        return
+
+    # 해당이면 **둘 다 저장합니다.** 다만 받은 값을 그대로 두 칸에 두지 않고, 고른 기준에서
+    # 나머지를 **다시 계산합니다.** 화면이 자동완성해 주더라도 폼은 두 숫자를 따로 보내므로,
+    # 손으로 한쪽만 고친 요청이 들어오면 두 값이 어긋난 채 저장됩니다 — 그리고 분당 단가와
+    # 총액이 서로 다른 금액에서 나옵니다. 기준 한 칸에서 파생시키면 그 상태가 아예 없습니다.
+    basis = won.billing_amount(contract)
+    if basis is None:
+        return
+    if won.vat_included(contract):
+        contract.amount_incl_vat = basis
+        contract.amount_excl_vat = basis / (1 + won.VAT_RATE)
+    else:
+        contract.amount_excl_vat = basis
+        contract.amount_incl_vat = basis * (1 + won.VAT_RATE)
 
 
 # --------------------------------------------------------------------------- #
@@ -187,13 +205,17 @@ _CONTRACT_FIELDS = (
     "payment_type", "first_payment_on", "billing_email", "note",
     "revenue_from", "plan", "plan_name", "perso_email",
     "plan_starts_on", "plan_ends_on", "space_seq",
+    # 중도 해지일. 플랜은 만료일과 이 날짜 중 빠른 쪽에서 끝납니다.
+    "terminated_on", "fx_on",
 )
 # credits 가 여기 있는 이유: 계약 크레딧은 이제 **입력**입니다. 계약서에 적히는 것이
 # 금액과 크레딧이고, 분당 단가가 그 둘에서 나옵니다(won.unit_price).
 _CONTRACT_INTS = (
     "credits", "installments", "invite_limit", "queue_limit", "concurrent_jobs", "space_count",
+    # 예상 환불 금액의 분자. 수동 입력입니다 — 제품 쪽에서 가져오는 경로가 아직 없습니다.
+    "credits_used",
 )
-_CONTRACT_DECIMALS = ("amount_incl_vat", "amount_excl_vat")
+_CONTRACT_DECIMALS = ("amount_incl_vat", "amount_excl_vat", "fx_rate")
 
 
 def _fill_contract(contract: ClientContract, form: dict) -> None:
@@ -209,9 +231,11 @@ def _fill_contract(contract: ClientContract, form: dict) -> None:
     # 금액 칸과 **같이** 와야 합니다. 안 그러면 「비고 한 줄」만 보내는 폼이 기준을
     # 뒤집습니다(그 폼은 금액을 안 보냅니다 — `_one_amount_per_currency` 의 주석 참고).
     if "vat_included" in form:
-        contract.vat_included = str(form.get("vat_included") or "").strip().lower() in {
-            "1", "true", "on", "yes",
-        }
+        contract.vat_included = _flag(form.get("vat_included"))
+    # **금액 칸보다 먼저 정해져야 하는 값입니다.** 부가세가 붙는 계약인지에 따라 아래
+    # `_settle_amounts` 가 한 칸을 남길지 두 칸을 채울지가 갈립니다.
+    if "vat_applicable" in form:
+        contract.vat_applicable = _flag(form.get("vat_applicable"))
     if "doc_types" in form:
         # 복수 선택. 화면은 " + " 로 이어 보여주지만 저장은 배열입니다 — 문자열로 두면
         # "직접 계약 / DocuSign + 세금계산서 발행" 을 다시 쪼개야 필터가 됩니다.
@@ -223,7 +247,38 @@ def _fill_contract(contract: ClientContract, form: dict) -> None:
     # 다르게 둘 일이 생기면 그때 칸을 만드는 편이, 늘 같은 값을 두 번 받는 것보다 낫습니다.
     contract.plan_starts_on = contract.plan_starts_on or contract.starts_on
     contract.plan_ends_on = contract.plan_ends_on or contract.ends_on
-    _one_amount_per_currency(contract)
+    _fill_contract_fx(contract)
+    _settle_amounts(contract)
+
+
+def _flag(value) -> bool:
+    return str(value or "").strip().lower() in {"1", "true", "on", "yes"}
+
+
+def _fill_contract_fx(contract: ClientContract) -> None:
+    """환율이 비어 있으면 **계약일 고시가**로 채웁니다. 적어 보냈으면 그 값 그대로.
+
+    왜 계약에 박아 두는가: 예상 MRR 이 오늘 고시가로 환산하던 시절에는 같은 계약의 지난달
+    매출이 이번 달에 달라 보였습니다. 계약에 박아 두면 언제 봐도 같은 숫자입니다.
+
+    원화 계약은 환산할 것이 없어 조회하지 않습니다. 조회가 실패해도 저장을 막지 않습니다 —
+    비어 있으면 화면이 예전처럼 오늘 고시가로 환산하고, 운영자가 나중에 손으로 적을 수
+    있습니다. 계약 하나 저장하자고 외부 API 한 번에 매달릴 이유가 없습니다.
+    """
+    if won.is_krw(contract) or contract.fx_rate is not None:
+        return
+    day = contract.starts_on or contract.first_payment_on
+    if not day:
+        return
+    try:
+        from ...integrations import fx
+
+        found = fx.usd_krw_on(day)
+    except Exception:
+        logger.warning("계약 환율 조회 실패 (client=%s seq=%s)", contract.client_id, contract.seq)
+        return
+    if found:
+        contract.fx_rate, contract.fx_on, _source = found
 
 
 @router.post("/won-customers/{client_id}/contracts")

@@ -694,6 +694,27 @@ class ClientContract(Base):
     # 예전과 같이 공급가를 받아 총액을 +10% 로 계산합니다. 다른 통화는 부가세가 없어
     # 이 값을 보지 않습니다 — 총액만 받습니다.
     vat_included: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # **부가세가 붙는 계약인가.** 기준은 통화가 아니라 고객입니다 — 국내 법인이면 해당,
+    # 그 외에는 미해당. 한동안 `won.is_krw` 가 이 판단을 대신했는데(원화면 부가세가 있다),
+    # 통화와 늘 같이 가지는 않습니다. 해당이면 포함·미포함 두 금액이 다 저장되고, 미해당이면
+    # 금액은 하나뿐이라 `vat_included` 는 볼 것이 없습니다.
+    #
+    # **NULL 은 「아직 안 고름」입니다** — 그때는 예전 규칙대로 통화로 추정합니다
+    # (`won.vat_applicable`). 이 칸이 생기기 전의 행 수백 개를 이관이 손대지 않아도 금액이
+    # 안 움직이는 이유이고, 새 폼은 언제나 값을 보냅니다. NOT NULL DEFAULT false 로 두면
+    # 그 옛 원화 계약이 전부 「미해당」이 되어 총액이 10% 씩 내려앉습니다.
+    vat_applicable: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    # 중도 해지일. 플랜은 만료일과 이 날짜 중 **빠른 쪽**에서 끝납니다.
+    terminated_on: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    # **그 계약에 적용할 환율과 기준 날짜.** 결제 회차에도 같은 이름의 칸이 있는데 뜻이
+    # 다릅니다: 저쪽은 **입금액을 환산한** 환율(그날 실제로 받은 돈), 이쪽은 **계약 금액을
+    # 환산할** 환율입니다. 비워 두면 저장할 때 계약일 고시가로 채웁니다.
+    fx_rate: Mapped[Decimal | None] = mapped_column(Numeric(12, 4), nullable=True)
+    fx_on: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    # 크레딧 사용량 — 예상 환불 금액의 분자입니다. **자동으로 안 채웁니다**: 제품 쪽에서
+    # 가져오는 경로가 아직 없고, 없는 값을 0 으로 두면 「하나도 안 썼으니 전액 환불」이
+    # 되어 해지월 매출이 통째로 음수가 됩니다. 비어 있으면 환불액을 계산하지 않습니다.
+    credits_used: Mapped[int | None] = mapped_column(Integer, nullable=True)
     payment_method: Mapped[str | None] = mapped_column(String(32), nullable=True)
     payment_type: Mapped[str | None] = mapped_column(String(16), nullable=True)
     installments: Mapped[int | None] = mapped_column(Integer, nullable=True)
