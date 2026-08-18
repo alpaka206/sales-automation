@@ -221,10 +221,3 @@ def test_later_reply_keeps_price_at_send(db_session, monkeypatch):
     # A later reply may quote prices — must be untouched.
     assert "$29" in msg.body
 
-
-def test_domain_history_skips_personal_domain(db_session):
-    from src.api.routes.messages import _domain_history
-
-    result = _domain_history(db_session, "gmail.com")
-    assert result["total"] == 0
-    assert result["rows"] == []

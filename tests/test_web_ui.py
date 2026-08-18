@@ -581,17 +581,17 @@ def test_message_edit_blocked_after_approve(mock_send, pending_msg):
     assert r.status_code == 400
 
 
-def test_the_stage_dropdown_is_only_on_the_screen_it_filters():
+def test_the_stage_dropdown_is_always_there():
     """리드 히스토리에서는 단계를 보여주는 열이 단계로 거르는 열이기도 합니다.
 
-    협상중 고객에서는 뺍니다. 그 화면은 이미 한 단계만 보는 화면이라, 행마다 드롭다운이
-    붙어 있으면 이 고객의 단계를 바꾸는 컨트롤처럼 보입니다 — 단계는 파이프라인 보드나
-    HubSpot 에서 움직이는 것이지 목록에서 고르는 것이 아닙니다.
+    한동안 이 열에 분기가 있었습니다 — 사이드바의 「협상중 고객」이 같은 화면을
+    `?stage=negotiation` 으로 열었고, 그때는 드롭다운 대신 `Stage(Negotiating)` 글자만
+    보여 줬습니다. 그 항목이 지워진(2026-08-18, 운영자 지시) 지금 분기가 남아 있으면
+    거꾸로 덫입니다: 드롭다운에서 Negotiating 을 고르는 순간 드롭다운 자신이 사라져
+    「전체」로 돌아갈 길이 없어집니다.
     """
     customers = pathlib.Path("frontend/src/screens/Customers.tsx").read_text(encoding="utf-8")
-    assert 'const isFixedStage = stage === "negotiation";' in customers
-    assert "label: isFixedStage ? (" in customers
-    # 필터 자체는 남아 있어야 합니다 — 리드 히스토리가 그것으로 좁힙니다.
+    assert "isFixedStage" not in customers
     assert 'id="stage-filter"' in customers
 
 

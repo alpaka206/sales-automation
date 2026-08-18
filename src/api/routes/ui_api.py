@@ -24,7 +24,7 @@ import asyncio
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
-from ...db.models import Contact, Conversation, CustomerProfile
+from ...db.models import Contact, Conversation
 
 router = APIRouter(tags=["ui-api"])
 
@@ -86,7 +86,6 @@ def _card(row: dict) -> dict:
 
     conversation: Conversation = row["conversation"]
     contact: Contact = row["contact"]
-    profile: CustomerProfile | None = row["profile"]
     return {
         "conversation_id": conversation.id,
         "ticket_id": conversation.hubspot_ticket_id,
@@ -105,7 +104,6 @@ def _card(row: dict) -> dict:
         "stage": row["stage"],
         # Won Type / Lost Reason. 티켓 세부 내역과 같은 판단을 같은 곳에서 합니다.
         "deal_detail": visible_deal_detail(row["stage"], conversation.deal_detail),
-        "temperature": profile.lead_temperature if profile else None,
     }
 
 
@@ -263,8 +261,6 @@ def ui_customers(stage: str = "", q: str = ""):
             for row in rows
         ],
         "stage_options": [{"key": key, "label": label} for key, label, _ in PIPELINE_STAGES],
-        "filter_stage": stage,
-        "query": q,
     }
 
 
@@ -433,6 +429,32 @@ def ui_logs(request: Request, view: str = "all"):
     if not admin_required(request):
         raise HTTPException(status_code=403, detail="관리자만 접근할 수 있습니다.")
     return {"rows": _events(view)}
+
+
+@router.get("/api/ui/contacts/{contact_id}/hubspot-record")
+def ui_hubspot_record(contact_id: int):
+    """허브스팟 연락처 레코드의 「기본 그룹」 — 티켓 세부 내역 오른쪽 카드들.
+
+    티켓 본문 payload 와 **따로** 가져온다. 이 값은 허브스팟에 물어야 나오는데, 그걸
+    `/api/ui/tickets/{id}` 안에 넣으면 화면이 뜨는 시각이 허브스팟 응답 시간에 묶인다 —
+    답을 읽는 일이 플랜 표시를 기다리게 된다. 패널만 늦게 채워지는 편이 낫다.
+
+    허브스팟 연락처 ID 가 없는 고객(손으로 만든 행, 워크북에서 온 행)은 조회할 대상이
+    없다. 그때도 200 에 빈 그룹이다 — 404 로 답하면 화면이 오류를 그리는데, 「이 고객은
+    허브스팟에 없다」는 오류가 아니다.
+    """
+    from ...db.models import Contact
+    from ...db.session import SessionLocal
+    from ...integrations.hubspot_record import fetch_record_groups
+
+    with SessionLocal() as session:
+        contact = session.get(Contact, contact_id)
+        if contact is None:
+            raise HTTPException(status_code=404, detail="연락처를 찾을 수 없습니다")
+        hubspot_contact_id = contact.hubspot_contact_id
+    if not hubspot_contact_id:
+        return {"groups": [], "error": None}
+    return fetch_record_groups(hubspot_contact_id)
 
 
 @router.get("/api/ui/customers/{contact_id}")

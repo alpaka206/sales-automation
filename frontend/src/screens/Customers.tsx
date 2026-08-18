@@ -21,8 +21,6 @@ type Row = {
 type CustomersData = {
   rows: Row[];
   stage_options: { key: string; label: string }[];
-  filter_stage: string;
-  query: string;
 };
 
 export function Customers() {
@@ -39,14 +37,11 @@ export function Customers() {
   });
 
   const labels = Object.fromEntries((data?.stage_options ?? []).map((s) => [s.key, s.label]));
-  // 협상중 고객 — 사이드바가 stage=negotiation 으로 들어오는 그 화면. 리드 히스토리와 같은
-  // 컴포넌트지만 "이 단계만 보는 화면"이라는 점이 다릅니다.
-  const isFixedStage = stage === "negotiation";
-
   return (
     <>
       {/* One screen, one name, whatever the filter says — filtering a list does not make
-          it a different list. 협상중 고객 in the sidebar is how you go there. */}
+          it a different list. 사이드바에 단계별 항목을 따로 두었던 적이 있는데, 같은 화면이
+          두 이름으로 서 있었을 뿐이라 지웠습니다(운영자 지시). 단계는 아래 열에서 고릅니다. */}
       <div className="page-header">
         <div><h1 className="page-title">리드 히스토리</h1></div>
       </div>
@@ -91,15 +86,11 @@ export function Customers() {
               ),
             },
             {
-              // 리드 히스토리에서는 이 컬럼이 곧 필터입니다 — 단계를 보여주는 열이 단계로
-              // 거르는 열이기도 한 것. 협상중 고객에서는 뺍니다: 그 화면은 이미 한 단계만
-              // 보는 화면이라, 여기 드롭다운이 있으면 이 행의 단계를 바꾸는 것처럼 보입니다.
+              // 이 컬럼이 곧 필터입니다 — 단계를 보여주는 열이 단계로 거르는 열이기도 한 것.
               // 열린 목록에서도 무엇을 고르는 중인지 보이도록 `Stage(…)` 한 모양으로 씁니다.
               // 예전에는 "파이프라인 · 전체" 다음에 "New", "Negotiating" 이 이어져서, 접혀
               // 있을 때 그 글자가 열 이름인지 고른 값인지 알 수 없었습니다.
-              label: isFixedStage ? (
-                `Stage(${labels[stage] ?? stage})`
-              ) : (
+              label: (
                 <>
                   <label className="sr-only" htmlFor="stage-filter">파이프라인 단계로 보기</label>
                   <select

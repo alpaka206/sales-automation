@@ -25,6 +25,36 @@ type Bubble = {
   sent_at: string | null;
   is_current: boolean;
 };
+/** 한 줄 = 운영자 표의 「필드」 하나. 값은 자유 입력이라 `truncate` 로 감쌉니다 —
+ *  `.info-row` 는 flex 라 `plan-2026-kr-renewal` 같은 한 덩어리 글자가 320px 카드를
+ *  뚫고 나갑니다. 옆의 이메일·수신자 줄이 같은 이유로 이미 그렇게 하고 있습니다. */
+function CompanyRow({ row }: { row: { label: string; value: string | null; found: boolean } }) {
+  return (
+    <div className="info-row">
+      <dt>{row.label}</dt>
+      <dd className="truncate">
+        {!row.found ? <span className="t-subtle">필드를 찾지 못했습니다</span>
+         : row.value ?? <span className="t-subtle">—</span>}
+      </dd>
+    </div>
+  );
+}
+
+/** 허브스팟 연락처 레코드의 「기본 그룹」. 카드를 나누는 것도 줄 이름도 서버가 정합니다 — 필드가 늘 때
+ *  고칠 곳이 한 곳이어야 합니다(`src/integrations/hubspot_record.py`). */
+type HubSpotRecord = {
+  groups: {
+    key: string;
+    title: string;
+    /** `found: false` 는 「그 회사에 값이 없다」가 아니라 「허브스팟에서 그 속성을 못 찾았다」
+     *  입니다. 값이 빈 것은 `—` 로 서고(허브스팟 사이드바가 `--` 를 그리는 그 자리),
+     *  못 찾은 것은 그렇다고 적습니다 — 앞엣것은 이 고객 이야기이고 뒤엣것은 설정
+     *  이야기라, 화면에서 같아 보이면 안 됩니다. */
+    rows: { label: string; value: string | null; found: boolean }[];
+  }[];
+  error: string | null;
+};
+
 type Detail = {
   thread: Bubble[];
   category: string | null;
@@ -52,7 +82,7 @@ type Detail = {
     sent_at: string | null; scheduled_at: string | null; category: string | null;
   } | null;
   contact: { id: number; name: string; email: string | null; company: string | null; domain: string | null; role_description: string | null } | null;
-  customer: { has_any?: boolean; profile: Record<string, unknown> | null; interactions: Interaction[] } | null;
+  customer: { profile: Record<string, unknown> | null; interactions: Interaction[] } | null;
   stage_labels: Record<string, string>;
   /** 소통 기록을 남길 수 있는 단계 — 보드의 + 버튼과 같은 목록, 같은 출처. */
   manual_log_stages: string[];
@@ -88,6 +118,17 @@ export function MessageDetail() {
     // The draft may still be being written; the Jinja page polled every 4s for that.
     refetchInterval: (query) =>
       (query.state.data as Detail | undefined)?.msg?.status === "drafting" ? 4_000 : false,
+  });
+
+  // 허브스팟에 물어야 나오는 값이라 본문과 따로 받습니다. 같이 받으면 답을 읽는 일이
+  // 허브스팟 응답을 기다리게 됩니다 — 패널만 늦게 채워지는 편이 낫습니다.
+  const contactId = data?.contact?.id;
+  const { data: hubspot, isPending: hubspotPending } = useQuery({
+    queryKey: ["hubspot-record", contactId],
+    queryFn: () => getJSON<HubSpotRecord>(`/api/ui/contacts/${contactId}/hubspot-record`),
+    enabled: !!contactId,
+    // 플랜은 티켓 하나 읽는 동안 바뀌지 않습니다.
+    staleTime: 5 * 60_000,
   });
 
   const [subject, setSubject] = useState("");
@@ -201,7 +242,11 @@ export function MessageDetail() {
     try {
       await postForm(`/messages/${msg.id}/${action}`, { subject, body, signature_key: signature, ...extra });
       setNote("완료되었습니다.");
-      await queryClient.invalidateQueries();
+      // 허브스팟 패널은 빼고 무효화합니다 — 우리가 저장한다고 저쪽 값이 바뀌지 않는데,
+      // 같이 걸면 콘솔의 모든 저장이 열려 있는 티켓 탭마다 외부 왕복을 한 번씩 냅니다.
+      await queryClient.invalidateQueries({
+        predicate: (query) => query.queryKey[0] !== "hubspot-record",
+      });
     } catch (error) {
       setNote(`실패: ${String(error)}`);
     }
@@ -519,6 +564,38 @@ export function MessageDetail() {
             </dl>
           </div>
 
+          {/* 허브스팟 Company 레코드. 카드가 곧 「레코드」, 줄이 곧 「필드」입니다.
+              `contact` 로 표시된 묶음은 제 카드를 만들지 않고 아래 연락처 정보 카드에
+              얹힙니다 — 같은 제목의 카드가 둘 서지 않도록. 그 키의 출처는 서버의
+              `GROUPS`(`src/integrations/hubspot_record.py`)이고, 이름을 바꾸면 여기도
+              같이 바뀌어야 합니다. */}
+          {contact && hubspotPending && (
+            <div className="card">
+              <div className="section-label">플랜 정보</div>
+              <div className="t-xs t-subtle" style={{ marginTop: 10 }}>
+                <span className="spinner" role="status" /> 허브스팟에서 읽는 중
+              </div>
+            </div>
+          )}
+
+          {hubspot?.error && (
+            <div className="card">
+              <div className="section-label" style={{ marginBottom: 10 }}>플랜 정보</div>
+              <p className="t-xs t-subtle" style={{ margin: 0 }}>{hubspot.error}</p>
+            </div>
+          )}
+
+          {hubspot?.groups
+            ?.filter((group) => group.key !== "contact")
+            .map((group) => (
+              <div className="card" key={group.key}>
+                <div className="section-label" style={{ marginBottom: 12 }}>{group.title}</div>
+                <dl className="info-list">
+                  {group.rows.map((row) => <CompanyRow key={row.label} row={row} />)}
+                </dl>
+              </div>
+            ))}
+
           {contact && (
             <div className="card">
               <div className="section-label" style={{ marginBottom: 12 }}>연락처 정보</div>
@@ -532,6 +609,9 @@ export function MessageDetail() {
                   <div className="info-row"><dt>도메인</dt>
                     <dd><Link className="mono" to={`/companies/${contact.domain}`}>{contact.domain}</Link></dd></div>
                 )}
+                {hubspot?.groups
+                  ?.find((group) => group.key === "contact")
+                  ?.rows.map((row) => <CompanyRow key={row.label} row={row} />)}
               </dl>
               {/* What the operator learns mid-conversation goes here — it is the only
                   place a gmail/unverified contact gets a company name at all. */}

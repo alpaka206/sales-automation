@@ -179,20 +179,22 @@ def test_the_sidebar_is_only_sections_now():
     assert "{SECTIONS.map(" in SHELL
 
 
-def test_customer_section_lists_negotiating_first():
-    """협상중 고객 → 수주 고객 → 리드 히스토리 — 손이 가는 순서입니다.
+def test_the_customer_section_is_two_screens():
+    """수주 고객 → 리드 히스토리 — 손이 가는 순서입니다.
 
-    리드 히스토리가 맨 아래인 이유: 지나간 리드 전부를 담은 목록이라 매일 여는 화면이
-    아닙니다. 위 둘은 오늘 일이 있는 고객입니다.
+    맨 위에 「협상중 고객」이 하나 더 있었습니다. `/customers?stage=negotiation` 이라 리드
+    히스토리와 **같은 화면**이었고, 쿼리 하나로 갈라진 이름 둘이었습니다. 2026-08-18 에
+    운영자 지시로 지웠습니다("완전히 삭제"). 단계로 좁혀 보는 일은 리드 히스토리의 Stage
+    열이 그대로 합니다.
+
+    그래서 사이드바에 쿼리를 든 항목은 하나도 없고, 활성 판정이 `location.search` 를 볼
+    이유도 없습니다 — 남겨 두면 오히려 버그입니다. Stage 드롭다운에서 Negotiating 을
+    고르는 순간 `?stage=negotiation` 이 붙어 리드 히스토리가 강조를 잃었습니다.
     """
-    assert SHELL.index("협상중 고객") < SHELL.index("수주 고객") < SHELL.index("리드 히스토리")
-    assert 'to: "/customers?stage=negotiation"' in SHELL
-
-
-def test_only_one_customer_entry_can_be_active():
-    """협상중 고객 and 리드 히스토리 are the same path; only the query separates them, so
-    the active test cannot be the router's path comparison alone."""
-    assert "location.search" in SHELL
+    assert SHELL.index("수주 고객") < SHELL.index("리드 히스토리")
+    assert "협상중 고객" not in SHELL
+    assert "stage=negotiation" not in SHELL
+    assert "location.search" not in SHELL
 
 
 def test_every_screen_has_a_route():

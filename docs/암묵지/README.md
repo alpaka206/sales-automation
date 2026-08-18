@@ -164,9 +164,10 @@ flowchart TB
 `ContractRecord`(`src/db/models.py:519`)와 `ClientContract`(`:647`)는 다른 테이블입니다. 04 는
 `ClientContract`(수주 고객 화면) 쪽만, 05 는 `ContractRecord` 가 나가던 `수주 DB` 탭이 죽었다는
 것만 다룹니다. 그런데 `ContractRecord` 를 쓰는 경로는 아직 살아 있습니다 —
-`POST /customers/{id}/contracts`(`customer_ops.py:878`, `:985`)가 만들고, 고객 상세
-(`customer_ops.py:538`)와 협상중 고객 목록(`:297`)이 읽고, 폴러가 10분마다 시트에 밀려고
-합니다(`sheet_sync.py:603-608`). 그 화면이던 `frontend/src/screens/Contracts.tsx` 는 07 이
+`POST /customers/{id}/contracts`(`customer_ops.py:909`, `:1016`)가 만들고, 고객 상세
+(`customer_ops.py:568`)가 읽고, 폴러가 10분마다 시트에 밀려고 합니다(`sheet_sync.py:603-608`).
+읽는 곳이 하나 더 있었습니다 — 리드 히스토리 목록과 티켓 세부 내역이 각자 계약을 조회했는데,
+둘 다 그 값을 화면에 쓰지 않아 2026-08-18 에 지웠습니다. 계약을 보는 화면은 고객 상세 하나입니다. 그 화면이던 `frontend/src/screens/Contracts.tsx` 는 07 이
 적었듯 **라우트에서 빠졌지만 파일은 남아 컴파일됩니다.**
 
 **왜 위험한가**: 같은 말을 쓰는 두 장부가 있고, 어느 쪽이 진짜인지 아무 데도 안 적혀

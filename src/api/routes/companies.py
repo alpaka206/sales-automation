@@ -2,18 +2,16 @@
 
 Surfaces the cross-ticket / cross-person history for a company: "same person,
 different ticket" and "different people, same domain", each with its rolling
-summary and append-only processing log. Linked from the message detail sidebar.
+summary. Linked from the message detail sidebar.
 """
 
 from __future__ import annotations
 
 import logging
-from collections import defaultdict
-
 from fastapi import APIRouter
 from sqlalchemy import func, select
 
-from ...db.models import Contact, Conversation, ConversationProgress, Message
+from ...db.models import Contact, Conversation, Message
 from ...db.session import SessionLocal
 
 
@@ -63,17 +61,6 @@ def company_context(domain: str) -> dict:
                 .order_by(Conversation.created_at.desc())
             ).all()
             conv_ids = [cv.id for cv, _ in rows]
-            latest = (
-                dict(
-                    session.execute(
-                        select(Message.conversation_id, func.max(Message.id))
-                        .where(Message.conversation_id.in_(conv_ids))
-                        .group_by(Message.conversation_id)
-                    ).all()
-                )
-                if conv_ids
-                else {}
-            )
             counts = (
                 dict(
                     session.execute(
@@ -85,23 +72,7 @@ def company_context(domain: str) -> dict:
                 if conv_ids
                 else {}
             )
-            # 진행 기록도 한 번에 읽어 회의별로 나눕니다. 바로 위 두 질의는 이미 그렇게
-            # 하고 있었는데 이것만 루프 안에 있어서, 티켓 25개짜리 회사 하나를 여는 데
-            # 질의가 29번 나갔습니다 — 왕복 하나가 200ms 인 환경에서 그건 6초입니다.
-            progress_by_conv: dict[int, list[ConversationProgress]] = defaultdict(list)
-            if conv_ids:
-                for row in session.execute(
-                    select(ConversationProgress)
-                    .where(ConversationProgress.conversation_id.in_(conv_ids))
-                    .order_by(
-                        ConversationProgress.created_at.asc(),
-                        ConversationProgress.id.asc(),
-                    )
-                ).scalars():
-                    progress_by_conv[row.conversation_id].append(row)
-
             for cv, ct in rows:
-                prog = progress_by_conv.get(cv.id, [])
                 conversations.append(
                     {
                         "conversation_id": cv.id,
@@ -115,11 +86,6 @@ def company_context(domain: str) -> dict:
                         "last_activity": cv.last_incoming_at
                         or cv.last_outgoing_at
                         or cv.created_at,
-                        "link_message_id": latest.get(cv.id),
-                        "progress": [
-                            {"kind": p.kind, "detail": p.detail, "created_at": p.created_at}
-                            for p in prog
-                        ],
                     }
                 )
 

@@ -22,10 +22,9 @@ const SECTIONS: Section[] = [
   {
     title: "고객 관리",
     icon: "users",
-    // 손이 가는 순서입니다: 지금 협상 중인 곳 → 이미 수주한 곳 → 지나간 리드 전부.
+    // 손이 가는 순서입니다: 이미 수주한 곳 → 지나간 리드 전부.
     // 맨 아래 것은 지나간 리드까지 전부 담은 목록이라 매일 여는 화면이 아닙니다.
     items: [
-      { to: "/customers?stage=negotiation", label: "협상중 고객", icon: "flame" },
       { to: "/won-customers", label: "수주 고객", icon: "globe" },
       { to: "/customers", label: "리드 히스토리", icon: "users", end: true, mobileLabel: "고객" },
     ],
@@ -51,8 +50,7 @@ const SECTIONS: Section[] = [
 
 function NavItem({ entry, pending }: { entry: Entry; pending?: number }) {
   const location = useLocation();
-  // 협상중 고객 and 리드 히스토리 are the same path; only the query separates them, and
-  // NavLink compares paths alone — so the active test is made here.
+  // 활성 판정을 NavLink 에 맡기지 않고 여기서 만드는 이유는 하위 경로입니다.
   //
   // 하위 경로도 같은 화면입니다: `/won-customers/2102` 에서 상세를 보고 있어도 왼쪽 nav 는
   // 수주 고객을 가리켜야 합니다. 정확 일치만 보면 상세로 들어가는 순간 사이드바가 아무
@@ -61,12 +59,9 @@ function NavItem({ entry, pending }: { entry: Entry; pending?: number }) {
   // `/` 를 따로 예외 처리하지 않습니다: 접두사를 `path + "/"` 로 보므로 루트는 `"//"` 가
   // 되어 어디에도 안 걸리고, 결국 정확 일치로만 켜집니다. 형제 경로도 안전합니다 —
   // `/won-customers` 는 `/customers/` 로 시작하지 않습니다.
-  const [path, query] = entry.to.split("?");
-  const onPath =
-    location.pathname === path || location.pathname.startsWith(path + "/");
+  const path = entry.to;
   const active =
-    onPath &&
-    (query ? location.search.includes(query) : !location.search.includes("stage=negotiation"));
+    location.pathname === path || location.pathname.startsWith(path + "/");
   return (
     <NavLink
       to={entry.to}
@@ -112,7 +107,7 @@ export function Shell({ pending }: { pending?: number }) {
           <nav className="sidebar__nav" aria-label="주요 메뉴">
             {SECTIONS.map((section) => {
               const current = section.items.some((item) =>
-                location.pathname.startsWith(item.to.split("?")[0].replace(/^\/$/, "/@never")),
+                location.pathname.startsWith(item.to.replace(/^\/$/, "/@never")),
               );
               return (
                 <section key={section.title} className={`nav-section${current ? " is-current" : ""}`}>

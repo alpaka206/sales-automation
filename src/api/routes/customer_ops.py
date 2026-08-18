@@ -302,10 +302,14 @@ def _parse_dt(value: str) -> datetime | None:
 def _customer_rows() -> list[dict]:
     """One row per contact, newest activity first.
 
-    Three grouped/joined reads instead of four table dumps: this used to pull every
-    conversation and every contract into Python only to count them and pick one, which
-    is what a GROUP BY and a WHERE are for. The aggregates return one row per contact —
-    the size of the page itself — rather than one per conversation.
+    한 번의 grouped/joined 읽기입니다. 예전에는 대화 전체와 계약 전체를 파이썬으로 끌어와
+    세고 고르기만 했는데, 그건 GROUP BY 와 WHERE 가 할 일입니다. 집계는 대화마다가 아니라
+    연락처마다 한 행 — 곧 이 페이지의 크기 — 을 돌려줍니다.
+
+    계약 읽기(`status == "active"` 인 ContractRecord 를 연락처별로 하나씩)가 여기 하나 더
+    있었습니다. 그 값을 담은 `active_contract` 키를 읽는 곳이 하나도 없어서 지웠습니다 —
+    리드 히스토리와 고객 인사이트가 매 요청마다 계약 테이블을 훑고 그 결과를 버렸습니다.
+    계약이 필요한 곳은 고객 상세와 갱신 목록이고, 둘 다 자기 조회를 따로 합니다.
     """
     activity = (
         select(
@@ -324,15 +328,6 @@ def _customer_rows() -> list[dict]:
             .outerjoin(CustomerProfile, CustomerProfile.contact_id == Contact.id)
             .outerjoin(activity, activity.c.contact_id == Contact.id)
         ).all()
-        # Only the one contract the row shows, not every contract ever signed.
-        active_contracts = {
-            contract.contact_id: contract
-            for contract in session.execute(
-                select(ContractRecord)
-                .where(ContractRecord.status == "active")
-                .order_by(ContractRecord.created_at.desc())
-            ).scalars()
-        }
 
     rows: list[dict] = []
     for contact, profile, _cid, conversations, incoming, outgoing, created in loaded:
@@ -345,7 +340,6 @@ def _customer_rows() -> list[dict]:
         # with a dialect switch only if this list ever needs SQL-side paging.
         stamps = [when for when in (incoming, outgoing, created) if when is not None]
         last_activity = max(stamps) if stamps else contact.updated_at
-        active_contract = active_contracts.get(contact.id)
         rows.append(
             {
                 "contact": contact,
@@ -357,7 +351,6 @@ def _customer_rows() -> list[dict]:
                 "next_action_at": profile.next_action_at if profile else None,
                 "last_activity": last_activity,
                 "conversation_count": conversations or 0,
-                "active_contract": active_contract,
             }
         )
     rows.sort(key=lambda row: row["last_activity"] or datetime.min, reverse=True)
@@ -386,15 +379,19 @@ def _pipeline_rows(
     Two shapes, one body. ``stage=None`` is the board's first paint: a window function
     takes the top ``limit`` of EVERY column in one query. ``stage="won"`` is what the
     column asks for when it is scrolled to the bottom, and needs no window at all — a
-    filtered LIMIT/OFFSET. Both then join Contact and CustomerProfile in the same trip
-    and look up newest-message ids only for the rows that survived.
+    filtered LIMIT/OFFSET. Both then join Contact in the same trip and look up
+    newest-message ids only for the rows that survived.
+
+    CustomerProfile 도 같이 조인했습니다. 카드가 그 프로필에서 읽는 값이 리드 온도 하나뿐
+    이었고 화면은 그것을 그리지 않아서, 대시보드를 그릴 때마다 아무도 안 보는 조인이
+    따라왔습니다. 리드 온도가 보이는 곳(리드 히스토리·고객 인사이트)은 `_customer_rows`
+    의 자기 조인을 씁니다.
 
     The window function needs SQLite >= 3.25 (2018) and any supported PostgreSQL.
     """
     query = (
-        select(Conversation, Contact, CustomerProfile)
+        select(Conversation, Contact)
         .join(Contact, Conversation.contact_id == Contact.id)
-        .outerjoin(CustomerProfile, CustomerProfile.contact_id == Contact.id)
         .order_by(*_CARD_ORDER)
     )
     if stage is None:
@@ -423,7 +420,7 @@ def _pipeline_rows(
 
         # Only for the cards actually rendered. The old grouped scan read every row in
         # the messages table to answer a question about at most a few hundred threads.
-        conversation_ids = [conversation.id for conversation, _c, _p in loaded]
+        conversation_ids = [conversation.id for conversation, _c in loaded]
         latest_message = (
             dict(
                 session.execute(
@@ -451,15 +448,14 @@ def _pipeline_rows(
         )
 
     rows: list[dict] = []
-    for conversation, contact, profile in loaded:
-        # Conversation.stage is the pipeline source of truth; profile is only a
-        # customer-summary projection and must not relocate another inquiry.
+    for conversation, contact in loaded:
+        # Conversation.stage is the pipeline source of truth — a card is placed by its
+        # own thread's stage, never by the contact's customer-summary stage.
         stage = conversation.stage if conversation.stage in VALID_PIPELINE_STAGES else "new"
         rows.append(
             {
                 "conversation": conversation,
                 "contact": contact,
-                "profile": profile,
                 "stage": stage,
                 # The workbook's stable key for this inquiry. Threads imported from the
                 # sheet carry it on the contact, ones this app appended on the

@@ -123,6 +123,36 @@ exempt from the auth gate, so React can draw it before a session exists).
   그리고 그 계산을 지키던 1,512행짜리 golden 코퍼스(`frontend/test/quote.golden.json`)까지
   전부입니다. 되살릴 일이 생기면 **git 이력에서 그 파일들을 그대로 꺼내라** — 특히 golden
   은 React 포팅 전 계산기가 실제로 뽑은 값을 캡처한 것이라 다시 만들 수 없습니다.
+- **사이드바의 `협상중 고객` 은 지웠습니다** (2026-08-18, 운영자 지시 "완전히 삭제").
+  `/customers?stage=negotiation` 이라 리드 히스토리와 **같은 화면**이었고, 쿼리 하나로 갈라진
+  이름 둘이었습니다. 단계로 좁혀 보는 일은 그 화면의 `Stage` 열이 그대로 합니다. 같이 나간 것:
+  `flame` 아이콘(그 항목만 쓰던 것), `Customers.tsx` 의 `isFixedStage` 분기, `Shell.tsx` 활성
+  판정의 `location.search` 가지. **뒤의 둘은 남겨 두면 버그입니다** — 항목이 없으면
+  `?stage=negotiation` 에 닿는 유일한 길이 Stage 드롭다운인데, 거기서 Negotiating 을 고르는
+  순간 사이드바가 강조를 잃고(`location.search` 가지) 드롭다운 자신이 정적 라벨로 바뀌어
+  「전체」로 돌아갈 길이 사라집니다(`isFixedStage`). 백엔드의 `negotiation` 단계는 그대로입니다 —
+  지운 것은 메뉴이지 파이프라인이 아닙니다.
+- **티켓 세부 내역 오른쪽의 「플랜 정보」는 허브스팟 연락처를 그때그때 읽어 그립니다**
+  (`src/integrations/hubspot_record.py`, `GET /api/ui/contacts/{id}/hubspot-record`).
+  **Company 가 아니라 Contact 입니다.** 처음에 Company 로 만들었다가 옮겼습니다 — 운영자가
+  준 매핑 표의 왼쪽 칸이 `Company` 였는데, 실제 포털 화면에서는 `Plan` · `IP Country` ·
+  `user seq` · `space seq` · `plan tier` · `plan seq` 가 전부 **연락처 레코드의 「기본
+  그룹」**에 있었습니다(같은 그룹의 `Contact owner` 가 결정적입니다 — Company 에 없는
+  속성입니다). 덕분에 연결(association) 조회도, 「주 회사가 어느 쪽이냐」도 없습니다.
+  네 가지가 일부러 그렇게 되어 있습니다. ① **속성 이름을 코드에 박지 않는다** — 운영자가
+  아는 것은 라벨(`user seq`)이고 내부 이름(`user_seq_c`)은 포털마다 다릅니다. 카탈로그를
+  읽어 **라벨 먼저, 내부 이름 나중**으로 찾습니다(순서가 중요합니다: 은퇴한 `user_seq` 와
+  현역 `user_seq_c` 가 같이 있을 때 이름을 먼저 보면 빈 옛 속성이 이깁니다). ② **빈 값도
+  줄을 만든다** — 허브스팟 사이드바가 그 자리에 `--` 를 그립니다. 우리가 숨기면 같은
+  레코드인데 줄 수가 다른 화면이 되고, 이 포털은 플랜 필드가 대부분 비어 있어 카드가 통째로
+  사라집니다. ③ **못 찾은 필드는 못 찾았다고 적는다** — ②와 다른 이야기입니다. 값이 빈 것은
+  그 고객 이야기이고 속성을 못 찾은 것은 설정 이야기인데, 라벨이 한국어면 정규화로 못 잡고
+  조용히 빼면 운영자가 진짜 라벨을 알려줄 기회가 없습니다. ④ **본문 payload 와 따로
+  받는다** — 같이 받으면 답을 읽는 일이 허브스팟 응답을 기다립니다.
+  회사 이름은 일부러 안 가져옵니다: 연락처 정보 카드에 이미 **고칠 수 있는** 회사 칸이 있고,
+  옆에 읽기 전용 사본을 세우면 둘 중 어느 것이 진짜인지 화면만 봐서는 알 수 없습니다.
+  **읽기 전용이라 `guard_external_write` 를 안 지납니다 — 면제가 아니라 쓰기가 없기
+  때문이고, 여기에 쓰기를 붙이는 순간 그 규칙이 돌아옵니다.**
 - **Styling is `static/console.css`**, linked rather than bundled — one copy of the design
   for the SPA and for the sign-in pages. There is no CSS framework.
 - **Reads go through `/api/ui/*`**, which calls the SAME context builders the templates

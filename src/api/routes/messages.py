@@ -8,7 +8,7 @@ from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse, JSONResponse
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.orm import joinedload
 
 from ...agents.approval import ApprovalError, approve, reject
@@ -20,12 +20,10 @@ from ...common.inquiry import CATEGORY_LABELS, UNQUALIFIED, category_label, is_u
 from ...db.email_templates import list_signature_templates
 from ...db.models import (
     Contact,
-    ContractRecord,
     Conversation,
     ConversationProgress,
     CustomerInteraction,
     CustomerProfile,
-    DomainProfile,
     Message,
 )
 from ...db.session import SessionLocal
@@ -180,28 +178,6 @@ def _message_detail_context(
                 .all()
             )
 
-        domain_profile_data = None
-        if contact and contact.domain:
-            dp = session.get(DomainProfile, contact.domain)
-            if dp:
-                domain_profile_data = {
-                    "domain": dp.domain,
-                    "company_name": dp.company_name,
-                    "industry": dp.industry,
-                    "services": dp.services,
-                    "target_market": dp.target_market,
-                    "size_hint": dp.size_hint,
-                    "confidence": dp.confidence,
-                    "source": dp.source,
-                    "analyzed_at": dp.analyzed_at,
-                }
-
-        domain_history = (
-            _domain_history(session, contact.domain, exclude_conv_id=conv.id if conv else None)
-            if (contact and contact.domain)
-            else None
-        )
-
         # Customer-level history (CRM state, contract, cross-channel touchpoints)
         # surfaced inline so the operator sees who this customer is without leaving
         # the reply screen. Full editable view stays at /customers/{id}.
@@ -263,7 +239,6 @@ def _message_detail_context(
             "category_label": category_label(conv.inquiry_category if conv else None),
             "unqualified": is_unqualified(conv.inquiry_category if conv else None),
             "signatures": list_signature_templates(),
-            "domain_history": domain_history,
             "ticket": {
                 "id": conv.id if conv else None,
                 "ticket_id": conv.hubspot_ticket_id if conv else None,
@@ -347,7 +322,6 @@ def _message_detail_context(
                 if contact
                 else None
             ),
-            "domain_profile": domain_profile_data,
             "customer": customer,
         }
 
@@ -363,8 +337,12 @@ def _customer_history(session, contact_id: int, exclude_conversation_id: int | N
     template never touches a detached ORM object. Editing lives at /customers/{id}.
 
     ``exclude_conversation_id`` drops the records THIS ticket already lists in its own
-    소통 기록 card, the same way ``_domain_history`` excludes the open thread — otherwise
-    every call the operator logs here would render twice on one screen.
+    소통 기록 card — otherwise every call the operator logs here would render twice on
+    one screen.
+
+    계약(`ContractRecord`)도 여기서 같이 실어 보냈습니다. 화면이 읽지 않아 지웠습니다 —
+    티켓 하나 열 때마다 계약 테이블을 한 번 더 읽고 버리는 값이었습니다. 계약을 보는 곳은
+    고객 상세입니다.
     """
     profile = session.get(CustomerProfile, contact_id)
     interaction_q = select(CustomerInteraction).where(
@@ -382,16 +360,6 @@ def _customer_history(session, contact_id: int, exclude_conversation_id: int | N
         .scalars()
         .all()
     )
-    contract = (
-        session.execute(
-            select(ContractRecord)
-            .where(ContractRecord.contact_id == contact_id)
-            .order_by(ContractRecord.created_at.desc())
-            .limit(1)
-        )
-        .scalar_one_or_none()
-    )
-
     profile_data = (
         {
             "customer_state": profile.customer_state,
@@ -402,17 +370,6 @@ def _customer_history(session, contact_id: int, exclude_conversation_id: int | N
             "next_action_at": profile.next_action_at,
         }
         if profile
-        else None
-    )
-    contract_data = (
-        {
-            "status": contract.status,
-            "plan": contract.plan,
-            "amount": contract.amount,
-            "currency": contract.currency,
-            "expires_at": contract.expires_at,
-        }
-        if contract
         else None
     )
     interaction_rows = [
@@ -428,65 +385,8 @@ def _customer_history(session, contact_id: int, exclude_conversation_id: int | N
     ]
     return {
         "profile": profile_data,
-        "contract": contract_data,
         "interactions": interaction_rows,
-        "has_any": bool(profile_data or contract_data or interaction_rows),
     }
-
-
-def _domain_history(session, domain: str, exclude_conv_id: int | None = None) -> dict:
-    """All other conversations sharing this email domain (same company).
-
-    Captures both "same person, different ticket" and "different people, same
-    company". Returns a summary dict the sidebar renders and the company page links
-    to. Personal/free-email domains (gmail, naver, …) are NEVER grouped — that would
-    expose one customer's history to an unrelated customer on the same provider.
-    """
-    from ...common.domains import is_personal_domain
-
-    if not domain or is_personal_domain(domain):
-        return {"domain": domain, "total": 0, "rows": []}
-    rows = session.execute(
-        select(Conversation, Contact)
-        .join(Contact, Conversation.contact_id == Contact.id)
-        .where(func.lower(Contact.domain) == domain.lower())
-        .order_by(Conversation.created_at.desc())
-    ).all()
-    convs = [(c, ct) for c, ct in rows if c.id != exclude_conv_id]
-    if not convs:
-        return {"domain": domain, "total": 0, "rows": []}
-
-    conv_ids = [c.id for c, _ in convs]
-    latest = dict(
-        session.execute(
-            select(Message.conversation_id, func.max(Message.id))
-            .where(Message.conversation_id.in_(conv_ids))
-            .group_by(Message.conversation_id)
-        ).all()
-    )
-    counts = dict(
-        session.execute(
-            select(Message.conversation_id, func.count(Message.id))
-            .where(Message.conversation_id.in_(conv_ids))
-            .group_by(Message.conversation_id)
-        ).all()
-    )
-    out = []
-    for c, ct in convs[:8]:
-        out.append(
-            {
-                "conversation_id": c.id,
-                "contact_name": ct.full_name,
-                "contact_email": ct.email,
-                "ticket_id": c.hubspot_ticket_id,
-                "inquiry_subject": c.inquiry_subject,
-                "summary": c.summary,
-                "message_count": counts.get(c.id, 0),
-                "last_activity": c.last_incoming_at or c.last_outgoing_at or c.created_at,
-                "link_message_id": latest.get(c.id),
-            }
-        )
-    return {"domain": domain, "total": len(convs), "rows": out}
 
 
 # 여기 있던 `_translate_inbound_bubbles` 는 지웠습니다. **화면을 여는 길에는 모델이 없습니다.**
