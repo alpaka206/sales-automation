@@ -60,17 +60,24 @@
   border-radius:7px;padding:3px 9px;font-size:11.5px;font-weight:600;cursor:pointer;}
 .won .seg button.on {background:var(--ink);color:#fff;border-color:var(--ink);}
 .won .seg-gap {width:8px;}
-/* 차트 라이브러리를 쓰지 않습니다 — 사각형 열두 개입니다. */
-.won .mrr-bars {display:grid;grid-template-columns:repeat(12,1fr);gap:5px;margin-top:10px;}
-.won .mrr-bar {display:flex;flex-direction:column;align-items:center;gap:3px;}
-.won .mrr-bar__track {display:flex;align-items:flex-end;height:46px;width:100%;}
-.won .mrr-bar__track i {display:block;width:100%;border-radius:3px 3px 0 0;background:var(--ink);min-height:2px;}
-/* 음수는 중도 해지 정산입니다. 그 달 매출이 마이너스라는 것이 이 카드에서 가장 눈에
-   띄어야 하는 사건이라 색을 갈라 둡니다. */
-.won .mrr-bar__track i.neg {background:var(--danger,#D64545);}
-.won .mrr-bar.is-now .mrr-bar__track i {background:var(--teal-700,#0F766E);}
-.won .mrr-bar em {font-style:normal;font-size:10px;color:var(--faint);}
-.won .mrr-bar.is-now em {color:var(--ink);font-weight:700;}
+/* 월별 막대. 색은 `MonthlyBars.tsx` 가 들고 있습니다 — 검사를 통과한 쌍이라 한 곳에
+   두고, 여기서는 배치와 글자만 정합니다. 격자·눈금은 배경에서 한 단계만 떨어진 회색이고
+   실선입니다: 점선은 데이터보다 시끄럽습니다. */
+.won .mbars {margin:10px 0 0;position:relative;}
+.won .mbars svg {width:100%;height:158px;display:block;overflow:visible;}
+.won .mbars__grid {stroke:var(--line-soft);stroke-width:1;}
+/* 0선만 한 단계 진합니다 — 음수가 있는 차트에서 어디가 0인지는 값만큼 중요합니다. */
+.won .mbars__zero {stroke:var(--line);stroke-width:1;}
+.won .mbars__tick {fill:var(--faint);font-size:10.5px;text-anchor:end;font-variant-numeric:tabular-nums;}
+.won .mbars__month {fill:var(--faint);font-size:10.5px;text-anchor:middle;}
+.won .mbars__month.is-now {fill:var(--ink);font-weight:700;}
+/* 글자는 데이터 색을 입지 않습니다. 막대가 색을 들고, 값은 잉크 색입니다. */
+.won .mbars__callout {fill:var(--ink);font-size:10.5px;font-weight:700;text-anchor:middle;
+  font-variant-numeric:tabular-nums;paint-order:stroke;stroke:#fff;stroke-width:3px;}
+.won .mbars__tip {position:absolute;top:-2px;right:0;font-size:11.5px;color:var(--muted);
+  background:#fff;padding:0 2px;font-variant-numeric:tabular-nums;}
+.won .mbars__tip b {color:var(--ink);margin-right:5px;}
+.won .mbars__tip em {font-style:normal;color:#B42318;font-weight:600;}
 .won .kpi-flex {display:flex;align-items:stretch;flex:1;margin-top:6px;}
 .won .kpi-main {flex:1;padding-right:26px;display:flex;align-items:center;}
 .won .kpi-main .kpi-value {margin-top:0;}
@@ -335,7 +342,7 @@
 .won .hidden {display:none !important;}
 @media (max-width:1240px) {
 .won .kpi-row {grid-template-columns:1fr;}
-.won .mrr-bars {grid-template-columns:repeat(6,1fr);gap:4px;}
+.won .mbars svg {height:132px;}
 .won .kpi.wide {grid-column:span 2;}
 .won .field-grid, .won .field-grid.c3, .won .form-row, .won .stat-row {grid-template-columns:repeat(2,1fr);}
 .won .board {grid-template-columns:repeat(2,1fr);}

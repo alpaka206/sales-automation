@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { getJSON, postForm } from "../../lib/api";
 import { ActionButton } from "../../ui/ActionButton";
+import { MonthlyBars } from "./MonthlyBars";
 import {
   type ListData, type Row,
   STATUS_ORDER, daysUntil, dday, dueClass, dueText, fmt, initials, money, num,
@@ -149,8 +150,6 @@ export function WonCustomers() {
   const months = data.months ?? [];
   const at = (month: string) => series[month]?.[unit] ?? 0;
   const thisMonth = at(data.month);
-  // 막대 높이의 기준. 0 으로 나누지 않도록 최소 1 을 둡니다.
-  const peak = Math.max(1, ...months.map(at).map(Math.abs));
   const renewing = activeRows
     .filter((r) => {
       const left = daysUntil(r.active?.ends_on, today);
@@ -238,25 +237,9 @@ export function WonCustomers() {
               </div>
             </div>
             <div className="kpi-value money">{unit === "KRW" ? man(thisMonth) : money(thisMonth, "USD")}</div>
-            {/* 차트 라이브러리를 쓰지 않습니다 — 사각형 열두 개입니다. 음수(중도 해지
-                정산)는 아래로 자랍니다: 그 달 매출이 마이너스라는 것이 이 카드에서 가장
-                눈에 띄어야 하는 사건입니다. */}
-            <div className="mrr-bars" role="img"
-                 aria-label={`${metric === "mrr" ? "월별 예상 MRR" : "월별 매출"} ${months[0]} ~ ${months[months.length - 1]}`}>
-              {months.map((m) => {
-                const value = at(m);
-                const height = Math.round((Math.abs(value) / peak) * 46);
-                return (
-                  <div key={m} className={`mrr-bar${m === data.month ? " is-now" : ""}`}
-                       title={`${m} · ${unit === "KRW" ? man(value) : money(value, "USD")}`}>
-                    <span className="mrr-bar__track">
-                      <i className={value < 0 ? "neg" : ""} style={{ height: `${height}px` }} />
-                    </span>
-                    <em>{m.slice(5)}</em>
-                  </div>
-                );
-              })}
-            </div>
+            <MonthlyBars months={months} valueAt={at} now={data.month}
+                         format={(value) => (unit === "KRW" ? man(value) : money(value, "USD"))}
+                         negativeNote="중도 해지 정산" />
             <div className="kpi-tail">
               {/* 손으로 적던 칸이었습니다. 이제 오늘 고시가를 가져오므로 적을 이유가
                   없고, 적게 두면 두 사람이 다른 환율로 다른 MRR 을 봅니다. 어느 날짜의
