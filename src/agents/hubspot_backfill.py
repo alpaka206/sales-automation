@@ -247,6 +247,81 @@ def backfill_b2b_pipeline(pipeline: str = B2B_PIPELINE_ID) -> dict:
     return result
 
 
+def adopt_ticket(ticket) -> bool:
+    """우리가 아직 모르는 티켓 하나를 주워 옵니다. 새로 만들었으면 True.
+
+    **왜 필요한가.** 접수 경로는 New 단계에 도착한 티켓만 들여옵니다
+    (`inbound_poller.poll_tickets_once` 가 New 만 검색하고, 웹훅도 New 로의 이동만
+    접수로 칩니다). 그래서 영업이 다른 파이프라인에서 끌어오거나 처음부터 Negotiating ·
+    Lost · Not a Fit 으로 만든 티켓은 **우리 쪽에 행 자체가 안 생깁니다.** 단계 동기화는
+    그때 고칠 대상이 없어서 조용히 지나갔고, 화면의 건수가 허브스팟보다 적었습니다.
+
+    안전은 백필과 같습니다(그 모듈 docstring 참고): 메일도 초안도 만들지 않고, 접수 큐에
+    넣지 않으며, ``last_incoming_at`` 을 NULL 로 둡니다 — 그 값이 차면 워크북 append 대기에
+    올라갑니다. 여기서 만드는 것은 **보이기 위한 행**이지 처리할 일감이 아닙니다.
+
+    부르는 쪽이 파이프라인을 먼저 거릅니다. 이 함수는 티켓 하나만 봅니다.
+    """
+    client = HubSpotClient()
+    with SessionLocal() as session:
+        if session.scalar(
+            select(Conversation.id).where(Conversation.hubspot_ticket_id == str(ticket.id))
+        ):
+            return False
+
+    contact_id = ticket.primary_contact_id or client.get_ticket_primary_contact_sync(str(ticket.id))
+    if not contact_id:
+        # 연락처가 없는 티켓은 문의를 누구 것으로 달지 알 수 없습니다. 백필과 같은 판단으로
+        # 지어내지 않고 건너뜁니다.
+        logger.info("Ticket %s has no contact; not adopting", ticket.id)
+        return False
+    dto = client.get_contact_sync(str(contact_id))
+
+    stage = local_stage_for(ticket.pipeline_stage) or "new"
+    email = (dto.email or "").strip().lower()
+    normalized = email or f"unknown:hs-{dto.id}"
+    with SessionLocal() as session:
+        contact = session.scalar(select(Contact).where(Contact.normalized_email == normalized))
+        if contact is None:
+            domain = email.split("@", 1)[1] if "@" in email else ""
+            contact = Contact(
+                normalized_email=normalized,
+                email=email or None,
+                full_name=_display_name(dto),
+                company=dto.company or None,
+                phone=dto.phone or None,
+                country=dto.country or None,
+                # Personal mailboxes must never be grouped as one company.
+                domain=domain if domain and not is_personal_domain(domain) else None,
+                hubspot_contact_id=dto.id,
+            )
+            session.add(contact)
+            session.flush()
+        else:
+            contact.hubspot_contact_id = contact.hubspot_contact_id or dto.id
+
+        session.add(
+            Conversation(
+                contact_id=contact.id,
+                hubspot_ticket_id=str(ticket.id),
+                stage=stage,
+                inquiry_subject=ticket.subject or None,
+                # last_incoming_at stays NULL on purpose — see the module docstring.
+                created_at=ticket.created_at or datetime.now(timezone.utc),
+            )
+        )
+        profile = session.get(CustomerProfile, contact.id)
+        if profile is None:
+            profile = CustomerProfile(contact_id=contact.id)
+            session.add(profile)
+            session.flush()
+        profile.pipeline_stage = stage
+        session.commit()
+
+    logger.info("Adopted HubSpot ticket %s in stage %s", ticket.id, stage)
+    return True
+
+
 def process_requested_hubspot_backfill() -> bool:
     """Run one pending backfill request. Called from the poller tick."""
     request = _pending_request()

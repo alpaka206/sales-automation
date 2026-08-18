@@ -282,22 +282,32 @@ def test_webhook_ignores_non_stage_property_changes(db, stages):
 
 
 def test_poller_reconcile_sweeps_every_stage(db, stages, monkeypatch):
-    """The reconcile pass must search ALL stages, unlike the New-only inbound poll."""
+    """모든 단계를 훑되(접수 폴러는 New 만 봅니다) **우리 파이프라인 안에서만** 훑습니다.
+
+    파이프라인을 안 좁히면 포털 전체가 들어옵니다. 예전에는 무해했지만(다른 파이프라인의
+    단계 id 는 매핑에 없어 그냥 버려졌습니다) 이제는 모르는 티켓을 주워 오므로, 좁히지
+    않으면 CS·지원 파이프라인 티켓 수백 건이 이 콘솔로 들어옵니다.
+    """
     from src.agents import inbound_poller
+    from src.agents.hubspot_backfill import B2B_PIPELINE_ID
     from src.integrations.hubspot_models import TicketDTO
 
     monkeypatch.setattr(inbound_poller, "SessionLocal", db)
     captured: dict = {}
 
     class FakeHubSpot:
-        def search_tickets_sync(self, created_after, pipeline_stage=None, limit=100):
+        def search_tickets_sync(
+            self, created_after, pipeline_stage=None, limit=100, pipeline=None
+        ):
             captured["pipeline_stage"] = pipeline_stage
+            captured["pipeline"] = pipeline
             return [TicketDTO(id=TICKET, pipeline_stage="1193733925")]
 
     monkeypatch.setattr(inbound_poller, "HubSpotClient", lambda *a, **k: FakeHubSpot())
 
     assert inbound_poller.reconcile_ticket_stages_once() == 1
     assert captured["pipeline_stage"] is None, "reconcile must not filter to one stage"
+    assert captured["pipeline"] == B2B_PIPELINE_ID, "reconcile must stay in our pipeline"
 
     with db() as session:
         conv = session.query(Conversation).filter_by(hubspot_ticket_id=TICKET).one()
@@ -311,8 +321,17 @@ def test_reconcile_survives_one_bad_ticket(db, stages, monkeypatch):
 
     monkeypatch.setattr(inbound_poller, "SessionLocal", db)
 
+    # 「boom」도 **우리가 아는** 티켓이어야 합니다. 모르는 티켓이면 주워 오는 길로 가고,
+    # 이 테스트가 고정하려던 「단계 동기화가 한 건 터져도 스윕이 계속된다」를 안 지납니다.
+    with db() as session:
+        contact = session.query(Conversation).filter_by(hubspot_ticket_id=TICKET).one()
+        session.add(Conversation(contact_id=contact.contact_id, hubspot_ticket_id="boom"))
+        session.commit()
+
     class FakeHubSpot:
-        def search_tickets_sync(self, created_after, pipeline_stage=None, limit=100):
+        def search_tickets_sync(
+            self, created_after, pipeline_stage=None, limit=100, pipeline=None
+        ):
             return [
                 TicketDTO(id="boom", pipeline_stage="1196772135"),
                 TicketDTO(id=TICKET, pipeline_stage="1196772135"),
@@ -597,3 +616,49 @@ def test_the_deploy_blueprint_carries_every_stage_id():
         text = pathlib.Path(name).read_text(encoding="utf-8")
         missing = [stage_id for stage_id in STAGE_IDS.values() if stage_id not in text]
         assert not missing, f"{name} 에 stage id 가 빠졌습니다: {missing}"
+
+
+def test_a_ticket_that_never_passed_through_new_is_picked_up(db, stages, monkeypatch):
+    """접수 경로는 New 에 도착한 티켓만 들여옵니다.
+
+    영업이 다른 파이프라인에서 끌어오거나 처음부터 Negotiating·Lost·Not a Fit 으로 만든
+    티켓은 우리 쪽에 **행 자체가 없었습니다.** 단계 동기화는 그때 고칠 대상이 없어 조용히
+    지나갔고, 화면 건수가 허브스팟보다 적었습니다.
+
+    주워 오되 일감으로 만들지는 않습니다: 메시지도 초안도 접수 큐도 없고
+    `last_incoming_at` 은 NULL 입니다(그 값이 차면 워크북 append 대기에 올라갑니다).
+    """
+    from src.agents import hubspot_backfill, inbound_poller
+    from src.db.models import Message
+    from src.integrations.hubspot_models import ContactDTO, TicketDTO
+
+    monkeypatch.setattr(inbound_poller, "SessionLocal", db)
+    monkeypatch.setattr(hubspot_backfill, "SessionLocal", db)
+
+    fresh = TicketDTO(id="T-NEVER-NEW", pipeline_stage="1172180246", subject="갑자기 Lost")
+
+    class FakeHubSpot:
+        def search_tickets_sync(
+            self, created_after, pipeline_stage=None, limit=100, pipeline=None
+        ):
+            return [fresh]
+
+        def get_ticket_primary_contact_sync(self, ticket_id):
+            return "hs-9001"
+
+        def get_contact_sync(self, contact_id):
+            return ContactDTO(id="hs-9001", email="late@example.com", firstname="Late")
+
+    monkeypatch.setattr(inbound_poller, "HubSpotClient", lambda *a, **k: FakeHubSpot())
+    monkeypatch.setattr(hubspot_backfill, "HubSpotClient", lambda *a, **k: FakeHubSpot())
+
+    assert inbound_poller.reconcile_ticket_stages_once() == 1
+
+    with db() as session:
+        conv = session.query(Conversation).filter_by(hubspot_ticket_id="T-NEVER-NEW").one()
+        assert conv.stage == "closed_lost"
+        assert conv.last_incoming_at is None, "워크북 append 대기에 올라가면 안 됩니다"
+        assert session.query(Message).filter_by(conversation_id=conv.id).count() == 0
+
+    # 두 번째 스윕은 같은 티켓을 또 만들지 않습니다.
+    assert inbound_poller.reconcile_ticket_stages_once() == 0

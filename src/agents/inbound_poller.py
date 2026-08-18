@@ -6,8 +6,10 @@ import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
 
+from sqlalchemy import select
+
 from ..common.config import settings
-from ..db.models import Event
+from ..db.models import Conversation, Event
 from ..db.session import SessionLocal
 from ..integrations.hubspot import HubSpotClient, HubSpotNotConfigured
 from .inbound_worker import enqueue_inbound_ticket
@@ -139,21 +141,30 @@ def _get_last_stage_poll_at() -> datetime:
 
 
 def reconcile_ticket_stages_once() -> int:
-    """Catch HubSpot stage moves the webhook never delivered.
+    """Catch HubSpot ticket moves the webhook never delivered — and tickets we never had.
 
     The webhook is best-effort: a missed delivery, a bulk edit, or an import moves a
     ticket with no ``propertyChange`` reaching us. This sweeps every ticket touched
     since the last run — across ALL stages, unlike ``poll_tickets_once`` which
     deliberately searches only the New stage — and realigns our copy.
 
-    Read-only against HubSpot; the only writes are to our own tables. Returns the
-    number of conversations whose stage actually moved.
+    **모르는 티켓은 주워 옵니다.** 접수 경로가 New 만 보므로, 다른 파이프라인에서 끌려왔거나
+    처음부터 다른 단계로 만들어진 티켓은 행 자체가 없었습니다. 그러면 단계 동기화는 고칠
+    대상이 없어 조용히 지나가고, 화면 건수가 허브스팟보다 적습니다.
+
+    검색을 **우리 파이프라인으로 좁힙니다.** 예전에는 포털 전체를 훑었는데(다른 단계 id 는
+    어차피 매핑에 없어 무해했습니다), 주워 오기 시작하면 그건 무해하지 않습니다 — CS·지원
+    파이프라인의 티켓 수백 건이 이 콘솔로 들어옵니다.
+
+    Read-only against HubSpot; the only writes are to our own tables. Returns the number
+    of conversations that were adopted or whose stage actually moved.
     """
     try:
         hubspot = HubSpotClient()
     except HubSpotNotConfigured:
         return 0
 
+    from .hubspot_backfill import B2B_PIPELINE_ID, adopt_ticket
     from .stage_sync import sync_stage_from_hubspot
 
     last_poll = _get_last_stage_poll_at()
@@ -162,15 +173,40 @@ def reconcile_ticket_stages_once() -> int:
         tickets = hubspot.search_tickets_sync(
             created_after=last_poll - POLL_OVERLAP,
             pipeline_stage=None,  # every stage — that is the whole point
+            pipeline=B2B_PIPELINE_ID,
             limit=POLL_BATCH_SIZE,
         )
     except Exception:
         logger.exception("HubSpot stage reconcile search failed")
         return 0
 
+    # 우리가 아는 티켓을 **한 번에** 확인합니다. 티켓마다 조회하면 스윕 한 번이 수백
+    # 왕복이고, 허브스팟 왕복은 정말 새 티켓에만 나야 합니다.
+    ids = [str(ticket.id) for ticket in tickets if ticket.id]
+    known: set[str] = set()
+    if ids:
+        with SessionLocal() as session:
+            known = {
+                row
+                for row in session.scalars(
+                    select(Conversation.hubspot_ticket_id).where(
+                        Conversation.hubspot_ticket_id.in_(ids)
+                    )
+                )
+            }
+
     changed = 0
     for ticket in tickets:
         try:
+            if str(ticket.id) not in known:
+                # **모르는 티켓은 주워 옵니다.** 접수 경로는 New 에 도착한 것만 들여오므로,
+                # 영업이 다른 파이프라인에서 끌어오거나 처음부터 Negotiating·Lost·Not a Fit
+                # 으로 만든 티켓은 우리 쪽에 행이 없었습니다. 단계 동기화는 그때 고칠 대상이
+                # 없어 조용히 지나갔고, 화면 건수가 허브스팟보다 적었습니다. 메일도 초안도
+                # 만들지 않습니다 — `adopt_ticket` 의 docstring 을 보세요.
+                if adopt_ticket(ticket):
+                    changed += 1
+                continue
             if sync_stage_from_hubspot(ticket.id, ticket.pipeline_stage, source="poller"):
                 changed += 1
         except Exception:

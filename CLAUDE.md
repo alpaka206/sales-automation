@@ -50,6 +50,21 @@ PERSO Inbound is a FastAPI workflow for inbound inquiry handling and customer op
     USER_ENTERED 로 나눠 보낸다 — 한 벌로 보내면 `+82 10-…` 이 수식이 되거나 날짜가 글자가
     된다. 부르는 곳은 `main.publish_changes_middleware` **한 곳**이다(쓰기 라우트가 열한 개다).
   - **화면은 운영자가 준 HTML 목업 그대로**다. `static/won.css` 는 그 목업의 스타일을 전부 `.won` 아래로 스코프해 옮긴 것이고, `:root` 변수도 `.won` 에 건다 — `:root` 에 두면 콘솔 전체 색이 바뀐다. 파일 끝의 되돌림 블록은 **목업이 값을 주지 않아 console.css 가 흘러 들어온 속성**만 다룬다.
+- **접수는 New 만 보지만, 유입은 그러면 안 된다.** `poll_tickets_once` 와 웹훅은 New 에
+  도착한 티켓만 접수 처리한다(그래야 초안이 엉뚱한 단계에 안 생긴다). 그런데 영업이 다른
+  파이프라인에서 끌어오거나 처음부터 Negotiating·Lost·Not a Fit 으로 만든 티켓은 그래서
+  **행 자체가 안 생겼다** — 단계 동기화는 고칠 대상이 없어 조용히 지나갔고, 화면 건수가
+  허브스팟보다 적었다(2026-08-18 운영자 보고: negotiating −1, lost −3, not a fit −1).
+  이제 10분 스윕이 모르는 티켓을 `hubspot_backfill.adopt_ticket` 으로 주워 온다. **일감이
+  아니라 보이기 위한 행이다**: 메시지도 초안도 접수 큐도 만들지 않고 `last_incoming_at` 을
+  NULL 로 둔다(차면 워크북 append 대기에 올라간다) — 백필과 같은 규칙이고, 그래서 Lost
+  티켓을 주워 와도 고객에게 메일이 갈 길이 없다.
+  그리고 스윕 검색을 **우리 파이프라인으로 좁혔다**. 전에는 포털 전체를 훑어도 무해했지만
+  (다른 파이프라인의 단계 id 는 매핑에 없어 버려졌다) 주워 오기 시작하면 무해하지 않다 —
+  CS·지원 파이프라인 수백 건이 이 콘솔로 들어온다.
+  스윕의 검색 창은 「마지막 스윕 이후 변경분」이라 **오래전에 만들어져 그 뒤로 안 건드려진
+  티켓은 안 걸린다.** 그건 대시보드의 「허브스팟에서 최신화」(`POST /pipeline/backfill`)가
+  파이프라인 전체를 훑어 채운다 — 라우트는 오래 있었는데 누를 곳이 없었다.
 - **단계 값이 사는 열은 둘이고, 둘 다 맞춰야 한다.** `Conversation.stage`(문의별)와
   `CustomerProfile.pipeline_stage`(연락처별)다. 화면이 자리마다 다른 쪽을 읽는다 — 보드는
   앞엣것, 리드 히스토리·고객 상세는 뒤엣것. 한동안 `sync_stage_from_hubspot` 이 `conv.stage`
