@@ -56,10 +56,6 @@ PERSO Inbound is a FastAPI workflow for inbound inquiry handling and customer op
   경우였다). 숫자가 안 맞으면 그 화면의 어떤 숫자도 못 믿는다. 이제 `_placeholder_contact`
   가 자리 표시 연락처를 만든다 — 키는 **티켓** 번호다(연락처 번호가 아니라: 그러면 연락처
   없는 티켓 둘이 한 사람으로 합쳐진다). 메일이 갈 길은 없다(이메일 None, 메시지·초안 없음).
-- **최신화 결과는 화면에 보인다.** `hubspot_backfill_status()` 는 오래 있었는데 어느 화면도
-  읽지 않았다. 그래서 버튼을 눌러도 예약·진행·완료·실패가 전부 같은 그림이었고, 운영자가
-  할 수 있는 말은 「받아온 게 없는 것 같다」뿐이었다. 대시보드가 티켓 수·새로 만든 수·단계를
-  맞춘 수, 실패면 그 이유를 적는다.
 - **접수는 New 만 보지만, 유입은 그러면 안 된다.** `poll_tickets_once` 와 웹훅은 New 에
   도착한 티켓만 접수 처리한다(그래야 초안이 엉뚱한 단계에 안 생긴다). 그런데 영업이 다른
   파이프라인에서 끌어오거나 처음부터 Negotiating·Lost·Not a Fit 으로 만든 티켓은 그래서
@@ -73,8 +69,11 @@ PERSO Inbound is a FastAPI workflow for inbound inquiry handling and customer op
   (다른 파이프라인의 단계 id 는 매핑에 없어 버려졌다) 주워 오기 시작하면 무해하지 않다 —
   CS·지원 파이프라인 수백 건이 이 콘솔로 들어온다.
   스윕의 검색 창은 「마지막 스윕 이후 변경분」이라 **오래전에 만들어져 그 뒤로 안 건드려진
-  티켓은 안 걸린다.** 그건 대시보드의 「허브스팟에서 최신화」(`POST /pipeline/backfill`)가
-  파이프라인 전체를 훑어 채운다 — 라우트는 오래 있었는데 누를 곳이 없었다.
+  티켓은 안 걸린다.** 그건 `POST /pipeline/backfill` 이 파이프라인 전체를 훑어 채운다.
+  **콘솔에 버튼은 없다.** 2026-08-18 에 하루 있었다가 운영자 지시로 지웠다 — 321건을 훑는
+  데 몇 분이 걸려서 「누른 직후」에는 아무 일도 안 일어난 것처럼 보이고, 기다리면 알아서
+  맞는다. 되살릴 거면 **진행 중인지 끝났는지가 화면에 보여야 한다**(`hubspot_backfill_status()`
+  가 그 값을 이미 기록하고 있다). 그게 없으면 「받아온 게 없는 것 같다」와 구별되지 않는다.
 - **단계 값이 사는 열은 둘이고, 둘 다 맞춰야 한다.** `Conversation.stage`(문의별)와
   `CustomerProfile.pipeline_stage`(연락처별)다. 화면이 자리마다 다른 쪽을 읽는다 — 보드는
   앞엣것, 리드 히스토리·고객 상세는 뒤엣것. 한동안 `sync_stage_from_hubspot` 이 `conv.stage`

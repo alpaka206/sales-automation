@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { getJSON } from "../lib/api";
 import { Icon } from "../ui/Icon";
 import { QueueTable, type QueueRow } from "../ui/QueueTable";
@@ -17,31 +17,12 @@ type DashboardData = {
   category_labels: Record<string, string>;
   unqualified: string[];
   manual_log_stages: string[];
-  backfill: Backfill;
   /** 단계 → 그 단계에서 고를 수 있는 Deal Detail. Won 과 Lost 만 있습니다. */
   deal_details: Record<string, string[]>;
   stages: Stage[];
 };
 
-/** 서버가 기록해 둔 최신화 결과. 예약·진행·완료·실패가 화면에서 달라 보여야 합니다 —
- *  전부 같은 그림이면 버튼을 눌렀는지조차 알 수 없습니다. */
-type Backfill = {
-  status: string; actor?: string; error?: string;
-  tickets?: number; conversations_created?: number; conversations_updated?: number;
-} | null;
-
-function backfillLine(justQueued: string | null, done: Backfill): string {
-  if (done?.status === "failed") return `허브스팟 최신화가 실패했습니다: ${done.error ?? "이유 불명"}`;
-  if (done?.status === "completed") {
-    return `허브스팟 최신화 완료 — 티켓 ${done.tickets ?? 0}건을 읽어 ${done.conversations_created ?? 0}건을 새로 만들고 ${done.conversations_updated ?? 0}건의 단계를 맞췄습니다.`;
-  }
-  if (justQueued === "error") return "허브스팟 최신화를 예약하지 못했습니다. 운영 로그를 확인해 주세요.";
-  return "허브스팟 최신화를 예약했습니다. 다음 폴러 회차(최대 10분)에 파이프라인 전체를 훑어 빠진 티켓을 채웁니다.";
-}
-
 export function Dashboard() {
-  const [params] = useSearchParams();
-  const justQueued = params.get("backfill");
   const { data, isPending, error } = useQuery({
     queryKey: ["dashboard"],
     queryFn: () => getJSON<DashboardData>("/api/ui/dashboard"),
@@ -60,12 +41,6 @@ export function Dashboard() {
 
       {/* 최신화는 폴러 다음 회차에 돕니다. 아무 표시가 없으면 버튼이 안 눌린 것으로 읽혀
           운영자가 계속 누르게 됩니다. */}
-      {(justQueued || data.backfill) && (
-        <div className="card mb-gap">
-          <p className="t-xs" style={{ margin: 0 }}>{backfillLine(justQueued, data.backfill)}</p>
-        </div>
-      )}
-
       <section className="card card--flush mb-gap">
         <div className="section-header table-heading">
           <div className="section-header__l">
@@ -95,16 +70,6 @@ export function Dashboard() {
           <span className="section-header__icon"><Icon name="sliders" size={17} /></span>
           <div className="section-header__title">문의 파이프라인</div>
         </div>
-        {/* 라우트는 오래전부터 있었는데 누를 곳이 없었습니다. 평소에는 10분 폴러가 알아서
-            맞추지만, 오래전에 만들어져 그 뒤로 한 번도 안 건드려진 티켓은 폴러의 검색
-            창(마지막 스윕 이후 변경분) 밖에 있어 안 걸립니다. 그때 누르는 버튼입니다 —
-            파이프라인 전체를 처음부터 훑습니다. 읽기 전용이고 메일도 초안도 안 만듭니다. */}
-        <form method="post" action="/pipeline/backfill">
-          <button className="btn btn--subtle btn--sm" type="submit"
-                  title="허브스팟 파이프라인 전체를 다시 훑어 빠진 티켓을 채웁니다">
-            <Icon name="refresh" size={14} /> 허브스팟에서 최신화
-          </button>
-        </form>
       </div>
 
       <Board stages={data.stages} manualLogStages={data.manual_log_stages}
