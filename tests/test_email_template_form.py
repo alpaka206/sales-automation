@@ -40,6 +40,8 @@ def template_db():
         patch("src.db.email_templates.SessionLocal", factory),
         # 휴지통 비우기도 자기 세션을 엽니다.
         patch("src.db.soft_delete.SessionLocal", factory),
+        # 목록을 그리는 /api/ui/email-templates 는 세션을 직접 엽니다.
+        patch("src.db.session.SessionLocal", factory),
     ):
         yield factory
 
@@ -239,14 +241,60 @@ def test_a_signature_cannot_keep_a_language(template_db):
     assert langs == {"signature_ko": "all", "auto_ack_en": "en"}
 
 
-def test_a_signature_never_groups_under_another_row(template_db):
-    """언어별 묶음은 ``auto_ack`` / ``auto_ack_en`` 을 한 줄로 보이게 하는 장치입니다.
-    서명 둘은 그냥 서명 둘이고, 묶으면 '전체' 라고 적힌 언어 칩이 두 개 뜹니다."""
-    from src.api.routes.ui_api import _base_key
+def test_every_row_gets_its_own_line_and_the_count_says_so(template_db):
+    """묶지 않습니다 — 목록에 그린 줄 수와 카드의 숫자가 같아야 합니다.
 
-    keys = {"signature_x", "signature_x_en", "auto_ack", "auto_ack_en"}
-    assert _base_key("signature_x_en", keys) == "signature_x_en"
-    assert _base_key("auto_ack_en", keys) == "auto_ack"
+    ``auto_ack_en`` 을 ``auto_ack`` 아래로 접어 두었더니 11개 행이 6줄로 그려지고 숫자만
+    11로 떴습니다. 그리고 접힌 다섯 줄이 하필 **영문 문의가 읽는 유일한 행들**입니다:
+    운영자는 「전체」라고 적힌 국문 행을 고치고, 영문 회신은 손대지 않은 ``_en`` 행을 계속
+    읽었습니다. 화면에는 그럴 이유가 하나도 안 보였습니다.
+    """
+    with template_db() as session:
+        session.add_all([
+            EmailTemplate(key="auto_ack", name="접수확인", language="ko", channel="email",
+                          status="active", version=1, body="안녕하세요"),
+            EmailTemplate(key="auto_ack_en", name="접수확인", language="en", channel="email",
+                          status="active", version=1, body="Hi"),
+        ])
+        session.commit()
+
+    with TestClient(app) as client:
+        payload = client.get("/api/ui/email-templates").json()
+
+    keys = [item["key"] for item in payload["items"] if item["kind"] == "template"]
+    assert sorted(keys) == ["auto_ack", "auto_ack_en"]
+    count = next(k["count"] for k in payload["kinds"] if k["key"] == "template")
+    assert count == len(keys)
+    # 접는 장치가 돌아오면 이 열이 먼저 돌아옵니다.
+    assert "base_key" not in payload["items"][0]
+    assert "base_key" not in FORM.read_text(encoding="utf-8")
+
+
+def test_saving_does_not_relabel_the_row_language(template_db):
+    """콘솔에는 언어를 고르는 칸이 없습니다 (0063). 그러니 저장이 언어를 바꿀 수 없습니다.
+
+    라우트가 ``language`` 의 기본값을 ``"all"`` 로 두던 동안, 0074 가 국문 행이라고 표시해 둔
+    ``reply_format`` · ``meeting_link`` · ``whatsapp_link`` 는 콘솔에서 한 번 저장할 때마다
+    조용히 '전체' 로 돌아갔습니다. 그 한 글자가 영문 회신이 ``_en`` 행을 읽는다는 것을
+    화면에서 말해 주는 유일한 자리입니다.
+    """
+    with template_db() as session:
+        session.add(
+            EmailTemplate(key="reply_format", name="답변 메일 형식", language="ko",
+                          channel="email", status="active", version=1, body="형식")
+        )
+        session.commit()
+        tpl_id = session.query(EmailTemplate).one().id
+
+    with TestClient(app) as client:
+        # 화면이 보내는 그대로 — 언어 칸이 없으므로 언어도 없습니다.
+        response = client.put(f"/email-templates/{tpl_id}",
+                              data={"name": "답변 메일 형식", "body": "고친 형식"})
+    assert response.status_code == 200
+    with template_db() as session:
+        row = session.query(EmailTemplate).one()
+    assert row.body == "고친 형식"
+    assert row.language == "ko"
 
 
 def test_everything_saved_here_is_active(template_db):
@@ -276,58 +324,79 @@ def test_everything_saved_here_is_active(template_db):
         assert {row.status for row in session.query(EmailTemplate).all()} == {"active"}
 
 
-def test_the_last_row_for_a_key_the_code_resolves_cannot_be_deleted(template_db):
-    """지우면 기능이 없어지는 게 아니라, 여전히 일어나는 lookup 의 답이 없어집니다 —
-    하드코딩된 문장으로 조용히 떨어지는 접수확인, 또는 {{MEETING_LINK}} 로 끝나는 회신."""
-    with template_db() as session:
-        session.add(
-            EmailTemplate(key="meeting_link", name="미팅 예약 링크", language="all",
-                          channel="email", status="active", version=1, body="https://cal")
-        )
-        session.commit()
-        tpl_id = session.query(EmailTemplate).one().id
+def test_anything_deletes_now_and_the_screen_says_what_that_costs(template_db):
+    """자유 삭제입니다 (2026-08-18, 운영자 결정) — 막는 대신 **말합니다.**
 
-    with TestClient(app) as client:
-        response = client.delete(f"/email-templates/{tpl_id}")
-    assert response.status_code == 400
-    with template_db() as session:
-        assert session.query(EmailTemplate).count() == 1
-
-
-def test_every_signature_deletes_and_nothing_else_does(template_db):
-    """Every other row is a key the code resolves by name — auto_ack_en and sender_name_en
-    included. Deleting one removes the answer to a lookup that still happens, and nothing
-    could put it back: the console creates signatures, not code references. 안 쓰려면
-    본문을 비웁니다 — 그건 보이고 되돌릴 수 있습니다.
-
-    ``signature_ko`` is in here on purpose. It WAS such a key — the prompt injected it into
-    every draft — so the screen showed it under 서명 and then refused to delete it, which
-    is the worst of both. Nothing reads it now, so it goes (0061)."""
+    ``signature_`` 로 시작하는 행만 지울 수 있었습니다. 나머지는 코드가 이름으로 찾는 행이라
+    지우면 기능이 없어지는 것이 아니라 여전히 일어나는 **조회의 답**이 없어지기 때문입니다.
+    그 대가를 알고 자유롭게 하기로 했으므로, 이제 유일한 방어선은 그 행이 어떤 행인지 화면이
+    말해 주는 것입니다: 목록의 「발송 경로 사용」 표와 삭제 확인 창의 빨간 문장이 둘 다
+    ``is_code_resolved`` 한 곳에서 나옵니다.
+    """
     with template_db() as session:
         session.add_all([
-            EmailTemplate(key="auto_ack_en", name="접수확인 영어", language="en",
-                          channel="email", status="active", version=1, body="Hi"),
-            EmailTemplate(key="signature_ko", name="서명 (한국어)", language="ko",
-                          channel="email", status="active", version=1, body="김규원"),
+            EmailTemplate(key="meeting_link", name="미팅 예약 링크", language="ko",
+                          channel="email", status="active", version=1, body="https://cal"),
             EmailTemplate(key=f"{SIGNATURE_KEY_PREFIX}x", name="서명", language="all",
                           channel="email", status="active", version=1, body="<p/>"),
+            EmailTemplate(key="my_own_note", name="내 메모", language="all",
+                          channel="email", status="active", version=1, body="메모"),
         ])
         session.commit()
-        ids = {row.name: row.id for row in session.query(EmailTemplate).all()}
+        ids = {row.key: row.id for row in session.query(EmailTemplate).all()}
 
     with TestClient(app) as client:
-        assert client.delete(f"/email-templates/{ids['접수확인 영어']}").status_code == 400
-        assert client.delete(f"/email-templates/{ids['서명 (한국어)']}").status_code == 200
-        assert client.delete(f"/email-templates/{ids['서명']}").status_code == 200
+        for key in ids:
+            assert client.delete(f"/email-templates/{ids[key]}").status_code == 200, key
+        payload = client.get("/api/ui/email-templates").json()
+
+    # 행은 남습니다 — 지운 것은 일주일 동안 되돌릴 수 있습니다(0070). 발송 경로가 보는 것은
+    # status 이고, 읽는 쪽은 전부 이미 'active' 만 봅니다.
     with template_db() as session:
-        # 행은 남습니다 — 지운 것은 일주일 동안 되돌릴 수 있습니다(0070). 발송 경로가
-        # 보는 것은 status 이고, 읽는 쪽은 전부 이미 'active' 만 봅니다.
-        alive = [row.name for row in session.query(EmailTemplate)
-                 if row.status == "active"]
-        assert alive == ["접수확인 영어"]
-        gone = session.query(EmailTemplate).filter_by(status="deleted").all()
-        assert {row.name for row in gone} == {"서명 (한국어)", "서명"}
-        assert all(row.deleted_at is not None for row in gone)
+        assert session.query(EmailTemplate).count() == 3
+        assert {row.status for row in session.query(EmailTemplate).all()} == {"deleted"}
+
+    # 그리고 화면은 어느 것이 발송 경로가 쓰던 행이었는지 말할 수 있어야 합니다.
+    marked = {item["key"]: item["code_resolved"] for item in payload["items"]}
+    assert marked == {"meeting_link": True, "signature_x": True, "my_own_note": False}
+
+
+def test_is_code_resolved_knows_the_shapes_not_just_the_names(template_db):
+    """이름 목록만으로는 부족합니다. 접수확인은 언어마다 한 행이고(`auto_ack_ja` 를 만들면
+    그 언어 문의가 실제로 읽습니다), 서명은 접두사로 훑습니다. 그리고 `auto_ack_footer` 는
+    접수확인의 언어판이 아니라 로고 한 줄이라 두 글자로 못 박습니다."""
+    from src.db.email_templates import is_code_resolved
+
+    assert is_code_resolved("auto_ack")
+    assert is_code_resolved("auto_ack_ja")          # 만들면 발송 경로가 읽습니다
+    assert is_code_resolved("auto_ack_footer")      # 이름으로 등록된 행
+    assert is_code_resolved("signature_anything")
+    assert not is_code_resolved("my_own_note")
+    assert not is_code_resolved("auto_ack_japanese")
+
+
+def test_the_key_is_the_operators_to_choose(template_db):
+    """키를 적으면 그대로, 비우면 서명. 발송 경로가 이름으로 꺼내 가므로, 콘솔이 키를 만들어
+    주기만 하던 동안에는 `auto_ack_ja` 처럼 **읽히는데 만들 수는 없는** 행이 있었습니다."""
+    with TestClient(app) as client:
+        assert client.post("/email-templates",
+                           data={"name": "일본어 접수확인", "key": "auto_ack_ja",
+                                 "language": "ja", "body": "こんにちは"}).status_code == 200
+        assert client.post("/email-templates",
+                           data={"name": "새 서명", "body": "김규원"}).status_code == 200
+        # 같은 키는 두 번 만들 수 없습니다 — 한 문의가 어느 행을 읽을지 정해지지 않습니다.
+        assert client.post("/email-templates",
+                           data={"name": "또", "key": "auto_ack_ja"}).status_code == 400
+        # 대문자·공백은 눈으로는 같은데 조회에는 안 걸리는 이름을 만듭니다.
+        assert client.post("/email-templates",
+                           data={"name": "또", "key": "Auto Ack"}).status_code == 400
+
+    with template_db() as session:
+        rows = {row.key: row.language for row in session.query(EmailTemplate).all()}
+    assert rows["auto_ack_ja"] == "ja"
+    # 비우고 만든 것은 서명이고, 서명에는 언어가 없습니다 (0063).
+    signature = next(k for k in rows if k.startswith(SIGNATURE_KEY_PREFIX))
+    assert rows[signature] == "all"
 
 
 def test_a_deleted_signature_is_gone_from_the_send_path_at_once(template_db):

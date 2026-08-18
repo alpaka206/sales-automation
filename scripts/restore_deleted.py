@@ -35,9 +35,9 @@ from src.db.session import SessionLocal  # noqa: E402
 
 def _orphan_knowledge(session) -> dict[str, KnowledgeDocument]:
     """등록부에서 사라진 정책 문서의 사본 — slug → 문서."""
-    from src.agents.policy_sync import _slug_for
+    from src.agents.policy_sync import knowledge_slug
 
-    live = {_slug_for(s) for s in session.query(PolicySource)}
+    live = {knowledge_slug(s) for s in session.query(PolicySource)}
     return {
         doc.slug: doc
         for doc in session.query(KnowledgeDocument).filter(

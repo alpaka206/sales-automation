@@ -530,33 +530,17 @@ def _template_kind(key: str) -> str:
     return "signature" if key.startswith(SIGNATURE_KEY_PREFIX) else "template"
 
 
-def _base_key(key: str, all_keys: set[str]) -> str:
-    """The row this one is a language of, or itself.
-
-    ``auto_ack_en`` belongs under ``auto_ack``; the screen lists one entry and the
-    language is chosen inside it. Two rows in the list for one thing reads as two things.
-
-    Signatures never group. They have no language at all (0063) — the operator picks one
-    on the draft — so two of them are two signatures, whatever their keys end in. A
-    signature named "x" and one named "x en" would otherwise land under one entry with a
-    language switcher offering 전체 twice.
-
-    Otherwise stripped ONLY when the shorter key actually exists, so an unrelated row
-    ending in ``_en`` keeps its own entry.
-    """
-    import re
-
-    from ...db.email_templates import SIGNATURE_KEY_PREFIX
-
-    if key.startswith(SIGNATURE_KEY_PREFIX):
-        return key
-    base = re.sub(r"_(ko|en|all)$", "", key)
-    return base if base != key and base in all_keys else key
-
-
 @router.get("/api/ui/email-templates")
 def ui_email_templates():
-    """Grouped, not one flat list — and each group says what it is for.
+    """Grouped by kind, and **one entry per row** inside a kind.
+
+    ``auto_ack`` and ``auto_ack_en`` used to collapse into a single entry with the
+    language picked inside it — one thing shown once. They are not one thing. The send
+    path resolves them by exact key, and the ``_en`` row is the ONLY one an English
+    inquiry reads: an operator who edited 답변 메일 형식 edited ``reply_format`` and
+    English replies went on using the untouched ``reply_format_en``, with nothing on
+    screen to say so. The count here was the tell — it counted rows (11) while the list
+    drew groups (6).
 
     Bodies ride along. There are a handful of rows and the largest is a 1.1 KB signature,
     while a second request costs a full round trip — measured at 200-370 ms from Seoul to
@@ -564,6 +548,7 @@ def ui_email_templates():
     as a static file, so the distance is the cost, not the query. Sending ~10 KB once
     means opening a template is instant instead of "a form appears, then changes".
     """
+    from ...db.email_templates import is_code_resolved
     from ...db.models import EmailTemplate
     from ...db.session import SessionLocal
     from ...db.soft_delete import DELETED, days_left, purge_expired
@@ -578,7 +563,6 @@ def ui_email_templates():
             session.query(PolicySource).filter(PolicySource.status != DELETED).count()
         )
         rows = session.query(EmailTemplate).order_by(EmailTemplate.updated_at.desc()).all()
-        all_keys = {row.key for row in rows}
         items = [
             {
                 "id": row.id,
@@ -589,9 +573,10 @@ def ui_email_templates():
                 "language": row.language or "all",
                 "updated_at": row.updated_at,
                 "kind": _template_kind(row.key),
-                # Which list entry this row sits under. Rows sharing one are the same
-                # template in different languages.
-                "base_key": _base_key(row.key, all_keys),
+                # 발송 경로가 이 이름으로 찾는 행인가. 아무 키나 만들고 무엇이든 지울 수
+                # 있게 한 뒤로(2026-08-18), 이것이 "이 행은 실제로 쓰인다" 와 "목록에만
+                # 있다" 를 가르는 유일한 표시입니다.
+                "code_resolved": is_code_resolved(row.key),
                 "body": row.body or "",
                 "subject": row.subject or "",
                 "chars": len(row.body or ""),
@@ -611,10 +596,9 @@ def ui_email_templates():
                 "label": label,
                 "count": policy_count if key == "policy"
                 else sum(1 for item in items if item["kind"] == key and not item["deleted"]),
-                # New rows are only reachable as signatures: the send path resolves the
-                # other kind by exact name, so a template created here would be a row
-                # nothing can ever read. Editing the existing ones is the point.
-                "can_create": key == "signature",
+                # 서명이든 아니든 만들 수 있습니다 (2026-08-18). 만든 행을 읽는 코드가
+                # 있는지는 `code_resolved` 가 행마다 말합니다 — 막는 대신 보이게 합니다.
+                "can_create": key != "policy",
                 "read_only": key == "policy",
             }
             for key, label in TEMPLATE_KINDS
@@ -632,6 +616,7 @@ def ui_policy_docs():
     이유였고, 그건 지금도 사실입니다. 다만 zip 을 만들기 귀찮은 경우가 더 잦아서, 고치는
     것을 막는 대신 **고친 사실을 화면이 말하도록** 바꿨습니다(``edited_at``).
     """
+    from ...agents.policy_sync import knowledge_slug
     from ...db.models import PolicySource
     from ...db.session import SessionLocal
     from ...db.soft_delete import DELETED, days_left, purge_expired
@@ -652,6 +637,9 @@ def ui_policy_docs():
                     "label": row.label,
                     "title": row.title,
                     "mode": row.mode,
+                    # 라우터가 이 문서를 고를 때 부르는 이름. 「항상 적용」 문서에는 없습니다
+                    # — 그건 고르는 대상이 아니라 모든 프롬프트에 통째로 들어갑니다.
+                    "slug": knowledge_slug(row) if row.mode == "knowledge" else "",
                     "body": row.body,
                     "chars": len(row.body or ""),
                     "subject": row.subject or "",

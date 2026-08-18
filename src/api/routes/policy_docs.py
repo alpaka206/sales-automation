@@ -196,12 +196,12 @@ async def policy_docs_restore(source_id: int):
 
 def _set_knowledge_status(session, source: PolicySource, status: str) -> None:
     """초안이 읽는 사본을 재우거나 깨웁니다. 「문의별 참고」에만 사본이 있습니다."""
-    from ...agents.policy_sync import _slug_for
+    from ...agents.policy_sync import knowledge_slug
     from ...db.models import KnowledgeDocument
 
     doc = (
         session.query(KnowledgeDocument)
-        .filter(KnowledgeDocument.slug == _slug_for(source))
+        .filter(KnowledgeDocument.slug == knowledge_slug(source))
         .one_or_none()
     )
     if doc is not None:

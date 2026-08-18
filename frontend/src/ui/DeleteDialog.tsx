@@ -14,8 +14,11 @@ import { ActionButton } from "./ActionButton";
 // 읽게 됩니다.
 export const DELETE_PHRASE = "이 문서를 삭제하겠습니다.";
 
-export function DeleteDialog({ name, onCancel, onConfirm }: {
+export function DeleteDialog({ name, warning, onCancel, onConfirm }: {
   name: string;
+  // 이 행을 지우면 남는 것이 무엇인지. 막지 않기로 한 삭제에는 이 문장이 유일한 방어선이라
+  // 「7일 뒤 사라집니다」 위에, 빨간 글씨로 둡니다.
+  warning?: string;
   onCancel: () => void;
   onConfirm: () => Promise<void> | void;
 }) {
@@ -32,6 +35,11 @@ export function DeleteDialog({ name, onCancel, onConfirm }: {
                  </span>
                  <div>
                    <strong>{name}</strong> 을(를) 삭제합니다.
+                   {warning && (
+                     <div className="t-sm" style={{ marginTop: 6, color: "var(--danger)" }}>
+                       {warning}
+                     </div>
+                   )}
                    <div className="t-sm t-subtle" style={{ marginTop: 6 }}>
                      발송과 초안에서는 <strong>즉시</strong> 빠집니다. 목록에는 7일 동안 남아
                      되돌릴 수 있고, 그 뒤에는 완전히 사라집니다.

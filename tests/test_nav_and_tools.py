@@ -122,9 +122,14 @@ def test_a_row_that_holds_only_one_value_is_edited_as_one_field():
     signature, and nothing matches a signature to a language — the operator picks one on
     the draft."""
     assert "ONE_LINE_FIELDS" in TEMPLATES
-    for key in ("meeting_link:", "whatsapp_link:", "sender_name:"):
+    # 국문·영문 행 여섯 개 전부. `_en` 행이 빠져 있으면 그 줄만 240px 텍스트영역으로 열립니다.
+    for key in ("meeting_link:", "meeting_link_en:", "whatsapp_link:", "whatsapp_link_en:",
+                "sender_name:", "sender_name_en:"):
         assert key in TEMPLATES, key
-    assert 'id="et-link"' in TEMPLATES and "type={oneLine.type}" in TEMPLATES
+    assert 'id="et-link"' in TEMPLATES
+    # type="url" 이 아닙니다: 0069 이후 이 값은 주소가 아니라 `[글자](주소)` 이고,
+    # 브라우저가 그것을 잘못된 값으로 표시했습니다.
+    assert "type={oneLine.type}" not in TEMPLATES
     assert 'id="et-language"' not in TEMPLATES
 
     # The screen can only tell them apart if the API sends the key.

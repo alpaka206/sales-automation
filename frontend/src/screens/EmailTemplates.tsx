@@ -12,51 +12,58 @@ import { PolicyDocs } from "./PolicyDocs";
 
 type Kind = { key: string; label: string; count: number; can_create: boolean; read_only: boolean };
 type Item = {
-  id: number; key: string; base_key: string; name: string; language: string;
+  id: number; key: string; name: string; language: string;
   updated_at: string; kind: string; body: string; subject: string;
   chars: number;
+  // 발송 경로가 이 이름으로 찾는 행인가. 아무 키나 만들 수 있게 된 뒤로, 이것이 「실제로
+  // 쓰이는 행」과 「목록에만 있는 행」을 가르는 유일한 표시입니다.
+  code_resolved: boolean;
   // 지운 행도 목록에 옵니다 — 흐리게, 「N일 후 완전 삭제」와 되돌리기와 함께.
   deleted: boolean; days_left: number | null;
 };
-// 한 줄 = 한 템플릿. 언어가 여럿이면 그 안에서 고릅니다.
-type Group = { base: string; rows: Item[] };
 
 const LANGUAGE_LABELS: Record<string, string> = { all: "전체", ko: "한국어", en: "영어" };
 
 type List = { kinds: Kind[]; items: Item[] };
 
-// Three rows hold a single value and nothing else: the booking calendar, the WhatsApp
-// number, and the name the Korean template introduces the writer by. A language, an HTML
+// These rows hold a single value and nothing else: the booking calendar, the WhatsApp
+// number, and the name the templates introduce the writer by. A language, an HTML
 // preview and a 240px textarea are the wrong questions to ask about any of them, so they
 // get one field. The label and the placeholder say what goes in it — no sentence under it:
 // what the value does is visible in the draft, which is where it is read.
-const ONE_LINE_FIELDS: Record<string, { label: string; type: string; placeholder: string }> = {
-  meeting_link: { label: "링크 주소", type: "url", placeholder: "https://…" },
-  whatsapp_link: { label: "링크 주소", type: "url", placeholder: "https://…" },
+//
+// 링크 네 줄은 **주소가 아니라 표기가 붙은 링크**입니다 (0069): 렌더러가 `[글자](주소)` 를
+// 앵커로 만들고, 국문은 「미팅 링크」 에 영문은 `Calendly` 에 겁니다. type="url" 로 두면
+// 브라우저가 바로 그 형태를 잘못된 값이라고 표시합니다.
+const ONE_LINE_FIELDS: Record<string, { label: string; placeholder: string; mono?: boolean }> = {
+  meeting_link: { label: "링크", placeholder: "[미팅 링크](https://…)", mono: true },
+  meeting_link_en: { label: "링크", placeholder: "[Calendly](https://…)", mono: true },
+  whatsapp_link: { label: "링크", placeholder: "[WhatsApp](https://…)", mono: true },
+  whatsapp_link_en: { label: "링크", placeholder: "[WhatsApp](https://…)", mono: true },
   // Two spellings of one person, not a translation. Empty is a real state, not a mistake:
   // the token then stays visible in the draft so the operator sees it before 발송.
-  sender_name: { label: "담당자 이름 (한국어)", type: "text", placeholder: "예: 배운태" },
-  sender_name_en: { label: "담당자 이름 (영문)", type: "text", placeholder: "예: Untae Bae" },
+  sender_name: { label: "담당자 이름 (한국어)", placeholder: "예: 배운태" },
+  sender_name_en: { label: "담당자 이름 (영문)", placeholder: "예: Untae Bae" },
 };
 
 // 제목이 있는 메일. 서명·링크·담당자 이름에는 제목이라는 것이 없고, 답변 메일 형식은
-// 뼈대일 뿐 메일이 아닙니다.
-const HAS_SUBJECT = new Set(["auto_ack", "auto_ack_en"]);
+// 뼈대일 뿐 메일이 아닙니다. 접수확인은 언어마다 한 행이고 (`auto_ack_ja` 를 만들면 발송
+// 경로가 그 언어 문의에서 실제로 읽습니다) 그 행에도 제목이 있어야 합니다 — 두 글자로
+// 못 박아 `auto_ack_footer` 는 걸리지 않게 합니다.
+const hasSubject = (key: string) => key === "auto_ack" || /^auto_ack_[a-z]{2}$/.test(key);
 
-function Editor({ id, data, siblings, onOpen, onDone }: {
+function Editor({ id, data, onDone }: {
   id: number | "new";
   // 목록이 이미 들고 있는 그 행입니다. 다시 받지 않습니다 — 서울에서 이 서비스까지 왕복이
   // 200~370ms 이고(측정), 그게 바닥입니다: DB를 찌르는 /healthz 가 정적 파일과 같은 시간이
   // 걸립니다. 거리가 값이지 쿼리가 값이 아닙니다. 행 몇 개에 가장 큰 본문이 1.1KB 라
   // 목록에 실어 보내는 편이 싸고, 여는 순간 그려집니다.
   data: Item | undefined;
-  // 같은 템플릿의 다른 언어들. 목록에서 언어별로 줄을 나누는 대신 여기서 고릅니다.
-  siblings: Item[];
-  onOpen: (id: number) => void;
   onDone: () => void;
 }) {
   const queryClient = useQueryClient();
   const [name, setName] = useState("");
+  const [key, setKey] = useState("");
   const [language, setLanguage] = useState("all");
   const [body, setBody] = useState("");
   const [subject, setSubject] = useState("");
@@ -90,8 +97,8 @@ function Editor({ id, data, siblings, onOpen, onDone }: {
       // Same routes the Jinja form uses: key derivation and the revision snapshot stay
       // on the server, in one place.
       if (id === "new") {
-        // 새로 만들 수 있는 것은 서명뿐이고, 서명에는 언어가 없습니다.
-        await postForm("/email-templates", { name, body: value });
+        // 키를 비우면 서버가 서명으로 만듭니다 — 여기서 만드는 것의 거의 전부입니다.
+        await postForm("/email-templates", { name, body: value, key, language });
       } else {
         const response = await fetch(`/email-templates/${id}`, {
           method: "PUT",
@@ -124,12 +131,16 @@ function Editor({ id, data, siblings, onOpen, onDone }: {
     }
   }
 
-  // 새로 만들기 is only offered for signatures, so a new row is one.
-  const isSignature = id === "new" || data?.kind === "signature";
+  // 이제 무엇이든 만들 수 있으므로 새 행이 서명이라는 보장이 없습니다 — 키가 정합니다.
+  const isSignature = data
+    ? data.kind === "signature"
+    : !key.trim() || key.trim().startsWith("signature_");
   const oneLine = data ? ONE_LINE_FIELDS[data.key] : undefined;
   // 미리보기는 태그가 있으면 나옵니다. 서명만 볼 수 있게 해 두었더니 접수확인 하단 로고를
   // 고치는 사람은 테스트 메일을 보내 보는 수밖에 없었습니다 — HTML 인 행이 서명만은 아닙니다.
   const canPreview = isSignature || /<\w/.test(body);
+  // 지우면 무엇이 없어지는지 — 확인 창이 이 행에서만 다른 문장을 띄웁니다.
+  const codeResolved = data?.code_resolved ?? false;
 
   // 목록을 거쳐 들어오면 data 가 이미 있으므로 이 스켈레톤은 보이지 않습니다. 주소를 직접
   // 열어 목록이 아직 없을 때만 나옵니다 — 그때도 틀린 폼을 그리는 것보다는 낫습니다:
@@ -159,28 +170,22 @@ function Editor({ id, data, siblings, onOpen, onDone }: {
         <div className="page-header">
           <div>
             <h1 className="page-title">
-              {id === "new" ? "새 서명 작성" : data?.name || "편집"}
+              {id === "new" ? "새 템플릿 작성" : data?.name || "편집"}
             </h1>
           </div>
-          {/* 언어가 하나뿐이면 고를 것이 없으므로 보이지 않습니다. */}
-          {siblings.length > 1 && (
-            <div className="chip-row">
-              {siblings.map((row) => (
-                <button key={row.id} type="button"
-                        className={`chip${row.id === data?.id ? " is-active" : ""}`}
-                        onClick={() => onOpen(row.id)}>
-                  {LANGUAGE_LABELS[row.language] ?? row.language}
-                </button>
-              ))}
-            </div>
+          {/* 언어를 고르는 칩은 없앴습니다. 언어마다 **다른 행**이고 목록에 각자 줄로 서
+              있습니다 — 칩 뒤에 숨겨 두었더니 국문 행만 고쳐 놓고 영문 회신이 왜 안 바뀌는지
+              화면에 아무 단서가 없었습니다. 여기서는 지금 보고 있는 행의 언어만 말합니다. */}
+          {data && data.kind !== "signature" && (
+            <span className="tag">{LANGUAGE_LABELS[data.language] ?? data.language}</span>
           )}
         </div>
 
         {oneLine ? (
           <>
             <label className="field-label" htmlFor="et-link">{oneLine.label}</label>
-            <input className={`input${oneLine.type === "url" ? " mono" : ""}`} id="et-link"
-                   type={oneLine.type} value={body}
+            <input className={`input${oneLine.mono ? " mono" : ""}`} id="et-link"
+                   type="text" value={body}
                    // 타자마다 trim 하면 안 됩니다. "Untae Bae" 를 치는 도중 "Untae " 가
                    // "Untae" 로 잘려 스페이스가 영영 안 들어갑니다. 다듬는 것은 저장할 때.
                    onChange={(e) => setBody(e.target.value)}
@@ -195,13 +200,34 @@ function Editor({ id, data, siblings, onOpen, onDone }: {
             <input className="input" id="et-name" value={name} onChange={(e) => setName(e.target.value)}
                    placeholder="예: 배운태 (Perso Dubbing)" required style={{ marginBottom: 14 }} />
 
+            {/* 키는 만들 때만 묻습니다. 고칠 때는 못 바꿉니다 — 발송 경로가 그 이름으로
+                꺼내 가므로, 옮기는 순간 조회의 답이 없어집니다. 비우면 서명이 됩니다:
+                여기서 만드는 것의 거의 전부라 기본값이 그쪽입니다. */}
+            {id === "new" && (
+              <>
+                <label className="field-label" htmlFor="et-key">키 (비우면 서명으로 만듭니다)</label>
+                <input className="input mono" id="et-key" value={key}
+                       onChange={(e) => setKey(e.target.value)}
+                       placeholder="예: auto_ack_ja" style={{ marginBottom: 14 }} />
+                {!isSignature && (
+                  <>
+                    <label className="field-label" htmlFor="et-lang">언어 코드 (비우면 전체)</label>
+                    <input className="input mono" id="et-lang"
+                           value={language === "all" ? "" : language}
+                           onChange={(e) => setLanguage(e.target.value.trim() || "all")}
+                           placeholder="예: ja" style={{ marginBottom: 14 }} />
+                  </>
+                )}
+              </>
+            )}
+
             {/* 서명에는 언어 칸이 없습니다. 어떤 코드도 언어로 서명을 고르지 않고 —
                 고르는 것은 사람입니다 — 그래서 그 칸은 아무 데도 가 닿지 않는 질문이었습니다.
                 다른 행들은 'all' 이거나 auto_ack 처럼 처음부터 언어별로 존재합니다. */}
 
             {/* 제목과 본문은 한 메일의 두 부분입니다. 따로 두면 한 메일을 고치는 데 두
                 화면을 오가게 됩니다. */}
-            {data && HAS_SUBJECT.has(data.key) && (
+            {data && hasSubject(data.key) && (
               <>
                 <label className="field-label" htmlFor="et-subject">메일 제목</label>
                 <input className="input" id="et-subject" value={subject}
@@ -238,7 +264,8 @@ function Editor({ id, data, siblings, onOpen, onDone }: {
                         onClick={save}>
             <Icon name="check" size={15} /> {id === "new" ? "생성" : "저장"}
           </ActionButton>
-          {data && isSignature && (
+          {/* 무엇이든 지웁니다. 발송 경로가 찾는 행이면 확인 창이 그렇게 말합니다. */}
+          {data && (
             <button type="button" className="btn btn--icon btn--danger-ghost"
                     title="삭제" aria-label="삭제" onClick={() => setConfirming(true)}>
               <Icon name="trash" size={16} />
@@ -248,7 +275,17 @@ function Editor({ id, data, siblings, onOpen, onDone }: {
         {note && <div className="t-sm" style={{ marginTop: 14 }} role="status">{note}</div>}
       </div>
       {confirming && data && (
-        <DeleteDialog name={data.name} onCancel={() => setConfirming(false)} onConfirm={remove} />
+        <DeleteDialog
+          name={data.name}
+          onCancel={() => setConfirming(false)}
+          onConfirm={remove}
+          warning={codeResolved
+            ? `발송 경로가 이 행을 「${data.key}」 라는 이름으로 찾습니다. 지워도 그 조회는 ` +
+              "계속 일어나고, 답만 없어집니다 — 접수확인이 하드코딩된 문장으로 떨어지거나, " +
+              "회신이 {{MEETING_LINK}} 같은 토큰으로 끝납니다. 7일이 지나면 콘솔로는 다시 " +
+              "만들 수 없습니다. 쓰지 않을 생각이라면 내용을 비우는 쪽이 되돌리기 쉽습니다."
+            : undefined}
+        />
       )}
     </>
   );
@@ -285,12 +322,6 @@ export function EmailTemplates() {
       <Editor
         id={edit === "new" ? "new" : Number(edit)}
         data={editing}
-        siblings={
-          editing ? data.items.filter((item) => item.base_key === editing.base_key) : []
-        }
-        // replace: 언어를 바꿔 보는 것은 들어간 것이 아니라 같은 화면을 다르게 보는 것이라,
-        // 뒤로가기가 언어를 되짚는 대신 목록으로 나가야 합니다.
-        onOpen={(next) => setParams({ kind: kind ?? "", edit: String(next) }, { replace: true })}
         onDone={() => setParams(kind ? { kind } : {}, { replace: true })}
       />
     );
@@ -335,58 +366,58 @@ export function EmailTemplates() {
   }
 
   const group = data.kinds.find((entry) => entry.key === kind);
+  // 한 줄 = 한 행입니다. 언어별로 묶지 않습니다: 발송 경로는 키로 찾고 `_en` 행은 영문
+  // 문의만 읽으므로, 묶어 두면 국문 행을 고쳐 놓고 영문이 그대로인 이유가 화면에
+  // 없습니다. 키 순서로 세워 같은 템플릿의 두 언어가 나란히 붙습니다.
   const items = data.items.filter((item) => item.kind === kind);
-  // 언어가 다른 같은 템플릿은 한 줄로 모읍니다. 두 줄이면 두 가지로 읽힙니다.
-  const groups: Group[] = [];
-  for (const item of items) {
-    const found = groups.find((g) => g.base === item.base_key);
-    if (found) found.rows.push(item);
-    else groups.push({ base: item.base_key, rows: [item] });
-  }
-  for (const g of groups) {
-    g.rows.sort((a, b) => (a.key === g.base ? -1 : b.key === g.base ? 1 : 0));
-  }
-  const columns: Column<Group>[] = [
+  if (kind === "template") items.sort((a, b) => a.key.localeCompare(b.key));
+  const columns: Column<Item>[] = [
     // "기본" 표시는 없앴습니다: 어느 서명을 쓸지는 초안마다 고르는 것이고, 목록에 미리
     // 정해 둔 하나를 표시하면 그게 강제인 것처럼 읽힙니다.
     { label: "템플릿 이름", width: kind === "signature" ? "68%" : "52%",
-      cell: (g) => (
+      cell: (row) => (
         <>
-          <strong className={g.rows[0].deleted ? "t-subtle" : undefined}>{g.rows[0].name}</strong>
-          {g.rows[0].deleted && (
+          <strong className={row.deleted ? "t-subtle" : undefined}>{row.name}</strong>
+          {/* 발송 경로가 이 행을 찾을 때 부르는 이름입니다. 열을 하나 더 내는 대신 이름
+              아래에 둡니다 — 폭을 다시 나눌 필요가 없고, 이름과 신원은 같은 자리에서
+              읽히는 편이 낫습니다. 「답변 메일 형식」이 둘인 이유가 여기 적혀 있습니다. */}
+          <div className="row t-xs" style={{ gap: 6, marginTop: 2 }}>
+            <span className="mono t-subtle">{row.key}</span>
+            {/* 이 표가 없는 행은 목록에만 있는 행입니다 — 어떤 코드도 열지 않습니다. */}
+            {row.code_resolved && <span className="tag">발송 경로 사용</span>}
+          </div>
+          {row.deleted && (
             <div className="t-xs" style={{ color: "var(--danger)" }}>
-              삭제됨 · {g.rows[0].days_left}일 후 완전 삭제
+              삭제됨 · {row.days_left}일 후 완전 삭제
             </div>
           )}
         </>
       ) },
-    // 무엇이 있는지만. 어느 것을 고칠지는 열어서 정합니다. 서명에는 언어라는 것이 없으므로
-    // (고르는 것은 사람입니다) 그 묶음에서는 이 칸 자체를 뺍니다.
+    // 이 행이 어느 언어의 행인지. 서명에는 언어라는 것이 없으므로 (고르는 것은
+    // 사람입니다) 서명 목록에서는 이 칸 자체를 뺍니다.
     ...(kind === "signature" ? [] : [{ label: "언어", width: "16%",
-      cell: (g: Group) => (
-        <span className="t-subtle t-xs">
-          {g.rows.map((r) => LANGUAGE_LABELS[r.language] ?? r.language).join(" · ")}
-        </span>
+      cell: (row: Item) => (
+        <span className="t-subtle t-xs">{LANGUAGE_LABELS[row.language] ?? row.language}</span>
       ) }]),
     // 연도까지. 이 열은 "얼마나 오래됐나" 를 보는 자리이고, 월·일만 있으면 작년 것과 올해
     // 것이 같은 글자로 보입니다.
     { label: "수정일", width: "20%", className: "td-subtle tnum",
-      cell: (g) => kst(g.rows[0].updated_at) || "—" },
+      cell: (row) => kst(row.updated_at) || "—" },
     {
       // 정책 문서 목록과 같은 자리. 줄을 클릭해도 열리지만, 지우려고 들어갔다 나오는
       // 왕복이 없어야 합니다.
       width: "12%",
-      cell: (g) => (
+      cell: (row) => (
         <div className="row" style={{ gap: 6 }} onClick={(e) => e.stopPropagation()}>
           {/* 삭제 버튼은 여기 없습니다. 열어서 지웁니다 — 확인 창이 문장을 옮겨 적으라고
               하는데, 무엇을 지우는지 안 보고 옮겨 적는 것은 확인이 아닙니다. 되돌리기는
               반대로 목록에 있습니다: 되돌리는 데는 망설일 이유가 없습니다. */}
-          {g.rows[0].deleted ? (
+          {row.deleted ? (
             <ActionButton className="btn btn--subtle btn--sm" pending="되돌리는 중"
-                          onClick={() => restoreTemplate(g.rows[0].id)}>되돌리기</ActionButton>
+                          onClick={() => restoreTemplate(row.id)}>되돌리기</ActionButton>
           ) : (
             <button type="button" className="btn btn--subtle btn--sm"
-                    onClick={() => setParams({ kind, edit: String(g.rows[0].id) })}>수정</button>
+                    onClick={() => setParams({ kind, edit: String(row.id) })}>수정</button>
           )}
         </div>
       ),
@@ -416,10 +447,10 @@ export function EmailTemplates() {
       <div className="card card--flush">
           <DataTable
             columns={columns}
-            rows={groups}
-            rowKey={(g) => g.base}
+            rows={items}
+            rowKey={(row) => String(row.id)}
             empty="템플릿이 없습니다"
-            onRowClick={(g) => setParams({ kind, edit: String(g.rows[0].id) })}
+            onRowClick={(row) => setParams({ kind, edit: String(row.id) })}
           />
       </div>
       {listNote && <div className="t-sm" style={{ marginTop: 12 }} role="status">{listNote}</div>}

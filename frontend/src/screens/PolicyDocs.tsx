@@ -11,7 +11,7 @@ import { DeleteDialog } from "../ui/DeleteDialog";
 
 type Mode = { key: string; label: string };
 type Row = {
-  id: number; label: string; title: string | null; mode: string;
+  id: number; label: string; title: string | null; mode: string; slug: string;
   body: string | null; chars: number;
   subject: string; usage_note: string; effective_on: string | null; edited_at: string | null;
   // 지운 문서도 목록에 옵니다 — 흐리게, 일주일 동안.
@@ -39,6 +39,11 @@ const buildColumns = (onRestore: (id: number) => Promise<void>): Column<Row>[] =
   { label: "문서", width: "70%", cell: (row) => (
       <>
         <strong className={row.deleted ? "t-subtle" : undefined}>{row.title || row.label}</strong>
+        {/* 라우터가 "이 문서를 보고 답해라" 라고 할 때 부르는 이름. 고르는 근거는 제목과
+            「언제 쓰는가」이지 이 글자가 아니지만, 로그에 남는 것이 이것이라 화면과 로그를
+            맞춰 보려면 여기 있어야 합니다. 「항상 적용」 문서에는 없습니다 — 고르는 대상이
+            아니라 모든 프롬프트에 통째로 들어갑니다. */}
+        {row.slug && <div className="t-xs mono t-subtle">{row.slug}</div>}
         {row.deleted && (
           <div className="t-xs" style={{ color: "var(--danger)" }}>
             삭제됨 · {row.days_left}일 후 완전 삭제

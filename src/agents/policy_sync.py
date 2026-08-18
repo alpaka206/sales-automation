@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 _SUMMARY_CHARS = 400
 
 
-def _slug_for(source: PolicySource) -> str:
+def knowledge_slug(source: PolicySource) -> str:
     """Stable knowledge slug for a document.
 
     Derived from ``doc_key``, not the label: renaming "가격 정책" to "B2B 가격 정책" must
@@ -69,7 +69,7 @@ def _tags_for(source: PolicySource) -> list[str]:
 
 
 def _upsert_knowledge(session, source: PolicySource, title: str, markdown: str) -> None:
-    slug = _slug_for(source)
+    slug = knowledge_slug(source)
     doc = session.query(KnowledgeDocument).filter(KnowledgeDocument.slug == slug).one_or_none()
     if doc is None:
         doc = KnowledgeDocument(
