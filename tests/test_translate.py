@@ -236,3 +236,69 @@ def test_choosing_no_signature_and_sending_straight_away_removes_it(inbound_db, 
     approval.approve(mid, approver="test")
     with inbound_db() as session:
         assert session.get(Message, mid).signature_key == "signature_hyeram"
+
+
+# ---------------------------------------------------------------------------
+# 주소는 모델에게 넘기지 않습니다.
+# ---------------------------------------------------------------------------
+
+BOOKING = (
+    "https://calendar.google.com/calendar/u/0/appointments/schedules/"
+    "AcZssZ3woViQ906eyzcO97gG4oZPCyESiCL7x_WyBERhh3-LZqZSpl-ZPAhONZtZWyQgIN7FzEtqrzwi"
+)
+
+
+class _FakeLLM:
+    """모델이 받은 것을 기록하고, 시키는 대로 돌려줍니다."""
+
+    def __init__(self, reply):
+        self.reply = reply
+        self.seen = ""
+
+    def complete(self, _name, variables, **_kw):
+        self.seen = variables["text"]
+        return self.reply(self.seen) if callable(self.reply) else self.reply
+
+
+def test_the_booking_url_never_reaches_the_translator():
+    """초안 단계에서 모델에게서 지킨 그 주소가, 발송 직전 번역에서 다시 노출됐습니다.
+
+    `apply_editable_tokens` 가 `{{MEETING_LINK}}` 를 진짜 값으로 바꾸는 것이 번역보다
+    **앞**입니다. 그래서 영문 고객에게 나갈 때 `enforce_send_language` 가 120자짜리 base64
+    주소를 통째로 모델에 넣고 있었습니다 — 토큰을 만든 이유가 바로 그것을 막는 것인데.
+    """
+    from src.llm.translate import translate_to
+
+    body = f"미팅은 여기서 잡으실 수 있습니다: [Calendly]({BOOKING})"
+    llm = _FakeLLM(lambda seen: seen.replace("미팅은 여기서 잡으실 수 있습니다", "Book a meeting here"))
+
+    out = translate_to(body, "en", llm=llm)
+
+    assert BOOKING not in llm.seen, "주소가 모델에게 갔습니다"
+    assert "%%0%%" in llm.seen
+    # 그리고 돌아온 본문에는 원래 주소가 글자 하나 안 틀리고 들어 있습니다.
+    assert out == f"Book a meeting here: [Calendly]({BOOKING})"
+
+
+def test_a_translation_that_loses_the_link_is_a_failed_translation():
+    """자리표시자가 안 돌아오면 링크가 없어진 것입니다. 그대로 내보내면 고객은 예약 링크가
+    빠진 메일을 받고, 사람이 발송을 누른 **뒤**에 도는 단계라 검토에도 안 걸립니다.
+    언어가 틀린 메일은 눈에 띄어 고쳐지지만, 링크가 빠진 메일은 안 띕니다."""
+    from src.llm.translate import translate_to
+
+    body = f"예약: [Calendly]({BOOKING})"
+    swallowed = _FakeLLM("Booking: Calendly")          # 자리표시자를 삼킨 모델
+
+    assert translate_to(body, "en", llm=swallowed) == ""
+
+
+def test_the_tokens_are_protected_too():
+    """`{{SENDER_NAME}}` 이 아직 안 바뀐 채로 번역을 지나는 경로도 있습니다 —
+    초안의 `ensure_korean` 은 치환보다 앞입니다."""
+    from src.llm.translate import _protect, _restore
+
+    masked, held = _protect("담당 {{SENDER_NAME}} 드림 — {{MEETING_LINK}}")
+    assert "{{" not in masked
+    assert held == ["{{SENDER_NAME}}", "{{MEETING_LINK}}"]
+    # 모델이 자리표시자 옆에 공백을 넣는 정도는 흔해서 느슨하게 되돌립니다.
+    assert _restore(masked.replace("%%1%%", "%% 1 %%"), held).endswith("{{MEETING_LINK}}")

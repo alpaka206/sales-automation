@@ -374,18 +374,14 @@ export function EmailTemplates() {
   const columns: Column<Item>[] = [
     // "기본" 표시는 없앴습니다: 어느 서명을 쓸지는 초안마다 고르는 것이고, 목록에 미리
     // 정해 둔 하나를 표시하면 그게 강제인 것처럼 읽힙니다.
-    { label: "템플릿 이름", width: kind === "signature" ? "68%" : "52%",
+    { label: "템플릿 이름", width: kind === "signature" ? "68%" : "40%",
       cell: (row) => (
         <>
           <strong className={row.deleted ? "t-subtle" : undefined}>{row.name}</strong>
           {/* 발송 경로가 이 행을 찾을 때 부르는 이름입니다. 열을 하나 더 내는 대신 이름
               아래에 둡니다 — 폭을 다시 나눌 필요가 없고, 이름과 신원은 같은 자리에서
               읽히는 편이 낫습니다. 「답변 메일 형식」이 둘인 이유가 여기 적혀 있습니다. */}
-          <div className="row t-xs" style={{ gap: 6, marginTop: 2 }}>
-            <span className="mono t-subtle">{row.key}</span>
-            {/* 이 표가 없는 행은 목록에만 있는 행입니다 — 어떤 코드도 열지 않습니다. */}
-            {row.code_resolved && <span className="tag">발송 경로 사용</span>}
-          </div>
+          <div className="t-xs mono t-subtle">{row.key}</div>
           {row.deleted && (
             <div className="t-xs" style={{ color: "var(--danger)" }}>
               삭제됨 · {row.days_left}일 후 완전 삭제
@@ -395,9 +391,15 @@ export function EmailTemplates() {
       ) },
     // 이 행이 어느 언어의 행인지. 서명에는 언어라는 것이 없으므로 (고르는 것은
     // 사람입니다) 서명 목록에서는 이 칸 자체를 뺍니다.
-    ...(kind === "signature" ? [] : [{ label: "언어", width: "16%",
+    ...(kind === "signature" ? [] : [{ label: "언어", width: "12%",
       cell: (row: Item) => (
         <span className="t-subtle t-xs">{LANGUAGE_LABELS[row.language] ?? row.language}</span>
+      ) },
+    // 발송 경로가 이 이름으로 이 행을 찾는가. 「안 씀」은 어떤 코드도 열지 않는 행이라는
+    // 뜻입니다 — 아무 키나 만들 수 있게 된 뒤로 그런 행이 생길 수 있습니다.
+    { label: "발송 경로", width: "16%",
+      cell: (row: Item) => (
+        <span className="t-subtle t-xs">{row.code_resolved ? "사용" : "안 씀"}</span>
       ) }]),
     // 연도까지. 이 열은 "얼마나 오래됐나" 를 보는 자리이고, 월·일만 있으면 작년 것과 올해
     // 것이 같은 글자로 보입니다.
