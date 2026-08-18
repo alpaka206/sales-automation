@@ -18,7 +18,12 @@ export type QueueRow = {
   waiting_since: string | null;
 };
 
-const STATUS_LABELS: Record<string, string> = {
+/** 상태 → 사람이 읽는 말. 티켓 세부 내역의 머리글도 이걸 씁니다 — 같은 상태를 두 화면이
+ *  다른 말로 부르면 그게 다른 상태로 읽힙니다. */
+export const STATUS_LABELS: Record<string, string> = {
+  // 고객이 보낸 메일. 티켓 세부 내역의 머리글은 방향을 안 가리고 가장 최근 메시지를
+  // 집으므로 이 값이 옵니다 — 없으면 영어 `received` 가 한국어 줄에 그대로 섭니다.
+  received: "고객 회신 도착",
   pending_approval: "발송 대기",
   drafting: "작성 중",
   draft_failed: "작성 실패",

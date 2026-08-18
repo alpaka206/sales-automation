@@ -161,7 +161,7 @@ export function Recovery() {
                           `HubSpot에 없는 티켓 ${r.deleted}건 — 해당 문의와 메일 기록을 완전히 삭제합니다. 되돌릴 수 없습니다.`,
                         r.stale > 0 &&
                           `New가 아닌 문의 ${r.stale}건 — 대기 중인 회신 초안을 종료합니다. 문의와 기록은 남습니다.`,
-                        "고객 정보와 계약, 직접 남긴 소통 기록은 어느 쪽에서도 지워지지 않습니다.",
+                        "고객 정보와 계약, 직접 남긴 소통 히스토리는 어느 쪽에서도 지워지지 않습니다.",
                       ].filter(Boolean).join("\n\n"),
                     });
                     return `${summary} · 삭제 대상 ${r.deleted} · 초안 정리 대상 ${r.stale}`;

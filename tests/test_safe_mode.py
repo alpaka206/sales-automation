@@ -202,7 +202,7 @@ def test_hubspot_timeline_email_blocked(safe):
 
 
 def test_hubspot_interaction_note_blocked(safe):
-    """소통 기록의 HubSpot 사본. 기록 자체는 우리 DB 에 남고, 이 통로만 막힙니다."""
+    """소통 히스토리의 HubSpot 사본. 기록 자체는 우리 DB 에 남고, 이 통로만 막힙니다."""
     from src.integrations.hubspot import HubSpotClient
 
     with pytest.raises(ExternalWriteBlocked):

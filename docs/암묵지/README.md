@@ -191,14 +191,14 @@ UPDATE 로 시도 하나를 예약하고, `SLACK_NOTIFICATION_MAX_ATTEMPTS = 5` 
 직접 열면 보이지만, 알림이 있어서 안 여는 것이 지금의 운용입니다. 위 다섯 곳(02 의 상태 목록)
 처럼 "실패해도 아무 데도 안 뜨는" 부류인지 확인이 필요합니다.
 
-### 소통 기록(`CustomerInteraction`)이 어느 대화에 붙는가
+### 소통 히스토리(`CustomerInteraction`)이 어느 대화에 붙는가
 
 `customer_ops.py:693`(`_linked_conversation`) · `:720`(`_log_interaction_to_hubspot`) ·
 `:766`(`interaction_add`). 03 은 HubSpot 쪽(`create_interaction_note` 는 note 한 종류만 쓴다)
 을, 07 은 `ui/InteractionForm.tsx` 를 세 화면이 공유한다는 것을 적었지만, **DB 쪽에서 그
 기록이 어느 대화·어느 계약 차수에 매달리는지**는 어느 문서에도 없습니다. CLAUDE.md 는
 "소통 히스토리만 예외로 고객 단위라 `contract_seq` 만 붙였다"(0065)까지만 말합니다. 가장 최근
-커밋(`528de3f` 「소통 기록이 HubSpot 타임라인과 양쪽으로 오간다」)이 이 영역을 바꿨는데 그
+커밋(`528de3f` 「소통 히스토리가 HubSpot 타임라인과 양쪽으로 오간다」)이 이 영역을 바꿨는데 그
 양방향 규칙이 문서에 안 들어갔습니다.
 
 **왜 위험한가**: 양방향 동기화는 03 이 적은 무한 루프 위험의 전형입니다. 03 의 「HubSpot →

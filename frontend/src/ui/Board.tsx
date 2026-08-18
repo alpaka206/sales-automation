@@ -6,6 +6,7 @@ import { kst } from "../lib/format";
 import { Icon } from "./Icon";
 import { ActionButton } from "./ActionButton";
 import { Modal } from "./Modal";
+import { ConfirmModal } from "./ConfirmModal";
 import { InteractionForm } from "./InteractionForm";
 import { SyncBanner, syncStateFrom, type SyncState } from "./SyncBanner";
 
@@ -61,6 +62,12 @@ export function Board({ stages, manualLogStages, dealDetails = {} }: {
   const [over, setOver] = useState<string | null>(null);
   const [sync, setSync] = useState<SyncState>(null);
   const [logging, setLogging] = useState<Card | null>(null);
+  // 저장 **전에** 묻습니다. 여기서 고치는 값은 우리 DB 에서 끝나지 않고 허브스팟 티켓과 영업
+  // 워크북까지 가므로, 되돌리려면 세 곳을 되돌려야 합니다. 특히 드래그는 손이 미끄러지면
+  // 그대로 실행되는 유일한 조작입니다 — 누른 적도 없이 단계가 옮겨집니다.
+  const [confirm, setConfirm] = useState<
+    { description: React.ReactNode; run: () => Promise<void> } | null
+  >(null);
 
   async function move(card: Card, stage: string) {
     if (card.stage === stage) return;      // a no-op drop skips the write entirely
@@ -166,7 +173,20 @@ export function Board({ stages, manualLogStages, dealDetails = {} }: {
                 onDrop={(event) => {
                   event.preventDefault();
                   setOver(null);
-                  if (dragging) void move(dragging, stage.key);
+                  if (dragging && dragging.stage !== stage.key) {
+                    const card = dragging;
+                    const label = stage.label;
+                    setConfirm({
+                      description: (
+                        <>
+                          <strong>{card.company || card.name || card.subject}</strong> 의 단계를{" "}
+                          <strong>{label}</strong> 로 옮깁니다. 허브스팟 티켓과 영업 워크북에도
+                          함께 반영됩니다.
+                        </>
+                      ),
+                      run: () => move(card, stage.key),
+                    });
+                  }
                   setDragging(null);
                 }}
               >
@@ -201,7 +221,7 @@ export function Board({ stages, manualLogStages, dealDetails = {} }: {
                     {/* **언제나 티켓으로 들어갑니다.** 예전에는 메일 행이 있는 카드만
                         티켓으로 가고 나머지는 고객 페이지로 빠졌는데, 메일이 없는 것은
                         HubSpot 에서 들여온 티켓 — 즉 Won·Lost 카드 대부분 — 이었습니다.
-                        Deal Detail 도 소통 기록도 티켓의 값이라, 그 카드만 정작 아무것도
+                        Deal Detail 도 소통 히스토리도 티켓의 값이라, 그 카드만 정작 아무것도
                         못 고치는 자리로 갔습니다. 고객 히스토리는 티켓 화면에서 한 번 더
                         눌러 갑니다. */}
                     <Link to={`/tickets/${card.conversation_id}`} draggable={false}>
@@ -236,7 +256,19 @@ export function Board({ stages, manualLogStages, dealDetails = {} }: {
                             aria-label={`Deal Detail — ${card.subject || "이 문의"}`}
                             onMouseDown={(event) => event.stopPropagation()}
                             onDragStart={(event) => { event.preventDefault(); event.stopPropagation(); }}
-                            onChange={(event) => void setDealDetail(card, event.target.value)}
+                            onChange={(event) => {
+                              const detail = event.target.value;
+                              setConfirm({
+                                description: (
+                                  <>
+                                    <strong>{card.company || card.name || card.subject}</strong> 의
+                                    Deal Detail 을{" "}
+                                    <strong>{detail || "선택 안 함"}</strong> 로 바꿉니다.
+                                  </>
+                                ),
+                                run: () => setDealDetail(card, detail),
+                              });
+                            }}
                           >
                             <option value="">Deal Detail</option>
                             {details.map((option) => (
@@ -249,8 +281,8 @@ export function Board({ stages, manualLogStages, dealDetails = {} }: {
                             type="button"
                             className="pipeline-card__log"
                             draggable={false}
-                            title="소통 기록 추가"
-                            aria-label="소통 기록 추가"
+                            title="소통 히스토리 추가"
+                            aria-label="소통 히스토리 추가"
                             aria-haspopup="dialog"
                             onClick={() => setLogging(card)}
                           >
@@ -278,9 +310,17 @@ export function Board({ stages, manualLogStages, dealDetails = {} }: {
       </div>
 
       {/* ONE form for the whole board, pointed at the card whose + was clicked. */}
+      {confirm && (
+        <ConfirmModal
+          description={confirm.description}
+          onConfirm={confirm.run}
+          onClose={() => setConfirm(null)}
+        />
+      )}
+
       {logging && (
         <Modal
-          title="소통 기록 추가"
+          title="소통 히스토리 추가"
           description={`${logging.company || logging.name} · 이 문의에 대해 오간 연락을 남깁니다.`}
           wide
           onClose={() => setLogging(null)}

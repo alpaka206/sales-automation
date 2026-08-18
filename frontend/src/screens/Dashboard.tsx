@@ -35,9 +35,22 @@ export function Dashboard() {
   if (isPending || !data) return <LoadingBlock />;
 
   const c = data.counters;
+  // 보드가 그리는 그 열의 총계입니다 — 위 칩과 아래 열이 다른 수를 말할 수 없습니다.
+  const negotiating = data.stages.find((stage) => stage.key === "negotiation")?.total ?? 0;
   return (
     <>
-      <h1 className="sr-only">문의 대시보드</h1>
+      {/* 숫자는 화면 맨 위, 제목 옆입니다(운영자 지시). 예전에는 「답변 대기중인 문의」 카드
+          머리에 붙어 있어서, 그 표에 대한 숫자로 읽혔습니다 — 협상중은 그 표에 아예 안 나오는
+          단계라 거기 둘 수 없었고, 그래서 없었습니다.
+
+          「협상중」은 아래 보드의 Negotiating 열 총계를 그대로 씁니다. 서버에 세는 곳을 하나
+          더 만들면 같은 화면의 두 숫자가 언젠가 어긋납니다. */}
+      <div className="row wrap" style={{ gap: 10, marginBottom: "var(--gap)" }}>
+        <h1 className="page-title page-title--lead">문의 대시보드</h1>
+        <span className="chip">오늘 접수 <b className="tnum">{c.received_today}</b></span>
+        <span className="chip">답변 대기 <b className="tnum">{c.awaiting_total}</b></span>
+        <span className="chip">협상중 <b className="tnum">{negotiating}</b></span>
+      </div>
 
       {/* 최신화는 폴러 다음 회차에 돕니다. 아무 표시가 없으면 버튼이 안 눌린 것으로 읽혀
           운영자가 계속 누르게 됩니다. */}
@@ -47,13 +60,7 @@ export function Dashboard() {
             <span className="section-header__icon"><Icon name="messages" size={17} /></span>
             <div className="section-header__title">답변 대기중인 문의</div>
           </div>
-          <div className="queue-counters">
-            <span><em>오늘 접수</em><b className="tnum">{c.received_today}</b></span>
-            {/* New/Negotiating 를 뺀 이유: 발송 대기가 New 만 보여주므로 ALL 이 곧 New
-                입니다. 같은 수를 세 칸에 적으면 다르다고 읽힙니다. */}
-            <span><em>ALL</em><b className="tnum">{c.awaiting_total}</b></span>
-            <Link to="/messages" className="chip">전체 보기</Link>
-          </div>
+          <Link to="/messages" className="chip">전체 보기</Link>
         </div>
         <QueueTable
           rows={data.queue}

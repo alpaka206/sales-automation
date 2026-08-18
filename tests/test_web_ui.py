@@ -150,20 +150,28 @@ def test_the_shell_loads_the_korean_ui_font():
 
 @patch("src.api.routes.dashboard._dashboard_context", _mock_dashboard_context)
 def test_dashboard_shows_queue_counters():
-    """Two numbers, not four.
+    """세 숫자가 화면 맨 위, 제목 옆에 섭니다 — 오늘 접수 · 답변 대기 · 협상중.
 
-    ALL used to sum every stage while the list it links to shows New only, so the header
-    said 6 and the screen behind it held 1 — the other five were drafts on tickets
-    somebody had already answered in HubSpot. Counting the same rows the list counts
-    makes ALL and New the same number, and two counters saying one thing read as two
-    different things. The per-stage numbers are on the board's column headers below.
+    예전에는 「답변 대기중인 문의」 카드 머리에 두 개(오늘 접수 · ALL)가 붙어 있었습니다.
+    거기 있으면 그 표에 대한 숫자로 읽히는데, 협상중은 그 표에 아예 안 나오는 단계라 넣을
+    자리가 없었습니다. 2026-08-18 에 운영자 지시로 위로 올리고 협상중을 더했습니다.
+
+    **협상중을 세는 곳을 서버에 만들지 않았습니다.** 아래 보드의 Negotiating 열 총계를 그대로
+    씁니다 — 같은 화면의 두 숫자가 서로 다른 질의에서 나오면 언젠가 어긋나고, 그때 어느 쪽이
+    맞는지 화면만 봐서는 알 수 없습니다. 그래서 payload 의 counters 는 그대로 둘입니다.
     """
     counters = _client().get("/api/ui/dashboard").json()["counters"]
     assert set(counters) == {"received_today", "awaiting_total"}
     screen = pathlib.Path("frontend/src/screens/Dashboard.tsx").read_text(encoding="utf-8")
-    for label in ("답변 대기중인 문의", "오늘 접수", "ALL"):
+    for label in ("답변 대기중인 문의", "오늘 접수", "협상중"):
         assert label in screen, label
+    # 「답변 대기」만 찾으면 카드 제목 「답변 대기중인 문의」에 걸려 칩을 지워도 통과합니다.
+    assert "답변 대기 <b" in screen
+    # 협상중은 보드의 열 총계에서 옵니다. 서버에 세 번째 카운터를 만들면 안 됩니다.
+    assert 'stage.key === "negotiation"' in screen
     assert "awaiting_negotiation" not in screen
+    # 카드 머리의 옛 카운터는 사라졌습니다 — 표에 대한 숫자로 읽히던 자리입니다.
+    assert "queue-counters" not in screen
 
 
 @patch("src.api.routes.dashboard._dashboard_context", _mock_dashboard_context)

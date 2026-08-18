@@ -87,7 +87,7 @@ def _message_detail_context(
     - ``message_id`` — 회신 및 검토 목록에서 그 초안을 열 때. 그 메일이 화면의 「현재」 글이
       되고, 검토 중이면 편집기가 그 자리에 그려집니다.
     - ``conversation_id`` — 보드 카드에서 티켓을 열 때. 그 대화의 마지막 메일이 현재 글이고,
-      **메일이 하나도 없으면 그대로 없는 채로** 티켓 정보·Deal Detail·소통 기록만 그립니다.
+      **메일이 하나도 없으면 그대로 없는 채로** 티켓 정보·Deal Detail·소통 히스토리만 그립니다.
 
     뒤엣것이 필요한 이유: ``hubspot_backfill`` 은 티켓에서 대화만 만들고 메일 행은 만들지
     않습니다. HubSpot 에서 들여온 Won·Lost 티켓이 전부 그렇고, 그래서 보드에서 그 카드를
@@ -337,7 +337,7 @@ def _customer_history(session, contact_id: int, exclude_conversation_id: int | N
     template never touches a detached ORM object. Editing lives at /customers/{id}.
 
     ``exclude_conversation_id`` drops the records THIS ticket already lists in its own
-    소통 기록 card — otherwise every call the operator logs here would render twice on
+    소통 히스토리 card — otherwise every call the operator logs here would render twice on
     one screen.
 
     계약(`ContractRecord`)도 여기서 같이 실어 보냈습니다. 화면이 읽지 않아 지웠습니다 —

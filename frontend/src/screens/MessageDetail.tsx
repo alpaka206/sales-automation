@@ -6,6 +6,8 @@ import { kst } from "../lib/format";
 import { Icon } from "../ui/Icon";
 import { channelLabel } from "../ui/InteractionForm";
 import { Modal } from "../ui/Modal";
+import { ConfirmModal } from "../ui/ConfirmModal";
+import { STATUS_LABELS } from "../ui/QueueTable";
 import { ActionButton, useAction } from "../ui/ActionButton";
 import { InteractionForm, InteractionItem, type Interaction } from "../ui/InteractionForm";
 import { LoadingBlock } from "../ui/Loading";
@@ -104,7 +106,7 @@ type Detail = {
   contact: { id: number; name: string; email: string | null; company: string | null; domain: string | null; role_description: string | null } | null;
   customer: { profile: Record<string, unknown> | null; interactions: Interaction[] } | null;
   stage_labels: Record<string, string>;
-  /** 소통 기록을 남길 수 있는 단계 — 보드의 + 버튼과 같은 목록, 같은 출처. */
+  /** 소통 히스토리를 남길 수 있는 단계 — 보드의 + 버튼과 같은 목록, 같은 출처. */
   manual_log_stages: string[];
   /** 단계 → 고를 수 있는 Deal Detail. Won 과 Lost 만 있습니다 — 보드와 같은 출처. */
   deal_details: Record<string, string[]>;
@@ -152,6 +154,12 @@ export function MessageDetail() {
   });
 
   const [editingContact, setEditingContact] = useState(false);
+  // 저장 **전에** 묻습니다. 예전에는 끝난 뒤 「저장했습니다」를 띄웠는데, 그건 이미 벌어진
+  // 일을 알려 줄 뿐이라 잘못 누른 사람에게는 쓸모가 없습니다 — 게다가 이 값들은 우리 DB 에서
+  // 끝나지 않고 허브스팟까지 갑니다.
+  const [confirm, setConfirm] = useState<
+    { description: React.ReactNode; run: () => Promise<void> } | null
+  >(null);
   const [editingRecord, setEditingRecord] = useState<string | null>(null);
   const [subject, setSubject] = useState("");
   const [body, setBody] = useState("");
@@ -174,25 +182,18 @@ export function MessageDetail() {
   // 훅은 아래 early return 보다 **위**에서 부릅니다. 아래에 두면 로딩 렌더에서는 건너뛰고
   // 데이터가 온 렌더에서는 부르게 되어, 훅 수가 달라졌다고 React 가 터집니다(#310) — 화면이
   // 통째로 안 뜹니다. 그래서 data 가 아직 없을 수 있다는 전제로 씁니다.
-  const [saveContact, savingContact] = useAction(async (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    const form = event.currentTarget;
-    const fields = Object.fromEntries(new FormData(form) as never) as Record<string, string>;
-    await postForm(`/contacts/${data?.contact?.id}/edit`, fields);
-    setNotice({
-      title: "티켓 정보를 저장했습니다",
-      body: (
-        <dl className="info-list" style={{ marginTop: 12 }}>
-          <div className="info-row"><dt>회사</dt>
-            <dd>{fields.company?.trim() || "—"}</dd></div>
-          <div className="info-row"><dt>하는 일 / 메모</dt>
-            <dd style={{ whiteSpace: "pre-line" }}>{fields.role_description?.trim() || "—"}</dd></div>
-        </dl>
-      ),
-    });
+  async function saveContactFields(fields: Record<string, string>) {
+    try {
+      await postForm(`/contacts/${data?.contact?.id}/edit`, fields);
+    } catch (error) {
+      // 실패하면 말합니다. 확인 창을 지나온 뒤의 침묵은 「눌렀는데 아무 일도 안 일어난다」로
+      // 읽혀서 한 번 더 누르게 만듭니다. 옆의 saveDealDetailNow 와 같은 모양입니다.
+      setNotice({ title: "연락처를 저장하지 못했습니다", body: String(error) });
+      return;
+    }
     setEditingContact(false);
     await queryClient.invalidateQueries({ queryKey: key });
-  });
+  }
 
   /** 플랜 값을 허브스팟에 되씁니다.
    *
@@ -260,7 +261,7 @@ export function MessageDetail() {
 
   /** 고른 값을 그 자리에서 저장합니다. 저장 버튼을 따로 두지 않는 이유는 보드 카드와
    *  같습니다 — 값 하나짜리 고르개에 저장 버튼이 붙으면, 고르고 안 누른 상태가 생깁니다. */
-  async function saveDealDetail(detail: string) {
+  async function saveDealDetailNow(detail: string) {
     try {
       await postForm(`/pipeline/conversations/${ticket.id}/deal-detail`, { detail });
       await queryClient.invalidateQueries({ queryKey: key });
@@ -325,7 +326,7 @@ export function MessageDetail() {
     <>
       {/* 나가는 문 둘. 왼쪽은 온 곳으로, 오른쪽은 **이 고객의 히스토리**입니다 —
           보드에서 티켓으로 들어오게 바뀌었으니, 고객 단위로 보고 싶을 때 갈 곳이
-          여기 있어야 합니다. Deal Detail·소통 기록은 티켓의 값이라 이 화면이 먼저입니다. */}
+          여기 있어야 합니다. Deal Detail·소통 히스토리는 티켓의 값이라 이 화면이 먼저입니다. */}
       <div className="row-between" style={{ marginBottom: 14 }}>
         <Link to={conversationId ? "/" : "/messages"} className="chip">
           <Icon name="chevron" size={14} /> {conversationId ? "문의 대시보드" : "회신 및 검토 목록"}
@@ -337,20 +338,30 @@ export function MessageDetail() {
         )}
       </div>
 
+      {/* 큰 글씨는 **누구인가** 입니다. 오래 「문의와 답변 · 제목」이었고 티켓 번호가 맨 위
+          태그였는데, 티켓 번호는 이 화면에서 답을 쓰는 데 한 번도 쓰이지 않습니다 — 허브스팟에
+          가서 같은 티켓을 찾을 때나 씁니다. 그래서 아래 작은 줄로 내리고, 그 자리에 회사
+          이름과 Client ID 를 올렸습니다(운영자 지시). 제목은 티켓 정보 카드에 그대로 있습니다. */}
       <div className="page-header">
         <div>
-          <div className="row" style={{ gap: 10 }}>
-            <span className="tag">
-              <Icon name="messages" size={14} />{" "}
-              {ticket.ticket_id ? `HubSpot 티켓 #${ticket.ticket_id}` : "연락처 기준 대화 (티켓 없음)"}
-            </span>
+          <div className="row wrap" style={{ gap: 10 }}>
+            <h1 className="page-title page-title--lead">
+              {contact?.company || contact?.name || ticket.inquiry_subject || "이름 없는 문의"}
+            </h1>
+            {ticket.client_id != null && (
+              <span className="chip tnum">Client ID {ticket.client_id}</span>
+            )}
             {ticket.inquiry_language && (
               <span className="tag"><Icon name="translate" size={13} /> 문의 언어 · {ticket.inquiry_language}</span>
             )}
           </div>
-          <h1 className="page-title" style={{ marginTop: 10 }}>
-            문의와 답변{ticket.inquiry_subject ? ` · ${ticket.inquiry_subject}` : ""}
-          </h1>
+          <div className="t-xs t-subtle" style={{ marginTop: 6 }}>
+            {[
+              ticket.ticket_id ? `HubSpot 티켓 #${ticket.ticket_id}` : "연락처 기준 대화 (티켓 없음)",
+              `진행 기록 ${data.thread.length}건`,
+              msg ? STATUS_LABELS[msg.status] ?? msg.status : null,
+            ].filter(Boolean).join(" · ")}
+          </div>
         </div>
       </div>
 
@@ -363,12 +374,11 @@ export function MessageDetail() {
 
       <div className="split">
         <div className="stack">
-          <div className="thread__meta"><Icon name="clock" size={14} /> 진행 기록 · {data.thread.length}건</div>
           {data.thread.length === 0 && (
             <div className="empty">
               <div className="empty__text">
                 이 티켓에는 이 콘솔이 주고받은 메일이 없습니다 — HubSpot 에서 들여온
-                티켓입니다. 오간 연락은 아래 소통 기록에 남겨주세요.
+                티켓입니다. 오간 연락은 아래 소통 히스토리에 남겨주세요.
               </div>
             </div>
           )}
@@ -507,7 +517,7 @@ export function MessageDetail() {
                 <div className="section-header__l">
                   <span className="section-header__icon"><Icon name="history" size={16} /></span>
                   <div>
-                    <div className="section-header__title">소통 기록</div>
+                    <div className="section-header__title">소통 히스토리</div>
                     <div className="section-header__sub">이 문의에 대해 이메일·WhatsApp·전화·문자로 오간 내용</div>
                   </div>
                 </div>
@@ -589,7 +599,18 @@ export function MessageDetail() {
                   <dd>
                     <select className="select select--inline" value={ticket.deal_detail ?? ""}
                             aria-label={ticket.stage === "won" ? "Won Type" : "Lost Reason"}
-                            onChange={(event) => void saveDealDetail(event.target.value)}>
+                            onChange={(event) => {
+                              const detail = event.target.value;
+                              setConfirm({
+                                description: (
+                                  <>
+                                    Deal Detail 을 <strong>{detail || "선택 안 함"}</strong> 로
+                                    바꿉니다.
+                                  </>
+                                ),
+                                run: () => saveDealDetailNow(detail),
+                              });
+                            }}>
                       <option value="">선택 안 함</option>
                       {dealOptions.map((option) => (
                         <option key={option} value={option}>{option}</option>
@@ -707,7 +728,26 @@ export function MessageDetail() {
               {/* What the operator learns mid-conversation goes here — it is the only
                   place a gmail/unverified contact gets a company name at all. */}
               {editingContact && (
-                <form onSubmit={saveContact} style={{ marginTop: 12 }}>
+                <form
+                  style={{ marginTop: 12 }}
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    // FormData 는 이 시점의 스냅숏입니다 — 확인 창을 지나면
+                    // event.currentTarget 은 이미 없습니다.
+                    const fields = Object.fromEntries(
+                      new FormData(event.currentTarget) as never,
+                    ) as Record<string, string>;
+                    setConfirm({
+                      description: (
+                        <>
+                          이 고객의 회사와 메모를 저장합니다. 회사:{" "}
+                          <strong>{fields.company?.trim() || "—"}</strong>
+                        </>
+                      ),
+                      run: () => saveContactFields(fields),
+                    });
+                  }}
+                >
                   <label className="field-label" htmlFor="c-company">회사</label>
                   <input className="input" id="c-company" name="company"
                          defaultValue={contact.company ?? ""} style={{ marginBottom: 10 }} />
@@ -716,10 +756,8 @@ export function MessageDetail() {
                             defaultValue={contact.role_description ?? ""}
                             placeholder="이 고객·회사가 어떤 일을 하는지 (대화하며 알게 된 내용 포함). gmail·미확인이어도 입력해 저장됩니다." />
                   <button className="btn btn--subtle btn--sm" type="submit"
-                          style={{ marginTop: 10, width: "100%" }}
-                          disabled={savingContact} aria-busy={savingContact || undefined}>
-                    {savingContact ? <><span className="spinner" role="status" /> 저장 중</>
-                                   : <><Icon name="check" size={14} /> 연락처 저장</>}
+                          style={{ marginTop: 10, width: "100%" }}>
+                    <Icon name="check" size={14} /> 연락처 저장
                   </button>
                 </form>
               )}
@@ -751,6 +789,14 @@ export function MessageDetail() {
           )}
         </div>
       </div>
+
+      {confirm && (
+        <ConfirmModal
+          description={confirm.description}
+          onConfirm={confirm.run}
+          onClose={() => setConfirm(null)}
+        />
+      )}
 
       {confirmSend && msg && (
         <Modal
@@ -827,7 +873,7 @@ export function MessageDetail() {
       {/* 보드 카드의 + 가 띄우는 것과 같은 모달, 같은 폼입니다. */}
       {logging && ticket.id && contact && (
         <Modal
-          title="소통 기록 추가"
+          title="소통 히스토리 추가"
           description={`${contact.company || contact.name} · 이 문의에 대해 오간 연락을 남깁니다.`}
           wide
           onClose={() => setLogging(false)}

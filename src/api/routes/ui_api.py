@@ -202,13 +202,13 @@ async def ui_ticket_detail(conversation_id: int):
 
 
 def _ticket_screen(context: dict, not_found: str) -> dict:
-    """두 진입점이 함께 얹는 것 — 단계 이름·소통 기록 가능 단계·Deal Detail 목록."""
+    """두 진입점이 함께 얹는 것 — 단계 이름·소통 히스토리 가능 단계·Deal Detail 목록."""
     from .customer_ops import DEAL_DETAILS, MANUAL_LOG_STAGES, PIPELINE_STAGES
 
     if not context:
         raise HTTPException(status_code=404, detail=not_found)
     context["stage_labels"] = {key: label for key, label, _ in PIPELINE_STAGES}
-    # 어느 단계에서 소통 기록을 남길 수 있는지. 보드의 + 버튼이 쓰는 것과 같은 목록을
+    # 어느 단계에서 소통 히스토리를 남길 수 있는지. 보드의 + 버튼이 쓰는 것과 같은 목록을
     # 같은 곳에서 보냅니다 — 화면마다 "New 는 빼고" 를 따로 적으면 언젠가 어긋납니다.
     context["manual_log_stages"] = list(MANUAL_LOG_STAGES)
     # 보드 카드가 쓰는 것과 **같은 목록**입니다. 티켓 세부 내역에서도 Won Type / Lost

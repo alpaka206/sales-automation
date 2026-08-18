@@ -153,6 +153,15 @@
   padding: 0; margin: -1px; overflow: hidden;
   clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
 }
+/* …단, 제목이 **화면의 정보**인 자리에는 되살립니다. 문의 대시보드의 숫자 칩은 무엇에
+   대한 숫자인지 말해 줄 글자가 있어야 하고, 티켓 세부 내역의 큰 글씨는 「누구인가」라서
+   왼쪽 메뉴가 대신해 줄 수 없습니다. 전역으로 풀지 않는 이유는 나머지 열여섯 화면이
+   왼쪽 메뉴 이름과 같은 글자를 하나씩 더 갖게 되기 때문입니다. */
+.page-title--lead {
+  position: static; width: auto; height: auto; margin: 0; overflow: visible;
+  clip: auto; white-space: normal;
+  font-size: 25px; font-weight: 700; letter-spacing: -.025em;
+}
 .page-sub { margin: 6px 0 0; font-size: 13.5px; color: var(--text-muted); }
 /* .page-title is visually hidden, so a header left with only a title collapses to
    zero height — drop its margin too, or it renders as a blank band above the page. */
@@ -306,10 +315,6 @@ a.kpi:hover { border-color: var(--accent); }
 
 /* Inline counters beside the 답변 대기중인 문의 heading. They replaced a five-card
    KPI block; the numbers stayed, the 254px-tall hero did not. */
-.queue-counters { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; }
-.queue-counters span { display: inline-flex; align-items: baseline; gap: 6px; }
-.queue-counters em { font-style: normal; color: var(--text-subtle); font-size: 11.5px; }
-.queue-counters b { font-size: 15px; font-weight: 750; }
 .metric-strip { margin: 0; display: grid; grid-template-columns: repeat(2, 1fr); }
 .metric-strip > div { min-height: 127px; padding: 24px; border-bottom: 1px solid var(--border); }
 .metric-strip > div:nth-child(odd) { border-right: 1px solid var(--border); }
@@ -410,7 +415,7 @@ a.kpi:hover { border-color: var(--accent); }
   padding: 10px; transition: background .16s ease;
 }
 .kanban-column__body.is-over { background: var(--accent-soft); }
-/* position: relative is the containing block for the corner 소통 기록 button. */
+/* position: relative is the containing block for the corner 소통 히스토리 button. */
 .pipeline-card { position: relative; padding: 13px; margin-bottom: 9px; border: 1px solid var(--border); background: var(--surface); box-shadow: var(--shadow-sm); cursor: grab; }
 .pipeline-card:active { cursor: grabbing; }
 /* 끌고 있는 카드는 **흐려질 뿐 사라지지 않는다.** 전에는 `display: none` 이었다: 그때는
@@ -426,7 +431,7 @@ a.kpi:hover { border-color: var(--accent); }
 .pipeline-card > a strong { font-size: 13px; }
 .pipeline-card > a span { margin-top: 5px; color: var(--text-muted); font-size: 11.5px; }
 .pipeline-card > a small { margin-top: 3px; color: var(--text-subtle); font-size: 10.5px; }
-/* The card's corner controls — Deal Detail and 소통 기록 (+). Pinned to the corner rather
+/* The card's corner controls — Deal Detail and 소통 히스토리 (+). Pinned to the corner rather
    than given a row: a column is a fixed-height scroller, so a line per card costs cards on
    screen. Out of flow, so they add no height at all. */
 .pipeline-card__tools {

@@ -548,7 +548,7 @@ class HubSpotClient:
         happened_at: datetime | None = None,
         ticket_id: str | None = None,
     ) -> str:
-        """Put one 소통 기록 on the contact's HubSpot timeline, as a note.
+        """Put one 소통 히스토리 on the contact's HubSpot timeline, as a note.
 
         A note, and ONE object type for all ten of the console's channels — not
         hs_call / hs_meeting / hs_communication. What the operator files is a whole

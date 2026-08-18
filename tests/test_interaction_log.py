@@ -1,4 +1,4 @@
-"""소통 기록 — the manual touchpoint log, and the two new doors into it.
+"""소통 히스토리 — the manual touchpoint log, and the two new doors into it.
 
 Up to 답변 발송 this app owns the thread: it acknowledges, drafts, and sends the reply
 through HubSpot. Everything after that happens where the customer prefers — email,
@@ -333,7 +333,7 @@ def test_a_card_opens_the_ticket_it_stands_for(log_db):
 def test_a_ticket_with_no_mail_still_opens(log_db):
     """HubSpot 에서 들여온 티켓에는 메일 행이 없습니다(`hubspot_backfill` 은 대화만 만듭니다).
 
-    그래도 티켓 화면은 떠야 합니다 — 그 화면에만 Deal Detail 고르개와 소통 기록이 있고,
+    그래도 티켓 화면은 떠야 합니다 — 그 화면에만 Deal Detail 고르개와 소통 히스토리가 있고,
     Won·Lost 로 넘어온 티켓이 대부분 이 모양입니다. 초안 편집기와 발송 정보는 안 그립니다.
     """
     factory, ids = log_db
@@ -468,7 +468,7 @@ def test_a_protocol_relative_return_address_is_refused(log_db):
 
 
 def test_the_ticket_screen_separates_its_own_records_from_the_rest(log_db):
-    """The ticket's 소통 기록 holds this inquiry's records; the sidebar keeps the rest of
+    """The ticket's 소통 히스토리 holds this inquiry's records; the sidebar keeps the rest of
     the customer. A record must appear in exactly one of the two, or every call logged
     here would render twice on one screen."""
     factory, ids = log_db

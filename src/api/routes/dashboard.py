@@ -143,7 +143,7 @@ def _dashboard_context() -> dict:
             for stage, label, _ in PIPELINE_STAGES
         ],
         "stage_labels": queue["stage_labels"],
-        # Which columns offer the 소통 기록 (+) button — from 답변 발송 onward, where the
+        # Which columns offer the 소통 히스토리 (+) button — from 답변 발송 onward, where the
         # thread has left HubSpot and only the operator knows what was said.
         "manual_log_stages": MANUAL_LOG_STAGES,
     }

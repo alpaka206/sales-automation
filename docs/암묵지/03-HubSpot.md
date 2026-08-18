@@ -306,7 +306,7 @@ HubSpot 에는 이 답장을 **보내는** API 가 없습니다(transactional si
 - **조용한 실패 하나**: `contact.hubspot_contact_id` 가 없으면 로그도 없이 그냥 돌아갑니다
   (`senders/__init__.py:137-138`). 워크북에서 들어온 고객이 여기 해당합니다.
 
-### 소통 기록은 note 한 종류로만 쓴다
+### 소통 히스토리는 note 한 종류로만 쓴다
 
 `create_interaction_note` (`hubspot.py:514-570`). 콘솔의 열 개 채널을 전부 note 로 씁니다 —
 `hs_call`/`hs_meeting`/`hs_communication` 을 안 쓰는 이유는 운영자가 남기는 것이 통화의
@@ -356,7 +356,7 @@ Message 행도 InboundJob 행도 **만들지 않는다** 는 것이 근거입니
 **고칠 때**: 이 세 가지 중 하나라도 채우면 안전 논증이 무너집니다. 특히 `last_incoming_at` 은
 "있으면 편한 값" 처럼 보이는데, 채우는 순간 300여 행이 공용 영업 워크북에 append 됩니다.
 
-### 「소통 기록」에 `contract_seq` 만 붙인 것과 같은 결
+### 「소통 히스토리」에 `contract_seq` 만 붙인 것과 같은 결
 
 `reconcile_with_hubspot` 이 존재 확인은 **모든** 티켓에, 단계·초안 확인은 **미발송 초안이 있는**
 스레드에만 하는 것은 비용 대칭이 아니라 피해 대칭입니다(`hubspot_reconcile.py:151-166`).

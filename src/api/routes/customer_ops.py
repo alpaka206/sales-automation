@@ -764,7 +764,7 @@ async def _log_interaction_to_hubspot(
     summary: str,
     happened_at: datetime,
 ) -> None:
-    """Copy one 소통 기록 onto the HubSpot timeline. Best effort, and deliberately so.
+    """Copy one 소통 히스토리 onto the HubSpot timeline. Best effort, and deliberately so.
 
     The record is committed before this runs and this console stays the place the
     post-발송 history lives. The copy is for whoever opens the contact in HubSpot: without
@@ -794,7 +794,7 @@ async def _log_interaction_to_hubspot(
         )
     except Exception:
         logger.warning(
-            "소통 기록은 저장됐지만 HubSpot 타임라인에 남기지 못했습니다 (contact %s).",
+            "소통 히스토리는 저장됐지만 HubSpot 타임라인에 남기지 못했습니다 (contact %s).",
             hubspot_contact_id,
             exc_info=True,
         )
