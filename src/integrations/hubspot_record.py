@@ -65,20 +65,25 @@ GROUPS: tuple[tuple[str, str], ...] = (
 
 # (그룹 키, 화면에 적을 라벨, 허브스팟에서 찾을 이름 후보)
 #
-# 순서는 운영자 표 그대로다. 후보는 그 표의 라벨이 첫 번째이고, 뒤따르는 것은 라벨이
-# 안 잡혔을 때의 대비책 — 허브스팟 기본 속성의 내부 이름이거나 다른 철자다. `user seq` 에
-# `user_seq` 를 덧붙이지 않는 이유는 `_norm` 이 둘을 이미 같은 자로 재기 때문이다.
+# **화면에 적는 말과 찾는 말은 다르다.** 가운데 칸은 운영자가 콘솔에서 읽고 싶어 하는
+# 글자이고(`플랜 (Plan)`), 오른쪽 칸은 허브스팟에서 그 속성을 집어내는 열쇠다(`plan`).
+# 둘을 한 칸으로 합치면 화면 글자를 다듬는 순간 조회가 끊긴다.
+#
+# 순서도 화면 순서다 — 운영자가 정한 대로 위에서 아래로 그려진다. 후보의 첫 번째는 허브스팟
+# 라벨이고, 뒤따르는 것은 그 라벨이 안 잡혔을 때의 대비책이다(기본 속성의 내부 이름이거나
+# 다른 철자). `user seq` 에 `user_seq` 를 덧붙이지 않는 이유는 `_norm` 이 둘을 이미 같은
+# 자로 재기 때문이다.
 #
 # 회사 이름은 넣지 않는다: 연락처 정보 카드에 이미 **고칠 수 있는** 회사 칸이 있고, 그건
 # gmail·미확인 고객이 회사 이름을 갖는 유일한 자리다. 옆에 읽기 전용 사본을 세우면 둘 중
 # 어느 것이 진짜인지 화면만 봐서는 알 수 없다.
 RECORD_FIELDS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
-    ("plan", "Plan", ("plan",)),
+    ("plan", "플랜 (Plan)", ("plan",)),
+    ("plan", "플랜 티어 (plan tier)", ("plan tier",)),
     ("plan", "user seq", ("user seq",)),
     ("plan", "space seq", ("space seq",)),
-    ("plan", "plan tier", ("plan tier",)),
     ("plan", "plan seq", ("plan seq",)),
-    ("contact", "IP", ("ip country", "hs_ip_country", "ip")),
+    ("contact", "국가 (IP Country)", ("ip country", "hs_ip_country", "ip")),
     ("contact", "전화번호", ("전화번호", "phone number", "phone")),
 )
 

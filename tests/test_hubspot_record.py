@@ -51,12 +51,12 @@ def _no_catalog_cache_between_tests():
 def test_properties_are_found_by_their_hubspot_label():
     """`user_seq_c` 를 코드가 알 리 없습니다. 아는 것은 라벨 `user seq` 뿐입니다."""
     assert hr.resolve_property_names(LABELS) == {
-        "Plan": "plan",
+        "플랜 (Plan)": "plan",
+        "플랜 티어 (plan tier)": "plan_tier_c",
         "user seq": "user_seq_c",
         "space seq": "space_seq_c",
-        "plan tier": "plan_tier_c",
         "plan seq": "plan_seq_c",
-        "IP": "hs_ip_country",
+        "국가 (IP Country)": "hs_ip_country",
         "전화번호": "phone",
     }
 
@@ -72,6 +72,21 @@ def test_fields_the_operator_did_not_ask_for_are_not_fetched():
     assert "lead_scoring_c" not in fetched
 
 
+def test_the_screen_label_is_not_the_search_key():
+    """화면에 적는 말과 허브스팟에서 찾는 말은 다릅니다.
+
+    운영자가 「플랜 (Plan)」이라고 읽고 싶어 해도 속성은 여전히 라벨 `Plan` 으로 찾습니다.
+    둘을 한 칸으로 합치면 화면 글자를 다듬는 순간 조회가 끊깁니다.
+    """
+    assert hr.resolve_property_names({"plan": "Plan"}) == {"플랜 (Plan)": "plan"}
+
+
+def test_the_plan_card_is_drawn_in_the_order_the_operator_set():
+    assert [field for key, field, _ in hr.RECORD_FIELDS if key == "plan"] == [
+        "플랜 (Plan)", "플랜 티어 (plan tier)", "user seq", "space seq", "plan seq",
+    ]
+
+
 def test_the_label_beats_a_retired_property_that_shares_the_name():
     """은퇴한 `user_seq` 와 현역 `user_seq_c`(라벨 `user seq`)가 같이 있는 포털.
 
@@ -84,7 +99,7 @@ def test_the_label_beats_a_retired_property_that_shares_the_name():
 
 def test_a_renamed_label_still_matches_by_internal_name():
     """라벨이 우리가 모르는 말로 바뀌어도 내부 이름이 그대로면 계속 잡힙니다."""
-    assert hr.resolve_property_names({"plan_tier": "요금제 등급"}) == {"plan tier": "plan_tier"}
+    assert hr.resolve_property_names({"plan_tier": "요금제 등급"}) == {"플랜 티어 (plan tier)": "plan_tier"}
 
 
 def test_punctuation_and_casing_do_not_matter():
@@ -108,13 +123,13 @@ def test_the_record_becomes_the_card_and_the_fields_become_its_rows():
     assert groups[0]["title"] == "플랜 정보"
     # 운영자 표의 순서 그대로이고, 빈 값도 줄로 섭니다 — 허브스팟 사이드바의 `--` 자리.
     assert [row["label"] for row in groups[0]["rows"]] == [
-        "Plan", "user seq", "space seq", "plan tier", "plan seq",
+        "플랜 (Plan)", "플랜 티어 (plan tier)", "user seq", "space seq", "plan seq",
     ]
     assert all(row["found"] and row["value"] is None for row in groups[0]["rows"])
 
     assert groups[1]["title"] == "연락처 정보"
     assert groups[1]["rows"] == [
-        {"label": "IP", "value": "south korea", "found": True},
+        {"label": "국가 (IP Country)", "value": "south korea", "found": True},
         {"label": "전화번호", "value": "01043391407", "found": True},
     ]
 
@@ -126,12 +141,12 @@ def test_a_missing_property_says_so_instead_of_looking_empty():
     groups = hr.build_groups({"phone": "01000000000"}, hr.resolve_property_names(korean_portal))
 
     plan_rows = {row["label"]: row for row in groups[0]["rows"]}
-    assert plan_rows["Plan"] == {"label": "Plan", "value": None, "found": False}
+    assert plan_rows["플랜 (Plan)"] == {"label": "플랜 (Plan)", "value": None, "found": False}
     assert plan_rows["user seq"]["found"] is False
     # 찾은 것은 찾은 대로 섭니다 — 하나 못 찾았다고 카드가 통째로 죽지 않습니다.
     contact_rows = {row["label"]: row for row in groups[1]["rows"]}
     assert contact_rows["전화번호"] == {"label": "전화번호", "value": "01000000000", "found": True}
-    assert contact_rows["IP"]["found"] is False
+    assert contact_rows["국가 (IP Country)"]["found"] is False
 
 
 def _raise(exc):
@@ -202,7 +217,7 @@ def test_the_happy_path_reads_the_contact_once_and_draws_both_cards(monkeypatch)
 
     assert result["error"] is None
     assert [group["title"] for group in result["groups"]] == ["플랜 정보", "연락처 정보"]
-    assert result["groups"][0]["rows"][0] == {"label": "Plan", "value": "Enterprise", "found": True}
+    assert result["groups"][0]["rows"][0] == {"label": "플랜 (Plan)", "value": "Enterprise", "found": True}
     # 연결(association) 조회는 없습니다 — 이 값들은 Contact 에 있습니다.
     assert not any("associations" in url for url in calls)
     assert sum("objects/contacts" in url for url in calls) == 1

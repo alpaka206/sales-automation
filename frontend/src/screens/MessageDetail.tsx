@@ -131,6 +131,7 @@ export function MessageDetail() {
     staleTime: 5 * 60_000,
   });
 
+  const [editingContact, setEditingContact] = useState(false);
   const [subject, setSubject] = useState("");
   const [body, setBody] = useState("");
   const [signature, setSignature] = useState("");
@@ -168,6 +169,7 @@ export function MessageDetail() {
         </dl>
       ),
     });
+    setEditingContact(false);
     await queryClient.invalidateQueries({ queryKey: key });
   });
 
@@ -559,8 +561,6 @@ export function MessageDetail() {
                     </select>
                   </dd></div>
               )}
-              {ticket.inquiry_subject && <div className="info-row"><dt>문의 제목</dt><dd>{ticket.inquiry_subject}</dd></div>}
-              <div className="info-row"><dt>메시지</dt><dd className="tnum">{data.thread.length}건</dd></div>
             </dl>
           </div>
 
@@ -598,8 +598,20 @@ export function MessageDetail() {
 
           {contact && (
             <div className="card">
-              <div className="section-label" style={{ marginBottom: 12 }}>연락처 정보</div>
-              <dl className="info-list" style={{ marginBottom: 12 }}>
+              {/* 평소에는 읽기만 하는 카드입니다. 늘 펼쳐 둔 폼이 있으면 사이드바 절반이
+                  입력칸이고, 저장 버튼은 누를 일이 없는 날에도 자리를 차지합니다. 연필을
+                  누른 동안만 폼이 되고, 저장 버튼도 그때만 섭니다. */}
+              <div className="row-between" style={{ marginBottom: 12 }}>
+                <div className="section-label">연락처 정보</div>
+                <button type="button" className="btn btn--subtle btn--sm"
+                        onClick={() => setEditingContact((on) => !on)}
+                        aria-pressed={editingContact}
+                        aria-label={editingContact ? "연락처 수정 취소" : "연락처 수정"}
+                        title={editingContact ? "수정 취소" : "수정"}>
+                  <Icon name={editingContact ? "x" : "edit"} size={14} />
+                </button>
+              </div>
+              <dl className="info-list">
                 <div className="info-row"><dt>이름</dt><dd>{contact.name}</dd></div>
                 {contact.email && (
                   <div className="info-row"><dt>이메일</dt>
@@ -612,23 +624,40 @@ export function MessageDetail() {
                 {hubspot?.groups
                   ?.find((group) => group.key === "contact")
                   ?.rows.map((row) => <CompanyRow key={row.label} row={row} />)}
+                {!editingContact && (
+                  <div className="info-row"><dt>회사</dt>
+                    <dd className="truncate">{contact.company || "—"}</dd></div>
+                )}
               </dl>
+
+              {!editingContact && contact.role_description && (
+                <div style={{ marginTop: 12 }}>
+                  <div className="field-label">하는 일 / 메모</div>
+                  <p className="t-xs" style={{ margin: 0, whiteSpace: "pre-line" }}>
+                    {contact.role_description}
+                  </p>
+                </div>
+              )}
+
               {/* What the operator learns mid-conversation goes here — it is the only
                   place a gmail/unverified contact gets a company name at all. */}
-              <form onSubmit={saveContact}>
-                <label className="field-label" htmlFor="c-company">회사</label>
-                <input className="input" id="c-company" name="company"
-                       defaultValue={contact.company ?? ""} style={{ marginBottom: 10 }} />
-                <label className="field-label" htmlFor="c-role">하는 일 / 메모</label>
-                <textarea className="textarea" id="c-role" name="role_description" rows={3}
-                          defaultValue={contact.role_description ?? ""}
-                          placeholder="이 고객·회사가 어떤 일을 하는지 (대화하며 알게 된 내용 포함). gmail·미확인이어도 입력해 저장됩니다." />
-                <button className="btn btn--subtle btn--sm" type="submit" style={{ marginTop: 10 }}
-                        disabled={savingContact} aria-busy={savingContact || undefined}>
-                  {savingContact ? <><span className="spinner" role="status" /> 저장 중</>
-                                 : <><Icon name="check" size={14} /> 연락처 저장</>}
-                </button>
-              </form>
+              {editingContact && (
+                <form onSubmit={saveContact} style={{ marginTop: 12 }}>
+                  <label className="field-label" htmlFor="c-company">회사</label>
+                  <input className="input" id="c-company" name="company"
+                         defaultValue={contact.company ?? ""} style={{ marginBottom: 10 }} />
+                  <label className="field-label" htmlFor="c-role">하는 일 / 메모</label>
+                  <textarea className="textarea" id="c-role" name="role_description" rows={3}
+                            defaultValue={contact.role_description ?? ""}
+                            placeholder="이 고객·회사가 어떤 일을 하는지 (대화하며 알게 된 내용 포함). gmail·미확인이어도 입력해 저장됩니다." />
+                  <button className="btn btn--subtle btn--sm" type="submit"
+                          style={{ marginTop: 10, width: "100%" }}
+                          disabled={savingContact} aria-busy={savingContact || undefined}>
+                    {savingContact ? <><span className="spinner" role="status" /> 저장 중</>
+                                   : <><Icon name="check" size={14} /> 연락처 저장</>}
+                  </button>
+                </form>
+              )}
             </div>
           )}
 
