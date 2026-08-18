@@ -432,3 +432,88 @@ def test_0035_migration_clears_legacy_duplicates_and_enforces_unique_key(db_engi
         session.add(Conversation(contact_id=contact_id, stage="new", sheet_client_id=1336))
         with pytest.raises(IntegrityError):
             session.commit()
+
+
+def test_the_workbook_never_overrides_a_stage_hubspot_owns(monkeypatch, db_session_factory):
+    """티켓이 있는 문의의 단계는 HubSpot 이 정합니다.
+
+    워크북 셀은 사람이 손으로 고치는 값이라 늦기 쉬운데, 예전에는 시간 비교 없이 마지막에
+    쓴 쪽이 이겼습니다 — HubSpot 에서 Qualified 로 옮겨 놓아도 다음 전체 동기화가 시트의 옛
+    'Negotiation' 으로 되돌렸고, 화면에서는 「HubSpot 변경이 반영 안 됨」과 똑같이 보였습니다.
+    """
+    with db_session_factory() as session:
+        contact = Contact(
+            normalized_email="ticketed@example.com",
+            email="ticketed@example.com",
+            full_name="Kim",
+            sheet_client_id=1400,
+        )
+        session.add(contact)
+        session.flush()
+        session.add(
+            Conversation(
+                contact_id=contact.id,
+                stage="meeting_link_sent",          # HubSpot 이 방금 옮긴 값
+                sheet_client_id=1400,
+                hubspot_ticket_id="T-1400",
+            )
+        )
+        session.commit()
+
+    monkeypatch.setattr(sheet_sync, "SessionLocal", db_session_factory)
+    monkeypatch.setattr(
+        sheet_sync,
+        "read_inbound_records",
+        lambda limit=5000: [
+            {"client_id": "1400", "email": "ticketed@example.com",
+             "deal_stage": "Negotiation", "_row": 2},   # 시트의 뒤처진 값
+        ],
+    )
+    sheet_sync.import_inbound_history()
+
+    with db_session_factory() as session:
+        assert session.scalar(select(Conversation)).stage == "meeting_link_sent"
+
+
+def test_the_workbook_still_owns_a_thread_hubspot_never_saw(monkeypatch, db_session_factory):
+    """티켓이 없는 행은 여전히 시트가 원본입니다 — 워크북에서만 사는 문의가 있습니다."""
+    with db_session_factory() as session:
+        contact = Contact(
+            normalized_email="sheetonly@example.com",
+            email="sheetonly@example.com",
+            full_name="Park",
+            sheet_client_id=1401,
+        )
+        session.add(contact)
+        session.flush()
+        session.add(Conversation(contact_id=contact.id, stage="new", sheet_client_id=1401))
+        session.commit()
+
+    monkeypatch.setattr(sheet_sync, "SessionLocal", db_session_factory)
+    monkeypatch.setattr(
+        sheet_sync,
+        "read_inbound_records",
+        lambda limit=5000: [
+            {"client_id": "1401", "email": "sheetonly@example.com",
+             "deal_stage": "Negotiation", "_row": 2},
+        ],
+    )
+    sheet_sync.import_inbound_history()
+
+    with db_session_factory() as session:
+        assert session.scalar(select(Conversation)).stage == "negotiation"
+
+
+def test_a_new_workbook_row_carries_the_stage_the_inquiry_is_actually_in():
+    """append 경로가 단계를 "New" 로 박고 있었습니다.
+
+    몇 주째 협상 중인 문의도 워크북에는 New 로 들어갔고, 전체 동기화가 그 값을 우리 DB 로
+    되돌려 단계를 잃었습니다. 표는 갱신 경로와 **같은 한 곳**을 씁니다 — 두 경로가 다른 말을
+    쓰면 같은 문의가 시트에서 두 얼굴을 갖습니다.
+    """
+    assert sheet_sync._stage_words("negotiation") == ("Negotiation", "Meeting")
+    assert sheet_sync._stage_words("won") == ("Won", "Closed Won")
+    assert sheet_sync._stage_words(None) == ("New", "Inquiry")
+    # 시트에 아직 말이 없는 단계는 행을 못 만드는 것보다 New 로 두는 편이 낫습니다.
+    # 갱신 경로가 그때 경고를 남깁니다(`google_sheets.update_inbound_stage`).
+    assert sheet_sync._stage_words("no_response") == ("New", "Inquiry")

@@ -18,6 +18,10 @@ from ..db.session import SessionLocal
 
 logger = logging.getLogger(__name__)
 
+# 발송 뒤 단계를 올려도 되는 출발점. 보드의 미팅 링크 버튼이 쓰는 규칙과 같은 모양입니다
+# (`customer_ops._MEETING_ADVANCES_FROM`). `None`·`initial` 은 아직 아무도 안 만진 값입니다.
+_ADVANCES_FROM = {None, "", "initial", "new", "meeting_link_sent"}
+
 POLL_INTERVAL_SECONDS = 60
 
 # Unique per-process token used as the value of Message.status while a worker holds the row.
@@ -231,7 +235,11 @@ async def _send_one(message_id: int) -> bool:
                 conv = session.get(Conversation, msg.conversation_id)
                 if conv:
                     conv.last_outgoing_at = msg.sent_at
-                    if msg.prompt_variant != "auto_ack":
+                    # **앞으로만 갑니다.** 발송은 「답이 나갔다」는 뜻이지 「협상 전으로
+                    # 돌아가라」가 아닙니다. 아직 아무도 안 옮긴 건만 올립니다 — 협상·수주·
+                    # 종료로 이미 가 있는 건을 여기서 되돌리면, 허브스팟이 기준인 값을
+                    # 우리가 덮어쓰고 다음 스윕이 그걸 또 되돌립니다.
+                    if msg.prompt_variant != "auto_ack" and conv.stage in _ADVANCES_FROM:
                         conv.stage = "meeting_link_sent"
                 if msg.prompt_variant == "auto_ack":
                     msg.post_send_synced_at = msg.sent_at

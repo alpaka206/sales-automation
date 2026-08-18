@@ -20,6 +20,8 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timezone
 
+from sqlalchemy import select
+
 from ..db.conversation_history import add_progress
 from ..db.models import Contact, Conversation, CustomerProfile
 from ..db.session import SessionLocal
@@ -203,7 +205,25 @@ def sync_stage_from_hubspot(
     both are normal (other pipelines share the same webhook).
     """
     local_stage = local_stage_for(hubspot_stage_id)
-    if not ticket_id or not local_stage:
+    if not local_stage:
+        # **여기가 조용하면 못 고칩니다.** 설정에 없는 stage id 로 옮겨진 티켓은 그 단계만
+        # 안 따라오는데, 화면에서는 「아직 안 바뀌었다」와 똑같이 보입니다. 다른 파이프라인의
+        # 티켓도 같은 웹훅으로 오므로 시끄러울 수 있지만, 조용히 버려 본 결과가 이 함수를
+        # 고치게 만들었습니다 — 어느 stage id 가 안 잡히는지 로그가 바로 말해 줍니다.
+        if ticket_id and hubspot_stage_id:
+            # **id 를 그대로 적지 않습니다.** `/logs` 의 스크러버가 9자리 이상 숫자를
+            # 전화번호로 보고 지웁니다(`common/log_buffer.py`) — HubSpot stage id 가 딱
+            # 거기 걸립니다. 그래서 지워지지 않고 **바로 행동이 되는** 사실을 적습니다:
+            # 어느 로컬 단계가 설정에서 빠졌는가. 하나라도 비어 있으면 그 단계로의 이동은
+            # 전부 이렇게 조용히 사라집니다.
+            missing = sorted(set(LOCAL_STAGE_TO_SETTING) - set(stage_id_to_local().values()))
+            logger.warning(
+                "HubSpot 이 우리가 모르는 단계로 티켓 %s 를 옮겼습니다 (source=%s). "
+                "id 가 설정되지 않은 단계: %s",
+                ticket_id, source, ", ".join(missing) or "(없음 — 다른 파이프라인일 수 있습니다)",
+            )
+        return None
+    if not ticket_id:
         return None
 
     with SessionLocal() as session:
@@ -213,29 +233,68 @@ def sync_stage_from_hubspot(
             .one_or_none()
         )
         if conv is None:
+            # 우리가 안 들여온 티켓입니다. 흔한 일이지만(다른 파이프라인) 흔적은 남깁니다 —
+            # 「우리 티켓인데 안 따라온다」와 구별할 수 있어야 합니다.
+            logger.info(
+                "Stage %s reported for ticket %s but no conversation carries that id (source=%s)",
+                local_stage, ticket_id, source,
+            )
             return None
-        if conv.stage == local_stage:
+
+        # 워크북 키는 세션이 열려 있는 동안 읽습니다. 미러는 커밋 뒤에 돌고, 블록을 벗어나면
+        # 이 인스턴스들은 detached 입니다.
+        #
+        # 연락처의 `sheet_client_id` 로 넘어가던 폴백은 뺐습니다. Client ID 는 **문의당**
+        # 하나인데 연락처는 문의를 여럿 가질 수 있어서, 그 폴백은 이 문의의 단계로 **다른
+        # 문의의** 워크북 행을 덮어썼습니다. 행이 없는 문의는 그냥 안 미러링합니다.
+        sheet_client_id = conv.sheet_client_id
+
+        # **프로필은 이 대화가 그 연락처의 최신일 때만 씁니다.** `CustomerProfile` 은 연락처당
+        # 하나인데 한 연락처에 문의가 여럿일 수 있어서, 옛 티켓이 움직일 때마다 화면 값이 그
+        # 옛 티켓으로 끌려갔습니다. 콘솔 쪽 이동은 이미 같은 규칙입니다
+        # (`customer_ops._set_conversation_stage`).
+        profile = None
+        if conv.contact_id:
+            newest_id = session.scalar(
+                select(Conversation.id)
+                .where(Conversation.contact_id == conv.contact_id)
+                .order_by(Conversation.created_at.desc(), Conversation.id.desc())
+                .limit(1)
+            )
+            if newest_id == conv.id:
+                profile = session.get(CustomerProfile, conv.contact_id)
+                if profile is None:
+                    profile = CustomerProfile(contact_id=conv.contact_id)
+                    session.add(profile)
+
+        # **단계 값이 사는 열은 둘입니다.** `Conversation.stage`(문의별)와
+        # `CustomerProfile.pipeline_stage`(연락처별). 화면은 자리마다 다른 쪽을 읽습니다 —
+        # 보드는 앞엣것, 리드 히스토리·고객 상세는 뒤엣것. 예전에는 `conv.stage` 하나만 보고
+        # 「바뀐 것 없음」이라 판단해 되돌아갔는데, 그러면 둘이 한 번 어긋난 뒤로는 **영영**
+        # 안 맞습니다: 이후 모든 스윕이 같은 자리에서 되돌아가 프로필을 못 고칩니다. 그리고
+        # 실제로 어긋납니다 — 발송 워커는 `conv.stage` 만, 고객 상세 폼은 프로필만 씁니다.
+        # 허브스팟이 기준이므로 여기서 **둘 다** 맞춥니다.
+        stage_changed = conv.stage != local_stage
+        profile_changed = profile is not None and profile.pipeline_stage != local_stage
+        if not stage_changed and not profile_changed:
             # 단계는 그대로여도 초안은 그 사이에 생겼을 수 있습니다: 작성 중이던 초안이
             # 단계가 옮겨진 **뒤에** 완성되면, 그 대화에는 다시 아무 변화도 오지 않습니다.
             # 여기서 한 번 더 훑지 않으면 그 초안은 영영 발송 대기로 남습니다.
-            if _retire_superseded_drafts(session, conv.id, local_stage):
+            dirty = bool(_retire_superseded_drafts(session, conv.id, local_stage))
+            # Won 은 다른 경로(콘솔·워크북)가 먼저 옮겼을 수 있습니다. 그때 수주 전환 대기가
+            # 비어 있으면 10분마다 도는 이 스윕이 유일한 복구 기회입니다.
+            if local_stage == WON_STAGE and _enqueue_pending_won(session, conv, sheet_client_id):
+                dirty = True
+            if dirty:
                 session.commit()
+            # 워크북 미러는 실패해도 아무 데도 안 남습니다. 이 스윕이 곧 재시도라서, 값이
+            # 같아도 한 번 더 밀어 둡니다 — 시트만 뒤처져 있던 경우가 여기서 복구됩니다.
+            _mirror_stage_to_sheet(sheet_client_id, local_stage, str(ticket_id))
             return None
 
         previous = conv.stage
         conv.stage = local_stage
-        # Read the workbook key while the session is open; the mirror runs after the
-        # commit, and these instances are detached once the block exits.
-        sheet_client_id = conv.sheet_client_id
-        if not sheet_client_id and conv.contact_id:
-            contact = session.get(Contact, conv.contact_id)
-            sheet_client_id = contact.sheet_client_id if contact else None
-
-        if conv.contact_id:
-            profile = session.get(CustomerProfile, conv.contact_id)
-            if profile is None:
-                profile = CustomerProfile(contact_id=conv.contact_id)
-                session.add(profile)
+        if profile is not None:
             profile.pipeline_stage = local_stage
             profile.customer_state = customer_state_for(local_stage, profile.customer_state)
 
@@ -266,7 +325,7 @@ def sync_stage_from_hubspot(
 WON_STAGE = "won"
 
 
-def _enqueue_pending_won(session, conv, sheet_client_id: int | None) -> None:
+def _enqueue_pending_won(session, conv, sheet_client_id: int | None) -> bool:
     """Won 티켓을 수주 전환 대기에 올립니다 — 계약 정보는 사람이 채웁니다.
 
     바로 수주 고객으로 만들지 않는 이유: 금액도 기간도 없는 고객이 활성 고객 수와 예상
@@ -280,12 +339,12 @@ def _enqueue_pending_won(session, conv, sheet_client_id: int | None) -> None:
 
     ticket_id = str(conv.hubspot_ticket_id or "").strip()
     if not ticket_id:
-        return
+        return False
     existing = (
         session.query(PendingWon).filter(PendingWon.ticket_id == ticket_id).one_or_none()
     )
     if existing is not None:
-        return
+        return False
     contact = session.get(Contact, conv.contact_id) if conv.contact_id else None
     session.add(
         PendingWon(
@@ -301,3 +360,4 @@ def _enqueue_pending_won(session, conv, sheet_client_id: int | None) -> None:
         )
     )
     logger.info("수주 전환 대기에 추가: ticket=%s client=%s", ticket_id, sheet_client_id)
+    return True

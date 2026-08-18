@@ -205,6 +205,18 @@ def _sheet_date(value: object) -> datetime | None:
     return None
 
 
+def _stage_words(stage: str | None) -> tuple[str, str]:
+    """로컬 단계 → 워크북의 (Deal Stage, Deal Stage Detail).
+
+    표는 `google_sheets._STAGE_VALUES` 한 곳입니다 — 갱신 경로와 append 경로가 서로 다른
+    말을 쓰면 같은 문의가 시트에서 두 얼굴을 갖습니다. 시트에 아직 말이 없는 단계는 New 로
+    둡니다: 행이 아예 없는 것보다는 낫고, 갱신 경로가 그때 경고를 남깁니다.
+    """
+    from ..integrations.google_sheets import _STAGE_VALUES
+
+    return _STAGE_VALUES.get(stage or "new", ("New", "Inquiry"))
+
+
 def _local_stage(record: dict) -> str | None:
     """Workbook Deal Stage -> local stage. The inverse of google_sheets._STAGE_VALUES.
 
@@ -348,6 +360,18 @@ def _import_inbound_records(records: list[dict]) -> int:
                 # Reattach a legacy placeholder conversation to the canonical
                 # email contact, but never downgrade a known stage on schema drift.
                 conversation.contact_id = contact.id
+                # **티켓이 있는 문의는 허브스팟이 기준입니다.** 워크북 셀은 사람이 손으로
+                # 고치는 값이라 늦기 쉬운데, 예전에는 시간 비교 없이 마지막에 쓴 쪽이
+                # 이겼습니다 — 허브스팟에서 옮긴 단계가 다음 전체 동기화에서 시트의 옛
+                # 값으로 되돌아갔습니다. 시트가 원본인 것은 티켓 없는 행(워크북에서만 사는
+                # 문의)뿐입니다.
+                if stage is not None and conversation.hubspot_ticket_id:
+                    if conversation.stage != stage:
+                        logger.info(
+                            "워크북의 '%s' 는 무시합니다 — 티켓 %s 의 단계는 HubSpot 이 정합니다 (지금 '%s')",
+                            stage, conversation.hubspot_ticket_id, conversation.stage,
+                        )
+                    stage = None
                 if stage is not None:
                     # 워크북에서 읽어 온 단계도 단계입니다. **바뀔 때만** 닫는 이유는
                     # hubspot_backfill 과 같습니다: 이 루프는 행마다 도는데 여러 행이 한
@@ -665,8 +689,12 @@ def sync_pending_inbound_rows(limit: int = 50) -> int:
                 "client_id": reserved_client_id,
                 "sales_direction": "Inbound",
                 "inquiry_date": when.date().isoformat(),
-                "deal_stage": "New",
-                "deal_stage_detail": "Inquiry",
+                # 단계는 그 문의의 **지금** 값입니다. 예전에는 "New" 로 박혀 있어서, 몇
+                # 주째 협상 중인 문의도 워크북에는 New 로 들어갔습니다 — 그리고 전체
+                # 동기화가 그 값을 우리 DB 로 되돌려 단계를 잃었습니다. 시트가 표현 못 하는
+                # 단계는 New 로 두되(행 자체는 있어야 합니다) 어긋난다고 남깁니다.
+                "deal_stage": _stage_words(conv.stage)[0],
+                "deal_stage_detail": _stage_words(conv.stage)[1],
                 "pipeline": qualification,
                 "company": (master.company if master else None) or contact.company or "알 수 없음",
                 "full_name": contact.full_name,

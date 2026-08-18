@@ -234,6 +234,10 @@ async def webhook_hubspot_inbound(request: Request) -> dict:
                 }
             )
             continue
+        # 단계 동기화는 **모든** hs_pipeline_stage 이동에 돕니다 — New 로 들어오는 것도
+        # 포함해서. 예전에는 아래 분기 안에만 있어서, New 로의 이동은 접수 처리 큐로만 가고
+        # 우리 쪽 단계는 접수가 끝날 때까지(실패하면 영영) 안 따라왔습니다.
+        synced = _sync_stage_change(event)
         event_type = _map_hubspot_event(event)
         if event_type is None:
             # Not inbound work — but it may be a ticket that is gone, or a stage move we
@@ -241,7 +245,6 @@ async def webhook_hubspot_inbound(request: Request) -> dict:
             if _handle_deletion(event):
                 results.append({"objectId": event.objectId, "status": "deleted"})
                 continue
-            synced = _sync_stage_change(event)
             results.append(
                 {"objectId": event.objectId, "status": "stage_synced", "stage": synced}
                 if synced

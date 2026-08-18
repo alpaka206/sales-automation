@@ -443,9 +443,19 @@ def test_a_draft_that_lands_after_the_move_is_retired_without_another_move(db, s
     """
     from src.db.models import Message
 
+    from src.db.models import CustomerProfile
+
     with db() as session:
         conv = session.query(Conversation).filter_by(hubspot_ticket_id=TICKET).one()
         conv.stage = "meeting_link_sent"
+        # 두 열을 **같이** 옮겨 둡니다. 하나만 옮기면 그건 이 테스트의 주제가 아니라 아래
+        # `test_a_stale_profile_is_repaired_even_when_the_conversation_already_agrees` 가
+        # 고정하는 「어긋난 상태」입니다.
+        profile = session.get(CustomerProfile, conv.contact_id)
+        if profile is None:
+            profile = CustomerProfile(contact_id=conv.contact_id)
+            session.add(profile)
+        profile.pipeline_stage = "meeting_link_sent"
         session.commit()
 
     draft_id = _draft(db)
@@ -457,6 +467,57 @@ def test_a_draft_that_lands_after_the_move_is_retired_without_another_move(db, s
 
     with db() as session:
         assert session.get(Message, draft_id).status == "superseded"
+
+
+def test_a_stale_profile_is_repaired_even_when_the_conversation_already_agrees(db, stages):
+    """단계 값이 사는 열은 둘이고, 화면은 자리마다 다른 쪽을 읽습니다.
+
+    `Conversation.stage` 는 문의별이고 `CustomerProfile.pipeline_stage` 는 연락처별입니다.
+    보드는 앞엣것을, 리드 히스토리·고객 상세는 뒤엣것을 그립니다. 예전에는 `conv.stage`
+    하나만 보고 「바뀐 것 없음」이라 되돌아갔는데, 그러면 둘이 한 번 어긋난 뒤로는 **영영**
+    안 맞습니다 — 이후 모든 스윕이 같은 자리에서 되돌아가 프로필을 못 고칩니다.
+
+    그리고 실제로 어긋납니다: 발송 워커는 `conv.stage` 만 쓰고, 고객 상세 폼은 프로필만
+    씁니다. 그래서 허브스팟에서 단계를 옮겨도 화면이 안 바뀌는 일이 생겼습니다.
+    """
+    from src.db.models import CustomerProfile
+
+    with db() as session:
+        conv = session.query(Conversation).filter_by(hubspot_ticket_id=TICKET).one()
+        conv.stage = "meeting_link_sent"          # 발송 워커가 옮겨 둔 값
+        profile = session.get(CustomerProfile, conv.contact_id)
+        if profile is None:
+            profile = CustomerProfile(contact_id=conv.contact_id)
+            session.add(profile)
+        profile.pipeline_stage = "negotiation"    # 화면이 읽는, 뒤처진 값
+        contact_id = conv.contact_id
+        session.commit()
+
+    moved = stage_sync.sync_stage_from_hubspot(
+        TICKET, STAGE_IDS["HUBSPOT_TICKET_STAGE_AFTER_SEND"]
+    )
+
+    assert moved == "meeting_link_sent"
+    with db() as session:
+        assert session.get(CustomerProfile, contact_id).pipeline_stage == "meeting_link_sent"
+
+
+def test_an_unmapped_stage_id_says_so_instead_of_vanishing(db, stages, caplog):
+    """설정에 없는 stage id 로 옮겨진 티켓은 그 단계만 안 따라옵니다.
+
+    화면에서는 「아직 안 바뀌었다」와 똑같이 보이고, 예전에는 로그도 진행 기록도 남지 않아
+    무엇이 잘못됐는지 알 방법이 없었습니다. 다른 파이프라인 티켓도 같은 웹훅으로 오므로
+    시끄러울 수 있지만, 조용히 버리는 쪽이 훨씬 비쌌습니다.
+    """
+    import logging
+
+    with caplog.at_level(logging.WARNING, logger="src.agents.stage_sync"):
+        assert stage_sync.sync_stage_from_hubspot(TICKET, "9999999999") is None
+
+    # id 자체는 안 적습니다 — `/logs` 스크러버가 9자리 이상 숫자를 전화번호로 지웁니다.
+    # 대신 바로 행동이 되는 사실을 적습니다: 어느 단계의 id 가 설정에서 빠졌는가.
+    assert any("우리가 모르는 단계" in record.getMessage() for record in caplog.records)
+    assert any(TICKET in record.getMessage() for record in caplog.records)
 
 
 def test_an_unmapped_stage_is_not_past_new(db, stages):

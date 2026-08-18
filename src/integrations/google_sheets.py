@@ -694,10 +694,18 @@ def update_inbound_stage(client_id: int | None, stage: str, pipeline: str | None
         row = _row_for_client_id(service, tab, header, client_id)
         if row is None:
             raise GoogleSheetsError(f"Inbound DB Client ID {client_id} was not found.")
-        values = {
-            "deal_stage": _STAGE_VALUES[stage][0],
-            "deal_stage_detail": _STAGE_VALUES[stage][1],
-        }
+        words = _STAGE_VALUES.get(stage)
+        if words is None:
+            # 시트의 Deal Stage 열은 영업팀이 필터로 쓰는 **값 목록**이라, 없는 말을 지어
+            # 넣으면 그 행이 어느 필터에도 안 걸립니다. 그래서 안 쓰고, 대신 어떤 단계가
+            # 빠져 있는지 남깁니다 — 목록에 넣을 말은 영업팀이 정할 일입니다.
+            logger.warning(
+                "워크북에 '%s' 단계를 적을 말이 없어 Client ID %s 행을 건너뜁니다. "
+                "_STAGE_VALUES 에 그 단계의 시트 표기를 추가해야 합니다.",
+                stage, client_id,
+            )
+            return False
+        values = {"deal_stage": words[0], "deal_stage_detail": words[1]}
         if pipeline:
             values["pipeline"] = pipeline
         lookup = _header_lookup(values)

@@ -675,6 +675,12 @@ async def customer_profile_save(
             .order_by(Conversation.created_at.desc())
         )
         if latest:
+            # 대화의 단계도 같이 옮깁니다. 예전에는 프로필만 옮겼는데, 그러면 두 열이
+            # 어긋난 채로 남고 화면은 자리마다 다른 값을 보여 줍니다(보드는 대화, 리드
+            # 히스토리는 프로필). 옮기는 곳이 여기 하나뿐인 것도 아니라 — 발송 워커는
+            # 반대로 대화만 옮깁니다 — 한쪽만 쓰는 폼이 하나라도 있으면 어긋남이 계속
+            # 생깁니다. 허브스팟 동기화가 이제 둘 다 맞추지만, 애초에 안 어긋나게 합니다.
+            latest.stage = pipeline_stage
             _retire_superseded_drafts(session, latest.id, pipeline_stage)
         latest_ticket = (
             session.execute(
