@@ -166,17 +166,19 @@ def backfill_b2b_pipeline(pipeline: str = B2B_PIPELINE_ID) -> dict:
         for ticket, ids in pairs:
             dto = next((contacts_by_id[i] for i in ids if i in contacts_by_id), None)
             if dto is None:
-                # No contact on the ticket (or it was deleted in HubSpot). There is
-                # nobody to attribute the inquiry to, so skip rather than invent one.
+                # 연락처가 안 붙은 티켓(또는 허브스팟에서 지워진 연락처). 예전에는 여기서
+                # 건너뛰었고, 그 대가가 화면 건수가 허브스팟보다 적은 것이었습니다 —
+                # `_placeholder_contact` 의 설명을 보세요.
+                contact = _placeholder_contact(session, ticket)
                 skipped += 1
-                continue
-
-            email = (dto.email or "").strip().lower()
-            normalized = email or f"unknown:hs-{dto.id}"
-            contact = session.scalar(
-                select(Contact).where(Contact.normalized_email == normalized)
-            )
-            if contact is None:
+                email = ""
+            else:
+                email = (dto.email or "").strip().lower()
+                normalized = email or f"unknown:hs-{dto.id}"
+                contact = session.scalar(
+                    select(Contact).where(Contact.normalized_email == normalized)
+                )
+            if dto is not None and contact is None:
                 domain = email.split("@", 1)[1] if "@" in email else ""
                 contact = Contact(
                     normalized_email=normalized,
@@ -192,7 +194,7 @@ def backfill_b2b_pipeline(pipeline: str = B2B_PIPELINE_ID) -> dict:
                 session.add(contact)
                 session.flush()
                 created_contacts += 1
-            else:
+            elif dto is not None:
                 contact.email = contact.email or (email or None)
                 contact.company = contact.company or dto.company or None
                 contact.phone = contact.phone or dto.phone or None
@@ -241,10 +243,38 @@ def backfill_b2b_pipeline(pipeline: str = B2B_PIPELINE_ID) -> dict:
         "contacts_created": created_contacts,
         "conversations_created": created_convs,
         "conversations_updated": updated_convs,
-        "skipped_no_contact": skipped,
+        # 이제 건너뛰지 않고 자리 표시 연락처로 들여옵니다. 세는 것은 남깁니다 — 허브스팟에서
+        # 연락처가 안 붙은 티켓이 몇 건인지는 알아 둘 값입니다.
+        "no_contact_rows": skipped,
     }
     logger.info("HubSpot backfill finished: %s", result)
     return result
+
+
+def _placeholder_contact(session, ticket):
+    """연락처가 안 붙은 티켓의 자리 표시 연락처. 없으면 만들고, 있으면 그대로 씁니다.
+
+    예전에는 이런 티켓을 통째로 건너뛰었습니다("붙일 사람이 없으니 지어내지 않는다"). 그
+    판단의 대가가 **화면 건수가 허브스팟보다 적은 것**이었고, 운영자가 세어 보고 알아챘습니다
+    (2026-08-18: Lost 3건 · Not a Fit 1건이 전부 이 경우였습니다). 파이프라인 건수는 맞아야
+    합니다 — 안 맞으면 그 화면의 숫자를 아무도 못 믿습니다.
+
+    키는 **티켓** 번호입니다(연락처 번호가 아니라). 그래야 같은 티켓을 다시 훑어도 한 행이고,
+    연락처 없는 티켓 둘이 한 사람으로 합쳐지지 않습니다.
+
+    메일이 갈 길은 없습니다: `email` 이 None 이고 메시지도 초안도 안 만듭니다.
+    """
+    normalized = f"unknown:ticket-{ticket.id}"
+    contact = session.scalar(select(Contact).where(Contact.normalized_email == normalized))
+    if contact is None:
+        contact = Contact(
+            normalized_email=normalized,
+            email=None,
+            full_name=(ticket.subject or "").strip() or "연락처 없는 티켓",
+        )
+        session.add(contact)
+        session.flush()
+    return contact
 
 
 def adopt_ticket(ticket) -> bool:
@@ -270,35 +300,36 @@ def adopt_ticket(ticket) -> bool:
             return False
 
     contact_id = ticket.primary_contact_id or client.get_ticket_primary_contact_sync(str(ticket.id))
-    if not contact_id:
-        # 연락처가 없는 티켓은 문의를 누구 것으로 달지 알 수 없습니다. 백필과 같은 판단으로
-        # 지어내지 않고 건너뜁니다.
-        logger.info("Ticket %s has no contact; not adopting", ticket.id)
-        return False
-    dto = client.get_contact_sync(str(contact_id))
+    dto = client.get_contact_sync(str(contact_id)) if contact_id else None
 
     stage = local_stage_for(ticket.pipeline_stage) or "new"
-    email = (dto.email or "").strip().lower()
-    normalized = email or f"unknown:hs-{dto.id}"
     with SessionLocal() as session:
-        contact = session.scalar(select(Contact).where(Contact.normalized_email == normalized))
-        if contact is None:
-            domain = email.split("@", 1)[1] if "@" in email else ""
-            contact = Contact(
-                normalized_email=normalized,
-                email=email or None,
-                full_name=_display_name(dto),
-                company=dto.company or None,
-                phone=dto.phone or None,
-                country=dto.country or None,
-                # Personal mailboxes must never be grouped as one company.
-                domain=domain if domain and not is_personal_domain(domain) else None,
-                hubspot_contact_id=dto.id,
-            )
-            session.add(contact)
-            session.flush()
+        if dto is None:
+            # 연락처가 안 붙은 티켓도 파이프라인의 한 건입니다 — `_placeholder_contact` 참고.
+            contact = _placeholder_contact(session, ticket)
         else:
-            contact.hubspot_contact_id = contact.hubspot_contact_id or dto.id
+            email = (dto.email or "").strip().lower()
+            normalized = email or f"unknown:hs-{dto.id}"
+            contact = session.scalar(
+                select(Contact).where(Contact.normalized_email == normalized)
+            )
+            if contact is None:
+                domain = email.split("@", 1)[1] if "@" in email else ""
+                contact = Contact(
+                    normalized_email=normalized,
+                    email=email or None,
+                    full_name=_display_name(dto),
+                    company=dto.company or None,
+                    phone=dto.phone or None,
+                    country=dto.country or None,
+                    # Personal mailboxes must never be grouped as one company.
+                    domain=domain if domain and not is_personal_domain(domain) else None,
+                    hubspot_contact_id=dto.id,
+                )
+                session.add(contact)
+                session.flush()
+            else:
+                contact.hubspot_contact_id = contact.hubspot_contact_id or dto.id
 
         session.add(
             Conversation(

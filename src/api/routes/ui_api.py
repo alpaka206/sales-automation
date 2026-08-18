@@ -109,6 +109,7 @@ def _card(row: dict) -> dict:
 
 @router.get("/api/ui/dashboard")
 def ui_dashboard(_request: Request):
+    from ...agents.hubspot_backfill import hubspot_backfill_status
     from .customer_ops import DEAL_DETAILS
     from .dashboard import _dashboard_context
 
@@ -128,6 +129,10 @@ def ui_dashboard(_request: Request):
         "category_labels": context["category_labels"],
         "unqualified": context["unqualified"],
         "manual_log_stages": list(context["manual_log_stages"]),
+        # 「허브스팟에서 최신화」의 결과. 이 값을 화면에 안 보내던 동안, 버튼을 눌러도 뭐가
+        # 됐는지 알 방법이 없어 운영자가 「받아온 게 없는 것 같다」고만 말할 수 있었습니다.
+        # 예약·진행·완료·실패가 전부 같은 그림이면 그 버튼은 없는 것과 같습니다.
+        "backfill": hubspot_backfill_status(),
         "stages": [
             {
                 "key": stage["key"],

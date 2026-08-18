@@ -106,8 +106,10 @@ def test_backfill_creates_rows_for_every_stage(db, fake):
 
     assert fake.asked_pipeline == PIPELINE, "must scope the fetch to the B2B pipeline"
     assert counts["tickets"] == 5
-    assert counts["conversations_created"] == 4
-    assert counts["skipped_no_contact"] == 1  # the ticket with no contact
+    # 다섯 건 **전부** 들어옵니다. 연락처가 안 붙은 티켓도 파이프라인의 한 건이고, 예전처럼
+    # 건너뛰면 화면 건수가 허브스팟보다 적습니다 — 운영자가 세어 보고 알아챈 그 문제입니다.
+    assert counts["conversations_created"] == 5
+    assert counts["no_contact_rows"] == 1
 
     with db() as s:
         stages = {c.hubspot_ticket_id: c.stage for c in s.query(Conversation).all()}
@@ -116,6 +118,7 @@ def test_backfill_creates_rows_for_every_stage(db, fake):
         "t-won": "won",
         "t-lost": "closed_lost",
         "t-reminded": "reminder_sent",
+        "t-orphan": "negotiation",
     }
 
 
@@ -135,11 +138,12 @@ def test_one_contact_owning_several_tickets(db, fake):
 
     counts = hubspot_backfill.backfill_b2b_pipeline()
 
-    assert counts["conversations_created"] == 5
+    assert counts["conversations_created"] == 6
     with db() as s:
         # One contact, one profile, but both of its tickets present.
         assert s.query(Contact).filter_by(normalized_email="buyer@bigcorp.com").count() == 1
-        assert s.query(CustomerProfile).count() == 4
+        # 자리 표시 연락처(t-orphan)도 프로필을 갖습니다 — 화면이 프로필의 단계를 읽습니다.
+        assert s.query(CustomerProfile).count() == 5
         convs = s.query(Conversation).filter_by(
             contact_id=s.query(Contact).filter_by(normalized_email="buyer@bigcorp.com").one().id
         ).all()
@@ -209,12 +213,13 @@ def test_backfill_is_idempotent(db, fake):
     first = hubspot_backfill.backfill_b2b_pipeline()
     second = hubspot_backfill.backfill_b2b_pipeline()
 
-    assert first["conversations_created"] == 4
+    assert first["conversations_created"] == 5
     assert second["conversations_created"] == 0
     assert second["contacts_created"] == 0
     with db() as s:
-        assert s.query(Conversation).count() == 4
-        assert s.query(Contact).count() == 4
+        assert s.query(Conversation).count() == 5
+        # 자리 표시 연락처는 **티켓** 번호로 갈리므로 두 번 돌려도 하나입니다.
+        assert s.query(Contact).count() == 5
 
 
 def test_backfill_reruns_pick_up_a_stage_move(db, fake):
@@ -244,9 +249,35 @@ def test_contact_without_email_still_gets_a_unique_identity(db, fake):
     """normalized_email and full_name are NOT NULL; a blank one would break the insert."""
     hubspot_backfill.backfill_b2b_pipeline()
     with db() as s:
-        c = s.query(Contact).filter(Contact.normalized_email.like("unknown:%")).one()
-    assert c.normalized_email == "unknown:hs-c4"
-    assert c.full_name  # non-empty
+        keys = {
+            c.normalized_email: c.full_name
+            for c in s.query(Contact).filter(Contact.normalized_email.like("unknown:%"))
+        }
+    # 연락처는 있는데 이메일이 없는 사람 — 연락처 번호로 갈립니다.
+    assert "unknown:hs-c4" in keys
+    # 연락처가 아예 안 붙은 티켓 — **티켓** 번호로 갈립니다. 연락처 번호로 키를 잡으면
+    # 그런 티켓 둘이 한 사람으로 합쳐집니다.
+    assert "unknown:ticket-t-orphan" in keys
+    assert all(keys.values()), "full_name 은 NOT NULL 입니다"
+
+
+def test_a_ticket_with_no_contact_is_still_a_row(db, fake):
+    """허브스팟에서 연락처가 안 붙은 티켓도 파이프라인의 한 건입니다.
+
+    예전에는 「붙일 사람이 없으니 지어내지 않는다」며 건너뛰었습니다. 그 대가가 화면 건수가
+    허브스팟보다 적은 것이었고(2026-08-18 실측: Lost 3건 · Not a Fit 1건이 전부 이 경우),
+    숫자가 안 맞으면 그 화면을 아무도 못 믿습니다.
+
+    메일이 갈 길은 없습니다: 이메일이 없고 메시지도 초안도 안 만듭니다.
+    """
+    hubspot_backfill.backfill_b2b_pipeline()
+
+    with db() as s:
+        conv = s.query(Conversation).filter_by(hubspot_ticket_id="t-orphan").one()
+        contact = s.get(Contact, conv.contact_id)
+        assert conv.stage == "negotiation"
+        assert contact.email is None
+        assert conv.last_incoming_at is None, "워크북 append 대기에 올라가면 안 됩니다"
 
 
 def test_request_and_status_round_trip(db, fake):
@@ -259,7 +290,7 @@ def test_request_and_status_round_trip(db, fake):
     status = hubspot_backfill.hubspot_backfill_status()
     assert status["status"] == "completed"
     assert status["request_id"] == request_id
-    assert status["conversations_created"] == 4
+    assert status["conversations_created"] == 5
 
     # Exactly one request is consumed per call.
     assert hubspot_backfill.process_requested_hubspot_backfill() is False
