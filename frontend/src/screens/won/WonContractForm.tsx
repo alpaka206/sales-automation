@@ -301,12 +301,15 @@ export function WonContractForm() {
               <input className="inp" type="date" value={draft.terminated_on}
                      onChange={(e) => set("terminated_on", e.target.value)} />
             </Field>
-            {/* 목업대로 읽기 전용입니다. 티켓은 수주 전환 대기에서 따라오는 값이라, 여기서
-                손으로 고치면 어느 문의에서 온 계약인지가 조용히 틀어집니다. */}
+            {/* 수주 전환 대기에서 온 건은 티켓이 따라오고, **그 밖에는 손으로 적습니다**
+                (2026-08-19, 운영자 지시 — 고객은 Client ID 로 묶이지만 계약별로 티켓을
+                붙이고 싶은 건이 있습니다). 목업대로 읽기 전용이던 칸입니다. 서버는 예전부터
+                받고 있었고(`_CONTRACT_FIELDS`), 막고 있던 것은 이 칸 하나였습니다.
+                비우면 연동이 풀립니다 — 잘못 적은 값을 되돌릴 길이 있어야 합니다. */}
             <Field label="Ticket ID">
-              <input className="inp" value={draft.ticket_id} readOnly
-                     style={{ background: "var(--bg-soft)", color: "var(--muted)" }}
-                     placeholder="인바운드 건만 자동 연동" />
+              <input className="inp" value={draft.ticket_id}
+                     onChange={(e) => set("ticket_id", e.target.value)}
+                     placeholder="인바운드 건은 자동 연동 · 그 외 직접 입력" />
             </Field>
             {/* 목업대로 손으로 적는 칸입니다. 계약서에 적히는 것이 금액과 크레딧이고,
                 분당 단가가 그 둘에서 나옵니다 — 한동안 반대로 두었는데, 그러면 반올림한

@@ -1290,3 +1290,29 @@ def test_the_renewal_list_sits_with_the_other_due_boards():
     # KPI 줄에는 더 이상 없습니다.
     kpis = screen[screen.index('<div className="kpi-row">') : screen.index('<div className="board">')]
     assert "갱신 임박" not in kpis
+
+
+def test_the_ticket_link_can_be_typed_per_contract():
+    """고객은 Client ID 로 묶이지만, **티켓은 계약별로 손으로 붙입니다** (2026-08-19 운영자 지시).
+
+    수주 전환 대기에서 온 건만 티켓이 따라오고 나머지는 영영 「연동 없음」이었습니다 —
+    고객 정보 화면은 「(계약에서 고침)」이라고 안내하는데 정작 그 칸이 읽기 전용이었습니다.
+
+    두 쪽을 같이 고정합니다. 칸만 열면 저장 경로가 이름을 안 받을 때 조용히 사라지고,
+    저장 경로만 두면 적을 곳이 없습니다. 빈 값은 연동을 **푸는** 것이어야 합니다 —
+    잘못 적은 티켓을 되돌릴 길이 있어야 합니다.
+    """
+    import pathlib
+
+    from src.api.routes.won_customers import _fill_contract
+
+    form = pathlib.Path("frontend/src/screens/won/WonContractForm.tsx").read_text(encoding="utf-8")
+    ticket = form[form.index('<Field label="Ticket ID">') :][:400]
+    assert "readOnly" not in ticket, "계약별 티켓은 운영자가 적습니다"
+    assert 'set("ticket_id", e.target.value)' in ticket
+
+    contract = ClientContract(client_id=1, seq=1)
+    _fill_contract(contract, {"ticket_id": " 44551122 ", "currency": "KRW"})
+    assert contract.ticket_id == "44551122"
+    _fill_contract(contract, {"ticket_id": "", "currency": "KRW"})
+    assert contract.ticket_id is None
