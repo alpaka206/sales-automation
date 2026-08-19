@@ -51,9 +51,9 @@
 /* KPI */
 /* 두 칸입니다: 활성 고객 | 월별 MRR(넓게). 갱신 임박은 이 줄 아래로 내려갔습니다 —
    매일 보는 숫자가 아니라 가끔 확인하는 목록이고, 그 자리를 MRR 이 가져갔습니다. */
-/* 활성 고객 + 지표 카드 둘. 지표 둘의 합(2.1fr)은 토글 한 장이던 시절의 폭 그대로라
-   왼쪽 카드의 자리가 안 움직입니다. */
-.won .kpi-row {display:grid;grid-template-columns:1fr 1.05fr 1.05fr;gap:14px;margin-top:22px;}
+/* 활성 고객 + 지표 카드 둘. **아래 보드 줄과 같은 3등분입니다** — 두 줄이 같은 칸에
+   서지 않으면 세로선이 어긋난 것이 화면에서 먼저 보입니다(운영자 지시). */
+.won .kpi-row {display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-top:22px;}
 /* 환율은 두 카드 바깥에 한 줄. 카드마다 넣으면 같은 문장이 둘이 됩니다. */
 .won .kpi-fx {display:flex;justify-content:flex-end;}
 .won .kpi-fx .fx-row {margin-top:6px;}

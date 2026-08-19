@@ -591,7 +591,12 @@ function MetricCard({ title, note, series, months, now }: {
                   onClick={() => setUnit("USD")}>USD</button>
         </div>
       </div>
-      <div className="kpi-value money">{amount(at(now), unit, scale)}</div>
+      {/* **이번 달** 값입니다. 안 적어 두면 이번 달에 잡힌 것이 없을 때(월 매출은 결제
+          회차가 있는 달에만 잡히므로 흔합니다) 큰 「0」 이 「매출 없음」으로 읽힙니다 —
+          정작 옆 막대에는 지난 달들이 서 있는데. */}
+      <div className="kpi-value money">
+        {amount(at(now), unit, scale)}<span className="unit">이번 달</span>
+      </div>
       <MonthlyBars months={months} valueAt={at} now={now}
                    format={(value) => amount(value, unit, scale)}
                    formatTick={(value) => tickLabel(value, scale)}
