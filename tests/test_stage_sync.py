@@ -430,7 +430,7 @@ def test_a_draft_is_retired_when_hubspot_moves_the_ticket_on(db, stages):
     assert stage_sync.sync_stage_from_hubspot(TICKET, STAGE_IDS["HUBSPOT_TICKET_STAGE_NEGOTIATION"])
 
     with db() as session:
-        assert session.get(Message, draft_id).status == "superseded"
+        assert session.get(Message, draft_id) is None, "나가지 않은 초안은 지웁니다"
 
 
 def test_a_draft_survives_a_move_that_is_still_new(db, stages):
@@ -459,12 +459,15 @@ def test_a_draft_still_being_written_is_left_alone(db, stages):
         assert session.get(Message, draft_id).status == "drafting"
 
 
-def test_retired_drafts_leave_the_waiting_queue():
-    """`superseded` is finished work: out of 발송 대기, visible under 발송 완료."""
+def test_a_retired_draft_is_in_no_bucket_because_it_is_gone():
+    """나가지 않은 초안은 어느 묶음에도 없습니다 — 행 자체가 지워지기 때문입니다.
+
+    예전에는 `superseded` 로 닫아 두고 「발송 완료」 묶음에 넣었는데, 고객이 본 적 없는
+    글이 보낸 것으로 보였습니다(2026-08-19 운영자 지시로 삭제로 바뀌었습니다).
+    """
     from src.api.routes.messages import LIST_STATUS_BUCKETS
 
-    assert "superseded" not in LIST_STATUS_BUCKETS["awaiting"]
-    assert "superseded" in LIST_STATUS_BUCKETS["sent"]
+    assert not any("superseded" in bucket for bucket in LIST_STATUS_BUCKETS.values())
 
 
 def test_an_approved_draft_is_retired_too(db, stages):
@@ -476,7 +479,7 @@ def test_an_approved_draft_is_retired_too(db, stages):
     stage_sync.sync_stage_from_hubspot(TICKET, STAGE_IDS["HUBSPOT_TICKET_STAGE_AFTER_SEND"])
 
     with db() as session:
-        assert session.get(Message, draft_id).status == "superseded"
+        assert session.get(Message, draft_id) is None, "나가지 않은 초안은 지웁니다"
 
 
 def test_a_queued_receipt_acknowledgement_is_never_retired(db, stages):
@@ -527,7 +530,7 @@ def test_a_draft_that_lands_after_the_move_is_retired_without_another_move(db, s
     )
 
     with db() as session:
-        assert session.get(Message, draft_id).status == "superseded"
+        assert session.get(Message, draft_id) is None, "나가지 않은 초안은 지웁니다"
 
 
 def test_a_stale_profile_is_repaired_even_when_the_conversation_already_agrees(db, stages):
@@ -635,7 +638,7 @@ def test_a_stage_moved_in_the_console_retires_the_draft(monkeypatch):
     customer_ops._set_conversation_stage(conv_id, "meeting_link_sent")
 
     with factory() as session:
-        assert session.get(Message, draft_id).status == "superseded"
+        assert session.get(Message, draft_id) is None, "나가지 않은 초안은 지웁니다"
 
 
 def test_the_deploy_blueprint_carries_every_stage_id():

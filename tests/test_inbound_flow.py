@@ -181,7 +181,7 @@ def test_a_draft_that_finishes_after_the_ticket_moved_is_closed_on_the_spot(db_s
         )
 
     reply = db_session.get(Message, result["message_id"])
-    assert reply.status == "superseded"
+    assert reply is None, "나가지 않은 초안은 지웁니다 (2026-08-19)"
     notify.assert_not_called()
 
 

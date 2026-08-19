@@ -486,10 +486,10 @@ def _customer_history(session, contact_id: int, exclude_conversation_id: int | N
 # few seconds it is claimed instead of rendering that token as a pill.
 LIST_STATUS_BUCKETS: dict[str, tuple[str, ...]] = {
     "awaiting": ("pending_approval", "drafting", "draft_failed", "send_failed"),
-    # "superseded" = a human answered this ticket in HubSpot while the draft waited, so
-    # stage_sync closed it. Finished work, not a decision: it belongs here, and keeping
-    # it out of 발송 대기 is the point.
-    "sent": ("sent", "test_sent", "rejected", "superseded"),
+    # `superseded` 는 없어졌습니다 (2026-08-19). 단계가 넘어가 뜻을 잃은 초안은 이제
+    # **지웁니다** — 여기 두면 고객이 본 적 없는 글이 「발송 완료」로 보였습니다. 이관
+    # 0079 가 그 전에 쌓인 행도 치웠습니다.
+    "sent": ("sent", "test_sent", "rejected"),
 }
 # Stage chips, per status bucket ("" = 전체). The two buckets sit at opposite ends of the
 # pipeline, so one shared chip row was wrong in both directions: a reply still waiting

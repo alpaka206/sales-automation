@@ -136,20 +136,24 @@ _PAST_NEW = frozenset(LOCAL_STAGE_TO_SETTING) - {"new"}
 
 
 def _retire_superseded_drafts(session, conversation_id: int, local_stage: str) -> int:
-    """Close drafts that the ticket has already moved past. Returns how many.
+    """티켓이 New 를 벗어나면 **나가지 않은 초안을 지웁니다.** 지운 수를 돌려줍니다.
 
-    Drafts are written for New tickets. When the ticket is in a later stage it means the
-    inquiry was answered another way — someone replied in HubSpot, the operator dragged
-    the card after a call, the meeting link went out. Leaving the draft in 발송 대기 asks
-    the operator to send an answer the customer already has, and it is exactly why the
-    queue used to show rows whose Stage is not New.
+    초안은 New 티켓에 대해 씁니다. 단계가 넘어갔다는 것은 답이 다른 경로로 나갔다는 뜻이고
+    (허브스팟에서 회신했거나, 통화 뒤 카드를 옮겼거나, 미팅 링크가 나갔거나), 그 초안을
+    발송 대기에 두면 고객이 이미 받은 답을 한 번 더 보내라고 청하는 셈입니다.
 
-    **이 함수가 초안을 종료하는 유일한 곳입니다.** 단계를 옮기는 쪽(HubSpot 동기화, 콘솔
+    **지웁니다, 닫지 않습니다** (2026-08-19 운영자 지시). 예전에는 ``superseded`` 로
+    상태만 바꿔 행을 남겼는데, 그러면 나가지도 않은 초안이 히스토리에 남아 나중에 읽는
+    사람이 「이 답변은 나갔다」로 셉니다. 고객이 본 적 없는 글은 그 대화의 기록이 아닙니다.
+    **고쳐서 보낸 초안은 안전합니다** — 그건 ``sent`` 가 되어 아래 목록에 애초에 안 걸립니다.
+
+    **이 함수가 초안을 없애는 유일한 곳입니다.** 단계를 옮기는 쪽(HubSpot 동기화, 콘솔
     보드, 워크북·백필 가져오기)과 초안을 완성하는 쪽(``_finalize_draft``)이 전부 여기로
-    옵니다 — 화면·집계·발송이 모두 ``Message.status`` 하나만 보므로, 여기서 한 번 종료하면
-    나머지는 따라옵니다.
+    옵니다 — 한 곳에서 지우면 화면·집계·발송이 따로 확인할 것이 없습니다.
     """
-    from ..db.models import Message
+    from sqlalchemy import delete as sql_delete
+
+    from ..db.models import Approval, Message
 
     if local_stage not in _PAST_NEW:
         return 0
@@ -167,18 +171,23 @@ def _retire_superseded_drafts(session, conversation_id: int, local_stage: str) -
         )
         .all()
     )
-    for draft in drafts:
-        draft.status = "superseded"
     if drafts:
+        ids = [draft.id for draft in drafts]
+        # 승인 기록이 먼저입니다. FK 는 ON DELETE CASCADE 지만 SQLite 는 `foreign_keys=ON`
+        # 일 때만 지키고, ORM 은 NOT NULL 인 열을 비우려 들어 터집니다 — 지우는 범위는
+        # 눈에 보이는 편이 낫기도 합니다(`delete_conversation` 과 같은 이유).
+        session.execute(sql_delete(Approval).where(Approval.message_id.in_(ids)))
+        session.execute(sql_delete(Message).where(Message.id.in_(ids)))
         add_progress(
             conversation_id,
-            # Its own kind: 처리 경과 hides the routine "draft" entries, and a draft
-            # retired out from under the operator is the opposite of routine.
+            # 자기 kind: 처리 경과는 일상적인 "draft" 기록을 숨기는데, 운영자 몰래 없어진
+            # 초안은 그 반대입니다. **행은 사라져도 사라졌다는 사실은 남습니다** — 검토
+            # 화면에서 초안이 안 보이는 이유를 물을 곳이 여기뿐입니다.
             "draft_retired",
             # 어디서 옮겼는지는 적지 않습니다 — 바로 위에 그 단계 이동 기록이 있고,
             # 이제 옮기는 곳이 HubSpot 만이 아닙니다(콘솔 보드·워크북·백필).
             f"단계가 {local_stage}(으)로 이동해 대기 중이던 초안 {len(drafts)}건을 "
-            f"종료 처리했습니다. 이미 답변이 나간 문의입니다.",
+            f"지웠습니다. 이미 답변이 나간 문의이고, 나가지 않은 글은 기록에 남기지 않습니다.",
             session=session,
         )
     return len(drafts)

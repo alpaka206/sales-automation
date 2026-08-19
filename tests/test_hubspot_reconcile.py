@@ -363,7 +363,7 @@ def test_a_deleted_ticket_leaves_the_board_with_no_draft_to_find_it_by(
         assert session.get(Conversation, conversation_id) is None
 
 
-def test_a_thread_past_new_has_its_draft_retired_not_deleted(monkeypatch, waiting_draft):
+def test_a_thread_past_new_keeps_its_thread_but_loses_the_unsent_draft(monkeypatch, waiting_draft):
     """After 최신화 only New keeps a waiting draft. Anything past it was answered in
     HubSpot, so our draft is a reply the customer already has.
 
@@ -398,7 +398,7 @@ def test_a_thread_past_new_has_its_draft_retired_not_deleted(monkeypatch, waitin
 
     hubspot_reconcile.reconcile_with_hubspot(apply=True)
     with SessionLocal() as session:
-        assert session.get(Message, message_id).status == "superseded"
+        assert session.get(Message, message_id) is None, "나가지 않은 초안은 지웁니다"
         assert session.get(Conversation, conversation_id) is not None, "the ticket exists"
 
 
