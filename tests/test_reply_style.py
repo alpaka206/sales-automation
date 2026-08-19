@@ -238,6 +238,26 @@ def test_an_unset_link_stays_visible_instead_of_vanishing():
         assert apply_editable_tokens("예약: {{MEETING_LINK}}") == "예약: {{MEETING_LINK}}"
 
 
+def test_the_english_link_row_can_go_because_the_korean_one_answers_for_it():
+    """링크는 **한 행**입니다 (2026-08-19 운영자 결정). 행에는 주소만 들어 있고 표기는
+    정책 문서가 `[Calendly]({{MEETING_LINK}})` 로 달아 줍니다 — 그래서 영문 전용 행은 같은
+    주소를 두 번 적어 두는 자리가 됐고, 둘 중 하나만 고치면 조용히 갈라졌습니다.
+
+    지운 행은 ``get_email_template`` 이 ``status='active'`` 만 보므로 None 입니다. 그때 영문
+    문의가 남은 행의 주소를 쓰지 못하면 링크가 통째로 빠진 메일이 검토 화면에 올라옵니다 —
+    지워도 되는지는 이 한 줄이 사실인지가 전부였습니다.
+    """
+    from src.llm.prompts import apply_editable_tokens
+
+    # `_en` 행이 없는 상태. 지운 행도, 비운 행도 결과는 같습니다.
+    left = {"meeting_link": "https://calendar.example/abc123", "whatsapp_link": "https://wa.me/1"}
+    with patch("src.db.email_templates.get_email_template", side_effect=lambda k, **kw: left.get(k)):
+        out = apply_editable_tokens(
+            "[Calendly]({{MEETING_LINK}}) · [WhatsApp]({{WHATSAPP}})", language="en"
+        )
+    assert out == "[Calendly](https://calendar.example/abc123) · [WhatsApp](https://wa.me/1)"
+
+
 def test_every_token_in_the_seeded_format_is_one_the_code_substitutes():
     """A token in the skeleton that the code does not know ships to the customer raw.
 
