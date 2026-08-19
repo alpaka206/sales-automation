@@ -235,10 +235,18 @@ def _message_detail_context(
                 "status": tm.status,
                 "subject": tm.subject,
                 "body": tm.body,
-                # Translate inbound bubbles when EITHER the body or the subject is
-                # non-Korean (a Korean body can still have an English subject line).
+                # **본문이 기준입니다** (2026-08-19 운영자 지시). 전에는 제목이 영문이기만
+                # 해도 번역 UI 가 켜졌습니다 — 한국어로 온 문의인데 제목이 "Custom Quote"
+                # 인 흔한 경우에 「원문 보기」가 뜨고, 눌러 봐야 같은 한국어 본문입니다.
+                # 제목 한 줄은 영문이어도 읽는 데 걸림돌이 아닙니다.
+                #
+                # 본문이 비어 있을 때만 제목으로 판단합니다: 그때는 제목이 곧 문의 전부라,
+                # 영문이면 번역이 필요합니다.
                 "needs_ko": tm.direction == "inbound"
-                and (needs_korean(tm.body) or needs_korean(tm.subject or "")),
+                and (
+                    needs_korean(tm.body)
+                    or (not (tm.body or "").strip() and needs_korean(tm.subject or ""))
+                ),
                 "body_ko": tm.body_ko,
                 "subject_ko": tm.subject_ko,
                 "is_auto_ack": tm.prompt_variant == "auto_ack",

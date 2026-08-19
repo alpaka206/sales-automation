@@ -241,3 +241,24 @@ def test_the_stage_labels_come_from_the_board_not_a_second_list(queue):
     labels = _messages_list_context(status="awaiting")["stage_labels"]
     assert labels["new"] == "New"
     assert labels["negotiation"] == "Negotiating"
+
+
+def test_a_korean_inquiry_offers_no_original_view() -> None:
+    """한국어로 온 문의에는 「원문 보기」가 뜨지 않습니다 (2026-08-19 운영자 지시).
+
+    전에는 **제목만** 영문이어도 번역 UI 가 켜졌습니다. 한국어 본문에 제목이
+    "Custom Quote" 인 문의가 흔한데, 그때 「원문 보기」를 눌러 봐야 같은 한국어 본문이
+    나옵니다 — 제목 한 줄이 영문인 것은 읽는 데 걸림돌이 아닙니다.
+
+    본문이 비어 있을 때만 제목으로 판단합니다: 그때는 제목이 곧 문의 전부입니다.
+    """
+    from src.llm.translate import needs_korean
+
+    def needs_ko(body: str, subject: str) -> bool:
+        # 라우트가 쓰는 규칙 그대로. 여기서 갈라지면 화면이 다시 옛 동작으로 돌아갑니다.
+        return needs_korean(body) or (not body.strip() and needs_korean(subject))
+
+    assert needs_ko("영어 문의입니다만 영문", "Custom Quote") is False
+    assert needs_ko("We need dubbing for 600 minutes.", "Custom Quote") is True
+    assert needs_ko("", "Custom Quote") is True
+    assert needs_ko("", "맞춤 견적 문의") is False
