@@ -121,8 +121,8 @@ function Editor({ id, data, onDone }: {
       const response = await fetch(`/email-templates/${id}`, {
         method: "DELETE", credentials: "same-origin",
       });
-      // The server refuses to delete the last row for a key the send path resolves, and
-      // says why — show that sentence rather than a status code.
+      // 서버는 거절하지 않습니다 — 무엇이든 지워집니다(운영자 결정). 그래도 본문을 읽는
+      // 이유는 404 처럼 진짜 실패했을 때 상태 코드 대신 문장을 보여 주기 위해서입니다.
       if (!response.ok) throw new Error((await response.text()).replace(/<[^>]*>/g, ""));
       await queryClient.invalidateQueries();
       onDone();
@@ -282,8 +282,9 @@ function Editor({ id, data, onDone }: {
           warning={codeResolved
             ? `발송 경로가 이 행을 「${data.key}」 라는 이름으로 찾습니다. 지워도 그 조회는 ` +
               "계속 일어나고, 답만 없어집니다 — 접수확인이 하드코딩된 문장으로 떨어지거나, " +
-              "회신이 {{MEETING_LINK}} 같은 토큰으로 끝납니다. 7일이 지나면 콘솔로는 다시 " +
-              "만들 수 없습니다. 쓰지 않을 생각이라면 내용을 비우는 쪽이 되돌리기 쉽습니다."
+              "회신이 {{MEETING_LINK}} 같은 토큰으로 끝납니다. 7일 동안은 목록에서 되돌릴 " +
+              "수 있지만 그 사이 같은 키로 새로 만들 수는 없고, 7일이 지나면 본문이 개정 " +
+              "이력까지 사라집니다. 쓰지 않을 생각이라면 내용을 비우는 쪽이 되돌리기 쉽습니다."
             : undefined}
         />
       )}
