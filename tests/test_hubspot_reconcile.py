@@ -272,6 +272,7 @@ def test_a_thread_past_new_has_its_draft_retired_not_deleted(monkeypatch, waitin
     a ticket that is gone from HubSpot earns a delete.
     """
     from src.agents import hubspot_reconcile
+    from src.agents.hubspot_backfill import B2B_PIPELINE_ID
 
     class Negotiating:
         def existing_ticket_ids_sync(self, ticket_ids):
@@ -281,6 +282,9 @@ def test_a_thread_past_new_has_its_draft_retired_not_deleted(monkeypatch, waitin
             class Ticket:
                 id = ticket_id
                 pipeline_stage = "negotiating-stage-id"
+                # 아직 **우리** 파이프라인 안입니다. 밖으로 나간 티켓은 이 패스가 지웁니다
+                # (우리 관할이 아니게 된 문의) — 이 검사는 그 경우가 아닙니다.
+                pipeline = B2B_PIPELINE_ID
             return Ticket()
 
     monkeypatch.setattr(hubspot_reconcile, "HubSpotClient", lambda: Negotiating())

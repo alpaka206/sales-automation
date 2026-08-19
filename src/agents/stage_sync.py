@@ -187,6 +187,79 @@ def _retire_superseded_drafts(session, conversation_id: int, local_stage: str) -
     return len(drafts)
 
 
+
+def _ticket_pipeline(ticket_id: str) -> str | None:
+    """그 티켓이 **지금** 어느 파이프라인에 있나. 못 물어보면 None.
+
+    None 은 「모른다」이지 「나갔다」가 아닙니다 — 부르는 쪽은 모르면 아무것도 지우지
+    않습니다. 토큰이 만료됐거나 허브스팟이 잠깐 죽은 것을 「우리 관할이 아니게 됐다」로
+    읽으면, 한 번 삐끗한 사이에 보드가 통째로 비워집니다.
+    """
+    try:
+        from ..integrations.hubspot import HubSpotClient
+
+        ticket = HubSpotClient().get_ticket_sync(str(ticket_id))
+    except Exception:
+        logger.warning("티켓 %s 의 파이프라인을 확인하지 못했습니다.", ticket_id, exc_info=True)
+        return None
+    return getattr(ticket, "pipeline", None)
+
+
+def _handle_unmapped_stage(
+    ticket_id: str | None, hubspot_stage_id: str | None, source: str
+) -> None:
+    """매핑에 없는 stage id 로 옮겨진 티켓. 세 가지인데 하는 일이 각각 다릅니다.
+
+    ① **우리 티켓이 다른 파이프라인으로 넘어갔다.** 우리 관할이 아니게 된 문의입니다.
+       티켓이 지워졌을 때와 같은 처리를 합니다(`delete_conversation` — 대화·메시지는
+       지우고 연락처·계약·소통 히스토리는 남깁니다). 안 지우면 **영영 남습니다**: 10분
+       스윕은 우리 파이프라인만 검색하므로 나간 티켓을 다시 만나지 못하고, 웹훅은 stage
+       id 만 들고 오므로 파이프라인이 바뀐 것 자체를 알 수 없습니다. 되돌아오면 스윕이
+       모르는 티켓으로 다시 주워 옵니다(`hubspot_backfill.adopt_ticket`).
+    ② **애초에 남의 파이프라인 티켓.** 웹훅은 포털 전체를 보내므로 대부분 이쪽입니다.
+       조용히 넘어갑니다 — 예전에는 이것까지 경고라 로그가 남의 티켓으로 가득 찼고,
+       그래서 정작 ③ 이 안 보였습니다.
+    ③ **우리 파이프라인인데 설정에 없는 단계.** 그 단계로의 이동이 전부 조용히 사라지는
+       상태라 경고를 남깁니다. **stage id 는 적지 않습니다** — `/logs` 의 스크러버가
+       9자리 이상 숫자를 전화번호로 보고 지웁니다(`common/log_buffer.py`). 대신 바로
+       행동이 되는 사실을 적습니다: 어느 로컬 단계가 설정에서 빠졌는가.
+    """
+    if not ticket_id or not hubspot_stage_id:
+        return None
+
+    with SessionLocal() as session:
+        conversation_id = session.scalar(
+            select(Conversation.id).where(Conversation.hubspot_ticket_id == str(ticket_id))
+        )
+    if conversation_id is None:
+        logger.info(
+            "Unmapped stage reported for ticket %s (source=%s); we do not carry it.",
+            ticket_id, source,
+        )
+        return None
+
+    from .hubspot_backfill import B2B_PIPELINE_ID
+
+    pipeline = _ticket_pipeline(ticket_id)
+    if pipeline and str(pipeline) != B2B_PIPELINE_ID:
+        from .hubspot_reconcile import delete_conversation
+
+        logger.warning(
+            "티켓 %s 가 우리 파이프라인 밖으로 옮겨졌습니다 (source=%s). 목록에서 내립니다.",
+            ticket_id, source,
+        )
+        delete_conversation(conversation_id, str(ticket_id))
+        return None
+
+    missing = sorted(set(LOCAL_STAGE_TO_SETTING) - set(stage_id_to_local().values()))
+    logger.warning(
+        "HubSpot 이 우리가 모르는 단계로 티켓 %s 를 옮겼습니다 (source=%s). "
+        "id 가 설정되지 않은 단계: %s",
+        ticket_id, source, ", ".join(missing) or "(없음 — 파이프라인 확인 실패)",
+    )
+    return None
+
+
 def sync_stage_from_hubspot(
     ticket_id: str | None,
     hubspot_stage_id: str | None,
@@ -206,23 +279,7 @@ def sync_stage_from_hubspot(
     """
     local_stage = local_stage_for(hubspot_stage_id)
     if not local_stage:
-        # **여기가 조용하면 못 고칩니다.** 설정에 없는 stage id 로 옮겨진 티켓은 그 단계만
-        # 안 따라오는데, 화면에서는 「아직 안 바뀌었다」와 똑같이 보입니다. 다른 파이프라인의
-        # 티켓도 같은 웹훅으로 오므로 시끄러울 수 있지만, 조용히 버려 본 결과가 이 함수를
-        # 고치게 만들었습니다 — 어느 stage id 가 안 잡히는지 로그가 바로 말해 줍니다.
-        if ticket_id and hubspot_stage_id:
-            # **id 를 그대로 적지 않습니다.** `/logs` 의 스크러버가 9자리 이상 숫자를
-            # 전화번호로 보고 지웁니다(`common/log_buffer.py`) — HubSpot stage id 가 딱
-            # 거기 걸립니다. 그래서 지워지지 않고 **바로 행동이 되는** 사실을 적습니다:
-            # 어느 로컬 단계가 설정에서 빠졌는가. 하나라도 비어 있으면 그 단계로의 이동은
-            # 전부 이렇게 조용히 사라집니다.
-            missing = sorted(set(LOCAL_STAGE_TO_SETTING) - set(stage_id_to_local().values()))
-            logger.warning(
-                "HubSpot 이 우리가 모르는 단계로 티켓 %s 를 옮겼습니다 (source=%s). "
-                "id 가 설정되지 않은 단계: %s",
-                ticket_id, source, ", ".join(missing) or "(없음 — 다른 파이프라인일 수 있습니다)",
-            )
-        return None
+        return _handle_unmapped_stage(ticket_id, hubspot_stage_id, source)
     if not ticket_id:
         return None
 

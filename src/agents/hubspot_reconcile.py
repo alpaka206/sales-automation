@@ -165,6 +165,7 @@ def reconcile_with_hubspot(*, apply: bool = False) -> dict:
     Testing this against a database of made-up ticket ids acted on three threads in one
     click. So the first pass only counts, and the operator confirms a number.
     """
+    from .hubspot_backfill import B2B_PIPELINE_ID
     from .inbound_poller import reconcile_ticket_stages_once
     from .stage_sync import local_stage_for, sync_stage_from_hubspot
 
@@ -236,6 +237,17 @@ def reconcile_with_hubspot(*, apply: bool = False) -> dict:
             continue
         except Exception:
             logger.exception("Ticket %s check failed", ticket_id)
+            continue
+
+        # **우리 파이프라인 밖으로 옮겨진 티켓.** 우리 관할이 아니게 된 문의라 티켓이
+        # 지워진 것과 같이 다룹니다. 세는 것은 두 패스 다, 지우는 것은 apply 일 때만 —
+        # 삭제는 되돌릴 수 없고, 이 화면의 규칙이 「먼저 세고 사람이 숫자를 확인한다」
+        # 입니다. 자동 경로(웹훅·폴러)는 `stage_sync` 가 그때그때 처리합니다.
+        if ticket.pipeline and str(ticket.pipeline) != B2B_PIPELINE_ID:
+            report["deleted"] += 1
+            if apply:
+                delete_conversation(conversation_id, ticket_id)
+                report["retired"] += 1
             continue
 
         # Applied in both passes: aligning to the stage HubSpot already shows is not a

@@ -248,6 +248,48 @@ def test_unknown_ticket_and_unmapped_stage_are_ignored(db, stages):
         assert session.query(Conversation).filter_by(hubspot_ticket_id=TICKET).one().stage == "new"
 
 
+def test_a_ticket_moved_out_of_our_pipeline_leaves_the_board(db, stages, monkeypatch):
+    """우리 관할이 아니게 된 문의는 목록에서 사라져야 합니다 (2026-08-19, 운영자 보고).
+
+    영업이 티켓을 다른 파이프라인으로 넘기면 우리 쪽에서는 **아무 일도 안 일어났습니다**.
+    웹훅은 stage id 만 들고 오므로 파이프라인이 바뀐 것 자체를 모르고, 10분 스윕은 우리
+    파이프라인만 검색하므로 나간 티켓을 다시 만나지 못합니다. 그래서 보드에 영영 남았습니다.
+    """
+    from src.agents import hubspot_reconcile
+    from src.integrations import hubspot as hubspot_module
+
+    monkeypatch.setattr(hubspot_reconcile, "SessionLocal", db)
+
+    class _MovedTicket:
+        pipeline = "999999999"
+
+    class _Client:
+        def get_ticket_sync(self, ticket_id):
+            return _MovedTicket()
+
+    monkeypatch.setattr(hubspot_module, "HubSpotClient", _Client)
+
+    assert stage_sync.sync_stage_from_hubspot(TICKET, "555000111") is None
+    with db() as session:
+        assert session.query(Conversation).filter_by(hubspot_ticket_id=TICKET).one_or_none() is None
+
+
+def test_a_pipeline_we_cannot_read_removes_nothing(db, stages, monkeypatch):
+    """**모르면 안 지웁니다.** 토큰 만료나 잠깐의 장애를 「관할이 아니게 됐다」로 읽으면,
+    한 번 삐끗한 사이에 보드가 통째로 비워집니다."""
+    from src.integrations import hubspot as hubspot_module
+
+    class _Client:
+        def get_ticket_sync(self, ticket_id):
+            raise RuntimeError("HubSpot down")
+
+    monkeypatch.setattr(hubspot_module, "HubSpotClient", _Client)
+
+    assert stage_sync.sync_stage_from_hubspot(TICKET, "555000111") is None
+    with db() as session:
+        assert session.query(Conversation).filter_by(hubspot_ticket_id=TICKET).one().stage == "new"
+
+
 def test_webhook_records_a_non_new_stage_change(db, stages, monkeypatch):
     """The regression: a move to Won used to be dropped as 'ignored'."""
     from src.api import webhook
