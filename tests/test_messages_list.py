@@ -129,7 +129,6 @@ def test_stage_chips_differ_by_status_bucket(queue):
         "reminder_sent",
         "won",
         "closed_lost",
-        "no_response",
         "closed",
     ]
     # Labels and order are the board's, not a second hand-written list.
@@ -140,8 +139,7 @@ def test_stage_chips_differ_by_status_bucket(queue):
         "Reminder Sent",
         "Won",
         "Lost",
-        "No Response",
-        "Not a Fit",
+        "Concluded",
     ]
 
 

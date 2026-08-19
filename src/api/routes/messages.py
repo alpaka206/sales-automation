@@ -431,7 +431,7 @@ LIST_STAGES: dict[str, tuple[str, ...]] = {
     "awaiting": ("new",),
     "sent": (
         "meeting_link_sent", "negotiation", "reminder_sent",
-        "won", "closed_lost", "no_response", "closed",
+        "won", "closed_lost", "closed",
     ),
 }
 LIST_SORTS = ("oldest", "newest")

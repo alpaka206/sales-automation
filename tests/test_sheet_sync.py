@@ -516,4 +516,4 @@ def test_a_new_workbook_row_carries_the_stage_the_inquiry_is_actually_in():
     assert sheet_sync._stage_words(None) == ("New", "Inquiry")
     # 시트에 아직 말이 없는 단계는 행을 못 만드는 것보다 New 로 두는 편이 낫습니다.
     # 갱신 경로가 그때 경고를 남깁니다(`google_sheets.update_inbound_stage`).
-    assert sheet_sync._stage_words("no_response") == ("New", "Inquiry")
+    assert sheet_sync._stage_words("reminder_sent") == ("New", "Inquiry")

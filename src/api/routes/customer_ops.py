@@ -39,8 +39,10 @@ GOOGLE_SHEETS_STATE_COOKIE = "perso_sheets_oauth_state"
 #
 # **이 튜플의 두 번째 칸이 파이프라인 이름의 유일한 출처입니다.** HubSpot 이 단계 이름을
 # 바꾸면 여기만 바꿉니다 — stage id 도 로컬 키도 그대로이고, 화면·목록·칩이 전부 여기를
-# 읽습니다. 그래서 `meeting_link_sent` 는 Qualified 로, `closed` 는 Not a Fit 으로 보입니다:
+# 읽습니다. 그래서 `meeting_link_sent` 는 Qualified 로, `closed` 는 Concluded 로 보입니다:
 # 이름만 바뀐 같은 단계라 예전 티켓이 저절로 새 이름 아래로 모입니다(옮길 것이 없습니다).
+# `closed` 의 이름 내력: Unqualified → Closed → Not a Fit → Concluded (2026-08-19). 그동안
+# stage id 는 1404814097 한 번도 안 바뀌었습니다.
 PIPELINE_STAGES: tuple[tuple[str, str, str], ...] = (
     ("new", "New", "새 문의"),
     ("meeting_link_sent", "Qualified", "답변 발송"),
@@ -48,8 +50,9 @@ PIPELINE_STAGES: tuple[tuple[str, str, str], ...] = (
     ("reminder_sent", "Reminder Sent", "리마인더 발송"),
     ("won", "Won", "계약 성사"),
     ("closed_lost", "Lost", "실패"),
-    ("no_response", "No Response", "무응답 종료"),
-    ("closed", "Not a Fit", "부적합 종료"),
+    # No Response 가 없어지면서 이 단계가 「끝난 문의」 전부를 받습니다(이관 0076) —
+    # 이름이 Not a Fit 에서 Concluded 로 넓어진 것도 그래서입니다.
+    ("closed", "Concluded", "종결"),
 )
 VALID_PIPELINE_STAGES = {stage for stage, _, _ in PIPELINE_STAGES}
 

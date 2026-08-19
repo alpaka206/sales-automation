@@ -467,7 +467,7 @@ def test_the_workbook_has_no_wording_for_two_board_stages() -> None:
     from src.integrations.google_sheets import _STAGE_VALUES
 
     missing = [key for key, _label, _description in PIPELINE_STAGES if key not in _STAGE_VALUES]
-    assert missing == ["reminder_sent", "no_response", "closed"]
+    assert missing == ["reminder_sent", "closed"]
 
 
 def test_pipeline_cards_have_no_stage_dropdown(customer_db, customer_id) -> None:

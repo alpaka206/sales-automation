@@ -29,7 +29,6 @@ STAGE_IDS = {
     "HUBSPOT_TICKET_STAGE_REMINDER_SENT": "1196621584",
     "HUBSPOT_TICKET_STAGE_WON": "1196772135",
     "HUBSPOT_TICKET_STAGE_CLOSED_LOST": "1172180246",
-    "HUBSPOT_TICKET_STAGE_NO_RESPONSE": "4142303959",
     "HUBSPOT_TICKET_STAGE_CLOSED": "1404814097",
 }
 
@@ -60,7 +59,7 @@ def db(monkeypatch):
 
 
 def test_every_pipeline_stage_is_mapped(stages):
-    """All 8 stages of [B2B] AI Dubbing must resolve — an unmapped one is invisible."""
+    """All 7 stages of [B2B] AI Dubbing must resolve — an unmapped one is invisible."""
     expected = {
         "1172180243": "new",
         "1193842435": "meeting_link_sent",
@@ -68,18 +67,21 @@ def test_every_pipeline_stage_is_mapped(stages):
         "1196621584": "reminder_sent",
         "1196772135": "won",
         "1172180246": "closed_lost",
-        "4142303959": "no_response",
         "1404814097": "closed",
     }
     assert stage_sync.stage_id_to_local() == expected
 
 
-def test_board_columns_are_exactly_the_eight_stages_in_flow_order():
+def test_board_columns_are_exactly_the_seven_stages_in_flow_order():
     """The board's column order IS this tuple — nothing else defines it.
 
     **키와 이름은 따로 움직입니다.** HubSpot 이 단계 이름을 바꿔도(Meeting link sent →
-    Qualified, Closed → Not a Fit) stage id 는 그대로라, 로컬 키도 그대로 두고 이 튜플의
+    Qualified, Not a Fit → Concluded) stage id 는 그대로라, 로컬 키도 그대로 두고 이 튜플의
     이름만 바꿉니다 — 옮겨야 할 행이 없습니다. 두 목록을 따로 적어 두는 이유입니다.
+
+    **없어진 단계는 다릅니다.** No Response 는 이름이 바뀐 것이 아니라 허브스팟에서 사라져
+    (2026-08-19) 그 값을 들고 있는 행이 어느 열에도 못 섭니다. 그래서 그건 키까지 지우고,
+    쓰던 행은 이관 0076 이 `closed` 로 접었습니다.
     """
     from src.api.routes.customer_ops import PIPELINE_STAGES
 
@@ -90,7 +92,6 @@ def test_board_columns_are_exactly_the_eight_stages_in_flow_order():
         "reminder_sent",
         "won",
         "closed_lost",
-        "no_response",
         "closed",
     ]
     assert [label for _, label, _ in PIPELINE_STAGES] == [
@@ -100,8 +101,7 @@ def test_board_columns_are_exactly_the_eight_stages_in_flow_order():
         "Reminder Sent",
         "Won",
         "Lost",
-        "No Response",
-        "Not a Fit",
+        "Concluded",
     ]
 
 

@@ -47,9 +47,10 @@ class Settings(BaseSettings):
     HUBSPOT_WEBHOOK_SECRET: str = ""
     # ----- [B2B] AI Dubbing ticket pipeline stage ids -----
     # The env names below mirror the stage labels in HubSpot (New / Qualified /
-    # Negotiating / Reminder Sent / Won / Lost / Not a Fit / No Response). Stages get
+    # Negotiating / Reminder Sent / Won / Lost / Concluded). Stages get
     # RENAMED in HubSpot without changing their id — "Meeting link sent" became
-    # "Qualified" and "Closed" became "Not a Fit" — so every former spelling stays as an
+    # "Qualified", and "Closed" became "Not a Fit" then "Concluded" — so every former
+    # spelling stays as an
     # alias: an existing .env or Render dashboard keeps working, and the id behind it is
     # the same row either way. Same pattern as HUBSPOT_ACCESS_TOKEN above. Find an id in
     # HubSpot Settings → Objects → Tickets → Pipelines (click a stage → copy id), or run
@@ -83,22 +84,25 @@ class Settings(BaseSettings):
     # (pydantic's extra="ignore" silently drops anything undeclared).
     HUBSPOT_TICKET_STAGE_REMINDER_SENT: str = ""
     HUBSPOT_TICKET_STAGE_WON: str = ""
-    # 지금 이름은 "Not a Fit" 입니다. 예전 이름("Closed", 그 전엔 "Unqualified")이 alias 로
-    # 남아 있는 것은 id 가 그대로이기 때문입니다 — HubSpot 에서 이름만 바뀌었습니다.
+    # 지금 이름은 "Concluded" 입니다(2026-08-19). 그 전엔 "Not a Fit", 그 전엔 "Closed",
+    # 그 전엔 "Unqualified" — 전부 alias 로 남습니다. **id 는 한 번도 안 바뀌었습니다**
+    # (1404814097). 이름을 따라 키를 바꾸면 대화·프로필 두 열을 옮기는 마이그레이션이
+    # 필요하고, 다음에 이름이 또 바뀌면 그걸 또 합니다.
     HUBSPOT_TICKET_STAGE_CLOSED: str = Field(
         default="",
         validation_alias=AliasChoices(
+            "HUBSPOT_TICKET_STAGE_CONCLUDED",
             "HUBSPOT_TICKET_STAGE_NOT_A_FIT",
             "HUBSPOT_TICKET_STAGE_CLOSED",
             "HUBSPOT_TICKET_STAGE_UNQUALIFIED",
         ),
     )
-    # 새로 생긴 단계 — 응답이 아예 없어 끝난 문의. 별칭이 없는 유일한 단계입니다(이름을
-    # 바꾼 것이 아니라 없던 것이 생겼으므로).
-    HUBSPOT_TICKET_STAGE_NO_RESPONSE: str = ""
-    # These eight are the whole pipeline. FOLLOW_UP_NEEDED / CONTRACTED / ONBOARDING /
-    # ACTIVE were retired in migration 0040 — do not redeclare them without a matching
-    # HubSpot stage and an entry in stage_sync.LOCAL_STAGE_TO_SETTING.
+    # NO_RESPONSE 는 지웠습니다 (2026-08-19). 이름이 바뀐 것이 아니라 **단계가 없어졌으므로**
+    # alias 로 남기지 않습니다 — 남겨 두면 없는 단계의 id 를 계속 읽으려 듭니다. 그 값을 쓰던
+    # 행은 이관 0076 이 Concluded 로 접었습니다.
+    # These seven are the whole pipeline. FOLLOW_UP_NEEDED / CONTRACTED / ONBOARDING /
+    # ACTIVE were retired in migration 0040, NO_RESPONSE in 0076 — do not redeclare them
+    # without a matching HubSpot stage and an entry in stage_sync.LOCAL_STAGE_TO_SETTING.
     # Set to true ONLY if the HubSpot account has a custom `inbound_status`
     # text property on contacts. We write "analyzed" / "meeting_link_sent" to
     # it for operator visibility, but the value is never read back, and the
