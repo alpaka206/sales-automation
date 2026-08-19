@@ -692,8 +692,9 @@ def update_inbound_stage(client_id: int | None, stage: str, pipeline: str | None
         # (`reminder_sent` 만 없습니다). 조용히 지나가면 시트가 옛 단계를 그대로 들고
         # 있는데 왜 그런지는 아무 데도 안 남습니다 — 로그에라도 적습니다.
         logger.warning(
-            "Google Sheets has no Deal Stage wording for local stage '%s' — the workbook "
-            "keeps its previous value (client_id=%s).",
+            "워크북의 단계 열%s 에 '%s' 단계를 적을 말이 없어 그 행은 이전 값을 유지합니다 "
+            "(client_id=%s). google_sheets._STAGE_VALUES 에 한 줄을 더하면 됩니다.",
+            _ALIASES["deal_stage"],
             stage,
             client_id,
         )
@@ -727,17 +728,32 @@ def update_inbound_stage(client_id: int | None, stage: str, pipeline: str | None
                 column = _column_letter(index)
                 data.append({"range": f"'{tab}'!{column}{row}", "values": [[values[key]]]})
         if len(data) < 2:
-            raise GoogleSheetsError("Inbound DB stage columns were not found.")
+            # **찾은 헤더를 그대로 적습니다.** 예전에는 「stage columns were not found」
+            # 한 줄이었는데, 그러면 시트에 실제로 무슨 열이 있는지 알 길이 없어 사람이
+            # 시트를 열어 눈으로 맞춰 보는 수밖에 없었습니다. 이 워크북은 2026년에 영문
+            # 이름으로 다시 만들어져 그 두 칸이 Ticket Status / Deal Detail 이 되었고,
+            # 코드의 키 이름(deal_stage)만 옛 이름으로 남아 로그가 시트에 없는 이름을
+            # 말하고 있었습니다.
+            raise GoogleSheetsError(
+                "Inbound DB 에서 단계 열을 못 찾았습니다. 찾는 이름: "
+                f"{_ALIASES['deal_stage']} / {_ALIASES['deal_stage_detail']}. "
+                f"시트의 헤더: {[str(v) for v in header.values if str(v).strip()]}"
+            )
         service.spreadsheets().values().batchUpdate(
             spreadsheetId=settings.GOOGLE_SHEETS_SPREADSHEET_ID.strip(),
             body={"valueInputOption": "RAW", "data": data},
         ).execute()
         return True
-    except Exception:
+    except Exception as exc:
+        # **이유를 메시지에 넣습니다.** `/logs` 는 메시지 한 줄만 보관하므로 exc_info 는
+        # 화면에 안 남습니다 — 「실패했습니다」만 보이고 왜인지는 서버 로그를 따로 봐야
+        # 했습니다. 그 한 줄이 열 이름 문제인지 권한 문제인지를 가릅니다.
         logger.warning(
-            "Google Sheets stage update failed (client_id=%s, stage=%s).",
+            "Google Sheets stage update failed (client_id=%s, stage=%s): %s: %s",
             client_id,
             stage,
+            type(exc).__name__,
+            exc,
             exc_info=True,
         )
         return False
