@@ -88,6 +88,14 @@ type Detail = {
   }[];
   summary: string | null;
   customer_requests: string | null;
+  other_tickets: {
+    conversation_id: number; ticket_id: string | null; subject: string | null;
+    stage: string; created_at: string;
+  }[];
+  customer_history: {
+    channel: string; direction: string; handler: string | null;
+    subject: string | null; summary: string | null; happened_at: string | null;
+  }[];
   signatures: { key: string; name: string }[];
   ticket: {
     id: number | null; ticket_id: string | null; stage: string | null;
@@ -553,12 +561,6 @@ export function MessageDetail() {
                   <div className="t-sm" style={{ lineHeight: 1.6, whiteSpace: "pre-line" }}>{data.summary}</div>
                 </div>
               )}
-              {data.customer_requests && (
-                <div className="msg-body--inset" style={{ marginBottom: 10 }}>
-                  <div className="ko-block__label" style={{ color: "var(--accent)" }}>고객 요청사항</div>
-                  <div className="t-sm" style={{ lineHeight: 1.6, whiteSpace: "pre-line" }}>{data.customer_requests}</div>
-                </div>
-              )}
               {data.progress.length > 0 && (
                 <ul className="progress-log">
                   {data.progress.map((p, index) => (
@@ -574,12 +576,68 @@ export function MessageDetail() {
                             {p.handler ? ` · ${p.handler}` : ""}
                           </span>
                         )}
-                        <span style={{ whiteSpace: "pre-line" }}>{p.detail}</span>
+                        {/* **문의 접수 줄은 제목이 아니라 요청사항입니다** (운영자 지시).
+                            「고객 문의 접수: Custom Quote」는 제목을 한 번 더 읽어 주는
+                            줄이었고, 정작 이 티켓에서 알아야 할 것 — 무엇을 요청했는가 —
+                            는 다른 카드에 따로 있었습니다. 한 자리로 합칩니다. 요청사항이
+                            아직 안 뽑힌 티켓은 예전 문장 그대로 둡니다. */}
+                        {p.kind === "inbound" && data.customer_requests ? (
+                          <>
+                            <span className="ko-block__label" style={{ color: "var(--accent)" }}>
+                              고객 요청사항
+                            </span>
+                            <span style={{ whiteSpace: "pre-line", display: "block" }}>
+                              {data.customer_requests}
+                            </span>
+                          </>
+                        ) : (
+                          <span style={{ whiteSpace: "pre-line" }}>{p.detail}</span>
+                        )}
                       </span>
                     </li>
                   ))}
                 </ul>
               )}
+            </div>
+          )}
+
+          {/* **이 티켓 밖의 것들.** 지금 처리할 것(왼쪽의 스레드·초안)과 섞지 않고 오른쪽에
+              둡니다 — 판단에 필요한 맥락이지 이 티켓에서 일어난 일이 아닙니다. */}
+          {data.other_tickets.length > 0 && (
+            <div className="card">
+              <div className="section-label" style={{ marginBottom: 12 }}>
+                이 고객의 다른 티켓 {data.other_tickets.length}건
+              </div>
+              <div className="stack" style={{ gap: 8 }}>
+                {data.other_tickets.map((other) => (
+                  <Link key={other.conversation_id} className="link--plain"
+                        to={`/tickets/${other.conversation_id}`}>
+                    <div className="row-between" style={{ gap: 8 }}>
+                      <strong className="t-sm">{other.subject || "제목 없는 문의"}</strong>
+                      <span className="tag">{data.stage_labels[other.stage] ?? other.stage}</span>
+                    </div>
+                    <div className="t-xs t-subtle">
+                      {kst(other.created_at)}{other.ticket_id ? ` · #${other.ticket_id}` : ""}
+                    </div>
+                  </Link>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {data.customer_history.length > 0 && (
+            <div className="card">
+              <div className="section-label" style={{ marginBottom: 12 }}>
+                고객 히스토리 {data.customer_history.length}건
+              </div>
+              {/* 접어 둡니다. 이 목록은 허브스팟에서 가져온 옛 메일까지 들어와 한 사람에
+                  스무 건이 넘기도 하는데, 본문을 다 펼치면 정작 이 티켓의 초안이 화면
+                  몇 개 아래로 밀립니다. 제목과 첫 줄만 보이고 「전체보기」로 폅니다. */}
+              <div className="stack" style={{ gap: 6 }}>
+                {data.customer_history.map((item, index) => (
+                  <HistoryRow key={index} item={item} />
+                ))}
+              </div>
             </div>
           )}
 
@@ -891,5 +949,39 @@ export function MessageDetail() {
         </Modal>
       )}
     </>
+  );
+}
+
+/** 연락처 단위 기록 한 줄 — 제목과 첫 줄만, 본문은 「전체보기」로. */
+function HistoryRow({ item }: {
+  item: {
+    channel: string; direction: string; handler: string | null;
+    subject: string | null; summary: string | null; happened_at: string | null;
+  };
+}) {
+  const body = (item.summary || "").trim();
+  // 두 줄이면 「무슨 이야기였나」는 알 수 있고, 그 이상은 펼쳐서 읽을 일입니다.
+  const preview = body.replace(/\s+/g, " ").slice(0, 90);
+  const truncated = body.replace(/\s+/g, " ").length > 90;
+  return (
+    <details style={{ borderTop: "1px solid var(--border)", paddingTop: 6 }}>
+      <summary style={{ cursor: "pointer", listStyle: "none" }}>
+        <div className="row" style={{ gap: 6, flexWrap: "wrap" }}>
+          <span className="tag">{channelLabel(item.channel)}</span>
+          {item.handler && <span className="t-xs t-subtle">{item.handler}</span>}
+          <span className="t-xs t-subtle tnum">{item.happened_at ? kst(item.happened_at) : ""}</span>
+        </div>
+        {item.subject && <div className="t-sm" style={{ marginTop: 3 }}><strong>{item.subject}</strong></div>}
+        <div className="t-xs t-subtle" style={{ marginTop: 2 }}>
+          {preview}{truncated ? "… " : " "}
+          {truncated && <span style={{ color: "var(--accent)" }}>전체보기</span>}
+        </div>
+      </summary>
+      {truncated && (
+        <div className="t-sm msg-body--inset" style={{ marginTop: 8, whiteSpace: "pre-line" }}>
+          {body}
+        </div>
+      )}
+    </details>
   );
 }

@@ -61,7 +61,10 @@ _MAX_EDIT_BODY_BYTES = 100_000
 # still there to explain a support question. A FAILED auto-ack and a draft HubSpot retired
 # out from under the operator are different sentences that need a human, so they keep
 # their own kinds and are not in here.
-_ROUTINE_PROGRESS_KINDS = ("draft", "auto_ack", "stage")
+# `translate` 도 같은 부류입니다 (2026-08-19 운영자 지시). 「회신 초안을 'en' 언어로
+# 번역함」이 세 줄 중 두 줄을 차지하고 있었는데, 그건 이 고객에게 일어난 일이 아니라
+# 앱이 스스로에게 한 일이고, 번역 결과는 바로 위 초안에 이미 보입니다.
+_ROUTINE_PROGRESS_KINDS = ("draft", "auto_ack", "stage", "translate")
 _MAX_EDIT_SUBJECT_LEN = 300
 
 
@@ -139,6 +142,8 @@ def _message_detail_context(
         thread_rows = []
         progress_rows = []
         interaction_rows = []
+        other_conversations = []
+        contact_history = []
         if conv:
             # Full ticket/conversation thread, oldest → newest — every inbound inquiry
             # and every outgoing reply or auto-ack for this thread.
@@ -173,6 +178,36 @@ def _message_detail_context(
                     select(CustomerInteraction)
                     .where(CustomerInteraction.conversation_id == conv.id)
                     .order_by(CustomerInteraction.happened_at.asc(), CustomerInteraction.id.asc())
+                )
+                .scalars()
+                .all()
+            )
+            # 같은 사람의 다른 티켓. 이 화면에서 「이 고객 건이 또 있나」를 물으려고 리드
+            # 히스토리를 열었다 돌아오는 왕복이 있었습니다.
+            other_conversations = (
+                session.execute(
+                    select(Conversation)
+                    .where(
+                        Conversation.contact_id == conv.contact_id,
+                        Conversation.id != conv.id,
+                    )
+                    .order_by(Conversation.created_at.desc())
+                )
+                .scalars()
+                .all()
+            )
+            # 어느 티켓에도 안 달린 기록 = 연락처 단위. 허브스팟에서 가져온 옛 기록이
+            # 여기 들어옵니다(가져올 때 티켓을 알 수 없습니다 — 이메일이 연락처에 붙어
+            # 있습니다).
+            contact_history = (
+                session.execute(
+                    select(CustomerInteraction)
+                    .where(
+                        CustomerInteraction.contact_id == conv.contact_id,
+                        CustomerInteraction.conversation_id.is_(None),
+                    )
+                    .order_by(CustomerInteraction.happened_at.desc())
+                    .limit(50)
                 )
                 .scalars()
                 .all()
@@ -233,6 +268,32 @@ def _message_detail_context(
                 ],
                 key=lambda entry: entry["created_at"],
             ),
+            # **이 티켓 밖의 것들.** 지금 처리할 것(위의 스레드·초안)과 섞지 않고 따로
+            # 내려보냅니다 — 판단에 필요한 맥락이지 이 티켓에서 일어난 일이 아닙니다.
+            "other_tickets": [
+                {
+                    "conversation_id": other.id,
+                    "ticket_id": other.hubspot_ticket_id,
+                    "subject": other.inquiry_subject,
+                    "stage": other.stage,
+                    "created_at": other.created_at,
+                }
+                for other in other_conversations
+            ],
+            # 연락처 단위 기록: 허브스팟에서 가져온 옛 메일·통화·미팅·메모, 그리고 사라진
+            # 티켓에서 옮겨 온 메일. `conversation_id` 가 비어 있다는 것이 곧 「이 티켓의
+            # 것이 아니다」라는 뜻이라, 위의 처리 경과와 섞이지 않습니다.
+            "customer_history": [
+                {
+                    "channel": item.channel,
+                    "direction": item.direction,
+                    "handler": item.handler,
+                    "subject": item.subject,
+                    "summary": item.summary,
+                    "happened_at": item.happened_at,
+                }
+                for item in contact_history
+            ],
             "summary": conv.summary if conv else None,
             "customer_requests": conv.customer_requests if conv else None,
             "category": conv.inquiry_category if conv else None,
