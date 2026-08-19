@@ -244,9 +244,13 @@ def _handle_unmapped_stage(
     if pipeline and str(pipeline) != B2B_PIPELINE_ID:
         from .hubspot_reconcile import delete_conversation
 
+        # **티켓 번호가 아니라 문의 번호를 적습니다.** `/logs` 의 스크러버가 9자리 이상
+        # 숫자를 전화번호로 보고 지우는데(`common/log_buffer.py`) 허브스팟 티켓 번호가 딱
+        # 거기 걸립니다 — 「티켓 [REDACTED_PHONE] 를 내렸습니다」는 아무것도 안 알려 줍니다.
+        # 문의 번호는 짧아 살아남고, 지운 뒤에 그것이 무엇이었는지 찾는 유일한 단서입니다.
         logger.warning(
-            "티켓 %s 가 우리 파이프라인 밖으로 옮겨졌습니다 (source=%s). 목록에서 내립니다.",
-            ticket_id, source,
+            "문의 #%s 의 티켓이 우리 파이프라인 밖으로 옮겨졌습니다 (source=%s). 목록에서 내립니다.",
+            conversation_id, source,
         )
         delete_conversation(conversation_id, str(ticket_id))
         return None
