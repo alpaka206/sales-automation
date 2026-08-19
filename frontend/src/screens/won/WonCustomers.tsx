@@ -195,20 +195,15 @@ export function WonCustomers() {
             <div className="kpi-label">
               <G name="person" /> 활성 고객 <span style={{ color: "var(--faint)" }}>({deptLabel})</span>
             </div>
-            <div className="kpi-flex">
-              <div className="kpi-main">
-                <div className="kpi-value"><span>{live + setup}</span><span className="unit">곳</span></div>
-              </div>
-              <div className="kpi-group">
-                <div className="cap">플랜 상태</div>
-                <div className="row"><span className="dot" style={{ background: "var(--teal-600)" }} />사용중<b>{live}</b><em>곳</em></div>
-                <div className="row"><span className="dot" style={{ background: "#E4A11B" }} />세팅중<b>{setup}</b><em>곳</em></div>
-              </div>
-              <div className="kpi-group">
-                <div className="cap">수주 유형</div>
-                <div className="row"><span className="dot" style={{ background: "var(--teal-600)" }} />MRR<b>{mrrCount}</b><em>곳</em></div>
-                <div className="row"><span className="dot" style={{ background: "#E4A11B" }} />PoC<b>{pocCount}</b><em>곳</em></div>
-              </div>
+            <div className="kpi-value"><span>{live + setup}</span><span className="unit">곳</span></div>
+            {/* 숫자 둘을 점 찍어 세로로 늘어놓던 자리입니다. 옆 칸이 차트라 카드 높이가
+                거기서 정해지는데, 그 높이 한가운데에 짧은 목록 둘이 떠 있어 카드가 비어
+                보였습니다. 같은 숫자를 비율 막대로 바닥에 붙이면 높이가 채워지고, 「2곳 중
+                몇 곳인가」를 숫자를 빼서 세지 않아도 보입니다. 색은 이 화면이 이미 쓰는
+                두 가지 그대로입니다 — 새 색을 들이면 범례가 하나 더 필요해집니다. */}
+            <div className="kpi-splits">
+              <Split cap="플랜 상태" a={{ label: "사용중", n: live }} b={{ label: "세팅중", n: setup }} />
+              <Split cap="수주 유형" a={{ label: "MRR", n: mrrCount }} b={{ label: "PoC", n: pocCount }} />
             </div>
           </button>
 
@@ -537,5 +532,41 @@ function RowView({ row, rows, index, today, onOpen }: {
         </td>
       </tr>
     </>
+  );
+}
+
+
+/** 두 값의 비율을 막대 하나로. 숫자는 옆에 그대로 있고, 막대는 **비율만** 말합니다.
+ *
+ *  막대만 두지 않는 이유: 2곳과 200곳이 같은 막대로 보입니다. 숫자만 두지 않는 이유:
+ *  「사용중 7 · 세팅중 3」 은 읽어서 비율을 만들어야 하고, 그 계산을 카드가 대신할 수
+ *  있습니다. 값이 0/0 이면 빈 트랙만 남습니다 — 100% 짜리 회색 막대는 무언가 가득 찬
+ *  것처럼 보입니다.
+ */
+function Split({ cap, a, b }: {
+  cap: string;
+  a: { label: string; n: number };
+  b: { label: string; n: number };
+}) {
+  const total = a.n + b.n;
+  return (
+    <div className="kpi-split">
+      <div className="kpi-split__head">
+        <span className="cap">{cap}</span>
+        <span className="kpi-split__nums">
+          <i><span className="dot" style={{ background: "var(--teal-600)" }} />{a.label}<b>{a.n}</b></i>
+          <i><span className="dot" style={{ background: "#E4A11B" }} />{b.label}<b>{b.n}</b></i>
+        </span>
+      </div>
+      <div className="kpi-split__bar" role="img"
+           aria-label={`${a.label} ${a.n}곳, ${b.label} ${b.n}곳`}>
+        {total > 0 && (
+          <>
+            <span style={{ width: `${(a.n / total) * 100}%`, background: "var(--teal-600)" }} />
+            <span style={{ width: `${(b.n / total) * 100}%`, background: "#E4A11B" }} />
+          </>
+        )}
+      </div>
+    </div>
   );
 }

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 /** 월별 막대 — SVG 하나. 차트 라이브러리를 안 쓰는 이유는 「없어서」가 아닙니다.
  *
@@ -17,7 +17,10 @@ import { useState } from "react";
 const POSITIVE = "#2A9D8F";
 const NEGATIVE = "#B42318";
 
-const W = 720;
+// 세로만 고정입니다. 가로는 카드 폭을 **재서** 그 값을 viewBox 로 씁니다 — 좌표 한 칸이
+// 화면 1px 이 되어야 글자가 안 늘어납니다. 예전에는 720 짜리 그림을 `preserveAspectRatio
+// ="none"` 으로 카드 폭에 맞춰 늘였는데, 그러면 넓은 화면에서 눈금·월 글자까지 가로로
+// 같이 늘어나 살짝 뚱뚱해 보였습니다(좁은 화면에서는 반대로 눌렸습니다).
 const H = 158;
 const PAD = { top: 14, right: 10, bottom: 22, left: 52 };
 
@@ -47,6 +50,19 @@ export function MonthlyBars({ months, valueAt, format, formatTick, now, negative
   negativeNote: string;
 }) {
   const [hover, setHover] = useState<number | null>(null);
+  const box = useRef<HTMLElement | null>(null);
+  // 재기 전 한 프레임의 값. 카드 폭과 비슷하면 첫 그림이 튀지 않습니다.
+  const [W, setW] = useState(720);
+
+  useEffect(() => {
+    const el = box.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(([entry]) => {
+      setW(Math.max(320, Math.round(entry.contentRect.width)));
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
 
   const values = months.map(valueAt);
   const top = Math.max(0, ...values);
@@ -60,7 +76,10 @@ export function MonthlyBars({ months, valueAt, format, formatTick, now, negative
   const band = plotW / months.length;
   // 막대는 칸을 다 채우지 않습니다 — 남는 자리가 곧 막대를 가르는 공백입니다. 테두리를
   // 그리지 않는 이유이기도 합니다: 선은 데이터가 아닌 잉크입니다.
-  const barW = Math.min(24, band - 10);
+  // 막대도 칸을 따라 굵어집니다. 24px 로 못 박아 두었더니 넓은 화면에서는 막대 여섯 개가
+  // 넓은 공백 사이에 실처럼 서 있었습니다. 위아래 한계는 둡니다 — 아래는 짚을 수 있는
+  // 굵기, 위는 막대가 아니라 색면이 되기 직전.
+  const barW = Math.max(14, Math.min(56, band * 0.42, band - 10));
   const y = (value: number) => PAD.top + plotH * (1 - (value - lo) / (hi - lo));
   const zero = y(0);
 
@@ -76,7 +95,7 @@ export function MonthlyBars({ months, valueAt, format, formatTick, now, negative
   const labelled = values.some((v) => v < 0) ? (worst >= 0 ? worst : values.indexOf(Math.min(...values))) : -1;
 
   return (
-    <figure className="mbars">
+    <figure className="mbars" ref={box}>
       <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" role="img"
            aria-label={`${months[0]}부터 ${months[months.length - 1]}까지 월별 값`}
            onMouseLeave={() => setHover(null)}>

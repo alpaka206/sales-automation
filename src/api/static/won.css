@@ -78,16 +78,17 @@
   background:#fff;padding:0 2px;font-variant-numeric:tabular-nums;}
 .won .mbars__tip b {color:var(--ink);margin-right:5px;}
 .won .mbars__tip em {font-style:normal;color:#B42318;font-weight:600;}
-.won .kpi-flex {display:flex;align-items:stretch;flex:1;margin-top:6px;}
-.won .kpi-main {flex:1;padding-right:26px;display:flex;align-items:center;}
-.won .kpi-main .kpi-value {margin-top:0;}
-.won .kpi-group {padding:2px 0 2px 26px;margin-left:26px;border-left:1px solid var(--line);
-    display:flex;flex-direction:column;justify-content:center;gap:8px;min-width:158px;}
-.won .kpi-group:first-of-type {margin-left:0;}
-.won .kpi-group .cap {font-size:11.5px;color:var(--faint);margin-bottom:3px;letter-spacing:.01em;}
-.won .kpi-group .row {display:flex;align-items:center;gap:7px;font-size:13px;color:var(--muted);}
-.won .kpi-group .row b {margin-left:auto;padding-left:16px;color:var(--ink);font-size:16px;font-weight:700;font-variant-numeric:tabular-nums;}
-.won .kpi-group .row em {font-style:normal;font-size:11.5px;color:var(--faint);margin-left:3px;}
+/* 활성 고객 카드의 아래 절반. `margin-top:auto` 로 바닥에 붙습니다 — 카드 높이는 옆의
+   차트가 정하고, 그 높이 한가운데에 짧은 목록이 떠 있으면 카드가 비어 보입니다. */
+.won .kpi-splits {flex:1;padding-top:16px;display:flex;flex-direction:column;justify-content:space-evenly;gap:14px;}
+.won .kpi-split__head {display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin-bottom:7px;}
+.won .kpi-split .cap {font-size:11.5px;color:var(--faint);letter-spacing:.01em;}
+.won .kpi-split__nums {display:flex;gap:13px;font-size:12.5px;color:var(--muted);}
+.won .kpi-split__nums i {font-style:normal;display:inline-flex;align-items:center;gap:5px;}
+.won .kpi-split__nums b {color:var(--ink);font-weight:700;font-variant-numeric:tabular-nums;}
+/* 트랙은 남는 자리가 아니라 **배경**입니다: 값이 둘 다 0 이면 이 회색만 남습니다. */
+.won .kpi-split__bar {display:flex;height:7px;border-radius:99px;overflow:hidden;background:var(--line-soft);}
+.won .kpi-split__bar span {display:block;}
 .won .kpi {border:1px solid var(--line);border-radius:12px;padding:18px 20px 17px;background:#fff;text-align:left;
     display:flex;flex-direction:column;min-height:152px;}
 .won .kpi[data-view]:hover {border-color:#CFDBD8;background:var(--teal-25);cursor:pointer;}
