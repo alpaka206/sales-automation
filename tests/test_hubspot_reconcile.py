@@ -155,9 +155,10 @@ def test_deleting_a_thread_never_takes_the_customer_or_the_money(waiting_draft):
         assert contract.conversation_id is None, "just detached"
         notes = session.query(CustomerInteraction).filter_by(contact_id=contact_id).all()
         assert any(n.summary == "미팅 요약" for n in notes), "the meeting still happened"
-        # 그리고 그 티켓의 메일은 **연락처 히스토리로 옮겨집니다** (2026-08-19 운영자 지시).
-        # 예전에는 티켓과 함께 지워져서, 리드 히스토리에 기록이 하나도 없는 고객이 남았습니다.
-        assert any(n.handler == "(지난 티켓)" and n.summary == "초안" for n in notes)
+        # **나가지 않은 초안은 안 옮겨집니다** (2026-08-19 운영자 지시). 이 픽스처의 메일은
+        # 검토 대기 상태라 고객이 본 적이 없습니다 — 히스토리에 넣으면 나중에 읽는 사람이
+        # 보낸 적 없는 답변을 보낸 것으로 셉니다.
+        assert not any(n.summary == "초안" for n in notes)
 
 
 def test_a_contact_with_nothing_left_goes_too(waiting_draft):
@@ -180,8 +181,13 @@ def test_a_contact_with_nothing_left_goes_too(waiting_draft):
         assert session.query(CustomerInteraction).filter_by(contact_id=contact_id).count() == 0
 
 
-def test_a_second_ticket_keeps_the_contact_and_the_mail(waiting_draft):
-    """다른 티켓이 하나라도 있으면 연락처는 남고, 사라진 티켓의 메일도 히스토리로 남습니다."""
+def test_a_second_ticket_keeps_the_contact_and_only_the_mail_that_went_out(waiting_draft):
+    """다른 티켓이 있으면 연락처는 남고, **실제로 오간 메일만** 히스토리로 옮겨집니다.
+
+    받은 문의는 무조건 남깁니다 — 고객이 실제로 보낸 것입니다. 나간 답변은 발송된 것만
+    남깁니다. 검토 대기로 있던 초안은 우리 안에서만 있던 문서라, 옮기면 「이 고객과 오간
+    것」의 수가 틀려집니다.
+    """
     from src.agents.hubspot_reconcile import delete_conversation
     from src.db.models import CustomerInteraction
 
@@ -190,6 +196,14 @@ def test_a_second_ticket_keeps_the_contact_and_the_mail(waiting_draft):
         session.add(
             Conversation(contact_id=contact_id, stage="new", hubspot_ticket_id="88888888")
         )
+        session.add(
+            Message(conversation_id=conversation_id, direction="inbound",
+                    status="received", subject="문의", body="고객이 보낸 문의")
+        )
+        session.add(
+            Message(conversation_id=conversation_id, direction="outgoing",
+                    status="sent", subject="RE: 문의", body="나간 답변")
+        )
         session.commit()
 
     delete_conversation(conversation_id, "99999999")
@@ -197,8 +211,8 @@ def test_a_second_ticket_keeps_the_contact_and_the_mail(waiting_draft):
     with SessionLocal() as session:
         assert session.get(Contact, contact_id) is not None
         moved = session.query(CustomerInteraction).filter_by(contact_id=contact_id).all()
-        assert [n.summary for n in moved] == ["초안"]
-        assert moved[0].conversation_id is None, "가리킬 대화가 곧 사라집니다"
+        assert sorted(n.summary for n in moved) == ["고객이 보낸 문의", "나간 답변"]
+        assert all(n.conversation_id is None for n in moved), "가리킬 대화가 곧 사라집니다"
         session.query(Conversation).filter_by(hubspot_ticket_id="88888888").delete()
         session.query(CustomerInteraction).filter_by(contact_id=contact_id).delete()
         session.commit()

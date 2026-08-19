@@ -111,14 +111,30 @@ def _archive_messages(session, contact_id: int, conversation_id: int) -> int:
     `conversation_id` 는 일부러 비웁니다: 그 대화 행은 이 함수 직후에 사라지고, 남겨 두면
     없는 행을 가리키는 값이 됩니다.
     """
-    from ..db.models import CustomerInteraction
+    from ..db.models import DELIVERED_STATUSES, CustomerInteraction
 
-    messages = (
-        session.query(Message)
-        .filter(Message.conversation_id == conversation_id)
-        .order_by(Message.created_at)
-        .all()
-    )
+    # **이미 뽑아 둔 요약을 물려줍니다.** 접수할 때 모델이 만든 「고객 요청사항」이 그
+    # 대화에 있습니다(`conversations.customer_requests`). 티켓이 사라져도 그 한 줄은
+    # 남아야 나중에 「이때 무슨 이야기였나」를 펼쳐 보지 않고 알 수 있습니다 — 없는 것을
+    # 다시 만들려고 모델을 부르는 대신, 있는 것을 가져다 씁니다.
+    conversation = session.get(Conversation, conversation_id)
+    digest = (conversation.customer_requests or conversation.summary) if conversation else None
+
+    messages = [
+        message
+        for message in (
+            session.query(Message)
+            .filter(Message.conversation_id == conversation_id)
+            .order_by(Message.created_at)
+            .all()
+        )
+        # **나가지 않은 것은 히스토리가 아닙니다** (2026-08-19 운영자 지시). 검토 대기로
+        # 남아 있던 초안, 종료된 초안, 발송 실패는 「이 고객과 오간 것」이 아니라 우리
+        # 안에서만 있던 문서입니다. 그걸 히스토리에 넣으면 나중에 그 대화를 읽는 사람이
+        # 보낸 적 없는 답변을 보낸 것으로 셉니다. 받은 메일은 무조건 남깁니다 — 그건
+        # 고객이 실제로 보낸 것입니다.
+        if message.direction == "inbound" or message.status in DELIVERED_STATUSES
+    ]
     for message in messages:
         session.add(
             CustomerInteraction(
@@ -131,6 +147,9 @@ def _archive_messages(session, contact_id: int, conversation_id: int) -> int:
                 # NOT NULL 입니다. 본문 없는 메일은 없지만, 있다면 빈 문자열보다 이 편이
                 # 화면에서 「무엇이 있었는지」를 말해 줍니다.
                 summary=message.body or "(본문 없음)",
+                # 받은 문의에만 붙입니다 — 요청사항은 고객이 물은 것을 줄인 값이라,
+                # 우리가 보낸 답변 옆에 두면 그 답변의 요약인 것처럼 읽힙니다.
+                context=digest if message.direction == "inbound" else None,
                 happened_at=message.sent_at or message.created_at,
             )
         )

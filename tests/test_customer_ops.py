@@ -802,3 +802,44 @@ def test_a_dead_ticket_does_not_break_the_rest_of_the_sync(customer_db, customer
     client.get_ticket_sync.side_effect = RuntimeError("404")
     with patch("src.agents.stage_sync.SessionLocal", customer_db):
         assert _sync_ticket_stages(client, customer_id) == 0
+
+
+def test_the_lead_history_counts_only_mail_that_went_out(customer_db, customer_id) -> None:
+    """리드 히스토리에는 **실제로 나간 것만** 실립니다 (2026-08-19 운영자 지시).
+
+    검토 대기로 남은 초안은 우리 안에서만 있던 문서입니다. 그걸 히스토리에 넣으면 나중에
+    그 고객을 여는 사람이 보낸 적 없는 답변을 보낸 것으로 셉니다 — 「이 얘기 이미 했네」로
+    읽히는 것이 가장 나쁩니다.
+
+    티켓 화면은 반대로 거르지 않습니다: 거기 초안은 히스토리가 아니라 지금 할 일입니다.
+    """
+    from src.api.routes.customer_ops import _customer_context
+    from src.db.models import Conversation, Message
+
+    with customer_db() as session:
+        conversation = Conversation(contact_id=customer_id, stage="new")
+        session.add(conversation)
+        session.flush()
+        session.add_all(
+            [
+                Message(conversation_id=conversation.id, direction="inbound",
+                        status="received", subject="문의", body="고객이 보낸 문의"),
+                Message(conversation_id=conversation.id, direction="outgoing",
+                        status="sent", subject="RE: 문의", body="나간 답변"),
+                Message(conversation_id=conversation.id, direction="outgoing",
+                        status="pending_approval", subject="RE: 문의", body="안 나간 초안"),
+            ]
+        )
+        session.commit()
+
+    context = _customer_context(customer_id)
+    bodies = [
+        message["summary"]
+        for ticket in context["tickets"]
+        for message in [
+            {"summary": m.body} for m in ticket["messages"]
+        ]
+    ]
+    assert "고객이 보낸 문의" in bodies
+    assert "나간 답변" in bodies
+    assert "안 나간 초안" not in bodies

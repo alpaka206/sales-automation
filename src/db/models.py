@@ -189,6 +189,16 @@ class Message(Base):
     approvals: Mapped[list[Approval]] = relationship(back_populates="message")
 
 
+# 고객에게 **실제로 나간** 답변의 status. 히스토리는 이 집합만 셉니다 — 검토 대기로 남은
+# 초안, 종료된 초안, 발송 실패는 우리 안에서만 있던 문서라, 그걸 히스토리에 넣으면 나중에
+# 읽는 사람이 보낸 적 없는 답변을 보낸 것으로 셉니다(2026-08-19 운영자 지시).
+#
+# `test_sent` 가 여기 있는 이유: 안전 모드에서 테스트 주소로 돌린 것이지만 **우리가 답을
+# 썼고 그 내용이 이것이었다**는 사실은 실재합니다. 고객에게 정말 간 것만 세는 자리는
+# `sent` 하나이고, 그 구분은 send_worker 가 지킵니다.
+DELIVERED_STATUSES = frozenset({"sent", "test_sent", "delivery_unknown"})
+
+
 class ConversationProgress(Base):
     """Append-only, dated processing log for a conversation ("처리경과").
 

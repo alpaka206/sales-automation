@@ -462,49 +462,10 @@ def ui_hubspot_record(contact_id: int):
     return fetch_record_groups(hubspot_contact_id)
 
 
-def _won_block(client, contracts) -> dict | None:
-    """리드 히스토리에 붙는 수주 요약. 계약의 **원본은 수주 고객 화면**이고 여기는 거울입니다.
-
-    금액은 `won.total_amount`(VAT 포함 총액) 하나만 씁니다 — 화면마다 다른 금액이 보이면
-    어느 것이 그 계약의 금액인지 알 수 없습니다. 상세는 링크를 눌러 그쪽에서 봅니다.
-    """
-    if client is None:
-        return None
-    from datetime import date
-
-    from ...common import won
-
-    today = date.today()
-    return {
-        "client_id": client.client_id,
-        "company": client.company,
-        "department": won.department(client),
-        "customer_type": won.client_type(client.client_id),
-        "plan_status": won.plan_status(client, today),
-        "owner": client.owner,
-        "first_won_on": client.first_won_on,
-        "contracts": [
-            {
-                "seq": contract.seq,
-                "state": won.contract_state(contract, today),
-                "deal_type": contract.deal_type,
-                "starts_on": contract.starts_on,
-                "ends_on": contract.ends_on,
-                "currency": contract.currency,
-                "total_amount": won.total_amount(contract),
-                "credits": contract.credits,
-                "plan_name": contract.plan_name,
-                "ticket_id": contract.ticket_id,
-            }
-            for contract in sorted(contracts, key=lambda c: c.seq or 0)
-        ],
-    }
-
-
 @router.get("/api/ui/customers/{contact_id}")
 def ui_customer_detail(contact_id: int):
     """고객 상세. The builder returns ORM rows; the screen needs their fields."""
-    from .customer_ops import _customer_context
+    from .customer_ops import _customer_context, won_block
 
     context = _customer_context(contact_id)
     if context is None:
@@ -581,7 +542,7 @@ def ui_customer_detail(contact_id: int):
             for item in context["tickets"]
         ],
         # 수주 고객. 없으면 null 이고, 그러면 화면이 그 블록을 안 그립니다.
-        "won": _won_block(context["won_client"], context["won_contracts"]),
+        "won": won_block(context["won_client"], context["won_contracts"]),
         # 소통 히스토리 — 사람 단위 기록. 사라진 티켓의 메일도 여기로 옮겨져 있습니다
         # (`hubspot_reconcile._archive_messages`, handler 가 「지난 티켓」).
         "interactions": [

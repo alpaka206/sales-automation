@@ -18,6 +18,7 @@ from ...agents.stage_sync import _retire_superseded_drafts, customer_state_for
 from ...common.config import settings
 from ...common.subjects import strip_reply_prefixes
 from ...db.models import (
+    DELIVERED_STATUSES,
     Client,
     Contact,
     ContractRecord,
@@ -545,6 +546,59 @@ def _set_conversation_stage(conversation_id: int, stage: str) -> tuple[str | Non
         )
 
 
+class _NoPayment:
+    """다음 회차가 없을 때의 빈 값. `None` 을 두 번 확인하는 대신 빈 것을 하나 둡니다."""
+
+    paid_on = None
+    amount = None
+
+
+_NO_PAYMENT = _NoPayment()
+
+
+def won_block(client, contracts) -> dict | None:
+    """리드 히스토리에 붙는 수주 요약. 계약의 **원본은 수주 고객 화면**이고 여기는 거울입니다.
+
+    금액은 `won.total_amount`(VAT 포함 총액) 하나만 씁니다 — 화면마다 다른 금액이 보이면
+    어느 것이 그 계약의 금액인지 알 수 없습니다. 상세는 링크를 눌러 그쪽에서 봅니다.
+    """
+    if client is None:
+        return None
+    from datetime import date
+
+    from ...common import won
+
+    today = date.today()
+    return {
+        "client_id": client.client_id,
+        "company": client.company,
+        "department": won.department(client),
+        "customer_type": won.client_type(client.client_id),
+        "plan_status": won.plan_status(client, today),
+        "owner": client.owner,
+        "first_won_on": client.first_won_on,
+        "contracts": [
+            {
+                "seq": contract.seq,
+                "state": won.contract_state(contract, today),
+                "deal_type": contract.deal_type,
+                "starts_on": contract.starts_on,
+                "ends_on": contract.ends_on,
+                "currency": contract.currency,
+                "total_amount": won.total_amount(contract),
+                "credits": contract.credits,
+                "plan_name": contract.plan_name,
+                "ticket_id": contract.ticket_id,
+                # 답장을 쓰는 사람이 실제로 쓰는 한 가지: **다음 결제가 언제 얼마인가.**
+                # 미납이 있는 고객에게 새 제안을 쓰는 것과 그렇지 않은 것은 다른 메일입니다.
+                "next_pay_on": (won.next_payment(contract) or _NO_PAYMENT).paid_on,
+                "next_pay_amount": (won.next_payment(contract) or _NO_PAYMENT).amount,
+            }
+            for contract in sorted(contracts, key=lambda c: c.seq or 0)
+        ],
+    }
+
+
 def _customer_context(contact_id: int) -> dict | None:
     with SessionLocal() as session:
         contact = session.get(Contact, contact_id)
@@ -561,10 +615,18 @@ def _customer_context(contact_id: int) -> dict | None:
             .all()
         )
         conv_ids = [c.id for c in conversations]
+        # **실제로 나간 것만.** 리드 히스토리는 「이 고객과 무엇이 오갔나」를 보는 화면이라,
+        # 검토 대기로 남은 초안이 섞이면 보낸 적 없는 답변을 보낸 것으로 세게 됩니다
+        # (2026-08-19 운영자 지시). 받은 문의는 무조건 남깁니다 — 고객이 실제로 보낸 것입니다.
+        # 티켓 화면은 반대로 거르지 않습니다: 거기 초안은 히스토리가 아니라 **지금 할 일**입니다.
         messages = (
             session.execute(
                 select(Message)
-                .where(Message.conversation_id.in_(conv_ids))
+                .where(
+                    Message.conversation_id.in_(conv_ids),
+                    (Message.direction == "inbound")
+                    | Message.status.in_(DELIVERED_STATUSES),
+                )
                 .order_by(Message.created_at.desc())
             )
             .scalars()
@@ -1191,6 +1253,39 @@ def _sync_ticket_stages(client, contact_id: int) -> int:
     return moved
 
 
+def _one_line(direction: str, subject: str | None, body: str | None) -> str | None:
+    """지난 기록 한 건을 한 줄로. **가져올 때 한 번** 만들어 두고 화면은 읽기만 합니다.
+
+    화면을 여는 길에는 모델이 없습니다 — 이 저장소의 규칙입니다. 그런데 리드 히스토리에서
+    「이때 무슨 이야기였나」는 제목만으로는 안 보입니다(「자막 번역 견적」이 무엇을 물은
+    것인지 알 수 없습니다). 그래서 이관·동기화라는 **백그라운드 경로**에서 한 줄로 줄여
+    `customer_interactions.context` 에 넣어 둡니다.
+
+    실패하면 None 입니다. 요약 한 줄 때문에 기록 자체를 못 가져오면 그게 더 큰 손해입니다 —
+    화면은 요약이 없으면 본문 앞머리를 대신 보여 줍니다.
+    """
+    text = (body or "").strip()
+    if len(text) < 80:
+        # 이미 짧은 것은 줄일 것이 없습니다. 모델 왕복만 늘어납니다.
+        return None
+    try:
+        from ...llm.client import LLMClient
+
+        line = LLMClient().complete(
+            "util/summarize_touchpoint",
+            {"direction": "받은 메일" if direction in {"inbound", "incoming"} else "보낸 메일",
+             "subject": subject or "(제목 없음)",
+             "body": text[:4000]},
+            tier="flash",
+            max_tokens=120,
+        )
+        line = str(line or "").strip().splitlines()[0].strip()
+        return line[:200] or None
+    except Exception:
+        logger.warning("기록 한 줄 요약 실패", exc_info=True)
+        return None
+
+
 def _sync_hubspot(contact_id: int, per_type: int = 20) -> int:
     """허브스팟에 있는 그 사람의 기록을 우리 히스토리로 가져옵니다.
 
@@ -1240,13 +1335,16 @@ def _sync_hubspot(contact_id: int, per_type: int = 20) -> int:
                 select(CustomerInteraction.id).where(CustomerInteraction.external_id == external_id)
             )
             if not exists:
+                direction = "incoming" if "incoming" in email.type else "outgoing"
                 session.add(
                     CustomerInteraction(
                         contact_id=contact_id,
                         channel="email",
-                        direction="incoming" if "incoming" in email.type else "outgoing",
+                        direction=direction,
                         subject=email.subject,
                         summary=email.body or email.subject or "HubSpot 이메일",
+                        # 한 줄 요약. 목록이 이걸 먼저 보여 주고, 본문은 눌러야 나옵니다.
+                        context=_one_line(direction, email.subject, email.body),
                         external_id=external_id,
                         happened_at=email.timestamp or datetime.now(timezone.utc),
                     )

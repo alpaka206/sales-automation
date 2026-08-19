@@ -90,8 +90,15 @@ type Detail = {
   customer_requests: string | null;
   other_tickets: {
     conversation_id: number; ticket_id: string | null; subject: string | null;
-    stage: string; created_at: string;
+    stage: string; created_at: string; requests: string | null;
   }[];
+  won: {
+    client_id: number; company: string; plan_status: string; department: string | null;
+    contracts: { seq: number; state: string; deal_type: string | null;
+                 starts_on: string | null; ends_on: string | null; currency: string | null;
+                 total_amount: number | null; next_pay_on: string | null;
+                 next_pay_amount: number | null }[];
+  } | null;
   signatures: { key: string; name: string }[];
   ticket: {
     id: number | null; ticket_id: string | null; stage: string | null;
@@ -834,16 +841,7 @@ export function MessageDetail() {
               「이 사람과 전에 오간 것」이라 가를 이유가 없습니다. 앞엣것 하나로 남깁니다.
               허브스팟에서 끌어온 옛 메일도 여기 들어옵니다. */}
           {data.customer?.interactions && data.customer.interactions.length > 0 && (
-            <div className="card">
-              <div className="section-label" style={{ marginBottom: 10 }}>
-                고객 히스토리 {data.customer.interactions.length}건
-              </div>
-              <div className="stack" style={{ gap: 6 }}>
-                {data.customer.interactions.map((item, index) => (
-                  <HistoryRow key={index} item={item} />
-                ))}
-              </div>
-            </div>
+            <HistoryDigest items={data.customer.interactions} />
           )}
         </div>
       </div>
@@ -957,12 +955,16 @@ function HistoryRow({ item }: {
   item: {
     channel: string; direction: string; handler: string | null;
     subject: string | null; summary: string | null; happened_at: string | null;
+    digest?: string | null;
   };
 }) {
+  // 요약이 있으면 그것이 미리보기입니다. 없을 때만 본문 앞머리를 씁니다 — 인사말로
+  // 시작하는 메일에서는 앞머리가 아무것도 안 알려 줍니다.
   const body = (item.summary || "").trim();
   // 두 줄이면 「무슨 이야기였나」는 알 수 있고, 그 이상은 펼쳐서 읽을 일입니다.
-  const preview = body.replace(/\s+/g, " ").slice(0, 90);
-  const truncated = body.replace(/\s+/g, " ").length > 90;
+  const flat = body.replace(/\s+/g, " ");
+  const preview = (item.digest || flat).slice(0, 110);
+  const truncated = !!item.digest || flat.length > 110;
   return (
     <details style={{ borderTop: "1px solid var(--border)", paddingTop: 6 }}>
       <summary style={{ cursor: "pointer", listStyle: "none" }}>
@@ -983,5 +985,89 @@ function HistoryRow({ item }: {
         </div>
       )}
     </details>
+  );
+}
+
+/** 제목에서 회신 접두사를 떼어 **한 대화**로 묶을 이름을 만듭니다. RE: / FW: / [태그] 는
+ *  같은 이야기의 다음 통이지 새 이야기가 아닙니다. */
+function threadKey(subject: string | null): string {
+  return (subject || "(제목 없음)")
+    .replace(/^\s*(\[[^\]]*\]|re|fw|fwd|답장|회신)\s*[:：]?\s*/gi, "")
+    .replace(/^\s*(\[[^\]]*\]|re|fw|fwd)\s*[:：]\s*/gi, "")
+    .trim() || "(제목 없음)";
+}
+
+const RECEIVED = new Set(["inbound", "incoming"]);
+const SENT = new Set(["outgoing", "outbound"]);
+
+/** 고객 히스토리 — **스무 줄이 아니라 이야기 단위로.**
+ *
+ *  스무 건을 시간순으로 늘어놓으면 「이 사람과 무슨 이야기를 했나」를 알려면 스무 번을
+ *  읽어야 합니다. 같은 제목끼리 묶으면 대화 한 건이 한 줄이 되고, 받은 것과 보낸 것의
+ *  수가 그 자리에서 보입니다 — **답이 안 나간 문의**(받음 1 · 보냄 0)가 특히 그렇게 해야
+ *  보입니다. 본문은 눌러야 나옵니다.
+ *
+ *  요약은 계산으로 만듭니다. 화면을 여는 길에는 모델이 없습니다 — 그건 이 저장소의
+ *  규칙이고(`_translate_inbound_bubbles` 를 지운 것과 같은 이유), 요약 한 줄 때문에
+ *  티켓 열 때마다 외부 왕복을 낼 수는 없습니다.
+ */
+function HistoryDigest({ items }: {
+  items: {
+    channel: string; direction: string; handler: string | null;
+    subject: string | null; summary: string | null; happened_at: string | null;
+    digest?: string | null;
+  }[];
+}) {
+  const groups = new Map<string, typeof items>();
+  for (const item of items) {
+    const key = threadKey(item.subject);
+    groups.set(key, [...(groups.get(key) || []), item]);
+  }
+  const threads = [...groups.entries()].map(([subject, rows]) => {
+    const times = rows.map((r) => r.happened_at).filter(Boolean).sort() as string[];
+    return {
+      subject,
+      rows,
+      received: rows.filter((r) => RECEIVED.has(r.direction)).length,
+      sent: rows.filter((r) => SENT.has(r.direction)).length,
+      first: times[0],
+      last: times[times.length - 1],
+    };
+  });
+  threads.sort((a, b) => (b.last || "").localeCompare(a.last || ""));
+  const received = threads.reduce((total, t) => total + t.received, 0);
+  const sent = threads.reduce((total, t) => total + t.sent, 0);
+
+  return (
+    <div className="card">
+      <div className="section-label" style={{ marginBottom: 4 }}>고객 히스토리</div>
+      <div className="t-xs t-subtle" style={{ marginBottom: 10 }}>
+        대화 {threads.length}건 · 받은 문의 {received} · 보낸 답변 {sent}
+      </div>
+      <div className="stack" style={{ gap: 6 }}>
+        {threads.map((thread) => (
+          <details key={thread.subject}
+                   style={{ borderTop: "1px solid var(--border)", paddingTop: 6 }}>
+            <summary style={{ cursor: "pointer", listStyle: "none" }}>
+              <div className="t-sm"><strong>{thread.subject}</strong></div>
+              <div className="t-xs t-subtle" style={{ marginTop: 2 }}>
+                {thread.first ? kst(thread.first, "date") : "-"}
+                {thread.last && thread.last !== thread.first && ` ~ ${kst(thread.last, "date")}`}
+                {" · "}
+                {/* 답이 안 나간 대화는 그렇게 적습니다 — 「받음 1 · 보냄 0」 을 세어 읽게
+                    하지 않고. 이 화면에서 가장 손이 가야 하는 줄입니다. */}
+                {thread.sent === 0 && thread.received > 0
+                  ? `문의 ${thread.received}건 · 답변 없음`
+                  : `문의 ${thread.received} · 답변 ${thread.sent}`}
+                <span style={{ color: "var(--accent)", marginLeft: 6 }}>전체보기</span>
+              </div>
+            </summary>
+            <div className="stack" style={{ gap: 6, marginTop: 6 }}>
+              {thread.rows.map((row, index) => <HistoryRow key={index} item={row} />)}
+            </div>
+          </details>
+        ))}
+      </div>
+    </div>
   );
 }

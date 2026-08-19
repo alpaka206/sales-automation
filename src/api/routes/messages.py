@@ -19,6 +19,7 @@ from ...db.conversation_history import add_progress
 from ...common.inquiry import CATEGORY_LABELS, UNQUALIFIED, category_label, is_unqualified
 from ...db.email_templates import list_signature_templates
 from ...db.models import (
+    Client,
     Contact,
     Conversation,
     ConversationProgress,
@@ -29,6 +30,7 @@ from ...db.models import (
 from ...db.session import SessionLocal
 from ...llm.translate import is_mostly_korean, needs_korean, translate_to
 from ..auth import actor_name
+from .customer_ops import won_block
 from ._shared import esc
 
 logger = logging.getLogger(__name__)
@@ -143,6 +145,7 @@ def _message_detail_context(
         progress_rows = []
         interaction_rows = []
         other_conversations = []
+        won_summary = None
         if conv:
             # Full ticket/conversation thread, oldest → newest — every inbound inquiry
             # and every outgoing reply or auto-ack for this thread.
@@ -181,6 +184,26 @@ def _message_detail_context(
                 .scalars()
                 .all()
             )
+            # 수주 고객인가. 정식 연결(`clients.contact_id`)이 먼저지만 운영 DB 에서 그
+            # 값이 거의 비어 있어(고객 추가 폼이 안 받습니다) Client ID 로도 찾습니다.
+            client_ids = {
+                cid
+                for cid in (conv.sheet_client_id, contact.sheet_client_id if contact else None)
+                if cid
+            }
+            won_client = (
+                session.execute(select(Client).where(Client.contact_id == conv.contact_id))
+                .scalars()
+                .first()
+            )
+            if won_client is None and client_ids:
+                won_client = (
+                    session.execute(select(Client).where(Client.client_id.in_(client_ids)))
+                    .scalars()
+                    .first()
+                )
+            won_summary = won_block(won_client, list(won_client.contracts) if won_client else [])
+
             # 같은 사람의 다른 티켓. 이 화면에서 「이 고객 건이 또 있나」를 물으려고 리드
             # 히스토리를 열었다 돌아오는 왕복이 있었습니다.
             other_conversations = (
@@ -268,9 +291,17 @@ def _message_detail_context(
                     "subject": other.inquiry_subject,
                     "stage": other.stage,
                     "created_at": other.created_at,
+                    # **이미 있는 요약을 씁니다.** 접수할 때 모델이 뽑아 둔 값이라
+                    # (`conversations.customer_requests`) 여기서 다시 만들 이유가 없습니다.
+                    # 제목만 있으면 「자막 번역 견적」이 무엇을 물은 건지 알 수 없습니다.
+                    "requests": other.customer_requests or other.summary,
                 }
                 for other in other_conversations
             ],
+            # **돈이 오갔는가.** 수주 고객에게 쓰는 답장은 톤부터 다릅니다 — 지금까지 이
+            # 화면에는 그 사실이 없어서, 계약이 도는 고객인지 확인하려면 수주 화면으로
+            # 나갔다 와야 했습니다. 계약의 원본은 그쪽이고 여기는 거울입니다.
+            "won": won_summary,
             "summary": conv.summary if conv else None,
             "customer_requests": conv.customer_requests if conv else None,
             "category": conv.inquiry_category if conv else None,
@@ -419,6 +450,9 @@ def _customer_history(session, contact_id: int, exclude_conversation_id: int | N
             "handler": it.handler,
             "subject": it.subject,
             "summary": it.summary,
+            # 가져올 때 만들어 둔 한 줄. 목록은 이것을 먼저 보여 주고 본문은 눌러야 나옵니다 —
+            # 제목만으로는 「자막 번역 견적」이 무엇을 물은 건지 알 수 없습니다.
+            "digest": it.context,
             "happened_at": it.happened_at,
         }
         for it in interactions
