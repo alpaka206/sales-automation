@@ -819,7 +819,11 @@ def test_the_card_does_not_filter_by_plan_status():
     import pathlib
 
     screen = pathlib.Path("frontend/src/screens/won/WonCustomers.tsx").read_text(encoding="utf-8")
-    카드 = screen[screen.index("const series = ") : screen.index("const renewing")]
+    # 지표 카드가 둘로 갈린 뒤로 이 코드는 두 곳에 삽니다: 어느 계열을 넘기는지는 부르는
+    # 자리에, 그것으로 무엇을 하는지는 MetricCard 안에. 둘 다 봐야 합니다.
+    호출 = screen[screen.index('<MetricCard title="월별 MRR"') :]
+    호출 = 호출[: 호출.index("/>", 호출.index('<MetricCard title="월 매출"')) + 2]
+    카드 = 호출 + screen[screen.index("function MetricCard") :]
     assert "data.mrr_months" in 카드 and "data.cash_months" in 카드
     assert "plan_status" not in 카드 and "activeRows" not in 카드
     # 환산도 화면이 하지 않습니다 — 서버가 계약마다 그 계약의 환율로 두 통화를 다 채워
@@ -859,9 +863,15 @@ def test_the_cards_say_which_department_they_counted():
     import pathlib
 
     screen = pathlib.Path("frontend/src/screens/won/WonCustomers.tsx").read_text(encoding="utf-8")
-    for anchor in ('<G name="person" /> 활성 고객', '<G name="trend" /> {metric === "mrr"'):
-        label = screen[screen.index(anchor):][:240]
-        assert "{deptLabel}" in label, anchor
+    label = screen[screen.index('<G name="person" /> 활성 고객') :][:240]
+    assert "{deptLabel}" in label
+    # 지표 카드 **둘 다** 적어야 합니다. 하나만 적혀 있으면 옆에 나란히 선 다른 카드가
+    # 어느 팀 숫자인지 화면에 없습니다.
+    for title in ("월별 MRR", "월 매출"):
+        call = screen[screen.index(f'<MetricCard title="{title}"') :][:240]
+        assert "${deptLabel}" in call, title
+    # 넘긴 값을 카드가 실제로 그리는지 — 안 그리면 위 검사는 문자열 검사일 뿐입니다.
+    assert "{note}" in screen[screen.index("function MetricCard") :]
     # 기본값은 GTM 입니다 — 이 화면을 매일 여는 쪽이고, 「전체」로 두면 세 팀을 합친
     # 숫자로 시작합니다.
     assert 'useState("GTM")' in screen
