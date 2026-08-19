@@ -153,8 +153,55 @@ def test_deleting_a_thread_never_takes_the_customer_or_the_money(waiting_draft):
         contract = session.query(ContractRecord).filter_by(contact_id=contact_id).one()
         assert contract.amount == Decimal("1000"), "a contract is never deleted for this"
         assert contract.conversation_id is None, "just detached"
-        note = session.query(CustomerInteraction).filter_by(contact_id=contact_id).one()
-        assert note.summary == "미팅 요약", "the meeting still happened"
+        notes = session.query(CustomerInteraction).filter_by(contact_id=contact_id).all()
+        assert any(n.summary == "미팅 요약" for n in notes), "the meeting still happened"
+        # 그리고 그 티켓의 메일은 **연락처 히스토리로 옮겨집니다** (2026-08-19 운영자 지시).
+        # 예전에는 티켓과 함께 지워져서, 리드 히스토리에 기록이 하나도 없는 고객이 남았습니다.
+        assert any(n.handler == "(지난 티켓)" and n.summary == "초안" for n in notes)
+
+
+def test_a_contact_with_nothing_left_goes_too(waiting_draft):
+    """수주도 다른 티켓도 없으면 **연락처까지** 지웁니다 (2026-08-19 운영자 지시).
+
+    안 그러면 대화도 계약도 메모도 없는 빈 연락처가 리드 히스토리 목록에 계속 서 있습니다 —
+    운영 DB 에 실제로 그런 행이 있었습니다. 옮겨 담을 메일도 여기서는 남기지 않습니다:
+    남길 사람이 없는데 히스토리만 남기면 그것이 곧 빈 연락처를 남기는 이유가 됩니다.
+    """
+    from src.agents.hubspot_reconcile import delete_conversation
+    from src.db.models import CustomerInteraction
+
+    contact_id, conversation_id, _message_id = waiting_draft
+
+    delete_conversation(conversation_id, "99999999")
+
+    with SessionLocal() as session:
+        assert session.get(Conversation, conversation_id) is None
+        assert session.get(Contact, contact_id) is None, "빈 연락처는 남지 않습니다"
+        assert session.query(CustomerInteraction).filter_by(contact_id=contact_id).count() == 0
+
+
+def test_a_second_ticket_keeps_the_contact_and_the_mail(waiting_draft):
+    """다른 티켓이 하나라도 있으면 연락처는 남고, 사라진 티켓의 메일도 히스토리로 남습니다."""
+    from src.agents.hubspot_reconcile import delete_conversation
+    from src.db.models import CustomerInteraction
+
+    contact_id, conversation_id, _message_id = waiting_draft
+    with SessionLocal() as session:
+        session.add(
+            Conversation(contact_id=contact_id, stage="new", hubspot_ticket_id="88888888")
+        )
+        session.commit()
+
+    delete_conversation(conversation_id, "99999999")
+
+    with SessionLocal() as session:
+        assert session.get(Contact, contact_id) is not None
+        moved = session.query(CustomerInteraction).filter_by(contact_id=contact_id).all()
+        assert [n.summary for n in moved] == ["초안"]
+        assert moved[0].conversation_id is None, "가리킬 대화가 곧 사라집니다"
+        session.query(Conversation).filter_by(hubspot_ticket_id="88888888").delete()
+        session.query(CustomerInteraction).filter_by(contact_id=contact_id).delete()
+        session.commit()
 
 
 def test_a_deletion_webhook_removes_the_thread(monkeypatch, waiting_draft):

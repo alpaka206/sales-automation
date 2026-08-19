@@ -66,6 +66,81 @@ def _all_ticket_ids() -> list[tuple[int, str]]:
     return [(conv_id, str(ticket_id)) for conv_id, ticket_id in rows if ticket_id]
 
 
+def _still_has_something(session, contact_id: int, conversation_id: int, sheet_client_id) -> bool:
+    """이 티켓이 사라진 뒤에도 그 연락처에 남는 것이 있나.
+
+    운영자 규칙(2026-08-19): **수주 고객도 아니고 다른 티켓도 없으면 히스토리에서도 지운다.**
+    거기에 두 가지를 더 붙입니다 — 사람이 손으로 쓴 메모(`CustomerInteraction`)와 계약
+    기록(`ContractRecord`). 둘 다 티켓이 아니라 사람에게 달린 기록이고, 그것을 지우는 것은
+    「티켓이 사라졌다」가 시키는 일이 아닙니다.
+
+    수주 고객은 두 방향으로 찾습니다. `clients.contact_id` 는 정식 연결이지만 **운영 DB 에서
+    29명 중 0명만 채워져 있어서**(콘솔 고객 추가 폼이 그 값을 안 받습니다) 그것만 보면 수주
+    고객의 연락처도 지워집니다. Client ID 는 문의와 고객이 같은 번호대를 쓰므로
+    (`conversations.sheet_client_id` ↔ `clients.client_id`) 그쪽으로도 맞춰 봅니다.
+    """
+    from ..db.models import Client, ContractRecord, CustomerInteraction
+
+    others = (
+        session.query(Conversation.id)
+        .filter(Conversation.contact_id == contact_id, Conversation.id != conversation_id)
+        .first()
+    )
+    if others:
+        return True
+    if session.query(CustomerInteraction.id).filter_by(contact_id=contact_id).first():
+        return True
+    if session.query(ContractRecord.id).filter_by(contact_id=contact_id).first():
+        return True
+    if session.query(Client.client_id).filter_by(contact_id=contact_id).first():
+        return True
+    if sheet_client_id and session.query(Client.client_id).filter_by(
+        client_id=sheet_client_id
+    ).first():
+        return True
+    return False
+
+
+def _archive_messages(session, contact_id: int, conversation_id: int) -> int:
+    """그 티켓의 메일을 **연락처 단위 히스토리로 옮겨 담습니다.**
+
+    `customer_interactions` 는 처음부터 「소통 히스토리만 예외로 고객 단위」인 표라, 티켓이
+    사라져도 남는 유일한 자리입니다. 옮겨 두면 리드 히스토리 타임라인이 지금 쓰는 조회를
+    그대로 쓰면서 옛 메일을 계속 보여 줍니다 — 보드·집계 쿼리는 한 줄도 안 바뀝니다.
+
+    `conversation_id` 는 일부러 비웁니다: 그 대화 행은 이 함수 직후에 사라지고, 남겨 두면
+    없는 행을 가리키는 값이 됩니다.
+    """
+    from ..db.models import CustomerInteraction
+
+    messages = (
+        session.query(Message)
+        .filter(Message.conversation_id == conversation_id)
+        .order_by(Message.created_at)
+        .all()
+    )
+    for message in messages:
+        session.add(
+            CustomerInteraction(
+                contact_id=contact_id,
+                conversation_id=None,
+                channel=message.channel or "email",
+                direction=message.direction or "note",
+                handler="(지난 티켓)",
+                subject=message.subject,
+                # NOT NULL 입니다. 본문 없는 메일은 없지만, 있다면 빈 문자열보다 이 편이
+                # 화면에서 「무엇이 있었는지」를 말해 줍니다.
+                summary=message.body or "(본문 없음)",
+                happened_at=message.sent_at or message.created_at,
+            )
+        )
+    if messages:
+        logger.info(
+            "티켓의 메일 %d통을 연락처 %s 의 히스토리로 옮겼습니다.", len(messages), contact_id
+        )
+    return len(messages)
+
+
 def delete_conversation(conversation_id: int, ticket_id: str) -> int:
     """The ticket is gone from HubSpot, so the thread goes here too.
 
@@ -74,11 +149,17 @@ def delete_conversation(conversation_id: int, ticket_id: str) -> int:
 
     What STAYS, and this is the part that matters:
 
-      * the Contact — a real person who may have other inquiries
       * ContractRecord — money. A contract is never deleted because a ticket was; its
         conversation_id is ON DELETE SET NULL for exactly this
       * CustomerInteraction — the operator's own note about a meeting that really
         happened, likewise detached rather than destroyed
+      * **주고받은 메일** — 그 연락처에 남는 것이 있으면(다른 티켓·수주 고객·메모·계약)
+        연락처 단위 히스토리로 옮겨 담습니다(`_archive_messages`). 예전에는 티켓과 함께
+        지워졌고, 그래서 리드 히스토리를 열면 「이전 기록이 하나도 없는」 고객이 남았습니다.
+
+    그리고 **아무것도 안 남으면 연락처까지 지웁니다** (2026-08-19 운영자 지시: 「수주와
+    다른 티켓이 없으면 히스토리에서도 지운다」). 그러지 않으면 대화도 계약도 메모도 없는
+    빈 연락처가 리드 히스토리 목록에 계속 서 있습니다 — 실제로 그런 행이 있었습니다.
 
     Children are removed explicitly rather than left to the FK: the cascades are declared
     ON DELETE, which SQLite only honours with foreign_keys=ON and which the ORM would
@@ -87,7 +168,7 @@ def delete_conversation(conversation_id: int, ticket_id: str) -> int:
     """
     from sqlalchemy import delete, update
 
-    from ..db.models import ContractRecord, ConversationProgress, CustomerInteraction
+    from ..db.models import Contact, ContractRecord, ConversationProgress, CustomerInteraction
 
     with SessionLocal() as session:
         conversation = session.get(Conversation, conversation_id)
@@ -95,9 +176,16 @@ def delete_conversation(conversation_id: int, ticket_id: str) -> int:
             return 0
         # 워크북 행을 찾는 자연키. 세션이 닫히면 못 읽으므로 지우기 전에 들고 나옵니다.
         sheet_client_id = conversation.sheet_client_id
+        contact_id = conversation.contact_id
         removed = session.query(Message).filter(
             Message.conversation_id == conversation_id
         ).count()
+
+        # **먼저 정합니다: 이 연락처가 남을 사람인가.** 메일을 옮겨 담은 뒤에 세면 방금
+        # 만든 히스토리가 「남을 이유」가 되어 빈 연락처도 영영 안 지워집니다.
+        keeps = _still_has_something(session, contact_id, conversation_id, sheet_client_id)
+        if keeps:
+            _archive_messages(session, contact_id, conversation_id)
 
         for model in (ContractRecord, CustomerInteraction):
             session.execute(
@@ -112,6 +200,10 @@ def delete_conversation(conversation_id: int, ticket_id: str) -> int:
         )
         session.execute(delete(Message).where(Message.conversation_id == conversation_id))
         session.execute(delete(Conversation).where(Conversation.id == conversation_id))
+        if not keeps:
+            # 프로필은 연락처와 함께 갑니다(PK 가 contact_id, ON DELETE CASCADE).
+            session.execute(delete(Contact).where(Contact.id == contact_id))
+            logger.info("빈 연락처 %s 도 같이 지웠습니다 — 남은 티켓도 수주도 없습니다.", contact_id)
         session.commit()
 
     logger.info(
