@@ -107,12 +107,16 @@ RENEWAL_WINDOW_DAYS = 60
 _STAGE_ORDER = [stage for stage, _, _ in PIPELINE_STAGES]
 MANUAL_LOG_STAGES: tuple[str, ...] = tuple(_STAGE_ORDER[_STAGE_ORDER.index("meeting_link_sent") :])
 
-# How many cards one board column renders. A column is a fixed-height scroller and the
-# busiest stage here holds 157 threads: nobody drags card 150, and loading them cost a
-# full read of every conversation, contact and profile on every dashboard request. The
-# header keeps showing the REAL total (see _pipeline_rows), and the column says so when
-# it is showing fewer than it counts.
-BOARD_CARDS_PER_STAGE = 60
+# How many cards one board column renders **before 더보기**. A column is a fixed-height
+# scroller and the busiest stage here holds 202 threads: nobody drags card 150, and
+# loading them cost a full read of every conversation, contact and profile on every
+# dashboard request. The header keeps showing the REAL total (see _pipeline_rows), and
+# the column says so when it is showing fewer than it counts.
+#
+# 60 → 15 (2026-08-19, 운영자 지시). 첫 화면에 60장이 깔리면 스크롤을 한참 내려야 다음
+# 열의 아래쪽이 보이고, 정작 손이 가는 카드는 맨 위 몇 장입니다. 나머지는 열 바닥의
+# 「더보기」가 같은 수만큼씩 이어 붙입니다(`/api/ui/pipeline/{stage}/cards?offset=`).
+BOARD_CARDS_PER_STAGE = 15
 
 # Logging a 미팅 means the deal is live, and it used to move the thread to 협의 중 from
 # WHEREVER it was. That was harmless while the only way to log one was the customer page;
