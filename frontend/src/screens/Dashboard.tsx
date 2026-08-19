@@ -72,7 +72,10 @@ export function Dashboard() {
         />
       </section>
 
-      <div className="section-header table-heading">
+      {/* `table-heading` 은 카드 **안쪽** 머리글입니다 — 좌우 22px 이 카드 패딩과 줄을
+          맞추라고 있는 값입니다. 이 머리글은 카드 밖에 홀로 서 있어서 그 22px 이 아이콘
+          왼쪽의 빈칸이 되고, 위의 「문의 대시보드」 제목과 줄이 어긋났습니다. */}
+      <div className="section-header">
         <div className="section-header__l">
           <span className="section-header__icon"><Icon name="sliders" size={17} /></span>
           <div className="section-header__title">문의 파이프라인</div>

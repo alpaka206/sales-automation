@@ -454,7 +454,7 @@ a.kpi:hover { border-color: var(--accent); }
   border: 1px solid var(--border); border-radius: var(--r-full);
   background: var(--surface-2); color: var(--text-subtle);
   font-family: inherit; font-size: 10.5px; font-weight: 700; line-height: 1;
-  text-overflow: ellipsis; cursor: pointer;
+  text-align: center; text-overflow: ellipsis; cursor: pointer;
 }
 .pipeline-card__deal:hover { border-color: var(--accent); }
 .pipeline-card__deal--won { border-color: var(--ok-soft); background: var(--ok-soft); color: var(--ok); }
