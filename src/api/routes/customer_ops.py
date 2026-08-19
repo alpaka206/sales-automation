@@ -1119,7 +1119,17 @@ def _sync_ticket_stages(client, contact_id: int) -> int:
     return moved
 
 
-def _sync_hubspot(contact_id: int) -> int:
+def _sync_hubspot(contact_id: int, per_type: int = 20) -> int:
+    """허브스팟에 있는 그 사람의 기록을 우리 히스토리로 가져옵니다.
+
+    ``per_type`` 은 종류마다 몇 개까지 훑을지입니다. 화면에서 손으로 누르는 동기화는 20 —
+    「최근 것 좀 당겨오기」이고 사람이 기다리는 중이라 왕복이 짧아야 합니다. **과거 이관**은
+    깊게 팝니다(`/internal/customers/hubspot-history`): 이 콘솔이 생기기 전의 문의·답변이
+    허브스팟에만 있고, 그것이 리드 히스토리를 볼 이유의 절반입니다.
+
+    같은 것을 두 번 넣지 않습니다 — 모든 행이 `external_id`(`hubspot:email:123` 꼴)로
+    먼저 조회됩니다. 그래서 몇 번을 돌려도 안전하고, 중간에 끊기면 다시 돌리면 됩니다.
+    """
     from ...integrations.hubspot import HubSpotClient
 
     with SessionLocal() as session:
@@ -1130,11 +1140,11 @@ def _sync_hubspot(contact_id: int) -> int:
 
     client = HubSpotClient()
     dto = client.get_contact_sync(hubspot_id)
-    emails = client.get_recent_emails_sync(hubspot_id, limit=20)
+    emails = client.get_recent_emails_sync(hubspot_id, limit=per_type)
     # Calls, meetings and messages somebody logged in HubSpot by hand. Without these the
     # 리드 히스토리 screen — the one that claims to hold everything — silently omits every
     # touchpoint that happened on the other side.
-    logged = client.get_logged_engagements_sync(hubspot_id, limit=20)
+    logged = client.get_logged_engagements_sync(hubspot_id, limit=per_type)
     deals = client.get_associated_deals_sync(hubspot_id)
     note = client.get_latest_note(hubspot_id)
     inserted = 0
@@ -1231,6 +1241,65 @@ def _sync_hubspot(contact_id: int) -> int:
     # 되돌리지 않습니다.
     _sync_ticket_stages(client, contact_id)
     return inserted
+
+
+@router.post("/internal/customers/hubspot-history")
+async def internal_contact_history_backfill(limit: int = 20, per_type: int = 100):
+    """이 콘솔이 생기기 전의 기록을 허브스팟에서 끌어옵니다 — **한 번에 조금씩, 여러 번.**
+
+    한 요청이 연락처 ``limit`` 명을 처리하고 남은 수를 돌려줍니다. 다 될 때까지 다시 부르면
+    됩니다. 288명을 한 요청에 넣지 않는 이유가 셋입니다: ① 연락처 한 명이 허브스팟 왕복
+    수십 번이라 한 번에 다 하면 몇십 분짜리 HTTP 요청이 되고, ② 중간에 끊기면 어디까지
+    했는지 알 수 없으며, ③ 레이트 리밋에 걸리면 통째로 실패합니다.
+
+    **어디까지 했는지는 따로 기록하지 않습니다.** `customer_profiles.last_synced_at` 이
+    이미 그 값이고(`_sync_hubspot` 이 매번 찍습니다), 오래된 것부터 고르면 그것이 곧
+    이어하기입니다. 한 명이 실패해도 나머지는 계속합니다 — 지워진 연락처, 권한 없는
+    레코드는 흔합니다.
+    """
+    from sqlalchemy import func
+
+    with SessionLocal() as session:
+        candidates = (
+            session.execute(
+                select(Contact.id)
+                .outerjoin(CustomerProfile, CustomerProfile.contact_id == Contact.id)
+                .where(
+                    Contact.hubspot_contact_id.isnot(None),
+                    Contact.hubspot_contact_id != "",
+                )
+                # 아직 한 번도 안 한 사람 먼저, 그다음 오래된 순.
+                .order_by(CustomerProfile.last_synced_at.is_(None).desc(),
+                          CustomerProfile.last_synced_at.asc())
+                .limit(max(1, min(limit, 200)))
+            )
+            .scalars()
+            .all()
+        )
+        total = session.scalar(
+            select(func.count(Contact.id)).where(
+                Contact.hubspot_contact_id.isnot(None), Contact.hubspot_contact_id != ""
+            )
+        )
+
+    inserted = 0
+    failed: list[int] = []
+    for contact_id in candidates:
+        try:
+            inserted += await asyncio.to_thread(_sync_hubspot, contact_id, per_type)
+        except Exception:
+            logger.warning("과거 기록 이관 실패 (contact=%s)", contact_id, exc_info=True)
+            failed.append(contact_id)
+    logger.info(
+        "과거 기록 이관: 연락처 %d명 처리, 기록 %d건 추가, 실패 %d명",
+        len(candidates), inserted, len(failed),
+    )
+    return {
+        "processed": len(candidates),
+        "inserted": inserted,
+        "failed": failed,
+        "contacts_with_hubspot_id": total,
+    }
 
 
 @router.post("/customers/{contact_id}/sync")

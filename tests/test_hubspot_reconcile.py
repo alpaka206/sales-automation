@@ -386,3 +386,49 @@ def test_a_thread_past_new_has_its_draft_retired_not_deleted(monkeypatch, waitin
     with SessionLocal() as session:
         assert session.get(Message, message_id).status == "superseded"
         assert session.get(Conversation, conversation_id) is not None, "the ticket exists"
+
+
+def test_the_one_off_purge_takes_only_the_truly_empty(tmp_path) -> None:
+    """이관 0078 — 대화·메모·계약·수주가 넷 다 없는 연락처만 지웁니다.
+
+    하나라도 있으면 남깁니다. 「빈 껍데기를 치운다」와 「고객을 지운다」는 한 글자 차이이고,
+    그 경계가 이 검사입니다.
+    """
+    import importlib
+    from decimal import Decimal
+
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import Session as PlainSession
+
+    from src.db.base import Base
+    from src.db.models import Client, ContractRecord, CustomerInteraction
+
+    engine = create_engine(f"sqlite:///{tmp_path}/purge.db")
+    Base.metadata.create_all(engine)
+    with PlainSession(engine) as session:
+        keep_ids = {}
+        for name in ("빈사람", "대화있음", "메모있음", "계약있음", "수주고객"):
+            person = Contact(normalized_email=f"{name}@example.com", full_name=name)
+            session.add(person)
+            session.flush()
+            keep_ids[name] = person.id
+        session.add(Conversation(contact_id=keep_ids["대화있음"], stage="new"))
+        session.add(
+            CustomerInteraction(contact_id=keep_ids["메모있음"], channel="meeting", summary="미팅")
+        )
+        session.add(
+            ContractRecord(
+                contact_id=keep_ids["계약있음"], status="active",
+                amount=Decimal("1"), currency="USD",
+            )
+        )
+        session.add(
+            Client(client_id=1001, company="수주사", contact_id=keep_ids["수주고객"])
+        )
+        session.commit()
+
+    importlib.import_module("src.db.migrations.0078_empty_contacts_leave_the_lead_history").up(engine)
+
+    with PlainSession(engine) as session:
+        left = {c.full_name for c in session.query(Contact).all()}
+        assert left == {"대화있음", "메모있음", "계약있음", "수주고객"}
