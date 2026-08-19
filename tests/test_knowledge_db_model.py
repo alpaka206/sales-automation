@@ -96,49 +96,34 @@ def test_migration_idempotent() -> None:
     up(engine)
 
 
-def test_import_script_seeds_then_stops_writing(tmp_path, monkeypatch) -> None:
-    """It creates missing rows and then leaves the database alone.
+def test_bundled_seeds_go_quiet_but_console_copies_do_not() -> None:
+    """이관 0077 — 저장소가 들고 있던 지식 문서만 재웁니다.
 
-    It used to upsert, so re-running it overwrote whatever had been edited in the console
-    or pulled from Notion since — the database owns knowledge now, and these files only
-    give a fresh install something to answer with.
+    그 파일들은 손으로 돌리는 스크립트 하나만 읽었고 배포 경로에는 없었습니다. 다만 과거에
+    누가 한 번 돌렸다면 그 내용이 DB 에 남아 초안이 계속 읽는데, 콘솔에는 그것을 보여 주는
+    화면이 없습니다 — 운영자가 못 보고 못 고치는 문서입니다.
+
+    **콘솔이 만든 사본은 건드리면 안 됩니다.** 규칙으로 거르지 않고 slug 열한 개를 이름으로
+    적어 둔 이유가 이것이고, 그 경계가 이 검사입니다. 지우지 않고 재우는 것도 일부러입니다:
+    되돌리는 것은 UPDATE 한 줄이고, 무엇이 있었는지도 남습니다.
     """
-    kb_dir = tmp_path / "knowledge_base"
-    kb_dir.mkdir()
-    (kb_dir / "pricing.md").write_text(
-        "---\ntitle: Pricing\ncategories: [pricing_question]\n---\nBody here.",
-        encoding="utf-8",
-    )
-    (kb_dir / "README.md").write_text("Skip me", encoding="utf-8")
+    import importlib
 
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
-    session = Session(engine)
+    with Session(engine) as session:
+        session.add_all(
+            [
+                KnowledgeDocument(slug="perso_faq_dubbing", title="더빙 FAQ", body="씨앗"),
+                KnowledgeDocument(slug="notion-1632872bb88d", title="콘솔 문서", body="사본"),
+            ]
+        )
+        session.commit()
 
-    monkeypatch.setattr("scripts.import_knowledge_base.KNOWLEDGE_DIR", kb_dir)
-    monkeypatch.setattr("scripts.import_knowledge_base.SessionLocal", lambda: session)
+    importlib.import_module("src.db.migrations.0077_the_bundled_knowledge_seeds_go_quiet").up(engine)
 
-    import scripts.import_knowledge_base as imp
-
-    imp.main()
-    assert session.query(KnowledgeDocument).count() == 1
-    doc = session.query(KnowledgeDocument).first()
-    assert doc.slug == "pricing"
-    assert doc.title == "Pricing"
-    assert doc.categories == ["pricing_question"]
-
-    (kb_dir / "pricing.md").write_text(
-        "---\ntitle: Pricing Updated\ncategories: [pricing_question]\n---\nNew body.",
-        encoding="utf-8",
-    )
-    imp.main()
-    assert session.query(KnowledgeDocument).count() == 1
-    db_doc = session.query(KnowledgeDocument).first()
-    assert db_doc.title == "Pricing"      # the database copy stands
-    assert db_doc.body == "Body here."
-
-    # …unless restoring from the file is the point.
-    imp.main(force=True)
-    restored = session.query(KnowledgeDocument).first()
-    assert restored.title == "Pricing Updated"
-    assert restored.body == "New body."
+    with Session(engine) as session:
+        seed = session.query(KnowledgeDocument).filter_by(slug="perso_faq_dubbing").one()
+        copy = session.query(KnowledgeDocument).filter_by(slug="notion-1632872bb88d").one()
+        assert seed.status == "archived"
+        assert copy.status == "active"

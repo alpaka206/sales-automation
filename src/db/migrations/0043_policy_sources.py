@@ -13,7 +13,7 @@ no ``notion_page_id`` of their own, so they get a stable ``file:<name>`` key; po
 at Notion later is an edit on the 정책 문서 screen, not another migration.
 
 ``knowledge_base/*.md`` is NOT re-imported here: those documents were already loaded into
-``knowledge_documents`` by scripts/import_knowledge_base.py, which remains the source of
+``knowledge_documents`` by a bundled importer, which was the source of
 truth for them until their Notion pages are registered.
 """
 
