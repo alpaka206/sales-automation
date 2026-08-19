@@ -63,9 +63,9 @@ VALID_PIPELINE_STAGES = {stage for stage, _, _ in PIPELINE_STAGES}
 WON_TYPES: tuple[str, ...] = ("PoC", "Contract", "Renewal")
 LOST_REASONS: tuple[str, ...] = (
     "Price",
-    # 진 것이 아니라 우리 다른 플랜으로 간 건입니다. 승률을 셀 때 이 값을 분모에서 빼는
-    # 것은 **사람이 합니다** — 이 콘솔에는 승률을 세는 곳이 없습니다.
-    "Use other plan",
+    # "Use other plan" 은 지웠습니다 (2026-08-19, 운영자 지시). 이미 고른 건이 있으면 그
+    # 값은 DB 에 남지만 화면에는 안 나옵니다 — `visible_deal_detail` 이 지금 단계의 목록에
+    # 있는 값만 내려보냅니다. 실측으로는 그 값을 쓴 문의가 없었습니다.
     "Competitor",
     "Product Gap",
     "No decision",
