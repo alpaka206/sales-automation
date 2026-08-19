@@ -92,10 +92,6 @@ type Detail = {
     conversation_id: number; ticket_id: string | null; subject: string | null;
     stage: string; created_at: string;
   }[];
-  customer_history: {
-    channel: string; direction: string; handler: string | null;
-    subject: string | null; summary: string | null; happened_at: string | null;
-  }[];
   signatures: { key: string; name: string }[];
   ticket: {
     id: number | null; ticket_id: string | null; stage: string | null;
@@ -262,6 +258,10 @@ export function MessageDetail() {
   // 보드가 어느 열에 + 를 그릴지 정하는 것과 **같은 목록**입니다. 서버가 주므로
   // 단계 이름이 바뀌어도 두 화면이 어긋나지 않습니다.
   const canLog = !!ticket.stage && data.manual_log_stages.includes(ticket.stage);
+  // **New 는 다른 화면입니다.** 아직 아무 일도 안 일어난 티켓이라 요약도 처리 경과도
+  // 보여 줄 것이 없고(있어야 「문의 접수」한 줄), 그 자리에 고객 요청사항만 둡니다.
+  // `initial` 은 모델 기본값 — 단계가 아직 안 정해진 것이라 New 와 같이 봅니다.
+  const afterNew = !!ticket.stage && !["new", "initial"].includes(ticket.stage);
   const canTranslate = !!msg?.target_language && msg.target_language !== "ko";
   // Won 과 Lost 에만 있습니다. 목록도 「이 단계에 고르개가 붙는가」도 서버가 정합니다 —
   // 보드 카드와 같은 출처라 두 화면이 다른 값을 내놓을 수 없습니다.
@@ -552,14 +552,35 @@ export function MessageDetail() {
         </div>
 
         <div className="stack" style={{ gap: "var(--gap)" }}>
-          {(data.summary || data.customer_requests || data.progress.length > 0) && (
+          {/* **고객 요청사항은 늘 맨 위, 시각 없이.** New 티켓에는 이것 말고 보여 줄
+              것이 없습니다 — 처리 경과라고 해 봐야 「문의 접수」한 줄이고, 그 줄의 시각은
+              바로 위 문의 말풍선에 이미 있습니다. 그래서 New 는 이 카드 하나로 끝나고,
+              단계가 넘어가면 그 아래로 실제로 일어난 일(발송·가드)과 요약이 붙습니다
+              (2026-08-19 운영자 지시). */}
+          {data.customer_requests && (
             <div className="card">
-              <div className="section-label" style={{ marginBottom: 12 }}>대화 요약 · 처리경과</div>
-              {data.summary && (
-                <div className="msg-body--inset" style={{ marginBottom: 10 }}>
-                  <div className="ko-block__label">요약</div>
-                  <div className="t-sm" style={{ lineHeight: 1.6, whiteSpace: "pre-line" }}>{data.summary}</div>
-                </div>
+              <div className="section-label" style={{ marginBottom: 8 }}>고객 요청사항</div>
+              <div className="t-sm" style={{ lineHeight: 1.7, whiteSpace: "pre-line" }}>
+                {data.customer_requests}
+              </div>
+            </div>
+          )}
+
+          {(afterNew || data.progress.length > 0) && (data.summary || data.progress.length > 0) && (
+            <div className="card">
+              <div className="section-label" style={{ marginBottom: 12 }}>처리 경과</div>
+              {/* 요약은 대화가 오간 뒤에야 뜻이 있습니다. New 에서는 문의 한 통을 요약한
+                  것이라 바로 위 말풍선과 같은 말을 두 번 하게 됩니다. */}
+              {afterNew && data.summary && (
+                <details className="msg-body--inset" style={{ marginBottom: 10 }}>
+                  <summary style={{ cursor: "pointer", listStyle: "none" }}>
+                    <span className="ko-block__label">티켓 요약</span>
+                    <span className="t-xs" style={{ color: "var(--accent)", marginLeft: 6 }}>전체보기</span>
+                  </summary>
+                  <div className="t-sm" style={{ lineHeight: 1.6, whiteSpace: "pre-line", marginTop: 6 }}>
+                    {data.summary}
+                  </div>
+                </details>
               )}
               {data.progress.length > 0 && (
                 <ul className="progress-log">
@@ -567,32 +588,13 @@ export function MessageDetail() {
                     <li key={index} className="progress-log__item">
                       <span className="progress-log__time tnum">{kst(p.created_at)}</span>
                       <span className="progress-log__detail">
-                        {/* An operator's own note, in the same sequence as the sends —
-                            "메일이 나갔다 → 미팅했고 요구사항은 이것" is one story, and
-                            it was split across two screens. */}
                         {p.kind === "interaction" && (
                           <span className="tag" style={{ marginRight: 6 }}>
                             {channelLabel(p.channel || "manual")}
                             {p.handler ? ` · ${p.handler}` : ""}
                           </span>
                         )}
-                        {/* **문의 접수 줄은 제목이 아니라 요청사항입니다** (운영자 지시).
-                            「고객 문의 접수: Custom Quote」는 제목을 한 번 더 읽어 주는
-                            줄이었고, 정작 이 티켓에서 알아야 할 것 — 무엇을 요청했는가 —
-                            는 다른 카드에 따로 있었습니다. 한 자리로 합칩니다. 요청사항이
-                            아직 안 뽑힌 티켓은 예전 문장 그대로 둡니다. */}
-                        {p.kind === "inbound" && data.customer_requests ? (
-                          <>
-                            <span className="ko-block__label" style={{ color: "var(--accent)" }}>
-                              고객 요청사항
-                            </span>
-                            <span style={{ whiteSpace: "pre-line", display: "block" }}>
-                              {data.customer_requests}
-                            </span>
-                          </>
-                        ) : (
-                          <span style={{ whiteSpace: "pre-line" }}>{p.detail}</span>
-                        )}
+                        <span style={{ whiteSpace: "pre-line" }}>{p.detail}</span>
                       </span>
                     </li>
                   ))}
@@ -620,22 +622,6 @@ export function MessageDetail() {
                       {kst(other.created_at)}{other.ticket_id ? ` · #${other.ticket_id}` : ""}
                     </div>
                   </Link>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {data.customer_history.length > 0 && (
-            <div className="card">
-              <div className="section-label" style={{ marginBottom: 12 }}>
-                고객 히스토리 {data.customer_history.length}건
-              </div>
-              {/* 접어 둡니다. 이 목록은 허브스팟에서 가져온 옛 메일까지 들어와 한 사람에
-                  스무 건이 넘기도 하는데, 본문을 다 펼치면 정작 이 티켓의 초안이 화면
-                  몇 개 아래로 밀립니다. 제목과 첫 줄만 보이고 「전체보기」로 폅니다. */}
-              <div className="stack" style={{ gap: 6 }}>
-                {data.customer_history.map((item, index) => (
-                  <HistoryRow key={index} item={item} />
                 ))}
               </div>
             </div>
@@ -835,13 +821,20 @@ export function MessageDetail() {
           </div>
           )}
 
+          {/* **이 티켓 밖의 접점은 한 곳입니다.** 한동안 「다른 접점 기록」과 「고객
+              히스토리」 두 카드가 거의 같은 것을 나눠 들고 있었습니다 — 앞엣것은 이 티켓을
+              뺀 모든 기록, 뒤엣것은 그중 어느 티켓에도 안 달린 것. 읽는 사람에게는 둘 다
+              「이 사람과 전에 오간 것」이라 가를 이유가 없습니다. 앞엣것 하나로 남깁니다.
+              허브스팟에서 끌어온 옛 메일도 여기 들어옵니다. */}
           {data.customer?.interactions && data.customer.interactions.length > 0 && (
             <div className="card">
-              <div className="ko-block__label" style={{ marginBottom: 6 }}>
-                다른 접점 기록 (최근 {data.customer.interactions.length}건)
+              <div className="section-label" style={{ marginBottom: 10 }}>
+                고객 히스토리 {data.customer.interactions.length}건
               </div>
-              <div className="history-list">
-                {data.customer.interactions.map((item, index) => <InteractionItem key={index} item={item} />)}
+              <div className="stack" style={{ gap: 6 }}>
+                {data.customer.interactions.map((item, index) => (
+                  <HistoryRow key={index} item={item} />
+                ))}
               </div>
             </div>
           )}

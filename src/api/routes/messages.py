@@ -143,7 +143,6 @@ def _message_detail_context(
         progress_rows = []
         interaction_rows = []
         other_conversations = []
-        contact_history = []
         if conv:
             # Full ticket/conversation thread, oldest → newest — every inbound inquiry
             # and every outgoing reply or auto-ack for this thread.
@@ -192,22 +191,6 @@ def _message_detail_context(
                         Conversation.id != conv.id,
                     )
                     .order_by(Conversation.created_at.desc())
-                )
-                .scalars()
-                .all()
-            )
-            # 어느 티켓에도 안 달린 기록 = 연락처 단위. 허브스팟에서 가져온 옛 기록이
-            # 여기 들어옵니다(가져올 때 티켓을 알 수 없습니다 — 이메일이 연락처에 붙어
-            # 있습니다).
-            contact_history = (
-                session.execute(
-                    select(CustomerInteraction)
-                    .where(
-                        CustomerInteraction.contact_id == conv.contact_id,
-                        CustomerInteraction.conversation_id.is_(None),
-                    )
-                    .order_by(CustomerInteraction.happened_at.desc())
-                    .limit(50)
                 )
                 .scalars()
                 .all()
@@ -287,20 +270,6 @@ def _message_detail_context(
                     "created_at": other.created_at,
                 }
                 for other in other_conversations
-            ],
-            # 연락처 단위 기록: 허브스팟에서 가져온 옛 메일·통화·미팅·메모, 그리고 사라진
-            # 티켓에서 옮겨 온 메일. `conversation_id` 가 비어 있다는 것이 곧 「이 티켓의
-            # 것이 아니다」라는 뜻이라, 위의 처리 경과와 섞이지 않습니다.
-            "customer_history": [
-                {
-                    "channel": item.channel,
-                    "direction": item.direction,
-                    "handler": item.handler,
-                    "subject": item.subject,
-                    "summary": item.summary,
-                    "happened_at": item.happened_at,
-                }
-                for item in contact_history
             ],
             "summary": conv.summary if conv else None,
             "customer_requests": conv.customer_requests if conv else None,
@@ -424,7 +393,9 @@ def _customer_history(session, contact_id: int, exclude_conversation_id: int | N
         )
     interactions = (
         session.execute(
-            interaction_q.order_by(CustomerInteraction.happened_at.desc()).limit(6)
+            # 6 → 20 (2026-08-19). 허브스팟에서 옛 기록을 끌어온 뒤로 6건은 최근 며칠
+            # 밖에 못 보여 줍니다. 화면에서는 접혀 있으므로 길어도 자리를 안 먹습니다.
+            interaction_q.order_by(CustomerInteraction.happened_at.desc()).limit(20)
         )
         .scalars()
         .all()
