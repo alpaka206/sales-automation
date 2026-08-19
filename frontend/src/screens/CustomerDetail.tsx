@@ -24,9 +24,30 @@ type Data = {
   profile: Record<string, string | null> | null;
   stage_options: { key: string; label: string }[];
   conversations: { id: number; created_at: string; inquiry_subject: string | null; stage: string; sheet_client_id: number | null }[];
+  client_ids: number[];
+  tickets: Ticket[];
+  won: Won | null;
+  interactions: Interaction[];
   contracts: Contract[];
   timeline: Interaction[];
   same_company: { id: number; full_name: string; email: string | null }[];
+};
+type Ticket = {
+  conversation_id: number; ticket_id: string | null; client_id: number | null;
+  subject: string | null; category: string | null; language: string | null;
+  stage: string; created_at: string;
+  last_incoming_at: string | null; last_outgoing_at: string | null; summary: string | null;
+  messages: { id: number; direction: string; status: string; subject: string | null;
+              body: string | null; happened_at: string | null }[];
+  progress: { kind: string; detail: string; created_at: string }[];
+};
+type Won = {
+  client_id: number; company: string; department: string | null; customer_type: string | null;
+  plan_status: string; owner: string | null; first_won_on: string | null;
+  contracts: { seq: number; state: string; deal_type: string | null;
+               starts_on: string | null; ends_on: string | null; currency: string | null;
+               total_amount: number | null; credits: number | null;
+               plan_name: string | null; ticket_id: string | null }[];
 };
 
 const CONTRACT_STATUSES: [string, string][] = [
@@ -64,8 +85,6 @@ export function CustomerDetail() {
   // 그래서 경로도 data 가 없을 수 있다는 전제로 씁니다.
   const [syncHubspot, syncing] = useAction((event: React.FormEvent<HTMLFormElement>) =>
     submit(event, `/customers/${data?.contact.id}/sync`));
-  const [saveProfile, savingProfile] = useAction((event: React.FormEvent<HTMLFormElement>) =>
-    submit(event, `/customers/${data?.contact.id}/profile`));
 
   if (isPending || !data) return <LoadingBlock />;
   const { contact, profile } = data;
@@ -145,6 +164,16 @@ export function CustomerDetail() {
           </div>
           <h1 className="page-title" style={{ marginTop: 10 }}>{contact.company || contact.full_name}</h1>
           <p className="page-sub">{contact.full_name} · {contact.email || "-"} · {contact.phone || "전화번호 없음"}</p>
+          {/* 수주 DB·워크북·시트가 전부 이 번호로 엮입니다. 문의마다 붙는 값이라 한 사람에게
+              여럿일 수 있고, 그때는 전부 보여 줍니다 — 어느 번호로 저쪽 화면을 찾아야 하는지가
+              그 자체로 정보입니다(운영자 지시). */}
+          {data.client_ids.length > 0 && (
+            <div className="row wrap" style={{ gap: 6, marginTop: 8 }}>
+              {data.client_ids.map((clientId) => (
+                <span key={clientId} className="chip tnum">Client ID {clientId}</span>
+              ))}
+            </div>
+          )}
         </div>
         {contact.hubspot_contact_id && (
           <form onSubmit={syncHubspot}>
@@ -157,67 +186,107 @@ export function CustomerDetail() {
 
       <div className="customer-layout">
         <div className="stack">
+          {/* **읽기 전용입니다** (2026-08-19 운영자 지시). 단계·다음 액션·리드 온도의
+              원본은 티켓과 수주 고객이고, 이 화면에서 또 고를 수 있으면 같은 값이 두
+              곳에서 갈라집니다 — 실제로 이 폼이 저장할 때 대화 단계까지 같이 옮겨서,
+              보드에서 옮긴 것과 여기서 고른 것이 서로 덮어썼습니다. 보는 자리와 정하는
+              자리를 갈라 둡니다. */}
           <section className="card">
-            <div className="section-header"><div className="section-header__title">고객 상태 · 다음 액션</div></div>
-            {/* 「고객 구분」 칸이 있었습니다(Negotiation / 서비스 이용중 / 기존 고객 Pool /
-                Lost). 손으로 고르는 값인데 **바로 옆 파이프라인 단계에서 그대로 나오는
-                값**이라, 둘이 어긋난 고객이 생겼습니다 — Won 인데 Negotiation 인 행.
-                이제 저장할 때 서버가 단계에서 정합니다(customer_state_for), 보드에서
-                카드를 옮겼을 때와 같은 규칙으로. */}
-            <form className="profile-grid" onSubmit={saveProfile}>
-              <label><span className="field-label">파이프라인</span>
-                <select className="select" name="pipeline_stage" defaultValue={profile?.pipeline_stage ?? "new"}>
-                  {data.stage_options.map((option) => (
-                    <option key={option.key} value={option.key}>{option.label}</option>
-                  ))}
-                </select></label>
-              <label><span className="field-label">리드 온도</span>
-                <select className="select" name="lead_temperature" defaultValue={profile?.lead_temperature ?? ""}>
-                  <option value="">미정</option>
-                  {["hot", "warm", "cold"].map((value) => <option key={value} value={value}>{value}</option>)}
-                </select></label>
-              <label><span className="field-label">MQL / PQL</span>
-                <select className="select" name="qualification" defaultValue={profile?.qualification ?? ""}>
-                  <option value="">미정</option>
-                  {["MQL", "PQL", "SQL"].map((value) => <option key={value} value={value}>{value}</option>)}
-                </select></label>
-              <label><span className="field-label">산업군</span>
-                <input className="input" name="industry" defaultValue={profile?.industry ?? ""} /></label>
-              <label><span className="field-label">user-seq</span>
-                <input className="input" name="user_seq" defaultValue={profile?.user_seq ?? ""} /></label>
-              <label><span className="field-label">현재 플랜</span>
-                <input className="input" name="current_plan" defaultValue={profile?.current_plan ?? ""} /></label>
-              <label><span className="field-label">유입 소스</span>
-                <input className="input" name="source" defaultValue={profile?.source ?? ""} /></label>
-              <label className="profile-grid__wide"><span className="field-label">다음 액션</span>
-                <input className="input" name="next_action" defaultValue={profile?.next_action ?? ""}
-                       placeholder="예: 견적서 확인 후 금요일 재연락" /></label>
-              <label><span className="field-label">다음 액션 일시</span>
-                <input className="input" type="datetime-local" name="next_action_at"
-                       defaultValue={forInput(profile?.next_action_at, 16)} /></label>
-              <label className="profile-grid__wide"><span className="field-label">Closed Lost 사유</span>
-                <textarea className="textarea" name="lost_reason" rows={2} defaultValue={profile?.lost_reason ?? ""} /></label>
-              <label className="profile-grid__wide"><span className="field-label">운영 메모</span>
-                <textarea className="textarea" name="notes" rows={3} defaultValue={profile?.notes ?? ""} /></label>
-              <div className="profile-grid__wide row-between">
-                <span className="t-xs t-subtle">
-                  {profile?.last_synced_at ? `마지막 HubSpot 동기화 ${kst(profile.last_synced_at)}` : "아직 수동 동기화하지 않았습니다."}
-                </span>
-                <SubmitButton busy={savingProfile}>저장</SubmitButton>
-              </div>
-            </form>
+            <div className="section-header">
+              <div className="section-header__title">고객 상태</div>
+              <span className="t-xs t-subtle">티켓과 수주 고객에서 정해집니다</span>
+            </div>
+            <div className="field-grid">
+              <KV k="파이프라인" v={labelFor(data.stage_options, profile?.pipeline_stage)} />
+              <KV k="리드 온도" v={profile?.lead_temperature || "-"} />
+              <KV k="MQL / PQL" v={profile?.qualification || "-"} />
+              <KV k="산업군" v={profile?.industry || "-"} />
+              <KV k="현재 플랜" v={profile?.current_plan || "-"} />
+              <KV k="user-seq" v={profile?.user_seq || "-"} />
+              <KV k="유입 소스" v={profile?.source || "-"} />
+              <KV k="다음 액션" v={profile?.next_action
+                ? `${profile.next_action}${profile.next_action_at ? ` · ${kst(profile.next_action_at)}` : ""}`
+                : "-"} />
+              {profile?.lost_reason && <KV k="Closed Lost 사유" v={profile.lost_reason} />}
+              {profile?.notes && <KV k="운영 메모" v={profile.notes} />}
+            </div>
+            <div className="t-xs t-subtle" style={{ marginTop: 10 }}>
+              {profile?.last_synced_at
+                ? `마지막 HubSpot 동기화 ${kst(profile.last_synced_at)}`
+                : "아직 HubSpot 동기화를 하지 않았습니다."}
+            </div>
           </section>
 
+          {/* **티켓 하나가 카드 하나.** 그 안에 그 티켓의 메일과 진행 기록이 들어갑니다.
+              예전에는 모든 티켓의 메일이 한 줄로 섞여 있어서, 문의가 둘 이상인 고객에서는
+              어느 메일이 어느 건인지 알 수 없었습니다. 최신 티켓만 펼쳐 둡니다 — 대개
+              그것이 지금 보는 건이고, 다 펼치면 스크롤이 화면 몇 개가 됩니다. */}
+          <section className="card" id="tickets">
+            <div className="section-header">
+              <div className="section-header__title">티켓 {data.tickets.length}건</div>
+            </div>
+            {data.tickets.length === 0 ? (
+              <p className="t-sm t-subtle">이 고객으로 접수된 티켓이 없습니다.</p>
+            ) : (
+              <div className="stack" style={{ gap: 10 }}>
+                {data.tickets.map((ticket, index) => (
+                  <TicketBlock key={ticket.conversation_id} ticket={ticket}
+                               open={index === 0} stages={data.stage_options} />
+                ))}
+              </div>
+            )}
+          </section>
+
+          {data.won && (
+            <section className="card" id="won">
+              <div className="section-header">
+                <div className="section-header__title">수주 고객</div>
+                <Link className="chip" to={`/won-customers/${data.won.client_id}`}>
+                  수주 화면에서 보기 <Icon name="chevron" size={13} />
+                </Link>
+              </div>
+              <div className="field-grid">
+                <KV k="Client ID" v={<span className="tnum">{data.won.client_id}</span>} />
+                <KV k="고객사" v={data.won.company} />
+                <KV k="플랜 상태" v={data.won.plan_status} />
+                <KV k="담당부서" v={data.won.department || "-"} />
+                <KV k="담당" v={data.won.owner || "-"} />
+                <KV k="최초 수주일" v={data.won.first_won_on || "-"} />
+              </div>
+              <div className="history-list" style={{ marginTop: 12 }}>
+                {data.won.contracts.map((contract) => (
+                  <div key={contract.seq} className="row-between t-sm"
+                       style={{ padding: "7px 0", borderTop: "1px solid var(--border)" }}>
+                    <span>
+                      <strong>{contract.seq}차</strong> · {contract.deal_type || "-"} ·{" "}
+                      {contract.starts_on || "?"} ~ {contract.ends_on || "?"}
+                      {contract.ticket_id && <span className="t-xs t-subtle"> · 티켓 {contract.ticket_id}</span>}
+                    </span>
+                    <span className="tnum">
+                      {contract.total_amount != null
+                        ? `${contract.currency || ""} ${Number(contract.total_amount).toLocaleString()}`
+                        : "-"}
+                      <span className="t-xs t-subtle"> · {contract.state}</span>
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
+
           <section className="card" id="history">
-            <div className="section-header"><div className="section-header__title">통합 히스토리</div></div>
+            <div className="section-header"><div className="section-header__title">소통 히스토리</div></div>
             {/* No conversation_id: a record added here belongs to the customer, not to
                 one inquiry. The ticket screen and the board's + button pass theirs. */}
             <InteractionForm contactId={contact.id} onSaved={refresh} />
+            {/* 메일은 위의 티켓 카드 안에 있습니다. 여기는 **사람에게 달린 기록**입니다 —
+                손으로 적은 메모, 통화·미팅, 허브스팟에서 가져온 것, 그리고 사라진 티켓에서
+                옮겨 온 옛 메일(작성자 「지난 티켓」). */}
             <div className="history-list" style={{ marginTop: 16 }}>
-              {data.timeline.length === 0 ? (
-                <div className="empty"><div className="empty__text">아직 히스토리가 없습니다.</div></div>
+              {data.interactions.length === 0 ? (
+                <div className="empty"><div className="empty__text">아직 기록이 없습니다.</div></div>
               ) : (
-                data.timeline.map((item, index) => <InteractionItem key={index} item={item} />)
+                data.interactions.map((item, index) => <InteractionItem key={index} item={item} />)
               )}
             </div>
           </section>
@@ -313,5 +382,92 @@ function ContractForm({ action, submit, label, children }: {
       {children}
       <SubmitButton busy={busy}>{label}</SubmitButton>
     </form>
+  );
+}
+
+/** 읽기 전용 한 칸. 값이 정해지는 자리가 여기가 아니라는 것을 모양으로도 말합니다. */
+function KV({ k, v }: { k: string; v: React.ReactNode }) {
+  return (
+    <div className="info-row">
+      <dt>{k}</dt>
+      <dd>{v}</dd>
+    </div>
+  );
+}
+
+const labelFor = (options: { key: string; label: string }[], value: string | null | undefined) =>
+  options.find((option) => option.key === value)?.label ?? value ?? "-";
+
+/** 티켓 한 건 — 머리글은 늘 보이고, 안의 메일과 진행 기록은 접힙니다.
+ *
+ *  `details/summary` 를 쓰는 이유: 접힘 상태를 브라우저가 들고 있어서 상태 하나를 더
+ *  만들지 않아도 되고, 키보드와 스크린리더가 원래부터 압니다.
+ */
+function TicketBlock({ ticket, open, stages }: {
+  ticket: Ticket;
+  open: boolean;
+  stages: { key: string; label: string }[];
+}) {
+  return (
+    <details className="card" open={open} style={{ padding: "12px 14px" }}>
+      <summary style={{ cursor: "pointer", listStyle: "none" }}>
+        <div className="row-between wrap" style={{ gap: 8 }}>
+          <strong className="t-sm">{ticket.subject || "제목 없는 문의"}</strong>
+          <span className="row wrap" style={{ gap: 6 }}>
+            <span className="tag">{labelFor(stages, ticket.stage)}</span>
+            {ticket.ticket_id && <span className="tag mono">#{ticket.ticket_id}</span>}
+            {ticket.client_id != null && (
+              <span className="tag tnum">Client ID {ticket.client_id}</span>
+            )}
+          </span>
+        </div>
+        <div className="t-xs t-subtle" style={{ marginTop: 4 }}>
+          접수 {kst(ticket.created_at)}
+          {ticket.last_outgoing_at && ` · 마지막 발송 ${kst(ticket.last_outgoing_at)}`}
+          {` · 메일 ${ticket.messages.length}통`}
+        </div>
+      </summary>
+
+      {ticket.summary && (
+        <p className="t-sm" style={{ margin: "10px 0 0", color: "var(--text-muted)" }}>
+          {ticket.summary}
+        </p>
+      )}
+
+      <div className="history-list" style={{ marginTop: 12 }}>
+        {ticket.messages.length === 0 ? (
+          <p className="t-sm t-subtle">이 티켓에는 남아 있는 메일이 없습니다.</p>
+        ) : (
+          ticket.messages.map((message) => (
+            <InteractionItem
+              key={message.id}
+              item={{
+                channel: "email",
+                direction: message.direction,
+                // 상태를 작성자 자리에 적습니다 — 나간 메일과 아직 안 나간 초안은
+                // 히스토리에서 반드시 구별돼야 합니다.
+                handler: message.status,
+                subject: message.subject,
+                summary: message.body,
+                context: null,
+                artifact_url: null,
+                happened_at: message.happened_at,
+                source: "message",
+              } as Interaction}
+            />
+          ))
+        )}
+      </div>
+
+      {ticket.progress.length > 0 && (
+        <div style={{ marginTop: 10, borderTop: "1px solid var(--border)", paddingTop: 8 }}>
+          {ticket.progress.map((row, index) => (
+            <div key={index} className="t-xs t-subtle">
+              {kst(row.created_at)} · {row.kind} · {row.detail}
+            </div>
+          ))}
+        </div>
+      )}
+    </details>
   );
 }

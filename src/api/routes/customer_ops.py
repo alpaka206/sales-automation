@@ -18,9 +18,11 @@ from ...agents.stage_sync import _retire_superseded_drafts, customer_state_for
 from ...common.config import settings
 from ...common.subjects import strip_reply_prefixes
 from ...db.models import (
+    Client,
     Contact,
     ContractRecord,
     Conversation,
+    ConversationProgress,
     CustomerInteraction,
     CustomerProfile,
     Message,
@@ -600,6 +602,58 @@ def _customer_context(contact_id: int) -> dict | None:
                 .all()
             )
 
+        # **티켓 단위로 묶습니다.** 예전에는 이 화면이 그 사람의 모든 메일을 한 덩어리로
+        # 섞어 시간순으로만 보여 줬습니다. 문의가 둘 이상인 고객에서는 어느 메일이 어느
+        # 건인지 알 수 없었고, 타임라인 항목에 `conversation_id` 조차 안 담겨서 화면이
+        # 나누고 싶어도 재료가 없었습니다 (2026-08-19 운영자 지시).
+        progress_rows = (
+            session.execute(
+                select(ConversationProgress)
+                .where(ConversationProgress.conversation_id.in_(conv_ids))
+                .order_by(ConversationProgress.created_at)
+            )
+            .scalars()
+            .all()
+            if conv_ids
+            else []
+        )
+        by_conversation: dict[int, list] = {cid: [] for cid in conv_ids}
+        for message in messages:
+            by_conversation.setdefault(message.conversation_id, []).append(message)
+        progress_by_conversation: dict[int, list] = {cid: [] for cid in conv_ids}
+        for row in progress_rows:
+            progress_by_conversation.setdefault(row.conversation_id, []).append(row)
+
+        tickets = [
+            {
+                "conversation": conversation,
+                # 오래된 것부터. 티켓 안에서는 대화 순서가 곧 읽는 순서입니다 — 목록 전체는
+                # 최신 티켓이 위지만, 한 티켓 안에서 답장이 문의보다 위에 있으면 안 됩니다.
+                "messages": sorted(
+                    by_conversation.get(conversation.id, []),
+                    key=lambda m: m.sent_at or m.created_at or datetime.min,
+                ),
+                "progress": progress_by_conversation.get(conversation.id, []),
+            }
+            for conversation in conversations
+        ]
+
+        # 수주 고객. 정식 연결(`clients.contact_id`)이 먼저지만 운영 DB 에서 그 값이 거의
+        # 비어 있어(고객 추가 폼이 안 받습니다) Client ID 로도 찾습니다 — 문의와 수주 고객이
+        # 같은 번호대를 씁니다(`conversations.sheet_client_id` ↔ `clients.client_id`).
+        client_ids = {
+            cid
+            for cid in [contact.sheet_client_id, *(c.sheet_client_id for c in conversations)]
+            if cid
+        }
+        won_client = session.execute(
+            select(Client).where(Client.contact_id == contact.id)
+        ).scalars().first()
+        if won_client is None and client_ids:
+            won_client = session.execute(
+                select(Client).where(Client.client_id.in_(client_ids))
+            ).scalars().first()
+
         timeline = [
             {
                 "channel": m.channel,
@@ -634,6 +688,11 @@ def _customer_context(contact_id: int) -> dict | None:
             "contact": contact,
             "profile": profile,
             "conversations": conversations,
+            "tickets": tickets,
+            "client_ids": sorted(client_ids),
+            "won_client": won_client,
+            "won_contracts": list(won_client.contracts) if won_client else [],
+            "interactions": interactions,
             "contracts": contracts,
             "timeline": timeline[:100],
             "same_company": same_company,

@@ -206,7 +206,22 @@ async def error_capture_middleware(request: Request, call_next):
     Skips static assets, favicon, healthz, and 401s (the normal "log in" gate)
     so the viewer surfaces real problems, not auth-redirect noise.
     """
-    response = await call_next(request)
+    try:
+        response = await call_next(request)
+    except Exception as exc:
+        # **잡히지 않은 예외는 여기서만 보입니다.** 아래 기록은 「응답을 본 뒤」에 도는데,
+        # 예외가 나면 응답이 없어 그 줄에 영영 못 갑니다 — 화면에는 Starlette 의 기본
+        # 500(text/plain "Internal Server Error")만 뜨고 `/logs` 는 조용했습니다. 이유를
+        # 물으려면 배포 플랫폼의 런타임 로그를 열어야 했고, 그건 콘솔에서 못 봅니다.
+        from ..common.log_buffer import record
+
+        record(
+            "ERROR",
+            f"{request.method} {request.url.path}",
+            f"처리 중 예외: {type(exc).__name__}: {exc}"[:500],
+            kind="http",
+        )
+        raise
     try:
         status = response.status_code
         path = request.url.path
