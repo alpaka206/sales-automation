@@ -839,6 +839,69 @@ async def message_edit(
 _MAX_ROLE_DESC_LEN = 4000
 
 
+@router.post("/contacts/history-digest")
+async def contact_history_digest(limit: int = 40):
+    """이미 가져다 둔 기록에 **한 줄 요약만** 채웁니다 — 허브스팟에 다시 다녀오지 않습니다.
+
+    옛 기록을 끌어올 때는 요약을 안 만들었습니다. 그 값들은 이미 우리 DB 에 본문째로 있고,
+    필요한 것은 줄이는 일뿐이라 밖으로 나갈 이유가 없습니다(운영자 지적).
+
+    한 번에 ``limit`` 건씩 하고 남은 수를 돌려줍니다. 다 될 때까지 다시 부르면 됩니다 —
+    진행 위치는 따로 기록하지 않습니다. **`context` 가 비어 있다는 것이 곧 「아직 안 했다」**
+    이고, 그것이 이어하기입니다.
+
+    이미 값이 있는 행은 건드리지 않습니다. 그 칸은 사람이 적을 수도 있는 자리라, 덮어쓰면
+    운영자가 쓴 메모가 모델 한 줄로 바뀝니다.
+
+    짧은 기록은 건너뜁니다(`_one_line` 이 그 판단을 합니다). 세 줄짜리 메모를 한 줄로
+    줄여 봐야 같은 말이고, 그 왕복만 늘어납니다.
+    """
+    from sqlalchemy import func as sa_func
+
+    from .customer_ops import _one_line
+
+    with SessionLocal() as session:
+        rows = (
+            session.execute(
+                select(CustomerInteraction)
+                .where(
+                    CustomerInteraction.context.is_(None),
+                    sa_func.length(CustomerInteraction.summary) >= 80,
+                )
+                .order_by(CustomerInteraction.happened_at.desc())
+                .limit(max(1, min(limit, 200)))
+            )
+            .scalars()
+            .all()
+        )
+        targets = [(row.id, row.direction, row.subject, row.summary) for row in rows]
+        remaining = session.scalar(
+            select(sa_func.count(CustomerInteraction.id)).where(
+                CustomerInteraction.context.is_(None),
+                sa_func.length(CustomerInteraction.summary) >= 80,
+            )
+        )
+
+    filled = 0
+    digests: dict[int, str] = {}
+    for row_id, direction, subject, body in targets:
+        line = await asyncio.to_thread(_one_line, direction or "", subject, body)
+        if line:
+            digests[row_id] = line
+    if digests:
+        with SessionLocal() as session:
+            for row_id, line in digests.items():
+                row = session.get(CustomerInteraction, row_id)
+                if row is not None and row.context is None:
+                    row.context = line
+                    filled += 1
+            session.commit()
+    logger.info("기록 요약: %d건 시도, %d건 채움, 남은 %d건", len(targets), filled, remaining or 0)
+    return JSONResponse(
+        {"processed": len(targets), "filled": filled, "remaining": max(0, (remaining or 0) - len(targets))}
+    )
+
+
 @router.post("/contacts/{contact_id}/hubspot-record")
 async def contact_hubspot_record_edit(contact_id: int, request: Request):
     """티켓 세부 내역의 「플랜 정보」를 허브스팟 연락처에 되쓴다.
