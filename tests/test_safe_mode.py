@@ -194,6 +194,15 @@ def test_hubspot_record_write_blocked(safe):
         update_record_fields("123", {"user_seq": "184920"})
 
 
+def test_hubspot_contact_company_write_blocked(safe):
+    """연락처 정보의 회사 이름도 허브스팟에 씁니다 (2026-08-19). 새 외부 쓰기 경로이므로
+    여기 한 줄이 같이 늘어납니다 — 그것이 이 파일의 규칙입니다."""
+    from src.integrations.hubspot import HubSpotClient
+
+    with pytest.raises(ExternalWriteBlocked):
+        HubSpotClient().update_contact_company_sync("123", "롯데지알에스")
+
+
 def test_hubspot_timeline_email_blocked(safe):
     from src.integrations.hubspot import HubSpotClient
 

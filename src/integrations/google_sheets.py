@@ -333,6 +333,58 @@ _REGISTRY_TAB = "고객 기본 정보"
 _REGISTRY_COLUMNS = {"company": 3, "company_type": 5, "country": 6}
 
 
+def update_registry_company(client_id: int | None, company: str | None) -> bool:
+    """고객 기본 정보의 **고객사 이름**을 고칩니다. 워크북에서 그 이름이 사는 유일한 곳입니다.
+
+    Inbound DB 의 고객사 칸은 이 탭을 Client ID 로 조회하는 수식이라(`_write_registry_formulas`),
+    여기 한 번 고치면 그 문의 행도 따라 바뀝니다 — 반대로 Inbound DB 쪽을 값으로 덮으면 그
+    행만 수식이 끊깁니다.
+
+    이 탭에서 우리가 쓰는 칸은 C(고객사)뿐입니다. 기업 종류·국가는 문의가 처음 들어올 때
+    한 번 채우고 그 뒤로는 운영자 것이며, Website URL 과 최초 연락일은 애초에 시트가
+    원본입니다. 그래서 **한 칸만** 씁니다.
+    """
+    if not client_id or not (company or "").strip() or not writes_enabled():
+        return False
+    try:
+        service = _build_service()
+        spreadsheet_id = settings.GOOGLE_SHEETS_SPREADSHEET_ID.strip()
+        ids = (
+            service.spreadsheets()
+            .values()
+            .get(spreadsheetId=spreadsheet_id, range=f"'{_REGISTRY_TAB}'!A2:A")
+            .execute()
+            .get("values")
+            or []
+        )
+        target = str(client_id).replace(",", "").strip()
+        row = next(
+            (
+                index + 2  # A2 부터 읽었으므로 첫 행이 2행입니다.
+                for index, value in enumerate(ids)
+                if value and str(value[0]).replace(",", "").strip() == target
+            ),
+            None,
+        )
+        if row is None:
+            logger.info("고객 기본 정보에 Client ID %s 행이 없어 이름을 못 고쳤습니다.", client_id)
+            return False
+        service.spreadsheets().values().update(
+            spreadsheetId=spreadsheet_id,
+            range=f"'{_REGISTRY_TAB}'!C{row}",
+            valueInputOption="RAW",  # 글자입니다 — USER_ENTERED 로 보내면 수식으로 읽힐 수 있습니다.
+            body={"values": [[company.strip()]]},
+        ).execute()
+        logger.info("고객 기본 정보 %s행의 고객사를 고쳤습니다 (client_id=%s).", row, client_id)
+        return True
+    except Exception as exc:
+        logger.warning(
+            "고객 기본 정보 이름 수정 실패 (client_id=%s): %s: %s",
+            client_id, type(exc).__name__, exc, exc_info=True,
+        )
+        return False
+
+
 def _ensure_registry_row(service, record: dict) -> None:
     """그 Client ID 의 회사 행이 고객 기본 정보에 없으면 만든다.
 

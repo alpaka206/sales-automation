@@ -210,7 +210,9 @@ export function MessageDetail() {
     const fields = Object.fromEntries(new FormData(event.currentTarget) as never) as Record<string, string>;
     await postForm(`/contacts/${data?.contact?.id}/hubspot-record`, fields);
     setEditingRecord(null);
-    setNotice({ title: "허브스팟에 저장했습니다", body: null });
+    // 「어디에」는 버튼이 아니라 결과가 말합니다 — 누를 때 알아야 할 것은 「저장한다」
+    // 하나뿐이고, 어디에 갔는지는 누른 뒤에 알면 됩니다.
+    setNotice({ title: "저장했습니다 (콘솔 · 허브스팟)", body: null });
     await queryClient.invalidateQueries({ queryKey: ["hubspot-record", data?.contact?.id] });
   });
 
@@ -262,6 +264,11 @@ export function MessageDetail() {
   // 보여 줄 것이 없고(있어야 「문의 접수」한 줄), 그 자리에 고객 요청사항만 둡니다.
   // `initial` 은 모델 기본값 — 단계가 아직 안 정해진 것이라 New 와 같이 봅니다.
   const afterNew = !!ticket.stage && !["new", "initial"].includes(ticket.stage);
+  // **「문의 접수」는 처리 경과가 아닙니다.** 무엇을 요청했는지는 바로 위 요청사항 카드가,
+  // 언제 왔는지는 왼쪽 문의 말풍선이 이미 말합니다. 그 줄 하나만 남는 티켓(=New)에서는
+  // 카드 자체가 안 뜹니다 — 온 것밖에 없는데 「처리 경과」라는 이름의 카드를 하나 더
+  // 세우는 셈이었습니다(2026-08-19 운영자 지시).
+  const happened = data.progress.filter((entry) => entry.kind !== "inbound");
   const canTranslate = !!msg?.target_language && msg.target_language !== "ko";
   // Won 과 Lost 에만 있습니다. 목록도 「이 단계에 고르개가 붙는가」도 서버가 정합니다 —
   // 보드 카드와 같은 출처라 두 화면이 다른 값을 내놓을 수 없습니다.
@@ -566,7 +573,7 @@ export function MessageDetail() {
             </div>
           )}
 
-          {(afterNew || data.progress.length > 0) && (data.summary || data.progress.length > 0) && (
+          {(happened.length > 0 || (afterNew && data.summary)) && (
             <div className="card">
               <div className="section-label" style={{ marginBottom: 12 }}>처리 경과</div>
               {/* 요약은 대화가 오간 뒤에야 뜻이 있습니다. New 에서는 문의 한 통을 요약한
@@ -582,9 +589,9 @@ export function MessageDetail() {
                   </div>
                 </details>
               )}
-              {data.progress.length > 0 && (
+              {happened.length > 0 && (
                 <ul className="progress-log">
-                  {data.progress.map((p, index) => (
+                  {happened.map((p, index) => (
                     <li key={index} className="progress-log__item">
                       <span className="progress-log__time tnum">{kst(p.created_at)}</span>
                       <span className="progress-log__detail">
@@ -718,7 +725,7 @@ export function MessageDetail() {
                               style={{ marginTop: 12, width: "100%" }}
                               disabled={savingRecord} aria-busy={savingRecord || undefined}>
                         {savingRecord ? <><span className="spinner" role="status" /> 저장 중</>
-                                      : <><Icon name="check" size={14} /> 허브스팟에 저장</>}
+                                      : <><Icon name="check" size={14} /> 저장</>}
                       </button>
                     )}
                   </form>
@@ -801,7 +808,7 @@ export function MessageDetail() {
                             placeholder="이 고객·회사가 어떤 일을 하는지 (대화하며 알게 된 내용 포함). gmail·미확인이어도 입력해 저장됩니다." />
                   <button className="btn btn--subtle btn--sm" type="submit"
                           style={{ marginTop: 10, width: "100%" }}>
-                    <Icon name="check" size={14} /> 연락처 저장
+                    <Icon name="check" size={14} /> 저장
                   </button>
                 </form>
               )}

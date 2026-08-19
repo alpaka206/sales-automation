@@ -844,12 +844,46 @@ async def contact_hubspot_record_edit(contact_id: int, request: Request):
     except Exception as exc:  # noqa: BLE001 - 화면에 이유를 적어 주려고 넓게 잡는다
         logger.warning("HubSpot record write failed for contact %s: %s", contact_id, exc)
         return JSONResponse({"error": "허브스팟에 저장하지 못했습니다"}, status_code=502)
+
+    # **우리 쪽에 자리가 있는 값은 우리도 씁니다** (2026-08-19 운영자 지시: 「저장하면
+    # 저장해야 할 곳에 다 저장한다」). 플랜과 user seq 는 고객 프로필에 같은 이름의 칸이
+    # 있고 리드 히스토리·인사이트가 그것을 읽습니다 — 허브스팟에만 쓰면 두 화면이 같은
+    # 고객을 다른 플랜으로 부릅니다. 나머지 셋(plan tier·space seq·plan seq)은 우리
+    # 스키마에 자리가 없어 허브스팟이 유일한 원본입니다. 없는 칸을 만들지는 않습니다 —
+    # 읽는 화면이 없는 열은 다음 사람에게 「왜 비어 있지」만 남깁니다.
+    local = {"plan": "current_plan", "user_seq": "user_seq"}
+    touched = {local[key]: values[key].strip() for key in local if key in values}
+    if touched:
+        with SessionLocal() as session:
+            profile = session.get(CustomerProfile, contact_id) or CustomerProfile(
+                contact_id=contact_id
+            )
+            for column, value in touched.items():
+                setattr(profile, column, value or None)
+            session.add(profile)
+            session.commit()
     return JSONResponse({"ok": True})
 
 
 @router.post("/contacts/{contact_id}/edit")
 async def contact_edit(contact_id: int, company: str = Form(""), role_description: str = Form("")):
-    """Save operator edits to a contact's company + "what they do" note.
+    """연락처 저장 — **그 값이 사는 곳 전부에** 씁니다 (2026-08-19 운영자 지시).
+
+    예전에는 우리 DB 한 곳이었습니다. 같은 회사 이름이 허브스팟과 워크북에는 옛 값으로
+    남아, 세 화면이 같은 사람을 다른 회사로 부르는 상태가 됐습니다.
+
+    회사 이름이 사는 곳은 셋입니다:
+
+      * `contacts.company` — 콘솔이 읽는 값
+      * 허브스팟 연락처의 `company` 속성 — 영업이 저쪽에서 보는 값
+      * 워크북 「고객 기본 정보」의 고객사 열 — Inbound DB 가 Client ID 로 조회하는 원본
+        (그래서 그 탭 한 곳만 고치면 문의 행이 따라옵니다)
+
+    「무엇을 하는 회사인가」(`role_description`)는 우리에게만 있는 칸이라 DB 뿐입니다.
+
+    **바깥 두 곳이 실패해도 저장은 성공입니다.** 운영자가 방금 친 글자를 잃는 것보다
+    나중에 다시 맞추는 편이 낫고, 실패는 로그와 응답에 남습니다. 안전 모드에서는 바깥
+    쓰기가 애초에 막히므로(`guard_external_write`) 로컬만 바뀝니다.
 
     Works even for gmail/unverified senders — the operator fills these in over the
     course of a conversation, and they persist to the DB.
@@ -868,7 +902,36 @@ async def contact_edit(contact_id: int, company: str = Form(""), role_descriptio
             )
         c.company = company.strip() or None
         c.role_description = role_description.strip() or None
+        hubspot_contact_id = c.hubspot_contact_id
+        # 워크북 행을 찾는 자연키. 문의에 붙은 값이 먼저고, 없으면 연락처에 박힌 값입니다 —
+        # 단계 동기화가 쓰는 것과 같은 순서입니다.
+        client_id = c.sheet_client_id or next(
+            (conv.sheet_client_id for conv in c.conversations if conv.sheet_client_id), None
+        )
         session.commit()
+
+    saved_company = company.strip()
+    elsewhere: list[str] = []
+    if saved_company and hubspot_contact_id:
+        try:
+            from ...integrations.hubspot import HubSpotClient
+
+            await asyncio.to_thread(
+                HubSpotClient().update_contact_company_sync, hubspot_contact_id, saved_company
+            )
+            elsewhere.append("허브스팟")
+        except Exception as exc:  # noqa: BLE001 - 바깥이 실패해도 저장은 끝났습니다
+            logger.warning("허브스팟 회사 이름 저장 실패 (contact=%s): %s", contact_id, exc)
+    if saved_company and client_id:
+        try:
+            from ...integrations.google_sheets import update_registry_company
+
+            if await asyncio.to_thread(update_registry_company, client_id, saved_company):
+                elsewhere.append("워크북")
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("워크북 회사 이름 저장 실패 (client_id=%s): %s", client_id, exc)
+
+    where = " · ".join(["콘솔", *elsewhere])
     return HTMLResponse(
-        '<div class="text-green-600 text-sm font-medium">연락처 정보 저장 완료</div>'
+        f'<div class="text-green-600 text-sm font-medium">저장 완료 ({where})</div>'
     )

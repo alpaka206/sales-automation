@@ -351,6 +351,26 @@ class HubSpotClient:
         r.raise_for_status()
         logger.info("Updated inbound_status=%s for contact %s", status, contact_id)
 
+    def update_contact_company_sync(self, contact_id: str, company: str) -> None:
+        """연락처의 회사 이름을 허브스팟에도 씁니다.
+
+        콘솔의 「연락처 정보」에서 고친 회사 이름이 우리 DB 에만 남던 것을 고칩니다 —
+        같은 사람의 회사가 두 화면에서 다르면 어느 쪽이 맞는지 알 방법이 없습니다.
+
+        **회사 이름 한 칸만** 씁니다. 다른 속성은 이 경로로 못 지나가므로, 콘솔에 닿은
+        누구든 `email` 이나 `lifecyclestage` 를 덮어쓰는 일은 생기지 않습니다(플랜 다섯
+        칸이 `RECORD_FIELDS.editable` 로 울타리를 치는 것과 같은 이유입니다).
+        """
+        guard_external_write("hubspot:update_contact_company")
+        headers = {"Authorization": f"Bearer {self.token}"}
+        with httpx.Client(headers=headers, timeout=30.0) as client:
+            r = client.patch(
+                f"{BASE_URL}/crm/v3/objects/contacts/{contact_id}",
+                json={"properties": {"company": company}},
+            )
+        r.raise_for_status()
+        logger.info("Updated company for contact %s", contact_id)
+
     def get_contact_sync(self, id_or_email: str) -> ContactDTO:
         """Synchronous version of get_contact."""
         params = {"properties": _contact_properties()}
