@@ -321,6 +321,12 @@ def _customer_rows() -> list[dict]:
             func.max(Conversation.last_incoming_at).label("incoming"),
             func.max(Conversation.last_outgoing_at).label("outgoing"),
             func.max(Conversation.created_at).label("created"),
+            # **Client ID 도 같이.** 수주 DB·워크북·시트가 전부 이 번호로 엮여 있어서,
+            # 리드 히스토리에서 그 번호가 안 보이면 같은 고객을 다른 화면에서 찾을 때
+            # 회사 이름으로 눈대중해야 합니다(운영자 지시). 문의마다 붙는 값이라 한
+            # 사람에게 여럿일 수 있고, 그때는 **가장 큰 = 가장 최근에 받은** 번호를
+            # 목록에 씁니다. 문의별 번호는 상세 화면이 티켓마다 그대로 보여 줍니다.
+            func.max(Conversation.sheet_client_id).label("client_id"),
         )
         .group_by(Conversation.contact_id)
         .subquery()
@@ -333,7 +339,7 @@ def _customer_rows() -> list[dict]:
         ).all()
 
     rows: list[dict] = []
-    for contact, profile, _cid, conversations, incoming, outgoing, created in loaded:
+    for contact, profile, _cid, conversations, incoming, outgoing, created, client_id in loaded:
         # The LATEST of everything that happened, not the first non-null. `incoming or
         # outgoing` returned the customer's last message even when our reply came after
         # it, so a thread answered this morning reported the inquiry's date and sorted
@@ -354,6 +360,9 @@ def _customer_rows() -> list[dict]:
                 "next_action_at": profile.next_action_at if profile else None,
                 "last_activity": last_activity,
                 "conversation_count": conversations or 0,
+                # 연락처에 박힌 값이 먼저입니다 — 문의가 하나도 안 남은 사람도(옛 티켓이
+                # 정리된 경우) 번호는 그대로 갖고 있습니다.
+                "client_id": contact.sheet_client_id or client_id,
             }
         )
     rows.sort(key=lambda row: row["last_activity"] or datetime.min, reverse=True)
@@ -1259,37 +1268,62 @@ async def internal_contact_history_backfill(limit: int = 20, per_type: int = 100
     """
     from sqlalchemy import func
 
-    with SessionLocal() as session:
-        candidates = (
-            session.execute(
-                select(Contact.id)
-                .outerjoin(CustomerProfile, CustomerProfile.contact_id == Contact.id)
-                .where(
+    try:
+        with SessionLocal() as session:
+            # **Concluded 만 남은 사람은 건너뜁니다** (2026-08-19 운영자 지시). 전체 321건
+            # 중 202건이 그 단계이고, 끝난 문의의 옛 메일을 다 끌어오는 것은 시간도 API
+            # 호출도 가장 많이 쓰면서 볼 일은 가장 적습니다. 한 사람에게 Concluded 가
+            # 아닌 티켓이 하나라도 있으면 대상입니다 — 그 사람의 히스토리는 통째로
+            # 이어져야 하니까요.
+            wanted = (
+                select(Conversation.contact_id)
+                .where(Conversation.stage != "closed")
+                .distinct()
+                .scalar_subquery()
+            )
+            candidates = (
+                session.execute(
+                    select(Contact.id)
+                    .outerjoin(CustomerProfile, CustomerProfile.contact_id == Contact.id)
+                    .where(
+                        Contact.hubspot_contact_id.isnot(None),
+                        Contact.hubspot_contact_id != "",
+                        Contact.id.in_(wanted),
+                    )
+                    # 아직 한 번도 안 한 사람 먼저, 그다음 오래된 순.
+                    .order_by(
+                        CustomerProfile.last_synced_at.is_(None).desc(),
+                        CustomerProfile.last_synced_at.asc(),
+                        Contact.id.asc(),
+                    )
+                    .limit(max(1, min(limit, 200)))
+                )
+                .scalars()
+                .all()
+            )
+            total = session.scalar(
+                select(func.count(Contact.id)).where(
                     Contact.hubspot_contact_id.isnot(None),
                     Contact.hubspot_contact_id != "",
+                    Contact.id.in_(wanted),
                 )
-                # 아직 한 번도 안 한 사람 먼저, 그다음 오래된 순.
-                .order_by(CustomerProfile.last_synced_at.is_(None).desc(),
-                          CustomerProfile.last_synced_at.asc())
-                .limit(max(1, min(limit, 200)))
             )
-            .scalars()
-            .all()
-        )
-        total = session.scalar(
-            select(func.count(Contact.id)).where(
-                Contact.hubspot_contact_id.isnot(None), Contact.hubspot_contact_id != ""
-            )
-        )
+    except Exception as exc:
+        # **왜 실패했는지 돌려줍니다.** 핸들러가 던진 예외는 로그 버퍼를 건너뛰므로
+        # (`/logs` 는 미들웨어가 본 응답만 적습니다) 500 만 보고는 아무것도 알 수 없습니다.
+        logger.warning("과거 기록 이관 대상 조회 실패", exc_info=True)
+        raise HTTPException(
+            status_code=500, detail=f"대상 조회 실패: {type(exc).__name__}: {exc}"
+        ) from exc
 
     inserted = 0
-    failed: list[int] = []
+    failed: list[str] = []
     for contact_id in candidates:
         try:
             inserted += await asyncio.to_thread(_sync_hubspot, contact_id, per_type)
-        except Exception:
+        except Exception as exc:
             logger.warning("과거 기록 이관 실패 (contact=%s)", contact_id, exc_info=True)
-            failed.append(contact_id)
+            failed.append(f"{contact_id}: {type(exc).__name__}: {exc}"[:200])
     logger.info(
         "과거 기록 이관: 연락처 %d명 처리, 기록 %d건 추가, 실패 %d명",
         len(candidates), inserted, len(failed),
@@ -1298,7 +1332,8 @@ async def internal_contact_history_backfill(limit: int = 20, per_type: int = 100
         "processed": len(candidates),
         "inserted": inserted,
         "failed": failed,
-        "contacts_with_hubspot_id": total,
+        "remaining_estimate": max(0, (total or 0) - len(candidates)),
+        "contacts_in_scope": total,
     }
 
 

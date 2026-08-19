@@ -259,6 +259,9 @@ def ui_customers(stage: str = "", q: str = ""):
                 "next_action_at": row["next_action_at"],
                 "last_activity": row["last_activity"],
                 "conversation_count": row["conversation_count"],
+                # 수주 DB·워크북·시트가 전부 이 번호로 엮입니다. 목록에 없으면 같은 고객을
+                # 다른 화면에서 회사 이름으로 찾아야 합니다(2026-08-19 운영자 지시).
+                "client_id": row["client_id"],
             }
             for row in rows
         ],

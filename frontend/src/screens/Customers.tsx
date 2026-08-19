@@ -17,6 +17,7 @@ type Row = {
   next_action_at: string | null;
   last_activity: string;
   conversation_count: number;
+  client_id: number | null;
 };
 type CustomersData = {
   rows: Row[];
@@ -81,7 +82,17 @@ export function Customers() {
                   <Link to={`/customers/${row.contact_id}`}>
                     <strong>{row.company || row.name}</strong>
                   </Link>
-                  <div className="t-xs t-subtle">{row.name} · {row.email || "-"}</div>
+                  <div className="t-xs t-subtle">
+                    {/* Client ID 를 이름 옆에 답니다. 수주 DB·워크북·시트가 전부 이 번호로
+                        엮여 있어서, 이 화면에만 없으면 같은 고객을 다른 화면에서 회사
+                        이름으로 눈대중해 찾게 됩니다(2026-08-19 운영자 지시). */}
+                    {row.client_id != null && (
+                      <span className="tnum" style={{ marginRight: 6, color: "var(--text)" }}>
+                        #{row.client_id}
+                      </span>
+                    )}
+                    {row.name} · {row.email || "-"}
+                  </div>
                 </>
               ),
             },
