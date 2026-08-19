@@ -90,8 +90,11 @@ def delete_conversation(conversation_id: int, ticket_id: str) -> int:
     from ..db.models import ContractRecord, ConversationProgress, CustomerInteraction
 
     with SessionLocal() as session:
-        if session.get(Conversation, conversation_id) is None:
+        conversation = session.get(Conversation, conversation_id)
+        if conversation is None:
             return 0
+        # 워크북 행을 찾는 자연키. 세션이 닫히면 못 읽으므로 지우기 전에 들고 나옵니다.
+        sheet_client_id = conversation.sheet_client_id
         removed = session.query(Message).filter(
             Message.conversation_id == conversation_id
         ).count()
@@ -115,6 +118,13 @@ def delete_conversation(conversation_id: int, ticket_id: str) -> int:
         "Deleted conversation %s (HubSpot ticket %s is gone); %d message(s) removed.",
         conversation_id, ticket_id, removed,
     )
+    # **워크북에서도 같이 사라집니다.** 안 그러면 같은 문의를 콘솔은 없다고 하고 시트는
+    # 있다고 해서 두 화면의 건수가 영영 안 맞습니다. 시트 쪽이 실패해도 로컬 삭제는
+    # 되돌리지 않습니다 — 이 함수는 「우리 것이 아니다」를 확인한 뒤에 불립니다.
+    if sheet_client_id:
+        from ..integrations.google_sheets import delete_inbound_row
+
+        delete_inbound_row(sheet_client_id)
     return removed
 
 

@@ -683,6 +683,81 @@ def _row_for_client_id(service, tab: str, header: _SheetHeader, client_id: int) 
     )
 
 
+def _sheet_id(service, tab: str) -> int | None:
+    """탭 이름 -> gid. 행 삭제는 A1 표기가 아니라 이 번호로만 됩니다."""
+    meta = (
+        service.spreadsheets()
+        .get(
+            spreadsheetId=settings.GOOGLE_SHEETS_SPREADSHEET_ID.strip(),
+            fields="sheets(properties(sheetId,title))",
+        )
+        .execute()
+    )
+    for sheet in meta.get("sheets") or ():
+        properties = sheet.get("properties") or {}
+        if str(properties.get("title") or "").strip() == tab:
+            return properties.get("sheetId")
+    return None
+
+
+def delete_inbound_row(client_id: int | None) -> bool:
+    """그 Client ID 의 Inbound DB 행을 **지웁니다**. 콘솔에서 사라진 문의는 시트에서도 사라집니다.
+
+    부르는 곳은 `hubspot_reconcile.delete_conversation` 한 곳입니다 — 티켓이 허브스팟에서
+    지워졌거나 우리 파이프라인 밖으로 옮겨져 그 문의가 우리 것이 아니게 된 두 경우. 안 지우면
+    같은 문의를 콘솔은 없다고 하고 시트는 있다고 해서, 두 화면의 건수가 영영 안 맞습니다.
+
+    **줄을 비우지 않고 지웁니다.** 비우면 가운데에 빈 줄이 쌓이고(append 는 늘 맨 아래로
+    갑니다), 문의 월·분기처럼 배열 수식이 채우는 칸은 애초에 값을 지울 수 없습니다. 줄을
+    지우면 배열이 알아서 다시 계산합니다. 저장된 행 번호(`Conversation.sheet_inbound_row`)가
+    아래로 밀리는 것은 괜찮습니다 — 그 값은 「이미 붙였다」는 표시로만 쓰이고, 실제 쓰기는
+    매번 Client ID 로 행을 다시 찾습니다.
+
+    행이 없으면 조용히 False 입니다. 이관 전 문의이거나 append 가 아직 안 된 문의라 지울
+    것이 없는 것이지, 실패가 아닙니다.
+    """
+    if not client_id or not writes_enabled():
+        return False
+    try:
+        service = _build_service()
+        tab = settings.GOOGLE_SHEETS_INBOUND_TAB.strip() or "Inbound DB"
+        header = _headers(service, tab)
+        row = _row_for_client_id(service, tab, header, client_id)
+        if row is None:
+            logger.info("Inbound DB 에 Client ID %s 행이 없어 지울 것이 없습니다.", client_id)
+            return False
+        sheet_id = _sheet_id(service, tab)
+        if sheet_id is None:
+            raise GoogleSheetsError(f"워크북에서 '{tab}' 탭을 못 찾았습니다.")
+        service.spreadsheets().batchUpdate(
+            spreadsheetId=settings.GOOGLE_SHEETS_SPREADSHEET_ID.strip(),
+            body={
+                "requests": [
+                    {
+                        "deleteDimension": {
+                            "range": {
+                                "sheetId": sheet_id,
+                                "dimension": "ROWS",
+                                # 0-기반 반열림 구간입니다. row 는 1-기반 행 번호라 그대로
+                                # 넣으면 **다음 행**이 지워집니다.
+                                "startIndex": row - 1,
+                                "endIndex": row,
+                            }
+                        }
+                    }
+                ]
+            },
+        ).execute()
+        logger.info("Inbound DB %s행(Client ID %s)을 지웠습니다.", row, client_id)
+        return True
+    except Exception as exc:
+        logger.warning(
+            "Inbound DB 행 삭제 실패 (client_id=%s): %s: %s",
+            client_id, type(exc).__name__, exc, exc_info=True,
+        )
+        return False
+
+
 def update_inbound_stage(client_id: int | None, stage: str, pipeline: str | None = None) -> bool:
     """Find the stable Client ID and update only its current stage cells."""
     if not client_id or not writes_enabled():

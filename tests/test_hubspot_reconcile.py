@@ -185,6 +185,44 @@ def test_a_deletion_webhook_removes_the_thread(monkeypatch, waiting_draft):
         assert session.get(Conversation, conversation_id) is None
 
 
+def test_a_thread_that_leaves_takes_its_workbook_row_with_it(monkeypatch, waiting_draft):
+    """콘솔에서 사라진 문의는 시트에서도 사라져야 합니다 (2026-08-19, 운영자 지시).
+
+    안 그러면 같은 문의를 콘솔은 없다고 하고 워크북은 있다고 해서, 두 화면의 건수가 영영
+    안 맞습니다 — 그 어긋남은 아무도 고칠 수 없습니다. 시트에서 행을 찾는 자연키는
+    `sheet_client_id` 이고, 대화를 지우면 그 값도 같이 사라지므로 **지우기 전에** 들고
+    나와야 합니다. 그 순서가 이 검사의 요점입니다.
+    """
+    from src.agents import hubspot_reconcile
+    from src.integrations import google_sheets
+
+    _contact_id, conversation_id, _message_id = waiting_draft
+    with SessionLocal() as session:
+        conversation = session.get(Conversation, conversation_id)
+        conversation.sheet_client_id = 1234
+        session.commit()
+
+    asked: list[int] = []
+    monkeypatch.setattr(google_sheets, "delete_inbound_row", lambda cid: asked.append(cid) or True)
+
+    hubspot_reconcile.delete_conversation(conversation_id, "99999999")
+    assert asked == [1234]
+
+
+def test_a_thread_with_no_workbook_row_asks_the_sheet_for_nothing(monkeypatch, waiting_draft):
+    """워크북에 붙은 적 없는 문의(`sheet_client_id` 가 비어 있음)는 시트를 부르지 않습니다.
+    Client ID 없이 부르면 그 호출은 아무 행도 못 찾고 실패 로그만 남깁니다."""
+    from src.agents import hubspot_reconcile
+    from src.integrations import google_sheets
+
+    _contact_id, conversation_id, _message_id = waiting_draft
+    calls: list[int] = []
+    monkeypatch.setattr(google_sheets, "delete_inbound_row", lambda cid: calls.append(cid) or True)
+
+    hubspot_reconcile.delete_conversation(conversation_id, "99999999")
+    assert calls == []
+
+
 def test_a_deleted_ticket_is_never_queued_as_inbound_work():
     """Fetching a ticket that no longer exists is not work. Mapping the subscription type
     would have enqueued exactly that."""
