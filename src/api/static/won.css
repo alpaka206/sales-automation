@@ -51,7 +51,12 @@
 /* KPI */
 /* 두 칸입니다: 활성 고객 | 월별 MRR(넓게). 갱신 임박은 이 줄 아래로 내려갔습니다 —
    매일 보는 숫자가 아니라 가끔 확인하는 목록이고, 그 자리를 MRR 이 가져갔습니다. */
-.won .kpi-row {display:grid;grid-template-columns:1fr 2.1fr;gap:14px;margin-top:22px;}
+/* 활성 고객 + 지표 카드 둘. 지표 둘의 합(2.1fr)은 토글 한 장이던 시절의 폭 그대로라
+   왼쪽 카드의 자리가 안 움직입니다. */
+.won .kpi-row {display:grid;grid-template-columns:1fr 1.05fr 1.05fr;gap:14px;margin-top:22px;}
+/* 환율은 두 카드 바깥에 한 줄. 카드마다 넣으면 같은 문장이 둘이 됩니다. */
+.won .kpi-fx {display:flex;justify-content:flex-end;}
+.won .kpi-fx .fx-row {margin-top:6px;}
 .won .kpi-head {display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;}
 /* 지표·통화 고르개. 링크가 아니라 토글이라 chip 을 안 씁니다 — 눌러도 화면이 안 바뀌는
    회색 알약이 옆에 있으면 어느 쪽이 눌리는 것인지 알 수 없습니다. */
@@ -346,7 +351,9 @@
 .won .hint {margin-top:22px;font-size:12.5px;color:var(--faint);border-top:1px dashed var(--line);padding-top:12px;}
 .won .hidden {display:none !important;}
 @media (max-width:1240px) {
-.won .kpi-row {grid-template-columns:1fr;}
+/* 카드가 셋이 된 뒤로 한 줄 세우기는 세로가 너무 깁니다. 활성 고객이 위를 다 쓰고
+   (`.kpi.wide` 가 원래 그러라고 있던 규칙입니다) 지표 둘이 그 아래 나란히 섭니다. */
+.won .kpi-row {grid-template-columns:repeat(2,1fr);}
 .won .mbars svg {height:132px;}
 .won .kpi.wide {grid-column:span 2;}
 .won .field-grid, .won .field-grid.c3, .won .form-row, .won .stat-row {grid-template-columns:repeat(2,1fr);}

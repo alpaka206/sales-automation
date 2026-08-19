@@ -81,7 +81,6 @@ export function WonCustomers() {
   const [view, setView] = useState<"" | "활성" | "갱신임박">("");
   // 어느 지표를, 어느 통화로. **환산은 서버가 이미 두 통화로 해 두었습니다** — 화면이
   // 다시 환산하면 같은 숫자가 화면마다 달라집니다.
-  const [metric, setMetric] = useState<"mrr" | "cash">("mrr");
   const [unit, setUnit] = useState<"KRW" | "USD">("USD");
 
   const today = data?.today ?? new Date().toISOString().slice(0, 10);
@@ -142,13 +141,7 @@ export function WonCustomers() {
   // 통화별로 내려줍니다. 여기서 행을 걸러 더하면 그 필터가 곧 정의가 됩니다 — 실제로 플랜
   // 상태로 거르고 있었고, 그래서 세팅중 고객이 통째로 빠졌습니다. 행에는 활성 계약 하나만
   // 실려 있다는 문제도 있었습니다(고객의 다른 계약이 돌고 있어도 안 잡힘).
-  const series = (metric === "mrr" ? data.mrr_months : data.cash_months)?.[deptLabel] ?? {};
   const months = data.months ?? [];
-  const at = (month: string) => series[month]?.[unit] ?? 0;
-  const thisMonth = at(data.month);
-  // **단위는 그 구간(6개월) 최댓값 하나로 정합니다.** 눈금마다 따로 접으면 50만 옆에 1,000만이
-  // 서고, 그러면 두 눈금을 비교하려고 자릿수를 세어야 합니다.
-  const scale = scaleFor(Math.max(...(data.months ?? []).map((m) => Math.abs(at(m))), 0), unit);
   const renewing = activeRows
     .filter((r) => {
       const left = daysUntil(r.active?.ends_on, today);
@@ -207,56 +200,42 @@ export function WonCustomers() {
             </div>
           </button>
 
-          <div className="kpi kpi--wide">
-            {/* GTM 이라고 적혀 있어야 합니다. 서버가 담당부서로 거르는데 화면이 말하지
-                않으면, 아래 목록을 더한 값과 안 맞을 때 어느 쪽이 틀린 건지 알 수 없습니다. */}
-            <div className="kpi-head">
-              <div className="kpi-label">
-                <G name="trend" /> {metric === "mrr" ? "월별 MRR" : "월 매출"}
-                <span style={{ color: "var(--faint)" }}> ({deptLabel} · VAT 포함)</span>
-              </div>
-              {/* 두 지표는 **다른 것을 셉니다**: MRR 은 플랜 기간에 균등 배분한 인식 매출,
-                  월 매출은 결제 회차가 잡힌 달에 통째로 얹는 현금흐름. 같은 계약이 두
-                  지표에서 다르게 보이는 것이 이 카드의 요점이라 나란히 둡니다. */}
-              <div className="seg">
-                <button type="button" className={metric === "mrr" ? "on" : ""}
-                        onClick={() => setMetric("mrr")}>예상 MRR</button>
-                <button type="button" className={metric === "cash" ? "on" : ""}
-                        onClick={() => setMetric("cash")}>월 매출</button>
-                <span className="seg-gap" />
-                <button type="button" className={unit === "KRW" ? "on" : ""}
-                        onClick={() => setUnit("KRW")}>KRW</button>
-                <button type="button" className={unit === "USD" ? "on" : ""}
-                        onClick={() => setUnit("USD")}>USD</button>
-              </div>
-            </div>
-            <div className="kpi-value money">{amount(thisMonth, unit, scale)}</div>
-            <MonthlyBars months={months} valueAt={at} now={data.month}
-                         format={(value) => amount(value, unit, scale)}
-                         formatTick={(value) => tickLabel(value, scale)}
-                         negativeNote="중도 해지 정산" />
-            <div className="kpi-tail">
-              {/* 손으로 적던 칸이었습니다. 이제 오늘 고시가를 가져오므로 적을 이유가
-                  없고, 적게 두면 두 사람이 다른 환율로 다른 MRR 을 봅니다. 어느 날짜의
-                  값인지 같이 보여 줍니다 — 그게 숫자를 설명하는 유일한 단서입니다. */}
-              <div className="fx-row">
-                적용 환율 <b>{num(Math.round(rate))}</b> 원 / USD
-                {/* 한국에서 낮에 보면 거의 항상 어제 날짜입니다 — ECB 가 유럽 오후에
-                    하루 한 번 내기 때문입니다. 그래서 "오늘" 이라고 쓰지 않고 실제
-                    고시일을 적습니다. */}
-                <span style={{ color: "var(--faint)", marginLeft: 6 }}
-                      title={data.fx_on
-                        ? "ECB 기준환율은 유럽 시간 오후에 하루 한 번 고시되어, 한국에서는 낮에 전일자 값이 보입니다."
-                        : `환율을 가져오지 못해 설정값을 씁니다. 10분 뒤 다시 시도합니다.${
-                            data.fx_error ? `
+          {/* 지표 둘을 **한 카드 안 토글**로 두었습니다. 하나를 보고 있으면 다른 하나가
+              어떤 모양인지 알 수 없었고, 두 지표가 갈리는 순간이 곧 그 계약을 봐야 할
+              때라 그것을 보려고 버튼을 누르고 있어야 했습니다. 이제 둘 다 그립니다
+              (2026-08-19, 운영자 지시). y축은 카드마다 따로입니다 — 인식 매출은 고르게
+              깔리고 현금은 한 달에 몰려서, 축을 합치면 MRR 쪽이 바닥에 눌립니다. 눈금에
+              단위(만·억)가 붙어 있어 두 축을 헷갈릴 일은 없습니다. */}
+          <MetricCard title="월별 MRR" note={`${deptLabel} · VAT 포함`}
+                      series={data.mrr_months?.[deptLabel] ?? {}}
+                      months={months} now={data.month} unit={unit} setUnit={setUnit} />
+          <MetricCard title="월 매출" note={`${deptLabel} · 입금 기준`}
+                      series={data.cash_months?.[deptLabel] ?? {}}
+                      months={months} now={data.month} unit={unit} setUnit={setUnit} />
+        </div>
+
+        {/* 환율 한 줄은 **두 카드 바깥에 한 번**입니다. 카드마다 넣으면 같은 문장이 화면에
+            둘이 되고, 그러면 둘이 다른 값일 수 있는 것처럼 읽힙니다 — 실제로는 서버가
+            계약마다 그 계약의 환율로 한 번 환산한 결과이고, 이 줄은 그중 오늘 고시가를
+            쓴 곳(예상 MRR 카드의 큰 숫자)이 어느 날 값인지를 말합니다.
+
+            손으로 적던 칸이었습니다. 이제 오늘 고시가를 가져오므로 적을 이유가 없고,
+            적게 두면 두 사람이 다른 환율로 다른 MRR 을 봅니다. */}
+        <div className="kpi-fx">
+          <div className="fx-row">
+            적용 환율 <b>{num(Math.round(rate))}</b> 원 / USD
+            {/* 한국에서 낮에 보면 거의 항상 어제 날짜입니다 — ECB 가 유럽 오후에 하루 한 번
+                내기 때문입니다. 그래서 "오늘" 이라고 쓰지 않고 실제 고시일을 적습니다. */}
+            <span style={{ color: "var(--faint)", marginLeft: 6 }}
+                  title={data.fx_on
+                    ? "ECB 기준환율은 유럽 시간 오후에 하루 한 번 고시되어, 한국에서는 낮에 전일자 값이 보입니다."
+                    : `환율을 가져오지 못해 설정값을 씁니다. 10분 뒤 다시 시도합니다.${
+                        data.fx_error ? `
 
 마지막 실패: ${data.fx_error}` : ""}`}>
-                  {data.fx_on ? `${fmt(data.fx_on)} 고시 기준` : "설정값"}
-                </span>
-              </div>
-            </div>
+              {data.fx_on ? `${fmt(data.fx_on)} 고시 기준` : "설정값"}
+            </span>
           </div>
-
         </div>
 
 
@@ -567,6 +546,54 @@ function Split({ cap, a, b }: {
           </>
         )}
       </div>
+    </div>
+  );
+}
+
+
+/** 월별 막대 카드 하나 — 지표 한 개. 예전에는 카드 하나에 지표 둘을 토글로 담았습니다.
+ *
+ *  y축(단위 접기)은 **이 카드 안에서** 정해집니다. 두 카드가 축을 나눠 쓰면, 플랜 기간에
+ *  고르게 깔리는 인식 매출이 한 달에 몰리는 현금 옆에서 바닥에 눌려 아무 모양도 안 남습니다.
+ *  눈금 글자에 단위(만·억)가 붙으므로 두 축을 같은 자로 착각할 일은 없습니다.
+ *
+ *  통화 고르개는 카드마다 있지만 **상태는 하나**입니다 — 한쪽을 USD 로 바꾸면 다른 쪽도
+ *  같이 바뀝니다. 두 카드를 나란히 두는 이유가 비교인데 단위가 다르면 비교가 안 됩니다.
+ */
+function MetricCard({ title, note, series, months, now, unit, setUnit }: {
+  title: string;
+  note: string;
+  series: Record<string, Record<string, number>>;
+  months: string[];
+  now: string;
+  unit: "KRW" | "USD";
+  setUnit: (value: "KRW" | "USD") => void;
+}) {
+  const at = (month: string) => series[month]?.[unit] ?? 0;
+  // **단위는 그 구간(6개월) 최댓값 하나로 정합니다.** 눈금마다 따로 접으면 50만 옆에
+  // 1,000만이 서고, 그러면 두 눈금을 비교하려고 자릿수를 세어야 합니다.
+  const scale = scaleFor(Math.max(...months.map((month) => Math.abs(at(month))), 0), unit);
+  return (
+    <div className="kpi">
+      <div className="kpi-head">
+        {/* GTM 이라고 적혀 있어야 합니다. 서버가 담당부서로 거르는데 화면이 말하지 않으면,
+            아래 목록을 더한 값과 안 맞을 때 어느 쪽이 틀린 건지 알 수 없습니다. */}
+        <div className="kpi-label">
+          <G name="trend" /> {title}
+          <span style={{ color: "var(--faint)" }}> ({note})</span>
+        </div>
+        <div className="seg">
+          <button type="button" className={unit === "KRW" ? "on" : ""}
+                  onClick={() => setUnit("KRW")}>KRW</button>
+          <button type="button" className={unit === "USD" ? "on" : ""}
+                  onClick={() => setUnit("USD")}>USD</button>
+        </div>
+      </div>
+      <div className="kpi-value money">{amount(at(now), unit, scale)}</div>
+      <MonthlyBars months={months} valueAt={at} now={now}
+                   format={(value) => amount(value, unit, scale)}
+                   formatTick={(value) => tickLabel(value, scale)}
+                   negativeNote="중도 해지 정산" />
     </div>
   );
 }
