@@ -963,9 +963,11 @@ def ui_won_customers():
     except Exception:  # 환율을 못 가져와도 목록은 떠야 합니다
         fx = None
     month = today.strftime("%Y-%m")
-    # 이번 달로 끝나는 **12개월**. MRR 은 한 달만 보면 늘었는지 줄었는지를 알 수 없어서,
-    # 카드가 옆으로 넓어진 자리에 이 구간을 펼칩니다.
-    months = _recent_months(today, 12)
+    # 이번 달로 끝나는 **6개월** (2026-08-19, 운영자 지시 — 1년치는 길다). MRR 은 한 달만
+    # 보면 늘었는지 줄었는지를 알 수 없어서, 카드가 옆으로 넓어진 자리에 이 구간을 펼칩니다.
+    # 구간을 정하는 곳은 여기 하나입니다 — 화면은 `data.months` 를 그대로 그리고, 눈금
+    # 단위도 그 구간의 최댓값에서 나옵니다.
+    months = _recent_months(today, 6)
     # 담당부서 → 달 → 통화 → 금액. **두 통화 다 채웁니다** — 어느 쪽으로 볼지는 화면이
     # 고르고, 환산은 여기서 계약마다 그 계약의 환율로 한 번만 합니다.
     mrr_months: dict[str, dict[str, dict[str, Decimal]]] = {}

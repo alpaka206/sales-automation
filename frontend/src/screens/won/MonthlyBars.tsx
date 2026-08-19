@@ -3,7 +3,7 @@ import { useState } from "react";
 /** 월별 막대 — SVG 하나. 차트 라이브러리를 안 쓰는 이유는 「없어서」가 아닙니다.
  *
  *  Recharts·Chart.js 는 gzip 90~110KB 이고 지금 번들이 127KB 입니다. 차트 하나에 번들을
- *  두 배로 만드는 값인지가 기준인데, 여기 필요한 것은 막대 열두 개·0선·눈금·툴팁이 전부라
+ *  두 배로 만드는 값인지가 기준인데, 여기 필요한 것은 막대 몇 개·0선·눈금·툴팁이 전부라
  *  라이브러리가 하는 일의 대부분을 안 씁니다. 게다가 이 화면의 색·글꼴·모서리는 `won.css`
  *  토큰에서 오고, 라이브러리는 자기 기본값을 들고 옵니다 — 맞추는 작업이 그리는 작업보다
  *  큽니다. 애니메이션·확대·여러 차트 종류가 필요해지면 그때가 라이브러리를 들일 때입니다.
@@ -67,7 +67,7 @@ export function MonthlyBars({ months, valueAt, format, formatTick, now, negative
   const ticks: number[] = [];
   for (let t = lo; t <= hi + 1e-9; t += step) ticks.push(Math.round(t));
 
-  // 이야기가 있는 막대 하나에만 값을 답니다. 열두 개에 다 적으면 아무것도 안 읽힙니다 —
+  // 이야기가 있는 막대 하나에만 값을 답니다. 전부에 다 적으면 아무것도 안 읽힙니다 —
   // 음수가 있으면 그것이(해지 정산), 없으면 아무 데도 안 답니다. 나머지는 눈금과 툴팁이.
   const worst = values.reduce(
     (acc, value, index) => (value < 0 && value < values[acc] ? index : acc),

@@ -146,7 +146,7 @@ export function WonCustomers() {
   const months = data.months ?? [];
   const at = (month: string) => series[month]?.[unit] ?? 0;
   const thisMonth = at(data.month);
-  // **단위는 열두 달의 최댓값 하나로 정합니다.** 눈금마다 따로 접으면 50만 옆에 1,000만이
+  // **단위는 그 구간(6개월) 최댓값 하나로 정합니다.** 눈금마다 따로 접으면 50만 옆에 1,000만이
   // 서고, 그러면 두 눈금을 비교하려고 자릿수를 세어야 합니다.
   const scale = scaleFor(Math.max(...(data.months ?? []).map((m) => Math.abs(at(m))), 0), unit);
   const renewing = activeRows
