@@ -81,7 +81,6 @@ export function WonCustomers() {
   const [view, setView] = useState<"" | "활성" | "갱신임박">("");
   // 어느 지표를, 어느 통화로. **환산은 서버가 이미 두 통화로 해 두었습니다** — 화면이
   // 다시 환산하면 같은 숫자가 화면마다 달라집니다.
-  const [unit, setUnit] = useState<"KRW" | "USD">("USD");
 
   const today = data?.today ?? new Date().toISOString().slice(0, 10);
   const rate = data?.fx_rate ?? 1380;
@@ -208,10 +207,10 @@ export function WonCustomers() {
               단위(만·억)가 붙어 있어 두 축을 헷갈릴 일은 없습니다. */}
           <MetricCard title="월별 MRR" note={`${deptLabel} · VAT 포함`}
                       series={data.mrr_months?.[deptLabel] ?? {}}
-                      months={months} now={data.month} unit={unit} setUnit={setUnit} />
+                      months={months} now={data.month} />
           <MetricCard title="월 매출" note={`${deptLabel} · 입금 기준`}
                       series={data.cash_months?.[deptLabel] ?? {}}
-                      months={months} now={data.month} unit={unit} setUnit={setUnit} />
+                      months={months} now={data.month} />
         </div>
 
         {/* 환율 한 줄은 **두 카드 바깥에 한 번**입니다. 카드마다 넣으면 같은 문장이 화면에
@@ -557,18 +556,21 @@ function Split({ cap, a, b }: {
  *  고르게 깔리는 인식 매출이 한 달에 몰리는 현금 옆에서 바닥에 눌려 아무 모양도 안 남습니다.
  *  눈금 글자에 단위(만·억)가 붙으므로 두 축을 같은 자로 착각할 일은 없습니다.
  *
- *  통화 고르개는 카드마다 있지만 **상태는 하나**입니다 — 한쪽을 USD 로 바꾸면 다른 쪽도
- *  같이 바뀝니다. 두 카드를 나란히 두는 이유가 비교인데 단위가 다르면 비교가 안 됩니다.
+ *  통화도 카드마다 따로 고릅니다. 축이 이미 따로라 두 카드는 같은 자로 재는 그림이
+ *  아니고, 어느 단위인지는 눈금과 큰 숫자가 각자 말합니다.
  */
-function MetricCard({ title, note, series, months, now, unit, setUnit }: {
+function MetricCard({ title, note, series, months, now }: {
   title: string;
   note: string;
   series: Record<string, Record<string, number>>;
   months: string[];
   now: string;
-  unit: "KRW" | "USD";
-  setUnit: (value: "KRW" | "USD") => void;
 }) {
+  // 카드마다 따로입니다 (2026-08-19, 운영자 지시). 한동안 한 값을 나눠 썼는데 — 나란히
+  // 두는 이유가 비교라 단위도 같아야 한다고 봤습니다 — 실제로는 인식 매출을 달러로,
+  // 입금을 원화로 보고 싶은 때가 있습니다. 두 카드는 y축도 이미 따로라 같은 자로 재는
+  // 그림이 아니었고, 단위는 눈금과 큰 숫자에 그때그때 적혀 있습니다.
+  const [unit, setUnit] = useState<"KRW" | "USD">("USD");
   const at = (month: string) => series[month]?.[unit] ?? 0;
   // **단위는 그 구간(6개월) 최댓값 하나로 정합니다.** 눈금마다 따로 접으면 50만 옆에
   // 1,000만이 서고, 그러면 두 눈금을 비교하려고 자릿수를 세어야 합니다.
