@@ -230,6 +230,13 @@ def _local_stage(record: dict) -> str | None:
         "negotiation": "negotiation",
         "won": "won",
         "lost_rejected": "closed_lost",
+        # 셋 다 `closed` 입니다. 쓰는 말은 Concluded 하나지만(2026-08-19), 시트에는 그
+        # 전에 사람이 적어 둔 옛 이름이 남아 있습니다 — 허브스팟에서 No Response 와
+        # Not a Fit 이 이 한 단계로 합쳐졌으므로 읽을 때도 같은 곳으로 접습니다. 안 그러면
+        # 그 행들은 「모르는 값」이 되어 전체 동기화가 단계를 그냥 지나칩니다.
+        "concluded": "closed",
+        "not_a_fit": "closed",
+        "no_response": "closed",
     }.get(stage)
 
 

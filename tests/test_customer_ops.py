@@ -453,21 +453,25 @@ def test_board_move_finds_the_sheet_row_on_the_contact(customer_db, customer_id)
     assert sheet_client_id == 4321
 
 
-def test_the_workbook_has_no_wording_for_two_board_stages() -> None:
+def test_the_workbook_has_no_wording_for_one_board_stage() -> None:
     """A KNOWN gap, pinned so it cannot be mistaken for working.
 
-    The board has eight stages; the workbook's Deal Stage column has words for five. Moving
-    a card to Reminder Sent, No Response or Not a Fit updates this database and HubSpot but
-    leaves the sheet on its previous stage (the write logs a warning and reports failure, so
-    it shows up as 동기화 실패 rather than silence). Fixing it needs the values the sales team
-    actually uses in that column — invented wording would corrupt their filters. When they
-    are added here, delete this test.
+    보드는 일곱 단계이고 워크북의 Deal Stage 열에는 그중 여섯의 말이 있습니다. Reminder Sent
+    로 카드를 옮기면 이 DB 와 허브스팟은 따라오지만 시트는 옛 단계에 남습니다(쓰기가 경고를
+    남기고 실패로 보고하므로 침묵이 아니라 동기화 실패로 보입니다). 채우려면 영업팀이 그
+    열에서 실제로 쓰는 값이 있어야 합니다 — 지어낸 말은 그들의 필터를 망가뜨립니다.
+
+    `closed` 는 2026-08-19 에 채웠습니다(운영자 결정): 허브스팟에서 No Response 와
+    Not a Fit 이 Concluded 하나로 합쳐지면서 시트에도 그 한 마디를 적기로 했습니다.
     """
     from src.api.routes.customer_ops import PIPELINE_STAGES
     from src.integrations.google_sheets import _STAGE_VALUES
 
     missing = [key for key, _label, _description in PIPELINE_STAGES if key not in _STAGE_VALUES]
-    assert missing == ["reminder_sent", "closed"]
+    assert missing == ["reminder_sent"]
+    # Detail 열에는 새 말을 만들지 않았습니다 — 못 딴 채로 끝난 건이라는 뜻의 칸이 이미
+    # 있고, 같은 뜻의 값이 둘이 되면 어느 쪽으로도 필터가 안 걸립니다.
+    assert _STAGE_VALUES["closed"] == ("Concluded", "Closed Lost")
 
 
 def test_pipeline_cards_have_no_stage_dropdown(customer_db, customer_id) -> None:

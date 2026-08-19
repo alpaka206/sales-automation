@@ -625,18 +625,29 @@ def append_order_row(record: dict) -> SheetWriteResult:
 # the sales team already uses in those columns may appear here — writing a new token
 # would pollute a column the team filters on. "won" inherits ("Won", "Closed Won") from
 # the retired contracted/onboarding/active keys (migration 0040).
-# reminder_sent, no_response and closed(=Not a Fit) have no workbook vocabulary yet, so
-# update_inbound_stage leaves the sheet untouched for them, exactly as it did before the trim.
 #
 # **HubSpot 이 단계 이름을 바꿔도 여기 글자는 안 바뀝니다.** 파이프라인에서 Meeting link
 # sent 가 Qualified 가 되었지만, 이 열은 영업팀이 필터로 쓰는 시트의 값 목록이라 없는 말을
 # 쓰면 그 행이 어느 필터에도 안 걸립니다. 시트에 Qualified 가 생기면 그때 여기를 바꿉니다.
+#
+# `closed` 는 예외입니다 — 운영자가 시트에도 적으라고 정했습니다 (2026-08-19). 그 전까지는
+# 적을 말이 없어 **그 단계로 옮겨도 시트가 옛 값 그대로 남았습니다**(경고만 남기고). 이제
+# 허브스팟에서 No Response 와 Not a Fit 이 Concluded 하나로 합쳐졌으므로, 시트에도 그 한
+# 마디를 적습니다. Detail 은 새 말을 만들지 않고 이미 쓰는 "Closed Lost" 를 씁니다: 못 딴
+# 채로 끝난 건이라는 뜻의 칸이 시트에 이미 있고, 거기에 또 다른 말을 들이면 같은 뜻의 값이
+# 둘이 됩니다.
+#
+# **시트의 Deal Stage 목록에 Concluded 가 없으면 먼저 추가해야 합니다** — 드롭다운에 없는
+# 값을 쓰면 그 행이 어느 필터에도 안 걸립니다. 그게 이 표를 다섯 개로 묶어 두었던 이유입니다.
+#
+# `reminder_sent` 는 여전히 말이 없습니다. 시트에 그 칸을 쓸 말이 정해지면 여기 한 줄입니다.
 _STAGE_VALUES = {
     "new": ("New", "Inquiry"),
     "meeting_link_sent": ("Meeting Link Sent", "Inquiry"),
     "negotiation": ("Negotiation", "Meeting"),
     "won": ("Won", "Closed Won"),
     "closed_lost": ("Lost_Rejected", "Closed Lost"),
+    "closed": ("Concluded", "Closed Lost"),
 }
 
 
@@ -677,9 +688,9 @@ def update_inbound_stage(client_id: int | None, stage: str, pipeline: str | None
     if not client_id or not writes_enabled():
         return False
     if stage not in _STAGE_VALUES:
-        # The board has eight stages; the workbook's Deal Stage column has words for five
-        # of them (reminder_sent, no_response and closed have none). Silence here meant the sheet kept
-        # its old stage with nothing to show anyone why — say it in the log at least.
+        # 보드는 일곱 단계이고 워크북의 Deal Stage 열에는 그중 여섯의 말이 있습니다
+        # (`reminder_sent` 만 없습니다). 조용히 지나가면 시트가 옛 단계를 그대로 들고
+        # 있는데 왜 그런지는 아무 데도 안 남습니다 — 로그에라도 적습니다.
         logger.warning(
             "Google Sheets has no Deal Stage wording for local stage '%s' — the workbook "
             "keeps its previous value (client_id=%s).",
