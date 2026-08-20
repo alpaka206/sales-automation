@@ -31,6 +31,10 @@ class EngagementDTO(BaseModel):
     subject: str | None = None
     body: str | None = None
     timestamp: datetime | None = None
+    # 이 메일이 붙어 있는 티켓. **허브스팟이 알려 주는 사실**이라 짐작이 아닙니다 —
+    # 한동안 시각으로 「그때 열려 있던 티켓」을 골랐는데, New 티켓에 몇 달 전 메일이
+    # 붙었습니다. 없으면 None: 티켓 없이 연락처에만 달린 메일도 있습니다.
+    ticket_id: str | None = None
 
 
 class DealDTO(BaseModel):

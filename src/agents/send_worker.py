@@ -13,6 +13,7 @@ from sqlalchemy import func, select, update
 
 from ..common.config import settings
 from ..db.conversation_history import add_progress
+from .summaries import append_summary_line
 from ..db.models import Contact, Conversation, CustomerProfile, Message
 from ..db.session import SessionLocal
 
@@ -168,6 +169,10 @@ async def _post_send_bookkeeping(session, msg, conv, message_id: int) -> None:
         if msg.post_send_sync_attempts > 1:
             return
         add_progress(conv.id, "reply", f"답변 발송 완료: {msg.subject or '(제목 없음)'}"[:200])
+        # 티켓 요약에 우리 답 한 줄을 덧붙입니다. **여기서** 하는 이유: 요약은 예전에
+        # 초안이 만들어진 직후에 쓰였고, 그래서 나가지 않은 글이 「이렇게 답했다」로
+        # 적혔습니다. 이 자리는 SMTP 를 지난 뒤이고 재시도에서 두 번 돌지 않습니다.
+        await asyncio.to_thread(append_summary_line, msg.id)
 
 
 async def _send_one(message_id: int) -> bool:

@@ -256,6 +256,9 @@ def _message_detail_context(
                 "body_ko": tm.body_ko,
                 "subject_ko": tm.subject_ko,
                 "is_auto_ack": tm.prompt_variant == "auto_ack",
+                # 한 줄 요약. New 를 지난 화면은 본문 대신 이것을 보여 주고,
+                # 「전체보기」를 눌렀을 때 본문이 나옵니다.
+                "summary_line": tm.summary_line,
                 "language": tm.language,
                 "channel": tm.channel,
                 "from_address": tm.from_address,
@@ -269,16 +272,16 @@ def _message_detail_context(
 
         return {
             "thread": thread,
+            # **진행 기록만.** 한동안 이 목록에 소통 기록(`interaction_rows`)을 같은
+            # 모양으로 섞어 보냈는데, 그건 바로 아래 `ticket_interactions` 로도 나가는
+            # **같은 행**입니다. 화면이 둘 다 그리면서 기록 하나가 두 번 보였고, 그중
+            # 한쪽은 `i.summary` — 메일 **본문 전체**를 회색 한 줄에 그대로 쏟았습니다
+            # (2026-08-20 운영자 지적). 섞어 보내던 시절에는 소통 기록이 이 화면에
+            # 나올 길이 저것뿐이었지만, 지금은 제 카드에서 접힌 채로 그려집니다.
             "progress": sorted(
                 [
-                    {"kind": p.kind, "detail": p.detail, "created_at": p.created_at,
-                     "channel": None, "handler": None}
+                    {"kind": p.kind, "detail": p.detail, "created_at": p.created_at}
                     for p in progress_rows
-                ]
-                + [
-                    {"kind": "interaction", "detail": i.summary, "created_at": i.happened_at,
-                     "channel": i.channel, "handler": i.handler}
-                    for i in interaction_rows
                 ],
                 key=lambda entry: entry["created_at"],
             ),

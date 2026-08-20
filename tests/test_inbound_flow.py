@@ -12,7 +12,7 @@ from src.agents.inbound import (
     ClassifyResult,
     ScoreAdjustResult,
     DraftResult,
-    _SummaryResult,
+    _RequestsResult,
     _base_score,
     _normalize_email,
     _processed,
@@ -65,8 +65,8 @@ def _mock_llm():
                 language="ko",
                 tone_notes="formal",
             )
-        if "summarize_thread" in prompt_name:
-            return _SummaryResult(summary="요약입니다.", customer_requests="- 요청사항")
+        if "extract_requests" in prompt_name:
+            return _RequestsResult(customer_requests="- 요청사항")
         if "detect_language" in prompt_name:
             return "en"
         if "translate_ko" in prompt_name:
@@ -278,7 +278,7 @@ def test_durable_retry_resumes_linked_placeholder(db_session, db_session_factory
     }
     with patch("src.agents.inbound.SessionLocal", db_session_factory):
         agent = InboundAgent(llm=_mock_llm(), hubspot=None)
-        message_id, _, _ = agent._persist_placeholder(
+        message_id, _, _, _ = agent._persist_placeholder(
             info, "email", "en", inbound_job_id=job.id
         )
 

@@ -350,7 +350,17 @@ a.kpi:hover { border-color: var(--accent); }
 .history-item__rail { display: flex; justify-content: center; position: relative; }
 .history-item__rail::after { content: ""; width: 1px; background: var(--border); position: absolute; inset: 13px auto -1px; }
 .history-item:last-child .history-item__rail::after { display: none; }
-.history-item__rail span { width: 8px; height: 8px; margin-top: 6px; border-radius: 50%; background: var(--accent); z-index: 1; }
+.history-item__rail span { width: 8px; height: 8px; margin-top: 6px; border-radius: 50%; background: var(--_dir, var(--accent)); z-index: 1; }
+/* 방향은 색으로도 말합니다 — 목록을 훑을 때 「누가 보낸 것인가」가 글자를 읽기 전에
+   보여야 하기 때문입니다. 말풍선이 이미 쓰는 두 색 그대로입니다(.bubble--in/--out):
+   받은 것은 --info, 우리 것은 --accent. 사람이 손으로 적은 기록은 한 건에 양쪽이 다
+   들어 있어(폼이 「오간 내용」을 한 번에 받습니다) 중립색입니다.
+   **색만으로 말하지 않습니다** (1.4.1): 같은 자리에 화살표 아이콘과 「받음·보냄·
+   주고받음」이라는 말이 같이 있습니다. */
+.history-item--in   { --_dir: var(--info); }
+.history-item--out  { --_dir: var(--accent); }
+.history-item--both { --_dir: var(--neutral-dot); }
+.history-item__dir { display: inline-flex; align-items: center; gap: 4px; font-weight: 700; color: var(--_dir, var(--text-subtle)); }
 .history-item > div:last-child { min-width: 0; padding-bottom: 22px; }
 .history-item__title { display: block; margin: 8px 0 5px; font-size: 13.5px; }
 .history-item__body { color: var(--text); font-size: 13px; line-height: 1.62; white-space: pre-wrap; overflow-wrap: anywhere; }
@@ -963,9 +973,6 @@ body.modal-open .content { overflow: hidden; }
 .chip--xs { height: 22px; font-size: 11px; padding: 0 8px; }
 
 /* ---- Append-only processing log ("처리경과") ---- */
-.progress-log { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
-.progress-log__item { display: flex; gap: 8px; font-size: 12.5px; line-height: 1.5; border-left: 2px solid var(--border); padding-left: 10px; }
-.progress-log__time { color: var(--text-subtle); white-space: nowrap; flex-shrink: 0; font-size: 11px; }
 
 /* ---- Same-company history list ---- */
 .domain-hist { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }

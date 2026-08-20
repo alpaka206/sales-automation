@@ -22,7 +22,6 @@ from datetime import datetime, timezone
 
 from sqlalchemy import select
 
-from ..db.conversation_history import add_progress
 from ..db.models import Contact, Conversation, CustomerProfile
 from ..db.session import SessionLocal
 
@@ -151,12 +150,32 @@ def _retire_superseded_drafts(session, conversation_id: int, local_stage: str) -
     보드, 워크북·백필 가져오기)과 초안을 완성하는 쪽(``_finalize_draft``)이 전부 여기로
     옵니다 — 한 곳에서 지우면 화면·집계·발송이 따로 확인할 것이 없습니다.
     """
+    if local_stage not in _PAST_NEW:
+        return 0
+    return _delete_pending_drafts(
+        session, conversation_id, why=f"단계 {local_stage} 이동"
+    )
+
+
+def retire_drafts_answered_elsewhere(session, conversation_id: int) -> int:
+    """허브스팟에 **우리가 보낸 메일**이 잡히면 그 답은 이미 나갔습니다 — 초안을 지웁니다.
+
+    단계와 무관합니다. 영업이 허브스팟에서 직접 회신하면 티켓이 New 에 그대로 있는 일이
+    흔하고(카드를 옮기는 것은 나중이거나 아예 안 합니다), 그동안 우리 초안은 발송 대기에
+    남아 있습니다. 그걸 누르면 고객은 같은 질문에 두 번째 답을 받습니다.
+
+    지우는 일 자체는 `_delete_pending_drafts` 한 곳입니다 — 단계 이동이든 이쪽이든
+    초안이 없어지는 길은 하나여야 화면·집계·발송이 따로 확인할 것이 없습니다.
+    """
+    return _delete_pending_drafts(session, conversation_id, why="허브스팟 발송 기록 확인")
+
+
+def _delete_pending_drafts(session, conversation_id: int, *, why: str) -> int:
+    """나가지 않은 초안과 그 승인 기록을 지웁니다. 지운 수를 돌려줍니다."""
     from sqlalchemy import delete as sql_delete
 
     from ..db.models import Approval, Message
 
-    if local_stage not in _PAST_NEW:
-        return 0
     drafts = (
         session.query(Message)
         .filter(
@@ -178,17 +197,13 @@ def _retire_superseded_drafts(session, conversation_id: int, local_stage: str) -
         # 눈에 보이는 편이 낫기도 합니다(`delete_conversation` 과 같은 이유).
         session.execute(sql_delete(Approval).where(Approval.message_id.in_(ids)))
         session.execute(sql_delete(Message).where(Message.id.in_(ids)))
-        add_progress(
-            conversation_id,
-            # 자기 kind: 처리 경과는 일상적인 "draft" 기록을 숨기는데, 운영자 몰래 없어진
-            # 초안은 그 반대입니다. **행은 사라져도 사라졌다는 사실은 남습니다** — 검토
-            # 화면에서 초안이 안 보이는 이유를 물을 곳이 여기뿐입니다.
-            "draft_retired",
-            # 어디서 옮겼는지는 적지 않습니다 — 바로 위에 그 단계 이동 기록이 있고,
-            # 이제 옮기는 곳이 HubSpot 만이 아닙니다(콘솔 보드·워크북·백필).
-            f"단계가 {local_stage}(으)로 이동해 대기 중이던 초안 {len(drafts)}건을 "
-            f"지웠습니다. 이미 답변이 나간 문의이고, 나가지 않은 글은 기록에 남기지 않습니다.",
-            session=session,
+        # **기록을 남기지 않습니다** (2026-08-20 운영자 지시). 나가지 않은 초안이
+        # 없어졌다는 사실은 이 고객과 오간 일이 아니라 우리 안의 사정이고, 히스토리는
+        # 「무엇이 오갔나」를 보는 자리입니다. 로그에는 남습니다 — 아래 호출부가
+        # 지운 수를 세어 로그에 적습니다.
+        logger.info(
+            "%s(으)로 대기 중이던 초안 %d건을 지웠습니다 (conversation=%s).",
+            why, len(drafts), conversation_id,
         )
     return len(drafts)
 
@@ -365,12 +380,11 @@ def sync_stage_from_hubspot(
             profile.pipeline_stage = local_stage
             profile.customer_state = customer_state_for(local_stage, profile.customer_state)
 
-        add_progress(
-            conv.id,
-            "stage",
-            f"HubSpot에서 단계 변경 감지: {previous or '미지정'} → {local_stage} ({source}).",
-            session=session,
-        )
+        # **단계 이동은 기록으로 남기지 않습니다** (2026-08-20 운영자 지시). 옮겨지면
+        # 우리 DB·워크북·허브스팟의 **상태만** 바뀌면 됩니다. 예전에는 여기서 진행 기록을
+        # 한 줄 남겼는데, 화면에서는 이미 숨기고 있었고(`_ROUTINE_PROGRESS_KINDS`) 지금
+        # 단계는 Stage 칸이 그대로 보여 줍니다 — 아무도 안 읽는 줄을 대화마다 쌓고
+        # 있었습니다. `previous` 는 아래 워크북 미러가 「바뀌었나」를 판단하는 데 씁니다.
         retired = _retire_superseded_drafts(session, conv.id, local_stage)
         # Won 으로 넘어온 건은 수주 전환 대기에 쌓습니다. 여기 다는 이유: 웹훅도 10분
         # 폴러도 수동 최신화도 전부 이 함수를 거칩니다. 감지 지점을 세 군데 두면 하나가

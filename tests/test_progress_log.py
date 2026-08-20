@@ -31,13 +31,22 @@ def test_a_failed_acknowledgement_is_still_on_the_log():
     assert "draft_retired" not in _ROUTINE_PROGRESS_KINDS
 
 
-def test_a_draft_retired_by_hubspot_is_not_hidden_with_the_routine_ones():
-    """It used to share the "draft" kind with the routine entry. A draft cancelled out
-    from under the operator is the opposite of routine."""
+def test_a_stage_move_leaves_no_progress_row():
+    """단계 이동은 기록으로 남기지 않습니다 (2026-08-20 운영자 지시).
+
+    옮겨지면 우리 DB·워크북·허브스팟의 **상태만** 바뀌면 됩니다. 예전에는 단계 이동과
+    「대기 중이던 초안을 종료했습니다」를 진행 기록에 한 줄씩 남겼는데, 앞엣것은 화면에서
+    이미 숨기고 있었고(지금 단계는 Stage 칸이 보여 줍니다) 뒤엣것은 이 고객과 오간 일이
+    아니라 우리 안의 사정입니다. 히스토리는 「무엇이 오갔나」를 보는 자리입니다.
+
+    이 검사는 그 두 줄이 되살아나는 것을 막습니다 — 지우는 것보다 다시 쓰기 시작하는
+    쪽이 쉽고, 그러면 대화마다 아무도 안 읽는 줄이 다시 쌓입니다.
+    """
     import pathlib
 
     stage_sync = pathlib.Path("src/agents/stage_sync.py").read_text(encoding="utf-8")
-    assert '"draft_retired"' in stage_sync
+    assert "add_progress" not in stage_sync
+    assert '"draft_retired"' not in stage_sync
 
 
 def test_hiding_is_a_read_filter_so_the_rows_survive():

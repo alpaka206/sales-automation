@@ -620,21 +620,45 @@ class HubSpotClient:
         return note_id
 
     def get_recent_emails_sync(self, contact_id: str, limit: int = 5) -> list[EngagementDTO]:
-        """Fetch recent email engagements with content for a contact (sync)."""
+        """Fetch email engagements with content for a contact (sync), newest side first.
+
+        **연결 목록은 페이지를 끝까지 넘깁니다.** 예전에는 첫 페이지만 읽고 `limit` 을
+        그대로 넘겼는데, 그러면 그 수를 넘긴 사람은 **조용히 잘렸습니다** — 실측으로
+        허브스팟에 메일 30통이 있는 연락처가 우리 화면에는 20통이었고, 어디에도 「덜
+        가져왔다」는 표시가 없었습니다(2026-08-20). 그래서 `limit` 은 이제 **몇 통까지
+        본문을 받아올지**만 정합니다. 목록 자체는 전부 세어 봐야 「다 가져왔나」에
+        답할 수 있습니다.
+        """
         headers = {"Authorization": f"Bearer {self.token}"}
         with httpx.Client(headers=headers, timeout=30.0) as client:
-            r = client.get(
-                f"{BASE_URL}/crm/v3/objects/contacts/{contact_id}/associations/emails",
-                params={"limit": limit},
-            )
-            r.raise_for_status()
-            assoc_results = r.json().get("results", [])
+            assoc_results: list[dict] = []
+            after: str | None = None
+            while True:
+                params: dict[str, object] = {"limit": 500}
+                if after:
+                    params["after"] = after
+                r = client.get(
+                    f"{BASE_URL}/crm/v3/objects/contacts/{contact_id}/associations/emails",
+                    params=params,
+                )
+                r.raise_for_status()
+                page = r.json()
+                assoc_results.extend(page.get("results", []))
+                after = ((page.get("paging") or {}).get("next") or {}).get("after")
+                if not after:
+                    break
+            # 연결 목록은 오래된 것부터 옵니다. 본문을 일부만 받아올 때 버릴 쪽은
+            # 오래된 쪽입니다 — 「최근 것 좀 당겨오기」가 이 함수의 쓰임입니다.
+            if limit and len(assoc_results) > limit:
+                assoc_results = assoc_results[-limit:]
+
+            email_ids = [str(i.get("id", "")) for i in assoc_results if i.get("id")]
+            # 어느 티켓의 메일인지는 **허브스팟에 적혀 있습니다.** 한 번에 물어봅니다 —
+            # 메일마다 따로 물으면 연락처 한 명에 왕복이 두 배가 됩니다.
+            ticket_of = self._ticket_of_emails(client, email_ids)
 
             engagements: list[EngagementDTO] = []
-            for item in assoc_results:
-                email_id = str(item.get("id", ""))
-                if not email_id:
-                    continue
+            for email_id in email_ids:
                 er = client.get(
                     f"{BASE_URL}/crm/v3/objects/emails/{email_id}",
                     params={
@@ -660,9 +684,39 @@ class HubSpotClient:
                             if ep.get("hs_email_timestamp") or ep.get("hs_timestamp")
                             else None
                         ),
+                        ticket_id=ticket_of.get(email_id),
                     )
                 )
         return engagements
+
+    @staticmethod
+    def _ticket_of_emails(client: httpx.Client, email_ids: list[str]) -> dict[str, str]:
+        """{email id: ticket id} — 붙어 있는 티켓이 있는 메일만.
+
+        실측(2026-08-20)으로 표본 9건 중 8건에 티켓 연결이 있었습니다. 영업이 티켓에서
+        회신하면 허브스팟이 그렇게 답니다. 연결이 여럿이면 첫 번째만 씁니다 — 한 메일이
+        두 문의의 답인 경우는 우리 화면에 표현할 자리가 없습니다.
+
+        실패해도 조용히 빕니다: 티켓을 못 붙이는 것과 기록을 통째로 못 가져오는 것 중
+        나쁜 쪽은 뒤엣것입니다.
+        """
+        out: dict[str, str] = {}
+        for start in range(0, len(email_ids), 100):  # 배치 상한
+            chunk = email_ids[start : start + 100]
+            try:
+                r = client.post(
+                    f"{BASE_URL}/crm/v4/associations/emails/tickets/batch/read",
+                    json={"inputs": [{"id": eid} for eid in chunk]},
+                )
+                if r.status_code != 200:
+                    continue
+                for row in r.json().get("results", []):
+                    targets = row.get("to") or []
+                    if targets:
+                        out[str(row.get("from", {}).get("id"))] = str(targets[0].get("toObjectId"))
+            except Exception:
+                logger.warning("메일-티켓 연결 조회 실패 (%d건)", len(chunk), exc_info=True)
+        return out
 
     # What a person logs in HubSpot by hand, per object type: (channel we file it under,
     # title property, body property, time property). Emails are NOT here — they have

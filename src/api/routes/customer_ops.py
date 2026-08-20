@@ -12,9 +12,14 @@ from urllib.parse import quote
 
 from fastapi import APIRouter, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 
-from ...agents.stage_sync import _retire_superseded_drafts, customer_state_for
+from ...agents.summaries import append_line, rebuild_summary
+from ...agents.stage_sync import (
+    _retire_superseded_drafts,
+    customer_state_for,
+    retire_drafts_answered_elsewhere,
+)
 from ...common.config import settings
 from ...common.subjects import strip_reply_prefixes
 from ...db.models import (
@@ -1329,27 +1334,63 @@ def _sync_hubspot(contact_id: int, per_type: int = 20) -> int:
         profile.last_synced_at = datetime.now(timezone.utc)
         session.add(profile)
 
+        # 티켓 번호 → 우리 대화. 허브스팟이 메일마다 알려 주는 값이라 짐작이 아닙니다.
+        ticket_ids = {e.ticket_id for e in emails if e.ticket_id}
+        conv_of_ticket = (
+            {
+                str(row.hubspot_ticket_id): row.id
+                for row in session.execute(
+                    select(Conversation.id, Conversation.hubspot_ticket_id).where(
+                        Conversation.hubspot_ticket_id.in_(ticket_ids)
+                    )
+                ).all()
+            }
+            if ticket_ids
+            else {}
+        )
         for email in emails:
             external_id = f"hubspot:email:{email.id}"
+            conv_id = conv_of_ticket.get(email.ticket_id or "")
             exists = session.scalar(
                 select(CustomerInteraction.id).where(CustomerInteraction.external_id == external_id)
             )
+            if exists and conv_id:
+                # 이미 있는 행에도 붙입니다 — 연결을 읽기 시작한 것이 나중이라, 먼저
+                # 가져온 수백 건은 티켓 없이 들어와 있습니다.
+                session.execute(
+                    update(CustomerInteraction)
+                    .where(
+                        CustomerInteraction.id == exists,
+                        CustomerInteraction.conversation_id.is_(None),
+                    )
+                    .values(conversation_id=conv_id)
+                )
             if not exists:
                 direction = "incoming" if "incoming" in email.type else "outgoing"
+                # 한 번만 만듭니다 — 기록 목록의 미리보기와 티켓 요약의 불릿이 **같은
+                # 줄**이라 두 번 부르면 모델 왕복만 두 배가 됩니다.
+                line = _one_line(direction, email.subject, email.body)
                 session.add(
                     CustomerInteraction(
                         contact_id=contact_id,
+                        # **허브스팟이 알려 준 티켓에만** 붙입니다. 시각으로 짐작하던
+                        # 시절에는 New 티켓에 몇 달 전 이야기가 붙었습니다(0084). 연결이
+                        # 없는 메일은 티켓 없이 「이 고객의 기록」에 남습니다.
+                        conversation_id=conv_id,
                         channel="email",
                         direction=direction,
                         subject=email.subject,
                         summary=email.body or email.subject or "HubSpot 이메일",
                         # 한 줄 요약. 목록이 이걸 먼저 보여 주고, 본문은 눌러야 나옵니다.
-                        context=_one_line(direction, email.subject, email.body),
+                        context=line,
                         external_id=external_id,
                         happened_at=email.timestamp or datetime.now(timezone.utc),
                     )
                 )
                 inserted += 1
+                # 그 티켓에 실제로 오간 것이므로 티켓 요약에도 한 줄 붙습니다. 우리가
+                # 만든 메시지만 세면 영업이 허브스팟에서 직접 한 답이 요약에서 빠집니다.
+                append_line(session, conv_id, line)
         for hubspot_channel, engagement in logged:
             external_id = f"hubspot:{engagement.id}"
             exists = session.scalar(
@@ -1406,6 +1447,7 @@ def _sync_hubspot(contact_id: int, per_type: int = 20) -> int:
                     )
                 )
                 inserted += 1
+        _retire_drafts_for_replies_seen_in_hubspot(session, contact_id, emails)
         session.commit()
     # 커밋 뒤입니다 — 단계 반영은 자기 세션에서 커밋하고, 실패해도 위에서 가져온 것을
     # 되돌리지 않습니다.
@@ -1413,8 +1455,60 @@ def _sync_hubspot(contact_id: int, per_type: int = 20) -> int:
     return inserted
 
 
+def _retire_drafts_for_replies_seen_in_hubspot(session, contact_id: int, emails) -> None:
+    """허브스팟에 **우리가 보낸 메일**이 있으면 그 문의의 대기 초안을 지웁니다.
+
+    영업이 허브스팟에서 직접 회신하면 티켓은 New 에 그대로 있는 일이 흔합니다 — 카드를
+    옮기는 것은 나중이거나 아예 안 합니다. 그동안 우리 초안은 발송 대기에 남아 있고, 그걸
+    누르면 고객은 같은 질문에 두 번째 답을 받습니다(2026-08-20 운영자 지시).
+
+    **우리가 보낸 것은 세지 않습니다.** 발송 경로가 허브스팟에 남긴 기록은 그 메시지 행에
+    `hubspot_engagement_id` 로 적혀 있습니다. 그걸 빼지 않으면 접수확인 한 통이 「답이
+    나갔다」가 되어, 아직 아무도 안 읽은 문의의 초안을 그 자리에서 지웁니다.
+    """
+    ours = {
+        str(row)
+        for row in session.scalars(
+            select(Message.hubspot_engagement_id).where(
+                Message.hubspot_engagement_id.isnot(None)
+            )
+        ).all()
+    }
+    # 티켓별로 「우리 쪽에서 마지막으로 나간 시각」. 허브스팟이 메일마다 티켓을 알려
+    # 주므로 어느 문의의 답인지 짐작하지 않습니다.
+    sent_on_ticket: dict[str, datetime] = {}
+    for e in emails:
+        if "incoming" in e.type or str(e.id) in ours or not e.timestamp or not e.ticket_id:
+            continue
+        when = e.timestamp.replace(tzinfo=None) if e.timestamp.tzinfo else e.timestamp
+        if when > sent_on_ticket.get(e.ticket_id, when.min):
+            sent_on_ticket[e.ticket_id] = when
+    if not sent_on_ticket:
+        return
+    # **그 초안보다 나중에 나간 메일**만 셉니다. 초안이 만들어진 뒤에 우리 쪽에서 메일이
+    # 나갔으면 그 답은 이미 다른 경로로 간 것입니다. 먼저 나간 메일은 다른 이야기입니다.
+    drafts = session.execute(
+        select(Message.conversation_id, Message.created_at, Conversation.hubspot_ticket_id)
+        .join(Conversation, Conversation.id == Message.conversation_id)
+        .where(
+            Conversation.contact_id == contact_id,
+            Conversation.hubspot_ticket_id.in_(sent_on_ticket.keys()),
+            Message.direction == "outgoing",
+            Message.status.in_(("pending_approval", "approved", "drafting")),
+            (Message.prompt_variant.is_(None)) | (Message.prompt_variant != "auto_ack"),
+        )
+    ).all()
+    for conv_id, created_at, ticket_id in drafts:
+        if created_at is not None and created_at <= sent_on_ticket[str(ticket_id)]:
+            retire_drafts_answered_elsewhere(session, conv_id)
+
+
 @router.post("/internal/customers/hubspot-history")
-async def internal_contact_history_backfill(limit: int = 20, per_type: int = 100):
+async def internal_contact_history_backfill(
+    limit: int = 20,
+    per_type: int = 100,
+    include_closed: bool = False,
+):
     """이 콘솔이 생기기 전의 기록을 허브스팟에서 끌어옵니다 — **한 번에 조금씩, 여러 번.**
 
     한 요청이 연락처 ``limit`` 명을 처리하고 남은 수를 돌려줍니다. 다 될 때까지 다시 부르면
@@ -1425,7 +1519,16 @@ async def internal_contact_history_backfill(limit: int = 20, per_type: int = 100
     **어디까지 했는지는 따로 기록하지 않습니다.** `customer_profiles.last_synced_at` 이
     이미 그 값이고(`_sync_hubspot` 이 매번 찍습니다), 오래된 것부터 고르면 그것이 곧
     이어하기입니다. 한 명이 실패해도 나머지는 계속합니다 — 지워진 연락처, 권한 없는
-    레코드는 흔합니다.
+    레코드는 흔합니다. 오래된 것부터라 **다시 부르면 이어서 도는 것이 곧 재동기화**이고,
+    그래서 코드가 고쳐졌을 때 전부 다시 훑는 별도 스위치가 필요 없습니다.
+
+    ``include_closed`` 는 Concluded 만 남은 사람까지 훑습니다. 기본값이 꺼짐인 이유는
+    운영자 지시(2026-08-19)였는데, 「우리가 보낸 답을 다 가져왔나」에 답하려면 이쪽도
+    봐야 합니다(2026-08-20 실측: 278명 중 175명이 그 경우였습니다).
+
+    돌려주는 ``never_synced`` 가 0 이고 ``oldest_synced_at`` 이 배포 시각보다 뒤면 한
+    바퀴가 끝난 것입니다 — ``remaining_estimate`` 는 한 요청 기준이라 여러 번 부를 때의
+    진척은 저 두 값으로 봅니다.
     """
     from sqlalchemy import func
 
@@ -1442,15 +1545,17 @@ async def internal_contact_history_backfill(limit: int = 20, per_type: int = 100
                 .distinct()
                 .scalar_subquery()
             )
+            scope = [
+                Contact.hubspot_contact_id.isnot(None),
+                Contact.hubspot_contact_id != "",
+            ]
+            if not include_closed:
+                scope.append(Contact.id.in_(wanted))
             candidates = (
                 session.execute(
                     select(Contact.id)
                     .outerjoin(CustomerProfile, CustomerProfile.contact_id == Contact.id)
-                    .where(
-                        Contact.hubspot_contact_id.isnot(None),
-                        Contact.hubspot_contact_id != "",
-                        Contact.id.in_(wanted),
-                    )
+                    .where(*scope)
                     # 아직 한 번도 안 한 사람 먼저, 그다음 오래된 순.
                     .order_by(
                         CustomerProfile.last_synced_at.is_(None).desc(),
@@ -1462,12 +1567,16 @@ async def internal_contact_history_backfill(limit: int = 20, per_type: int = 100
                 .scalars()
                 .all()
             )
-            total = session.scalar(
-                select(func.count(Contact.id)).where(
-                    Contact.hubspot_contact_id.isnot(None),
-                    Contact.hubspot_contact_id != "",
-                    Contact.id.in_(wanted),
-                )
+            total = session.scalar(select(func.count(Contact.id)).where(*scope))
+            never_synced = session.scalar(
+                select(func.count(Contact.id))
+                .outerjoin(CustomerProfile, CustomerProfile.contact_id == Contact.id)
+                .where(*scope, CustomerProfile.last_synced_at.is_(None))
+            )
+            oldest_synced_at = session.scalar(
+                select(func.min(CustomerProfile.last_synced_at))
+                .join(Contact, Contact.id == CustomerProfile.contact_id)
+                .where(*scope)
             )
     except Exception as exc:
         # **왜 실패했는지 돌려줍니다.** 핸들러가 던진 예외는 로그 버퍼를 건너뛰므로
@@ -1495,7 +1604,79 @@ async def internal_contact_history_backfill(limit: int = 20, per_type: int = 100
         "failed": failed,
         "remaining_estimate": max(0, (total or 0) - len(candidates)),
         "contacts_in_scope": total,
+        # 한 바퀴가 끝났는지 보는 두 값. 아래를 보세요.
+        "never_synced": never_synced,
+        "oldest_synced_at": oldest_synced_at,
     }
+
+
+@router.post("/internal/conversations/rebuild-summaries")
+async def internal_rebuild_summaries(limit: int = 50, after: int = 0, force: bool = False):
+    """티켓 요약을 **실제로 오간 것**으로 다시 만듭니다 — 한 번에 조금씩, 여러 번.
+
+    0081 이 초안으로 쓴 요약을 비웠습니다(그 요약은 아무도 보내지 않은 초안을 「이렇게
+    답했다」로 적고 있었습니다). 이 라우트가 그 자리를 우리 메시지와 허브스팟에서 끌어온
+    그 티켓의 메일로 채웁니다 — 하는 일은 `summaries.rebuild_summary` 한 곳이고,
+    `scripts/rebuild_ticket_summaries.py` 도 같은 함수를 부릅니다.
+
+    **허브스팟에 묻지 않습니다.** 이미 가져다 둔 것으로만 돕니다 — 그러니 기록 이관을
+    먼저 끝내고 이걸 부르세요. 줄이 없는 메시지는 여기서 모델로 한 줄씩 만들기 때문에
+    ``limit`` 을 크게 잡으면 한 요청이 길어집니다.
+
+    **이어하기는 `after` 로 합니다** — 돌려주는 `next_after` 를 그대로 다음 요청에 넣고,
+    `processed` 가 0 이 될 때까지 부르면 한 바퀴입니다. 「요약이 없는 것」을 앞에서부터
+    고르는 방식은 안 됩니다: 붙일 기록이 하나도 없는 대화(실측 321건 중 106건 — 백필로
+    주워 온 티켓은 메시지도 소통 기록도 없습니다)가 그 자리에 영원히 남아, 다시 부를
+    때마다 **같은 셋을 다시 처리하고 아무 데도 가지 못합니다.**
+
+    ``force`` 는 요약이 이미 있는 대화도 다시 만듭니다. 기본값은 있는 것을 건너뛰므로
+    중간에 끊고 다시 돌려도 한 것을 또 하지 않습니다.
+    """
+    from sqlalchemy import func
+
+    with SessionLocal() as session:
+        pending = (
+            select(Conversation.id)
+            .where(Conversation.id > after)
+            .order_by(Conversation.id.asc())
+        )
+        if not force:
+            pending = pending.where(
+                (Conversation.summary.is_(None)) | (func.trim(Conversation.summary) == "")
+            )
+        conv_ids = list(session.scalars(pending.limit(max(1, min(limit, 200)))).all())
+        remaining = session.scalar(
+            select(func.count(Conversation.id)).where(Conversation.id > after)
+        )
+
+    touched = lines = 0
+    for conv_id in conv_ids:
+        try:
+            written = await asyncio.to_thread(_rebuild_one, conv_id)
+        except Exception:
+            logger.warning("요약 재생성 실패 (conversation=%s)", conv_id, exc_info=True)
+            continue
+        if written:
+            touched += 1
+            lines += written
+    logger.info("요약 재생성: 대화 %d건 · 줄 %d개", touched, lines)
+    return {
+        "processed": len(conv_ids),
+        "rebuilt": touched,
+        "lines": lines,
+        # 이걸 다음 요청의 `after` 에 그대로 넣으세요. `processed` 가 0 이면 끝입니다.
+        "next_after": conv_ids[-1] if conv_ids else after,
+        "conversations_left": max(0, (remaining or 0) - len(conv_ids)),
+    }
+
+
+def _rebuild_one(conv_id: int) -> int:
+    """대화 하나. 자기 세션에서 커밋합니다 — 한 건이 실패해도 앞의 것은 남습니다."""
+    with SessionLocal() as session:
+        written = rebuild_summary(session, conv_id)
+        if written:
+            session.commit()
+        return written
 
 
 @router.post("/customers/{contact_id}/sync")

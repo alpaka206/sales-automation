@@ -22,6 +22,7 @@ type Bubble = {
   subject_ko: string | null;
   needs_ko: boolean;
   is_auto_ack: boolean;
+  summary_line: string | null;
   language: string | null;
   created_at: string;
   sent_at: string | null;
@@ -82,10 +83,7 @@ type Detail = {
   category: string | null;
   category_label: string;
   unqualified: boolean;
-  progress: {
-    kind: string; detail: string; created_at: string;
-    channel: string | null; handler: string | null;
-  }[];
+  progress: { kind: string; detail: string; created_at: string }[];
   summary: string | null;
   customer_requests: string | null;
   other_tickets: {
@@ -276,6 +274,24 @@ export function MessageDetail() {
   // 카드 자체가 안 뜹니다 — 온 것밖에 없는데 「처리 경과」라는 이름의 카드를 하나 더
   // 세우는 셈이었습니다(2026-08-19 운영자 지시).
   const happened = data.progress.filter((entry) => entry.kind !== "inbound");
+  // 티켓 기록 한 줄기: 사람이 적은 기록 + 시스템이 남긴 사실. 시간순입니다 — 기록은
+  // 읽는 순서가 곧 일어난 순서여야 합니다. **처리 경과가 여기 사는 이유**: 그것은 이
+  // 티켓에 일어난 일이라(2026-08-20 운영자 지시) 오른쪽 참고 칸이 아니라 기록 줄기에
+  // 속합니다 — 「메일이 나갔다 → 미팅했고 요구사항은 이것」이 한 이야기입니다.
+  const ticketLog = [
+    ...data.ticket_interactions.map((item, index) => ({
+      key: `i${item.id ?? index}`,
+      at: item.happened_at || "",
+      item,
+      progress: null as string | null,
+    })),
+    ...happened.map((entry, index) => ({
+      key: `p${index}`,
+      at: entry.created_at,
+      item: null,
+      progress: entry.detail,
+    })),
+  ].sort((a, b) => (a.at || "").localeCompare(b.at || ""));
   const canTranslate = !!msg?.target_language && msg.target_language !== "ko";
   // Won 과 Lost 에만 있습니다. 목록도 「이 단계에 고르개가 붙는가」도 서버가 정합니다 —
   // 보드 카드와 같은 출처라 두 화면이 다른 값을 내놓을 수 없습니다.
@@ -480,12 +496,43 @@ export function MessageDetail() {
               }
               const inbound = bubble.direction === "inbound";
               const open = showOrig[bubble.id];
+              const label = inbound
+                ? "고객 문의"
+                : bubble.is_auto_ack
+                  ? "자동 접수확인 (승인 없이 발송)"
+                  : "회신";
+              // **New 를 지나면 메일은 한 줄입니다** (2026-08-20 운영자 지시). 그때부터
+              // 이 화면의 일은 초안을 고치는 것이 아니라 오간 것을 훑는 것이고, 히스토리의
+              // 다른 줄들은 이미 한 줄로 정리돼 있습니다 — 문의만 통째로 펼쳐 두면 그
+              // 목록에서 혼자 열 배 깁니다. 본문은 「전체보기」로 그 자리에서 열립니다.
+              // 줄이 아직 없는 옛 티켓은 예전처럼 펼쳐 둡니다(없는 것을 접을 수는 없습니다).
+              if (afterNew && bubble.summary_line) {
+                return (
+                  <details key={bubble.id} className={`bubble bubble--${inbound ? "in" : "out"}`}>
+                    <summary style={{ cursor: "pointer", listStyle: "none" }}>
+                      <div className="bubble__head">
+                        <span className="bubble__dir">
+                          <Icon name={inbound ? "inbound" : bubble.is_auto_ack ? "sparkles" : "send"} size={14} />{" "}
+                          {label}
+                        </span>
+                        <span className="bubble__time tnum">{kst(bubble.sent_at || bubble.created_at)}</span>
+                      </div>
+                      <div className="t-sm" style={{ lineHeight: 1.6 }}>
+                        {bubble.summary_line}
+                        <span className="t-xs" style={{ color: "var(--accent)", marginLeft: 6 }}>전체보기</span>
+                      </div>
+                    </summary>
+                    {bubble.subject && <div className="bubble__subject" style={{ marginTop: 10 }}>{bubble.subject}</div>}
+                    <div className="msg-body">{bubble.body}</div>
+                  </details>
+                );
+              }
               return (
                 <div key={bubble.id} className={`bubble bubble--${inbound ? "in" : "out"}${bubble.is_current ? " bubble--current" : ""}`}>
                   <div className="bubble__head">
                     <span className="bubble__dir">
                       <Icon name={inbound ? "inbound" : bubble.is_auto_ack ? "sparkles" : "send"} size={14} />{" "}
-                      {inbound ? "고객 문의" : bubble.is_auto_ack ? "자동 접수확인 (승인 없이 발송)" : "회신"}
+                      {label}
                     </span>
                     {bubble.needs_ko && (
                       <button type="button" className="chip chip--xs"
@@ -533,15 +580,17 @@ export function MessageDetail() {
               단계가 아직 New 면 버튼도 없습니다. 검토할 초안이 있다는 것 자체가 아직
               아무 답도 안 나갔다는 뜻이라 적을 소통이 없습니다 — 보드에서 New 열에만
               + 버튼이 없는 것과 같은 규칙이고, 목록도 서버가 주는 같은 것을 씁니다. */}
-          {ticket.id && contact && (canLog || data.ticket_interactions.length > 0) && (
+          {/* **New 는 다른 화면입니다** (2026-08-20 운영자 지시). 아직 아무 일도 안 일어난
+              티켓이라 「이 티켓의 기록」이 있을 수 없습니다 — 한동안 허브스팟에서 가져온
+              그 사람의 **옛** 메일이 시각만 보고 여기 붙었는데, 몇 달 전 다른 이야기가
+              방금 온 문의의 기록으로 그려졌습니다(0084 가 그 연결을 풀었습니다).
+              New 에서 이 화면의 일은 초안을 읽고 보내는 것 하나입니다. */}
+          {afterNew && ticket.id && contact && (canLog || ticketLog.length > 0) && (
             <div className="card" id="log">
               <div className="section-header" style={{ marginBottom: 12 }}>
                 <div className="section-header__l">
                   <span className="section-header__icon"><Icon name="history" size={16} /></span>
-                  <div>
-                    <div className="section-header__title">소통 히스토리</div>
-                    <div className="section-header__sub">이 문의에 대해 이메일·WhatsApp·전화·문자로 오간 내용</div>
-                  </div>
+                  <div className="section-header__title">이 티켓의 기록</div>
                 </div>
                 {canLog && (
                   <button
@@ -555,13 +604,28 @@ export function MessageDetail() {
                 )}
               </div>
               <div className="history-list">
-                {data.ticket_interactions.length === 0 ? (
+                {ticketLog.length === 0 ? (
                   <div className="empty"><div className="empty__text">아직 기록이 없습니다. 회신 이후의 연락은 여기에 남겨주세요.</div></div>
                 ) : (
-                  data.ticket_interactions.map((item) => <InteractionItem key={item.id} item={item} />)
+                  ticketLog.map((entry) =>
+                    entry.progress ? (
+                      <div key={entry.key} className="t-xs t-subtle"
+                           style={{ padding: "6px 0", borderTop: "1px solid var(--border)" }}>
+                        <span className="tnum">{kst(entry.at)}</span>{" · "}{entry.progress}
+                      </div>
+                    ) : (
+                      <InteractionItem key={entry.key} item={entry.item as Interaction} />
+                    ),
+                  )
                 )}
               </div>
             </div>
+          )}
+          {/* **고객 기록도 메인입니다** — New 이후에는 이 화면의 본론이 「이 사람과 무슨
+              이야기가 오갔나」이기 때문입니다. New 에서는 오른쪽에 둡니다: 그때는 본론이
+              초안이고, 이건 그 초안을 쓰기 위한 참고입니다. */}
+          {afterNew && data.customer?.interactions && data.customer.interactions.length > 0 && (
+            <HistoryDigest items={data.customer.interactions} />
           )}
         </div>
 
@@ -580,40 +644,15 @@ export function MessageDetail() {
             </div>
           )}
 
-          {(happened.length > 0 || (afterNew && data.summary)) && (
+          {/* 요약은 대화가 오간 뒤에야 뜻이 있습니다. New 에서는 문의 한 통을 요약한
+              것이라 바로 위 말풍선과 같은 말을 두 번 하게 됩니다. **접지 않습니다** —
+              불릿 몇 줄을 여는 데 클릭이 필요하면 아무도 안 엽니다(운영자 지시). */}
+          {afterNew && data.summary && (
             <div className="card">
-              <div className="section-label" style={{ marginBottom: 12 }}>처리 경과</div>
-              {/* 요약은 대화가 오간 뒤에야 뜻이 있습니다. New 에서는 문의 한 통을 요약한
-                  것이라 바로 위 말풍선과 같은 말을 두 번 하게 됩니다. */}
-              {afterNew && data.summary && (
-                <details className="msg-body--inset" style={{ marginBottom: 10 }}>
-                  <summary style={{ cursor: "pointer", listStyle: "none" }}>
-                    <span className="ko-block__label">티켓 요약</span>
-                    <span className="t-xs" style={{ color: "var(--accent)", marginLeft: 6 }}>전체보기</span>
-                  </summary>
-                  <div className="t-sm" style={{ lineHeight: 1.6, whiteSpace: "pre-line", marginTop: 6 }}>
-                    {data.summary}
-                  </div>
-                </details>
-              )}
-              {happened.length > 0 && (
-                <ul className="progress-log">
-                  {happened.map((p, index) => (
-                    <li key={index} className="progress-log__item">
-                      <span className="progress-log__time tnum">{kst(p.created_at)}</span>
-                      <span className="progress-log__detail">
-                        {p.kind === "interaction" && (
-                          <span className="tag" style={{ marginRight: 6 }}>
-                            {channelLabel(p.channel || "manual")}
-                            {p.handler ? ` · ${p.handler}` : ""}
-                          </span>
-                        )}
-                        <span style={{ whiteSpace: "pre-line" }}>{p.detail}</span>
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              )}
+              <div className="section-label" style={{ marginBottom: 8 }}>티켓 요약</div>
+              <div className="t-sm" style={{ lineHeight: 1.7, whiteSpace: "pre-line" }}>
+                {data.summary}
+              </div>
             </div>
           )}
 
@@ -840,7 +879,7 @@ export function MessageDetail() {
               뺀 모든 기록, 뒤엣것은 그중 어느 티켓에도 안 달린 것. 읽는 사람에게는 둘 다
               「이 사람과 전에 오간 것」이라 가를 이유가 없습니다. 앞엣것 하나로 남깁니다.
               허브스팟에서 끌어온 옛 메일도 여기 들어옵니다. */}
-          {data.customer?.interactions && data.customer.interactions.length > 0 && (
+          {!afterNew && data.customer?.interactions && data.customer.interactions.length > 0 && (
             <HistoryDigest items={data.customer.interactions} />
           )}
         </div>
@@ -961,6 +1000,8 @@ function HistoryRow({ item }: {
   // 요약이 있으면 그것이 미리보기입니다. 없을 때만 본문 앞머리를 씁니다 — 인사말로
   // 시작하는 메일에서는 앞머리가 아무것도 안 알려 줍니다.
   const body = (item.summary || "").trim();
+  const received = RECEIVED.has(item.direction);
+  const sent = SENT.has(item.direction);
   // 두 줄이면 「무슨 이야기였나」는 알 수 있고, 그 이상은 펼쳐서 읽을 일입니다.
   const flat = body.replace(/\s+/g, " ");
   const preview = (item.digest || flat).slice(0, 110);
@@ -969,7 +1010,14 @@ function HistoryRow({ item }: {
     <details style={{ borderTop: "1px solid var(--border)", paddingTop: 6 }}>
       <summary style={{ cursor: "pointer", listStyle: "none" }}>
         <div className="row" style={{ gap: 6, flexWrap: "wrap" }}>
-          <span className="tag">{channelLabel(item.channel)}</span>
+          {/* 방향은 색으로도 말합니다 — 목록을 훑을 때 「누가 보낸 것인가」가 글자를 읽기
+              전에 보여야 합니다. 말풍선·소통 기록과 같은 두 색입니다. 채널 태그는
+              이메일이 아닐 때만: 거의 모든 줄이 이메일이라 붙여 봐야 같은 말입니다. */}
+          <span className={`t-xs history-item__dir history-item--${received ? "in" : sent ? "out" : "both"}`}>
+            <Icon name={received ? "inbound" : sent ? "send" : "messages"} size={12} />
+            {received ? "받음" : sent ? "보냄" : "주고받음"}
+          </span>
+          {item.channel !== "email" && <span className="tag">{channelLabel(item.channel)}</span>}
           {item.handler && <span className="t-xs t-subtle">{item.handler}</span>}
           <span className="t-xs t-subtle tnum">{item.happened_at ? kst(item.happened_at) : ""}</span>
         </div>
@@ -1040,7 +1088,7 @@ function HistoryDigest({ items }: {
 
   return (
     <div className="card">
-      <div className="section-label" style={{ marginBottom: 4 }}>고객 히스토리</div>
+      <div className="section-label" style={{ marginBottom: 4 }}>이 고객의 기록 (티켓 밖)</div>
       <div className="t-xs t-subtle" style={{ marginBottom: 10 }}>
         대화 {threads.length}건 · 받은 문의 {received} · 보낸 답변 {sent}
       </div>

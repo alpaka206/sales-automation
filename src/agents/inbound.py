@@ -37,6 +37,7 @@ from .inbound_scoring import (  # noqa: F401 — re-exported for callers/tests
     _domain_from_email,
     _normalize_email,
 )
+from .summaries import append_summary_line
 from .stage_sync import _retire_superseded_drafts
 
 logger = logging.getLogger(__name__)
@@ -123,8 +124,7 @@ class DraftResult(BaseModel):
     tone_notes: str = ""
 
 
-class _SummaryResult(BaseModel):
-    summary: str = ""
+class _RequestsResult(BaseModel):
     customer_requests: str = ""
 
 
@@ -211,13 +211,17 @@ class InboundAgent:
         # Persist the inquiry + a "drafting" placeholder up front so the ticket shows
         # on the site immediately, before the (slower) AI reply draft is ready. The
         # placeholder flips to pending_approval once the draft finishes.
-        message_id, conv_id, is_first_inbound = self._persist_placeholder(
+        message_id, conv_id, is_first_inbound, inbound_message_id = self._persist_placeholder(
             contact_info,
             channel,
             inquiry_lang,
             resume_message_id=resume_message_id,
             inbound_job_id=event.get("_inbound_job_id"),
         )
+
+        # 티켓 요약은 **일어난 일마다 한 줄**입니다. 문의가 실제로 저장됐을 때만 붙입니다 —
+        # 티켓 하나에 이벤트가 여러 번 오고, 본문을 저장하는 것은 그중 한 번뿐입니다.
+        append_summary_line(inbound_message_id)
 
         # 이 대화에는 이미 회신이 있습니다. 자동 초안은 첫 회신 한 번뿐이고, 이후는 사람이
         # 직접 등록합니다. 고객 문의는 위에서 이미 기록됐으므로 화면에는 그대로 보입니다.
@@ -287,9 +291,9 @@ class InboundAgent:
             self._mark_draft_failed(message_id)
             raise
 
-        # Refresh the rolling summary + customer requests (best-effort, separate
-        # from the append-only progress log). Never breaks the pipeline.
-        self._update_summary(conv_id, contact_info)
+        # 고객 요청사항만 새로 뽑습니다(best-effort). 티켓 요약은 위에서 문의 한 줄이
+        # 이미 붙었고, 우리 답은 **정말 나갔을 때** send_worker 가 붙입니다.
+        self._extract_requests(conv_id, contact_info)
 
         # The draft is always pending_approval now — the old `if auto_approved: dispatch
         # else: notify` fork went with the auto-approval branch. The one exception is a
@@ -925,10 +929,13 @@ class InboundAgent:
         *,
         resume_message_id: int | None = None,
         inbound_job_id: int | None = None,
-    ) -> tuple[int | None, int, bool]:
+    ) -> tuple[int | None, int, bool, bool]:
         """Persist the inquiry and a drafting reply placeholder before the AI draft.
 
-        Returns ``(reply_message_id, conversation_id, is_first_inbound)``. The
+        Returns ``(reply_message_id, conversation_id, is_first_inbound, inbound_message_id)``.
+        ``inbound_message_id`` is set only when this call actually wrote the customer's
+        message — one ticket gets several events, and only the first of them stores the
+        body. 티켓 요약에 불릿을 덧붙이는 쪽이 그 한 번을 알아야 합니다. The
         card appears on the site immediately as "작성중"; _finalize_draft fills it in
         once the reply is ready. ``is_first_inbound`` is True when this is the very
         first inbound message in the thread (drives the immediate auto-ack).
@@ -1056,6 +1063,7 @@ class InboundAgent:
             # Snapshot the inbound body so the approval UI shows what we're replying to
             # (the subject is kept separate — fixes "가끔 제목만 오더라").
             inbound_body = (contact_info.get("last_message") or "").strip()
+            inbound_message_id: int | None = None
             # A durable retry of the same HubSpot ticket may replace a failed
             # draft, but it must not append the customer's inquiry a second time.
             if inbound_body and (not ticket_id or is_first_inbound):
@@ -1079,21 +1087,21 @@ class InboundAgent:
                 )
                 if latest_reply:
                     latest_reply.replied = True
-                session.add(
-                    Message(
-                        conversation_id=conv.id,
-                        direction="inbound",
-                        channel=channel,
-                        from_address=email or None,
-                        to_address=settings.SMTP_FROM_EMAIL or None,
-                        subject=inbound_subject,
-                        body=inbound_body,
-                        language=inquiry_lang or "en",
-                        status="received",
-                    )
+                inquiry = Message(
+                    conversation_id=conv.id,
+                    direction="inbound",
+                    channel=channel,
+                    from_address=email or None,
+                    to_address=settings.SMTP_FROM_EMAIL or None,
+                    subject=inbound_subject,
+                    body=inbound_body,
+                    language=inquiry_lang or "en",
+                    status="received",
                 )
+                session.add(inquiry)
                 conv.last_incoming_at = datetime.now(timezone.utc)
                 session.flush()
+                inbound_message_id = inquiry.id
                 # Append-only progress entry: inquiry received.
                 excerpt = (inbound_subject or inbound_body).replace("\n", " ").strip()
                 add_progress(
@@ -1136,7 +1144,7 @@ class InboundAgent:
                 )
                 if prior_reply:
                     session.commit()  # 고객 문의와 진행 기록은 남깁니다.
-                    return None, conv.id, False
+                    return None, conv.id, False, inbound_message_id
             if not resumable:
                 msg = Message(
                     conversation_id=conv.id,
@@ -1179,7 +1187,7 @@ class InboundAgent:
                     payload["draft_message_id"] = msg.id
                     job.payload = payload
             session.commit()
-            return msg.id, conv.id, is_first_inbound
+            return msg.id, conv.id, is_first_inbound, inbound_message_id
         finally:
             session.close()
 
@@ -1377,31 +1385,39 @@ class InboundAgent:
     # which is gone: a detailed reply is never approved without a human, so there is
     # never a freshly-approved draft for the inbound agent to send inline.
 
-    # ----- Rolling summary + customer requests -----
+    # ----- Customer requests -----
 
-    def _update_summary(self, conv_id: int | None, contact_info: dict) -> None:
-        """Refresh the conversation's rolling summary + customer_requests (best-effort)."""
+    def _extract_requests(self, conv_id: int | None, contact_info: dict) -> None:
+        """고객이 명시적으로 요청한 것만 뽑아 `customer_requests` 에 넣습니다(best-effort).
+
+        **고객이 쓴 글만 읽습니다.** 예전에는 이 자리에서 대화 전체를 읽어 요약 문단까지
+        같이 썼는데, 이 호출은 초안이 만들어진 **직후**에 돌고 초안도 메시지 행이라 아무도
+        보내지 않은 글이 「우리가 이렇게 답했다」로 요약에 들어갔습니다(2026-08-20 지적).
+        요약은 이제 `summaries.append_summary_line` 이 실제로 일어난 일마다 한 줄씩
+        덧붙입니다 — 여기서는 요청사항만 봅니다.
+        """
         if not conv_id:
             return
         try:
             with SessionLocal() as session:
                 rows = (
                     session.query(Message)
-                    .filter(Message.conversation_id == conv_id)
+                    .filter(
+                        Message.conversation_id == conv_id,
+                        Message.direction == "inbound",
+                    )
                     .order_by(Message.created_at.asc(), Message.id.asc())
                     .all()
                 )
-                # Keep the newest complete turns when a thread is long. Taking
-                # the first N characters would discard the very message that
-                # triggered the current reply.
+                # 긴 대화에서는 **최근** 문의부터 담습니다. 앞에서 자르면 지금 답하려는
+                # 바로 그 메시지가 빠집니다.
                 newest_first: list[str] = []
                 used = 0
                 for m in reversed(rows):
                     if not (m.body or "").strip():
                         continue
-                    who = "고객" if m.direction == "inbound" else "우리"
                     subj = f"[{m.subject}] " if m.subject else ""
-                    part = f"{who}: {subj}{m.body.strip()}"
+                    part = f"고객: {subj}{m.body.strip()}"
                     remaining = 8000 - used
                     if remaining <= 0:
                         break
@@ -1416,27 +1432,28 @@ class InboundAgent:
                 return
 
             result = self.llm.complete(
-                "inbound/summarize_thread",
+                "inbound/extract_requests",
                 {
                     "contact_name": contact_info.get("full_name", ""),
                     "company": contact_info.get("company", ""),
                     "thread_text": thread_text,
                 },
-                schema=_SummaryResult,
+                schema=_RequestsResult,
                 tier="flash",
                 max_tokens=1200,
             )
             with SessionLocal() as session:
                 conv = session.get(Conversation, conv_id)
                 if conv:
-                    conv.summary = (result.summary or "").strip() or conv.summary
                     conv.customer_requests = (
                         result.customer_requests or ""
                     ).strip() or conv.customer_requests
                     session.commit()
         except Exception:
             logger.warning(
-                "Summary refresh failed for conv %s (non-fatal).", conv_id, exc_info=True
+                "Customer-request extraction failed for conv %s (non-fatal).",
+                conv_id,
+                exc_info=True,
             )
 
     def _mark_draft_failed(self, message_id: int) -> None:

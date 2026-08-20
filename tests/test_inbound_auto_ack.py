@@ -13,7 +13,7 @@ from src.agents.inbound import (
     DraftResult,
     InboundAgent,
     ScoreAdjustResult,
-    _SummaryResult,
+    _RequestsResult,
     _processed,
 )
 from src.common.config import settings
@@ -37,8 +37,8 @@ def _mock_llm():
             return ScoreAdjustResult(adjustment=0, reasoning="x")
         if "draft_reply" in prompt_name:
             return DraftResult(subject="s", body="본문입니다.", language="ko")
-        if "summarize_thread" in prompt_name:
-            return _SummaryResult(summary="요약", customer_requests="")
+        if "extract_requests" in prompt_name:
+            return _RequestsResult(customer_requests="")
         if "detect_language" in prompt_name:
             return "en"
         if "translate_to" in prompt_name:

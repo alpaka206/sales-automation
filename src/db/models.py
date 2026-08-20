@@ -157,6 +157,9 @@ class Message(Base):
     smtp_message_id: Mapped[str | None] = mapped_column(String, nullable=True)
     in_reply_to: Mapped[str | None] = mapped_column(String, nullable=True)
     hubspot_engagement_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    # 이 메일 한 통을 줄인 한 줄. 티켓 요약이 이 줄들을 이어 붙인 것이고, New 를 지난
+    # 화면은 본문 대신 이것을 보여 준 뒤 「전체보기」로 본문을 엽니다.
+    summary_line: Mapped[str | None] = mapped_column(String(300), nullable=True)
     scheduled_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     slack_notified_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     slack_notification_attempted_at: Mapped[datetime | None] = mapped_column(
