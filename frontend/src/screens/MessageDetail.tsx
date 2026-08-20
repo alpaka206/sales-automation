@@ -278,19 +278,38 @@ export function MessageDetail() {
   // 읽는 순서가 곧 일어난 순서여야 합니다. **처리 경과가 여기 사는 이유**: 그것은 이
   // 티켓에 일어난 일이라(2026-08-20 운영자 지시) 오른쪽 참고 칸이 아니라 기록 줄기에
   // 속합니다 — 「메일이 나갔다 → 미팅했고 요구사항은 이것」이 한 이야기입니다.
+  //
+  // **New 를 지나면 문의·회신도 이 줄기에 들어옵니다** (2026-08-20 운영자 지시). 그때부터
+  // 이 화면의 일은 초안을 고치는 것이 아니라 「무슨 이야기가 오갔나」를 읽는 것이고,
+  // 우리가 주고받은 메일만 위에 따로 세워 두면 같은 시간축이 두 동강 납니다 — 허브스팟에서
+  // 온 답과 우리 메일 중 무엇이 먼저였는지가 화면에서 안 보입니다. New 에서는 그대로
+  // 위에 남습니다: 거기서는 원문을 읽고 초안을 쓰는 것이 본론입니다.
   const ticketLog = [
     ...data.ticket_interactions.map((item, index) => ({
       key: `i${item.id ?? index}`,
       at: item.happened_at || "",
       item,
       progress: null as string | null,
+      bubble: null as Bubble | null,
     })),
     ...happened.map((entry, index) => ({
       key: `p${index}`,
       at: entry.created_at,
       item: null,
       progress: entry.detail,
+      bubble: null as Bubble | null,
     })),
+    ...(afterNew
+      ? data.thread
+          .filter((b) => !(b.is_current && isPendingApproval))
+          .map((b) => ({
+            key: `m${b.id}`,
+            at: b.sent_at || b.created_at,
+            item: null,
+            progress: null as string | null,
+            bubble: b,
+          }))
+      : []),
   ].sort((a, b) => (a.at || "").localeCompare(b.at || ""));
   const canTranslate = !!msg?.target_language && msg.target_language !== "ko";
   // Won 과 Lost 에만 있습니다. 목록도 「이 단계에 고르개가 붙는가」도 서버가 정합니다 —
@@ -412,7 +431,7 @@ export function MessageDetail() {
 
       <div className="split">
         <div className="stack">
-          {data.thread.length === 0 && (
+          {!afterNew && data.thread.length === 0 && (
             <div className="empty">
               <div className="empty__text">
                 이 티켓에는 이 콘솔이 주고받은 메일이 없습니다 — HubSpot 에서 들여온
@@ -421,7 +440,10 @@ export function MessageDetail() {
             </div>
           )}
           <div className="thread">
-            {data.thread.map((bubble) => {
+            {(afterNew
+              ? data.thread.filter((b) => b.is_current && isPendingApproval)
+              : data.thread
+            ).map((bubble) => {
               if (bubble.is_current && isPendingApproval) {
                 return (
                   <div key={bubble.id} className="bubble bubble--out bubble--current">
@@ -501,32 +523,6 @@ export function MessageDetail() {
                 : bubble.is_auto_ack
                   ? "자동 접수확인 (승인 없이 발송)"
                   : "회신";
-              // **New 를 지나면 메일은 한 줄입니다** (2026-08-20 운영자 지시). 그때부터
-              // 이 화면의 일은 초안을 고치는 것이 아니라 오간 것을 훑는 것이고, 히스토리의
-              // 다른 줄들은 이미 한 줄로 정리돼 있습니다 — 문의만 통째로 펼쳐 두면 그
-              // 목록에서 혼자 열 배 깁니다. 본문은 「전체보기」로 그 자리에서 열립니다.
-              // 줄이 아직 없는 옛 티켓은 예전처럼 펼쳐 둡니다(없는 것을 접을 수는 없습니다).
-              if (afterNew && bubble.summary_line) {
-                return (
-                  <details key={bubble.id} className={`bubble bubble--${inbound ? "in" : "out"}`}>
-                    <summary style={{ cursor: "pointer", listStyle: "none" }}>
-                      <div className="bubble__head">
-                        <span className="bubble__dir">
-                          <Icon name={inbound ? "inbound" : bubble.is_auto_ack ? "sparkles" : "send"} size={14} />{" "}
-                          {label}
-                        </span>
-                        <span className="bubble__time tnum">{kst(bubble.sent_at || bubble.created_at)}</span>
-                      </div>
-                      <div className="t-sm" style={{ lineHeight: 1.6 }}>
-                        {bubble.summary_line}
-                        <span className="t-xs" style={{ color: "var(--accent)", marginLeft: 6 }}>전체보기</span>
-                      </div>
-                    </summary>
-                    {bubble.subject && <div className="bubble__subject" style={{ marginTop: 10 }}>{bubble.subject}</div>}
-                    <div className="msg-body">{bubble.body}</div>
-                  </details>
-                );
-              }
               return (
                 <div key={bubble.id} className={`bubble bubble--${inbound ? "in" : "out"}${bubble.is_current ? " bubble--current" : ""}`}>
                   <div className="bubble__head">
@@ -585,7 +581,7 @@ export function MessageDetail() {
               그 사람의 **옛** 메일이 시각만 보고 여기 붙었는데, 몇 달 전 다른 이야기가
               방금 온 문의의 기록으로 그려졌습니다(0084 가 그 연결을 풀었습니다).
               New 에서 이 화면의 일은 초안을 읽고 보내는 것 하나입니다. */}
-          {afterNew && ticket.id && contact && (canLog || ticketLog.length > 0) && (
+          {afterNew && ticket.id && contact && (
             <div className="card" id="log">
               <div className="section-header" style={{ marginBottom: 12 }}>
                 <div className="section-header__l">
@@ -613,6 +609,8 @@ export function MessageDetail() {
                            style={{ padding: "6px 0", borderTop: "1px solid var(--border)" }}>
                         <span className="tnum">{kst(entry.at)}</span>{" · "}{entry.progress}
                       </div>
+                    ) : entry.bubble ? (
+                      <MessageRow key={entry.key} bubble={entry.bubble} />
                     ) : (
                       <InteractionItem key={entry.key} item={entry.item as Interaction} />
                     ),
@@ -986,6 +984,56 @@ export function MessageDetail() {
         </Modal>
       )}
     </>
+  );
+}
+
+/** 우리가 주고받은 메일 한 줄 — 소통 기록과 **같은 모양**으로 그립니다.
+ *
+ *  New 를 지난 티켓에서 이 줄은 「이 티켓의 기록」 안에 삽니다. 우리 메일만 다른 모양이면
+ *  같은 시간축에 있어도 두 목록으로 읽히고, 「허브스팟에서 온 답과 우리 메일 중 무엇이
+ *  먼저였나」가 안 보입니다. 방향 색도 같은 것을 씁니다(받음 파랑 · 보냄 청록).
+ *
+ *  줄이 아직 없는 옛 메일은 본문 앞머리를 대신 씁니다 — 접히기는 해야 목록이 됩니다. */
+function MessageRow({ bubble }: { bubble: Bubble }) {
+  const received = bubble.direction === "inbound";
+  const body = (bubble.body_ko || bubble.body || "").trim();
+  const preview = (bubble.summary_line || body).replace(/\s+/g, " ");
+  return (
+    <article className={`history-item history-item--${received ? "in" : "out"}`}>
+      <div className="history-item__rail"><span /></div>
+      <div>
+        <details>
+          <summary style={{ cursor: "pointer", listStyle: "none" }}>
+            <div className="row wrap" style={{ gap: 6 }}>
+              <span className="t-xs history-item__dir">
+                <Icon name={received ? "inbound" : bubble.is_auto_ack ? "sparkles" : "send"} size={13} />
+                {received ? "받음" : "보냄"}
+              </span>
+              {bubble.is_auto_ack && <span className="tag">자동 접수확인</span>}
+              <time className="t-xs t-subtle tnum">
+                {kst(bubble.sent_at || bubble.created_at)}
+              </time>
+            </div>
+            {bubble.subject && (
+              <strong className="history-item__title">{bubble.subject_ko || bubble.subject}</strong>
+            )}
+            <div className="t-sm t-subtle" style={{ lineHeight: 1.6 }}>
+              {preview.slice(0, 120)}
+              {preview.length > 120 ? "… " : " "}
+              <span style={{ color: "var(--accent)" }}>전체보기</span>
+            </div>
+          </summary>
+          <div className="history-item__body" style={{ marginTop: 8 }}>{body}</div>
+          {/* 번역해서 보여 준 메일은 원문도 같이 둡니다 — 숫자와 고유명사는 원문이 기준입니다. */}
+          {bubble.needs_ko && bubble.body_ko && (
+            <div className="msg-body--inset" style={{ marginTop: 8 }}>
+              <div className="ko-block__label t-subtle">원문 ({bubble.language || "original"})</div>
+              <div className="history-item__body">{bubble.body}</div>
+            </div>
+          )}
+        </details>
+      </div>
+    </article>
   );
 }
 

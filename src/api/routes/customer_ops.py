@@ -1291,6 +1291,18 @@ def _one_line(direction: str, subject: str | None, body: str | None) -> str | No
         return None
 
 
+def _fit(value: str | None, limit: int = 300) -> str | None:
+    """`customer_interactions.subject` 는 varchar(300) 입니다. 넘치면 **잘라서** 넣습니다.
+
+    SQLite 는 길이를 안 지키고 Postgres 는 지킵니다. 그래서 로컬에서는 멀쩡하다가 운영에서
+    `StringDataRightTruncation` 으로 그 연락처의 기록만 통째로 안 들어왔습니다(2026-08-20
+    실측: 회신 인용문이 제목에 통째로 들어간 메일이 있었습니다). 제목이 300자를 넘는 메일은
+    이미 제목이 아니므로, 기록을 잃는 것보다 뒤를 자르는 편이 낫습니다.
+    """
+    text = (value or "").strip()
+    return text[:limit] or None
+
+
 def _sync_hubspot(contact_id: int, per_type: int = 20) -> int:
     """허브스팟에 있는 그 사람의 기록을 우리 히스토리로 가져옵니다.
 
@@ -1379,7 +1391,7 @@ def _sync_hubspot(contact_id: int, per_type: int = 20) -> int:
                         conversation_id=conv_id,
                         channel="email",
                         direction=direction,
-                        subject=email.subject,
+                        subject=_fit(email.subject),
                         summary=email.body or email.subject or "HubSpot 이메일",
                         # 한 줄 요약. 목록이 이걸 먼저 보여 주고, 본문은 눌러야 나옵니다.
                         context=line,
@@ -1405,7 +1417,7 @@ def _sync_hubspot(contact_id: int, per_type: int = 20) -> int:
                         # nothing about who dialled, and the form stopped asking for
                         # the same reason.
                         direction="note",
-                        subject=engagement.subject,
+                        subject=_fit(engagement.subject),
                         summary=engagement.body or engagement.subject or "HubSpot 기록",
                         external_id=external_id,
                         happened_at=engagement.timestamp or datetime.now(timezone.utc),
@@ -1423,7 +1435,7 @@ def _sync_hubspot(contact_id: int, per_type: int = 20) -> int:
                         contact_id=contact_id,
                         channel="hubspot",
                         direction="note",
-                        subject=deal.name or "HubSpot Deal",
+                        subject=_fit(deal.name) or "HubSpot Deal",
                         summary=f"단계: {deal.stage or '-'} · 금액: {deal.amount or '-'}",
                         external_id=external_id,
                     )

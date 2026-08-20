@@ -82,3 +82,14 @@ def test_the_draft_can_no_longer_write_the_summary():
     # 우리 답 한 줄은 SMTP 를 지난 뒤에만 붙습니다.
     worker = pathlib.Path("src/agents/send_worker.py").read_text(encoding="utf-8")
     assert "append_summary_line" in worker
+
+
+def test_an_oversize_subject_is_cut_not_dropped():
+    """`customer_interactions.subject` 는 varchar(300). SQLite 는 안 지키고 Postgres 는
+    지켜서, 운영에서만 그 연락처의 기록이 통째로 안 들어왔습니다(2026-08-20)."""
+    from src.api.routes.customer_ops import _fit
+
+    assert _fit("x" * 400) == "x" * 300
+    assert _fit("  제목  ") == "제목"
+    assert _fit("") is None
+    assert _fit(None) is None
