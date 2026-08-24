@@ -134,7 +134,6 @@ export function WonCustomers() {
   const activeRows = scoped.filter((r) => r.plan_status !== "사용 중단" && r.active);
   const mrrCount = activeRows.filter((r) => r.active?.deal_type === "MRR").length;
   const pocCount = activeRows.filter((r) => r.active?.deal_type === "PoC").length;
-  const untypedCount = activeRows.length - mrrCount - pocCount;
   // 「이번달 예상 MRR」은 **서버가 계약 기간으로 계산해서**(계약 금액 ÷ 개월수) 담당부서별·
   // 통화별로 내려줍니다. 여기서 행을 걸러 더하면 그 필터가 곧 정의가 됩니다 — 실제로 플랜
   // 상태로 거르고 있었고, 그래서 세팅중 고객이 통째로 빠졌습니다. 행에는 활성 계약 하나만
@@ -182,8 +181,8 @@ export function WonCustomers() {
               <G name="person" /> 활성 고객 <span style={{ color: "var(--faint)" }}>({deptLabel})</span>
             </div>
             <div className="kpi-value"><span>{live + setup}</span><span className="unit">곳</span></div>
-            {/* 두 지표는 구성비를 읽는 값이라 원그래프로 보여 줍니다. 수주 유형이 비어 있는
-                활성 계약도 모집단에서 사라지지 않도록 '미등록' 조각으로 드러냅니다. */}
+            {/* 두 지표는 구성비를 읽는 값이라 원그래프로 보여 줍니다. 수주 유형은 계약을
+                저장할 때 MRR 또는 PoC로 정해지므로 화면도 그 두 종류만 나눕니다. */}
             <div className="kpi-splits">
               <Donut cap="플랜 상태" slices={[
                 { label: "사용중", n: live, color: "var(--teal-600)" },
@@ -192,7 +191,6 @@ export function WonCustomers() {
               <Donut cap="수주 유형" slices={[
                 { label: "MRR", n: mrrCount, color: "var(--teal-600)" },
                 { label: "PoC", n: pocCount, color: "#E4A11B" },
-                { label: "미등록", n: untypedCount, color: "#AAB7B4" },
               ]} />
             </div>
           </button>
