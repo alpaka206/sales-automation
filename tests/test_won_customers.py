@@ -430,6 +430,21 @@ def test_active_customer_donuts_resize_and_show_only_real_deal_types():
     assert "aspect-ratio:1" in chart_rule
 
 
+def test_waiting_card_bypasses_the_three_way_customer_picker():
+    import pathlib
+
+    waiting = pathlib.Path(
+        "frontend/src/screens/won/WonCustomers.tsx"
+    ).read_text(encoding="utf-8")
+    picker = pathlib.Path(
+        "frontend/src/screens/won/WonNew.tsx"
+    ).read_text(encoding="utf-8")
+
+    assert "pendingContractPath(data, item)" in waiting
+    assert "/won-customers/new?pending=" not in waiting
+    assert "티켓에 물려 있는 Client ID로 기존 고객인지 판별합니다." not in picker
+
+
 def test_the_console_can_actually_reach_the_write_routes():
     """`/won-customers` 는 화면이 세션 쿠키로 부르는 브라우저 경로입니다.
 

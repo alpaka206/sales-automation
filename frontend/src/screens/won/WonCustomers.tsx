@@ -2,7 +2,9 @@ import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { getJSON } from "../../lib/api";
+import { ActionButton } from "../../ui/ActionButton";
 import { MonthlyBars } from "./MonthlyBars";
+import { pendingContractPath } from "./pending";
 import {
   type ListData, type Row,
   STATUS_ORDER, amount, daysUntil, dday, dueClass, dueText, fmt, initials, money, num,
@@ -73,6 +75,7 @@ export function WonCustomers() {
   const [status, setStatus] = useState("all");
   const [plan, setPlan] = useState("all");
   const [type, setType] = useState("all");
+  const [intakeError, setIntakeError] = useState<string | null>(null);
   // **기본은 GTM 입니다.** 이 화면을 매일 여는 쪽이 GTM 이고, 「전체」로 두면 위 카드가
   // 세 팀을 합친 — 아무 팀의 것도 아닌 — 숫자로 시작합니다.
   const [dept, setDept] = useState("GTM");
@@ -148,6 +151,16 @@ export function WonCustomers() {
 
   const open = (clientId: number, section?: string) =>
     navigate(`/won-customers/${clientId}${section ? `#${section}` : ""}`);
+
+  async function openPending(item: ListData["pending"][number]) {
+    if (!data) return;
+    setIntakeError(null);
+    try {
+      navigate(await pendingContractPath(data, item));
+    } catch (error) {
+      setIntakeError(error instanceof Error ? error.message : String(error));
+    }
+  }
 
   return (
     <div className="won">
@@ -321,14 +334,15 @@ export function WonCustomers() {
                       : "Client ID 없음 → 새 고객으로 등록"}
                   </div>
                   <div className="intake-actions">
-                    <button className="btn btn-sm btn-primary" type="button"
-                            onClick={() => navigate(`/won-customers/new?pending=${item.id}`)}>
+                    <ActionButton className="btn btn-sm btn-primary" pending="준비 중"
+                                  onClick={() => openPending(item)}>
                       계약 정보 입력
-                    </button>
+                    </ActionButton>
                   </div>
                 </div>
               ))}
             </div>
+            {intakeError && <div className="intake-error" role="alert">{intakeError}</div>}
           </div>
         )}
 

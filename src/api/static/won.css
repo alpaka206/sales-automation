@@ -166,6 +166,8 @@
 .won .intake-match {font-size:12.5px;padding:8px 11px;border-radius:8px;background:var(--teal-25);color:var(--teal-700);font-weight:500;}
 .won .intake-match.new {background:var(--bg-soft);color:var(--muted);font-weight:400;}
 .won .intake-actions {display:flex;gap:7px;margin-top:2px;}
+.won .intake-error {margin:0 18px 16px;padding:9px 11px;border-radius:8px;background:#FEF3F2;
+  color:#B42318;font-size:12.5px;}
 /* Toolbar */
 .won .toolbar {display:flex;align-items:center;gap:10px;margin-top:30px;flex-wrap:wrap;padding-bottom:14px;border-bottom:1px solid var(--line);}
 .won .search {position:relative;flex:1;min-width:240px;max-width:360px;}

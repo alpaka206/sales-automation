@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { getJSON, postForm } from "../../lib/api";
 import { SubmitButton, useAction } from "../../ui/ActionButton";
+import { pendingContractPath } from "./pending";
 import { type ListData, fmt } from "./shared";
 
 /** 수주 고객 추가 — 목업의 1단계 모달을 화면으로.
@@ -56,6 +57,7 @@ export function WonNew() {
 
   const [save, saving] = useAction(async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (!data) return;
     setNote(null);
     try {
       if (mode === "existing" && pickedClient) {
@@ -63,20 +65,9 @@ export function WonNew() {
         return;
       }
       if (mode === "won") {
-        const item = data?.pending.find((p) => p.id === pickedWon);
+        const item = data.pending.find((p) => p.id === pickedWon);
         if (!item) { setNote("전환할 대기 건을 골라 주세요."); return; }
-        // 티켓에 Client ID 가 물려 있고 그 고객이 이미 있으면 계약만 추가합니다.
-        const exists = data?.rows.some((row) => row.client_id === item.client_id);
-        if (item.client_id && exists) {
-          navigate(`/won-customers/${item.client_id}/contracts/new?pending=${item.id}`);
-          return;
-        }
-        const created = await postForm("/won-customers", {
-          customer_type: "GTM Inbound",
-          company: item.company || "고객사 미확인",
-          client_id: item.client_id ? String(item.client_id) : "",
-        }).then((response) => response.json());
-        navigate(`/won-customers/${created.client_id}/contracts/new?pending=${item.id}`);
+        navigate(await pendingContractPath(data, item));
         return;
       }
       if (!type) { setNote("고객 종류를 골라 주세요."); return; }
@@ -117,11 +108,12 @@ export function WonNew() {
         <div className="page-head">
           <div>
             <h1 className="page-title">수주 고객 추가</h1>
-            <p className="page-sub">
-              {mode === "won" ? "티켓에 물려 있는 Client ID로 기존 고객인지 판별합니다."
-               : mode === "new" ? "고객 종류를 선택하면 규칙에 맞는 Client ID가 자동 생성됩니다."
-               : "선택한 고객의 Client ID는 유지되고, 새 계약이 최신 계약으로 등록됩니다."}
-            </p>
+            {mode !== "won" && (
+              <p className="page-sub">
+                {mode === "new" ? "고객 종류를 선택하면 규칙에 맞는 Client ID가 자동 생성됩니다."
+                 : "선택한 고객의 Client ID는 유지되고, 새 계약이 최신 계약으로 등록됩니다."}
+              </p>
+            )}
           </div>
           <button className="btn" type="button" onClick={() => navigate("/won-customers")}>← 목록</button>
         </div>
@@ -155,10 +147,6 @@ export function WonNew() {
                       </div>
                     </button>
                   ))}
-                </div>
-                <div className="note-box">
-                  티켓에 물려 있는 Client ID로 기존 고객인지 판별합니다. 기존 고객이면 계약
-                  차수만 올라가고, 없으면 새 Client ID가 발급됩니다.
                 </div>
               </>
             ) : (
