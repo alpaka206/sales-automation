@@ -1,9 +1,8 @@
 """External-write and outbound-email safety controls.
 
-The Render production blueprint enables live external writes and real-recipient SMTP.
-The in-code settings remain fail-safe for other deployments: disabling
-``LIVE_EXTERNAL_WRITES`` blocks CRM/Sheet writes and reroutes email, while the two module
-constants provide an emergency hard stop and forced test-recipient mode.
+The Render production blueprint enables live external writes and customer delivery.
+Other deployments fail closed: disabling ``LIVE_EXTERNAL_WRITES`` blocks CRM/Sheet
+writes and email delivery instead of silently changing the recipient.
 """
 
 from __future__ import annotations
@@ -14,11 +13,6 @@ from .config import settings
 
 logger = logging.getLogger(__name__)
 
-# Hard-coded pre-launch recipient. All outbound email is force-routed here while
-# external writes are disabled, so a customer can never be emailed during testing
-# — this holds even if SEND_OVERRIDE_EMAIL is empty/cleared.
-PRELAUNCH_TEST_RECIPIENT = "ronald@estsoft.com"
-
 # --------------------------------------------------------------------------- #
 # EMAIL: production delivery is ON.
 #
@@ -26,13 +20,10 @@ PRELAUNCH_TEST_RECIPIENT = "ronald@estsoft.com"
 # customer. Immediate inbound acknowledgements were removed separately; enabling this
 # switch cannot recreate them because no auto-ack message is produced or claimable.
 #
-# These are code-level emergency controls, intentionally separate from deployment env.
-# ``False`` for EMAIL_SENDING_ENABLED stops SMTP at the lowest chokepoint. ``True`` for
-# FORCE_TEST_RECIPIENT reroutes every message to PRELAUNCH_TEST_RECIPIENT. Production is
-# the inverse: SMTP enabled and no forced recipient.
+# This code-level emergency control is intentionally separate from deployment env.
+# ``False`` stops delivery at the lowest chokepoint.
 # --------------------------------------------------------------------------- #
 EMAIL_SENDING_ENABLED = True
-FORCE_TEST_RECIPIENT = False
 
 
 def email_sending_enabled() -> bool:
@@ -42,11 +33,6 @@ def email_sending_enabled() -> bool:
     have one place to touch.
     """
     return bool(EMAIL_SENDING_ENABLED)
-
-
-def force_test_recipient() -> bool:
-    """True while every outbound email is pinned to the single test address."""
-    return bool(FORCE_TEST_RECIPIENT)
 
 
 class ExternalWriteBlocked(RuntimeError):
@@ -117,19 +103,6 @@ def guard_external_write(action: str) -> None:
     raise ExternalWriteBlocked(f"refused external write: {action} ({remedy})")
 
 
-def resolve_send_override() -> str:
-    """The address ALL outbound email must be rerouted to, or '' for real delivery.
-
-    - ``FORCE_TEST_RECIPIENT`` (the current posture): always ``ronald@estsoft.com``,
-      whatever the master switch says and whatever ``SEND_OVERRIDE_EMAIL`` holds. The
-      env value is deliberately ignored: "only ronald@estsoft.com" is a code guarantee,
-      and reading an address from a deployment dashboard would not be one.
-    - Safe mode (pre-launch): always non-empty, for the same reason.
-    - Neither engaged: honors SEND_OVERRIDE_EMAIL as-is ('' = real customer delivery).
-    """
-    explicit = settings.SEND_OVERRIDE_EMAIL.strip()
-    if force_test_recipient():
-        return PRELAUNCH_TEST_RECIPIENT
-    if live_external_writes():
-        return explicit
-    return explicit or PRELAUNCH_TEST_RECIPIENT
+def email_delivery_enabled() -> bool:
+    """True only when both the emergency switch and live mode allow delivery."""
+    return email_sending_enabled() and live_external_writes()

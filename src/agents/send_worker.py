@@ -228,11 +228,9 @@ async def _send_one(message_id: int) -> bool:
                         message_id,
                     )
 
-                from ..common.safe_mode import resolve_send_override
-
-                # "sent" 는 고객에게 정말 간 것뿐입니다. 테스트 주소로 돌렸거나 아예 보내지
-                # 않은 건은 test_sent — 화면에서 구분되고 발송률 집계도 흐리지 않습니다.
-                test_mode = bool(resolve_send_override()) or not delivered
+                # "sent" 는 고객에게 실제 발송을 시도한 건뿐입니다. 아예 보내지 않은
+                # 건은 test_sent — 화면에서 구분되고 발송률 집계도 흐리지 않습니다.
+                test_mode = not delivered
                 msg.status = "test_sent" if test_mode else "sent"
                 msg.send_claimed_at = None
                 msg.sent_at = datetime.now(timezone.utc)
@@ -252,9 +250,7 @@ async def _send_one(message_id: int) -> bool:
                     # 메일을 못 받는 동안 워커가 스스로 속도를 늦춥니다.
                     _record_send()
 
-                # 발송 이후 처리는 test_mode 와 무관하게 돕니다. 예전에는 `not test_mode`
-                # 였는데, FORCE_TEST_RECIPIENT 가 켜져 있는 한 test_mode 는 **항상** 참이라
-                # HubSpot 티켓도 워크북도 영영 움직이지 않았습니다. 각 목적지는 아래에서
+                # 발송 이후 처리는 test_mode 와 무관하게 돕니다. 각 목적지는 아래에서
                 # guard_external_write 가 따로 막습니다 — 여기서 두 번 막을 일이 아닙니다.
                 try:
                     await _post_send_bookkeeping(session, msg, conv, message_id)

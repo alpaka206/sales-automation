@@ -124,10 +124,8 @@ class Settings(BaseSettings):
     #   - every HubSpot write is hard-blocked (ticket stage, contact/inbound status,
     #     timeline email) → the real HubSpot account cannot change during testing;
     #   - Google Sheets writes are disabled (no test rows in the shared workbook);
-    #   - every outbound email is force-routed to the test recipient (ronald@…),
-    #     so no customer is ever emailed even if SEND_OVERRIDE_EMAIL is cleared.
-    # Reads (HubSpot GET, Gemini, homepage fetch) stay on. Going live = set this to
-    # true AND clear SEND_OVERRIDE_EMAIL. See src/common/safe_mode.py.
+    #   - outbound email delivery is blocked (the recipient is never rewritten).
+    # Reads (HubSpot GET, Gemini, homepage fetch) stay on. See src/common/safe_mode.py.
     LIVE_EXTERNAL_WRITES: bool = False
     # Per-destination switches, consulted ONLY once LIVE_EXTERNAL_WRITES is true.
     # Default true, so flipping the master alone behaves exactly as before. Set one to
@@ -136,14 +134,6 @@ class Settings(BaseSettings):
     # fight whoever is editing the pipeline. Neither can override the master.
     LIVE_HUBSPOT_WRITES: bool = True
     LIVE_SHEETS_WRITES: bool = True
-
-    # ----- Test mode: redirect ALL real sends to one address -----
-    # When non-empty, every customer-facing inbound reply is rerouted to this
-    # address and sent via SMTP — the HubSpot provider is bypassed so nothing lands
-    # on a real contact's timeline. The original intended recipient is preserved in
-    # the subject as "[TEST→original]".
-    # Requires SMTP_USERNAME/SMTP_PASSWORD. Leave EMPTY in production.
-    SEND_OVERRIDE_EMAIL: str = ""
 
     # ----- 수주 고객 -----
     # 한국수출입은행 OpenAPI 인증키. 있으면 결제 등록·입금 완료 시 그 날짜의 매매기준율을

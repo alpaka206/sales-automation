@@ -724,7 +724,7 @@ def build_developer_guide() -> Path:
             ("코드·테스트", "Ruff 통과, 전체 521개 테스트 통과", "CI의 Python 3.11/3.12·PostgreSQL·Docker gate 유지"),
             ("HubSpot", "개발 계정 New=1, 발송 후=2", "실제 pipeline stage 내부 ID로 교체"),
             ("Google Sheets", "서비스 계정 자격증명 감지, 편집 권한 불가", "사용자 OAuth 웹 클라이언트 생성·연결"),
-            ("SMTP", "자격증명 있음, SMTP가 실제 전달 수단", "SEND_OVERRIDE_EMAIL로 1건 검증 후 해제"),
+            ("SMTP", "자격증명 있음, SMTP가 실제 전달 수단", "별도 테스트 연락처로 1건 검증"),
             ("Slack", "토큰은 있을 수 있으나 전체 스위치와 채널 모드 OFF", "필요할 때 reply-ready 알림만 활성"),
             ("UI 인증", "로컬 basic 모드", "운영은 회사 Google OAuth와 allowlist 권장"),
             ("배포", "단일 프로세스·worker heartbeat·시작 안전검사", "Managed PostgreSQL, 공개 HTTPS, WEB_CONCURRENCY=1"),
@@ -832,9 +832,8 @@ def build_developer_guide() -> Path:
     add_bullets(
         doc,
         [
-            "SEND_OVERRIDE_EMAIL에 내부 테스트 주소를 설정하면 원본 DB 수신자를 바꾸지 않고 테스트 주소로만 보내며 상태를 test_sent로 기록한다.",
-            "test_sent는 HubSpot 활동·문의 단계·Sheets를 전혀 변경하지 않는다.",
-            "실서비스 전 반드시 SEND_OVERRIDE_EMAIL을 비운다.",
+            "애플리케이션은 수신자를 내부 테스트 주소로 치환하지 않는다. 별도 테스트 연락처와 승인된 초안 한 건으로 검증한다.",
+            "LIVE_EXTERNAL_WRITES=false에서는 이메일을 포함한 외부 쓰기가 차단된다.",
             "개발 계정 단계 ID 1→2를 실제 계정에 그대로 복사하지 않는다. scripts/list_ticket_stages.py로 내부 ID를 확인한다.",
         ],
     )
@@ -1136,7 +1135,7 @@ def build_developer_guide() -> Path:
     add_callout(
         doc,
         "Go-live 게이트",
-        "실제 고객에게 보내기 전 SEND_OVERRIDE_EMAIL이 비어 있는지, Slack이 의도한 값인지, 개발 stage 1→2가 실제 ID로 교체됐는지를 두 사람이 교차 확인한다.",
+        "실제 고객에게 보내기 전 LIVE_EXTERNAL_WRITES, Slack, 발신 계정, 수신 연락처, 실제 HubSpot stage ID를 두 사람이 교차 확인한다.",
         fill=SUCCESS,
         accent=PERSO_TEAL,
     )

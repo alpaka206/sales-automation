@@ -301,8 +301,8 @@ HubSpot 에는 이 답장을 **보내는** API 가 없습니다(transactional si
 - **티켓 연관 실패는 삼킵니다**(`hubspot.py:314-325`). 메일은 이미 나갔고 engagement 도 이미
   만들어졌는데 여기서 raise 하면 호출자가 "기록 실패" 경로로 가면서 `hubspot_engagement_id` 를
   잃습니다.
-- **테스트 발송도 기록합니다**(`senders/__init__.py:207-211`). 제목에 `[TEST→…]` 가 붙은 채로요.
-  `FORCE_TEST_RECIPIENT` 가 켜져 있는 동안은 그게 발송의 전부라, 건너뛰면 히스토리가 통째로 빕니다.
+- **전달 성공 뒤에만 기록합니다.** 안전 스위치로 억제되거나 SMTP가 실패한 메일을 고객
+  타임라인에 답장으로 남기지 않습니다.
 - **조용한 실패 하나**: `contact.hubspot_contact_id` 가 없으면 로그도 없이 그냥 돌아갑니다
   (`senders/__init__.py:137-138`). 워크북에서 들어온 고객이 여기 해당합니다.
 

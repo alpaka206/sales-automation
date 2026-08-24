@@ -19,9 +19,8 @@ Usage (PowerShell):
 Production overrides (differ from local .env) are applied automatically:
     APP_HOST = 0.0.0.0      (bind all interfaces on Render)
     AUTH_MODE = google_oauth (public console uses Google sign-in, not localhost)
-LIVE_EXTERNAL_WRITES and SEND_OVERRIDE_EMAIL are sent AS-IS from .env, so the
-pre-launch safe mode (blocked writes, mail forced to ronald@…) also holds on Render
-until you flip them.
+LIVE_EXTERNAL_WRITES is sent AS-IS from .env. When false, external writes and email
+delivery are blocked; the application never substitutes a different recipient.
 """
 
 from __future__ import annotations

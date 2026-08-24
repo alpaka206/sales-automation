@@ -21,7 +21,6 @@ $env:SEND_WORKER_ENABLED            = "false"
 $env:INBOUND_AUTO_ACK_ENABLED       = "false"
 $env:APPROVAL_CHANNEL               = "none"
 $env:SLACK_ENABLED                  = "false"
-$env:SEND_OVERRIDE_EMAIL            = ""
 $env:INBOUND_DOMAIN_ENRICHMENT_ENABLED = "false"   # no outbound homepage fetches per request
 
 # --- local web-UI access: localhost-only gate, unsigned mock webhooks ---

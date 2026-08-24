@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import copy
 import logging
 import smtplib
 import ssl
@@ -126,27 +125,16 @@ def send_smtp(message: Message) -> None:
     Classifies SMTP failures into transient vs permanent so the worker can decide
     whether to retry. Header CRLF injection is rejected before connecting.
     """
-    # Final safety boundary (pre-launch): no email may reach a real customer.
-    # resolve_send_override() is non-empty while external writes are disabled, so
-    # force the recipient here too — even a caller that bypassed send() cannot
-    # email a customer. send() already redirected on the normal path, so this is
-    # a no-op there (to_address already equals the override).
-    from ...common.safe_mode import email_sending_enabled, resolve_send_override
+    from ...common.safe_mode import email_delivery_enabled
 
-    # Hard stop, checked before anything else: while the operator's temporary
-    # no-send switch is engaged nothing is emailed at all, not even to the
-    # pre-launch test recipient. This is the lowest chokepoint every send path
-    # reaches, so no caller can route around it.
-    if not email_sending_enabled():
+    # Hard stop, checked before anything else. This is the lowest chokepoint every
+    # reply send reaches, so no caller can route around safe mode or the emergency
+    # code switch. The recipient is never rewritten.
+    if not email_delivery_enabled():
         raise SMTPSendingDisabled(
-            "Email sending is disabled in code "
-            "(src/common/safe_mode.py: EMAIL_SENDING_ENABLED = False)."
+            "Email delivery is disabled: enable LIVE_EXTERNAL_WRITES and the "
+            "code-level EMAIL_SENDING_ENABLED switch."
         )
-
-    override = resolve_send_override()
-    if override and (message.to_address or "") != override:
-        message = copy.copy(message)
-        message.to_address = override
 
     if not settings.SMTP_USERNAME or not settings.SMTP_PASSWORD:
         raise SMTPPermanentError("SMTP credentials not configured.")

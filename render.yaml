@@ -138,9 +138,6 @@ services:
         value: "true"
       - key: LIVE_SHEETS_WRITES
         value: "true"
-      - key: SEND_OVERRIDE_EMAIL
-        value: ""
-
       # ----- Sensible defaults (override in dashboard if needed) -----
       - key: GEMINI_MODEL
         value: gemini-2.5-flash

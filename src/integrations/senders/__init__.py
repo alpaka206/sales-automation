@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import copy
 import logging
 
 from ...common.textwash import text_wash
@@ -116,10 +115,8 @@ def enforce_first_reply_no_price(message: Message) -> None:
 async def _log_hubspot_email(message: Message, row: Message | None = None) -> None:
     """Best-effort timeline log after SMTP delivery; never reverses a real send.
 
-    ``message`` is what actually left (in test mode a copy whose subject carries the
-    ``[TEST→…]`` marker, so the timeline says what really happened). ``row`` is the ORM
-    record: relationships are read from it and the engagement id is stamped on it, because
-    the copy shares session state and may not be able to load either.
+    ``row`` is the ORM record whose relationships are used and whose engagement id is
+    stamped. It is accepted separately so this helper remains safe for detached callers.
     """
     record = row if row is not None else message
     try:
@@ -159,36 +156,11 @@ async def _log_hubspot_email(message: Message, row: Message | None = None) -> No
 async def send(message: Message) -> None:
     """Send a message via SMTP, then record it on the HubSpot timeline.
 
-    HubSpot is not a transport here and cannot be: it has no API that sends this reply
-    (the transactional single-send needs a paid add-on and a designed template). The CRM
-    email object it writes at the end IS the customer history.
+    HubSpot is not the configured transport here. Transactional Single-Send requires a
+    paid add-on, ``transactional-email`` scope, and a designed template. The CRM email
+    object written at the end is only the customer-history record.
     """
-    from ...common.safe_mode import resolve_send_override
-
-    # The ORM record the caller will commit. `message` is rebound to a copy below when
-    # the mail is rerouted, and the copy must not be what carries the engagement id.
     row = message
-
-    # In pre-launch safe mode this is ALWAYS non-empty (forces ronald@…), so every
-    # branch below that keys off `override` reroutes the mail.
-    override = resolve_send_override()
-
-    # Test-mode redirect: reroute every customer-facing email to one address and
-    # force SMTP. Real HubSpot contacts are not touched in this mode.
-    if override:
-        # Never mutate the ORM row: test delivery must not replace the real recipient
-        # or reviewed subject that operators see in the console.
-        message = copy.copy(message)
-        original = message.to_address or "(none)"
-        message.to_address = override
-        if message.subject and not message.subject.startswith("[TEST"):
-            message.subject = f"[TEST→{original}] {message.subject}"
-        logger.info(
-            "TEST MODE: redirecting message %d from %s to %s (forcing SMTP).",
-            message.id,
-            original,
-            override,
-        )
 
     # Code-enforced language + text wash, then the first-reply no-price rule.
     if message.direction == "outgoing":
@@ -199,8 +171,4 @@ async def send(message: Message) -> None:
     await asyncio.to_thread(send_smtp, message)
     logger.info("Message %d sent via smtp.", message.id)
 
-    # Logged for a rerouted send too. Skipping it used to leave the customer's history
-    # with a gap for every test send — and while FORCE_TEST_RECIPIENT is pinned on, that
-    # is every send there is. What goes on the timeline is what actually left, subject
-    # marker and all, so a test copy can never read as a real reply to the customer.
     await _log_hubspot_email(message, row)

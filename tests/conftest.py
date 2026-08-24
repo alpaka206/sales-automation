@@ -30,10 +30,6 @@ os.environ.setdefault("INTERNAL_API_TOKEN", "test-internal-token")
 # this only satisfies the constructor's token check (matching local .env, where
 # the full suite passes — no test depends on the token being absent).
 os.environ.setdefault("HUBSPOT_PRIVATE_APP_TOKEN", "test-hubspot-token")
-# Keep the send-redirect test override OFF during tests so a developer's local
-# .env (SEND_OVERRIDE_EMAIL=...) can't leak in and silently reroute/force-SMTP
-# the dispatch tests. setdefault still lets CI opt in explicitly.
-os.environ.setdefault("SEND_OVERRIDE_EMAIL", "")
 # TestClient must never start real background integrations from a developer's
 # local .env. Individual worker/poller tests invoke those functions explicitly.
 os.environ.setdefault("INBOUND_POLL_ENABLED", "false")
@@ -129,26 +125,17 @@ if _real_engine.url.get_backend_name() == "sqlite":
 def _allow_send_in_tests(monkeypatch):
     """Put the suite on the REAL delivery path, the same reason as LIVE_EXTERNAL_WRITES.
 
-    Two shipped email switches are lifted here so the sender / worker / dispatch tests
-    exercise production behaviour instead of test-mode behaviour:
-
-    - ``EMAIL_SENDING_ENABLED`` — if the operator ever engages the no-send switch again,
-      every send test would otherwise assert a refusal.
-    - ``FORCE_TEST_RECIPIENT`` — shipped True, which reroutes every message to
-      ronald@estsoft.com and marks it ``test_sent``. Real delivery (``sent`` + a HubSpot
-      timeline entry) is the path worth covering, and it is the one that must keep
-      working the day the pin comes off.
+    The shipped email switch is enabled here so sender / worker / dispatch tests
+    exercise production behaviour instead of asserting a refusal.
 
     Safe to do: SMTP_USERNAME/PASSWORD are blanked above and every one of those tests
     substitutes a fake ``smtplib.SMTP``, so no socket is ever opened.
 
-    Both switches' own behaviour — that they block, and that the pin outranks the master
-    switch — is asserted in tests/test_safe_mode.py, which sets them back explicitly.
+    The switch's blocking behaviour is asserted in tests/test_safe_mode.py.
     """
     from src.common import safe_mode
 
     monkeypatch.setattr(safe_mode, "EMAIL_SENDING_ENABLED", True)
-    monkeypatch.setattr(safe_mode, "FORCE_TEST_RECIPIENT", False)
 
 
 @pytest.fixture()

@@ -145,14 +145,12 @@ class ReportAgent:
     def _email_report(self, report: str, kind: str) -> None:
         """Send the report via SMTP to REPORT_EMAIL_TO recipients."""
         # This path builds its own smtplib connection instead of going through
-        # senders.send_smtp, so it has to check the no-send switch itself — the
-        # chokepoint in smtp.py does not cover it.
-        from ..common.safe_mode import email_sending_enabled, resolve_send_override
+        # senders.send_smtp, so it has to check the delivery gate itself.
+        from ..common.safe_mode import email_delivery_enabled
 
-        if not email_sending_enabled():
+        if not email_delivery_enabled():
             logger.warning(
-                "Report email suppressed: sending is disabled in code "
-                "(src/common/safe_mode.py: EMAIL_SENDING_ENABLED = False)."
+                "Report email suppressed: live email delivery is disabled."
             )
             return
 
@@ -163,11 +161,6 @@ class ReportAgent:
         recipients = [e.strip() for e in settings.REPORT_EMAIL_TO.split(",") if e.strip()]
         if not recipients:
             return
-
-        # Pre-launch: all outbound email is force-routed to the test recipient.
-        override = resolve_send_override()
-        if override:
-            recipients = [override]
 
         date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         subject = f"{kind.title()} Report — {date_str}"

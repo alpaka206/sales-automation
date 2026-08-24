@@ -2,7 +2,7 @@
 
 Pins the two invariants that must hold at ANY time until go-live:
   1. No write ever reaches the real HubSpot account (or the shared Sheet).
-  2. No email ever reaches a real customer — every send is forced to ronald@….
+  2. No email leaves the service; recipients are never silently rewritten.
 
 If any of these fail, a test/migration run could touch real customer data.
 """
@@ -18,10 +18,10 @@ from src.common import safe_mode
 from src.common.config import settings
 from src.common.safe_mode import (
     ExternalWriteBlocked,
-    PRELAUNCH_TEST_RECIPIENT,
+    email_delivery_enabled,
     guard_external_write,
-    resolve_send_override,
 )
+from src.integrations.senders.smtp import SMTPSendingDisabled
 
 
 @pytest.fixture()
@@ -286,79 +286,29 @@ def test_env_refresh_token_does_not_bypass_safe_mode(safe, monkeypatch):
     assert google_sheets.update_inbound_stage(1336, "won") is False
 
 
-# ---- Every email is forced to the test recipient ----------------------------
+# ---- Email delivery fails closed without changing the recipient -------------
 
-def test_override_forces_ronald_in_safe_mode(safe, monkeypatch):
-    monkeypatch.setattr(settings, "SEND_OVERRIDE_EMAIL", "")
-    assert resolve_send_override() == PRELAUNCH_TEST_RECIPIENT == "ronald@estsoft.com"
-
-
-def test_explicit_override_still_wins_in_safe_mode(safe, monkeypatch):
-    monkeypatch.setattr(settings, "SEND_OVERRIDE_EMAIL", "qa@example.com")
-    assert resolve_send_override() == "qa@example.com"
+def test_email_delivery_is_blocked_in_safe_mode(safe):
+    assert email_delivery_enabled() is False
 
 
-def test_live_mode_alone_cannot_reach_a_customer(live, monkeypatch):
-    """FORCE_TEST_RECIPIENT outranks the master switch.
-
-    This is the whole point of that constant: LIVE_EXTERNAL_WRITES is already true, so
-    without it, blanking SEND_OVERRIDE_EMAIL in a Render dashboard was the only step
-    between this system and a real customer's inbox. Set explicitly rather than trusting
-    the ambient value — conftest turns it off for the suite so the sender tests can
-    exercise real delivery.
-    """
-    monkeypatch.setattr(safe_mode, "FORCE_TEST_RECIPIENT", True)
-    monkeypatch.setattr(settings, "SEND_OVERRIDE_EMAIL", "")
-    assert resolve_send_override() == PRELAUNCH_TEST_RECIPIENT
-    # …and the env value cannot redirect it either: "ronald@estsoft.com 으로만" is the
-    # instruction, so an address in a deployment dashboard is ignored while the pin is on.
-    monkeypatch.setattr(settings, "SEND_OVERRIDE_EMAIL", "qa@example.com")
-    assert resolve_send_override() == PRELAUNCH_TEST_RECIPIENT
+def test_email_delivery_is_enabled_in_live_mode(live):
+    assert email_delivery_enabled() is True
 
 
-def test_real_delivery_needs_both_switches_off(live, monkeypatch):
-    """The documented go-live: unpin in code AND clear the env override."""
-    monkeypatch.setattr(safe_mode, "FORCE_TEST_RECIPIENT", False)
-    monkeypatch.setattr(settings, "SEND_OVERRIDE_EMAIL", "")
-    assert resolve_send_override() == ""
-    # Either one alone still protects the customer.
-    monkeypatch.setattr(settings, "SEND_OVERRIDE_EMAIL", "qa@example.com")
-    assert resolve_send_override() == "qa@example.com"
-
-
-def test_send_smtp_forces_recipient_to_ronald(safe, monkeypatch):
-    """Even a direct send_smtp() call to a customer address is rerouted to ronald."""
+def test_direct_smtp_send_is_blocked_in_safe_mode(safe, monkeypatch):
+    """A caller bypassing send() is blocked before SMTP is opened."""
     from src.db.models import Message
     from src.integrations.senders import smtp
 
-    monkeypatch.setattr(settings, "SEND_OVERRIDE_EMAIL", "")
     monkeypatch.setattr(settings, "SMTP_USERNAME", "user")
     monkeypatch.setattr(settings, "SMTP_PASSWORD", "pass")
     monkeypatch.setattr(settings, "SMTP_FROM_EMAIL", "sales@estsoft.com")
-    monkeypatch.setattr(settings, "SMTP_FROM_NAME", "Sales")
-
-    captured: dict = {}
-
-    class FakeSMTP:
-        def __init__(self, *a, **k):
-            pass
-
-        def starttls(self, *a, **k):
-            pass
-
-        def login(self, *a, **k):
-            pass
-
-        def send_message(self, msg):
-            captured["msg"] = msg
-
-        def quit(self):
-            pass
-
-        def close(self):
-            pass
-
-    monkeypatch.setattr(smtplib, "SMTP", FakeSMTP)
+    monkeypatch.setattr(
+        smtplib,
+        "SMTP",
+        lambda *a, **k: pytest.fail("SMTP opened while live writes were disabled"),
+    )
 
     msg = Message(
         to_address="real.customer@bigcorp.com",
@@ -367,16 +317,13 @@ def test_send_smtp_forces_recipient_to_ronald(safe, monkeypatch):
         language="en",
         signature_key=None,
     )
-    smtp.send_smtp(msg)
-
-    assert "ronald@estsoft.com" in captured["msg"]["To"]
-    assert "bigcorp.com" not in captured["msg"]["To"]
-    # The caller's ORM row must not be mutated by the reroute.
+    with pytest.raises(smtp.SMTPSendingDisabled):
+        smtp.send_smtp(msg)
     assert msg.to_address == "real.customer@bigcorp.com"
 
 
-# ---- The two email constants, as SHIPPED --------------------------------------
-# Sending is on for the real recipient. Both values are read out of the source
+# ---- The email constant, as SHIPPED -----------------------------------------
+# Sending is on for the real recipient. The value is read out of the source
 # file rather than imported, so a monkeypatch elsewhere in the suite cannot make these
 # pass: what is asserted here is what the repository actually ships.
 
@@ -404,7 +351,6 @@ def _shipped_constant(name: str):
 def test_email_ships_live_without_a_forced_test_recipient():
     """Human-approved drafts ship to their real recipient in the deployed posture."""
     assert _shipped_constant("EMAIL_SENDING_ENABLED") is True
-    assert _shipped_constant("FORCE_TEST_RECIPIENT") is False
 
 
 def test_no_send_switch_blocks_smtp_entirely(no_send, monkeypatch):
@@ -414,7 +360,6 @@ def test_no_send_switch_blocks_smtp_entirely(no_send, monkeypatch):
 
     # Fully configured SMTP + live mode: only the switch stands in the way.
     monkeypatch.setattr(settings, "LIVE_EXTERNAL_WRITES", True)
-    monkeypatch.setattr(settings, "SEND_OVERRIDE_EMAIL", "")
     monkeypatch.setattr(settings, "SMTP_USERNAME", "user")
     monkeypatch.setattr(settings, "SMTP_PASSWORD", "pass")
     monkeypatch.setattr(settings, "SMTP_FROM_EMAIL", "sales@estsoft.com")
@@ -526,8 +471,6 @@ def test_no_send_switch_does_everything_except_the_mail(no_send, monkeypatch):
 async def test_safe_mode_still_records_local_send_bookkeeping(safe, monkeypatch):
     """test_sent must still stamp last_outgoing_at/stage, and still run the sync.
 
-    발송 이후 처리를 `not test_mode` 로 막던 시절이 있었는데, FORCE_TEST_RECIPIENT 가 켜져
-    있는 한 test_mode 는 **항상** 참이라 HubSpot 티켓도 워크북도 영영 움직이지 않았습니다.
     목적지별 차단은 guard_external_write 가 각자 합니다 — 여기서 두 번 막을 일이 아닙니다.
     """
     from unittest.mock import AsyncMock
@@ -538,8 +481,6 @@ async def test_safe_mode_still_records_local_send_bookkeeping(safe, monkeypatch)
     from src.agents import send_worker
     from src.db.base import Base
     from src.db.models import Contact, Conversation, Message
-
-    monkeypatch.setattr(settings, "SEND_OVERRIDE_EMAIL", "")
 
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
@@ -559,7 +500,10 @@ async def test_safe_mode_still_records_local_send_bookkeeping(safe, monkeypatch)
     mid = msg.id
 
     send_worker._claim_ready_id()
-    monkeypatch.setattr("src.integrations.senders.send", AsyncMock())
+    monkeypatch.setattr(
+        "src.integrations.senders.send",
+        AsyncMock(side_effect=SMTPSendingDisabled("safe mode")),
+    )
     bookkeeping = AsyncMock()
     monkeypatch.setattr(send_worker, "_post_send_bookkeeping", bookkeeping)
 
