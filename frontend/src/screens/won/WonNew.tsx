@@ -1,17 +1,16 @@
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { getJSON, postForm } from "../../lib/api";
 import { SubmitButton, useAction } from "../../ui/ActionButton";
-import { pendingContractPath } from "./pending";
-import { type ListData, fmt } from "./shared";
+import { type ListData } from "./shared";
 
 /** 수주 고객 추가 — 목업의 1단계 모달을 화면으로.
  *
- * 세 갈래입니다. 목업이 세 개를 한 모달에 둔 이유가 그대로 여기서도 맞습니다: **어느
- * 갈래든 끝은 "계약을 등록한다" 하나**라서, 고른 뒤 가는 곳이 같습니다.
+ * 두 갈래입니다. 어느 쪽이든 끝은 "계약을 등록한다" 하나라서, 고른 뒤 가는 곳이
+ * 같습니다. Won 티켓은 목록의 「수주 전환 대기」에서 이미 대상이 정해지므로 이 화면을
+ * 거치지 않고 계약 폼으로 바로 갑니다.
  *
- *   Won 티켓 전환   — 티켓에 물린 Client ID 로 기존 고객을 찾습니다. 대부분 이쪽입니다.
  *   신규 고객 등록  — 고객 종류를 고르면 그 번호대의 다음 ID 가 발급됩니다.
  *   기존 고객에 계약 추가 — Client ID 는 그대로, 차수만 올라갑니다.
  *
@@ -31,17 +30,14 @@ const TYPE_BASE: Record<string, number> = {
 export function WonNew() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const [params] = useSearchParams();
   const { data } = useQuery({
     queryKey: ["won-customers"],
     queryFn: () => getJSON<ListData>("/api/ui/won-customers"),
   });
 
-  const pendingId = params.get("pending");
-  const [mode, setMode] = useState<"won" | "new" | "existing">(pendingId ? "won" : "won");
+  const [mode, setMode] = useState<"new" | "existing">("new");
   const [type, setType] = useState("");
   const [pickedClient, setPickedClient] = useState<number | null>(null);
-  const [pickedWon, setPickedWon] = useState<number | null>(pendingId ? Number(pendingId) : null);
   const [query, setQuery] = useState("");
   const [note, setNote] = useState<string | null>(null);
 
@@ -60,14 +56,12 @@ export function WonNew() {
     if (!data) return;
     setNote(null);
     try {
-      if (mode === "existing" && pickedClient) {
+      if (mode === "existing") {
+        if (!pickedClient) {
+          setNote("계약을 추가할 기존 고객을 골라 주세요.");
+          return;
+        }
         navigate(`/won-customers/${pickedClient}/contracts/new`);
-        return;
-      }
-      if (mode === "won") {
-        const item = data.pending.find((p) => p.id === pickedWon);
-        if (!item) { setNote("전환할 대기 건을 골라 주세요."); return; }
-        navigate(await pendingContractPath(data, item));
         return;
       }
       if (!type) { setNote("고객 종류를 골라 주세요."); return; }
@@ -108,53 +102,21 @@ export function WonNew() {
         <div className="page-head">
           <div>
             <h1 className="page-title">수주 고객 추가</h1>
-            {mode !== "won" && (
-              <p className="page-sub">
-                {mode === "new" ? "고객 종류를 선택하면 규칙에 맞는 Client ID가 자동 생성됩니다."
-                 : "선택한 고객의 Client ID는 유지되고, 새 계약이 최신 계약으로 등록됩니다."}
-              </p>
-            )}
+            <p className="page-sub">
+              {mode === "new" ? "고객 종류를 선택하면 규칙에 맞는 Client ID가 자동 생성됩니다."
+               : "선택한 고객의 Client ID는 유지되고, 새 계약이 최신 계약으로 등록됩니다."}
+            </p>
           </div>
           <button className="btn" type="button" onClick={() => navigate("/won-customers")}>← 목록</button>
         </div>
 
         <form className="sec" onSubmit={save}>
-          <div className="seg">
-            <button type="button" className={`seg-btn${mode === "won" ? " is-on" : ""}`}
-                    onClick={() => setMode("won")}>
-              Won 티켓 전환{data.pending.length ? ` (${data.pending.length})` : ""}
-            </button>
+          <div className="seg customer-paths">
             <button type="button" className={`seg-btn${mode === "new" ? " is-on" : ""}`}
                     onClick={() => setMode("new")}>신규 고객 등록</button>
             <button type="button" className={`seg-btn${mode === "existing" ? " is-on" : ""}`}
                     onClick={() => setMode("existing")}>기존 고객에 계약 추가</button>
           </div>
-
-          {mode === "won" && (
-            data.pending.length ? (
-              <>
-                <div className="pick-list">
-                  {data.pending.map((item) => (
-                    <button key={item.id} type="button"
-                            className={`pick-row${pickedWon === item.id ? " is-on" : ""}`}
-                            onClick={() => setPickedWon(item.id)}>
-                      <div>
-                        <div className="pick-name">{item.company || "고객사 미확인"}</div>
-                        <div className="pick-meta">
-                          Ticket {item.ticket_id} · Won {fmt(item.won_on)}
-                          {item.client_id ? ` · ID ${item.client_id}` : " · Client ID 없음"}
-                        </div>
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              </>
-            ) : (
-              <div className="board-empty" style={{ padding: "40px 20px" }}>
-                Won으로 전환된 대기 건이 없습니다.
-              </div>
-            )
-          )}
 
           {mode === "new" && (
             <>

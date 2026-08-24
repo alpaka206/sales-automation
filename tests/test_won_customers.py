@@ -443,6 +443,12 @@ def test_waiting_card_bypasses_the_three_way_customer_picker():
     assert "pendingContractPath(data, item)" in waiting
     assert "/won-customers/new?pending=" not in waiting
     assert "티켓에 물려 있는 Client ID로 기존 고객인지 판별합니다." not in picker
+    assert "Won 티켓 전환" not in picker
+    assert 'className="seg customer-paths"' in picker
+
+    css = pathlib.Path("src/api/static/won.css").read_text(encoding="utf-8")
+    assert ".won .customer-paths .seg-btn" in css
+    assert "min-height:50px" in css
 
 
 def test_the_console_can_actually_reach_the_write_routes():
