@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -98,6 +98,31 @@ class TestCacheHit:
 
         mock_fetch.assert_not_called()
         llm.complete.assert_not_called()
+
+    def test_cache_age_uses_the_configured_days(self, db_session, monkeypatch):
+        from src.agents import domain_enrichment
+
+        now = datetime.now(timezone.utc)
+        db_session.add(
+            DomainProfile(
+                domain="stale-by-setting.com",
+                company_name="Old",
+                confidence="low",
+                source="llm_only",
+                analyzed_at=now - timedelta(days=2),
+                updated_at=now - timedelta(days=2),
+            )
+        )
+        db_session.commit()
+        monkeypatch.setattr(domain_enrichment.settings, "INBOUND_DOMAIN_REANALYZE_DAYS", 1)
+        monkeypatch.setattr(domain_enrichment.settings, "INBOUND_DOMAIN_HOMEPAGE_FETCH", False)
+        monkeypatch.setattr(domain_enrichment.settings, "INBOUND_DOMAIN_SEARCH_GROUNDING", False)
+        llm = _make_llm()
+
+        result = analyze_domain("stale-by-setting.com", llm=llm)
+
+        assert result is not None
+        llm.complete.assert_called_once()
 
 
 class TestCacheMissWithHomepage:

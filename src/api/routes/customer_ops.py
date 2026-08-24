@@ -261,10 +261,27 @@ async def _sync_stage(
     with SessionLocal() as session:
         profile = session.get(CustomerProfile, contact_id)
         qualification = profile.qualification if profile else None
+        inquiry_query = select(Conversation).where(Conversation.contact_id == contact_id)
+        if ticket_id:
+            inquiry_query = inquiry_query.where(
+                Conversation.hubspot_ticket_id == str(ticket_id)
+            )
+        elif sheet_client_id:
+            inquiry_query = inquiry_query.where(
+                Conversation.sheet_client_id == sheet_client_id
+            ).order_by(Conversation.created_at.desc(), Conversation.id.desc())
+        inquiry = session.execute(inquiry_query.limit(1)).scalar_one_or_none()
+        inquiry_key = inquiry.sheet_inquiry_key if inquiry else None
     sheet_result: bool | None = None
     if sheet_client_id and is_configured():
         sheet_result = (
-            await asyncio.to_thread(update_inbound_stage, sheet_client_id, stage, qualification)
+            await asyncio.to_thread(
+                update_inbound_stage,
+                sheet_client_id,
+                stage,
+                qualification,
+                inquiry_key,
+            )
             if live_sheets_writes()
             else None
         )
@@ -2101,5 +2118,4 @@ def _operations_context() -> dict:
             "lost": lost,
             "upsell": upsell,
     }
-
 

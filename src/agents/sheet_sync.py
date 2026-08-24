@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import hashlib
 import logging
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import or_, select, text
 from sqlalchemy.exc import IntegrityError
 
 from .inbound_scoring import _normalize_email
@@ -33,6 +34,7 @@ from ..integrations.google_sheets import (
 logger = logging.getLogger(__name__)
 
 SHEET_SYNC_REQUESTED = "sheet_sync_requested"
+_INBOUND_CLIENT_ID_LOCK = 0x504552534F434944  # "PERSOCID", Postgres advisory xact lock
 SHEET_SYNC_STARTED = "sheet_sync_started"
 SHEET_SYNC_COMPLETED = "sheet_sync_completed"
 SHEET_SYNC_FAILED = "sheet_sync_failed"
@@ -263,10 +265,21 @@ def _import_inbound_records(records: list[dict]) -> int:
             continue
         raw_email = _clean_sheet_value(record.get("email")).lower()
         email = raw_email if "@" in raw_email else ""
+        inquiry_key = _clean_sheet_value(record.get("inquiry_key"))
+        if not inquiry_key:
+            # Legacy rows predate the Inquiry ID column. Use business content rather
+            # than physical row position so sorting the workbook does not duplicate
+            # the local conversation on the next import.
+            fingerprint = "\x1f".join(
+                _clean_sheet_value(record.get(key))
+                for key in ("client_id", "inquiry_date", "email", "history")
+            )
+            inquiry_key = f"legacy:{client_id}:{hashlib.sha256(fingerprint.encode()).hexdigest()[:20]}"
         prepared.append(
             {
                 "record": record,
                 "client_id": client_id,
+                "inquiry_key": inquiry_key,
                 "email": email,
                 "normalized_email": _normalize_email(email) if email else "",
                 "inquiry_at": _sheet_date(record.get("inquiry_date")),
@@ -339,12 +352,27 @@ def _import_inbound_records(records: list[dict]) -> int:
         # Allocate all new contact IDs with one flush, not one transaction per row.
         session.flush()
 
+        inquiry_keys = {item["inquiry_key"] for item in prepared}
         conversations = session.scalars(
-            select(Conversation).where(Conversation.sheet_client_id.in_(client_ids))
+            select(Conversation).where(
+                or_(
+                    Conversation.sheet_inquiry_key.in_(inquiry_keys),
+                    Conversation.sheet_client_id.in_(client_ids),
+                )
+            )
         ).all()
-        conversations_by_client = {
-            conversation.sheet_client_id: conversation for conversation in conversations
+        conversations_by_key = {
+            conversation.sheet_inquiry_key: conversation
+            for conversation in conversations
+            if conversation.sheet_inquiry_key
         }
+        conversations_per_client: dict[int, list[Conversation]] = {}
+        for conversation in conversations:
+            if conversation.sheet_client_id is not None:
+                conversations_per_client.setdefault(conversation.sheet_client_id, []).append(
+                    conversation
+                )
+        fallback_claimed: set[int] = set()
         fallback_now = datetime.now(timezone.utc)
         for item in prepared:
             client_id = item["client_id"]
@@ -352,7 +380,23 @@ def _import_inbound_records(records: list[dict]) -> int:
             record = item["record"]
             inquiry_at = item["inquiry_at"] or fallback_now
             stage = item["stage"]
-            conversation = conversations_by_client.get(client_id)
+            inquiry_key = item["inquiry_key"]
+            conversation = conversations_by_key.get(inquiry_key)
+            if conversation is None:
+                # One pre-0085 row can be adopted safely. Once a Client ID has more
+                # than one conversation, only Inquiry ID may choose between them.
+                legacy_candidates = [
+                    candidate
+                    for candidate in conversations_per_client.get(client_id, [])
+                    if candidate.id not in fallback_claimed
+                    and candidate.sheet_inquiry_key not in inquiry_keys
+                ]
+                if len(legacy_candidates) == 1:
+                    conversation = legacy_candidates[0]
+                    fallback_claimed.add(conversation.id)
+                    conversations_by_key.pop(conversation.sheet_inquiry_key, None)
+                    conversation.sheet_inquiry_key = inquiry_key
+                    conversations_by_key[inquiry_key] = conversation
             if conversation is None:
                 conversation = Conversation(
                     contact_id=contact.id,
@@ -360,9 +404,11 @@ def _import_inbound_records(records: list[dict]) -> int:
                     last_incoming_at=inquiry_at,
                     sheet_inbound_row=_sheet_int(record.get("_row")),
                     sheet_client_id=client_id,
+                    sheet_inquiry_key=inquiry_key,
                 )
                 session.add(conversation)
-                conversations_by_client[client_id] = conversation
+                conversations_by_key[inquiry_key] = conversation
+                conversations_per_client.setdefault(client_id, []).append(conversation)
             else:
                 # Reattach a legacy placeholder conversation to the canonical
                 # email contact, but never downgrade a known stage on schema drift.
@@ -512,40 +558,78 @@ def pending_order_count() -> int:
 
 
 def reserve_inbound_client_id(conversation_id: int) -> int | None:
-    """Reserve a stable per-inquiry sheet key before an external append."""
+    """Reserve the company's Client ID and this inquiry's separate row key."""
+    if not writes_enabled():
+        return None
     with SessionLocal() as session:
         conversation = session.get(Conversation, conversation_id)
         if conversation is None:
             return None
-        if conversation.sheet_client_id:
-            return conversation.sheet_client_id
-    if not writes_enabled():
-        return None
+        contact = session.get(Contact, conversation.contact_id)
+        if not conversation.sheet_inquiry_key:
+            conversation.sheet_inquiry_key = (
+                f"hubspot:{conversation.hubspot_ticket_id}"
+                if conversation.hubspot_ticket_id
+                else f"conversation:{conversation.id}"
+            )
+        from .client_ids import find_existing_client_id
+
+        existing = find_existing_client_id(session, contact)
+        if existing or conversation.sheet_client_id:
+            client_id = existing or conversation.sheet_client_id
+            conversation.sheet_client_id = client_id
+            if contact and not contact.sheet_client_id:
+                contact.sheet_client_id = client_id
+            session.commit()
+            return client_id
+
     suggested = suggest_inbound_client_id()
     for _attempt in range(5):
         with SessionLocal() as session:
+            bind = session.get_bind()
+            if bind.dialect.name == "postgresql":
+                session.execute(
+                    text("SELECT pg_advisory_xact_lock(:key)"),
+                    {"key": _INBOUND_CLIENT_ID_LOCK},
+                )
             conversation = session.get(Conversation, conversation_id)
             if conversation is None:
                 return None
-            if conversation.sheet_client_id:
-                return conversation.sheet_client_id
-            local_max = session.scalar(
-                select(func.max(Conversation.sheet_client_id)).where(
-                    Conversation.sheet_client_id >= 1000,
-                    Conversation.sheet_client_id < 2000,
+            contact = session.get(Contact, conversation.contact_id)
+            if not conversation.sheet_inquiry_key:
+                conversation.sheet_inquiry_key = (
+                    f"hubspot:{conversation.hubspot_ticket_id}"
+                    if conversation.hubspot_ticket_id
+                    else f"conversation:{conversation.id}"
                 )
-            )
-            candidate = max(suggested, (local_max or 999) + 1)
+
+            from .client_ids import find_existing_client_id, next_client_id
+
+            existing = find_existing_client_id(session, contact)
+            if existing:
+                conversation.sheet_client_id = existing
+                if contact and not contact.sheet_client_id:
+                    contact.sheet_client_id = existing
+                session.commit()
+                return existing
+
+            local_next = next_client_id(session, "GTM Inbound")
+            candidate = max(suggested, local_next)
             if candidate >= 2000:
                 raise RuntimeError("Inbound Client ID 1000-series is exhausted.")
             conversation.sheet_client_id = candidate
+            if contact:
+                contact.sheet_client_id = candidate
             try:
                 session.commit()
                 return candidate
             except IntegrityError:
+                # A concurrent reservation can still win the inquiry-key insert.
+                # Reload before trying again; production currently has one worker,
+                # while this keeps webhook/poller overlap idempotent.
                 session.rollback()
                 suggested = candidate + 1
-    raise RuntimeError("Could not reserve a unique Inbound Client ID.")
+    raise RuntimeError("Could not reserve an Inbound Client ID.")
 
 
 def _order_record(contact: Contact, contract: ContractRecord) -> dict:
@@ -690,10 +774,18 @@ def sync_pending_inbound_rows(limit: int = 50) -> int:
             # 고객 기본 정보를 조회하면 그 반대 방향과 순환 참조가 되고, 조회가 빈 리드
             # 153건은 이름을 잃습니다. 값으로 쓰면 둘 다 없습니다.
             master = session.get(Client, reserved_client_id) if reserved_client_id else None
+            legacy_inquiry_keys = session.scalars(
+                select(Conversation.sheet_inquiry_key).where(
+                    Conversation.id != conv.id,
+                    Conversation.sheet_client_id == reserved_client_id,
+                    Conversation.sheet_inbound_row.isnot(None),
+                    Conversation.sheet_inquiry_key.isnot(None),
+                )
+            ).all()
             record = {
-                # The key belongs to this inquiry, not the contact. Reusing a
-                # contact's first Client ID would overwrite an older inquiry.
                 "client_id": reserved_client_id,
+                "inquiry_key": conv.sheet_inquiry_key,
+                "_legacy_inquiry_keys": legacy_inquiry_keys,
                 "sales_direction": "Inbound",
                 "inquiry_date": when.date().isoformat(),
                 # 단계는 그 문의의 **지금** 값입니다. 예전에는 "New" 로 박혀 있어서, 몇

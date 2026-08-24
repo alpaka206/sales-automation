@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from pydantic import BaseModel
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 from ..common.config import settings
@@ -28,7 +29,7 @@ from ..common.sheet_values import (
 )
 from ..llm.client import LLMClient
 from ..llm.knowledge import select_relevant_docs
-from ..llm.prompts import apply_editable_tokens, get_reply_format
+from ..llm.prompts import apply_editable_tokens, canonicalize_contact_links, get_reply_format
 from ._notify import notify_approval_once
 from .inbound_scoring import (  # noqa: F401 — re-exported for callers/tests
     _TARGET_COUNTRIES,
@@ -364,6 +365,15 @@ class InboundAgent:
                     return
                 contact = session.get(Contact, conv.contact_id)
                 profile = session.get(CustomerProfile, conv.contact_id)
+                inquiry_key = conv.sheet_inquiry_key
+                legacy_inquiry_keys = session.scalars(
+                    select(Conversation.sheet_inquiry_key).where(
+                        Conversation.id != conv.id,
+                        Conversation.sheet_client_id == reserved_client_id,
+                        Conversation.sheet_inbound_row.isnot(None),
+                        Conversation.sheet_inquiry_key.isnot(None),
+                    )
+                ).all()
 
             when = datetime.now(timezone.utc)
             raw_when = contact_info.get("occurred_at")
@@ -384,6 +394,8 @@ class InboundAgent:
             result = record_inbound(
                 {
                     "client_id": reserved_client_id,
+                    "inquiry_key": inquiry_key,
+                    "_legacy_inquiry_keys": legacy_inquiry_keys,
                     "sales_direction": "Inbound",
                     "inquiry_date": when.date().isoformat(),
                     "deal_stage": "New",
@@ -889,6 +901,7 @@ class InboundAgent:
         # CODE GUARD 1b — links are substituted, never generated. Runs AFTER
         # ensure_korean: translation would happily rewrite a URL.
         draft.body = apply_editable_tokens(draft.body, language=inquiry_lang)
+        draft.body = canonicalize_contact_links(draft.body, language=inquiry_lang)
 
         # CODE GUARD 2 — the first reply must never state a price. Strip offending
         # lines deterministically and record it on the progress log.

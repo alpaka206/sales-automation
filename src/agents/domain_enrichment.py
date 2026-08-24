@@ -16,9 +16,6 @@ from ..llm.client import LLMClient
 
 logger = logging.getLogger(__name__)
 
-_MAX_AGE_DAYS = 90
-
-
 def _clamp(value: str | None, limit: int) -> str | None:
     """Truncate a string to a column's max length (None stays None)."""
     if value is None:
@@ -65,7 +62,7 @@ def analyze_domain(
                 if analyzed_at.tzinfo is None:
                     analyzed_at = analyzed_at.replace(tzinfo=timezone.utc)
                 age_days = (datetime.now(timezone.utc) - analyzed_at).days
-                if age_days <= _MAX_AGE_DAYS:
+                if age_days <= settings.INBOUND_DOMAIN_REANALYZE_DAYS:
                     logger.info("Domain profile cache hit: %s", domain)
                     return existing
                 logger.info("Domain profile stale (%d days): %s", age_days, domain)

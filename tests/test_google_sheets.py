@@ -53,6 +53,12 @@ class _FakeValues:
         self.store["batch"] = body
         return _Exec({})
 
+    def update(self, spreadsheetId, range, valueInputOption, body):
+        self.store.setdefault("updates", []).append(
+            {"range": range, "valueInputOption": valueInputOption, "body": body}
+        )
+        return _Exec({})
+
 
 class _FakeService:
     def __init__(self, store):
@@ -214,6 +220,67 @@ def test_inbound_retry_upserts_existing_client_id_without_duplicate(monkeypatch)
     assert result == gs.SheetWriteResult(row=2, client_id=1336)
     assert "appended" not in store
     assert store["batch"]["valueInputOption"] == "RAW"
+
+
+def test_same_client_gets_a_new_row_when_inquiry_id_differs(monkeypatch):
+    _configure(monkeypatch)
+    store = {
+        "existing_header": [["Cluent ID", "문의 날짜", "Deal Stage", "Contact Email"]],
+        "range_values": {
+            "'Inbound DB'!A2:E": [
+                ["1336", "2026-07-18", "New", "old@example.com", ""]
+            ],
+            "'Inbound DB'!E2:E": [[]],
+            "'Inbound DB'!A2:A": [["1336"]],
+            "'고객 기본 정보'!A2:A": [["1336"]],
+        },
+    }
+    monkeypatch.setattr(gs, "_build_service", lambda: _FakeService(store))
+
+    result = gs.append_inbound_row(
+        {
+            "client_id": 1336,
+            "inquiry_key": "conversation:2",
+            "_legacy_inquiry_keys": ["conversation:1"],
+            "inquiry_date": "2026-08-24",
+            "deal_stage": "New",
+            "email": "buyer@example.com",
+        }
+    )
+
+    assert result == gs.SheetWriteResult(row=42, client_id=1336)
+    assert store["updates"][0] == {
+        "range": "'Inbound DB'!E1",
+        "valueInputOption": "RAW",
+        "body": {"values": [["Inquiry ID"]]},
+    }
+    assert store["updates"][1] == {
+        "range": "'Inbound DB'!E2",
+        "valueInputOption": "RAW",
+        "body": {"values": [["conversation:1"]]},
+    }
+    assert store["appended"] == [[1336, "2026-08-24", "New", "buyer@example.com", "conversation:2"]]
+
+
+def test_stage_update_uses_inquiry_id_when_client_id_is_shared(monkeypatch):
+    _configure(monkeypatch)
+    store = {
+        "existing_header": [["Client ID", "Inquiry ID", "Deal Stage", "Deal Stage Detail"]],
+        "range_values": {
+            "'Inbound DB'!B2:B": [["conversation:1"], ["conversation:2"]],
+            "'Inbound DB'!A2:A": [["1336"], ["1336"]],
+        },
+    }
+    monkeypatch.setattr(gs, "_build_service", lambda: _FakeService(store))
+
+    assert gs.update_inbound_stage(
+        1336, "negotiation", inquiry_key="conversation:2"
+    ) is True
+    assert store["batch"]["data"] == [
+        {"range": "'Inbound DB'!B3", "values": [["conversation:2"]]},
+        {"range": "'Inbound DB'!C3", "values": [["Negotiation"]]},
+        {"range": "'Inbound DB'!D3", "values": [["Meeting"]]},
+    ]
 
 
 def test_allocated_inbound_id_is_rechecked_before_append(monkeypatch):

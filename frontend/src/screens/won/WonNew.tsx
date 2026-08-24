@@ -24,7 +24,7 @@ const TYPE_NOTE: Record<string, string> = {
   "AX": "AX 팀 고객",
 };
 const TYPE_BASE: Record<string, number> = {
-  "Inbound": 1000, "GTM Outbound": 2000, "Interactive": 3000, "AX": 4000,
+  "GTM Inbound": 1000, "GTM Outbound": 2000, "Interactive": 3000, "AX": 4000,
 };
 
 export function WonNew() {

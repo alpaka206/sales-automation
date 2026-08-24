@@ -154,6 +154,7 @@ async def _post_send_bookkeeping(session, msg, conv, message_id: int) -> None:
                 sheet_client_id,
                 "meeting_link_sent",
                 profile.qualification if profile else None,
+                conv.sheet_inquiry_key,
             )
             if not sheet_ok:
                 errors.append("google_sheets_stage")

@@ -93,11 +93,13 @@ class Conversation(Base):
     # Exact row written for this inquiry. Pipeline moves update only that row's
     # stage cells and never rewrite the operator-owned sheet layout.
     sheet_inbound_row: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    # Stable key written into this inquiry's sheet row. Unlike a physical row
-    # number it survives operator sorting and inserted rows. Uniqueness is
-    # enforced by migration 0035 (a unique index), not at the model level — the
-    # 0035 migration test must be able to create_all then insert legacy dupes.
+    # Customer/account ID shared by every inquiry from the same company. It is a
+    # join key, not an inquiry-row key; ``sheet_inquiry_key`` identifies the row.
     sheet_client_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    # Stable per-inquiry key written into Inbound DB. Unlike the physical row number
+    # it survives sorting, and unlike Client ID it stays unique when one company asks
+    # more than once. Migration 0085 backfills and uniquely indexes this column.
+    sheet_inquiry_key: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
 
     contact: Mapped[Contact] = relationship(back_populates="conversations")

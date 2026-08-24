@@ -136,6 +136,7 @@ export function WonCustomers() {
   const activeRows = scoped.filter((r) => r.plan_status !== "사용 중단" && r.active);
   const mrrCount = activeRows.filter((r) => r.active?.deal_type === "MRR").length;
   const pocCount = activeRows.filter((r) => r.active?.deal_type === "PoC").length;
+  const untypedCount = activeRows.length - mrrCount - pocCount;
   // 「이번달 예상 MRR」은 **서버가 계약 기간으로 계산해서**(계약 금액 ÷ 개월수) 담당부서별·
   // 통화별로 내려줍니다. 여기서 행을 걸러 더하면 그 필터가 곧 정의가 됩니다 — 실제로 플랜
   // 상태로 거르고 있었고, 그래서 세팅중 고객이 통째로 빠졌습니다. 행에는 활성 계약 하나만
@@ -188,14 +189,18 @@ export function WonCustomers() {
               <G name="person" /> 활성 고객 <span style={{ color: "var(--faint)" }}>({deptLabel})</span>
             </div>
             <div className="kpi-value"><span>{live + setup}</span><span className="unit">곳</span></div>
-            {/* 숫자 둘을 점 찍어 세로로 늘어놓던 자리입니다. 옆 칸이 차트라 카드 높이가
-                거기서 정해지는데, 그 높이 한가운데에 짧은 목록 둘이 떠 있어 카드가 비어
-                보였습니다. 같은 숫자를 비율 막대로 바닥에 붙이면 높이가 채워지고, 「2곳 중
-                몇 곳인가」를 숫자를 빼서 세지 않아도 보입니다. 색은 이 화면이 이미 쓰는
-                두 가지 그대로입니다 — 새 색을 들이면 범례가 하나 더 필요해집니다. */}
+            {/* 두 지표는 구성비를 읽는 값이라 원그래프로 보여 줍니다. 수주 유형이 비어 있는
+                활성 계약도 모집단에서 사라지지 않도록 '미등록' 조각으로 드러냅니다. */}
             <div className="kpi-splits">
-              <Split cap="플랜 상태" a={{ label: "사용중", n: live }} b={{ label: "세팅중", n: setup }} />
-              <Split cap="수주 유형" a={{ label: "MRR", n: mrrCount }} b={{ label: "PoC", n: pocCount }} />
+              <Donut cap="플랜 상태" slices={[
+                { label: "사용중", n: live, color: "var(--teal-600)" },
+                { label: "세팅중", n: setup, color: "#E4A11B" },
+              ]} />
+              <Donut cap="수주 유형" slices={[
+                { label: "MRR", n: mrrCount, color: "var(--teal-600)" },
+                { label: "PoC", n: pocCount, color: "#E4A11B" },
+                { label: "미등록", n: untypedCount, color: "#AAB7B4" },
+              ]} />
             </div>
           </button>
 
@@ -514,36 +519,35 @@ function RowView({ row, rows, index, today, onOpen }: {
 }
 
 
-/** 두 값의 비율을 막대 하나로. 숫자는 옆에 그대로 있고, 막대는 **비율만** 말합니다.
- *
- *  막대만 두지 않는 이유: 2곳과 200곳이 같은 막대로 보입니다. 숫자만 두지 않는 이유:
- *  「사용중 7 · 세팅중 3」 은 읽어서 비율을 만들어야 하고, 그 계산을 카드가 대신할 수
- *  있습니다. 값이 0/0 이면 빈 트랙만 남습니다 — 100% 짜리 회색 막대는 무언가 가득 찬
- *  것처럼 보입니다.
- */
-function Split({ cap, a, b }: {
+function Donut({ cap, slices }: {
   cap: string;
-  a: { label: string; n: number };
-  b: { label: string; n: number };
+  slices: { label: string; n: number; color: string }[];
 }) {
-  const total = a.n + b.n;
+  const total = slices.reduce((sum, slice) => sum + slice.n, 0);
+  let cursor = 0;
+  const stops = slices.map((slice) => {
+    const start = cursor;
+    cursor += total ? (slice.n / total) * 100 : 0;
+    return `${slice.color} ${start}% ${cursor}%`;
+  });
+  const background = total ? `conic-gradient(${stops.join(", ")})` : "var(--line-soft)";
+  const aria = slices.map((slice) => `${slice.label} ${slice.n}곳`).join(", ");
   return (
-    <div className="kpi-split">
-      <div className="kpi-split__head">
-        <span className="cap">{cap}</span>
-        <span className="kpi-split__nums">
-          <i><span className="dot" style={{ background: "var(--teal-600)" }} />{a.label}<b>{a.n}</b></i>
-          <i><span className="dot" style={{ background: "#E4A11B" }} />{b.label}<b>{b.n}</b></i>
+    <div className="kpi-donut">
+      <span className="cap">{cap}</span>
+      <div className="kpi-donut__body">
+        <div className="kpi-donut__chart" style={{ background }} role="img" aria-label={aria}>
+          <span><b>{total}</b><small>곳</small></span>
+        </div>
+        <span className="kpi-donut__legend">
+          {slices.map((slice) => (
+            <i key={slice.label}>
+              <span className="dot" style={{ background: slice.color }} />
+              {slice.label}<b>{slice.n}</b>
+              <small>{total ? Math.round((slice.n / total) * 100) : 0}%</small>
+            </i>
+          ))}
         </span>
-      </div>
-      <div className="kpi-split__bar" role="img"
-           aria-label={`${a.label} ${a.n}곳, ${b.label} ${b.n}곳`}>
-        {total > 0 && (
-          <>
-            <span style={{ width: `${(a.n / total) * 100}%`, background: "var(--teal-600)" }} />
-            <span style={{ width: `${(b.n / total) * 100}%`, background: "#E4A11B" }} />
-          </>
-        )}
       </div>
     </div>
   );

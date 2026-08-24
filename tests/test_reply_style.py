@@ -258,6 +258,28 @@ def test_the_english_link_row_can_go_because_the_korean_one_answers_for_it():
     assert out == "[Calendly](https://calendar.example/abc123) · [WhatsApp](https://wa.me/1)"
 
 
+def test_contact_links_are_an_exact_two_line_footer_not_model_prose():
+    from src.llm.prompts import canonicalize_contact_links
+
+    values = {
+        "meeting_link": "https://calendar.example/abc123",
+        "whatsapp_link": "[WhatsApp](https://wa.me/1)",
+    }
+    body = (
+        "Thank you for your inquiry.\n\n"
+        "You can schedule a meeting at [Calendly](https://calendar.example/abc123) "
+        "or contact us via [WhatsApp](https://wa.me/1)."
+    )
+    with patch("src.db.email_templates.get_email_template", side_effect=values.get):
+        out = canonicalize_contact_links(body, "en")
+
+    assert out == (
+        "Thank you for your inquiry.\n\n"
+        "[Calendly](https://calendar.example/abc123)\n"
+        "[WhatsApp](https://wa.me/1)"
+    )
+
+
 def test_every_token_in_the_seeded_format_is_one_the_code_substitutes():
     """A token in the skeleton that the code does not know ships to the customer raw.
 
@@ -404,3 +426,37 @@ def test_the_language_rows_exist_because_nothing_else_can_make_them():
     with engine.begin() as conn:
         다시 = dict(conn.execute(text("SELECT key, body FROM email_templates")).fetchall())
     assert 다시 == 행
+
+
+def test_0086_normalizes_live_link_templates_without_changing_urls():
+    import importlib
+
+    from sqlalchemy import create_engine, text
+
+    from src.db.models import EmailTemplate, EmailTemplateRevision
+
+    engine = create_engine("sqlite:///:memory:")
+    for model in (EmailTemplate, EmailTemplateRevision):
+        model.__table__.create(engine)
+    importlib.import_module("src.db.migrations.0042_reply_format_template").up(engine)
+    importlib.import_module("src.db.migrations.0069_links_are_words_not_urls").up(engine)
+    importlib.import_module("src.db.migrations.0086_contact_link_templates_are_exact").up(engine)
+
+    with engine.begin() as conn:
+        rows = dict(
+            conn.execute(
+                text(
+                    "SELECT key, body FROM email_templates WHERE key LIKE 'meeting_link%' "
+                    "OR key LIKE 'whatsapp_link%'"
+                )
+            ).fetchall()
+        )
+        revisions = conn.execute(
+            text("SELECT COUNT(*) FROM email_template_revisions WHERE edited_by='0086'")
+        ).scalar_one()
+
+    assert rows["meeting_link"].startswith("[Calendly](https://calendar.google.com/")
+    assert rows["meeting_link_en"].startswith("[Calendly](https://calendar.google.com/")
+    assert rows["whatsapp_link"] == "[WhatsApp](https://wa.me/821054802261)"
+    assert rows["whatsapp_link_en"] == "[WhatsApp](https://wa.me/821054802261)"
+    assert revisions >= 1

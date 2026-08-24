@@ -59,7 +59,7 @@ services:
       # Names mirror the HubSpot stage labels. Stages get RENAMED without their id
       # changing, so the older env names still resolve as aliases (QUALIFIED was
       # "Meeting link sent" / AFTER_SEND, NOT_A_FIT was "Closed" / UNQUALIFIED).
-      # THE BOARD HAS EIGHT COLUMNS AND ALL EIGHT MUST BE HERE: a stage with no id
+      # THE BOARD HAS SEVEN COLUMNS AND ALL SEVEN MUST BE HERE: a stage with no id
       # configured is skipped by stage_id_to_local(), so HubSpot moves into it are
       # invisible and console moves out of it silently do not reach HubSpot (an empty
       # stage id reports "not attempted", which the sync banner does not warn about).
@@ -75,8 +75,6 @@ services:
         value: "1196772135"            # Won
       - key: HUBSPOT_TICKET_STAGE_LOST
         value: "1172180246"            # Lost
-      - key: HUBSPOT_TICKET_STAGE_NO_RESPONSE
-        value: "4142303959"            # No Response — no reply ever came
       - key: HUBSPOT_TICKET_STAGE_NOT_A_FIT
         value: "1404814097"            # Not a Fit (ex-Closed, ex-Unqualified)
       - key: GOOGLE_CREDENTIALS_JSON   # Vertex AI service-account JSON (full contents)

@@ -160,6 +160,78 @@ def apply_editable_tokens(body: str, language: str | None = None) -> str:
     return body
 
 
+_LINK_URL_RE = re.compile(r"https?://[^\s)>\]]+")
+_CONTACT_LINK_MARKDOWN_RE = re.compile(
+    r"\[(?:Calendly|WhatsApp|미팅\s*링크)\]\([^\n]+?\)", re.IGNORECASE
+)
+
+
+def _url_from_template(value: str | None) -> str:
+    found = _LINK_URL_RE.search(value or "")
+    return found.group(0).rstrip(".,;:") if found else ""
+
+
+def canonicalize_contact_links(body: str, language: str | None = None) -> str:
+    """Put Calendly and WhatsApp in an exact, deterministic two-line footer.
+
+    The model may decide how the prose reads, but it must not decide where contact
+    links sit. Existing prose such as "schedule at Calendly or contact us via
+    WhatsApp" is removed as one line, then the configured URLs are appended with
+    fixed labels. The function is intentionally a no-op for messages with no contact
+    link at all (for example the automatic acknowledgement).
+    """
+    if not body:
+        return body
+    from ..db.email_templates import get_email_template
+
+    english = bool(language) and not language.lower().startswith("ko")
+    values: dict[str, str] = {}
+    for key in ("meeting_link", "meeting_link_en", "whatsapp_link", "whatsapp_link_en"):
+        try:
+            values[key] = (get_email_template(key) or "").strip()
+        except Exception:
+            values[key] = ""
+    urls = {_url_from_template(value) for value in values.values()}
+    urls.discard("")
+    has_link = (
+        "{{MEETING_LINK}}" in body
+        or "{{WHATSAPP}}" in body
+        or bool(_CONTACT_LINK_MARKDOWN_RE.search(body))
+        or any(url in body for url in urls)
+    )
+    if not has_link:
+        return body
+
+    meeting_keys = ("meeting_link_en", "meeting_link") if english else (
+        "meeting_link", "meeting_link_en"
+    )
+    whatsapp_keys = ("whatsapp_link_en", "whatsapp_link") if english else (
+        "whatsapp_link", "whatsapp_link_en"
+    )
+    meeting_url = next((_url_from_template(values[key]) for key in meeting_keys if values[key]), "")
+    whatsapp_url = next(
+        (_url_from_template(values[key]) for key in whatsapp_keys if values[key]), ""
+    )
+    if not meeting_url and not whatsapp_url:
+        return body
+
+    markers = ["{{MEETING_LINK}}", "{{WHATSAPP}}", *urls]
+    kept = [
+        line
+        for line in body.splitlines()
+        if not any(marker and marker in line for marker in markers)
+        and not _CONTACT_LINK_MARKDOWN_RE.search(line)
+    ]
+    cleaned = "\n".join(kept).strip()
+    footer = []
+    if meeting_url:
+        footer.append(f"[Calendly]({meeting_url})")
+    if whatsapp_url:
+        footer.append(f"[WhatsApp]({whatsapp_url})")
+    footer_text = "\n".join(footer)
+    return f"{cleaned}\n\n{footer_text}" if cleaned else footer_text
+
+
 # Preserve the previous public API: callers (e.g. llm/knowledge.reset_cache) call
 # get_company_rules.cache_clear() to drop cached rules. Nothing is cached any more —
 # rules and signature are both read per call — so this is a no-op kept for those callers.

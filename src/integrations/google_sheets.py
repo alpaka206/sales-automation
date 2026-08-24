@@ -23,6 +23,7 @@ class SheetWriteResult:
 _ALIASES: dict[str, tuple[str, ...]] = {
     # Inbound DB
     "client_id": ("Cluent ID", "Client ID", "client_id"),
+    "inquiry_key": ("Inquiry ID", "문의 ID", "Ticket ID", "inquiry_key"),
     "sales_direction": ("영업방향",),
     "inquiry_date": ("문의 날짜", "Create Date"),
     # "Ticket Status"/"Deal Detail" are the rebuilt workbook's names for these two.
@@ -260,6 +261,56 @@ def _headers(service, tab: str) -> _SheetHeader:
         if row:
             return _SheetHeader(values=list(row), row=offset)
     raise GoogleSheetsError(f"'{tab}' tab has no header row; refusing to modify it.")
+
+
+def _ensure_inquiry_key_column(service, tab: str, header: _SheetHeader) -> _SheetHeader:
+    """Add the per-inquiry idempotency column at the far right when first needed.
+
+    Appending at the right edge does not shift the operator's existing columns or
+    formulas. Old rows may stay blank; stage/delete operations fall back to Client ID
+    only while that ID still identifies exactly one legacy row.
+    """
+    lookup = _header_lookup({"inquiry_key": ""})
+    if any(_key_for_header(cell, lookup) == "inquiry_key" for cell in header.values):
+        return header
+    index = len(header.values)
+    service.spreadsheets().values().update(
+        spreadsheetId=settings.GOOGLE_SHEETS_SPREADSHEET_ID.strip(),
+        range=f"'{tab}'!{_column_letter(index)}{header.row}",
+        valueInputOption="RAW",
+        body={"values": [["Inquiry ID"]]},
+    ).execute()
+    logger.info("Added Inquiry ID column to '%s' at %s.", tab, _column_letter(index))
+    return _SheetHeader(values=[*header.values, "Inquiry ID"], row=header.row)
+
+
+def _backfill_legacy_inquiry_key(
+    service,
+    tab: str,
+    header: _SheetHeader,
+    client_id: int,
+    inquiry_key: str,
+) -> None:
+    """Give a pre-0085 row its key before another row shares the Client ID."""
+    if _rows_for_value(service, tab, header, "inquiry_key", inquiry_key):
+        return
+    rows = _rows_for_value(service, tab, header, "client_id", client_id)
+    if len(rows) != 1:
+        raise GoogleSheetsError(
+            f"Cannot backfill Inquiry ID for Client ID {client_id}: found {len(rows)} rows."
+        )
+    lookup = _header_lookup({"inquiry_key": ""})
+    index = next(
+        idx
+        for idx, cell in enumerate(header.values)
+        if _key_for_header(cell, lookup) == "inquiry_key"
+    )
+    service.spreadsheets().values().update(
+        spreadsheetId=settings.GOOGLE_SHEETS_SPREADSHEET_ID.strip(),
+        range=f"'{tab}'!{_column_letter(index)}{rows[0]}",
+        valueInputOption="RAW",
+        body={"values": [[inquiry_key]]},
+    ).execute()
 
 
 def _next_inbound_client_id(service, tab: str, header: _SheetHeader) -> int:
@@ -568,12 +619,20 @@ def _append_existing_tab(
         service = _build_service()
         header = _headers(service, tab)
         payload = dict(record)
+        legacy_inquiry_keys = tuple(payload.pop("_legacy_inquiry_keys", ()) or ())
+        if payload.get("inquiry_key"):
+            header = _ensure_inquiry_key_column(service, tab, header)
         client_id = payload.get("client_id")
         if allocate_client_id and not client_id:
             client_id = _next_inbound_client_id(service, tab, header)
             payload["client_id"] = client_id
         if registry:
             _ensure_registry_row(service, payload)
+        for legacy_key in legacy_inquiry_keys:
+            if client_id and legacy_key:
+                _backfill_legacy_inquiry_key(
+                    service, tab, header, int(client_id), str(legacy_key)
+                )
         if dedup_keys:
             existing_row = _existing_row_for_keys(service, tab, header, payload, dedup_keys)
             if existing_row:
@@ -613,7 +672,9 @@ def append_inbound_row(record: dict) -> SheetWriteResult:
         record,
         settings.GOOGLE_SHEETS_INBOUND_TAB.strip() or "Inbound DB",
         allocate_client_id=True,
-        dedup_keys=("client_id",),
+        # New rows are inquiries; Client ID is deliberately shared by a company.
+        # Keep the legacy fallback for callers/old workbooks without Inquiry ID.
+        dedup_keys=("inquiry_key",) if record.get("inquiry_key") else ("client_id",),
         registry=True,
     )
 
@@ -703,14 +764,16 @@ _STAGE_VALUES = {
 }
 
 
-def _row_for_client_id(service, tab: str, header: _SheetHeader, client_id: int) -> int | None:
-    lookup = _header_lookup({"client_id": ""})
+def _rows_for_value(
+    service, tab: str, header: _SheetHeader, key: str, value: object
+) -> list[int]:
+    lookup = _header_lookup({key: ""})
     index = next(
-        (idx for idx, cell in enumerate(header.values) if _key_for_header(cell, lookup) == "client_id"),
+        (idx for idx, cell in enumerate(header.values) if _key_for_header(cell, lookup) == key),
         None,
     )
     if index is None:
-        raise GoogleSheetsError("Inbound DB has no Client ID column.")
+        return []
     column = _column_letter(index)
     first = header.first_data_row
     values = (
@@ -724,15 +787,33 @@ def _row_for_client_id(service, tab: str, header: _SheetHeader, client_id: int) 
         .get("values")
         or []
     )
-    target = str(client_id).replace(",", "").strip()
-    return next(
-        (
-            offset + first
-            for offset, value in enumerate(values)
-            if value and str(value[0]).replace(",", "").strip() == target
-        ),
-        None,
-    )
+    target = str(value).replace(",", "").strip()
+    return [
+        offset + first
+        for offset, row in enumerate(values)
+        if row and str(row[0]).replace(",", "").strip() == target
+    ]
+
+
+def _row_for_inquiry(
+    service,
+    tab: str,
+    header: _SheetHeader,
+    client_id: int,
+    inquiry_key: str | None = None,
+) -> int | None:
+    """Find one inquiry row without guessing between shared Client IDs."""
+    if inquiry_key:
+        exact = _rows_for_value(service, tab, header, "inquiry_key", inquiry_key)
+        if exact:
+            return exact[0]
+    rows = _rows_for_value(service, tab, header, "client_id", client_id)
+    if len(rows) > 1:
+        raise GoogleSheetsError(
+            f"Inbound DB Client ID {client_id} has {len(rows)} inquiry rows; "
+            "an Inquiry ID is required."
+        )
+    return rows[0] if rows else None
 
 
 def _sheet_id(service, tab: str) -> int | None:
@@ -752,7 +833,7 @@ def _sheet_id(service, tab: str) -> int | None:
     return None
 
 
-def delete_inbound_row(client_id: int | None) -> bool:
+def delete_inbound_row(client_id: int | None, inquiry_key: str | None = None) -> bool:
     """그 Client ID 의 Inbound DB 행을 **지웁니다**. 콘솔에서 사라진 문의는 시트에서도 사라집니다.
 
     부르는 곳은 `hubspot_reconcile.delete_conversation` 한 곳입니다 — 티켓이 허브스팟에서
@@ -774,7 +855,7 @@ def delete_inbound_row(client_id: int | None) -> bool:
         service = _build_service()
         tab = settings.GOOGLE_SHEETS_INBOUND_TAB.strip() or "Inbound DB"
         header = _headers(service, tab)
-        row = _row_for_client_id(service, tab, header, client_id)
+        row = _row_for_inquiry(service, tab, header, client_id, inquiry_key)
         if row is None:
             logger.info("Inbound DB 에 Client ID %s 행이 없어 지울 것이 없습니다.", client_id)
             return False
@@ -810,7 +891,12 @@ def delete_inbound_row(client_id: int | None) -> bool:
         return False
 
 
-def update_inbound_stage(client_id: int | None, stage: str, pipeline: str | None = None) -> bool:
+def update_inbound_stage(
+    client_id: int | None,
+    stage: str,
+    pipeline: str | None = None,
+    inquiry_key: str | None = None,
+) -> bool:
     """Find the stable Client ID and update only its current stage cells."""
     if not client_id or not writes_enabled():
         return False
@@ -830,7 +916,9 @@ def update_inbound_stage(client_id: int | None, stage: str, pipeline: str | None
         service = _build_service()
         tab = settings.GOOGLE_SHEETS_INBOUND_TAB.strip() or "Inbound DB"
         header = _headers(service, tab)
-        row = _row_for_client_id(service, tab, header, client_id)
+        if inquiry_key:
+            header = _ensure_inquiry_key_column(service, tab, header)
+        row = _row_for_inquiry(service, tab, header, client_id, inquiry_key)
         if row is None:
             raise GoogleSheetsError(f"Inbound DB Client ID {client_id} was not found.")
         words = _STAGE_VALUES.get(stage)
@@ -847,6 +935,8 @@ def update_inbound_stage(client_id: int | None, stage: str, pipeline: str | None
         values = {"deal_stage": words[0], "deal_stage_detail": words[1]}
         if pipeline:
             values["pipeline"] = pipeline
+        if inquiry_key:
+            values["inquiry_key"] = inquiry_key
         lookup = _header_lookup(values)
         data = []
         for index, cell in enumerate(header.values):

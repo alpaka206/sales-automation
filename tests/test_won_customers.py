@@ -831,6 +831,14 @@ def test_the_card_does_not_filter_by_plan_status():
     assert "fx_rate" not in 카드
 
 
+def test_new_customer_screen_knows_the_gtm_inbound_number_band():
+    import pathlib
+
+    screen = pathlib.Path("frontend/src/screens/won/WonNew.tsx").read_text(encoding="utf-8")
+    assert '"GTM Inbound": 1000' in screen
+    assert '"Inbound": 1000' not in screen
+
+
 def test_the_card_counts_gtm_only():
     """Interactive 와 AX 는 각자 매출을 따로 봅니다. 셋을 한 숫자로 더하면 그 카드는 아무
     팀의 숫자도 아닙니다.

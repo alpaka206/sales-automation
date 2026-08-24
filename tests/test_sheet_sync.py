@@ -7,7 +7,7 @@ from datetime import datetime
 from types import SimpleNamespace
 
 import pytest
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -263,7 +263,7 @@ def test_import_retries_once_after_concurrent_unique_race(monkeypatch):
     assert calls == 2
 
 
-def test_pending_sync_uses_inquiry_client_id_not_contacts_first_id(
+def test_pending_sync_reuses_the_contacts_company_client_id(
     monkeypatch, db_session_factory
 ):
     with db_session_factory() as session:
@@ -306,7 +306,8 @@ def test_pending_sync_uses_inquiry_client_id_not_contacts_first_id(
     monkeypatch.setattr(sheet_sync, "record_inbound", record_inbound)
 
     assert sheet_sync.sync_pending_inbound_rows() == 1
-    assert captured["client_id"] == 1337
+    assert captured["client_id"] == 1336
+    assert captured["inquiry_key"] == "conversation:1"
 
 
 def test_order_sync_uses_contract_inquiry_snapshot(monkeypatch, db_session_factory):
@@ -398,11 +399,47 @@ def test_reserve_inbound_client_id_uses_sheet_and_local_max(
     monkeypatch.setattr(sheet_sync, "writes_enabled", lambda: True)
     monkeypatch.setattr(sheet_sync, "suggest_inbound_client_id", lambda: 1400)
 
-    assert sheet_sync.reserve_inbound_client_id(second_id) == 1451
-    assert sheet_sync.reserve_inbound_client_id(second_id) == 1451
+    assert sheet_sync.reserve_inbound_client_id(second_id) == 1450
+    assert sheet_sync.reserve_inbound_client_id(second_id) == 1450
 
     with db_session_factory() as session:
-        assert session.get(Conversation, second_id).sheet_client_id == 1451
+        second = session.get(Conversation, second_id)
+        assert second.sheet_client_id == 1450
+        assert second.sheet_inquiry_key == f"conversation:{second_id}"
+
+
+def test_reserve_inbound_client_id_reuses_corporate_domain(
+    monkeypatch, db_session_factory
+):
+    with db_session_factory() as session:
+        first = Contact(
+            normalized_email="first@acme.com",
+            email="first@acme.com",
+            domain="acme.com",
+            full_name="First",
+            sheet_client_id=1450,
+        )
+        second = Contact(
+            normalized_email="second@acme.com",
+            email="second@acme.com",
+            domain="acme.com",
+            full_name="Second",
+        )
+        session.add_all([first, second])
+        session.flush()
+        conversation = Conversation(contact_id=second.id, stage="new")
+        session.add(conversation)
+        session.commit()
+        conversation_id = conversation.id
+        second_id = second.id
+
+    monkeypatch.setattr(sheet_sync, "SessionLocal", db_session_factory)
+    monkeypatch.setattr(sheet_sync, "writes_enabled", lambda: True)
+
+    assert sheet_sync.reserve_inbound_client_id(conversation_id) == 1450
+    with db_session_factory() as session:
+        assert session.get(Contact, second_id).sheet_client_id == 1450
+        assert session.get(Conversation, conversation_id).sheet_client_id == 1450
 
 
 def test_0035_migration_clears_legacy_duplicates_and_enforces_unique_key(db_engine):
@@ -430,6 +467,56 @@ def test_0035_migration_clears_legacy_duplicates_and_enforces_unique_key(db_engi
         assert values == [1336, None]
         contact_id = session.scalar(select(Contact.id))
         session.add(Conversation(contact_id=contact_id, stage="new", sheet_client_id=1336))
+        with pytest.raises(IntegrityError):
+            session.commit()
+
+
+def test_0085_migration_shares_client_id_but_keeps_inquiry_key_unique(db_engine):
+    with Session(db_engine) as session:
+        contact = Contact(normalized_email="buyer@acme.com", full_name="Kim")
+        session.add(contact)
+        session.flush()
+        first = Conversation(
+            contact_id=contact.id,
+            stage="new",
+            hubspot_ticket_id="T-1336",
+            sheet_client_id=1336,
+        )
+        session.add(first)
+        session.commit()
+        contact_id = contact.id
+        first_id = first.id
+    with db_engine.begin() as conn:
+        conn.execute(
+            text(
+                "CREATE UNIQUE INDEX ux_conversations_sheet_client_id "
+                "ON conversations (sheet_client_id)"
+            )
+        )
+
+    importlib.import_module(
+        "src.db.migrations.0085_company_client_id_and_inquiry_key"
+    ).up(db_engine)
+
+    with Session(db_engine) as session:
+        assert session.get(Conversation, first_id).sheet_inquiry_key == "hubspot:T-1336"
+        session.add(
+            Conversation(
+                contact_id=contact_id,
+                stage="new",
+                sheet_client_id=1336,
+                sheet_inquiry_key="conversation:second",
+            )
+        )
+        session.commit()
+        session.add(
+            Conversation(
+                contact_id=contact_id,
+                stage="new",
+                sheet_client_id=1336,
+                sheet_inquiry_key="conversation:second",
+            )
+        )
         with pytest.raises(IntegrityError):
             session.commit()
 

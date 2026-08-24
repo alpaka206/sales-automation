@@ -13,6 +13,16 @@ from .smtp import send_smtp
 logger = logging.getLogger(__name__)
 
 
+def _canonicalize_reply_links(message: Message, language: str) -> None:
+    if getattr(message, "prompt_variant", None) == "auto_ack":
+        return
+    if not isinstance(message.body, str):
+        return
+    from ...llm.prompts import canonicalize_contact_links
+
+    message.body = text_wash(canonicalize_contact_links(message.body, language))
+
+
 def enforce_send_language(message: Message) -> None:
     """Final code guard: a customer reply leaves in the right language, washed.
 
@@ -34,6 +44,8 @@ def enforce_send_language(message: Message) -> None:
     target = message.target_language if isinstance(message.target_language, str) else ""
     target = target.lower()
     if not target:
+        language = getattr(message, "language", "")
+        _canonicalize_reply_links(message, language if isinstance(language, str) else "")
         return
     current = message.language if isinstance(message.language, str) else ""
     current = current.lower()
@@ -46,6 +58,7 @@ def enforce_send_language(message: Message) -> None:
         # predominantly Korean (e.g. the operator translated, then re-typed Korean),
         # the metadata is stale — fall through and translate. No LLM call here.
         if not (target != "ko" and is_mostly_korean(message.body)):
+            _canonicalize_reply_links(message, target)
             return
 
     translated = translate_to(message.body, target)
@@ -65,6 +78,7 @@ def enforce_send_language(message: Message) -> None:
             target,
             current or "?",
         )
+    _canonicalize_reply_links(message, target)
 
 
 def enforce_first_reply_no_price(message: Message) -> None:

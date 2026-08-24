@@ -92,7 +92,9 @@ def local_stage_for(hubspot_stage_id: str | None) -> str | None:
     return stage_id_to_local().get(str(hubspot_stage_id).strip())
 
 
-def _mirror_stage_to_sheet(client_id: int | None, stage: str, ticket_id: str) -> None:
+def _mirror_stage_to_sheet(
+    client_id: int | None, stage: str, ticket_id: str, inquiry_key: str | None = None
+) -> None:
     """Push a HubSpot-driven stage move into the sales workbook, best effort.
 
     This is what makes the Sheet track HubSpot without anyone re-typing it. Three
@@ -112,7 +114,7 @@ def _mirror_stage_to_sheet(client_id: int | None, stage: str, ticket_id: str) ->
     try:
         from ..integrations.google_sheets import update_inbound_stage
 
-        if update_inbound_stage(client_id, stage):
+        if update_inbound_stage(client_id, stage, inquiry_key=inquiry_key):
             logger.info("Sheet stage updated from HubSpot (ticket=%s -> %s)", ticket_id, stage)
     except Exception:
         logger.warning(
@@ -326,10 +328,10 @@ def sync_stage_from_hubspot(
         # 워크북 키는 세션이 열려 있는 동안 읽습니다. 미러는 커밋 뒤에 돌고, 블록을 벗어나면
         # 이 인스턴스들은 detached 입니다.
         #
-        # 연락처의 `sheet_client_id` 로 넘어가던 폴백은 뺐습니다. Client ID 는 **문의당**
-        # 하나인데 연락처는 문의를 여럿 가질 수 있어서, 그 폴백은 이 문의의 단계로 **다른
-        # 문의의** 워크북 행을 덮어썼습니다. 행이 없는 문의는 그냥 안 미러링합니다.
+        # Client ID는 회사가 공유하므로 그것만으로 행을 고르면 안 됩니다. 문의별
+        # `sheet_inquiry_key`를 함께 넘겨 정확한 워크북 행만 갱신합니다.
         sheet_client_id = conv.sheet_client_id
+        sheet_inquiry_key = conv.sheet_inquiry_key
 
         # **프로필은 이 대화가 그 연락처의 최신일 때만 씁니다.** `CustomerProfile` 은 연락처당
         # 하나인데 한 연락처에 문의가 여럿일 수 있어서, 옛 티켓이 움직일 때마다 화면 값이 그
@@ -371,7 +373,9 @@ def sync_stage_from_hubspot(
                 session.commit()
             # 워크북 미러는 실패해도 아무 데도 안 남습니다. 이 스윕이 곧 재시도라서, 값이
             # 같아도 한 번 더 밀어 둡니다 — 시트만 뒤처져 있던 경우가 여기서 복구됩니다.
-            _mirror_stage_to_sheet(sheet_client_id, local_stage, str(ticket_id))
+            _mirror_stage_to_sheet(
+                sheet_client_id, local_stage, str(ticket_id), sheet_inquiry_key
+            )
             return None
 
         previous = conv.stage
@@ -398,7 +402,7 @@ def sync_stage_from_hubspot(
         ticket_id, previous, local_stage, source, retired,
     )
     # After the commit, so a Sheets failure can never roll back the local move.
-    _mirror_stage_to_sheet(sheet_client_id, local_stage, str(ticket_id))
+    _mirror_stage_to_sheet(sheet_client_id, local_stage, str(ticket_id), sheet_inquiry_key)
     return local_stage
 
 

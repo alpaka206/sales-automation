@@ -195,6 +195,7 @@ def delete_conversation(conversation_id: int, ticket_id: str) -> int:
             return 0
         # 워크북 행을 찾는 자연키. 세션이 닫히면 못 읽으므로 지우기 전에 들고 나옵니다.
         sheet_client_id = conversation.sheet_client_id
+        sheet_inquiry_key = conversation.sheet_inquiry_key
         contact_id = conversation.contact_id
         removed = session.query(Message).filter(
             Message.conversation_id == conversation_id
@@ -235,7 +236,10 @@ def delete_conversation(conversation_id: int, ticket_id: str) -> int:
     if sheet_client_id:
         from ..integrations.google_sheets import delete_inbound_row
 
-        delete_inbound_row(sheet_client_id)
+        if sheet_inquiry_key:
+            delete_inbound_row(sheet_client_id, sheet_inquiry_key)
+        else:
+            delete_inbound_row(sheet_client_id)
     return removed
 
 

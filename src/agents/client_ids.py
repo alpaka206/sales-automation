@@ -19,16 +19,11 @@
 
 from __future__ import annotations
 
-import logging
-
 from sqlalchemy import func
 
 from ..common.domains import is_personal_domain
 from ..common.won import ALLOCATABLE_BANDS
 from ..db.models import Client, Contact, Conversation
-from ..db.session import SessionLocal
-
-logger = logging.getLogger(__name__)
 
 _BAND_SIZE = 1000
 
@@ -39,6 +34,20 @@ def find_existing_client_id(session, contact: Contact | None) -> int | None:
         return None
     if contact.sheet_client_id:
         return contact.sheet_client_id
+
+    # Legacy data may have the number only on an older conversation. The same
+    # person is still the same customer even before domain-level matching.
+    own_inquiry = (
+        session.query(Conversation.sheet_client_id)
+        .filter(
+            Conversation.contact_id == contact.id,
+            Conversation.sheet_client_id.isnot(None),
+        )
+        .order_by(Conversation.sheet_client_id)
+        .first()
+    )
+    if own_inquiry and own_inquiry[0]:
+        return int(own_inquiry[0])
 
     # 같은 회사 도메인의 다른 담당자. 개인 메일 도메인은 회사가 아닙니다.
     domain = (contact.domain or "").lower().strip()
@@ -70,7 +79,9 @@ def next_client_id(session, customer_type: str) -> int:
         raise ValueError(f"발급할 수 없는 고객 종류입니다: {customer_type}")
     ceiling = base + _BAND_SIZE
     highest = 0
-    for column in (Client.client_id, Conversation.sheet_client_id):
+    # Contact is included because a company may already own an ID even when its
+    # original conversation was removed or has not yet become a won Client.
+    for column in (Client.client_id, Contact.sheet_client_id, Conversation.sheet_client_id):
         value = (
             session.query(func.max(column))
             .filter(column >= base, column < ceiling)
@@ -79,27 +90,3 @@ def next_client_id(session, customer_type: str) -> int:
         if value:
             highest = max(highest, int(value))
     return max(highest + 1, base + 1)
-
-
-def client_id_for_inquiry(conversation_id: int) -> int | None:
-    """문의 하나에 줄 Client ID — 같은 고객사가 이미 있으면 그 번호.
-
-    ``inbound.py`` 가 시트에 행을 붙이기 전에 부릅니다. 시트가 죽어 있어도 번호는 나오므로,
-    수주 장부는 시트 상태와 무관하게 고객을 하나로 묶을 수 있습니다.
-    """
-    with SessionLocal() as session:
-        conversation = session.get(Conversation, conversation_id)
-        if conversation is None:
-            return None
-        if conversation.sheet_client_id:
-            return conversation.sheet_client_id
-        contact = session.get(Contact, conversation.contact_id)
-        existing = find_existing_client_id(session, contact)
-        if existing:
-            logger.info(
-                "Client ID %s reused for conversation %s (same customer).",
-                existing,
-                conversation_id,
-            )
-            return existing
-        return next_client_id(session, "Inbound")

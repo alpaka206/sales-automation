@@ -12,7 +12,7 @@ HubSpot 신규 문의를 받아 접수 확인 메일을 즉시 보내고, Gemini
 6. 운영자가 웹 UI에서 수정·번역하고 **서명을 고른 뒤** 발송합니다. 서명은 이때 붙습니다 — 초안 본문에는 서명이 없습니다.
 7. SMTP 발송 성공 후 HubSpot 이메일 활동을 기록하고 티켓 단계를 이동합니다.
 
-현재 개발자 HubSpot 계정에는 `Meeting link sent` 단계가 없어 임시로 `New(1) → Waiting on contact(2)`를 사용합니다. 실제 계정 연결 시 `.env`의 단계 ID만 바꾸면 됩니다.
+운영 HubSpot 단계 ID는 `.env.example`과 `render.yaml`의 7개 항목을 기준으로 설정합니다. 단계 이름이 바뀌어도 HubSpot 내부 ID가 같으면 기존 alias로 호환됩니다.
 
 ## 운영 기능
 
@@ -50,7 +50,8 @@ scripts\run.bat
 
 - `src/agents`: 문의 처리와 발송 워커
 - `src/integrations`: HubSpot, SMTP, Slack
-- `src/api/web`: 운영 UI
-- `company_rules`: 답변 원칙
-- `knowledge_base`: AI가 선택해서 참고할 정책·제품 문서
+- `src/api`: FastAPI 라우트와 운영 UI 정적 자산
+- `frontend`: React 운영 콘솔
+- `src/llm/prompts`: 코드로 관리하는 프롬프트 골격
+- DB `policy_sources` / `email_templates`: 콘솔에서 편집하는 내부 정책·제품 문서와 메일 템플릿
 - `src/db/migrations`: 기존 DB를 보존하는 순차 마이그레이션
