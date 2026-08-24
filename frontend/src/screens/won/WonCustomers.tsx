@@ -537,7 +537,6 @@ function Donut({ cap, slices }: {
       <span className="cap">{cap}</span>
       <div className="kpi-donut__body">
         <div className="kpi-donut__chart" style={{ background }} role="img" aria-label={aria}>
-          <span><b>{total}</b><small>곳</small></span>
         </div>
         <span className="kpi-donut__legend">
           {slices.map((slice) => (
