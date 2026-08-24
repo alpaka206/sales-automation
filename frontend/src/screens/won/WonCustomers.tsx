@@ -1,8 +1,7 @@
 import { useMemo, useState } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
-import { getJSON, postForm } from "../../lib/api";
-import { ActionButton } from "../../ui/ActionButton";
+import { getJSON } from "../../lib/api";
 import { MonthlyBars } from "./MonthlyBars";
 import {
   type ListData, type Row,
@@ -64,7 +63,6 @@ const round = (item: { no: number | null; total: number | null }, unit = "회차
 
 export function WonCustomers() {
   const navigate = useNavigate();
-  const queryClient = useQueryClient();
   const { data } = useQuery({
     queryKey: ["won-customers"],
     queryFn: () => getJSON<ListData>("/api/ui/won-customers"),
@@ -151,11 +149,6 @@ export function WonCustomers() {
 
   const open = (clientId: number, section?: string) =>
     navigate(`/won-customers/${clientId}${section ? `#${section}` : ""}`);
-
-  async function dismiss(id: number) {
-    await postForm(`/won-customers/pending/${id}/dismiss`, {});
-    await queryClient.invalidateQueries({ queryKey: ["won-customers"] });
-  }
 
   return (
     <div className="won">
@@ -334,8 +327,6 @@ export function WonCustomers() {
                             onClick={() => navigate(`/won-customers/new?pending=${item.id}`)}>
                       계약 정보 입력
                     </button>
-                    <ActionButton className="btn btn-sm" pending="보류 중"
-                                  onClick={() => dismiss(item.id)}>보류</ActionButton>
                   </div>
                 </div>
               ))}

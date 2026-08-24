@@ -12,12 +12,15 @@
 1. 그 연락처가 이미 들고 있는 번호 (같은 사람이 또 문의한 경우)
 2. 같은 회사 도메인의 다른 연락처가 들고 있는 번호 — **개인 메일 도메인은 제외**합니다.
    gmail 로 문의한 두 사람을 한 회사로 묶으면 남의 계약이 보입니다.
-3. 없으면 새로 발급
+3. 수주 장부에 회사명이 정확히 일치하는 고객이 **하나뿐이면** 그 번호
+4. 없거나 동명 고객이 여러 명이면 새로 발급
 
 2번이 이 파일이 존재하는 이유입니다. 담당자가 바뀌어 다른 사람이 문의해도 같은 고객입니다.
 """
 
 from __future__ import annotations
+
+import re
 
 from sqlalchemy import func
 
@@ -26,6 +29,27 @@ from ..common.won import ALLOCATABLE_BANDS
 from ..db.models import Client, Contact, Conversation
 
 _BAND_SIZE = 1000
+_PLACEHOLDER_COMPANIES = {"", "unknown", "알수없음", "고객사미확인", "미확인"}
+
+
+def company_key(value: str | None) -> str:
+    """대소문자·공백·구두점을 제외한 회사명 비교 키."""
+    return re.sub(r"[^a-z0-9가-힣]", "", (value or "").casefold())
+
+
+def unique_client_id_for_company(session, company: str | None) -> int | None:
+    """회사명이 같은 수주 고객이 정확히 하나일 때만 그 Client ID를 돌려줍니다."""
+    key = company_key(company)
+    if key in _PLACEHOLDER_COMPANIES:
+        return None
+    matches = {
+        int(client_id)
+        for client_id, stored_company in session.query(
+            Client.client_id, Client.company
+        ).all()
+        if company_key(stored_company) == key
+    }
+    return next(iter(matches)) if len(matches) == 1 else None
 
 
 def find_existing_client_id(session, contact: Contact | None) -> int | None:
@@ -64,7 +88,7 @@ def find_existing_client_id(session, contact: Contact | None) -> int | None:
         )
         if sibling and sibling[0]:
             return int(sibling[0])
-    return None
+    return unique_client_id_for_company(session, contact.company)
 
 
 def next_client_id(session, customer_type: str) -> int:

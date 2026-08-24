@@ -158,6 +158,47 @@ def test_the_same_company_keeps_one_client_id(factory):
         assert find_existing_client_id(session, second) == 1108
 
 
+def test_a_unique_won_company_reuses_its_client_id(factory):
+    """문의 연결이 없어도 회사명이 정확히 하나의 수주 고객을 가리키면 같은 번호입니다."""
+    from src.agents.client_ids import find_existing_client_id
+
+    with factory() as session:
+        contact = Contact(
+            normalized_email="buyer@gmail.com",
+            full_name="Buyer",
+            company="JUPITER AND MERCURY",
+            domain="gmail.com",
+        )
+        session.add_all(
+            [contact, Client(client_id=1323, company="JUPITER AND MERCURY")]
+        )
+        session.flush()
+
+        assert find_existing_client_id(session, contact) == 1323
+
+
+def test_an_ambiguous_company_name_does_not_guess_a_client_id(factory):
+    from src.agents.client_ids import find_existing_client_id
+
+    with factory() as session:
+        contact = Contact(
+            normalized_email="buyer@gmail.com",
+            full_name="Buyer",
+            company="ACME",
+            domain="gmail.com",
+        )
+        session.add_all(
+            [
+                contact,
+                Client(client_id=1101, company="ACME"),
+                Client(client_id=1102, company="ACME"),
+            ]
+        )
+        session.flush()
+
+        assert find_existing_client_id(session, contact) is None
+
+
 def test_two_gmail_senders_are_not_one_company(factory):
     """개인 메일 도메인으로 묶으면 남의 계약이 보입니다."""
     from src.agents.client_ids import find_existing_client_id
@@ -212,6 +253,162 @@ def test_won_lands_in_the_waiting_list_once(factory, monkeypatch):
     with factory() as session:
         rows = session.query(PendingWon).all()
         assert [(r.ticket_id, r.client_id, r.status) for r in rows] == [("T-1", 1108, "pending")]
+
+
+def test_won_waiting_row_finds_and_links_a_unique_existing_company(factory):
+    from src.agents.stage_sync import _enqueue_pending_won
+    from src.db.models import Conversation, PendingWon
+
+    with factory() as session:
+        contact = Contact(
+            normalized_email="buyer@gmail.com",
+            full_name="Buyer",
+            company="JUPITER AND MERCURY",
+            domain="gmail.com",
+        )
+        session.add_all(
+            [contact, Client(client_id=1323, company="JUPITER AND MERCURY")]
+        )
+        session.flush()
+        conversation = Conversation(
+            contact_id=contact.id,
+            hubspot_ticket_id="T-JUPITER",
+            stage="won",
+        )
+        session.add(conversation)
+        session.flush()
+
+        assert _enqueue_pending_won(session, conversation, None) is True
+        session.commit()
+
+        pending = session.query(PendingWon).one()
+        assert pending.client_id == 1323
+        assert conversation.sheet_client_id == 1323
+        assert contact.sheet_client_id == 1323
+
+
+def test_saving_a_contract_completes_its_waiting_row(factory):
+    from src.api.routes.won_customers import _complete_pending_won
+    from src.db.models import Conversation, PendingWon
+
+    with factory() as session:
+        contact = Contact(
+            normalized_email="buyer@example.com",
+            full_name="Buyer",
+            company="JUPITER AND MERCURY",
+        )
+        client = Client(client_id=1323, company="JUPITER AND MERCURY")
+        session.add_all([contact, client])
+        session.flush()
+        conversation = Conversation(
+            contact_id=contact.id,
+            hubspot_ticket_id="T-JUPITER",
+            stage="won",
+        )
+        session.add(conversation)
+        session.flush()
+        pending = PendingWon(
+            ticket_id="T-JUPITER",
+            company="JUPITER AND MERCURY",
+            conversation_id=conversation.id,
+        )
+        session.add(pending)
+        session.flush()
+
+        _complete_pending_won(session, pending.id, client)
+        session.commit()
+
+        assert pending.status == "done"
+        assert pending.client_id == 1323
+        assert conversation.sheet_client_id == 1323
+        assert contact.sheet_client_id == 1323
+        assert client.contact_id == contact.id
+
+
+def test_0089_backfills_only_an_unambiguous_pending_company(db_engine):
+    import importlib
+
+    from sqlalchemy.orm import Session
+    from src.db.models import Conversation, PendingWon
+
+    with Session(db_engine) as session:
+        jupiter_contact = Contact(
+            normalized_email="jupiter@example.com",
+            full_name="Jupiter",
+            company="JUPITER AND MERCURY",
+        )
+        acme_contact = Contact(
+            normalized_email="acme@example.com",
+            full_name="Acme",
+            company="ACME",
+        )
+        session.add_all(
+            [
+                jupiter_contact,
+                acme_contact,
+                Client(client_id=1323, company="JUPITER AND MERCURY"),
+                Client(client_id=1101, company="ACME"),
+                Client(client_id=1102, company="ACME"),
+            ]
+        )
+        session.flush()
+        jupiter = Conversation(
+            contact_id=jupiter_contact.id,
+            hubspot_ticket_id="T-JUPITER",
+            stage="won",
+        )
+        acme = Conversation(
+            contact_id=acme_contact.id,
+            hubspot_ticket_id="T-ACME",
+            stage="won",
+        )
+        session.add_all([jupiter, acme])
+        session.flush()
+        session.add_all(
+            [
+                PendingWon(
+                    ticket_id="T-JUPITER",
+                    company="JUPITER AND MERCURY",
+                    conversation_id=jupiter.id,
+                ),
+                PendingWon(
+                    ticket_id="T-ACME",
+                    company="ACME",
+                    conversation_id=acme.id,
+                ),
+            ]
+        )
+        session.commit()
+        jupiter_id = jupiter.id
+        jupiter_contact_id = jupiter_contact.id
+
+    migration = importlib.import_module(
+        "src.db.migrations.0089_pending_won_finds_existing_client"
+    )
+    migration.up(db_engine)
+
+    with Session(db_engine) as session:
+        rows = {
+            row.ticket_id: row
+            for row in session.query(PendingWon).order_by(PendingWon.ticket_id)
+        }
+        assert rows["T-JUPITER"].client_id == 1323
+        assert rows["T-ACME"].client_id is None
+        assert session.get(Conversation, jupiter_id).sheet_client_id == 1323
+        assert session.get(Contact, jupiter_contact_id).sheet_client_id == 1323
+
+
+def test_waiting_list_has_no_manual_hold_action():
+    import pathlib
+
+    from src.api.routes import won_customers
+
+    screen = pathlib.Path(
+        "frontend/src/screens/won/WonCustomers.tsx"
+    ).read_text(encoding="utf-8")
+    assert ">보류</" not in screen
+    assert "/dismiss" not in screen
+    assert all("/dismiss" not in route.path for route in won_customers.router.routes)
 
 
 def test_the_console_can_actually_reach_the_write_routes():

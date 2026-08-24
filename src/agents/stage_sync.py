@@ -424,17 +424,35 @@ def _enqueue_pending_won(session, conv, sheet_client_id: int | None) -> bool:
     ticket_id = str(conv.hubspot_ticket_id or "").strip()
     if not ticket_id:
         return False
+    contact = session.get(Contact, conv.contact_id) if conv.contact_id else None
+    from .client_ids import find_existing_client_id
+
+    resolved_client_id = sheet_client_id or find_existing_client_id(session, contact)
+    changed = False
+    if resolved_client_id and conv.sheet_client_id is None:
+        conv.sheet_client_id = resolved_client_id
+        changed = True
+    if resolved_client_id and contact is not None and contact.sheet_client_id is None:
+        contact.sheet_client_id = resolved_client_id
+        changed = True
+
     existing = (
         session.query(PendingWon).filter(PendingWon.ticket_id == ticket_id).one_or_none()
     )
     if existing is not None:
-        return False
-    contact = session.get(Contact, conv.contact_id) if conv.contact_id else None
+        if (
+            existing.status == "pending"
+            and existing.client_id is None
+            and resolved_client_id is not None
+        ):
+            existing.client_id = resolved_client_id
+            changed = True
+        return changed
     session.add(
         PendingWon(
             ticket_id=ticket_id,
             company=(contact.company if contact else None) or (contact.full_name if contact else None),
-            client_id=sheet_client_id,
+            client_id=resolved_client_id,
             conversation_id=conv.id,
             # 수주 유형(MRR/PoC)은 담당자가 고릅니다. HubSpot 의 Won type 은 읽지
             # 않습니다 — 그 속성이 이 파이프라인에 있는지 확인되지 않았고, 없는 값을
@@ -443,5 +461,7 @@ def _enqueue_pending_won(session, conv, sheet_client_id: int | None) -> bool:
             won_on=datetime.now(timezone.utc).date().isoformat(),
         )
     )
-    logger.info("수주 전환 대기에 추가: ticket=%s client=%s", ticket_id, sheet_client_id)
+    logger.info(
+        "수주 전환 대기에 추가: ticket=%s client=%s", ticket_id, resolved_client_id
+    )
     return True

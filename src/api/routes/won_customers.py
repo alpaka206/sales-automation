@@ -251,6 +251,38 @@ def _fill_contract(contract: ClientContract, form: dict) -> None:
     _settle_amounts(contract)
 
 
+def _complete_pending_won(session, pending_id: int | None, client: Client) -> None:
+    """계약 저장과 같은 트랜잭션에서 선택한 전환 대기를 끝냅니다."""
+    if pending_id is None:
+        return
+    pending = session.get(PendingWon, pending_id)
+    if pending is None or pending.status != "pending":
+        return
+    if pending.client_id is not None and pending.client_id != client.client_id:
+        raise HTTPException(
+            status_code=409,
+            detail="수주 전환 대기의 Client ID와 계약 고객이 다릅니다",
+        )
+    pending.client_id = client.client_id
+    pending.status = "done"
+    if pending.conversation_id:
+        from ...db.models import Contact, Conversation
+
+        conversation = session.get(Conversation, pending.conversation_id)
+        if conversation is not None:
+            if conversation.sheet_client_id is None:
+                conversation.sheet_client_id = client.client_id
+            contact = (
+                session.get(Contact, conversation.contact_id)
+                if conversation.contact_id
+                else None
+            )
+            if contact is not None and contact.sheet_client_id is None:
+                contact.sheet_client_id = client.client_id
+            if client.contact_id is None and contact is not None:
+                client.contact_id = contact.id
+
+
 def _flag(value) -> bool:
     return str(value or "").strip().lower() in {"1", "true", "on", "yes"}
 
@@ -303,6 +335,7 @@ async def create_contract(client_id: int, request: Request):
             credit_rounds=_int(form.get("credit_rounds")) or 1,
             first_credit_on=_text(form.get("first_credit_on")),
         )
+        _complete_pending_won(session, _int(form.get("pending_id")), client)
         session.commit()
         contract_id = contract.id
     return {"id": contract_id, "seq": seq}
@@ -509,20 +542,6 @@ def _fill_fx(payment: ContractPayment) -> None:
         return
     if found:
         payment.fx_rate, payment.fx_on, _source = found
-
-
-# --------------------------------------------------------------------------- #
-# 수주 전환 대기
-# --------------------------------------------------------------------------- #
-@router.post("/won-customers/pending/{pending_id}/dismiss")
-async def dismiss_pending(pending_id: int):
-    """보류. Won → Negotiating 롤백은 여기서 내리면 끝입니다."""
-    with SessionLocal() as session:
-        pending = session.get(PendingWon, pending_id)
-        if pending is not None:
-            pending.status = "dismissed"
-            session.commit()
-    return {"ok": True}
 
 
 # --------------------------------------------------------------------------- #

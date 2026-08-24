@@ -196,6 +196,8 @@ export function WonContractForm() {
       credit_rounds: creditRounds,
       first_credit_on: firstCreditOn,
     };
+    const pendingId = params.get("pending");
+    if (!editing && pendingId) body.pending_id = pendingId;
     try {
       if (editing) {
         await postForm(`/won-customers/contracts/${contractId}`, body);
