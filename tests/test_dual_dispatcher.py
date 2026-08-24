@@ -1,4 +1,4 @@
-"""Tests for the SMTP send dispatcher with DB tracking."""
+"""Tests for the HubSpot Conversations send dispatcher with DB tracking."""
 
 from __future__ import annotations
 
@@ -9,6 +9,7 @@ import pytest
 from src.db.models import Contact, Conversation, Message
 from src.db.session import SessionLocal
 from src.integrations.senders import send
+from src.integrations.delivery import DeliveryPermanentError
 
 
 def _create_test_message(phone: str = "+821012345678") -> int:
@@ -23,7 +24,11 @@ def _create_test_message(phone: str = "+821012345678") -> int:
         session.add(contact)
         session.flush()
 
-        conv = Conversation(contact_id=contact.id, inquiry_subject="test")
+        conv = Conversation(
+            contact_id=contact.id,
+            inquiry_subject="test",
+            hubspot_ticket_id="ticket-test",
+        )
         session.add(conv)
         session.flush()
 
@@ -54,11 +59,14 @@ def _cleanup():
 
 
 @pytest.mark.asyncio
-@patch("src.integrations.senders.send_smtp", side_effect=RuntimeError("SMTP down"))
-async def test_email_failure_raises(mock_smtp):
+@patch(
+    "src.integrations.hubspot.HubSpotClient",
+    side_effect=DeliveryPermanentError("HubSpot unavailable"),
+)
+async def test_email_failure_raises(mock_client):
     msg_id = _create_test_message()
 
     with SessionLocal() as session:
         msg = session.get(Message, msg_id)
-        with pytest.raises(RuntimeError, match="SMTP down"):
+        with pytest.raises(DeliveryPermanentError, match="HubSpot unavailable"):
             await send(msg)

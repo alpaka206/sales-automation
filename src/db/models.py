@@ -148,7 +148,7 @@ class Message(Base):
     send_claimed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     send_attempts: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     sent_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    # Delivery and CRM/Sheets synchronization are separate commits: SMTP may
+    # Delivery and CRM/Sheets synchronization are separate commits: HubSpot may
     # succeed while a downstream system is temporarily unavailable.
     post_send_synced_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     post_send_sync_attempted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
@@ -158,6 +158,8 @@ class Message(Base):
     smtp_message_id: Mapped[str | None] = mapped_column(String, nullable=True)
     in_reply_to: Mapped[str | None] = mapped_column(String, nullable=True)
     hubspot_engagement_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    hubspot_thread_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    hubspot_message_id: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
     # 이 메일 한 통을 줄인 한 줄. 티켓 요약이 이 줄들을 이어 붙인 것이고, New 를 지난
     # 화면은 본문 대신 이것을 보여 준 뒤 「전체보기」로 본문을 엽니다.
     summary_line: Mapped[str | None] = mapped_column(String(300), nullable=True)

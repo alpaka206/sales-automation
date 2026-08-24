@@ -47,7 +47,6 @@ def test_daily_report(seeded_db) -> None:
     with (
         patch("src.agents.report.SessionLocal", return_value=session),
         patch.object(ReportAgent, "_save_report"),
-        patch.object(ReportAgent, "_distribute"),
     ):
         agent = ReportAgent(llm=llm)
         report = agent.generate("daily")
@@ -67,7 +66,6 @@ def test_weekly_report(seeded_db) -> None:
     with (
         patch("src.agents.report.SessionLocal", return_value=session),
         patch.object(ReportAgent, "_save_report"),
-        patch.object(ReportAgent, "_distribute"),
     ):
         agent = ReportAgent(llm=llm)
         report = agent.generate("weekly")
@@ -85,7 +83,6 @@ def test_report_llm_fallback(seeded_db) -> None:
     with (
         patch("src.agents.report.SessionLocal", return_value=session),
         patch.object(ReportAgent, "_save_report"),
-        patch.object(ReportAgent, "_distribute"),
     ):
         agent = ReportAgent(llm=llm)
         report = agent.generate("daily")
@@ -94,8 +91,7 @@ def test_report_llm_fallback(seeded_db) -> None:
     assert "messages sent" in report
 
 
-@patch("src.agents.report.smtplib")
-def test_distribute_emails_report_without_slack(mock_smtp, seeded_db) -> None:
+def test_report_is_saved_without_an_external_send(seeded_db) -> None:
     session = seeded_db
 
     llm = MagicMock()
@@ -103,37 +99,10 @@ def test_distribute_emails_report_without_slack(mock_smtp, seeded_db) -> None:
 
     with (
         patch("src.agents.report.SessionLocal", return_value=session),
-        patch.object(ReportAgent, "_save_report"),
-        patch("src.agents.report.settings") as mock_settings,
+        patch.object(ReportAgent, "_save_report") as save_report,
     ):
-        mock_settings.REPORT_EMAIL_TO = "boss@co.com,team@co.com"
-        mock_settings.SMTP_USERNAME = "user"
-        mock_settings.SMTP_PASSWORD = "pass"
-        mock_settings.SMTP_HOST = "smtp.test.com"
-        mock_settings.SMTP_PORT = 587
-        mock_settings.SMTP_FROM_NAME = "Bot"
-        mock_settings.SMTP_FROM_EMAIL = "bot@co.com"
-
-        agent = ReportAgent(llm=llm)
-        agent.generate("daily")
-
-    mock_smtp.SMTP.assert_called_once()
-
-
-def test_distribute_without_email_has_no_external_send(seeded_db) -> None:
-    session = seeded_db
-
-    llm = MagicMock()
-    llm.complete.return_value = "Narrative."
-
-    with (
-        patch("src.agents.report.SessionLocal", return_value=session),
-        patch.object(ReportAgent, "_save_report"),
-        patch("src.agents.report.settings") as mock_settings,
-    ):
-        mock_settings.REPORT_EMAIL_TO = ""
-
         agent = ReportAgent(llm=llm)
         report = agent.generate("daily")
 
     assert "# Daily Report" in report
+    save_report.assert_called_once_with(report, "daily")

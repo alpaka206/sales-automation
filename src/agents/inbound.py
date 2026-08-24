@@ -1068,7 +1068,7 @@ class InboundAgent:
                     direction="inbound",
                     channel=channel,
                     from_address=email or None,
-                    to_address=settings.SMTP_FROM_EMAIL or None,
+                    to_address=None,
                     subject=inbound_subject,
                     body=inbound_body,
                     language=inquiry_lang or "en",
@@ -1126,7 +1126,7 @@ class InboundAgent:
                     conversation_id=conv.id,
                     direction="outgoing",
                     channel=channel,
-                    from_address=settings.SMTP_FROM_EMAIL or None,
+                    from_address=None,
                     to_address=to_addr,
                     subject=None,
                     body="",
@@ -1181,11 +1181,9 @@ class InboundAgent:
             msg.body = draft.body
             msg.language = "ko"  # the draft the operator reviews is always Korean
             msg.target_language = inquiry_lang or msg.target_language
-            # A detailed reply ALWAYS waits for a human. This used to be a score-vs-
-            # AUTO_SEND_THRESHOLD comparison that could set "approved" on its own; the
-            # operator's rule is that only the receipt acknowledgement ever sends by
-            # itself, so the branch is gone rather than merely configured shut. Nothing
-            # in config can reopen it — see tests/test_safe_mode.py.
+            # Every reply waits for a human. The old score-based auto-approval branch
+            # and the immediate receipt acknowledgement have both been removed, so no
+            # configuration value can make an inbound message send by itself.
             msg.status = "pending_approval"
             msg.score_snapshot = score
             conv = session.get(Conversation, msg.conversation_id)

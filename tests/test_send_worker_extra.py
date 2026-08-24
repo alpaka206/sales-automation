@@ -109,19 +109,19 @@ def test_request_shutdown():
     send_worker._shutdown = False
 
 
-# ---------- SMTP error handling ----------
+# ---------- Delivery error handling ----------
 
 
 @pytest.mark.asyncio
 async def test_send_one_permanent_error() -> None:
-    """SMTPPermanentError fails immediately without retry."""
+    """DeliveryPermanentError fails immediately without retry."""
     from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker
     from unittest.mock import AsyncMock
 
     from src.db.base import Base
     from src.db.models import Contact, Conversation, Message
-    from src.integrations.senders.smtp import SMTPPermanentError
+    from src.integrations.delivery import DeliveryPermanentError
 
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
@@ -147,7 +147,7 @@ async def test_send_one_permanent_error() -> None:
 
     with patch.object(send_worker, "SessionLocal", factory):
         send_worker._claim_ready_id()
-        mock_send = AsyncMock(side_effect=SMTPPermanentError("550 user not found"))
+        mock_send = AsyncMock(side_effect=DeliveryPermanentError("invalid recipient"))
         with patch("src.integrations.senders.send", mock_send):
             result = await send_worker._send_one(msg_id)
 
@@ -161,14 +161,14 @@ async def test_send_one_permanent_error() -> None:
 
 @pytest.mark.asyncio
 async def test_send_one_transient_error_retries() -> None:
-    """SMTPTransientError retries up to SEND_TRANSIENT_MAX_RETRIES times."""
+    """DeliveryTransientError retries up to the configured maximum."""
     from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker
     from unittest.mock import AsyncMock
 
     from src.db.base import Base
     from src.db.models import Contact, Conversation, Message
-    from src.integrations.senders.smtp import SMTPTransientError
+    from src.integrations.delivery import DeliveryTransientError
 
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
@@ -194,7 +194,7 @@ async def test_send_one_transient_error_retries() -> None:
 
     with patch.object(send_worker, "SessionLocal", factory):
         send_worker._claim_ready_id()
-        mock_send = AsyncMock(side_effect=SMTPTransientError("421 try later"))
+        mock_send = AsyncMock(side_effect=DeliveryTransientError("429 try later"))
         with patch("src.integrations.senders.send", mock_send):
             result = await send_worker._send_one(msg_id)
 
@@ -204,4 +204,3 @@ async def test_send_one_transient_error_retries() -> None:
     m = s.get(Message, msg_id)
     assert m.status == "send_failed"
     s.close()
-

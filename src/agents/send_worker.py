@@ -171,7 +171,7 @@ async def _post_send_bookkeeping(session, msg, conv, message_id: int) -> None:
         add_progress(conv.id, "reply", f"답변 발송 완료: {msg.subject or '(제목 없음)'}"[:200])
         # 티켓 요약에 우리 답 한 줄을 덧붙입니다. **여기서** 하는 이유: 요약은 예전에
         # 초안이 만들어진 직후에 쓰였고, 그래서 나가지 않은 글이 「이렇게 답했다」로
-        # 적혔습니다. 이 자리는 SMTP 를 지난 뒤이고 재시도에서 두 번 돌지 않습니다.
+        # 적혔습니다. 이 자리는 Conversations 발송 뒤이고 재시도에서 두 번 돌지 않습니다.
         await asyncio.to_thread(append_summary_line, msg.id)
 
 
@@ -179,16 +179,16 @@ async def _send_one(message_id: int) -> bool:
     """Send a single message that this worker has already claimed (status == _WORKER_ID).
 
     Caller is responsible for the atomic claim. We only send + update.
-    Transient failures (network blip, 421/451) are retried with exponential backoff
+    Transient failures (for example an explicit 429) are retried with exponential backoff
     inside this call. Permanent failures (bad recipient, auth) fail immediately to
     send_failed without retry.
     """
     from ..integrations.senders import send
-    from ..integrations.senders.smtp import (
-        SMTPDeliveryUnknown,
-        SMTPPermanentError,
-        SMTPSendingDisabled,
-        SMTPTransientError,
+    from ..integrations.delivery import (
+        DeliveryPermanentError,
+        DeliveryTransientError,
+        DeliveryUnknown,
+        SendingDisabled,
     )
 
     session = SessionLocal()
@@ -198,29 +198,20 @@ async def _send_one(message_id: int) -> bool:
             # Lost the row (shouldn't happen — caller already claimed) or another process intervened.
             return False
 
-        if msg.channel == "email" and not msg.smtp_message_id:
-            from ..integrations.senders.smtp import _generate_message_id
-
-            # Persist the provider reconciliation key before touching SMTP.
-            msg.smtp_message_id = _generate_message_id(message_id)
-            session.commit()
-
         last_exc: Exception | None = None
         for attempt in range(SEND_TRANSIENT_MAX_RETRIES):
             try:
                 # 메일만 막는 스위치(safe_mode.EMAIL_SENDING_ENABLED)는 **실패가 아닙니다.**
                 # "이번 건은 보내지 않는다" 이고, 운영자가 검토 완료·발송을 누른 뒤에 일어나야
                 # 하는 나머지 — 단계 이동, HubSpot 티켓, 워크북 — 은 전부 그대로 일어납니다.
-                # 여기서 안 잡으면 SMTPPermanentError 로 떨어져 send_failed 가 되고, 누른
+                # 여기서 안 잡으면 DeliveryPermanentError 로 떨어져 send_failed 가 되고, 누른
                 # 사람 눈에는 아무것도 안 된 것으로 보입니다.
                 #
-                # 고객 타임라인에 "답장했다" 기록은 남지 않습니다: senders.send() 가 SMTP
-                # **뒤에** 타임라인을 쓰는데, 여기서 예외가 그 앞에서 났기 때문입니다. 나가지
-                # 않은 메일이 나간 것처럼 기록되면 안 됩니다.
+                # HubSpot POST 전에 막히므로 고객 스레드에도 기록이 생기지 않습니다.
                 delivered = True
                 try:
                     await send(msg)
-                except SMTPSendingDisabled:
+                except SendingDisabled:
                     delivered = False
                     logger.info(
                         "메일 발송이 코드에서 꺼져 있어 %d 번은 보내지 않았습니다. "
@@ -246,7 +237,7 @@ async def _send_one(message_id: int) -> bool:
                         conv.stage = "meeting_link_sent"
                 session.commit()
                 if delivered:
-                    # 발송 한도는 SMTP 를 실제로 쓴 것만 셉니다. 안 보낸 건까지 세면 아무도
+                    # 발송 한도는 HubSpot POST가 성공한 것만 셉니다. 안 보낸 건까지 세면 아무도
                     # 메일을 못 받는 동안 워커가 스스로 속도를 늦춥니다.
                     _record_send()
 
@@ -263,20 +254,20 @@ async def _send_one(message_id: int) -> bool:
                     )
                 logger.info("Worker sent message %d.", message_id)
                 return True
-            except SMTPDeliveryUnknown as exc:
+            except DeliveryUnknown as exc:
                 session.rollback()
                 msg = session.get(Message, message_id)
                 if msg:
                     msg.status = "delivery_unknown"
                     msg.send_claimed_at = None
                     session.commit()
-                logger.error("SMTP delivery outcome unknown for message %d: %s", message_id, exc)
+                logger.error("Delivery outcome unknown for message %d: %s", message_id, exc)
                 return False
-            except SMTPPermanentError as exc:
+            except DeliveryPermanentError as exc:
                 last_exc = exc
                 logger.error("Permanent send failure for message %d: %s", message_id, exc)
                 break  # do not retry
-            except SMTPTransientError as exc:
+            except DeliveryTransientError as exc:
                 last_exc = exc
                 if attempt < SEND_TRANSIENT_MAX_RETRIES - 1:
                     delay = 2 ** attempt
@@ -383,7 +374,7 @@ def request_shutdown() -> None:
 def _reclaim_stuck_sending(now: datetime | None = None) -> int:
     """Quarantine stale sends whose delivery outcome cannot be known safely.
 
-    SMTP may have accepted the message just before the worker crashed. Automatic
+    HubSpot may have accepted the message just before the worker crashed. Automatic
     replay could duplicate a customer email, so an operator must verify it first.
     """
     session = SessionLocal()

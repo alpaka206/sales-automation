@@ -599,7 +599,7 @@ def build_diagrams() -> None:
         ((625, 190, 975, 360), "2. 즉시 접수확인", "첫 문의에만, 사람 승인 없이 고객 언어로 발송"),
         ((1180, 190, 1530, 360), "3. AI + 내부 규정", "문의 분류, 관련 문서 선택, 한국어 검토 초안"),
         ((1180, 590, 1530, 760), "4. 사람 검토", "수정, 번역, 서명, 미리보기 후 발송 승인"),
-        ((625, 590, 975, 760), "5. 실제 발송", "SMTP 이메일로 발송"),
+        ((625, 590, 975, 760), "5. 실제 발송", "HubSpot Conversations 답장"),
         ((70, 590, 420, 760), "6. 상태 동기화", "HubSpot, 사이트 파이프라인, Inbound DB 갱신"),
     ]
     for xy, title, body in boxes:
@@ -678,7 +678,7 @@ def build_diagrams() -> None:
     d.text((70, 100), "운영 로그 → 복구 대상 탭은 안전하게 다시 할 수 있는 작업과 사람 확인이 필요한 작업을 분리합니다.", font=_font(21), fill=f"#{MUTED}")
     recovery_boxes = [
         ((70, 190, 410, 430), "Dead 문의 작업", "원인 수정\n→ 문의 작업 재시도"),
-        ((445, 190, 785, 430), "확정 발송 실패", "주소·SMTP 수정\n→ 발송 재시도"),
+        ((445, 190, 785, 430), "확정 발송 실패", "스레드·권한 수정\n→ 발송 재시도"),
         ((820, 190, 1160, 430), "발송 확인 필요", "보낸메일함 확인\n→ 보냄/안 보냄 확정"),
         ((1195, 190, 1535, 430), "외부 동기화 실패", "연결 복구\n→ sync만 재시도"),
     ]
@@ -746,7 +746,7 @@ def build_developer_guide() -> Path:
         [
             ("Webhook은 빨리 응답", "서명 검증과 DB enqueue까지만 하고 외부 API/AI 호출은 worker로 넘긴다."),
             ("DB가 시스템 원장", "Google Sheets는 운영 미러이며 백업이나 유일한 정합성 원장이 아니다."),
-            ("고객 발송과 CRM 동기화 분리", "SMTP 성공 후 HubSpot/Sheets가 실패해도 메일을 실패로 되돌리거나 재발송하지 않는다."),
+            ("고객 발송과 후처리 분리", "Conversations 성공 후 티켓 단계/Sheets가 실패해도 메일을 실패로 되돌리거나 재발송하지 않는다."),
             ("안전 기본값", "상세 답변은 기본적으로 사람 승인, Slack은 기본 비활성이다."),
         ],
         [2160, 7200],
@@ -765,7 +765,7 @@ def build_developer_guide() -> Path:
             "Inbound DB Client ID를 예약하고 시트 미러를 시도한다. 실패해도 poller가 backfill한다.",
             "Gemini가 언어, 분류, 점수, 관련 활성 정책 문서를 선택하고 한국어 검토 초안을 작성한다.",
             "기본값은 pending_approval. 이 시점에만 Slack 알림을 보낼 수 있다.",
-            "운영자가 수정·번역·서명을 선택하고 승인하면 send worker가 atomic claim 후 SMTP로 발송한다.",
+            "운영자가 수정·번역·서명을 선택하고 승인하면 send worker가 atomic claim 후 기존 Conversations 스레드로 발송한다.",
             "상세 메일 성공을 먼저 커밋하고, HubSpot 활동·단계와 Inbound DB 단계는 별도 retry로 갱신한다.",
         ],
     )
@@ -905,7 +905,7 @@ def build_developer_guide() -> Path:
             ("Webhook→InboundJob", "event_key unique, 짧은 transaction", "동일 event는 duplicate, HubSpot retry 안전"),
             ("Inbound worker", "owner token claim, 30분 lease+10분 heartbeat, 최대 8회 retry", "소진 시 dead, 장애 복구에서 재처리"),
             ("auto_ack", "일반 Message claim 재사용, thread당 1건", "transient 최대 5회, 상세 답변은 계속"),
-            ("상세 발송", "approved→sending:<worker> atomic claim", "SMTP transient 3회, permanent는 send_failed"),
+            ("상세 발송", "approved→sending:<worker> atomic claim", "429만 재시도, timeout/5xx는 delivery_unknown"),
             ("stale sending", "자동 replay 금지", "15분 후 delivery_unknown 격리"),
             ("post-send sync", "메일 sent 커밋 후 외부 상태만 재시도", "최대 8회, 고객 메일 재전송 없음"),
             ("Sheets", "Client ID 선예약, key upsert, 수동 요청을 Event에 영속 저장", "poller가 import/backfill 처리, 실패 상태 표시"),
@@ -915,8 +915,8 @@ def build_developer_guide() -> Path:
     )
     add_callout(
         doc,
-        "SMTP exactly-once 한계",
-        "DB claim은 원자적이지만 SMTP 서버가 메일을 수락한 직후 연결이 끊기면 성공 여부를 확정할 수 없다. delivery_unknown은 보낸메일함과 제공자 로그의 Message-ID를 확인한 뒤에만 수동 판단하며 즉시 재발송하지 않는다.",
+        "Conversations exactly-once 한계",
+        "DB claim은 원자적이지만 HubSpot이 메시지를 수락한 직후 연결이 끊기면 성공 여부를 확정할 수 없다. delivery_unknown은 실제 스레드를 확인한 뒤에만 수동 판단하며 즉시 재발송하지 않는다.",
         fill=RISK,
         accent="9B1C1C",
     )
@@ -1066,7 +1066,7 @@ def build_developer_guide() -> Path:
             ("delivery_unknown > 0", "즉시", "제공자 Sent/Message-ID 확인, 자동 재발송 금지"),
             ("InboundJob dead > 0", "즉시", "last_error 확인 후 원인 제거·재처리"),
             ("oldest pending job > 10분", "높음", "worker heartbeat/DB lock/HubSpot 확인"),
-            ("send_failed 급증/SMTP auth", "즉시", "발송 중지, 자격증명/쿼터 확인"),
+            ("send_failed 급증/HubSpot 권한", "즉시", "발송 중지, actor/channel/scope 확인"),
             ("post-sync 8회 소진", "높음", "HubSpot/Sheets 수동 동기화"),
             ("Sheet pending > 30분", "높음", "OAuth 권한·중복·API quota 확인"),
             ("poller 마지막 성공 > 20분", "높음", "worker task와 HubSpot search 확인"),
@@ -1103,7 +1103,7 @@ def build_developer_guide() -> Path:
             ("문의가 안 잡힘", "stage ID, webhook 401, ticket body/association", "webhook 수정 후 poller 또는 test ticket 재이동"),
             ("auto_ack 없음", "Message auto_ack 상태, SMTP, first inbound 여부", "transient queue 관찰; failed면 원인 수정"),
             ("draft_failed", "LLM/정책 선택/HubSpot fetch log", "원인 수정 후 장애 복구에서 job 재처리"),
-            ("승인 후 안 감", "approved/sending/send_failed, SMTP quota", "worker와 자격증명 수정; 반복 클릭 금지"),
+            ("승인 후 안 감", "approved/sending/send_failed/delivery_unknown", "worker·스레드·권한 확인; 반복 클릭 금지"),
             ("delivery_unknown", "Sent mailbox, provider log, Message-ID", "확인 후 수동 상태 결정; 바로 재전송 금지"),
             ("메일 sent, CRM 미반영", "post_send_sync_error/attempts", "외부 연결 복구, sync retry 또는 수동 이동"),
             ("Slack 반복/원치 않음", "SLACK_ENABLED, APPROVAL_CHANNEL, 중복 배포", "false/none로 재시작, old process 종료"),

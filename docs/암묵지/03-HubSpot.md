@@ -201,10 +201,11 @@ CLAUDE.md 의 "Won 감지는 `sync_stage_from_hubspot` 한 곳" 은 HubSpot 쪽�
 
 - `update_ticket_stage_sync` (`:848-857`) — 보드 이동의 실제 쓰기. 429 하나에 `False` → 배너 `partial`
 - `search_tickets_sync` (`:902`) — 10분 폴러와 sweep 의 유일한 조회. 429 면 그 틱이 통째로 날아감
-- `get_ticket_sync` (`:823-831`), `create_email_engagement` (`:301`), `create_interaction_note` (`:541`)
+- `get_ticket_sync`, `create_interaction_note`
 
-`create_email_engagement` 가 `self._retry` 가 아니라 `http.post` 를 직접 쓰는 것은
-`:301` 에서 확인됩니다 — 눈에 잘 안 띄니 고치기 전에 이 줄을 보세요.
+Conversations의 스레드·메시지·actor·channel account **조회**는 안전하게 재시도한다. 실제
+메시지 POST는 일부러 한 번만 시도한다. 이 API에는 idempotency key가 없어 timeout·5xx 뒤
+자동 재시도하면 같은 답장이 두 번 갈 수 있기 때문이다. 이때는 `delivery_unknown`으로 격리한다.
 
 ### 고객 상세의 `HubSpot 동기화` 버튼 한 번 = 왕복 약 95번
 
@@ -290,21 +291,19 @@ CLAUDE.md 의 "Won 감지는 `sync_stage_from_hubspot` 한 곳" 은 HubSpot 쪽�
 
 ## 왜 이렇게 되어 있는가
 
-### 타임라인 이메일 객체는 발송 수단이 아니라 **기록 그 자체**다
+### 실제 발송은 기존 Conversations 스레드의 답장이다
 
-HubSpot 에는 이 답장을 **보내는** API 가 없습니다(transactional single-send 는 유료 애드온과
-디자인된 템플릿을 요구). SMTP 가 배달하고, `create_email_engagement` 가 만든 CRM 이메일 객체가
-고객 히스토리의 전부입니다(`src/integrations/hubspot.py:275-283`, `senders/__init__.py:164-169`).
+CRM 이메일 객체 생성은 실제 전송이 아니므로 발송 경로에서 제거했다. 현재는 티켓에 연결된
+Conversations 스레드를 찾고, 기존 이메일 메시지의 channel/account를 복사해 그 스레드에
+`MESSAGE`를 POST한다. 따라서 HubSpot Inbox와 티켓 타임라인에 원래 대화의 답장으로 남는다.
 
-- **연관을 두 번 겁니다**: contact(타입 `198`)와 ticket(타입 `224`). 티켓 연관이 없으면 운영자가
-  읽는 그 문의 화면에 활동이 **하나도** 안 보입니다(`hubspot.py:306`, `:316`).
-- **티켓 연관 실패는 삼킵니다**(`hubspot.py:314-325`). 메일은 이미 나갔고 engagement 도 이미
-  만들어졌는데 여기서 raise 하면 호출자가 "기록 실패" 경로로 가면서 `hubspot_engagement_id` 를
-  잃습니다.
-- **전달 성공 뒤에만 기록합니다.** 안전 스위치로 억제되거나 SMTP가 실패한 메일을 고객
-  타임라인에 답장으로 남기지 않습니다.
-- **조용한 실패 하나**: `contact.hubspot_contact_id` 가 없으면 로그도 없이 그냥 돌아갑니다
-  (`senders/__init__.py:137-138`). 워크북에서 들어온 고객이 여기 해당합니다.
+- `senderActorId`는 내부 발송 주체·감사 기록을 정하고, 실제 From 주소는
+  `channelAccountId`가 정한다.
+- 이메일 이력이 없는 폼 스레드는 후보가 하나이고 기본 support 계정과 Inbox가 같을 때만
+  보낸다.
+- 스레드가 없거나 모호한 티켓은 새 스레드를 임의 생성하지 않고 수동 처리한다.
+- 로컬에는 `hubspot_thread_id`와 `hubspot_message_id`를 저장한다. 과거
+  `hubspot_engagement_id` 열은 기존 데이터 판별용으로만 남는다.
 
 ### 소통 히스토리는 note 한 종류로만 쓴다
 
@@ -371,7 +370,7 @@ Message 행도 InboundJob 행도 **만들지 않는다** 는 것이 근거입니
 | `stage_sync.local_stage_for` (HubSpot ID → 로컬 키) | `customer_ops._stage_id` (`customer_ops.py:114-119`) — 명시적 역함수. 한쪽만 고치면 왕복이 깨짐 |
 | `_retire_superseded_drafts` 의 `_SUPERSEDABLE` | `src/api/routes/messages.py` `LIST_STATUS_BUCKETS` — `superseded` 가 `awaiting` 이 아니라 `sent` 에 있어야 함(`tests/test_stage_sync.py:392`) |
 | `HubSpotClient._TICKET_PROPERTIES` (`hubspot.py:788-791`) | `_ticket_from_api` (`:793-821`), `TicketDTO` (`hubspot_models.py:45-73`), `search_tickets_sync` 가 이 문자열을 `,` 로 split 함(`:897`) |
-| `create_email_engagement` / `create_interaction_note` 에 새 쓰기 추가 | `guard_external_write("hubspot:…")` 접두사 필수 — 접두사가 없으면 채널 게이트가 아니라 마스터로 폴백(`src/common/safe_mode.py:147-171`), 그리고 `tests/test_safe_mode.py` 에 한 줄 |
+| Conversations 발송 / `create_interaction_note` 에 새 쓰기 추가 | `guard_external_write("hubspot:…")` 접두사 필수 — 접두사가 없으면 채널 게이트가 아니라 마스터로 폴백하고, `tests/test_safe_mode.py` 에 한 줄 |
 | `sync_stage_from_hubspot` 의 분기 구조 | `_enqueue_pending_won`(같은 파일 `:243`)과 `_retire_superseded_drafts` 가 서로 다른 분기에 있음 — 조기 반환 위치를 옮기면 둘 중 하나가 조용히 빠짐 |
 | `webhook._map_hubspot_event` | `inbound_worker.inbound_event_key` (`:29-35`) — `occurrence_key` 유무가 `…:created` / `…:changed:<key>` 를 가르고, 그게 중복 제거의 전부 |
 | `_public_request_uri` | HubSpot Private App 의 Webhook Target URL, 그리고 `tests/test_inbound_webhook_route.py:48` 의 `_sign_request` |

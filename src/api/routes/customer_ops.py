@@ -1491,9 +1491,9 @@ def _retire_drafts_for_replies_seen_in_hubspot(session, contact_id: int, emails)
     옮기는 것은 나중이거나 아예 안 합니다. 그동안 우리 초안은 발송 대기에 남아 있고, 그걸
     누르면 고객은 같은 질문에 두 번째 답을 받습니다(2026-08-20 운영자 지시).
 
-    **우리가 보낸 것은 세지 않습니다.** 발송 경로가 허브스팟에 남긴 기록은 그 메시지 행에
-    `hubspot_engagement_id` 로 적혀 있습니다. 그걸 빼지 않으면 접수확인 한 통이 「답이
-    나갔다」가 되어, 아직 아무도 안 읽은 문의의 초안을 그 자리에서 지웁니다.
+    **우리가 보낸 것은 세지 않습니다.** 예전 CRM 이메일 기록은
+    `hubspot_engagement_id`로, 현재 Conversations 답장은 티켓·제목·발송 시각으로
+    대조합니다. 그렇지 않으면 우리 발송을 상담원의 별도 답변으로 오인합니다.
     """
     ours = {
         str(row)
@@ -1503,11 +1503,51 @@ def _retire_drafts_for_replies_seen_in_hubspot(session, contact_id: int, emails)
             )
         ).all()
     }
+    our_conversation_sends = session.execute(
+        select(
+            Conversation.hubspot_ticket_id,
+            Message.subject,
+            Message.sent_at,
+        )
+        .join(Conversation, Conversation.id == Message.conversation_id)
+        .where(
+            Message.hubspot_message_id.isnot(None),
+            Message.status == "sent",
+            Message.sent_at.isnot(None),
+            Conversation.hubspot_ticket_id.isnot(None),
+        )
+    ).all()
+
+    def _is_our_conversation_send(email) -> bool:
+        if not email.ticket_id or not email.timestamp:
+            return False
+        email_time = (
+            email.timestamp.replace(tzinfo=None)
+            if email.timestamp.tzinfo
+            else email.timestamp
+        )
+        email_subject = (email.subject or "").strip().casefold()
+        for ticket_id, subject, sent_at in our_conversation_sends:
+            if str(ticket_id) != str(email.ticket_id) or sent_at is None:
+                continue
+            local_time = sent_at.replace(tzinfo=None) if sent_at.tzinfo else sent_at
+            if abs((email_time - local_time).total_seconds()) > 300:
+                continue
+            local_subject = (subject or "").strip().casefold()
+            if not email_subject or not local_subject or email_subject == local_subject:
+                return True
+        return False
     # 티켓별로 「우리 쪽에서 마지막으로 나간 시각」. 허브스팟이 메일마다 티켓을 알려
     # 주므로 어느 문의의 답인지 짐작하지 않습니다.
     sent_on_ticket: dict[str, datetime] = {}
     for e in emails:
-        if "incoming" in e.type or str(e.id) in ours or not e.timestamp or not e.ticket_id:
+        if (
+            "incoming" in e.type
+            or str(e.id) in ours
+            or _is_our_conversation_send(e)
+            or not e.timestamp
+            or not e.ticket_id
+        ):
             continue
         when = e.timestamp.replace(tzinfo=None) if e.timestamp.tzinfo else e.timestamp
         if when > sent_on_ticket.get(e.ticket_id, when.min):
@@ -2118,4 +2158,3 @@ def _operations_context() -> dict:
             "lost": lost,
             "upsell": upsell,
     }
-

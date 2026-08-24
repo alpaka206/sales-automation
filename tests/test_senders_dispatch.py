@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from src.integrations.senders import send
+from src.integrations.hubspot import ConversationReplyContext
 
 
 def _make_message(**overrides) -> MagicMock:
@@ -23,15 +24,27 @@ def _make_message(**overrides) -> MagicMock:
     msg.signature_key = overrides.get("signature_key", "none")
     msg.conversation = MagicMock()
     msg.conversation.contact_id = overrides.get("contact_id", 100)
+    msg.conversation.hubspot_ticket_id = overrides.get("ticket_id", "ticket-1")
     msg.conversation.contact = None
     return msg
 
 
 @pytest.mark.asyncio
-@patch("src.integrations.senders._log_hubspot_email", new_callable=AsyncMock)
-@patch("src.integrations.senders.send_smtp")
-async def test_smtp_sends_then_logs_to_hubspot(mock_smtp, mock_log) -> None:
+@patch("src.integrations.hubspot.HubSpotClient")
+async def test_sends_on_existing_hubspot_thread(mock_client_class) -> None:
+    client = mock_client_class.return_value
+    client.find_conversation_reply_context = AsyncMock(
+        return_value=ConversationReplyContext("thread-1", "1002", "account-1")
+    )
+    client.send_conversation_message = AsyncMock(return_value="message-1")
+    client.close = AsyncMock()
     msg = _make_message()
+
     await send(msg)
-    mock_smtp.assert_called_once_with(msg)
-    mock_log.assert_awaited_once_with(msg, msg)
+
+    client.find_conversation_reply_context.assert_awaited_once_with(
+        "ticket-1", "to@example.com"
+    )
+    client.send_conversation_message.assert_awaited_once()
+    assert msg.hubspot_thread_id == "thread-1"
+    assert msg.hubspot_message_id == "message-1"

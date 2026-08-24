@@ -137,7 +137,6 @@ def test_run_healthchecks_returns_report(db_session_factory) -> None:
     with (
         patch("src.common.healthcheck.settings") as s,
         patch("src.db.session.SessionLocal", db_session_factory),
-        patch("smtplib.SMTP"),
     ):
         s.GOOGLE_CREDENTIALS_JSON = ""  # FAIL fast, no network
         s.HUBSPOT_PRIVATE_APP_TOKEN = ""

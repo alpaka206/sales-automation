@@ -8,6 +8,7 @@ import logging
 import random
 import re
 import time
+from dataclasses import dataclass
 from datetime import datetime, timezone
 
 import httpx
@@ -15,6 +16,7 @@ import httpx
 from ..common.config import settings
 from ..common.safe_mode import guard_external_write
 from .hubspot_models import ContactDTO, DealDTO, EngagementDTO, TicketDTO
+from .delivery import DeliveryPermanentError, DeliveryTransientError, DeliveryUnknown
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +49,15 @@ def _html_to_text(s: str | None) -> str | None:
 # also transient. We retry both with full-jitter exponential backoff.
 _RETRY_STATUS = {429, 500, 502, 503, 504}
 _MAX_RETRIES = 4
+
+
+@dataclass(frozen=True)
+class ConversationReplyContext:
+    """The existing HubSpot thread and connected email account used for a reply."""
+
+    thread_id: str
+    channel_id: str
+    channel_account_id: str
 
 
 async def _request_with_retries(
@@ -263,74 +274,232 @@ class HubSpotClient:
                 )
             raise
 
-    async def create_email_engagement(
-        self,
-        contact_id: str,
-        subject: str,
-        body: str,
-        sent_at: datetime | None = None,
-        ticket_id: str | None = None,
-    ) -> str:
-        """Log an email engagement and return its id.
+    @staticmethod
+    def _delivery_addresses(message: dict) -> set[str]:
+        """Collect email delivery identifiers from both legacy response shapes."""
+        values: set[str] = set()
+        for party in [*(message.get("senders") or []), *(message.get("recipients") or [])]:
+            identifiers = party.get("deliveryIdentifiers") or []
+            if party.get("deliveryIdentifier"):
+                identifiers = [party["deliveryIdentifier"]]
+            for identifier in identifiers:
+                if not isinstance(identifier, dict):
+                    continue
+                if identifier.get("type") != "HS_EMAIL_ADDRESS":
+                    continue
+                value = str(identifier.get("value") or "").strip().lower()
+                if value:
+                    values.add(value)
+        return values
 
-        HubSpot has no API that SENDS this reply (the transactional single-send needs a
-        paid add-on and a designed template), so this CRM email object IS the history:
-        SMTP delivers, and this records what went out.
+    @staticmethod
+    def _lookup_error(response: httpx.Response, action: str) -> RuntimeError:
+        detail = ""
+        try:
+            payload = response.json()
+            detail = str(payload.get("message") or "")[:300]
+        except Exception:
+            detail = response.text[:300]
+        message = f"HubSpot {action} failed (HTTP {response.status_code})"
+        if detail:
+            message += f": {detail}"
+        if response.status_code == 429 or response.status_code >= 500:
+            return DeliveryTransientError(message)
+        return DeliveryPermanentError(message)
 
-        Associated with the contact (type 198) and, when the thread has one, with the
-        TICKET (type 224). The ticket association is what the operator actually reads —
-        without it a reply lands on the contact timeline only, and the 문의 it answers
-        shows no activity at all.
+    async def _get_conversation_json(
+        self, url: str, *, params: dict | None = None, action: str
+    ) -> dict:
+        """GET Conversations data with safe retries and delivery-oriented errors."""
+        try:
+            response = await self._retry("GET", url, params=params)
+        except (httpx.TimeoutException, httpx.TransportError) as exc:
+            raise DeliveryTransientError(f"HubSpot {action} transport failure: {exc}") from exc
+        if response.status_code >= 400:
+            raise self._lookup_error(response, action)
+        return response.json()
+
+    async def _email_channel_account(self, account_id: str) -> dict:
+        data = await self._get_conversation_json(
+            f"/conversations/v3/conversations/channel-accounts/{account_id}",
+            action="channel-account lookup",
+        )
+        if str(data.get("channelId") or "") != "1002":
+            raise DeliveryPermanentError(
+                f"HubSpot channel account {account_id} is not an email channel"
+            )
+        if data.get("archived") or not data.get("active") or not data.get("authorized"):
+            raise DeliveryPermanentError(
+                f"HubSpot email channel account {account_id} is inactive or unauthorized"
+            )
+        return data
+
+    async def validate_conversation_sender(self) -> dict:
+        """Verify that the configured sender is an active HubSpot agent actor."""
+        actor_id = settings.HUBSPOT_SENDER_ACTOR_ID.strip()
+        if not actor_id.startswith("A-"):
+            raise DeliveryPermanentError(
+                "HUBSPOT_SENDER_ACTOR_ID must be an agent actor such as A-82843387"
+            )
+        actor = await self._get_conversation_json(
+            f"/conversations/v3/conversations/actors/{actor_id}",
+            action="sender actor lookup",
+        )
+        if actor.get("type") != "AGENT" or str(actor.get("id") or "") != actor_id:
+            raise DeliveryPermanentError(
+                f"HubSpot actor {actor_id} is not a valid AGENT sender"
+            )
+        return actor
+
+    async def find_conversation_reply_context(
+        self, ticket_id: str, recipient_email: str
+    ) -> ConversationReplyContext:
+        """Select the newest safe email reply route for a ticket.
+
+        Existing outbound/inbound email messages are the source of truth for channel
+        account selection. A form-only thread has no email route to copy, so it may use
+        the configured default email account only when that account belongs to the same
+        inbox. Ambiguous tickets fail closed instead of replying on the wrong thread.
         """
-        guard_external_write("hubspot:create_email_engagement")
-        http = await self._http()
-        ts = int((sent_at or datetime.now(timezone.utc)).timestamp() * 1000)
-        from .email_html import to_html_email
+        target = recipient_email.strip().lower()
+        if not ticket_id:
+            raise DeliveryPermanentError("The message has no HubSpot ticket ID")
+        if not target or "@" not in target:
+            raise DeliveryPermanentError("The message has no valid recipient email")
 
-        payload = {
-            "properties": {
-                "hs_timestamp": str(ts),
-                "hubspot_owner_id": settings.HUBSPOT_OWNER_ID or None,
-                "hs_email_direction": "EMAIL",
-                "hs_email_subject": subject,
-                "hs_email_text": body,
-                "hs_email_html": to_html_email(body),
-                "hs_email_status": "SENT",
+        data = await self._get_conversation_json(
+            "/conversations/v3/conversations/threads",
+            params={
+                "associatedTicketId": ticket_id,
+                "association": "TICKET",
+                "limit": 100,
             },
+            action="ticket thread lookup",
+        )
+        threads = [
+            thread
+            for thread in (data.get("results") or [])
+            if not thread.get("archived") and not thread.get("spam")
+        ]
+        if not threads:
+            raise DeliveryPermanentError(
+                f"HubSpot ticket {ticket_id} has no active Conversations thread"
+            )
+
+        candidates: list[tuple[str, str, str, str]] = []
+        target_threads: list[dict] = []
+        for thread in threads:
+            thread_id = str(thread.get("id") or "")
+            if not thread_id:
+                continue
+            messages_data = await self._get_conversation_json(
+                f"/conversations/v3/conversations/threads/{thread_id}/messages",
+                params={"limit": 100},
+                action=f"thread {thread_id} message lookup",
+            )
+            messages = [
+                message
+                for message in (messages_data.get("results") or [])
+                if message.get("type") == "MESSAGE"
+            ]
+            if any(target in self._delivery_addresses(message) for message in messages):
+                target_threads.append(thread)
+            for message in messages:
+                if target not in self._delivery_addresses(message):
+                    continue
+                channel_id = str(message.get("channelId") or "")
+                account_id = str(message.get("channelAccountId") or "")
+                if channel_id != "1002" or not account_id:
+                    continue
+                timestamp = str(message.get("createdAt") or "")
+                candidates.append((timestamp, thread_id, channel_id, account_id))
+
+        if candidates:
+            _timestamp, thread_id, channel_id, account_id = max(candidates)
+            await self._email_channel_account(account_id)
+            return ConversationReplyContext(thread_id, channel_id, account_id)
+
+        # A brand-new form thread has no email message to copy yet. Use the configured
+        # support channel only when one matching thread is unambiguous and shares its inbox.
+        fallback_threads = target_threads or threads
+        if len(fallback_threads) != 1:
+            raise DeliveryPermanentError(
+                f"HubSpot ticket {ticket_id} has {len(fallback_threads)} possible threads "
+                "and no prior email route to disambiguate them"
+            )
+        account_id = settings.HUBSPOT_DEFAULT_EMAIL_CHANNEL_ACCOUNT_ID.strip()
+        if not account_id:
+            raise DeliveryPermanentError(
+                "HUBSPOT_DEFAULT_EMAIL_CHANNEL_ACCOUNT_ID is required for a form-only thread"
+            )
+        account = await self._email_channel_account(account_id)
+        thread = fallback_threads[0]
+        if str(account.get("inboxId") or "") != str(thread.get("inboxId") or ""):
+            raise DeliveryPermanentError(
+                f"HubSpot email channel account {account_id} does not belong to thread inbox"
+            )
+        return ConversationReplyContext(str(thread["id"]), "1002", account_id)
+
+    async def send_conversation_message(
+        self,
+        context: ConversationReplyContext,
+        *,
+        recipient_email: str,
+        subject: str,
+        text: str,
+        rich_text: str,
+    ) -> str:
+        """Send one reply to an existing thread and return the HubSpot message ID.
+
+        The POST is deliberately attempted once. A timeout, connection break, or 5xx
+        response is quarantined as delivery-unknown because HubSpot may already have
+        accepted the message and this endpoint has no idempotency key.
+        """
+        guard_external_write("hubspot:send_conversation_message")
+        actor = await self.validate_conversation_sender()
+        actor_id = str(actor["id"])
+        recipient = recipient_email.strip()
+        payload = {
+            "type": "MESSAGE",
+            "subject": subject,
+            "text": text,
+            "richText": rich_text,
+            "senderActorId": actor_id,
+            "channelId": context.channel_id,
+            "channelAccountId": context.channel_account_id,
+            "recipients": [
+                {
+                    "actorId": f"E-{recipient}",
+                    "recipientField": "TO",
+                    "deliveryIdentifiers": [
+                        {"type": "HS_EMAIL_ADDRESS", "value": recipient}
+                    ],
+                }
+            ],
         }
-        r = await http.post("/crm/v3/objects/emails", json=payload)
-        r.raise_for_status()
-        email_id = r.json()["id"]
+        http = await self._http()
+        try:
+            response = await http.post(
+                f"/conversations/v3/conversations/threads/{context.thread_id}/messages",
+                json=payload,
+            )
+        except (httpx.TimeoutException, httpx.TransportError) as exc:
+            raise DeliveryUnknown(
+                f"HubSpot message delivery outcome is unknown: {exc}"
+            ) from exc
 
-        association = await http.put(
-            f"/crm/v3/objects/emails/{email_id}/associations/contacts/{contact_id}/198",
-        )
-        association.raise_for_status()
-
-        if ticket_id:
-            # Best effort on purpose: the engagement already exists and is worth keeping
-            # even if this fails, and a raise here would send the caller down its
-            # "logging failed" path after a mail that really did go out.
-            try:
-                ticket_link = await http.put(
-                    f"/crm/v3/objects/emails/{email_id}/associations/tickets/{ticket_id}/224",
-                )
-                ticket_link.raise_for_status()
-            except Exception:
-                logger.warning(
-                    "Email engagement %s was logged but could not be attached to ticket %s.",
-                    email_id,
-                    ticket_id,
-                    exc_info=True,
-                )
-
-        logger.info(
-            "Logged email engagement %s for contact %s (ticket %s)",
-            email_id,
-            contact_id,
-            ticket_id or "-",
-        )
-        return email_id
+        if 200 <= response.status_code < 300:
+            message_id = str(response.json().get("id") or "")
+            if not message_id:
+                raise DeliveryUnknown("HubSpot accepted the message but returned no message ID")
+            return message_id
+        if response.status_code == 429:
+            raise DeliveryTransientError("HubSpot rate-limited the message send (HTTP 429)")
+        if response.status_code >= 500:
+            raise DeliveryUnknown(
+                f"HubSpot message delivery outcome is unknown (HTTP {response.status_code})"
+            )
+        raise self._lookup_error(response, "conversation message send")
 
     # ------ Sync helpers (for use in synchronous agent code) ------
 

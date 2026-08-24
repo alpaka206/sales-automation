@@ -10,7 +10,6 @@ If any of these fail, a test/migration run could touch real customer data.
 from __future__ import annotations
 
 import asyncio
-import smtplib
 
 import pytest
 
@@ -21,7 +20,7 @@ from src.common.safe_mode import (
     email_delivery_enabled,
     guard_external_write,
 )
-from src.integrations.senders.smtp import SMTPSendingDisabled
+from src.integrations.delivery import SendingDisabled
 
 
 @pytest.fixture()
@@ -203,11 +202,19 @@ def test_hubspot_contact_company_write_blocked(safe):
         HubSpotClient().update_contact_company_sync("123", "롯데지알에스")
 
 
-def test_hubspot_timeline_email_blocked(safe):
-    from src.integrations.hubspot import HubSpotClient
+def test_hubspot_conversation_send_blocked(safe):
+    from src.integrations.hubspot import ConversationReplyContext, HubSpotClient
 
     with pytest.raises(ExternalWriteBlocked):
-        asyncio.run(HubSpotClient().create_email_engagement("123", "subj", "body"))
+        asyncio.run(
+            HubSpotClient().send_conversation_message(
+                ConversationReplyContext("thread", "1002", "account"),
+                recipient_email="buyer@example.com",
+                subject="subj",
+                text="body",
+                rich_text="<p>body</p>",
+            )
+        )
 
 
 def test_hubspot_interaction_note_blocked(safe):
@@ -296,19 +303,10 @@ def test_email_delivery_is_enabled_in_live_mode(live):
     assert email_delivery_enabled() is True
 
 
-def test_direct_smtp_send_is_blocked_in_safe_mode(safe, monkeypatch):
-    """A caller bypassing send() is blocked before SMTP is opened."""
+def test_direct_send_is_blocked_in_safe_mode(safe):
+    """A caller is blocked before a HubSpot delivery client is opened."""
     from src.db.models import Message
-    from src.integrations.senders import smtp
-
-    monkeypatch.setattr(settings, "SMTP_USERNAME", "user")
-    monkeypatch.setattr(settings, "SMTP_PASSWORD", "pass")
-    monkeypatch.setattr(settings, "SMTP_FROM_EMAIL", "sales@estsoft.com")
-    monkeypatch.setattr(
-        smtplib,
-        "SMTP",
-        lambda *a, **k: pytest.fail("SMTP opened while live writes were disabled"),
-    )
+    from src.integrations.senders import send
 
     msg = Message(
         to_address="real.customer@bigcorp.com",
@@ -317,8 +315,8 @@ def test_direct_smtp_send_is_blocked_in_safe_mode(safe, monkeypatch):
         language="en",
         signature_key=None,
     )
-    with pytest.raises(smtp.SMTPSendingDisabled):
-        smtp.send_smtp(msg)
+    with pytest.raises(SendingDisabled):
+        asyncio.run(send(msg))
     assert msg.to_address == "real.customer@bigcorp.com"
 
 
@@ -353,21 +351,13 @@ def test_email_ships_live_without_a_forced_test_recipient():
     assert _shipped_constant("EMAIL_SENDING_ENABLED") is True
 
 
-def test_no_send_switch_blocks_smtp_entirely(no_send, monkeypatch):
+def test_no_send_switch_blocks_hubspot_delivery_entirely(no_send, monkeypatch):
     """Not even the pre-launch test recipient is emailed while the switch is off."""
     from src.db.models import Message
-    from src.integrations.senders import smtp
+    from src.integrations.senders import send
 
-    # Fully configured SMTP + live mode: only the switch stands in the way.
+    # Fully live mode: only the code-level switch stands in the way.
     monkeypatch.setattr(settings, "LIVE_EXTERNAL_WRITES", True)
-    monkeypatch.setattr(settings, "SMTP_USERNAME", "user")
-    monkeypatch.setattr(settings, "SMTP_PASSWORD", "pass")
-    monkeypatch.setattr(settings, "SMTP_FROM_EMAIL", "sales@estsoft.com")
-
-    def _explode(*a, **k):  # pragma: no cover - must never run
-        raise AssertionError("smtplib.SMTP was constructed despite the no-send switch")
-
-    monkeypatch.setattr(smtplib, "SMTP", _explode)
 
     msg = Message(
         to_address="real.customer@bigcorp.com",
@@ -376,35 +366,15 @@ def test_no_send_switch_blocks_smtp_entirely(no_send, monkeypatch):
         language="en",
         signature_key=None,
     )
-    with pytest.raises(smtp.SMTPSendingDisabled):
-        smtp.send_smtp(msg)
-
-
-def test_no_send_switch_covers_the_report_emailer(no_send, monkeypatch):
-    """report.py opens its own smtplib connection, bypassing the smtp.py chokepoint."""
-    from src.agents.report import ReportAgent
-
-    monkeypatch.setattr(settings, "REPORT_EMAIL_TO", "boss@estsoft.com")
-    monkeypatch.setattr(settings, "SMTP_USERNAME", "user")
-    monkeypatch.setattr(settings, "SMTP_PASSWORD", "pass")
-    monkeypatch.setattr(settings, "SMTP_FROM_EMAIL", "sales@estsoft.com")
-
-    # _email_report wraps its send in `except Exception`, so a raising fake would be
-    # swallowed and the test would pass either way. Record the attempt instead.
-    opened: list[str] = []
-    monkeypatch.setattr(smtplib, "SMTP", lambda *a, **k: opened.append("smtp"))
-
-    agent = ReportAgent.__new__(ReportAgent)
-    agent._email_report("report body", "daily")
-
-    assert opened == [], "report emailer opened SMTP despite the no-send switch"
+    with pytest.raises(SendingDisabled):
+        asyncio.run(send(msg))
 
 
 def test_no_send_switch_does_everything_except_the_mail(no_send, monkeypatch):
     """메일만 막고, 나머지는 전부 그대로 — 운영자의 요구입니다.
 
     검토 완료·발송을 누르면 메일은 나가지 않지만 단계는 옮겨지고 HubSpot·워크북 동기화도
-    돕니다. 예전에는 no-send 스위치가 SMTPPermanentError 로 떨어져 `send_failed` 가 됐고,
+    돕니다. no-send 스위치는 `send_failed`가 아니라 테스트 완료 상태로 처리됩니다.
     누른 사람 눈에는 아무 일도 안 일어난 것으로 보였습니다.
 
     상태는 `sent` 가 아니라 `test_sent` 입니다: 고객에게 정말 간 것만 `sent` 여야 합니다.
@@ -417,10 +387,6 @@ def test_no_send_switch_does_everything_except_the_mail(no_send, monkeypatch):
     from src.agents import send_worker
     from src.db.base import Base
     from src.db.models import Contact, Conversation, Message
-
-    monkeypatch.setattr(settings, "SMTP_USERNAME", "user")
-    monkeypatch.setattr(settings, "SMTP_PASSWORD", "pass")
-    monkeypatch.setattr(smtplib, "SMTP", lambda *a, **k: pytest.fail("SMTP opened"))
 
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
@@ -502,7 +468,7 @@ async def test_safe_mode_still_records_local_send_bookkeeping(safe, monkeypatch)
     send_worker._claim_ready_id()
     monkeypatch.setattr(
         "src.integrations.senders.send",
-        AsyncMock(side_effect=SMTPSendingDisabled("safe mode")),
+        AsyncMock(side_effect=SendingDisabled("safe mode")),
     )
     bookkeeping = AsyncMock()
     monkeypatch.setattr(send_worker, "_post_send_bookkeeping", bookkeeping)

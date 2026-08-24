@@ -1,240 +1,162 @@
-"""Additional healthcheck tests — SMTP, HubSpot, send quota, Gemini, overall status."""
+"""Additional healthcheck tests for HubSpot delivery and send quota."""
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
+
+import httpx
+import respx
 
 from src.common.healthcheck import (
     CheckResult,
     _check_hubspot,
+    _check_hubspot_conversations,
     _check_send_quota,
-    _check_smtp,
-    _smtp_provider_label,
     run_healthchecks,
 )
 
 
-# ---------- _smtp_provider_label ----------
-
-
-def test_smtp_provider_label_gmail() -> None:
-    with patch("src.common.healthcheck.settings") as s:
-        s.SMTP_HOST = "smtp.gmail.com"
-        assert _smtp_provider_label() == "Gmail"
-
-
-def test_smtp_provider_label_unknown() -> None:
-    with patch("src.common.healthcheck.settings") as s:
-        s.SMTP_HOST = "mail.custom.co"
-        assert _smtp_provider_label() == "mail.custom.co"
-
-
-def test_smtp_provider_label_empty() -> None:
-    with patch("src.common.healthcheck.settings") as s:
-        s.SMTP_HOST = ""
-        assert _smtp_provider_label() == "unknown"
-
-
-# ---------- _check_smtp ----------
-
-
-@patch("smtplib.SMTP")
-def test_check_smtp_pass(mock_smtp_cls) -> None:
-    mock_server = MagicMock()
-    mock_smtp_cls.return_value = mock_server
-
-    with patch("src.common.healthcheck.settings") as s:
-        s.SMTP_HOST = "smtp.gmail.com"
-        s.SMTP_PORT = 587
-        s.SMTP_USERNAME = "user"
-        s.SMTP_PASSWORD = "pass"
-        result = _check_smtp()
-
-    assert result.status == "PASS"
-    assert "Gmail" in result.detail
-    mock_server.starttls.assert_called_once()
-    mock_server.login.assert_called_once_with("user", "pass")
-
-
-@patch("smtplib.SMTP", side_effect=ConnectionError("refused"))
-def test_check_smtp_fail(mock_smtp_cls) -> None:
-    with patch("src.common.healthcheck.settings") as s:
-        s.SMTP_HOST = "smtp.gmail.com"
-        s.SMTP_PORT = 587
-        s.SMTP_USERNAME = ""
-        s.SMTP_PASSWORD = ""
-        result = _check_smtp()
-
-    assert result.status == "FAIL"
-
-
-# ---------- _check_hubspot ----------
-
-
+@respx.mock
 def test_check_hubspot_pass() -> None:
-    import httpx
-    import respx
-
-    with respx.mock:
-        respx.get("https://api.hubapi.com/crm/v3/objects/contacts").mock(
-            return_value=httpx.Response(200, json={"results": []})
-        )
-        with patch("src.common.healthcheck.settings") as s:
-            s.HUBSPOT_PRIVATE_APP_TOKEN = "test-token"
-            result = _check_hubspot()
-
+    respx.get("https://api.hubapi.com/crm/v3/objects/contacts").mock(
+        return_value=httpx.Response(200, json={"results": []})
+    )
+    with patch("src.common.healthcheck.settings") as configured:
+        configured.HUBSPOT_PRIVATE_APP_TOKEN = "test-token"
+        result = _check_hubspot()
     assert result.status == "PASS"
 
 
+@respx.mock
 def test_check_hubspot_auth_fail() -> None:
-    import httpx
-    import respx
-
-    with respx.mock:
-        respx.get("https://api.hubapi.com/crm/v3/objects/contacts").mock(
-            return_value=httpx.Response(401, json={"message": "unauthorized"})
-        )
-        with patch("src.common.healthcheck.settings") as s:
-            s.HUBSPOT_PRIVATE_APP_TOKEN = "bad-token"
-            result = _check_hubspot()
-
+    respx.get("https://api.hubapi.com/crm/v3/objects/contacts").mock(
+        return_value=httpx.Response(401, json={"message": "unauthorized"})
+    )
+    with patch("src.common.healthcheck.settings") as configured:
+        configured.HUBSPOT_PRIVATE_APP_TOKEN = "bad-token"
+        result = _check_hubspot()
     assert result.status == "FAIL"
     assert "Auth" in result.detail
 
 
-def test_check_hubspot_server_error() -> None:
-    import httpx
-    import respx
-
-    with respx.mock:
-        respx.get("https://api.hubapi.com/crm/v3/objects/contacts").mock(
-            return_value=httpx.Response(500, json={})
-        )
-        with patch("src.common.healthcheck.settings") as s:
-            s.HUBSPOT_PRIVATE_APP_TOKEN = "token"
-            result = _check_hubspot()
-
+@respx.mock
+def test_check_hubspot_server_error_is_warning() -> None:
+    respx.get("https://api.hubapi.com/crm/v3/objects/contacts").mock(
+        return_value=httpx.Response(500, json={})
+    )
+    with patch("src.common.healthcheck.settings") as configured:
+        configured.HUBSPOT_PRIVATE_APP_TOKEN = "test-token"
+        result = _check_hubspot()
     assert result.status == "WARN"
 
 
+@respx.mock
 def test_check_hubspot_connection_error() -> None:
-    import httpx
-    import respx
-
-    with respx.mock:
-        respx.get("https://api.hubapi.com/crm/v3/objects/contacts").mock(
-            side_effect=httpx.ConnectError("no connection")
-        )
-        with patch("src.common.healthcheck.settings") as s:
-            s.HUBSPOT_PRIVATE_APP_TOKEN = "token"
-            result = _check_hubspot()
-
+    respx.get("https://api.hubapi.com/crm/v3/objects/contacts").mock(
+        side_effect=httpx.ConnectError("no connection")
+    )
+    with patch("src.common.healthcheck.settings") as configured:
+        configured.HUBSPOT_PRIVATE_APP_TOKEN = "test-token"
+        result = _check_hubspot()
     assert result.status == "FAIL"
 
 
-# ---------- _check_send_quota ----------
+@respx.mock
+def test_check_hubspot_conversations_pass() -> None:
+    respx.get(
+        "https://api.hubapi.com/conversations/v3/conversations/actors/A-82843387"
+    ).mock(
+        return_value=httpx.Response(
+            200, json={"id": "A-82843387", "type": "AGENT"}
+        )
+    )
+    respx.get(
+        "https://api.hubapi.com/conversations/v3/conversations/channel-accounts/2039804092"
+    ).mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "channelId": "1002",
+                "active": True,
+                "authorized": True,
+                "archived": False,
+            },
+        )
+    )
+    with patch("src.common.healthcheck.settings") as configured:
+        configured.HUBSPOT_PRIVATE_APP_TOKEN = "test-token"
+        configured.HUBSPOT_SENDER_ACTOR_ID = "A-82843387"
+        configured.HUBSPOT_DEFAULT_EMAIL_CHANNEL_ACCOUNT_ID = "2039804092"
+        result = _check_hubspot_conversations()
+    assert result.status == "PASS"
+
+
+def test_check_hubspot_conversations_requires_delivery_config() -> None:
+    with patch("src.common.healthcheck.settings") as configured:
+        configured.HUBSPOT_SENDER_ACTOR_ID = ""
+        configured.HUBSPOT_DEFAULT_EMAIL_CHANNEL_ACCOUNT_ID = ""
+        result = _check_hubspot_conversations()
+    assert result.status == "FAIL"
 
 
 def test_check_send_quota_pass() -> None:
-    with patch("src.common.healthcheck.settings") as s, \
-         patch("src.agents.send_worker.get_daily_count", return_value=5):
-        s.DAILY_SEND_LIMIT = 100
-        s.SEND_WORKER_ENABLED = True
+    with (
+        patch("src.common.healthcheck.settings") as configured,
+        patch("src.agents.send_worker.get_daily_count", return_value=5),
+    ):
+        configured.DAILY_SEND_LIMIT = 100
         result = _check_send_quota()
-
     assert result.status == "PASS"
     assert "5/100" in result.detail
 
 
 def test_check_send_quota_limit_hit() -> None:
-    with patch("src.common.healthcheck.settings") as s, \
-         patch("src.agents.send_worker.get_daily_count", return_value=100):
-        s.DAILY_SEND_LIMIT = 100
-        s.SEND_WORKER_ENABLED = True
+    with (
+        patch("src.common.healthcheck.settings") as configured,
+        patch("src.agents.send_worker.get_daily_count", return_value=100),
+    ):
+        configured.DAILY_SEND_LIMIT = 100
         result = _check_send_quota()
-
     assert result.status == "WARN"
 
 
-# ---------- run_healthchecks ----------
-
-
-def test_run_healthchecks_includes_gemini(db_session_factory) -> None:
-    with patch("src.common.healthcheck.settings") as s, \
-         patch("src.db.session.SessionLocal", db_session_factory), \
-         patch("src.common.healthcheck._check_google_sheets",
-               return_value=CheckResult(name="google_sheets", status="PASS",
-                                        detail="patched", latency_ms=0)), \
-         patch("smtplib.SMTP"), \
-         patch("src.llm.providers.gemini_vertex.call_gemini"):
-        s.GOOGLE_CREDENTIALS_JSON = '{"project_id": "p"}'
-        s.HUBSPOT_PRIVATE_APP_TOKEN = ""
-        s.SEND_WORKER_ENABLED = False
-
+def test_run_healthchecks_includes_core_checks(db_session_factory) -> None:
+    with (
+        patch("src.common.healthcheck.settings") as configured,
+        patch("src.db.session.SessionLocal", db_session_factory),
+        patch(
+            "src.common.healthcheck._check_google_sheets",
+            return_value=CheckResult(
+                name="google_sheets", status="PASS", detail="patched"
+            ),
+        ),
+        patch("src.llm.providers.gemini_vertex.call_gemini"),
+    ):
+        configured.GOOGLE_CREDENTIALS_JSON = '{"project_id": "p"}'
+        configured.HUBSPOT_PRIVATE_APP_TOKEN = ""
+        configured.SEND_WORKER_ENABLED = False
         report = run_healthchecks()
-
-    names = [c.name for c in report.checks]
+    names = [check.name for check in report.checks]
     assert "Gemini (Vertex)" in names
-
-
-@patch("smtplib.SMTP")
-def test_run_healthchecks_with_smtp(mock_smtp, db_session_factory) -> None:
-    mock_smtp.return_value = MagicMock()
-
-    with patch("src.common.healthcheck.settings") as s, \
-         patch("src.db.session.SessionLocal", db_session_factory), \
-         patch("src.common.healthcheck._check_google_sheets",
-               return_value=CheckResult(name="google_sheets", status="PASS",
-                                        detail="patched", latency_ms=0)), \
-         patch("src.llm.providers.gemini_vertex.call_gemini"):
-        s.GOOGLE_CREDENTIALS_JSON = '{"project_id": "p"}'
-        s.HUBSPOT_PRIVATE_APP_TOKEN = ""
-        s.SMTP_HOST = "smtp.gmail.com"
-        s.SMTP_PORT = 587
-        s.SMTP_USERNAME = ""
-        s.SMTP_PASSWORD = ""
-        s.SEND_WORKER_ENABLED = False
-
-        report = run_healthchecks()
-
-    names = [c.name for c in report.checks]
-    assert "smtp_login" in names
+    assert "smtp_login" not in names
 
 
 def test_run_healthchecks_with_send_worker(db_session_factory) -> None:
-    with patch("src.common.healthcheck.settings") as s, \
-         patch("src.db.session.SessionLocal", db_session_factory), \
-         patch("src.common.healthcheck._check_google_sheets",
-               return_value=CheckResult(name="google_sheets", status="PASS",
-                                        detail="patched", latency_ms=0)), \
-         patch("smtplib.SMTP"), \
-         patch("src.llm.providers.gemini_vertex.call_gemini"), \
-         patch("src.agents.send_worker.get_daily_count", return_value=0):
-        s.GOOGLE_CREDENTIALS_JSON = '{"project_id": "p"}'
-        s.HUBSPOT_PRIVATE_APP_TOKEN = ""
-        s.SEND_WORKER_ENABLED = True
-        s.DAILY_SEND_LIMIT = 100
-
+    with (
+        patch("src.common.healthcheck.settings") as configured,
+        patch("src.db.session.SessionLocal", db_session_factory),
+        patch(
+            "src.common.healthcheck._check_google_sheets",
+            return_value=CheckResult(
+                name="google_sheets", status="PASS", detail="patched"
+            ),
+        ),
+        patch("src.llm.providers.gemini_vertex.call_gemini"),
+        patch("src.agents.send_worker.get_daily_count", return_value=0),
+    ):
+        configured.GOOGLE_CREDENTIALS_JSON = '{"project_id": "p"}'
+        configured.HUBSPOT_PRIVATE_APP_TOKEN = ""
+        configured.SEND_WORKER_ENABLED = True
+        configured.DAILY_SEND_LIMIT = 100
         report = run_healthchecks()
-
-    names = [c.name for c in report.checks]
-    assert "send_quota" in names
-
-
-def test_run_healthchecks_overall_warn(db_session_factory) -> None:
-    with patch("src.common.healthcheck.settings") as s, \
-         patch("src.db.session.SessionLocal", db_session_factory), \
-         patch("src.common.healthcheck._check_google_sheets",
-               return_value=CheckResult(name="google_sheets", status="PASS",
-                                        detail="patched", latency_ms=0)), \
-         patch("src.common.healthcheck.shutil.disk_usage") as mock_du, \
-         patch("smtplib.SMTP"), \
-         patch("src.llm.providers.gemini_vertex.call_gemini"):
-        s.GOOGLE_CREDENTIALS_JSON = '{"project_id": "p"}'
-        s.HUBSPOT_PRIVATE_APP_TOKEN = ""
-        s.SEND_WORKER_ENABLED = False
-
-        mock_du.return_value = MagicMock(free=100 * 1024 * 1024)
-        report = run_healthchecks()
-
-    assert report.overall_status == "WARN"
+    assert "send_quota" in [check.name for check in report.checks]

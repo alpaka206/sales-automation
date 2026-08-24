@@ -1,13 +1,13 @@
-"""Send inbound replies through SMTP."""
+"""Send reviewed inbound replies through HubSpot Conversations."""
 
 from __future__ import annotations
 
-import asyncio
 import logging
+from email.utils import getaddresses
 
 from ...common.textwash import text_wash
 from ...db.models import Message
-from .smtp import send_smtp
+from ..delivery import DeliveryPermanentError, SendingDisabled
 
 logger = logging.getLogger(__name__)
 
@@ -112,63 +112,59 @@ def enforce_first_reply_no_price(message: Message) -> None:
         )
 
 
-async def _log_hubspot_email(message: Message, row: Message | None = None) -> None:
-    """Best-effort timeline log after SMTP delivery; never reverses a real send.
-
-    ``row`` is the ORM record whose relationships are used and whose engagement id is
-    stamped. It is accepted separately so this helper remains safe for detached callers.
-    """
-    record = row if row is not None else message
-    try:
-        conversation = record.conversation
-        contact = conversation.contact if conversation else None
-        contact_id = contact.hubspot_contact_id if contact else None
-        ticket_id = conversation.hubspot_ticket_id if conversation else None
-    except Exception:
-        contact_id, ticket_id = None, None
-    if not contact_id:
-        return
-
-    from ..hubspot import HubSpotClient, HubSpotNotConfigured
-
-    client = None
-    try:
-        client = HubSpotClient()
-        record.hubspot_engagement_id = await client.create_email_engagement(
-            contact_id=contact_id,
-            subject=message.subject or "",
-            body=message.body or "",
-            ticket_id=ticket_id,
-        )
-    except HubSpotNotConfigured:
-        logger.info("HubSpot is not configured; skipping timeline log for message %d.", message.id)
-    except Exception:
-        logger.warning(
-            "HubSpot timeline log failed for message %d; SMTP send succeeded.",
-            message.id,
-            exc_info=True,
-        )
-    finally:
-        if client is not None:
-            await client.close()
-
-
 async def send(message: Message) -> None:
-    """Send a message via SMTP, then record it on the HubSpot timeline.
+    """Reply on the ticket's existing HubSpot Conversations email thread."""
+    from ...common.safe_mode import email_delivery_enabled
 
-    HubSpot is not the configured transport here. Transactional Single-Send requires a
-    paid add-on, ``transactional-email`` scope, and a designed template. The CRM email
-    object written at the end is only the customer-history record.
-    """
-    row = message
+    if not email_delivery_enabled():
+        raise SendingDisabled(
+            "Email delivery is disabled: enable LIVE_EXTERNAL_WRITES and the "
+            "code-level EMAIL_SENDING_ENABLED switch."
+        )
 
     # Code-enforced language + text wash, then the first-reply no-price rule.
     if message.direction == "outgoing":
         enforce_send_language(message)
         enforce_first_reply_no_price(message)
 
-    # SMTP is the only delivery channel; HubSpot receives a timeline copy afterwards.
-    await asyncio.to_thread(send_smtp, message)
-    logger.info("Message %d sent via smtp.", message.id)
+    if any(char in (message.subject or "") for char in ("\r", "\n")):
+        raise DeliveryPermanentError("Email subject contains illegal CR/LF characters")
+    if any(char in (message.to_address or "") for char in ("\r", "\n")):
+        raise DeliveryPermanentError("Recipient contains illegal CR/LF characters")
+    recipients = [address for _name, address in getaddresses([message.to_address or ""]) if address]
+    if len(recipients) != 1 or "@" not in recipients[0]:
+        raise DeliveryPermanentError("Exactly one valid recipient email is required")
 
-    await _log_hubspot_email(message, row)
+    try:
+        ticket_id = message.conversation.hubspot_ticket_id
+    except Exception as exc:
+        raise DeliveryPermanentError("The message has no loaded HubSpot ticket") from exc
+    if not ticket_id:
+        raise DeliveryPermanentError("The message has no HubSpot ticket ID")
+
+    from ..email_html import branded_signature_html, to_html_email
+    from ..hubspot import HubSpotClient
+
+    signature_html = branded_signature_html(getattr(message, "signature_key", None))
+    rich_text = to_html_email(message.body or "", signature_html=signature_html)
+    client = HubSpotClient()
+    try:
+        context = await client.find_conversation_reply_context(ticket_id, recipients[0])
+        hubspot_message_id = await client.send_conversation_message(
+            context,
+            recipient_email=recipients[0],
+            subject=message.subject or "",
+            text=message.body or "",
+            rich_text=rich_text,
+        )
+    finally:
+        await client.close()
+
+    message.hubspot_thread_id = context.thread_id
+    message.hubspot_message_id = hubspot_message_id
+    logger.info(
+        "Message %d sent through HubSpot Conversations (thread=%s, message=%s).",
+        message.id,
+        context.thread_id,
+        hubspot_message_id,
+    )

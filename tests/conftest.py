@@ -51,12 +51,10 @@ os.environ.setdefault("LIVE_EXTERNAL_WRITES", "true")
 # "live" here means "exercise the real code path against a mocked transport".
 os.environ.setdefault("LIVE_HUBSPOT_WRITES", "true")
 os.environ.setdefault("LIVE_SHEETS_WRITES", "true")
-# Hard stop for every external write path. Tests that cover a sender enable it
-# explicitly and mock the transport; a developer's real .env must never receive
-# an email, report, or Sheets write during `pytest`.
-os.environ["SMTP_USERNAME"] = ""
-os.environ["SMTP_PASSWORD"] = ""
-os.environ["REPORT_EMAIL_TO"] = ""
+# Delivery tests replace the HubSpot transport, and the token above is deliberately
+# fake so a developer's real Private App can never receive a write during `pytest`.
+os.environ["HUBSPOT_SENDER_ACTOR_ID"] = "A-test"
+os.environ["HUBSPOT_DEFAULT_EMAIL_CHANNEL_ACCOUNT_ID"] = "account-test"
 # A developer's real PUBLIC_BASE_URL (e.g. the Render URL) must not leak in — it is
 # the same-origin baseline for the CSRF check, so a non-empty value 403s the web
 # POST tests (recovery, customer ops) whose Origin is http://testserver.
@@ -128,8 +126,8 @@ def _allow_send_in_tests(monkeypatch):
     The shipped email switch is enabled here so sender / worker / dispatch tests
     exercise production behaviour instead of asserting a refusal.
 
-    Safe to do: SMTP_USERNAME/PASSWORD are blanked above and every one of those tests
-    substitutes a fake ``smtplib.SMTP``, so no socket is ever opened.
+    Safe to do: the suite uses a dummy HubSpot token, and sender tests substitute a
+    mocked Conversations client.
 
     The switch's blocking behaviour is asserted in tests/test_safe_mode.py.
     """

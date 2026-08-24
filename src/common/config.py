@@ -45,6 +45,12 @@ class Settings(BaseSettings):
     )
     HUBSPOT_OWNER_ID: str = ""
     HUBSPOT_WEBHOOK_SECRET: str = ""
+    # HubSpot Conversations sends as this account user. The connected channel account,
+    # not this actor, decides the actual From address.
+    HUBSPOT_SENDER_ACTOR_ID: str = ""
+    # Used only for a form-only thread with no previous email message to copy. It must
+    # be an active channelId=1002 account in the same inbox as the selected thread.
+    HUBSPOT_DEFAULT_EMAIL_CHANNEL_ACCOUNT_ID: str = ""
     # ----- [B2B] AI Dubbing ticket pipeline stage ids -----
     # The env names below mirror the stage labels in HubSpot (New / Qualified /
     # Negotiating / Reminder Sent / Won / Lost / Concluded). Stages get
@@ -59,7 +65,7 @@ class Settings(BaseSettings):
     # Only tickets in this stage are treated as new inbound inquiries. Empty keeps the
     # existing "all newly-created tickets" behavior.
     HUBSPOT_TICKET_STAGE_NEW: str = ""
-    # After SMTP send completes, move the linked ticket here. Empty = don't touch stage.
+    # After HubSpot Conversations delivery completes, move the linked ticket here.
     HUBSPOT_TICKET_STAGE_AFTER_SEND: str = Field(
         default="",
         validation_alias=AliasChoices(
@@ -110,15 +116,6 @@ class Settings(BaseSettings):
     # off — keeping it on without the property logs a 400 every webhook.
     HUBSPOT_UPDATE_CONTACT_INBOUND_STATUS: bool = False
 
-    # ----- Email -----
-    # SMTP delivers mail; HubSpot's email API only receives a timeline copy.
-    SMTP_HOST: str = "smtp.gmail.com"
-    SMTP_PORT: int = 587
-    SMTP_USERNAME: str = ""
-    SMTP_PASSWORD: str = ""
-    SMTP_FROM_NAME: str = "Sales Team"
-    SMTP_FROM_EMAIL: str = ""
-
     # ----- Launch safety switch (pre-launch "대전제") -----
     # Master kill switch for ALL external side effects. Default False = SAFE:
     #   - every HubSpot write is hard-blocked (ticket stage, contact/inbound status,
@@ -151,9 +148,6 @@ class Settings(BaseSettings):
     SLACK_BOT_TOKEN: str = ""
     SLACK_APPROVAL_CHANNEL_ID: str = ""
 
-    # ----- Reports -----
-    REPORT_EMAIL_TO: str = ""
-
     # ----- Inbound poller -----
     INBOUND_POLL_ENABLED: bool = False
     INBOUND_POLL_INTERVAL_SECONDS: int = 600
@@ -164,9 +158,8 @@ class Settings(BaseSettings):
     # ----- Send worker -----
     SEND_WORKER_ENABLED: bool = False
     SEND_RATE_PER_MINUTE: int = 5
-    # Safety cap on customer emails/day. It guards the Gmail/SMTP sender quota
-    # (free Gmail ~500/day; exceeding throttles the account) and sender reputation.
-    # Set generously rather than disabling (0 = unlimited). 400 ≈ free-Gmail margin.
+    # Safety cap on customer emails/day. It limits accidental HubSpot sends and protects
+    # sender reputation. Set generously rather than disabling (0 = unlimited).
     DAILY_SEND_LIMIT: int = 400
     SEND_JITTER_SECONDS: int = 15
 

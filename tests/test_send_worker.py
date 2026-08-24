@@ -127,7 +127,7 @@ def test_claim_is_atomic_under_concurrent_workers(_db: Session, monkeypatch) -> 
 
 
 def test_reclaim_stuck_sending(_db: Session) -> None:
-    """Expired sends are quarantined because SMTP delivery may have succeeded."""
+    """Expired sends are quarantined because HubSpot delivery may have succeeded."""
     now = datetime.now(timezone.utc)
     stale = now - timedelta(seconds=send_worker.SEND_LEASE_SECONDS + 1)
     mid = _create_message(_db, "sending:dead-worker", None, stale)
@@ -180,20 +180,19 @@ def test_legacy_auto_ack_is_never_claimed(_db: Session) -> None:
 
 
 @pytest.mark.asyncio
-async def test_unknown_smtp_outcome_is_quarantined_without_retry(
+async def test_unknown_delivery_outcome_is_quarantined_without_retry(
     _db: Session, monkeypatch
 ) -> None:
-    from src.integrations.senders.smtp import SMTPDeliveryUnknown
+    from src.integrations.delivery import DeliveryUnknown
 
     mid = _create_message(_db, "approved", None)
     send_worker._claim_ready_id()
-    send = AsyncMock(side_effect=SMTPDeliveryUnknown("ambiguous"))
+    send = AsyncMock(side_effect=DeliveryUnknown("ambiguous"))
     monkeypatch.setattr("src.integrations.senders.send", send)
 
     assert await send_worker._send_one(mid) is False
     _db.expire_all()
     assert _db.get(Message, mid).status == "delivery_unknown"
-    assert _db.get(Message, mid).smtp_message_id is not None
     assert send.await_count == 1
 
 
@@ -240,7 +239,7 @@ async def test_send_one_failure(_db: Session, monkeypatch) -> None:
     mid = _create_message(_db, "approved", None)
     send_worker._claim_ready_id()
 
-    mock_send = AsyncMock(side_effect=RuntimeError("SMTP down"))
+    mock_send = AsyncMock(side_effect=RuntimeError("delivery down"))
     monkeypatch.setattr("src.integrations.senders.send", mock_send)
 
     await send_worker._send_one(mid)

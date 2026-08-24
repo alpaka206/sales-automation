@@ -4,13 +4,10 @@ from __future__ import annotations
 
 import logging
 import os
-import smtplib
 from datetime import datetime, timedelta, timezone
-from email.mime.text import MIMEText
 
 from sqlalchemy import func
 
-from ..common.config import settings
 from ..db.models import Message
 from ..db.session import SessionLocal
 from ..llm.client import LLMClient
@@ -40,7 +37,6 @@ class ReportAgent:
             narrative = self._generate_narrative(stats, period)
             report = self._format_report(stats, narrative, period, since)
             self._save_report(report, kind)
-            self._distribute(report, kind)
             return report
         finally:
             session.close()
@@ -136,45 +132,3 @@ class ReportAgent:
         with open(path, "w", encoding="utf-8") as f:
             f.write(report)
         logger.info("Report saved to %s", path)
-
-    def _distribute(self, report: str, kind: str) -> None:
-        """Best-effort email delivery. Slack is reserved for reply-ready alerts."""
-        if settings.REPORT_EMAIL_TO:
-            self._email_report(report, kind)
-
-    def _email_report(self, report: str, kind: str) -> None:
-        """Send the report via SMTP to REPORT_EMAIL_TO recipients."""
-        # This path builds its own smtplib connection instead of going through
-        # senders.send_smtp, so it has to check the delivery gate itself.
-        from ..common.safe_mode import email_delivery_enabled
-
-        if not email_delivery_enabled():
-            logger.warning(
-                "Report email suppressed: live email delivery is disabled."
-            )
-            return
-
-        if not settings.SMTP_USERNAME or not settings.SMTP_PASSWORD:
-            logger.warning("SMTP not configured — skipping report email.")
-            return
-
-        recipients = [e.strip() for e in settings.REPORT_EMAIL_TO.split(",") if e.strip()]
-        if not recipients:
-            return
-
-        date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        subject = f"{kind.title()} Report — {date_str}"
-
-        msg = MIMEText(report, "plain", "utf-8")
-        msg["Subject"] = subject
-        msg["From"] = f"{settings.SMTP_FROM_NAME} <{settings.SMTP_FROM_EMAIL}>"
-        msg["To"] = ", ".join(recipients)
-
-        try:
-            with smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT) as server:
-                server.starttls()
-                server.login(settings.SMTP_USERNAME, settings.SMTP_PASSWORD)
-                server.send_message(msg)
-            logger.info("Report emailed to %s.", recipients)
-        except Exception:
-            logger.warning("Failed to email report.", exc_info=True)

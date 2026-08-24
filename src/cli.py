@@ -17,9 +17,17 @@ def doctor() -> int:
             "GOOGLE_CREDENTIALS_JSON",
         ),
         (
-            bool(settings.SMTP_USERNAME and settings.SMTP_PASSWORD),
-            "SMTP",
-            "SMTP_USERNAME / SMTP_PASSWORD",
+            bool(settings.HUBSPOT_PRIVATE_APP_TOKEN.strip()),
+            "HubSpot",
+            "HUBSPOT_ACCESS_TOKEN",
+        ),
+        (
+            bool(
+                settings.HUBSPOT_SENDER_ACTOR_ID.strip()
+                and settings.HUBSPOT_DEFAULT_EMAIL_CHANNEL_ACCOUNT_ID.strip()
+            ),
+            "HubSpot delivery",
+            "HUBSPOT_SENDER_ACTOR_ID / HUBSPOT_DEFAULT_EMAIL_CHANNEL_ACCOUNT_ID",
         ),
     ]
 
@@ -31,7 +39,6 @@ def doctor() -> int:
         print(f"  {'[OK]' if configured else '[XX]'} {name:20s} {status}")
 
     optional = {
-        "HubSpot": bool(settings.HUBSPOT_PRIVATE_APP_TOKEN),
         "Slack reply-ready alert": bool(
             settings.SLACK_ENABLED
             and settings.APPROVAL_CHANNEL == "slack"

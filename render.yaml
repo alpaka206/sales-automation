@@ -55,6 +55,10 @@ services:
         sync: false
       - key: HUBSPOT_WEBHOOK_SECRET    # Client secret — required for webhook v3 signature check
         sync: false
+      - key: HUBSPOT_SENDER_ACTOR_ID
+        value: "A-82843387"           # Perso Dubbing GTM Marketing
+      - key: HUBSPOT_DEFAULT_EMAIL_CHANNEL_ACCOUNT_ID
+        value: "2039804092"           # support@perso.ai, B2B Dubbing inbox fallback
       # [B2B] AI Dubbing pipeline (798618015) stage IDs — set here, no dashboard entry needed.
       # Names mirror the HubSpot stage labels. Stages get RENAMED without their id
       # changing, so the older env names still resolve as aliases (QUALIFIED was
@@ -84,12 +88,6 @@ services:
       - key: SLACK_BOT_TOKEN
         sync: false
       - key: SLACK_APPROVAL_CHANNEL_ID
-        sync: false
-      - key: SMTP_USERNAME
-        sync: false
-      - key: SMTP_PASSWORD
-        sync: false
-      - key: SMTP_FROM_EMAIL
         sync: false
       - key: PUBLIC_BASE_URL           # Render URL (Slack approval links, OAuth redirect base)
         value: https://sales-automation-4if2.onrender.com

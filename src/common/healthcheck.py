@@ -42,12 +42,11 @@ def run_healthchecks() -> HealthReport:
 
     if settings.HUBSPOT_PRIVATE_APP_TOKEN:
         checks.append(_check_hubspot())
+        checks.append(_check_hubspot_conversations())
 
     # Unconditional: "no token configured" is itself the failure worth reporting now
     # that nothing in the UI shows the connection state.
     checks.append(_check_google_sheets())
-
-    checks.append(_check_smtp())
 
     checks.append(_check_disk_space())
 
@@ -280,37 +279,70 @@ def _check_hubspot() -> CheckResult:
         return CheckResult(name="hubspot_token", status="FAIL", detail=str(e)[:200], latency_ms=ms)
 
 
-_SMTP_PROVIDER_MAP = {
-    "smtp.gmail.com": "Gmail",
-    "smtp-mail.outlook.com": "Outlook",
-    "smtp-relay.brevo.com": "Brevo",
-    "smtp.sendgrid.net": "SendGrid",
-}
-
-
-def _smtp_provider_label() -> str:
-    """Return a human-readable SMTP provider name based on SMTP_HOST."""
-    host = (settings.SMTP_HOST or "").lower().strip()
-    return _SMTP_PROVIDER_MAP.get(host, host or "unknown")
-
-
-def _check_smtp() -> CheckResult:
-    """Open and close SMTP connection to verify credentials."""
-    provider = _smtp_provider_label()
+def _check_hubspot_conversations() -> CheckResult:
+    """Verify the exact actor and fallback email account used for delivery."""
     start = time.monotonic()
+    actor_id = settings.HUBSPOT_SENDER_ACTOR_ID.strip()
+    account_id = settings.HUBSPOT_DEFAULT_EMAIL_CHANNEL_ACCOUNT_ID.strip()
+    if not actor_id or not account_id:
+        return CheckResult(
+            name="hubspot_conversations",
+            status="FAIL",
+            detail="sender actor or default email channel account is missing",
+        )
     try:
-        import smtplib
+        import httpx
 
-        server = smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT, timeout=10)
-        server.starttls()
-        if settings.SMTP_USERNAME and settings.SMTP_PASSWORD:
-            server.login(settings.SMTP_USERNAME, settings.SMTP_PASSWORD)
-        server.quit()
+        headers = {"Authorization": f"Bearer {settings.HUBSPOT_PRIVATE_APP_TOKEN}"}
+        actor = httpx.get(
+            f"https://api.hubapi.com/conversations/v3/conversations/actors/{actor_id}",
+            headers=headers,
+            timeout=10,
+        )
+        account = httpx.get(
+            "https://api.hubapi.com/conversations/v3/conversations/"
+            f"channel-accounts/{account_id}",
+            headers=headers,
+            timeout=10,
+        )
         ms = int((time.monotonic() - start) * 1000)
-        return CheckResult(name="smtp_login", status="PASS", detail=f"Using {provider} SMTP", latency_ms=ms)
+        if actor.status_code >= 400 or account.status_code >= 400:
+            return CheckResult(
+                name="hubspot_conversations",
+                status="FAIL",
+                detail=f"actor HTTP {actor.status_code}, account HTTP {account.status_code}",
+                latency_ms=ms,
+            )
+        actor_data = actor.json()
+        account_data = account.json()
+        valid_actor = actor_data.get("type") == "AGENT"
+        valid_account = (
+            str(account_data.get("channelId") or "") == "1002"
+            and bool(account_data.get("active"))
+            and bool(account_data.get("authorized"))
+            and not bool(account_data.get("archived"))
+        )
+        if not valid_actor or not valid_account:
+            return CheckResult(
+                name="hubspot_conversations",
+                status="FAIL",
+                detail="configured actor or email channel account is not usable",
+                latency_ms=ms,
+            )
+        return CheckResult(
+            name="hubspot_conversations",
+            status="PASS",
+            detail=f"{actor_id} via channel account {account_id}",
+            latency_ms=ms,
+        )
     except Exception as e:
         ms = int((time.monotonic() - start) * 1000)
-        return CheckResult(name="smtp_login", status="FAIL", detail=f"[{provider}] {str(e)[:180]}", latency_ms=ms)
+        return CheckResult(
+            name="hubspot_conversations",
+            status="FAIL",
+            detail=str(e)[:200],
+            latency_ms=ms,
+        )
 
 
 def _check_send_quota() -> CheckResult:

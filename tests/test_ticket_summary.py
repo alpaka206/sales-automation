@@ -79,7 +79,7 @@ def test_the_draft_can_no_longer_write_the_summary():
     assert "conv.summary =" not in inbound
     # 문의 한 줄은 저장이 **실제로 일어났을 때만** 붙습니다(안 썼으면 id 가 None).
     assert "append_summary_line(inbound_message_id)" in inbound
-    # 우리 답 한 줄은 SMTP 를 지난 뒤에만 붙습니다.
+    # 우리 답 한 줄은 Conversations 발송을 지난 뒤에만 붙습니다.
     worker = pathlib.Path("src/agents/send_worker.py").read_text(encoding="utf-8")
     assert "append_summary_line" in worker
 
