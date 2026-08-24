@@ -38,7 +38,7 @@ def _disable_approval_token_and_send_worker():
 @patch("src.agents.inbound.InboundAgent._finalize_draft")
 @patch(
     "src.agents.inbound.InboundAgent._persist_placeholder",
-    return_value=(1, 1, False, False),
+        return_value=(1, 1, False),
 )
 @patch("src.agents.inbound.InboundAgent._draft_reply")
 @patch("src.agents.inbound.InboundAgent._score", return_value=70)
@@ -81,7 +81,7 @@ def test_handle_sets_analyzed_status(
 @patch("src.agents.inbound.InboundAgent._finalize_draft")
 @patch(
     "src.agents.inbound.InboundAgent._persist_placeholder",
-    return_value=(2, 2, False, False),
+        return_value=(2, 2, False),
 )
 @patch("src.agents.inbound.InboundAgent._draft_reply")
 @patch("src.agents.inbound.InboundAgent._score", return_value=60)

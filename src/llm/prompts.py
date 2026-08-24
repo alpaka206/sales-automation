@@ -87,7 +87,7 @@ def get_reply_format(language: str | None = None) -> str:
     behaviour we do not want here.
 
     **국문과 영문은 다른 서식입니다.** 접미사 없는 행이 국문이고, 영문 문의는 ``_en`` 행을
-    먼저 봅니다(``auto_ack`` / ``auto_ack_en`` 과 같은 규칙). 한 벌만 두었더니 국문 문의에
+    먼저 봅니다(``reply_format`` / ``reply_format_en`` 규칙). 한 벌만 두었더니 국문 문의에
     영문용 문장이 그대로 따라왔습니다 — WhatsApp 안내가 한국어 회신에 붙은 것이 그것입니다.
     영문 행이 없으면 국문 행으로 떨어집니다: 서식이 아예 없는 것보다는 낫습니다.
     """

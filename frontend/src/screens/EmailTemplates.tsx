@@ -46,12 +46,6 @@ const ONE_LINE_FIELDS: Record<string, { label: string; placeholder: string; mono
   sender_name_en: { label: "담당자 이름 (영문)", placeholder: "예: Untae Bae" },
 };
 
-// 제목이 있는 메일. 서명·링크·담당자 이름에는 제목이라는 것이 없고, 답변 메일 형식은
-// 뼈대일 뿐 메일이 아닙니다. 접수확인은 언어마다 한 행이고 (`auto_ack_ja` 를 만들면 발송
-// 경로가 그 언어 문의에서 실제로 읽습니다) 그 행에도 제목이 있어야 합니다 — 두 글자로
-// 못 박아 `auto_ack_footer` 는 걸리지 않게 합니다.
-const hasSubject = (key: string) => key === "auto_ack" || /^auto_ack_[a-z]{2}$/.test(key);
-
 function Editor({ id, data, onDone }: {
   id: number | "new";
   // 목록이 이미 들고 있는 그 행입니다. 다시 받지 않습니다 — 서울에서 이 서비스까지 왕복이
@@ -208,7 +202,7 @@ function Editor({ id, data, onDone }: {
                 <label className="field-label" htmlFor="et-key">키 (비우면 서명으로 만듭니다)</label>
                 <input className="input mono" id="et-key" value={key}
                        onChange={(e) => setKey(e.target.value)}
-                       placeholder="예: auto_ack_ja" style={{ marginBottom: 14 }} />
+                       placeholder="예: custom_followup" style={{ marginBottom: 14 }} />
                 {!isSignature && (
                   <>
                     <label className="field-label" htmlFor="et-lang">언어 코드 (비우면 전체)</label>
@@ -222,20 +216,8 @@ function Editor({ id, data, onDone }: {
             )}
 
             {/* 서명에는 언어 칸이 없습니다. 어떤 코드도 언어로 서명을 고르지 않고 —
-                고르는 것은 사람입니다 — 그래서 그 칸은 아무 데도 가 닿지 않는 질문이었습니다.
-                다른 행들은 'all' 이거나 auto_ack 처럼 처음부터 언어별로 존재합니다. */}
+                고르는 것은 사람입니다 — 그래서 그 칸은 아무 데도 가 닿지 않는 질문이었습니다. */}
 
-            {/* 제목과 본문은 한 메일의 두 부분입니다. 따로 두면 한 메일을 고치는 데 두
-                화면을 오가게 됩니다. */}
-            {data && hasSubject(data.key) && (
-              <>
-                <label className="field-label" htmlFor="et-subject">메일 제목</label>
-                <input className="input" id="et-subject" value={subject}
-                       onChange={(e) => setSubject(e.target.value)}
-                       placeholder="비우면 RE: 고객이 쓴 제목"
-                       style={{ marginBottom: 14 }} />
-              </>
-            )}
             {/* 나란히. 미리보기가 본문 **아래**에 붙으면 그만큼 세로가 밀리는데, 이 화면을
                 보는 노트북은 세로가 640px 남짓입니다. 옆에 두면 늘 켜 두어도 높이가 그대로고,
                 고치는 곳과 결과가 한눈에 들어옵니다. */}

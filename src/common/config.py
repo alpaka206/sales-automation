@@ -171,13 +171,6 @@ class Settings(BaseSettings):
     # Webhook and poller only enqueue; this worker performs HubSpot/AI work with retries.
     INBOUND_WORKER_ENABLED: bool = True
 
-    # ----- Inbound auto-acknowledgement -----
-    # On the FIRST inbound of a thread, immediately send a "we received your
-    # message, we'll send a detailed reply shortly" acknowledgement — WITHOUT human approval,
-    # in the inquiry's language (enforced in code). It does not change the
-    # ticket/draft status. Editable text lives in the ``auto_ack`` email template.
-    INBOUND_AUTO_ACK_ENABLED: bool = True
-
     # ----- Send worker -----
     SEND_WORKER_ENABLED: bool = False
     SEND_RATE_PER_MINUTE: int = 5

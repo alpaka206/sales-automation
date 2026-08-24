@@ -9,7 +9,6 @@ from typing import Any
 
 from pydantic import BaseModel
 from sqlalchemy import select
-from sqlalchemy.exc import IntegrityError
 
 from ..common.config import settings
 from ..common.domains import is_personal_domain
@@ -47,8 +46,6 @@ logger = logging.getLogger(__name__)
 def _default_signature() -> str | None:
     """어느 서명으로 시작할지 — 목록의 첫 서명. 그 건에서 바꾸는 것은 검토 화면입니다.
 
-    **답변 초안에만** 씁니다. 접수확인에는 ``_auto_ack_footer`` 가 갑니다.
-
     Imported here rather than at module load for the same reason every other template
     helper in this file is: the DB layer must not be pulled in before settings are.
     """
@@ -57,29 +54,7 @@ def _default_signature() -> str | None:
     return default_signature_key()
 
 
-def _auto_ack_footer() -> str:
-    """접수확인 아래에 붙는 것 — 서명이 아니라 로고 한 줄 (0062).
-
-    접수확인은 "받았습니다" 한 문장이고 아직 아무도 읽지 않은 메일입니다. 담당자 서명을
-    붙이면 그 사람이 쓴 메일로 읽히는데, 정작 답은 며칠 뒤에 다른 사람이 쓸 수도 있습니다.
-    서명은 사람이 검토하고 발송을 누르는 첫 답변부터입니다.
-    """
-    from ..db.email_templates import AUTO_ACK_FOOTER_KEY
-
-    return AUTO_ACK_FOOTER_KEY
-
-
 _DEFAULT_HUBSPOT = object()
-
-# Fallback acknowledgement body if the editable ``auto_ack`` template is missing.
-# ``{name}`` is substituted in code; the whole thing is translated to the inquiry
-# language before sending (the language rule is enforced in code, not the prompt).
-_DEFAULT_AUTO_ACK_KO = (
-    "안녕하세요 {name}님,\n\n"
-    "문의 주셔서 감사합니다. 보내주신 메일은 잘 도착했으며, "
-    "담당자가 내용을 확인한 뒤 곧 자세한 답변을 보내드리겠습니다.\n\n"
-    "감사합니다."
-)
 
 # Pricing guidance handed to the draft prompt. The FIRST reply must not state any
 # amount (a hard rule also enforced by strip_price_sentences); later replies may
@@ -201,9 +176,8 @@ class InboundAgent:
 
         channel = self._pick_channel(contact_info)
 
-        # Detect the inquiry language ONCE, up front. Every reply in this thread —
-        # the auto-ack now and the operator's reply later — must go out in this
-        # language; that's enforced in code (not the prompt).
+        # Detect the inquiry language once, up front. Every operator-approved reply
+        # in this thread must go out in this language; that is enforced in code.
         from ..llm.language import detect_language
 
         inquiry_lang = detect_language(contact_info.get("last_message", ""), llm=self.llm)
@@ -212,7 +186,7 @@ class InboundAgent:
         # Persist the inquiry + a "drafting" placeholder up front so the ticket shows
         # on the site immediately, before the (slower) AI reply draft is ready. The
         # placeholder flips to pending_approval once the draft finishes.
-        message_id, conv_id, is_first_inbound, inbound_message_id = self._persist_placeholder(
+        message_id, conv_id, inbound_message_id = self._persist_placeholder(
             contact_info,
             channel,
             inquiry_lang,
@@ -238,28 +212,18 @@ class InboundAgent:
                 "object_id": contact_info.get("object_id"),
             }
 
-        # Immediate acknowledgement on the FIRST inbound of a thread. Goes out
-        # without approval, in the inquiry language, and never changes ticket/draft
-        # status. It is queued before the external Sheet write so a slow Sheet can
-        # never delay the customer receipt email.
-        if is_first_inbound and channel == "email" and contact_info.get("email"):
-            self._maybe_send_auto_ack(contact_info, conv_id, inquiry_lang)
-
-        # The sales ledger is written as soon as the acknowledgement is queued.
-        # AI drafting may take time or fail, but the inbound itself must never wait.
+        # Record the inquiry before the slower AI draft work.
         self._mirror_new_inbound_to_sheet(contact_info, channel, message_id, conv_id)
 
-        # 한국어가 아닌 문의를 지금 옮겨 둡니다 — 접수확인이 나간 뒤이고, 아래 초안 작성이
-        # 어차피 모델을 더 오래 쓰므로 여기 한 번이 늘어나도 고객이 기다리는 시간은 그대로
-        # 입니다. 운영자가 이 티켓을 열 때는 이미 행에 들어 있습니다.
+        # 한국어가 아닌 문의를 지금 옮겨 둡니다. 운영자가 이 티켓을 열 때는 이미 행에
+        # 들어 있도록, 아래의 더 느린 초안 작성 전에 처리합니다.
         try:
             cache_korean_inquiries(conversation_id=conv_id)
         except Exception:
             # 못 옮겨도 파이프라인은 갑니다. 화면은 원문을 보여 주고 폴러가 다시 집습니다.
             logger.warning("문의 번역을 미리 해 두지 못했습니다 (conv=%s)", conv_id, exc_info=True)
 
-        # History, deal, and domain research is useful for the detailed draft but
-        # must never delay the immediate receipt acknowledgement above.
+        # History, deal, and domain research enriches the reviewable draft.
         self._enrich_draft_context(contact_info)
 
         classification = None
@@ -942,16 +906,15 @@ class InboundAgent:
         *,
         resume_message_id: int | None = None,
         inbound_job_id: int | None = None,
-    ) -> tuple[int | None, int, bool, bool]:
+    ) -> tuple[int | None, int, int | None]:
         """Persist the inquiry and a drafting reply placeholder before the AI draft.
 
-        Returns ``(reply_message_id, conversation_id, is_first_inbound, inbound_message_id)``.
+        Returns ``(reply_message_id, conversation_id, inbound_message_id)``.
         ``inbound_message_id`` is set only when this call actually wrote the customer's
         message — one ticket gets several events, and only the first of them stores the
         body. 티켓 요약에 불릿을 덧붙이는 쪽이 그 한 번을 알아야 합니다. The
         card appears on the site immediately as "작성중"; _finalize_draft fills it in
-        once the reply is ready. ``is_first_inbound`` is True when this is the very
-        first inbound message in the thread (drives the immediate auto-ack).
+        once the reply is ready.
 
         ``reply_message_id`` is **None** when this thread already has a reply of its own:
         the automatic draft is the first reply only, and everything after it is registered
@@ -1157,7 +1120,7 @@ class InboundAgent:
                 )
                 if prior_reply:
                     session.commit()  # 고객 문의와 진행 기록은 남깁니다.
-                    return None, conv.id, False, inbound_message_id
+                    return None, conv.id, inbound_message_id
             if not resumable:
                 msg = Message(
                     conversation_id=conv.id,
@@ -1181,18 +1144,6 @@ class InboundAgent:
                 msg.subject = None
                 msg.body = ""
 
-                # If the process died before creating the first auto-ack, retry it.
-                has_auto_ack = (
-                    session.query(Message.id)
-                    .filter(
-                        Message.conversation_id == conv.id,
-                        Message.prompt_variant == "auto_ack",
-                    )
-                    .first()
-                    is not None
-                )
-                is_first_inbound = prior_inbound == 1 and not has_auto_ack
-
             if inbound_job_id:
                 job = session.get(InboundJob, inbound_job_id)
                 if job and job.status == "processing":
@@ -1200,7 +1151,7 @@ class InboundAgent:
                     payload["draft_message_id"] = msg.id
                     job.payload = payload
             session.commit()
-            return msg.id, conv.id, is_first_inbound, inbound_message_id
+            return msg.id, conv.id, inbound_message_id
         finally:
             session.close()
 
@@ -1258,145 +1209,6 @@ class InboundAgent:
             return not retired
         finally:
             session.close()
-
-    # ----- Immediate auto-acknowledgement (first inbound only) -----
-
-    def _maybe_send_auto_ack(self, contact_info: dict, conv_id: int, inquiry_lang: str) -> None:
-        """Send the immediate "received, will reply in 24h" acknowledgement.
-
-        Sent WITHOUT approval and in the inquiry's language (enforced in code:
-        Korean template → translate_to). Recorded in the thread as an auto_ack
-        message but never changes the ticket/draft status. Best-effort throughout.
-        """
-        if not settings.INBOUND_AUTO_ACK_ENABLED:
-            return
-        try:
-            from ..db.email_templates import get_email_subject, get_email_template
-            from ..llm.translate import translate_to
-
-            name = (contact_info.get("full_name") or "").strip() or "고객님"
-            lang = (inquiry_lang or "ko").lower()
-
-            # A template WRITTEN in the inquiry's language beats one translated into it.
-            # This mail goes out with no human in front of it, so a machine translation is
-            # both a Gemini call the customer waits through and a sentence that comes out
-            # slightly different every time — for the one mail that should be identical
-            # every time. English has its own row (0053); other languages still translate.
-            native = get_email_template(f"auto_ack_{lang}") if lang != "ko" else None
-            if native:
-                body = text_wash(native.replace("{name}", name))
-                final_lang = lang
-            else:
-                template = get_email_template("auto_ack", language="ko") or _DEFAULT_AUTO_ACK_KO
-                ko_body = template.replace("{name}", name)
-                if lang != "ko":
-                    translated = translate_to(ko_body, lang, llm=self.llm)
-                    body = text_wash(translated) if translated else text_wash(ko_body)
-                    # If translation failed we keep Korean rather than dropping the ack.
-                    final_lang = lang if translated else "ko"
-                else:
-                    body = text_wash(ko_body)
-                    final_lang = "ko"
-
-            # 접수확인만 고정 제목입니다. 정확히 그 언어의 행이 있을 때만 — 프랑스어
-            # 문의에 한국어 제목이 붙는 것은 제목이 없는 것보다 나쁩니다.
-            #
-            # 대가는 알고 씁니다: RE: 가 아니면 고객 메일함에서 원래 문의와 **다른 대화**로
-            # 뜹니다. 담당자의 상세 회신은 여전히 RE: 라 그쪽은 원래 스레드에 붙습니다.
-            fixed_subject = get_email_subject("auto_ack" if lang == "ko" else f"auto_ack_{lang}")
-            subject = (fixed_subject or "").strip() or reply_subject(
-                contact_info.get("subject"), target_code=lang
-            )
-            msg_id = self._persist_auto_ack(conv_id, contact_info, subject, body, final_lang, lang)
-            if msg_id is not None:
-                self._dispatch_auto_ack(msg_id, conv_id)
-        except Exception:
-            logger.warning("Auto-ack failed for conv %s (non-fatal).", conv_id, exc_info=True)
-
-    def _persist_auto_ack(
-        self,
-        conv_id: int,
-        contact_info: dict,
-        subject: str,
-        body: str,
-        language: str,
-        target_language: str,
-    ) -> int | None:
-        """Insert the auto-ack message in an interim state, returning its id.
-
-        Status is ``approved`` so both the immediate attempt and transient retries use
-        the same atomic claim and lease as every other outbound message.
-
-        Returns None (skips) if an auto-ack already exists for this conversation, so
-        two near-simultaneous first events (webhook + poller) don't double-ack.
-        """
-        with SessionLocal() as session:
-            # Serialise the check+insert on the parent row. PostgreSQL honours the
-            # row lock; SQLite serialises the write transaction itself.
-            session.query(Conversation).filter(Conversation.id == conv_id).with_for_update().one()
-            existing = (
-                session.query(Message)
-                .filter(
-                    Message.conversation_id == conv_id,
-                    Message.prompt_variant == "auto_ack",
-                )
-                .first()
-            )
-            if existing is not None:
-                return None
-            msg = Message(
-                conversation_id=conv_id,
-                direction="outgoing",
-                channel="email",
-                from_address=settings.SMTP_FROM_EMAIL or None,
-                to_address=contact_info.get("email") or None,
-                subject=subject,
-                body=body,
-                language=language,
-                target_language=target_language,
-                status="approved",
-                prompt_variant="auto_ack",
-                signature_key=_auto_ack_footer(),
-                approved_by="auto_ack",
-                approved_at=datetime.now(timezone.utc),
-                draft_provider=settings.LLM_PROVIDER,
-            )
-            session.add(msg)
-            try:
-                session.commit()
-            except IntegrityError:
-                # A concurrent webhook/poller transaction won the unique
-                # one-auto-ack-per-conversation constraint.
-                session.rollback()
-                return None
-            return msg.id
-
-    def _dispatch_auto_ack(self, message_id: int, conv_id: int) -> None:
-        """Attempt immediately; known transient SMTP failures stay in the send queue."""
-        import asyncio
-
-        from .send_worker import send_approved_now
-
-        try:
-            sent_ok = asyncio.run(send_approved_now(message_id))
-        except Exception:
-            logger.warning("Auto-ack dispatch error for message %d.", message_id, exc_info=True)
-            sent_ok = False
-
-        # Only the failure. A successful acknowledgement IS the first outgoing message
-        # in the thread above — a log line repeating it is a second copy of the same
-        # fact. A failure is a different sentence and needs a person, so it keeps its
-        # own kind and stays on 처리 경과.
-        if not sent_ok:
-            add_progress(
-                conv_id,
-                "auto_ack_failed",
-                "자동 접수확인 메일 발송 재시도 대기 또는 수동 확인 필요.",
-            )
-
-    # _dispatch_approved() lived here. Its only caller was the auto-approval branch,
-    # which is gone: a detailed reply is never approved without a human, so there is
-    # never a freshly-approved draft for the inbound agent to send inline.
 
     # ----- Customer requests -----
 

@@ -58,7 +58,6 @@ os.environ.setdefault("LIVE_SHEETS_WRITES", "true")
 # Hard stop for every external write path. Tests that cover a sender enable it
 # explicitly and mock the transport; a developer's real .env must never receive
 # an email, report, or Sheets write during `pytest`.
-os.environ["INBOUND_AUTO_ACK_ENABLED"] = "false"
 os.environ["SMTP_USERNAME"] = ""
 os.environ["SMTP_PASSWORD"] = ""
 os.environ["REPORT_EMAIL_TO"] = ""

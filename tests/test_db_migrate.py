@@ -407,3 +407,72 @@ class TestRetireDraftsPastNew:
             "received",
             "approved",  # 접수확인은 그대로 나갑니다
         ]
+
+
+class TestRemoveInboundAutoAck:
+    MODULE = "src.db.migrations.0087_remove_inbound_auto_ack"
+
+    def test_skips_when_tables_do_not_exist(self, mem_engine):
+        importlib.import_module(self.MODULE).up(mem_engine)
+        assert "messages" not in inspect(mem_engine).get_table_names()
+
+    def test_retires_unsent_preserves_sent_and_removes_templates(self, mem_engine):
+        from sqlalchemy.orm import Session
+
+        from src.db.base import Base
+        from src.db.models import Contact, Conversation, EmailTemplate, Message
+
+        Base.metadata.create_all(mem_engine)
+        with mem_engine.begin() as conn:
+            conn.execute(
+                text(
+                    "CREATE UNIQUE INDEX ux_messages_one_auto_ack_per_conversation "
+                    "ON messages (conversation_id) WHERE prompt_variant='auto_ack'"
+                )
+            )
+        with Session(mem_engine) as session:
+            contact = Contact(normalized_email="ack@example.com", full_name="Ack")
+            session.add(contact)
+            session.flush()
+            for status in ("approved", "sent", "test_sent", "delivery_unknown", "send_failed"):
+                conversation = Conversation(contact_id=contact.id, stage="new")
+                session.add(conversation)
+                session.flush()
+                session.add(
+                    Message(
+                        conversation_id=conversation.id,
+                        direction="outgoing",
+                        channel="email",
+                        body="received",
+                        status=status,
+                        prompt_variant="auto_ack",
+                    )
+                )
+            session.add_all(
+                [
+                    EmailTemplate(key="auto_ack", name="ack", body="ack"),
+                    EmailTemplate(key="auto_ack_en", name="ack en", body="ack"),
+                    EmailTemplate(key="auto_ack_footer", name="ack footer", body="logo"),
+                    EmailTemplate(key="reply_format", name="reply", body="reply"),
+                ]
+            )
+            session.commit()
+
+        migration = importlib.import_module(self.MODULE)
+        migration.up(mem_engine)
+        migration.up(mem_engine)
+
+        with mem_engine.connect() as conn:
+            statuses = conn.execute(text("SELECT status FROM messages ORDER BY id")).scalars().all()
+            keys = conn.execute(text("SELECT key FROM email_templates ORDER BY key")).scalars().all()
+        assert statuses == [
+            "superseded",
+            "sent",
+            "test_sent",
+            "delivery_unknown",
+            "superseded",
+        ]
+        assert keys == ["reply_format"]
+        assert "ux_messages_one_auto_ack_per_conversation" not in {
+            row["name"] for row in inspect(mem_engine).get_indexes("messages")
+        }

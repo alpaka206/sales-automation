@@ -188,7 +188,6 @@ def _delete_pending_drafts(session, conversation_id: int, *, why: str) -> int:
             # 자동 응답이고, ``approved`` 로 발송 큐에 들어가 있습니다 — 여기서 걸러 내지
             # 않으면 단계 한 번 옮기는 것이 아직 안 나간 고객 접수확인을 취소합니다.
             # 목록·집계·검토 화면이 전부 두는 것과 같은 조건입니다.
-            (Message.prompt_variant.is_(None)) | (Message.prompt_variant != "auto_ack"),
         )
         .all()
     )

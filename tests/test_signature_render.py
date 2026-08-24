@@ -70,7 +70,6 @@ def test_a_plain_text_signature_keeps_its_line_breaks(fake_templates):
 def test_the_auto_ack_footer_is_seeded_under_the_key_the_ack_asks_for():
     """접수확인이 찾는 키와 마이그레이션이 넣는 키가 다르면 로고는 조용히 안 붙습니다 —
     없는 템플릿은 None 이 되고, 메일은 그냥 나갑니다."""
-    from src.db.email_templates import AUTO_ACK_FOOTER_KEY
     from src.db.models import Base
 
     module = importlib.import_module("src.db.migrations.0062_auto_ack_footer_logo")
@@ -83,7 +82,7 @@ def test_the_auto_ack_footer_is_seeded_under_the_key_the_ack_asks_for():
     with engine.connect() as conn:
         rows = conn.execute(
             text("SELECT key, body FROM email_templates WHERE key = :k"),
-            {"k": AUTO_ACK_FOOTER_KEY},
+            {"k": "auto_ack_footer"},
         ).all()
     assert len(rows) == 1
     assert "perso.ai/dubbing" in rows[0][1]

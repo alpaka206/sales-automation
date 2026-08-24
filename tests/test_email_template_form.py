@@ -241,7 +241,7 @@ def test_a_signature_cannot_keep_a_language(template_db):
     assert langs == {"signature_ko": "all", "auto_ack_en": "en"}
 
 
-def test_every_row_gets_its_own_line_and_the_count_says_so(template_db):
+def test_removed_auto_ack_rows_are_hidden_from_the_console(template_db):
     """묶지 않습니다 — 목록에 그린 줄 수와 카드의 숫자가 같아야 합니다.
 
     ``auto_ack_en`` 을 ``auto_ack`` 아래로 접어 두었더니 11개 행이 6줄로 그려지고 숫자만
@@ -262,11 +262,10 @@ def test_every_row_gets_its_own_line_and_the_count_says_so(template_db):
         payload = client.get("/api/ui/email-templates").json()
 
     keys = [item["key"] for item in payload["items"] if item["kind"] == "template"]
-    assert sorted(keys) == ["auto_ack", "auto_ack_en"]
+    assert keys == []
     count = next(k["count"] for k in payload["kinds"] if k["key"] == "template")
     assert count == len(keys)
-    # 접는 장치가 돌아오면 이 열이 먼저 돌아옵니다.
-    assert "base_key" not in payload["items"][0]
+    # 접는 장치가 돌아오면 이 필드가 먼저 돌아옵니다.
     assert "base_key" not in FORM.read_text(encoding="utf-8")
 
 
@@ -361,39 +360,42 @@ def test_anything_deletes_now_and_the_screen_says_what_that_costs(template_db):
     assert marked == {"meeting_link": True, "signature_x": True, "my_own_note": False}
 
 
-def test_is_code_resolved_knows_the_shapes_not_just_the_names(template_db):
+def test_is_code_resolved_rejects_removed_auto_ack_keys(template_db):
     """이름 목록만으로는 부족합니다. 접수확인은 언어마다 한 행이고(`auto_ack_ja` 를 만들면
     그 언어 문의가 실제로 읽습니다), 서명은 접두사로 훑습니다. 그리고 `auto_ack_footer` 는
     접수확인의 언어판이 아니라 로고 한 줄이라 두 글자로 못 박습니다."""
     from src.db.email_templates import is_code_resolved
 
-    assert is_code_resolved("auto_ack")
-    assert is_code_resolved("auto_ack_ja")          # 만들면 발송 경로가 읽습니다
-    assert is_code_resolved("auto_ack_footer")      # 이름으로 등록된 행
+    assert not is_code_resolved("auto_ack")
+    assert not is_code_resolved("auto_ack_ja")
+    assert not is_code_resolved("auto_ack_footer")
     assert is_code_resolved("signature_anything")
     assert not is_code_resolved("my_own_note")
     assert not is_code_resolved("auto_ack_japanese")
 
 
-def test_the_key_is_the_operators_to_choose(template_db):
+def test_auto_ack_keys_cannot_be_recreated(template_db):
     """키를 적으면 그대로, 비우면 서명. 발송 경로가 이름으로 꺼내 가므로, 콘솔이 키를 만들어
     주기만 하던 동안에는 `auto_ack_ja` 처럼 **읽히는데 만들 수는 없는** 행이 있었습니다."""
     with TestClient(app) as client:
         assert client.post("/email-templates",
                            data={"name": "일본어 접수확인", "key": "auto_ack_ja",
+                                 "language": "ja", "body": "こんにちは"}).status_code == 400
+        assert client.post("/email-templates",
+                           data={"name": "커스텀 후속", "key": "custom_followup",
                                  "language": "ja", "body": "こんにちは"}).status_code == 200
         assert client.post("/email-templates",
                            data={"name": "새 서명", "body": "김규원"}).status_code == 200
         # 같은 키는 두 번 만들 수 없습니다 — 한 문의가 어느 행을 읽을지 정해지지 않습니다.
         assert client.post("/email-templates",
-                           data={"name": "또", "key": "auto_ack_ja"}).status_code == 400
+                           data={"name": "또", "key": "custom_followup"}).status_code == 400
         # 대문자·공백은 눈으로는 같은데 조회에는 안 걸리는 이름을 만듭니다.
         assert client.post("/email-templates",
                            data={"name": "또", "key": "Auto Ack"}).status_code == 400
 
     with template_db() as session:
         rows = {row.key: row.language for row in session.query(EmailTemplate).all()}
-    assert rows["auto_ack_ja"] == "ja"
+    assert rows["custom_followup"] == "ja"
     # 비우고 만든 것은 서명이고, 서명에는 언어가 없습니다 (0063).
     signature = next(k for k in rows if k.startswith(SIGNATURE_KEY_PREFIX))
     assert rows[signature] == "all"

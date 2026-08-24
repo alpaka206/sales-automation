@@ -482,22 +482,6 @@ def test_an_approved_draft_is_retired_too(db, stages):
         assert session.get(Message, draft_id) is None, "나가지 않은 초안은 지웁니다"
 
 
-def test_a_queued_receipt_acknowledgement_is_never_retired(db, stages):
-    """접수확인은 초안이 아닙니다.
-
-    사람이 검토하는 회신이 아니라 "문의 잘 받았습니다" 자동 응답이고, ``approved`` 로 발송
-    큐에 앉아 있습니다. 단계 한 번 옮기는 것이 아직 안 나간 고객 접수확인을 취소하면, 고객은
-    아무 답도 못 받습니다.
-    """
-    from src.db.models import Message
-
-    ack_id = _draft(db, status="approved", variant="auto_ack")
-    stage_sync.sync_stage_from_hubspot(TICKET, STAGE_IDS["HUBSPOT_TICKET_STAGE_NEGOTIATION"])
-
-    with db() as session:
-        assert session.get(Message, ack_id).status == "approved"
-
-
 def test_a_draft_that_lands_after_the_move_is_retired_without_another_move(db, stages):
     """단계는 이미 옮겨져 있고, 그 뒤에 초안이 생긴 경우.
 

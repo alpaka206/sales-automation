@@ -377,3 +377,4 @@ Message 행도 InboundJob 행도 **만들지 않는다** 는 것이 근거입니
 | `_public_request_uri` | HubSpot Private App 의 Webhook Target URL, 그리고 `tests/test_inbound_webhook_route.py:48` 의 `_sign_request` |
 | `hubspot_backfill.B2B_PIPELINE_ID = "798618015"` | 설정이 아니라 상수(`hubspot_backfill.py:54-55`). 파이프라인을 바꾸면 여기와 모든 `HUBSPOT_TICKET_STAGE_*` 를 같이 |
 | `reconcile_with_hubspot` 의 리포트 키 | `src/api/routes/recovery.py:104-108` 이 `report["retired"]` 를 감사 로그에 씀, 프런트가 `checked/moved/deleted/retired/stale/swept` 를 그대로 표시 |
+> 2026-08-24 변경: 즉시 자동 접수확인은 제거되었습니다. 아래 `auto_ack` 예외 설명은 과거 데이터 호환을 위한 기록입니다.

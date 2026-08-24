@@ -20,15 +20,7 @@ def test_the_routine_machine_entries_are_not_written_any_more():
     inbound = pathlib.Path("src/agents/inbound.py").read_text(encoding="utf-8")
     assert "AI 회신 초안 작성 완료" not in inbound
     assert "자동 접수확인 메일 발송됨" not in inbound
-    # The failure is a different sentence and needs a person.
-    assert "auto_ack_failed" in inbound
-
-
-def test_a_failed_acknowledgement_is_still_on_the_log():
-    from src.api.routes.messages import _ROUTINE_PROGRESS_KINDS
-
-    assert "auto_ack_failed" not in _ROUTINE_PROGRESS_KINDS
-    assert "draft_retired" not in _ROUTINE_PROGRESS_KINDS
+    assert "auto_ack_failed" not in inbound
 
 
 def test_a_stage_move_leaves_no_progress_row():

@@ -152,12 +152,6 @@ services:
         value: "false"
       - key: WEB_UI_USERNAME
         value: admin
-      # The auto-acknowledgement is the ONLY path that emails without a human pressing
-      # approve — it dispatches inline the moment an inbound ticket lands. Left
-      # undeclared it fell back to the code default (true), so the deployed console
-      # mailed on its own. Pinned false until go-live is deliberate.
-      - key: INBOUND_AUTO_ACK_ENABLED
-        value: "false"
       # Webhook is primary; poller is the 10-minute recovery path for missed events.
       - key: SEND_WORKER_ENABLED
         value: "true"

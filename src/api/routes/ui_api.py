@@ -592,7 +592,7 @@ def ui_customer_detail(contact_id: int):
 
 # The two kinds of row in email_templates, told apart by the only thing that decides how
 # a row is used: its key. `signature_*` is what the compose screen's picker offers;
-# everything else is a body the send path fetches by exact name (auto_ack, the reply
+# everything else is a body the send path fetches by exact name (for example the reply
 # format). Flat, the list mixed the two and gave no clue which was which.
 TEMPLATE_KINDS: tuple[tuple[str, str], ...] = (
     ("signature", "서명"),
@@ -614,9 +614,8 @@ def _template_kind(key: str) -> str:
 def ui_email_templates():
     """Grouped by kind, and **one entry per row** inside a kind.
 
-    ``auto_ack`` and ``auto_ack_en`` used to collapse into a single entry with the
-    language picked inside it — one thing shown once. They are not one thing. The send
-    path resolves them by exact key, and the ``_en`` row is the ONLY one an English
+    Language-specific rows used to collapse into a single entry with the language picked
+    inside it. The send path resolves them by exact key, and the ``_en`` row is the ONLY
     inquiry reads: an operator who edited 답변 메일 형식 edited ``reply_format`` and
     English replies went on using the untouched ``reply_format_en``, with nothing on
     screen to say so. The count here was the tell — it counted rows (11) while the list
@@ -642,7 +641,12 @@ def ui_email_templates():
         policy_count = (
             session.query(PolicySource).filter(PolicySource.status != DELETED).count()
         )
-        rows = session.query(EmailTemplate).order_by(EmailTemplate.updated_at.desc()).all()
+        rows = (
+            session.query(EmailTemplate)
+            .filter(~EmailTemplate.key.like("auto_ack%"))
+            .order_by(EmailTemplate.updated_at.desc())
+            .all()
+        )
         items = [
             {
                 "id": row.id,

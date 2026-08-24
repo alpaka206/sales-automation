@@ -16,7 +16,6 @@ from sqlalchemy import (
     Numeric,
     String,
     Text,
-    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -176,13 +175,6 @@ class Message(Base):
         Index("ix_messages_status_scheduled", "status", "scheduled_at"),
         Index("ix_messages_status_claimed", "status", "send_claimed_at"),
         Index(
-            "ux_messages_one_auto_ack_per_conversation",
-            "conversation_id",
-            unique=True,
-            sqlite_where=text("prompt_variant = 'auto_ack'"),
-            postgresql_where=text("prompt_variant = 'auto_ack'"),
-        ),
-        Index(
             "ix_messages_post_send_sync",
             "status",
             "post_send_synced_at",
@@ -210,7 +202,7 @@ class ConversationProgress(Base):
     The operator's rule: existing entries are NEVER edited — only new ones are
     appended. So there is INSERT-only code against this table (no UPDATE/DELETE),
     and each row stamps its own ``created_at``. ``kind`` is a short machine tag
-    (inbound / auto_ack / draft / reply / note), ``detail`` the human line shown.
+    (inbound / draft / reply / note; legacy rows may use auto_ack), ``detail`` the human line shown.
     """
 
     __tablename__ = "conversation_progress"

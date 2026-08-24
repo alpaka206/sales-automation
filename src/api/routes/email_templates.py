@@ -33,7 +33,7 @@ _KEY_RE = re.compile(r"^[a-z][a-z0-9_]{0,99}$")
 def _generate_key(session, name: str) -> str:
     """키를 안 적었을 때 만들어 주는 이름 — **서명**으로 만듭니다.
 
-    키는 코드 참조입니다: ``auto_ack``, 답변 형식, 링크 두 개는 발송 경로가 정확한 이름으로
+    키는 코드 참조입니다: 답변 형식과 링크는 발송 경로가 정확한 이름으로
     꺼내 가고, 검토 화면의 고르개는 ``signature_`` 아래를 훑습니다. 이제 콘솔에서 아무 키나
     적을 수 있지만(운영자 결정), 비워 두면 **거의 언제나 서명**이라 그 접두사를 붙입니다 —
     그래야 만든 즉시 어딘가에서 읽힙니다. 다른 것을 만들 생각이면 키를 적으면 됩니다.
@@ -104,6 +104,11 @@ async def email_templates_create(
             "키는 영문 소문자로 시작하고 소문자·숫자·밑줄만 쓸 수 있습니다</div>",
             status_code=400,
         )
+    if key.startswith("auto_ack"):
+        return HTMLResponse(
+            '<div class="text-red-600 text-sm">자동 접수확인 기능은 제거되었습니다</div>',
+            status_code=400,
+        )
     with SessionLocal() as session:
         if key and session.query(EmailTemplate).filter_by(key=key).first():
             return HTMLResponse(
@@ -152,8 +157,8 @@ async def email_templates_update(
     described a template that exists and does nothing. Saving revives a dormant row
     rather than leaving it unreachable now that nothing can set the value back.
 
-    ``language`` is still posted — ``auto_ack`` and ``auto_ack_en`` really are one mail in
-    two languages — but a SIGNATURE is pinned to ``all`` no matter what arrives. The screen
+    ``language`` is still posted for language-specific rows, but a SIGNATURE is pinned to
+    ``all`` no matter what arrives. The screen
     stopped asking (0063), so anything posted for one is a stale value from a form that no
     longer has that field, and writing it back would resurrect a column the operator can
     neither see nor change. An ABSENT value leaves the row's language alone; it used to
@@ -250,5 +255,4 @@ async def email_templates_restore(tpl_id: int, request: Request):
         _snapshot_revision(session, tpl, change_note="restored", edited_by=editor)
         session.commit()
     return HTMLResponse('<div class="text-green-600 text-sm font-medium">되돌렸습니다</div>')
-
 

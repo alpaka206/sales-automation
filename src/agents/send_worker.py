@@ -100,7 +100,6 @@ def _database_send_counts(now: datetime | None = None) -> tuple[int, int]:
 SEND_TRANSIENT_MAX_RETRIES = 3
 SEND_LEASE_SECONDS = 15 * 60
 POST_SEND_SYNC_MAX_RETRIES = 8
-AUTO_ACK_QUEUE_MAX_ATTEMPTS = 5
 
 
 async def _post_send_bookkeeping(session, msg, conv, message_id: int) -> None:
@@ -245,10 +244,8 @@ async def _send_one(message_id: int) -> bool:
                     # 돌아가라」가 아닙니다. 아직 아무도 안 옮긴 건만 올립니다 — 협상·수주·
                     # 종료로 이미 가 있는 건을 여기서 되돌리면, 허브스팟이 기준인 값을
                     # 우리가 덮어쓰고 다음 스윕이 그걸 또 되돌립니다.
-                    if msg.prompt_variant != "auto_ack" and conv.stage in _ADVANCES_FROM:
+                    if conv.stage in _ADVANCES_FROM:
                         conv.stage = "meeting_link_sent"
-                if msg.prompt_variant == "auto_ack":
-                    msg.post_send_synced_at = msg.sent_at
                 session.commit()
                 if delivered:
                     # 발송 한도는 SMTP 를 실제로 쓴 것만 셉니다. 안 보낸 건까지 세면 아무도
@@ -259,16 +256,15 @@ async def _send_one(message_id: int) -> bool:
                 # 였는데, FORCE_TEST_RECIPIENT 가 켜져 있는 한 test_mode 는 **항상** 참이라
                 # HubSpot 티켓도 워크북도 영영 움직이지 않았습니다. 각 목적지는 아래에서
                 # guard_external_write 가 따로 막습니다 — 여기서 두 번 막을 일이 아닙니다.
-                if msg.prompt_variant != "auto_ack":
-                    try:
-                        await _post_send_bookkeeping(session, msg, conv, message_id)
-                    except Exception:
-                        # Delivery is already committed. A bookkeeping outage must
-                        # never turn a delivered email into `send_failed`.
-                        logger.exception(
-                            "Post-send bookkeeping failed for message %d; queued for retry.",
-                            message_id,
-                        )
+                try:
+                    await _post_send_bookkeeping(session, msg, conv, message_id)
+                except Exception:
+                    # Delivery is already committed. A bookkeeping outage must
+                    # never turn a delivered email into `send_failed`.
+                    logger.exception(
+                        "Post-send bookkeeping failed for message %d; queued for retry.",
+                        message_id,
+                    )
                 logger.info("Worker sent message %d.", message_id)
                 return True
             except SMTPDeliveryUnknown as exc:
@@ -306,25 +302,9 @@ async def _send_one(message_id: int) -> bool:
         session.rollback()
         msg = session.get(Message, message_id)
         if msg:
-            retry_auto_ack = (
-                isinstance(last_exc, SMTPTransientError)
-                and msg.prompt_variant == "auto_ack"
-                and msg.send_attempts < AUTO_ACK_QUEUE_MAX_ATTEMPTS
-            )
-            msg.status = "approved" if retry_auto_ack else "send_failed"
+            msg.status = "send_failed"
             msg.send_claimed_at = None
-            if retry_auto_ack:
-                delay = min(60 * (2 ** max(msg.send_attempts - 1, 0)), 15 * 60)
-                msg.scheduled_at = datetime.now(timezone.utc) + timedelta(seconds=delay)
             session.commit()
-            if retry_auto_ack:
-                logger.warning(
-                    "Auto-ack %d requeued after transient SMTP failure (attempt %d/%d).",
-                    message_id,
-                    msg.send_attempts,
-                    AUTO_ACK_QUEUE_MAX_ATTEMPTS,
-                )
-                return False
         logger.error("Worker failed to send message %d: %s", message_id, last_exc)
         return False
     finally:
@@ -336,7 +316,11 @@ def _claim_id(message_id: int) -> bool:
     with SessionLocal() as session:
         result = session.execute(
             update(Message)
-            .where(Message.id == message_id, Message.status == "approved")
+            .where(
+                Message.id == message_id,
+                Message.status == "approved",
+                (Message.prompt_variant.is_(None)) | (Message.prompt_variant != "auto_ack"),
+            )
             .values(
                 status=_WORKER_ID,
                 send_claimed_at=datetime.now(timezone.utc),
@@ -360,6 +344,7 @@ def _claim_ready_id() -> int | None:
             session.query(Message.id)
             .filter(
                 Message.status == "approved",
+                (Message.prompt_variant.is_(None)) | (Message.prompt_variant != "auto_ack"),
                 (Message.scheduled_at <= now) | (Message.scheduled_at.is_(None)),
             )
             .order_by(Message.scheduled_at.asc().nullsfirst())
@@ -441,6 +426,7 @@ async def _retry_post_send_syncs(limit: int = 20) -> int:
             session.query(Message.id)
             .filter(
                 Message.status == "sent",
+                (Message.prompt_variant.is_(None)) | (Message.prompt_variant != "auto_ack"),
                 Message.post_send_synced_at.is_(None),
                 Message.post_send_sync_attempts < POST_SEND_SYNC_MAX_RETRIES,
             )

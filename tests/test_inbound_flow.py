@@ -32,15 +32,6 @@ def _clear_dedup():
 
 
 @pytest.fixture(autouse=True)
-def _no_auto_ack(monkeypatch):
-    """Disable the immediate auto-ack here so message-count assertions stay exact.
-
-    The auto-ack is covered on its own in test_inbound_auto_ack.py.
-    """
-    monkeypatch.setattr(settings, "INBOUND_AUTO_ACK_ENABLED", False)
-
-
-@pytest.fixture(autouse=True)
 def _isolated_knowledge_db(db_session, monkeypatch):
     """Point knowledge loader at the test DB session so it starts empty."""
     factory = lambda: db_session  # noqa: E731
@@ -278,7 +269,7 @@ def test_durable_retry_resumes_linked_placeholder(db_session, db_session_factory
     }
     with patch("src.agents.inbound.SessionLocal", db_session_factory):
         agent = InboundAgent(llm=_mock_llm(), hubspot=None)
-        message_id, _, _, _ = agent._persist_placeholder(
+        message_id, _, _ = agent._persist_placeholder(
             info, "email", "en", inbound_job_id=job.id
         )
 

@@ -169,25 +169,14 @@ async def test_send_one_success(_db: Session, monkeypatch) -> None:
     mock_send.assert_awaited_once()
 
 
-@pytest.mark.asyncio
-async def test_auto_ack_transient_failure_is_requeued(_db: Session, monkeypatch) -> None:
-    from src.integrations.senders.smtp import SMTPTransientError
-
+def test_legacy_auto_ack_is_never_claimed(_db: Session) -> None:
     mid = _create_message(_db, "approved", None, prompt_variant="auto_ack")
-    send_worker._claim_ready_id()
-    monkeypatch.setattr(
-        "src.integrations.senders.send",
-        AsyncMock(side_effect=SMTPTransientError("temporary")),
-    )
-    monkeypatch.setattr(send_worker.asyncio, "sleep", AsyncMock())
 
-    assert await send_worker._send_one(mid) is False
+    assert send_worker._claim_ready_id() is None
+    assert send_worker._claim_id(mid) is False
 
     _db.expire_all()
-    msg = _db.get(Message, mid)
-    assert msg.status == "approved"
-    assert msg.scheduled_at is not None
-    assert msg.send_attempts == 1
+    assert _db.get(Message, mid).status == "approved"
 
 
 @pytest.mark.asyncio
@@ -206,45 +195,6 @@ async def test_unknown_smtp_outcome_is_quarantined_without_retry(
     assert _db.get(Message, mid).status == "delivery_unknown"
     assert _db.get(Message, mid).smtp_message_id is not None
     assert send.await_count == 1
-
-
-@pytest.mark.asyncio
-async def test_auto_ack_transient_retry_is_bounded(_db: Session, monkeypatch) -> None:
-    from src.integrations.senders.smtp import SMTPTransientError
-
-    mid = _create_message(_db, "approved", None, prompt_variant="auto_ack")
-    msg = _db.get(Message, mid)
-    msg.send_attempts = send_worker.AUTO_ACK_QUEUE_MAX_ATTEMPTS - 1
-    _db.commit()
-    send_worker._claim_ready_id()
-    monkeypatch.setattr(
-        "src.integrations.senders.send",
-        AsyncMock(side_effect=SMTPTransientError("temporary")),
-    )
-    monkeypatch.setattr(send_worker.asyncio, "sleep", AsyncMock())
-
-    assert await send_worker._send_one(mid) is False
-
-    _db.expire_all()
-    assert _db.get(Message, mid).status == "send_failed"
-
-
-@pytest.mark.asyncio
-async def test_auto_ack_success_does_not_advance_pipeline(_db: Session, monkeypatch) -> None:
-    mid = _create_message(_db, "approved", None, prompt_variant="auto_ack")
-    send_worker._claim_ready_id()
-    monkeypatch.setattr("src.integrations.senders.send", AsyncMock())
-    bookkeeping = AsyncMock()
-    monkeypatch.setattr(send_worker, "_post_send_bookkeeping", bookkeeping)
-
-    assert await send_worker._send_one(mid) is True
-
-    _db.expire_all()
-    msg = _db.get(Message, mid)
-    assert msg.status == "sent"
-    assert msg.post_send_synced_at is not None
-    assert msg.conversation.stage != "meeting_link_sent"
-    bookkeeping.assert_not_awaited()
 
 
 @pytest.mark.asyncio
