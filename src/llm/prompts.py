@@ -178,7 +178,7 @@ def canonicalize_contact_links(body: str, language: str | None = None) -> str:
     links sit. Existing prose such as "schedule at Calendly or contact us via
     WhatsApp" is removed as one line, then the configured URLs are appended with
     fixed labels. The function is intentionally a no-op for messages with no contact
-    link at all (for example the automatic acknowledgement).
+    link at all.
     """
     if not body:
         return body

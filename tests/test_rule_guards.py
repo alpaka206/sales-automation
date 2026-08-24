@@ -5,6 +5,8 @@ from __future__ import annotations
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import pytest
+
 from src.common.pricing_guard import contains_price, strip_price_sentences
 from src.common.subjects import (
     generic_inquiry_subject,
@@ -126,15 +128,14 @@ def _msg(**kw):
     return SimpleNamespace(**base)
 
 
-def test_send_guard_translates_when_language_differs():
-    from src.integrations.senders import enforce_send_language
+def test_send_guard_refuses_unreviewed_translation():
+    from src.integrations.senders import SendLanguageMismatch, enforce_send_language
 
     msg = _msg(language="ko", target_language="en")
-    with patch("src.llm.translate.translate_to", return_value="Hello, here is our reply.") as tx:
-        enforce_send_language(msg)
-    tx.assert_called_once()
-    assert msg.body == "Hello, here is our reply."
-    assert msg.language == "en"
+    with patch("src.llm.translate.translate_to") as tx:
+        with pytest.raises(SendLanguageMismatch, match="requires reviewed translation"):
+            enforce_send_language(msg)
+    tx.assert_not_called()
 
 
 def test_send_guard_noop_when_already_target():
@@ -145,6 +146,14 @@ def test_send_guard_noop_when_already_target():
         enforce_send_language(msg)
     tx.assert_not_called()
     assert msg.body == "Hello."
+
+
+def test_send_guard_refuses_korean_body_with_stale_target_metadata():
+    from src.integrations.senders import SendLanguageMismatch, enforce_send_language
+
+    msg = _msg(language="en", target_language="en", body="안녕하세요. 문의 감사합니다.")
+    with pytest.raises(SendLanguageMismatch):
+        enforce_send_language(msg)
 
 
 def test_send_guard_noop_without_target():

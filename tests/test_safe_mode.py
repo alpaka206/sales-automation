@@ -376,7 +376,7 @@ def test_send_smtp_forces_recipient_to_ronald(safe, monkeypatch):
 
 
 # ---- The two email constants, as SHIPPED --------------------------------------
-# Sending is on and pinned to the test address. Both values are read out of the source
+# Sending is on for the real recipient. Both values are read out of the source
 # file rather than imported, so a monkeypatch elsewhere in the suite cannot make these
 # pass: what is asserted here is what the repository actually ships.
 
@@ -401,25 +401,10 @@ def _shipped_constant(name: str):
     )
 
 
-def test_email_ships_off_while_everything_else_writes_for_real():
-    """The current posture, asserted from source: HubSpot and the Sheet are live and
-    nothing is emailed.
-
-    Two layers, and both are code rather than env — a deployment dashboard can flip
-    neither. EMAIL_SENDING_ENABLED is the no-send switch; FORCE_TEST_RECIPIENT stays on
-    underneath it so that turning sending back on resumes delivery pinned to one address
-    instead of reaching customers. Going live on email is therefore still a reviewed
-    change, in two places.
-    """
-    assert _shipped_constant("EMAIL_SENDING_ENABLED") is False, (
-        "email sending was turned back on in source — the operator's posture is that "
-        "HubSpot and the Sheet write for real and NOTHING is emailed."
-    )
-    assert _shipped_constant("FORCE_TEST_RECIPIENT") is True, (
-        "FORCE_TEST_RECIPIENT was turned off in source — every email would go to its "
-        "real recipient. Clear SEND_OVERRIDE_EMAIL in the same change only if that is "
-        "genuinely go-live."
-    )
+def test_email_ships_live_without_a_forced_test_recipient():
+    """Human-approved drafts ship to their real recipient in the deployed posture."""
+    assert _shipped_constant("EMAIL_SENDING_ENABLED") is True
+    assert _shipped_constant("FORCE_TEST_RECIPIENT") is False
 
 
 def test_no_send_switch_blocks_smtp_entirely(no_send, monkeypatch):

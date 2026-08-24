@@ -79,6 +79,36 @@ def test_approve_freezes_subject_and_signature_in_same_commit(db_with_message) -
     assert result.signature_key == "none"
 
 
+def test_foreign_reply_requires_reviewed_translation(db_with_message) -> None:
+    session, _Session, msg_id = db_with_message
+    msg = session.get(Message, msg_id)
+    msg.language = "ko"
+    msg.target_language = "en"
+    msg.body = "안녕하세요. 문의 주셔서 감사합니다."
+    session.commit()
+
+    with patch("src.agents.approval.SessionLocal", return_value=session):
+        with pytest.raises(ApprovalError, match="번역하기"):
+            approve(msg_id, approver="web:user")
+
+    session.expire_all()
+    assert session.get(Message, msg_id).status == "pending_approval"
+
+
+def test_reviewed_foreign_translation_can_be_approved(db_with_message) -> None:
+    session, _Session, msg_id = db_with_message
+    msg = session.get(Message, msg_id)
+    msg.language = "en"
+    msg.target_language = "en"
+    msg.body = "Hello. Thank you for your inquiry."
+    session.commit()
+
+    with patch("src.agents.approval.SessionLocal", return_value=session):
+        result = approve(msg_id, approver="web:user")
+
+    assert result.status == "approved"
+
+
 def test_reject(db_with_message) -> None:
     session, Session, msg_id = db_with_message
 

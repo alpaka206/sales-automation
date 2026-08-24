@@ -56,15 +56,20 @@ def test_a_korean_body_is_never_stamped_with_the_send_language():
 
 
 def test_the_send_guard_still_catches_a_korean_body_marked_as_sent_language():
-    """Belt and braces, and it is what kept the bug from reaching a customer. The guard
-    translates when the metadata says target-language but the script says Korean."""
-    def returns_without_translating(body: str, target: str) -> bool:
-        # src/integrations/senders: `if not (target != "ko" and is_mostly_korean(body))`
-        return not (target != "ko" and is_mostly_korean(body))
+    """The delivery chokepoint blocks stale metadata instead of translating unseen text."""
+    from types import SimpleNamespace
 
-    assert returns_without_translating(KOREAN, "en") is False   # stale flag -> translate
-    assert returns_without_translating(ENGLISH, "en") is True   # genuinely English -> send
-    assert returns_without_translating(KOREAN, "ko") is True    # Korean target -> send
+    from src.integrations.senders import SendLanguageMismatch, enforce_send_language
+
+    message = SimpleNamespace(
+        id=1,
+        body=KOREAN,
+        language="en",
+        target_language="en",
+        prompt_variant=None,
+    )
+    with pytest.raises(SendLanguageMismatch):
+        enforce_send_language(message)
 
 
 # ----- 미리 해 두는 번역: 한국어가 아닌 **고객 문의** 하나뿐, 그리고 화면 밖에서 -----

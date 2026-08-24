@@ -125,6 +125,7 @@ def test_inbound_handle_creates_db_rows(db_session) -> None:
     assert inbound_msg[0].status == "received"
     assert len(reply_msg) == 1
     assert reply_msg[0].status == "pending_approval"
+    assert not any(m.prompt_variant == "auto_ack" for m in messages)
     # Subject is built in code as "RE: <customer subject or localized generic>",
     # never the raw model subject.
     assert reply_msg[0].subject == "RE: Bulk dubbing quote"

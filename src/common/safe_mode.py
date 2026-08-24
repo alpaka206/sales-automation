@@ -1,35 +1,9 @@
-"""Global pre-launch safety switch — the operator's hard "대전제".
+"""External-write and outbound-email safety controls.
 
-Until the service goes live, NOTHING may touch the outside world in a way that
-could harm real data or reach a real customer:
-
-- **HubSpot writes are hard-blocked.** No ticket-stage move, contact update,
-  inbound-status write, or timeline email is ever sent. The real HubSpot account
-  cannot change no matter what testing / migration happens.
-- **Google Sheets writes are disabled**, so test rows never pollute the shared
-  sales workbook.
-- **Every outbound email is force-routed to a single test recipient**
-  (``ronald@estsoft.com`` unless ``SEND_OVERRIDE_EMAIL`` overrides it), so no
-  customer can ever be emailed — even if the env override is later cleared.
-
-Email is a separate axis from this master switch, and it is the ONE thing still held
-back: ``EMAIL_SENDING_ENABLED = False`` means nothing is emailed at all. HubSpot and
-the Sheet are live; only delivery is off. See the EMAIL block below.
-
-Reads stay ON (HubSpot GET, Gemini, homepage fetch) so the whole pipeline can be
-exercised against real inbound data with zero external side effects.
-
-The SAFE state is the DEFAULT. Going live is a deliberate, single opt-in:
-set ``LIVE_EXTERNAL_WRITES=true`` (and clear ``SEND_OVERRIDE_EMAIL`` for real
-delivery). If the flag is unset, misspelled, or config fails to load, the system
-stays SAFE. This is enforced in deterministic code, not prompts — every external
-write/send chokepoint routes through this module; ``tests/test_safe_mode.py``
-pins the guaranteed behavior.
-
-Once live, ``LIVE_HUBSPOT_WRITES`` and ``LIVE_SHEETS_WRITES`` (both default true)
-turn the two destinations on and off independently, so one can go live before the
-other. They are strictly SUBORDINATE: neither can permit a write while
-``LIVE_EXTERNAL_WRITES`` is false, so the master remains the one thing to check.
+The Render production blueprint enables live external writes and real-recipient SMTP.
+The in-code settings remain fail-safe for other deployments: disabling
+``LIVE_EXTERNAL_WRITES`` blocks CRM/Sheet writes and reroutes email, while the two module
+constants provide an emergency hard stop and forced test-recipient mode.
 """
 
 from __future__ import annotations
@@ -46,47 +20,19 @@ logger = logging.getLogger(__name__)
 PRELAUNCH_TEST_RECIPIENT = "ronald@estsoft.com"
 
 # --------------------------------------------------------------------------- #
-# EMAIL: sending is OFF. Everything else is live.
+# EMAIL: production delivery is ON.
 #
-# 2026-08-04, the operator's decision: "메일 발송되는 것만 막고 나머지는 모두 다 되도록."
-# Ticket stages, contact updates and the sales workbook all write for real; no message
-# leaves this process, not even to the test address.
+# 2026-08-24, the operator's decision: a human-approved draft is delivered to the
+# customer. Immediate inbound acknowledgements were removed separately; enabling this
+# switch cannot recreate them because no auto-ack message is produced or claimable.
 #
-# 2026-07-30 (superseded): sending was ON and pinned to ronald@estsoft.com.
-#
-# Both switches are module constants and NOT env vars. Env is exactly what we could
-# not trust: LIVE_EXTERNAL_WRITES / SEND_OVERRIDE_EMAIL live in a Render dashboard
-# nobody can audit from here, and scripts/render_env_sync.py can overwrite the whole
-# set from a local .env. A constant cannot be flipped by deployment config.
-#
-#   EMAIL_SENDING_ENABLED  False = nothing is emailed at all, not even to the test
-#                          address (the lowest chokepoint, below the reroute, so it
-#                          catches callers that bypass senders.send()). True = SMTP
-#                          delivery happens.
-#                          블록은 **실패가 아닙니다.** 운영자가 검토 완료·발송을 누르면
-#                          메일만 안 나가고 나머지는 전부 그대로 일어납니다 — 단계가
-#                          답변 발송으로 옮겨지고 HubSpot 티켓과 워크북도 따라갑니다
-#                          (send_worker._send_one 이 SMTPSendingDisabled 를 잡습니다).
-#                          행은 `sent` 가 아니라 `test_sent` 로 남습니다: 고객에게 정말
-#                          간 것만 `sent` 여야 합니다. 고객 타임라인에 "답장했다" 기록도
-#                          남지 않습니다 — senders.send() 가 SMTP **뒤에** 쓰기 때문에
-#                          거기까지 가지 못합니다.
-#   FORCE_TEST_RECIPIENT   True = every message goes to PRELAUNCH_TEST_RECIPIENT and
-#                          nowhere else. SEND_OVERRIDE_EMAIL is IGNORED while this is
-#                          on — the operator's instruction is "ronald@estsoft.com 으로만",
-#                          and honouring an env address here would mean a deployment
-#                          dashboard could still redirect mail somewhere unreviewed.
-#                          This holds EVEN IN LIVE MODE, which is the point.
-#
-# REACHING REAL CUSTOMERS is therefore a deliberate two-place act: set
-# FORCE_TEST_RECIPIENT = False here AND clear SEND_OVERRIDE_EMAIL. Nothing in a
-# deployment dashboard can do the first one.
+# These are code-level emergency controls, intentionally separate from deployment env.
+# ``False`` for EMAIL_SENDING_ENABLED stops SMTP at the lowest chokepoint. ``True`` for
+# FORCE_TEST_RECIPIENT reroutes every message to PRELAUNCH_TEST_RECIPIENT. Production is
+# the inverse: SMTP enabled and no forced recipient.
 # --------------------------------------------------------------------------- #
-EMAIL_SENDING_ENABLED = False
-# Kept ON underneath the no-send switch, deliberately. It is the second layer: if
-# EMAIL_SENDING_ENABLED is ever flipped back without thinking, delivery resumes pinned to
-# one address rather than reaching customers. Two mistakes are needed, not one.
-FORCE_TEST_RECIPIENT = True
+EMAIL_SENDING_ENABLED = True
+FORCE_TEST_RECIPIENT = False
 
 
 def email_sending_enabled() -> bool:

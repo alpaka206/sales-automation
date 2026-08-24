@@ -129,15 +129,17 @@ services:
       - key: INTERNAL_API_TOKEN
         generateValue: true
 
-      # ----- Pre-launch safety -----
-      # LIVE_EXTERNAL_WRITES is intentionally NOT declared here: the code default
-      # is false (SAFE) — all HubSpot writes blocked, every email forced to the
-      # test recipient. To GO LIVE, add LIVE_EXTERNAL_WRITES=true in the Render
-      # dashboard (a dashboard var persists across deploys) AND clear
-      # SEND_OVERRIDE_EMAIL. Until then the webhook only detects + drafts.
-      # LIVE_HUBSPOT_WRITES / LIVE_SHEETS_WRITES are likewise undeclared; they default
-      # to true and only matter once the master is on, for going live on one
-      # destination before the other. Neither can override the master.
+      # ----- Production delivery and external synchronization -----
+      # Only human-approved drafts are delivered. Immediate inbound auto-replies are
+      # absent from the application and cannot be claimed by the send worker.
+      - key: LIVE_EXTERNAL_WRITES
+        value: "true"
+      - key: LIVE_HUBSPOT_WRITES
+        value: "true"
+      - key: LIVE_SHEETS_WRITES
+        value: "true"
+      - key: SEND_OVERRIDE_EMAIL
+        value: ""
 
       # ----- Sensible defaults (override in dashboard if needed) -----
       - key: GEMINI_MODEL

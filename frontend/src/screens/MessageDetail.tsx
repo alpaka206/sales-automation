@@ -135,6 +135,13 @@ const MARKS: { key: string; mark: ReactNode; wrap: [string, string]; title: stri
     title: "링크 ([글자](주소)) — 고른 글자가 링크 글자가 됩니다" },
 ];
 
+function isMostlyKoreanText(text: string): boolean {
+  const letters = text.match(/\p{L}/gu) ?? [];
+  if (letters.length === 0) return false;
+  const hangul = letters.filter((ch) => /[가-힣ᄀ-ᇿ㄰-㆏]/u.test(ch)).length;
+  return hangul / letters.length >= 0.5;
+}
+
 export function MessageDetail() {
   // 같은 화면에 문이 둘입니다. `/messages/:id` 는 회신 및 검토 목록에서 **그 초안**을 열 때,
   // `/tickets/:conversationId` 는 보드 카드에서 **티켓**을 열 때 — 뒤엣것은 메일이 하나도
@@ -173,6 +180,7 @@ export function MessageDetail() {
   const [subject, setSubject] = useState("");
   const [body, setBody] = useState("");
   const [signature, setSignature] = useState("");
+  const [draftLanguage, setDraftLanguage] = useState("");
   const [note, setNote] = useState("");
   const [preview, setPreview] = useState<string | null>(null);
   const [confirmSend, setConfirmSend] = useState(false);
@@ -233,6 +241,7 @@ export function MessageDetail() {
     setSubject(data.msg.subject);
     setBody(data.msg.body);
     setSignature(data.msg.signature_key);
+    setDraftLanguage(data.msg.language || "");
   }
 
   /** 본문에서 고른 글자를 표기로 감쌉니다. 아무것도 안 골랐으면 커서 자리에 껍데기만
@@ -312,6 +321,10 @@ export function MessageDetail() {
       : []),
   ].sort((a, b) => (a.at || "").localeCompare(b.at || ""));
   const canTranslate = !!msg?.target_language && msg.target_language !== "ko";
+  const translationRequired = canTranslate && (
+    draftLanguage.toLowerCase() !== msg?.target_language?.toLowerCase()
+    || isMostlyKoreanText(body)
+  );
   // Won 과 Lost 에만 있습니다. 목록도 「이 단계에 고르개가 붙는가」도 서버가 정합니다 —
   // 보드 카드와 같은 출처라 두 화면이 다른 값을 내놓을 수 없습니다.
   const dealOptions = ticket.stage ? data.deal_details[ticket.stage] : undefined;
@@ -361,6 +374,7 @@ export function MessageDetail() {
     if (result.error) return setNote(result.error);
     setBody(result.body);
     if (result.subject !== undefined) setSubject(result.subject);
+    if (result.language) setDraftLanguage(result.language);
     setNote(result.translated ? `번역됨 → ${result.language}` : "번역할 내용이 없습니다.");
   }
 
@@ -491,15 +505,16 @@ export function MessageDetail() {
                     </select>
 
                     <div className="action-bar">
-                      {canTranslate && (
+                      {translationRequired ? (
                         <ActionButton className="btn btn--subtle" pending="번역 중" onClick={translate}>
                           <Icon name="translate" size={15} /> 번역하기 ({msg.target_language})
                         </ActionButton>
+                      ) : (
+                        <button type="button" className="btn btn--ok"
+                                aria-haspopup="dialog" onClick={() => setConfirmSend(true)}>
+                          <Icon name="check" size={15} /> 검토 완료 · 발송
+                        </button>
                       )}
-                      <button type="button" className="btn btn--ok"
-                              aria-haspopup="dialog" onClick={() => setConfirmSend(true)}>
-                        <Icon name="check" size={15} /> 검토 완료 · 발송
-                      </button>
                       <ActionButton className="btn btn--subtle" pending="여는 중" onClick={openPreview}>
                         <Icon name="file" size={15} /> 미리보기
                       </ActionButton>
@@ -898,10 +913,7 @@ export function MessageDetail() {
             <>
               승인 즉시 <strong>{msg.channel}</strong>로 발송됩니다.
               {msg.to_address && <> 수신자: <span className="mono">{msg.to_address}</span>.</>}
-              {canTranslate && (
-                <><br />발송 본문은 문의 언어({msg.target_language})로 나갑니다 — 아직 한국어라면
-                발송 직전 자동 번역됩니다.</>
-              )}
+              {msg.target_language && <><br />확인한 {msg.target_language} 번역문이 그대로 발송됩니다.</>}
               {" 이 동작은 되돌릴 수 없습니다."}
             </>
           }

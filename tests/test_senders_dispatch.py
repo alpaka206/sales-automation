@@ -19,7 +19,7 @@ def _make_message(**overrides) -> MagicMock:
     msg.body = overrides.get("body", "Hello")
     msg.language = overrides.get("language", "ko")
     msg.target_language = overrides.get("target_language", None)
-    msg.prompt_variant = overrides.get("prompt_variant", "auto_ack")
+    msg.prompt_variant = overrides.get("prompt_variant", None)
     msg.signature_key = overrides.get("signature_key", "none")
     msg.conversation = MagicMock()
     msg.conversation.contact_id = overrides.get("contact_id", 100)
@@ -45,8 +45,8 @@ async def test_a_rerouted_send_is_still_written_to_the_history(
 ) -> None:
     """A test send is a gap in the customer's history if it is not logged.
 
-    While FORCE_TEST_RECIPIENT is pinned on, EVERY send is rerouted, so skipping the log
-    for rerouted mail meant the HubSpot timeline recorded nothing at all. What gets logged
+    When FORCE_TEST_RECIPIENT is on, every send is rerouted, so skipping the log for
+    rerouted mail would leave the HubSpot timeline empty. What gets logged
     is the copy that actually went out — subject marker included, so it cannot be mistaken
     for a real reply — while the engagement id is stamped on the original row.
     """

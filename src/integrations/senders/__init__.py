@@ -13,6 +13,10 @@ from .smtp import send_smtp
 logger = logging.getLogger(__name__)
 
 
+class SendLanguageMismatch(RuntimeError):
+    """Raised when an approved message has not completed operator-reviewed translation."""
+
+
 def _canonicalize_reply_links(message: Message, language: str) -> None:
     if getattr(message, "prompt_variant", None) == "auto_ack":
         return
@@ -24,19 +28,17 @@ def _canonicalize_reply_links(message: Message, language: str) -> None:
 
 
 def enforce_send_language(message: Message) -> None:
-    """Final code guard: a customer reply leaves in the right language, washed.
+    """Final guard: only an already reviewed target-language body may leave.
 
     The operator's hard rule is that a reply must go out in the inquiry's language.
     Our code sets ``message.language`` at every step (draft = 'ko', translate button
-    = target, auto-ack = its final language), and ``message.target_language`` holds
+    = target), and ``message.target_language`` holds
     the language it MUST be sent in. So:
 
     - every reply body is whitespace/format-normalized (text wash);
-    - if a target is set and the body isn't in it yet (e.g. the operator hit send on
-      the Korean draft without translating), it is translated to the target here so
-      a wrong-language reply can never leave.
-
-    Translation failures are logged and the body is sent as-is rather than dropped.
+    Translation belongs to the explicit review-screen button. If an old API client or
+    stale approved row bypasses the approval guard, fail closed instead of translating
+    unseen text during delivery.
     """
     if isinstance(message.body, str):
         message.body = text_wash(message.body)
@@ -50,33 +52,12 @@ def enforce_send_language(message: Message) -> None:
     current = message.language if isinstance(message.language, str) else ""
     current = current.lower()
 
-    from ...llm.translate import is_mostly_korean, translate_to
+    from ...llm.translate import is_mostly_korean
 
-    if current == target:
-        # Metadata says we're already in the target. Trust it, EXCEPT the cheap
-        # script sanity check: if the target isn't Korean yet the body is actually
-        # predominantly Korean (e.g. the operator translated, then re-typed Korean),
-        # the metadata is stale — fall through and translate. No LLM call here.
-        if not (target != "ko" and is_mostly_korean(message.body)):
-            _canonicalize_reply_links(message, target)
-            return
-
-    translated = translate_to(message.body, target)
-    if translated:
-        message.body = text_wash(translated)
-        message.language = target
-        logger.info(
-            "Send guard: translated message %s body from '%s' to target '%s'.",
-            message.id,
-            current or "?",
-            target,
-        )
-    else:
-        logger.warning(
-            "Send guard: translation of message %s to '%s' failed; sending as-is ('%s').",
-            message.id,
-            target,
-            current or "?",
+    if current != target or (target != "ko" and is_mostly_korean(message.body)):
+        raise SendLanguageMismatch(
+            f"message {message.id} requires reviewed translation "
+            f"(current={current or '?'}, target={target})"
         )
     _canonicalize_reply_links(message, target)
 

@@ -20,6 +20,25 @@ class ApprovalError(RuntimeError):
     pass
 
 
+def translation_required(message: Message, body: str | None = None) -> bool:
+    """Whether a draft must pass through the review-screen translation step.
+
+    Foreign-language replies start as Korean review drafts. The operator must press
+    번역하기 and review the result before approval; delivery is never the place to call
+    the translator. The script check also catches a draft edited back to Korean after
+    it had previously been translated.
+    """
+    target = (message.target_language or "").strip().lower()
+    if not target or target == "ko":
+        return False
+    current = (message.language or "").strip().lower()
+    candidate = message.body if body is None else body
+
+    from ..llm.translate import is_mostly_korean
+
+    return current != target or is_mostly_korean(candidate)
+
+
 # "안 넘겼다" 와 "없음으로 정했다" 를 가릅니다. 서명은 None 이 곧 「서명 없음」이라, 기본값을
 # None 으로 두면 그 둘이 같은 값이 되어 **운영자가 고른 「서명 없음」이 무시됐습니다** —
 # 초안이 만들어질 때 달린 기본 서명이 그대로 붙어 나갔습니다. 같은 폼의 `저장`·`번역하기`는
@@ -69,6 +88,19 @@ def approve(
     """
     session = SessionLocal()
     try:
+        pending = session.get(Message, message_id)
+        if not pending:
+            raise ApprovalError(f"Message {message_id} not found.")
+        if pending.status != "pending_approval":
+            raise ApprovalError(
+                f"Message {message_id} is {pending.status}, not pending_approval."
+            )
+        candidate_body = edited_body if edited_body is not None else pending.body
+        if translation_required(pending, candidate_body):
+            raise ApprovalError(
+                "외국어 문의는 번역하기를 완료하고 번역문을 검토한 뒤 발송할 수 있습니다."
+            )
+
         values: dict[str, object] = {
             "status": "approved",
             "approved_by": approver,

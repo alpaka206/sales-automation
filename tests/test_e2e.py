@@ -56,6 +56,11 @@ def test_full_pipeline(db_session, db_session_factory) -> None:
     msg = verify.get(Message, msg_id)
     assert msg.status == "pending_approval"
 
+    # The review-screen translation step persists the target language before approval.
+    # This stub already returned English text, so simulate the button's no-op branch.
+    msg.language = msg.target_language
+    verify.commit()
+
     with patch("src.agents.approval.SessionLocal", return_value=verify):
         approved = approve(msg_id, approver="slack:e2e-user")
     assert approved.status == "approved"
