@@ -31,6 +31,7 @@ from ...db.models import (
     ConversationProgress,
     CustomerInteraction,
     CustomerProfile,
+    Event,
     Message,
 )
 from ...db.session import SessionLocal
@@ -63,6 +64,71 @@ PIPELINE_STAGES: tuple[tuple[str, str, str], ...] = (
     ("closed", "Concluded", "종결"),
 )
 VALID_PIPELINE_STAGES = {stage for stage, _, _ in PIPELINE_STAGES}
+
+
+@router.post("/internal/clients/merge")
+async def internal_merge_client_ids(
+    source_id: int,
+    target_id: int,
+    expected_company: str,
+    dry_run: bool = True,
+):
+    """Audit or merge a confirmed duplicate Client ID across DB and Sheets."""
+    from ...agents.client_merge import (
+        ClientMergeConflict,
+        client_merge_snapshot,
+        merge_client_ids,
+        validate_client_merge,
+    )
+    from ...integrations.google_sheets import inbound_client_id_rows
+
+    try:
+        with SessionLocal() as session:
+            if dry_run:
+                database = client_merge_snapshot(session, source_id, target_id)
+                validate_client_merge(database, expected_company)
+            else:
+                database = merge_client_ids(
+                    session, source_id, target_id, expected_company
+                )
+                session.add(
+                    Event(
+                        kind="client_id_merged",
+                        payload={
+                            "source_id": source_id,
+                            "target_id": target_id,
+                            "company": expected_company,
+                            "moved": database["moved"],
+                            "contract_seq_changes": database["contract_seq_changes"],
+                        },
+                    )
+                )
+                session.commit()
+    except ClientMergeConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    source_sheet_rows = await asyncio.to_thread(inbound_client_id_rows, source_id)
+    if dry_run:
+        return {
+            "dry_run": True,
+            "database": database,
+            "inbound_sheet_source_rows": source_sheet_rows,
+        }
+
+    sheet_result: dict[str, object] = {}
+    try:
+        from ...agents.won_sheets import sync_won_sheets
+        from ...integrations.google_sheets import replace_inbound_client_id
+
+        sheet_result["inbound_rows_changed"] = await asyncio.to_thread(
+            replace_inbound_client_id, source_id, target_id
+        )
+        sheet_result["won_tabs"] = await asyncio.to_thread(sync_won_sheets)
+    except Exception as exc:
+        logger.exception("Client ID DB merge succeeded but Sheets sync failed")
+        sheet_result["error"] = f"{type(exc).__name__}: {exc}"
+
+    return {"dry_run": False, "database": database, "sheets": sheet_result}
 
 # ----- Deal Detail — Won 과 Lost 에만 있는 세부 구분 -----
 # 두 단계뿐인 이유가 곧 정의입니다: 왜 이겼나(Won Type)와 왜 졌나(Lost Reason)는 결말이

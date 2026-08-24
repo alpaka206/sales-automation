@@ -795,6 +795,54 @@ def _rows_for_value(
     ]
 
 
+def inbound_client_id_rows(client_id: int) -> list[int]:
+    """Read the Inbound DB row numbers carrying an exact Client ID."""
+    if not is_configured():
+        return []
+    service = _build_service()
+    tab = settings.GOOGLE_SHEETS_INBOUND_TAB.strip() or "Inbound DB"
+    header = _headers(service, tab)
+    return _rows_for_value(service, tab, header, "client_id", client_id)
+
+
+def replace_inbound_client_id(source_id: int, target_id: int) -> int:
+    """Replace a duplicate Client ID without touching each inquiry's unique row key."""
+    if not is_configured():
+        return 0
+    from ..common.safe_mode import guard_external_write
+
+    guard_external_write("sheets:merge_client_id")
+    service = _build_service()
+    tab = settings.GOOGLE_SHEETS_INBOUND_TAB.strip() or "Inbound DB"
+    header = _headers(service, tab)
+    rows = _rows_for_value(service, tab, header, "client_id", source_id)
+    lookup = _header_lookup({"client_id": ""})
+    index = next(
+        idx
+        for idx, cell in enumerate(header.values)
+        if _key_for_header(cell, lookup) == "client_id"
+    )
+    column = _column_letter(index)
+    if rows:
+        service.spreadsheets().values().batchUpdate(
+            spreadsheetId=settings.GOOGLE_SHEETS_SPREADSHEET_ID.strip(),
+            body={
+                "valueInputOption": "RAW",
+                "data": [
+                    {"range": f"'{tab}'!{column}{row}", "values": [[target_id]]}
+                    for row in rows
+                ],
+            },
+        ).execute()
+    logger.info(
+        "Replaced Inbound DB Client ID %s with %s on %d row(s).",
+        source_id,
+        target_id,
+        len(rows),
+    )
+    return len(rows)
+
+
 def _row_for_inquiry(
     service,
     tab: str,

@@ -283,6 +283,24 @@ def test_stage_update_uses_inquiry_id_when_client_id_is_shared(monkeypatch):
     ]
 
 
+def test_replace_client_id_keeps_each_inquiry_row(monkeypatch):
+    _configure(monkeypatch)
+    store = {
+        "existing_header": [["Client ID", "Inquiry ID", "Deal Stage"]],
+        "range_values": {"'Inbound DB'!A2:A": [["1364"], ["1323"], ["1364"]]},
+    }
+    monkeypatch.setattr(gs, "_build_service", lambda: _FakeService(store))
+
+    assert gs.replace_inbound_client_id(1364, 1323) == 2
+    assert store["batch"] == {
+        "valueInputOption": "RAW",
+        "data": [
+            {"range": "'Inbound DB'!A2", "values": [[1323]]},
+            {"range": "'Inbound DB'!A4", "values": [[1323]]},
+        ],
+    }
+
+
 def test_allocated_inbound_id_is_rechecked_before_append(monkeypatch):
     _configure(monkeypatch)
     store = {
