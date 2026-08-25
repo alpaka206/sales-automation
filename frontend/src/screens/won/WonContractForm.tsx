@@ -51,17 +51,39 @@ export function WonContractForm() {
   const queryClient = useQueryClient();
   const [params] = useSearchParams();
   const editing = Boolean(contractId);
+  // 아직 만들어지지 않은 고객의 **첫 계약**입니다. 예전에는 이 폼을 열기 전에 고객을 먼저
+  // 만들었는데, 폼을 채우지 않고 나가면 계약이 0건인 고객이 남아 워크북에 「세팅중」으로
+  // 실려 나갔습니다. 이제 고객은 이 폼을 저장할 때 계약과 함께 만들어집니다.
+  const creating = !clientId;
 
   const { data } = useQuery({
     queryKey: ["won-customer", clientId],
     queryFn: () => getJSON<Row>(`/api/ui/won-customers/${clientId}`),
+    enabled: !creating,
   });
   const { data: list } = useQuery({
     queryKey: ["won-customers"],
     queryFn: () => getJSON<ListData>("/api/ui/won-customers"),
   });
 
+  /** 만들 고객. `creating` 일 때만 값이 있습니다.
+   *
+   * 두 갈래로 옵니다. 「수주 고객 추가」는 1단계에서 받은 칸을 라우터 state 로 넘기고,
+   * 수주 전환 대기 카드는 `?pending=` 하나만 넘깁니다 — 회사와 번호는 목록 payload 에 이미
+   * 있으니 다시 나를 이유가 없고, 주소만으로 열리니 새로고침해도 살아남습니다.
+   */
+  const pendingId = params.get("pending");
+  const pendingItem = list?.pending.find((item) => String(item.id) === pendingId);
+  const handed = (location.state as { customer?: Record<string, string> } | null)?.customer;
+  const contracts = (creating ? [] : data?.contracts) ?? [];
+  const ready = Boolean(list) && (creating || Boolean(data));
+
   const [draft, setDraft] = useState<Draft | null>(null);
+  // **초안과 같이 한 번만 굳힙니다.** 매 렌더 `list.pending` 에서 다시 찾으면, 폼을 채우는
+  // 동안 그 대기 행이 사라졌을 때(누가 같은 티켓을 다른 계약에 적었다 — `_claim_ticket`)
+  // 다 채운 폼이 「고객 정보가 없습니다」 한 줄로 바뀝니다. 아무 쓰기나 SSE 로 목록을
+  // 다시 받아 오므로 남의 저장 하나에 이 화면이 통째로 날아갑니다.
+  const [customer, setCustomer] = useState<Record<string, string> | null>(null);
   const [docTypes, setDocTypes] = useState<string[]>([]);
   const [copyPrev, setCopyPrev] = useState(true);
   const [creditRounds, setCreditRounds] = useState("12");
@@ -83,21 +105,40 @@ export function WonContractForm() {
   // 여기서도 모달 칸이 남지 않습니다.
   const back = useCallback(
     () => {
+      // 「수주 고객 추가」에서 왔으면 **적어 온 칸을 돌려주며** 되돌립니다. 1단계는 이제
+      // 아무것도 저장하지 않으므로, 그냥 뒤로 보내면 여덟 칸을 처음부터 다시 칩니다.
+      // `location.state` 를 통째로 넘기는 이유는 그 안에 산업 분야의 「직접 입력」 여부처럼
+      // 1단계만 아는 값이 같이 들어 있어서입니다 — 여기서 그 모양을 알 필요가 없습니다.
+      if (creating && handed) {
+        navigate("/won-customers/new", { state: location.state, replace: true });
+        return;
+      }
       if (location.key !== "default") navigate(-1);
-      else navigate(`/won-customers/${clientId}`, { replace: true });
+      else navigate(creating ? "/won-customers" : `/won-customers/${clientId}`, { replace: true });
     },
-    [navigate, location.key, clientId],
+    [navigate, location.key, location.state, clientId, creating, handed],
   );
 
 
   // 첫 렌더에서 한 번만 채웁니다. 이후 다시 채우면 타이핑 중인 값이 되돌아갑니다.
-  if (data && list && !loaded) {
+  if (ready && !loaded) {
     setLoaded(true);
-    const contracts = data.contracts ?? [];
+    const made = !creating
+      ? null
+      : handed ?? (pendingItem
+          ? {
+              // 대기 건은 인바운드 문의라 1000번대입니다. 번호가 이미 있으면 그 번호를
+              // 그대로 씁니다 — 문의 시점에 발급된 그 고객의 번호입니다.
+              customer_type: "GTM Inbound",
+              company: pendingItem.company || "고객사 미확인",
+              client_id: pendingItem.client_id ? String(pendingItem.client_id) : "",
+            }
+          : null);
+    setCustomer(made);
+    const shownCompany = creating ? (made?.company ?? "") : (data?.company ?? "");
     const target = editing ? contracts.find((c) => String(c.id) === contractId) : undefined;
     const prev = contracts.length ? contracts[contracts.length - 1] : undefined;
-    const pending = params.get("pending");
-    const pendingTicket = list.pending.find((p) => String(p.id) === pending)?.ticket_id ?? "";
+    const pendingTicket = pendingItem?.ticket_id ?? "";
     if (target) {
       setDraft(fromContract(target));
       setDocTypes(target.doc_types || []);
@@ -112,7 +153,7 @@ export function WonContractForm() {
         ends_on: addMonths(start, 12),
         first_payment_on: start,
         ticket_id: pendingTicket,
-        plan_name: prev?.plan_name || data.company,
+        plan_name: prev?.plan_name || shownCompany,
       });
       setDocTypes(prev && copyPrev ? prev.doc_types || [] : []);
       setFirstCreditOn(start);
@@ -196,11 +237,18 @@ export function WonContractForm() {
       credit_rounds: creditRounds,
       first_credit_on: firstCreditOn,
     };
-    const pendingId = params.get("pending");
     if (!editing && pendingId) body.pending_id = pendingId;
     try {
       if (editing) {
         await postForm(`/won-customers/contracts/${contractId}`, body);
+      } else if (creating) {
+        // 고객과 첫 계약이 **한 요청**입니다 — 둘로 나누면 그 사이에 폼을 닫았을 때
+        // 계약 없는 고객이 남습니다.
+        const created = await postForm("/won-customers", { ...customer, ...body })
+          .then((response) => response.json() as Promise<{ client_id: number }>);
+        await queryClient.invalidateQueries();
+        navigate(`/won-customers/${created.client_id}`, { replace: true });
+        return;
       } else {
         await postForm(`/won-customers/${clientId}/contracts`, body);
       }
@@ -211,13 +259,25 @@ export function WonContractForm() {
     }
   });
 
-  if (!data || !list || !draft) {
+  // 만들 고객이 없는데 `creating` 이면 주소만 열었거나 새로고침으로 초안이 날아간 것입니다.
+  // 빈 폼을 그려 두면 저장이 400 으로 떨어지고 화면에는 이유가 안 보입니다.
+  // `loaded` 로 재는 이유: 한 번 굳힌 뒤의 판정이라야 목록이 다시 와도 흔들리지 않습니다.
+  if (creating && loaded && !customer) {
+    return <Modal key="lost" title="계약 정보" onClose={back}>
+             <div className="won">
+               <p className="note-box">고객 정보가 없습니다 — 「수주 고객 추가」에서 다시 시작해 주세요.</p>
+             </div>
+           </Modal>;
+  }
+  // `ready` 를 그대로 쓰지 않는 이유는 타입 하나입니다 — boolean 은 아래 `list.options` 를
+  // 좁혀 주지 않습니다. 조건은 같습니다.
+  if (!list || !draft || (!creating && !data)) {
     return <Modal key="loading" title="계약 정보" onClose={back}>
              <div className="won"><p className="note-box">불러오는 중…</p></div>
            </Modal>;
   }
 
-  const contracts = data.contracts ?? [];
+  const company = creating ? (customer?.company ?? "") : data!.company;
   const prev = contracts.length ? contracts[contracts.length - 1] : undefined;
   const seq = editing ? contracts.find((c) => String(c.id) === contractId)?.seq : contracts.length + 1;
   const options = list.options;
@@ -234,7 +294,9 @@ export function WonContractForm() {
           ? "이 계약의 정보를 고칩니다."
           : prev
             ? "기존 고객에 새 계약을 추가합니다. Client ID는 그대로 유지되고, 계약만 별도 히스토리로 쌓입니다."
-            : "이 고객의 첫 계약 정보를 입력합니다."
+            : creating
+              ? "저장하면 고객과 첫 계약이 함께 등록됩니다."
+              : "이 고객의 첫 계약 정보를 입력합니다."
       }
       wide
       onClose={back}
@@ -262,8 +324,12 @@ export function WonContractForm() {
               <div className="big">{seq}차 계약</div>
             </div>
             <div style={{ fontSize: 12.5, color: "var(--muted)", borderLeft: "1px solid #CFE2DF", paddingLeft: 12 }}>
-              {data.company} · Client ID <b>{data.client_id}</b> (유지)<br />
-              기존 계약 {contracts.length}건 · 저장 시 최신 계약으로 노출
+              {company} · Client ID{" "}
+              <b>{creating ? (customer?.client_id || "저장할 때 발급") : data?.client_id}</b>
+              {creating ? "" : " (유지)"}<br />
+              {creating
+                ? "저장하면 고객과 첫 계약이 함께 등록됩니다"
+                : `기존 계약 ${contracts.length}건 · 저장 시 최신 계약으로 노출`}
             </div>
           </div>
 

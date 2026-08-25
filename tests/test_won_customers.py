@@ -325,6 +325,275 @@ def test_saving_a_contract_completes_its_waiting_row(factory):
         assert client.contact_id == contact.id
 
 
+def test_a_ticket_that_already_has_a_contract_never_waits(factory):
+    """티켓은 계약에 붙는 값입니다. 거기 있으면 대기 목록에 있을 이유가 없습니다.
+
+    계약이 시트에서 들어왔거나 운영자가 티켓을 손으로 적은 건은 대기 카드를 지난 적이
+    없어 ``done`` 행이 없습니다. ``done`` 만 보고 판단하던 시절에는 백필과 10분 스윕이
+    그 티켓을 훑을 때마다 **이미 등록된 고객이** 대기 목록으로 돌아왔습니다.
+    """
+    from src.agents.stage_sync import _enqueue_pending_won
+    from src.db.models import Conversation, PendingWon
+
+    with factory() as session:
+        contact = Contact(
+            normalized_email="buyer@snu.ac.kr", full_name="Buyer", company="서울대학교 산학협력단"
+        )
+        client = Client(client_id=1108, company="서울대학교")
+        session.add_all([contact, client])
+        session.flush()
+        session.add(ClientContract(client_id=1108, seq=1, ticket_id="T-SNU"))
+        conversation = Conversation(
+            contact_id=contact.id, hubspot_ticket_id="T-SNU", stage="won"
+        )
+        session.add(conversation)
+        session.flush()
+
+        assert _enqueue_pending_won(session, conversation, None) is True
+        session.commit()
+
+        assert session.query(PendingWon).count() == 0
+        # 회사명이 다른데도 계약의 고객으로 묶입니다 — 티켓이 회사명 추측보다 확실합니다.
+        assert conversation.sheet_client_id == 1108
+        assert contact.sheet_client_id == 1108
+
+
+def test_a_waiting_row_leaves_once_its_ticket_turns_up_on_a_contract(factory):
+    """대기에 있던 티켓이 계약에서 발견되면 그 자리에서 내려놓습니다."""
+    from src.agents.stage_sync import _enqueue_pending_won
+    from src.db.models import Conversation, PendingWon
+
+    with factory() as session:
+        contact = Contact(normalized_email="b@acme.com", full_name="B", company="ACME")
+        session.add_all([contact, Client(client_id=1201, company="ACME")])
+        session.flush()
+        session.add(ClientContract(client_id=1201, seq=1, ticket_id="T-ACME"))
+        conversation = Conversation(
+            contact_id=contact.id, hubspot_ticket_id="T-ACME", stage="won"
+        )
+        session.add(conversation)
+        session.flush()
+        session.add(PendingWon(ticket_id="T-ACME", company="ACME", conversation_id=conversation.id))
+        session.commit()
+
+        assert _enqueue_pending_won(session, conversation, None) is True
+        session.commit()
+
+        pending = session.query(PendingWon).one()
+        assert (pending.status, pending.client_id) == ("done", 1201)
+
+
+def test_typing_a_ticket_into_a_contract_clears_that_waiting_row(factory):
+    """운영자가 계약에 티켓을 적는 순간 그 대기 카드는 끝납니다 — 번호가 달라도.
+
+    같은 회사에 Client ID 가 둘 생긴 것을 바로잡는 길이 이쪽입니다: 어느 고객의 티켓인지는
+    방금 운영자가 적어서 정한 것이고, 대기 행의 번호는 문의 시점의 추정입니다.
+    """
+    from src.api.routes.won_customers import _claim_ticket
+    from src.db.models import Conversation, PendingWon
+
+    with factory() as session:
+        contact = Contact(
+            normalized_email="buyer@snu.ac.kr", full_name="Buyer", company="서울대학교 산학협력단"
+        )
+        client = Client(client_id=1108, company="서울대학교")
+        session.add_all([contact, client])
+        session.flush()
+        contract = ClientContract(client_id=1108, seq=1, ticket_id="T-SNU")
+        conversation = Conversation(
+            contact_id=contact.id, hubspot_ticket_id="T-SNU", stage="won"
+        )
+        session.add_all([contract, conversation])
+        session.flush()
+        session.add(
+            PendingWon(
+                ticket_id="T-SNU",
+                company="서울대학교 산학협력단",
+                client_id=1160,
+                conversation_id=conversation.id,
+            )
+        )
+        session.commit()
+
+        _claim_ticket(session, contract, client)
+        session.commit()
+
+        pending = session.query(PendingWon).one()
+        assert (pending.status, pending.client_id) == ("done", 1108)
+        assert conversation.sheet_client_id == 1108
+        assert client.contact_id == contact.id
+
+        # 티켓 칸을 비우는 것은 연동을 푸는 것이지 대기를 되살리는 것이 아닙니다.
+        contract.ticket_id = None
+        _claim_ticket(session, contract, client)
+        assert session.query(PendingWon).one().status == "done"
+
+
+def _console(factory):
+    """콘솔이 부르는 대로 쓰기 라우트를 두드리는 TestClient."""
+    from unittest.mock import patch
+
+    from fastapi.testclient import TestClient
+
+    from src.api.main import app
+    from src.api.routes import won_customers
+
+    return patch.object(won_customers, "SessionLocal", factory), TestClient(app)
+
+
+def test_a_customer_and_its_first_contract_are_one_request(factory):
+    """고객만 있는 순간이 없어야 합니다 — 그 상태가 워크북에 「세팅중」으로 실려 나갑니다.
+
+    예전에는 화면이 고객을 먼저 만들고(POST /won-customers) 계약 폼으로 갔습니다. 폼을
+    채우지 않고 나가면 계약 0건인 고객이 남았고, `won.plan_status` 가 그런 고객을
+    「세팅중」으로 읽어 「고객 기본 정보」 탭에 행을 하나 얹었습니다. 지울 길도 없었습니다.
+    """
+    from src.db.models import ClientContract as CC
+
+    patched, client = _console(factory)
+    with patched, client:
+        created = client.post("/won-customers", data={
+            # 화면은 대기 건을 「GTM Inbound」로 보냅니다. 번호는 3000번대인데도요.
+            "customer_type": "GTM Inbound", "company": "인터랙티브 고객",
+            "client_id": "3105", "starts_on": "2026-09-01", "ends_on": "2027-09-01",
+            "currency": "KRW", "vat_applicable": "1", "amount_excl_vat": "10000000",
+            "credits": "60000",
+        })
+    assert created.status_code == 200, created.text
+    assert created.json()["client_id"] == 3105
+
+    with factory() as session:
+        saved = session.get(Client, 3105)
+        assert [c.seq for c in saved.contracts] == [1]
+        # 담당부서는 **번호대**에서 나옵니다. 화면이 보낸 종류를 믿으면 3000번대 고객의
+        # 매출이 GTM 묶음으로 들어갑니다.
+        assert saved.department == "Interactive"
+        assert won.plan_status(saved, date(2026, 9, 2)) == "사용중"
+        assert session.query(CC).count() == 1
+
+
+def test_a_customer_cannot_be_created_without_its_first_contract(factory):
+    """고객만 만드는 길을 막습니다 — 길이 남아 있으면 다른 화면이 언젠가 또 그리로 갑니다."""
+    patched, client = _console(factory)
+    with patched, client:
+        answer = client.post("/won-customers", data={
+            "customer_type": "GTM Inbound", "company": "계약 없는 고객",
+        })
+    assert answer.status_code == 400
+    assert "첫 계약" in answer.json()["detail"]
+    with factory() as session:
+        assert session.query(Client).count() == 0
+
+
+def test_an_empty_customer_can_be_removed_but_a_contracted_one_cannot(factory):
+    """잘못 만들어진 번호를 되돌리는 길. 계약이 있으면 거부합니다 — 지울 일이 아닙니다."""
+    from src.db.models import Conversation, PendingWon
+
+    with factory() as session:
+        contact = Contact(
+            normalized_email="a@snu.ac.kr", full_name="A", company="서울대학교 산학협력단",
+            sheet_client_id=1160,
+        )
+        session.add_all([
+            contact,
+            Client(client_id=1160, company="서울대학교 산학협력단"),
+            Client(client_id=1108, company="서울대학교"),
+        ])
+        session.flush()
+        session.add_all([
+            ClientContract(client_id=1108, seq=1, ticket_id="T-SNU"),
+            Conversation(contact_id=contact.id, hubspot_ticket_id="T-SNU",
+                         stage="won", sheet_client_id=1160),
+            PendingWon(ticket_id="T-OTHER", company="서울대학교 산학협력단", client_id=1160),
+        ])
+        session.commit()
+
+    patched, client = _console(factory)
+    with patched, client:
+        assert client.post("/won-customers/1108/delete").status_code == 400
+        assert client.post("/won-customers/1160/delete").status_code == 200
+
+    with factory() as session:
+        assert session.get(Client, 1160) is None
+        assert session.get(Client, 1108) is not None
+        # 없는 번호를 들고 있으면 다음 Won 때 그 번호가 도로 찾아져 고객이 살아 돌아옵니다.
+        assert session.query(Contact).one().sheet_client_id is None
+        assert session.query(Conversation).one().sheet_client_id is None
+        assert session.query(PendingWon).one().client_id is None
+
+    # 라우트만 있고 버튼이 없으면 없는 기능입니다 — Client ID 합치기가 그렇게 되어 있고,
+    # 그래서 운영자가 갈라진 번호를 콘솔에서 손볼 방법이 하나도 없습니다.
+    import pathlib
+
+    detail = pathlib.Path(
+        "frontend/src/screens/won/WonCustomerDetail.tsx"
+    ).read_text(encoding="utf-8")
+    assert "/delete`, {})" in detail
+    assert "이 고객 삭제" in detail
+
+
+def test_the_console_creates_no_customer_before_the_contract_is_saved():
+    """화면 세 곳이 같은 규칙을 지켜야 합니다 — 한 곳만 먼저 만들면 유령이 다시 생깁니다."""
+    import pathlib
+
+    pending = pathlib.Path("frontend/src/screens/won/pending.ts").read_text(encoding="utf-8")
+    picker = pathlib.Path("frontend/src/screens/won/WonNew.tsx").read_text(encoding="utf-8")
+    form = pathlib.Path("frontend/src/screens/won/WonContractForm.tsx").read_text(encoding="utf-8")
+
+    # 주소만 고릅니다. 저장 요청은 계약 폼에서 한 번만 나갑니다.
+    assert "postForm" not in pending
+    assert '/won-customers/new/contract?pending=' in pending
+    assert "postForm" not in picker
+    assert '"/won-customers/new/contract"' in picker
+    assert 'postForm("/won-customers", { ...customer, ...body })' in form
+
+
+def test_0090_drops_waiting_rows_whose_ticket_is_already_contracted(db_engine):
+    import importlib
+
+    from sqlalchemy.orm import Session
+    from src.db.models import Conversation, PendingWon
+
+    with Session(db_engine) as session:
+        contact = Contact(
+            normalized_email="buyer@snu.ac.kr", full_name="Buyer", company="서울대학교 산학협력단"
+        )
+        other = Contact(normalized_email="open@example.com", full_name="Open", company="아직")
+        session.add_all([contact, other, Client(client_id=1108, company="서울대학교")])
+        session.flush()
+        session.add_all([
+            ClientContract(client_id=1108, seq=1, ticket_id="T-SNU"),
+            # 2차 계약에도 같은 티켓이 적혀 있으면 1차가 이깁니다.
+            ClientContract(client_id=1108, seq=2, ticket_id="T-SNU"),
+        ])
+        contracted = Conversation(
+            contact_id=contact.id, hubspot_ticket_id="T-SNU", stage="won"
+        )
+        untouched = Conversation(contact_id=other.id, hubspot_ticket_id="T-OPEN", stage="won")
+        session.add_all([contracted, untouched])
+        session.flush()
+        session.add_all([
+            PendingWon(ticket_id="T-SNU", company="서울대학교 산학협력단",
+                       conversation_id=contracted.id),
+            PendingWon(ticket_id="T-OPEN", company="아직 계약 없음",
+                       conversation_id=untouched.id),
+        ])
+        session.commit()
+        contacted_id, contact_id = contracted.id, contact.id
+
+    migration = importlib.import_module(
+        "src.db.migrations.0090_a_registered_ticket_leaves_the_waiting_list"
+    )
+    migration.up(db_engine)
+
+    with Session(db_engine) as session:
+        rows = {row.ticket_id: row for row in session.query(PendingWon)}
+        assert (rows["T-SNU"].status, rows["T-SNU"].client_id) == ("done", 1108)
+        assert (rows["T-OPEN"].status, rows["T-OPEN"].client_id) == ("pending", None)
+        assert session.get(Conversation, contacted_id).sheet_client_id == 1108
+        assert session.get(Contact, contact_id).sheet_client_id == 1108
+
+
 def test_0089_backfills_only_an_unambiguous_pending_company(db_engine):
     import importlib
 

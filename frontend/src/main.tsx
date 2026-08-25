@@ -65,6 +65,9 @@ function mountConsole() {
             <Route path="outbound-history" element={<WonCustomers />} />
             <Route path="won-customers" element={<WonCustomers />} />
             <Route path="won-customers/new" element={<WonNew />} />
+            {/* 아직 없는 고객의 첫 계약 폼. 뒤에 세울 상세가 없어서 목록 위에
+                뜹니다 — 고객은 그 폼을 저장할 때 계약과 함께 만들어집니다. */}
+            <Route path="won-customers/new/contract" element={<WonCustomers />} />
             <Route path="won-customers/:clientId" element={<WonCustomerDetail />} />
             {/* 계약 폼은 모달입니다 — 뒤에 상세가 남아 있어야 어느 고객의 계약인지가
                 보입니다. 그래서 같은 화면을 그리고, 상세가 경로를 보고 모달을 엽니다.

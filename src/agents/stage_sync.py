@@ -418,8 +418,15 @@ def _enqueue_pending_won(session, conv, sheet_client_id: int | None) -> bool:
     같은 티켓이 두 번 와도 한 줄입니다(ticket_id UNIQUE). 이미 처리해서 ``done`` 이 된
     티켓은 되살리지 않습니다 — 계약을 등록한 뒤 폴러가 그 티켓을 또 훑으면 대기 목록에
     유령이 돌아옵니다.
+
+    **그 티켓의 계약이 이미 장부에 있으면 대기가 아닙니다.** ``done`` 만 보던 시절에는
+    그것으로 부족했습니다: 계약이 시트에서 들어왔거나(``sheet_to_db``) 운영자가 계약에
+    티켓을 손으로 적은 건은 대기를 거친 적이 없어 ``done`` 행 자체가 없고, 그래서 백필과
+    10분 스윕이 그 티켓을 훑을 때마다 **이미 등록된 고객이** 「계약 정보를 입력해야
+    합니다」 카드로 돌아왔습니다. 티켓은 계약에 붙는 값이므로(``client_contracts.ticket_id``)
+    거기 있으면 여기 있을 이유가 없습니다.
     """
-    from ..db.models import PendingWon
+    from ..db.models import ClientContract, PendingWon
 
     ticket_id = str(conv.hubspot_ticket_id or "").strip()
     if not ticket_id:
@@ -427,7 +434,15 @@ def _enqueue_pending_won(session, conv, sheet_client_id: int | None) -> bool:
     contact = session.get(Contact, conv.contact_id) if conv.contact_id else None
     from .client_ids import find_existing_client_id
 
-    resolved_client_id = sheet_client_id or find_existing_client_id(session, contact)
+    registered = (
+        session.query(ClientContract).filter(ClientContract.ticket_id == ticket_id).first()
+    )
+    # 등록된 계약이 있으면 그 계약의 고객이 이깁니다 — 회사명·도메인 추측보다 확실합니다.
+    resolved_client_id = (
+        registered.client_id
+        if registered is not None
+        else sheet_client_id or find_existing_client_id(session, contact)
+    )
     changed = False
     if resolved_client_id and conv.sheet_client_id is None:
         conv.sheet_client_id = resolved_client_id
@@ -440,13 +455,20 @@ def _enqueue_pending_won(session, conv, sheet_client_id: int | None) -> bool:
         session.query(PendingWon).filter(PendingWon.ticket_id == ticket_id).one_or_none()
     )
     if existing is not None:
-        if (
+        if existing.status == "pending" and registered is not None:
+            # 대기 중인데 계약이 이미 있습니다. 내려놓고 그 고객에 묶습니다.
+            existing.client_id = registered.client_id
+            existing.status = "done"
+            changed = True
+        elif (
             existing.status == "pending"
             and existing.client_id is None
             and resolved_client_id is not None
         ):
             existing.client_id = resolved_client_id
             changed = True
+        return changed
+    if registered is not None:
         return changed
     session.add(
         PendingWon(

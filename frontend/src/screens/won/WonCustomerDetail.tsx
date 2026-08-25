@@ -59,6 +59,7 @@ export function WonCustomerDetail() {
   const [showAll, setShowAll] = useState(false);
   const [commFilter, setCommFilter] = useState<"all" | "nego" | number>("all");
   const [addingComm, setAddingComm] = useState(false);
+  const [removing, setRemoving] = useState(false);
 
   // 액션 보드가 `/won-customers/2102#sec-credit` 로 보냅니다. 브라우저의 기본 앵커 이동은
   // 소용이 없습니다 — 그 시점에 섹션이 아직 그려지지 않았습니다. 데이터가 온 **뒤에**
@@ -169,10 +170,15 @@ export function WonCustomerDetail() {
             <div className="empty">
               <strong>등록된 계약이 없습니다</strong>
               계약 · 결제 · 플랜 · 크레딧 정보는 지금 추가할 수 있습니다.
-              <div style={{ marginTop: 14 }}>
+              <div style={{ marginTop: 14, display: "flex", gap: 8, justifyContent: "center" }}>
                 <button className="btn btn-primary" type="button"
                         onClick={() => navigate(`/won-customers/${data.client_id}/contracts/new`)}>
                   계약 정보 입력
+                </button>
+                {/* 잘못 만들어진 번호를 되돌리는 자리입니다. 계약이 있는 고객에는 이
+                    버튼이 아예 없습니다 — 이 자리가 「계약 0건」일 때만 그려집니다. */}
+                <button className="btn btn--danger" type="button" onClick={() => setRemoving(true)}>
+                  이 고객 삭제
                 </button>
               </div>
             </div>
@@ -257,6 +263,24 @@ export function WonCustomerDetail() {
       </div>
 
       {contractRoute && <WonContractForm />}
+
+      {removing && (
+        <Confirm
+          title="이 고객을 지웁니다"
+          rows={[["고객사", data.company], ["Client ID", String(data.client_id)], ["계약", "0건"]]}
+          note={
+            "이 번호를 들고 있던 문의·연락처·수주 전환 대기의 Client ID 도 함께 비웁니다 — " +
+            "없는 번호가 남아 있으면 다음 Won 때 그 번호가 도로 찾아져 고객이 살아 돌아옵니다. " +
+            "워크북 「고객 기본 정보」의 그 행은 시트가 원본이라 손으로 지웁니다."
+          }
+          okLabel="삭제"
+          danger
+          onOk={() => postForm(`/won-customers/${data.client_id}/delete`, {})
+            .then(() => queryClient.invalidateQueries())
+            .then(() => navigate("/won-customers", { replace: true }))}
+          onClose={() => setRemoving(false)}
+        />
+      )}
     </div>
   );
 }

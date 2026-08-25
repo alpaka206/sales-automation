@@ -1,10 +1,10 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { getJSON } from "../../lib/api";
-import { ActionButton } from "../../ui/ActionButton";
 import { MonthlyBars } from "./MonthlyBars";
 import { pendingContractPath } from "./pending";
+import { WonContractForm } from "./WonContractForm";
 import {
   type ListData, type Row,
   STATUS_ORDER, amount, daysUntil, dday, dueClass, dueText, fmt, initials, money, num,
@@ -65,6 +65,9 @@ const round = (item: { no: number | null; total: number | null }, unit = "회차
 
 export function WonCustomers() {
   const navigate = useNavigate();
+  // 새 고객의 첫 계약 폼은 이 화면 위의 모달입니다 — 상세가 하는 것과 같은 판단이고,
+  // 주소로 열리므로 새로고침해도 열려 있고 뒤로가기가 곧 닫기입니다.
+  const newContract = useLocation().pathname.endsWith("/new/contract");
   const { data } = useQuery({
     queryKey: ["won-customers"],
     queryFn: () => getJSON<ListData>("/api/ui/won-customers"),
@@ -75,7 +78,6 @@ export function WonCustomers() {
   const [status, setStatus] = useState("all");
   const [plan, setPlan] = useState("all");
   const [type, setType] = useState("all");
-  const [intakeError, setIntakeError] = useState<string | null>(null);
   // **기본은 GTM 입니다.** 이 화면을 매일 여는 쪽이 GTM 이고, 「전체」로 두면 위 카드가
   // 세 팀을 합친 — 아무 팀의 것도 아닌 — 숫자로 시작합니다.
   const [dept, setDept] = useState("GTM");
@@ -152,14 +154,11 @@ export function WonCustomers() {
   const open = (clientId: number, section?: string) =>
     navigate(`/won-customers/${clientId}${section ? `#${section}` : ""}`);
 
-  async function openPending(item: ListData["pending"][number]) {
+  // 대기 카드 → 계약 폼. 고객은 계약을 저장할 때 같이 만들어지므로 여기서는 요청이
+  // 나가지 않습니다 — 폼을 닫고 나가도 남는 것이 없습니다.
+  function openPending(item: ListData["pending"][number]) {
     if (!data) return;
-    setIntakeError(null);
-    try {
-      navigate(await pendingContractPath(data, item));
-    } catch (error) {
-      setIntakeError(error instanceof Error ? error.message : String(error));
-    }
+    navigate(pendingContractPath(data, item));
   }
 
   return (
@@ -334,15 +333,16 @@ export function WonCustomers() {
                       : "Client ID 없음 → 새 고객으로 등록"}
                   </div>
                   <div className="intake-actions">
-                    <ActionButton className="btn btn-sm btn-primary" pending="준비 중"
-                                  onClick={() => openPending(item)}>
+                    {/* 평범한 버튼입니다 — 누르면 주소만 바뀝니다. 예전에는 여기서
+                        고객을 만드느라 요청이 나갔고, 그래서 「준비 중」이 필요했습니다. */}
+                    <button type="button" className="btn btn-sm btn-primary"
+                            onClick={() => openPending(item)}>
                       계약 정보 입력
-                    </ActionButton>
+                    </button>
                   </div>
                 </div>
               ))}
             </div>
-            {intakeError && <div className="intake-error" role="alert">{intakeError}</div>}
           </div>
         )}
 
@@ -398,6 +398,11 @@ export function WonCustomers() {
           )}
         </div>
       </div>
+
+      {/* 아직 없는 고객의 첫 계약 폼. 상세 화면 위에 뜨는 그 모달과 같은 것인데, 뒤에
+          세울 상세가 아직 없어서 목록 위에 뜹니다 — 방금 떠나온 화면이라 어디서 왔는지가
+          그대로 보입니다. 저장하는 순간 고객과 계약이 함께 만들어집니다. */}
+      {newContract && <WonContractForm />}
     </div>
   );
 }

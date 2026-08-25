@@ -123,27 +123,31 @@ def _settle_amounts(contract: ClientContract) -> None:
 # 고객
 # --------------------------------------------------------------------------- #
 @router.post("/won-customers")
-async def create_client(
-    request: Request,
-    customer_type: str = Form(...),
-    company: str = Form(...),
-    industry: str = Form(""),
-    country: str = Form(""),
-    contact_name: str = Form(""),
-    contact_info: str = Form(""),
-    first_won_on: str = Form(""),
-    owner: str = Form(""),
-    client_id: str = Form(""),
-):
-    """새 고객. Client ID 는 **고객 종류가 정합니다** — 번호대가 곧 종류라서요.
+async def create_client(request: Request):
+    """새 고객 — **첫 계약과 함께**. 고객만 있는 순간이 존재하지 않습니다.
 
-    ``client_id`` 를 넘기면 그 번호를 씁니다: 인바운드 고객은 문의 시점에 이미 번호를 받아
-    두었으므로, Won 전환 건은 그 번호로 들어옵니다.
+    Client ID 는 고객 종류가 정합니다(번호대가 곧 종류). ``client_id`` 를 넘기면 그 번호를
+    씁니다: 인바운드 고객은 문의 시점에 이미 번호를 받아 두었으므로 Won 전환 건은 그 번호로
+    들어옵니다.
+
+    **계약을 같이 받는 것이 이 라우트의 요점입니다.** 예전에는 화면이 여기서 고객을 먼저
+    만들고 계약 폼으로 갔습니다. 그 사이에 폼을 닫으면 계약이 0건인 고객이 남았고,
+    ``won.plan_status`` 가 그런 고객을 「세팅중」으로 읽어 워크북 「고객 기본 정보」에
+    세팅중 행으로 실어 보냈습니다. 대기 카드를 누를 때마다 하나씩 늘었고 지울 길이 없어서
+    운영자가 「왜 계속 추가되냐」고 물었습니다(2026-08-25).
+
+    고친 곳이 폼이 아니라 **라우트**인 이유: 고객만 만드는 길이 남아 있는 한 다른 화면이
+    언젠가 또 그리로 갑니다. 길을 없애면 그 상태가 아예 만들어지지 않습니다.
     """
-    if not company.strip():
+    form = dict(await request.form())
+    company = (form.get("company") or "").strip()
+    if not company:
         raise HTTPException(status_code=400, detail="고객사를 입력해 주세요")
+    if not _text(form.get("starts_on")):
+        raise HTTPException(status_code=400, detail="첫 계약 정보를 함께 입력해 주세요")
+    customer_type = (form.get("customer_type") or "").strip()
     with SessionLocal() as session:
-        given = _int(client_id)
+        given = _int(form.get("client_id"))
         if given is None:
             if customer_type not in ALLOCATABLE_BANDS:
                 raise HTTPException(status_code=400, detail="고객 종류를 골라 주세요")
@@ -151,21 +155,25 @@ async def create_client(
         elif session.get(Client, given) is not None:
             raise HTTPException(status_code=400, detail=f"Client ID {given} 는 이미 있습니다")
 
-        session.add(
-            Client(
-                client_id=given,
-                company=company.strip(),
-                industry=_text(industry),
-                country=_text(country),
-                department=DEPARTMENT_BY_TYPE.get(customer_type),
-                contact_name=_text(contact_name),
-                contact_info=_text(contact_info),
-                first_won_on=_text(first_won_on) or date.today().isoformat(),
-                owner=_text(owner) or actor_name(request, fallback="") or None,
-            )
+        client = Client(
+            client_id=given,
+            company=company,
+            industry=_text(form.get("industry")),
+            country=_text(form.get("country")),
+            # 담당부서는 **번호대**에서 나옵니다. 화면이 보낸 고객 종류를 그대로 믿으면,
+            # 대기 건이 물고 온 3000·4000번대 번호에 GTM 이 박히고 — `won.department` 는
+            # 저장된 값이 이기므로 — 그 고객의 매출이 남의 부서 묶음으로 들어갑니다.
+            department=DEPARTMENT_BY_TYPE.get(won.client_type(given)),
+            contact_name=_text(form.get("contact_name")),
+            contact_info=_text(form.get("contact_info")),
+            first_won_on=_text(form.get("first_won_on")) or date.today().isoformat(),
+            owner=_text(form.get("owner")) or actor_name(request, fallback="") or None,
         )
+        session.add(client)
+        session.flush()
+        contract_id, seq = _add_contract(session, client, form)
         session.commit()
-    return {"client_id": given}
+    return {"client_id": given, "id": contract_id, "seq": seq}
 
 
 @router.post("/won-customers/{client_id}")
@@ -194,6 +202,48 @@ async def update_client(
         client.first_won_on = _text(first_won_on)
         client.owner = _text(owner)
         session.commit()
+    return {"ok": True}
+
+
+@router.post("/won-customers/{client_id}/delete")
+async def delete_client(client_id: int):
+    """계약이 하나도 없는 고객을 지웁니다 — 잘못 만들어진 번호를 콘솔에서 되돌리는 길.
+
+    **계약이 있으면 거부합니다.** 거기 딸린 결제·크레딧·인식 매출이 같이 사라지고 되돌릴
+    방법이 없습니다. 그건 지울 일이 아니라 고칠 일입니다(모듈 첫머리의 「계약 삭제는
+    없습니다」와 같은 이유). 그래서 이 라우트는 「고객을 지운다」가 아니라 「빈 고객을
+    치운다」입니다.
+
+    그 번호를 가리키던 문의·연락처·전환 대기의 Client ID 도 같이 비웁니다. 없는 번호를
+    들고 있으면 다음 Won 때 ``find_existing_client_id`` 가 그 번호를 도로 찾아 주고, 지운
+    고객이 살아 돌아옵니다.
+
+    **워크북의 행은 건드리지 않습니다.** 동기화는 지금 있는 고객의 행만 정리하므로
+    (``won_sheets.collect_rows`` 의 ``managed``), 지워진 번호의 행은 「손으로 쓴 행」으로
+    보여 그대로 남습니다 — 그 탭은 운영자의 것이고, 콘솔이 모르는 행을 지우기 시작하면
+    운영자가 먼저 채워 둔 회사가 사라집니다. 그 한 줄은 손으로 지웁니다.
+    """
+    from ...db.models import Contact, Conversation
+
+    with SessionLocal() as session:
+        client = session.get(Client, client_id)
+        if client is None:
+            raise HTTPException(status_code=404, detail="고객을 찾을 수 없습니다")
+        if client.contracts:
+            raise HTTPException(
+                status_code=400,
+                detail=f"계약 {len(client.contracts)}건이 있는 고객은 지울 수 없습니다",
+            )
+        for model in (Contact, Conversation):
+            session.query(model).filter(model.sheet_client_id == client_id).update(
+                {"sheet_client_id": None}, synchronize_session=False
+            )
+        session.query(PendingWon).filter(PendingWon.client_id == client_id).update(
+            {"client_id": None}, synchronize_session=False
+        )
+        session.delete(client)
+        session.commit()
+    logger.info("계약이 없는 수주 고객 %s 를 지웠습니다", client_id)
     return {"ok": True}
 
 
@@ -263,6 +313,41 @@ def _complete_pending_won(session, pending_id: int | None, client: Client) -> No
             status_code=409,
             detail="수주 전환 대기의 Client ID와 계약 고객이 다릅니다",
         )
+    _close_pending(session, pending, client)
+
+
+def _claim_ticket(session, contract: ClientContract, client: Client) -> None:
+    """계약에 적힌 티켓의 전환 대기를 내려놓습니다 — 그 티켓은 이제 이 고객 것입니다.
+
+    운영자가 계약에 티켓 번호를 적는 순간 「계약 정보를 입력해야 합니다」는 끝납니다.
+    대기 카드에서 넘어온 건은 ``pending_id`` 로 닫히지만, 이미 장부에 있던 고객의 계약에
+    티켓을 **손으로** 적은 경우에는 닫을 사람이 없어 같은 티켓이 대기에 그대로 남았습니다.
+
+    ``_complete_pending_won`` 과 달리 Client ID 가 달라도 **막지 않습니다.** 어느 고객의
+    티켓인지는 방금 운영자가 적어서 정한 것이고, 대기 행의 번호는 문의 시점의 추정입니다.
+    티켓 칸을 비우면 아무 일도 하지 않습니다: 연동을 푸는 것이지 대기를 되살리는 것이
+    아닙니다.
+
+    **여기서 옮겨지는 것은 대기 행의 번호뿐입니다.** 문의·연락처의 ``sheet_client_id`` 는
+    ``_close_pending`` 이 비어 있을 때만 채우므로, 이미 다른 번호가 박혀 있으면 「한 회사에
+    번호가 둘」인 상태는 남습니다. 그 둘을 진짜로 합치는 것은
+    ``client_merge.merge_client_ids`` 입니다 — 네 테이블과 워크북을 같이 옮기고, 양쪽에
+    저장된 회사명이 전부 같아야 통과합니다.
+    """
+    ticket_id = (contract.ticket_id or "").strip()
+    if not ticket_id:
+        return
+    rows = (
+        session.query(PendingWon)
+        .filter(PendingWon.ticket_id == ticket_id, PendingWon.status == "pending")
+        .all()
+    )
+    for pending in rows:
+        _close_pending(session, pending, client)
+
+
+def _close_pending(session, pending: PendingWon, client: Client) -> None:
+    """대기 한 줄을 끝내고 그 문의·연락처를 이 고객에 묶습니다."""
     pending.client_id = client.client_id
     pending.status = "done"
     if pending.conversation_id:
@@ -313,31 +398,40 @@ def _fill_contract_fx(contract: ClientContract) -> None:
         contract.fx_rate, contract.fx_on, _source = found
 
 
+def _add_contract(session, client: Client, form: dict) -> tuple[int, int]:
+    """계약 한 건 + 회차 + 전환 대기 정리. 신규 고객과 기존 고객이 같은 길을 지납니다.
+
+    차수는 받지 않고 **마지막 차수 + 1** 입니다.
+    """
+    seq = max((c.seq for c in client.contracts), default=0) + 1
+    contract = ClientContract(client_id=client.client_id, seq=seq)
+    _fill_contract(contract, form)
+    # 「저장 후 플랜 상태」 칸이 여기 있었습니다. 이제 플랜 상태는 계약 기간에서
+    # 나오므로(won.plan_status), 첫 계약을 넣는 순간이 곧 세팅중에서 사용중으로
+    # 넘어가는 순간입니다 — 따로 고를 것이 없습니다.
+    session.add(contract)
+    session.flush()
+    _seed_schedules(
+        session,
+        contract,
+        credit_rounds=_int(form.get("credit_rounds")) or 1,
+        first_credit_on=_text(form.get("first_credit_on")),
+    )
+    _complete_pending_won(session, _int(form.get("pending_id")), client)
+    _claim_ticket(session, contract, client)
+    return contract.id, seq
+
+
 @router.post("/won-customers/{client_id}/contracts")
 async def create_contract(client_id: int, request: Request):
-    """계약 추가. 차수는 받지 않고 **마지막 차수 + 1** 입니다."""
+    """기존 고객에 계약 추가. 새 고객의 첫 계약은 ``POST /won-customers`` 가 같이 만듭니다."""
     form = dict(await request.form())
     with SessionLocal() as session:
         client = session.get(Client, client_id)
         if client is None:
             raise HTTPException(status_code=404, detail="고객을 찾을 수 없습니다")
-        seq = max((c.seq for c in client.contracts), default=0) + 1
-        contract = ClientContract(client_id=client_id, seq=seq)
-        _fill_contract(contract, form)
-        # 「저장 후 플랜 상태」 칸이 여기 있었습니다. 이제 플랜 상태는 계약 기간에서
-        # 나오므로(won.plan_status), 첫 계약을 넣는 순간이 곧 세팅중에서 사용중으로
-        # 넘어가는 순간입니다 — 따로 고를 것이 없습니다.
-        session.add(contract)
-        session.flush()
-        _seed_schedules(
-            session,
-            contract,
-            credit_rounds=_int(form.get("credit_rounds")) or 1,
-            first_credit_on=_text(form.get("first_credit_on")),
-        )
-        _complete_pending_won(session, _int(form.get("pending_id")), client)
+        contract_id, seq = _add_contract(session, client, form)
         session.commit()
-        contract_id = contract.id
     return {"id": contract_id, "seq": seq}
 
 
@@ -408,6 +502,9 @@ async def update_contract(contract_id: int, request: Request):
     with SessionLocal() as session:
         contract = _get_contract(session, contract_id)
         _fill_contract(contract, form)
+        client = session.get(Client, contract.client_id)
+        if client is not None:
+            _claim_ticket(session, contract, client)
         session.commit()
     return {"ok": True}
 
