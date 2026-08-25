@@ -212,8 +212,13 @@ export const dueText = (value: string | null | undefined, today: string): string
   return `${fmt(value)} · ${dday(value, today)}`;
 };
 
-/** 목록 정렬: 손이 가야 하는 것이 위로. 세팅중 → 사용중 → 사용 중단. */
-export const STATUS_ORDER: Record<string, number> = { "세팅중": 0, "사용중": 1, "사용 중단": 2 };
+/** 장부에서 내린 고객. 서버의 `won.RETIRED_PLAN_STATUS` 와 같은 말이어야 합니다 —
+ *  목록이 이 값으로 행을 숨기고, 필터 고르개가 이 값으로 다시 꺼냅니다. */
+export const RETIRED = "내림";
+
+/** 목록 정렬: 손이 가야 하는 것이 위로. 세팅중 → 사용중 → 사용 중단 → 내림. */
+export const STATUS_ORDER: Record<string, number> =
+  { "세팅중": 0, "사용중": 1, "사용 중단": 2, [RETIRED]: 3 };
 
 export const initials = (name: string): string =>
   (name.replace(/[^A-Za-z가-힣 ]/g, "").split(" ")[0] || name).slice(0, 2).toUpperCase();

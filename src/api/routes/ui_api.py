@@ -1161,7 +1161,9 @@ def ui_won_customers():
         "options": {
             "industries": list(won.INDUSTRIES),
             "plans": list(won.PLANS),
-            "plan_statuses": list(won.PLAN_STATUSES),
+            # 「내림」이 뒤에 붙습니다 — 내린 고객은 목록에서 숨기므로, 이 고르개가
+            # 그들을 다시 보는 유일한 길입니다.
+            "plan_statuses": [*won.PLAN_STATUSES, won.RETIRED_PLAN_STATUS],
             "deal_types": list(won.DEAL_TYPES),
             "doc_types": list(won.DOC_TYPES),
             "payment_methods": list(won.PAYMENT_METHODS),

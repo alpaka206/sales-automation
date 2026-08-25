@@ -195,62 +195,41 @@ def _retire_pending_won(session, conversation_id: int, local_stage: str) -> bool
     )
     for row in rows:
         row.status = "dismissed"
-        _drop_empty_client(session, row, conversation_id)
+        _retire_empty_client(session, row, conversation_id)
         logger.info(
             "수주 전환 대기에서 내렸습니다 (ticket=%s, stage=%s)", row.ticket_id, local_stage
         )
     return bool(rows)
 
 
-def _drop_empty_client(session, row, conversation_id: int) -> None:
-    """물러난 대기 건이 남긴 **계약 없는 고객**을 같이 치웁니다.
+def _retire_empty_client(session, row, conversation_id: int) -> None:
+    """물러난 대기 건이 남긴 **계약 없는 고객**을 장부에서 내립니다.
 
     Won 이 아니게 된 문의가 「세팅중」 고객으로 목록과 워크북 「고객 기본 정보」에 남으면
     활성 고객 수가 부풀고, 치우는 길은 사람이 상세 화면을 찾아 들어가 누르는 것뿐입니다.
 
+    **지우지 않고 내립니다** (2026-08-25 운영자 지시). 지우면 Client ID 가 같이 사라지는데,
+    그 번호는 문의·연락처가 들고 있고 워크북의 계약·회차 탭과 Inbound DB 가 그 행을 조회해
+    회사명을 가져옵니다 — 한 건이 Won 에서 물러났다고 그 연결을 끊을 이유가 없습니다.
+    내림은 되돌릴 수 있고(``POST /won-customers/{id}/retire``), 계약이 들어오면 저절로
+    되돌아옵니다(``_add_contract`` 가 ``retired_on`` 을 비웁니다).
+
     **계약이 하나라도 있으면 손대지 않습니다** — 금액·크레딧·인식 매출이 붙은 행입니다.
-    그 번호를 쓰는 다른 문의·대기·계약 기록이 있어도 그대로 둡니다: Client ID 는 회사 하나에
-    하나라, 티켓 하나가 물러났다고 그 회사의 장부를 지우면 남의 것을 지웁니다.
-
-    **문의·연락처에 박힌 번호는 그대로 둡니다.** 그 번호는 그 회사 것이고, 비우면 같은
-    회사가 다음에 수주됐을 때 새 번호가 나가 한 회사에 번호가 둘 생깁니다 — 지금 고치고
-    있는 바로 그 증상입니다. ``next_client_id`` 가 대화·연락처도 보므로 그 번호가 남에게
-    다시 나가는 일도 없습니다. (사람이 「이 번호는 잘못 만든 것」이라고 판단해 지우는
-    ``POST /won-customers/{id}/delete`` 는 반대로 그 포인터까지 비웁니다.)
-
-    워크북의 그 행은 콘솔이 안 건드립니다 — 지워진 번호는 「손으로 쓴 행」으로 보입니다.
+    그 외에는 조건을 두지 않습니다: 그 번호를 다른 문의가 같이 쓰고 있더라도 계약이 없는
+    고객은 어느 쪽에서 보아도 활성 고객이 아니고, 그 문의가 나중에 수주되면 계약을 저장하는
+    순간 다시 올라옵니다. 지우던 시절에는 그 경우를 막아야 했습니다 — 되돌릴 수 없어서요.
     """
-    from ..db.models import Client, ContractRecord, PendingWon
+    from ..db.models import Client
 
     client_id = row.client_id
     if not client_id:
         return
     client = session.get(Client, client_id)
-    if client is None or client.contracts:
+    if client is None or client.contracts or client.retired_on:
         return
-    used_elsewhere = (
-        session.query(Conversation.id)
-        .filter(
-            Conversation.sheet_client_id == client_id,
-            Conversation.id != conversation_id,
-        )
-        .first()
-        or session.query(PendingWon.id)
-        .filter(
-            PendingWon.client_id == client_id,
-            PendingWon.id != row.id,
-            PendingWon.status.in_(("pending", "done")),
-        )
-        .first()
-        or session.query(ContractRecord.id)
-        .filter(ContractRecord.sheet_client_id == client_id)
-        .first()
-    )
-    if used_elsewhere:
-        return
-    session.delete(client)
+    client.retired_on = datetime.now(timezone.utc).date().isoformat()
     logger.info(
-        "계약이 없는 수주 고객 %s 를 같이 내렸습니다 (ticket=%s)", client_id, row.ticket_id
+        "계약이 없는 수주 고객 %s 를 장부에서 내렸습니다 (ticket=%s)", client_id, row.ticket_id
     )
 
 

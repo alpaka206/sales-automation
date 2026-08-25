@@ -466,11 +466,12 @@ def test_leaving_won_takes_the_ticket_off_the_waiting_list(factory):
 
         row = session.query(PendingWon).one()
         assert row.status == "dismissed"
-        # 딸려 있던 계약 0건짜리 고객도 같이 내려갑니다 — 남으면 「세팅중」으로 목록과
-        # 워크북에 실려 활성 고객 수를 부풀립니다.
-        assert session.get(Client, 1201) is None
-        # 번호는 문의·연락처에 그대로 둡니다. 비우면 같은 회사가 다음에 수주됐을 때 새
-        # 번호가 나가 한 회사에 번호가 둘 생깁니다 — 지금 고치고 있는 그 증상입니다.
+        # 딸려 있던 계약 0건짜리 고객은 **지우지 않고 내립니다.** 남겨 두면 「세팅중」으로
+        # 목록과 워크북에 실려 활성 고객 수를 부풀리고, 지우면 Client ID 가 같이 사라져
+        # 문의·연락처와 워크북 조회가 끊깁니다.
+        client = session.get(Client, 1201)
+        assert client is not None and client.retired_on
+        assert won.plan_status(client) == won.RETIRED_PLAN_STATUS
         assert session.query(Contact).one().sheet_client_id == 1201
 
 
@@ -480,7 +481,8 @@ def test_a_rollback_never_touches_a_customer_that_has_a_contract(factory):
 
     conversation_id = _won_rollback(factory)
     with factory() as session:
-        session.add(ClientContract(client_id=1201, seq=1, starts_on="2026-01-01"))
+        session.add(ClientContract(client_id=1201, seq=1,
+                                   starts_on="2026-01-01", ends_on="2027-01-01"))
         session.commit()
 
         # Lost 의 로컬 키는 `closed_lost` 입니다(`LOCAL_STAGE_TO_SETTING`).
@@ -488,26 +490,29 @@ def test_a_rollback_never_touches_a_customer_that_has_a_contract(factory):
         session.commit()
 
         assert session.query(PendingWon).one().status == "dismissed"
-        assert session.get(Client, 1201) is not None
+        # 계약이 있으면 활성 고객입니다 — 내리지 않습니다.
+        client = session.get(Client, 1201)
+        assert client.retired_on is None
+        assert won.plan_status(client, date(2026, 1, 2)) == "사용중"
 
 
-def test_a_rollback_keeps_a_number_another_inquiry_is_riding_on(factory):
-    """Client ID 는 회사 하나에 하나입니다. 티켓 하나가 물러났다고 장부를 지우면 남의 것입니다."""
+def test_a_contract_puts_a_retired_customer_back_on_the_books(factory):
+    """내려 둔 고객에 계약을 넣고도 목록에 안 보이면, 운영자는 저장이 안 된 줄 압니다."""
     from src.agents.stage_sync import _retire_superseded_drafts
-    from src.db.models import Conversation
+    from src.api.routes.won_customers import _add_contract
 
     conversation_id = _won_rollback(factory)
     with factory() as session:
-        other = Contact(normalized_email="b@acme.com", full_name="B", company="ACME")
-        session.add(other)
-        session.flush()
-        session.add(Conversation(contact_id=other.id, hubspot_ticket_id="T-OTHER",
-                                 stage="negotiation", sheet_client_id=1201))
-        session.commit()
-
         _retire_superseded_drafts(session, conversation_id, "negotiation")
         session.commit()
-        assert session.get(Client, 1201) is not None
+        assert session.get(Client, 1201).retired_on
+
+        client = session.get(Client, 1201)
+        _add_contract(session, client, {"starts_on": "2026-01-01", "ends_on": "2027-01-01",
+                                        "currency": "KRW"})
+        session.commit()
+
+        assert session.get(Client, 1201).retired_on is None
 
 
 def test_an_untouched_ticket_keeps_its_card(factory):
@@ -560,6 +565,97 @@ def test_a_ticket_whose_contract_exists_stays_done_even_after_a_rollback(factory
         _enqueue_pending_won(session, conversation, None)
         session.commit()
         assert session.query(PendingWon).one().status == "done"
+
+
+def test_a_retired_customer_leaves_the_active_count_but_keeps_its_row(factory):
+    """「내림」은 계약이 **없는** 고객에게만 뜻이 있습니다.
+
+    계약이 들어오면 그 순간 다시 장부에 올라오므로(`_add_contract`), 계약이 있는데 내려가
+    있는 상태는 만들어지지 않습니다 — 그래도 `plan_status` 가 한 번 더 가릅니다.
+    """
+    with factory() as session:
+        empty = Client(client_id=1301, company="내린 고객", retired_on="2026-08-25")
+        contracted = Client(client_id=1302, company="계약 있는 고객", retired_on="2026-08-25")
+        session.add_all([empty, contracted])
+        session.flush()
+        session.add(ClientContract(client_id=1302, seq=1,
+                                   starts_on="2026-01-01", ends_on="2027-01-01"))
+        session.commit()
+
+        assert won.plan_status(empty) == won.RETIRED_PLAN_STATUS
+        assert won.plan_status(contracted, date(2026, 6, 1)) == "사용중"
+        # 활성 고객 수는 사용중·세팅중만 셉니다.
+        assert won.RETIRED_PLAN_STATUS not in won.ACTIVE_PLAN_STATUSES
+        # 워크북 「플랜 상태」 드롭다운에는 이 말이 없습니다 — 없는 말을 쓰면 그 행이
+        # 영업팀의 어느 필터에도 안 걸립니다.
+        assert won.RETIRED_PLAN_STATUS not in won.PLAN_STATUSES
+
+
+def test_the_sheet_keeps_a_retired_customers_row_but_empties_the_status(factory):
+    """행은 그대로 나가야 합니다 — 계약·회차 탭과 Inbound DB 가 그 행을 조회합니다."""
+    from src.agents.won_sheets import _client_row
+
+    with factory() as session:
+        client = Client(client_id=1301, company="내린 고객", industry="교육",
+                        retired_on="2026-08-25")
+        session.add(client)
+        session.commit()
+
+        row = _client_row(client)
+        assert row.natural == ("1301",)
+        assert row.raw["C"] == "내린 고객"
+        assert row.raw["J"] == ""
+
+
+def test_retiring_is_reversible_and_refused_on_a_contracted_customer(factory):
+    patched, client = _console(factory)
+    with factory() as session:
+        session.add(Client(client_id=1301, company="내린 고객"))
+        session.add(Client(client_id=1302, company="계약 있는 고객"))
+        session.flush()
+        session.add(ClientContract(client_id=1302, seq=1, starts_on="2026-01-01"))
+        session.commit()
+
+    with patched, client:
+        assert client.post("/won-customers/1301/retire", data={"retire": "1"}).status_code == 200
+        assert client.post("/won-customers/1302/retire", data={"retire": "1"}).status_code == 400
+    with factory() as session:
+        assert session.get(Client, 1301).retired_on
+        assert session.get(Client, 1302).retired_on is None
+
+    with patched, client:
+        # 끄는 것은 "0" 입니다 — 빈 폼 값은 httpx 가 아예 안 보내서 기본값(내리기)이
+        # 걸립니다. 끄는 것은 끄는 값으로 말해야 합니다.
+        assert client.post("/won-customers/1301/retire", data={"retire": "0"}).status_code == 200
+    with factory() as session:
+        assert session.get(Client, 1301).retired_on is None
+
+
+def test_the_list_hides_retired_customers_unless_the_filter_asks(factory):
+    """안 보이는 행을 다시 볼 길이 하나는 있어야 합니다 — 플랜 상태 고르개입니다."""
+    import pathlib
+
+    from src.api.routes.ui_api import ui_won_customers
+
+    screen = pathlib.Path(
+        "frontend/src/screens/won/WonCustomers.tsx"
+    ).read_text(encoding="utf-8")
+    assert "if (row.plan_status === RETIRED && status !== RETIRED) return false;" in screen
+
+    api = pathlib.Path("src/api/routes/ui_api.py").read_text(encoding="utf-8")
+    assert '"plan_statuses": [*won.PLAN_STATUSES, won.RETIRED_PLAN_STATUS]' in api
+
+    shared = pathlib.Path("frontend/src/screens/won/shared.ts").read_text(encoding="utf-8")
+    assert f'export const RETIRED = "{won.RETIRED_PLAN_STATUS}";' in shared
+
+    # 상세에서 내리고 되돌릴 수 있어야 합니다 — 라우트만 있고 버튼이 없으면 없는 기능입니다.
+    detail = pathlib.Path(
+        "frontend/src/screens/won/WonCustomerDetail.tsx"
+    ).read_text(encoding="utf-8")
+    assert "/retire`" in detail
+    assert "장부에서 내리기" in detail and "장부에 다시 올리기" in detail
+
+    assert callable(ui_won_customers)
 
 
 def _console(factory):
@@ -727,7 +823,7 @@ def test_0090_drops_waiting_rows_whose_ticket_is_already_contracted(db_engine):
         assert session.get(Contact, contact_id).sheet_client_id == 1108
 
 
-def test_0091_drops_rollbacks_but_keeps_shared_and_contracted_numbers(db_engine):
+def test_0091_and_0092_take_rollbacks_off_the_books_without_losing_a_number(db_engine):
     import importlib
 
     from sqlalchemy.orm import Session
@@ -736,10 +832,10 @@ def test_0091_drops_rollbacks_but_keeps_shared_and_contracted_numbers(db_engine)
     with Session(db_engine) as session:
         made = {}
         for client_id, stage, ticket in (
-            (1201, "negotiation", "T-ROLL"),    # 되돌아감 + 계약 없음 → 둘 다 내려감
+            (1201, "negotiation", "T-ROLL"),    # 되돌아감 + 계약 없음 → 대기도 고객도 내려감
             (1202, "won", "T-STILL"),           # 아직 Won → 그대로
-            (1203, "closed_lost", "T-PAID"),    # 되돌아갔지만 계약이 있음 → 고객은 남음
-            (1204, "negotiation", "T-SHARED"),  # 그 번호를 다른 문의가 쓰는 중 → 고객은 남음
+            (1203, "closed_lost", "T-PAID"),    # 되돌아갔지만 계약이 있음 → 고객은 그대로
+            (1204, "negotiation", "T-SHARED"),  # 그 번호를 다른 문의가 쓰는 중 → 그래도 내려감
         ):
             contact = Contact(normalized_email=f"{client_id}@acme.com",
                               full_name=str(client_id), company="ACME")
@@ -760,10 +856,9 @@ def test_0091_drops_rollbacks_but_keeps_shared_and_contracted_numbers(db_engine)
                                  stage="negotiation", sheet_client_id=1204))
         session.commit()
 
-    migration = importlib.import_module(
-        "src.db.migrations.0091_won_rollbacks_leave_the_waiting_list"
-    )
-    migration.up(db_engine)
+    for name in ("0091_won_rollbacks_leave_the_waiting_list",
+                 "0092_a_customer_can_be_taken_off_the_books"):
+        importlib.import_module(f"src.db.migrations.{name}").up(db_engine)
 
     with Session(db_engine) as session:
         rows = {row.ticket_id: row.status for row in session.query(PendingWon)}
@@ -771,11 +866,12 @@ def test_0091_drops_rollbacks_but_keeps_shared_and_contracted_numbers(db_engine)
             "T-ROLL": "dismissed", "T-STILL": "pending",
             "T-PAID": "dismissed", "T-SHARED": "dismissed",
         }
-        assert session.get(Client, 1201) is None
-        assert session.get(Client, 1202) is not None
-        assert session.get(Client, 1203) is not None
-        assert session.get(Client, 1204) is not None
-        # 번호는 문의에 그대로 남습니다 — 그 회사가 다음에 수주되면 같은 번호를 씁니다.
+        # **어느 고객도 지워지지 않습니다.** 지우면 Client ID 가 같이 사라지고, 그 번호를
+        # 문의·연락처와 워크북 조회가 들고 있습니다.
+        retired = {cid: session.get(Client, cid).retired_on for cid in (1201, 1202, 1203, 1204)}
+        assert retired[1202] is None                      # 아직 Won
+        assert retired[1203] is None                      # 계약이 있음
+        assert retired[1201] and retired[1204]            # 계약 없이 물러난 건
         assert session.get(Conversation, made["T-ROLL"]).sheet_client_id == 1201
 
 
@@ -1264,7 +1360,10 @@ def test_the_sheet_gets_the_same_status_the_screen_shows():
     import pathlib
 
     source = pathlib.Path("src/agents/won_sheets.py").read_text(encoding="utf-8")
-    assert '"J": _text(won.plan_status(client))' in source
+    assert "status = won.plan_status(client)" in source
+    # 내린 고객만 빈칸입니다 — 「내림」은 콘솔 안의 말이라 시트의 「플랜 상태」 드롭다운에
+    # 없고, 없는 말을 쓰면 그 행이 영업팀의 어느 필터에도 안 걸립니다.
+    assert '"J": "" if status == won.RETIRED_PLAN_STATUS else _text(status)' in source
     # 시트에서 거꾸로 읽어 오지도 않습니다 — 손으로 적힌 옛 값이 날짜를 이기면 안 됩니다.
     importer = pathlib.Path("src/agents/sheet_to_db.py").read_text(encoding="utf-8")
     assert "client.plan_status" not in importer

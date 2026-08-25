@@ -46,8 +46,16 @@ DEPARTMENT_BY_TYPE: dict[str, str] = {
 
 PLAN_STATUSES = ("사용중", "세팅중", "사용 중단")
 ACTIVE_PLAN_STATUSES = ("사용중", "세팅중")
-# 목록 정렬: 손이 가야 하는 것이 위로. 세팅중 → 사용중 → 사용 중단.
-PLAN_STATUS_ORDER = {"세팅중": 0, "사용중": 1, "사용 중단": 2}
+# **장부에서 내린 고객.** 계약이 없어 활성 고객이 아닌데 행과 번호는 살려 둬야 하는
+# 고객입니다 — Won 에 잘못 올라갔다가 다른 단계로 옮겨진 건이 여기 옵니다.
+#
+# `PLAN_STATUSES` 에 **넣지 않습니다.** 그 셋은 워크북 「플랜 상태」 드롭다운의 값이고,
+# 거기 없는 말을 시트에 쓰면 그 행이 영업팀의 어느 필터에도 안 걸립니다(단계 표기에서
+# 같은 이유로 한 번 데었습니다). 시트에는 **빈칸**이 갑니다 — 플랜이 없는 것이 사실이고,
+# 빈칸은 드롭다운이 막지 않습니다. 이 말은 콘솔 안에서만 씁니다.
+RETIRED_PLAN_STATUS = "내림"
+# 목록 정렬: 손이 가야 하는 것이 위로. 세팅중 → 사용중 → 사용 중단 → 내림.
+PLAN_STATUS_ORDER = {"세팅중": 0, "사용중": 1, "사용 중단": 2, RETIRED_PLAN_STATUS: 3}
 
 DEAL_TYPES = ("MRR", "PoC")
 PLANS = ("Business Tier 1", "Business Tier 2", "Business Tier 3", "Enterprise")
@@ -144,6 +152,11 @@ def plan_status(client, today: date | None = None) -> str:
     today = today or date.today()
     contracts = list(client.contracts or ())
     if not contracts:
+        # 계약이 없는 고객만 내려둘 수 있습니다. 계약이 하나라도 들어오면 그 순간 다시
+        # 장부에 올라오므로(`_add_contract` 가 `retired_on` 을 비웁니다), 계약이 있는데
+        # 내려가 있는 상태는 만들어지지 않습니다 — 그래도 여기서 한 번 더 가릅니다.
+        if getattr(client, "retired_on", None):
+            return RETIRED_PLAN_STATUS
         return "세팅중"
     pending = False
     for contract in contracts:

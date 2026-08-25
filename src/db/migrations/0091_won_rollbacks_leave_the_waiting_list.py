@@ -8,10 +8,11 @@
 ``dismissed`` 이지 ``done`` 이 아닙니다 — ``done`` 은 「계약을 받았다」라서, 그것으로 닫으면
 그 티켓이 다시 Won 이 되어도 카드가 안 돌아옵니다.
 
-딸려 있던 **계약 없는 고객**도 같이 내립니다. 조건은 런타임(``_drop_empty_client``)과
-같습니다: 계약이 하나라도 있거나, 그 번호를 쓰는 다른 문의·대기·계약 기록이 있으면 그대로
-둡니다. 문의·연락처에 박힌 번호는 건드리지 않습니다 — 그 번호는 그 회사 것이고, 비우면
-같은 회사가 다음에 수주됐을 때 새 번호가 나가 한 회사에 번호가 둘 생깁니다.
+딸려 있던 **계약 없는 고객**은 여기서 손대지 않습니다. 이 이관이 처음 쓰였을 때는 그런
+고객을 지웠는데, 지우면 Client ID 가 같이 사라집니다 — 그 번호는 문의·연락처가 들고 있고
+워크북의 계약·회차 탭과 Inbound DB 가 그 행을 조회해 회사명을 가져옵니다. 운영자 지시로
+방향을 바꿨습니다(2026-08-25): 지우지 않고 **장부에서 내립니다**. 그 칸(`clients.retired_on`)은
+다음 이관이 만들고, 내리는 것도 거기서 합니다.
 """
 
 from __future__ import annotations
@@ -34,7 +35,7 @@ def up(engine: Engine) -> None:
         return
 
     stages = ", ".join(f"'{stage}'" for stage in _LEFT_WON)
-    dismissed = dropped = 0
+    dismissed = 0
     with engine.begin() as conn:
         rows = conn.execute(
             text(
@@ -52,40 +53,4 @@ def up(engine: Engine) -> None:
             )
             dismissed += 1
 
-        # 상태를 다 바꾼 **뒤에** 고객을 봅니다. 먼저 보면, 같은 번호를 쓰는 다른 대기 행이
-        # 아직 'pending' 이라 「남이 쓰는 중」으로 읽혀 아무것도 못 내립니다.
-        for row in rows:
-            client_id = row["client_id"]
-            if not client_id:
-                continue
-            args = {"cid": int(client_id), "pid": row["id"], "conv": row["conversation_id"]}
-            busy = conn.execute(
-                text(
-                    "SELECT 1 FROM client_contracts WHERE client_id = :cid "
-                    "UNION ALL "
-                    "SELECT 1 FROM conversations "
-                    "WHERE sheet_client_id = :cid AND (:conv IS NULL OR id <> :conv) "
-                    "UNION ALL "
-                    "SELECT 1 FROM pending_won "
-                    "WHERE client_id = :cid AND id <> :pid AND status IN ('pending', 'done') "
-                    + (
-                        "UNION ALL SELECT 1 FROM contract_records WHERE sheet_client_id = :cid"
-                        if "contract_records" in tables
-                        else ""
-                    )
-                    + " LIMIT 1"
-                ),
-                args,
-            ).first()
-            if busy:
-                continue
-            deleted = conn.execute(
-                text("DELETE FROM clients WHERE client_id = :cid"), {"cid": args["cid"]}
-            )
-            dropped += deleted.rowcount or 0
-
-    logger.info(
-        "0091: Won 을 벗어난 수주 전환 대기 %d건을 내리고, 계약 없는 고객 %d건을 같이 치웠습니다",
-        dismissed,
-        dropped,
-    )
+    logger.info("0091: Won 을 벗어난 수주 전환 대기 %d건을 내렸습니다", dismissed)

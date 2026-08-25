@@ -7,7 +7,7 @@ import { pendingContractPath } from "./pending";
 import { WonContractForm } from "./WonContractForm";
 import {
   type ListData, type Row,
-  STATUS_ORDER, amount, daysUntil, dday, dueClass, dueText, fmt, initials, money, num,
+  RETIRED, STATUS_ORDER, amount, daysUntil, dday, dueClass, dueText, fmt, initials, money, num,
   planTone, scaleFor, statusTone, tickLabel,
 } from "./shared";
 
@@ -94,6 +94,10 @@ export function WonCustomers() {
     const filtered = all.filter((row) => {
       // 담당부서는 화면 맨 위 고르개가 거릅니다 — 카드도 목록도 같은 값을 봅니다.
       if (dept !== "all" && row.department !== dept) return false;
+      // **내린 고객은 기본으로 숨깁니다.** 활성 고객이 아닌데 목록 맨 위(세팅중)에 앉아
+      // 있던 것이 이 상태가 생긴 이유입니다. 아래 플랜 상태 고르개에서 「내림」을 고르면
+      // 그때만 보입니다 — 안 보이는 행을 다시 볼 길이 하나는 있어야 합니다.
+      if (row.plan_status === RETIRED && status !== RETIRED) return false;
       if (view === "활성" && row.plan_status === "사용 중단") return false;
       if (view === "갱신임박") {
         // 사용 중단은 갱신 대상이 아닙니다 — 세지도, 목록에 넣지도 않습니다.

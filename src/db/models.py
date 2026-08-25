@@ -646,6 +646,12 @@ class Client(Base):
     contact_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
     contact_info: Mapped[str | None] = mapped_column(String(255), nullable=True)
     first_won_on: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    # **장부에서 내린 날.** NULL 이면 정상입니다. 계약이 없어 활성 고객이 아닌데 행과
+    # 번호는 살려 둬야 하는 고객이 여기 옵니다 — Won 에 잘못 올라갔다가 다른 단계로
+    # 옮겨진 건. 지우지 않는 이유는 **번호**입니다: 그 번호를 문의·연락처가 들고 있고
+    # 워크북의 다른 탭과 Inbound DB 가 그 행을 조회해 회사명을 가져옵니다. 지우면 그
+    # 연결이 통째로 끊깁니다. 계약이 들어오면 이 칸이 비워지고 다시 올라옵니다.
+    retired_on: Mapped[str | None] = mapped_column(String(10), nullable=True)
     # 플랜 상태(사용중 / 세팅중 / 사용 중단)는 **열이 아닙니다.** 계약 기간에서 나옵니다 —
     # `won.plan_status`. 저장해 두던 시절에는 계약이 끝나도 누가 손으로 바꿔 주기 전까지
     # 「사용중」이 남았고, 시트에도 그 값이 그대로 실려 나갔습니다(이관 0067).

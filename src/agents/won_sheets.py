@@ -123,6 +123,7 @@ def _natural(*values: object) -> tuple[str, ...]:
 
 
 def _client_row(client: Client) -> _Row:
+    status = won.plan_status(client)
     return _Row(
         natural=_natural(client.client_id),
         entered={"A": client.client_id, "I": _date(client.first_won_on)},
@@ -132,7 +133,13 @@ def _client_row(client: Client) -> _Row:
             "F": _text(client.country),
             # 화면과 같은 값이 시트에도 갑니다 — 계약 기간에서 나옵니다. 저장된 값을
             # 싣던 시절에는 계약이 끝나도 시트가 「사용중」인 채였습니다.
-            "J": _text(won.plan_status(client)),
+            #
+            # **내린 고객만 예외로 빈칸입니다.** 「내림」은 콘솔 안의 말이라 워크북
+            # 「플랜 상태」 드롭다운에 없고, 없는 말을 쓰면 그 행이 영업팀의 어느 필터에도
+            # 안 걸립니다. 플랜이 없는 것이 사실이라 빈칸이 맞기도 합니다.
+            # **행 자체는 그대로 내보냅니다** — 계약·회차 탭과 Inbound DB 가 이 행을
+            # 조회해 회사명을 가져오므로, 빼면 그 조회가 전부 빕니다.
+            "J": "" if status == won.RETIRED_PLAN_STATUS else _text(status),
         },
     )
 

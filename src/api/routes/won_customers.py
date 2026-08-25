@@ -205,6 +205,40 @@ async def update_client(
     return {"ok": True}
 
 
+@router.post("/won-customers/{client_id}/retire")
+async def retire_client(client_id: int, retire: str = Form("1")):
+    """계약이 없는 고객을 **장부에서 내립니다.** 행도 번호도 그대로 둡니다.
+
+    삭제와 무엇이 다른가: 삭제는 「이 번호는 잘못 만든 것」이라 번호까지 걷어냅니다(중복으로
+    발급된 번호를 정리하는 길). 내리기는 「이 고객은 활성이 아니다」일 뿐이라 번호가 남습니다 —
+    그 번호를 문의·연락처가 들고 있고, 워크북의 계약·회차 탭과 Inbound DB 가 그 행을 조회해
+    회사명을 가져오므로 지우면 그 조회가 통째로 빕니다.
+
+    Won 에 잘못 올라갔다가 다른 단계로 옮겨진 건이 이쪽입니다. 자동으로도 내려갑니다
+    (`stage_sync._retire_empty_client`) — 이 라우트는 그 자동 처리가 못 잡은 건과, 되돌리는
+    길입니다.
+
+    **계약이 있으면 거부합니다.** 계약이 있는 고객은 활성이고, 내려야 할 이유가 있다면 그건
+    계약 종료일이 말할 일입니다(`won.plan_status`).
+
+    되돌리려면 ``retire=0`` 을 보냅니다. **빈 문자열이 아닙니다** — 빈 폼 값은 중간에서
+    통째로 사라지는 일이 있어서(httpx 가 그렇습니다) 「해제」가 조용히 「내리기」가 됩니다.
+    끄는 것은 끄는 값으로 말해야 합니다.
+    """
+    with SessionLocal() as session:
+        client = session.get(Client, client_id)
+        if client is None:
+            raise HTTPException(status_code=404, detail="고객을 찾을 수 없습니다")
+        if client.contracts:
+            raise HTTPException(
+                status_code=400,
+                detail=f"계약 {len(client.contracts)}건이 있는 고객은 내릴 수 없습니다",
+            )
+        client.retired_on = date.today().isoformat() if _flag(retire) else None
+        session.commit()
+    return {"ok": True}
+
+
 @router.post("/won-customers/{client_id}/delete")
 async def delete_client(client_id: int):
     """계약이 하나도 없는 고객을 지웁니다 — 잘못 만들어진 번호를 콘솔에서 되돌리는 길.
@@ -403,6 +437,9 @@ def _add_contract(session, client: Client, form: dict) -> tuple[int, int]:
 
     차수는 받지 않고 **마지막 차수 + 1** 입니다.
     """
+    # 계약이 들어오면 그 순간 다시 장부에 올라옵니다. 내려 둔 고객에 계약을 넣고도
+    # 목록에 안 보이면, 운영자는 저장이 안 된 줄 압니다.
+    client.retired_on = None
     seq = max((c.seq for c in client.contracts), default=0) + 1
     contract = ClientContract(client_id=client.client_id, seq=seq)
     _fill_contract(contract, form)

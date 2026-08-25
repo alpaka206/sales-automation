@@ -6,6 +6,7 @@ import { useAction } from "../../ui/ActionButton";
 import { Confirm } from "./Confirm";
 import { WonContractForm } from "./WonContractForm";
 import {
+  RETIRED,
   type Contract, type Grant, type ListData, type Options, type Payment, type Row,
   addMonths, dday, dueClass, fmt, initials, money, n, num, planTone, statusTone,
 } from "./shared";
@@ -60,6 +61,7 @@ export function WonCustomerDetail() {
   const [commFilter, setCommFilter] = useState<"all" | "nego" | number>("all");
   const [addingComm, setAddingComm] = useState(false);
   const [removing, setRemoving] = useState(false);
+  const [retiring, setRetiring] = useState(false);
 
   // 액션 보드가 `/won-customers/2102#sec-credit` 로 보냅니다. 브라우저의 기본 앵커 이동은
   // 소용이 없습니다 — 그 시점에 섹션이 아직 그려지지 않았습니다. 데이터가 온 **뒤에**
@@ -175,8 +177,12 @@ export function WonCustomerDetail() {
                         onClick={() => navigate(`/won-customers/${data.client_id}/contracts/new`)}>
                   계약 정보 입력
                 </button>
-                {/* 잘못 만들어진 번호를 되돌리는 자리입니다. 계약이 있는 고객에는 이
-                    버튼이 아예 없습니다 — 이 자리가 「계약 0건」일 때만 그려집니다. */}
+                {/* 둘 다 「계약 0건」일 때만 그려집니다. 하는 일이 다릅니다:
+                    내리기는 **번호를 남기고** 목록에서만 뺍니다(Won 에 잘못 올라갔던 건),
+                    삭제는 번호까지 걷어냅니다(같은 회사에 중복으로 발급된 번호). */}
+                <button className="btn" type="button" onClick={() => setRetiring(true)}>
+                  {data.plan_status === RETIRED ? "장부에 다시 올리기" : "장부에서 내리기"}
+                </button>
                 <button className="btn btn--danger" type="button" onClick={() => setRemoving(true)}>
                   이 고객 삭제
                 </button>
@@ -263,6 +269,28 @@ export function WonCustomerDetail() {
       </div>
 
       {contractRoute && <WonContractForm />}
+
+      {retiring && (
+        <Confirm
+          title={data.plan_status === RETIRED
+            ? "이 고객을 장부에 다시 올립니다" : "이 고객을 장부에서 내립니다"}
+          rows={[["고객사", data.company], ["Client ID", String(data.client_id)], ["계약", "0건"]]}
+          note={
+            data.plan_status === RETIRED
+              ? "수주 고객 목록과 활성 고객 수에 다시 들어갑니다."
+              : "Client ID·고객 행·문의 연결은 그대로 두고 목록에서만 내립니다 — 그 번호를 "
+                + "워크북의 계약·회차 탭과 Inbound DB 가 조회해 회사명을 가져오기 때문입니다. "
+                + "계약을 넣으면 저절로 다시 올라옵니다."
+          }
+          okLabel={data.plan_status === RETIRED ? "다시 올리기" : "내리기"}
+          // 끄는 것은 "0" 입니다 — 빈 문자열은 중간에서 사라지면 「해제」가 조용히
+          // 「내리기」가 되기 때문입니다.
+          onOk={() => postForm(`/won-customers/${data.client_id}/retire`, {
+            retire: data.plan_status === RETIRED ? "0" : "1",
+          }).then(() => queryClient.invalidateQueries())}
+          onClose={() => setRetiring(false)}
+        />
+      )}
 
       {removing && (
         <Confirm
