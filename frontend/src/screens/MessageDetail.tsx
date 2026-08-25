@@ -4,7 +4,7 @@ import { Link, useParams } from "react-router-dom";
 import { getJSON, postForm } from "../lib/api";
 import { kst } from "../lib/format";
 import { Icon } from "../ui/Icon";
-import { channelLabel } from "../ui/InteractionForm";
+import { channelLabel, directionMark } from "../ui/InteractionForm";
 import { Modal } from "../ui/Modal";
 import { ConfirmModal } from "../ui/ConfirmModal";
 import { STATUS_LABELS } from "../ui/QueueTable";
@@ -1003,23 +1003,23 @@ export function MessageDetail() {
  *
  *  New 를 지난 티켓에서 이 줄은 「이 티켓의 기록」 안에 삽니다. 우리 메일만 다른 모양이면
  *  같은 시간축에 있어도 두 목록으로 읽히고, 「허브스팟에서 온 답과 우리 메일 중 무엇이
- *  먼저였나」가 안 보입니다. 방향 색도 같은 것을 씁니다(받음 파랑 · 보냄 청록).
+ *  먼저였나」가 안 보입니다. 방향 색도 같은 것을 씁니다(문의 접수 파랑 · 문의 회신 청록).
  *
  *  줄이 아직 없는 옛 메일은 본문 앞머리를 대신 씁니다 — 접히기는 해야 목록이 됩니다. */
 function MessageRow({ bubble }: { bubble: Bubble }) {
-  const received = bubble.direction === "inbound";
+  const dir = directionMark(bubble.direction);
   const body = (bubble.body_ko || bubble.body || "").trim();
   const preview = (bubble.summary_line || body).replace(/\s+/g, " ");
   return (
-    <article className={`history-item history-item--${received ? "in" : "out"}`}>
+    <article className={`history-item history-item--${dir.tone}`}>
       <div className="history-item__rail"><span /></div>
       <div>
         <details>
           <summary style={{ cursor: "pointer", listStyle: "none" }}>
             <div className="row wrap" style={{ gap: 6 }}>
               <span className="t-xs history-item__dir">
-                <Icon name={received ? "inbound" : bubble.is_auto_ack ? "sparkles" : "send"} size={13} />
-                {received ? "받음" : "보냄"}
+                <Icon name={bubble.is_auto_ack ? "sparkles" : dir.icon} size={13} />
+                {dir.label}
               </span>
               {bubble.is_auto_ack && <span className="tag">자동 접수확인</span>}
               <time className="t-xs t-subtle tnum">
@@ -1060,8 +1060,7 @@ function HistoryRow({ item }: {
   // 요약이 있으면 그것이 미리보기입니다. 없을 때만 본문 앞머리를 씁니다 — 인사말로
   // 시작하는 메일에서는 앞머리가 아무것도 안 알려 줍니다.
   const body = (item.summary || "").trim();
-  const received = RECEIVED.has(item.direction);
-  const sent = SENT.has(item.direction);
+  const dir = directionMark(item.direction);
   // 두 줄이면 「무슨 이야기였나」는 알 수 있고, 그 이상은 펼쳐서 읽을 일입니다.
   const flat = body.replace(/\s+/g, " ");
   const preview = (item.digest || flat).slice(0, 110);
@@ -1073,9 +1072,9 @@ function HistoryRow({ item }: {
           {/* 방향은 색으로도 말합니다 — 목록을 훑을 때 「누가 보낸 것인가」가 글자를 읽기
               전에 보여야 합니다. 말풍선·소통 기록과 같은 두 색입니다. 채널 태그는
               이메일이 아닐 때만: 거의 모든 줄이 이메일이라 붙여 봐야 같은 말입니다. */}
-          <span className={`t-xs history-item__dir history-item--${received ? "in" : sent ? "out" : "both"}`}>
-            <Icon name={received ? "inbound" : sent ? "send" : "messages"} size={12} />
-            {received ? "받음" : sent ? "보냄" : "주고받음"}
+          <span className={`t-xs history-item__dir history-item--${dir.tone}`}>
+            <Icon name={dir.icon} size={12} />
+            {dir.label}
           </span>
           {item.channel !== "email" && <span className="tag">{channelLabel(item.channel)}</span>}
           {item.handler && <span className="t-xs t-subtle">{item.handler}</span>}
@@ -1112,7 +1111,7 @@ const SENT = new Set(["outgoing", "outbound"]);
  *
  *  스무 건을 시간순으로 늘어놓으면 「이 사람과 무슨 이야기를 했나」를 알려면 스무 번을
  *  읽어야 합니다. 같은 제목끼리 묶으면 대화 한 건이 한 줄이 되고, 받은 것과 보낸 것의
- *  수가 그 자리에서 보입니다 — **답이 안 나간 문의**(받음 1 · 보냄 0)가 특히 그렇게 해야
+ *  수가 그 자리에서 보입니다 — **답이 안 나간 문의**(문의 1 · 답변 0)가 특히 그렇게 해야
  *  보입니다. 본문은 눌러야 나옵니다.
  *
  *  요약은 계산으로 만듭니다. 화면을 여는 길에는 모델이 없습니다 — 그건 이 저장소의
@@ -1162,7 +1161,7 @@ function HistoryDigest({ items }: {
                 {thread.first ? kst(thread.first, "date") : "-"}
                 {thread.last && thread.last !== thread.first && ` ~ ${kst(thread.last, "date")}`}
                 {" · "}
-                {/* 답이 안 나간 대화는 그렇게 적습니다 — 「받음 1 · 보냄 0」 을 세어 읽게
+                {/* 답이 안 나간 대화는 그렇게 적습니다 — 「문의 1 · 답변 0」 을 세어 읽게
                     하지 않고. 이 화면에서 가장 손이 가야 하는 줄입니다. */}
                 {thread.sent === 0 && thread.received > 0
                   ? `문의 ${thread.received}건 · 답변 없음`

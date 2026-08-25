@@ -1046,10 +1046,12 @@ async def interaction_add(
     system: from 답변 발송 onward the thread leaves HubSpot and only the operator knows
     what was said.
 
-    One record is the whole exchange, summarized once. The form used to ask for a
-    ``direction`` and that was the wrong question — it made the operator cut one
-    conversation into "who spoke" rows. It asks who handled it instead; ``direction``
-    keeps its default here and carries a real value only on HubSpot-synced rows.
+    One record is the whole exchange, summarized once, so ``direction`` defaults to
+    ``note`` — that is what a record written without choosing one means, and it is what
+    every record made before 2026-08-25 holds. The form offers 발송·수신·주고받음 again
+    (운영자 지시): a touchpoint filed against one ticket usually IS one of the two, and
+    the ticket log labels them 문의 접수 / 문의 회신. The three values are the ones
+    HubSpot-synced rows already use — see ``InteractionForm.tsx``.
 
     ``conversation_id`` files the record under ONE inquiry (the board's + button and the
     ticket screen send it, so the ticket can show its own log); the contact-level form on

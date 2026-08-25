@@ -94,16 +94,23 @@ def _post(client, contact_id, **data):
 # ---- one record is the whole exchange -----------------------------------------------
 
 
-def test_the_form_asks_who_handled_it_not_which_way_it_went():
-    """A record is the back-and-forth written up once, so "고객 → 우리" has no single
-    answer for it. Who was on the call does, and months later nothing else can say."""
+def test_the_form_asks_who_handled_it_and_which_way_it_went():
+    """방향은 2026-08-25 에 돌아왔습니다 — 티켓에 다는 기록은 대개 발송이거나 수신이고,
+    운영자가 그걸 고를 수 있어야 티켓 기록이 「문의 접수 / 문의 회신」으로 읽힙니다.
+    담당자는 그대로입니다: 몇 달 뒤에 누가 그 통화를 했는지는 다른 무엇도 못 말합니다.
+
+    값은 셋뿐이고 전부 이미 쓰이던 것입니다 — 새 값을 만들면 허브스팟에서 온 옛 줄과
+    새 줄이 다른 말로 같은 것을 가리킵니다. 기본은 `note`(주고받음)여야 합니다: 안
+    고르고 저장한 기록의 뜻이 그 전에 쌓인 수백 건과 달라지면 안 됩니다."""
     import pathlib
 
     form = pathlib.Path("frontend/src/ui/InteractionForm.tsx").read_text(
         encoding="utf-8"
     )
     assert 'name="handler"' in form
-    assert 'name="direction"' not in form
+    assert 'name="direction"' in form
+    assert 'defaultValue="note"' in form
+    assert '["outgoing", "발송"], ["inbound", "수신"], ["note", "주고받음"]' in form
 
 
 def test_a_record_keeps_the_handler_and_no_direction(log_db):
@@ -120,8 +127,25 @@ def test_a_record_keeps_the_handler_and_no_direction(log_db):
     with factory() as session:
         record = session.query(CustomerInteraction).one()
         assert record.handler == "박세일"
-        # The column stays for HubSpot-synced rows; a hand-written one has no direction.
+        # 안 고르면 `note` — 폼의 기본값이고, 방향 칸이 생기기 전에 쌓인 기록과 같은
+        # 값입니다. 여기가 바뀌면 옛 기록만 뜻이 다른 목록이 됩니다.
         assert record.direction == "note"
+
+
+def test_the_chosen_direction_is_what_gets_stored(log_db):
+    """고른 방향은 그대로 남습니다 — 티켓 기록이 그 값으로 「문의 접수 / 문의 회신」을
+    가릅니다(`directionMark`)."""
+    factory, ids = log_db
+    with TestClient(app) as client:
+        _post(
+            client,
+            ids["contact"],
+            direction="inbound",
+            summary="고객이 자막 언어 목록을 보내왔습니다.",
+            conversation_id=str(ids["negotiating"]),
+        )
+    with factory() as session:
+        assert session.query(CustomerInteraction).one().direction == "inbound"
 
 
 def test_the_handler_shows_on_the_ticket_and_note_is_not_labelled(log_db):

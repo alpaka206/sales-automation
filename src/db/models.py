@@ -519,9 +519,10 @@ class CustomerInteraction(Base):
         Integer, ForeignKey("conversations.id", ondelete="SET NULL"), nullable=True
     )
     channel: Mapped[str] = mapped_column(String(32), nullable=False, default="manual")
-    # Only the HubSpot sync sets a real direction now. A hand-written record is the whole
-    # exchange summarized once, which has no single direction, so it stores the default —
-    # ``handler`` is what a manual record is asked for instead (migration 0044).
+    # ``note`` is "no single direction" — a record written up as one exchange. The form
+    # offers 발송·수신·주고받음 and defaults to it, so an untouched record keeps that
+    # meaning; the other two are the values HubSpot-synced rows already carry, on purpose
+    # (a third vocabulary would make old and new rows say the same thing differently).
     direction: Mapped[str] = mapped_column(String(16), nullable=False, default="note")
     handler: Mapped[str | None] = mapped_column(String(120), nullable=True)
     subject: Mapped[str | None] = mapped_column(String(300), nullable=True)

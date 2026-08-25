@@ -15,6 +15,26 @@ export function channelLabel(value: string) {
   return CHANNELS.find(([key]) => key === value)?.[1] ?? value;
 }
 
+// 방향 — **고르는 말과 줄에 찍히는 말이 다릅니다** (2026-08-25 운영자 지시). 폼에서는
+// 「무엇을 적는가」라 발송·수신이고, 목록에서는 「이 티켓에 무슨 일이 있었나」라 문의
+// 접수·문의 회신입니다. 값 셋은 이미 쓰이던 것 그대로입니다 — `inbound`/`outgoing` 은
+// 허브스팟에서 가져온 줄이 쓰고, `note` 는 한 건에 양쪽이 다 들어 있는 기록입니다.
+// 새 값을 만들면 옛 줄과 새 줄이 다른 말로 같은 것을 가리킵니다.
+export const DIRECTIONS: [string, string][] = [
+  ["outgoing", "발송"], ["inbound", "수신"], ["note", "주고받음"],
+];
+
+/** 방향 한 줄에 필요한 것 — 말·아이콘·색을 **한 곳에서** 정합니다. 티켓 기록·고객
+ *  기록·리드 히스토리가 같은 목록을 그리므로 여기가 갈리면 같은 줄이 화면마다 다른
+ *  말을 합니다. 별칭(`incoming`·`outbound`)은 옛 행이 들고 있는 값입니다. */
+export function directionMark(value: string) {
+  if (value === "inbound" || value === "incoming")
+    return { label: "문의 접수", icon: "inbound", tone: "in" };
+  if (value === "outgoing" || value === "outbound")
+    return { label: "문의 회신", icon: "send", tone: "out" };
+  return { label: "주고받음", icon: "messages", tone: "both" };
+}
+
 export type Interaction = {
   id?: number;
   channel: string;
@@ -57,6 +77,13 @@ export function InteractionForm({
           {CHANNELS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
         </select>
       </label>
+      <label><span className="field-label">방향</span>
+        {/* 기본은 「주고받음」입니다 — 한 건을 통째로 적는 것이 이 폼의 원래 쓰임이라,
+            안 고르고 저장한 기록의 뜻이 바뀌면 안 됩니다. */}
+        <select className="select" name="direction" defaultValue="note">
+          {DIRECTIONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+        </select>
+      </label>
       <label><span className="field-label">담당자</span>
         <input className="input" name="handler" maxLength={120} placeholder="이 건을 진행한 사람" />
       </label>
@@ -66,8 +93,9 @@ export function InteractionForm({
       <label><span className="field-label">일시</span>
         <input className="input" type="datetime-local" name="happened_at" />
       </label>
-      {/* One record = one exchange, written up once. Splitting it into "who spoke" rows
-          is what the direction field used to force. */}
+      {/* One record = one exchange, written up once. 방향은 그 기록이 무엇인지 말할
+          뿐, 한 대화를 「누가 말했나」 줄로 쪼개라는 뜻이 아닙니다 — 그래서 기본이
+          「주고받음」이고 본문은 여전히 한 칸입니다. */}
       <label className="quick-form__wide"><span className="field-label">오간 내용</span>
         <textarea className="textarea" name="summary" rows={4} required
                   placeholder="고객이 요청한 내용과 우리가 답한 내용을 한 번에 정리해서 적어주세요." />
@@ -95,8 +123,7 @@ export function InteractionForm({
  *  가장 먼저 알아야 할 것입니다. 방향도 「우리 → 고객」이라는 태그 대신 **화살표와 한
  *  단어**입니다 — 이 목록은 이미 한 고객의 것이라 「고객」은 어느 줄에나 적혀 있습니다. */
 export function InteractionItem({ item }: { item: Interaction }) {
-  const received = item.direction === "incoming" || item.direction === "inbound";
-  const sent = item.direction === "outgoing";
+  const dir = directionMark(item.direction);
   const body = (item.summary || "").trim();
   // 미리보기는 `context` 가 있으면 그것입니다. 가져온 메일에서는 한 줄 요약이고,
   // 사람이 적은 기록에서는 「맥락·다음 액션」이라 어느 쪽이든 한 줄로 읽힙니다.
@@ -107,8 +134,8 @@ export function InteractionItem({ item }: { item: Interaction }) {
     <>
       <div className="row wrap" style={{ gap: 6 }}>
         <span className="t-xs history-item__dir">
-          <Icon name={received ? "inbound" : sent ? "send" : "messages"} size={13} />
-          {received ? "받음" : sent ? "보냄" : "주고받음"}
+          <Icon name={dir.icon} size={13} />
+          {dir.label}
         </span>
         {item.channel !== "email" && <span className="tag">{channelLabel(item.channel)}</span>}
         {item.handler && <span className="tag">{item.handler}</span>}
@@ -118,7 +145,7 @@ export function InteractionItem({ item }: { item: Interaction }) {
     </>
   );
   return (
-    <article className={`history-item history-item--${received ? "in" : sent ? "out" : "both"}`}>
+    <article className={`history-item history-item--${dir.tone}`}>
       <div className="history-item__rail"><span /></div>
       <div>
         {foldable ? (
