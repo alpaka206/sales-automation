@@ -134,6 +134,10 @@ _SUPERSEDABLE = ("pending_approval", "approved", "draft_failed", "send_failed")
 # None, 뜻을 모르는 값은 단계가 움직인 것이 아닙니다 — `!= "new"` 로 세면 아직 아무도 손대지
 # 않은 티켓의 초안까지 종료됩니다.
 _PAST_NEW = frozenset(LOCAL_STAGE_TO_SETTING) - {"new"}
+# 뜻을 아는 단계 전부. 「Won 에서 벗어났다」를 재는 자입니다 — `!= "won"` 으로 세면 모델
+# 기본값 `initial` 이나 아직 매핑되지 않은 값까지 「벗어났다」가 되어, 아무도 손대지 않은
+# 티켓의 대기 카드를 내려 버립니다.
+_MAPPED_STAGES = frozenset(LOCAL_STAGE_TO_SETTING)
 
 
 def _retire_superseded_drafts(session, conversation_id: int, local_stage: str) -> int:
@@ -151,11 +155,102 @@ def _retire_superseded_drafts(session, conversation_id: int, local_stage: str) -
     **이 함수가 초안을 없애는 유일한 곳입니다.** 단계를 옮기는 쪽(HubSpot 동기화, 콘솔
     보드, 워크북·백필 가져오기)과 초안을 완성하는 쪽(``_finalize_draft``)이 전부 여기로
     옵니다 — 한 곳에서 지우면 화면·집계·발송이 따로 확인할 것이 없습니다.
+
+    **그래서 수주 전환 대기를 내리는 것도 여기서 합니다.** 단계가 옮겨졌을 때 그 단계에
+    안 맞는 것을 치우는 자리가 이미 여기이고, 여덟 군데가 전부 이 함수를 지납니다. 옮기는
+    곳마다 따로 달면 하나가 조용히 빠지고, 그러면 그 경로로 옮긴 건만 카드가 남습니다.
+    돌려주는 수는 **초안만** 셉니다 — ``_finalize_draft`` 가 이 값으로 「내 초안이 밀렸나」를
+    판단하므로(``inbound.py``), 대기를 내린 것까지 더하면 멀쩡한 초안이 밀린 것이 됩니다.
     """
+    _retire_pending_won(session, conversation_id, local_stage)
     if local_stage not in _PAST_NEW:
         return 0
     return _delete_pending_drafts(
         session, conversation_id, why=f"단계 {local_stage} 이동"
+    )
+
+
+def _retire_pending_won(session, conversation_id: int, local_stage: str) -> bool:
+    """Won 에서 벗어난 티켓을 수주 전환 대기에서 내립니다.
+
+    Won 이 아니게 되었다는 것은 계약 정보를 받을 일이 없어졌다는 뜻입니다. 그대로 두면
+    「계약 정보를 입력해야 합니다」 카드가 영영 남고, 운영자는 그것이 살아 있는 일감인지
+    되돌려진 건인지 화면만 봐서는 모릅니다.
+
+    ``done`` 이 아니라 ``dismissed`` 입니다. ``done`` 은 「계약을 받았다」는 뜻이라, 그것으로
+    닫으면 그 티켓이 다시 Won 이 되어도 카드가 안 돌아옵니다. ``dismissed`` 는 「지금 Won 이
+    아니다」이고, 다시 Won 이 되면 ``_enqueue_pending_won`` 이 ``pending`` 으로 되살립니다.
+    """
+    from ..db.models import PendingWon
+
+    if local_stage == WON_STAGE or local_stage not in _MAPPED_STAGES:
+        return False
+    rows = (
+        session.query(PendingWon)
+        .filter(
+            PendingWon.conversation_id == conversation_id,
+            PendingWon.status == "pending",
+        )
+        .all()
+    )
+    for row in rows:
+        row.status = "dismissed"
+        _drop_empty_client(session, row, conversation_id)
+        logger.info(
+            "수주 전환 대기에서 내렸습니다 (ticket=%s, stage=%s)", row.ticket_id, local_stage
+        )
+    return bool(rows)
+
+
+def _drop_empty_client(session, row, conversation_id: int) -> None:
+    """물러난 대기 건이 남긴 **계약 없는 고객**을 같이 치웁니다.
+
+    Won 이 아니게 된 문의가 「세팅중」 고객으로 목록과 워크북 「고객 기본 정보」에 남으면
+    활성 고객 수가 부풀고, 치우는 길은 사람이 상세 화면을 찾아 들어가 누르는 것뿐입니다.
+
+    **계약이 하나라도 있으면 손대지 않습니다** — 금액·크레딧·인식 매출이 붙은 행입니다.
+    그 번호를 쓰는 다른 문의·대기·계약 기록이 있어도 그대로 둡니다: Client ID 는 회사 하나에
+    하나라, 티켓 하나가 물러났다고 그 회사의 장부를 지우면 남의 것을 지웁니다.
+
+    **문의·연락처에 박힌 번호는 그대로 둡니다.** 그 번호는 그 회사 것이고, 비우면 같은
+    회사가 다음에 수주됐을 때 새 번호가 나가 한 회사에 번호가 둘 생깁니다 — 지금 고치고
+    있는 바로 그 증상입니다. ``next_client_id`` 가 대화·연락처도 보므로 그 번호가 남에게
+    다시 나가는 일도 없습니다. (사람이 「이 번호는 잘못 만든 것」이라고 판단해 지우는
+    ``POST /won-customers/{id}/delete`` 는 반대로 그 포인터까지 비웁니다.)
+
+    워크북의 그 행은 콘솔이 안 건드립니다 — 지워진 번호는 「손으로 쓴 행」으로 보입니다.
+    """
+    from ..db.models import Client, ContractRecord, PendingWon
+
+    client_id = row.client_id
+    if not client_id:
+        return
+    client = session.get(Client, client_id)
+    if client is None or client.contracts:
+        return
+    used_elsewhere = (
+        session.query(Conversation.id)
+        .filter(
+            Conversation.sheet_client_id == client_id,
+            Conversation.id != conversation_id,
+        )
+        .first()
+        or session.query(PendingWon.id)
+        .filter(
+            PendingWon.client_id == client_id,
+            PendingWon.id != row.id,
+            PendingWon.status.in_(("pending", "done")),
+        )
+        .first()
+        or session.query(ContractRecord.id)
+        .filter(ContractRecord.sheet_client_id == client_id)
+        .first()
+    )
+    if used_elsewhere:
+        return
+    session.delete(client)
+    logger.info(
+        "계약이 없는 수주 고객 %s 를 같이 내렸습니다 (ticket=%s)", client_id, row.ticket_id
     )
 
 
@@ -363,13 +458,16 @@ def sync_stage_from_hubspot(
             # 단계는 그대로여도 초안은 그 사이에 생겼을 수 있습니다: 작성 중이던 초안이
             # 단계가 옮겨진 **뒤에** 완성되면, 그 대화에는 다시 아무 변화도 오지 않습니다.
             # 여기서 한 번 더 훑지 않으면 그 초안은 영영 발송 대기로 남습니다.
-            dirty = bool(_retire_superseded_drafts(session, conv.id, local_stage))
+            # 돌려주는 수는 초안만 세지만, 이 함수는 그 단계에 안 맞는 수주 전환 대기도
+            # 같이 내립니다. 그래서 「바뀐 것이 있을 때만」 커밋하지 않고 늘 커밋합니다 —
+            # 아무것도 안 바뀐 커밋은 공짜이고, 조건을 달면 대기를 내린 것이 조용히
+            # 사라집니다(그 값은 초안 수에 안 실립니다).
+            _retire_superseded_drafts(session, conv.id, local_stage)
             # Won 은 다른 경로(콘솔·워크북)가 먼저 옮겼을 수 있습니다. 그때 수주 전환 대기가
             # 비어 있으면 10분마다 도는 이 스윕이 유일한 복구 기회입니다.
-            if local_stage == WON_STAGE and _enqueue_pending_won(session, conv, sheet_client_id):
-                dirty = True
-            if dirty:
-                session.commit()
+            if local_stage == WON_STAGE:
+                _enqueue_pending_won(session, conv, sheet_client_id)
+            session.commit()
             # 워크북 미러는 실패해도 아무 데도 안 남습니다. 이 스윕이 곧 재시도라서, 값이
             # 같아도 한 번 더 밀어 둡니다 — 시트만 뒤처져 있던 경우가 여기서 복구됩니다.
             _mirror_stage_to_sheet(
@@ -455,10 +553,18 @@ def _enqueue_pending_won(session, conv, sheet_client_id: int | None) -> bool:
         session.query(PendingWon).filter(PendingWon.ticket_id == ticket_id).one_or_none()
     )
     if existing is not None:
-        if existing.status == "pending" and registered is not None:
-            # 대기 중인데 계약이 이미 있습니다. 내려놓고 그 고객에 묶습니다.
-            existing.client_id = registered.client_id
-            existing.status = "done"
+        if registered is not None:
+            # 계약이 이미 있습니다. 내려놓고 그 고객에 묶습니다.
+            if existing.status != "done":
+                existing.client_id = registered.client_id
+                existing.status = "done"
+                changed = True
+        elif existing.status == "dismissed":
+            # Won 에서 벗어났다가 **돌아왔습니다.** `done`(계약을 받았다)은 되살리지
+            # 않습니다 — 그건 이 분기 위에서 이미 걸러집니다.
+            existing.status = "pending"
+            if resolved_client_id and existing.client_id is None:
+                existing.client_id = resolved_client_id
             changed = True
         elif (
             existing.status == "pending"

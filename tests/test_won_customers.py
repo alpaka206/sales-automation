@@ -429,6 +429,139 @@ def test_typing_a_ticket_into_a_contract_clears_that_waiting_row(factory):
         assert session.query(PendingWon).one().status == "done"
 
 
+def _won_rollback(factory, **client_kwargs):
+    """Won 이었다가 협상으로 되돌아간 티켓 하나. 대기 한 줄과 계약 없는 고객이 딸려 있습니다."""
+    from src.db.models import Conversation, PendingWon
+
+    with factory() as session:
+        contact = Contact(normalized_email="a@acme.com", full_name="A", company="ACME",
+                          sheet_client_id=1201)
+        session.add_all([contact, Client(client_id=1201, company="ACME", **client_kwargs)])
+        session.flush()
+        conversation = Conversation(contact_id=contact.id, hubspot_ticket_id="T-ROLL",
+                                    stage="won", sheet_client_id=1201)
+        session.add(conversation)
+        session.flush()
+        session.add(PendingWon(ticket_id="T-ROLL", company="ACME", client_id=1201,
+                               conversation_id=conversation.id))
+        session.commit()
+        return conversation.id
+
+
+def test_leaving_won_takes_the_ticket_off_the_waiting_list(factory):
+    """Won 이 아니게 되면 「계약 정보를 입력해야 합니다」는 끝입니다.
+
+    단계를 옮기는 여덟 경로가 전부 `_retire_superseded_drafts` 를 지나므로 거기에 답니다 —
+    옮기는 곳마다 따로 달면 하나가 조용히 빠지고, 그 경로로 옮긴 건만 카드가 남습니다.
+    """
+    from src.agents.stage_sync import _retire_superseded_drafts
+    from src.db.models import PendingWon
+
+    conversation_id = _won_rollback(factory)
+    with factory() as session:
+        # 돌려주는 수는 **초안만** 셉니다 — `_finalize_draft` 가 이 값으로 「내 초안이
+        # 밀렸나」를 판단하므로, 대기를 내린 것까지 더하면 멀쩡한 초안이 밀린 것이 됩니다.
+        assert _retire_superseded_drafts(session, conversation_id, "negotiation") == 0
+        session.commit()
+
+        row = session.query(PendingWon).one()
+        assert row.status == "dismissed"
+        # 딸려 있던 계약 0건짜리 고객도 같이 내려갑니다 — 남으면 「세팅중」으로 목록과
+        # 워크북에 실려 활성 고객 수를 부풀립니다.
+        assert session.get(Client, 1201) is None
+        # 번호는 문의·연락처에 그대로 둡니다. 비우면 같은 회사가 다음에 수주됐을 때 새
+        # 번호가 나가 한 회사에 번호가 둘 생깁니다 — 지금 고치고 있는 그 증상입니다.
+        assert session.query(Contact).one().sheet_client_id == 1201
+
+
+def test_a_rollback_never_touches_a_customer_that_has_a_contract(factory):
+    from src.agents.stage_sync import _retire_superseded_drafts
+    from src.db.models import PendingWon
+
+    conversation_id = _won_rollback(factory)
+    with factory() as session:
+        session.add(ClientContract(client_id=1201, seq=1, starts_on="2026-01-01"))
+        session.commit()
+
+        # Lost 의 로컬 키는 `closed_lost` 입니다(`LOCAL_STAGE_TO_SETTING`).
+        _retire_superseded_drafts(session, conversation_id, "closed_lost")
+        session.commit()
+
+        assert session.query(PendingWon).one().status == "dismissed"
+        assert session.get(Client, 1201) is not None
+
+
+def test_a_rollback_keeps_a_number_another_inquiry_is_riding_on(factory):
+    """Client ID 는 회사 하나에 하나입니다. 티켓 하나가 물러났다고 장부를 지우면 남의 것입니다."""
+    from src.agents.stage_sync import _retire_superseded_drafts
+    from src.db.models import Conversation
+
+    conversation_id = _won_rollback(factory)
+    with factory() as session:
+        other = Contact(normalized_email="b@acme.com", full_name="B", company="ACME")
+        session.add(other)
+        session.flush()
+        session.add(Conversation(contact_id=other.id, hubspot_ticket_id="T-OTHER",
+                                 stage="negotiation", sheet_client_id=1201))
+        session.commit()
+
+        _retire_superseded_drafts(session, conversation_id, "negotiation")
+        session.commit()
+        assert session.get(Client, 1201) is not None
+
+
+def test_an_untouched_ticket_keeps_its_card(factory):
+    """모델 기본값 `initial` 은 단계가 움직인 것이 아닙니다 — `!= "won"` 으로 세면 안 됩니다."""
+    from src.agents.stage_sync import _retire_superseded_drafts
+    from src.db.models import PendingWon
+
+    conversation_id = _won_rollback(factory)
+    with factory() as session:
+        _retire_superseded_drafts(session, conversation_id, "initial")
+        session.commit()
+        assert session.query(PendingWon).one().status == "pending"
+        assert session.get(Client, 1201) is not None
+
+
+def test_a_ticket_that_returns_to_won_comes_back_to_the_waiting_list(factory):
+    """`dismissed` 는 「지금 Won 이 아니다」입니다. 다시 Won 이면 카드가 돌아와야 합니다.
+
+    `done` 으로 닫으면 안 되는 이유가 이것입니다 — 그건 「계약을 받았다」라서 안 돌아옵니다.
+    """
+    from src.agents.stage_sync import _enqueue_pending_won, _retire_superseded_drafts
+    from src.db.models import Conversation, PendingWon
+
+    conversation_id = _won_rollback(factory)
+    with factory() as session:
+        _retire_superseded_drafts(session, conversation_id, "negotiation")
+        session.commit()
+        assert session.query(PendingWon).one().status == "dismissed"
+
+        conversation = session.get(Conversation, conversation_id)
+        assert _enqueue_pending_won(session, conversation, None) is True
+        session.commit()
+
+        row = session.query(PendingWon).one()
+        assert (row.status, row.client_id) == ("pending", 1201)
+        # 같은 티켓이 두 줄이 되면 안 됩니다.
+        assert session.query(PendingWon).count() == 1
+
+
+def test_a_ticket_whose_contract_exists_stays_done_even_after_a_rollback(factory):
+    from src.agents.stage_sync import _enqueue_pending_won
+    from src.db.models import Conversation, PendingWon
+
+    conversation_id = _won_rollback(factory)
+    with factory() as session:
+        session.add(ClientContract(client_id=1201, seq=1, ticket_id="T-ROLL"))
+        session.commit()
+
+        conversation = session.get(Conversation, conversation_id)
+        _enqueue_pending_won(session, conversation, None)
+        session.commit()
+        assert session.query(PendingWon).one().status == "done"
+
+
 def _console(factory):
     """콘솔이 부르는 대로 쓰기 라우트를 두드리는 TestClient."""
     from unittest.mock import patch
@@ -592,6 +725,58 @@ def test_0090_drops_waiting_rows_whose_ticket_is_already_contracted(db_engine):
         assert (rows["T-OPEN"].status, rows["T-OPEN"].client_id) == ("pending", None)
         assert session.get(Conversation, contacted_id).sheet_client_id == 1108
         assert session.get(Contact, contact_id).sheet_client_id == 1108
+
+
+def test_0091_drops_rollbacks_but_keeps_shared_and_contracted_numbers(db_engine):
+    import importlib
+
+    from sqlalchemy.orm import Session
+    from src.db.models import Conversation, PendingWon
+
+    with Session(db_engine) as session:
+        made = {}
+        for client_id, stage, ticket in (
+            (1201, "negotiation", "T-ROLL"),    # 되돌아감 + 계약 없음 → 둘 다 내려감
+            (1202, "won", "T-STILL"),           # 아직 Won → 그대로
+            (1203, "closed_lost", "T-PAID"),    # 되돌아갔지만 계약이 있음 → 고객은 남음
+            (1204, "negotiation", "T-SHARED"),  # 그 번호를 다른 문의가 쓰는 중 → 고객은 남음
+        ):
+            contact = Contact(normalized_email=f"{client_id}@acme.com",
+                              full_name=str(client_id), company="ACME")
+            session.add_all([contact, Client(client_id=client_id, company=f"ACME {client_id}")])
+            session.flush()
+            conversation = Conversation(contact_id=contact.id, hubspot_ticket_id=ticket,
+                                        stage=stage, sheet_client_id=client_id)
+            session.add(conversation)
+            session.flush()
+            session.add(PendingWon(ticket_id=ticket, company="ACME",
+                                   client_id=client_id, conversation_id=conversation.id))
+            made[ticket] = conversation.id
+        session.add(ClientContract(client_id=1203, seq=1, starts_on="2026-01-01"))
+        rider = Contact(normalized_email="rider@acme.com", full_name="Rider", company="ACME")
+        session.add(rider)
+        session.flush()
+        session.add(Conversation(contact_id=rider.id, hubspot_ticket_id="T-RIDER",
+                                 stage="negotiation", sheet_client_id=1204))
+        session.commit()
+
+    migration = importlib.import_module(
+        "src.db.migrations.0091_won_rollbacks_leave_the_waiting_list"
+    )
+    migration.up(db_engine)
+
+    with Session(db_engine) as session:
+        rows = {row.ticket_id: row.status for row in session.query(PendingWon)}
+        assert rows == {
+            "T-ROLL": "dismissed", "T-STILL": "pending",
+            "T-PAID": "dismissed", "T-SHARED": "dismissed",
+        }
+        assert session.get(Client, 1201) is None
+        assert session.get(Client, 1202) is not None
+        assert session.get(Client, 1203) is not None
+        assert session.get(Client, 1204) is not None
+        # 번호는 문의에 그대로 남습니다 — 그 회사가 다음에 수주되면 같은 번호를 씁니다.
+        assert session.get(Conversation, made["T-ROLL"]).sheet_client_id == 1201
 
 
 def test_0089_backfills_only_an_unambiguous_pending_company(db_engine):
