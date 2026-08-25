@@ -979,6 +979,14 @@ def test_active_customer_donuts_resize_and_show_only_real_deal_types():
     assert "clamp(68px,22cqi,92px)" in chart_rule
     assert "aspect-ratio:1" in chart_rule
 
+    # 좁아지면 범례가 원 **아래**로 내려갑니다. 옆에 두면 둘 다 물러날 데가 없어서
+    # (원은 최소 68px, 범례 줄은 nowrap) 글자가 원 위로 겹칩니다 — 3열로 서는 넓은
+    # 화면에서 오히려 그렇습니다. 기준은 화면이 아니라 `.kpi-splits` 의 폭입니다.
+    assert "container-type:inline-size" in css[css.index(".won .kpi-splits {") :][:200]
+    stacked = css[css.index("@container (max-width:420px)") :]
+    stacked = stacked[: stacked.index("}")]
+    assert ".won .kpi-donut__body {flex-direction:column" in stacked
+
 
 def test_waiting_card_bypasses_the_three_way_customer_picker():
     import pathlib

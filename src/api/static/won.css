@@ -102,6 +102,17 @@
 .won .kpi-donut__legend .dot {width:8px;height:8px;border-radius:50%;box-shadow:0 0 0 1px rgba(15,45,42,.06);}
 .won .kpi-donut__legend b {color:var(--ink);font-weight:650;font-variant-numeric:tabular-nums;}
 .won .kpi-donut__legend small {color:var(--faint);font-variant-numeric:tabular-nums;min-width:25px;text-align:right;}
+/* 좁아지면 범례가 원 **아래**로 내려갑니다. 옆에 두면 둘 다 물러날 데가 없습니다 — 원은
+   최소 지름 68px 이고 범례 줄은 `nowrap` 이라, 폭이 모자라면 글자가 원 위로 겹칩니다.
+   내려갈 자리는 원래 비어 있습니다: `.kpi-splits` 가 `flex:1` 로 카드의 남은 세로를 받는데
+   `align-items:start` 라 도넛이 위에 붙고 아래가 빕니다.
+   기준은 `.kpi-splits` 의 폭입니다(그 요소가 `container-type:inline-size`). 도넛 하나가
+   나란히 서려면 원 68 + 간격 10 + 범례 110 ≈ 190px 이고 둘이니 400px 쯤 듭니다 — 420 은
+   그 위의 여유입니다. 3열로 서는 넓은 화면에서 카드 하나가 오히려 좁아지므로(`.kpi.wide`
+   가 두 칸을 쓰는 것은 1240px **아래**입니다) 화면 크기가 아니라 이 폭으로 재야 맞습니다. */
+@container (max-width:420px) {
+  .won .kpi-donut__body {flex-direction:column;align-items:stretch;gap:11px;}
+}
 .won .kpi {border:1px solid var(--line);border-radius:12px;padding:18px 20px 17px;background:#fff;text-align:left;
     display:flex;flex-direction:column;min-height:152px;}
 .won .kpi[data-view]:hover {border-color:#CFDBD8;background:var(--teal-25);cursor:pointer;}
