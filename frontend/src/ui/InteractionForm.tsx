@@ -1,5 +1,6 @@
 import { Icon } from "./Icon";
 import { postForm } from "../lib/api";
+import { kst } from "../lib/format";
 import { SubmitButton, useAction } from "./ActionButton";
 
 // The 소통·미팅 기록 form, defined ONCE — the port of partials/interaction_form.html.
@@ -121,10 +122,21 @@ export function InteractionForm({
  *  머리줄에서 **채널 태그는 이메일이 아닐 때만** 붙습니다. 거의 모든 줄이 이메일이라
  *  「이메일」은 모든 줄에 같은 말을 하나씩 더 얹을 뿐이고, 「전화」·「미팅」은 그 줄에서
  *  가장 먼저 알아야 할 것입니다. 방향도 「우리 → 고객」이라는 태그 대신 **화살표와 한
- *  단어**입니다 — 이 목록은 이미 한 고객의 것이라 「고객」은 어느 줄에나 적혀 있습니다. */
-export function InteractionItem({ item }: { item: Interaction }) {
+ *  단어**입니다 — 이 목록은 이미 한 고객의 것이라 「고객」은 어느 줄에나 적혀 있습니다.
+ *
+ *  `hideSubject` 는 **한 스레드짜리 목록**을 위한 것입니다(「이 티켓의 기록」). 거기서는
+ *  줄마다 같은 메일 제목이 반복되고, 우리 메일 줄은 그 제목을 **번역해서** 쓰기 때문에
+ *  같은 제목이 원문·국문으로 나란히 놓여 다른 두 건처럼 보였습니다(2026-08-25 운영자
+ *  지적). 고객 기록·리드 히스토리에서는 켜지 않습니다 — 거기서는 제목이 대화를 가르는
+ *  유일한 열쇠입니다(`threadKey`). */
+export function InteractionItem({ item, hideSubject = false }: {
+  item: Interaction;
+  hideSubject?: boolean;
+}) {
   const dir = directionMark(item.direction);
-  const body = (item.summary || "").trim();
+  // 제목을 안 그리는 자리에서는 본문 없는 줄이 통째로 빈칸이 됩니다 — 그때는 제목이
+  // 그 기록의 전부라 본문 자리에 씁니다.
+  const body = (item.summary || "").trim() || (hideSubject ? item.subject || "" : "");
   // 미리보기는 `context` 가 있으면 그것입니다. 가져온 메일에서는 한 줄 요약이고,
   // 사람이 적은 기록에서는 「맥락·다음 액션」이라 어느 쪽이든 한 줄로 읽힙니다.
   // 없으면 본문 앞머리 — 인사말로 시작하는 메일에서는 이게 아무것도 안 알려 줍니다.
@@ -139,9 +151,14 @@ export function InteractionItem({ item }: { item: Interaction }) {
         </span>
         {item.channel !== "email" && <span className="tag">{channelLabel(item.channel)}</span>}
         {item.handler && <span className="tag">{item.handler}</span>}
-        <time className="t-xs t-subtle tnum">{item.happened_at?.slice(0, 16).replace("T", " ")}</time>
+        {/* **`kst()` 로 찍습니다.** API 가 주는 것은 오프셋 없는 UTC 라, 잘라서 그대로
+            쓰면 한국 시각보다 9시간 이른 값이 찍힙니다 — 같은 목록의 메일 줄은 변환해서
+            쓰고 있어서, 1분 차이로 오간 두 건이 9시간 떨어져 보였습니다. */}
+        <time className="t-xs t-subtle tnum">{kst(item.happened_at)}</time>
       </div>
-      {item.subject && <strong className="history-item__title">{item.subject}</strong>}
+      {item.subject && !hideSubject && (
+        <strong className="history-item__title">{item.subject}</strong>
+      )}
     </>
   );
   return (

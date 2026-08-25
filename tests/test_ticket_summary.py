@@ -84,6 +84,40 @@ def test_the_draft_can_no_longer_write_the_summary():
     assert "append_summary_line" in worker
 
 
+def test_the_ticket_screen_does_not_say_the_same_thing_twice():
+    """티켓 화면에서 **요약 카드와 제목 줄을 뺐습니다** (2026-08-25 운영자 지시).
+
+    요약의 불릿과 「이 티켓의 기록」 각 줄의 둘째 줄은 **같은 문자열**입니다 — 한 줄을
+    만들어 `messages.summary_line` 과 `conversations.summary` 에 같이 쓰기 때문입니다
+    (`append_summary_line`). 그래서 한 화면이 같은 말을 두 번 했고, 카드 쪽에는 시각도
+    방향도 없었습니다. 제목 줄도 같은 이유입니다: 그 목록은 스레드 하나라 줄마다 같은
+    제목이 반복되고, 우리 메일 줄은 그것을 번역해서 쓰기 때문에 원문·국문이 나란히 놓여
+    다른 두 건처럼 보였습니다.
+
+    **값은 그대로 쌓입니다.** 초안 프롬프트가 「기존 대화 요약」으로 읽으므로, 지운 것은
+    화면과 그 화면에 보내던 값뿐입니다.
+    """
+    screen = pathlib.Path("frontend/src/screens/MessageDetail.tsx").read_text(
+        encoding="utf-8"
+    )
+    assert "data.summary" not in screen
+    assert "history-item__title" not in screen  # 티켓 기록의 메일 줄
+    assert "hideSubject" in screen  # 소통 기록 줄
+    route = pathlib.Path("src/api/routes/messages.py").read_text(encoding="utf-8")
+    assert '"summary": conv.summary' not in route
+    inbound = pathlib.Path("src/agents/inbound.py").read_text(encoding="utf-8")
+    assert "기존 대화 요약" in inbound
+
+
+def test_a_record_row_prints_korean_time():
+    """기록 줄의 시각은 `kst()` 를 지납니다. API 가 주는 것은 오프셋 없는 UTC 라 잘라서
+    그대로 쓰면 9시간 이른 값이 찍히는데, 같은 목록의 메일 줄은 변환해서 쓰고 있어서
+    1분 차이로 오간 두 건이 9시간 떨어져 보였습니다(2026-08-25 실측)."""
+    item = pathlib.Path("frontend/src/ui/InteractionForm.tsx").read_text(encoding="utf-8")
+    assert "kst(item.happened_at)" in item
+    assert "happened_at?.slice" not in item
+
+
 def test_an_oversize_subject_is_cut_not_dropped():
     """`customer_interactions.subject` 는 varchar(300). SQLite 는 안 지키고 Postgres 는
     지켜서, 운영에서만 그 연락처의 기록이 통째로 안 들어왔습니다(2026-08-20)."""

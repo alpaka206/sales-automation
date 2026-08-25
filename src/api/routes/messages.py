@@ -305,7 +305,9 @@ def _message_detail_context(
             # 화면에는 그 사실이 없어서, 계약이 도는 고객인지 확인하려면 수주 화면으로
             # 나갔다 와야 했습니다. 계약의 원본은 그쪽이고 여기는 거울입니다.
             "won": won_summary,
-            "summary": conv.summary if conv else None,
+            # `summary` 는 안 보냅니다 — 화면의 요약 카드를 뺐습니다(2026-08-25). 그
+            # 불릿은 「이 티켓의 기록」 각 줄의 둘째 줄과 같은 문자열이라 같은 화면이 같은
+            # 말을 두 번 했습니다. 값 자체는 계속 쌓이고 초안 프롬프트가 읽습니다.
             "customer_requests": conv.customer_requests if conv else None,
             "category": conv.inquiry_category if conv else None,
             "category_label": category_label(conv.inquiry_category if conv else None),

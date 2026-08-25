@@ -84,7 +84,6 @@ type Detail = {
   category_label: string;
   unqualified: boolean;
   progress: { kind: string; detail: string; created_at: string }[];
-  summary: string | null;
   customer_requests: string | null;
   other_tickets: {
     conversation_id: number; ticket_id: string | null; subject: string | null;
@@ -627,7 +626,8 @@ export function MessageDetail() {
                     ) : entry.bubble ? (
                       <MessageRow key={entry.key} bubble={entry.bubble} />
                     ) : (
-                      <InteractionItem key={entry.key} item={entry.item as Interaction} />
+                      <InteractionItem key={entry.key} item={entry.item as Interaction}
+                                       hideSubject />
                     ),
                   )
                 )}
@@ -657,18 +657,14 @@ export function MessageDetail() {
             </div>
           )}
 
-          {/* 요약은 대화가 오간 뒤에야 뜻이 있습니다. New 에서는 문의 한 통을 요약한
-              것이라 바로 위 말풍선과 같은 말을 두 번 하게 됩니다. **접지 않습니다** —
-              불릿 몇 줄을 여는 데 클릭이 필요하면 아무도 안 엽니다(운영자 지시). */}
-          {afterNew && data.summary && (
-            <div className="card">
-              <div className="section-label" style={{ marginBottom: 8 }}>티켓 요약</div>
-              <div className="t-sm" style={{ lineHeight: 1.7, whiteSpace: "pre-line" }}>
-                {data.summary}
-              </div>
-            </div>
-          )}
-
+          {/* 여기 있던 요약 카드는 뺐습니다 (2026-08-25 운영자 지시). 그 불릿들은
+              「이 티켓의 기록」 각 줄의 **둘째 줄과 같은 문자열**입니다 — 한 줄을 만들어
+              메시지 행(`messages.summary_line`)과 `conversations.summary` 에 **같이**
+              쓰기 때문입니다(`summaries.append_line`). 한 화면이 같은 말을 두 번 했고,
+              한쪽에는 시각도 방향도 없었습니다.
+              **값은 그대로 쌓입니다** — 초안 프롬프트가 「기존 대화 요약」으로 읽습니다
+              (`inbound.py`). 그래서 지운 것은 카드뿐이고, 이 화면은 그 값을 이제 안
+              받습니다. */}
           {/* **이 티켓 밖의 것들.** 지금 처리할 것(왼쪽의 스레드·초안)과 섞지 않고 오른쪽에
               둡니다 — 판단에 필요한 맥락이지 이 티켓에서 일어난 일이 아닙니다. */}
           {data.other_tickets.length > 0 && (
@@ -1005,10 +1001,18 @@ export function MessageDetail() {
  *  같은 시간축에 있어도 두 목록으로 읽히고, 「허브스팟에서 온 답과 우리 메일 중 무엇이
  *  먼저였나」가 안 보입니다. 방향 색도 같은 것을 씁니다(문의 접수 파랑 · 문의 회신 청록).
  *
- *  줄이 아직 없는 옛 메일은 본문 앞머리를 대신 씁니다 — 접히기는 해야 목록이 됩니다. */
+ *  줄이 아직 없는 옛 메일은 본문 앞머리를 대신 씁니다 — 접히기는 해야 목록이 됩니다.
+ *
+ *  **제목 줄은 없습니다** (2026-08-25 운영자 지시). 이 목록은 스레드 하나라 줄마다 같은
+ *  제목이 반복되고, 우리 메일 줄은 그 제목을 번역해서 쓰기 때문에 같은 제목이 원문·국문
+ *  으로 나란히 놓여 다른 두 건처럼 보였습니다. 소통 기록 줄도 같이 껐습니다
+ *  (`InteractionItem hideSubject`). */
 function MessageRow({ bubble }: { bubble: Bubble }) {
   const dir = directionMark(bubble.direction);
-  const body = (bubble.body_ko || bubble.body || "").trim();
+  // 본문 없이 제목만 있는 메일이 있습니다(제목이 곧 문의 전부인 경우). 제목 줄을 안
+  // 그리므로 그때는 제목이 본문 자리에 옵니다 — 아니면 빈 줄이 됩니다.
+  const title = bubble.subject_ko || bubble.subject || "";
+  const body = (bubble.body_ko || bubble.body || "").trim() || title;
   const preview = (bubble.summary_line || body).replace(/\s+/g, " ");
   return (
     <article className={`history-item history-item--${dir.tone}`}>
@@ -1026,9 +1030,6 @@ function MessageRow({ bubble }: { bubble: Bubble }) {
                 {kst(bubble.sent_at || bubble.created_at)}
               </time>
             </div>
-            {bubble.subject && (
-              <strong className="history-item__title">{bubble.subject_ko || bubble.subject}</strong>
-            )}
             <div className="t-sm t-subtle" style={{ lineHeight: 1.6 }}>
               {preview.slice(0, 120)}
               {preview.length > 120 ? "… " : " "}
