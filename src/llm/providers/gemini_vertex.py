@@ -109,6 +109,21 @@ def call_gemini(
         max_output_tokens=max_tokens,
         system_instruction=system or None,
     )
+    # **함수 호출(AFC)은 안 씁니다 — 그걸 SDK 에 말해 둡니다.**
+    #
+    # 우리가 넘기는 도구는 `google_search` 하나이고 파이썬 콜러블은 하나도 없습니다. 그런데
+    # SDK 는 도구가 있으면 AFC 경로를 켜고 호출마다 「AFC is enabled with max remote calls:
+    # 10」을 남기며, 프로세스마다 「Direct use of AFC ... is not recommended」를 **경고로**
+    # 냅니다. 부를 함수가 없으니 동작은 아무 문제가 없습니다 — 문제는 그 경고가
+    # `common/log_buffer` 를 지나 `/logs` 의 「개발자가 봐야 할 것」 목록에 앉는다는 것입니다.
+    # 그 목록은 신호만 있어야 합니다.
+    #
+    # 끄는 것이 사실에 맞습니다. 조용히 무시하는 것이 아니라 「우리는 AFC 를 안 쓴다」를
+    # 적어 두는 것이고, 그래서 다음에 정말 함수 호출을 붙이는 사람이 이 줄을 지우게 됩니다.
+    try:
+        config.automatic_function_calling = types.AutomaticFunctionCallingConfig(disable=True)
+    except Exception:  # pragma: no cover - depends on SDK version
+        logger.debug("AutomaticFunctionCallingConfig unsupported by SDK; leaving the default.")
     if thinking_budget is not None:
         # Guard against SDK variants that don't expose ThinkingConfig — a missing
         # cap is non-fatal, so degrade gracefully rather than crash the call.
