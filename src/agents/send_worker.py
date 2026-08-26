@@ -225,6 +225,7 @@ async def _send_one(message_id: int) -> bool:
                 msg.status = "test_sent" if test_mode else "sent"
                 msg.send_claimed_at = None
                 msg.sent_at = datetime.now(timezone.utc)
+                msg.send_error = None
 
                 conv = session.get(Conversation, msg.conversation_id)
                 if conv:
@@ -260,6 +261,7 @@ async def _send_one(message_id: int) -> bool:
                 if msg:
                     msg.status = "delivery_unknown"
                     msg.send_claimed_at = None
+                    msg.send_error = str(exc)[:2000]
                     session.commit()
                 logger.error("Delivery outcome unknown for message %d: %s", message_id, exc)
                 return False
@@ -291,6 +293,9 @@ async def _send_one(message_id: int) -> bool:
         if msg:
             msg.status = "send_failed"
             msg.send_claimed_at = None
+            # 사유를 행에 남깁니다. 로그에만 있으면 30분 뒤 스크롤 밖이고, 화면은 빨간
+            # 「발송 실패」 배지 하나로 끝나 운영자가 왜인지 알 길이 없습니다.
+            msg.send_error = str(last_exc)[:2000] if last_exc else None
             session.commit()
         logger.error("Worker failed to send message %d: %s", message_id, last_exc)
         return False
@@ -312,6 +317,7 @@ def _claim_id(message_id: int) -> bool:
                 status=_WORKER_ID,
                 send_claimed_at=datetime.now(timezone.utc),
                 send_attempts=Message.send_attempts + 1,
+                send_error=None,
             )
         )
         session.commit()

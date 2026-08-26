@@ -148,6 +148,10 @@ class Message(Base):
     send_claimed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     send_attempts: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     sent_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # Why the last send attempt failed. Separate from post_send_sync_error below: that
+    # one means "the mail went out and only the bookkeeping failed", which the recovery
+    # screen lists apart and acts on differently. Cleared when a retry is claimed.
+    send_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Delivery and CRM/Sheets synchronization are separate commits: HubSpot may
     # succeed while a downstream system is temporarily unavailable.
     post_send_synced_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

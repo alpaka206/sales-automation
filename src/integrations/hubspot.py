@@ -294,12 +294,31 @@ class HubSpotClient:
 
     @staticmethod
     def _lookup_error(response: httpx.Response, action: str) -> RuntimeError:
+        """Turn a HubSpot error response into our delivery exception.
+
+        **The reason lives in ``errors``, not in ``message``.** A HubSpot validation
+        failure answers with ``"message": "Multiple errors validating request."`` — the
+        same sentence for every cause — and puts what actually failed in an ``errors``
+        array. Reading only ``message`` left a log line that said something was wrong and
+        never what, so a failed send could not be diagnosed from the logs at all; it cost
+        a live send to find out. Both are kept: the summary names the shape, the array
+        names the field.
+        """
         detail = ""
         try:
             payload = response.json()
-            detail = str(payload.get("message") or "")[:300]
+            detail = str(payload.get("message") or "")
+            reasons = [
+                str(item.get("message") or "").strip()
+                for item in (payload.get("errors") or [])
+                if isinstance(item, dict)
+            ]
+            joined = "; ".join(reason for reason in reasons if reason)
+            if joined:
+                detail = f"{detail} [{joined}]" if detail else joined
+            detail = detail[:600]
         except Exception:
-            detail = response.text[:300]
+            detail = response.text[:600]
         message = f"HubSpot {action} failed (HTTP {response.status_code})"
         if detail:
             message += f": {detail}"

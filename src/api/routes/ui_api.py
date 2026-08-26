@@ -395,7 +395,10 @@ def ui_recovery(request: Request):
             "subject": message.subject,
             "to_address": message.to_address,
             "created_at": message.created_at,
-            "error": message.post_send_sync_error,
+            # 한 행은 둘 중 하나입니다 — 못 보낸 건(send_error)이거나, 보내고 기록만
+            # 실패한 건(post_send_sync_error)이거나. 화면은 이 값을 빨간 줄로 그리므로
+            # 어느 쪽이든 이유가 배지 옆에 섭니다.
+            "error": message.send_error or message.post_send_sync_error,
             "company": (contact.company or contact.full_name) if contact else None,
         }
 

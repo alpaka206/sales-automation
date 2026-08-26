@@ -365,6 +365,10 @@ def _message_detail_context(
             "msg": {
                 "id": msg.id,
                 "status": msg.status,
+                # 발송이 실패한 이유. 운영자가 발송을 누른 자리가 여기라서 결과도 여기에
+                # 섭니다 — 복구 화면까지 가야 이유를 볼 수 있으면 그건 「실패」 배지 하나와
+                # 다를 게 없습니다.
+                "send_error": msg.send_error,
                 "subject": msg.subject or "",
                 "body": msg.body,
                 "body_ko": None,

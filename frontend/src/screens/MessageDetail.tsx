@@ -106,7 +106,7 @@ type Detail = {
   ticket_interactions: Interaction[];
   /** 메일이 하나도 없는 티켓은 `null` 입니다 — HubSpot 에서 들여온 티켓이 그렇습니다. */
   msg: {
-    id: number; status: string; subject: string; body: string; channel: string;
+    id: number; status: string; send_error: string | null; subject: string; body: string; channel: string;
     language: string | null; target_language: string | null; signature_key: string;
     to_address: string; score_snapshot: number | null; created_at: string;
     sent_at: string | null; scheduled_at: string | null; category: string | null;
@@ -439,6 +439,20 @@ export function MessageDetail() {
         <div className="banner banner--info mb-gap" role="status">
           <span className="banner__icon"><Icon name="sparkles" size={18} /></span>
           <div><div className="banner__title">답변 작성 중</div></div>
+        </div>
+      )}
+
+      {/* 발송을 누른 자리가 여기이므로 실패한 이유도 여기에 섭니다. 배지만 「발송 실패」로
+          바뀌던 시절에는 왜인지 알 방법이 화면에 없었습니다(2026-08-26). */}
+      {(msg?.status === "send_failed" || msg?.status === "delivery_unknown") && msg.send_error && (
+        <div className="banner banner--danger mb-gap" role="alert">
+          <span className="banner__icon"><Icon name="warn" size={18} /></span>
+          <div>
+            <div className="banner__title">
+              {msg.status === "send_failed" ? "발송 실패" : "발송 확인 필요"}
+            </div>
+            <div className="t-sm">{msg.send_error}</div>
+          </div>
         </div>
       )}
 

@@ -223,3 +223,33 @@ async def test_send_5xx_is_delivery_unknown_without_retry(
     await client.close()
 
     assert route.call_count == 1
+
+
+def test_a_validation_failure_names_the_field_not_just_multiple_errors():
+    """HubSpot 400 의 진짜 이유는 ``errors`` 배열에 있습니다.
+
+    ``message`` 는 어떤 원인이든 "Multiple errors validating request." 한 줄이라, 그것만
+    남기면 로그가 무엇이 틀렸는지 말하지 않습니다. 실제로 발송 실패 하나를 그 로그만으로는
+    진단할 수 없었습니다(msg 62, 2026-08-26).
+    """
+    import httpx
+
+    from src.integrations.hubspot import HubSpotClient
+
+    response = httpx.Response(
+        400,
+        json={
+            "status": "error",
+            "message": "Multiple errors validating request.",
+            "errors": [
+                {"message": "channelAccountId is not valid for this thread"},
+                {"message": "recipients[0].actorId must be a visitor on this thread"},
+            ],
+        },
+        request=httpx.Request("POST", "https://api.hubapi.com/x"),
+    )
+    error = HubSpotClient._lookup_error(response, "conversation message send")
+
+    assert "Multiple errors validating request." in str(error)
+    assert "channelAccountId is not valid for this thread" in str(error)
+    assert "recipients[0].actorId must be a visitor on this thread" in str(error)
