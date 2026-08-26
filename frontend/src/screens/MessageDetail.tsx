@@ -674,7 +674,7 @@ export function MessageDetail() {
                                   isFirstReply={entry.bubble.id === firstReplyId} />
                     ) : (
                       <InteractionItem key={entry.key} item={entry.item as Interaction}
-                                       hideSubject />
+                                       hideSubject hideHandler />
                     ),
                   )
                 )}

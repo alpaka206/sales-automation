@@ -176,9 +176,18 @@ export function InteractionForm({
  *  같은 제목이 원문·국문으로 나란히 놓여 다른 두 건처럼 보였습니다(2026-08-25 운영자
  *  지적). 고객 기록·리드 히스토리에서는 켜지 않습니다 — 거기서는 제목이 대화를 가르는
  *  유일한 열쇠입니다(`threadKey`). */
-export function InteractionItem({ item, hideSubject = false }: {
+export function InteractionItem({ item, hideSubject = false, hideHandler = false }: {
   item: Interaction;
   hideSubject?: boolean;
+  /** 담당자를 빼고 그립니다. **티켓 기록이 그렇게 씁니다** (2026-08-26 운영자 지시) —
+   *  그 목록은 「이 티켓에 무슨 일이 있었나」를 훑는 자리라 누가 했는지는 줄마다 붙을
+   *  값이 아닙니다.
+   *
+   *  플래그로 두는 이유: 이 칸이 **한 가지 뜻이 아닙니다.** 고객 상세의 티켓 블록은
+   *  같은 자리에 메일의 **상태**를 적고("나간 메일과 아직 안 나간 초안은 반드시
+   *  구별돼야 한다"), 사라진 티켓에서 옮겨 온 메일은 「지난 티켓」을 적습니다. 통째로
+   *  지우면 그 둘이 같이 사라집니다. */
+  hideHandler?: boolean;
 }) {
   const dir = interactionMark(item.channel, item.direction);
   // 제목을 안 그리는 자리에서는 본문 없는 줄이 통째로 빈칸이 됩니다 — 그때는 제목이
@@ -201,7 +210,7 @@ export function InteractionItem({ item, hideSubject = false }: {
         </span>
         {/* 채널 태그는 뺐습니다 — 라벨이 이미 「왓츠앱 수신」이라 바로 옆에 「WhatsApp」을
             한 번 더 다는 셈입니다. */}
-        {item.handler && <span className="tag">{item.handler}</span>}
+        {!hideHandler && item.handler && <span className="tag">{item.handler}</span>}
         {/* **`kst()` 로 찍습니다.** API 가 주는 것은 오프셋 없는 UTC 라, 잘라서 그대로
             쓰면 한국 시각보다 9시간 이른 값이 찍힙니다 — 같은 목록의 메일 줄은 변환해서
             쓰고 있어서, 1분 차이로 오간 두 건이 9시간 떨어져 보였습니다. */}
