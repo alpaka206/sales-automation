@@ -268,9 +268,11 @@ export function CustomerDetail() {
               보드에서 옮긴 것과 여기서 고른 것이 서로 덮어썼습니다. 보는 자리와 정하는
               자리를 갈라 둡니다. */}
           <section className="card">
+            {/* 「티켓과 수주 고객에서 정해집니다」는 뺐습니다 (2026-08-26 운영자 지시).
+                고를 수 있는 것이 하나도 없는 카드라 읽기 전용인 것은 보면 알고, 어디서
+                정해지는지는 그 값을 고치러 갈 때 알면 되는 이야기입니다. */}
             <div className="section-header">
               <div className="section-header__title">고객 상태</div>
-              <span className="t-xs t-subtle">티켓과 수주 고객에서 정해집니다</span>
             </div>
             <div className="field-grid">
               <KV k="파이프라인" v={labelFor(data.stage_options, profile?.pipeline_stage)} />
@@ -286,11 +288,15 @@ export function CustomerDetail() {
               {profile?.lost_reason && <KV k="Closed Lost 사유" v={profile.lost_reason} />}
               {profile?.notes && <KV k="운영 메모" v={profile.notes} />}
             </div>
-            <div className="t-xs t-subtle" style={{ marginTop: 10 }}>
-              {profile?.last_synced_at
-                ? `마지막 HubSpot 동기화 ${kst(profile.last_synced_at)}`
-                : "아직 HubSpot 동기화를 하지 않았습니다."}
-            </div>
+            {/* **언제 것인지는 값이 있을 때만 적습니다.** 「아직 동기화를 하지 않았습니다」는
+                할 일을 알려 주는 말처럼 보이지만, 그 버튼은 이 페이지 맨 위에 이미 서
+                있습니다 — 안 누른 상태를 한 줄로 설명할 이유가 없습니다. 값이 있으면
+                그때는 적어야 합니다: 이 칸들이 언제 것이냐가 곧 믿어도 되느냐입니다. */}
+            {profile?.last_synced_at && (
+              <div className="t-xs t-subtle" style={{ marginTop: 10 }}>
+                {`마지막 HubSpot 동기화 ${kst(profile.last_synced_at)}`}
+              </div>
+            )}
           </section>
 
           <section className="card" id="contracts">
