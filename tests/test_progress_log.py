@@ -47,7 +47,27 @@ def test_hiding_is_a_read_filter_so_the_rows_survive():
     import pathlib
 
     source = pathlib.Path("src/api/routes/messages.py").read_text(encoding="utf-8")
-    assert "kind.not_in(_ROUTINE_PROGRESS_KINDS)" in source
+    assert "kind.not_in(ROUTINE_PROGRESS_KINDS)" in source
     # Nothing anywhere removes a progress row.
     assert "delete(ConversationProgress" not in source
     assert "session.delete" not in source
+
+
+def test_every_screen_that_reads_progress_uses_the_same_filter():
+    """목록이 한 곳에 있고, 읽는 화면이 전부 그것을 쓴다.
+
+    예전에는 목록이 ``messages.py`` 안에만 있어서 티켓 세부 내역만 걸러졌고, 고객 상세는
+    같은 행을 ``kind`` 문자열까지 그대로 찍었다. 화면마다 목록을 따로 들면 다음에 종류가
+    하나 늘 때 한 화면만 조용히 빠진다.
+    """
+    import pathlib
+
+    from src.db.conversation_history import ROUTINE_PROGRESS_KINDS
+
+    for path in ("src/api/routes/messages.py", "src/api/routes/customer_ops.py"):
+        source = pathlib.Path(path).read_text(encoding="utf-8")
+        assert "select(ConversationProgress)" in source, path
+        assert "kind.not_in(ROUTINE_PROGRESS_KINDS)" in source, path
+
+    # 「답변 발송 완료: <제목>」은 그 메일 줄이 바로 옆에 있을 때만 그려지는 카드에 산다.
+    assert "reply" in ROUTINE_PROGRESS_KINDS

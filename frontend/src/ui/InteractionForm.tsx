@@ -107,8 +107,9 @@ export function InteractionForm({
       <label className="quick-form__wide"><span className="field-label">관련 자료 URL</span>
         <input className="input" name="artifact_url" placeholder="회의록·Invoice·계약서 URL" />
       </label>
-      <div className="quick-form__wide row-between">
-        <span className="t-xs t-subtle">일시를 비우면 지금 시각으로 기록됩니다.</span>
+      {/* 안내 문구를 뺐으므로 버튼만 남습니다 — space-between 은 그 하나를 왼쪽 끝으로
+          밀어붙입니다. 제출 버튼은 오른쪽 아래에 있어야 합니다. */}
+      <div className="quick-form__wide" style={{ display: "flex", justifyContent: "flex-end" }}>
         <SubmitButton busy={saving}>기록 저장</SubmitButton>
       </div>
     </form>

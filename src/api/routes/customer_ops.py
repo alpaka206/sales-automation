@@ -22,6 +22,7 @@ from ...agents.stage_sync import (
 )
 from ...common.config import settings
 from ...common.subjects import strip_reply_prefixes
+from ...db.conversation_history import ROUTINE_PROGRESS_KINDS
 from ...db.models import (
     DELIVERED_STATUSES,
     Client,
@@ -760,6 +761,10 @@ def _customer_context(contact_id: int) -> dict | None:
             session.execute(
                 select(ConversationProgress)
                 .where(ConversationProgress.conversation_id.in_(conv_ids))
+                # 티켓 세부 내역과 **같은 목록**으로 거릅니다. 예전에는 이 화면만 안 걸러서,
+                # 바로 위에 그 메일이 줄로 서 있는데 아래에 「답변 발송 완료: <제목>」이
+                # 한 번 더 붙었습니다 — ``kind`` 문자열까지 그대로 찍은 채로.
+                .where(ConversationProgress.kind.not_in(ROUTINE_PROGRESS_KINDS))
                 .order_by(ConversationProgress.created_at)
             )
             .scalars()

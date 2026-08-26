@@ -16,7 +16,7 @@ from ...agents.approval import ApprovalError, approve, reject
 from ...common.config import settings
 from ...common.subjects import strip_reply_prefixes
 from ...common.textwash import text_wash
-from ...db.conversation_history import add_progress
+from ...db.conversation_history import ROUTINE_PROGRESS_KINDS, add_progress
 from ...common.inquiry import CATEGORY_LABELS, UNQUALIFIED, category_label, is_unqualified
 from ...db.email_templates import list_signature_templates
 from ...db.models import (
@@ -56,18 +56,6 @@ def list_now() -> datetime:
 
 _MAX_EDIT_BODY_BYTES = 100_000
 
-# 처리 경과 answers "what happened with this customer". These answer "what the app did to
-# itself" and say nothing the screen is not already showing: the auto-acknowledgement is
-# the first row of the thread above, "초안 작성 완료" is what the 검토 대기 status means,
-# and "HubSpot에서 단계 변경 감지: new → meeting_link_sent" is bookkeeping about a move
-# the Stage column already displays. Hidden on read only — the rows are still written and
-# still there to explain a support question. A FAILED auto-ack and a draft HubSpot retired
-# out from under the operator are different sentences that need a human, so they keep
-# their own kinds and are not in here.
-# `translate` 도 같은 부류입니다 (2026-08-19 운영자 지시). 「회신 초안을 'en' 언어로
-# 번역함」이 세 줄 중 두 줄을 차지하고 있었는데, 그건 이 고객에게 일어난 일이 아니라
-# 앱이 스스로에게 한 일이고, 번역 결과는 바로 위 초안에 이미 보입니다.
-_ROUTINE_PROGRESS_KINDS = ("draft", "auto_ack", "stage", "translate")
 _MAX_EDIT_SUBJECT_LEN = 300
 
 
@@ -166,7 +154,7 @@ def _message_detail_context(
                 session.execute(
                     select(ConversationProgress)
                     .where(ConversationProgress.conversation_id == conv.id)
-                    .where(ConversationProgress.kind.not_in(_ROUTINE_PROGRESS_KINDS))
+                    .where(ConversationProgress.kind.not_in(ROUTINE_PROGRESS_KINDS))
                     .order_by(ConversationProgress.created_at.asc(), ConversationProgress.id.asc())
                 )
                 .scalars()

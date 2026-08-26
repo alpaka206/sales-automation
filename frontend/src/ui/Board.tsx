@@ -321,7 +321,6 @@ export function Board({ stages, manualLogStages, dealDetails = {} }: {
       {logging && (
         <Modal
           title="소통 히스토리 추가"
-          description={`${logging.company || logging.name} · 이 문의에 대해 오간 연락을 남깁니다.`}
           wide
           onClose={() => setLogging(null)}
         >
