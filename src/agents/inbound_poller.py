@@ -165,7 +165,7 @@ def reconcile_ticket_stages_once() -> int:
         return 0
 
     from .hubspot_backfill import B2B_PIPELINE_ID, adopt_ticket
-    from .stage_sync import sync_stage_from_hubspot
+    from .stage_sync import sync_stage_from_hubspot, sync_ticket_subject
 
     last_poll = _get_last_stage_poll_at()
     now = datetime.now(timezone.utc)
@@ -207,7 +207,11 @@ def reconcile_ticket_stages_once() -> int:
                 if adopt_ticket(ticket):
                     changed += 1
                 continue
-            if sync_stage_from_hubspot(ticket.id, ticket.pipeline_stage, source="poller"):
+            # 이름도 같이 맞춥니다. **호출이 안 늘어납니다** — 이 티켓은 이미 통째로
+            # 받아 왔고 `subject` 가 그 안에 들어 있습니다.
+            moved = sync_stage_from_hubspot(ticket.id, ticket.pipeline_stage, source="poller")
+            renamed = sync_ticket_subject(ticket.id, ticket.subject)
+            if moved or renamed:
                 changed += 1
         except Exception:
             # One bad ticket must not abort the sweep or hold back the watermark.

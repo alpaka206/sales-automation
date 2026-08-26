@@ -691,3 +691,60 @@ def test_a_ticket_that_never_passed_through_new_is_picked_up(db, stages, monkeyp
 
     # 두 번째 스윕은 같은 티켓을 또 만들지 않습니다.
     assert inbound_poller.reconcile_ticket_stages_once() == 0
+
+
+def test_a_ticket_renamed_in_hubspot_renames_our_inquiry(monkeypatch):
+    """허브스팟에서 티켓 이름을 바꾸면 우리 문의 제목도 따라간다 (2026-08-26 운영자 요청).
+
+    **호출을 안 늘린다.** 값을 들고 있는 쪽이 부른다 — 10분 스윕은 티켓을 이미 통째로 받아
+    오고, 웹훅은 새 값을 payload 에 실어 온다.
+
+    이미 나간 메일의 제목은 안 건드린다. 그건 `messages.subject` 에 따로 살고 고객 메일함에
+    이미 그 제목으로 앉아 있다 — 바꾸면 우리 화면과 고객이 보는 것이 갈린다.
+    """
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from sqlalchemy.pool import StaticPool
+
+    from src.agents import stage_sync
+    from src.db.base import Base
+    from src.db.models import Contact, Conversation, Message
+
+    engine = create_engine(
+        "sqlite:///:memory:", connect_args={"check_same_thread": False}, poolclass=StaticPool
+    )
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine, expire_on_commit=False)
+    monkeypatch.setattr(stage_sync, "SessionLocal", factory)
+
+    with factory() as session:
+        contact = Contact(normalized_email="rename@example.com", full_name="Rename")
+        session.add(contact)
+        session.flush()
+        conv = Conversation(
+            contact_id=contact.id, hubspot_ticket_id="T-9", inquiry_subject="옛 이름"
+        )
+        session.add(conv)
+        session.flush()
+        session.add(
+            Message(
+                conversation_id=conv.id, direction="outgoing", channel="email",
+                body="reply", status="sent", subject="RE: 옛 이름",
+            )
+        )
+        session.commit()
+        conv_id = conv.id
+
+    assert stage_sync.sync_ticket_subject("T-9", "새 이름") is True
+    # 같은 값이면 아무 일도 안 한다 — 스윕이 10분마다 도는데 매번 쓰면 안 된다.
+    assert stage_sync.sync_ticket_subject("T-9", "새 이름") is False
+    # 빈 이름은 무시한다. 지우는 것은 실수이지 「이름을 없애라」가 아니다.
+    assert stage_sync.sync_ticket_subject("T-9", "  ") is False
+    # 모르는 티켓도 조용히 지나간다.
+    assert stage_sync.sync_ticket_subject("T-없음", "아무거나") is False
+
+    with factory() as session:
+        assert session.get(Conversation, conv_id).inquiry_subject == "새 이름"
+        # 이미 나간 메일의 제목은 그대로다.
+        sent = session.query(Message).filter_by(conversation_id=conv_id).one()
+        assert sent.subject == "RE: 옛 이름"

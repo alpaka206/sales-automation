@@ -12,6 +12,7 @@ import time
 from fastapi import APIRouter, HTTPException, Request
 
 from ..agents.contact_sync import WATCHED_PROPERTIES
+from ..agents.stage_sync import sync_ticket_subject
 from ..agents.inbound_worker import enqueue_contact_field_sync, enqueue_inbound_ticket
 from ..common.config import settings
 from .schemas import HubSpotWebhookEvent
@@ -88,6 +89,22 @@ def _verify_hubspot_signature(
         except Exception:
             logger.exception("webhook reject dump failed")
     raise HTTPException(status_code=401, detail="invalid signature")
+
+
+def _sync_ticket_rename(event: HubSpotWebhookEvent) -> bool:
+    """허브스팟에서 티켓 이름을 바꾸면 그 자리에서 우리 제목도 바뀝니다.
+
+    **큐를 안 지납니다.** 연락처 쪽과 다른 이유는 하나입니다 — 새 값이 payload 의
+    ``propertyValue`` 에 이미 실려 옵니다. 읽을 것이 없으니 이 라우트의 계약("acknowledge
+    without external calls")을 어기지 않고, 우리 행 하나 쓰는 것이 전부입니다.
+    """
+    if event.subscriptionType != "ticket.propertyChange" or event.propertyName != "subject":
+        return False
+    try:
+        return sync_ticket_subject(str(event.objectId), event.propertyValue)
+    except Exception:
+        logger.warning("티켓 %s 이름 동기화 실패", event.objectId, exc_info=True)
+        return False
 
 
 def _queue_contact_sync(event: HubSpotWebhookEvent) -> bool:
@@ -266,6 +283,9 @@ async def webhook_hubspot_inbound(request: Request) -> dict:
         # 포함해서. 예전에는 아래 분기 안에만 있어서, New 로의 이동은 접수 처리 큐로만 가고
         # 우리 쪽 단계는 접수가 끝날 때까지(실패하면 영영) 안 따라왔습니다.
         synced = _sync_stage_change(event)
+        if _sync_ticket_rename(event):
+            results.append({"objectId": event.objectId, "status": "ticket_renamed"})
+            continue
         if _queue_contact_sync(event):
             results.append({"objectId": event.objectId, "status": "contact_queued"})
             continue

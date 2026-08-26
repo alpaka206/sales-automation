@@ -360,6 +360,37 @@ def _handle_unmapped_stage(
     return None
 
 
+def sync_ticket_subject(ticket_id: str | None, subject: str | None) -> bool:
+    """허브스팟에서 티켓 이름이 바뀌면 우리 문의 제목도 따라갑니다. 바뀌었으면 True.
+
+    **네트워크에 안 닿습니다.** 값을 들고 있는 쪽이 부릅니다 — 10분 스윕은 티켓을 이미 통째로
+    받아 오고(`_TICKET_PROPERTIES` 에 subject 가 있습니다), 웹훅은 새 값을 payload 의
+    ``propertyValue`` 에 실어 옵니다. 그래서 이 동기화는 호출을 하나도 안 늘립니다.
+
+    **이미 나간 메일의 제목은 안 건드립니다.** 그건 `messages.subject` 에 따로 살고, 고객
+    메일함에 이미 그 제목으로 앉아 있습니다 — 바꾸면 우리 화면과 고객이 보는 것이 갈립니다.
+    여기서 고치는 것은 목록·티켓 화면이 이 문의를 부르는 이름 하나입니다.
+
+    빈 제목은 무시합니다. 허브스팟에서 이름을 지우는 일은 실수이지 「이름을 없애라」가 아니고,
+    비면 화면이 「이름 없는 문의」로 떨어집니다.
+    """
+    subject = (subject or "").strip()
+    if not ticket_id or not subject:
+        return False
+    with SessionLocal() as session:
+        conv = (
+            session.query(Conversation)
+            .filter(Conversation.hubspot_ticket_id == str(ticket_id))
+            .first()
+        )
+        if conv is None or (conv.inquiry_subject or "") == subject:
+            return False
+        conv.inquiry_subject = subject
+        session.commit()
+    logger.info("티켓 %s 의 이름이 바뀌어 문의 제목을 맞췄습니다.", ticket_id)
+    return True
+
+
 def sync_stage_from_hubspot(
     ticket_id: str | None,
     hubspot_stage_id: str | None,
