@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import json
+from unittest.mock import patch
+
 import httpx
 import pytest
 import respx
@@ -253,3 +256,41 @@ def test_a_validation_failure_names_the_field_not_just_multiple_errors():
     assert "Multiple errors validating request." in str(error)
     assert "channelAccountId is not valid for this thread" in str(error)
     assert "recipients[0].actorId must be a visitor on this thread" in str(error)
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_the_recipient_is_an_address_not_an_email_actor(client: HubSpotClient):
+    """수신자에 ``actorId`` 를 넣지 않는다 — HubSpot 이 EMAIL actor 를 받는 쪽으로 거부한다.
+
+    문서 예시에는 ``"actorId": "E-user@hubspot.com"`` 이 있고 actor 조회도 그 ID 를 200 으로
+    돌려줍니다. 거부하는 곳은 발송 엔드포인트 하나입니다 — "Actor type EMAIL is not
+    supported for receiving" (2026-08-26, msg 62). 그래서 읽기 검증으로는 못 잡고,
+    이 테스트가 그 자리를 대신합니다.
+    """
+    respx.get(f"{BASE_URL}/conversations/v3/conversations/actors/A-1").mock(
+        return_value=httpx.Response(200, json={"id": "A-1", "type": "AGENT"})
+    )
+    route = respx.post(
+        f"{BASE_URL}/conversations/v3/conversations/threads/t1/messages"
+    ).mock(return_value=httpx.Response(200, json={"id": "m1"}))
+
+    with patch.object(settings, "HUBSPOT_SENDER_ACTOR_ID", "A-1"):
+        await client.send_conversation_message(
+            ConversationReplyContext("t1", "1002", "acct-1"),
+            recipient_email="buyer@example.com",
+            subject="s",
+            text="t",
+            rich_text="<p>t</p>",
+        )
+
+    sent = json.loads(route.calls.last.request.content)
+    assert sent["recipients"] == [
+        {
+            "recipientField": "TO",
+            "deliveryIdentifiers": [
+                {"type": "HS_EMAIL_ADDRESS", "value": "buyer@example.com"}
+            ],
+        }
+    ]
+    assert "actorId" not in sent["recipients"][0]

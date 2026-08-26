@@ -486,9 +486,20 @@ class HubSpotClient:
             "senderActorId": actor_id,
             "channelId": context.channel_id,
             "channelAccountId": context.channel_account_id,
+            # 수신자는 **주소로만** 지정합니다 — ``actorId`` 를 넣지 않습니다.
+            #
+            # HubSpot 문서의 예시에는 ``"actorId": "E-user@hubspot.com"`` 이 있고, actor 조회
+            # 엔드포인트도 그 ID 를 200 으로 받아줍니다(``{"type": "EMAIL"}``). 그래서 읽기
+            # 검증만으로는 멀쩡해 보입니다. 그런데 **발송 엔드포인트만** 그것을 거부합니다::
+            #
+            #     Actor type EMAIL is not supported for receiving;
+            #     `E-devrel.365@gmail.com` is not a valid actor ID
+            #
+            # (2026-08-26, msg 62 — 이 포털의 첫 실제 발송이 이것으로 실패했습니다.)
+            # 이 포털에서 성공한 발신 28건도 전부 recipients 에 actorId 가 없습니다.
+            # 문서가 API 보다 오래됐습니다.
             "recipients": [
                 {
-                    "actorId": f"E-{recipient}",
                     "recipientField": "TO",
                     "deliveryIdentifiers": [
                         {"type": "HS_EMAIL_ADDRESS", "value": recipient}
