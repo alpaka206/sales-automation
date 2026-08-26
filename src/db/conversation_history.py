@@ -27,7 +27,18 @@ logger = logging.getLogger(__name__)
 # **한 곳에 두는 이유**: 예전에는 이 목록이 messages.py 안에만 있어서 티켓 세부 내역만
 # 걸러졌고, 고객 상세는 같은 행을 ``kind`` 문자열까지 그대로 찍고 있었다. 화면마다 목록을
 # 따로 들면 다음에 종류가 하나 늘 때 한 화면만 조용히 빠진다.
-ROUTINE_PROGRESS_KINDS: tuple[str, ...] = ("draft", "auto_ack", "stage", "translate", "reply")
+# ``inbound`` 은 기계 소음이 아니다 — 「고객 문의 접수: <본문 앞부분>」은 진짜 사건이다.
+# 그런데 그 문의 메일 자체가 같은 목록에 줄로 서 있고, 그 줄이 본문을 더 온전히 보여 준다.
+# 티켓 세부 내역은 이미 화면에서 걸러내고 있었고(``kind !== "inbound"``), 고객 상세만
+# 안 걸러서 같은 말이 두 번 있었다 (2026-08-26 운영자 지시). 거르는 곳을 여기 하나로 모은다.
+ROUTINE_PROGRESS_KINDS: tuple[str, ...] = (
+    "draft",
+    "auto_ack",
+    "stage",
+    "translate",
+    "reply",
+    "inbound",
+)
 
 
 def add_progress(

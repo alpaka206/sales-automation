@@ -186,37 +186,6 @@ export function CustomerDetail() {
 
       <div className="customer-layout">
         <div className="stack">
-          {/* **읽기 전용입니다** (2026-08-19 운영자 지시). 단계·다음 액션·리드 온도의
-              원본은 티켓과 수주 고객이고, 이 화면에서 또 고를 수 있으면 같은 값이 두
-              곳에서 갈라집니다 — 실제로 이 폼이 저장할 때 대화 단계까지 같이 옮겨서,
-              보드에서 옮긴 것과 여기서 고른 것이 서로 덮어썼습니다. 보는 자리와 정하는
-              자리를 갈라 둡니다. */}
-          <section className="card">
-            <div className="section-header">
-              <div className="section-header__title">고객 상태</div>
-              <span className="t-xs t-subtle">티켓과 수주 고객에서 정해집니다</span>
-            </div>
-            <div className="field-grid">
-              <KV k="파이프라인" v={labelFor(data.stage_options, profile?.pipeline_stage)} />
-              <KV k="리드 온도" v={profile?.lead_temperature || "-"} />
-              <KV k="MQL / PQL" v={profile?.qualification || "-"} />
-              <KV k="산업군" v={profile?.industry || "-"} />
-              <KV k="현재 플랜" v={profile?.current_plan || "-"} />
-              <KV k="user-seq" v={profile?.user_seq || "-"} />
-              <KV k="유입 소스" v={profile?.source || "-"} />
-              <KV k="다음 액션" v={profile?.next_action
-                ? `${profile.next_action}${profile.next_action_at ? ` · ${kst(profile.next_action_at)}` : ""}`
-                : "-"} />
-              {profile?.lost_reason && <KV k="Closed Lost 사유" v={profile.lost_reason} />}
-              {profile?.notes && <KV k="운영 메모" v={profile.notes} />}
-            </div>
-            <div className="t-xs t-subtle" style={{ marginTop: 10 }}>
-              {profile?.last_synced_at
-                ? `마지막 HubSpot 동기화 ${kst(profile.last_synced_at)}`
-                : "아직 HubSpot 동기화를 하지 않았습니다."}
-            </div>
-          </section>
-
           {/* **티켓 하나가 카드 하나.** 그 안에 그 티켓의 메일과 진행 기록이 들어갑니다.
               예전에는 모든 티켓의 메일이 한 줄로 섞여 있어서, 문의가 둘 이상인 고객에서는
               어느 메일이 어느 건인지 알 수 없었습니다. 최신 티켓만 펼쳐 둡니다 — 대개
@@ -293,6 +262,37 @@ export function CustomerDetail() {
         </div>
 
         <aside className="stack">
+          {/* **읽기 전용입니다** (2026-08-19 운영자 지시). 단계·다음 액션·리드 온도의
+              원본은 티켓과 수주 고객이고, 이 화면에서 또 고를 수 있으면 같은 값이 두
+              곳에서 갈라집니다 — 실제로 이 폼이 저장할 때 대화 단계까지 같이 옮겨서,
+              보드에서 옮긴 것과 여기서 고른 것이 서로 덮어썼습니다. 보는 자리와 정하는
+              자리를 갈라 둡니다. */}
+          <section className="card">
+            <div className="section-header">
+              <div className="section-header__title">고객 상태</div>
+              <span className="t-xs t-subtle">티켓과 수주 고객에서 정해집니다</span>
+            </div>
+            <div className="field-grid">
+              <KV k="파이프라인" v={labelFor(data.stage_options, profile?.pipeline_stage)} />
+              <KV k="리드 온도" v={profile?.lead_temperature || "-"} />
+              <KV k="MQL / PQL" v={profile?.qualification || "-"} />
+              <KV k="산업군" v={profile?.industry || "-"} />
+              <KV k="현재 플랜" v={profile?.current_plan || "-"} />
+              <KV k="user-seq" v={profile?.user_seq || "-"} />
+              <KV k="유입 소스" v={profile?.source || "-"} />
+              <KV k="다음 액션" v={profile?.next_action
+                ? `${profile.next_action}${profile.next_action_at ? ` · ${kst(profile.next_action_at)}` : ""}`
+                : "-"} />
+              {profile?.lost_reason && <KV k="Closed Lost 사유" v={profile.lost_reason} />}
+              {profile?.notes && <KV k="운영 메모" v={profile.notes} />}
+            </div>
+            <div className="t-xs t-subtle" style={{ marginTop: 10 }}>
+              {profile?.last_synced_at
+                ? `마지막 HubSpot 동기화 ${kst(profile.last_synced_at)}`
+                : "아직 HubSpot 동기화를 하지 않았습니다."}
+            </div>
+          </section>
+
           <section className="card" id="contracts">
             <div className="section-header"><div className="section-header__title">계약 · 결제</div></div>
             {data.contracts.length === 0 && <p className="t-sm t-subtle">등록된 계약이 없습니다.</p>}
