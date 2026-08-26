@@ -1396,10 +1396,15 @@ def _fit(value: str | None, limit: int = 300) -> str | None:
 def _sync_hubspot(contact_id: int, per_type: int = 20) -> int:
     """허브스팟에 있는 그 사람의 기록을 우리 히스토리로 가져옵니다.
 
-    ``per_type`` 은 종류마다 몇 개까지 훑을지입니다. 화면에서 손으로 누르는 동기화는 20 —
-    「최근 것 좀 당겨오기」이고 사람이 기다리는 중이라 왕복이 짧아야 합니다. **과거 이관**은
-    깊게 팝니다(`/internal/customers/hubspot-history`): 이 콘솔이 생기기 전의 문의·답변이
-    허브스팟에만 있고, 그것이 리드 히스토리를 볼 이유의 절반입니다.
+    **손으로 누르는 버튼은 없어졌습니다** (2026-08-26). 부르는 곳은 둘입니다 — 2분 연락처
+    스윕(`agents/contact_sync`)과 과거 이관 라우트(`/internal/customers/hubspot-history`).
+    버튼이 있던 시절의 정당성은 「스윕이 안 보는 사람이 있다」였는데, 그 시점에 이미
+    `never_synced` 가 0 이었습니다(실측). 스윕이 2분마다 도는 지금 그 버튼이 하는 일은
+    「곧 일어날 일을 앞당기기」뿐이고, 그러면 「이걸 눌러야 하나」만 남습니다.
+
+    ``per_type`` 은 종류마다 몇 개까지 훑을지입니다. 스윕은 10 — 자주 도니 누적으로 채워
+    집니다. **과거 이관**은 깊게 팝니다(100): 이 콘솔이 생기기 전의 문의·답변이 허브스팟에만
+    있고, 그것이 리드 히스토리를 볼 이유의 절반입니다.
 
     같은 것을 두 번 넣지 않습니다 — 모든 행이 `external_id`(`hubspot:email:123` 꼴)로
     먼저 조회됩니다. 그래서 몇 번을 돌려도 안전하고, 중간에 끊기면 다시 돌리면 됩니다.
@@ -1830,16 +1835,6 @@ def _rebuild_one(conv_id: int) -> int:
         if written:
             session.commit()
         return written
-
-
-@router.post("/customers/{contact_id}/sync")
-async def customer_sync(contact_id: int):
-    try:
-        await asyncio.to_thread(_sync_hubspot, contact_id)
-    except Exception as exc:
-        logger.warning("Customer HubSpot sync failed for %d", contact_id, exc_info=True)
-        raise HTTPException(status_code=502, detail=f"HubSpot 동기화 실패: {exc}") from exc
-    return RedirectResponse(f"/customers/{contact_id}", status_code=303)
 
 
 @router.get("/pipeline")

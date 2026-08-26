@@ -86,8 +86,6 @@ export function CustomerDetail() {
   // 훅은 아래 early return 보다 **위**에서 부릅니다. 아래에 두면 로딩 렌더에서는 건너뛰고
   // 데이터가 온 렌더에서는 부르게 되어, 훅 수가 달라졌다고 React 가 터집니다(#310).
   // 그래서 경로도 data 가 없을 수 있다는 전제로 씁니다.
-  const [syncHubspot, syncing] = useAction((event: React.FormEvent<HTMLFormElement>) =>
-    submit(event, `/customers/${data?.contact.id}/sync`));
 
   if (isPending || !data) return <LoadingBlock />;
   const { contact, profile } = data;
@@ -178,13 +176,11 @@ export function CustomerDetail() {
             </div>
           )}
         </div>
-        {contact.hubspot_contact_id && (
-          <form onSubmit={syncHubspot}>
-            <SubmitButton busy={syncing} pending="동기화 중" className="btn btn--subtle">
-              <Icon name="refresh" size={15} /> HubSpot 동기화
-            </SubmitButton>
-          </form>
-        )}
+        {/* 「HubSpot 동기화」 버튼은 지웠습니다 (2026-08-26 운영자 지시). 2분마다 도는
+            연락처 스윕이 같은 일을 합니다 — 플랜 칸, 메일·통화·미팅·노트·Deal 전부. 그
+            버튼이 남아 있으면 하는 일이 「곧 일어날 일을 앞당기기」뿐인데, 그건 누르는
+            사람에게 「안 누르면 안 맞나」를 묻게 합니다. 마지막으로 받아온 시각은 오른쪽
+            「고객 상태」 카드 아래에 그대로 있습니다. */}
       </div>
 
       <div className="customer-layout">
@@ -309,7 +305,10 @@ export function CustomerDetail() {
                 그때는 적어야 합니다: 이 칸들이 언제 것이냐가 곧 믿어도 되느냐입니다. */}
             {profile?.last_synced_at && (
               <div className="t-xs t-subtle" style={{ marginTop: 10 }}>
-                {`마지막 HubSpot 동기화 ${kst(profile.last_synced_at)}`}
+                {/* 「동기화」가 아니라 「수신」입니다 — 누를 버튼이 없어졌으니 이건
+                    사람이 한 일이 아니라 저쪽에서 온 시각입니다. 플랜 정보 카드도 같은
+                    말을 씁니다. */}
+                {`마지막 HubSpot 수신 ${kst(profile.last_synced_at)}`}
               </div>
             )}
           </section>
