@@ -321,6 +321,7 @@ export function Board({ stages, manualLogStages, dealDetails = {} }: {
       {logging && (
         <Modal
           title="소통 히스토리 추가"
+          hideCancel
           wide
           onClose={() => setLogging(null)}
         >

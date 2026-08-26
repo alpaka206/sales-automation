@@ -1022,6 +1022,7 @@ export function MessageDetail() {
       {logging && ticket.id && contact && (
         <Modal
           title="소통 히스토리 추가"
+          hideCancel
           wide
           onClose={() => setLogging(false)}
         >

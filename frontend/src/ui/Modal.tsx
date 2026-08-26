@@ -10,6 +10,7 @@ export function Modal({
   onClose,
   children,
   actions,
+  hideCancel = false,
 }: {
   title: string;
   description?: ReactNode;
@@ -17,6 +18,15 @@ export function Modal({
   onClose: () => void;
   children?: ReactNode;
   actions?: ReactNode;
+  /** 아래 줄의 기본 「취소」를 빼고 그립니다 — **내용이 자기 취소를 이미 들고 있을 때**만.
+   *
+   *  소통 히스토리 추가 모달이 그렇습니다. 그 폼의 제출 버튼은 `type="submit"` 이라야
+   *  Enter 로도 눌리고, 그래서 폼 안에 있어야 합니다. 취소를 저장 왼쪽에 두려면 그것도
+   *  같이 폼 안으로 들어와야 하는데, 그러면 아래 기본 취소와 **둘**이 됩니다.
+   *
+   *  포커스 덫은 그대로 돕니다: 걸리는 것을 취소 버튼 하나로 세지 않고 dialog 안의 모든
+   *  포커스 가능한 요소로 세기 때문입니다(위 `focusable`). 이 폼은 입력만 여덟 개입니다. */
+  hideCancel?: boolean;
 }) {
   const dialog = useRef<HTMLDivElement>(null);
   const opener = useRef<Element | null>(null);
@@ -123,10 +133,14 @@ export function Modal({
         <h2 className="modal__title">{title}</h2>
         {description && <div className="modal__body">{description}</div>}
         {children}
-        <div className="modal__actions">
-          <button type="button" className="btn btn--ghost" onClick={onClose}>취소</button>
-          {actions}
-        </div>
+        {(!hideCancel || actions) && (
+          <div className="modal__actions">
+            {!hideCancel && (
+              <button type="button" className="btn btn--ghost" onClick={onClose}>취소</button>
+            )}
+            {actions}
+          </div>
+        )}
       </div>
     </div>
   );
