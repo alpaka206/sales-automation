@@ -142,6 +142,44 @@ def request_redraft(message_id: int) -> int:
     return conv_id
 
 
+# 연락처 필드 동기화 작업임을 알아보는 표. payload 에 ticket_id 대신 이것이 들어 있다.
+CONTACT_SYNC = "contact_field_sync"
+
+
+def enqueue_contact_field_sync(hubspot_contact_id: str, occurred_at: int | None) -> bool:
+    """연락처 하나를 「다시 읽어야 한다」고 큐에 적습니다. **네트워크에 닿지 않습니다.**
+
+    웹훅 요청 안에서 허브스팟을 읽던 코드가 여기로 왔습니다. 이유는 볼륨입니다: 대량 임포트나
+    워크플로우 일괄 수정이 한 번에 수백 건을 보내는데, 이벤트마다 읽으면 그 요청 하나가
+    수십 초가 되고 허브스팟은 응답을 못 받아 **같은 것을 다시 보냅니다** — 폭주가 스스로를
+    키웁니다. 티켓 웹훅이 진작 이 모양인 이유가 그것이고("acknowledge without external
+    calls"), 연락처 쪽만 그 규칙을 어기고 있었습니다.
+
+    **같은 연락처의 같은 분(minute)은 한 건으로 접힙니다.** 속성 여덟 개를 감시하므로 한 번의
+    저장이 이벤트 여덟 개로 옵니다 — 그 여덟이 한 작업이 되어야 허브스팟을 한 번만 읽습니다.
+    분이 바뀌면 새 작업이라, 나중의 변경이 막히지도 않습니다.
+    """
+    bucket = int(occurred_at or 0) // 60_000
+    now = _utcnow()
+    with SessionLocal() as session:
+        session.add(
+            InboundJob(
+                event_key=f"{CONTACT_SYNC}:{hubspot_contact_id}:{bucket}",
+                source="webhook",
+                payload={"kind": CONTACT_SYNC, "hubspot_contact_id": str(hubspot_contact_id)},
+                status="pending",
+                available_at=now,
+            )
+        )
+        try:
+            session.commit()
+            return True
+        except IntegrityError:
+            # 이미 같은 분의 같은 연락처가 큐에 있습니다 — 그게 접히는 자리입니다.
+            session.rollback()
+            return False
+
+
 def _claim_next_job() -> tuple[int, dict, int, str] | None:
     now = _utcnow()
     stale_before = now - timedelta(seconds=LEASE_SECONDS)
@@ -272,6 +310,20 @@ def process_one_inbound_job() -> bool:
         return False
 
     job_id, payload, attempts, owner = claimed
+    if payload.get("kind") == CONTACT_SYNC:
+        # 리스 하트비트를 안 답니다 — 허브스팟 읽기 한 번과 행 하나 쓰기라, 리스가 끊길
+        # 만큼 오래 걸리지 않습니다. 실패하면 `_retry_job` 이 뒤로 미룹니다.
+        from .contact_sync import sync_contact_from_hubspot
+
+        try:
+            sync_contact_from_hubspot(str(payload["hubspot_contact_id"]))
+        except Exception as exc:
+            _retry_job(job_id, owner, attempts, exc)
+            logger.warning("연락처 필드 동기화 실패 (attempt=%d)", attempts, exc_info=True)
+        else:
+            _finish_job(job_id, owner)
+        return True
+
     ticket_id = str(payload["ticket_id"])
     heartbeat_stop = threading.Event()
     heartbeat = threading.Thread(

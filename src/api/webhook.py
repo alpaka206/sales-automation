@@ -11,8 +11,8 @@ import time
 
 from fastapi import APIRouter, HTTPException, Request
 
-from ..agents.contact_sync import WATCHED_PROPERTIES, sync_contact_from_hubspot
-from ..agents.inbound_worker import enqueue_inbound_ticket
+from ..agents.contact_sync import WATCHED_PROPERTIES
+from ..agents.inbound_worker import enqueue_contact_field_sync, enqueue_inbound_ticket
 from ..common.config import settings
 from .schemas import HubSpotWebhookEvent
 
@@ -90,25 +90,31 @@ def _verify_hubspot_signature(
     raise HTTPException(status_code=401, detail="invalid signature")
 
 
-def _sync_contact_fields(event: HubSpotWebhookEvent) -> dict[str, str]:
-    """연락처의 플랜 칸이 저쪽에서 바뀌면 이쪽으로 받습니다 — **실시간이 이 문입니다.**
+def _queue_contact_sync(event: HubSpotWebhookEvent) -> bool:
+    """연락처의 감시 속성이 바뀌었으면 **큐에만 적고** 돌아옵니다.
 
-    화면은 우리 DB 를 보므로(티켓을 열 때마다 허브스팟에 묻지 않습니다) 저쪽 변경이 여기로
-    들어오지 않으면 그 값은 영영 옛 것입니다. 10분 폴러가 같은 일을 한 번 더 하지만, 그건
-    이 문이 닫혀 있을 때(구독 미설정·유실·배포 중)를 위한 그물입니다.
+    **여기서 허브스팟을 읽지 않습니다.** 처음에는 읽었는데, 그건 이 라우트의 계약을 어기는
+    것이었습니다("Verify and durably enqueue events, then acknowledge without external
+    calls"). 대량 임포트나 워크플로우 일괄 수정은 한 번에 수백 건을 보내고, 이벤트마다 읽으면
+    그 요청 하나가 수십 초가 됩니다 — 허브스팟은 응답을 못 받아 같은 것을 다시 보내고,
+    폭주가 스스로를 키웁니다. 감시 속성이 여덟 개라 한 번의 저장이 이벤트 여덟 개로 오는
+    것도 같은 이유로 위험합니다.
+
+    큐를 지나면 2초 안에 워커가 집습니다(`IDLE_SECONDS`). 「실시간」이 잃는 것은 그 2초뿐이고,
+    얻는 것은 폭주에도 안 무너지는 것입니다.
 
     **속성 이름으로 먼저 거릅니다.** 연락처 속성은 549개이고, 이메일 한 글자만 고쳐도 이
-    웹훅이 옵니다 — 이름을 안 보면 그때마다 허브스팟을 다시 읽습니다.
+    웹훅이 옵니다 — 이름을 안 보면 그때마다 작업이 하나씩 쌓입니다.
     """
     if event.subscriptionType != "contact.propertyChange":
-        return {}
+        return False
     if (event.propertyName or "") not in WATCHED_PROPERTIES:
-        return {}
+        return False
     try:
-        return sync_contact_from_hubspot(str(event.objectId))
+        enqueue_contact_field_sync(str(event.objectId), event.occurredAt)
     except Exception:
-        logger.warning("연락처 %s 필드 동기화 실패", event.objectId, exc_info=True)
-        return {}
+        logger.warning("연락처 %s 동기화 작업을 큐에 넣지 못했습니다", event.objectId, exc_info=True)
+    return True
 
 
 def _map_hubspot_event(event: HubSpotWebhookEvent) -> str | None:
@@ -260,15 +266,8 @@ async def webhook_hubspot_inbound(request: Request) -> dict:
         # 포함해서. 예전에는 아래 분기 안에만 있어서, New 로의 이동은 접수 처리 큐로만 가고
         # 우리 쪽 단계는 접수가 끝날 때까지(실패하면 영영) 안 따라왔습니다.
         synced = _sync_stage_change(event)
-        fields = _sync_contact_fields(event)
-        if fields:
-            results.append(
-                {
-                    "objectId": event.objectId,
-                    "status": "contact_synced",
-                    "fields": sorted(fields),
-                }
-            )
+        if _queue_contact_sync(event):
+            results.append({"objectId": event.objectId, "status": "contact_queued"})
             continue
         event_type = _map_hubspot_event(event)
         if event_type is None:
