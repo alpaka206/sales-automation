@@ -326,6 +326,7 @@ export function Board({ stages, manualLogStages, dealDetails = {} }: {
         >
           <div style={{ marginTop: 16 }}>
             <InteractionForm
+              onCancel={() => setLogging(null)}
               contactId={logging.contact_id}
               conversationId={logging.conversation_id}
               onSaved={() => {

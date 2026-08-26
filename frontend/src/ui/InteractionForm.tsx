@@ -89,10 +89,15 @@ export function InteractionForm({
   contactId,
   conversationId,
   onSaved,
+  onCancel,
 }: {
   contactId: number;
   conversationId?: number | null;
   onSaved: () => void;
+  /** 창을 닫는 길. **모달에서만 넘깁니다** — 고객 상세는 이 폼이 카드 안에 그냥 놓여
+   *  있어서 「취소」가 닫을 것이 없습니다. 없는 자리에 버튼을 두면 눌러도 아무 일이
+   *  안 일어나고, 그건 고장으로 읽힙니다. */
+  onCancel?: () => void;
 }) {
   const [save, saving] = useAction(async (event: React.FormEvent<HTMLFormElement>) => {
         event.preventDefault();
@@ -144,9 +149,13 @@ export function InteractionForm({
       <label className="quick-form__wide"><span className="field-label">관련 자료 URL</span>
         <input className="input" name="artifact_url" placeholder="회의록·Invoice·계약서 URL" />
       </label>
-      {/* 안내 문구를 뺐으므로 버튼만 남습니다 — space-between 은 그 하나를 왼쪽 끝으로
-          밀어붙입니다. 제출 버튼은 오른쪽 아래에 있어야 합니다. */}
-      <div className="quick-form__wide" style={{ display: "flex", justifyContent: "flex-end" }}>
+      {/* 오른쪽 아래에 붙이고, 취소는 저장 **왼쪽**입니다 — 되돌리는 쪽이 왼쪽, 진행하는
+          쪽이 오른쪽. 이 콘솔의 다른 확인 창과 같은 순서입니다. */}
+      <div className="quick-form__wide"
+           style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+        {onCancel && (
+          <button type="button" className="btn btn--subtle" onClick={onCancel}>취소</button>
+        )}
         <SubmitButton busy={saving}>기록 저장</SubmitButton>
       </div>
     </form>

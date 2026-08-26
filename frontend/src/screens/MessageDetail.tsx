@@ -7,7 +7,6 @@ import { Icon } from "../ui/Icon";
 import { channelLabel, directionMark, interactionMark } from "../ui/InteractionForm";
 import { Modal } from "../ui/Modal";
 import { ConfirmModal } from "../ui/ConfirmModal";
-import { STATUS_LABELS } from "../ui/QueueTable";
 import { ActionButton, useAction } from "../ui/ActionButton";
 import { InteractionForm, InteractionItem, type Interaction } from "../ui/InteractionForm";
 import { LoadingBlock } from "../ui/Loading";
@@ -437,16 +436,19 @@ export function MessageDetail() {
             {ticket.client_id != null && (
               <span className="chip tnum">Client ID {ticket.client_id}</span>
             )}
-            {ticket.inquiry_language && (
-              <span className="tag"><Icon name="translate" size={13} /> 문의 언어 · {ticket.inquiry_language}</span>
-            )}
+            {/* 「문의 언어 · ko」 는 뺐습니다 (2026-08-26 운영자 지시). 거의 모든 문의가
+                국문이라 늘 같은 값이고, 다를 때 알아야 하는 자리는 여기가 아니라 초안
+                편집기입니다 — 거기에 번역하기 버튼과 발송 언어가 이미 서 있습니다. */}
           </div>
+          {/* 「진행 기록 n건」과 상태도 뺐습니다. 앞엣것은 바로 아래 목록을 세면 나오는
+              값이고, 뒤엣것은 상태마다 그 말을 하는 자리가 이미 있습니다 — 작성 중·발송
+              실패는 배너가, 발송 대기는 그 아래 편집기와 발송 버튼이, 발송 완료는 기록의
+              그 줄이 말합니다. 티켓 번호만 남깁니다: 허브스팟에서 같은 티켓을 찾을 때
+              쓰는 값이라 이 화면에서 유일하게 다른 데서 못 얻는 것입니다. */}
           <div className="t-xs t-subtle" style={{ marginTop: 6 }}>
-            {[
-              ticket.ticket_id ? `HubSpot 티켓 #${ticket.ticket_id}` : "연락처 기준 대화 (티켓 없음)",
-              `진행 기록 ${data.thread.length}건`,
-              msg ? STATUS_LABELS[msg.status] ?? msg.status : null,
-            ].filter(Boolean).join(" · ")}
+            {ticket.ticket_id
+              ? `HubSpot 티켓 #${ticket.ticket_id}`
+              : "연락처 기준 대화 (티켓 없음)"}
           </div>
         </div>
       </div>
@@ -1021,6 +1023,7 @@ export function MessageDetail() {
         >
           <div style={{ marginTop: 16 }}>
             <InteractionForm
+              onCancel={() => setLogging(false)}
               contactId={contact.id}
               conversationId={ticket.id}
               onSaved={() => {
@@ -1065,8 +1068,10 @@ function MessageRow({ bubble, isFirstReply = false }: {
   const dir = sent && !isFirstReply
     ? interactionMark("email", "outgoing")
     : directionMark(bubble.direction);
-  // 문의는 허브스팟에서 옵니다 — 그 사실이 글자를 읽기 전에 보여야 해서 브랜드 색을 씁니다.
-  const fromHubspot = !sent;
+  // **이름 붙은 두 사건이 허브스팟 마크를 답니다** — 문의 접수와 문의 회신. 둘 다 저쪽
+  // 스레드에서 일어난 일이라서입니다: 문의가 거기로 왔고, 첫 답이 거기로 나갔습니다.
+  // 그 뒤로 오간 것은 운영자가 고른 채널의 아이콘을 답니다 (2026-08-26 운영자 지시).
+  const fromHubspot = !sent || isFirstReply;
   // 본문 없이 제목만 있는 메일이 있습니다(제목이 곧 문의 전부인 경우). 제목 줄을 안
   // 그리므로 그때는 제목이 본문 자리에 옵니다 — 아니면 빈 줄이 됩니다.
   const title = bubble.subject_ko || bubble.subject || "";
