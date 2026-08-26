@@ -927,6 +927,45 @@ async def contact_history_digest(limit: int = 40):
     )
 
 
+def _write_local_plan_fields(
+    contact_id: int, incoming: dict[str, str], sheet_client_id: int | None
+) -> None:
+    """폼이 보낸 플랜 칸을 우리 프로필과 워크북에 씁니다.
+
+    ``contact_sync.apply_contact_fields`` 를 쓰지 않는 이유는 **빈 칸의 뜻이 반대**라서입니다.
+    저쪽에서 흘러들어오는 값의 빈 칸은 「허브스팟이 아직 모른다」라 덮으면 안 되고, 이 폼의
+    빈 칸은 **사람이 일부러 비운 것**이라 지워야 합니다 — 잘못 들어간 값을 되돌릴 길이 있어야
+    합니다. 두 뜻을 한 함수에 담으면 어느 쪽 호출자를 위한 규칙인지가 그 안에서 사라집니다.
+
+    워크북은 자리가 있는 칸만 갑니다. 수식 칸은 `SYNCABLE_INBOUND_FIELDS` 가 막습니다 —
+    특히 Pipeline(MQL/PQL)은 구독 플랜에서 저절로 계산되므로 플랜만 쓰면 따라옵니다.
+
+    시트가 실패해도 저장은 성공입니다. 그것이 방금 허브스팟에 들어간 값을 되돌릴 이유는
+    아니고, 이유는 로그에 남습니다.
+    """
+    from ...agents.contact_sync import FIELDS, SHEET_FIELDS
+
+    with SessionLocal() as session:
+        profile = session.get(CustomerProfile, contact_id) or CustomerProfile(
+            contact_id=contact_id
+        )
+        touched: dict[str, str] = {}
+        for prop, value in incoming.items():
+            column = FIELDS[prop]
+            setattr(profile, column, value or None)
+            touched[column] = value
+        session.add(profile)
+        session.commit()
+
+    sheet_values = {
+        key: touched[column] for column, key in SHEET_FIELDS.items() if column in touched
+    }
+    if sheet_values and sheet_client_id:
+        from ...integrations.google_sheets import update_inbound_fields
+
+        update_inbound_fields(sheet_client_id, sheet_values)
+
+
 @router.post("/contacts/{contact_id}/hubspot-record")
 async def contact_hubspot_record_edit(contact_id: int, request: Request):
     """티켓 세부 내역의 「플랜 정보」를 허브스팟 연락처에 되쓴다.
@@ -968,42 +1007,14 @@ async def contact_hubspot_record_edit(contact_id: int, request: Request):
         logger.warning("HubSpot record write failed for contact %s: %s", contact_id, exc)
         return JSONResponse({"error": "허브스팟에 저장하지 못했습니다"}, status_code=502)
 
-    # **우리 쪽에 자리가 있는 값은 우리도 씁니다** (2026-08-19 운영자 지시: 「저장하면
-    # 저장해야 할 곳에 다 저장한다」). 플랜과 user seq 는 고객 프로필에 같은 이름의 칸이
-    # 있고 리드 히스토리·인사이트가 그것을 읽습니다 — 허브스팟에만 쓰면 두 화면이 같은
-    # 고객을 다른 플랜으로 부릅니다. 나머지 셋(plan tier·space seq·plan seq)은 우리
-    # 스키마에 자리가 없어 허브스팟이 유일한 원본입니다. 없는 칸을 만들지는 않습니다 —
-    # 읽는 화면이 없는 열은 다음 사람에게 「왜 비어 있지」만 남깁니다.
-    local = {"plan": "current_plan", "user_seq": "user_seq"}
-    touched = {local[key]: values[key].strip() for key in local if key in values}
-    if touched:
-        with SessionLocal() as session:
-            profile = session.get(CustomerProfile, contact_id) or CustomerProfile(
-                contact_id=contact_id
-            )
-            for column, value in touched.items():
-                setattr(profile, column, value or None)
-            session.add(profile)
-            session.commit()
+    # **저장하면 저장해야 할 곳에 다 저장합니다** (2026-08-19 운영자 지시). 다섯 칸 전부
+    # 우리 프로필에 자리가 있고(0094) 화면이 읽는 곳도 이제 거기이므로, 허브스팟에만 쓰면
+    # 방금 저장한 값이 다음 스윕까지 화면에 안 보입니다.
+    from ...agents.contact_sync import FIELDS
 
-    # **워크북에도 씁니다** (2026-08-26 운영자 지시). 같은 값이 세 곳에 사는데 한 곳만
-    # 고치면 영업팀이 필터로 쓰는 열이 옛 값을 들고 앉습니다.
-    #
-    # 수식 칸은 안 건드립니다(`SYNCABLE_INBOUND_FIELDS` 가 울타리입니다). 특히
-    # Pipeline(MQL/PQL)은 **구독 플랜에서 저절로 계산되므로** 플랜만 쓰면 따라옵니다 —
-    # 값으로 덮으면 그 행만 계산이 멈추고, 화면 어디에도 그게 안 보입니다.
-    #
-    # 실패해도 저장은 성공입니다. 시트가 안 되는 것이 방금 허브스팟에 들어간 값을 되돌릴
-    # 이유는 아니고, 이유는 로그에 남습니다.
-    sheet_values = {
-        key: values[key].strip()
-        for key in ("plan", "user_seq", "space_seq")
-        if key in values
-    }
-    if sheet_values and sheet_client_id:
-        from ...integrations.google_sheets import update_inbound_fields
-
-        await asyncio.to_thread(update_inbound_fields, sheet_client_id, sheet_values)
+    incoming = {prop: values[prop].strip() for prop in FIELDS if prop in values}
+    if incoming:
+        await run_in_threadpool(_write_local_plan_fields, contact_id, incoming, sheet_client_id)
     return JSONResponse({"ok": True})
 
 

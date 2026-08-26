@@ -37,6 +37,9 @@ class Contact(Base):
     company: Mapped[str | None] = mapped_column(String, nullable=True)
     domain: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
     country: Mapped[str | None] = mapped_column(String, nullable=True)
+    # 허브스팟이 접속 IP 로 뽑은 국가 (0094). 위 `country` 와 다른 값이다 — 저쪽은 사람이
+    # 폼에 적은 값이라 대개 비어 있고, 워크북의 IP Country 열이 뜻하는 것은 이쪽이다.
+    ip_country: Mapped[str | None] = mapped_column(String(64), nullable=True)
     lifecycle_stage: Mapped[str | None] = mapped_column(String, nullable=True)
     score: Mapped[int | None] = mapped_column(Integer, nullable=True)
     phone: Mapped[str | None] = mapped_column(String, nullable=True)
@@ -499,6 +502,12 @@ class CustomerProfile(Base):
     industry: Mapped[str | None] = mapped_column(String(128), nullable=True)
     user_seq: Mapped[str | None] = mapped_column(String(128), nullable=True)
     current_plan: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # 티켓 세부 내역의 「플랜 정보」가 읽는 나머지 셋 (0094). 그 패널은 허브스팟을 그때그때
+    # 읽다가 우리 행을 읽는 것으로 바뀌었고, 다섯 칸이 한 카드에 서는데 둘만 여기 있으면
+    # 그 카드가 두 곳에서 값을 모아야 한다.
+    plan_tier: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    space_seq: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    plan_seq: Mapped[str | None] = mapped_column(String(128), nullable=True)
     qualification: Mapped[str | None] = mapped_column(String(16), nullable=True)
     lost_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     source: Mapped[str | None] = mapped_column(String(64), nullable=True)

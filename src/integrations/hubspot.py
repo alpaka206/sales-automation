@@ -193,13 +193,22 @@ def _contact_properties() -> str:
         # Where the visitor actually browsed from. `country` is whatever they typed into
         # a form (often blank); this one HubSpot derives from the IP and it is the value
         # the workbook's IP Country column means.
+        #
+        # **이 포털의 이름은 `ip_country` 다** — `hs_` 접두사가 붙은 쪽은 아예 없다(2026-08-26
+        # 실측). 오래 없는 이름만 물어보고 있었고, 허브스팟은 모르는 속성을 조용히 무시하므로
+        # 값이 늘 비어 있어도 아무도 몰랐다. 둘 다 적어 둔다: 포털마다 다를 수 있고, 없는
+        # 이름은 그냥 안 돌아온다.
+        "ip_country",
         "hs_ip_country",
         "lifecyclestage",
         # 고객 상태 카드가 읽는 셋. 이름을 여기 박아도 되는 이유: 허브스팟은 **모르는 속성
         # 이름을 조용히 무시한다**(400 이 아니다 — 2026-08-26 실측). 그래서 포털에 그 속성이
         # 없으면 값이 안 올 뿐, 이 호출이 깨지지 않는다.
         "plan",
+        "plan_tier",
+        "plan_seq",
         "user_seq",
+        "space_seq",
         "industry",
     ]
     return ",".join(names)
@@ -253,10 +262,13 @@ class HubSpotClient:
             company=props.get("company"),
             phone=props.get("phone"),
             country=props.get("country"),
-            ip_country=props.get("hs_ip_country"),
+            ip_country=props.get("ip_country") or props.get("hs_ip_country"),
             lifecyclestage=props.get("lifecyclestage"),
             plan=props.get("plan"),
+            plan_tier=props.get("plan_tier"),
+            plan_seq=props.get("plan_seq"),
             user_seq=props.get("user_seq"),
+            space_seq=props.get("space_seq"),
             industry=props.get("industry"),
         )
 
@@ -605,10 +617,13 @@ class HubSpotClient:
             company=props.get("company"),
             phone=props.get("phone"),
             country=props.get("country"),
-            ip_country=props.get("hs_ip_country"),
+            ip_country=props.get("ip_country") or props.get("hs_ip_country"),
             lifecyclestage=props.get("lifecyclestage"),
             plan=props.get("plan"),
+            plan_tier=props.get("plan_tier"),
+            plan_seq=props.get("plan_seq"),
             user_seq=props.get("user_seq"),
+            space_seq=props.get("space_seq"),
             industry=props.get("industry"),
         )
 
@@ -1222,7 +1237,7 @@ class HubSpotClient:
                             company=props.get("company"),
                             phone=props.get("phone"),
                             country=props.get("country"),
-                            ip_country=props.get("hs_ip_country"),
+                            ip_country=props.get("ip_country") or props.get("hs_ip_country"),
                             lifecyclestage=props.get("lifecyclestage"),
                             plan=props.get("plan"),
                             user_seq=props.get("user_seq"),

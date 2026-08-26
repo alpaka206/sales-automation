@@ -912,5 +912,12 @@ def test_the_three_doors_share_one_sync():
         source = pathlib.Path(path).read_text(encoding="utf-8")
         assert "contact_sync" in source, path
 
-    # 셋만 잇는다. 나머지는 저쪽에 속성이 없거나 워크북이 수식 칸이다.
-    assert set(FIELDS) == {"plan", "user_seq", "industry"}
+    # 플랜 패널 다섯 + 산업군. 리드 온도·다음 액션은 저쪽에 속성이 아예 없다.
+    assert set(FIELDS) == {
+        "plan", "plan_tier", "plan_seq", "user_seq", "space_seq", "industry",
+    }
+
+    # 워크북에는 자리가 있는 셋만 간다 — 나머지는 열이 없거나 수식 칸이다.
+    from src.agents.contact_sync import SHEET_FIELDS
+
+    assert set(SHEET_FIELDS.values()) == {"plan", "user_seq", "space_seq"}

@@ -1,14 +1,17 @@
 """허브스팟 연락처 레코드가 티켓 세부 내역 오른쪽에 앉는 규칙.
 
+**읽기는 우리 행에서, 쓰기는 허브스팟으로** (0094). 예전에는 읽기도 저쪽이었고, 그래서
+티켓을 열 때마다 외부 왕복이 하나씩 났습니다.
+
 고정하는 것 넷:
 
-1. **속성을 라벨로 찾는다.** 운영자가 아는 것은 허브스팟 화면의 라벨(`user seq`)이고 내부
-   이름(`user_seq_c`)은 포털마다 다릅니다. 내부 이름을 박으면 허브스팟에서 이름 한 번
-   바꾸는 순간 그 줄만 조용히 비고 아무 데도 오류가 남지 않습니다.
+1. **읽기는 네트워크에 안 닿는다.** 화면 값의 출처는 `customer_profiles` 와 `contacts` 이고,
+   저쪽에서 값이 들어오는 문은 `agents/contact_sync` 의 셋입니다(웹훅 · 10분 스윕 · 수동).
 2. **빈 값도 줄을 만든다.** 허브스팟 사이드바가 `--` 를 그리는 자리를 우리가 숨기면, 같은
    레코드인데 줄 수가 다른 화면이 됩니다.
-3. **못 찾은 필드는 못 찾았다고 말한다.** 「값이 없다」와 「속성을 못 찾았다」는 전자는 고객
-   이야기, 후자는 설정 이야기입니다 — 화면에서 같아 보이면 안 됩니다.
+3. **쓸 때는 속성을 라벨로 찾는다.** 운영자가 아는 것은 허브스팟 화면의 라벨(`user seq`)이고
+   내부 이름(`user_seq_c`)은 포털마다 다릅니다. **쓰기의 울타리가 `RECORD_FIELDS` 입니다** —
+   화면이 보낸 이름을 그대로 썼다면 콘솔에 닿은 누구든 남의 속성을 덮어쓸 수 있었습니다.
 4. **`fetch_record_groups` 는 절대 안 터진다.** 이 패널 하나 때문에 티켓 세부 내역이 안
    열리면 답을 못 씁니다.
 
@@ -187,59 +190,49 @@ def _forbidden() -> httpx.HTTPStatusError:
     return httpx.HTTPStatusError("403", request=request, response=httpx.Response(403, request=request))
 
 
-@pytest.mark.parametrize(
-    ("exc", "expected"),
-    [
-        (_forbidden(), "crm.schemas.contacts.read"),
-        (httpx.ReadTimeout("timed out"), "허브스팟을 읽지 못했습니다."),
-        # dict 가 아닌 JSON. 잡을 예외를 나열했다면 이게 500 이 됩니다.
-        (AttributeError("'list' object has no attribute 'get'"), "허브스팟을 읽지 못했습니다."),
-        (RuntimeError("something nobody predicted"), "허브스팟을 읽지 못했습니다."),
-    ],
-)
-def test_the_panel_never_raises_whatever_hubspot_does(monkeypatch, exc, expected):
-    """티켓 세부 내역이 이 패널 때문에 안 열리면 안 됩니다."""
-    monkeypatch.setattr(hr, "_sync_request_with_retries", _raise(exc))
-
-    result = hr.fetch_record_groups("42")
-
-    assert set(result) == {"groups", "error"}
-    assert result["groups"] == []
-    assert expected in result["error"]
+class _Row:
+    def __init__(self, **values):
+        for key, value in values.items():
+            setattr(self, key, value)
 
 
-def test_an_empty_catalog_is_not_kept_for_the_life_of_the_process(monkeypatch):
-    """빈 카탈로그를 물고 있으면 허브스팟에서 속성을 고쳐도 배포 전까지 패널이 빕니다."""
-    def _fake(_client, _method, url, **_kw):
-        return httpx.Response(200, json={"results": []}, request=httpx.Request("GET", url))
+class _Session:
+    """`SessionLocal()` 자리. 두 표를 흉내 냅니다 — 연락처와 프로필."""
 
-    monkeypatch.setattr(hr, "_sync_request_with_retries", _fake)
+    def __init__(self, contact=None, profile=None):
+        self._rows = {"Contact": contact, "CustomerProfile": profile}
 
-    assert hr.fetch_record_groups("42")["error"] == "허브스팟 속성 목록을 읽지 못했습니다."
-    assert hr._property_labels.cache_info().currsize == 0
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_):
+        return False
+
+    def get(self, model, _id):
+        return self._rows.get(model.__name__)
 
 
-def test_the_happy_path_reads_the_contact_once_and_draws_both_cards(monkeypatch):
-    calls: list[str] = []
+def _patch_db(monkeypatch, contact, profile):
+    from src.db import session as db_session
 
-    def _fake(_client, _method, url, **kwargs):
-        calls.append(url)
-        request = httpx.Request("GET", url)
-        if url.endswith("/crm/v3/properties/contacts"):
-            body = {"results": [{"name": n, "label": label} for n, label in LABELS.items()]}
-            return httpx.Response(200, json=body, request=request)
-        # 달라고 한 속성만 물어봅니다 — 수백 개를 통째로 끌어오지 않습니다.
-        assert "user_seq_c" in kwargs["params"]["properties"]
-        assert "hubspot_owner_id" not in kwargs["params"]["properties"]
-        return httpx.Response(
-            200,
-            json={"id": "42", "properties": {"plan": "Enterprise", "phone": "01043391407"}},
-            request=request,
-        )
+    monkeypatch.setattr(db_session, "SessionLocal", lambda: _Session(contact, profile))
 
-    monkeypatch.setattr(hr, "_sync_request_with_retries", _fake)
 
-    result = hr.fetch_record_groups("42")
+def test_the_panel_reads_our_own_rows_and_never_touches_hubspot(monkeypatch):
+    """**읽기는 네트워크에 안 닿습니다** (0094).
+
+    예전에는 티켓을 열 때마다 허브스팟 연락처를 한 번씩 읽었습니다. 화면 값이 언제나 지금
+    저쪽 값이었지만, 답을 읽는 일이 매번 외부 왕복을 기다렸습니다.
+    """
+    monkeypatch.setattr(hr, "_sync_request_with_retries", _raise(RuntimeError("네트워크에 닿았다")))
+    _patch_db(
+        monkeypatch,
+        _Row(ip_country="south korea", phone="01043391407"),
+        _Row(current_plan="Enterprise", plan_tier=None, user_seq="184920",
+             space_seq=None, plan_seq=None, last_synced_at=None),
+    )
+
+    result = hr.fetch_record_groups(42)
 
     assert result["error"] is None
     assert [group["title"] for group in result["groups"]] == ["플랜 정보", "연락처 정보"]
@@ -247,9 +240,37 @@ def test_the_happy_path_reads_the_contact_once_and_draws_both_cards(monkeypatch)
         "key": "plan", "label": "플랜 (Plan)", "value": "Enterprise",
         "found": True, "editable": True,
     }
-    # 연결(association) 조회는 없습니다 — 이 값들은 Contact 에 있습니다.
-    assert not any("associations" in url for url in calls)
-    assert sum("objects/contacts" in url for url in calls) == 1
+    # 빈 값도 줄을 만듭니다 — 허브스팟 사이드바가 `--` 를 그리는 그 자리입니다.
+    assert [row["value"] for row in result["groups"][0]["rows"]] == [
+        "Enterprise", None, "184920", None, None,
+    ]
+    assert result["groups"][1]["rows"][0]["value"] == "south korea"
+
+
+def test_the_panel_never_raises_whatever_the_database_does(monkeypatch):
+    """티켓 세부 내역이 이 패널 때문에 안 열리면 안 됩니다."""
+    from src.db import session as db_session
+
+    def _boom():
+        raise RuntimeError("database is on fire")
+
+    monkeypatch.setattr(db_session, "SessionLocal", _boom)
+
+    result = hr.fetch_record_groups(42)
+
+    assert result["groups"] == []
+    assert "플랜 정보를 읽지 못했습니다." in result["error"]
+
+
+def test_a_contact_we_have_never_synced_is_an_empty_panel_not_an_error(monkeypatch):
+    """프로필 행이 아직 없어도 카드는 섭니다 — 줄 수가 고객마다 달라지면 안 됩니다."""
+    _patch_db(monkeypatch, _Row(ip_country=None, phone=None), None)
+
+    result = hr.fetch_record_groups(42)
+
+    assert result["error"] is None
+    assert [group["title"] for group in result["groups"]] == ["플랜 정보", "연락처 정보"]
+    assert all(row["value"] is None for group in result["groups"] for row in group["rows"])
 
 
 def test_only_the_plan_fields_can_be_written(monkeypatch, live_writes):
@@ -324,10 +345,15 @@ def test_an_empty_box_clears_the_value(monkeypatch, live_writes):
     assert sent == {"plan": ""}
 
 
-def test_a_contact_without_a_hubspot_id_is_an_empty_panel_not_an_error():
-    """워크북에서 온 행과 손으로 만든 행에는 조회할 대상이 없습니다.
+def test_a_contact_without_a_hubspot_id_still_gets_the_panel():
+    """워크북에서 온 행과 손으로 만든 행도 자기 칸을 갖습니다 (0094).
 
-    404 로 답하면 화면이 오류를 그리는데, 「이 고객은 허브스팟에 없다」는 오류가 아닙니다.
+    예전에는 이 패널이 허브스팟 연락처 ID 로만 조회할 수 있어서, ID 가 없는 고객에게는 카드
+    자체가 안 떴습니다. 이제 읽는 곳이 우리 행이라 ID 는 상관없습니다 — 비어 있으면 비어
+    있는 채로 그려지고, 사람이 그 자리에 채워 넣을 수 있습니다.
+
+    없는 연락처도 200 입니다. 이 패널의 계약은 「티켓 세부 내역을 절대 못 열게 하지 않는다」
+    이고, 그러려면 실패가 상태 코드가 아니라 `error` 문자열로 와야 합니다.
     """
     from src.db.models import Contact
     from src.db.session import SessionLocal
@@ -347,6 +373,10 @@ def test_a_contact_without_a_hubspot_id_is_an_empty_panel_not_an_error():
         missing = client.get("/api/ui/contacts/999999/hubspot-record")
 
     assert response.status_code == 200
-    assert response.json() == {"groups": [], "error": None}
-    # 없는 연락처는 여전히 404 입니다 — 그건 정말 없는 것입니다.
-    assert missing.status_code == 404
+    payload = response.json()
+    assert payload["error"] is None
+    assert [group["title"] for group in payload["groups"]] == ["플랜 정보", "연락처 정보"]
+
+    assert missing.status_code == 200
+    assert missing.json()["groups"] == []
+    assert "연락처를 찾을 수 없습니다." in missing.json()["error"]

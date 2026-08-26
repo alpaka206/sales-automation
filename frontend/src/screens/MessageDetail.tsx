@@ -59,9 +59,17 @@ function CompanyRow({ row, editing }: { row: RecordRow; editing?: boolean }) {
   );
 }
 
-/** 허브스팟 연락처 레코드의 「기본 그룹」. 카드를 나누는 것도 줄 이름도 서버가 정합니다 — 필드가 늘 때
- *  고칠 곳이 한 곳이어야 합니다(`src/integrations/hubspot_record.py`). */
+/** 플랜·연락처 칸. **값은 우리 DB 에서 옵니다** (0094) — 티켓을 열 때마다 허브스팟을 읽던
+ *  것을 그만뒀습니다. 저쪽에서 값이 들어오는 문은 셋입니다: 웹훅 · 10분 스윕 · 고객 상세의
+ *  「HubSpot 동기화」(`src/agents/contact_sync.py`).
+ *
+ *  카드를 나누는 것도 줄 이름도 서버가 정합니다 — 필드가 늘 때 고칠 곳이 한 곳이어야
+ *  합니다(`src/integrations/hubspot_record.py`). */
 type HubSpotRecord = {
+  /** 마지막으로 허브스팟에서 받아온 시각. 저쪽을 그때그때 읽던 시절에는 물어볼 필요가
+   *  없던 질문이고, 지금은 화면이 답할 수 있어야 합니다 — 언제 것이냐가 곧 믿어도
+   *  되느냐입니다. 한 번도 못 받아왔으면 `null`. */
+  synced_at?: string | null;
   groups: {
     key: string;
     title: string;
@@ -822,6 +830,13 @@ export function MessageDetail() {
                         <CompanyRow key={row.key} row={row} editing={editing} />
                       ))}
                     </dl>
+                    {/* **언제 것인지가 곧 믿어도 되느냐입니다.** 값이 있을 때만 적습니다 —
+                        한 번도 못 받아온 상태를 한 줄로 설명할 이유는 없습니다. */}
+                    {hubspot?.synced_at && (
+                      <div className="t-xs t-subtle" style={{ marginTop: 10 }}>
+                        마지막 HubSpot 수신 {kst(hubspot.synced_at)}
+                      </div>
+                    )}
                     {editing && (
                       <button className="btn btn--subtle btn--sm" type="submit"
                               style={{ marginTop: 12, width: "100%" }}

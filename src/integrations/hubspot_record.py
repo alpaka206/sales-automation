@@ -52,7 +52,7 @@ from typing import NamedTuple
 import httpx
 
 from ..common.safe_mode import guard_external_write
-from .hubspot import BASE_URL, HubSpotNotConfigured, _require_token, _sync_request_with_retries
+from .hubspot import BASE_URL, _require_token, _sync_request_with_retries
 
 logger = logging.getLogger(__name__)
 
@@ -79,6 +79,9 @@ class Field(NamedTuple):
     - ``label``      : 화면에 적는 말. 운영자가 정한다.
     - ``candidates`` : 허브스팟에서 집어낼 열쇠. 첫 번째가 포털 라벨이고 뒤는 대비책.
     - ``editable``   : 콘솔에서 되쓸 수 있는가. **쓰기의 울타리가 이 칸이다.**
+    - ``column``     : 우리 DB 의 자리(`profile.<칸>` 또는 `contact.<칸>`). **읽기는 여기서**
+      한다 — 0094 이후 이 패널은 허브스팟이 아니라 우리 행을 읽는다. `candidates` 는 그
+      반대편, 즉 **되쓸 때** 허브스팟 속성 이름을 찾는 데만 쓰인다.
     """
 
     group: str
@@ -86,6 +89,7 @@ class Field(NamedTuple):
     label: str
     candidates: tuple[str, ...]
     editable: bool = False
+    column: str = ""
 
 
 # 순서가 곧 화면 순서다 — 운영자가 정한 대로 위에서 아래로 그려진다.
@@ -98,13 +102,16 @@ class Field(NamedTuple):
 # gmail·미확인 고객이 회사 이름을 갖는 유일한 자리다. 옆에 사본을 세우면 둘 중 어느 것이
 # 진짜인지 화면만 봐서는 알 수 없다.
 RECORD_FIELDS: tuple[Field, ...] = (
-    Field("plan", "plan", "플랜 (Plan)", ("plan",), editable=True),
-    Field("plan", "plan_tier", "플랜 티어 (plan tier)", ("plan tier",), editable=True),
-    Field("plan", "user_seq", "user seq", ("user seq",), editable=True),
-    Field("plan", "space_seq", "space seq", ("space seq",), editable=True),
-    Field("plan", "plan_seq", "plan seq", ("plan seq",), editable=True),
-    Field("contact", "ip_country", "국가 (IP Country)", ("ip country", "hs_ip_country", "ip")),
-    Field("contact", "phone", "전화번호", ("전화번호", "phone number", "phone")),
+    Field("plan", "plan", "플랜 (Plan)", ("plan",), True, "profile.current_plan"),
+    Field("plan", "plan_tier", "플랜 티어 (plan tier)", ("plan tier",), True, "profile.plan_tier"),
+    Field("plan", "user_seq", "user seq", ("user seq",), True, "profile.user_seq"),
+    Field("plan", "space_seq", "space seq", ("space seq",), True, "profile.space_seq"),
+    Field("plan", "plan_seq", "plan seq", ("plan seq",), True, "profile.plan_seq"),
+    Field(
+        "contact", "ip_country", "국가 (IP Country)",
+        ("ip country", "ip_country", "hs_ip_country", "ip"), False, "contact.ip_country",
+    ),
+    Field("contact", "phone", "전화번호", ("전화번호", "phone number", "phone"), False, "contact.phone"),
 )
 
 
@@ -276,49 +283,65 @@ def update_record_fields(hubspot_contact_id: str, values: dict[str, str]) -> Non
     response.raise_for_status()
 
 
-def fetch_record_groups(hubspot_contact_id: str) -> dict:
-    """연락처 레코드를 읽어 화면이 그릴 그룹으로 돌려준다.
+def fetch_record_groups(contact_id: int) -> dict:
+    """**우리 행**을 읽어 화면이 그릴 그룹으로 돌려준다.
 
-    돌려주는 모양은 **언제나 같다**: `{"groups": [...], "error": str|None}`. 무슨 일이 나든
-    예외를 올리지 않는다 — 이 패널 하나 때문에 티켓 세부 내역 전체가 안 열리면 답을 못 쓴다.
-    그래서 `except Exception` 이다: 잡을 예외를 나열하면 그 목록에 없는 것 하나가 곧 이
-    함수의 계약을 깬다(허브스팟이 dict 가 아닌 JSON 을 돌려주면 `.get` 이 `AttributeError`
-    다).
+    돌려주는 모양은 예전 그대로다: `{"groups": [...], "error": str|None}`. 바뀐 것은 값이
+    어디서 오느냐 하나다.
 
-    ponytail: 캐시가 없다. 티켓을 열 때마다 연락처 1회다(카탈로그는 프로세스 캐시). 사람이
-    여는 속도라 허브스팟 한도(10초 100회)에 한참 못 미치고, 대신 화면에 뜨는 값이 언제나
-    지금 허브스팟의 값이다. 여는 속도가 한도를 넘기 시작하면 그때 테이블에 담고 폴러가
-    갱신하게 바꾼다 — 그때부터는 「언제 것이냐」를 화면에 적어야 한다.
+    **예전에는 티켓을 열 때마다 허브스팟 연락처를 한 번씩 읽었다.** 그래서 화면 값이 언제나
+    지금 허브스팟 값이었지만, 답을 읽는 일이 매번 외부 왕복을 기다렸고 허브스팟이 느린 날에는
+    그 패널 때문에 티켓이 늦게 열렸다. 운영자 지시(2026-08-26): 화면은 우리 DB 를 보고, 저쪽이
+    바뀌면 그때 이쪽으로 들어오게 한다 — 그 들어오는 문이 `agents/contact_sync` 의 셋이다
+    (웹훅 · 10분 스윕 · 고객 상세의 수동 동기화).
+
+    그래서 이 함수는 이제 **네트워크에 닿지 않는다.** 예외를 올리지 않는 계약은 그대로 두되
+    (이 패널 하나 때문에 티켓 세부 내역이 안 열리면 답을 못 쓴다) 실패할 거리가 거의 없다.
+
+    ``found`` 는 언제나 참이다. 예전에 거짓일 수 있었던 것은 「그 포털에 그 속성이 없다」는
+    뜻이었고, 그건 허브스팟 카탈로그를 뒤질 때만 알 수 있는 사실이다. 지금 그 정보가 필요한
+    곳은 되쓰기(`update_record_fields`) 하나뿐이고, 거기서는 여전히 카탈로그를 본다.
     """
-    try:
-        token = _require_token()
-    except HubSpotNotConfigured:
-        return _blank("HubSpot 토큰이 설정되지 않았습니다.")
+    from ..db.models import Contact, CustomerProfile
+    from ..db.session import SessionLocal
 
     try:
-        headers = {"Authorization": f"Bearer {token}"}
-        with httpx.Client(headers=headers, timeout=_TIMEOUT) as client:
-            labels = _property_labels(token)
-            if not labels:
-                # 빈 카탈로그를 프로세스 내내 물고 있지 않는다.
-                _property_labels.cache_clear()
-                return _blank("허브스팟 속성 목록을 읽지 못했습니다.")
-
-            resolved = resolve_property_names(labels)
-            if not resolved:
-                return _blank("허브스팟 연락처에서 해당 속성을 하나도 찾지 못했습니다.")
-
-            record = _sync_request_with_retries(
-                client,
-                "GET",
-                f"{BASE_URL}/crm/v3/objects/contacts/{hubspot_contact_id}",
-                params={"properties": ",".join(sorted(set(resolved.values())))},
-            )
-            record.raise_for_status()
-            properties = record.json().get("properties") or {}
-            groups = build_groups(properties, resolved)
+        with SessionLocal() as session:
+            contact = session.get(Contact, int(contact_id))
+            if contact is None:
+                return _blank("연락처를 찾을 수 없습니다.")
+            profile = session.get(CustomerProfile, int(contact_id))
+            sources = {"contact": contact, "profile": profile}
+            rows_by_group: dict[str, list[dict]] = {}
+            for field in RECORD_FIELDS:
+                table, _, column = field.column.partition(".")
+                row = sources.get(table)
+                raw = getattr(row, column, None) if row is not None else None
+                value = "" if raw is None else str(raw).strip()
+                rows_by_group.setdefault(field.group, []).append(
+                    {
+                        "key": field.key,
+                        "label": field.label,
+                        "value": value or None,
+                        "found": True,
+                        "editable": field.editable,
+                    }
+                )
+            synced_at = getattr(profile, "last_synced_at", None) if profile else None
     except Exception as exc:  # 계약이 「절대 안 터진다」라서 종류를 나열하지 않는다.
-        logger.warning("HubSpot record lookup failed for contact %s: %s", hubspot_contact_id, exc)
-        return _blank(_friendly_error(exc))
+        logger.warning("Plan panel read failed for contact %s: %s", contact_id, exc)
+        return _blank("플랜 정보를 읽지 못했습니다.")
 
-    return {"groups": groups, "error": None}
+    groups = [
+        {
+            "key": key,
+            "title": title,
+            "rows": rows_by_group[key],
+            "editable": any(row["editable"] for row in rows_by_group[key]),
+        }
+        for key, title in GROUPS
+        if rows_by_group.get(key)
+    ]
+    # **언제 것인지가 곧 믿어도 되느냐다.** 저쪽을 그때그때 읽던 시절에는 물어볼 필요가
+    # 없던 질문이고, 지금은 화면이 답할 수 있어야 한다.
+    return {"groups": groups, "error": None, "synced_at": synced_at}

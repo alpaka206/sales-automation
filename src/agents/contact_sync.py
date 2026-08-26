@@ -31,17 +31,36 @@ logger = logging.getLogger(__name__)
 # 허브스팟 속성 이름 → 우리 `CustomerProfile` 칸.
 FIELDS: dict[str, str] = {
     "plan": "current_plan",
+    "plan_tier": "plan_tier",
+    "plan_seq": "plan_seq",
     "user_seq": "user_seq",
+    "space_seq": "space_seq",
     "industry": "industry",
 }
 
+# 같은 일을 하는데 사는 표가 다른 것: 국가는 사람이 아니라 **연락처**의 값입니다.
+CONTACT_FIELDS: dict[str, str] = {"ip_country": "ip_country"}
+
 # 그중 워크북에 자리가 있는 것. **산업군은 없습니다** — 시트에서 「기업 종류」인데 그 칸이
 # 「고객 기본 정보」를 Client ID 로 조회하는 수식이라, 값으로 덮으면 그 행만 조회를 멈춥니다.
-_SHEET_FIELDS: dict[str, str] = {"current_plan": "plan", "user_seq": "user_seq"}
+# plan tier·plan seq 도 시트에 열이 없습니다.
+SHEET_FIELDS: dict[str, str] = {
+    "current_plan": "plan",
+    "user_seq": "user_seq",
+    "space_seq": "space_seq",
+}
 
 # 웹훅이 이 이름으로 올 때만 일합니다. 연락처의 속성은 549개고, 그중 하나가 바뀔 때마다
 # 허브스팟을 다시 읽으면 이메일 한 글자 고친 것에도 왕복이 납니다.
-WATCHED_PROPERTIES = frozenset(FIELDS)
+WATCHED_PROPERTIES = frozenset(FIELDS) | frozenset(CONTACT_FIELDS)
+
+
+def values_from(dto) -> dict[str, str | None]:
+    """``ContactDTO`` 에서 우리가 보는 칸만 뽑습니다 — **한 곳에서**.
+
+    세 문(수동 동기화 · 웹훅 · 스윕)이 각자 dict 를 짜면, 칸이 하나 늘 때 한 문만 빠집니다.
+    """
+    return {prop: getattr(dto, prop, None) for prop in WATCHED_PROPERTIES}
 
 
 def apply_contact_fields(contact_id: int, incoming: dict[str, str | None]) -> dict[str, str]:
@@ -70,14 +89,22 @@ def apply_contact_fields(contact_id: int, incoming: dict[str, str | None]) -> di
             if value and value != (getattr(profile, column) or ""):
                 setattr(profile, column, value)
                 changed[column] = value
+        for prop, column in CONTACT_FIELDS.items():
+            value = (incoming.get(prop) or "").strip()
+            if value and value != (getattr(contact, column) or ""):
+                setattr(contact, column, value)
+                changed[column] = value
         if not changed:
             return {}
+        # **언제 것인지가 곧 믿어도 되느냐입니다.** 플랜 패널은 이제 허브스팟이 아니라 이
+        # 행을 읽으므로, 마지막으로 받아온 시각이 화면에 설 수 있어야 합니다.
+        profile.last_synced_at = datetime.now(timezone.utc)
         session.add(profile)
         sheet_client_id = contact.sheet_client_id
         session.commit()
 
     sheet_values = {
-        key: changed[column] for column, key in _SHEET_FIELDS.items() if column in changed
+        key: changed[column] for column, key in SHEET_FIELDS.items() if column in changed
     }
     if sheet_values and sheet_client_id:
         from ..integrations.google_sheets import update_inbound_fields
@@ -114,9 +141,7 @@ def sync_contact_from_hubspot(hubspot_contact_id: str) -> dict[str, str]:
         logger.warning("HubSpot contact read failed (contact=%s)", contact_id, exc_info=True)
         return {}
 
-    changed = apply_contact_fields(
-        contact_id, {"plan": dto.plan, "user_seq": dto.user_seq, "industry": dto.industry}
-    )
+    changed = apply_contact_fields(contact_id, values_from(dto))
     if changed:
         logger.info("연락처 %d: 허브스팟에서 %s 를 받았습니다.", contact_id, sorted(changed))
     return changed
@@ -184,10 +209,7 @@ def sync_changed_contacts_once() -> int:
         if contact_id is None:
             continue
         try:
-            if apply_contact_fields(
-                contact_id,
-                {"plan": dto.plan, "user_seq": dto.user_seq, "industry": dto.industry},
-            ):
+            if apply_contact_fields(contact_id, values_from(dto)):
                 touched += 1
         except Exception:
             logger.warning("연락처 %d 반영 실패", contact_id, exc_info=True)

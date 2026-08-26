@@ -451,18 +451,12 @@ def ui_hubspot_record(contact_id: int):
     없다. 그때도 200 에 빈 그룹이다 — 404 로 답하면 화면이 오류를 그리는데, 「이 고객은
     허브스팟에 없다」는 오류가 아니다.
     """
-    from ...db.models import Contact
-    from ...db.session import SessionLocal
     from ...integrations.hubspot_record import fetch_record_groups
 
-    with SessionLocal() as session:
-        contact = session.get(Contact, contact_id)
-        if contact is None:
-            raise HTTPException(status_code=404, detail="연락처를 찾을 수 없습니다")
-        hubspot_contact_id = contact.hubspot_contact_id
-    if not hubspot_contact_id:
-        return {"groups": [], "error": None}
-    return fetch_record_groups(hubspot_contact_id)
+    # **우리 행을 읽습니다** (0094). 허브스팟 연락처 ID 가 있든 없든 상관없어졌습니다 —
+    # 손으로 만든 행도 워크북에서 온 행도 자기 칸을 갖고, 비어 있으면 비어 있는 채로
+    # 그려집니다. 저쪽에서 값이 들어오는 문은 `agents/contact_sync` 의 셋입니다.
+    return fetch_record_groups(contact_id)
 
 
 @router.get("/api/ui/customers/{contact_id}")
