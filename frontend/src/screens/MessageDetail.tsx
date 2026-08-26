@@ -4,7 +4,7 @@ import { Link, useParams } from "react-router-dom";
 import { getJSON, postForm } from "../lib/api";
 import { kst } from "../lib/format";
 import { Icon } from "../ui/Icon";
-import { channelLabel, directionMark } from "../ui/InteractionForm";
+import { channelLabel, directionMark, interactionMark } from "../ui/InteractionForm";
 import { Modal } from "../ui/Modal";
 import { ConfirmModal } from "../ui/ConfirmModal";
 import { STATUS_LABELS } from "../ui/QueueTable";
@@ -301,6 +301,10 @@ export function MessageDetail() {
   // 우리가 주고받은 메일만 위에 따로 세워 두면 같은 시간축이 두 동강 납니다 — 허브스팟에서
   // 온 답과 우리 메일 중 무엇이 먼저였는지가 화면에서 안 보입니다. New 에서는 그대로
   // 위에 남습니다: 거기서는 원문을 읽고 초안을 쓰는 것이 본론입니다.
+  // **첫 번째로 나간 답변**이 어느 줄인지. 그 한 줄만 「문의 회신」이고, 그 뒤의 우리
+  // 메일은 「이메일 발송」입니다 — 「문의 회신」은 이 티켓에서 한 번 일어나는 사건이라
+  // 두 번 세 번 적히면 어느 것이 그 사건인지 알 수 없습니다 (2026-08-26 운영자 지시).
+  const firstReplyId = data.thread.find((b) => SENT.has(b.direction))?.id;
   const ticketLog = [
     ...data.ticket_interactions.map((item, index) => ({
       key: `i${item.id ?? index}`,
@@ -327,7 +331,10 @@ export function MessageDetail() {
             bubble: b,
           }))
       : []),
-  ].sort((a, b) => (a.at || "").localeCompare(b.at || ""));
+    // **최신순입니다** (2026-08-26 운영자 지시). 오래된 순이던 시절에는 기록이 쌓일수록
+    // 방금 일어난 일이 스크롤 밑바닥으로 내려갔습니다 — 이 목록을 여는 이유는 대개
+    // 「마지막으로 무슨 일이 있었나」이지 「처음에 무슨 일이 있었나」가 아닙니다.
+  ].sort((a, b) => (b.at || "").localeCompare(a.at || ""));
   const canTranslate = !!msg?.target_language && msg.target_language !== "ko";
   const translationRequired = canTranslate && (
     draftLanguage.toLowerCase() !== msg?.target_language?.toLowerCase()
@@ -657,7 +664,8 @@ export function MessageDetail() {
                         <span className="tnum">{kst(entry.at)}</span>{" · "}{entry.progress}
                       </div>
                     ) : entry.bubble ? (
-                      <MessageRow key={entry.key} bubble={entry.bubble} />
+                      <MessageRow key={entry.key} bubble={entry.bubble}
+                                  isFirstReply={entry.bubble.id === firstReplyId} />
                     ) : (
                       <InteractionItem key={entry.key} item={entry.item as Interaction}
                                        hideSubject />
@@ -1039,8 +1047,26 @@ export function MessageDetail() {
  *  제목이 반복되고, 우리 메일 줄은 그 제목을 번역해서 쓰기 때문에 같은 제목이 원문·국문
  *  으로 나란히 놓여 다른 두 건처럼 보였습니다. 소통 기록 줄도 같이 껐습니다
  *  (`InteractionItem hideSubject`). */
-function MessageRow({ bubble }: { bubble: Bubble }) {
-  const dir = directionMark(bubble.direction);
+/** 메일 한 줄. **말이 셋으로 갈립니다** (2026-08-26 운영자 지시):
+ *
+ *   고객이 보낸 것        → 「문의 접수」  + 허브스팟 마크
+ *   우리가 보낸 **첫** 답 → 「문의 회신」
+ *   그 뒤의 우리 메일     → 「이메일 발송」
+ *
+ *  앞의 둘은 이 티켓에서 한 번씩 일어나는 사건이라 이름이 있고, 그 뒤로는 그냥 오가는
+ *  것이라 사람이 적는 기록과 같은 말(채널 + 방향)을 씁니다. 셋을 다 「문의 접수/회신」로
+ *  적으면 그 두 사건이 어느 줄인지 목록에서 사라집니다.
+ */
+function MessageRow({ bubble, isFirstReply = false }: {
+  bubble: Bubble;
+  isFirstReply?: boolean;
+}) {
+  const sent = SENT.has(bubble.direction);
+  const dir = sent && !isFirstReply
+    ? interactionMark("email", "outgoing")
+    : directionMark(bubble.direction);
+  // 문의는 허브스팟에서 옵니다 — 그 사실이 글자를 읽기 전에 보여야 해서 브랜드 색을 씁니다.
+  const fromHubspot = !sent;
   // 본문 없이 제목만 있는 메일이 있습니다(제목이 곧 문의 전부인 경우). 제목 줄을 안
   // 그리므로 그때는 제목이 본문 자리에 옵니다 — 아니면 빈 줄이 됩니다.
   const title = bubble.subject_ko || bubble.subject || "";
@@ -1054,7 +1080,10 @@ function MessageRow({ bubble }: { bubble: Bubble }) {
           <summary style={{ cursor: "pointer", listStyle: "none" }}>
             <div className="row wrap" style={{ gap: 6 }}>
               <span className="t-xs history-item__dir">
-                <Icon name={bubble.is_auto_ack ? "sparkles" : dir.icon} size={13} />
+                <span style={fromHubspot ? { color: "#ff7a59" } : undefined}>
+                  <Icon name={bubble.is_auto_ack ? "sparkles" : fromHubspot ? "hubspot" : dir.icon}
+                        size={13} />
+                </span>
                 {dir.label}
               </span>
               {bubble.is_auto_ack && <span className="tag">자동 접수확인</span>}

@@ -25,6 +25,43 @@ export const DIRECTIONS: [string, string][] = [
   ["outgoing", "발송"], ["inbound", "수신"], ["note", "주고받음"],
 ];
 
+/** 채널마다 앞에 서는 아이콘. 「이 줄이 무엇으로 오갔나」가 글자를 읽기 전에 보여야
+ *  합니다 — 스무 줄을 훑을 때 눈이 먼저 잡는 것은 모양이지 말이 아닙니다. */
+const CHANNEL_ICON: Record<string, string> = {
+  email: "mail",
+  whatsapp: "messages",
+  sms: "messages",
+  kakao: "messages",
+  phone: "phone",
+  meeting: "users",
+  hubspot: "hubspot",
+  invoice: "file",
+  contract: "file",
+  manual: "edit",
+};
+
+/** 사람이 적은 기록 한 줄의 **말과 아이콘** — 「이메일 발송」 · 「왓츠앱 수신」 · 「통화 주고받음」.
+ *
+ *  메일 줄과 다른 말을 쓰는 이유(2026-08-26 운영자 지시): 이 티켓에서 「문의 접수」와
+ *  「문의 회신」은 **한 번씩만 일어나는 사건**입니다 — 허브스팟으로 문의가 왔고, 우리가
+ *  첫 답을 보냈다. 그 뒤로 오가는 것은 종류가 다양해서 같은 두 말로는 못 적습니다.
+ *  왓츠앱으로 받은 것과 전화로 통화한 것이 화면에서 똑같이 「문의 접수」였습니다.
+ *
+ *  그래서 여기서는 **고를 때 쓴 말을 그대로** 씁니다 — 채널 이름 + 방향(발송·수신·주고받음).
+ *  운영자가 폼에서 고른 두 값이 곧 줄에 찍히는 말이라, 무엇을 고르면 무엇이 보이는지가
+ *  화면만 봐도 이어집니다.
+ */
+export function interactionMark(channel: string, direction: string) {
+  const base = directionMark(direction);
+  const tail = DIRECTIONS.find(([key]) => key === direction)?.[1]
+    ?? (direction === "incoming" ? "수신" : direction === "outbound" ? "발송" : "주고받음");
+  return {
+    label: `${channelLabel(channel)} ${tail}`,
+    icon: CHANNEL_ICON[channel] ?? base.icon,
+    tone: base.tone,
+  };
+}
+
 /** 방향 한 줄에 필요한 것 — 말·아이콘·색을 **한 곳에서** 정합니다. 티켓 기록·고객
  *  기록·리드 히스토리가 같은 목록을 그리므로 여기가 갈리면 같은 줄이 화면마다 다른
  *  말을 합니다. 별칭(`incoming`·`outbound`)은 옛 행이 들고 있는 값입니다. */
@@ -134,7 +171,7 @@ export function InteractionItem({ item, hideSubject = false }: {
   item: Interaction;
   hideSubject?: boolean;
 }) {
-  const dir = directionMark(item.direction);
+  const dir = interactionMark(item.channel, item.direction);
   // 제목을 안 그리는 자리에서는 본문 없는 줄이 통째로 빈칸이 됩니다 — 그때는 제목이
   // 그 기록의 전부라 본문 자리에 씁니다.
   const body = (item.summary || "").trim() || (hideSubject ? item.subject || "" : "");
@@ -142,7 +179,10 @@ export function InteractionItem({ item, hideSubject = false }: {
   // 사람이 적은 기록에서는 「맥락·다음 액션」이라 어느 쪽이든 한 줄로 읽힙니다.
   // 없으면 본문 앞머리 — 인사말로 시작하는 메일에서는 이게 아무것도 안 알려 줍니다.
   const preview = (item.context || body).replace(/\s+/g, " ");
-  const foldable = body.length > 0 && (!!item.context || body.length > 120);
+  // **본문이 있으면 언제나 접습니다.** 예전에는 짧고 `context` 도 없는 기록만 통째로
+  // 펼쳐 뒀는데, 그러면 같은 목록에서 어떤 줄은 한 줄이고 어떤 줄은 열 줄이라 훑을 수가
+  // 없습니다 — 기록을 하나 더 적을수록 목록이 목록이 아니게 됩니다(2026-08-26 운영자 지시).
+  const foldable = body.length > 0;
   const head = (
     <>
       <div className="row wrap" style={{ gap: 6 }}>
@@ -150,7 +190,8 @@ export function InteractionItem({ item, hideSubject = false }: {
           <Icon name={dir.icon} size={13} />
           {dir.label}
         </span>
-        {item.channel !== "email" && <span className="tag">{channelLabel(item.channel)}</span>}
+        {/* 채널 태그는 뺐습니다 — 라벨이 이미 「왓츠앱 수신」이라 바로 옆에 「WhatsApp」을
+            한 번 더 다는 셈입니다. */}
         {item.handler && <span className="tag">{item.handler}</span>}
         {/* **`kst()` 로 찍습니다.** API 가 주는 것은 오프셋 없는 UTC 라, 잘라서 그대로
             쓰면 한국 시각보다 9시간 이른 값이 찍힙니다 — 같은 목록의 메일 줄은 변환해서
