@@ -1082,13 +1082,20 @@ function MessageRow({ bubble }: { bubble: Bubble }) {
   );
 }
 
-/** 연락처 단위 기록 한 줄 — 제목과 첫 줄만, 본문은 「전체보기」로. */
-function HistoryRow({ item }: {
+/** 연락처 단위 기록 한 줄 — 제목과 첫 줄만, 본문은 「전체보기」로.
+ *
+ *  ``unanswered`` 는 **혼자 있는 줄**이 쓰는 표입니다. 여러 줄짜리 대화에서는 바깥
+ *  묶음이 「문의 n건 · 답변 없음」을 적어 주는데, 줄이 하나면 그 묶음이 없기 때문입니다
+ *  (아래 참조). 이 화면에서 가장 손이 가야 하는 신호라 묶음이 사라진다고 같이 사라지면
+ *  안 됩니다.
+ */
+function HistoryRow({ item, unanswered = false }: {
   item: {
     channel: string; direction: string; handler: string | null;
     subject: string | null; summary: string | null; happened_at: string | null;
     digest?: string | null;
   };
+  unanswered?: boolean;
 }) {
   // 요약이 있으면 그것이 미리보기입니다. 없을 때만 본문 앞머리를 씁니다 — 인사말로
   // 시작하는 메일에서는 앞머리가 아무것도 안 알려 줍니다.
@@ -1110,6 +1117,7 @@ function HistoryRow({ item }: {
             {dir.label}
           </span>
           {item.channel !== "email" && <span className="tag">{channelLabel(item.channel)}</span>}
+          {unanswered && <span className="tag">답변 없음</span>}
           {item.handler && <span className="t-xs t-subtle">{item.handler}</span>}
           <span className="t-xs t-subtle tnum">{item.happened_at ? kst(item.happened_at) : ""}</span>
         </div>
@@ -1191,7 +1199,15 @@ function HistoryDigest({ items }: {
         </div>
       </div>
       <div className="stack" style={{ gap: 6 }}>
-        {threads.map((thread) => (
+        {/* **줄이 하나인 대화는 묶지 않습니다.** 묶음은 「스무 건을 이야기 단위로」 하려고
+            있는 것인데, 안에 메일이 하나뿐이면 하는 일이 없습니다 — 눌러서 편 자리에
+            같은 제목이 한 번 더 적힌 줄 하나가 있고, 본문을 읽으려면 「전체보기」를 또
+            눌러야 했습니다. 한 통을 읽는 데 두 번입니다(2026-08-26 운영자 지적).
+            묶음이 사라지면서 같이 사라질 뻔한 「답변 없음」은 줄이 직접 답니다. */}
+        {threads.map((thread) => (thread.rows.length === 1 ? (
+          <HistoryRow key={thread.subject} item={thread.rows[0]}
+                      unanswered={thread.sent === 0 && thread.received > 0} />
+        ) : (
           <details key={thread.subject}
                    style={{ borderTop: "1px solid var(--border)", paddingTop: 6 }}>
             <summary style={{ cursor: "pointer", listStyle: "none" }}>
@@ -1212,7 +1228,7 @@ function HistoryDigest({ items }: {
               {thread.rows.map((row, index) => <HistoryRow key={index} item={row} />)}
             </div>
           </details>
-        ))}
+        )))}
       </div>
     </div>
   );
