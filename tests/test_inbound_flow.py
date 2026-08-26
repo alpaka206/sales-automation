@@ -527,3 +527,39 @@ def test_a_spam_classification_still_gets_documents(db_session) -> None:
 
     draft_call = next(c for c in llm.complete.call_args_list if "draft_reply" in c[0][0])
     assert "Always-on company info." in draft_call[0][1]["knowledge_docs"]
+
+
+def test_a_policy_document_subject_follows_the_inquiry_language():
+    """제목의 언어는 문의의 언어다 — 문서의 언어가 아니다.
+
+    정책 문서에 적힌 고정 제목은 운영자가 쓴 우리 문장이라 그 문서의 언어로 나간다. 그래서
+    한국어 문의에 한국어 본문 + 영어 제목이 나갔다 —
+    ``[Perso Dubbing] Next steps on your customizable plan`` (2026-08-26, msg 62).
+
+    「RE: <고객이 쓴 제목>」 은 이 함수를 지나지 않는다. 고객의 말이라 이미 고객의 언어이고,
+    번역하면 메일 클라이언트가 제목으로 잇던 스레드가 끊긴다.
+    """
+    from src.agents.inbound import _subject_in_inquiry_language
+
+    english = "[Perso Dubbing] Next steps on your customizable plan"
+    korean = "[Perso Dubbing] 맞춤형 플랜 안내"
+
+    # 이미 맞는 언어면 모델을 부르지 않는다 — 부르면 이 patch 가 터진다.
+    with patch("src.llm.translate.translate_to", side_effect=AssertionError("불필요한 번역")):
+        assert _subject_in_inquiry_language(korean, "ko") == korean
+        assert _subject_in_inquiry_language(english, "en") == english
+        assert _subject_in_inquiry_language("", "ko") == ""
+        assert _subject_in_inquiry_language(None, "ko") == ""
+
+    with patch("src.llm.translate.translate_to", return_value="맞춤형 플랜 다음 단계") as tx:
+        assert _subject_in_inquiry_language(english, "ko") == "맞춤형 플랜 다음 단계"
+        assert tx.call_args[0][1] == "ko"
+
+    # 제3의 언어는 영어 제목이어도 그 언어로 번역한다.
+    with patch("src.llm.translate.translate_to", return_value="Próximos pasos") as tx:
+        assert _subject_in_inquiry_language(english, "es") == "Próximos pasos"
+        assert tx.call_args[0][1] == "es"
+
+    # 번역이 실패하면 원문을 쓴다. 제목 없는 메일보다 낫다.
+    with patch("src.llm.translate.translate_to", return_value=""):
+        assert _subject_in_inquiry_language(english, "ko") == english

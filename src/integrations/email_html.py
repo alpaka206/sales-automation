@@ -145,21 +145,21 @@ def sanitize_email_html(fragment: str) -> str:
     parser.close()
     return parser.result()
 
-# Table-based shell with inline styles — the layout that survives across email clients.
+# **틀을 씌우지 않습니다.** 예전에는 회색 배경 위에 흰 카드(600px · 둥근 모서리 · 테두리)를
+# 얹었는데, 그러면 사람이 쓴 메일이 아니라 **발송 시스템이 만든 알림처럼** 보입니다 —
+# 운영자가 실제로 받아 보고 "미리보기처럼 나갔다" 고 했습니다(2026-08-26). 영업 회신은
+# 담당자가 직접 쓴 메일로 보여야 하고, HubSpot 에서 사람이 「Create an email」로 보내는
+# 메일에도 그런 카드가 없습니다.
+#
+# **그래도 HTML 자체는 남습니다.** 서명이 운영자가 콘솔에 쓴 HTML 이고(로고·표), 링크도
+# 앵커여야 120자짜리 예약 URL 이 본문에 그대로 실리지 않습니다. 즉 없애는 것은 **꾸밈**이지
+# 마크업이 아닙니다 — 글꼴·색·너비를 지정하지 않고 문단만 넘겨 수신자의 메일 클라이언트가
+# 제 기본값으로 그리게 둡니다. 그것이 「텍스트로 온 메일」의 모양입니다.
 _SHELL = (
     "<!DOCTYPE html>\n"
     '<html lang="ko"><head><meta charset="utf-8">'
     '<meta name="viewport" content="width=device-width,initial-scale=1"></head>'
-    '<body style="margin:0;padding:0;background:#f4f5f7;">'
-    '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
-    'style="background:#f4f5f7;"><tr><td align="center" style="padding:24px 12px;">'
-    '<table role="presentation" width="600" cellpadding="0" cellspacing="0" '
-    'style="max-width:600px;width:100%;background:#ffffff;border-radius:10px;'
-    'border:1px solid #e6e8eb;"><tr><td '
-    "style=\"padding:28px 32px;font-family:'Pretendard Variable',Pretendard;font-size:15px;"
-    'line-height:1.7;color:#1f2329;word-break:break-word;">'
-    + _CONTENT_TOKEN
-    + "</td></tr></table></td></tr></table></body></html>"
+    "<body>" + _CONTENT_TOKEN + "</body></html>"
 )
 
 

@@ -487,3 +487,30 @@ def test_0086_normalizes_live_link_templates_without_changing_urls():
     assert rows["whatsapp_link"] == "[WhatsApp](https://wa.me/821054802261)"
     assert rows["whatsapp_link_en"] == "[WhatsApp](https://wa.me/821054802261)"
     assert revisions >= 1
+
+
+def test_the_link_replaces_the_line_it_found_and_does_not_move_to_the_end():
+    """미팅 링크는 맺음말 **위**에 선다 — 붙이는 것이 아니라 그 자리를 대신한다.
+
+    끝에 덧붙이던 시절에는 국문 회신이 「감사합니다.」 아래에 링크를 달고 나갔다. 맺음말이
+    행동 요청보다 먼저 온 것이다(2026-08-26, msg 62). 서식은 이미 모델에게 맺음말 위에
+    토큰을 두라고 말하고 있었고, 옮긴 것은 이 함수였다.
+    """
+    from src.llm.prompts import canonicalize_contact_links
+
+    values = {"meeting_link": "https://calendar.example/abc123", "whatsapp_link": ""}
+    body = (
+        "안녕하세요.\n"
+        "\n"
+        "아래 링크로 편하신 시간을 알려주세요.\n"
+        "\n"
+        "{{MEETING_LINK}}\n"
+        "\n"
+        "감사합니다."
+    )
+    with patch("src.db.email_templates.get_email_template", side_effect=values.get):
+        out = canonicalize_contact_links(body, "ko")
+
+    assert out.index("[미팅 링크]") < out.index("감사합니다.")
+    assert out.endswith("감사합니다.")
+    assert "\n\n\n" not in out

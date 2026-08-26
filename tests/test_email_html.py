@@ -53,3 +53,24 @@ def test_mixed_paragraph_and_bullets():
     # text → bullets → text yields two <p> blocks and one <ul>.
     assert html.count("<ul") == 1
     assert html.count("<p ") == 2
+
+
+def test_the_mail_carries_no_card_or_page_background():
+    """메일은 사람이 쓴 메일로 보여야 한다 — 발송 시스템이 만든 카드가 아니라.
+
+    회색 배경 위 흰 카드(600px · 둥근 모서리 · 테두리)를 씌우던 시절이 있었고, 운영자가
+    실제로 받아 보고 "미리보기처럼 나갔다" 고 했다(2026-08-26). 마크업 자체는 남는다 —
+    서명이 HTML 이고 링크는 앵커여야 한다. 없애는 것은 꾸밈이다.
+    """
+    html = to_html_email("안녕하세요.")
+
+    for chrome in ("background", "border-radius", "width=\"600\"", "max-width", "font-family"):
+        assert chrome not in html, chrome
+    assert "<p" in html and "안녕하세요." in html
+
+
+def test_a_signature_still_renders_below_the_body():
+    """틀을 걷어내도 서명은 본문 아래 제자리에 붙는다."""
+    html = to_html_email("본문입니다.", signature_html="<p>홍길동</p>")
+
+    assert html.index("본문입니다.") < html.index("홍길동")

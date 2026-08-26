@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import re
 from datetime import datetime, timezone
 from typing import Any
 
@@ -71,6 +72,50 @@ _PRICING_RULE_NORMAL = (
     "판단하는 용도이지 옮겨 적는 값이 아닙니다. 금액은 미팅·채팅에서 개별 안내하겠다고 "
     "쓰세요."
 )
+
+_HANGUL_RE = re.compile(r"[가-힣]")
+
+
+def _subject_in_inquiry_language(subject: str | None, inquiry_language: str | None) -> str:
+    """정책 문서가 들고 온 메일 제목을 **문의 언어로** 맞춥니다.
+
+    제목이 오는 길은 둘입니다. ``reply_subject`` 가 만드는 「RE: <고객이 쓴 제목>」 은 고객의
+    말을 그대로 쓰므로 언제나 고객의 언어이고, 손대면 안 됩니다 — 번역하면 메일 클라이언트가
+    제목으로 잇던 스레드가 끊깁니다. 나머지 하나가 여기서 다루는 것: 정책 문서에 적힌 고정
+    제목은 **운영자가 쓴 우리 문장**이라 문의 언어와 무관하게 그 문서의 언어로 나갑니다.
+
+    실제로 한국어 문의에 한국어 본문 + 영어 제목이 나갔습니다 —
+    ``[Perso Dubbing] Next steps on your customizable plan`` (2026-08-26, msg 62).
+
+    **번역 단계가 아니라 여기서 맞춥니다.** 초안 본문은 검토를 위해 늘 한국어로 쓰였다가
+    승인 때 문의 언어로 번역되는데, 제목까지 그 길을 태우면 운영자가 영어로 써 둔 제목이
+    한국어를 거쳐 영어로 되돌아옵니다 — 왕복하면서 문장이 상합니다. 제목은 처음부터 문의
+    언어로 만들어 두고 번역 단계는 건드리지 않습니다(``messages.message_translate`` 의
+    「제목은 이미 맞는 언어다」라는 전제가 그래야 참이 됩니다).
+
+    번역이 실패하면 원문을 그대로 씁니다. 제목 없는 메일보다는 낫습니다.
+    """
+    from ..llm.translate import translate_to
+
+    subject = (subject or "").strip()
+    if not subject:
+        return ""
+    target = (inquiry_language or "en").strip().lower()[:2] or "en"
+    # **글자가 섞여 있는지가 아니라 한글이 하나라도 있는지로 봅니다.** ``is_mostly_korean``
+    # 은 글자 수 비율이라 제목에는 못 씁니다 — 이 제목들은 하나같이 ``[Perso Dubbing]`` 으로
+    # 시작하고, 그 브랜드 이름의 로마자 열두 자가 뒤따르는 한글 아홉 자를 이겨서 멀쩡한 국문
+    # 제목이 「한국어가 아님」으로 나옵니다. 영문 제목에 한글이 섞일 일은 없으므로 존재
+    # 여부면 충분합니다.
+    #
+    # 정책 문서 제목은 국문 아니면 영문이라 그 둘은 모델을 부르지 않고 넘기고, 제3의 언어만
+    # 번역합니다.
+    has_hangul = bool(_HANGUL_RE.search(subject))
+    if target == "ko":
+        return subject if has_hangul else (translate_to(subject, "ko") or subject)
+    if target == "en":
+        return subject if not has_hangul else (translate_to(subject, "en") or subject)
+    return translate_to(subject, target) or subject
+
 
 # Kept for compatibility with older extensions/tests; durable queue keys now
 # provide production deduplication and this set is intentionally not consulted.
@@ -818,7 +863,10 @@ class InboundAgent:
         - the draft is always Korean (``ensure_korean``);
         - the first reply contains no prices (``strip_price_sentences``);
         - the subject is "RE: <customer subject>" with no duplicate prefixes, in
-          the inquiry's language (``reply_subject``).
+          the inquiry's language (``reply_subject``) — or, when a policy document
+          carries its own mail subject, that subject rendered in the inquiry's
+          language (``_subject_in_inquiry_language``). Either way the subject and
+          the body the customer receives are in the same language.
         """
         from ..llm.reply import ensure_korean
 
@@ -893,7 +941,12 @@ class InboundAgent:
         # 근거로 쓴 정책 문서가 메일 제목을 들고 있으면 그것을 씁니다(견적·소개처럼 제목이
         # 정해진 회신). 없으면 예전대로 "RE: <고객이 쓴 제목>" 이고, 그쪽이 고객 메일함에서
         # 원래 스레드에 붙습니다. 어느 쪽이든 검토 화면에서 고칠 수 있습니다.
-        draft.subject = doc_subject or reply_subject(
+        #
+        # **제목의 언어는 문의의 언어입니다.** 문서 제목은 운영자가 쓴 고정 문장이라 문서의
+        # 언어로 나갑니다 — 한국어 문의에 영어 제목이 나간 것이 그것입니다(msg 62).
+        draft.subject = _subject_in_inquiry_language(
+            doc_subject, contact_info.get("inquiry_language")
+        ) or reply_subject(
             contact_info.get("subject"), target_code=contact_info.get("inquiry_language")
         )
         return draft

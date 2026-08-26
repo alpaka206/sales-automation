@@ -172,11 +172,17 @@ def _url_from_template(value: str | None) -> str:
 
 
 def canonicalize_contact_links(body: str, language: str | None = None) -> str:
-    """Put the contact links in an exact, deterministic footer.
+    """Put the contact links in an exact, deterministic block.
 
-    The model may decide how the prose reads, but it must not decide where contact
-    links sit. Existing prose such as "schedule at Calendly or contact us via
-    WhatsApp" is removed as one line, then the configured URLs are appended.
+    The model decides how the prose reads and WHERE the link belongs; it does not decide
+    what the link line says. Existing prose such as "schedule at Calendly or contact us
+    via WhatsApp" is removed as one line and the configured URLs take **that same spot**.
+
+    **The block replaces the line it found, it is not appended to the end.** Appending is
+    what this did at first, and a Korean reply went out with the meeting link *below*
+    「감사합니다.」 — the closing came before the call to action (2026-08-26, msg 62). The
+    skeleton already tells the model to put ``{{MEETING_LINK}}`` above the sign-off, so
+    the placement was right until this function moved it.
 
     **WhatsApp is an English-reply line only, and the label follows the language.**
     0069 took ``{{WHATSAPP}}`` out of the Korean skeleton because there is no reason to
@@ -227,20 +233,27 @@ def canonicalize_contact_links(body: str, language: str | None = None) -> str:
         return body
 
     markers = ["{{MEETING_LINK}}", "{{WHATSAPP}}", *urls]
-    kept = [
-        line
-        for line in body.splitlines()
-        if not any(marker and marker in line for marker in markers)
-        and not _CONTACT_LINK_MARKDOWN_RE.search(line)
-    ]
-    cleaned = "\n".join(kept).strip()
+    kept: list[str] = []
+    slot: int | None = None  # 첫 링크 줄이 있던 자리. 블록은 거기로 돌아간다.
+    for line in body.splitlines():
+        if any(marker and marker in line for marker in markers) or _CONTACT_LINK_MARKDOWN_RE.search(
+            line
+        ):
+            if slot is None:
+                slot = len(kept)
+            continue
+        kept.append(line)
     footer = []
     if meeting_url:
         footer.append(f"[{'Calendly' if english else '미팅 링크'}]({meeting_url})")
     if whatsapp_url:
         footer.append(f"[WhatsApp]({whatsapp_url})")
-    footer_text = "\n".join(footer)
-    return f"{cleaned}\n\n{footer_text}" if cleaned else footer_text
+    if slot is None:  # 링크 줄을 못 찾았다 — 그때만 끝에 붙인다.
+        slot = len(kept)
+    kept[slot:slot] = footer
+    # 링크 줄이 두 줄이었다가 한 줄이 되면(국문) 그 자리에 빈 줄이 하나 남는다. 세 줄 이상
+    # 이어지는 빈 줄만 두 줄로 줄인다 — 문단 사이의 빈 줄 하나는 그대로 둬야 한다.
+    return re.sub(r"\n{3,}", "\n\n", "\n".join(kept)).strip()
 
 
 # Preserve the previous public API: callers (e.g. llm/knowledge.reset_cache) call

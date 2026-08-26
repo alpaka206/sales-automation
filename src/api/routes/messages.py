@@ -648,8 +648,14 @@ async def message_translate(
 
     The reply workflow: the operator reviews/edits a KOREAN draft, then presses
     "번역하기". This translates the (possibly edited) body into the thread's target
-    language, washes it, and persists it so it goes out as-is. The subject already
-    carries "RE: <original>" in the right language, so it is left untouched.
+    language, washes it, and persists it so it goes out as-is.
+
+    **The subject is not translated here — it is already in the inquiry's language.**
+    Both of the ways a subject is produced settle that at draft time: "RE: <original>"
+    reuses the customer's own words (translating those would break the mail client's
+    subject threading), and a policy document's fixed subject goes through
+    ``inbound._subject_in_inquiry_language``. Translating here instead would round-trip
+    an operator-written English subject through Korean and back.
 
     Returns JSON {subject, body, language, translated} which the page swaps into
     the editable fields.
