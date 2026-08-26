@@ -252,6 +252,7 @@ def _poller_steps() -> list[tuple[str, object]]:
     """
     from functools import partial
 
+    from .contact_sync import sync_changed_contacts_once
     from .hubspot_backfill import process_requested_hubspot_backfill
     from .inbound import cache_korean_inquiries
     from .sheet_sync import (
@@ -265,6 +266,10 @@ def _poller_steps() -> list[tuple[str, object]]:
         ("heartbeat", partial(record_worker_heartbeat, "poller", min_interval_seconds=0)),
         ("poll_tickets", poll_tickets_once),
         ("reconcile_stages", reconcile_ticket_stages_once),
+        # 웹훅(`contact.propertyChange`)이 실시간으로 하는 일을 한 번 더 합니다 — 그 구독이
+        # 꺼져 있거나 한 건이 유실되거나 우리가 배포 중이었을 때를 위한 그물입니다. 티켓
+        # 폴러가 존재하는 이유와 같습니다.
+        ("contact_fields", sync_changed_contacts_once),
         # 접수 때 못 채운 문의 번역을 조금씩 메웁니다 — 이 기능이 생기기 전의 옛 행과,
         # 그때 모델이 안 되던 건입니다. 기다리는 사람이 없는 자리라 여기 둡니다.
         ("cache_korean", cache_korean_inquiries),

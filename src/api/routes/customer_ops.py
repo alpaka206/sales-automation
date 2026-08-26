@@ -1435,34 +1435,7 @@ def _sync_hubspot(contact_id: int, per_type: int = 20) -> int:
         profile = session.get(CustomerProfile, contact_id) or CustomerProfile(contact_id=contact_id)
         profile.last_synced_at = datetime.now(timezone.utc)
 
-        # **허브스팟에서 온 값이 이겼으면 우리 것도 바꾸고, 바뀐 것만 워크북으로 보냅니다**
-        # (2026-08-26 운영자 지시). 「고객 상태」 카드의 여덟 칸 중 저쪽에 실제로 대응
-        # 속성이 있는 것은 이 셋뿐입니다 — 549개 속성을 훑어 확인했습니다. 리드 온도·다음
-        # 액션은 아예 없고, MQL/PQL 과 산업군은 워크북 쪽이 수식 칸이라 값으로 덮으면 그
-        # 행만 계산이 멈춥니다.
-        #
-        # 빈 값은 **안 덮어씁니다**: 허브스팟의 플랜 칸은 대부분 비어 있고(제품 연동이
-        # 100% 가 아닙니다), 빈 것을 「지워라」로 읽으면 사람이 콘솔에서 채워 넣은 값이
-        # 동기화 한 번에 사라집니다. 지우는 것은 티켓 세부 내역의 플랜 정보 폼이 합니다 —
-        # 거기 빈 칸은 사람이 일부러 비운 것입니다.
-        changed: dict[str, str] = {}
-        for column, incoming in (
-            ("current_plan", dto.plan),
-            ("user_seq", dto.user_seq),
-            ("industry", dto.industry),
-        ):
-            value = (incoming or "").strip()
-            if value and value != (getattr(profile, column) or ""):
-                setattr(profile, column, value)
-                changed[column] = value
         session.add(profile)
-        sheet_client_id = contact.sheet_client_id
-        # 산업군은 워크북에서 「기업 종류」인데 그 칸이 조회 수식이라 빼 둡니다.
-        sheet_values = {
-            key: changed[column]
-            for column, key in (("current_plan", "plan"), ("user_seq", "user_seq"))
-            if column in changed
-        }
 
         # 티켓 번호 → 우리 대화. 허브스팟이 메일마다 알려 주는 값이라 짐작이 아닙니다.
         ticket_ids = {e.ticket_id for e in emails if e.ticket_id}
@@ -1583,13 +1556,15 @@ def _sync_hubspot(contact_id: int, per_type: int = 20) -> int:
     # 되돌리지 않습니다.
     _sync_ticket_stages(client, contact_id)
 
-    # **바뀐 것만** 워크북으로 보냅니다. 안 바뀐 값을 매번 다시 쓰면 동기화를 누를 때마다
-    # 시트에 쓰기가 나가고, 그 왕복이 안 바뀐 값에 쓰이는 것은 낭비일 뿐 아니라 영업팀이
-    # 손으로 고쳐 둔 칸을 같은 값으로 계속 덮습니다. 실패는 로그에 남고 동기화는 성공입니다.
-    if sheet_values and sheet_client_id:
-        from ...integrations.google_sheets import update_inbound_fields
+    # 플랜 칸은 **웹훅·폴러와 같은 함수**를 지납니다. 세 문(손으로 누른 동기화 · 저쪽
+    # 속성 변경 웹훅 · 10분 스윕)이 각자 반영하면, 어느 문으로 들어왔느냐에 따라 시트에
+    # 갈지 말지가 달라집니다 — 그건 화면만 봐서는 절대 안 보이는 종류의 어긋남입니다.
+    from ...agents.contact_sync import apply_contact_fields
 
-        update_inbound_fields(sheet_client_id, sheet_values)
+    apply_contact_fields(
+        contact_id,
+        {"plan": dto.plan, "user_seq": dto.user_seq, "industry": dto.industry},
+    )
     return inserted
 
 

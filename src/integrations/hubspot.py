@@ -1171,6 +1171,69 @@ class HubSpotClient:
             )
         r.raise_for_status()
 
+    def search_contacts_changed_since(
+        self, since: datetime, limit: int = 200
+    ) -> list[ContactDTO]:
+        """마지막 스윕 이후 바뀐 연락처. 폴러가 웹훅의 그물 밑을 받칩니다.
+
+        티켓 검색과 같은 모양입니다 — ``hs_lastmodifieddate`` 로 자르고 오름차순으로 페이지를
+        따라갑니다. 돌려주는 것은 같은 ``ContactDTO`` 라, 부르는 쪽이 웹훅으로 온 건과 스윕으로
+        온 건을 다르게 다룰 일이 없습니다.
+        """
+        headers = {"Authorization": f"Bearer {self.token}"}
+        ts_ms = str(int(since.timestamp() * 1000))
+        contacts: list[ContactDTO] = []
+        after: str | None = None
+        with httpx.Client(headers=headers, timeout=30.0) as client:
+            while len(contacts) < limit:
+                body: dict = {
+                    "filterGroups": [
+                        {
+                            "filters": [
+                                {
+                                    "propertyName": "lastmodifieddate",
+                                    "operator": "GT",
+                                    "value": ts_ms,
+                                }
+                            ]
+                        }
+                    ],
+                    "sorts": [
+                        {"propertyName": "lastmodifieddate", "direction": "ASCENDING"}
+                    ],
+                    "properties": _contact_properties().split(","),
+                    "limit": min(100, limit - len(contacts)),
+                }
+                if after:
+                    body["after"] = after
+                response = _sync_request_with_retries(
+                    client, "POST", f"{BASE_URL}/crm/v3/objects/contacts/search", json=body
+                )
+                response.raise_for_status()
+                page = response.json()
+                for item in page.get("results", []):
+                    props = item.get("properties") or {}
+                    contacts.append(
+                        ContactDTO(
+                            id=str(item["id"]),
+                            email=props.get("email"),
+                            firstname=props.get("firstname"),
+                            lastname=props.get("lastname"),
+                            company=props.get("company"),
+                            phone=props.get("phone"),
+                            country=props.get("country"),
+                            ip_country=props.get("hs_ip_country"),
+                            lifecyclestage=props.get("lifecyclestage"),
+                            plan=props.get("plan"),
+                            user_seq=props.get("user_seq"),
+                            industry=props.get("industry"),
+                        )
+                    )
+                after = page.get("paging", {}).get("next", {}).get("after")
+                if not after:
+                    break
+        return contacts
+
     def search_tickets_sync(
         self,
         created_after: datetime,

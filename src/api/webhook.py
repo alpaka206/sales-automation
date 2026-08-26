@@ -11,6 +11,7 @@ import time
 
 from fastapi import APIRouter, HTTPException, Request
 
+from ..agents.contact_sync import WATCHED_PROPERTIES, sync_contact_from_hubspot
 from ..agents.inbound_worker import enqueue_inbound_ticket
 from ..common.config import settings
 from .schemas import HubSpotWebhookEvent
@@ -87,6 +88,27 @@ def _verify_hubspot_signature(
         except Exception:
             logger.exception("webhook reject dump failed")
     raise HTTPException(status_code=401, detail="invalid signature")
+
+
+def _sync_contact_fields(event: HubSpotWebhookEvent) -> dict[str, str]:
+    """연락처의 플랜 칸이 저쪽에서 바뀌면 이쪽으로 받습니다 — **실시간이 이 문입니다.**
+
+    화면은 우리 DB 를 보므로(티켓을 열 때마다 허브스팟에 묻지 않습니다) 저쪽 변경이 여기로
+    들어오지 않으면 그 값은 영영 옛 것입니다. 10분 폴러가 같은 일을 한 번 더 하지만, 그건
+    이 문이 닫혀 있을 때(구독 미설정·유실·배포 중)를 위한 그물입니다.
+
+    **속성 이름으로 먼저 거릅니다.** 연락처 속성은 549개이고, 이메일 한 글자만 고쳐도 이
+    웹훅이 옵니다 — 이름을 안 보면 그때마다 허브스팟을 다시 읽습니다.
+    """
+    if event.subscriptionType != "contact.propertyChange":
+        return {}
+    if (event.propertyName or "") not in WATCHED_PROPERTIES:
+        return {}
+    try:
+        return sync_contact_from_hubspot(str(event.objectId))
+    except Exception:
+        logger.warning("연락처 %s 필드 동기화 실패", event.objectId, exc_info=True)
+        return {}
 
 
 def _map_hubspot_event(event: HubSpotWebhookEvent) -> str | None:
@@ -238,6 +260,16 @@ async def webhook_hubspot_inbound(request: Request) -> dict:
         # 포함해서. 예전에는 아래 분기 안에만 있어서, New 로의 이동은 접수 처리 큐로만 가고
         # 우리 쪽 단계는 접수가 끝날 때까지(실패하면 영영) 안 따라왔습니다.
         synced = _sync_stage_change(event)
+        fields = _sync_contact_fields(event)
+        if fields:
+            results.append(
+                {
+                    "objectId": event.objectId,
+                    "status": "contact_synced",
+                    "fields": sorted(fields),
+                }
+            )
+            continue
         event_type = _map_hubspot_event(event)
         if event_type is None:
             # Not inbound work — but it may be a ticket that is gone, or a stage move we

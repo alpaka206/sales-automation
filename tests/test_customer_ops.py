@@ -849,19 +849,68 @@ def test_hubspot_sync_does_not_blank_a_field_the_operator_filled_in():
     """빈 값은 덮어쓰지 않는다 — 허브스팟의 플랜 칸은 대부분 비어 있다.
 
     제품 쪽 연동이 100% 가 아니라 사람이 콘솔에서 채워 넣는 값이 있는데, 빈 것을
-    「지워라」로 읽으면 그 값이 동기화 한 번에 사라진다. 지우는 것은 티켓 세부 내역의
+    「지워라」로 읽으면 그 값이 스윕 한 번에 사라진다. 지우는 것은 티켓 세부 내역의
     플랜 정보 폼이 한다 — 거기 빈 칸은 사람이 일부러 비운 것이다 (2026-08-26).
+    """
+    from unittest.mock import patch
+
+    from src.agents import contact_sync
+
+    saved: dict[str, str] = {}
+
+    class _Profile:
+        current_plan = "pro"
+        user_seq = None
+        industry = None
+
+    class _Contact:
+        id = 1
+        sheet_client_id = None
+
+    class _Session:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            return False
+
+        def get(self, model, _id):
+            return _Contact() if model.__name__ == "Contact" else profile
+
+        def add(self, obj):
+            saved.update({k: getattr(obj, k) for k in ("current_plan", "user_seq", "industry")})
+
+        def commit(self):
+            pass
+
+    profile = _Profile()
+    with patch.object(contact_sync, "SessionLocal", _Session):
+        # 빈 값이 왔다 — 이미 있는 "pro" 를 지우면 안 된다.
+        assert contact_sync.apply_contact_fields(1, {"plan": "", "user_seq": None}) == {}
+        assert profile.current_plan == "pro"
+        # 다른 값이 왔다 — 그때는 바꾼다.
+        assert contact_sync.apply_contact_fields(1, {"plan": "enterprise"}) == {
+            "current_plan": "enterprise"
+        }
+
+
+def test_the_three_doors_share_one_sync():
+    """손으로 누른 동기화 · 웹훅 · 10분 스윕이 **같은 함수**를 지난다.
+
+    각자 반영하면 어느 문으로 들어왔느냐에 따라 시트에 갈지 말지가 달라지고, 그건 화면만
+    봐서는 절대 안 보이는 종류의 어긋남이다.
     """
     import pathlib
 
-    source = pathlib.Path("src/api/routes/customer_ops.py").read_text(encoding="utf-8")
-    block = source[source.index("changed: dict[str, str] = {}"):]
-    block = block[: block.index("session.add(profile)")]
+    from src.agents.contact_sync import FIELDS
 
-    # 셋만 가져온다. 나머지 다섯은 저쪽에 대응 속성이 없거나 워크북이 수식 칸이다.
-    for column in ("current_plan", "user_seq", "industry"):
-        assert column in block, column
-    for absent in ("lead_temperature", "next_action", "qualification", "source"):
-        assert absent not in block, absent
-    # 빈 값은 건너뛴다.
-    assert "if value and value !=" in block
+    for path in (
+        "src/api/routes/customer_ops.py",   # 손으로 누른 동기화
+        "src/api/webhook.py",               # contact.propertyChange
+        "src/agents/inbound_poller.py",     # 10분 스윕
+    ):
+        source = pathlib.Path(path).read_text(encoding="utf-8")
+        assert "contact_sync" in source, path
+
+    # 셋만 잇는다. 나머지는 저쪽에 속성이 없거나 워크북이 수식 칸이다.
+    assert set(FIELDS) == {"plan", "user_seq", "industry"}
