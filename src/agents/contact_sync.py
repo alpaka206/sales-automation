@@ -38,8 +38,10 @@ FIELDS: dict[str, str] = {
     "industry": "industry",
 }
 
-# 같은 일을 하는데 사는 표가 다른 것: 국가는 사람이 아니라 **연락처**의 값입니다.
-CONTACT_FIELDS: dict[str, str] = {"ip_country": "ip_country"}
+# 같은 일을 하는데 사는 표가 다른 것: 국가와 전화번호는 프로필이 아니라 **연락처**의
+# 값입니다. 둘 다 플랜 패널이 그리는 줄이고, 그 패널은 0094 이후 허브스팟이 아니라 우리
+# 행을 읽습니다 — 여기 없으면 저쪽에서 바뀐 값이 그 줄에 영영 안 옵니다.
+CONTACT_FIELDS: dict[str, str] = {"ip_country": "ip_country", "phone": "phone"}
 
 # 그중 워크북에 자리가 있는 것. **산업군은 없습니다** — 시트에서 「기업 종류」인데 그 칸이
 # 「고객 기본 정보」를 Client ID 로 조회하는 수식이라, 값으로 덮으면 그 행만 조회를 멈춥니다.
