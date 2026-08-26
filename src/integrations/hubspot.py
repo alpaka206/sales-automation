@@ -195,6 +195,12 @@ def _contact_properties() -> str:
         # the workbook's IP Country column means.
         "hs_ip_country",
         "lifecyclestage",
+        # 고객 상태 카드가 읽는 셋. 이름을 여기 박아도 되는 이유: 허브스팟은 **모르는 속성
+        # 이름을 조용히 무시한다**(400 이 아니다 — 2026-08-26 실측). 그래서 포털에 그 속성이
+        # 없으면 값이 안 올 뿐, 이 호출이 깨지지 않는다.
+        "plan",
+        "user_seq",
+        "industry",
     ]
     return ",".join(names)
 
@@ -249,6 +255,9 @@ class HubSpotClient:
             country=props.get("country"),
             ip_country=props.get("hs_ip_country"),
             lifecyclestage=props.get("lifecyclestage"),
+            plan=props.get("plan"),
+            user_seq=props.get("user_seq"),
+            industry=props.get("industry"),
         )
 
     async def update_contact(self, contact_id: str, properties: dict) -> None:
@@ -598,6 +607,9 @@ class HubSpotClient:
             country=props.get("country"),
             ip_country=props.get("hs_ip_country"),
             lifecyclestage=props.get("lifecyclestage"),
+            plan=props.get("plan"),
+            user_seq=props.get("user_seq"),
+            industry=props.get("industry"),
         )
 
     def list_tickets_with_contacts_sync(

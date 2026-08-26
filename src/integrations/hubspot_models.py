@@ -21,6 +21,12 @@ class ContactDTO(BaseModel):
     # usually blank, so this is what the workbook's IP Country column is filled from.
     ip_country: str | None = None
     lifecyclestage: str | None = None
+    # 고객 상태 카드가 읽는 셋. 이 셋만 있는 이유는 나머지 다섯(리드 온도·다음 액션·
+    # MQL/PQL·유입 소스·파이프라인)이 이 포털의 연락처에 대응 속성이 없거나 워크북 쪽이
+    # 수식 칸이기 때문이다 — 2026-08-26 에 549개 속성을 훑어 확인했다.
+    plan: str | None = None
+    user_seq: str | None = None
+    industry: str | None = None
 
 
 class EngagementDTO(BaseModel):

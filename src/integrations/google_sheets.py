@@ -1024,6 +1024,79 @@ def update_inbound_stage(
         return False
 
 
+# 이 함수로 쓸 수 있는 열. **수식 칸은 여기 없습니다** — 값으로 덮으면 시트가 스스로
+# 계산하던 것이 그 행에서만 멈추고, 화면 어디에도 그게 안 보입니다. 특히 두 칸이 그렇습니다:
+#
+#   기업 종류(산업군) = 「고객 기본 정보」를 Client ID 로 조회하는 수식
+#   Pipeline(MQL/PQL) = IF(구독 플랜="N/A","MQL",IF(...,"재계약","PQL"))
+#
+# 뒤엣것은 **구독 플랜을 쓰면 저절로 따라옵니다.** 그래서 여기서 할 일이 없습니다.
+# (2026-08-26 운영자 지시: 수식 칸은 안 건드린다.)
+SYNCABLE_INBOUND_FIELDS = frozenset({"plan", "user_seq", "space_seq"})
+
+
+def update_inbound_fields(client_id: int | None, values: dict[str, str]) -> int:
+    """그 Client ID 의 **모든 행**에 이름 붙은 칸 몇 개를 씁니다. 고친 행 수를 돌려줍니다.
+
+    한 행이 아니라 모든 행인 이유: 플랜도 user seq 도 **그 고객의 값**이지 그 문의의 값이
+    아닙니다. 같은 회사가 세 번 문의했으면 세 행이고, 한 행만 고치면 나머지 둘이 옛 플랜을
+    들고 앉아 영업팀 필터에 다르게 걸립니다.
+
+    빈 문자열은 「지워라」입니다 — 콘솔의 빈 칸이 허브스팟에서 뜻하는 것과 같습니다. None 은
+    「안 넘겼다」라서 건너뜁니다.
+
+    실패해도 raise 하지 않습니다: 시트가 안 되는 것이 허브스팟 저장을 되돌릴 이유는 아니고,
+    이유는 로그에 남습니다.
+    """
+    if not client_id or not writes_enabled():
+        return 0
+    unknown = set(values) - SYNCABLE_INBOUND_FIELDS
+    if unknown:
+        # 조용히 거르지 않습니다. 부르는 쪽이 쓴다고 믿은 값이 안 써지면, 그 사실이
+        # 어디엔가는 적혀 있어야 다음 사람이 찾습니다.
+        logger.warning("워크북에 쓸 수 없는 칸이라 건너뜁니다: %s", sorted(unknown))
+    writable = {k: v for k, v in values.items() if k in SYNCABLE_INBOUND_FIELDS and v is not None}
+    if not writable:
+        return 0
+    try:
+        service = _build_service()
+        tab = settings.GOOGLE_SHEETS_INBOUND_TAB.strip() or "Inbound DB"
+        header = _headers(service, tab)
+        rows = _rows_for_value(service, tab, header, "client_id", client_id)
+        if not rows:
+            logger.info("Inbound DB 에 Client ID %s 행이 없어 건너뜁니다.", client_id)
+            return 0
+        lookup = _header_lookup(writable)
+        data = []
+        for row in rows:
+            for index, cell in enumerate(header.values):
+                key = _key_for_header(cell, lookup)
+                if key:
+                    column = _column_letter(index)
+                    data.append(
+                        {"range": f"'{tab}'!{column}{row}", "values": [[writable[key]]]}
+                    )
+        if not data:
+            logger.warning(
+                "Inbound DB 에서 %s 열을 못 찾았습니다. 시트의 헤더: %s",
+                sorted(writable),
+                [str(v) for v in header.values if str(v).strip()],
+            )
+            return 0
+        service.spreadsheets().values().batchUpdate(
+            spreadsheetId=settings.GOOGLE_SHEETS_SPREADSHEET_ID.strip(),
+            # 글자입니다 — 숫자로 읽히면 user seq 의 앞자리 0 이 사라집니다.
+            body={"valueInputOption": "RAW", "data": data},
+        ).execute()
+        return len(rows)
+    except Exception as exc:
+        logger.warning(
+            "Google Sheets 필드 갱신 실패 (client_id=%s, fields=%s): %s: %s",
+            client_id, sorted(writable), type(exc).__name__, exc, exc_info=True,
+        )
+        return 0
+
+
 def record_inbound(record: dict) -> SheetWriteResult | None:
     if not writes_enabled():
         return None

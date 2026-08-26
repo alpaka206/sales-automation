@@ -843,3 +843,25 @@ def test_the_lead_history_counts_only_mail_that_went_out(customer_db, customer_i
     assert "고객이 보낸 문의" in bodies
     assert "나간 답변" in bodies
     assert "안 나간 초안" not in bodies
+
+
+def test_hubspot_sync_does_not_blank_a_field_the_operator_filled_in():
+    """빈 값은 덮어쓰지 않는다 — 허브스팟의 플랜 칸은 대부분 비어 있다.
+
+    제품 쪽 연동이 100% 가 아니라 사람이 콘솔에서 채워 넣는 값이 있는데, 빈 것을
+    「지워라」로 읽으면 그 값이 동기화 한 번에 사라진다. 지우는 것은 티켓 세부 내역의
+    플랜 정보 폼이 한다 — 거기 빈 칸은 사람이 일부러 비운 것이다 (2026-08-26).
+    """
+    import pathlib
+
+    source = pathlib.Path("src/api/routes/customer_ops.py").read_text(encoding="utf-8")
+    block = source[source.index("changed: dict[str, str] = {}"):]
+    block = block[: block.index("session.add(profile)")]
+
+    # 셋만 가져온다. 나머지 다섯은 저쪽에 대응 속성이 없거나 워크북이 수식 칸이다.
+    for column in ("current_plan", "user_seq", "industry"):
+        assert column in block, column
+    for absent in ("lead_temperature", "next_action", "qualification", "source"):
+        assert absent not in block, absent
+    # 빈 값은 건너뛴다.
+    assert "if value and value !=" in block

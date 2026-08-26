@@ -527,3 +527,54 @@ def test_a_new_company_gets_a_registry_row_before_its_inquiry_is_written(monkeyp
     # 문의 행의 고객사·국가는 값이 아니라 그 회사 행을 가리키는 조회다.
     formulas = [entry["values"][0][0] for entry in store["batch"]["data"]]
     assert any("'고객 기본 정보'!$A:$J" in formula for formula in formulas)
+
+
+# ---- 워크북으로 되쓰기 (2026-08-26) ------------------------------------------------
+
+
+def test_a_formula_column_is_never_written_by_field_sync():
+    """수식 칸에 값을 쓰면 그 행만 계산이 멈추고, 화면 어디에도 그게 안 보인다.
+
+    워크북에서 「고객 상태」의 값처럼 보이는 칸 둘이 수식이다:
+
+        기업 종류(산업군) = 「고객 기본 정보」를 Client ID 로 조회
+        Pipeline(MQL/PQL) = IF(구독 플랜="N/A","MQL",IF(...,"재계약","PQL"))
+
+    뒤엣것은 구독 플랜을 쓰면 저절로 따라오므로 여기서 할 일이 애초에 없다.
+    울타리는 화면도 부르는 쪽도 아닌 ``SYNCABLE_INBOUND_FIELDS`` 한 곳이다.
+    """
+    from src.integrations.google_sheets import SYNCABLE_INBOUND_FIELDS
+
+    for formula_column in ("company_type", "pipeline", "company", "deal_stage"):
+        assert formula_column not in SYNCABLE_INBOUND_FIELDS, formula_column
+    assert SYNCABLE_INBOUND_FIELDS == {"plan", "user_seq", "space_seq"}
+
+
+def test_field_sync_drops_unknown_keys_instead_of_writing_them(monkeypatch, caplog):
+    """모르는 칸은 쓰지 않고, **조용히 넘어가지도 않는다.**
+
+    부르는 쪽이 쓴다고 믿은 값이 안 써지면 그 사실이 어디엔가는 적혀 있어야 다음 사람이
+    찾는다. 여기서는 시트에 닿기 전에 걸러지므로 로그가 유일한 자국이다.
+    """
+    import logging
+
+    from src.integrations import google_sheets
+
+    monkeypatch.setattr(google_sheets, "writes_enabled", lambda: True)
+    monkeypatch.setattr(
+        google_sheets, "_build_service", lambda: pytest.fail("수식 칸 때문에 시트에 닿으면 안 된다")
+    )
+    with caplog.at_level(logging.WARNING):
+        assert google_sheets.update_inbound_fields(1234, {"company_type": "SaaS"}) == 0
+    assert "company_type" in caplog.text
+
+
+def test_field_sync_writes_nothing_in_safe_mode(monkeypatch):
+    """안전 모드에서는 네트워크에 닿기도 전에 멈춘다 — 시트 쓰기의 대전제."""
+    from src.integrations import google_sheets
+
+    monkeypatch.setattr(google_sheets, "writes_enabled", lambda: False)
+    monkeypatch.setattr(
+        google_sheets, "_build_service", lambda: pytest.fail("안전 모드에서 시트에 닿았다")
+    )
+    assert google_sheets.update_inbound_fields(1234, {"plan": "pro"}) == 0

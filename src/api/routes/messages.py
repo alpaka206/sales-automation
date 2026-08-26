@@ -949,6 +949,7 @@ async def contact_hubspot_record_edit(contact_id: int, request: Request):
         if not contact:
             return JSONResponse({"error": "연락처를 찾을 수 없습니다"}, status_code=404)
         hubspot_contact_id = contact.hubspot_contact_id
+        sheet_client_id = contact.sheet_client_id
     if not hubspot_contact_id:
         return JSONResponse(
             {"error": "이 고객은 허브스팟 연락처가 아니라 저장할 곳이 없습니다"},
@@ -984,6 +985,25 @@ async def contact_hubspot_record_edit(contact_id: int, request: Request):
                 setattr(profile, column, value or None)
             session.add(profile)
             session.commit()
+
+    # **워크북에도 씁니다** (2026-08-26 운영자 지시). 같은 값이 세 곳에 사는데 한 곳만
+    # 고치면 영업팀이 필터로 쓰는 열이 옛 값을 들고 앉습니다.
+    #
+    # 수식 칸은 안 건드립니다(`SYNCABLE_INBOUND_FIELDS` 가 울타리입니다). 특히
+    # Pipeline(MQL/PQL)은 **구독 플랜에서 저절로 계산되므로** 플랜만 쓰면 따라옵니다 —
+    # 값으로 덮으면 그 행만 계산이 멈추고, 화면 어디에도 그게 안 보입니다.
+    #
+    # 실패해도 저장은 성공입니다. 시트가 안 되는 것이 방금 허브스팟에 들어간 값을 되돌릴
+    # 이유는 아니고, 이유는 로그에 남습니다.
+    sheet_values = {
+        key: values[key].strip()
+        for key in ("plan", "user_seq", "space_seq")
+        if key in values
+    }
+    if sheet_values and sheet_client_id:
+        from ...integrations.google_sheets import update_inbound_fields
+
+        await asyncio.to_thread(update_inbound_fields, sheet_client_id, sheet_values)
     return JSONResponse({"ok": True})
 
 
