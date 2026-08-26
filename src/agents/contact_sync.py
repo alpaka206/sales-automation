@@ -257,9 +257,20 @@ def sync_changed_contacts_once() -> int:
 
     # **워터마크는 끝에 한 번만.** 중간에 터지면 안 밀리고, 다음 회차가 같은 창을 다시
     # 훑습니다 — 같은 값을 다시 넣는 것은 무해합니다(바뀐 것이 없으면 아무 데도 안 씁니다).
+    #
+    # **못 읽은 것이 남았으면 워터마크를 끝까지 밀지 않습니다.** 두 가지로 남습니다:
+    #
+    #   ① 검색 페이지가 꽉 찼다 — 허브스팟에 더 있다는 뜻이고, 정렬이 오름차순이라 **안 읽은
+    #      쪽이 더 최신**입니다. `now` 로 밀면 그 사람들은 다음 창 밖으로 나가 영영 안
+    #      돌아옵니다. 대량 임포트에서만 나는 일이라 평소에는 안 걸리지만, 나는 그날
+    #      조용히 유실됩니다 (2026-08-26 지적).
+    #   ② 기록 몫에서 끊겼다 — 같은 이유입니다.
+    #
+    # 티켓 스윕이 ①을 이미 그렇게 합니다. 그때 옮기는 자리는 **읽은 것 중 가장 최신**입니다.
+    read_upto = [stamp for stamp in map(_changed_at, rows) if stamp]
+    if len(rows) >= _SWEEP_LIMIT and read_upto:
+        now = min(now, max(read_upto))
     if pulled >= _HISTORY_PER_SWEEP and reached:
-        # 몫에서 끊겼습니다. 읽은 데까지만 옮깁니다 — `now` 로 밀면 남은 사람들이 다음
-        # 창 밖으로 나가 기록을 영영 못 받습니다.
         now = min(now, reached)
     with SessionLocal() as session:
         session.add(Event(kind=_SWEEP_MARKER_KIND, payload={"poll_at": now.isoformat()}))
@@ -269,3 +280,32 @@ def sync_changed_contacts_once() -> int:
             "연락처 스윕: 플랜 칸 %d명, 기록 %d명 가져옴.", touched, pulled
         )
     return touched
+
+
+# 이 스윕만 따로, 더 자주 돕니다. 10분짜리 폴러에 얹혀 있던 것을 떼어낸 이유는 **이것이
+# 사람이 읽기만 하는 값이 아니기 때문**입니다: 영업이 허브스팟에서 직접 회신하면
+# `_retire_drafts_for_replies_seen_in_hubspot` 이 우리 대기 초안을 종료시킵니다. 그 사이가
+# 곧 「고객이 같은 질문에 두 번째 답을 받는」 창이라, 10분과 2분은 체감이 다릅니다.
+#
+# **30초로는 안 내립니다.** 허브스팟 Search 는 새 레코드가 색인에 뜨기까지 5~10초가
+# 걸립니다("It may take a few moments for newly created or updated CRM objects to appear
+# in search results"). 주기가 30초면 그 지연이 주기의 1/3이라 창 설계가 예민해지는데,
+# 2분 대비 얻는 것이 없습니다. 지금 창은 `주기 + _SWEEP_OVERLAP(2분)` 이라 색인 지연보다
+# 한참 넉넉하고, 다시 읽는 것은 무해합니다(바뀐 것이 없으면 아무 데도 안 씁니다).
+#
+# Search 는 일반 한도(10초 100회)와 **별개로 초당 4회**가 걸립니다. 2분에 1~2회라 여유가
+# 큽니다 — 페이지가 둘 이상이 되는 것은 2분 안에 100명 넘게 바뀔 때뿐입니다.
+CONTACT_SWEEP_SECONDS = 120
+
+
+async def run_contact_sweep() -> None:
+    """연락처 스윕만 따로 도는 루프."""
+    import asyncio
+
+    logger.info("연락처 스윕 시작 (주기 %ds)", CONTACT_SWEEP_SECONDS)
+    while True:
+        try:
+            await asyncio.to_thread(sync_changed_contacts_once)
+        except Exception:
+            logger.exception("연락처 스윕 회차 실패")
+        await asyncio.sleep(CONTACT_SWEEP_SECONDS)

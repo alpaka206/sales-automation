@@ -907,7 +907,7 @@ def test_the_three_doors_share_one_sync():
     for path in (
         "src/api/routes/customer_ops.py",   # 손으로 누른 동기화
         "src/api/webhook.py",               # contact.propertyChange
-        "src/agents/inbound_poller.py",     # 10분 스윕
+        "src/api/main.py",                  # 2분 스윕 (자기 루프로 돕니다)
     ):
         source = pathlib.Path(path).read_text(encoding="utf-8")
         assert "contact_sync" in source, path
@@ -992,3 +992,44 @@ def test_the_sweep_pulls_history_and_stops_at_its_quota(monkeypatch):
     # 다음 창 밖으로 나가 기록을 영영 못 받는다.
     last_pulled_at = base + timedelta(minutes=cs._HISTORY_PER_SWEEP - 1)
     assert marker["poll_at"] == last_pulled_at.isoformat()
+
+
+def test_a_full_search_page_holds_the_watermark_back():
+    """못 읽은 것이 남았으면 워터마크를 끝까지 밀지 않는다.
+
+    Search 는 페이지당 100건이고 이 스윕은 200건에서 자른다. 대량 임포트가 그보다 많이
+    건드리면 **안 읽은 쪽이 더 최신**인데(정렬이 오름차순), `now` 로 밀면 그 사람들은
+    다음 창 밖으로 나가 영영 안 돌아온다. 평소에는 안 걸리고, 나는 그날 조용히 유실된다
+    (2026-08-26 지적). 티켓 스윕이 같은 이유로 이미 그렇게 한다.
+    """
+    import pathlib
+
+    source = pathlib.Path("src/agents/contact_sync.py").read_text(encoding="utf-8")
+    block = source[source.index("read_upto = ["):source.index("with SessionLocal() as session:", source.index("read_upto = ["))]
+
+    # 페이지가 꽉 찼을 때와 기록 몫에서 끊겼을 때, 둘 다 워터마크를 잡아 둔다.
+    assert "len(rows) >= _SWEEP_LIMIT" in block
+    assert "pulled >= _HISTORY_PER_SWEEP" in block
+    assert block.count("now = min(now,") == 2
+
+
+def test_the_sweep_runs_on_its_own_clock_not_the_ten_minute_poller():
+    """이 스윕이 가져오는 것 중에 **사람이 읽기만 하는 값이 아닌 것**이 있다.
+
+    영업이 허브스팟에서 직접 회신하면 `_retire_drafts_for_replies_seen_in_hubspot` 이 우리
+    대기 초안을 종료시킨다. 그 사이가 곧 「고객이 같은 질문에 두 번째 답을 받는」 창이라,
+    10분과 2분은 체감이 다르다.
+
+    30초로는 안 내린다 — 허브스팟 Search 는 새 레코드가 색인에 뜨기까지 5~10초가 걸린다.
+    지금 창은 `주기 + _SWEEP_OVERLAP` 이라 그 지연보다 넉넉하다.
+    """
+    import pathlib
+
+    from src.agents.contact_sync import CONTACT_SWEEP_SECONDS, _SWEEP_OVERLAP
+
+    assert CONTACT_SWEEP_SECONDS == 120
+    # 창이 색인 지연(5~10초)보다 한참 넉넉해야 한다.
+    assert _SWEEP_OVERLAP.total_seconds() >= 60
+
+    poller = pathlib.Path("src/agents/inbound_poller.py").read_text(encoding="utf-8")
+    assert "sync_changed_contacts_once" not in poller, "10분 폴러에 남아 두 번 돌면 안 된다"

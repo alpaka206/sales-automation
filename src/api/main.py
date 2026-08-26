@@ -116,6 +116,15 @@ async def lifespan(app: FastAPI):
         tasks.append(asyncio.create_task(run_poller(), name="inbound_poller"))
         logger.info("Inbound poller background task started.")
 
+    if settings.INBOUND_POLL_ENABLED:
+        # 10분 폴러와 **따로** 돕니다(2분). 이 스윕이 가져오는 것 중에 사람이 읽기만 하는
+        # 값이 아닌 것이 있습니다 — 영업이 허브스팟에서 직접 회신하면 우리 대기 초안이
+        # 종료됩니다. 그 사이가 곧 「고객이 같은 질문에 두 번째 답을 받는」 창입니다.
+        from ..agents.contact_sync import run_contact_sweep
+
+        tasks.append(asyncio.create_task(run_contact_sweep(), name="contact_sweep"))
+        logger.info("Contact sweep background task started.")
+
     if settings.SEND_WORKER_ENABLED:
         from ..agents.send_worker import run_send_worker
 
