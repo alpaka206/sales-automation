@@ -172,13 +172,22 @@ def _url_from_template(value: str | None) -> str:
 
 
 def canonicalize_contact_links(body: str, language: str | None = None) -> str:
-    """Put Calendly and WhatsApp in an exact, deterministic two-line footer.
+    """Put the contact links in an exact, deterministic footer.
 
     The model may decide how the prose reads, but it must not decide where contact
     links sit. Existing prose such as "schedule at Calendly or contact us via
-    WhatsApp" is removed as one line, then the configured URLs are appended with
-    fixed labels. The function is intentionally a no-op for messages with no contact
-    link at all.
+    WhatsApp" is removed as one line, then the configured URLs are appended.
+
+    **WhatsApp is an English-reply line only, and the label follows the language.**
+    0069 took ``{{WHATSAPP}}`` out of the Korean skeleton because there is no reason to
+    offer WhatsApp to a domestic customer — and then this footer put it back on every
+    Korean reply, because it read ``language`` only to pick WHICH row holds the URL,
+    never whether the line belongs at all. It hardcoded ``[Calendly]`` for the same
+    reason, so a Korean reply linked the word "Calendly" where 0069 had settled on
+    「미팅 링크」. Both decisions live here now, in one place: the send path calls this
+    function last, so whatever it appends is what the customer receives.
+
+    The function is intentionally a no-op for messages with no contact link at all.
     """
     if not body:
         return body
@@ -209,8 +218,10 @@ def canonicalize_contact_links(body: str, language: str | None = None) -> str:
         "whatsapp_link", "whatsapp_link_en"
     )
     meeting_url = next((_url_from_template(values[key]) for key in meeting_keys if values[key]), "")
-    whatsapp_url = next(
-        (_url_from_template(values[key]) for key in whatsapp_keys if values[key]), ""
+    whatsapp_url = (
+        next((_url_from_template(values[key]) for key in whatsapp_keys if values[key]), "")
+        if english
+        else ""
     )
     if not meeting_url and not whatsapp_url:
         return body
@@ -225,7 +236,7 @@ def canonicalize_contact_links(body: str, language: str | None = None) -> str:
     cleaned = "\n".join(kept).strip()
     footer = []
     if meeting_url:
-        footer.append(f"[Calendly]({meeting_url})")
+        footer.append(f"[{'Calendly' if english else '미팅 링크'}]({meeting_url})")
     if whatsapp_url:
         footer.append(f"[WhatsApp]({whatsapp_url})")
     footer_text = "\n".join(footer)

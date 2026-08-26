@@ -280,6 +280,33 @@ def test_contact_links_are_an_exact_two_line_footer_not_model_prose():
     )
 
 
+def test_a_korean_reply_gets_the_meeting_link_only_and_in_korean():
+    """국문 회신에는 WhatsApp 이 붙지 않고, 링크 글자도 「미팅 링크」입니다.
+
+    0069 가 국문 서식에서 ``{{WHATSAPP}}`` 을 뺐는데도 이 푸터가 언어와 무관하게 두 줄을
+    다시 붙였습니다 — ``language`` 를 어느 행에서 URL 을 읽을지 고르는 데만 썼기 때문입니다.
+    운영자가 실제로 받은 국문 메일에 WhatsApp 링크가 들어 있었습니다(2026-08-26).
+    """
+    from src.llm.prompts import canonicalize_contact_links
+
+    values = {
+        "meeting_link": "https://calendar.example/abc123",
+        "whatsapp_link": "https://wa.me/1",
+    }
+    body = (
+        "안녕하세요.\n"
+        "\n"
+        "아래 링크로 편하신 시간을 알려주세요.\n"
+        "\n"
+        "{{MEETING_LINK}}"
+    )
+    with patch("src.db.email_templates.get_email_template", side_effect=values.get):
+        out = canonicalize_contact_links(body, "ko")
+
+    assert out.endswith("[미팅 링크](https://calendar.example/abc123)")
+    assert "wa.me" not in out and "WhatsApp" not in out
+
+
 def test_every_token_in_the_seeded_format_is_one_the_code_substitutes():
     """A token in the skeleton that the code does not know ships to the customer raw.
 
