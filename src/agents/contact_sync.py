@@ -154,6 +154,25 @@ _SWEEP_OVERLAP = timedelta(minutes=2)
 _SWEEP_MARKER_KIND = "contact_field_poll"
 _SWEEP_LIMIT = 200
 
+# 한 회차에 **기록까지** 당겨올 사람 수. 필드 반영은 검색 결과에 이미 값이 들어 있어 공짜지만,
+# 기록(메일·통화·미팅·노트·Deal)은 사람당 왕복 다섯 번입니다.
+#
+# **웹훅을 안 쓰는 이유가 여기 있습니다.** 허브스팟에 Note/Call/Meeting/Email 구독이 있긴
+# 한데(expanded object support), 그걸 켜면 한 엔드포인트가 두 가지 payload 스키마를 받게
+# 되고 스코프도 늘어납니다. 얻는 것은 「10분 → 즉시」뿐인데, 통화 기록이 10분 늦게 보이는
+# 것은 아무 문제가 아닙니다.
+#
+# 그리고 **활동을 남기면 그 연락처의 `lastmodifieddate` 가 같이 밀립니다** — 2026-08-26 실측:
+# 활동 10:39:33 → 연락처 수정 10:40:13. 그래서 이 스윕이 이미 그 사람들을 보고 있고, 구독을
+# 하나도 안 만들어도 됩니다.
+_HISTORY_PER_SWEEP = 15
+
+
+def _changed_at(dto) -> datetime | None:
+    """그 연락처가 마지막으로 바뀐 시각. 몫에서 끊겼을 때 워터마크를 여기까지만 옮깁니다."""
+    raw = getattr(dto, "updated_at", None)
+    return raw if isinstance(raw, datetime) else None
+
 
 def _last_sweep_at() -> datetime:
     from ..db.models import Event
@@ -206,6 +225,8 @@ def sync_changed_contacts_once() -> int:
         }
 
     touched = 0
+    pulled = 0
+    reached: datetime | None = None
     for dto in rows:
         contact_id = known.get(str(dto.id))
         if contact_id is None:
@@ -216,11 +237,35 @@ def sync_changed_contacts_once() -> int:
         except Exception:
             logger.warning("연락처 %d 반영 실패", contact_id, exc_info=True)
 
+        # 기록까지 당겨옵니다 — 메일·통화·미팅·노트·Deal. 손으로 누르던 「HubSpot 동기화」가
+        # 하던 일이고, 그 버튼은 이제 「지금 당장」이 필요할 때만 씁니다.
+        #
+        # **한 회차의 몫이 있습니다.** 대량 임포트가 아는 연락처 이백 명을 건드리면 왕복이
+        # 천 번이 넘고, 허브스팟 한도(10초 100회)에 걸려 스윕 한 회차가 몇 분이 됩니다.
+        # 몫을 넘기면 워터마크를 **여기까지**로 두어 다음 회차가 이어서 훑습니다 — 티켓
+        # 스윕이 페이지가 꽉 찼을 때 하는 것과 같은 규칙입니다.
+        if pulled >= _HISTORY_PER_SWEEP:
+            break
+        try:
+            from ..api.routes.customer_ops import _sync_hubspot
+
+            _sync_hubspot(contact_id, per_type=10)
+        except Exception:
+            logger.warning("연락처 %d 기록 가져오기 실패", contact_id, exc_info=True)
+        pulled += 1
+        reached = _changed_at(dto) or reached
+
     # **워터마크는 끝에 한 번만.** 중간에 터지면 안 밀리고, 다음 회차가 같은 창을 다시
     # 훑습니다 — 같은 값을 다시 넣는 것은 무해합니다(바뀐 것이 없으면 아무 데도 안 씁니다).
+    if pulled >= _HISTORY_PER_SWEEP and reached:
+        # 몫에서 끊겼습니다. 읽은 데까지만 옮깁니다 — `now` 로 밀면 남은 사람들이 다음
+        # 창 밖으로 나가 기록을 영영 못 받습니다.
+        now = min(now, reached)
     with SessionLocal() as session:
         session.add(Event(kind=_SWEEP_MARKER_KIND, payload={"poll_at": now.isoformat()}))
         session.commit()
-    if touched:
-        logger.info("연락처 스윕: %d명의 플랜 칸을 허브스팟에 맞췄습니다.", touched)
+    if touched or pulled:
+        logger.info(
+            "연락처 스윕: 플랜 칸 %d명, 기록 %d명 가져옴.", touched, pulled
+        )
     return touched

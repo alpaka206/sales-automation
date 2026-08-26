@@ -24,6 +24,9 @@ class ContactDTO(BaseModel):
     # 고객 상태 카드가 읽는 셋. 이 셋만 있는 이유는 나머지 다섯(리드 온도·다음 액션·
     # MQL/PQL·유입 소스·파이프라인)이 이 포털의 연락처에 대응 속성이 없거나 워크북 쪽이
     # 수식 칸이기 때문이다 — 2026-08-26 에 549개 속성을 훑어 확인했다.
+    # 스윕이 「여기까지 읽었다」를 표시할 때 쓰는 값(`lastmodifieddate`). 검색으로 받아올
+    # 때만 채워집니다 — 단건 조회에는 필요가 없습니다.
+    updated_at: datetime | None = None
     plan: str | None = None
     plan_tier: str | None = None
     plan_seq: str | None = None

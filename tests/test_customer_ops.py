@@ -921,3 +921,74 @@ def test_the_three_doors_share_one_sync():
     from src.agents.contact_sync import SHEET_FIELDS
 
     assert set(SHEET_FIELDS.values()) == {"plan", "user_seq", "space_seq"}
+
+
+def test_the_sweep_pulls_history_and_stops_at_its_quota(monkeypatch):
+    """10분 스윕이 기록(메일·통화·미팅·노트·Deal)까지 당겨온다 — 구독 없이.
+
+    허브스팟에 Note/Call/Meeting/Email 웹훅이 있긴 하지만(expanded object support) 켜면 한
+    엔드포인트가 두 payload 스키마를 받게 되고 스코프도 늘어난다. 얻는 것은 「10분 → 즉시」
+    뿐인데, 통화 기록이 10분 늦게 보이는 것은 문제가 아니다.
+
+    그리고 **활동을 남기면 그 연락처의 lastmodifieddate 가 같이 밀린다** (2026-08-26 실측:
+    활동 10:39:33 → 연락처 수정 10:40:13). 그래서 이 스윕이 이미 그 사람들을 보고 있다.
+
+    **몫이 있는 이유**: 기록은 사람당 왕복 다섯 번이 넘는다. 대량 임포트가 아는 연락처
+    이백 명을 건드리면 스윕 한 회차가 몇 분이 되고 허브스팟 한도에 걸린다. 몫에서 끊기면
+    워터마크를 거기까지만 옮겨 다음 회차가 이어 훑는다 — 안 그러면 남은 사람들이 다음 창
+    밖으로 나가 기록을 영영 못 받는다.
+    """
+    from datetime import datetime, timedelta, timezone
+    from unittest.mock import patch
+
+    from src.agents import contact_sync as cs
+
+    base = datetime(2026, 8, 26, 10, 0, tzinfo=timezone.utc)
+    total = cs._HISTORY_PER_SWEEP + 5
+    rows = [
+        type("Dto", (), {
+            "id": str(1000 + i), "plan": None, "plan_tier": None, "plan_seq": None,
+            "user_seq": None, "space_seq": None, "industry": None, "ip_country": None,
+            "phone": None, "updated_at": base + timedelta(minutes=i),
+        })()
+        for i in range(total)
+    ]
+    contacts = [
+        type("Row", (), {"id": 1000 + i, "hubspot_contact_id": str(1000 + i)})()
+        for i in range(total)
+    ]
+    pulled: list[int] = []
+    marker: dict = {}
+
+    class _Query:
+        def filter(self, *_a, **_k): return self
+        def all(self): return contacts
+
+    class _Session:
+        def __enter__(self): return self
+        def __exit__(self, *_): return False
+        def query(self, *_a, **_k): return _Query()
+        def add(self, obj): marker["poll_at"] = obj.payload["poll_at"]
+        def commit(self): pass
+
+    class _Client:
+        def search_contacts_changed_since(self, *_a, **_k): return rows
+
+    monkeypatch.setattr(cs, "SessionLocal", _Session)
+    monkeypatch.setattr(cs, "_last_sweep_at", lambda: base - timedelta(hours=1))
+    monkeypatch.setattr(cs, "apply_contact_fields", lambda *_a, **_k: {})
+
+    with patch("src.integrations.hubspot.HubSpotClient", lambda: _Client()), patch(
+        "src.api.routes.customer_ops._sync_hubspot",
+        side_effect=lambda cid, per_type=10: pulled.append(cid),
+    ):
+        cs.sync_changed_contacts_once()
+
+    # 몫만큼만 당겨왔다 — 스무 명이 바뀌어도 한 회차는 열다섯이다.
+    assert len(pulled) == cs._HISTORY_PER_SWEEP
+    assert pulled[0] == 1000
+
+    # 워터마크는 **마지막으로 당겨온 사람까지만** 갔다. `now` 로 밀면 나머지 다섯이
+    # 다음 창 밖으로 나가 기록을 영영 못 받는다.
+    last_pulled_at = base + timedelta(minutes=cs._HISTORY_PER_SWEEP - 1)
+    assert marker["poll_at"] == last_pulled_at.isoformat()

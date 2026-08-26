@@ -182,6 +182,16 @@ def _require_token() -> str:
     return token
 
 
+def _parse_ts(raw: object) -> datetime | None:
+    """허브스팟의 ISO 시각을 datetime 으로. 못 읽으면 None — 시각 하나 때문에 스윕이 서면 안 된다."""
+    if not isinstance(raw, str) or not raw:
+        return None
+    try:
+        return datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
 def _contact_properties() -> str:
     names = [
         "email",
@@ -1216,7 +1226,7 @@ class HubSpotClient:
                     "sorts": [
                         {"propertyName": "lastmodifieddate", "direction": "ASCENDING"}
                     ],
-                    "properties": _contact_properties().split(","),
+                    "properties": _contact_properties().split(",") + ["lastmodifieddate"],
                     "limit": min(100, limit - len(contacts)),
                 }
                 if after:
@@ -1239,6 +1249,7 @@ class HubSpotClient:
                             country=props.get("country"),
                             ip_country=props.get("ip_country") or props.get("hs_ip_country"),
                             lifecyclestage=props.get("lifecyclestage"),
+                            updated_at=_parse_ts(props.get("lastmodifieddate")),
                             plan=props.get("plan"),
                             user_seq=props.get("user_seq"),
                             industry=props.get("industry"),
