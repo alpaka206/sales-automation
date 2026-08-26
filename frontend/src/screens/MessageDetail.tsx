@@ -269,7 +269,13 @@ export function MessageDetail() {
   if (isPending || !data) return <LoadingBlock />;
 
   const { msg, ticket, contact } = data;
-  const isPendingApproval = msg?.status === "pending_approval";
+  // **발송이 실패한 초안도 검토 중인 초안과 같은 화면입니다.** 실패는 「고객에게 아무것도
+  // 안 갔다」는 뜻이라 아직 보낼 것이 남아 있고, 그러면 고칠 수 있어야 하고 보낼 수 있어야
+  // 합니다. 예전에는 편집기 자체가 안 그려져서, 실패한 초안은 읽기 전용 말풍선으로 기록
+  // 줄기에 섞여 들어가고 다시 보낼 길이 복구 화면밖에 없었습니다(2026-08-26 운영자 지시).
+  const isDraftOpen =
+    msg?.status === "pending_approval" || msg?.status === "send_failed";
+  const sendFailed = msg?.status === "send_failed";
   // 보드가 어느 열에 + 를 그릴지 정하는 것과 **같은 목록**입니다. 서버가 주므로
   // 단계 이름이 바뀌어도 두 화면이 어긋나지 않습니다.
   const canLog = !!ticket.stage && data.manual_log_stages.includes(ticket.stage);
@@ -309,7 +315,7 @@ export function MessageDetail() {
     })),
     ...(afterNew
       ? data.thread
-          .filter((b) => !(b.is_current && isPendingApproval))
+          .filter((b) => !(b.is_current && isDraftOpen))
           .map((b) => ({
             key: `m${b.id}`,
             at: b.sent_at || b.created_at,
@@ -452,6 +458,16 @@ export function MessageDetail() {
               {msg.status === "send_failed" ? "발송 실패" : "발송 확인 필요"}
             </div>
             <div className="t-sm">{msg.send_error}</div>
+            {/* 실패한 뒤에 할 수 있는 일은 둘입니다 — 글부터 다시 쓰거나(여기), 같은 글을
+                그대로 다시 보내거나(아래 편집기의 「검토 완료 · 발송」). 실패가 배달 사고만은
+                아니라서 둘 다 있어야 합니다: 초안 자체가 틀렸으면 다시 보내도 같은 것이
+                나갑니다. */}
+            {sendFailed && (
+              <ActionButton className="btn btn--subtle btn--sm" style={{ marginTop: 10 }}
+                            pending="다시 쓰는 중" onClick={() => act("redraft")}>
+                <Icon name="refresh" size={14} /> 초안 다시 쓰기
+              </ActionButton>
+            )}
           </div>
         </div>
       )}
@@ -468,10 +484,10 @@ export function MessageDetail() {
           )}
           <div className="thread">
             {(afterNew
-              ? data.thread.filter((b) => b.is_current && isPendingApproval)
+              ? data.thread.filter((b) => b.is_current && isDraftOpen)
               : data.thread
             ).map((bubble) => {
-              if (bubble.is_current && isPendingApproval) {
+              if (bubble.is_current && isDraftOpen) {
                 return (
                   <div key={bubble.id} className="bubble bubble--out bubble--current">
                     <div className="bubble__head">
@@ -1157,14 +1173,20 @@ function HistoryDigest({ items }: {
     };
   });
   threads.sort((a, b) => (b.last || "").localeCompare(a.last || ""));
-  const received = threads.reduce((total, t) => total + t.received, 0);
-  const sent = threads.reduce((total, t) => total + t.sent, 0);
 
   return (
     <div className="card">
-      <div className="section-label" style={{ marginBottom: 4 }}>이 고객의 기록 (티켓 밖)</div>
-      <div className="t-xs t-subtle" style={{ marginBottom: 10 }}>
-        대화 {threads.length}건 · 받은 문의 {received} · 보낸 답변 {sent}
+      {/* 「이 티켓의 기록」과 **같은 머리글 모양**입니다 — 같은 아이콘, 같은 구조. 둘 다 이
+          화면의 기록 줄기라 다르게 생길 이유가 없습니다.
+
+          합계 줄(대화 n건 · 받은 문의 n · 보낸 답변 n)은 뺐습니다(2026-08-26 운영자 지시).
+          바로 아래에 그 대화들이 줄로 서 있어서 세면 나오는 값이고, 각 줄이 이미 답이
+          나갔는지 아닌지를 말로 적습니다 — 숫자를 세어 읽게 하는 자리가 아닙니다. */}
+      <div className="section-header" style={{ marginBottom: 12 }}>
+        <div className="section-header__l">
+          <span className="section-header__icon"><Icon name="history" size={16} /></span>
+          <div className="section-header__title">리드 히스토리</div>
+        </div>
       </div>
       <div className="stack" style={{ gap: 6 }}>
         {threads.map((thread) => (

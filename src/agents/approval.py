@@ -91,7 +91,14 @@ def approve(
         pending = session.get(Message, message_id)
         if not pending:
             raise ApprovalError(f"Message {message_id} not found.")
-        if pending.status != "pending_approval":
+        # ``send_failed`` 도 승인할 수 있습니다 — **재발송이 곧 재승인**입니다.
+        # 발송이 실패했다는 것은 고객에게 아무것도 안 갔다는 뜻이고(400 이면 HubSpot 이
+        # 아무것도 만들지 않습니다), 그 초안을 다시 보내겠다는 판단은 처음 보내겠다는 판단과
+        # 같은 종류입니다. 그래서 사람이 승인한다는 대전제는 그대로입니다.
+        # ``delivery_unknown`` 은 **넣지 않습니다**: 그건 「갔는지 모른다」라서 다시 보내면
+        # 고객이 같은 메일을 두 번 받을 수 있고, 그 판단은 복구 화면의 「발송됨 확인 /
+        # 미발송 확인」이 따로 받습니다.
+        if pending.status not in {"pending_approval", "send_failed"}:
             raise ApprovalError(
                 f"Message {message_id} is {pending.status}, not pending_approval."
             )
@@ -115,7 +122,10 @@ def approve(
 
         result = session.execute(
             update(Message)
-            .where(Message.id == message_id, Message.status == "pending_approval")
+            .where(
+                Message.id == message_id,
+                Message.status.in_(["pending_approval", "send_failed"]),
+            )
             .values(**values)
         )
         if result.rowcount != 1:
@@ -149,9 +159,15 @@ def reject(message_id: int, approver: str, reason: str | None = None) -> Message
     """Reject a message only while it is still awaiting approval."""
     session = SessionLocal()
     try:
+        # 발송이 실패한 초안도 거절할 수 있습니다 — 「이건 안 보낸다」는 결정은 실패
+        # 전후로 같은 결정입니다. 복구 화면의 「발송 실패 정리」가 이미 같은 일을 묶음으로
+        # 합니다.
         result = session.execute(
             update(Message)
-            .where(Message.id == message_id, Message.status == "pending_approval")
+            .where(
+                Message.id == message_id,
+                Message.status.in_(["pending_approval", "send_failed"]),
+            )
             .values(status="rejected")
         )
         if result.rowcount != 1:

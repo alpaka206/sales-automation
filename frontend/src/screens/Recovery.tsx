@@ -191,7 +191,7 @@ export function Recovery() {
 
       {/* delivery_unknown is not a retry: the mail may have gone out. The operator says
           which, and only the "not sent" branch queues it again — hence the confirm. */}
-      {section("발송·작성 실패", "재시도하면 같은 워커 경로로 다시 처리합니다.", data.messages,
+      {section("발송·작성 실패", "재시도하면 초안을 다시 씁니다. 발송은 티켓 세부 내역에서 하세요.", data.messages,
                (row) =>
                  row.status === "delivery_unknown"
                    ? [
@@ -201,7 +201,7 @@ export function Recovery() {
                          body: { action: "confirmed_not_sent" }, danger: true,
                          confirm: "실제로 발송되지 않은 것을 확인했나요? 다시 발송 대기로 돌아갑니다." },
                      ]
-                   : [{ label: "재시도", path: `/operations/recovery/messages/${row.id}/retry` }])}
+                   : [{ label: "초안 다시 쓰기", path: `/operations/recovery/messages/${row.id}/retry` }])}
       {section("HubSpot·시트 동기화 실패", "메일은 나갔고 기록만 실패한 건입니다.", data.sync_failures,
                (row) => [{ label: "동기화 재시도", path: `/operations/recovery/messages/${row.id}/sync` }])}
       {section("작성 중 멈춘 초안", "30분 넘게 drafting 상태입니다. 참고용.", data.stale_drafts)}

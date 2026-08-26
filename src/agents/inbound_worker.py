@@ -11,7 +11,7 @@ from uuid import uuid4
 from sqlalchemy import and_, or_
 from sqlalchemy.exc import IntegrityError
 
-from ..db.models import InboundJob
+from ..db.models import Conversation, InboundJob, Message
 from ..db.session import SessionLocal
 
 logger = logging.getLogger(__name__)
@@ -43,8 +43,15 @@ def enqueue_inbound_ticket(
     hubspot_event_id: str | None = None,
     event_type: str = "ticket_created",
     occurrence_key: str | None = None,
+    draft_message_id: int | None = None,
 ) -> bool:
-    """Persist a ticket for processing. Returns true when newly queued/rearmed."""
+    """Persist a ticket for processing. Returns true when newly queued/rearmed.
+
+    ``draft_message_id`` 를 주면 새 초안을 만드는 대신 **그 메시지를 다시 씁니다**. 운영자가
+    누르는 「재생성」이 이 길로 옵니다 — 리스가 끊긴 작업이 자기 초안으로 돌아오는 길과 같은
+    길입니다(``_draft_message_id``). 새 행을 만들지 않으므로 그 티켓의 회신은 하나로 남고,
+    화면·집계·발송이 보던 ``Message.id`` 도 그대로입니다.
+    """
     now = _utcnow()
     event_key = inbound_event_key(ticket_id, occurrence_key)
     payload = {
@@ -53,6 +60,8 @@ def enqueue_inbound_ticket(
         "occurred_at": occurred_at,
         "hubspot_event_id": hubspot_event_id,
     }
+    if draft_message_id is not None:
+        payload["draft_message_id"] = draft_message_id
     with SessionLocal() as session:
         session.add(
             InboundJob(
@@ -70,6 +79,7 @@ def enqueue_inbound_ticket(
             session.rollback()
             existing = session.query(InboundJob).filter_by(event_key=event_key).first()
             if existing and existing.status == "dead":
+                existing.payload = payload
                 existing.status = "pending"
                 existing.attempts = 0
                 existing.available_at = now
@@ -80,6 +90,56 @@ def enqueue_inbound_ticket(
                 session.commit()
                 return True
             return False
+
+
+class RedraftError(RuntimeError):
+    """이 메시지는 다시 쓸 수 없습니다 — 사유는 메시지 본문에 있습니다."""
+
+
+def request_redraft(message_id: int) -> int:
+    """초안을 처음부터 다시 쓰게 큐에 올립니다. 대화 id 를 돌려줍니다.
+
+    **함수인 이유**: 부르는 곳이 둘입니다 — 티켓 세부 내역의 「초안 다시 쓰기」와 복구 화면의
+    「재시도」. 한쪽이 다른 쪽의 라우트를 부르게 두면 응답 JSON 을 도로 뜯어 예외로 바꾸는
+    코드가 생기고, 두 화면이 서로 다른 세션을 들고 같은 행을 만지게 됩니다.
+
+    **행을 새로 만들지 않습니다.** 새 초안을 따로 만들면 한 티켓에 회신이 둘이 되고, 화면·
+    집계·발송 큐가 어느 쪽이 진짜인지 각자 판단하게 됩니다. 대신 이 메시지를 ``drafting`` 으로
+    돌리고 ``draft_message_id`` 를 실은 작업을 올려 **그 메시지를 덮어쓰게** 합니다.
+
+    발송은 하지 않습니다. 다시 쓰인 초안은 검토 대기로 서고, 보낼지는 사람이 정합니다.
+    """
+    from ..db.conversation_history import add_progress
+
+    with SessionLocal() as session:
+        msg = session.get(Message, message_id)
+        if not msg:
+            raise RedraftError("메시지를 찾을 수 없습니다")
+        if msg.status not in {"send_failed", "draft_failed"}:
+            raise RedraftError(f"발송·작성 실패 상태만 다시 쓸 수 있습니다 (현재: {msg.status})")
+        conv = session.get(Conversation, msg.conversation_id)
+        ticket_id = (conv.hubspot_ticket_id or "") if conv else ""
+        if not ticket_id:
+            # 티켓이 없으면 다시 쓸 근거(문의 본문)를 가져올 곳이 없습니다. 워크북에서만 사는
+            # 문의가 여기 해당하고, 그 건은 손으로 고치는 편이 맞습니다.
+            raise RedraftError("HubSpot 티켓이 없는 문의는 다시 쓸 수 없습니다")
+        msg.status = "drafting"
+        msg.send_error = None
+        msg.send_claimed_at = None
+        conv_id = msg.conversation_id
+        session.commit()
+
+    # 누를 때마다 새 작업이어야 합니다 — 이벤트 키가 같으면 두 번째 누름이 조용히 버려집니다.
+    stamp = _utcnow().strftime("%Y%m%d%H%M%S%f")
+    enqueue_inbound_ticket(
+        ticket_id,
+        source="console_redraft",
+        event_type="redraft",
+        occurrence_key=f"redraft:{message_id}:{stamp}",
+        draft_message_id=message_id,
+    )
+    add_progress(conv_id, "draft", "회신 초안을 다시 작성합니다.")
+    return conv_id
 
 
 def _claim_next_job() -> tuple[int, dict, int, str] | None:

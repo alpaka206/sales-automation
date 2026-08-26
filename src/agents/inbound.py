@@ -170,9 +170,15 @@ class InboundAgent:
         """Process an inbound webhook event. Returns summary dict or None if skipped."""
         contact_info = self._fetch_contact(event)
 
+        # **이미 있는 초안으로 돌아온 작업은 단계로 막지 않습니다.** 이 관문은 「새 초안을
+        # 저절로 만들지 마라」는 규칙이지 「이 초안을 마저 쓰지 마라」가 아닙니다. 막으면
+        # 리스가 끊겨 돌아온 작업도, 운영자가 누른 「재생성」도 그 자리에서 조용히 멈추고
+        # 메시지는 ``drafting`` 인 채로 남습니다. 단계가 정말 넘어갔다면 완성된 초안을
+        # ``_retire_superseded_drafts`` 가 곧바로 종료시키므로 나갈 길은 어차피 없습니다.
         expected_stage = settings.HUBSPOT_TICKET_STAGE_NEW.strip()
         if (
             expected_stage
+            and not event.get("_draft_message_id")
             and contact_info.get("ticket_id")
             and contact_info.get("ticket_stage") != expected_stage
         ):

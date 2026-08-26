@@ -161,19 +161,28 @@ async def retry_inbound_job(request: Request, job_id: int):
 
 @router.post("/operations/recovery/messages/{message_id}/retry")
 async def retry_failed_message(request: Request, message_id: int):
+    """재시도 — 초안을 **다시 쓰고**, 보내지는 않습니다.
+
+    예전에는 이 버튼이 상태를 곧장 ``approved`` 로 바꿨고, 발송 워커가 1분 안에 집어
+    **같은 글을 그대로 다시 보냈습니다.** 두 가지가 잘못이었습니다.
+
+    - 실패는 배달 사고만이 아닙니다. 오늘 실패한 초안들은 옛 코드가 쓴 것이라 제목이
+      영어이고 미팅 링크가 맺음말 아래에 있었습니다 — 그대로 다시 보내면 같은 것이 나갑니다.
+    - **이 화면에서 고객에게 메일이 나가서는 안 됩니다.** 여기는 무엇이 고장났는지 보는
+      자리이고, 발송은 글을 읽고 누르는 결정입니다. 운영자 지시(2026-08-26): 재시도는 다시
+      쓰는 데까지, 발송은 티켓 세부 내역에서.
+
+    그래서 ``message_redraft`` 와 **같은 일**을 합니다. 다시 쓰인 초안은 검토 대기로 서고,
+    보낼지는 티켓 세부 내역에서 사람이 정합니다.
+    """
+    from ...agents.inbound_worker import RedraftError, request_redraft
+
+    try:
+        await run_in_threadpool(request_redraft, message_id)
+    except RedraftError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     with SessionLocal() as session:
-        result = session.execute(
-            update(Message)
-            .where(Message.id == message_id, Message.status == "send_failed")
-            .values(
-                status="approved",
-                scheduled_at=datetime.now(timezone.utc),
-                send_claimed_at=None,
-            )
-        )
-        if result.rowcount != 1:
-            raise HTTPException(status_code=409, detail="발송 실패 상태만 재시도할 수 있습니다")
-        _audit(session, request, "retry", "message", message_id)
+        _audit(session, request, "redraft", "message", message_id)
         session.commit()
     return RedirectResponse("/logs?tab=recovery&updated=message", status_code=303)
 

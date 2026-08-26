@@ -9,6 +9,7 @@ from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from sqlalchemy import select
+from starlette.concurrency import run_in_threadpool
 from sqlalchemy.orm import joinedload
 
 from ...agents.approval import ApprovalError, approve, reject
@@ -810,6 +811,27 @@ async def message_reject(request: Request, message_id: int, reason: str = Form("
             f'<div class="text-red-600 text-sm">{esc(str(exc))}</div>', status_code=400
         )
     return HTMLResponse('<div class="text-orange-600 text-sm font-medium">거절 처리 완료</div>')
+
+
+@router.post("/messages/{message_id}/redraft")
+async def message_redraft(message_id: int):
+    """초안을 처음부터 다시 씁니다 — 새 행을 만들지 않고 이 메시지를 덮어씁니다.
+
+    발송이 실패했을 때 할 수 있는 일은 둘입니다. 같은 글을 그대로 다시 보내거나(「검토 완료 ·
+    발송」), 글부터 다시 쓰거나(여기). 후자가 필요한 이유는 실패가 배달 사고만이 아니기
+    때문입니다 — 오늘 실패한 초안들은 옛 코드가 쓴 것이라 제목이 영어이고 미팅 링크가 맺음말
+    아래에 있었습니다. 그런 초안은 다시 보내도 같은 것이 나갑니다.
+
+    일은 ``inbound_worker.request_redraft`` 가 합니다. 복구 화면의 「재시도」도 같은 함수를
+    부릅니다 — 화면이 둘이지 동작이 둘이 아닙니다.
+    """
+    from ...agents.inbound_worker import RedraftError, request_redraft
+
+    try:
+        await run_in_threadpool(request_redraft, message_id)
+    except RedraftError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=409)
+    return JSONResponse({"status": "drafting"})
 
 
 @router.post("/messages/{message_id}/edit")
