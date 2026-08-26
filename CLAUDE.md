@@ -6,6 +6,48 @@ PERSO Inbound is a FastAPI workflow for inbound inquiry handling and customer op
 
 - **External-write safety (대전제, top priority).** `LIVE_EXTERNAL_WRITES` defaults to `false` (SAFE). While safe: HubSpot writes, Google Sheets writes, and outbound email delivery are blocked. The application never substitutes an internal test recipient. Reads stay on. Enforced in `src/common/safe_mode.py`; guaranteed behavior is pinned by `tests/test_safe_mode.py`. Any new external-write/send path must use the same gate and add a safety test.
 - **Human-approved email delivery is live.** `EMAIL_SENDING_ENABLED = True`; only an operator-approved draft is claimable. Immediate inbound acknowledgements were removed structurally. Foreign-language drafts cannot be approved or sent until the operator completes the explicit translation step. Delivery replies on the ticket's existing HubSpot Conversations thread. The actor is `HUBSPOT_SENDER_ACTOR_ID`; the actual From address comes from the thread's email `channelAccountId` (or the same-Inbox fallback account for a form-only thread). SMTP and CRM email-activity logging are not delivery paths.
+  - **발송 payload 는 문서가 아니라 이 포털이 정한다** (2026-08-26, 첫 실전 발송 msg 62 가
+    이것으로 실패했다). HubSpot 문서의 예시에는 수신자에
+    `"actorId": "E-user@hubspot.com"` 이 있는데 **발송 엔드포인트가 그것을 거부한다** —
+    `Actor type EMAIL is not supported for receiving`. 그래서 수신자는 `recipientField` 와
+    `deliveryIdentifiers` **주소로만** 적는다. **읽기 검증으로는 절대 못 잡는다**: actor 조회
+    (`GET /conversations/v3/conversations/actors/E-<메일>`)는 그 ID 를 200 으로 돌려주고
+    `{"type":"EMAIL"}` 이라고 답한다. 고칠 때 기준으로 삼을 것은 문서도 actor 조회도 아니고
+    **그 포털에서 실제로 나간 메시지**다 — `GET .../threads/{id}/messages` 로 성공한
+    OUTGOING 한 건을 열어 `senders`·`recipients` 모양을 그대로 베껴라. `tests/
+    test_hubspot_conversations.py::test_the_recipient_is_an_address_not_an_email_actor`
+    가 고정한다(기존 발송 테스트는 `senderActorId`·`channelAccountId`·`deliveryIdentifiers`
+    만 봐서 `actorId` 가 있든 없든 통과했다 — 그게 뚫린 구멍이었다).
+  - **HubSpot 400 의 이유는 `message` 가 아니라 `errors[]` 에 있다.** `message` 는 원인이
+    무엇이든 언제나 `"Multiple errors validating request."` 한 문장이라, 그것만 로그에 남기면
+    「무언가 틀렸다」까지만 말하고 무엇이 틀렸는지는 어디에도 안 남는다. `_lookup_error` 가
+    둘 다 싣는다 — 요약은 모양을, 배열은 필드를 말한다. **이 한 줄이 없으면 발송 실패는
+    로그만으로 진단이 불가능하고, 알아내는 데 실제 발송을 한 번 태워야 한다.**
+  - **실패는 이유를 행에 남긴다** (`messages.send_error`, 0093). 로그는 30분이면 스크롤 밖이고,
+    그때 화면에 남는 것은 빨간 「발송 실패」 배지 하나뿐이었다. `post_send_sync_error` 를
+    쓰면 안 된다 — 그 칸은 「메일은 나갔고 기록만 실패했다」는 뜻이고, 복구 화면이 그 둘을
+    다른 목록으로 갈라 다르게 처리한다. 사유는 티켓 화면 배너와 복구 화면 두 곳에 뜨는데,
+    출처는 이 한 칸이다.
+  - **폼 스레드 폴백은 실전에서 동작한다 — 채널 계정을 의심하지 마라.** 2026-08-26 에 폼
+    스레드(`originalChannelId: 1003`)로 온 문의에 `HUBSPOT_DEFAULT_EMAIL_CHANNEL_ACCOUNT_ID`
+    (support@perso.ai)로 회신이 나갔고 `status: SENT` 로 남았다. 그 계정이 이 포털에서 오간
+    적 없는 계정처럼 보여 한 번 의심했는데 **아니었다**: HubSpot 은 검증 오류를 한 번에 다
+    돌려주므로(그래서 "Multiple errors") 채널 계정 얘기가 없으면 통과했다는 뜻이다.
+  - **「티켓 → Email → Create an email」은 API 로 못 한다.** 운영자가 아는 그 동작은 UI
+    전용이다. CRM Emails engagement API 는 **기록만** 하고 발송하지 않으며(공식 문서 원문:
+    "log and manage emails"), 우리 토큰의 `sales-email-read` 는 읽기 전용이라 기록조차 못
+    만든다. Transactional Single-Send 는 `transactional-email` 스코프 + Marketing Hub
+    Pro/Ent + 부가상품이 필요하고 티켓 스레드에 회신도 안 된다. **API 가 실제로 메일을 보내는
+    길은 Conversations 스레드 회신 하나뿐이고**, 그 회신은 티켓 스레드에 그대로 붙으므로
+    고객이 받는 메일도 티켓에 남는 기록도 같은 자리에 선다.
+- **연락처 링크는 언어가 정하고, 정하는 곳은 `canonicalize_contact_links` 한 곳이다.**
+  국문 회신에는 WhatsApp 을 붙이지 않고 링크 글자는 「미팅 링크」, 영문에는 둘 다 붙이고
+  `Calendly` · `WhatsApp` 이다. **서식(`reply_format`)만 고치면 안 된다**: 0069 가 국문
+  서식에서 `{{WHATSAPP}}` 을 뺐는데도 국문 메일에 WhatsApp 이 계속 나갔다 — 이 함수가
+  모델이 쓴 링크 줄을 전부 지우고 푸터를 **다시 만드는데**, `language` 를 「어느 행에서 URL 을
+  읽을지」 고르는 데만 쓰고 「그 줄이 붙어야 하는지」는 보지 않았기 때문이다. 발송 경로가 이
+  함수를 마지막에 부르므로 **여기서 붙인 것이 곧 고객이 받는 것**이고, 서식·정책 문서에 무엇이
+  적혀 있든 이 함수가 이긴다.
 - **The CRM/workbook are LIVE.** `LIVE_EXTERNAL_WRITES=true` with `LIVE_HUBSPOT_WRITES` / `LIVE_SHEETS_WRITES` both on, so a stage moved in the console moves the HubSpot ticket and updates the Inbound DB row. Every screen write goes through the same routes the Jinja forms used, which is why that stayed true through the React port.
 - **Per-destination switches are subordinate.** `LIVE_HUBSPOT_WRITES` / `LIVE_SHEETS_WRITES` (both default `true`) select which destinations go live *after* the master is on; neither can permit a write while `LIVE_EXTERNAL_WRITES` is `false`. `guard_external_write("<channel>:<action>")` picks the gate from the label prefix, and an unregistered channel falls back to the master — so a new write path is blocked by default.
 - HubSpot tickets are accepted only from `HUBSPOT_TICKET_STAGE_NEW` when a ticket ID exists.
