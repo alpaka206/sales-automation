@@ -94,10 +94,11 @@ export function InteractionForm({
   contactId: number;
   conversationId?: number | null;
   onSaved: () => void;
-  /** 창을 닫는 길. **모달에서만 넘깁니다** — 고객 상세는 이 폼이 카드 안에 그냥 놓여
-   *  있어서 「취소」가 닫을 것이 없습니다. 없는 자리에 버튼을 두면 눌러도 아무 일이
-   *  안 일어나고, 그건 고장으로 읽힙니다. */
-  onCancel?: () => void;
+  /** 창을 닫는 길. **선택이 아닙니다** — 이 폼이 사는 자리는 셋 다 모달입니다(티켓 세부
+   *  내역 · 보드 카드의 + · 고객 상세). 한동안 고객 상세만 카드 안에 펼쳐 둬서 여기가
+   *  선택이었는데, 그러면 「취소가 없는 폼」이라는 두 번째 모양을 이 컴포넌트가 계속
+   *  들고 있어야 합니다. 모양이 하나면 고칠 곳도 하나입니다. */
+  onCancel: () => void;
 }) {
   const [save, saving] = useAction(async (event: React.FormEvent<HTMLFormElement>) => {
         event.preventDefault();
@@ -153,9 +154,7 @@ export function InteractionForm({
           쪽이 오른쪽. 이 콘솔의 다른 확인 창과 같은 순서입니다. */}
       <div className="quick-form__wide"
            style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-        {onCancel && (
-          <button type="button" className="btn btn--subtle" onClick={onCancel}>취소</button>
-        )}
+        <button type="button" className="btn btn--subtle" onClick={onCancel}>취소</button>
         <SubmitButton busy={saving}>기록 저장</SubmitButton>
       </div>
     </form>

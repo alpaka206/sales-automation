@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
 import { getJSON, postForm } from "../lib/api";
@@ -6,6 +7,7 @@ import { SubmitButton, useAction } from "../ui/ActionButton";
 import { kst } from "../lib/format";
 import { InteractionForm, InteractionItem, type Interaction } from "../ui/InteractionForm";
 import { LoadingBlock } from "../ui/Loading";
+import { Modal } from "../ui/Modal";
 
 type Contract = {
   id: number; plan: string | null; status: string; amount: number | null; currency: string;
@@ -70,6 +72,7 @@ export function CustomerDetail() {
     queryFn: () => getJSON<Data>(`/api/ui/customers/${id}`),
   });
   const refresh = () => queryClient.invalidateQueries();
+  const [logging, setLogging] = useState(false);
 
   // Every write goes to the route the Jinja form posts to: the stage sync, the sheet
   // mirror and the contract validation all stay server-side, in one copy.
@@ -244,10 +247,22 @@ export function CustomerDetail() {
           )}
 
           <section className="card" id="history">
-            <div className="section-header"><div className="section-header__title">소통 히스토리</div></div>
-            {/* No conversation_id: a record added here belongs to the customer, not to
-                one inquiry. The ticket screen and the board's + button pass theirs. */}
-            <InteractionForm contactId={contact.id} onSaved={refresh} />
+            {/* **폼은 펼쳐 두지 않고 `추가하기` → 모달입니다** (2026-08-26 운영자 제안).
+                티켓 세부 내역과 보드의 + 버튼은 진작 그랬는데 이 화면만 인라인이었습니다 —
+                서른 줄짜리 입력 폼이 제목과 기록 목록 사이에 늘 끼어 있어서, 이 카드를
+                여는 이유(무슨 이야기가 오갔나)가 스크롤 아래로 밀려 있었습니다.
+                세 자리가 같은 모달·같은 폼을 쓰니 고칠 곳도 하나입니다. */}
+            <div className="section-header" style={{ marginBottom: 12 }}>
+              <div className="section-header__title">소통 히스토리</div>
+              <button
+                type="button"
+                className="btn btn--subtle btn--sm"
+                aria-haspopup="dialog"
+                onClick={() => setLogging(true)}
+              >
+                <Icon name="plus" size={14} /> 추가하기
+              </button>
+            </div>
             {/* 메일은 위의 티켓 카드 안에 있습니다. 여기는 **사람에게 달린 기록**입니다 —
                 손으로 적은 메모, 통화·미팅, 허브스팟에서 가져온 것, 그리고 사라진 티켓에서
                 옮겨 온 옛 메일(작성자 「지난 티켓」). */}
@@ -370,6 +385,29 @@ export function CustomerDetail() {
           )}
         </aside>
       </div>
+
+      {/* 티켓 세부 내역·보드의 + 버튼과 **같은 모달, 같은 폼**입니다. 다른 것은 하나뿐:
+          여기는 `conversation_id` 를 안 넘깁니다 — 이 화면에서 남기는 기록은 그 사람에게
+          달린 것이지 한 문의에 달린 것이 아닙니다. */}
+      {logging && (
+        <Modal
+          title="소통 히스토리 추가"
+          hideCancel
+          wide
+          onClose={() => setLogging(false)}
+        >
+          <div style={{ marginTop: 16 }}>
+            <InteractionForm
+              onCancel={() => setLogging(false)}
+              contactId={contact.id}
+              onSaved={() => {
+                setLogging(false);
+                refresh();
+              }}
+            />
+          </div>
+        </Modal>
+      )}
     </>
   );
 }
