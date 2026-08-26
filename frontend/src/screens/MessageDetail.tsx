@@ -304,6 +304,11 @@ export function MessageDetail() {
   // 메일은 「이메일 발송」입니다 — 「문의 회신」은 이 티켓에서 한 번 일어나는 사건이라
   // 두 번 세 번 적히면 어느 것이 그 사건인지 알 수 없습니다 (2026-08-26 운영자 지시).
   const firstReplyId = data.thread.find((b) => SENT.has(b.direction))?.id;
+  // New 를 지나면 말풍선은 「이 티켓의 기록」 줄기로 내려가고, 위에는 검토 중인 초안만
+  // 남습니다. 그 초안마저 없으면 그릴 것이 없습니다.
+  const visibleBubbles = afterNew
+    ? data.thread.filter((b) => b.is_current && isDraftOpen)
+    : data.thread;
   const ticketLog = [
     ...data.ticket_interactions.map((item, index) => ({
       key: `i${item.id ?? index}`,
@@ -425,30 +430,27 @@ export function MessageDetail() {
 
       {/* 큰 글씨는 **누구인가** 입니다. 오래 「문의와 답변 · 제목」이었고 티켓 번호가 맨 위
           태그였는데, 티켓 번호는 이 화면에서 답을 쓰는 데 한 번도 쓰이지 않습니다 — 허브스팟에
-          가서 같은 티켓을 찾을 때나 씁니다. 그래서 아래 작은 줄로 내리고, 그 자리에 회사
-          이름과 Client ID 를 올렸습니다(운영자 지시). 제목은 티켓 정보 카드에 그대로 있습니다. */}
+          가서 같은 티켓을 찾을 때나 씁니다. 그래서 회사 이름을 올렸고, 나머지는 전부
+          내려갔습니다. 제목·티켓 번호·Client ID 는 오른쪽 티켓 정보 카드에 있습니다. */}
       <div className="page-header">
         <div>
           <div className="row wrap" style={{ gap: 10 }}>
             <h1 className="page-title page-title--lead">
               {contact?.company || contact?.name || ticket.inquiry_subject || "이름 없는 문의"}
             </h1>
-            {ticket.client_id != null && (
-              <span className="chip tnum">Client ID {ticket.client_id}</span>
-            )}
-            {/* 「문의 언어 · ko」 는 뺐습니다 (2026-08-26 운영자 지시). 거의 모든 문의가
-                국문이라 늘 같은 값이고, 다를 때 알아야 하는 자리는 여기가 아니라 초안
-                편집기입니다 — 거기에 번역하기 버튼과 발송 언어가 이미 서 있습니다. */}
-          </div>
-          {/* 「진행 기록 n건」과 상태도 뺐습니다. 앞엣것은 바로 아래 목록을 세면 나오는
-              값이고, 뒤엣것은 상태마다 그 말을 하는 자리가 이미 있습니다 — 작성 중·발송
-              실패는 배너가, 발송 대기는 그 아래 편집기와 발송 버튼이, 발송 완료는 기록의
-              그 줄이 말합니다. 티켓 번호만 남깁니다: 허브스팟에서 같은 티켓을 찾을 때
-              쓰는 값이라 이 화면에서 유일하게 다른 데서 못 얻는 것입니다. */}
-          <div className="t-xs t-subtle" style={{ marginTop: 6 }}>
-            {ticket.ticket_id
-              ? `HubSpot 티켓 #${ticket.ticket_id}`
-              : "연락처 기준 대화 (티켓 없음)"}
+            {/* **머리글은 이름 하나입니다** (2026-08-26 운영자 지시). 여기 있던 넷 —
+                문의 언어 · 진행 기록 건수 · 상태 · 티켓 번호 · Client ID — 는 전부 이
+                화면의 다른 자리가 이미 말합니다:
+
+                  문의 언어    초안 편집기의 번역하기·발송 언어
+                  진행 기록 n건 바로 아래 목록을 세면 나온다
+                  상태         작성 중·발송 실패는 배너, 발송 대기는 편집기와 발송 버튼,
+                               발송 완료는 기록의 그 줄
+                  티켓 번호     오른쪽 티켓 정보 카드
+                  Client ID    오른쪽 티켓 정보 카드
+
+                머리글이 그것을 한 번 더 적으면 화면을 여는 사람이 같은 사실을 두 번 읽고,
+                정작 「누구인가」가 그 틈에 묻힙니다. */}
           </div>
         </div>
       </div>
@@ -494,11 +496,12 @@ export function MessageDetail() {
               </div>
             </div>
           )}
+          {/* **그릴 것이 없으면 이 상자 자체를 안 그립니다.** `.stack` 은 flex 라 빈 자식도
+              간격 하나를 차지합니다 — 초안이 닫힌 티켓에서 「이 티켓의 기록」이 오른쪽
+              카드보다 딱 그만큼 내려가 있던 이유입니다 (2026-08-26 운영자 지적). */}
+          {visibleBubbles.length > 0 && (
           <div className="thread">
-            {(afterNew
-              ? data.thread.filter((b) => b.is_current && isDraftOpen)
-              : data.thread
-            ).map((bubble) => {
+            {visibleBubbles.map((bubble) => {
               if (bubble.is_current && isDraftOpen) {
                 return (
                   <div key={bubble.id} className="bubble bubble--out bubble--current">
@@ -621,6 +624,7 @@ export function MessageDetail() {
               );
             })}
           </div>
+          )}
 
           {/* This ticket's manual touchpoints — everything after the first reply happens
               off HubSpot, so the operator types it in and the ticket keeps one history.
