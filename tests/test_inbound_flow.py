@@ -19,7 +19,7 @@ from src.agents.inbound import (
 )
 from src.common.config import settings
 from src.db.models import Contact, Conversation, InboundJob, Message
-from src.db.models import KnowledgeDocument
+from src.db.models import PolicySource
 from src.integrations.hubspot import ContactDTO, EngagementDTO, DealDTO
 from src.llm import knowledge
 
@@ -455,12 +455,9 @@ def test_inbound_enriched_from_hubspot(db_session, monkeypatch) -> None:
 def test_inbound_passes_knowledge_docs_to_draft(db_session) -> None:
     """When classification matches a knowledge_base doc, its body must reach the draft prompt."""
     knowledge.reset_cache()
-    doc = KnowledgeDocument(
-        title="Plans",
-        slug="plans",
-        categories=["purchase_inquiry"],
-        scope="both",
-        body="Starter plan starts at 99k KRW.",
+    doc = PolicySource(
+        label="Plans", title="Plans", doc_key="p" * 32, mode="knowledge",
+        status="active", body="Starter plan starts at 99k KRW.",
     )
     db_session.add(doc)
     db_session.commit()
@@ -491,12 +488,9 @@ def test_a_spam_classification_still_gets_documents(db_session) -> None:
     was exactly the one this rule produced. What to send is the operator's call on the
     draft, not something decided by withholding the documents."""
     knowledge.reset_cache()
-    doc = KnowledgeDocument(
-        title="General",
-        slug="general",
-        categories=["all"],
-        scope="both",
-        body="Always-on company info.",
+    doc = PolicySource(
+        label="General", title="General", doc_key="g" * 32, mode="knowledge",
+        status="active", body="Always-on company info.",
     )
     db_session.add(doc)
     db_session.commit()

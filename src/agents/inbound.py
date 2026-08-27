@@ -887,7 +887,6 @@ class InboundAgent:
         knowledge_docs, doc_subject = select_relevant_docs(
             inquiry=contact_info["last_message"],
             category=classification.category,
-            scope="inbound",
             llm=self.llm,
             # 한국어 문의에는 KR 문서, 그 외에는 ENG 문서. 기본 메일 템플릿이 두 벌이라
             # 언어를 안 가리면 두 벌이 같이 붙습니다.

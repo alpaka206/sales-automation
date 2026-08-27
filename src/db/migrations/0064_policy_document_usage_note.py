@@ -39,18 +39,7 @@ def up(engine: Engine) -> None:
                 conn.execute(text("ALTER TABLE policy_sources ADD COLUMN usage_note TEXT"))
             logger.info("0064: policy_sources.usage_note added.")
 
-    if "knowledge_documents" in tables:
-        # ORM 로 씁니다. ``categories`` 는 JSON 열이고, 리스트를 문자열로 직렬화하는 방식이
-        # SQLite 와 PostgreSQL 에서 다릅니다 — 원시 SQL 로는 한쪽에서 반드시 틀립니다.
-        from sqlalchemy.orm import Session
-
-        from ..models import KnowledgeDocument
-
-        fixed = 0
-        with Session(engine) as session:
-            for doc in session.query(KnowledgeDocument).all():
-                if "policy" in (doc.categories or []):
-                    doc.categories = ["all"]
-                    fixed += 1
-            session.commit()
-        logger.info("0064: %d knowledge document(s) moved from 'policy' to 'all'.", fixed)
+    # ``knowledge_documents`` 의 ``categories`` 를 'policy' → 'all' 로 옮기던 단계가 여기
+    # 있었습니다. **그 표는 0098 이 지웠습니다** — 라우터가 ``policy_sources`` 를 직접
+    # 읽으므로 유형 칸 자체가 없습니다. 새 DB 에서는 만들어지지도 않으므로 할 일이 없고,
+    # 옛 DB 에서는 이미 돌았습니다.

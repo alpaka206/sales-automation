@@ -294,39 +294,6 @@ class IntegrationCredential(Base):
     )
 
 
-class KnowledgeDocument(Base):
-    """Stores knowledge base documents for web UI editing and LLM prompt context.
-
-    ``summary`` and ``tags`` feed the LLM document router (knowledge.py) so the
-    model can pick the right docs from a compact index without reading every
-    body. ``author``/``version``/``status`` give operators provenance.
-
-    **판본 이력은 여기 없습니다.** 이 표의 행은 대부분 ``policy_sources`` 의 **사본**이고
-    (``policy_sync._upsert_knowledge``), 사람이 고치는 것은 그 등록부 쪽입니다 — 이력도
-    거기 달립니다(``document_revisions``). 한동안 ``knowledge_document_revisions`` 라는
-    표가 있었고 이 자리에 「every edit snapshots …」 라고 적혀 있었는데, **그 표에 쓰는
-    코드는 한 줄도 없었습니다**(0016 이 만들고 끝). 2026-08-27 에 지웠습니다.
-    """
-
-    __tablename__ = "knowledge_documents"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    title: Mapped[str] = mapped_column(String, nullable=False)
-    slug: Mapped[str] = mapped_column(String, unique=True, nullable=False)
-    categories: Mapped[list | None] = mapped_column(JSON, nullable=True)
-    tags: Mapped[list | None] = mapped_column(JSON, nullable=True)
-    summary: Mapped[str | None] = mapped_column(Text, nullable=True)
-    scope: Mapped[str] = mapped_column(String, nullable=False, default="both")
-    body: Mapped[str] = mapped_column(Text, nullable=False)
-    author: Mapped[str | None] = mapped_column(String, nullable=True)
-    status: Mapped[str] = mapped_column(String, nullable=False, default="active")
-    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=_utcnow, onupdate=_utcnow, nullable=False
-    )
-
-
 class PolicySource(Base):
     """정책·지식 문서 한 편. **원본이 여기 있습니다.**
 
@@ -338,8 +305,9 @@ class PolicySource(Base):
     ``mode`` decides how the copy is used:
       ``rules``     — always applied, concatenated into the LLM system instruction
                       (this is what ``company_rules/*.md`` used to be).
-      ``knowledge`` — offered to the per-inquiry document router, i.e. upserted into
-                      ``knowledge_documents`` under ``slug``.
+      ``knowledge`` — offered to the per-inquiry document router. 라우터가 이 행을
+                      **직접** 읽습니다 — 한동안 ``knowledge_documents`` 라는 사본 표가
+                      있었는데, 칸이 하나도 자기 것이 아니어서 2026-08-27 에 지웠습니다.
     """
 
     __tablename__ = "policy_sources"

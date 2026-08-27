@@ -21,7 +21,7 @@ from sqlalchemy.pool import StaticPool
 
 from src.api.main import app
 from src.db.base import Base
-from src.db.models import KnowledgeDocument, PolicySource
+from src.db.models import PolicySource
 
 
 @pytest.fixture()
@@ -33,7 +33,6 @@ def policy_db():
     factory = sessionmaker(bind=engine, expire_on_commit=False)
     with (
         patch("src.api.routes.policy_docs.SessionLocal", factory),
-        patch("src.agents.policy_sync.SessionLocal", factory),
     ):
         yield factory
 
@@ -52,7 +51,7 @@ def test_a_pasted_document_is_readable_by_the_draft_immediately(policy_db):
         _create(client, body="업로드 실패 시에는 크레딧을 복구해 드립니다.")
 
     with policy_db() as session:
-        doc = session.query(KnowledgeDocument).one()
+        doc = session.query(PolicySource).one()
         assert "크레딧을 복구" in doc.body
         assert doc.status == "active"
 
@@ -65,16 +64,24 @@ def test_the_same_name_twice_is_refused_rather_than_split_in_two(policy_db):
         assert client.post("/policy-docs", data={"label": "CS 문의 대응 가이드"}).status_code == 400
 
 
-def test_editing_the_body_reaches_the_copy_the_draft_reads(policy_db):
-    """이것이 이 파일의 요점입니다. 등록부만 고치고 사본을 두면, 화면에는 새 내용이
-    보이는데 회신은 옛 내용으로 나갑니다."""
+def test_editing_the_body_reaches_the_draft_at_once(policy_db):
+    """이것이 이 파일의 요점입니다. 화면에는 새 내용이 보이는데 회신은 옛 내용으로 나가면
+    눈치챌 방법이 없습니다.
+
+    **예전에는 사본을 밀어야 했습니다** — 라우터가 ``knowledge_documents`` 를 읽었고, 그
+    사본을 안 밀면 정확히 그 상태가 됐습니다. 사본이 없어졌으므로(0098) 밀 것이 없습니다:
+    라우터가 이 행을 직접 읽습니다."""
+    from unittest.mock import patch as _patch
+
+    from src.llm import knowledge
+
     with TestClient(app) as client:
         source_id = _create(client, body="옛 내용")
         response = client.put(f"/policy-docs/{source_id}", data={"body": "새 내용"})
         assert response.status_code == 200, response.text
 
-    with policy_db() as session:
-        assert session.query(KnowledgeDocument).one().body == "새 내용"
+    with _patch.object(knowledge, "SessionLocal", policy_db):
+        assert "새 내용" in knowledge.select_relevant_docs("문의", "support")
 
 
 def test_an_edit_is_stamped_because_it_is_the_only_date_this_document_has(policy_db):
@@ -151,12 +158,12 @@ def test_deleting_a_reference_document_also_stops_the_router_citing_it(policy_db
     with TestClient(app) as client:
         source_id = _create(client, body="환불은 영업일 5~10일", mode="knowledge")
         with policy_db() as session:
-            assert session.query(KnowledgeDocument).one().status == "active"
+            assert session.query(PolicySource).one().status == "active"
 
         assert client.post(f"/policy-docs/{source_id}/delete").status_code == 200
         with policy_db() as session:
-            # 사본은 재워지고, 행은 남습니다 — 라우터는 active 만 봅니다.
-            assert session.query(KnowledgeDocument).one().status != "active"
+            # 행은 남고 status 만 바뀝니다 — 라우터는 active 만 봅니다.
+            assert session.query(PolicySource).one().status != "active"
 
 
 # ---- 판본 기록 ------------------------------------------------------------------

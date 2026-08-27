@@ -1,64 +1,26 @@
-"""scripts/restore_deleted.py — 7일이 지난 뒤에도 되살릴 데가 남아 있는 두 가지.
+"""scripts/restore_deleted.py — 저장소의 씨앗 파일에서 「항상 적용」 규칙을 다시 넣는 길.
 
-이메일 템플릿은 여기 없습니다. 콘솔의 7일 휴지통이 그 일을 하고, 그 뒤에는 개정 이력까지
-같이 청소됩니다 — 7일이 지나면 정말 없어진다는 것이 그 기능의 전부라서, 뒷문을 하나 더 두면
-운영자가 일부러 흘려보낸 것이 되살아납니다. 그 청소는 tests/test_email_template_form.py 가
-고정합니다.
+**되살릴 데가 여기밖에 없는 경우는 이제 하나뿐입니다.** 2026-08-27 부터 콘솔에서 지운 것은
+행이 남습니다 — 목록에서만 사라지고 DB 에서는 안 사라집니다. 그래서 이메일 템플릿이든 정책
+문서든 되살리는 길은 그 행의 ``status`` 를 되돌리는 것이고, 본문은 판본 기록에 있습니다.
 
-여기 남은 둘은 휴지통이 아니라 **다른 목적의 사본**이 우연히 남는 경우입니다.
+여기 「사본에서 정책 문서 되짚기」 테스트가 둘 있었습니다. 그 사본 표(``knowledge_documents``)
+가 없어졌고(0098), 그 길이 존재하던 이유(등록부 행이 하드 삭제로 사라짐)도 같이 없어졌습니다.
 """
 
 from __future__ import annotations
 
 import pytest
 
-from src.db.models import KnowledgeDocument, PolicySource
+from scripts.restore_deleted import _restore_rule, _rule_seeds
+from src.db.models import PolicySource
 from src.db.session import SessionLocal
-from scripts.restore_deleted import (
-    _orphan_knowledge,
-    _restore_policy_doc,
-    _restore_rule,
-    _rule_seeds,
-)
-
-
-@pytest.fixture
-def 지운_정책문서():
-    """정책 문서 삭제는 등록부 행만 지웁니다 — 사본은 그대로 남습니다."""
-    from src.api.routes.policy_docs import _doc_key
-
-    key = _doc_key("톤앤 매너 가이드")
-    slug = f"notion-{key[:12]}"
-    with SessionLocal() as session:
-        session.add(
-            KnowledgeDocument(
-                slug=slug, title="톤앤 매너 가이드", body="사본 본문",
-                summary="말투를 정할 때", tags=["notion", "subject:안내"],
-            )
-        )
-        session.commit()
-    yield slug
-    with SessionLocal() as session:
-        session.query(KnowledgeDocument).filter_by(slug=slug).delete()
-        session.query(PolicySource).filter_by(doc_key=key).delete()
-        session.commit()
-
-
-def test_a_deleted_policy_doc_comes_back_from_the_copy(지운_정책문서):
-    with SessionLocal() as session:
-        고아 = _orphan_knowledge(session)
-        assert 지운_정책문서 in 고아
-        _restore_policy_doc(session, 고아[지운_정책문서])
-
-    with SessionLocal() as session:
-        source = session.query(PolicySource).filter_by(label="톤앤 매너 가이드").one()
-        assert source.body == "사본 본문" and source.mode == "knowledge"
-        assert source.subject == "안내"        # 제목은 태그에서 되짚습니다
-        assert 지운_정책문서 not in _orphan_knowledge(session)
 
 
 def test_an_always_applied_rule_comes_back_from_its_seed_file():
-    """DB 사본이 없는 대신 씨앗 파일이 저장소에 있습니다 — 0043 이 처음 넣은 그 텍스트."""
+    """「항상 적용」은 DB 에 사본이 없는 대신 씨앗 파일이 저장소에 있습니다 — 0043 이 처음
+    넣은 그 텍스트입니다. 되살아나는 것은 **원본**이라, 그 뒤 콘솔에서 고친 내용은 돌아오지
+    않습니다."""
     from src.llm.prompts import get_company_rules
 
     seeds = _rule_seeds()
@@ -87,11 +49,10 @@ def test_an_always_applied_rule_comes_back_from_its_seed_file():
             session.commit()
 
 
-def test_a_renamed_copy_is_refused_rather_than_split_in_two(지운_정책문서):
-    """제목이 바뀐 뒤였다면 doc_key 가 안 맞습니다. 지어내면 같은 문서가 둘이 됩니다."""
-    with SessionLocal() as session:
-        doc = _orphan_knowledge(session)[지운_정책문서]
-        doc.title = "다른 이름"
-        with pytest.raises(SystemExit):
-            _restore_policy_doc(session, doc)
-        session.rollback()
+def test_the_copy_recovery_path_is_gone():
+    """사본에서 등록부를 되짚던 길입니다. 사본 표가 없어졌으므로 되짚을 것이 없고, 지운
+    문서는 이제 행이 남으므로 되짚을 이유도 없습니다."""
+    import scripts.restore_deleted as restore
+
+    for gone in ("_orphan_knowledge", "_restore_policy_doc"):
+        assert not hasattr(restore, gone), gone

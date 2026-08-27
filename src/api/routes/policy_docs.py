@@ -152,13 +152,17 @@ async def policy_docs_update(
 
 
 def _publish(source_id: int) -> None:
-    """등록부에서 바뀐 것을 초안이 읽는 사본까지 밀어 넣습니다."""
-    from ...agents.policy_sync import refresh_knowledge_copy
+    """저장 직후 프롬프트 캐시를 비웁니다.
+
+    예전에는 여기서 초안이 읽는 **사본**까지 밀어 넣었습니다(``refresh_knowledge_copy``).
+    사본이 없어졌으므로(2026-08-27) 밀 것이 없습니다 — 라우터가 이 행을 직접 읽습니다.
+    """
+    from ...llm.knowledge import reset_cache
 
     try:
-        refresh_knowledge_copy(source_id)
+        reset_cache()
     except Exception:
-        logger.warning("Knowledge copy refresh failed for %s.", source_id, exc_info=True)
+        logger.warning("Prompt cache reset failed for %s.", source_id, exc_info=True)
 
 
 @router.post("/policy-docs/{source_id}/delete")
@@ -181,7 +185,6 @@ async def policy_docs_delete(source_id: int):
             snapshot_policy(session, source, change_note="deleted", edited_by="web")
             source.status = DELETED
             source.deleted_at = utcnow()
-            _set_knowledge_status(session, source, "archived")
             session.commit()
     return RedirectResponse("/policy-docs", status_code=303)
 
@@ -189,17 +192,6 @@ async def policy_docs_delete(source_id: int):
 # 「되돌리기」가 여기 있었습니다 — 이메일 템플릿과 같은 이유로 지웠습니다(2026-08-27).
 
 
-def _set_knowledge_status(session, source: PolicySource, status: str) -> None:
-    """초안이 읽는 사본을 재우거나 깨웁니다. 「문의별 참고」에만 사본이 있습니다."""
-    from ...agents.policy_sync import knowledge_slug
-    from ...db.models import KnowledgeDocument
-
-    doc = (
-        session.query(KnowledgeDocument)
-        .filter(KnowledgeDocument.slug == knowledge_slug(source))
-        .one_or_none()
-    )
-    if doc is not None:
-        doc.status = status
-
-
+# ``_set_knowledge_status`` 가 여기 있었습니다. 정책 문서를 지우면 초안이 읽는 **사본**도
+# 같이 재워야 했는데, 사본이 없어졌으므로 재울 것이 없습니다 — 이 행의 ``status`` 하나가
+# 곧 「초안이 이 문서를 보는가」입니다 (2026-08-27).

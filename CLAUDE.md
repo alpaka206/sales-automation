@@ -310,6 +310,20 @@ PERSO Inbound is a FastAPI workflow for inbound inquiry handling and customer op
 - Personal email domains are never grouped as one company.
 - Existing conversation progress rows are append-only.
 
+- **정책 문서의 표는 하나다 — 라우터가 `policy_sources` 를 직접 읽는다** (2026-08-27, 이관 0098).
+  한동안 사본 표(`knowledge_documents`)가 있었고 초안은 그것을 읽었다. **그 표의 칸은 하나도
+  자기 것이 아니었다**: slug 은 `doc_key` 에서, 요약은 `usage_note` 에서, 메일 제목은
+  `subject` 를 `tags` 에 `"subject:…"` 로 실어서, `scope`·`categories`·`author` 는 행마다
+  똑같은 상수. 파생물이라 **어긋날 수 있었고 어긋났다** — 상태를 따로 재워야 했고
+  (`_set_knowledge_status`), 저장 직후 따로 밀어야 했고(`refresh_knowledge_copy`), 재우다 만
+  행 하나가 콘솔에 안 보이는 채로 초안에 인용될 뻔했다(0097 의 `perso_refund_policy`).
+  - **모델이 읽는 본문은 한 글자도 안 바뀌었다.** 운영 데이터로 전/후를 대조했다: 문서 8편,
+    본문 9534자 바이트 단위 동일. 라우터 인덱스만 2083 → 1633자로 줄었고, 빠진 것은 행마다
+    똑같던 `categories: all` 과 `tags: notion` 두 줄이다.
+  - **라우터에게 보이는 이름은 `doc_key` 다.** 제목이 아니다 — 제목을 바꿔도 같은 문서여야
+    하고, 이름으로 만들면 바꾼 순간 옛 것이 남아 한 정책을 두 번 인용한다.
+  - `policy_sync` 는 `knowledge_slug` 하나만 남았다. 만드는 곳은 없고, 0097 이 「어느 행이
+    사본인가」를 그 규칙으로 갈랐기 때문에 읽을 수 있게 남긴다.
 - **정책·지식 문서의 원본은 이 콘솔이다. 노션에서 받아오는 코드는 하나도 없다.**
   `이메일 템플릿 → 정책 문서 → 직접 추가`(제목+본문), 어떤 문서든 `수정` 가능. 다섯 가지를
   시도했고 전부 막혔다 — 통합 토큰 발급 불가, 쿠키는 `file.notion.com`에서 403, 로컬

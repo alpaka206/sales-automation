@@ -20,7 +20,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from src.db.base import Base
-from src.db.models import KnowledgeDocument, PolicySource
+from src.db.models import PolicySource
 
 
 @pytest.fixture()
@@ -30,9 +30,6 @@ def db(monkeypatch):
     )
     Base.metadata.create_all(engine)
     factory = sessionmaker(bind=engine, expire_on_commit=False)
-    from src.agents import policy_sync
-
-    monkeypatch.setattr(policy_sync, "SessionLocal", factory)
     # prompts._rules_from_db imports SessionLocal at call time, so patching the module
     # attribute is what redirects it.
     monkeypatch.setattr("src.db.session.SessionLocal", factory)
@@ -94,71 +91,27 @@ def test_knowledge_rows_are_not_in_the_system_instruction(db):
     assert "Tier 1" not in get_company_rules()
 
 
-# ---- The copy the router reads -------------------------------------------------------
+# ---- 라우터가 읽는 것은 이 행 자체다 -------------------------------------------------
+#
+# 「사본이 제대로 만들어지는가」를 재던 테스트 셋이 여기 있었습니다. 사본 표가 없어졌고
+# (0098) 라우터가 ``policy_sources`` 를 직접 읽으므로, 옮겨 적히는 사이에 어긋날 자리가
+# 없습니다. 누가 후보가 되는지는 ``tests/test_knowledge.py`` 가 잽니다.
 
 
-def test_a_knowledge_row_reaches_the_table_the_router_reads(db):
-    from src.agents.policy_sync import refresh_knowledge_copy
+def test_a_rules_row_is_never_a_router_candidate(db):
+    """「항상 적용」 문서는 시스템 지시문으로 이미 통째로 들어갑니다. 라우터 후보로도
+    올리면 같은 글이 한 프롬프트에 두 번 들어갑니다."""
+    from unittest.mock import patch
+
+    from src.llm import knowledge
 
     with db() as session:
-        session.add(
-            PolicySource(
-                label="크레딧 차감 정책", title="크레딧 차감 정책", doc_key="c" * 32,
-                mode="knowledge", body="업로드 실패 시 크레딧은 복구됩니다.",
-            )
-        )
+        session.add_all([
+            PolicySource(label="가드레일", doc_key="e" * 32, mode="rules", body="가격 숫자 금지"),
+            PolicySource(label="크레딧 차감 정책", title="크레딧 차감 정책", doc_key="c" * 32,
+                         mode="knowledge", body="업로드 실패 시 크레딧은 복구됩니다."),
+        ])
         session.commit()
-        source_id = session.query(PolicySource).one().id
 
-    refresh_knowledge_copy(source_id)
-    with db() as session:
-        doc = session.query(KnowledgeDocument).one()
-        assert doc.title == "크레딧 차감 정책"
-        assert "크레딧은 복구" in doc.body
-
-
-def test_renaming_a_document_updates_its_copy_instead_of_making_a_second_one(db):
-    """슬러그가 제목이 아니라 doc_key 에서 나오는 이유입니다. 제목으로 만들면 이름을 바꾼
-    순간 옛 사본이 남고, 라우터가 한 정책을 서로 다른 두 문서로 인용합니다."""
-    from src.agents.policy_sync import refresh_knowledge_copy
-
-    with db() as session:
-        session.add(
-            PolicySource(
-                label="가격 정책", title="가격 정책", doc_key="d" * 32,
-                mode="knowledge", body="v1",
-            )
-        )
-        session.commit()
-        source_id = session.query(PolicySource).one().id
-    refresh_knowledge_copy(source_id)
-
-    with db() as session:
-        source = session.get(PolicySource, source_id)
-        source.title = "B2B 가격 정책"
-        source.body = "v2"
-        session.commit()
-    refresh_knowledge_copy(source_id)
-
-    with db() as session:
-        docs = session.query(KnowledgeDocument).all()
-        assert len(docs) == 1
-        assert docs[0].title == "B2B 가격 정책"
-        assert docs[0].body == "v2"
-
-
-def test_a_rules_row_never_becomes_a_knowledge_document(db):
-    """항상 적용 문서는 시스템 지시문으로 이미 들어갑니다. 사본까지 만들면 같은 글이 한
-    프롬프트에 두 번 들어갑니다."""
-    from src.agents.policy_sync import refresh_knowledge_copy
-
-    with db() as session:
-        session.add(
-            PolicySource(label="가드레일", doc_key="e" * 32, mode="rules", body="가격 숫자 금지")
-        )
-        session.commit()
-        source_id = session.query(PolicySource).one().id
-
-    refresh_knowledge_copy(source_id)
-    with db() as session:
-        assert session.query(KnowledgeDocument).count() == 0
+    with patch.object(knowledge, "SessionLocal", db):
+        assert [d.label for d in knowledge.active_docs()] == ["크레딧 차감 정책"]

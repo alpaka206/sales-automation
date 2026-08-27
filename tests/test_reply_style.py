@@ -137,48 +137,30 @@ def test_0061_takes_the_signature_out_of_a_live_rule_document():
 
 
 def test_the_router_reads_the_usage_note_when_one_is_written():
-    """문서를 고르는 것은 모델이고, 모델이 보는 것은 본문이 아니라 인덱스의 summary 한 줄입니다.
+    """문서를 고르는 것은 모델이고, 모델이 보는 것은 본문이 아니라 인덱스의 summary 한
+    줄입니다. 그래서 「언제 쓰는가」 칸이 그 자리에 들어가야 합니다 — 안 들어가면 화면에는
+    용도가 보이는데 문서는 계속 안 골라지고, 그 이유는 아무 데도 안 보입니다.
 
-    그래서 "언제 쓰는가" 칸이 그 자리에 들어가야 합니다. 안 들어가면 화면에는 용도가 보이는데
-    문서는 계속 안 골라지고, 그 이유는 아무 데도 안 보입니다. 비워 두면 예전처럼 본문 앞부분.
+    비워 두면 본문 앞부분을 자릅니다. 표로 시작하는 문서에는 그게 쓸모없는 요약이라
+    (「| 케이스 | 문구 |」) 그런 문서는 이 칸을 채워야 골라집니다.
     """
-    from sqlalchemy import create_engine
-    from sqlalchemy.orm import sessionmaker
+    from src.db.models import PolicySource
+    from src.llm.knowledge import summary_of
 
-    from src.agents.policy_sync import _upsert_knowledge
-    from src.db.models import Base, KnowledgeDocument, PolicySource
+    written = PolicySource(
+        label="견적 및 맞춤형 플랜 안내", doc_key="k-quote", mode="knowledge",
+        body="| 케이스 | 문구 |\n|---|---|\n| 1 | ... |",
+        usage_note="Quote, Price, pricing, cost, estimate 등 가격·견적을 직접 묻는 문의에 씁니다.",
+    )
+    blank = PolicySource(
+        label="지원 언어", doc_key="k-lang", mode="knowledge",
+        body="지원 언어 목록입니다. 한국어, 영어, 일본어…",
+    )
 
-    engine = create_engine("sqlite:///:memory:")
-    Base.metadata.create_all(engine)
-    factory = sessionmaker(bind=engine)
-
-    with factory() as session:
-        written = PolicySource(
-            label="견적 및 맞춤형 플랜 안내", doc_key="k-quote", mode="knowledge",
-            body="| 케이스 | 문구 |\n|---|---|\n| 1 | ... |",
-            usage_note="Quote, Price, pricing, cost, estimate 등 가격·견적을 직접 묻는 문의에 씁니다.",
-        )
-        blank = PolicySource(
-            label="지원 언어", doc_key="k-lang", mode="knowledge",
-            body="지원 언어 목록입니다. 한국어, 영어, 일본어…",
-        )
-        session.add_all([written, blank])
-        session.flush()
-        for source in (written, blank):
-            _upsert_knowledge(session, source, source.label, source.body)
-        session.commit()
-
-        docs = {d.slug: d for d in session.query(KnowledgeDocument).all()}
-        summaries = {d.title: d.summary for d in docs.values()}
-
-    assert summaries["견적 및 맞춤형 플랜 안내"].startswith("Quote, Price")
+    assert summary_of(written).startswith("Quote, Price")
     # 표로 시작하는 문서였습니다 — 칸이 없었으면 요약이 "| 케이스 | 문구 |" 였습니다.
-    assert "케이스" not in summaries["견적 및 맞춤형 플랜 안내"]
-    assert summaries["지원 언어"].startswith("지원 언어 목록입니다")
-
-    # 라우터가 실패해 유형 매칭으로 떨어져도 후보로 남아야 합니다. "policy" 는 어떤 문의
-    # 유형과도 안 맞아서, 그 순간 문서 0개로 답을 쓰게 했습니다.
-    assert all(doc.categories == ["all"] for doc in docs.values())
+    assert "케이스" not in summary_of(written)
+    assert summary_of(blank).startswith("지원 언어 목록입니다")
 
 
 def test_translation_prompt_preserves_dash_bullets() -> None:

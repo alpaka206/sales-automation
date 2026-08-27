@@ -1,4 +1,13 @@
-"""Tests for the DB-backed knowledge_base loader."""
+"""문서 라우터 — 원본은 ``policy_sources`` 한 곳입니다.
+
+한동안 사본 표(``knowledge_documents``)를 읽었습니다. 그 표의 칸은 하나도 자기 것이
+아니었고(slug 은 ``doc_key`` 에서, 요약은 ``usage_note`` 에서, 메일 제목은 ``subject`` 를
+태그에 실어서, ``scope``·``categories``·``author`` 는 행마다 같은 상수), 그래서 어긋날 수
+있었습니다. 2026-08-27 에 표를 없애고 원본을 직접 읽습니다(이관 0098).
+
+여기서 고정하는 것: **누가 후보가 되는가**(활성인 「문의별 참고」 행), **모델이 고른 것만
+싣는가**, **못 골랐을 때 무엇으로 떨어지는가**, 그리고 **메일 제목은 누가 정하는가**.
+"""
 
 from __future__ import annotations
 
@@ -7,13 +16,13 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from src.db.base import Base
-from src.db.models import KnowledgeDocument
+from src.db.models import PolicySource
 from src.llm import knowledge
 from src.llm.knowledge import SelectDocsResult
 
 
 class _FakeLLM:
-    """Stub LLM whose router call returns a fixed set of slugs."""
+    """Stub LLM whose router call returns a fixed set of keys."""
 
     def __init__(self, slugs: list[str]) -> None:
         self.slugs = slugs
@@ -32,317 +41,167 @@ class _BoomLLM:
 
 
 @pytest.fixture(autouse=True)
-def _db_backed_knowledge(monkeypatch):
-    """Point the knowledge loader at an in-memory DB and clear its cache."""
+def db(monkeypatch):
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
     factory = sessionmaker(bind=engine, expire_on_commit=False)
     monkeypatch.setattr(knowledge, "SessionLocal", factory)
-    knowledge.reset_cache()
-    yield factory
-    knowledge.reset_cache()
+    return factory
 
 
-def _insert(factory, **kwargs) -> None:
-    """Helper to insert a KnowledgeDocument."""
-    defaults = {"scope": "both", "body": "body"}
-    defaults.update(kwargs)
-    session = factory()
-    session.add(KnowledgeDocument(**defaults))
-    session.commit()
-    session.close()
+def _doc(db, doc_key: str, title: str, **kwargs) -> None:
+    """「문의별 참고」 문서 하나. ``doc_key`` 가 라우터에게 보이는 이름입니다."""
+    fields = {"mode": "knowledge", "status": "active", "body": f"{title} 본문"}
+    fields.update(kwargs)
+    with db() as session:
+        session.add(PolicySource(label=title, title=title, doc_key=doc_key, **fields))
+        session.commit()
 
 
-def test_category_match(_db_backed_knowledge) -> None:
-    _insert(
-        _db_backed_knowledge,
-        title="2026 Pricing",
-        slug="pricing",
-        categories=["pricing_question", "purchase_inquiry"],
-        body="Body text here.",
+# ---- 누가 후보가 되는가 -------------------------------------------------------------
+
+
+def test_only_active_knowledge_rows_are_candidates(db) -> None:
+    """「항상 적용」은 고르는 대상이 아닙니다 — 모든 프롬프트에 통째로 들어갑니다.
+    지운 문서도 후보가 아닙니다: 그 ``status`` 하나가 「초안이 이 문서를 보는가」입니다."""
+    _doc(db, "k1", "지원 언어 정책")
+    _doc(db, "k2", "지운 문서", status="deleted")
+    _doc(db, "r1", "공통 원칙", mode="rules")
+
+    assert [d.doc_key for d in knowledge.active_docs()] == ["k1"]
+
+
+def test_no_documents_means_no_block(db) -> None:  # noqa: ARG001
+    assert knowledge.select_relevant_docs("문의", "pricing_question") == ""
+
+
+def test_selected_bodies_are_rendered_with_their_titles(db) -> None:
+    _doc(db, "k1", "크레딧 차감 정책", body="초 단위로 차감합니다")
+    _doc(db, "k2", "지원 언어 정책", body="99개 언어")
+
+    out = knowledge.select_relevant_docs("문의", "support", llm=_FakeLLM(["k1", "k2"]))
+
+    assert "### 크레딧 차감 정책" in out and "초 단위로 차감합니다" in out
+    assert "### 지원 언어 정책" in out and "99개 언어" in out
+    assert "---" in out, "문서 사이 구분이 없으면 모델이 한 문서로 읽습니다"
+
+
+# ---- 라우터 ------------------------------------------------------------------------
+
+
+def test_the_router_loads_only_what_it_picked(db) -> None:
+    _doc(db, "k1", "고른 문서")
+    _doc(db, "k2", "안 고른 문서")
+
+    llm = _FakeLLM(["k1"])
+    out = knowledge.select_relevant_docs("가격이 궁금합니다", "pricing_question", llm=llm)
+
+    assert "고른 문서" in out and "안 고른 문서" not in out
+    # 인덱스에는 둘 다 보여야 고를 수 있습니다.
+    index = llm.calls[0]["variables"]["doc_index"]
+    assert "k1" in index and "k2" in index
+
+
+def test_the_index_carries_the_key_title_and_summary_only(db) -> None:
+    """인덱스는 문의마다 통째로 프롬프트에 들어갑니다. 행마다 똑같은 값을 실으면 그만큼
+    토큰이고 모델에게는 아무 정보도 아닙니다 — 사본 시절의 ``categories: all`` 과
+    ``tags: notion`` 이 그랬습니다."""
+    _doc(db, "k1", "크레딧 차감 정책", usage_note="크레딧이 얼마나 차감되는지 묻는 문의")
+
+    llm = _FakeLLM([])
+    knowledge.select_relevant_docs("문의", "support", llm=llm)
+    index = llm.calls[0]["variables"]["doc_index"]
+
+    assert index == (
+        "- slug: k1\n  title: 크레딧 차감 정책\n"
+        "  summary: 크레딧이 얼마나 차감되는지 묻는 문의"
     )
-    out = knowledge.load_relevant_docs("pricing_question")
-    assert "2026 Pricing" in out
-    assert "Body text here." in out
 
 
-def test_no_match_returns_empty(_db_backed_knowledge) -> None:
-    _insert(
-        _db_backed_knowledge,
-        title="Pricing",
-        slug="pricing",
-        categories=["pricing_question"],
-    )
-    assert knowledge.load_relevant_docs("recruiting") == ""
+def test_the_summary_falls_back_to_the_top_of_the_body(db) -> None:
+    """「언제 쓰는가」가 라우터가 읽는 유일한 설명입니다. 안 적었으면 본문 앞을 자릅니다 —
+    첫 문단이 용도를 설명하는 문서라면 그것도 맞는 답입니다."""
+    _doc(db, "k1", "환불 정책", body="## 표\n\n환불은 영업일 5~10일 안에 처리됩니다.")
+
+    llm = _FakeLLM([])
+    knowledge.select_relevant_docs("문의", "support", llm=llm)
+
+    assert "환불은 영업일 5~10일 안에 처리됩니다." in llm.calls[0]["variables"]["doc_index"]
 
 
-def test_all_keyword_matches_every_category(_db_backed_knowledge) -> None:
-    _insert(
-        _db_backed_knowledge,
-        title="About Us",
-        slug="about",
-        categories=["all"],
-        body="We are a company.",
-    )
-    for cat in ("purchase_inquiry", "partnership", "support", "recruiting", "other"):
-        knowledge.reset_cache()
-        out = knowledge.load_relevant_docs(cat)
-        assert "About Us" in out, f"missing for category={cat}"
+@pytest.mark.parametrize("llm", [None, _BoomLLM(), _FakeLLM([]), _FakeLLM(["없는키"])])
+def test_every_failure_falls_back_to_every_active_document(db, llm) -> None:
+    """**문서 없이 답을 쓰는 것보다는 낫습니다.** 라우터를 못 부르든, 터지든, 아무것도 못
+    고르든, 있지도 않은 키를 돌려주든 — 답은 같습니다."""
+    _doc(db, "k1", "문서 하나")
+    _doc(db, "k2", "문서 둘")
+
+    out = knowledge.select_relevant_docs("문의", "pricing_question", llm=llm)
+
+    assert "문서 하나" in out and "문서 둘" in out
 
 
-def test_empty_categories_defaults_to_all(_db_backed_knowledge) -> None:
-    _insert(
-        _db_backed_knowledge,
-        title="General Info",
-        slug="general",
-        categories=[],
-        body="Applies to everything.",
-    )
-    assert "General Info" in knowledge.load_relevant_docs("partnership")
-    knowledge.reset_cache()
-    assert "General Info" in knowledge.load_relevant_docs("support")
+def test_spam_still_gets_documents(db) -> None:
+    """영업·홍보 목적의 문의에도 회신은 나가고, 그 회신이 볼 것이 소개 문서입니다."""
+    _doc(db, "k1", "Business 플랜 홍보")
+
+    assert "Business 플랜 홍보" in knowledge.select_relevant_docs("광고입니다", "spam")
 
 
-def test_null_categories_defaults_to_all(_db_backed_knowledge) -> None:
-    _insert(
-        _db_backed_knowledge,
-        title="General Info",
-        slug="general",
-        categories=None,
-        body="Applies to everything.",
-    )
-    assert "General Info" in knowledge.load_relevant_docs("partnership")
+# ---- 메일 제목 ---------------------------------------------------------------------
 
 
-def test_spam_still_gets_documents(_db_backed_knowledge) -> None:
-    """It used to short-circuit to "". The operator's rule is that a 영업·홍보 목적의
-    문의에도 회신은 나가고, 그 회신이 볼 것이 소개 문서입니다 — so taking the documents
-    away left exactly that one reply written from nothing."""
-    _insert(
-        _db_backed_knowledge,
-        title="General",
-        slug="general",
-        categories=["all"],
-        body="Applies to everything.",
-    )
-    assert "General" in knowledge.load_relevant_docs("spam")
+def test_the_document_can_carry_the_mail_subject(db) -> None:
+    """제목은 코드가 읽습니다 — 모델에게 묻지 않습니다. 짧은 줄일수록 모델이 지어냅니다."""
+    _doc(db, "k1", "견적 안내", subject="[Perso Dubbing] Next steps")
 
-
-def test_empty_db_returns_empty(_db_backed_knowledge) -> None:
-    assert knowledge.load_relevant_docs("purchase_inquiry") == ""
-
-
-def test_multiple_matches_are_separated(_db_backed_knowledge) -> None:
-    _insert(
-        _db_backed_knowledge,
-        title="Pricing A",
-        slug="a-pricing",
-        categories=["pricing_question"],
-        body="A body.",
-    )
-    _insert(
-        _db_backed_knowledge,
-        title="Plans B",
-        slug="b-plans",
-        categories=["pricing_question"],
-        body="B body.",
-    )
-    out = knowledge.load_relevant_docs("pricing_question")
-    assert "Pricing A" in out
-    assert "Plans B" in out
-    assert "---" in out
-
-
-def test_scope_inbound_includes_shared_docs(_db_backed_knowledge) -> None:
-    _insert(
-        _db_backed_knowledge,
-        title="Inbound Only",
-        slug="inbound-only",
-        categories=["all"],
-        scope="inbound",
-    )
-    _insert(_db_backed_knowledge, title="Shared", slug="shared", categories=["all"], scope="both")
-    out = knowledge.load_relevant_docs("purchase_inquiry", scope="inbound")
-    assert "Inbound Only" in out
-    assert "Shared" in out
-
-
-def test_scope_both_matches_all(_db_backed_knowledge) -> None:
-    _insert(_db_backed_knowledge, title="Both", slug="both", categories=["all"], scope="both")
-    _insert(_db_backed_knowledge, title="In", slug="in", categories=["all"], scope="inbound")
-    out = knowledge.load_relevant_docs("purchase_inquiry", scope="both")
-    assert "Both" in out
-    assert "In" in out
-
-
-def test_archived_docs_excluded_from_category_match(_db_backed_knowledge) -> None:
-    _insert(
-        _db_backed_knowledge,
-        title="Archived Pricing",
-        slug="archived",
-        categories=["pricing_question"],
-        body="old body",
-        status="archived",
-    )
-    assert knowledge.load_relevant_docs("pricing_question") == ""
-
-
-# ---- LLM document router ----
-
-
-def test_router_selects_only_returned_slugs(_db_backed_knowledge) -> None:
-    _insert(_db_backed_knowledge, title="Pricing", slug="pricing",
-            categories=["pricing_question"], body="pricing body", summary="prices")
-    _insert(_db_backed_knowledge, title="Refund", slug="refund",
-            categories=["support"], body="refund body", summary="refunds")
-    llm = _FakeLLM(slugs=["refund"])
-    out = knowledge.select_relevant_docs("환불 되나요?", "support", llm=llm)
-    assert "Refund" in out
-    assert "Pricing" not in out
-    # router runs on the cheap flash tier
-    assert llm.calls and llm.calls[0]["tier"] == "flash"
-
-
-def test_router_none_llm_falls_back_to_category(_db_backed_knowledge) -> None:
-    _insert(_db_backed_knowledge, title="Pricing", slug="pricing",
-            categories=["pricing_question"], body="pricing body")
-    out = knowledge.select_relevant_docs("price?", "pricing_question", llm=None)
-    assert "Pricing" in out
-
-
-def test_router_empty_selection_falls_back_to_category(_db_backed_knowledge) -> None:
-    _insert(_db_backed_knowledge, title="Pricing", slug="pricing",
-            categories=["pricing_question"], body="pricing body")
-    llm = _FakeLLM(slugs=[])  # selects nothing
-    out = knowledge.select_relevant_docs("price?", "pricing_question", llm=llm)
-    assert "Pricing" in out  # fell back to category match
-
-
-def test_router_error_falls_back_to_category(_db_backed_knowledge) -> None:
-    _insert(_db_backed_knowledge, title="Pricing", slug="pricing",
-            categories=["pricing_question"], body="pricing body")
-    out = knowledge.select_relevant_docs("price?", "pricing_question", llm=_BoomLLM())
-    assert "Pricing" in out
-
-
-def test_the_router_picks_documents_for_spam_too(_db_backed_knowledge) -> None:
-    """The router decides; spam is no longer refused at the door. Selecting nothing is
-    still its own call to make — the prompt says so — but it has to be a judgement about
-    this inquiry, not a rule that fires before the model sees it."""
-    _insert(_db_backed_knowledge, title="X", slug="x", categories=["all"], body="b")
-    assert "X" in knowledge.select_relevant_docs("buy viagra", "spam", llm=_FakeLLM(["x"]))
-
-
-def test_router_ignores_archived_candidates(_db_backed_knowledge) -> None:
-    _insert(_db_backed_knowledge, title="Live", slug="live",
-            categories=["pricing_question"], body="live body", status="active")
-    _insert(_db_backed_knowledge, title="Old", slug="old",
-            categories=["pricing_question"], body="old body", status="archived")
-    # Even if the model names the archived slug, it isn't a candidate.
-    llm = _FakeLLM(slugs=["old", "live"])
-    out = knowledge.select_relevant_docs("price?", "pricing_question", llm=llm)
-    assert "Live" in out
-    assert "Old" not in out
-
-
-def test_a_document_can_carry_the_mail_subject_for_replies_written_from_it(
-    _db_backed_knowledge,
-) -> None:
-    """「기본 메일 템플릿 ENG」 같은 문서는 그 자체가 회신 한 통의 본보기입니다. 제목을 본문
-    안에 "Subject: ..." 로 적으면 모델이 그 줄을 본문에 옮겨 적어, 첫 줄이 "Subject: ..." 인
-    메일이 나갑니다. 그래서 문서의 칸으로 두고 **코드가** 꺼냅니다 — 제목은 모델이 지어내기
-    딱 좋은 자리이고, 지어내면 RE: 가 겹치거나 언어가 뒤집힙니다."""
-    _insert(
-        _db_backed_knowledge, title="기본 메일 템플릿 ENG", slug="intro",
-        categories=["purchase_inquiry"], body="Hey [Name],",
-        tags=["notion", "subject:Next Steps on Your custom Perso Dubbing plan"],
-    )
     body, subject = knowledge.select_relevant_docs(
-        "tell me more", "purchase_inquiry", with_subject=True
+        "견적", "pricing_question", llm=_FakeLLM(["k1"]), with_subject=True
     )
-    assert "Hey [Name]," in body
-    assert subject == "Next Steps on Your custom Perso Dubbing plan"
+
+    assert "견적 안내" in body
+    assert subject == "[Perso Dubbing] Next steps"
 
 
-def test_a_document_with_no_subject_leaves_the_reply_on_re(_db_backed_knowledge) -> None:
-    """그쪽이 고객 메일함에서 원래 스레드에 붙습니다. 제목을 정한 문서만 그걸 벗어납니다."""
-    _insert(_db_backed_knowledge, title="크레딧", slug="credits",
-            categories=["credits"], body="1 credit/초")
-    _, subject = knowledge.select_relevant_docs("크레딧?", "credits", with_subject=True)
+def test_a_document_with_no_subject_leaves_the_reply_on_re(db) -> None:
+    _doc(db, "k1", "지원 언어 정책")
+
+    subject = knowledge.select_relevant_docs(
+        "언어", "support", llm=_FakeLLM(["k1"]), with_subject=True
+    )[1]
+
     assert subject is None
 
 
-def test_two_documents_carrying_a_subject_is_logged_not_silently_resolved(
-    _db_backed_knowledge, caplog
-) -> None:
-    """메일 제목은 메일 템플릿에만 채웁니다 — 지원 언어·크레딧 같은 근거 문서는 내용을
-    제공할 뿐 그 메일의 제목을 정하지 않습니다.
+def test_two_documents_carrying_a_subject_is_logged_not_silently_resolved(db, caplog) -> None:
+    """순서는 제목 가나다순이라 **이긴 문서가 메일 템플릿이라는 보장이 없습니다** —
+    2026-08-26 에 「B2B 플랜 비교표」(참고 문서)가 「견적 및 맞춤형 플랜 안내」(실제 회신
+    서식)를 제치고 제목을 정했습니다. 그래서 경고는 어느 쪽이 옳다고 지목하지 않고 제목을
+    든 문서를 전부 나열합니다 — 어느 것이 메일 템플릿인지는 운영자가 압니다."""
+    _doc(db, "k1", "B2B 플랜 비교표", subject="비교표 제목")
+    _doc(db, "k2", "견적 및 맞춤형 플랜 안내", subject="견적 제목")
 
-    코드가 이름으로 "메일 템플릿" 을 알아보게 하지는 않았습니다: 문서 이름은 바뀌고, 이름을
-    조건에 넣으면 이름을 바꾸는 순간 조용히 끊깁니다. 대신 둘 이상 채워져 있으면 경고를
-    남깁니다 — 조용히 하나를 고르면 고객 메일함에 뜨는 제목이 문서 제목 알파벳순으로 정해지고
-    왜 그런지 아무 데도 안 남습니다.
-    """
-    import logging
+    with caplog.at_level("WARNING"):
+        subject = knowledge.select_relevant_docs(
+            "견적", "pricing_question", llm=_FakeLLM(["k1", "k2"]), with_subject=True
+        )[1]
 
-    _insert(_db_backed_knowledge, title="A 템플릿", slug="a", categories=["credits"],
-            body="a", tags=["subject:From the template"])
-    _insert(_db_backed_knowledge, title="B 근거", slug="b", categories=["credits"],
-            body="b", tags=["subject:From the reference"])
-
-    with caplog.at_level(logging.WARNING, logger="src.llm.knowledge"):
-        _, subject = knowledge.select_relevant_docs("크레딧?", "credits", with_subject=True)
-
-    assert subject == "From the template"
-    assert "메일 제목은 메일 템플릿에만" in caplog.text
+    assert subject == "비교표 제목"
+    logged = caplog.text
+    assert "B2B 플랜 비교표" in logged and "견적 및 맞춤형 플랜 안내" in logged
 
 
-# ---- 화면에 없는 문서는 남지 않는다 (0097) -------------------------------------------
+# ---- 사본 표는 없다 ----------------------------------------------------------------
 
 
-def test_0097_keeps_only_the_copies_the_console_can_show():
-    """**남을 것을 정의합니다 — 지울 것을 나열하지 않습니다.**
+def test_the_copy_table_is_gone() -> None:
+    """``knowledge_documents`` 는 파생물이었습니다 — 칸이 하나도 자기 것이 아니었고,
+    그래서 원본과 어긋날 수 있었습니다(0097 의 ``perso_refund_policy`` 가 그 결과입니다).
+    표도, 그 표를 채우던 코드도 없어야 합니다(0098)."""
+    import src.agents.policy_sync as policy_sync
+    from src.db import models
 
-    0077 은 지울 씨앗 문서 11개의 이름을 그대로 적었고, 그래서 목록에서 빠진
-    ``perso_refund_policy`` 하나가 ``status='active'`` 로 살아남았습니다. 초안 라우터는
-    그것을 고를 수 있었는데 콘솔에는 안 떴습니다 — 운영자가 못 보고 못 고치는 문서가
-    회신에 인용되는 상태입니다. 규칙을 뒤집으면 빠진 것은 살아남지 않고 지워집니다.
-    """
-    import hashlib
-    import importlib
-
-    from sqlalchemy import create_engine, text
-
-    from src.db.models import KnowledgeDocument, PolicySource
-
-    engine = create_engine("sqlite:///:memory:")
-    for model in (KnowledgeDocument, PolicySource):
-        model.__table__.create(engine)
-
-    doc_key = hashlib.sha256("살아 있는 정책".encode()).hexdigest()[:32]
-    with engine.begin() as conn:
-        conn.execute(
-            text("INSERT INTO policy_sources (label, doc_key, mode, order_index, status, "
-                 "version, created_at, updated_at) VALUES ('살아 있는 정책', :k, 'knowledge', "
-                 "100, 'active', 3, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"),
-            {"k": doc_key},
-        )
-        for slug, status in (
-            (f"notion-{doc_key}", "active"),   # 사본 — 남습니다
-            ("perso_refund_policy", "active"),  # 0077 목록에서 빠졌던 그 행
-            ("perso_pricing", "archived"),      # 재워 둔 씨앗
-        ):
-            conn.execute(
-                text("INSERT INTO knowledge_documents (slug, title, body, scope, status, "
-                     "version, created_at, updated_at) VALUES (:s, :s, 'b', 'both', :st, 1, "
-                     "CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"),
-                {"s": slug, "st": status},
-            )
-
-    importlib.import_module("src.db.migrations.0097_only_the_documents_in_use_remain").up(engine)
-
-    with engine.begin() as conn:
-        left = [r[0] for r in conn.execute(text("SELECT slug FROM knowledge_documents"))]
-        assert left == [f"notion-{doc_key}"]
-        # 판 번호는 1부터 다시. 화면의 "v3" 이 「이 화면에서 세 번 저장했다」가 되도록.
-        assert conn.execute(text("SELECT version FROM policy_sources")).scalar() == 1
+    assert not hasattr(models, "KnowledgeDocument")
+    assert "knowledge_documents" not in Base.metadata.tables
+    for gone in ("refresh_knowledge_copy", "_upsert_knowledge", "_tags_for"):
+        assert not hasattr(policy_sync, gone), gone
