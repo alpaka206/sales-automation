@@ -319,7 +319,7 @@ def test_a_translation_that_loses_the_link_is_a_failed_translation():
 
 def test_the_tokens_are_protected_too():
     """`{{SENDER_NAME}}` 이 아직 안 바뀐 채로 번역을 지나는 경로도 있습니다 —
-    초안의 `ensure_korean` 은 치환보다 앞입니다."""
+    초안의 `ensure_language` 는 치환보다 앞입니다."""
     from src.llm.translate import _protect, _restore
 
     masked, held = _protect("담당 {{SENDER_NAME}} 드림 — {{MEETING_LINK}}")

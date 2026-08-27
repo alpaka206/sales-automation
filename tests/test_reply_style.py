@@ -21,14 +21,15 @@ def test_draft_prompt_requires_scannable_plain_text_layout() -> None:
             "enrichment_context": "",
             "knowledge_docs": "",
             "pricing_rule": "확인된 정책만 사용합니다.",
+            "reply_language": "English",
         },
         include_rules=False,
     )
 
     assert "이전 대화 맥락" in prompt
     assert "이전 문의가 있습니다." in prompt
-    # 이 초안에만 해당하는 것은 여기 남습니다.
-    assert "**한국어로만** 작성합니다" in prompt
+    # 이 초안에만 해당하는 것은 여기 남습니다. 언어는 문의마다 다르므로 값으로 들어옵니다.
+    assert "**English로만** 작성합니다" in prompt
 
 
 def test_the_layout_rules_live_in_exactly_one_place():

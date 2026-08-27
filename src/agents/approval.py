@@ -23,10 +23,12 @@ class ApprovalError(RuntimeError):
 def translation_required(message: Message, body: str | None = None) -> bool:
     """Whether a draft must pass through the review-screen translation step.
 
-    Foreign-language replies start as Korean review drafts. The operator must press
-    번역하기 and review the result before approval; delivery is never the place to call
-    the translator. The script check also catches a draft edited back to Korean after
-    it had previously been translated.
+    **보통은 False 입니다** — 초안은 처음부터 나갈 언어로 쓰입니다. 이 함수가 남아 있는 것은
+    두 경우 때문입니다: ① 초안을 쓰는 모델이 지시를 어기고 한국어로 썼고 그 자리의 번역도
+    실패했다 ② 운영자가 검토 화면에서 본문을 한국어로 고쳐 놓았다. 어느 쪽이든 한국어 메일이
+    영어 고객에게 가는 길이라, 번역하기를 한 번 거치게 합니다.
+
+    발송은 번역기를 부르는 자리가 아닙니다 — 사람이 못 본 글이 나가면 안 됩니다.
     """
     target = (message.target_language or "").strip().lower()
     if not target or target == "ko":

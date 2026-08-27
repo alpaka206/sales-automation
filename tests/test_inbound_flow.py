@@ -129,8 +129,9 @@ def test_inbound_handle_creates_db_rows(db_session) -> None:
     # Subject is built in code as "RE: <customer subject or localized generic>",
     # never the raw model subject.
     assert reply_msg[0].subject == "RE: Bulk dubbing quote"
-    # Draft is always Korean; the language to SEND in is the detected inquiry language.
-    assert reply_msg[0].language == "ko"
+    # **초안은 나갈 언어로 씁니다.** 예전에는 늘 한국어였고 승인 때 번역했는데, 그러면
+    # 정책 문서에 영어로 써 둔 완성 메일이 고객에게 그대로 갈 길이 없었습니다.
+    assert reply_msg[0].language == "en"
     assert reply_msg[0].target_language == "en"
 
     conversations = db_session.query(Conversation).all()

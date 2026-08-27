@@ -30,9 +30,9 @@ def enforce_send_language(message: Message) -> None:
     """Final guard: only an already reviewed target-language body may leave.
 
     The operator's hard rule is that a reply must go out in the inquiry's language.
-    Our code sets ``message.language`` at every step (draft = 'ko', translate button
-    = target), and ``message.target_language`` holds
-    the language it MUST be sent in. So:
+    Our code sets ``message.language`` at every step (draft = the language it was
+    actually written in, translate button = target), and ``message.target_language``
+    holds the language it MUST be sent in. So:
 
     - every reply body is whitespace/format-normalized (text wash);
     Translation belongs to the explicit review-screen button. If an old API client or

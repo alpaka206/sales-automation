@@ -521,11 +521,10 @@ export function MessageDetail() {
                 return (
                   <div key={bubble.id} className="bubble bubble--out bubble--current">
                     <div className="bubble__head">
+                      {/* 이 칸의 글이 곧 고객이 받는 글입니다 — 예전처럼 「검토용 한국어」가
+                          아닙니다. 한국어 대역은 아래 접힌 줄에 저장돼 있습니다. */}
                       <span className="bubble__dir">
-                        <Icon name="send" size={14} />{" "}
-                        {isMostlyKoreanText(body)
-                          ? "회신 초안 · 한국어 (검토용)"
-                          : `회신 초안 · ${draftLanguage || msg.target_language} (발송본)`}
+                        <Icon name="send" size={14} /> 회신 초안 (고객이 받을 글)
                       </span>
                       <span className="bubble__time tnum">{kst(bubble.created_at)}</span>
                     </div>
@@ -555,12 +554,13 @@ export function MessageDetail() {
                         ))}
                       </div>
                     </div>
-                    {/* 번역이 덮어쓴 한국어. 접어 둡니다 — 지금 고치는 것은 나갈 본문이고,
-                        이것은 대조용입니다. */}
+                    {/* 한국어 대역. **초안 때 한 번 만들어 행에 저장한 것**이라 여기를
+                        펼쳐도 모델을 부르지 않습니다. 접어 두는 이유는 지금 고치는 것이
+                        나갈 본문이고 이것은 대조용이기 때문입니다. */}
                     {koreanDraft && !isMostlyKoreanText(body) && (
                       <details style={{ marginTop: 10 }}>
                         <summary className="t-xs t-subtle" style={{ cursor: "pointer" }}>
-                          <Icon name="translate" size={12} /> 번역 전 한국어 초안
+                          <Icon name="translate" size={12} /> 한국어로 보기
                         </summary>
                         <div className="msg-body msg-body--inset" style={{ marginTop: 6 }}>
                           {koreanDraft}

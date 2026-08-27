@@ -124,10 +124,11 @@ class Message(Base):
     to_address: Mapped[str | None] = mapped_column(String, nullable=True)
     subject: Mapped[str | None] = mapped_column(String, nullable=True)
     body: Mapped[str] = mapped_column(Text, nullable=False)
-    # The Korean the review screen shows for a foreign-language inbound bubble. Stored
-    # because a body never changes, so its translation never changes — and the only cache
-    # before this was process memory, which Render empties every time the service sleeps
-    # (migration 0045). None means "not translated yet", not "no translation needed".
+    # 이 메일의 한국어 판본. **양쪽 다 씁니다**: 외국어로 온 고객 문의(0045)와, 외국어로
+    # 쓰인 우리 회신 초안. 저장하는 이유는 같습니다 — 본문이 바뀌지 않는 한 번역도 바뀌지
+    # 않는데, 이것 말고는 캐시가 프로세스 메모리뿐이었고 Render 는 서비스가 잠들 때마다
+    # 그것을 비웁니다. 문의 쪽에서 None 은 "아직 안 옮겼다"(폴러가 다시 집습니다), 초안
+    # 쪽에서 None 은 "본문이 이미 한국어다" 입니다.
     body_ko: Mapped[str | None] = mapped_column(Text, nullable=True)
     subject_ko: Mapped[str | None] = mapped_column(Text, nullable=True)
     # ``language`` = language the body is CURRENTLY in (a draft is "ko" until the

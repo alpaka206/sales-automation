@@ -143,6 +143,10 @@ class DraftResult(BaseModel):
     body: str
     language: str
     tone_notes: str = ""
+    # 운영자가 읽을 한국어 대역. **모델이 채우지 않습니다** — `schema=` 는 응답을 파싱할
+    # 때만 쓰이고(프롬프트가 JSON 모양을 따로 적습니다), 이 칸은 링크·금액 가드가 전부
+    # 끝난 뒤 `_draft_reply` 가 채웁니다. 본문이 이미 한국어면 빈 문자열입니다.
+    body_ko: str = ""
 
 
 class _RequestsResult(BaseModel):
@@ -863,10 +867,12 @@ class InboundAgent:
         conv_id: int | None = None,
         inquiry_lang: str | None = None,
     ) -> DraftResult:
-        """Draft the Korean working reply the operator reviews.
+        """Draft the reply — in the inquiry's language, with a Korean reading beside it.
 
         Hard rules enforced in CODE here (not left to the model):
-        - the draft is always Korean (``ensure_korean``);
+        - the draft is in the language it will be SENT in (``ensure_language``), and the
+          Korean the operator reviews against is produced once here and stored on the
+          row (``korean_reading`` → ``messages.body_ko``);
         - the first reply contains no prices (``strip_price_sentences``);
         - the subject is "RE: <customer subject>" with no duplicate prefixes, in
           the inquiry's language (``reply_subject``) — or, when a policy document
@@ -874,7 +880,9 @@ class InboundAgent:
           language (``_subject_in_inquiry_language``). Either way the subject and
           the body the customer receives are in the same language.
         """
-        from ..llm.reply import ensure_korean
+        from ..llm.language import language_name
+        from ..llm.reply import ensure_language, korean_reading
+        from ..llm.translate import is_mostly_korean
 
         knowledge_docs, doc_subject = select_relevant_docs(
             inquiry=contact_info["last_message"],
@@ -906,18 +914,25 @@ class InboundAgent:
                 # The reply SHAPE (opening / middle / closing), edited in the console.
                 # Read per draft, so a change there lands on the next reply.
                 "reply_format": get_reply_format(inquiry_lang),
+                # 초안이 나갈 언어. 참고 문서에 그 언어로 된 완성 메일이 있으면 모델이
+                # 그 문장을 그대로 살려 쓸 수 있어야 합니다 — 한 번 한국어를 거치면
+                # 그 문장은 되돌아오지 못합니다.
+                "reply_language": language_name(inquiry_lang),
             },
             schema=DraftResult,
             tier="pro",
             max_tokens=4000,
         )
 
-        # CODE GUARD 1 — the operator always reviews Korean.
-        draft.body = ensure_korean(draft.body, llm=self.llm)
-        draft.language = "ko"
+        # CODE GUARD 1 — the draft is in the language it will be sent in.
+        #
+        # **언어 라벨은 결과를 보고 붙입니다.** 번역이 실패하면 본문은 한국어로 남는데,
+        # 라벨만 'en' 으로 찍으면 발송 관문이 통과시켜 한국어 메일이 영어 고객에게 갑니다.
+        draft.body = ensure_language(draft.body, inquiry_lang, llm=self.llm)
+        draft.language = "ko" if is_mostly_korean(draft.body) else (inquiry_lang or "ko")
 
         # CODE GUARD 1b — links are substituted, never generated. Runs AFTER
-        # ensure_korean: translation would happily rewrite a URL.
+        # ensure_language: translation would happily rewrite a URL.
         draft.body = apply_editable_tokens(draft.body, language=inquiry_lang)
         draft.body = canonicalize_contact_links(draft.body, language=inquiry_lang)
 
@@ -955,6 +970,11 @@ class InboundAgent:
         ) or reply_subject(
             contact_info.get("subject"), target_code=contact_info.get("inquiry_language")
         )
+
+        # CODE GUARD 4 — 운영자가 읽을 한국어 대역. **맨 마지막**입니다: 링크 치환·정규화와
+        # 금액 가드가 끝난 뒤라야 두 벌이 같은 문장, 같은 링크를 들고 대조가 됩니다.
+        # 한 번만 돌고 행에 저장되므로 화면을 열 때마다 모델을 부르지 않습니다.
+        draft.body_ko = korean_reading(draft.body, llm=self.llm)
         return draft
 
     def _persist_placeholder(
@@ -1238,10 +1258,11 @@ class InboundAgent:
                 return False
             msg.subject = draft.subject
             msg.body = draft.body
-            # 새로 쓴 초안입니다. 지난 번역의 한국어 원문을 그대로 두면 검토 화면이 이
-            # 초안 옆에 **다른 초안**을 한국어 원문이라며 붙입니다 (「초안 다시 쓰기」).
-            msg.body_ko = None
-            msg.language = "ko"  # the draft the operator reviews is always Korean
+            # 이 초안의 한국어 대역. **매번 새로 씁니다** — 「초안 다시 쓰기」로 들어오면
+            # 지난 초안의 대역이 남아 있고, 그러면 화면이 새 초안 옆에 다른 초안을
+            # 「한국어」라며 붙입니다. 본문이 이미 한국어면 대역은 없습니다.
+            msg.body_ko = draft.body_ko or None
+            msg.language = draft.language or "ko"
             msg.target_language = inquiry_lang or msg.target_language
             # Every reply waits for a human. The old score-based auto-approval branch
             # and the immediate receipt acknowledgement have both been removed, so no

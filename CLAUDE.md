@@ -5,7 +5,7 @@ PERSO Inbound is a FastAPI workflow for inbound inquiry handling and customer op
 ## Invariants
 
 - **External-write safety (대전제, top priority).** `LIVE_EXTERNAL_WRITES` defaults to `false` (SAFE). While safe: HubSpot writes, Google Sheets writes, and outbound email delivery are blocked. The application never substitutes an internal test recipient. Reads stay on. Enforced in `src/common/safe_mode.py`; guaranteed behavior is pinned by `tests/test_safe_mode.py`. Any new external-write/send path must use the same gate and add a safety test.
-- **Human-approved email delivery is live.** `EMAIL_SENDING_ENABLED = True`; only an operator-approved draft is claimable. Immediate inbound acknowledgements were removed structurally. Foreign-language drafts cannot be approved or sent until the operator completes the explicit translation step. Delivery replies on the ticket's existing HubSpot Conversations thread. The actor is `HUBSPOT_SENDER_ACTOR_ID`; the actual From address comes from the thread's email `channelAccountId` (or the same-Inbox fallback account for a form-only thread). SMTP and CRM email-activity logging are not delivery paths.
+- **Human-approved email delivery is live.** `EMAIL_SENDING_ENABLED = True`; only an operator-approved draft is claimable. Immediate inbound acknowledgements were removed structurally. A draft whose body is still Korean when the thread's target language is not cannot be approved or sent until the operator presses 번역하기 (`approval.translation_required`). Delivery replies on the ticket's existing HubSpot Conversations thread. The actor is `HUBSPOT_SENDER_ACTOR_ID`; the actual From address comes from the thread's email `channelAccountId` (or the same-Inbox fallback account for a form-only thread). SMTP and CRM email-activity logging are not delivery paths.
   - **발송 payload 는 문서가 아니라 이 포털이 정한다** (2026-08-26, 첫 실전 발송 msg 62 가
     이것으로 실패했다). HubSpot 문서의 예시에는 수신자에
     `"actorId": "E-user@hubspot.com"` 이 있는데 **발송 엔드포인트가 그것을 거부한다** —
@@ -251,6 +251,24 @@ PERSO Inbound is a FastAPI workflow for inbound inquiry handling and customer op
   - 과거 데이터의 `prompt_variant='auto_ack'`는 호환을 위해 일반 회신 집계와 발송 큐에서 제외한다. 새 자동 접수확인은 생성되지 않는다.
   - **단계가 안 바뀌어도 훑는 이유**: 초안 작성은 몇 분이 걸린다. 그 사이에 단계가 옮겨지면 그 대화에는 다시 아무 이벤트도 오지 않는다(10분 폴러의 stage reconcile 은 HubSpot 에서 **최근에 바뀐** 티켓만 훑는다). `tests/test_stage_sync.py` · `tests/test_inbound_flow.py` 가 고정한다.
 - **자동 회신은 없다.** 첫 문의는 검토용 초안만 만들며, 고객에게 바로 나가는 메일은 없다. 그 대화에 이미 사람이 승인해 보낸 회신이 있으면 이후 고객 메시지는 기록만 되고 새 초안을 자동 생성하지 않는다.
+- **초안은 나갈 언어로 쓴다. 한국어는 옆에 저장해 둔다** (2026-08-27 운영자 지시).
+  예전에는 초안이 늘 한국어였고 승인 때 flash 가 고객 언어로 되돌렸다. 그러면 **정책 문서에
+  운영자가 영어로 써 둔 완성된 메일이 고객에게 그대로 갈 길이 없다** — 모델이 그 문장을
+  한국어로 다시 쓰고, 번역기가 그 한국어를 영어로 되돌린다. 실제로 `Hi [Name], Thanks for
+  reaching out to Perso Dubbing…` 이 `Hello, Ivan. Thank you for your inquiry about Perso
+  Dubbing.` 으로, `Looking forward to helping you get started! Cheers, Untae Bae` 가
+  `Thank you.` 로 나갔다 (2026-08-26, msg 64 — 로그의 `Doc router selected 1/9` 가 고른 것은
+  견적 문서였고, 그 문서의 **내용**은 살아남고 **문장**은 못 살아남았다). 지금은
+  `reply.ensure_language` 가 초안을 문의 언어에 두고, `reply.korean_reading` 이 한국어 대역을
+  **한 번** 만들어 `messages.body_ko` 에 넣는다 — 화면을 열 때마다 모델을 부르지 않는다
+  (본문이 안 바뀌면 번역도 안 바뀐다, 0045 가 고객 문의에 같은 이유로 만든 칸이다).
+  - **언어 라벨은 결과를 보고 붙인다.** 번역이 실패하면 본문은 한국어로 남는데 라벨만 `en`
+    으로 찍으면 발송 관문이 통과시켜 한국어 메일이 영어 고객에게 간다. `_draft_reply` 가
+    `is_mostly_korean(draft.body)` 로 다시 재고, `enforce_send_language` 가 한 번 더 막는다.
+  - **대역은 맨 마지막에 만든다.** 링크 치환·정규화와 금액 가드가 끝난 뒤라야 두 벌이 같은
+    문장, 같은 링크를 들고 대조가 된다.
+  - **`번역하기` 버튼은 남는다 — 다만 대개 안 보인다.** 모델이 지시를 어겼거나 운영자가 본문을
+    한국어로 고쳐 놓았을 때만 뜬다(`approval.translation_required`).
 - **답변의 형식·톤 규칙은 콘솔에 한 벌만 둔다.** `policy_sources(mode='rules')` 의 「공통 원칙 및 가드레일」이 그 한 벌이고, `draft_reply.md` 는 그것을 따르라고 가리키기만 한다. 양쪽에 적으면 운영자가 콘솔에서 고친 쪽과 배포해야 바뀌는 파일이 조용히 어긋난다. `tests/test_reply_style.py::test_the_layout_rules_live_in_exactly_one_place` 가 고정한다.
   - **가격은 문서와 코드가 같은 말을 해야 한다.** 문서의 가드레일이 "구체적 가격 숫자를 쓰지 않는다" 이므로 `_PRICING_RULE_NORMAL` 도 그렇게 말한다. 예전에는 정반대였고(코드는 "금액을 명시하라"), 그때 이기는 쪽은 코드였다. `enforce_first_reply_no_price` 는 첫 회신에만 도는 하드 가드로 남는다 — 모든 회신에 걸면 운영자가 일부러 적은 금액을 조용히 지운다.
   - **어떤 문서를 쓸지는 모델이 고른다.** 매핑을 코드에 박으면 문서 이름이 바뀌거나 지워질 때마다 흔적 없이 끊긴다. 모델이 보는 것은 본문이 아니라 인덱스 한 줄(`slug·title·categories·tags·summary`)이고, `summary` 는 정책 문서의 **「언제 쓰는가」 칸**(0064)이다 — 비면 본문 앞 400자. 사본의 `categories` 는 `["all"]` 이어야 한다: 라우터가 실패해 유형 매칭으로 떨어질 때 후보가 0개가 되면 **문서 없이** 답을 쓴다.

@@ -635,11 +635,11 @@ async def message_translate(
     subject: str = Form(""),
     signature_key: str = Form(""),
 ):
-    """Translate the Korean draft into the inquiry's language for the operator.
+    """Put the draft into the inquiry's language when it is not already there.
 
-    The reply workflow: the operator reviews/edits a KOREAN draft, then presses
-    "번역하기". This translates the (possibly edited) body into the thread's target
-    language, washes it, and persists it so it goes out as-is.
+    **초안은 이제 처음부터 나갈 언어로 쓰입니다**, 그래서 이 버튼은 대개 화면에 없습니다.
+    남아 있는 쓰임은 운영자가 본문을 한국어로 고쳐 놓았을 때 하나입니다 — 그때는 고친
+    본문을 목표 언어로 옮기고, 옮기기 전의 한국어를 ``body_ko`` 에 남깁니다.
 
     **The subject is not translated here — it is already in the inquiry's language.**
     Both of the ways a subject is produced settle that at draft time: "RE: <original>"
