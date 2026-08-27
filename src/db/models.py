@@ -319,9 +319,10 @@ class PolicySource(Base):
     # 지식 문서 사본이 따라오도록 슬러그는 이 값에서 나옵니다.
     doc_key: Mapped[str] = mapped_column(String, unique=True, nullable=False, index=True)
     mode: Mapped[str] = mapped_column(String, nullable=False, default="knowledge")
-    # Ordering for mode='rules': the system instruction is read top to bottom.
-    order_index: Mapped[int] = mapped_column(Integer, nullable=False, default=100)
-    status: Mapped[str] = mapped_column(String, nullable=False, default="active")
+    # ``order_index`` 와 ``status`` 가 여기 있었습니다 (0101). 순서는 읽히기만 하고 정할
+    # 방법이 없어서 늘 100 이었고 결국 id 순이었습니다 — 이제 그것을 사실대로 적습니다.
+    # 상태는 0100 이 삭제를 하드 삭제로 바꾸면서 뜻을 잃었습니다: 표에 있는 행이 곧 살아
+    # 있는 행입니다.
     # 이 문서를 근거로 회신할 때의 메일 제목. 비면 RE: 고객이 쓴 제목입니다. 본문 안에
     # "Subject: ..." 로 적으면 모델이 그 줄을 본문에 옮겨 적는 일이 생겨서 열로 뺐습니다.
     subject: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -330,12 +331,9 @@ class PolicySource(Base):
     # 그 요약이 되고, 비우면 예전처럼 본문 앞부분이 잘려 들어갑니다. 본문 맨 위에 용도를 적어
     # 두던 방식은 노션에서 다시 붙여넣을 때마다 그 줄이 날아갔습니다.
     usage_note: Mapped[str | None] = mapped_column(Text, nullable=True)
-    # 이 문서가 언제 기준인가. 적으면 그 값, 안 적으면 edited_at 이 대신합니다 — 오늘
-    # 붙여넣은 넉 달 된 정책이 "최신"으로 보이지 않게 하는 것이 요점입니다. "YYYY-MM-DD".
-    effective_on: Mapped[str | None] = mapped_column(String(10), nullable=True)
-    # 콘솔에서 본문을 고친 시각. 다음 업로드가 파일 내용으로 되돌리므로, 화면이 그렇게
-    # 말해 줄 수 있도록 남깁니다 (조용히 사라지는 것이 문제이지 덮어쓰는 것 자체가 아님).
-    edited_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # ``effective_on`` 과 ``edited_at`` 이 여기 있었습니다 (0101). 「언제 기준인가」를 두
+    # 칸이 서로 다르게 말했고, 앞엣것은 마이그레이션이 심은 한 행 말고는 아무도 안
+    # 채웠습니다. 답은 ``updated_at`` 하나입니다 — 저장할 때마다 자동으로 움직입니다.
     # 몇 번째 판인가. 저장할 때마다 1씩. 화면이 「v3」로 그리고, 판본 목록이 그 번호로
     # 정렬됩니다 — ``email_templates.version`` 과 같은 뜻입니다.
     #
@@ -348,7 +346,8 @@ class PolicySource(Base):
     # The synced copy. NULL until the first successful sync.
     body: Mapped[str | None] = mapped_column(Text, nullable=True)
     title: Mapped[str | None] = mapped_column(String, nullable=True)
-    summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # ``summary`` 가 여기 있었습니다 (0101) — 읽는 코드가 없고 채워진 행도 0개였습니다.
+    # 라우터가 읽는 요약은 ``usage_note``, 비면 본문 앞 400자입니다.
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=_utcnow, onupdate=_utcnow, nullable=False
@@ -377,7 +376,8 @@ class EmailTemplate(Base):
     language: Mapped[str] = mapped_column(String, nullable=False, default="all")
     body: Mapped[str] = mapped_column(Text, nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
-    status: Mapped[str] = mapped_column(String, nullable=False, default="active")
+    # ``status`` 가 여기 있었습니다 (0101). 0100 이 삭제를 하드 삭제로 바꾸면서 뜻을
+    # 잃었습니다 — 표에 있는 행이 곧 살아 있는 행입니다.
     # ``is_default`` 는 0060 에서 지웠습니다. 어느 서명을 쓸지는 초안마다 검토 화면에서
     # 고르고, 아무것도 안 고르면 회사 규칙의 텍스트 서명이 붙습니다.
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
@@ -422,7 +422,6 @@ class DocumentRevision(Base):
     title: Mapped[str] = mapped_column(String, nullable=False)
     body: Mapped[str] = mapped_column(Text, nullable=False)
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
-    status: Mapped[str] = mapped_column(String, nullable=False, default="active")
     # created / edited / deleted / restored, 또는 마이그레이션이 남긴 한 줄.
     change_note: Mapped[str | None] = mapped_column(Text, nullable=True)
     edited_by: Mapped[str | None] = mapped_column(String, nullable=True)

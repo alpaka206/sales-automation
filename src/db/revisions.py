@@ -38,7 +38,6 @@ def snapshot_template(session, tpl: EmailTemplate, *, change_note: str, edited_b
             title=tpl.name or "",
             body=tpl.body or "",
             version=tpl.version or 1,
-            status=tpl.status or "active",
             change_note=change_note,
             edited_by=edited_by,
             extra={
@@ -67,7 +66,6 @@ def snapshot_policy(session, source: PolicySource, *, change_note: str, edited_b
             title=source.label or source.title or "",
             body=source.body or "",
             version=source.version or 1,
-            status=source.status or "active",
             change_note=change_note,
             edited_by=edited_by,
             extra={
@@ -76,7 +74,6 @@ def snapshot_policy(session, source: PolicySource, *, change_note: str, edited_b
                     ("mode", source.mode),
                     ("subject", source.subject),
                     ("usage_note", source.usage_note),
-                    ("effective_on", source.effective_on),
                 )
                 if value
             },
@@ -103,7 +100,6 @@ def history(session, kind: str, document_id: int, limit: int = 50) -> list[dict[
             "version": row.version,
             "title": row.title,
             "body": row.body,
-            "status": row.status,
             "change_note": row.change_note,
             "edited_by": row.edited_by,
             "created_at": row.created_at,

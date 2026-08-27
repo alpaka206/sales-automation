@@ -46,13 +46,9 @@ def test_rules_rows_become_the_system_instruction(db):
         session.add_all(
             [
                 PolicySource(
-                    label="톤", doc_key="file:01_tone.md", mode="rules",
-                    order_index=10, body="항상 존댓말.",
-                ),
+                    label="톤", doc_key="file:01_tone.md", mode="rules", body="항상 존댓말."),
                 PolicySource(
-                    label="CS", doc_key="file:04_cs.md", mode="rules",
-                    order_index=20, body="사과는 한 번만.",
-                ),
+                    label="CS", doc_key="file:04_cs.md", mode="rules", body="사과는 한 번만."),
             ]
         )
         session.commit()
@@ -62,18 +58,21 @@ def test_rules_rows_become_the_system_instruction(db):
     assert rules.index("항상 존댓말.") < rules.index("사과는 한 번만.")  # order_index honoured
 
 
-def test_a_paused_rule_leaves_the_prompt(db):
-    from src.llm.prompts import get_company_rules
+def test_a_deleted_rule_leaves_the_prompt(db):
+    """「멈춤」이라는 상태는 없습니다 (0054). 지우면 행이 사라지고(0100), 그러면 프롬프트에
+    안 들어갑니다 — 상태 칸이 하던 일을 삭제가 합니다 (0101)."""
+    from src.llm.prompts import _rules_from_db
 
     with db() as session:
-        session.add(
-            PolicySource(
-                label="톤", doc_key="file:x.md", mode="rules",
-                body="적용되면 안 됨", status="paused",
-            )
-        )
+        session.add(PolicySource(label="가드레일", doc_key="g" * 32, mode="rules",
+                                 body="가격 숫자 금지"))
         session.commit()
-    assert "적용되면 안 됨" not in get_company_rules()
+    assert "가격 숫자 금지" in _rules_from_db()
+
+    with db() as session:
+        session.delete(session.query(PolicySource).one())
+        session.commit()
+    assert _rules_from_db() == ""
 
 
 def test_knowledge_rows_are_not_in_the_system_instruction(db):
@@ -84,8 +83,7 @@ def test_knowledge_rows_are_not_in_the_system_instruction(db):
     with db() as session:
         session.add(
             PolicySource(
-                label="가격", doc_key="p" * 32, mode="knowledge", body="Tier 1 $1,000",
-            )
+                label="가격", doc_key="p" * 32, mode="knowledge", body="Tier 1 $1,000")
         )
         session.commit()
     assert "Tier 1" not in get_company_rules()
@@ -114,4 +112,4 @@ def test_a_rules_row_is_never_a_router_candidate(db):
         session.commit()
 
     with patch.object(knowledge, "SessionLocal", db):
-        assert [d.label for d in knowledge.active_docs()] == ["크레딧 차감 정책"]
+        assert [d.label for d in knowledge.router_docs()] == ["크레딧 차감 정책"]

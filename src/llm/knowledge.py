@@ -17,7 +17,7 @@
 1. ``select_relevant_docs(inquiry, category, llm)`` — **LLM 라우터.** 문서마다 한 줄짜리
    인덱스(``doc_key`` · 제목 · 요약)를 만들어 모델에게 주고 고르게 합니다. 본문은 고른
    것만 싣습니다.
-2. ``active_docs()`` — 낙하산. 라우터가 실패하거나 아무것도 못 고르면 **활성 문서 전부**
+2. ``router_docs()`` — 낙하산. 라우터가 실패하거나 아무것도 못 고르면 **문서 전부**
    입니다. 문서 없이 답을 쓰는 것보다는 낫습니다.
 
 어떤 문의에 어떤 문서를 붙일지는 **코드에 없습니다.** 정책은 바뀌고 문서 이름도 바뀌므로,
@@ -40,7 +40,6 @@ logger = logging.getLogger(__name__)
 _SUMMARY_CHARS = 400
 
 KNOWLEDGE = "knowledge"
-ACTIVE = "active"
 
 
 class SelectDocsResult(BaseModel):
@@ -109,18 +108,21 @@ def _format_docs(docs: list[PolicySource]) -> str:
     return "## Relevant knowledge base documents\n\n" + "\n\n---\n\n".join(parts)
 
 
-def active_docs() -> list[PolicySource]:
-    """초안이 고를 수 있는 문서 전부 — 활성인 「문의별 참고」 행.
+def router_docs() -> list[PolicySource]:
+    """초안이 고를 수 있는 문서 전부 — 「문의별 참고」 행.
 
-    캐시하지 않습니다. 행이 몇 개뿐이고, 여기서 캐시가 굳으면 어제 정책과 오늘 정책의
-    차이가 됩니다. ``mode='rules'`` 는 여기 안 옵니다 — 그쪽은 고르는 대상이 아니라 모든
-    프롬프트에 통째로 들어갑니다(``llm.prompts._rules_from_db``).
+    **상태를 안 봅니다** (0101). 지우면 행이 사라지므로(0100) 표에 있는 행이 곧 살아 있는
+    행입니다 — 「항상 쓰는 것이니 항상 가져옵니다」. 캐시도 없습니다: 행이 몇 개뿐이고,
+    여기서 캐시가 굳으면 어제 정책과 오늘 정책의 차이가 됩니다.
+
+    ``mode='rules'`` 는 여기 안 옵니다 — 그쪽은 고르는 대상이 아니라 모든 프롬프트에
+    통째로 들어갑니다(``llm.prompts._rules_from_db``).
     """
     session = SessionLocal()
     try:
         return (
             session.query(PolicySource)
-            .filter(PolicySource.mode == KNOWLEDGE, PolicySource.status == ACTIVE)
+            .filter(PolicySource.mode == KNOWLEDGE)
             .order_by(PolicySource.title, PolicySource.label, PolicySource.id)
             .all()
         )
@@ -131,7 +133,7 @@ def active_docs() -> list[PolicySource]:
 def reset_cache() -> None:
     """회사 규칙 프롬프트 캐시를 비웁니다.
 
-    문서 쪽은 캐시가 없습니다(``active_docs`` 가 매번 읽습니다). 이름이 남아 있는 것은
+    문서 쪽은 캐시가 없습니다(``router_docs`` 가 매번 읽습니다). 이름이 남아 있는 것은
     콘솔이 정책 문서를 저장한 뒤 이것을 부르기 때문입니다.
     """
     from .prompts import get_company_rules
@@ -162,7 +164,7 @@ def select_relevant_docs(
     할 형식이 두 개가 됩니다). 규칙이 프롬프트에 있다는 것이 요점입니다 — 정책이 바뀌면
     문서와 프롬프트가 바뀌지, 라우팅 표를 고치러 코드로 오지 않습니다.
 
-    라우터가 실패하거나 아무것도 못 고르면 **활성 문서 전부**로 떨어집니다.
+    라우터가 실패하거나 아무것도 못 고르면 **문서 전부**로 떨어집니다.
 
     ``with_subject=True`` 면 (본문, 그 문서들이 들고 온 메일 제목) 을 돌려줍니다.
     """
@@ -171,7 +173,7 @@ def select_relevant_docs(
         text = _format_docs(docs)
         return (text, subject_from_docs(docs)) if with_subject else text
 
-    candidates = active_docs()
+    candidates = router_docs()
     if not candidates:
         return done([])
     if llm is None:
@@ -191,12 +193,12 @@ def select_relevant_docs(
         )
         wanted = {s.strip().lower() for s in (result.slugs or []) if s.strip()}
     except Exception:
-        logger.warning("Doc router failed, falling back to every active document.", exc_info=True)
+        logger.warning("Doc router failed, falling back to every document.", exc_info=True)
         return done(candidates)
 
     selected = [doc for doc in candidates if (doc.doc_key or "").lower() in wanted]
     if not selected:
-        logger.info("Doc router selected nothing; falling back to every active document.")
+        logger.info("Doc router selected nothing; falling back to every document.")
         return done(candidates)
 
     logger.info(

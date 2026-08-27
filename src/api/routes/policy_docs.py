@@ -7,7 +7,7 @@
     본문 편집              이미 있는 문서를
 
 한동안 본문이 읽기 전용이었습니다 — 원본이 노션이라 여기서 고치면 다음 업로드가 덮어쓰기
-때문입니다. 그건 지금도 사실이라, 막는 대신 ``edited_at`` 을 남겨 **화면이 그렇게 말합니다.**
+때문입니다. 그건 지금도 사실이고, 화면은 ``updated_at`` 으로 마지막 저장 시각을 말합니다.
 조용히 사라지는 것이 문제이지 덮어쓰는 것 자체가 문제는 아닙니다.
 
 어떤 문의에 어떤 문서를 쓸지는 여기서 정하지 않습니다. 모델이 문서 목록을 보고 고릅니다 —
@@ -21,7 +21,6 @@ still using the previous copy. An operator must be able to see "정책이 3일�
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
 
 from fastapi import APIRouter, Form, HTTPException, Request
 from fastapi.responses import RedirectResponse
@@ -59,7 +58,6 @@ async def policy_docs_create(
     label: str = Form(...),
     body: str = Form(""),
     mode: str = Form("knowledge"),
-    effective_on: str = Form(""),
     subject: str = Form(""),
     usage_note: str = Form(""),
 ):
@@ -93,8 +91,6 @@ async def policy_docs_create(
             body=body,
             subject=subject.strip() or None,
             usage_note=usage_note.strip() or None,
-            effective_on=effective_on.strip() or None,
-            edited_at=datetime.now(timezone.utc).replace(tzinfo=None),
         )
         session.add(source)
         # 만든 직후에는 이력을 남기지 않습니다 — 이 표는 「이전 판본」을 들고 있고,
@@ -113,15 +109,14 @@ async def policy_docs_update(
     label: str = Form(""),
     body: str = Form(""),
     mode: str = Form(""),
-    effective_on: str = Form(""),
     subject: str = Form(""),
     usage_note: str = Form(""),
 ):
     """본문을 고칩니다. 어떤 문서든 고칠 수 있습니다.
 
     노션에서 온 문서를 여기서 고치면 **같은 문서를 다시 업로드하는 순간 파일 내용으로
-    돌아갑니다.** 그게 문제인 것이 아니라 조용히 그러는 것이 문제라서, ``edited_at`` 을
-    남기고 화면이 그렇게 말합니다. 노션이 원본인 문서는 노션에서 고치는 편이 낫습니다.
+    돌아갑니다.** 그게 문제인 것이 아니라 조용히 그러는 것이 문제라서, 화면이 마지막
+    저장 시각(``updated_at``)을 말합니다. 노션이 원본인 문서는 노션에서 고치는 편이 낫습니다.
     """
     if not admin_required(request):
         raise HTTPException(status_code=403, detail="관리자만 접근할 수 있습니다.")
@@ -138,13 +133,10 @@ async def policy_docs_update(
             source.title = label.strip()
         if mode in _MODE_KEYS:
             source.mode = mode
-        # 빈 문자열은 "지운다" 로 읽습니다 — 그러면 edited_at 이 다시 날짜 역할을 합니다.
-        source.effective_on = effective_on.strip() or None
         source.subject = subject.strip() or None
         source.usage_note = usage_note.strip() or None
         if body.strip():
             source.body = body
-            source.edited_at = datetime.now(timezone.utc).replace(tzinfo=None)
         session.commit()
 
     _publish(source_id)

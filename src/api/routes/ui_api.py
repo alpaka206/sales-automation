@@ -697,7 +697,7 @@ def ui_policy_docs():
     with SessionLocal() as session:
         rows = (
             session.query(PolicySource)
-            .order_by(PolicySource.mode, PolicySource.order_index, PolicySource.id)
+            .order_by(PolicySource.mode, PolicySource.id)
             .all()
         )
         return {
@@ -715,8 +715,7 @@ def ui_policy_docs():
                     "chars": len(row.body or ""),
                         # 라우터가 이 문서를 고를 때 읽는 한 줄. 비면 본문 앞부분이 대신합니다.
                     "usage_note": row.usage_note or "",
-                    "effective_on": row.effective_on,
-                    "edited_at": row.edited_at,
+                    "updated_at": row.updated_at,
                     "version": row.version or 1,
                 }
                 for row in rows

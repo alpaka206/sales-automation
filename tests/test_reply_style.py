@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
-from tests.conftest import legacy_template_columns
+from tests.conftest import legacy_policy_columns, legacy_template_columns
 from src.llm.prompts import load_prompt
 
 
@@ -110,6 +110,7 @@ def test_0061_takes_the_signature_out_of_a_live_rule_document():
 
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
+    legacy_policy_columns(engine)
     with engine.begin() as conn:
         conn.execute(
             text(
@@ -151,12 +152,10 @@ def test_the_router_reads_the_usage_note_when_one_is_written():
     written = PolicySource(
         label="견적 및 맞춤형 플랜 안내", doc_key="k-quote", mode="knowledge",
         body="| 케이스 | 문구 |\n|---|---|\n| 1 | ... |",
-        usage_note="Quote, Price, pricing, cost, estimate 등 가격·견적을 직접 묻는 문의에 씁니다.",
-    )
+        usage_note="Quote, Price, pricing, cost, estimate 등 가격·견적을 직접 묻는 문의에 씁니다.")
     blank = PolicySource(
         label="지원 언어", doc_key="k-lang", mode="knowledge",
-        body="지원 언어 목록입니다. 한국어, 영어, 일본어…",
-    )
+        body="지원 언어 목록입니다. 한국어, 영어, 일본어…")
 
     assert summary_of(written).startswith("Quote, Price")
     # 표로 시작하는 문서였습니다 — 칸이 없었으면 요약이 "| 케이스 | 문구 |" 였습니다.

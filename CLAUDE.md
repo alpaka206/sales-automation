@@ -73,6 +73,15 @@ PERSO Inbound is a FastAPI workflow for inbound inquiry handling and customer op
       `document_revisions` 는 `src/llm` · `src/agents` 어디에서도 **이름으로조차** 등장하지
       않는다 — `tests/test_email_template_form.py::test_the_revision_history_is_out_of_
       gemini_reach` 가 두 폴더를 훑어 고정한다.
+  - **읽는 코드가 있는 칸만 남는다** (0101). `policy_sources` 에서 `order_index`(읽히기만
+    하고 **정할 방법이 없어** 늘 100 이었다 — 순서는 결국 `id` 였고 이제 그렇게 적는다) ·
+    `status`(0100 이 하드 삭제로 바꾸면서 `deleted` 가 되는 행이 없어졌다 — 표에 있는 행이
+    곧 살아 있는 행) · `summary`(읽는 코드 0, 채워진 행 0 — 라우터가 읽는 요약은
+    `usage_note`) · `effective_on`·`edited_at`(「언제 기준인가」를 세 칸이 서로 다르게
+    말했다. 답은 `updated_at` 하나 — 저장할 때마다 자동으로 움직인다)를 지웠다.
+    `email_templates.status` 와 `document_revisions.status` 도 같은 이유로 나갔다.
+    - 그래서 **초안이 읽는 곳에 상태 필터가 없다**: `_rules_from_db` 도 `router_docs` 도
+      `get_email_template` 도 그냥 가져온다. 「항상 쓰는 것이니 항상 가져온다.」
   - **안 쓰는 칸은 남기지 않는다** (0100). `email_templates` 에서 `subject`(운영 7행 중
     채워진 행 0개, 읽는 코드 0) · `channel`(행마다 `'email'`) · `deleted_at` 을, 그리고
     `policy_sources.deleted_at` 을 지웠다. **`author` 는 남되 뜻이 바뀌었다** — 만든 사람이

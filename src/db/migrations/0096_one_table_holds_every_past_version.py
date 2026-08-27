@@ -47,7 +47,6 @@ def _create(conn, dialect: str) -> None:
                 title VARCHAR NOT NULL,
                 body TEXT NOT NULL,
                 version INTEGER NOT NULL DEFAULT 1,
-                status VARCHAR NOT NULL DEFAULT 'active',
                 change_note TEXT,
                 edited_by VARCHAR,
                 extra {"JSON" if dialect != "sqlite" else "TEXT"},
@@ -88,8 +87,8 @@ def _carry_over(conn, dialect: str) -> int:
         conn.execute(
             text(
                 f"INSERT INTO {_NEW} (kind, document_id, doc_key, title, body, version, "
-                f"status, change_note, edited_by, extra, created_at) VALUES "
-                f"('email_template', :doc_id, :key, :title, :body, :version, :status, "
+                f"change_note, edited_by, extra, created_at) VALUES "
+                f"('email_template', :doc_id, :key, :title, :body, :version, "
                 f":note, :by, {value}, :at)"
             ),
             {
@@ -98,7 +97,6 @@ def _carry_over(conn, dialect: str) -> int:
                 "title": row.name,
                 "body": row.body or "",
                 "version": seen[row.template_id],
-                "status": row.status or "active",
                 "note": row.change_note,
                 "by": row.edited_by,
                 "extra": payload,

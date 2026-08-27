@@ -54,15 +54,8 @@ def _restore_rule(session, path: Path) -> str:
     key = f"file:{path.name}"
     if session.query(PolicySource).filter_by(doc_key=key).one_or_none() is not None:
         raise SystemExit(f"'{key}' 는 이미 등록되어 있습니다. 지운 것이 아닙니다.")
-    order = max(
-        (s.order_index for s in session.query(PolicySource).filter_by(mode="rules")), default=0
-    )
-    session.add(
-        PolicySource(
-            label=label, title=label, doc_key=key, mode="rules",
-            order_index=order + 10, body=body,
-        )
-    )
+    # 순서 칸은 없습니다 (0101) — 「항상 적용」은 만든 순서(id)로 이어 붙습니다.
+    session.add(PolicySource(label=label, title=label, doc_key=key, mode="rules", body=body))
     session.commit()
     return (
         f"항상 적용 규칙 복원: {label} ({key})\n"
@@ -84,7 +77,7 @@ def main() -> None:
             print("지금 등록된 「항상 적용」 규칙:")
             live_rules = session.query(PolicySource).filter_by(mode="rules").all()
             for source in live_rules or ():
-                print(f"  {source.doc_key:40} {source.label} [{source.status}]")
+                print(f"  {source.doc_key:40} {source.label}")
             if not live_rules:
                 print("  없습니다.")
 

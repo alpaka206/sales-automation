@@ -53,7 +53,6 @@ def test_a_pasted_document_is_readable_by_the_draft_immediately(policy_db):
     with policy_db() as session:
         doc = session.query(PolicySource).one()
         assert "크레딧을 복구" in doc.body
-        assert doc.status == "active"
 
 
 def test_the_same_name_twice_is_refused_rather_than_split_in_two(policy_db):
@@ -84,15 +83,22 @@ def test_editing_the_body_reaches_the_draft_at_once(policy_db):
         assert "새 내용" in knowledge.select_relevant_docs("문의", "support")
 
 
-def test_an_edit_is_stamped_because_it_is_the_only_date_this_document_has(policy_db):
-    """위에서 받아 오는 것이 없으므로 "마지막 동기화" 라는 값이 존재하지 않습니다. 화면이
-    보여줄 수 있는 유일한 날짜가 마지막으로 손댄 시각입니다."""
+def test_the_only_date_is_the_last_save(policy_db):
+    """날짜 칸이 셋이었습니다 — ``effective_on``(기준일) · ``edited_at`` · ``updated_at``.
+    「언제 기준인가」를 셋이 서로 다르게 말했고, 기준일은 마이그레이션이 심은 한 행 말고는
+    아무도 안 채웠습니다. 답은 마지막으로 저장한 시각 하나입니다 (0101).
+    """
+    from src.db.models import PolicySource as _P
+
     with TestClient(app) as client:
         source_id = _create(client, body="처음 내용")
         assert client.put(f"/policy-docs/{source_id}", data={"body": "고친 내용"}).status_code == 200
 
     with policy_db() as session:
-        assert session.get(PolicySource, source_id).edited_at is not None
+        source = session.get(_P, source_id)
+        assert source.updated_at is not None
+        for gone in ("effective_on", "edited_at", "status", "order_index", "summary"):
+            assert not hasattr(source, gone), gone
 
 
 def test_nothing_can_overwrite_a_document_behind_the_operators_back(policy_db):
@@ -102,30 +108,6 @@ def test_nothing_can_overwrite_a_document_behind_the_operators_back(policy_db):
 
     assert not hasattr(policy_sync, "sync_policy_sources")
     assert not pathlib.Path("src/integrations/notion.py").exists()
-
-
-def test_a_document_can_say_when_it_is_effective_rather_than_when_it_was_pasted(policy_db):
-    """「크레딧 차감 정책 (26.04.28 기준)」을 오늘 붙여넣으면 저장 시각은 오늘입니다. 목록이
-    그것만 보여주면 넉 달 된 정책이 어제 손댄 최신 문서처럼 보이고, 그 차이가 "이 숫자 아직
-    맞나?" 를 물어볼지 말지를 가릅니다."""
-    with TestClient(app) as client:
-        source_id = _create(client, body="초 단위 차감", effective_on="2026-04-28")
-
-    with policy_db() as session:
-        assert session.get(PolicySource, source_id).effective_on == "2026-04-28"
-
-
-def test_clearing_the_effective_date_hands_the_column_back_to_the_save_time(policy_db):
-    """빈 값은 "안 적었다" 가 아니라 "지운다" 로 읽습니다 — 잘못 적은 날짜를 되돌릴 방법이
-    없으면, 틀린 기준일이 영원히 남습니다."""
-    with TestClient(app) as client:
-        source_id = _create(client, body="본문", effective_on="2026-04-28")
-        assert client.put(f"/policy-docs/{source_id}", data={"body": "본문2"}).status_code == 200
-
-    with policy_db() as session:
-        source = session.get(PolicySource, source_id)
-        assert source.effective_on is None
-        assert source.edited_at is not None
 
 
 def test_a_deleted_document_leaves_the_prompt_and_frees_its_name(policy_db):
@@ -158,8 +140,6 @@ def test_deleting_a_reference_document_also_stops_the_router_citing_it(policy_db
     사라졌는데 라우터는 계속 인용합니다 — 하드 삭제 시절이 그랬습니다."""
     with TestClient(app) as client:
         source_id = _create(client, body="환불은 영업일 5~10일", mode="knowledge")
-        with policy_db() as session:
-            assert session.query(PolicySource).one().status == "active"
 
         assert client.post(f"/policy-docs/{source_id}/delete").status_code == 200
         with policy_db() as session:

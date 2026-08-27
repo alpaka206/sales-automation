@@ -50,8 +50,10 @@ def _rules_from_db() -> str:
         with SessionLocal() as session:
             rows = (
                 session.query(PolicySource)
-                .filter(PolicySource.mode == "rules", PolicySource.status == "active")
-                .order_by(PolicySource.order_index, PolicySource.id)
+                .filter(PolicySource.mode == "rules")
+                # 순서는 만든 순서입니다. `order_index` 라는 칸이 있었지만 정할 방법이
+                # 없어서 늘 같은 값이었고, 결국 이 정렬이었습니다 (0101).
+                .order_by(PolicySource.id)
                 .all()
             )
             parts = [

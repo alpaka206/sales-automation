@@ -14,7 +14,7 @@ type Mode = { key: string; label: string };
 type Row = {
   id: number; label: string; title: string | null; mode: string; slug: string;
   body: string | null; chars: number;
-  subject: string; usage_note: string; effective_on: string | null; edited_at: string | null;
+  subject: string; usage_note: string; updated_at: string;
   version: number;
 };
 type Data = { modes: Mode[]; rows: Row[] };
@@ -46,17 +46,10 @@ const COLUMNS: Column<Row>[] = [
         {row.slug && <div className="t-xs mono t-subtle">{row.slug}</div>}
       </>
     ) },
-  // **기준일과 수정일은 다른 사실입니다.** 기준일은 「이 정책이 언제 기준인가」라 오늘
-  // 붙여넣은 넉 달 된 정책이 최신으로 보이지 않게 하고, 수정일은 「내가 언제 저장했나」
-  // 입니다. 한 칸에서 기준일이 이기게 해 두었더니, 콘솔에서 고쳐도 이 칸이 안 움직여
-  // 「저장이 안 됐나」로 읽혔습니다 (2026-08-27 운영자 지적). 둘 다 적습니다.
-  { label: "기준 · 수정", width: "22%", className: "tnum td-subtle",
-    cell: (row) => (
-      <>
-        <div>{row.effective_on || "—"}</div>
-        <div className="t-xs t-subtle">수정 {kst(row.edited_at || "") || "—"}</div>
-      </>
-    ) },
+  // **날짜는 하나입니다** (0101). 「기준일」이라는 칸이 따로 있었는데 마이그레이션이 심은
+  // 한 행 말고는 아무도 안 채웠고, 「언제 기준인가」는 결국 마지막으로 저장한 시각입니다.
+  { label: "수정", width: "22%", className: "tnum td-subtle",
+    cell: (row) => kst(row.updated_at) || "—" },
 ];
 
 /** 문서 하나 — 만들 때도 고칠 때도 이 화면입니다.
@@ -73,7 +66,6 @@ function DocEditor({ doc, modes, onDone }: {
   const [mode, setMode] = useState(doc?.mode || "knowledge");
   const [subject, setSubject] = useState(doc?.subject || "");
   const [usageNote, setUsageNote] = useState(doc?.usage_note || "");
-  const [effectiveOn, setEffectiveOn] = useState(doc?.effective_on || "");
   const [body, setBody] = useState(doc?.body || "");
   const [note, setNote] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
@@ -82,15 +74,14 @@ function DocEditor({ doc, modes, onDone }: {
   // 화면에서만 앞서 보입니다. 실제로 올라가는 것은 저장을 눌렀을 때뿐입니다.
   const dirty = doc
     ? label !== (doc.title || doc.label) || mode !== doc.mode || subject !== (doc.subject || "")
-      || usageNote !== (doc.usage_note || "") || effectiveOn !== (doc.effective_on || "")
-      || body !== (doc.body || "")
+      || usageNote !== (doc.usage_note || "") || body !== (doc.body || "")
     : Boolean(label.trim() || body.trim());
   const shownVersion = (doc?.version ?? 1) + (dirty && doc ? 1 : 0);
 
   async function save() {
     setNote(null);
     try {
-      const fields = { label, mode, subject, usage_note: usageNote, effective_on: effectiveOn, body };
+      const fields = { label, mode, subject, usage_note: usageNote, body };
       if (doc) await send(`/policy-docs/${doc.id}`, "PUT", fields);
       else await send("/policy-docs", "POST", fields);
       onDone();
@@ -135,13 +126,9 @@ function DocEditor({ doc, modes, onDone }: {
               {modes.map((m) => <option key={m.key} value={m.key}>{m.label}</option>)}
             </select>
           </div>
-          <div>
-            <label className="field-label" htmlFor="pd-eff">
-              기준일 <span className="t-subtle">(비우면 저장한 날짜)</span>
-            </label>
-            <input className="input" id="pd-eff" type="date" value={effectiveOn}
-                   onChange={(e) => setEffectiveOn(e.target.value)} />
-          </div>
+          {/* 「기준일」 칸이 여기 있었습니다 (0101). 「언제 기준인가」는 결국 마지막으로
+              저장한 시각이고, 그건 저장할 때마다 자동으로 움직입니다 — 사람이 채워야 하는
+              칸으로 두었더니 마이그레이션이 심은 한 행 말고는 아무도 안 채웠습니다. */}
         </div>
 
         {/* 이 문서를 근거로 회신할 때의 메일 제목. 본문 안에 "Subject: ..." 로 적으면 모델이

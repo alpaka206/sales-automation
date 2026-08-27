@@ -456,9 +456,7 @@ def test_inbound_passes_knowledge_docs_to_draft(db_session) -> None:
     """When classification matches a knowledge_base doc, its body must reach the draft prompt."""
     knowledge.reset_cache()
     doc = PolicySource(
-        label="Plans", title="Plans", doc_key="p" * 32, mode="knowledge",
-        status="active", body="Starter plan starts at 99k KRW.",
-    )
+        label="Plans", title="Plans", doc_key="p" * 32, mode="knowledge", body="Starter plan starts at 99k KRW.")
     db_session.add(doc)
     db_session.commit()
 
@@ -489,9 +487,7 @@ def test_a_spam_classification_still_gets_documents(db_session) -> None:
     draft, not something decided by withholding the documents."""
     knowledge.reset_cache()
     doc = PolicySource(
-        label="General", title="General", doc_key="g" * 32, mode="knowledge",
-        status="active", body="Always-on company info.",
-    )
+        label="General", title="General", doc_key="g" * 32, mode="knowledge", body="Always-on company info.")
     db_session.add(doc)
     db_session.commit()
 

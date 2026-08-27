@@ -51,7 +51,7 @@ def db(monkeypatch):
 
 def _doc(db, doc_key: str, title: str, **kwargs) -> None:
     """「문의별 참고」 문서 하나. ``doc_key`` 가 라우터에게 보이는 이름입니다."""
-    fields = {"mode": "knowledge", "status": "active", "body": f"{title} 본문"}
+    fields = {"mode": "knowledge", "body": f"{title} 본문"}
     fields.update(kwargs)
     with db() as session:
         session.add(PolicySource(label=title, title=title, doc_key=doc_key, **fields))
@@ -61,14 +61,16 @@ def _doc(db, doc_key: str, title: str, **kwargs) -> None:
 # ---- 누가 후보가 되는가 -------------------------------------------------------------
 
 
-def test_only_active_knowledge_rows_are_candidates(db) -> None:
+def test_only_knowledge_rows_are_candidates(db) -> None:
     """「항상 적용」은 고르는 대상이 아닙니다 — 모든 프롬프트에 통째로 들어갑니다.
-    지운 문서도 후보가 아닙니다: 그 ``status`` 하나가 「초안이 이 문서를 보는가」입니다."""
+
+    **상태는 안 봅니다** (0101): 지우면 행이 사라지므로(0100) 표에 있는 행이 곧 살아
+    있는 행입니다.
+    """
     _doc(db, "k1", "지원 언어 정책")
-    _doc(db, "k2", "지운 문서", status="deleted")
     _doc(db, "r1", "공통 원칙", mode="rules")
 
-    assert [d.doc_key for d in knowledge.active_docs()] == ["k1"]
+    assert [d.doc_key for d in knowledge.router_docs()] == ["k1"]
 
 
 def test_no_documents_means_no_block(db) -> None:  # noqa: ARG001

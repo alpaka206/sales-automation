@@ -167,7 +167,7 @@ def mock_llm():
 
 
 def legacy_template_columns(engine) -> None:
-    """``channel`` 과 ``subject`` — 0019 부터 0100 까지 ``email_templates`` 에 살던 칸.
+    """``channel``·``subject``(~0100) 와 ``status``(~0101) — 그 시절 ``email_templates`` 의 칸.
 
     옛 씨앗 마이그레이션들은 그 이름으로 INSERT 합니다. 실제 배포에서는 0019 가 그 둘을
     만들어 두고 0100 이 지우므로 순서가 맞는데, 여기서는 모델에서 표를 만들고 그 씨앗
@@ -185,3 +185,32 @@ def legacy_template_columns(engine) -> None:
             ))
         if "subject" not in existing:
             conn.execute(_text("ALTER TABLE email_templates ADD COLUMN subject TEXT"))
+        if "status" not in existing:
+            conn.execute(_text(
+                "ALTER TABLE email_templates ADD COLUMN status VARCHAR NOT NULL DEFAULT 'active'"
+            ))
+
+
+def legacy_policy_columns(engine) -> None:
+    """``order_index``·``status``·``summary``·``effective_on``·``edited_at`` —
+    0043 부터 0101 까지 ``policy_sources`` 에 살던 칸.
+
+    옛 마이그레이션들은 그 이름으로 INSERT 합니다. 실제 배포에서는 0043 이 세워 두고
+    0101 이 지우므로 순서가 맞는데, 여기서는 모델에서 표를 만들고 그 마이그레이션 하나만
+    바로 돌리므로 그 시절 모양을 직접 세워 줍니다.
+    """
+    from sqlalchemy import inspect as _inspect
+    from sqlalchemy import text as _text
+
+    existing = {c["name"] for c in _inspect(engine).get_columns("policy_sources")}
+    legacy = (
+        ("order_index", "INTEGER NOT NULL DEFAULT 100"),
+        ("status", "VARCHAR NOT NULL DEFAULT 'active'"),
+        ("summary", "TEXT"),
+        ("effective_on", "VARCHAR(10)"),
+        ("edited_at", "TIMESTAMP"),
+    )
+    with engine.begin() as conn:
+        for column, spec in legacy:
+            if column not in existing:
+                conn.execute(_text(f"ALTER TABLE policy_sources ADD COLUMN {column} {spec}"))

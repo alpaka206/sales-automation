@@ -59,7 +59,6 @@ def list_signature_templates() -> list[dict]:
                 session.query(EmailTemplate)
                 .filter(
                     EmailTemplate.key.like(f"{SIGNATURE_KEY_PREFIX}%"),
-                    EmailTemplate.status == "active",
                 )
                 .order_by(EmailTemplate.name)
                 .all()
@@ -89,7 +88,6 @@ def default_signature_key() -> str | None:
                 session.query(EmailTemplate)
                 .filter(
                     EmailTemplate.key.like(f"{SIGNATURE_KEY_PREFIX}%"),
-                    EmailTemplate.status == "active",
                 )
                 .order_by(EmailTemplate.name)
                 .first()
@@ -115,7 +113,7 @@ def get_email_template(key: str, language: str | None = None) -> str | None:
     with SessionLocal() as session:
         rows = (
             session.query(EmailTemplate)
-            .filter(EmailTemplate.key == key, EmailTemplate.status == "active")
+            .filter(EmailTemplate.key == key)
             .all()
         )
         if not rows:

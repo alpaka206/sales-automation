@@ -106,7 +106,6 @@ async def email_templates_create(
                 if final_key.startswith(SIGNATURE_KEY_PREFIX)
                 else (language.strip().lower() or "all")
             ),
-            status="active",
             version=1,
             author=author,
             body=body,
@@ -164,7 +163,6 @@ async def email_templates_update(
         # 값이 안 오면 **그 행의 언어를 그대로 둡니다.** 빈 값은 "전체로 바꿔 달라" 가
         # 아니라 "이 폼은 언어를 모른다" 입니다 — 옛 화면이나 다른 클라이언트가 그렇습니다.
         tpl.language = "all" if is_signature else (language.strip() or tpl.language or "all")
-        tpl.status = "active"
         tpl.version = (tpl.version or 1) + 1
         tpl.body = body
         # 만든 사람이 아니라 **마지막으로 저장한 사람**입니다 (0100).

@@ -39,6 +39,25 @@ def up(engine: Engine) -> None:
     ts_default = "CURRENT_TIMESTAMP" if is_sqlite else "NOW()"
     autoincrement = "INTEGER PRIMARY KEY AUTOINCREMENT" if is_sqlite else "SERIAL PRIMARY KEY"
 
+    # **``order_index`` · ``status`` · ``summary`` · ``effective_on`` · ``edited_at`` 은
+    # 0043~0101 을 살았던 칸입니다.** 새 DB 는 0001 의 ``create_all`` 이 **지금** 모델로
+    # 표를 만들어 그 칸들이 없는 채로 시작하는데, 0043~0064 의 씨앗들은 그 이름으로
+    # INSERT 합니다. 옛 마이그레이션의 SQL 을 고쳐 역사를 다시 쓰는 대신 그때의 모양을
+    # 세워 두고, 0101 이 그때처럼 다시 지웁니다 (0019 가 channel/subject 에 하는 것과 같음).
+    if "policy_sources" in set(inspector.get_table_names()):
+        existing = {c["name"] for c in inspector.get_columns("policy_sources")}
+        legacy = (
+            ("order_index", "INTEGER NOT NULL DEFAULT 100"),
+            ("status", "VARCHAR NOT NULL DEFAULT 'active'"),
+            ("summary", "TEXT"),
+            ("effective_on", "VARCHAR(10)"),
+            ("edited_at", "TIMESTAMP"),
+        )
+        with engine.begin() as conn:
+            for column, spec in legacy:
+                if column not in existing:
+                    conn.execute(text(f"ALTER TABLE policy_sources ADD COLUMN {column} {spec}"))
+
     if "policy_sources" not in set(inspector.get_table_names()):
         with engine.begin() as conn:
             conn.execute(

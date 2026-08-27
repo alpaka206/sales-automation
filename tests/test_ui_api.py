@@ -89,15 +89,13 @@ def test_the_document_screens_render_with_a_row_in_them():
     factory = sessionmaker(bind=engine, expire_on_commit=False)
     with factory() as session:
         session.add_all([
-            EmailTemplate(key="reply_format", name="답변 메일 형식", language="ko",
-                          status="active", version=2, body="뼈대", author="배운태"),
-            EmailTemplate(key="signature_x", name="서명", language="all",
-                          status="active", version=1, body="<p/>"),
+            EmailTemplate(key="reply_format", name="답변 메일 형식", language="ko", version=2, body="뼈대", author="배운태"),
+            EmailTemplate(key="signature_x", name="서명", language="all", version=1, body="<p/>"),
             PolicySource(label="지원 언어 정책", title="지원 언어 정책", doc_key="k" * 32,
-                         mode="knowledge", status="active", version=3, body="99개 언어",
-                         usage_note="언어 문의에 씁니다", effective_on="2026-07-29"),
+                         mode="knowledge", version=3, body="99개 언어",
+                         usage_note="언어 문의에 씁니다"),
             PolicySource(label="공통 원칙", title="공통 원칙", doc_key="r" * 32,
-                         mode="rules", status="active", version=1, body="규칙"),
+                         mode="rules", version=1, body="규칙"),
         ])
         session.commit()
 
@@ -114,7 +112,7 @@ def test_the_document_screens_render_with_a_row_in_them():
     assert counts["signature"] == 1 and counts["template"] == 1
     rows = {row["label"]: row for row in docs.json()["rows"]}
     assert rows["지원 언어 정책"]["version"] == 3
-    assert rows["지원 언어 정책"]["effective_on"] == "2026-07-29"
+    assert rows["지원 언어 정책"]["updated_at"]
 
 
 def test_a_personal_domain_is_never_grouped_as_one_company():

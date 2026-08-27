@@ -52,7 +52,7 @@ def up(engine: Engine) -> None:
 
     tables = set(insp.get_table_names())
 
-    # **``channel`` 과 ``subject`` 는 0019 부터 0100 까지 살았던 칸입니다.**
+    # **``channel``·``subject``(~0100)·``status``(~0101) 는 그 시절의 칸입니다.**
     # 새 DB 는 0001 의 ``create_all`` 이 **지금** 모델로 표를 만들므로 그 둘이 없는 채로
     # 시작하는데, 0019~0056 의 씨앗들은 그 이름으로 INSERT 합니다. 여덟 개 넘는 옛
     # 마이그레이션의 SQL 을 고쳐 역사를 다시 쓰는 대신, 여기서 **그때의 모양을 만들어
@@ -68,6 +68,11 @@ def up(engine: Engine) -> None:
                 ))
             if "subject" not in existing:
                 conn.execute(text("ALTER TABLE email_templates ADD COLUMN subject TEXT"))
+            if "status" not in existing:
+                conn.execute(text(
+                    "ALTER TABLE email_templates ADD COLUMN status VARCHAR "
+                    "NOT NULL DEFAULT 'active'"
+                ))
 
     if "email_templates" not in tables:
         with engine.begin() as conn:

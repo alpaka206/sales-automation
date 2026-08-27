@@ -42,7 +42,6 @@ const NOTES: Record<string, string> = {
 const EXTRA_LABELS: Record<string, string> = {
   subject: "메일 제목",
   usage_note: "언제 쓰는가",
-  effective_on: "기준일",
   mode: "종류",
   language: "언어",
   channel: "채널",

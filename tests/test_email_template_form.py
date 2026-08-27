@@ -109,10 +109,8 @@ def test_editing_cannot_move_the_key_or_blank_the_description(template_db):
                 name="접수확인",
                 language="ko",
                 description="자동 접수확인 본문",
-                status="active",
                 version=1,
-                body="안녕하세요",
-            )
+                body="안녕하세요")
         )
         session.commit()
         tpl_id = session.query(EmailTemplate).one().id
@@ -143,10 +141,8 @@ def test_a_new_draft_starts_on_the_first_signature(template_db):
 
     with template_db() as session:
         session.add_all([
-            EmailTemplate(key=f"{SIGNATURE_KEY_PREFIX}b", name="B 담당자", language="all",
-                          status="active", version=1, body="<p>b</p>"),
-            EmailTemplate(key=f"{SIGNATURE_KEY_PREFIX}a", name="A 담당자", language="all",
-                          status="active", version=1, body="<p>a</p>"),
+            EmailTemplate(key=f"{SIGNATURE_KEY_PREFIX}b", name="B 담당자", language="all", version=1, body="<p>b</p>"),
+            EmailTemplate(key=f"{SIGNATURE_KEY_PREFIX}a", name="A 담당자", language="all", version=1, body="<p>a</p>"),
         ])
         session.commit()
 
@@ -224,9 +220,8 @@ def test_a_signature_cannot_keep_a_language(template_db):
     ``auto_ack`` 은 다릅니다 — 그건 정말 한 메일의 두 언어입니다."""
     with template_db() as session:
         session.add_all([
-            EmailTemplate(key="signature_ko", name="서명", language="ko", status="active", version=1, body="김규원"),
-            EmailTemplate(key="auto_ack_en", name="접수확인 영어", language="en",
-                          status="active", version=1, body="Hi"),
+            EmailTemplate(key="signature_ko", name="서명", language="ko", version=1, body="김규원"),
+            EmailTemplate(key="auto_ack_en", name="접수확인 영어", language="en", version=1, body="Hi"),
         ])
         session.commit()
         ids = {row.key: row.id for row in session.query(EmailTemplate).all()}
@@ -251,8 +246,8 @@ def test_removed_auto_ack_rows_are_hidden_from_the_console(template_db):
     """
     with template_db() as session:
         session.add_all([
-            EmailTemplate(key="auto_ack", name="접수확인", language="ko", status="active", version=1, body="안녕하세요"),
-            EmailTemplate(key="auto_ack_en", name="접수확인", language="en", status="active", version=1, body="Hi"),
+            EmailTemplate(key="auto_ack", name="접수확인", language="ko", version=1, body="안녕하세요"),
+            EmailTemplate(key="auto_ack_en", name="접수확인", language="en", version=1, body="Hi"),
         ])
         session.commit()
 
@@ -277,8 +272,7 @@ def test_saving_does_not_relabel_the_row_language(template_db):
     """
     with template_db() as session:
         session.add(
-            EmailTemplate(key="reply_format", name="답변 메일 형식", language="ko",
-                          status="active", version=1, body="형식")
+            EmailTemplate(key="reply_format", name="답변 메일 형식", language="ko", version=1, body="형식")
         )
         session.commit()
         tpl_id = session.query(EmailTemplate).one().id
@@ -294,31 +288,21 @@ def test_saving_does_not_relabel_the_row_language(template_db):
     assert row.language == "ko"
 
 
-def test_everything_saved_here_is_active(template_db):
-    """Only active rows are ever read — the send path and the signature picker both
-    filter on it — so a draft template was one that exists and does nothing. With no
-    control left to set the value back, saving has to revive a dormant row rather than
-    strand it where nothing can reach it."""
-    with template_db() as session:
-        session.add(
-            EmailTemplate(
-                key="signature_html_old",
-                name="예전 서명",
-                language="ko",
-                status="archived",
-                version=1,
-                body="<p>old</p>",
-            )
-        )
-        session.commit()
-        tpl_id = session.query(EmailTemplate).one().id
+def test_saving_always_leaves_a_live_row(template_db):
+    """상태 칸이 여기 있었습니다 — 「초안/보관」 같은 값을 쓸 방법이 없어서 언제나
+    ``active`` 였고, 0100 이 삭제를 하드 삭제로 바꾸면서 뜻을 완전히 잃었습니다(0101).
+    이제 **표에 있는 행이 곧 살아 있는 행**입니다."""
+    from src.db.email_templates import get_email_template
+    from src.db.models import EmailTemplate as _T
 
     with TestClient(app) as client:
-        client.post("/email-templates", data={"name": "새 서명", "language": "ko"})
-        client.put(f"/email-templates/{tpl_id}", data={"name": "예전 서명", "language": "ko"})
-    with template_db() as session:
-        assert {row.status for row in session.query(EmailTemplate).all()} == {"active"}
+        assert client.post("/email-templates", data={
+            "name": "새 서식", "key": "custom_note", "body": "본문", "language": "ko",
+        }).status_code == 200
 
+    assert get_email_template("custom_note") == "본문"
+    with template_db() as session:
+        assert not hasattr(session.query(_T).one(), "status")
 
 def test_anything_deletes_now_and_the_screen_says_what_that_costs(template_db):
     """자유 삭제입니다 (2026-08-18, 운영자 결정) — 막는 대신 **말합니다.**
@@ -331,12 +315,9 @@ def test_anything_deletes_now_and_the_screen_says_what_that_costs(template_db):
     """
     with template_db() as session:
         session.add_all([
-            EmailTemplate(key="meeting_link", name="미팅 예약 링크", language="ko",
-                          status="active", version=1, body="https://cal"),
-            EmailTemplate(key=f"{SIGNATURE_KEY_PREFIX}x", name="서명", language="all",
-                          status="active", version=1, body="<p/>"),
-            EmailTemplate(key="my_own_note", name="내 메모", language="all",
-                          status="active", version=1, body="메모"),
+            EmailTemplate(key="meeting_link", name="미팅 예약 링크", language="ko", version=1, body="https://cal"),
+            EmailTemplate(key=f"{SIGNATURE_KEY_PREFIX}x", name="서명", language="all", version=1, body="<p/>"),
+            EmailTemplate(key="my_own_note", name="내 메모", language="all", version=1, body="메모"),
         ])
         session.commit()
         ids = {row.key: row.id for row in session.query(EmailTemplate).all()}
@@ -357,8 +338,7 @@ def test_anything_deletes_now_and_the_screen_says_what_that_costs(template_db):
     assert payload["items"] == []
     # 그리고 **같은 키로 다시 만들 수 있어야 합니다** — 그게 하드 삭제의 요점입니다.
     with template_db() as session:
-        session.add(EmailTemplate(key="meeting_link", name="다시 만든 링크", language="ko",
-                                  status="active", version=1, body="https://cal"))
+        session.add(EmailTemplate(key="meeting_link", name="다시 만든 링크", language="ko", version=1, body="https://cal"))
         session.commit()
 
 
@@ -410,7 +390,7 @@ def test_a_deleted_signature_is_gone_from_the_send_path_at_once(template_db):
 
     with template_db() as session:
         session.add(EmailTemplate(key=f"{SIGNATURE_KEY_PREFIX}y", name="지울 서명",
-                                  language="all", status="active",
+                                  language="all",
                                   version=1, body="<p/>"))
         session.commit()
         tpl_id = session.query(EmailTemplate).filter_by(name="지울 서명").one().id
@@ -441,8 +421,7 @@ def test_a_deleted_row_frees_its_key_and_leaves_its_content_in_history(template_
     from src.db.email_templates import get_email_template
 
     with template_db() as session:
-        session.add(EmailTemplate(key="reply_format", name="서식", language="ko",
-                                  status="active", version=4, body="옛 서식"))
+        session.add(EmailTemplate(key="reply_format", name="서식", language="ko", version=4, body="옛 서식"))
         session.commit()
         tpl_id = session.query(EmailTemplate).one().id
 
@@ -525,7 +504,7 @@ def test_every_write_path_leaves_the_value_before_it(template_db):
 
     key = f"{SIGNATURE_KEY_PREFIX}untae"
     with template_db() as session:
-        session.add(EmailTemplate(key=key, name="서명", language="all", status="active", version=1, body="처음 서명"))
+        session.add(EmailTemplate(key=key, name="서명", language="all", version=1, body="처음 서명"))
         session.commit()
         tpl_id = session.query(EmailTemplate).one().id
 
@@ -541,7 +520,6 @@ def test_every_write_path_leaves_the_value_before_it(template_db):
         assert {r.kind for r in rows} == {EMAIL_TEMPLATE}
         # 「바꾸기 **직전** 값」이 규칙이고 예외가 없습니다.
         assert [r.body for r in rows] == ["처음 서명", "두 번째 서명", "세 번째 서명"]
-        assert [r.status for r in rows] == ["active", "active", "active"]
         # append-only: 이력이 서로를 덮어쓰지 않았습니다. 행 자체는 삭제로 사라졌고,
         # 마지막 스냅샷이 그때 본문을 들고 있습니다.
         assert session.get(EmailTemplate, tpl_id) is None
@@ -560,7 +538,7 @@ def test_the_language_is_editable_and_the_other_one_is_not_english(template_db):
     """
     with template_db() as session:
         session.add(EmailTemplate(key="reply_format_en", name="답변 메일 형식 (외국어)",
-                                  language="ko", status="active",
+                                  language="ko",
                                   version=1, body="뼈대"))
         session.commit()
         tpl_id = session.query(EmailTemplate).one().id
@@ -578,8 +556,7 @@ def test_the_language_is_editable_and_the_other_one_is_not_english(template_db):
 def test_a_signature_still_cannot_keep_a_language(template_db):
     """어떤 코드도 언어로 서명을 고르지 않습니다 — 고르는 것은 사람입니다(0063)."""
     with template_db() as session:
-        session.add(EmailTemplate(key=f"{SIGNATURE_KEY_PREFIX}z", name="서명", language="all",
-                                  status="active", version=1, body="<p/>"))
+        session.add(EmailTemplate(key=f"{SIGNATURE_KEY_PREFIX}z", name="서명", language="all", version=1, body="<p/>"))
         session.commit()
         tpl_id = session.query(EmailTemplate).one().id
 
