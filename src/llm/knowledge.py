@@ -98,12 +98,19 @@ def subject_from_docs(docs: list[KnowledgeDocument]) -> str | None:
     if not carrying:
         return None
     if len(carrying) > 1:
+        # **어느 쪽이 옳은지 여기서는 모릅니다.** 순서는 제목 가나다순이라(`_candidate_docs`
+        # 가 title 로 정렬), 이긴 문서가 「메일 템플릿」이라는 보장이 없습니다 — 2026-08-26
+        # 에 「B2B 플랜 비교표」(참고 문서)가 「견적 및 맞춤형 플랜 안내」(실제 회신 서식)를
+        # 제치고 제목을 정했습니다. 그때 이 경고는 **이긴 쪽을 옳다고 가정하고** 진 쪽을
+        # 비우라고 적었는데, 비워야 할 것은 반대였습니다. 그래서 이제 지목하지 않고 전부
+        # 나열합니다 — 어느 것이 메일 템플릿인지는 운영자가 압니다.
         logger.warning(
-            "%d documents carry a mail subject; using %s. 메일 제목은 메일 템플릿에만 "
-            "채우고 근거 문서(%s)는 비워 두세요.",
+            "%d documents carry a mail subject (%s); 가나다순으로 앞선 「%s」의 제목을 "
+            "씁니다. 메일 제목은 메일 템플릿에만 채우고, 내용만 제공하는 근거 문서는 "
+            "제목 칸을 비워 두세요.",
             len(carrying),
+            ", ".join(doc.title for doc, _ in carrying),
             carrying[0][0].title,
-            ", ".join(doc.title for doc, _ in carrying[1:]),
         )
     return carrying[0][1]
 
