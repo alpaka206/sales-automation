@@ -161,3 +161,49 @@ def test_deleting_a_reference_document_also_stops_the_router_citing_it(policy_db
         assert client.post(f"/policy-docs/{source_id}/restore").status_code == 200
         with policy_db() as session:
             assert session.query(KnowledgeDocument).one().status == "active"
+
+
+# ---- 판본 기록 ------------------------------------------------------------------
+
+
+def _make_doc(client, label="정책 하나", body="첫 본문") -> int:
+    response = client.post("/policy-docs", data={"label": label, "body": body, "mode": "knowledge"})
+    assert response.status_code == 200, response.text
+    return response.json()["id"]
+
+
+def test_editing_a_policy_document_leaves_the_version_before_it(policy_db):
+    """정책 문서에는 이력이 **없었습니다.** 그 몫이라던 ``knowledge_document_revisions`` 는
+    0016 이 만들고 아무도 쓰지 않았고(0095 가 지웠습니다), 이메일 템플릿만 이력이 쌓였습니다.
+
+    남는 것은 고치기 **직전** 본문입니다. 그래야 「저장했는데 전엔 뭐였지」에 답이 됩니다.
+    """
+    from src.db.models import DocumentRevision, PolicySource
+    from src.db.revisions import POLICY_SOURCE, history
+
+    with TestClient(app) as client:
+        doc_id = _make_doc(client)
+        client.put(f"/policy-docs/{doc_id}", data={"body": "두 번째 본문"})
+        client.put(f"/policy-docs/{doc_id}", data={"body": "세 번째 본문"})
+
+    with policy_db() as session:
+        rows = history(session, POLICY_SOURCE, doc_id)
+        # 만들 때는 안 남깁니다 — 이 표는 「이전 판본」이고, 갓 만든 행에는 이전이 없습니다.
+        assert [r["body"] for r in rows] == ["두 번째 본문", "첫 본문"]
+        assert [r["version"] for r in rows] == [2, 1]
+        source = session.get(PolicySource, doc_id)
+        assert source.version == 3 and source.body == "세 번째 본문"
+        # 이력은 종류를 달고 삽니다 — 한 표에 이메일 템플릿과 같이 삽니다.
+        assert {r.kind for r in session.query(DocumentRevision)} == {POLICY_SOURCE}
+
+
+def test_the_revision_route_refuses_a_kind_it_does_not_know(policy_db):
+    """``kind`` 는 경로에서 온 문자열입니다. 그대로 조회에 넣으면 아무 문자열이나 지나가고,
+    그때 돌아오는 빈 목록은 「이력이 없다」와 구별되지 않습니다."""
+    with TestClient(app) as client, patch("src.db.session.SessionLocal", policy_db):
+        doc_id = _make_doc(client)
+        assert client.get(f"/api/ui/documents/nope/{doc_id}/revisions").status_code == 400
+        ok = client.get(f"/api/ui/documents/policy_source/{doc_id}/revisions")
+        assert ok.status_code == 200
+        assert ok.json()["kind_label"] == "정책 문서"
+        assert ok.json()["revisions"] == []

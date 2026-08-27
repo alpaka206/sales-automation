@@ -417,6 +417,27 @@ def test_the_meeting_and_whatsapp_links_are_per_language():
         assert apply_editable_tokens("{{WHATSAPP}}", "en") == 행["whatsapp_link_en"]
 
 
+def _legacy_revision_table(engine) -> None:
+    """0069·0086 이 스냅샷을 쓰던 ``email_template_revisions``.
+
+    그 표는 0096 이 ``document_revisions`` 로 옮기고 지웠으므로 모델이 없습니다. 옛
+    마이그레이션은 raw SQL 로 그 이름에 쓰는데, **이미 적용된 DB 에서는 다시 돌지 않으므로**
+    고칠 이유가 없습니다 — 여기서만 그때의 표를 세워 주면 그 시절 동작을 그대로 잽니다.
+    """
+    from sqlalchemy import text as sql_text
+
+    with engine.begin() as conn:
+        conn.execute(
+            sql_text(
+                "CREATE TABLE email_template_revisions ("
+                "id INTEGER PRIMARY KEY AUTOINCREMENT, template_id INTEGER, key VARCHAR, "
+                "name VARCHAR, language VARCHAR, channel VARCHAR, body TEXT, "
+                "description TEXT, status VARCHAR, change_note TEXT, edited_by VARCHAR, "
+                "created_at DATETIME DEFAULT CURRENT_TIMESTAMP)"
+            )
+        )
+
+
 def test_the_language_rows_exist_because_nothing_else_can_make_them():
     """위 두 테스트가 읽는 ``*_en`` 행은 콘솔에서 만들 수 없습니다 — 「추가」는 ``signature_``
     접두사가 붙은 행만 만듭니다. 심는 곳이 마이그레이션 하나뿐이라, 그게 실제로 심는지를
@@ -425,11 +446,11 @@ def test_the_language_rows_exist_because_nothing_else_can_make_them():
 
     from sqlalchemy import create_engine, text
 
-    from src.db.models import EmailTemplate, EmailTemplateRevision
+    from src.db.models import EmailTemplate
 
     engine = create_engine("sqlite:///:memory:")
-    for model in (EmailTemplate, EmailTemplateRevision):
-        model.__table__.create(engine)
+    EmailTemplate.__table__.create(engine)
+    _legacy_revision_table(engine)
     importlib.import_module("src.db.migrations.0042_reply_format_template").up(engine)
     importlib.import_module("src.db.migrations.0069_links_are_words_not_urls").up(engine)
 
@@ -461,11 +482,11 @@ def test_0086_normalizes_live_link_templates_without_changing_urls():
 
     from sqlalchemy import create_engine, text
 
-    from src.db.models import EmailTemplate, EmailTemplateRevision
+    from src.db.models import EmailTemplate
 
     engine = create_engine("sqlite:///:memory:")
-    for model in (EmailTemplate, EmailTemplateRevision):
-        model.__table__.create(engine)
+    EmailTemplate.__table__.create(engine)
+    _legacy_revision_table(engine)
     importlib.import_module("src.db.migrations.0042_reply_format_template").up(engine)
     importlib.import_module("src.db.migrations.0069_links_are_words_not_urls").up(engine)
     importlib.import_module("src.db.migrations.0086_contact_link_templates_are_exact").up(engine)

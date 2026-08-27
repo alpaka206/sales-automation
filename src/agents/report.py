@@ -11,7 +11,6 @@ from sqlalchemy import func
 from ..db.models import Message
 from ..db.session import SessionLocal
 from ..llm.client import LLMClient
-from ..llm.pricing import format_cost, get_usage_since
 
 logger = logging.getLogger(__name__)
 
@@ -99,29 +98,9 @@ class ReportAgent:
             "",
         ]
 
-        llm_section = self._llm_cost_summary(since)
-        if llm_section:
-            lines.append(llm_section)
+        # 「LLM Usage」 절이 여기 있었습니다. 사용량 기록을 그만두면서 같이 나갔습니다
+        # (0095) — 읽는 사람이 없는 표를 매 호출마다 쓰고 있었습니다.
 
-        return "\n".join(lines)
-
-    def _llm_cost_summary(self, since: datetime | None) -> str:
-        """Build the LLM Usage section from usage records."""
-        if since is None:
-            since = datetime.now(timezone.utc) - timedelta(days=1)
-        usage = get_usage_since(since)
-        if usage["calls"] == 0:
-            return ""
-        lines = [
-            "## LLM Usage",
-            f"- API calls: **{usage['calls']}**",
-            f"- Input tokens: **{usage['total_input']:,}**",
-            f"- Output tokens: **{usage['total_output']:,}**",
-            f"- Estimated cost: **{format_cost(usage['total_cost'])}**",
-        ]
-        for model, counts in sorted(usage["models"].items()):
-            lines.append(f"  - {model}: {counts['input']:,} in / {counts['output']:,} out")
-        lines.append("")
         return "\n".join(lines)
 
     def _save_report(self, report: str, kind: str) -> None:

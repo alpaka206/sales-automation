@@ -653,6 +653,8 @@ def ui_email_templates():
                 "name": row.name,
                 "language": row.language or "all",
                 "updated_at": row.updated_at,
+                # 몇 번째 판인가. 「판본 기록」이 이 번호까지의 이력을 보여 줍니다.
+                "version": row.version or 1,
                 "kind": _template_kind(row.key),
                 # 발송 경로가 이 이름으로 찾는 행인가. 아무 키나 만들고 무엇이든 지울 수
                 # 있게 한 뒤로(2026-08-18), 이것이 "이 행은 실제로 쓰인다" 와 "목록에만
@@ -728,12 +730,38 @@ def ui_policy_docs():
                     "usage_note": row.usage_note or "",
                     "effective_on": row.effective_on,
                     "edited_at": row.edited_at,
+                    "version": row.version or 1,
                     # 지운 문서도 실립니다 — 흐리게, 되돌리기와 함께 일주일.
                     "deleted": row.status == DELETED,
                     "days_left": days_left(row.deleted_at) if row.status == DELETED else None,
                 }
                 for row in rows
             ],
+        }
+
+
+@router.get("/api/ui/documents/{kind}/{document_id}/revisions")
+def ui_document_revisions(kind: str, document_id: int):
+    """그 문서의 이전 판본들, 최신 먼저.
+
+    **이메일 템플릿과 정책 문서가 같은 라우트를 씁니다.** 보고 싶은 것이 같기 때문입니다 —
+    언제, 누가, 무엇을, 그때 본문은 무엇이었나. 종류마다 라우트를 두면 화면도 둘이 되고,
+    둘 중 하나에만 이력이 달리는 날이 옵니다(실제로 그랬습니다 — 0096).
+
+    ``kind`` 는 경로에서 온 문자열이라 **허용 목록으로 거릅니다.** 그대로 조회에 넣으면
+    아무 문자열이나 지나가고, 그때 돌아오는 빈 목록은 「이력이 없다」와 구별되지 않습니다.
+    """
+    from ...db.revisions import KIND_LABELS, KINDS, history
+    from ...db.session import SessionLocal
+
+    if kind not in KINDS:
+        raise HTTPException(status_code=400, detail="알 수 없는 문서 종류입니다")
+    with SessionLocal() as session:
+        return {
+            "kind": kind,
+            "kind_label": KIND_LABELS[kind],
+            "document_id": document_id,
+            "revisions": history(session, kind, document_id),
         }
 
 

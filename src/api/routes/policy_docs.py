@@ -27,8 +27,9 @@ from fastapi import APIRouter, Form, HTTPException, Request
 from fastapi.responses import RedirectResponse
 
 from ...db.models import PolicySource
-from ..auth import admin_required
+from ...db.revisions import snapshot_policy
 from ...db.session import SessionLocal
+from ..auth import actor_name, admin_required
 
 logger = logging.getLogger(__name__)
 
@@ -96,6 +97,8 @@ async def policy_docs_create(
             edited_at=datetime.now(timezone.utc).replace(tzinfo=None),
         )
         session.add(source)
+        # 만든 직후에는 이력을 남기지 않습니다 — 이 표는 「이전 판본」을 들고 있고,
+        # 갓 만든 행에는 이전이 없습니다(이메일 템플릿과 같은 규칙).
         session.commit()
         source_id = source.id
 
@@ -127,6 +130,9 @@ async def policy_docs_update(
         source = session.get(PolicySource, source_id)
         if source is None:
             raise HTTPException(status_code=404, detail="문서를 찾을 수 없습니다")
+        # 고치기 **전** 상태를 먼저 남기고, 판 번호를 올린 뒤 적용합니다.
+        snapshot_policy(session, source, change_note="edited", edited_by=actor_name(request, fallback="web") or "web")
+        source.version = (source.version or 1) + 1
         if label.strip():
             source.label = label.strip()
             source.title = label.strip()
@@ -172,6 +178,7 @@ async def policy_docs_delete(source_id: int):
     with SessionLocal() as session:
         source = session.get(PolicySource, source_id)
         if source is not None:
+            snapshot_policy(session, source, change_note="deleted", edited_by="web")
             source.status = DELETED
             source.deleted_at = utcnow()
             _set_knowledge_status(session, source, "archived")
@@ -188,6 +195,7 @@ async def policy_docs_restore(source_id: int):
             raise HTTPException(status_code=404, detail="보관 기간이 지나 이미 사라졌습니다")
         source.status = "active"
         source.deleted_at = None
+        snapshot_policy(session, source, change_note="restored", edited_by="web")
         _set_knowledge_status(session, source, "active")
         session.commit()
     _publish(source_id)

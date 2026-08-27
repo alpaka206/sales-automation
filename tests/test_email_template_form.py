@@ -448,32 +448,47 @@ def test_the_bin_empties_after_a_week(template_db):
 
 
 def test_the_history_of_a_purged_template_goes_with_it(template_db):
-    """개정 이력도 같이 갑니다. 안 그러면 「7일 뒤 사라진다」가 사실이 아닙니다 — 화면에서만
+    """판본 이력도 같이 갑니다. 안 그러면 「7일 뒤 사라진다」가 사실이 아닙니다 — 화면에서만
     없어지고 본문은 그대로 남아, 일부러 흘려보낸 것을 누군가 되살릴 수 있습니다.
 
-    **지금 살아 있는 템플릿의 이력은 그대로 둡니다.** 그쪽은 되돌리기의 재료입니다.
+    **지금 살아 있는 문서의 이력은 그대로 둡니다.** 그쪽은 「판본 기록」이 읽는 것입니다.
+    그리고 **다른 종류의 이력은 건드리지 않습니다** — 한 표에 둘이 사는데 종류를 안 보고
+    고아를 세면, 정책 문서 이력이 전부 「가리키는 템플릿이 없다」로 잡혀 사라집니다.
     """
-    from src.db.models import EmailTemplateRevision
+    from src.db.models import DocumentRevision, PolicySource
+    from src.db.revisions import EMAIL_TEMPLATE, POLICY_SOURCE
     from src.db.soft_delete import purge_expired
 
     with template_db() as session:
         session.add(EmailTemplate(key=f"{SIGNATURE_KEY_PREFIX}live", name="쓰는 서명",
                                   language="all", channel="email", status="active",
                                   version=1, body="살아 있음"))
+        session.add(PolicySource(label="살아 있는 정책", doc_key="k1", mode="knowledge",
+                                 status="active", body="본문"))
         session.flush()
         live_id = session.query(EmailTemplate).one().id
+        policy_id = session.query(PolicySource).one().id
         session.add_all([
-            EmailTemplateRevision(template_id=live_id, key=f"{SIGNATURE_KEY_PREFIX}live",
-                                  name="쓰는 서명", body="옛 본문", change_note="edited"),
+            DocumentRevision(kind=EMAIL_TEMPLATE, document_id=live_id,
+                             doc_key=f"{SIGNATURE_KEY_PREFIX}live", title="쓰는 서명",
+                             body="옛 본문", change_note="edited"),
             # 하드 삭제 시절에 남은 고아 — 가리키는 템플릿이 없습니다.
-            EmailTemplateRevision(template_id=9999, key="signature_hyeram", name="퇴사자 서명",
-                                  body="<table/>", change_note="deleted"),
+            DocumentRevision(kind=EMAIL_TEMPLATE, document_id=9999,
+                             doc_key="signature_hyeram", title="퇴사자 서명",
+                             body="<table/>", change_note="deleted"),
+            # 같은 표에 사는 다른 종류. 템플릿 id 로 재면 이것도 고아로 보입니다.
+            DocumentRevision(kind=POLICY_SOURCE, document_id=policy_id,
+                             doc_key="k1", title="살아 있는 정책", body="옛 정책",
+                             change_note="edited"),
         ])
         session.commit()
 
     purge_expired()
     with template_db() as session:
-        assert [r.name for r in session.query(EmailTemplateRevision)] == ["쓰는 서명"]
+        assert sorted(r.title for r in session.query(DocumentRevision)) == [
+            "살아 있는 정책",
+            "쓰는 서명",
+        ]
 
 
 def test_deleting_needs_the_sentence_typed_out_not_a_click():

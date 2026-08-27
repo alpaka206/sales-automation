@@ -4,6 +4,7 @@ import { useSearchParams } from "react-router-dom";
 import { getJSON, postForm } from "../lib/api";
 import { Icon } from "../ui/Icon";
 import { DataTable, type Column } from "../ui/DataTable";
+import { RevisionHistoryButton } from "../ui/RevisionHistory";
 import { ActionButton } from "../ui/ActionButton";
 import { kst } from "../lib/format";
 import { Loading, LoadingBlock } from "../ui/Loading";
@@ -13,7 +14,8 @@ import { PolicyDocs } from "./PolicyDocs";
 type Kind = { key: string; label: string; count: number; can_create: boolean; read_only: boolean };
 type Item = {
   id: number; key: string; name: string; language: string;
-  updated_at: string; kind: string; body: string; subject: string;
+  updated_at: string;
+  version: number; kind: string; body: string; subject: string;
   chars: number;
   // 발송 경로가 이 이름으로 찾는 행인가. 아무 키나 만들 수 있게 된 뒤로, 이것이 「실제로
   // 쓰이는 행」과 「목록에만 있는 행」을 가르는 유일한 표시입니다.
@@ -242,10 +244,17 @@ function Editor({ id, data, onDone }: {
         {/* 저장은 왼쪽, 삭제는 **오른쪽 끝에 휴지통 하나**. 나란히 두면 둘이 같은 무게로
             보이고, 실제로 저장을 누르려다 삭제를 누른 사람이 있었습니다. */}
         <div className="action-bar row-between" style={{ marginTop: 14 }}>
-          <ActionButton className="btn btn--primary" pending={id === "new" ? "만드는 중" : "저장 중"}
-                        onClick={save}>
-            <Icon name="check" size={15} /> {id === "new" ? "생성" : "저장"}
-          </ActionButton>
+          <div className="row" style={{ gap: 8 }}>
+            <ActionButton className="btn btn--primary" pending={id === "new" ? "만드는 중" : "저장 중"}
+                          onClick={save}>
+              <Icon name="check" size={15} /> {id === "new" ? "생성" : "저장"}
+            </ActionButton>
+            {/* 저장 옆입니다 — 「이 글이 전에 어땠나」는 고치기 직전에 궁금해집니다. */}
+            {data && (
+              <RevisionHistoryButton kind="email_template" documentId={data.id}
+                                     title={data.name} currentVersion={data.version} />
+            )}
+          </div>
           {/* 무엇이든 지웁니다. 발송 경로가 찾는 행이면 확인 창이 그렇게 말합니다. */}
           {data && (
             <button type="button" className="btn btn--icon btn--danger-ghost"

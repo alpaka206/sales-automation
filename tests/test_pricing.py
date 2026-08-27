@@ -1,18 +1,13 @@
-"""Tests for LLM pricing module."""
+"""토큰 추정과 단가표.
+
+**사용량 기록 테스트는 없습니다.** ``log_usage``/``get_usage_since`` 와 ``llm_usage`` 표는
+2026-08-27 에 나갔습니다(마이그레이션 0095) — 호출마다 한 줄씩 쌓는데 읽는 화면이 없었습니다.
+여기 남은 것은 상태 없는 계산뿐입니다.
+"""
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
-from unittest.mock import patch
-
-from src.llm.pricing import (
-    LLMResult,
-    estimate_cost,
-    estimate_tokens,
-    format_cost,
-    get_usage_since,
-    log_usage,
-)
+from src.llm.pricing import LLMResult, estimate_cost, estimate_tokens, format_cost
 
 
 def test_estimate_tokens_basic() -> None:
@@ -44,54 +39,15 @@ def test_format_cost_zero() -> None:
     assert format_cost(0.0) == "$0.0000"
 
 
-def test_log_and_get_usage(db_session_factory) -> None:
-    with patch("src.db.session.SessionLocal", db_session_factory):
-        now = datetime.now(timezone.utc)
-        result = LLMResult(text="hi", input_tokens=100, output_tokens=50, model="gemini-2.5-flash")
-        log_usage(result, "gemini_vertex")
-        log_usage(result, "gemini_vertex")
+def test_usage_recording_is_gone() -> None:
+    """기록을 그만둔 것은 결정입니다. 되살아나면 다시 쌓이기만 하는 표가 됩니다 — 되살릴
+    거면 *어느 화면이 그것을 읽는지*부터 정하세요(0095 의 docstring)."""
+    import src.llm.client as client
+    import src.llm.pricing as pricing
 
-        usage = get_usage_since(now - timedelta(seconds=10))
-
-    assert usage["calls"] == 2
-    assert usage["total_input"] == 200
-    assert usage["total_output"] == 100
-    assert usage["total_cost"] > 0
-    assert "gemini-2.5-flash" in usage["models"]
-
-
-def test_get_usage_since_filters_old(db_session_factory) -> None:
-    from src.db.models import LLMUsage
-
-    session = db_session_factory()
-    old = datetime.now(timezone.utc) - timedelta(hours=2)
-    recent = datetime.now(timezone.utc)
-
-    session.add(LLMUsage(
-        provider="x", model="m", input_tokens=100, output_tokens=50,
-        estimated_cost=0.0, created_at=old,
-    ))
-    session.add(LLMUsage(
-        provider="x", model="m", input_tokens=200, output_tokens=80,
-        estimated_cost=0.0, created_at=recent,
-    ))
-    session.commit()
-    session.close()
-
-    with patch("src.db.session.SessionLocal", db_session_factory):
-        usage = get_usage_since(datetime.now(timezone.utc) - timedelta(hours=1))
-
-    assert usage["calls"] == 1
-    assert usage["total_input"] == 200
-    assert usage["total_output"] == 80
-
-
-def test_get_usage_since_empty_db(db_session_factory) -> None:
-    with patch("src.db.session.SessionLocal", db_session_factory):
-        usage = get_usage_since(datetime.now(timezone.utc) - timedelta(days=1))
-
-    assert usage["calls"] == 0
-    assert usage["total_cost"] == 0.0
+    assert not hasattr(pricing, "log_usage")
+    assert not hasattr(pricing, "get_usage_since")
+    assert "log_usage" not in client.__dict__
 
 
 def test_llm_result_dataclass() -> None:

@@ -19,7 +19,6 @@ from pydantic import BaseModel, ValidationError
 from ..common.config import settings
 from ..db.models import Event
 from ..db.session import SessionLocal
-from .pricing import log_usage
 from .prompts import get_company_rules, load_prompt
 from .providers.gemini_vertex import call_gemini
 
@@ -243,7 +242,6 @@ class LLMClient:
             grounded=grounded,
         )
 
-        log_usage(llm_result, self.provider)
         self._log_event(prompt, llm_result.text)
         return llm_result.text
 

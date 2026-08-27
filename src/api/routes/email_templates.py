@@ -16,7 +16,8 @@ from fastapi.responses import HTMLResponse
 from ..auth import actor_name
 
 from ...db.email_templates import SIGNATURE_KEY_PREFIX, is_code_resolved
-from ...db.models import EmailTemplate, EmailTemplateRevision
+from ...db.models import EmailTemplate
+from ...db.revisions import snapshot_template
 from ...db.session import SessionLocal
 from ...db.soft_delete import DELETED, utcnow
 
@@ -48,24 +49,6 @@ def _generate_key(session, name: str) -> str:
         candidate = f"{SIGNATURE_KEY_PREFIX}{base}_{suffix}"[:100]
         suffix += 1
     return candidate
-
-
-def _snapshot_revision(session, tpl: EmailTemplate, change_note: str, edited_by: str) -> None:
-    """Append the template's CURRENT state to the revision history."""
-    session.add(
-        EmailTemplateRevision(
-            template_id=tpl.id,
-            key=tpl.key,
-            name=tpl.name,
-            language=tpl.language or "all",
-            channel=tpl.channel or "email",
-            body=tpl.body,
-            description=tpl.description,
-            status=tpl.status or "active",
-            change_note=change_note,
-            edited_by=edited_by,
-        )
-    )
 
 
 @router.post("/email-templates")
@@ -131,8 +114,9 @@ async def email_templates_create(
             body=body,
         )
         session.add(tpl)
-        session.flush()
-        _snapshot_revision(session, tpl, change_note="created", edited_by=author)
+        # 만든 직후에는 이력을 남기지 않습니다. 이 표가 들고 있는 것은 「이 판본 **이전**의
+        # 것」이고, 갓 만든 행에는 이전이 없습니다 — 남기면 첫 수정 때의 스냅샷과 같은
+        # 버전·같은 본문이 두 줄로 섭니다.
         session.commit()
     return HTMLResponse(
         '<div class="text-green-600 text-sm font-medium">템플릿 생성 완료</div>'
@@ -173,7 +157,7 @@ async def email_templates_update(
                 status_code=404,
             )
         # Snapshot the current (pre-edit) state, then bump version and apply.
-        _snapshot_revision(session, tpl, change_note="edited", edited_by=author)
+        snapshot_template(session, tpl, change_note="edited", edited_by=author)
         if name.strip():
             tpl.name = name.strip()
         is_signature = (tpl.key or "").startswith(SIGNATURE_KEY_PREFIX)
@@ -190,8 +174,7 @@ async def email_templates_update(
         # 빈 문자열은 "제목 없음" 입니다 — 접수확인이 RE: 고객 제목으로 돌아갑니다.
         tpl.subject = subject.strip() or None
         session.commit()
-    # The version still increments — it orders the revision history — it is just not a
-    # number anyone reads off a screen.
+    # 판 번호는 화면에 뜹니다 — 목록의 「v3」과 판본 기록의 정렬이 이 값입니다.
     return HTMLResponse('<div class="text-green-600 text-sm font-medium">저장 완료</div>')
 
 
@@ -229,7 +212,7 @@ async def email_templates_delete(tpl_id: int, request: Request):
                 tpl.name,
                 editor,
             )
-        _snapshot_revision(session, tpl, change_note="deleted", edited_by=editor)
+        snapshot_template(session, tpl, change_note="deleted", edited_by=editor)
         tpl.status = DELETED
         tpl.deleted_at = utcnow()
         session.commit()
@@ -252,7 +235,7 @@ async def email_templates_restore(tpl_id: int, request: Request):
             )
         tpl.status = "active"
         tpl.deleted_at = None
-        _snapshot_revision(session, tpl, change_note="restored", edited_by=editor)
+        snapshot_template(session, tpl, change_note="restored", edited_by=editor)
         session.commit()
     return HTMLResponse('<div class="text-green-600 text-sm font-medium">되돌렸습니다</div>')
 

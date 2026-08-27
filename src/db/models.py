@@ -8,7 +8,6 @@ from decimal import Decimal
 from sqlalchemy import (
     Boolean,
     DateTime,
-    Float,
     ForeignKey,
     Index,
     Integer,
@@ -16,6 +15,7 @@ from sqlalchemy import (
     Numeric,
     String,
     Text,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -299,8 +299,13 @@ class KnowledgeDocument(Base):
 
     ``summary`` and ``tags`` feed the LLM document router (knowledge.py) so the
     model can pick the right docs from a compact index without reading every
-    body. ``author``/``version``/``status`` give operators provenance, and every
-    edit snapshots the prior state into ``knowledge_document_revisions``.
+    body. ``author``/``version``/``status`` give operators provenance.
+
+    **판본 이력은 여기 없습니다.** 이 표의 행은 대부분 ``policy_sources`` 의 **사본**이고
+    (``policy_sync._upsert_knowledge``), 사람이 고치는 것은 그 등록부 쪽입니다 — 이력도
+    거기 달립니다(``document_revisions``). 한동안 ``knowledge_document_revisions`` 라는
+    표가 있었고 이 자리에 「every edit snapshots …」 라고 적혀 있었는데, **그 표에 쓰는
+    코드는 한 줄도 없었습니다**(0016 이 만들고 끝). 2026-08-27 에 지웠습니다.
     """
 
     __tablename__ = "knowledge_documents"
@@ -320,34 +325,6 @@ class KnowledgeDocument(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=_utcnow, onupdate=_utcnow, nullable=False
     )
-
-
-class KnowledgeDocumentRevision(Base):
-    """Append-only history of knowledge document edits.
-
-    A new row is written *before* each update with the document's prior content,
-    so the full change history survives even if the live document is later
-    edited or deleted. ``document_id`` is kept as a plain int (no hard FK) so
-    revisions outlive their source document.
-    """
-
-    __tablename__ = "knowledge_document_revisions"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    document_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
-    slug: Mapped[str] = mapped_column(String, nullable=False, index=True)
-    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
-    title: Mapped[str] = mapped_column(String, nullable=False)
-    categories: Mapped[list | None] = mapped_column(JSON, nullable=True)
-    tags: Mapped[list | None] = mapped_column(JSON, nullable=True)
-    summary: Mapped[str | None] = mapped_column(Text, nullable=True)
-    scope: Mapped[str] = mapped_column(String, nullable=False, default="both")
-    body: Mapped[str] = mapped_column(Text, nullable=False)
-    author: Mapped[str | None] = mapped_column(String, nullable=True)
-    status: Mapped[str] = mapped_column(String, nullable=False, default="active")
-    change_note: Mapped[str | None] = mapped_column(Text, nullable=True)
-    edited_by: Mapped[str | None] = mapped_column(String, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
 
 
 class PolicySource(Base):
@@ -391,6 +368,15 @@ class PolicySource(Base):
     # 콘솔에서 본문을 고친 시각. 다음 업로드가 파일 내용으로 되돌리므로, 화면이 그렇게
     # 말해 줄 수 있도록 남깁니다 (조용히 사라지는 것이 문제이지 덮어쓰는 것 자체가 아님).
     edited_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # 몇 번째 판인가. 저장할 때마다 1씩. 화면이 「v3」로 그리고, 판본 목록이 그 번호로
+    # 정렬됩니다 — ``email_templates.version`` 과 같은 뜻입니다.
+    #
+    # ``server_default`` 가 붙어 있는 이유: 씨앗 마이그레이션(0043 등)이 이 표에 **raw SQL**
+    # 로 넣는데, 그 INSERT 는 이 열을 모릅니다. 파이썬 쪽 기본값만 두면 새 DB 의 seed 가
+    # `NOT NULL constraint failed` 로 죽습니다.
+    version: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=1, server_default=text("1")
+    )
     # The synced copy. NULL until the first successful sync.
     body: Mapped[str | None] = mapped_column(Text, nullable=True)
     title: Mapped[str | None] = mapped_column(String, nullable=True)
@@ -411,7 +397,7 @@ class EmailTemplate(Base):
     Stores reusable snippets keyed by ``key``, optionally scoped per ``language``
     ("ko" | "en" | "all"). Only ``active`` rows are surfaced to the send path via
     the lookup helper. Every edit snapshots the prior state into
-    ``email_template_revisions``, mirroring the knowledge-base pattern.
+    ``document_revisions`` — the same table policy documents use.
     """
 
     __tablename__ = "email_templates"
@@ -439,28 +425,42 @@ class EmailTemplate(Base):
     )
 
 
-class EmailTemplateRevision(Base):
-    """Append-only history of email template edits.
+class DocumentRevision(Base):
+    """이전 판본 한 벌. **템플릿과 정책 문서가 같은 표를 씁니다.**
 
-    A new row is written *before* each update with the template's prior content,
-    so the change history survives even if the live template is later edited or
-    deleted. ``template_id`` is a plain int (no hard FK) so revisions outlive
-    their source template.
+    새 행은 고치기 **전**에 쓰입니다. 그래서 이 표의 맨 위 행은 「지금 본문」이 아니라
+    「직전 본문」이고, 되돌릴 때 꺼내는 것이 그것입니다.
+
+    표가 하나인 이유: 운영자가 콘솔에서 고치는 글은 두 종류(이메일 템플릿 · 정책 문서)인데
+    보고 싶은 것은 같습니다 — 언제, 누가, 무엇을, 그때 본문은 무엇이었나. 표를 종류마다
+    두면 읽는 화면도 라우트도 둘이 되고, 둘 중 하나에만 이력이 달리는 날이 옵니다. 실제로
+    그랬습니다: ``email_template_revisions`` 는 쌓이는데 정책 문서는 아무 이력도 없었고,
+    그쪽 몫이라던 ``knowledge_document_revisions`` 는 만들어만 놓고 아무도 안 썼습니다.
+
+    ``document_id`` 는 순수 정수입니다(FK 없음) — 이력은 원본보다 오래 삽니다. 종류마다
+    다른 부속 칸(언어·채널·모드·제목…)은 ``extra`` JSON 한 칸에 넣습니다: 두 종류의 칸을
+    다 세우면 어느 행에서든 절반이 NULL 이고, 종류가 셋이 되면 또 늘어납니다.
     """
 
-    __tablename__ = "email_template_revisions"
+    __tablename__ = "document_revisions"
+
+    KIND_EMAIL_TEMPLATE = "email_template"
+    KIND_POLICY_SOURCE = "policy_source"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    template_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
-    key: Mapped[str] = mapped_column(String, nullable=False)
-    name: Mapped[str] = mapped_column(String, nullable=False)
-    language: Mapped[str] = mapped_column(String, nullable=False, default="all")
-    channel: Mapped[str] = mapped_column(String, nullable=False, default="email")
+    kind: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    document_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    # 사람이 안 바꾸는 신원. 템플릿은 ``key``, 정책 문서는 ``doc_key``. 원본 행이 사라진
+    # 뒤에도 「무엇의 이력인가」를 말할 수 있어야 합니다.
+    doc_key: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    title: Mapped[str] = mapped_column(String, nullable=False)
     body: Mapped[str] = mapped_column(Text, nullable=False)
-    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     status: Mapped[str] = mapped_column(String, nullable=False, default="active")
+    # created / edited / deleted / restored, 또는 마이그레이션이 남긴 한 줄.
     change_note: Mapped[str | None] = mapped_column(Text, nullable=True)
     edited_by: Mapped[str | None] = mapped_column(String, nullable=True)
+    extra: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
 
 
@@ -592,22 +592,6 @@ class ContractRecord(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=_utcnow, onupdate=_utcnow, nullable=False
-    )
-
-
-class LLMUsage(Base):
-    __tablename__ = "llm_usage"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    provider: Mapped[str] = mapped_column(String, nullable=False)
-    model: Mapped[str] = mapped_column(String, nullable=False)
-    input_tokens: Mapped[int] = mapped_column(Integer, nullable=False)
-    output_tokens: Mapped[int] = mapped_column(Integer, nullable=False)
-    cache_read_input_tokens: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
-    cache_creation_input_tokens: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
-    estimated_cost: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime, default=_utcnow, nullable=False, index=True
     )
 
 

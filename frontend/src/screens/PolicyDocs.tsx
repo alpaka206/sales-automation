@@ -4,6 +4,7 @@ import { useSearchParams } from "react-router-dom";
 import { getJSON } from "../lib/api";
 import { Icon } from "../ui/Icon";
 import { DataTable, type Column } from "../ui/DataTable";
+import { RevisionHistoryButton } from "../ui/RevisionHistory";
 import { ActionButton } from "../ui/ActionButton";
 import { kst } from "../lib/format";
 import { Loading } from "../ui/Loading";
@@ -14,6 +15,7 @@ type Row = {
   id: number; label: string; title: string | null; mode: string; slug: string;
   body: string | null; chars: number;
   subject: string; usage_note: string; effective_on: string | null; edited_at: string | null;
+  version: number;
   // 지운 문서도 목록에 옵니다 — 흐리게, 일주일 동안.
   deleted: boolean; days_left: number | null;
 };
@@ -183,10 +185,16 @@ function DocEditor({ doc, modes, onDone }: {
         {/* 저장은 왼쪽, 삭제는 오른쪽 끝에 휴지통 하나 — 이메일 템플릿과 같은 배치입니다.
             나란히 두면 둘이 같은 무게로 보입니다. */}
         <div className="action-bar row-between">
-          <ActionButton className="btn btn--primary" pending={doc ? "저장 중" : "만드는 중"}
-                        onClick={save}>
-            <Icon name="check" size={15} /> {doc ? "저장" : "만들기"}
-          </ActionButton>
+          <div className="row" style={{ gap: 8 }}>
+            <ActionButton className="btn btn--primary" pending={doc ? "저장 중" : "만드는 중"}
+                          onClick={save}>
+              <Icon name="check" size={15} /> {doc ? "저장" : "만들기"}
+            </ActionButton>
+            {doc && (
+              <RevisionHistoryButton kind="policy_source" documentId={doc.id}
+                                     title={doc.title || doc.label} currentVersion={doc.version} />
+            )}
+          </div>
           {doc && !doc.deleted && (
             <button type="button" className="btn btn--icon btn--danger-ghost"
                     title="삭제" aria-label="삭제" onClick={() => setConfirming(true)}>
