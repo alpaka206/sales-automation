@@ -78,6 +78,15 @@ function DocEditor({ doc, modes, onDone }: {
   const [note, setNote] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
 
+  // 이메일 템플릿 편집기와 같은 규칙입니다 — 바꾼 것이 있을 때만 저장이 뜨고, 판 번호는
+  // 화면에서만 앞서 보입니다. 실제로 올라가는 것은 저장을 눌렀을 때뿐입니다.
+  const dirty = doc
+    ? label !== (doc.title || doc.label) || mode !== doc.mode || subject !== (doc.subject || "")
+      || usageNote !== (doc.usage_note || "") || effectiveOn !== (doc.effective_on || "")
+      || body !== (doc.body || "")
+    : Boolean(label.trim() || body.trim());
+  const shownVersion = (doc?.version ?? 1) + (dirty && doc ? 1 : 0);
+
   async function save() {
     setNote(null);
     try {
@@ -108,7 +117,7 @@ function DocEditor({ doc, modes, onDone }: {
           <Icon name="chevron" size={14} /> 정책 문서
         </button>
       </div>
-      <div className="card" style={{ maxWidth: 900 }}>
+      <div className="card">
         <div className="page-header">
           <div><h1 className="page-title">{doc ? label || "편집" : "새 문서"}</h1></div>
         </div>
@@ -181,13 +190,20 @@ function DocEditor({ doc, modes, onDone }: {
             나란히 두면 둘이 같은 무게로 보입니다. */}
         <div className="action-bar row-between">
           <div className="row" style={{ gap: 8 }}>
-            <ActionButton className="btn btn--primary" pending={doc ? "저장 중" : "만드는 중"}
-                          onClick={save}>
-              <Icon name="check" size={15} /> {doc ? "저장" : "만들기"}
-            </ActionButton>
+            {dirty && (
+              <ActionButton className="btn btn--primary btn--editor"
+                            pending={doc ? "저장 중" : "만드는 중"} onClick={save}>
+                <Icon name="check" size={15} /> {doc ? "저장" : "만들기"}
+              </ActionButton>
+            )}
             {doc && (
               <RevisionHistoryButton kind="policy_source" documentId={doc.id}
                                      title={doc.title || doc.label} />
+            )}
+            {doc && (
+              <span className="t-xs t-subtle tnum" style={{ marginLeft: 4 }}>
+                v{shownVersion}{dirty ? " (저장 전)" : ""}
+              </span>
             )}
           </div>
           {doc && (

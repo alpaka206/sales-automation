@@ -98,7 +98,6 @@ def test_failed_slack_attempt_is_retried_after_delay(
         message = Message(
             conversation_id=conversation.id,
             direction="outgoing",
-            channel="email",
             subject="Reply",
             body="Draft",
             status="pending_approval",
@@ -139,7 +138,6 @@ def test_ready_draft_missed_before_first_notify_is_recovered(
             Message(
                 conversation_id=conversation.id,
                 direction="outgoing",
-                channel="email",
                 subject="Reply",
                 body="Draft",
                 status="pending_approval",

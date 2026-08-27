@@ -287,7 +287,6 @@ def test_pending_sync_reuses_the_contacts_company_client_id(
             Message(
                 conversation_id=conversation.id,
                 direction="inbound",
-                channel="email",
                 body="Hello",
                 status="received",
                 created_at=datetime(2026, 7, 18),

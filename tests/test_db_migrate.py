@@ -375,7 +375,6 @@ class TestRetireDraftsPastNew:
                     Message(
                         conversation_id=conversation.id,
                         direction=direction,
-                        channel="email",
                         body="",
                         status=status,
                         prompt_variant=variant,
@@ -442,7 +441,6 @@ class TestRemoveInboundAutoAck:
                     Message(
                         conversation_id=conversation.id,
                         direction="outgoing",
-                        channel="email",
                         body="received",
                         status=status,
                         prompt_variant="auto_ack",

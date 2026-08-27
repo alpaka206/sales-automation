@@ -14,6 +14,7 @@ import importlib
 import pytest
 from sqlalchemy import create_engine, inspect, text
 
+from tests.conftest import legacy_template_columns
 import src.db.email_templates as et
 from src.integrations.email_html import (
     branded_signature_html,
@@ -76,6 +77,7 @@ def test_the_auto_ack_footer_is_seeded_under_the_key_the_ack_asks_for():
 
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
+    legacy_template_columns(engine)
     module.up(engine)
     module.up(engine)  # idempotent — 두 번째가 행을 하나 더 만들면 안 됩니다.
 
@@ -168,6 +170,7 @@ def test_migration_0022_seeds_and_is_idempotent():
 
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
+    legacy_template_columns(engine)
 
     _run_0022(engine)
     _run_0022(engine)  # idempotent — a second run must not duplicate or error

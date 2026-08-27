@@ -549,7 +549,6 @@ def test_insights_are_the_lists_not_the_charts(customer_db, customer_id) -> None
             Message(
                 conversation_id=conversation.id,
                 direction="inbound",
-                channel="email",
                 body="pricing inquiry",
                 status="received",
             )
@@ -725,8 +724,7 @@ def test_the_ticket_page_shows_the_same_deal_detail_as_the_board(customer_db, cu
         conversation = session.query(Conversation).filter_by(contact_id=customer_id).one()
         conversation_id = conversation.id
         message = Message(
-            conversation_id=conversation_id, direction="outgoing", channel="email",
-            body="답변", status="sent",
+            conversation_id=conversation_id, direction="outgoing", body="답변", status="sent",
         )
         session.add(message)
         session.commit()

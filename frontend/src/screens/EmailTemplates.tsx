@@ -15,7 +15,9 @@ type Kind = { key: string; label: string; count: number; can_create: boolean; re
 type Item = {
   id: number; key: string; name: string; language: string;
   updated_at: string;
-  version: number; kind: string; body: string; subject: string;
+  version: number; kind: string; body: string;
+  /** 마지막으로 저장한 사람. */
+  author: string | null;
   chars: number;
   // 발송 경로가 이 이름으로 찾는 행인가. 아무 키나 만들 수 있게 된 뒤로, 이것이 「실제로
   // 쓰이는 행」과 「목록에만 있는 행」을 가르는 유일한 표시입니다.
@@ -73,7 +75,6 @@ function Editor({ id, data, onDone }: {
   const [key, setKey] = useState("");
   const [language, setLanguage] = useState("all");
   const [body, setBody] = useState("");
-  const [subject, setSubject] = useState("");
   const [note, setNote] = useState<string | null>("");
   // 미리보기는 늘 켜져 있고 타자가 멎으면 따라옵니다. 그래도 **스냅샷**입니다: srcDoc 을
   // body 에 직접 묶으면 글자 하나에 iframe 이 문서를 통째로 다시 싣습니다 — 타자 한 번에
@@ -92,8 +93,21 @@ function Editor({ id, data, onDone }: {
     setName(data.name);
     setLanguage(data.language);
     setBody(data.body);
-    setSubject(data.subject);
   }
+
+  // **바뀐 것이 있나.** 목록이 이미 들고 있는 서버 행과 비교합니다 — 상태를 하나 더 두면
+  // 그 사본이 언젠가 어긋납니다. 저장 버튼이 뜨는 조건이자, 아래 판 번호가 한 칸 앞서
+  // 보이는 조건입니다.
+  const dirty =
+    id === "new"
+      ? Boolean(name.trim() || body.trim())
+      : !!data &&
+        (name !== data.name ||
+          language !== data.language ||
+          body !== data.body);
+  // **화면에서만 올라갑니다.** 타자를 치는 동안 서버에는 아무것도 안 갑니다 — 판이 실제로
+  // 올라가고 이력이 남는 것은 저장을 눌렀을 때뿐입니다 (2026-08-27 운영자 지시).
+  const shownVersion = (data?.version ?? 1) + (dirty && id !== "new" ? 1 : 0);
 
   async function save() {
     setNote(null);
@@ -111,7 +125,7 @@ function Editor({ id, data, onDone }: {
           method: "PUT",
           credentials: "same-origin",
           headers: { "Content-Type": "application/x-www-form-urlencoded" },
-          body: new URLSearchParams({ name, language, body: value, subject }),
+          body: new URLSearchParams({ name, language, body: value }),
         });
         if (!response.ok) throw new Error(String(response.status));
       }
@@ -163,7 +177,7 @@ function Editor({ id, data, onDone }: {
     return (
       <>
         {backChip}
-        <div className="card" style={{ maxWidth: 860 }}><LoadingBlock lines={6} /></div>
+        <div className="card"><LoadingBlock lines={6} /></div>
       </>
     );
   }
@@ -173,19 +187,16 @@ function Editor({ id, data, onDone }: {
       {/* Left, with the chevron — the same back affordance as every other screen. It sat
           on the right of the header here alone, which read as an action, not a way out. */}
       {backChip}
-      <div className="card" style={{ maxWidth: 860 }}>
+      <div className="card">
         <div className="page-header">
           <div>
             <h1 className="page-title">
               {id === "new" ? "새 템플릿 작성" : data?.name || "편집"}
             </h1>
           </div>
-          {/* 언어를 고르는 칩은 없앴습니다. 언어마다 **다른 행**이고 목록에 각자 줄로 서
-              있습니다 — 칩 뒤에 숨겨 두었더니 국문 행만 고쳐 놓고 영문 회신이 왜 안 바뀌는지
-              화면에 아무 단서가 없었습니다. 여기서는 지금 보고 있는 행의 언어만 말합니다. */}
-          {data && data.kind !== "signature" && (
-            <span className="tag">{LANGUAGE_LABELS[data.language] ?? data.language}</span>
-          )}
+          {/* 오른쪽 위에 언어 태그가 있었습니다. 바로 아래 칸이 같은 것을 고를 수 있는
+              모양으로 말하므로 지웠습니다 — 같은 사실을 두 자리에서 말하면 어느 쪽이
+              진짜인지 화면만 봐서는 모릅니다 (2026-08-27 운영자 지시). */}
         </div>
 
         {oneLine ? (
@@ -224,18 +235,32 @@ function Editor({ id, data, onDone }: {
                 키가 코드 참조라 그럴 수도 없는 행이 있습니다. 자유 입력이 아니라 목록인
                 이유: 이 값은 화면에 보여 주는 글자이고, 아무 코드도 임의의 언어 코드로
                 행을 고르지 않습니다. `ja` 라고 적어 봐야 읽는 곳이 없습니다. */}
-            {!isSignature && (
-              <>
-                <label className="field-label" htmlFor="et-lang">언어</label>
-                <select className="select" id="et-lang" value={language}
-                        onChange={(e) => setLanguage(e.target.value)}
-                        style={{ marginBottom: 14 }}>
-                  {LANGUAGES.map((entry) => (
-                    <option key={entry.value} value={entry.value}>{entry.label}</option>
-                  ))}
-                </select>
-              </>
-            )}
+            {/* 언어와 판 번호를 한 줄에 나눠 놓습니다. 언어 고르개가 카드 폭만큼 뻗어
+                있었는데, 고를 것이 셋뿐이라 그 폭이 아무 의미도 없었습니다. */}
+            <div className="row" style={{ gap: 12, marginBottom: 14, alignItems: "flex-end" }}>
+              {!isSignature && (
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <label className="field-label" htmlFor="et-lang">언어</label>
+                  <select className="select" id="et-lang" value={language}
+                          onChange={(e) => setLanguage(e.target.value)}>
+                    {LANGUAGES.map((entry) => (
+                      <option key={entry.value} value={entry.value}>{entry.label}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+              {id !== "new" && (
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <label className="field-label" htmlFor="et-version">버전</label>
+                  {/* 못 고칩니다 — 사람이 정하는 값이 아니라 저장한 횟수입니다. 고친 것이
+                      있으면 저장했을 때 될 번호를 미리 보여 주고, 그게 아직 저장 전이라는
+                      것을 옆에 적습니다. */}
+                  <input className="input tnum" id="et-version" value={`v${shownVersion}`}
+                         readOnly disabled />
+                  {dirty && <div className="t-xs t-subtle" style={{ marginTop: 4 }}>저장하면 이 번호가 됩니다</div>}
+                </div>
+              )}
+            </div>
 
             {/* 서명에는 언어 칸이 없습니다. 어떤 코드도 언어로 서명을 고르지 않고 —
                 고르는 것은 사람입니다 — 그래서 그 칸은 아무 데도 가 닿지 않는 질문이었습니다. */}
@@ -265,11 +290,16 @@ function Editor({ id, data, onDone }: {
             보이고, 실제로 저장을 누르려다 삭제를 누른 사람이 있었습니다. */}
         <div className="action-bar row-between" style={{ marginTop: 14 }}>
           <div className="row" style={{ gap: 8 }}>
-            <ActionButton className="btn btn--primary" pending={id === "new" ? "만드는 중" : "저장 중"}
-                          onClick={save}>
-              <Icon name="check" size={15} /> {id === "new" ? "생성" : "저장"}
-            </ActionButton>
-            {/* 저장 옆입니다 — 「이 글이 전에 어땠나」는 고치기 직전에 궁금해집니다. */}
+            {/* **바꾼 것이 있을 때만 뜹니다** (2026-08-27 운영자 지시). 늘 떠 있으면 아무것도
+                안 고치고 누른 저장이 판을 올리고 이력에 같은 본문을 한 줄 더 남깁니다. */}
+            {dirty && (
+              <ActionButton className="btn btn--primary btn--editor"
+                            pending={id === "new" ? "만드는 중" : "저장 중"} onClick={save}>
+                <Icon name="check" size={15} /> {id === "new" ? "생성" : "저장"}
+              </ActionButton>
+            )}
+            {/* 저장 옆이고 **크기가 같습니다** — 나란히 선 둘의 높이·폭이 다르면 한쪽이
+                더 중요한 것처럼 읽힙니다. */}
             {data && (
               <RevisionHistoryButton kind="email_template" documentId={data.id}
                                      title={data.name} />
@@ -389,20 +419,25 @@ export function EmailTemplates() {
     // 한 줄이면 읽히는데 그 뒤가 비어 있었습니다.
     { label: "버전", width: "10%", className: "tnum td-subtle",
       cell: (row) => `v${row.version}` },
-    ...(kind === "signature" ? [] : [{ label: "언어", width: "12%",
+    // 「발송 경로 사용」 열이 여기 있었습니다. 남아 있는 행이 전부 「사용」이라 아무것도
+    // 구별해 주지 않았습니다 (2026-08-27 운영자 지적). 그 사실이 정말 필요한 순간은
+    // **지울 때**이고, 삭제 확인 창이 그때 같은 `is_code_resolved` 로 경고합니다.
+    ...(kind === "signature" ? [] : [{ label: "언어", width: "14%",
       cell: (row: Item) => (
         <span className="t-subtle t-xs">{LANGUAGE_LABELS[row.language] ?? row.language}</span>
       ) },
-    // 발송 경로가 이 이름으로 이 행을 찾는가. 「안 씀」은 어떤 코드도 열지 않는 행이라는
-    // 뜻입니다 — 아무 키나 만들 수 있게 된 뒤로 그런 행이 생길 수 있습니다.
-    { label: "발송 경로", width: "16%",
-      cell: (row: Item) => (
-        <span className="t-subtle t-xs">{row.code_resolved ? "사용" : "안 씀"}</span>
-      ) }]),
+    ]),
     // 연도까지. 이 열은 "얼마나 오래됐나" 를 보는 자리이고, 월·일만 있으면 작년 것과 올해
     // 것이 같은 글자로 보입니다.
-    { label: "수정일", width: "18%", className: "td-subtle tnum",
-      cell: (row) => kst(row.updated_at) || "—" },
+    // 언제 · 누가. `author` 는 **만든 사람이 아니라 마지막으로 저장한 사람**입니다(0100) —
+    // 만든 사람은 이 행이 처음 생긴 뒤로 아무 질문에도 답하지 않았습니다.
+    { label: "수정", width: "22%", className: "td-subtle tnum",
+      cell: (row) => (
+        <>
+          <div>{kst(row.updated_at) || "—"}</div>
+          {row.author && <div className="t-xs t-subtle">{row.author}</div>}
+        </>
+      ) },
     {
       // 정책 문서 목록과 같은 자리. 줄을 클릭해도 열리지만, 지우려고 들어갔다 나오는
       // 왕복이 없어야 합니다.

@@ -45,8 +45,6 @@ def snapshot_template(session, tpl: EmailTemplate, *, change_note: str, edited_b
                 key: value
                 for key, value in (
                     ("language", tpl.language),
-                    ("channel", tpl.channel),
-                    ("subject", tpl.subject),
                     ("description", tpl.description),
                 )
                 if value

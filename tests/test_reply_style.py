@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
+from tests.conftest import legacy_template_columns
 from src.llm.prompts import load_prompt
 
 
@@ -432,6 +433,7 @@ def test_the_language_rows_exist_because_nothing_else_can_make_them():
 
     engine = create_engine("sqlite:///:memory:")
     EmailTemplate.__table__.create(engine)
+    legacy_template_columns(engine)
     _legacy_revision_table(engine)
     importlib.import_module("src.db.migrations.0042_reply_format_template").up(engine)
     importlib.import_module("src.db.migrations.0069_links_are_words_not_urls").up(engine)
@@ -468,6 +470,7 @@ def test_0086_normalizes_live_link_templates_without_changing_urls():
 
     engine = create_engine("sqlite:///:memory:")
     EmailTemplate.__table__.create(engine)
+    legacy_template_columns(engine)
     _legacy_revision_table(engine)
     importlib.import_module("src.db.migrations.0042_reply_format_template").up(engine)
     importlib.import_module("src.db.migrations.0069_links_are_words_not_urls").up(engine)

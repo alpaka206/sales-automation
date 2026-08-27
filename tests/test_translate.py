@@ -86,8 +86,7 @@ def _seed(session_factory, *, direction: str, body: str, subject: str | None = N
         session.add(conv)
         session.flush()
         msg = Message(
-            conversation_id=conv.id, direction=direction, channel="email",
-            body=body, subject=subject, status="received",
+            conversation_id=conv.id, direction=direction, body=body, subject=subject, status="received",
         )
         session.add(msg)
         session.commit()
@@ -366,7 +365,6 @@ def _one_draft(factory, body: str):
         msg = Message(
             conversation_id=conv.id,
             direction="outgoing",
-            channel="email",
             subject="RE: Pricing",
             body=body,
             status="pending_approval",

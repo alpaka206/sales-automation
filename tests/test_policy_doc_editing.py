@@ -128,7 +128,7 @@ def test_clearing_the_effective_date_hands_the_column_back_to_the_save_time(poli
         assert source.edited_at is not None
 
 
-def test_a_deleted_document_leaves_the_prompt_but_not_the_database(policy_db):
+def test_a_deleted_document_leaves_the_prompt_and_frees_its_name(policy_db):
     """운영자가 「항상 적용」 규칙 하나를 실수로 지웠고 되돌릴 방법이 없었습니다 — 그
     종류는 DB 어디에도 사본이 없어서, 저장소의 씨앗 파일에서 **원본**을 다시 넣는 것이
     최선이었고 그 사이 콘솔에서 고친 내용은 돌아오지 않았습니다.
@@ -146,8 +146,9 @@ def test_a_deleted_document_leaves_the_prompt_but_not_the_database(policy_db):
         assert client.post(f"/policy-docs/{source_id}/delete").status_code == 200
         assert _rules_from_db() == "", "지운 규칙이 프롬프트에 남으면 지운 것이 아닙니다"
         with policy_db() as session:
-            source = session.get(PolicySource, source_id)
-            assert source is not None and source.deleted_at is not None
+            # 행이 사라집니다 — `doc_key` 가 제목에서 나오고 unique 라, 남겨 두면 그 제목을
+            # 다시는 못 씁니다. 그때 내용은 판본 이력에 있습니다 (0100).
+            assert session.get(PolicySource, source_id) is None
 
         # 되돌리기는 없습니다 — 지우면 화면에서 바로 사라지고 행만 남습니다(2026-08-27).
 
@@ -162,8 +163,9 @@ def test_deleting_a_reference_document_also_stops_the_router_citing_it(policy_db
 
         assert client.post(f"/policy-docs/{source_id}/delete").status_code == 200
         with policy_db() as session:
-            # 행은 남고 status 만 바뀝니다 — 라우터는 active 만 봅니다.
-            assert session.query(PolicySource).one().status != "active"
+            assert session.query(PolicySource).count() == 0
+        # 같은 이름으로 다시 만들 수 있습니다 — `doc_key` 가 제목에서 나오기 때문입니다.
+        assert _create(client, body="다시 씁니다")
 
 
 # ---- 판본 기록 ------------------------------------------------------------------

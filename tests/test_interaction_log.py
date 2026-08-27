@@ -65,7 +65,6 @@ def log_db():
             message = Message(
                 conversation_id=conv.id,
                 direction="outgoing",
-                channel="email",
                 subject=f"RE: {subject}",
                 body="draft",
                 status="pending_approval",

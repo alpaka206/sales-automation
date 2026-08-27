@@ -297,7 +297,6 @@ def test_the_all_counter_counts_the_rows_the_list_it_opens_holds(db_session_fact
                 Message(
                     conversation_id=conv.id,
                     direction="outgoing",
-                    channel="email",
                     subject="RE: 문의",
                     body="draft",
                     status="pending_approval",
@@ -340,7 +339,6 @@ def test_dashboard_queue_is_the_five_oldest(db_session_factory, monkeypatch):
                 Message(
                     conversation_id=conv.id,
                     direction="outgoing",
-                    channel="email",
                     subject="RE: 문의",
                     body="draft",
                     status="pending_approval",
@@ -412,8 +410,7 @@ def test_message_detail_embeds_customer_history(_use_test_db):
     session.add(conv)
     session.flush()
     msg = Message(
-        conversation_id=conv.id, direction="outgoing", channel="email",
-        subject="안내", body="안녕하세요", status="pending_approval",
+        conversation_id=conv.id, direction="outgoing", subject="안내", body="안녕하세요", status="pending_approval",
     )
     session.add(msg)
     session.add(CustomerProfile(
@@ -478,7 +475,6 @@ def pending_msg(_use_test_db):
     msg = Message(
         conversation_id=conv.id,
         direction="outgoing",
-        channel="email",
         subject="Test",
         body="Hello",
         status="pending_approval",

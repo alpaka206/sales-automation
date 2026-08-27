@@ -406,7 +406,6 @@ def _draft(db, status: str = "pending_approval", variant: str | None = None) -> 
         msg = Message(
             conversation_id=conv.id,
             direction="outgoing",
-            channel="email",
             subject="RE: 문의",
             body="초안",
             status=status,
@@ -610,7 +609,6 @@ def test_a_stage_moved_in_the_console_retires_the_draft(monkeypatch):
         draft = Message(
             conversation_id=conv.id,
             direction="outgoing",
-            channel="email",
             subject="RE: 문의",
             body="초안",
             status="pending_approval",
@@ -728,8 +726,7 @@ def test_a_ticket_renamed_in_hubspot_renames_our_inquiry(monkeypatch):
         session.flush()
         session.add(
             Message(
-                conversation_id=conv.id, direction="outgoing", channel="email",
-                body="reply", status="sent", subject="RE: 옛 이름",
+                conversation_id=conv.id, direction="outgoing", body="reply", status="sent", subject="RE: 옛 이름",
             )
         )
         session.commit()

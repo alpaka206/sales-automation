@@ -19,6 +19,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from tests.conftest import legacy_template_columns
 from src.api.main import app
 from src.db.base import Base
 from src.db.email_templates import SIGNATURE_KEY_PREFIX
@@ -107,7 +108,6 @@ def test_editing_cannot_move_the_key_or_blank_the_description(template_db):
                 key="auto_ack",
                 name="접수확인",
                 language="ko",
-                channel="email",
                 description="자동 접수확인 본문",
                 status="active",
                 version=1,
@@ -144,9 +144,9 @@ def test_a_new_draft_starts_on_the_first_signature(template_db):
     with template_db() as session:
         session.add_all([
             EmailTemplate(key=f"{SIGNATURE_KEY_PREFIX}b", name="B 담당자", language="all",
-                          channel="email", status="active", version=1, body="<p>b</p>"),
+                          status="active", version=1, body="<p>b</p>"),
             EmailTemplate(key=f"{SIGNATURE_KEY_PREFIX}a", name="A 담당자", language="all",
-                          channel="email", status="active", version=1, body="<p>a</p>"),
+                          status="active", version=1, body="<p>a</p>"),
         ])
         session.commit()
 
@@ -186,6 +186,9 @@ def test_a_signature_typed_before_the_prefix_existed_is_re_keyed(tmp_path):
 
     engine = create_engine(f"sqlite:///{tmp_path / 'm.db'}")
     Base.metadata.create_all(engine)
+    # 0048 이 살던 시절의 표에는 ``channel`` 이 있었습니다 — 0019 가 만들고 0100 이
+    # 지운 칸입니다. 그 시절 동작을 재려면 그 시절 표여야 합니다.
+    legacy_template_columns(engine)
     with engine.begin() as conn:
         for key, name in (
             ("baeuntae", "배운태"),          # typed by hand before 08-04
@@ -221,10 +224,9 @@ def test_a_signature_cannot_keep_a_language(template_db):
     ``auto_ack`` 은 다릅니다 — 그건 정말 한 메일의 두 언어입니다."""
     with template_db() as session:
         session.add_all([
-            EmailTemplate(key="signature_ko", name="서명", language="ko", channel="email",
-                          status="active", version=1, body="김규원"),
+            EmailTemplate(key="signature_ko", name="서명", language="ko", status="active", version=1, body="김규원"),
             EmailTemplate(key="auto_ack_en", name="접수확인 영어", language="en",
-                          channel="email", status="active", version=1, body="Hi"),
+                          status="active", version=1, body="Hi"),
         ])
         session.commit()
         ids = {row.key: row.id for row in session.query(EmailTemplate).all()}
@@ -249,10 +251,8 @@ def test_removed_auto_ack_rows_are_hidden_from_the_console(template_db):
     """
     with template_db() as session:
         session.add_all([
-            EmailTemplate(key="auto_ack", name="접수확인", language="ko", channel="email",
-                          status="active", version=1, body="안녕하세요"),
-            EmailTemplate(key="auto_ack_en", name="접수확인", language="en", channel="email",
-                          status="active", version=1, body="Hi"),
+            EmailTemplate(key="auto_ack", name="접수확인", language="ko", status="active", version=1, body="안녕하세요"),
+            EmailTemplate(key="auto_ack_en", name="접수확인", language="en", status="active", version=1, body="Hi"),
         ])
         session.commit()
 
@@ -278,7 +278,7 @@ def test_saving_does_not_relabel_the_row_language(template_db):
     with template_db() as session:
         session.add(
             EmailTemplate(key="reply_format", name="답변 메일 형식", language="ko",
-                          channel="email", status="active", version=1, body="형식")
+                          status="active", version=1, body="형식")
         )
         session.commit()
         tpl_id = session.query(EmailTemplate).one().id
@@ -305,7 +305,6 @@ def test_everything_saved_here_is_active(template_db):
                 key="signature_html_old",
                 name="예전 서명",
                 language="ko",
-                channel="email",
                 status="archived",
                 version=1,
                 body="<p>old</p>",
@@ -333,11 +332,11 @@ def test_anything_deletes_now_and_the_screen_says_what_that_costs(template_db):
     with template_db() as session:
         session.add_all([
             EmailTemplate(key="meeting_link", name="미팅 예약 링크", language="ko",
-                          channel="email", status="active", version=1, body="https://cal"),
+                          status="active", version=1, body="https://cal"),
             EmailTemplate(key=f"{SIGNATURE_KEY_PREFIX}x", name="서명", language="all",
-                          channel="email", status="active", version=1, body="<p/>"),
+                          status="active", version=1, body="<p/>"),
             EmailTemplate(key="my_own_note", name="내 메모", language="all",
-                          channel="email", status="active", version=1, body="메모"),
+                          status="active", version=1, body="메모"),
         ])
         session.commit()
         ids = {row.key: row.id for row in session.query(EmailTemplate).all()}
@@ -347,15 +346,20 @@ def test_anything_deletes_now_and_the_screen_says_what_that_costs(template_db):
             assert client.delete(f"/email-templates/{ids[key]}").status_code == 200, key
         payload = client.get("/api/ui/email-templates").json()
 
-    # **행은 영원히 남습니다** (2026-08-27 운영자 지시) — 화면에서만 즉시 사라집니다.
-    # 발송 경로가 보는 것은 status 이고, 읽는 쪽은 전부 이미 'active' 만 봅니다.
+    # **행이 사라집니다** (0100). 소프트 삭제로 두면 지운 행이 unique 한 `key` 를 영원히
+    # 붙들고 있어서, 발송 경로가 찾는 이름을 다시는 못 만듭니다. 지운 내용은 판본 이력에
+    # `change_note='deleted'` 로 남습니다.
     with template_db() as session:
-        assert session.query(EmailTemplate).count() == 3
-        assert {row.status for row in session.query(EmailTemplate).all()} == {"deleted"}
+        assert session.query(EmailTemplate).count() == 0
 
     # 그리고 화면은 어느 것이 발송 경로가 쓰던 행이었는지 말할 수 있어야 합니다.
-    # 지운 행은 목록에 안 옵니다 — 「N일 후 완전 삭제」 대기줄이 없어졌습니다.
+    # 지운 행은 목록에 안 옵니다 — 행 자체가 없습니다.
     assert payload["items"] == []
+    # 그리고 **같은 키로 다시 만들 수 있어야 합니다** — 그게 하드 삭제의 요점입니다.
+    with template_db() as session:
+        session.add(EmailTemplate(key="meeting_link", name="다시 만든 링크", language="ko",
+                                  status="active", version=1, body="https://cal"))
+        session.commit()
 
 
 def test_is_code_resolved_rejects_removed_auto_ack_keys(template_db):
@@ -406,7 +410,7 @@ def test_a_deleted_signature_is_gone_from_the_send_path_at_once(template_db):
 
     with template_db() as session:
         session.add(EmailTemplate(key=f"{SIGNATURE_KEY_PREFIX}y", name="지울 서명",
-                                  language="all", channel="email", status="active",
+                                  language="all", status="active",
                                   version=1, body="<p/>"))
         session.commit()
         tpl_id = session.query(EmailTemplate).filter_by(name="지울 서명").one().id
@@ -415,58 +419,56 @@ def test_a_deleted_signature_is_gone_from_the_send_path_at_once(template_db):
     with TestClient(app) as client:
         assert client.delete(f"/email-templates/{tpl_id}").status_code == 200
     assert "지울 서명" not in {s["name"] for s in list_signature_templates()}
-    # 행 자체는 DB 에 남습니다 — 운영자가 Supabase 에서 볼 수 있어야 합니다.
+    # 행은 사라지고, 그때 내용은 판본 이력에 남습니다 — 그것이 「DB 에서 볼 수 있게」입니다.
+    from src.db.models import DocumentRevision
+
     with template_db() as session:
-        assert session.get(EmailTemplate, tpl_id) is not None
+        assert session.get(EmailTemplate, tpl_id) is None
+        gone = session.query(DocumentRevision).filter_by(change_note="deleted").one()
+        assert gone.title == "지울 서명" and gone.body == "<p/>"
 
 
-def test_nothing_is_ever_purged_and_gemini_never_sees_it(template_db):
-    """지운 것은 **영원히 남고**, 그럼에도 초안에는 절대 안 닿습니다 (2026-08-27 운영자 지시).
+def test_a_deleted_row_frees_its_key_and_leaves_its_content_in_history(template_db):
+    """**지우면 행이 사라지고, 내용은 판본 이력에 남습니다** (0100).
 
-    전에는 7일 휴지통이었습니다 — 지운 행이 목록에 흐리게 남아 「N일 후 완전 삭제」를 달고
-    있다가 본문과 판본 이력이 같이 사라졌습니다. 지금은 그 맞바꿈을 안 합니다: 화면에서는
-    즉시 사라지고 DB 에서는 안 사라집니다.
-
-    **그래서 「안 닿는다」를 여기서 고정합니다.** 영원히 남는다면, 남은 것이 회신에 인용될
-    길이 하나도 없다는 것이 표로 증명돼야 합니다.
+    한동안 ``status='deleted'`` 로만 바꿨습니다. 그런데 ``key`` 가 unique 이고 만들기
+    라우트가 상태를 안 보고 중복을 막기 때문에, 청소를 없앤 뒤로는 **지운 행이 그 이름을
+    영원히 붙들고** 있었습니다 — `reply_format` 을 한 번 지우면 다시는 그 이름으로 만들 수
+    없고, 그 이름은 발송 경로가 찾는 이름입니다.
     """
-    import src.db.soft_delete as soft_delete
-    from src.db.email_templates import get_email_template, list_signature_templates
-
-    # 청소는 아예 없습니다 — 함수도, 보관 기간도.
-    assert not hasattr(soft_delete, "purge_expired")
-    assert not hasattr(soft_delete, "RETENTION_DAYS")
+    import src.db as db_pkg
+    from src.db.models import DocumentRevision
+    from src.db.email_templates import get_email_template
 
     with template_db() as session:
-        session.add_all([
-            EmailTemplate(key=f"{SIGNATURE_KEY_PREFIX}gone", name="지운 서명", language="all",
-                          channel="email", status="deleted", version=1, body="<p/>",
-                          deleted_at=soft_delete.utcnow()),
-            EmailTemplate(key="reply_format", name="지운 서식", language="ko", channel="email",
-                          status="deleted", version=1, body="지운 서식 본문",
-                          deleted_at=soft_delete.utcnow()),
-        ])
+        session.add(EmailTemplate(key="reply_format", name="서식", language="ko",
+                                  status="active", version=4, body="옛 서식"))
         session.commit()
+        tpl_id = session.query(EmailTemplate).one().id
 
-    # 발송 경로가 이름으로 찾는 조회도, 서명 고르개도 지운 행을 안 봅니다.
-    assert get_email_template("reply_format") is None
-    assert list_signature_templates() == []
-    # **살아 있는 행을 같이 둡니다.** 지운 행만 있으면 목록이 비어서, 행을 읽는 코드가
-    # 한 줄도 안 돕니다 — 그래서 `item["deleted"]` 를 아직 읽던 개수 세는 줄이 테스트를
-    # 통과하고 운영에서 500 이 났습니다 (2026-08-27).
-    with template_db() as session:
-        session.add(EmailTemplate(key=f"{SIGNATURE_KEY_PREFIX}live", name="살아 있는 서명",
-                                  language="all", channel="email", status="active",
-                                  version=1, body="<p/>"))
-        session.commit()
     with TestClient(app) as client:
-        payload = client.get("/api/ui/email-templates").json()
-    assert [item["name"] for item in payload["items"]] == ["살아 있는 서명"]
-    counts = {kind["key"]: kind["count"] for kind in payload["kinds"]}
-    assert counts["signature"] == 1, "지운 행이 개수에 섞이면 안 됩니다"
-    # 그래도 지운 행은 그대로입니다.
+        assert client.delete(f"/email-templates/{tpl_id}").status_code == 200
+        # 같은 키로 다시 만들 수 있습니다 — 이것이 하드 삭제의 요점입니다.
+        assert client.post("/email-templates", data={
+            "name": "새 서식", "key": "reply_format", "body": "새 본문", "language": "ko",
+        }).status_code == 200
+
+    assert get_email_template("reply_format") == "새 본문"
     with template_db() as session:
-        assert session.query(EmailTemplate).count() == 3
+        assert session.query(EmailTemplate).count() == 1
+        # 지운 것의 내용은 이력에 그대로 있습니다.
+        gone = session.query(DocumentRevision).filter_by(change_note="deleted").one()
+        assert gone.body == "옛 서식" and gone.version == 4
+
+    # 7일 휴지통은 없습니다 — 모듈째로.
+    assert not hasattr(db_pkg, "soft_delete")
+    import importlib
+
+    try:
+        importlib.import_module("src.db.soft_delete")
+        raise AssertionError("soft_delete 모듈이 아직 있습니다")
+    except ModuleNotFoundError:
+        pass
 
 
 def test_the_revision_history_is_out_of_gemini_reach():
@@ -523,8 +525,7 @@ def test_every_write_path_leaves_the_value_before_it(template_db):
 
     key = f"{SIGNATURE_KEY_PREFIX}untae"
     with template_db() as session:
-        session.add(EmailTemplate(key=key, name="서명", language="all", channel="email",
-                                  status="active", version=1, body="처음 서명"))
+        session.add(EmailTemplate(key=key, name="서명", language="all", status="active", version=1, body="처음 서명"))
         session.commit()
         tpl_id = session.query(EmailTemplate).one().id
 
@@ -541,9 +542,9 @@ def test_every_write_path_leaves_the_value_before_it(template_db):
         # 「바꾸기 **직전** 값」이 규칙이고 예외가 없습니다.
         assert [r.body for r in rows] == ["처음 서명", "두 번째 서명", "세 번째 서명"]
         assert [r.status for r in rows] == ["active", "active", "active"]
-        # append-only: 이력이 현재 행을 덮어쓰지 않았고, 그 행도 지워지지 않았습니다.
-        row = session.get(EmailTemplate, tpl_id)
-        assert row.body == "세 번째 서명" and row.status == "deleted"
+        # append-only: 이력이 서로를 덮어쓰지 않았습니다. 행 자체는 삭제로 사라졌고,
+        # 마지막 스냅샷이 그때 본문을 들고 있습니다.
+        assert session.get(EmailTemplate, tpl_id) is None
 
 
 def test_the_language_is_editable_and_the_other_one_is_not_english(template_db):
@@ -559,7 +560,7 @@ def test_the_language_is_editable_and_the_other_one_is_not_english(template_db):
     """
     with template_db() as session:
         session.add(EmailTemplate(key="reply_format_en", name="답변 메일 형식 (외국어)",
-                                  language="ko", channel="email", status="active",
+                                  language="ko", status="active",
                                   version=1, body="뼈대"))
         session.commit()
         tpl_id = session.query(EmailTemplate).one().id
@@ -578,7 +579,7 @@ def test_a_signature_still_cannot_keep_a_language(template_db):
     """어떤 코드도 언어로 서명을 고르지 않습니다 — 고르는 것은 사람입니다(0063)."""
     with template_db() as session:
         session.add(EmailTemplate(key=f"{SIGNATURE_KEY_PREFIX}z", name="서명", language="all",
-                                  channel="email", status="active", version=1, body="<p/>"))
+                                  status="active", version=1, body="<p/>"))
         session.commit()
         tpl_id = session.query(EmailTemplate).one().id
 

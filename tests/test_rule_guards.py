@@ -119,7 +119,6 @@ def test_strip_price_sentences_noop_when_no_price():
 def _msg(**kw):
     base = dict(
         id=1,
-        channel="email",
         body="안녕하세요, 회신드립니다.",
         language="ko",
         target_language="en",
@@ -191,7 +190,6 @@ def _seed_reply(db_session, body, *, prior_sent=False):
             Message(
                 conversation_id=conv.id,
                 direction="outgoing",
-                channel="email",
                 body="이전 회신",
                 language="en",
                 status="sent",
@@ -200,7 +198,6 @@ def _seed_reply(db_session, body, *, prior_sent=False):
     msg = Message(
         conversation_id=conv.id,
         direction="outgoing",
-        channel="email",
         body=body,
         language="ko",
         target_language="en",

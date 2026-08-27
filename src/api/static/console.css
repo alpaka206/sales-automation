@@ -821,6 +821,11 @@ body.show-translation .has-ko .msg-ko { display: block; }
 .modal--wide { max-width: 640px; max-height: calc(100dvh - 48px); overflow-y: auto; }
 /* 판본 기록처럼 **본문을 그대로 읽어야 하는** 창. 좁으면 줄이 접혀 비교가 안 됩니다.
    운영자 화면이 세로로 짧아(≈640px) 높이는 뷰포트에 맞추고 안에서 스크롤합니다. */
+/* 편집기 바닥에 나란히 서는 버튼(저장 · 히스토리). 높이와 최소 폭을 맞춥니다 — 둘의
+   크기가 다르면 한쪽이 더 중요한 것처럼 읽힙니다. 저장은 바꾼 것이 있을 때만 뜨므로
+   히스토리 혼자 남는 순간이 잦고, 그때 자리가 안 흔들려야 합니다. */
+.btn--editor { min-width: 132px; height: 36px; justify-content: center; }
+
 .modal--full { width: calc(100vw - 40px); max-width: none;
                height: calc(100dvh - 40px); max-height: none;
                display: flex; flex-direction: column; overflow: hidden; }

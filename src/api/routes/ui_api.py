@@ -619,18 +619,18 @@ def ui_email_templates():
     from ...db.email_templates import is_code_resolved
     from ...db.models import EmailTemplate
     from ...db.session import SessionLocal
-    from ...db.soft_delete import DELETED
 
     from ...db.models import PolicySource
 
-    # 지운 행은 여기 안 옵니다 — 화면에서 바로 사라지고 DB 에는 남습니다(soft_delete).
+    # 지운 행은 여기 안 옵니다 — 지우면 행 자체가 사라지고, 그때 내용은 판본 이력에
+    # 남습니다 (0100).
     with SessionLocal() as session:
         policy_count = (
-            session.query(PolicySource).filter(PolicySource.status != DELETED).count()
+            session.query(PolicySource).count()
         )
         rows = (
             session.query(EmailTemplate)
-            .filter(~EmailTemplate.key.like("auto_ack%"), EmailTemplate.status != DELETED)
+            .filter(~EmailTemplate.key.like("auto_ack%"))
             .order_by(EmailTemplate.updated_at.desc())
             .all()
         )
@@ -645,13 +645,14 @@ def ui_email_templates():
                 "updated_at": row.updated_at,
                 # 몇 번째 판인가. 「판본 기록」이 이 번호까지의 이력을 보여 줍니다.
                 "version": row.version or 1,
+                # 마지막으로 저장한 사람 (0100).
+                "author": row.author,
                 "kind": _template_kind(row.key),
                 # 발송 경로가 이 이름으로 찾는 행인가. 아무 키나 만들고 무엇이든 지울 수
                 # 있게 한 뒤로(2026-08-18), 이것이 "이 행은 실제로 쓰인다" 와 "목록에만
                 # 있다" 를 가르는 유일한 표시입니다.
                 "code_resolved": is_code_resolved(row.key),
                 "body": row.body or "",
-                "subject": row.subject or "",
                 "chars": len(row.body or ""),
                 # Which signature a new draft starts with. A row, not a literal in
                 # inbound.py — and the screen is where it moves.
@@ -691,13 +692,11 @@ def ui_policy_docs():
     from ...agents.policy_sync import knowledge_slug
     from ...db.models import PolicySource
     from ...db.session import SessionLocal
-    from ...db.soft_delete import DELETED
     from .policy_docs import MODES
 
     with SessionLocal() as session:
         rows = (
             session.query(PolicySource)
-            .filter(PolicySource.status != DELETED)
             .order_by(PolicySource.mode, PolicySource.order_index, PolicySource.id)
             .all()
         )
@@ -714,12 +713,13 @@ def ui_policy_docs():
                     "slug": knowledge_slug(row) if row.mode == "knowledge" else "",
                     "body": row.body,
                     "chars": len(row.body or ""),
-                    "subject": row.subject or "",
-                    # 라우터가 이 문서를 고를 때 읽는 한 줄. 비면 본문 앞부분이 대신합니다.
+                        # 라우터가 이 문서를 고를 때 읽는 한 줄. 비면 본문 앞부분이 대신합니다.
                     "usage_note": row.usage_note or "",
                     "effective_on": row.effective_on,
                     "edited_at": row.edited_at,
                     "version": row.version or 1,
+                # 마지막으로 저장한 사람 (0100).
+                "author": row.author,
                 }
                 for row in rows
             ],

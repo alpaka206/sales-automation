@@ -31,7 +31,6 @@ def test_context_includes_summary_and_prior_turns_but_not_current(
                 Message(
                     conversation_id=conversation.id,
                     direction="outgoing",
-                    channel="email",
                     subject="RE: Previous",
                     body="PoC 가능 여부를 확인하겠습니다.",
                     status="sent",
@@ -39,7 +38,6 @@ def test_context_includes_summary_and_prior_turns_but_not_current(
                 Message(
                     conversation_id=conversation.id,
                     direction="inbound",
-                    channel="email",
                     subject="RE: Previous",
                     body="Please confirm the PoC schedule.",
                     status="received",

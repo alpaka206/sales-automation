@@ -349,10 +349,6 @@ class PolicySource(Base):
     body: Mapped[str | None] = mapped_column(Text, nullable=True)
     title: Mapped[str | None] = mapped_column(String, nullable=True)
     summary: Mapped[str | None] = mapped_column(Text, nullable=True)
-    # 지운 시각. 지우면 행이 사라지는 대신 ``status='deleted'`` 가 되고 여기 시각이 박히며,
-    # 목록에 일주일 남았다가 청소됩니다 — 읽는 쪽은 전부 이미 ``status='active'`` 만 보므로
-    # 이 한 칸으로 "언제까지 되돌릴 수 있나" 가 정해집니다. src/db/soft_delete.py
-    deleted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=_utcnow, onupdate=_utcnow, nullable=False
@@ -371,22 +367,24 @@ class EmailTemplate(Base):
     __tablename__ = "email_templates"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    # **unique 입니다 — 그리고 지우면 행이 사라집니다** (0100). 소프트 삭제로 두면 지운
+    # 행이 이 이름을 영원히 붙들고 있어서, 발송 경로가 찾는 이름을 다시는 못 만듭니다.
     key: Mapped[str] = mapped_column(String, unique=True, nullable=False, index=True)
-    # 메일 제목. 제목이 있는 것은 접수확인뿐입니다 — 서명·링크·담당자 이름에는 제목이라는
-    # 것이 없고, 답변 메일 형식은 뼈대일 뿐 메일이 아닙니다. 비면 RE: 고객 제목입니다.
-    subject: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # ``subject`` 와 ``channel`` 이 여기 있었습니다. 제목은 접수확인 템플릿이 쓰던 칸인데
+    # 그 기능이 0087 에서 나갔고 채워진 행이 0개였습니다. 채널은 행마다 'email' 이라 한
+    # 번도 아무것도 안 걸렀습니다. 둘 다 0100 이 지웠습니다.
     name: Mapped[str] = mapped_column(String, nullable=False)
     language: Mapped[str] = mapped_column(String, nullable=False, default="all")
-    channel: Mapped[str] = mapped_column(String, nullable=False, default="email")
     body: Mapped[str] = mapped_column(Text, nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[str] = mapped_column(String, nullable=False, default="active")
     # ``is_default`` 는 0060 에서 지웠습니다. 어느 서명을 쓸지는 초안마다 검토 화면에서
     # 고르고, 아무것도 안 고르면 회사 규칙의 텍스트 서명이 붙습니다.
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    # **마지막으로 저장한 사람.** 만든 사람이 아닙니다(0100) — 만든 사람은 이 행이 처음
+    # 생긴 뒤로 아무 질문에도 답하지 않았고, 화면이 알고 싶은 것은 「이 글을 마지막에 누가
+    # 건드렸나」입니다. 목록의 수정일 옆에 뜹니다.
     author: Mapped[str | None] = mapped_column(String, nullable=True)
-    # 지운 시각 — PolicySource 와 같은 뜻입니다. src/db/soft_delete.py
-    deleted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=_utcnow, onupdate=_utcnow, nullable=False

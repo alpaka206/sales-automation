@@ -35,7 +35,6 @@ def _create_test_message(phone: str = "+821012345678") -> int:
         msg = Message(
             conversation_id=conv.id,
             direction="outgoing",
-            channel="email",
             to_address="dual-test@example.com",
             subject="Test",
             body="Test body",

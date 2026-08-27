@@ -22,10 +22,14 @@ type Revision = {
 
 type History = { kind: string; kind_label: string; revisions: Revision[] };
 
-/** 무슨 일이 있었나. 서버가 영어 한 낱말로 남기고(코드가 읽는 값), 화면이 사람 말로 옮깁니다 —
- *  두 벌을 저장하면 반드시 어긋납니다. 모르는 값은 그대로 보여 줍니다: 지어낸 말보다 낫습니다. */
+/** 무슨 일이 있었나. 서버가 영어 한 낱말로 남기고(코드가 읽는 값), 화면이 사람 말로 옮깁니다.
+ *
+ *  **`edited` 는 여기 없습니다.** 이 표의 행은 거의 전부 수정이라, 줄마다 「고침」이라고
+ *  적으면 판 번호 옆에서 아무것도 구별해 주지 않습니다 (2026-08-27 운영자 지시:
+ *  「v2 고침 → v2」). 지움·되돌림은 드물고 의미가 있어서 남깁니다. 모르는 값도 그대로
+ *  보여 줍니다 — 지어낸 말보다 낫습니다. */
 const NOTES: Record<string, string> = {
-  edited: "고침",
+  edited: "",
   deleted: "지움",
   restored: "되돌림",
 };
@@ -46,7 +50,7 @@ const EXTRA_LABELS: Record<string, string> = {
 };
 
 export function noteLabel(note: string | null): string {
-  if (!note) return "고침";
+  if (!note) return "";
   return NOTES[note] ?? note;
 }
 
@@ -93,13 +97,15 @@ export function RevisionHistory({
                     onClick={() => setOpenId(open ? null : rev.id)}>
               <span className="row" style={{ gap: 8, minWidth: 0 }}>
                 <span className="tag tnum">v{rev.version}</span>
-                <span className="t-sm">{noteLabel(rev.change_note)}</span>
+                {noteLabel(rev.change_note) && (
+                  <span className="t-sm">{noteLabel(rev.change_note)}</span>
+                )}
                 {rev.edited_by && <span className="t-xs t-subtle">{rev.edited_by}</span>}
               </span>
               <span className="row" style={{ gap: 10 }}>
                 <time className="t-xs t-subtle tnum">{kst(rev.created_at)}</time>
                 <span className="t-xs" style={{ color: "var(--accent)" }}>
-                  {open ? "닫기" : "그때 내용 보기"}
+                  {open ? "닫기" : "보기"}
                 </span>
               </span>
             </button>
@@ -145,7 +151,7 @@ export function RevisionHistoryButton(props: {
   const [open, setOpen] = useState(false);
   return (
     <>
-      <button type="button" className="btn btn--subtle btn--sm" onClick={() => setOpen(true)}>
+      <button type="button" className="btn btn--subtle btn--editor" onClick={() => setOpen(true)}>
         <Icon name="file" size={14} /> 히스토리
       </button>
       {open && <RevisionHistory {...props} onClose={() => setOpen(false)} />}

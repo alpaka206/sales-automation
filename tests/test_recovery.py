@@ -49,7 +49,6 @@ def _seed(factory, status: str) -> tuple[int, int]:
         message = Message(
             conversation_id=conversation.id,
             direction="outgoing",
-            channel="email",
             body="reply",
             status=status,
         )

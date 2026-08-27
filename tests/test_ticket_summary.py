@@ -27,8 +27,7 @@ def _conv(session) -> int:
 
 def _msg(session, conv_id: int, direction: str, body: str) -> int:
     row = Message(
-        conversation_id=conv_id, direction=direction, channel="email",
-        subject="제목", body=body, status="received",
+        conversation_id=conv_id, direction=direction, subject="제목", body=body, status="received",
     )
     session.add(row)
     session.commit()

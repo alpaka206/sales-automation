@@ -60,7 +60,6 @@ def list_signature_templates() -> list[dict]:
                 .filter(
                     EmailTemplate.key.like(f"{SIGNATURE_KEY_PREFIX}%"),
                     EmailTemplate.status == "active",
-                    EmailTemplate.channel == "email",
                 )
                 .order_by(EmailTemplate.name)
                 .all()

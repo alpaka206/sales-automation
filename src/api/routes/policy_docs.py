@@ -177,14 +177,12 @@ async def policy_docs_delete(source_id: int):
     ``mode='knowledge'`` 는 초안이 읽는 **사본**까지 같이 재워야 합니다. 안 그러면 지운
     문서를 라우터가 계속 인용합니다 — 하드 삭제 시절에도 그랬습니다(사본은 안 지웠으니까).
     """
-    from ...db.soft_delete import DELETED, utcnow
-
     with SessionLocal() as session:
         source = session.get(PolicySource, source_id)
         if source is not None:
+            # 스냅샷이 **먼저**입니다 — 행이 사라진 뒤에는 남길 것이 없습니다.
             snapshot_policy(session, source, change_note="deleted", edited_by="web")
-            source.status = DELETED
-            source.deleted_at = utcnow()
+            session.delete(source)
             session.commit()
     return RedirectResponse("/policy-docs", status_code=303)
 

@@ -50,7 +50,6 @@ def queue(db_session_factory, monkeypatch):
                 Message(
                     conversation_id=conv.id,
                     direction="outgoing",
-                    channel="email",
                     subject="RE: 우리 답변 제목",
                     body="draft",
                     status=status,
@@ -183,7 +182,6 @@ def test_the_column_never_shows_the_re_prefix_we_added(db_session_factory, monke
                 Message(
                     conversation_id=conv.id,
                     direction="outgoing",
-                    channel="email",
                     subject="RE: 더빙 단가 문의",
                     body="draft",
                     status="pending_approval",

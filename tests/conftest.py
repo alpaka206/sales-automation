@@ -164,3 +164,24 @@ def mock_llm():
     llm = MagicMock()
     llm.complete.return_value = "ok"
     return llm
+
+
+def legacy_template_columns(engine) -> None:
+    """``channel`` 과 ``subject`` — 0019 부터 0100 까지 ``email_templates`` 에 살던 칸.
+
+    옛 씨앗 마이그레이션들은 그 이름으로 INSERT 합니다. 실제 배포에서는 0019 가 그 둘을
+    만들어 두고 0100 이 지우므로 순서가 맞는데, 여기서는 모델에서 표를 만들고 그 씨앗
+    하나만 바로 돌리므로 그 시절 모양을 직접 세워 줍니다. 그 시절 동작을 재는 테스트라면
+    그 시절 표여야 합니다.
+    """
+    from sqlalchemy import inspect as _inspect
+    from sqlalchemy import text as _text
+
+    existing = {c["name"] for c in _inspect(engine).get_columns("email_templates")}
+    with engine.begin() as conn:
+        if "channel" not in existing:
+            conn.execute(_text(
+                "ALTER TABLE email_templates ADD COLUMN channel VARCHAR NOT NULL DEFAULT 'email'"
+            ))
+        if "subject" not in existing:
+            conn.execute(_text("ALTER TABLE email_templates ADD COLUMN subject TEXT"))

@@ -19,7 +19,6 @@ from ...db.email_templates import SIGNATURE_KEY_PREFIX, is_code_resolved
 from ...db.models import EmailTemplate
 from ...db.revisions import snapshot_template
 from ...db.session import SessionLocal
-from ...db.soft_delete import DELETED, utcnow
 
 logger = logging.getLogger(__name__)
 
@@ -107,7 +106,6 @@ async def email_templates_create(
                 if final_key.startswith(SIGNATURE_KEY_PREFIX)
                 else (language.strip().lower() or "all")
             ),
-            channel="email",
             status="active",
             version=1,
             author=author,
@@ -131,7 +129,6 @@ async def email_templates_update(
     name: str = Form(""),
     language: str = Form(""),
     body: str = Form(""),
-    subject: str = Form(""),
 ):
     """Update an email template, snapshotting the prior state into history.
 
@@ -170,8 +167,8 @@ async def email_templates_update(
         tpl.status = "active"
         tpl.version = (tpl.version or 1) + 1
         tpl.body = body
-        # 빈 문자열은 "제목 없음" 입니다 — 접수확인이 RE: 고객 제목으로 돌아갑니다.
-        tpl.subject = subject.strip() or None
+        # 만든 사람이 아니라 **마지막으로 저장한 사람**입니다 (0100).
+        tpl.author = author
         session.commit()
     # 판 번호는 화면에 뜹니다 — 목록의 「v3」과 판본 기록의 정렬이 이 값입니다.
     return HTMLResponse('<div class="text-green-600 text-sm font-medium">저장 완료</div>')
@@ -181,9 +178,14 @@ async def email_templates_update(
 async def email_templates_delete(tpl_id: int, request: Request):
     """**어떤 행이든** 지웁니다 — 일주일 동안 되돌릴 수 있습니다 (2026-08-18).
 
-    행을 지우지 않습니다. ``status='deleted'`` 로 바꾸고 ``deleted_at`` 을 박으면 읽는 쪽은
-    전부 ``status='active'`` 만 보므로 발송·고르개에서 즉시 빠지고, 목록에는 흐리게 남아
-    되돌릴 수 있습니다. 일주일 뒤 청소됩니다 — src/db/soft_delete.py.
+    **행이 사라집니다** (0100). 한동안 ``status='deleted'`` 로만 바꿨는데, ``key`` 가
+    unique 이고 만들기 라우트가 상태를 안 보고 중복을 막기 때문에 **지운 행이 그 이름을
+    영원히 붙들고 있었습니다** — `reply_format` 을 한 번 지우면 다시는 그 이름으로 만들 수
+    없고, 그 이름은 발송 경로가 찾는 이름입니다.
+
+    지운 내용은 없어지지 않습니다: 바로 위에서 남긴 스냅샷이 ``document_revisions`` 에
+    ``change_note='deleted'`` 로 들어갑니다. 「DB 에서 볼 수 있게 영원히 지우지 않는다」는
+    그 이력이 지킵니다.
 
     여기는 ``signature_`` 로 시작하는 행만 지웠습니다. 나머지는 코드가 이름으로 찾는 행이라
     지우면 기능이 없어지는 것이 아니라 **여전히 일어나는 조회의 답**이 없어지기 때문입니다:
@@ -211,9 +213,9 @@ async def email_templates_delete(tpl_id: int, request: Request):
                 tpl.name,
                 editor,
             )
+        # 스냅샷이 **먼저**입니다 — 행이 사라진 뒤에는 남길 것이 없습니다.
         snapshot_template(session, tpl, change_note="deleted", edited_by=editor)
-        tpl.status = DELETED
-        tpl.deleted_at = utcnow()
+        session.delete(tpl)
         session.commit()
     return HTMLResponse(
         '<div class="text-orange-600 text-sm font-medium">삭제 완료</div>'
