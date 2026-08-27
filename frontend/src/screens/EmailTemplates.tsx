@@ -22,7 +22,20 @@ type Item = {
   code_resolved: boolean;
 };
 
-const LANGUAGE_LABELS: Record<string, string> = { all: "전체", ko: "한국어", en: "영어" };
+/** 언어 칸에 들어갈 수 있는 값. **「영어」가 아니라 「외국어」입니다** — `_en` 행을 고르는
+ *  조건이 「영어인가」가 아니라 「한국어가 **아닌가**」라서, 일본어 문의도 베트남어 문의도
+ *  그 행을 읽습니다(`prompts.get_reply_format`). 화면에 「영어」라고 적으면 그 행을 영어
+ *  전용으로 읽게 되고, 무엇이 실제로 그 행을 읽는지와 어긋납니다 (2026-08-27 이관 0099).
+ *
+ *  키의 `_en` 접미사는 그대로입니다 — 그건 발송 경로가 이름으로 꺼내 가는 코드 참조입니다. */
+const LANGUAGES: { value: string; label: string }[] = [
+  { value: "all", label: "전체" },
+  { value: "ko", label: "한국어" },
+  { value: "foreign", label: "외국어" },
+];
+const LANGUAGE_LABELS: Record<string, string> = Object.fromEntries(
+  LANGUAGES.map((entry) => [entry.value, entry.label]),
+);
 
 type List = { kinds: Kind[]; items: Item[] };
 
@@ -203,15 +216,24 @@ function Editor({ id, data, onDone }: {
                 <input className="input mono" id="et-key" value={key}
                        onChange={(e) => setKey(e.target.value)}
                        placeholder="예: custom_followup" style={{ marginBottom: 14 }} />
-                {!isSignature && (
-                  <>
-                    <label className="field-label" htmlFor="et-lang">언어 코드 (비우면 전체)</label>
-                    <input className="input mono" id="et-lang"
-                           value={language === "all" ? "" : language}
-                           onChange={(e) => setLanguage(e.target.value.trim() || "all")}
-                           placeholder="예: ja" style={{ marginBottom: 14 }} />
-                  </>
-                )}
+              </>
+            )}
+
+            {/* **언제든 고칠 수 있습니다** (2026-08-27 운영자 지시). 만들 때만 물어보고
+                그 뒤로 못 바꾸면, 잘못 고른 행을 지우고 다시 만드는 수밖에 없습니다 —
+                키가 코드 참조라 그럴 수도 없는 행이 있습니다. 자유 입력이 아니라 목록인
+                이유: 이 값은 화면에 보여 주는 글자이고, 아무 코드도 임의의 언어 코드로
+                행을 고르지 않습니다. `ja` 라고 적어 봐야 읽는 곳이 없습니다. */}
+            {!isSignature && (
+              <>
+                <label className="field-label" htmlFor="et-lang">언어</label>
+                <select className="select" id="et-lang" value={language}
+                        onChange={(e) => setLanguage(e.target.value)}
+                        style={{ marginBottom: 14 }}>
+                  {LANGUAGES.map((entry) => (
+                    <option key={entry.value} value={entry.value}>{entry.label}</option>
+                  ))}
+                </select>
               </>
             )}
 
@@ -250,7 +272,7 @@ function Editor({ id, data, onDone }: {
             {/* 저장 옆입니다 — 「이 글이 전에 어땠나」는 고치기 직전에 궁금해집니다. */}
             {data && (
               <RevisionHistoryButton kind="email_template" documentId={data.id}
-                                     title={data.name} currentVersion={data.version} />
+                                     title={data.name} />
             )}
           </div>
           {/* 무엇이든 지웁니다. 발송 경로가 찾는 행이면 확인 창이 그렇게 말합니다. */}
@@ -351,7 +373,7 @@ export function EmailTemplates() {
   const columns: Column<Item>[] = [
     // "기본" 표시는 없앴습니다: 어느 서명을 쓸지는 초안마다 고르는 것이고, 목록에 미리
     // 정해 둔 하나를 표시하면 그게 강제인 것처럼 읽힙니다.
-    { label: "템플릿 이름", width: kind === "signature" ? "68%" : "40%",
+    { label: "템플릿 이름", width: kind === "signature" ? "44%" : "34%",
       cell: (row) => (
         <>
           <strong>{row.name}</strong>
@@ -363,6 +385,10 @@ export function EmailTemplates() {
       ) },
     // 이 행이 어느 언어의 행인지. 서명에는 언어라는 것이 없으므로 (고르는 것은
     // 사람입니다) 서명 목록에서는 이 칸 자체를 뺍니다.
+    // 이름을 반만 쓰고 남은 폭을 언어·버전에 줍니다 (2026-08-27 운영자 지시) — 이름은
+    // 한 줄이면 읽히는데 그 뒤가 비어 있었습니다.
+    { label: "버전", width: "10%", className: "tnum td-subtle",
+      cell: (row) => `v${row.version}` },
     ...(kind === "signature" ? [] : [{ label: "언어", width: "12%",
       cell: (row: Item) => (
         <span className="t-subtle t-xs">{LANGUAGE_LABELS[row.language] ?? row.language}</span>
@@ -375,7 +401,7 @@ export function EmailTemplates() {
       ) }]),
     // 연도까지. 이 열은 "얼마나 오래됐나" 를 보는 자리이고, 월·일만 있으면 작년 것과 올해
     // 것이 같은 글자로 보입니다.
-    { label: "수정일", width: "20%", className: "td-subtle tnum",
+    { label: "수정일", width: "18%", className: "td-subtle tnum",
       cell: (row) => kst(row.updated_at) || "—" },
     {
       // 정책 문서 목록과 같은 자리. 줄을 클릭해도 열리지만, 지우려고 들어갔다 나오는

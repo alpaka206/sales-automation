@@ -141,12 +141,15 @@ async def email_templates_update(
     described a template that exists and does nothing. Saving revives a dormant row
     rather than leaving it unreachable now that nothing can set the value back.
 
-    ``language`` is still posted for language-specific rows, but a SIGNATURE is pinned to
-    ``all`` no matter what arrives. The screen
-    stopped asking (0063), so anything posted for one is a stale value from a form that no
-    longer has that field, and writing it back would resurrect a column the operator can
-    neither see nor change. An ABSENT value leaves the row's language alone; it used to
-    default to ``all``, which meant a save could quietly relabel a Korean row 전체.
+    ``language`` 는 **이제 화면에서 언제든 고칩니다** (2026-08-27 운영자 지시). 값은 셋뿐이고
+    (`all` · `ko` · `foreign`) 화면이 드롭다운으로 묻습니다 — 아무 코드도 임의의 언어 코드로
+    행을 고르지 않으므로 자유 입력일 이유가 없습니다. 「영어」가 아니라 「외국어」인 이유는
+    이관 0099 에 있습니다: `_en` 행을 고르는 조건이 「한국어가 **아닌가**」입니다.
+
+    **서명은 무엇이 오든 ``all`` 로 못박습니다.** 어떤 코드도 언어로 서명을 고르지 않고,
+    고르는 것은 사람입니다(0063). 값이 **안 오면** 그 행의 언어를 그대로 둡니다 — 기본값이
+    ``all`` 이던 동안, 0074 가 국문 행이라고 표시해 둔 reply_format / meeting_link /
+    whatsapp_link 가 콘솔에서 한 번 저장할 때마다 조용히 '전체' 로 돌아갔습니다.
     """
     author = actor_name(request, fallback="") or "web"
     with SessionLocal() as session:
@@ -161,12 +164,8 @@ async def email_templates_update(
         if name.strip():
             tpl.name = name.strip()
         is_signature = (tpl.key or "").startswith(SIGNATURE_KEY_PREFIX)
-        # 값이 안 오면 **그 행의 언어를 그대로 둡니다.** 화면에 언어를 고르는 칸이 없으므로
-        # (0063) 빈 값은 "전체로 바꿔 달라" 가 아니라 "이 폼은 언어를 모른다" 입니다.
-        # 기본값이 ``"all"`` 이던 동안에는, 0074 가 국문 행이라고 표시해 둔
-        # reply_format / meeting_link / whatsapp_link 가 콘솔에서 한 번 저장할 때마다
-        # 조용히 '전체' 로 돌아갔습니다 — 그 한 글자가 영문 회신이 어느 행을 읽는지에
-        # 대한 유일한 단서입니다.
+        # 값이 안 오면 **그 행의 언어를 그대로 둡니다.** 빈 값은 "전체로 바꿔 달라" 가
+        # 아니라 "이 폼은 언어를 모른다" 입니다 — 옛 화면이나 다른 클라이언트가 그렇습니다.
         tpl.language = "all" if is_signature else (language.strip() or tpl.language or "all")
         tpl.status = "active"
         tpl.version = (tpl.version or 1) + 1

@@ -821,8 +821,14 @@ body.show-translation .has-ko .msg-ko { display: block; }
 .modal--wide { max-width: 640px; max-height: calc(100dvh - 48px); overflow-y: auto; }
 /* 판본 기록처럼 **본문을 그대로 읽어야 하는** 창. 좁으면 줄이 접혀 비교가 안 됩니다.
    운영자 화면이 세로로 짧아(≈640px) 높이는 뷰포트에 맞추고 안에서 스크롤합니다. */
-.modal--full { max-width: min(1180px, calc(100vw - 40px)); width: 100%;
-               max-height: calc(100dvh - 40px); overflow-y: auto; }
+.modal--full { width: calc(100vw - 40px); max-width: none;
+               height: calc(100dvh - 40px); max-height: none;
+               display: flex; flex-direction: column; overflow: hidden; }
+/* 머리글은 고정, 내용만 스크롤합니다 — 창이 화면만큼 커지면 목록을 내리는 동안 제목이
+   같이 올라가 버립니다. */
+.modal--full > :is(.modal__title, .modal__body) { flex: 0 0 auto; }
+.modal--full > .revision { flex: 0 0 auto; }
+.modal--full > :not(.modal__title):not(.modal__body):not(.modal__actions) { min-height: 0; }
 
 /* 판본 한 줄. `.history-item` 을 쓰면 안 됩니다 — 그건 `display:grid` 에 첫 칸이 18px
    짜리 타임라인 레일이라, 자식을 하나만 주면 본문이 그 18px 안에서 한 글자씩 세로로
@@ -839,8 +845,7 @@ body.show-translation .has-ko .msg-ko { display: block; }
 .revision__text { margin: 0; padding: 12px; border: 1px solid var(--border);
                   border-radius: var(--r-sm); background: var(--surface-2);
                   font: 12.5px/1.7 var(--font-mono); color: var(--text);
-                  white-space: pre-wrap; overflow-wrap: anywhere; max-height: 52vh;
-                  overflow-y: auto; }
+                  white-space: pre-wrap; overflow-wrap: anywhere; }
 .modal__title { font-size: 16px; font-weight: 800; letter-spacing: -.02em; }
 /* pre-line: 확인 문구는 여러 문단짜리가 있습니다(복구 화면의 파괴적 작업 경고). 없으면
    

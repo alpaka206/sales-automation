@@ -663,8 +663,11 @@ def ui_email_templates():
             {
                 "key": key,
                 "label": label,
+                # 지운 행은 `items` 에 애초에 안 실립니다(위 필터) — 세는 쪽에서 다시
+                # 거를 것이 없습니다. `item["deleted"]` 를 읽던 줄이 여기 있었고, 그 키를
+                # payload 에서 뺀 날 이 화면이 통째로 500 이 됐습니다 (2026-08-27).
                 "count": policy_count if key == "policy"
-                else sum(1 for item in items if item["kind"] == key and not item["deleted"]),
+                else sum(1 for item in items if item["kind"] == key),
                 # 서명이든 아니든 만들 수 있습니다 (2026-08-18). 만든 행을 읽는 코드가
                 # 있는지는 `code_resolved` 가 행마다 말합니다 — 막는 대신 보이게 합니다.
                 "can_create": key != "policy",

@@ -451,11 +451,22 @@ def test_nothing_is_ever_purged_and_gemini_never_sees_it(template_db):
     # 발송 경로가 이름으로 찾는 조회도, 서명 고르개도 지운 행을 안 봅니다.
     assert get_email_template("reply_format") is None
     assert list_signature_templates() == []
-    with TestClient(app) as client:
-        assert client.get("/api/ui/email-templates").json()["items"] == []
-    # 그래도 행은 그대로입니다.
+    # **살아 있는 행을 같이 둡니다.** 지운 행만 있으면 목록이 비어서, 행을 읽는 코드가
+    # 한 줄도 안 돕니다 — 그래서 `item["deleted"]` 를 아직 읽던 개수 세는 줄이 테스트를
+    # 통과하고 운영에서 500 이 났습니다 (2026-08-27).
     with template_db() as session:
-        assert session.query(EmailTemplate).count() == 2
+        session.add(EmailTemplate(key=f"{SIGNATURE_KEY_PREFIX}live", name="살아 있는 서명",
+                                  language="all", channel="email", status="active",
+                                  version=1, body="<p/>"))
+        session.commit()
+    with TestClient(app) as client:
+        payload = client.get("/api/ui/email-templates").json()
+    assert [item["name"] for item in payload["items"]] == ["살아 있는 서명"]
+    counts = {kind["key"]: kind["count"] for kind in payload["kinds"]}
+    assert counts["signature"] == 1, "지운 행이 개수에 섞이면 안 됩니다"
+    # 그래도 지운 행은 그대로입니다.
+    with template_db() as session:
+        assert session.query(EmailTemplate).count() == 3
 
 
 def test_the_revision_history_is_out_of_gemini_reach():
@@ -533,3 +544,47 @@ def test_every_write_path_leaves_the_value_before_it(template_db):
         # append-only: 이력이 현재 행을 덮어쓰지 않았고, 그 행도 지워지지 않았습니다.
         row = session.get(EmailTemplate, tpl_id)
         assert row.body == "세 번째 서명" and row.status == "deleted"
+
+
+def test_the_language_is_editable_and_the_other_one_is_not_english(template_db):
+    """**「영어」가 아니라 「외국어」입니다** (2026-08-27 운영자 지시, 이관 0099).
+
+    ``_en`` 행을 고르는 조건이 「영어인가」가 아니라 「한국어가 **아닌가**」입니다
+    (``prompts.get_reply_format``) — 일본어 문의도 베트남어 문의도 그 행을 읽습니다.
+    화면에 「영어」라고 적혀 있으면 그 행을 영어 전용으로 읽게 되고, 무엇이 실제로 그
+    행을 읽는지와 어긋납니다.
+
+    그리고 **언제든 고칠 수 있습니다.** 만들 때만 묻고 그 뒤로 못 바꾸면, 잘못 고른
+    행을 지우고 다시 만드는 수밖에 없는데 키가 코드 참조라 그럴 수도 없습니다.
+    """
+    with template_db() as session:
+        session.add(EmailTemplate(key="reply_format_en", name="답변 메일 형식 (외국어)",
+                                  language="ko", channel="email", status="active",
+                                  version=1, body="뼈대"))
+        session.commit()
+        tpl_id = session.query(EmailTemplate).one().id
+
+    with TestClient(app) as client:
+        response = client.put(f"/email-templates/{tpl_id}",
+                              data={"name": "답변 메일 형식 (외국어)", "language": "foreign",
+                                    "body": "뼈대"})
+        assert response.status_code == 200, response.text
+
+    with template_db() as session:
+        assert session.get(EmailTemplate, tpl_id).language == "foreign"
+
+
+def test_a_signature_still_cannot_keep_a_language(template_db):
+    """어떤 코드도 언어로 서명을 고르지 않습니다 — 고르는 것은 사람입니다(0063)."""
+    with template_db() as session:
+        session.add(EmailTemplate(key=f"{SIGNATURE_KEY_PREFIX}z", name="서명", language="all",
+                                  channel="email", status="active", version=1, body="<p/>"))
+        session.commit()
+        tpl_id = session.query(EmailTemplate).one().id
+
+    with TestClient(app) as client:
+        client.put(f"/email-templates/{tpl_id}",
+                   data={"name": "서명", "language": "foreign", "body": "<p/>"})
+
+    with template_db() as session:
+        assert session.get(EmailTemplate, tpl_id).language == "all"

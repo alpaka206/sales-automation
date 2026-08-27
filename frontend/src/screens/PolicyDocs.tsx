@@ -187,7 +187,7 @@ function DocEditor({ doc, modes, onDone }: {
             </ActionButton>
             {doc && (
               <RevisionHistoryButton kind="policy_source" documentId={doc.id}
-                                     title={doc.title || doc.label} currentVersion={doc.version} />
+                                     title={doc.title || doc.label} />
             )}
           </div>
           {doc && (

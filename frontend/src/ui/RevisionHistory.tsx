@@ -50,7 +50,7 @@ export function noteLabel(note: string | null): string {
   return NOTES[note] ?? note;
 }
 
-/** 「판본 기록」 창. 이메일 템플릿과 정책 문서가 **같은 컴포넌트**를 씁니다 — 보고 싶은 것이
+/** 「히스토리」 창. 이메일 템플릿과 정책 문서가 **같은 컴포넌트**를 씁니다 — 보고 싶은 것이
  *  같기 때문입니다: 언제, 누가, 무엇을, 그때 값은 무엇이었나.
  *
  *  판본은 고치기 **직전**에 남습니다. 그래서 맨 위 행은 「지금 본문」이 아니라 「직전
@@ -59,13 +59,11 @@ export function RevisionHistory({
   kind,
   documentId,
   title,
-  currentVersion,
   onClose,
 }: {
   kind: "email_template" | "policy_source";
   documentId: number;
   title: string;
-  currentVersion?: number;
   onClose: () => void;
 }) {
   const [openId, setOpenId] = useState<number | null>(null);
@@ -78,19 +76,12 @@ export function RevisionHistory({
   return (
     <Modal
       full
-      title={`판본 기록 — ${title}`}
-      description={
-        currentVersion
-          ? `지금은 v${currentVersion} 입니다. 아래는 저장·삭제 **직전**에 남긴 값입니다.`
-          : "저장·삭제 직전에 남긴 값입니다."
-      }
+      title={`히스토리 — ${title}`}
       onClose={onClose}
     >
       {isPending && <LoadingBlock />}
       {!isPending && revisions.length === 0 && (
-        <p className="t-sm t-subtle">
-          아직 남은 판본이 없습니다. 다음에 저장하면 지금 내용이 여기 남습니다.
-        </p>
+        <p className="t-sm t-subtle">현재 히스토리가 없습니다.</p>
       )}
       {revisions.map((rev) => {
         const open = openId === rev.id;
@@ -142,19 +133,20 @@ export function RevisionHistory({
   );
 }
 
-/** 편집기 바닥의 「판본 기록」 버튼 + 창. 두 화면이 같은 자리에 같은 것을 답니다. */
+/** 편집기 바닥의 「히스토리」 버튼 + 창. 두 화면이 같은 자리에 같은 것을 답니다.
+ *
+ *  **버튼에 판 번호를 안 답니다.** 지금 몇 판인지는 목록의 「버전」 열이 말하고, 버튼은
+ *  누르면 무엇이 열리는지만 말하면 됩니다 (2026-08-27 운영자 지시). */
 export function RevisionHistoryButton(props: {
   kind: "email_template" | "policy_source";
   documentId: number;
   title: string;
-  currentVersion?: number;
 }) {
   const [open, setOpen] = useState(false);
   return (
     <>
       <button type="button" className="btn btn--subtle btn--sm" onClick={() => setOpen(true)}>
-        <Icon name="file" size={14} /> 판본 기록
-        {props.currentVersion ? <span className="tnum"> · v{props.currentVersion}</span> : null}
+        <Icon name="file" size={14} /> 히스토리
       </button>
       {open && <RevisionHistory {...props} onClose={() => setOpen(false)} />}
     </>
