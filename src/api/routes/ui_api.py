@@ -718,8 +718,6 @@ def ui_policy_docs():
                     "effective_on": row.effective_on,
                     "edited_at": row.edited_at,
                     "version": row.version or 1,
-                # 마지막으로 저장한 사람 (0100).
-                "author": row.author,
                 }
                 for row in rows
             ],

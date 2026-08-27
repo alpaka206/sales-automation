@@ -10,6 +10,8 @@ from __future__ import annotations
 import asyncio
 
 import pytest
+from unittest.mock import patch
+
 from fastapi.testclient import TestClient
 
 from src.api.main import app
@@ -63,6 +65,56 @@ def test_every_screen_the_sidebar_offers_has_working_json():
             "/api/ui/recovery",
         ):
             assert client.get(path).status_code == 200, path
+
+
+def test_the_document_screens_render_with_a_row_in_them():
+    """**빈 표로는 이 두 화면을 못 잽니다.** 위 테스트는 모든 화면을 훑지만 DB 가 비어
+    있어서, 행 하나하나를 그리는 목록 컴프리헨션이 **한 번도 안 돕니다.** 그래서 없어진
+    칸을 아직 읽던 줄이 두 번 통과했고 두 번 다 운영에서 500 이었습니다 (2026-08-27:
+    `item["deleted"]`, `row.author`).
+
+    행을 하나씩 넣고 부릅니다 — 그래야 그 줄들이 실제로 실행됩니다.
+    """
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from sqlalchemy.pool import StaticPool
+
+    from src.db.base import Base
+    from src.db.models import EmailTemplate, PolicySource
+
+    engine = create_engine(
+        "sqlite:///:memory:", connect_args={"check_same_thread": False}, poolclass=StaticPool
+    )
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine, expire_on_commit=False)
+    with factory() as session:
+        session.add_all([
+            EmailTemplate(key="reply_format", name="답변 메일 형식", language="ko",
+                          status="active", version=2, body="뼈대", author="배운태"),
+            EmailTemplate(key="signature_x", name="서명", language="all",
+                          status="active", version=1, body="<p/>"),
+            PolicySource(label="지원 언어 정책", title="지원 언어 정책", doc_key="k" * 32,
+                         mode="knowledge", status="active", version=3, body="99개 언어",
+                         usage_note="언어 문의에 씁니다", effective_on="2026-07-29"),
+            PolicySource(label="공통 원칙", title="공통 원칙", doc_key="r" * 32,
+                         mode="rules", status="active", version=1, body="규칙"),
+        ])
+        session.commit()
+
+    with patch("src.db.session.SessionLocal", factory), TestClient(app) as client:
+        templates = client.get("/api/ui/email-templates")
+        docs = client.get("/api/ui/policy-docs")
+
+    assert templates.status_code == 200, templates.text
+    assert docs.status_code == 200, docs.text
+    items = {item["key"]: item for item in templates.json()["items"]}
+    assert items["reply_format"]["version"] == 2
+    assert items["reply_format"]["author"] == "배운태"
+    counts = {kind["key"]: kind["count"] for kind in templates.json()["kinds"]}
+    assert counts["signature"] == 1 and counts["template"] == 1
+    rows = {row["label"]: row for row in docs.json()["rows"]}
+    assert rows["지원 언어 정책"]["version"] == 3
+    assert rows["지원 언어 정책"]["effective_on"] == "2026-07-29"
 
 
 def test_a_personal_domain_is_never_grouped_as_one_company():
