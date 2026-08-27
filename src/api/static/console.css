@@ -819,6 +819,28 @@ body.show-translation .has-ko .msg-ko { display: block; }
 }
 /* A form, not a confirmation — 440px puts one field per line. */
 .modal--wide { max-width: 640px; max-height: calc(100dvh - 48px); overflow-y: auto; }
+/* 판본 기록처럼 **본문을 그대로 읽어야 하는** 창. 좁으면 줄이 접혀 비교가 안 됩니다.
+   운영자 화면이 세로로 짧아(≈640px) 높이는 뷰포트에 맞추고 안에서 스크롤합니다. */
+.modal--full { max-width: min(1180px, calc(100vw - 40px)); width: 100%;
+               max-height: calc(100dvh - 40px); overflow-y: auto; }
+
+/* 판본 한 줄. `.history-item` 을 쓰면 안 됩니다 — 그건 `display:grid` 에 첫 칸이 18px
+   짜리 타임라인 레일이라, 자식을 하나만 주면 본문이 그 18px 안에서 한 글자씩 세로로
+   떨어집니다(2026-08-27 운영자 지적). 여기는 그냥 블록입니다. */
+.revision { border: 1px solid var(--border); border-radius: var(--r-sm); margin-bottom: 8px;
+            background: var(--surface); }
+.revision__head { display: flex; align-items: center; justify-content: space-between; gap: 12px;
+                  width: 100%; padding: 10px 12px; background: none; border: 0; cursor: pointer;
+                  text-align: left; font: inherit; color: inherit; }
+.revision__head:hover { background: var(--surface-2); }
+.revision__body { padding: 0 12px 12px; border-top: 1px solid var(--border); }
+.revision__label { margin: 12px 0 6px; font-size: 12px; font-weight: 700;
+                   color: var(--text-muted); }
+.revision__text { margin: 0; padding: 12px; border: 1px solid var(--border);
+                  border-radius: var(--r-sm); background: var(--surface-2);
+                  font: 12.5px/1.7 var(--font-mono); color: var(--text);
+                  white-space: pre-wrap; overflow-wrap: anywhere; max-height: 52vh;
+                  overflow-y: auto; }
 .modal__title { font-size: 16px; font-weight: 800; letter-spacing: -.02em; }
 /* pre-line: 확인 문구는 여러 문단짜리가 있습니다(복구 화면의 파괴적 작업 경고). 없으면
    

@@ -25,10 +25,24 @@ type History = { kind: string; kind_label: string; revisions: Revision[] };
 /** 무슨 일이 있었나. 서버가 영어 한 낱말로 남기고(코드가 읽는 값), 화면이 사람 말로 옮깁니다 —
  *  두 벌을 저장하면 반드시 어긋납니다. 모르는 값은 그대로 보여 줍니다: 지어낸 말보다 낫습니다. */
 const NOTES: Record<string, string> = {
-  created: "만듦",
   edited: "고침",
   deleted: "지움",
   restored: "되돌림",
+};
+
+/** `extra` 에 실려 오는 부속 칸의 사람 이름.
+ *
+ *  **본문만 보여 주면 안 됩니다.** 정책 문서에서 「메일 제목」 칸만 비우는 편집이 실제로
+ *  있었고(2026-08-27), 그때 본문은 한 글자도 안 바뀌어서 판본 기록이 「아무 일도 없었다」로
+ *  보였습니다. 바뀐 것이 여기 있는 칸이면 여기에 보여야 합니다. */
+const EXTRA_LABELS: Record<string, string> = {
+  subject: "메일 제목",
+  usage_note: "언제 쓰는가",
+  effective_on: "기준일",
+  mode: "종류",
+  language: "언어",
+  channel: "채널",
+  description: "설명",
 };
 
 export function noteLabel(note: string | null): string {
@@ -37,7 +51,7 @@ export function noteLabel(note: string | null): string {
 }
 
 /** 「판본 기록」 창. 이메일 템플릿과 정책 문서가 **같은 컴포넌트**를 씁니다 — 보고 싶은 것이
- *  같기 때문입니다: 언제, 누가, 무엇을, 그때 본문은 무엇이었나.
+ *  같기 때문입니다: 언제, 누가, 무엇을, 그때 값은 무엇이었나.
  *
  *  판본은 고치기 **직전**에 남습니다. 그래서 맨 위 행은 「지금 본문」이 아니라 「직전
  *  본문」이고, 창이 그렇게 적어 둡니다 — 안 적으면 맨 위가 현재라고 읽힙니다. */
@@ -63,50 +77,64 @@ export function RevisionHistory({
   const revisions = data?.revisions ?? [];
   return (
     <Modal
-      wide
+      full
       title={`판본 기록 — ${title}`}
       description={
         currentVersion
-          ? `지금은 v${currentVersion} 입니다. 아래는 저장·삭제 직전에 남긴 이전 판본입니다.`
-          : "저장·삭제 직전에 남긴 이전 판본입니다."
+          ? `지금은 v${currentVersion} 입니다. 아래는 저장·삭제 **직전**에 남긴 값입니다.`
+          : "저장·삭제 직전에 남긴 값입니다."
       }
       onClose={onClose}
     >
       {isPending && <LoadingBlock />}
       {!isPending && revisions.length === 0 && (
         <p className="t-sm t-subtle">
-          아직 남은 판본이 없습니다. 다음에 저장하면 지금 본문이 여기 남습니다.
+          아직 남은 판본이 없습니다. 다음에 저장하면 지금 내용이 여기 남습니다.
         </p>
       )}
       {revisions.map((rev) => {
         const open = openId === rev.id;
+        const extras = Object.entries(rev.extra || {}).filter(([, value]) => value);
         return (
-          <div key={rev.id} className="history-item" style={{ marginBottom: 8 }}>
-            <div>
-              <button
-                type="button"
-                className="row-between"
-                style={{ width: "100%", background: "none", border: 0, padding: 0, cursor: "pointer", textAlign: "left" }}
-                onClick={() => setOpenId(open ? null : rev.id)}
-              >
-                <span className="row" style={{ gap: 8 }}>
-                  <span className="tag tnum">v{rev.version}</span>
-                  <span className="t-sm">{noteLabel(rev.change_note)}</span>
-                  {rev.edited_by && <span className="t-xs t-subtle">{rev.edited_by}</span>}
+          <div key={rev.id} className="revision">
+            <button type="button" className="revision__head"
+                    aria-expanded={open}
+                    onClick={() => setOpenId(open ? null : rev.id)}>
+              <span className="row" style={{ gap: 8, minWidth: 0 }}>
+                <span className="tag tnum">v{rev.version}</span>
+                <span className="t-sm">{noteLabel(rev.change_note)}</span>
+                {rev.edited_by && <span className="t-xs t-subtle">{rev.edited_by}</span>}
+              </span>
+              <span className="row" style={{ gap: 10 }}>
+                <time className="t-xs t-subtle tnum">{kst(rev.created_at)}</time>
+                <span className="t-xs" style={{ color: "var(--accent)" }}>
+                  {open ? "닫기" : "그때 내용 보기"}
                 </span>
-                <span className="row" style={{ gap: 8 }}>
-                  <time className="t-xs t-subtle tnum">{kst(rev.created_at)}</time>
-                  <span className="t-xs" style={{ color: "var(--accent)" }}>
-                    {open ? "닫기" : "본문 보기"}
-                  </span>
-                </span>
-              </button>
-              {open && (
-                <div className="msg-body msg-body--inset mono" style={{ marginTop: 8, fontSize: 12.5 }}>
-                  {rev.body || <span className="t-subtle">본문이 비어 있었습니다.</span>}
-                </div>
-              )}
-            </div>
+              </span>
+            </button>
+            {open && (
+              <div className="revision__body">
+                {/* 부속 칸 먼저입니다 — 제목·용도만 고치는 편집이 잦고, 그때 본문은
+                    그대로라 아래 본문만 보면 아무것도 안 바뀐 것처럼 보입니다. */}
+                {extras.length > 0 && (
+                  <dl className="info-list">
+                    <div className="info-row">
+                      <dt>문서 이름</dt><dd>{rev.title}</dd>
+                    </div>
+                    {extras.map(([key, value]) => (
+                      <div className="info-row" key={key}>
+                        <dt>{EXTRA_LABELS[key] || key}</dt>
+                        <dd>{value}</dd>
+                      </div>
+                    ))}
+                  </dl>
+                )}
+                <div className="revision__label">본문</div>
+                <pre className="revision__text">
+                  {rev.body || "(본문이 비어 있었습니다)"}
+                </pre>
+              </div>
+            )}
           </div>
         );
       })}

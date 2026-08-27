@@ -7,6 +7,7 @@ export function Modal({
   title,
   description,
   wide,
+  full,
   onClose,
   children,
   actions,
@@ -15,6 +16,9 @@ export function Modal({
   title: string;
   description?: ReactNode;
   wide?: boolean;
+  /** 화면을 거의 꽉 채웁니다. 판본 기록처럼 **본문을 그대로 읽어야 하는** 창용입니다
+   *  — 좁은 창에서는 줄이 접혀 비교가 안 됩니다. */
+  full?: boolean;
   onClose: () => void;
   children?: ReactNode;
   actions?: ReactNode;
@@ -124,7 +128,7 @@ export function Modal({
       <div
         ref={dialog}
         onInput={() => { typed.current = true; }}
-        className={`modal${wide ? " modal--wide" : ""}`}
+        className={`modal${full ? " modal--full" : wide ? " modal--wide" : ""}`}
         role="dialog"
         aria-modal="true"
         aria-label={title}

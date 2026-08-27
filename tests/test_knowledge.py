@@ -295,3 +295,54 @@ def test_two_documents_carrying_a_subject_is_logged_not_silently_resolved(
 
     assert subject == "From the template"
     assert "메일 제목은 메일 템플릿에만" in caplog.text
+
+
+# ---- 화면에 없는 문서는 남지 않는다 (0097) -------------------------------------------
+
+
+def test_0097_keeps_only_the_copies_the_console_can_show():
+    """**남을 것을 정의합니다 — 지울 것을 나열하지 않습니다.**
+
+    0077 은 지울 씨앗 문서 11개의 이름을 그대로 적었고, 그래서 목록에서 빠진
+    ``perso_refund_policy`` 하나가 ``status='active'`` 로 살아남았습니다. 초안 라우터는
+    그것을 고를 수 있었는데 콘솔에는 안 떴습니다 — 운영자가 못 보고 못 고치는 문서가
+    회신에 인용되는 상태입니다. 규칙을 뒤집으면 빠진 것은 살아남지 않고 지워집니다.
+    """
+    import hashlib
+    import importlib
+
+    from sqlalchemy import create_engine, text
+
+    from src.db.models import KnowledgeDocument, PolicySource
+
+    engine = create_engine("sqlite:///:memory:")
+    for model in (KnowledgeDocument, PolicySource):
+        model.__table__.create(engine)
+
+    doc_key = hashlib.sha256("살아 있는 정책".encode()).hexdigest()[:32]
+    with engine.begin() as conn:
+        conn.execute(
+            text("INSERT INTO policy_sources (label, doc_key, mode, order_index, status, "
+                 "version, created_at, updated_at) VALUES ('살아 있는 정책', :k, 'knowledge', "
+                 "100, 'active', 3, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"),
+            {"k": doc_key},
+        )
+        for slug, status in (
+            (f"notion-{doc_key}", "active"),   # 사본 — 남습니다
+            ("perso_refund_policy", "active"),  # 0077 목록에서 빠졌던 그 행
+            ("perso_pricing", "archived"),      # 재워 둔 씨앗
+        ):
+            conn.execute(
+                text("INSERT INTO knowledge_documents (slug, title, body, scope, status, "
+                     "version, created_at, updated_at) VALUES (:s, :s, 'b', 'both', :st, 1, "
+                     "CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"),
+                {"s": slug, "st": status},
+            )
+
+    importlib.import_module("src.db.migrations.0097_only_the_documents_in_use_remain").up(engine)
+
+    with engine.begin() as conn:
+        left = [r[0] for r in conn.execute(text("SELECT slug FROM knowledge_documents"))]
+        assert left == [f"notion-{doc_key}"]
+        # 판 번호는 1부터 다시. 화면의 "v3" 이 「이 화면에서 세 번 저장했다」가 되도록.
+        assert conn.execute(text("SELECT version FROM policy_sources")).scalar() == 1

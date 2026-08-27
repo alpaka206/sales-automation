@@ -38,7 +38,7 @@ async function send(path: string, method: string, fields: Record<string, string>
 /** 같은 columns 객체를 두 묶음이 씁니다 — 표 둘이 각자 폭을 재면 같은 열이 다른 자리에
  *  섭니다. 되돌리기 버튼 하나 때문에 함수가 되었을 뿐, 여전히 한 벌입니다. */
 const buildColumns = (onRestore: (id: number) => Promise<void>): Column<Row>[] => [
-  { label: "문서", width: "70%", cell: (row) => (
+  { label: "문서", width: "66%", cell: (row) => (
       <>
         <strong className={row.deleted ? "t-subtle" : undefined}>{row.title || row.label}</strong>
         {/* 라우터가 "이 문서를 보고 답해라" 라고 할 때 부르는 이름. 고르는 근거는 제목과
@@ -53,15 +53,22 @@ const buildColumns = (onRestore: (id: number) => Promise<void>): Column<Row>[] =
         )}
       </>
     ) },
-  // 기준일이 있으면 그것, 없으면 마지막으로 손댄 시각. 오늘 붙여넣은 넉 달 된 정책이
-  // "최신" 으로 보이지 않게 하는 것이 요점입니다.
-  { label: "기준", width: "18%", className: "tnum td-subtle",
+  // **기준일과 수정일은 다른 사실입니다.** 기준일은 「이 정책이 언제 기준인가」라 오늘
+  // 붙여넣은 넉 달 된 정책이 최신으로 보이지 않게 하고, 수정일은 「내가 언제 저장했나」
+  // 입니다. 한 칸에서 기준일이 이기게 해 두었더니, 콘솔에서 고쳐도 이 칸이 안 움직여
+  // 「저장이 안 됐나」로 읽혔습니다 (2026-08-27 운영자 지적). 둘 다 적습니다.
+  { label: "기준 · 수정", width: "22%", className: "tnum td-subtle",
     cell: (row) => row.deleted ? (
       <div onClick={(e) => e.stopPropagation()}>
         <ActionButton className="btn btn--subtle btn--sm" pending="되돌리는 중"
                       onClick={() => onRestore(row.id)}>되돌리기</ActionButton>
       </div>
-    ) : row.effective_on || kst(row.edited_at || "") || "—" },
+    ) : (
+      <>
+        <div>{row.effective_on || "—"}</div>
+        <div className="t-xs t-subtle">수정 {kst(row.edited_at || "") || "—"}</div>
+      </>
+    ) },
 ];
 
 /** 문서 하나 — 만들 때도 고칠 때도 이 화면입니다.
