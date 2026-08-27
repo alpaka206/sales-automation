@@ -511,3 +511,46 @@ def test_deleting_needs_the_sentence_typed_out_not_a_click():
         # 휴지통은 오른쪽 끝. 저장 옆에 나란히 두면 둘이 같은 무게로 보입니다.
         assert 'className="action-bar row-between"' in source, screen
         assert 'name="trash"' in source, screen
+
+
+# ---- 고치는 길은 전부 판본을 남긴다 ------------------------------------------------
+
+
+def test_every_write_path_leaves_the_value_before_it(template_db):
+    """**서명도 갑니다.** 서명은 별도 표가 아니라 ``signature_`` 로 시작하는 이메일 템플릿
+    행이고, 화면도 라우트도 같습니다 — 그래서 같은 스냅샷을 지납니다.
+
+    수정 · 삭제 · 되돌리기 셋 다 남기고, **덮어쓰지 않습니다**(append-only). 만들 때만
+    안 남깁니다: 이 표가 들고 있는 것은 「바꾸기 **직전** 값」인데 갓 만든 행에는 직전이
+    없습니다. 남기면 첫 수정 스냅샷과 같은 버전·같은 본문이 두 줄로 섭니다.
+    """
+    from src.db.models import DocumentRevision
+    from src.db.revisions import EMAIL_TEMPLATE
+
+    key = f"{SIGNATURE_KEY_PREFIX}untae"
+    with template_db() as session:
+        session.add(EmailTemplate(key=key, name="서명", language="all", channel="email",
+                                  status="active", version=1, body="처음 서명"))
+        session.commit()
+        tpl_id = session.query(EmailTemplate).one().id
+
+    with TestClient(app) as client:
+        # 만들기는 위에서 직접 했으므로, 여기서는 고치는 길 셋만 지납니다.
+        client.put(f"/email-templates/{tpl_id}", data={"name": "서명", "body": "두 번째 서명"})
+        client.delete(f"/email-templates/{tpl_id}")
+        client.post(f"/email-templates/{tpl_id}/restore")
+
+    with template_db() as session:
+        rows = (
+            session.query(DocumentRevision)
+            .order_by(DocumentRevision.id)
+            .all()
+        )
+        assert [r.change_note for r in rows] == ["edited", "deleted", "restored"]
+        assert {r.kind for r in rows} == {EMAIL_TEMPLATE}
+        # 「바꾸기 직전」이 규칙이고 예외가 없습니다 — 되돌리기 행의 상태도 직전인 deleted.
+        assert [r.status for r in rows] == ["active", "active", "deleted"]
+        # 수정 스냅샷은 고치기 전 본문을, 삭제 스냅샷은 그때 살아 있던 본문을 듭니다.
+        assert [r.body for r in rows] == ["처음 서명", "두 번째 서명", "두 번째 서명"]
+        # append-only: 지금 행은 그대로 살아 있고 이력이 그것을 덮어쓰지 않았습니다.
+        assert session.get(EmailTemplate, tpl_id).body == "두 번째 서명"

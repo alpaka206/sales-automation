@@ -193,9 +193,10 @@ async def policy_docs_restore(source_id: int):
         source = session.get(PolicySource, source_id)
         if source is None:
             raise HTTPException(status_code=404, detail="보관 기간이 지나 이미 사라졌습니다")
+        # 스냅샷이 **먼저**입니다 — 이메일 템플릿과 같은 규칙(바꾸기 직전 값).
+        snapshot_policy(session, source, change_note="restored", edited_by="web")
         source.status = "active"
         source.deleted_at = None
-        snapshot_policy(session, source, change_note="restored", edited_by="web")
         _set_knowledge_status(session, source, "active")
         session.commit()
     _publish(source_id)
