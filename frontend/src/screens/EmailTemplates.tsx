@@ -20,8 +20,6 @@ type Item = {
   // 발송 경로가 이 이름으로 찾는 행인가. 아무 키나 만들 수 있게 된 뒤로, 이것이 「실제로
   // 쓰이는 행」과 「목록에만 있는 행」을 가르는 유일한 표시입니다.
   code_resolved: boolean;
-  // 지운 행도 목록에 옵니다 — 흐리게, 「N일 후 완전 삭제」와 되돌리기와 함께.
-  deleted: boolean; days_left: number | null;
 };
 
 const LANGUAGE_LABELS: Record<string, string> = { all: "전체", ko: "한국어", en: "영어" };
@@ -285,21 +283,8 @@ function Editor({ id, data, onDone }: {
 
 export function EmailTemplates() {
   const [params, setParams] = useSearchParams();
-  const queryClient = useQueryClient();
-  const [listNote, setListNote] = useState<string | null>(null);
   const kind = params.get("kind");
 
-  async function restoreTemplate(id: number) {
-    setListNote(null);
-    const response = await fetch(`/email-templates/${id}/restore`, {
-      method: "POST", credentials: "same-origin",
-    });
-    if (!response.ok) {
-      setListNote((await response.text()).replace(/<[^>]*>/g, ""));
-      return;
-    }
-    await queryClient.invalidateQueries({ queryKey: ["email-templates"] });
-  }
   const edit = params.get("edit");
   const { data, isPending } = useQuery({
     queryKey: ["email-templates"],
@@ -369,16 +354,11 @@ export function EmailTemplates() {
     { label: "템플릿 이름", width: kind === "signature" ? "68%" : "40%",
       cell: (row) => (
         <>
-          <strong className={row.deleted ? "t-subtle" : undefined}>{row.name}</strong>
+          <strong>{row.name}</strong>
           {/* 발송 경로가 이 행을 찾을 때 부르는 이름입니다. 열을 하나 더 내는 대신 이름
               아래에 둡니다 — 폭을 다시 나눌 필요가 없고, 이름과 신원은 같은 자리에서
               읽히는 편이 낫습니다. 「답변 메일 형식」이 둘인 이유가 여기 적혀 있습니다. */}
           <div className="t-xs mono t-subtle">{row.key}</div>
-          {row.deleted && (
-            <div className="t-xs" style={{ color: "var(--danger)" }}>
-              삭제됨 · {row.days_left}일 후 완전 삭제
-            </div>
-          )}
         </>
       ) },
     // 이 행이 어느 언어의 행인지. 서명에는 언어라는 것이 없으므로 (고르는 것은
@@ -404,15 +384,9 @@ export function EmailTemplates() {
       cell: (row) => (
         <div className="row" style={{ gap: 6 }} onClick={(e) => e.stopPropagation()}>
           {/* 삭제 버튼은 여기 없습니다. 열어서 지웁니다 — 확인 창이 문장을 옮겨 적으라고
-              하는데, 무엇을 지우는지 안 보고 옮겨 적는 것은 확인이 아닙니다. 되돌리기는
-              반대로 목록에 있습니다: 되돌리는 데는 망설일 이유가 없습니다. */}
-          {row.deleted ? (
-            <ActionButton className="btn btn--subtle btn--sm" pending="되돌리는 중"
-                          onClick={() => restoreTemplate(row.id)}>되돌리기</ActionButton>
-          ) : (
-            <button type="button" className="btn btn--subtle btn--sm"
-                    onClick={() => setParams({ kind, edit: String(row.id) })}>수정</button>
-          )}
+              하는데, 무엇을 지우는지 안 보고 옮겨 적는 것은 확인이 아닙니다. */}
+          <button type="button" className="btn btn--subtle btn--sm"
+                  onClick={() => setParams({ kind, edit: String(row.id) })}>수정</button>
         </div>
       ),
     },
@@ -447,7 +421,6 @@ export function EmailTemplates() {
             onRowClick={(row) => setParams({ kind, edit: String(row.id) })}
           />
       </div>
-      {listNote && <div className="t-sm" style={{ marginTop: 12 }} role="status">{listNote}</div>}
     </>
   );
 }

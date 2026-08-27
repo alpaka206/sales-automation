@@ -222,23 +222,7 @@ async def email_templates_delete(tpl_id: int, request: Request):
     )
 
 
-@router.post("/email-templates/{tpl_id}/restore")
-async def email_templates_restore(tpl_id: int, request: Request):
-    """되돌리기. 보관 기간 안이면 지우기 전 그대로 돌아옵니다."""
-    editor = actor_name(request, fallback="web") or "web"
-    with SessionLocal() as session:
-        tpl = session.get(EmailTemplate, tpl_id)
-        if not tpl:
-            return HTMLResponse(
-                '<div class="text-red-600 text-sm">보관 기간이 지나 이미 사라졌습니다</div>',
-                status_code=404,
-            )
-        # 스냅샷이 **먼저**입니다 — 이 표가 들고 있는 것은 언제나 「바꾸기 직전 값」이라,
-        # 되돌리기 행의 status 도 직전인 'deleted' 여야 합니다. 예외를 하나 두면 읽는
-        # 사람이 규칙을 두 번 배웁니다.
-        snapshot_template(session, tpl, change_note="restored", edited_by=editor)
-        tpl.status = "active"
-        tpl.deleted_at = None
-        session.commit()
-    return HTMLResponse('<div class="text-green-600 text-sm font-medium">되돌렸습니다</div>')
-
+# 「되돌리기」가 여기 있었습니다. 삭제가 7일 휴지통이던 시절, 목록에 흐리게 남은 행에
+# 달려 있던 버튼입니다. 지금은 지우면 목록에서 바로 사라지므로 누를 자리가 없습니다
+# (2026-08-27 운영자 지시). 행과 판본 이력은 DB 에 그대로 남으니 되살릴 재료는 있습니다 —
+# 다시 만들 거면 콘솔에서 새로 만들고, 본문은 판본 기록에서 가져오면 됩니다.

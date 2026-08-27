@@ -186,21 +186,7 @@ async def policy_docs_delete(source_id: int):
     return RedirectResponse("/policy-docs", status_code=303)
 
 
-@router.post("/policy-docs/{source_id}/restore")
-async def policy_docs_restore(source_id: int):
-    """되돌리기. 사본도 같이 깨웁니다."""
-    with SessionLocal() as session:
-        source = session.get(PolicySource, source_id)
-        if source is None:
-            raise HTTPException(status_code=404, detail="보관 기간이 지나 이미 사라졌습니다")
-        # 스냅샷이 **먼저**입니다 — 이메일 템플릿과 같은 규칙(바꾸기 직전 값).
-        snapshot_policy(session, source, change_note="restored", edited_by="web")
-        source.status = "active"
-        source.deleted_at = None
-        _set_knowledge_status(session, source, "active")
-        session.commit()
-    _publish(source_id)
-    return {"ok": True}
+# 「되돌리기」가 여기 있었습니다 — 이메일 템플릿과 같은 이유로 지웠습니다(2026-08-27).
 
 
 def _set_knowledge_status(session, source: PolicySource, status: str) -> None:

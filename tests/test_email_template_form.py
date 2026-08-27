@@ -38,8 +38,6 @@ def template_db():
         patch("src.api.routes.email_templates.SessionLocal", factory),
         # default_signature_key opens its own session — the read side of the same table.
         patch("src.db.email_templates.SessionLocal", factory),
-        # 휴지통 비우기도 자기 세션을 엽니다.
-        patch("src.db.soft_delete.SessionLocal", factory),
         # 목록을 그리는 /api/ui/email-templates 는 세션을 직접 엽니다.
         patch("src.db.session.SessionLocal", factory),
     ):
@@ -349,15 +347,15 @@ def test_anything_deletes_now_and_the_screen_says_what_that_costs(template_db):
             assert client.delete(f"/email-templates/{ids[key]}").status_code == 200, key
         payload = client.get("/api/ui/email-templates").json()
 
-    # 행은 남습니다 — 지운 것은 일주일 동안 되돌릴 수 있습니다(0070). 발송 경로가 보는 것은
-    # status 이고, 읽는 쪽은 전부 이미 'active' 만 봅니다.
+    # **행은 영원히 남습니다** (2026-08-27 운영자 지시) — 화면에서만 즉시 사라집니다.
+    # 발송 경로가 보는 것은 status 이고, 읽는 쪽은 전부 이미 'active' 만 봅니다.
     with template_db() as session:
         assert session.query(EmailTemplate).count() == 3
         assert {row.status for row in session.query(EmailTemplate).all()} == {"deleted"}
 
     # 그리고 화면은 어느 것이 발송 경로가 쓰던 행이었는지 말할 수 있어야 합니다.
-    marked = {item["key"]: item["code_resolved"] for item in payload["items"]}
-    assert marked == {"meeting_link": True, "signature_x": True, "my_own_note": False}
+    # 지운 행은 목록에 안 옵니다 — 「N일 후 완전 삭제」 대기줄이 없어졌습니다.
+    assert payload["items"] == []
 
 
 def test_is_code_resolved_rejects_removed_auto_ack_keys(template_db):
@@ -402,7 +400,7 @@ def test_auto_ack_keys_cannot_be_recreated(template_db):
 
 
 def test_a_deleted_signature_is_gone_from_the_send_path_at_once(template_db):
-    """되돌릴 수 있다는 것이 아직 쓰인다는 뜻이면 안 됩니다. 지운 서명이 검토 화면의
+    """DB 에 남는다는 것이 아직 쓰인다는 뜻이면 안 됩니다. 지운 서명이 검토 화면의
     고르개에 남아 있으면, 지웠다고 생각한 서명으로 메일이 나갑니다."""
     from src.db.email_templates import list_signature_templates
 
@@ -416,79 +414,64 @@ def test_a_deleted_signature_is_gone_from_the_send_path_at_once(template_db):
     assert "지울 서명" in {s["name"] for s in list_signature_templates()}
     with TestClient(app) as client:
         assert client.delete(f"/email-templates/{tpl_id}").status_code == 200
-        assert "지울 서명" not in {s["name"] for s in list_signature_templates()}
-        # 되돌리면 그대로 돌아옵니다.
-        assert client.post(f"/email-templates/{tpl_id}/restore").status_code == 200
-    assert "지울 서명" in {s["name"] for s in list_signature_templates()}
-
-
-def test_the_bin_empties_after_a_week(template_db):
-    """일주일이 지나면 진짜로 사라집니다 — 목록을 읽을 때 청소합니다."""
-    from datetime import timedelta
-
-    from src.db.soft_delete import RETENTION_DAYS, days_left, purge_expired, utcnow
-
+    assert "지울 서명" not in {s["name"] for s in list_signature_templates()}
+    # 행 자체는 DB 에 남습니다 — 운영자가 Supabase 에서 볼 수 있어야 합니다.
     with template_db() as session:
-        session.add_all([
-            EmailTemplate(key=f"{SIGNATURE_KEY_PREFIX}fresh", name="어제 지움", language="all",
-                          channel="email", status="deleted", version=1, body="a",
-                          deleted_at=utcnow() - timedelta(days=1)),
-            EmailTemplate(key=f"{SIGNATURE_KEY_PREFIX}stale", name="열흘 전 지움", language="all",
-                          channel="email", status="deleted", version=1, body="b",
-                          deleted_at=utcnow() - timedelta(days=RETENTION_DAYS + 3)),
-        ])
-        session.commit()
-
-    assert purge_expired() == 1
-    with template_db() as session:
-        assert [row.name for row in session.query(EmailTemplate)] == ["어제 지움"]
-        # 「N일 후 완전 삭제」는 올림입니다. 반나절 남은 것을 0일이라 쓰면 이미 지난
-        # 것처럼 읽히는데, 그 사이에도 되돌릴 수 있습니다.
-        assert days_left(session.query(EmailTemplate).one().deleted_at) == RETENTION_DAYS - 1
+        assert session.get(EmailTemplate, tpl_id) is not None
 
 
-def test_the_history_of_a_purged_template_goes_with_it(template_db):
-    """판본 이력도 같이 갑니다. 안 그러면 「7일 뒤 사라진다」가 사실이 아닙니다 — 화면에서만
-    없어지고 본문은 그대로 남아, 일부러 흘려보낸 것을 누군가 되살릴 수 있습니다.
+def test_nothing_is_ever_purged_and_gemini_never_sees_it(template_db):
+    """지운 것은 **영원히 남고**, 그럼에도 초안에는 절대 안 닿습니다 (2026-08-27 운영자 지시).
 
-    **지금 살아 있는 문서의 이력은 그대로 둡니다.** 그쪽은 「판본 기록」이 읽는 것입니다.
-    그리고 **다른 종류의 이력은 건드리지 않습니다** — 한 표에 둘이 사는데 종류를 안 보고
-    고아를 세면, 정책 문서 이력이 전부 「가리키는 템플릿이 없다」로 잡혀 사라집니다.
+    전에는 7일 휴지통이었습니다 — 지운 행이 목록에 흐리게 남아 「N일 후 완전 삭제」를 달고
+    있다가 본문과 판본 이력이 같이 사라졌습니다. 지금은 그 맞바꿈을 안 합니다: 화면에서는
+    즉시 사라지고 DB 에서는 안 사라집니다.
+
+    **그래서 「안 닿는다」를 여기서 고정합니다.** 영원히 남는다면, 남은 것이 회신에 인용될
+    길이 하나도 없다는 것이 표로 증명돼야 합니다.
     """
-    from src.db.models import DocumentRevision, PolicySource
-    from src.db.revisions import EMAIL_TEMPLATE, POLICY_SOURCE
-    from src.db.soft_delete import purge_expired
+    import src.db.soft_delete as soft_delete
+    from src.db.email_templates import get_email_template, list_signature_templates
+
+    # 청소는 아예 없습니다 — 함수도, 보관 기간도.
+    assert not hasattr(soft_delete, "purge_expired")
+    assert not hasattr(soft_delete, "RETENTION_DAYS")
 
     with template_db() as session:
-        session.add(EmailTemplate(key=f"{SIGNATURE_KEY_PREFIX}live", name="쓰는 서명",
-                                  language="all", channel="email", status="active",
-                                  version=1, body="살아 있음"))
-        session.add(PolicySource(label="살아 있는 정책", doc_key="k1", mode="knowledge",
-                                 status="active", body="본문"))
-        session.flush()
-        live_id = session.query(EmailTemplate).one().id
-        policy_id = session.query(PolicySource).one().id
         session.add_all([
-            DocumentRevision(kind=EMAIL_TEMPLATE, document_id=live_id,
-                             doc_key=f"{SIGNATURE_KEY_PREFIX}live", title="쓰는 서명",
-                             body="옛 본문", change_note="edited"),
-            # 하드 삭제 시절에 남은 고아 — 가리키는 템플릿이 없습니다.
-            DocumentRevision(kind=EMAIL_TEMPLATE, document_id=9999,
-                             doc_key="signature_hyeram", title="퇴사자 서명",
-                             body="<table/>", change_note="deleted"),
-            # 같은 표에 사는 다른 종류. 템플릿 id 로 재면 이것도 고아로 보입니다.
-            DocumentRevision(kind=POLICY_SOURCE, document_id=policy_id,
-                             doc_key="k1", title="살아 있는 정책", body="옛 정책",
-                             change_note="edited"),
+            EmailTemplate(key=f"{SIGNATURE_KEY_PREFIX}gone", name="지운 서명", language="all",
+                          channel="email", status="deleted", version=1, body="<p/>",
+                          deleted_at=soft_delete.utcnow()),
+            EmailTemplate(key="reply_format", name="지운 서식", language="ko", channel="email",
+                          status="deleted", version=1, body="지운 서식 본문",
+                          deleted_at=soft_delete.utcnow()),
         ])
         session.commit()
 
-    purge_expired()
+    # 발송 경로가 이름으로 찾는 조회도, 서명 고르개도 지운 행을 안 봅니다.
+    assert get_email_template("reply_format") is None
+    assert list_signature_templates() == []
+    with TestClient(app) as client:
+        assert client.get("/api/ui/email-templates").json()["items"] == []
+    # 그래도 행은 그대로입니다.
     with template_db() as session:
-        assert sorted(r.title for r in session.query(DocumentRevision)) == [
-            "살아 있는 정책",
-            "쓰는 서명",
-        ]
+        assert session.query(EmailTemplate).count() == 2
+
+
+def test_the_revision_history_is_out_of_gemini_reach():
+    """판본 이력은 **초안이 절대 안 보는 표**입니다 (2026-08-27 운영자 지시:
+    「gemini 가 답변 쓸 때 이 히스토리 쪽은 절대 참고하면 안 됨」).
+
+    구조로 보장합니다 — 모델을 부르는 코드(``src/llm``)도, 그것을 부르는 에이전트
+    (``src/agents``)도 그 표를 이름으로조차 알지 못합니다. 아는 것은 콘솔 라우트뿐입니다.
+    """
+    import pathlib
+
+    for folder in ("src/llm", "src/agents"):
+        for path in pathlib.Path(folder).rglob("*.py"):
+            source = path.read_text(encoding="utf-8")
+            assert "DocumentRevision" not in source, path
+            assert "document_revisions" not in source, path
 
 
 def test_deleting_needs_the_sentence_typed_out_not_a_click():
@@ -535,22 +518,18 @@ def test_every_write_path_leaves_the_value_before_it(template_db):
         tpl_id = session.query(EmailTemplate).one().id
 
     with TestClient(app) as client:
-        # 만들기는 위에서 직접 했으므로, 여기서는 고치는 길 셋만 지납니다.
+        # 만들기는 위에서 직접 했으므로, 여기서는 고치는 길 둘만 지납니다.
         client.put(f"/email-templates/{tpl_id}", data={"name": "서명", "body": "두 번째 서명"})
+        client.put(f"/email-templates/{tpl_id}", data={"name": "서명", "body": "세 번째 서명"})
         client.delete(f"/email-templates/{tpl_id}")
-        client.post(f"/email-templates/{tpl_id}/restore")
 
     with template_db() as session:
-        rows = (
-            session.query(DocumentRevision)
-            .order_by(DocumentRevision.id)
-            .all()
-        )
-        assert [r.change_note for r in rows] == ["edited", "deleted", "restored"]
+        rows = session.query(DocumentRevision).order_by(DocumentRevision.id).all()
+        assert [r.change_note for r in rows] == ["edited", "edited", "deleted"]
         assert {r.kind for r in rows} == {EMAIL_TEMPLATE}
-        # 「바꾸기 직전」이 규칙이고 예외가 없습니다 — 되돌리기 행의 상태도 직전인 deleted.
-        assert [r.status for r in rows] == ["active", "active", "deleted"]
-        # 수정 스냅샷은 고치기 전 본문을, 삭제 스냅샷은 그때 살아 있던 본문을 듭니다.
-        assert [r.body for r in rows] == ["처음 서명", "두 번째 서명", "두 번째 서명"]
-        # append-only: 지금 행은 그대로 살아 있고 이력이 그것을 덮어쓰지 않았습니다.
-        assert session.get(EmailTemplate, tpl_id).body == "두 번째 서명"
+        # 「바꾸기 **직전** 값」이 규칙이고 예외가 없습니다.
+        assert [r.body for r in rows] == ["처음 서명", "두 번째 서명", "세 번째 서명"]
+        assert [r.status for r in rows] == ["active", "active", "active"]
+        # append-only: 이력이 현재 행을 덮어쓰지 않았고, 그 행도 지워지지 않았습니다.
+        row = session.get(EmailTemplate, tpl_id)
+        assert row.body == "세 번째 서명" and row.status == "deleted"

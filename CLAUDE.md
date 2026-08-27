@@ -55,6 +55,18 @@ PERSO Inbound is a FastAPI workflow for inbound inquiry handling and customer op
   - **Deal Detail 은 Won 과 Lost 에만 있다** (`DEAL_DETAILS`). 왜 이겼나(PoC/Contract/Renewal)와 왜 졌나(여섯 가지)는 결말이 난 건에만 있는 정보라 다른 단계에는 채울 답이 없다. **열은 하나**(`conversations.deal_detail`)다 — 한 문의가 동시에 이기고 지지 않으므로 어느 목록의 값인지는 그때의 단계가 정하고, 단계가 바뀌면 값은 남되 화면에는 안 나온다(되돌아오면 다시 뜬다). 우리 DB 에만 쓴다: 그 파이프라인에 대응하는 HubSpot 속성이 있는지 확인되지 않았고, 없는 속성에 쓰면 요청마다 400 이다.
 - **서명은 사람이 고르는 것이고, 코드는 본문에 넣지 않는다.** 예전에는 두 벌이었다 — 회사 규칙 안의 `{{__signature__}}` 가 `signature_ko` 행을 프롬프트에 끼워 모델이 **본문에** 서명을 쓰게 했고, 그래서 발송 경로에는 운영자가 다른 서명을 고르면 그 텍스트를 도로 찾아 떼어내는 기계(`strip_known_signature`, 번역된 메일에서는 메일 주소를 앵커로 잘랐다)까지 있었다. 지금은 한 벌이다: 운영자가 초안에서 고르고 `발송` 을 누르면 그때 본문 아래로 붙는다(`messages.signature_key` → `branded_signature_html` → `to_html_email`). 되살리기 전에 왜 두 벌이면 안 되는지부터 읽어라 — 0061 의 docstring 에 적혀 있다.
   - **서명은 데이터다.** 접두사 `signature_` **하나**가 목록의 서명 묶음과 검토 화면 고르개를 가른다. 둘이 같은 집합을 가리켜야 한다 — 예전에 `signature_html_`(고르개)과 `signature_`(목록)로 갈라져 있었고, 그래서 화면에는 서명으로 보이는데 고를 수 없는 행이 있었다. 추가·수정·삭제 전부 콘솔에서 되고, 코드가 이름으로 찾는 서명은 하나도 없다. 글로 써도 되고 HTML 로 써도 된다.
+  - **지운 것은 화면에서 바로 사라지고 DB 에는 영원히 남는다** (2026-08-27 운영자 지시).
+    삭제 확인 창(이름을 옮겨 적어야 한다)을 지나면 목록에서 즉시 빠진다. 행은 지워지지
+    않는다 — `status='deleted'` 로 바뀌고 그대로 산다. **청소는 없다**: 7일 휴지통과
+    `purge_expired` 는 사라졌고, 되돌리기 버튼과 라우트도 같이 나갔다(누를 자리가 없다).
+    되살릴 재료는 판본 기록에 있다.
+    - **그래서 「Gemini 는 안 본다」가 더 중요해진다.** 읽는 쪽 셋이 전부 이미
+      `status='active'` 만 본다 — 서명·링크 조회(`db/email_templates`), 항상 적용 규칙
+      (`llm/prompts._rules_from_db`), 문의별 참고 문서(`llm/knowledge._is_active`). 정책
+      문서를 지우면 초안이 읽는 **사본**도 같이 재운다(`_set_knowledge_status`). 그리고
+      `document_revisions` 는 `src/llm` · `src/agents` 어디에서도 **이름으로조차** 등장하지
+      않는다 — `tests/test_email_template_form.py::test_the_revision_history_is_out_of_
+      gemini_reach` 가 두 폴더를 훑어 고정한다.
   - **판본 이력은 표 하나이고, 두 종류가 같이 쓴다** (2026-08-27 운영자 지시, 이관 0096).
     `document_revisions` 에 이메일 템플릿과 정책 문서의 이전 판본이 같이 산다. 남기는 곳도
     읽는 곳도 `src/db/revisions.py` **한 곳**이고, 화면은 두 편집기 바닥의 「판본 기록」

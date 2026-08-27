@@ -619,20 +619,18 @@ def ui_email_templates():
     from ...db.email_templates import is_code_resolved
     from ...db.models import EmailTemplate
     from ...db.session import SessionLocal
-    from ...db.soft_delete import DELETED, days_left, purge_expired
+    from ...db.soft_delete import DELETED
 
     from ...db.models import PolicySource
 
-    # 보관 기간이 지난 것은 여기서 사라집니다. 스케줄러를 하나 더 두는 것보다 작고, 휴지통은
-    # 아무도 안 볼 때 비어 있을 필요가 없습니다.
-    purge_expired()
+    # 지운 행은 여기 안 옵니다 — 화면에서 바로 사라지고 DB 에는 남습니다(soft_delete).
     with SessionLocal() as session:
         policy_count = (
             session.query(PolicySource).filter(PolicySource.status != DELETED).count()
         )
         rows = (
             session.query(EmailTemplate)
-            .filter(~EmailTemplate.key.like("auto_ack%"))
+            .filter(~EmailTemplate.key.like("auto_ack%"), EmailTemplate.status != DELETED)
             .order_by(EmailTemplate.updated_at.desc())
             .all()
         )
@@ -655,10 +653,6 @@ def ui_email_templates():
                 "body": row.body or "",
                 "subject": row.subject or "",
                 "chars": len(row.body or ""),
-                # 지운 행도 목록에 실립니다 — 흐리게, 「N일 후 완전 삭제」와 되돌리기 버튼과
-                # 함께. 발송 경로는 이미 status='active' 만 읽으므로 여기 실려도 안전합니다.
-                "deleted": row.status == DELETED,
-                "days_left": days_left(row.deleted_at) if row.status == DELETED else None,
                 # Which signature a new draft starts with. A row, not a literal in
                 # inbound.py — and the screen is where it moves.
             }
@@ -694,13 +688,13 @@ def ui_policy_docs():
     from ...agents.policy_sync import knowledge_slug
     from ...db.models import PolicySource
     from ...db.session import SessionLocal
-    from ...db.soft_delete import DELETED, days_left, purge_expired
+    from ...db.soft_delete import DELETED
     from .policy_docs import MODES
 
-    purge_expired()
     with SessionLocal() as session:
         rows = (
             session.query(PolicySource)
+            .filter(PolicySource.status != DELETED)
             .order_by(PolicySource.mode, PolicySource.order_index, PolicySource.id)
             .all()
         )
@@ -723,9 +717,6 @@ def ui_policy_docs():
                     "effective_on": row.effective_on,
                     "edited_at": row.edited_at,
                     "version": row.version or 1,
-                    # 지운 문서도 실립니다 — 흐리게, 되돌리기와 함께 일주일.
-                    "deleted": row.status == DELETED,
-                    "days_left": days_left(row.deleted_at) if row.status == DELETED else None,
                 }
                 for row in rows
             ],
