@@ -1238,6 +1238,9 @@ class InboundAgent:
                 return False
             msg.subject = draft.subject
             msg.body = draft.body
+            # 새로 쓴 초안입니다. 지난 번역의 한국어 원문을 그대로 두면 검토 화면이 이
+            # 초안 옆에 **다른 초안**을 한국어 원문이라며 붙입니다 (「초안 다시 쓰기」).
+            msg.body_ko = None
             msg.language = "ko"  # the draft the operator reviews is always Korean
             msg.target_language = inquiry_lang or msg.target_language
             # Every reply waits for a human. The old score-based auto-approval branch

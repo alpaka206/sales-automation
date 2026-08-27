@@ -360,7 +360,9 @@ def _message_detail_context(
                 "send_error": msg.send_error,
                 "subject": msg.subject or "",
                 "body": msg.body,
-                "body_ko": None,
+                # 번역이 덮어쓰기 **전**의 한국어 초안. 번역 전에는 `None` 입니다
+                # (본문 자체가 그 한국어라 옆에 한 벌 더 둘 이유가 없습니다).
+                "body_ko": msg.body_ko,
                 "channel": msg.channel,
                 "direction": msg.direction,
                 # Every thread starts from an inbound inquiry.
@@ -674,6 +676,7 @@ async def message_translate(
         if not needs_tx:
             washed = text_wash(cur_body)
             msg.body = washed
+            korean_draft = msg.body_ko
             if cur_subject:
                 msg.subject = cur_subject
             # Keep metadata honest: a non-Korean body for a non-Korean target is
@@ -688,16 +691,23 @@ async def message_translate(
                     "subject": cur_subject,
                     "language": msg.language,
                     "translated": False,
+                    "body_ko": korean_draft,
                 }
             )
 
         translated = await asyncio.to_thread(translate_to, cur_body, target)
         final_body = text_wash(translated) if translated else text_wash(cur_body)
+        # 번역이 덮어쓰기 전의 한국어. **이 칸이 없던 동안 운영자는 「무엇을 승인했는지」를
+        # 다시 읽을 방법이 없었습니다** — 번역이 뜻을 바꿨는지 확인하려면 원문이 있어야
+        # 하고, 번역은 이 화면에서 한 번 누르면 되돌릴 수 없습니다. `body_ko` 는 「이 메일의
+        # 한국어 판본」이라는 뜻이고, 그건 고객 문의든 우리 초안이든 같습니다 (0045).
+        korean_draft = text_wash(cur_body) if translated else msg.body_ko
         msg.body = final_body
         if cur_subject:
             msg.subject = cur_subject
         if translated:
             msg.language = target
+            msg.body_ko = korean_draft
         session.commit()
 
     if translated:
@@ -708,6 +718,7 @@ async def message_translate(
             "subject": cur_subject,
             "language": target if translated else "ko",
             "translated": bool(translated),
+            "body_ko": korean_draft,
         }
     )
 

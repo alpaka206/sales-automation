@@ -285,6 +285,26 @@ def test_the_booking_url_never_reaches_the_translator():
     assert out == f"Book a meeting here: [Calendly]({BOOKING})"
 
 
+def test_the_closing_paren_of_a_markdown_link_is_not_part_of_the_url():
+    """`[Calendly](주소))` 로 나갔습니다 — 괄호가 하나 더 붙어서.
+
+    지키는 정규식이 `)` 까지 주소로 집었습니다. 그러면 모델이 보는 것은 짝이 안 맞는
+    `[Calendly](%%0%%` 이고, 모델은 그 괄호를 닫아 줍니다. 되돌릴 때 원래 `)` 가 다시
+    붙으니 `))` 입니다. 발송 직전 `canonicalize_contact_links` 가 그 줄을 다시 만들어
+    주는 덕에 고객에게는 안 갔지만, 검토 화면에는 그대로 보였습니다.
+    """
+    from src.llm.translate import translate_to
+
+    body = f"미팅은 [Calendly]({BOOKING}) 에서 잡으실 수 있습니다"
+    llm = _FakeLLM(lambda seen: seen.replace("미팅은 ", "Book at ").replace(" 에서 잡으실 수 있습니다", ""))
+
+    out = translate_to(body, "en", llm=llm)
+
+    # 모델이 **짝이 맞는** 괄호를 봐야 스스로 하나 더 닫지 않습니다.
+    assert "[Calendly](%%0%%)" in llm.seen
+    assert out == f"Book at [Calendly]({BOOKING})"
+
+
 def test_a_translation_that_loses_the_link_is_a_failed_translation():
     """자리표시자가 안 돌아오면 링크가 없어진 것입니다. 그대로 내보내면 고객은 예약 링크가
     빠진 메일을 받고, 사람이 발송을 누른 **뒤**에 도는 단계라 검토에도 안 걸립니다.
@@ -307,3 +327,111 @@ def test_the_tokens_are_protected_too():
     assert held == ["{{SENDER_NAME}}", "{{MEETING_LINK}}"]
     # 모델이 자리표시자 옆에 공백을 넣는 정도는 흔해서 느슨하게 되돌립니다.
     assert _restore(masked.replace("%%1%%", "%% 1 %%"), held).endswith("{{MEETING_LINK}}")
+
+
+# ---- 번역해도 한국어 초안은 남는다 -------------------------------------------------
+
+
+@pytest.fixture()
+def draft_db():
+    """검토 화면이 읽고 쓰는 그 DB. 라우트가 여는 커넥션과 테스트가 여는 커넥션이 같아야
+    하므로 StaticPool 입니다 — 기본 풀은 `:memory:` 를 커넥션마다 새로 만듭니다."""
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from sqlalchemy.pool import StaticPool
+
+    from src.db.base import Base
+
+    engine = create_engine(
+        "sqlite:///:memory:", connect_args={"check_same_thread": False}, poolclass=StaticPool
+    )
+    Base.metadata.create_all(engine)
+    return sessionmaker(bind=engine, expire_on_commit=False)
+
+
+def _one_draft(factory, body: str):
+    from src.db.models import Contact, Conversation, Message
+
+    with factory() as session:
+        contact = Contact(
+            full_name="Ivan",
+            email="ivan@example.com",
+            normalized_email="ivan@example.com",
+        )
+        session.add(contact)
+        session.flush()
+        conv = Conversation(contact_id=contact.id, stage="new")
+        session.add(conv)
+        session.flush()
+        msg = Message(
+            conversation_id=conv.id,
+            direction="outgoing",
+            channel="email",
+            subject="RE: Pricing",
+            body=body,
+            status="pending_approval",
+            language="ko",
+            target_language="en",
+        )
+        session.add(msg)
+        session.commit()
+        return msg.id
+
+
+def test_translating_keeps_the_korean_the_operator_reviewed(draft_db):
+    """번역은 한 번 누르면 되돌릴 수 없고, 그때 한국어 초안은 화면에서 사라졌습니다.
+
+    운영자가 승인한 것은 그 한국어입니다. 번역이 뜻을 바꿨는지 확인하려면 두 벌이
+    같이 있어야 하는데, 남는 것은 번역본 하나뿐이었습니다.
+    """
+    from unittest.mock import patch
+
+    from fastapi.testclient import TestClient
+
+    from src.api.main import app
+    from src.db.models import Message
+
+    message_id = _one_draft(draft_db, KOREAN)
+    with (
+        patch("src.api.routes.messages.SessionLocal", draft_db),
+        patch("src.api.routes.messages.translate_to", return_value=ENGLISH),
+        TestClient(app) as client,
+    ):
+        response = client.post(f"/messages/{message_id}/translate", data={"body": KOREAN})
+
+    assert response.status_code == 200
+    assert response.json()["body_ko"] == KOREAN
+    with draft_db() as session:
+        row = session.get(Message, message_id)
+        assert row.body == ENGLISH
+        assert row.body_ko == KOREAN      # 승인한 한국어는 행에 남습니다
+        assert row.language == "en"
+
+
+def test_re_translating_an_edited_draft_replaces_the_korean_copy(draft_db):
+    """운영자가 본문을 도로 한국어로 고쳐 놓고 다시 번역하면, 옆 칸도 그 새 한국어입니다.
+    지난 판본이 남아 있으면 대조할 것이 「승인한 글」이 아니게 됩니다."""
+    from unittest.mock import patch
+
+    from fastapi.testclient import TestClient
+
+    from src.api.main import app
+    from src.db.models import Message
+
+    message_id = _one_draft(draft_db, ENGLISH)
+    with draft_db() as session:
+        row = session.get(Message, message_id)
+        row.body_ko, row.language = "예전 한국어 초안입니다.", "en"
+        session.commit()
+
+    edited = KOREAN + " 조건을 하나 더 확인했습니다."
+    with (
+        patch("src.api.routes.messages.SessionLocal", draft_db),
+        patch("src.api.routes.messages.translate_to", return_value=ENGLISH),
+        TestClient(app) as client,
+    ):
+        response = client.post(f"/messages/{message_id}/translate", data={"body": edited})
+
+    assert response.json()["body_ko"] == edited
+    with draft_db() as session:
+        assert session.get(Message, message_id).body_ko == edited

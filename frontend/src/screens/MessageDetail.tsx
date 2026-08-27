@@ -114,6 +114,8 @@ type Detail = {
   /** 메일이 하나도 없는 티켓은 `null` 입니다 — HubSpot 에서 들여온 티켓이 그렇습니다. */
   msg: {
     id: number; status: string; send_error: string | null; subject: string; body: string; channel: string;
+    /** 번역이 덮어쓰기 전의 한국어 초안. 번역 전에는 `null`. */
+    body_ko: string | null;
     language: string | null; target_language: string | null; signature_key: string;
     to_address: string; score_snapshot: number | null; created_at: string;
     sent_at: string | null; scheduled_at: string | null; category: string | null;
@@ -187,6 +189,9 @@ export function MessageDetail() {
   const [body, setBody] = useState("");
   const [signature, setSignature] = useState("");
   const [draftLanguage, setDraftLanguage] = useState("");
+  // 번역 전의 한국어 초안. 번역은 되돌릴 수 없는 한 번의 누름이라, 무엇을 승인했는지
+  // 다시 읽을 자리가 있어야 합니다.
+  const [koreanDraft, setKoreanDraft] = useState<string | null>(null);
   const [note, setNote] = useState("");
   const [preview, setPreview] = useState<string | null>(null);
   const [confirmSend, setConfirmSend] = useState(false);
@@ -248,6 +253,7 @@ export function MessageDetail() {
     setBody(data.msg.body);
     setSignature(data.msg.signature_key);
     setDraftLanguage(data.msg.language || "");
+    setKoreanDraft(data.msg.body_ko);
   }
 
   /** 본문에서 고른 글자를 표기로 감쌉니다. 아무것도 안 골랐으면 커서 자리에 껍데기만
@@ -402,6 +408,7 @@ export function MessageDetail() {
     setBody(result.body);
     if (result.subject !== undefined) setSubject(result.subject);
     if (result.language) setDraftLanguage(result.language);
+    setKoreanDraft(result.body_ko ?? null);
     setNote(result.translated ? `번역됨 → ${result.language}` : "번역할 내용이 없습니다.");
   }
 
@@ -514,7 +521,12 @@ export function MessageDetail() {
                 return (
                   <div key={bubble.id} className="bubble bubble--out bubble--current">
                     <div className="bubble__head">
-                      <span className="bubble__dir"><Icon name="send" size={14} /> 회신 초안 · 한국어 (검토용)</span>
+                      <span className="bubble__dir">
+                        <Icon name="send" size={14} />{" "}
+                        {isMostlyKoreanText(body)
+                          ? "회신 초안 · 한국어 (검토용)"
+                          : `회신 초안 · ${draftLanguage || msg.target_language} (발송본)`}
+                      </span>
                       <span className="bubble__time tnum">{kst(bubble.created_at)}</span>
                     </div>
                     <label className="field-label" htmlFor="msg-subject">제목</label>
@@ -543,6 +555,18 @@ export function MessageDetail() {
                         ))}
                       </div>
                     </div>
+                    {/* 번역이 덮어쓴 한국어. 접어 둡니다 — 지금 고치는 것은 나갈 본문이고,
+                        이것은 대조용입니다. */}
+                    {koreanDraft && !isMostlyKoreanText(body) && (
+                      <details style={{ marginTop: 10 }}>
+                        <summary className="t-xs t-subtle" style={{ cursor: "pointer" }}>
+                          <Icon name="translate" size={12} /> 번역 전 한국어 초안
+                        </summary>
+                        <div className="msg-body msg-body--inset" style={{ marginTop: 6 }}>
+                          {koreanDraft}
+                        </div>
+                      </details>
+                    )}
 
                     {/* 골라야 붙습니다. 예전에는 여기에 "기본 (텍스트 서명)" 이 하나 더
                         있었는데, 그건 모델이 본문에 써 넣은 서명을 그대로 두라는 뜻이었습니다
@@ -1095,7 +1119,10 @@ function MessageRow({ bubble, isFirstReply = false }: {
   // 본문 없이 제목만 있는 메일이 있습니다(제목이 곧 문의 전부인 경우). 제목 줄을 안
   // 그리므로 그때는 제목이 본문 자리에 옵니다 — 아니면 빈 줄이 됩니다.
   const title = bubble.subject_ko || bubble.subject || "";
-  const body = (bubble.body_ko || bubble.body || "").trim() || title;
+  // `body_ko` 는 **번역해서 보여 주는 고객 문의**의 자리입니다(`needs_ko`). 우리 회신에도
+  // 같은 칸이 차는데(번역 전 한국어 초안), 거기서 그 값을 쓰면 이 줄이 고객에게 실제로 나간
+  // 글 대신 그 전 판본을 보여 줍니다.
+  const body = ((bubble.needs_ko ? bubble.body_ko : "") || bubble.body || "").trim() || title;
   const preview = (bubble.summary_line || body).replace(/\s+/g, " ");
   return (
     <article className={`history-item history-item--${dir.tone}`}>
