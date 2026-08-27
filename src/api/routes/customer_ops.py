@@ -160,19 +160,9 @@ def visible_deal_detail(stage: str | None, value: str | None) -> str | None:
     """
     return value if value and value in DEAL_DETAILS.get(stage or "", ()) else None
 CONTRACT_STATUSES = {"draft", "sent", "contracted", "active", "expired", "cancelled"}
-# In the order a contract moves through them, with the words the 수주 고객 screen shows.
-CONTRACT_STATUS_LABELS: tuple[tuple[str, str], ...] = (
-    ("draft", "작성 중"),
-    ("sent", "발송"),
-    ("contracted", "계약 체결"),
-    ("active", "서비스 중"),
-    ("expired", "만료"),
-    ("cancelled", "해지"),
-)
-# What "곧 만료" means on the 수주 고객 and 전체 대시보드 screens. One number, because two
-# screens showing different renewal windows is how a renewal gets missed on the screen
-# that happened to use the longer one.
-RENEWAL_WINDOW_DAYS = 60
+# `CONTRACT_STATUS_LABELS` 와 `RENEWAL_WINDOW_DAYS` 가 여기 있었습니다. 둘 다 계약 목록
+# 엔드포인트(`GET /api/ui/contracts`)와 그 요약만 읽었고, 그 통로는 부르는 화면이 없어
+# 2026-08-27 에 지웠습니다. `CONTRACT_STATUSES` 는 남습니다 — 계약 폼이 값을 검증합니다.
 
 # Stages where the automated part of the thread is over. Up to 답변 발송 the app owns the
 # conversation (auto-acknowledgement, then the reviewed AI reply out through HubSpot);
@@ -2038,111 +2028,6 @@ async def google_sheets_sync(request: Request):
         f"/?google=queued&request_id={request_id}",
         status_code=303,
     )
-
-
-def _contract_rows(*, status: str = "", query: str = "") -> list[dict]:
-    """수주 고객 — every contract with the customer it belongs to, newest first.
-
-    One join, not a contract dump plus a contact lookup per row: the screen shows the
-    customer's name on every line, so the name comes back with the line.
-    """
-    now = datetime.now(timezone.utc).replace(tzinfo=None)
-    with SessionLocal() as session:
-        statement = (
-            select(ContractRecord, Contact)
-            .join(Contact, Contact.id == ContractRecord.contact_id)
-            .order_by(ContractRecord.contract_date.desc().nullslast(), ContractRecord.id.desc())
-        )
-        if status:
-            statement = statement.where(ContractRecord.status == status)
-        loaded = session.execute(statement).all()
-
-    needle = query.strip().lower()
-    rows: list[dict] = []
-    for contract, contact in loaded:
-        if needle and needle not in " ".join(
-            filter(None, [contact.full_name, contact.email, contact.company, contact.domain,
-                          contract.plan])
-        ).lower():
-            continue
-        expires = contract.expires_at
-        rows.append(
-            {
-                "id": contract.id,
-                "contact_id": contact.id,
-                "company": contact.company or contact.full_name,
-                "name": contact.full_name,
-                "email": contact.email,
-                "status": contract.status,
-                "plan": contract.plan,
-                "amount": contract.amount,
-                "currency": contract.currency,
-                "payment_method": contract.payment_method,
-                "contract_date": contract.contract_date,
-                "payment_due_at": contract.payment_due_at,
-                "paid_at": contract.paid_at,
-                "expires_at": expires,
-                # Negative means it already lapsed. None when no expiry was recorded —
-                # which is not the same as "never expires" and must not render as 0.
-                "days_to_expiry": (expires - now).days if expires else None,
-                "conversation_id": contract.conversation_id,
-                "sheet_client_id": contract.sheet_client_id,
-                "unit_price": contract.unit_price,
-                "language_pairs": contract.language_pairs or [],
-            }
-        )
-    return rows
-
-
-def _contract_summary() -> dict:
-    """The money line on 전체 대시보드 and 수주 고객.
-
-    Amounts are summed PER CURRENCY. A single total would add ₩ to $ — the workbook
-    holds both, and one number covering both currencies is worse than no number.
-    """
-    now = datetime.now(timezone.utc).replace(tzinfo=None)
-    horizon = now + timedelta(days=RENEWAL_WINDOW_DAYS)
-    with SessionLocal() as session:
-        by_status = dict(
-            session.execute(
-                select(ContractRecord.status, func.count()).group_by(ContractRecord.status)
-            ).all()
-        )
-        active_money = session.execute(
-            select(ContractRecord.currency, func.sum(ContractRecord.amount))
-            .where(ContractRecord.status.in_(("contracted", "active")))
-            .group_by(ContractRecord.currency)
-        ).all()
-        expiring = session.scalar(
-            select(func.count())
-            .select_from(ContractRecord)
-            .where(
-                ContractRecord.status == "active",
-                ContractRecord.expires_at.is_not(None),
-                ContractRecord.expires_at <= horizon,
-            )
-        )
-        overdue = session.scalar(
-            select(func.count())
-            .select_from(ContractRecord)
-            .where(
-                ContractRecord.paid_at.is_(None),
-                ContractRecord.payment_due_at.is_not(None),
-                ContractRecord.payment_due_at < now,
-                ContractRecord.status.in_(("sent", "contracted", "active")),
-            )
-        )
-    return {
-        "total": sum(by_status.values()),
-        "by_status": {status: by_status.get(status, 0) for status, _ in CONTRACT_STATUS_LABELS},
-        "active_amounts": [
-            {"currency": currency, "amount": amount} for currency, amount in active_money
-        ],
-        "expiring_soon": expiring or 0,
-        "renewal_window_days": RENEWAL_WINDOW_DAYS,
-        "payment_overdue": overdue or 0,
-    }
-
 
 
 def _operations_context() -> dict:

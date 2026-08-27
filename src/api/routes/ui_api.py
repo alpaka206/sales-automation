@@ -143,19 +143,11 @@ def ui_dashboard(_request: Request):
 
 
 
-@router.get("/api/ui/contracts")
-def ui_contracts(status: str = "", q: str = ""):
-    """수주 고객. The contract book, plus the summary the overview shows — same two
-    builders, so the money on one screen cannot disagree with the money on the other."""
-    from .customer_ops import CONTRACT_STATUS_LABELS, _contract_rows, _contract_summary
-
-    return {
-        "rows": _contract_rows(status=status, query=q),
-        "summary": _contract_summary(),
-        "status_options": [{"key": key, "label": label} for key, label in CONTRACT_STATUS_LABELS],
-        "filter_status": status,
-        "query": q,
-    }
+# 「계약 장부」(`GET /api/ui/contracts`)가 여기 있었습니다. **부르는 화면이 하나도
+# 없었습니다** — 수주 고객이 `clients`/`client_contracts` 로 옮겨 가면서 화면만 갈아탔고,
+# 이 엔드포인트와 그 뒤의 `_contract_rows`/`_contract_summary` 가 `contract_records` 를 읽은
+# 채로 남았습니다. 그 표는 그대로입니다(고객 상세의 「계약 · 결제」 폼이 씁니다) — 지운 것은
+# 아무도 안 부르는 통로입니다 (2026-08-27 운영자 지시).
 
 
 @router.get("/api/ui/messages")

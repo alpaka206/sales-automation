@@ -1,132 +1,46 @@
-"""수주 고객 and 전체 대시보드 — the two screens that were "준비 중" placeholders.
+"""화면 없는 통로 둘은 없다 — 「전체 대시보드」와 「계약 장부」.
 
-Neither invents data. 수주 고객 is the contract book; 전체 대시보드 is a roll-up whose
-every number belongs to a screen further in. So what is worth pinning is not the layout
-but the arithmetic that could quietly lie: money summed across currencies, an expiry that
-was never recorded reading as "expires today", and the roll-up disagreeing with the
-screen it summarises.
+이 파일은 그 두 화면의 산술을 지키던 곳이었습니다. 둘 다 없어졌습니다:
+
+- **전체 대시보드** — 각 화면의 숫자를 모아 보여 주기만 하는 자리라 아무도 안 봤습니다
+  (2026-08-13 운영자 지시).
+- **계약 장부** (`GET /api/ui/contracts`) — 「수주 고객」이 `clients`/`client_contracts` 로
+  옮겨 가면서 **화면만 갈아탔고**, 이 엔드포인트와 그 뒤의 `_contract_rows` ·
+  `_contract_summary` 가 `contract_records` 를 읽은 채로 남았습니다. 부르는 화면은 하나도
+  없었습니다 (2026-08-27 운영자 지시).
+
+**`contract_records` 표는 그대로입니다.** 고객 상세의 「계약 · 결제」 폼이 여전히 그 표에
+쓰고, 워크북 동기화가 읽습니다 — 그 경로는 ``tests/test_customer_ops.py`` 가 지킵니다.
+지운 것은 표가 아니라 아무도 안 부르는 통로입니다.
+
+되살릴 일이 생기면 git 이력에서 그대로 꺼내세요. 다만 되살리기 전에 **어느 화면이 그것을
+읽는지** 부터 정하십시오 — 그게 없어서 이렇게 됐습니다.
 """
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
-from decimal import Decimal
-
-import pytest
 from fastapi.testclient import TestClient
 
 from src.api.main import app
-from src.api.routes.customer_ops import (
-    CONTRACT_STATUS_LABELS,
-    CONTRACT_STATUSES,
-    RENEWAL_WINDOW_DAYS,
-    _contract_rows,
-    _contract_summary,
-)
-from src.db.models import Contact, ContractRecord
-from src.db.session import SessionLocal
 
 
-@pytest.fixture
-def book():
-    """Four contracts: two live in different currencies, one lapsed, one with no expiry.
-
-    Cleans up after itself: the suite shares one sqlite file, so rows left behind would
-    change the totals the next test asserts.
-    """
-    now = datetime.utcnow()
-    made = []
-    with SessionLocal() as session:
-        for index, (status, amount, currency, expires) in enumerate(
-            [
-                ("active", Decimal("6000000"), "KRW", now + timedelta(days=10)),
-                ("active", Decimal("1000"), "USD", now + timedelta(days=400)),
-                ("expired", Decimal("500000"), "KRW", now - timedelta(days=5)),
-                ("draft", None, "KRW", None),
-            ]
-        ):
-            email = f"book{index}@example.com"
-            contact = Contact(email=email, normalized_email=email, full_name=f"고객 {index}",
-                              company=f"회사 {index}", domain="example.com")
-            session.add(contact)
-            session.flush()
-            contract = ContractRecord(
-                contact_id=contact.id, status=status, amount=amount,
-                currency=currency, expires_at=expires, contract_date=now - timedelta(days=30),
-            )
-            session.add(contract)
-            made.append((contact, contract))
-        session.commit()
-        ids = [(contact.id, contract.id) for contact, contract in made]
-
-    yield ids
-
-    with SessionLocal() as session:
-        for contact_id, _contract_id in ids:
-            # The contract goes with it — contact_id is ON DELETE CASCADE.
-            session.delete(session.get(Contact, contact_id))
-        session.commit()
-
-
-def test_money_is_summed_per_currency_never_across_them(book):
-    """₩6,000,000 + $1,000 is not 6,001,000 of anything. The workbook holds both, and one
-    number covering both currencies is worse than showing no number at all."""
-    summary = _contract_summary()
-    amounts = {entry["currency"]: entry["amount"] for entry in summary["active_amounts"]}
-    assert amounts["KRW"] == Decimal("6000000")
-    assert amounts["USD"] == Decimal("1000")
-
-
-def test_only_live_contracts_count_towards_the_money(book):
-    """An expired contract is history, not revenue. A draft was never signed."""
-    summary = _contract_summary()
-    total = sum(entry["amount"] for entry in summary["active_amounts"])
-    assert total == Decimal("6001000")  # the two active ones, per currency, nothing else
-
-
-def test_a_contract_with_no_expiry_is_not_a_contract_expiring_today(book):
-    """None means nobody recorded an end date. Rendering that as 0 days would put it at
-    the top of the renewal list and push a real renewal down."""
-    rows = {row["id"]: row for row in _contract_rows()}
-    no_expiry = [row for row in rows.values() if row["expires_at"] is None]
-    assert no_expiry and all(row["days_to_expiry"] is None for row in no_expiry)
-
-
-def test_a_lapsed_contract_reports_negative_days_not_zero(book):
-    lapsed = [row for row in _contract_rows() if row["status"] == "expired"]
-    assert lapsed and lapsed[0]["days_to_expiry"] < 0
-
-
-def test_the_renewal_window_is_one_number_for_both_screens(book):
-    """수주 고객 and 전체 대시보드 both say "N일 내 만료". Two windows is how a renewal is
-    missed on whichever screen used the longer one."""
-    summary = _contract_summary()
-    assert summary["renewal_window_days"] == RENEWAL_WINDOW_DAYS
-    # 10 days out is inside the window; 400 days is not.
-    assert summary["expiring_soon"] == 1
-
-
-def test_the_status_vocabulary_is_the_one_the_write_route_accepts():
-    """A filter chip for a status no contract can hold is a chip that always reads 0."""
-    assert {key for key, _label in CONTRACT_STATUS_LABELS} == CONTRACT_STATUSES
-
-
-def test_filtering_and_search_narrow_the_same_rows(book):
-    assert all(row["status"] == "active" for row in _contract_rows(status="active"))
-    assert [row["company"] for row in _contract_rows(query="회사 1")] == ["회사 1"]
-    assert _contract_rows(query="존재하지 않는 회사") == []
-
-
-def test_the_contract_book_is_served(book):
-    """전체 대시보드(`/api/ui/overview`)는 지웠습니다 — 각 화면의 숫자를 모아 보여 주기만
-    하는 자리라 아무도 안 봤습니다(운영자 지시). 남은 것은 계약 장부 하나입니다."""
+def test_the_screenless_endpoints_are_gone():
     with TestClient(app) as client:
-        contracts = client.get("/api/ui/contracts")
-        gone = client.get("/api/ui/overview")
-    assert contracts.status_code == 200
-    assert len(contracts.json()["rows"]) >= 4
-    assert gone.status_code == 404
+        assert client.get("/api/ui/contracts").status_code == 404
+        assert client.get("/api/ui/overview").status_code == 404
 
-    from src.api.routes import dashboard
+
+def test_nothing_builds_those_numbers_any_more():
+    """화면만 지우면 매 요청마다 아무도 안 읽는 집계가 계속 돕니다. 빌더까지 같이 갑니다."""
+    from src.api.routes import customer_ops, dashboard
 
     assert not hasattr(dashboard, "_overview_context")
+    for name in ("_contract_rows", "_contract_summary", "CONTRACT_STATUS_LABELS"):
+        assert not hasattr(customer_ops, name), name
+
+
+def test_the_status_vocabulary_the_write_route_accepts_survives():
+    """계약 폼은 남았고, 그 폼이 받는 값의 목록도 남아야 합니다."""
+    from src.api.routes.customer_ops import CONTRACT_STATUSES
+
+    assert CONTRACT_STATUSES == {"draft", "sent", "contracted", "active", "expired", "cancelled"}
