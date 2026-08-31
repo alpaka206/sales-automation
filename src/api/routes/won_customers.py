@@ -412,24 +412,31 @@ def _flag(value) -> bool:
 
 
 def _fill_contract_fx(contract: ClientContract) -> None:
-    """환율이 비어 있으면 **계약일 고시가**로 채웁니다. 적어 보냈으면 그 값 그대로.
+    """환율이 비어 있으면 조회해서 채웁니다. 적어 보냈으면 그 값 그대로.
 
-    왜 계약에 박아 두는가: 예상 MRR 이 오늘 고시가로 환산하던 시절에는 같은 계약의 지난달
-    매출이 이번 달에 달라 보였습니다. 계약에 박아 두면 언제 봐도 같은 숫자입니다.
+    **원화 계약에도 채웁니다** (2026-08-31 운영자 지시). 예전에는 「원화 계약은 환산할 것이
+    없다」며 건너뛰었는데, 그건 한쪽 방향만 본 이야기였습니다: 예상 MRR 카드는 원화 계약을
+    **USD 로도** 보여 주고, 계약에 환율이 없으면 그 환산이 매일 오늘 고시가로 다시
+    일어납니다 — 지난달 숫자가 오늘 환율에 따라 움직입니다. USD 계약에 대해 고친 문제가
+    원화 계약에는 그대로 남아 있었습니다.
 
-    원화 계약은 환산할 것이 없어 조회하지 않습니다. 조회가 실패해도 저장을 막지 않습니다 —
-    비어 있으면 화면이 예전처럼 오늘 고시가로 환산하고, 운영자가 나중에 손으로 적을 수
-    있습니다. 계약 하나 저장하자고 외부 API 한 번에 매달릴 이유가 없습니다.
+    **넣는 값은 계약일 고시가이고, 그게 없으면 오늘 고시가입니다.** 계약일 쪽이 먼저인
+    이유는 그 계약이 맺어진 시점의 값이기 때문이고, 오늘 고시가로 떨어지는 이유는 이 칸이
+    **비어 있으면 안 되기** 때문입니다 — 비어 있는 계약은 화면이 매일 다른 환율로 환산합니다.
+    날짜가 아예 없는 계약(작성 중)도 오늘 값으로 채웁니다.
+
+    조회가 전부 실패해도 저장을 막지 않습니다. 계약 하나 저장하자고 외부 API 에 매달릴
+    이유가 없고, 운영자가 나중에 손으로 적을 수 있습니다.
     """
-    if won.is_krw(contract) or contract.fx_rate is not None:
-        return
-    day = contract.starts_on or contract.first_payment_on
-    if not day:
+    if contract.fx_rate is not None:
         return
     try:
         from ...integrations import fx
 
-        found = fx.usd_krw_on(day)
+        day = contract.starts_on or contract.first_payment_on
+        found = fx.usd_krw_on(day) if day else None
+        if not found:
+            found = fx.usd_krw_today()
     except Exception:
         logger.warning("계약 환율 조회 실패 (client=%s seq=%s)", contract.client_id, contract.seq)
         return

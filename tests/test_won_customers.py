@@ -1867,9 +1867,11 @@ def test_the_form_lets_the_operator_pick_the_supply_basis():
 def test_the_form_asks_in_the_order_the_answers_depend_on():
     """부가세 해당 여부 → 통화 → 환율 → 금액 → 공급가.
 
-    앞의 것이 뒤의 것을 정합니다: 해당 여부가 금액 칸을 한 개로 할지 두 개로 할지 정하고,
-    통화가 환율을 물어볼지 말지 정합니다. 순서가 뒤집히면 이미 적은 금액이 뒤늦게 바뀐
-    해당 여부 때문에 다른 뜻이 됩니다.
+    앞의 것이 뒤의 것을 정합니다: 해당 여부가 금액 칸을 한 개로 할지 두 개로 할지 정합니다.
+    순서가 뒤집히면 이미 적은 금액이 뒤늦게 바뀐 해당 여부 때문에 다른 뜻이 됩니다.
+
+    **환율은 통화와 무관하게 묻습니다** (2026-08-31): 예상 MRR 카드가 원화 계약도 USD 로
+    보여 주고, 계약에 환율이 없으면 그 환산이 매일 오늘 고시가로 다시 일어납니다.
     """
     import pathlib
 
@@ -1878,13 +1880,13 @@ def test_the_form_asks_in_the_order_the_answers_depend_on():
     order = [
         money.index('label="VAT 해당 여부"'),
         money.index('label="통화"'),
-        money.index('label="환율 (선택)"'),
+        money.index('label="환율 (USD → KRW)"'),
         money.index('label="총 계약금액 (VAT 포함)"'),
         money.index('label="공급가 (분당단가 기준)"'),
     ]
     assert order == sorted(order), "금액 구역의 칸 순서가 스펙과 다릅니다"
-    # 원화는 환산할 것이 없어 환율을 묻지 않습니다.
-    assert 'draft.currency !== "KRW" && (' in money
+    # 통화로 감싸지 않습니다 — 원화 계약도 USD 로 환산되어 보이기 때문입니다.
+    assert 'draft.currency !== "KRW" && (' not in money
 
 
 
@@ -2284,3 +2286,104 @@ def test_mrr_is_divided_by_the_plan_months_not_the_contract_months():
     # 그리고 열두 달을 다 더해도 총액을 넘지 않습니다.
     year = sum(won.revenue_in_month(contract, f"2026-{m:02d}") for m in range(1, 13))
     assert year == Decimal("6000000")
+
+
+# ---- 환율은 계약마다 박힌다 (2026-08-31) ------------------------------------------
+
+
+def test_the_rate_is_filled_for_krw_contracts_too():
+    """**원화 계약에도 채웁니다.** 예상 MRR 카드는 원화 계약을 USD 로도 보여 주고, 계약에
+    환율이 없으면 그 환산이 매일 오늘 고시가로 다시 일어납니다 — 지난달 숫자가 이번 달에
+    달라 보입니다. 「원화 계약은 환산할 것이 없다」는 한쪽 방향만 본 이야기였습니다.
+    """
+    from decimal import Decimal
+    from unittest.mock import patch
+
+    from src.api.routes.won_customers import _fill_contract_fx
+
+    krw = ClientContract(client_id=1, seq=1, currency="KRW", starts_on="2026-03-02")
+    with patch("src.integrations.fx.usd_krw_on",
+               return_value=(Decimal("1380.5"), "2026-03-02", "koreaexim")):
+        _fill_contract_fx(krw)
+
+    assert krw.fx_rate == Decimal("1380.5") and krw.fx_on == "2026-03-02"
+
+
+def test_a_contract_with_no_date_still_gets_todays_rate():
+    """이 칸은 **비어 있으면 안 되는 칸**입니다 — 비어 있는 계약은 화면이 매일 다른
+    환율로 환산합니다. 계약일이 없으면 오늘 고시가로 채웁니다."""
+    from decimal import Decimal
+    from unittest.mock import patch
+
+    from src.api.routes.won_customers import _fill_contract_fx
+
+    draft = ClientContract(client_id=1, seq=1, currency="USD")
+    with patch("src.integrations.fx.usd_krw_today",
+               return_value=(Decimal("1400"), "2026-08-31", "frankfurter")):
+        _fill_contract_fx(draft)
+
+    assert draft.fx_rate == Decimal("1400")
+
+
+def test_a_rate_the_operator_typed_is_never_overwritten():
+    """적어 보냈으면 그 값 그대로입니다 — 조회를 아예 안 합니다."""
+    from decimal import Decimal
+    from unittest.mock import patch
+
+    from src.api.routes.won_customers import _fill_contract_fx
+
+    typed = ClientContract(client_id=1, seq=1, currency="USD", starts_on="2026-03-02",
+                           fx_rate=Decimal("1300"))
+    with patch("src.integrations.fx.usd_krw_on", side_effect=AssertionError("조회하면 안 됩니다")):
+        _fill_contract_fx(typed)
+
+    assert typed.fx_rate == Decimal("1300")
+
+
+def test_a_failed_lookup_does_not_block_saving():
+    """계약 하나 저장하자고 외부 API 에 매달릴 이유가 없습니다."""
+    from unittest.mock import patch
+
+    from src.api.routes.won_customers import _fill_contract_fx
+
+    contract = ClientContract(client_id=1, seq=1, currency="USD", starts_on="2026-03-02")
+    with patch("src.integrations.fx.usd_krw_on", side_effect=RuntimeError("api down")),          patch("src.integrations.fx.usd_krw_today", side_effect=RuntimeError("api down")):
+        _fill_contract_fx(contract)
+
+    assert contract.fx_rate is None
+
+
+def test_0102_backfills_the_rate_per_contract_date(factory):
+    """옛 행 33건이 환율 없이 있었습니다 — 그 계약들의 MRR 이 매일 오늘 환율로 환산되고
+    있었다는 뜻입니다. 같은 날짜는 한 번만 조회하고, 못 가져온 행은 비워 둡니다."""
+    import importlib
+    from decimal import Decimal
+    from unittest.mock import patch
+
+    with factory() as session:
+        session.add(Client(client_id=1301, company="A"))
+        session.add_all([
+            ClientContract(client_id=1301, seq=1, currency="USD", starts_on="2026-03-02"),
+            ClientContract(client_id=1301, seq=2, currency="KRW", starts_on="2026-03-02"),
+            ClientContract(client_id=1301, seq=3, currency="USD", starts_on="2026-05-01",
+                           fx_rate=Decimal("1200")),
+        ])
+        session.commit()
+
+    calls: list[str] = []
+
+    def _on(day):
+        calls.append(day)
+        return (Decimal("1380.5"), day, "koreaexim")
+
+    module = importlib.import_module("src.db.migrations.0102_every_contract_carries_its_own_rate")
+    with patch("src.integrations.fx.usd_krw_on", side_effect=_on),          patch("src.integrations.fx.usd_krw_today", return_value=None):
+        module.up(factory().get_bind())
+
+    # 같은 날짜 둘은 한 번만 조회합니다.
+    assert calls == ["2026-03-02"]
+    with factory() as session:
+        rates = {c.seq: c.fx_rate for c in session.query(ClientContract).all()}
+    assert rates[1] == Decimal("1380.5")
+    assert rates[2] == Decimal("1380.5")   # 원화 계약도 채웁니다
+    assert rates[3] == Decimal("1200")     # 이미 있던 값은 안 건드립니다
