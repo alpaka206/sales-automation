@@ -467,8 +467,12 @@ export function WonContractForm() {
                          placeholder="예: 10000000" />
                 </Field>
                 {/* 분당 단가가 어느 금액에서 나오는지. 계약서가 총액으로 적힌 건과 공급가로
-                    적힌 건이 둘 다 있어서, 고르지 않으면 계약마다 단가가 10% 씩 달라집니다. */}
-                <Field label="공급가 (분당단가 기준)">
+                    적힌 건이 둘 다 있어서, 고르지 않으면 계약마다 단가가 10% 씩 달라집니다.
+
+                    라벨에서 「공급가」를 뺐습니다 (2026-08-31 운영자 지시): 바로 위 칸이
+                    **공급가 (VAT 미포함)** 이라 두 칸이 같은 말로 시작했고, 이 칸은 공급가를
+                    입력받는 칸이 아니라 **어느 금액을 기준으로 삼을지 고르는** 칸입니다. */}
+                <Field label="분당단가 기준">
                   <select className="inp" value={draft.vat_included}
                           onChange={(e) => set("vat_included", e.target.value)}>
                     <option value="">VAT 미포함 금액으로</option>

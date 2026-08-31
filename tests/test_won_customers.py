@@ -1857,7 +1857,10 @@ def test_the_form_lets_the_operator_pick_the_supply_basis():
     import pathlib
 
     form = pathlib.Path("frontend/src/screens/won/WonContractForm.tsx").read_text(encoding="utf-8")
-    assert '<Field label="공급가 (분당단가 기준)">' in form
+    # 라벨에서 「공급가」를 뺐습니다 (2026-08-31): 바로 위 칸이 「공급가 (VAT 미포함)」
+    # 이라 두 칸이 같은 말로 시작했고, 이 칸은 공급가를 **입력받는** 칸이 아니라 어느
+    # 금액을 기준으로 삼을지 **고르는** 칸입니다.
+    assert '<Field label="분당단가 기준">' in form
     assert "VAT 미포함 금액으로" in form
     assert "VAT 포함 금액으로" in form
     # 고를 것이 있는지는 **부가세 해당 여부**가 정합니다 — 통화가 아니라.
@@ -1882,7 +1885,7 @@ def test_the_form_asks_in_the_order_the_answers_depend_on():
         money.index('label="통화"'),
         money.index('label="환율 (USD → KRW)"'),
         money.index('label="총 계약금액 (VAT 포함)"'),
-        money.index('label="공급가 (분당단가 기준)"'),
+        money.index('label="분당단가 기준"'),
     ]
     assert order == sorted(order), "금액 구역의 칸 순서가 스펙과 다릅니다"
     # 통화로 감싸지 않습니다 — 원화 계약도 USD 로 환산되어 보이기 때문입니다.
@@ -2448,3 +2451,58 @@ def test_the_payload_counts_the_contracts_that_fell_back(factory):
     assert payload["fallback_fx_on"] == "2026-08-28"
     # 카드 전체에 적용되는 환율이라는 것은 이제 없습니다.
     assert "fx_rate" not in payload and "fx_source" not in payload
+
+
+def test_a_payment_rate_can_be_typed_and_clearing_it_means_automatic(factory):
+    """**은행이 적용한 환율은 고시가와 다릅니다** (2026-08-31 운영자 지시).
+
+    입금 완료로 바꾸면 그 날짜 고시가가 들어가고, 다르면 그 자리에서 고쳐 적습니다.
+    **비우면 다시 자동**입니다 — 지운 값이 그대로 남으면 되돌릴 길이 없습니다.
+    """
+    from decimal import Decimal
+    from unittest.mock import patch
+
+    with factory() as session:
+        session.add(Client(client_id=1501, company="A"))
+        session.add(ClientContract(client_id=1501, seq=1, currency="USD"))
+        session.flush()
+        contract_id = session.query(ClientContract).one().id
+        session.add(ContractPayment(contract_id=contract_id, no=1, total=1,
+                                    amount=Decimal("10000"), paid_on="2026-03-15"))
+        session.commit()
+        payment_id = session.query(ContractPayment).one().id
+
+    def rate_now():
+        with factory() as session:
+            return session.get(ContractPayment, payment_id).fx_rate
+
+    quoted = (Decimal("1380.5"), "2026-03-15", "koreaexim")
+    patcher, client = _console(factory)
+    with patcher, patch("src.integrations.fx.usd_krw_on", return_value=quoted), client:
+        # 완료로 바꿉니다 — 적은 것이 없으니 그 날짜 고시가가 들어갑니다.
+        client.post(f"/won-customers/payments/{payment_id}", data={"done": "true"})
+        assert rate_now() == Decimal("1380.5")
+
+        # 은행이 다른 환율을 적용했다면 그 자리에서 고쳐 적습니다.
+        client.post(f"/won-customers/payments/{payment_id}", data={"fx_rate": "1402.75"})
+        assert rate_now() == Decimal("1402.75")
+
+        # 날짜만 고치는 저장은 그 칸을 안 보냅니다 — 환율을 건드리면 안 됩니다.
+        client.post(f"/won-customers/payments/{payment_id}", data={"paid_on": "2026-03-16"})
+        assert rate_now() == Decimal("1402.75")
+
+        # 비우면 다시 자동입니다 — 빈 문자열은 「안 보냈다」와 구별이 안 되므로 `auto`.
+        client.post(f"/won-customers/payments/{payment_id}", data={"fx_rate": "auto"})
+        assert rate_now() == Decimal("1380.5")
+
+
+def test_the_payment_row_lets_the_rate_be_typed():
+    """읽기 전용 글자였습니다 — 라우트는 받고 있었고 화면이 안 보냈습니다."""
+    import pathlib
+
+    screen = pathlib.Path(
+        "frontend/src/screens/won/WonCustomerDetail.tsx"
+    ).read_text(encoding="utf-8")
+
+    assert 'void onSave({ fx_rate: next || "auto" })' in screen
+    assert 'placeholder="비우면 그날 고시가"' in screen

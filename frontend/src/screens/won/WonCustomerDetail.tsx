@@ -1027,7 +1027,7 @@ function PaySection({ contract, today, onDone }: {
           ]}
           note={ask.done
             ? "수금율과 다음 결제일이 바로 갱신됩니다."
-            : "수금율과 다음 결제일이 바로 갱신됩니다. 그 날짜의 환율이 함께 저장됩니다 — 나중에 오늘 환율로 다시 환산하지 않기 위해서입니다."}
+            : "수금율과 다음 결제일이 바로 갱신됩니다. 그 날짜의 환율이 함께 저장됩니다 — 나중에 오늘 환율로 다시 환산하지 않기 위해서입니다. 은행이 적용한 환율이 다르면 「적용 환율」 칸에 직접 적으면 되고, 비우면 다시 그 날짜 고시가로 채워집니다."}
           okLabel={ask.done ? "입금 전으로" : "입금 완료"}
           danger={ask.done}
           onOk={() => save(ask.id, { done: String(!ask.done) })}
@@ -1051,6 +1051,13 @@ function PayRow({ payment, currency, today, onAsk, onSave }: {
   // 금액은 **읽을 때는 목업처럼 ₩1,722,600**, 고칠 때는 숫자입니다. type="number" 로 두면
   // 표에 자릿수 구분 없는 날숫자가 남아 다른 금액 칸과 따로 놉니다.
   const [amount, setAmount] = useState(money(payment.amount, currency));
+  // **환율도 고칠 수 있습니다** (2026-08-31 운영자 지시). 입금 완료로 바꾸면 그 날짜
+  // 고시가가 자동으로 들어가지만, 실제로 은행이 적용한 환율은 다를 수 있습니다 — 그때
+  // 여기서 적습니다. **비우면 다시 자동**입니다: 저장할 때 그 날짜 고시가로 채워집니다.
+  const [rate, setRate] = useState(payment.fx_rate ? String(payment.fx_rate) : "");
+  // 비우고 저장하면 서버가 채워 넣으므로 **화면 값이 내가 친 것과 달라집니다** — 그때
+  // 따라옵니다(날짜·금액 칸에는 없어도 되는 줄입니다: 그 둘은 적은 값이 그대로 남습니다).
+  useEffect(() => setRate(payment.fx_rate ? String(payment.fx_rate) : ""), [payment.fx_rate]);
   const overdue = !payment.done && dueClass(payment.paid_on, today) === "over";
   const raw = (text: string) => text.replace(/[^0-9.-]/g, "");
   return (
@@ -1077,7 +1084,16 @@ function PayRow({ payment, currency, today, onAsk, onSave }: {
                }} />
       </td>
       <td className="mono nowrap">
-        {payment.fx_rate ? `${num(Number(payment.fx_rate))} (${fmt(payment.fx_on)})` : "—"}
+        <input className="cell-inp" inputMode="decimal" style={{ textAlign: "right" }}
+               value={rate} placeholder="비우면 그날 고시가"
+               onChange={(e) => setRate(e.target.value)}
+               onBlur={() => {
+                 const next = rate.trim();
+                 if (next !== String(payment.fx_rate ?? "")) void onSave({ fx_rate: next || "auto" });
+               }} />
+        {payment.fx_on && (
+          <div className="memo-line">{fmt(payment.fx_on)} 고시</div>
+        )}
       </td>
       <td>
         <select className={`pay-sel${payment.done ? " is-done" : ""}`} value={payment.done ? "1" : "0"}

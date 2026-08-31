@@ -648,9 +648,15 @@ async def update_payment(
             payment.paid_on = paid_on.strip()
         if amount.strip():
             payment.amount = _number(amount)
-        if fx_rate.strip():
-            payment.fx_rate = _number(fx_rate)
-            payment.fx_on = payment.paid_on
+        # **빈 값은 「안 보냈다」와 구별되지 않습니다.** 같은 라우트를 날짜·금액 칸도 쓰고
+        # 그 저장들은 자기 칸만 보내는데, `fx_rate=` 로 빈 문자열이 와도 FastAPI 는 기본값을
+        # 줍니다(실측) — 그래서 「비웠다」는 뜻은 글자로 보냅니다. `auto` 가 그것이고,
+        # 아래에서 그 날짜 고시가로 다시 채워집니다. 콘솔의 `retire=0` 과 같은 이유입니다.
+        typed = fx_rate.strip()
+        if typed == "auto":
+            payment.fx_rate = payment.fx_on = None
+        elif typed:
+            payment.fx_rate, payment.fx_on = _number(typed), payment.paid_on
         if done:
             payment.done = done == "true"
         if payment.done and payment.paid_on and payment.fx_rate is None:
