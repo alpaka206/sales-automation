@@ -188,3 +188,40 @@ def usd_krw_today() -> tuple[Decimal, str, str] | None:
     _last_error = None
     _today_cache[key] = found
     return found
+
+
+# 계약일 조회는 같은 날짜가 여러 계약에 걸립니다(워크북 임포트가 특히 그렇습니다). 성공한
+# 값만 담아 두고 재사용합니다 — 실패를 담으면 그 날짜가 프로세스 수명 동안 굳습니다.
+_on_cache: dict[str, tuple[Decimal, str, str]] = {}
+
+
+def fill_contract_rate(contract) -> bool:
+    """계약에 그 시점 환율을 박습니다. 이미 있으면 손대지 않습니다. 채웠으면 True.
+
+    **정책이 여기 한 곳에 있습니다.** 부르는 데가 셋입니다 — 콘솔 저장
+    (`won_customers._fill_contract_fx`), 워크북 임포트(`sheet_to_db`), 옛 행 백필(이관
+    0102). 세 군데가 각자 규칙을 들고 있으면 어느 길로 들어온 계약이냐에 따라 환율이
+    달라지고, 그건 화면에 안 보입니다.
+
+    규칙: **계약일 고시가 → 없거나 못 가져오면 오늘 고시가.** 이 칸은 비어 있으면 안
+    됩니다 — 비어 있는 계약은 화면이 매일 다른 환율로 환산합니다(`ui_api._contract_rate`).
+
+    통화를 보지 않습니다. 원화 계약도 예상 MRR 카드에서 USD 로 환산되어 보입니다.
+    """
+    if getattr(contract, "fx_rate", None) is not None:
+        return False
+    day = getattr(contract, "starts_on", None) or getattr(contract, "first_payment_on", None)
+    found = None
+    if day:
+        key = str(day)[:10]
+        found = _on_cache.get(key)
+        if found is None:
+            found = usd_krw_on(key)
+            if found:
+                _on_cache[key] = found
+    if not found:
+        found = usd_krw_today()
+    if not found:
+        return False
+    contract.fx_rate, contract.fx_on, _source = found
+    return True

@@ -174,6 +174,16 @@ def import_from_sheet(write: bool = True) -> dict:
             contract.concurrent_jobs = whole(cell(r, "AJ"))
             contract.space_count = whole(cell(r, "AK"))
             contract.space_seq = text(cell(r, "AL"))
+            # **환율은 여기서도 박습니다.** 안 채우면 워크북에서 들어온 계약만 예상 MRR
+            # 에서 매일 오늘 고시가로 환산되고, 그건 화면에 안 보입니다 — 콘솔로 저장한
+            # 계약과 시트로 들어온 계약이 다르게 동작할 이유가 없습니다. 같은 날짜는
+            # `fx` 가 한 번만 조회합니다. 실패해도 임포트를 막지 않습니다.
+            try:
+                from ..integrations import fx
+
+                fx.fill_contract_rate(contract)
+            except Exception:
+                logger.warning("계약 환율 조회 실패 (client=%s seq=%s)", client_id, seq)
             session.add(contract)
             by_key[(client_id, seq)] = contract
             counts["contract"] += 1

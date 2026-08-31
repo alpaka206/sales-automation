@@ -27,7 +27,12 @@ logger = logging.getLogger(__name__)
 
 
 def _rate_for(day: str | None, cache: dict, today_rate) -> tuple | None:
-    """그 날짜의 (환율, 고시일). 같은 날짜는 한 번만 조회합니다."""
+    """그 날짜의 (환율, 고시일). 같은 날짜는 한 번만 조회합니다.
+
+    ``fx.fill_contract_rate`` 와 같은 규칙입니다(계약일 → 없으면 오늘). 여기서 그 함수를
+    쓰지 않는 이유는 raw SQL 로 도는 마이그레이션이라 ORM 객체가 없기 때문입니다 — 규칙이
+    바뀌면 두 곳을 같이 고쳐야 하고, 그래서 이 주석이 있습니다.
+    """
     from ...integrations import fx
 
     if not day:

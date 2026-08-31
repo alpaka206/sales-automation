@@ -2291,6 +2291,20 @@ def test_mrr_is_divided_by_the_plan_months_not_the_contract_months():
 # ---- 환율은 계약마다 박힌다 (2026-08-31) ------------------------------------------
 
 
+@pytest.fixture(autouse=True)
+def _clean_fx_cache():
+    """`fx` 는 날짜별로 성공한 조회를 담아 둡니다 — 같은 날짜가 여러 계약에 걸리기 때문입니다.
+    그 캐시는 프로세스 수명 내내 살아 있어서, 비우지 않으면 앞 테스트가 담아 둔 값이 다음
+    테스트의 「조회 실패」를 성공으로 만듭니다."""
+    from src.integrations import fx
+
+    fx._on_cache.clear()
+    fx._today_cache.clear()
+    yield
+    fx._on_cache.clear()
+    fx._today_cache.clear()
+
+
 def test_the_rate_is_filled_for_krw_contracts_too():
     """**원화 계약에도 채웁니다.** 예상 MRR 카드는 원화 계약을 USD 로도 보여 주고, 계약에
     환율이 없으면 그 환산이 매일 오늘 고시가로 다시 일어납니다 — 지난달 숫자가 이번 달에

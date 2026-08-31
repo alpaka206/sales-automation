@@ -603,3 +603,18 @@ def test_a_new_workbook_row_carries_the_stage_the_inquiry_is_actually_in():
     # 시트에 아직 말이 없는 단계는 행을 못 만드는 것보다 New 로 두는 편이 낫습니다.
     # 갱신 경로가 그때 경고를 남깁니다(`google_sheets.update_inbound_stage`).
     assert sheet_sync._stage_words("reminder_sent") == ("New", "Inquiry")
+
+
+def test_a_contract_imported_from_the_workbook_carries_its_rate():
+    """**콘솔로 저장한 계약과 시트로 들어온 계약이 다르게 동작할 이유가 없습니다.**
+
+    환율을 안 채우면 워크북에서 들어온 계약만 예상 MRR 에서 매일 오늘 고시가로 환산되고,
+    그건 화면에 안 보입니다. 규칙은 `fx.fill_contract_rate` 한 곳이고, 세 경로(콘솔 저장 ·
+    워크북 임포트 · 이관 0102)가 모두 그것을 지납니다.
+    """
+    import pathlib
+
+    source = pathlib.Path("src/agents/sheet_to_db.py").read_text(encoding="utf-8")
+    assert "fx.fill_contract_rate(contract)" in source
+    # 실패해도 임포트를 막지 않습니다 — 시트 한 장 들여오자고 외부 API 에 매달릴 이유가 없습니다.
+    assert "except Exception:" in source.split("fill_contract_rate")[1][:200]
