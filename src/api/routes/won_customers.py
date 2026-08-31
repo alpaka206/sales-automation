@@ -327,8 +327,13 @@ def _fill_contract(contract: ClientContract, form: dict) -> None:
         contract.doc_types = [part.strip() for part in raw.split("|") if part.strip()] or None
     contract.deal_type = contract.deal_type or "MRR"
     contract.currency = contract.currency or "KRW"
-    # 플랜 기간은 계약기간과 같습니다 — 폼이 묻지 않고 그렇게 저장한다고 적어 둡니다.
-    # 다르게 둘 일이 생기면 그때 칸을 만드는 편이, 늘 같은 값을 두 번 받는 것보다 낫습니다.
+    # **플랜 기간은 계약 기간과 다른 것입니다** (2026-08-31 운영자 지시). 계약은 먼저 맺고
+    # 실제 사용은 늦게 시작하는 일이 흔한데, 한동안 폼이 묻지 않고 계약 날짜를 그대로
+    # 복사했습니다 — 그래서 MRR 도 「사용중」도 계약 기간으로 계산되고 있었습니다.
+    #
+    # 이 두 줄은 이제 **기본값**입니다: 비워 두면 계약 기간과 같다는 뜻이고, 그게 대부분의
+    # 계약입니다. 폼이 값을 보내면 그대로 저장됩니다. 옛 행과 워크북에서 온 행도 이 기본값
+    # 덕분에 빈 채로 남지 않습니다.
     contract.plan_starts_on = contract.plan_starts_on or contract.starts_on
     contract.plan_ends_on = contract.plan_ends_on or contract.ends_on
     _fill_contract_fx(contract)

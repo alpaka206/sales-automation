@@ -1310,15 +1310,20 @@ def test_the_sheet_gets_the_computed_amounts():
 
 
 def _client_with(*periods, today=None):
-    """(시작일, 종료일) 쌍으로 계약을 단 고객. None 은 날짜가 덜 적힌 계약입니다."""
+    """(시작일, 종료일) 쌍으로 계약을 단 고객. None 은 날짜가 덜 적힌 계약입니다.
+
+    플랜 날짜는 비워 둡니다 — 서버 기본값과 같은 규칙으로 계약 날짜에 떨어집니다.
+    """
     from types import SimpleNamespace
 
     return SimpleNamespace(contracts=[
-        SimpleNamespace(starts_on=start, ends_on=end) for start, end in periods
+        SimpleNamespace(starts_on=start, ends_on=end, plan_starts_on=None,
+                        plan_ends_on=None, terminated_on=None)
+        for start, end in periods
     ])
 
 
-def test_plan_status_follows_the_contract_dates():
+def test_plan_status_falls_back_to_the_contract_dates():
     from datetime import date
 
     from src.common.won import plan_status
@@ -1328,7 +1333,8 @@ def test_plan_status_follows_the_contract_dates():
     ended = ("2024-01-01", "2025-01-01")
     upcoming = ("2026-12-01", "2027-12-01")
 
-    # 계약 기간이 끝나면 손대지 않아도 사용 중단으로 갑니다 — 이것이 요구의 핵심입니다.
+    # 플랜 날짜를 안 적으면 계약 날짜가 그 자리에 섭니다 — 대부분의 계약이 그렇습니다.
+    # 기간이 끝나면 손대지 않아도 사용 중단으로 갑니다 — 이것이 요구의 핵심입니다.
     assert plan_status(_client_with(ended), today) == "사용 중단"
     assert plan_status(_client_with(running), today) == "사용중"
     # 추가된 계약이 있으면 세팅중. 지난 계약이 같이 있어도 마찬가지입니다.
@@ -2132,3 +2138,96 @@ def test_the_ticket_link_can_be_typed_per_contract():
     assert contract.ticket_id == "44551122"
     _fill_contract(contract, {"ticket_id": "", "currency": "KRW"})
     assert contract.ticket_id is None
+
+
+# ---- 플랜 기간은 계약 기간과 다른 것이다 (2026-08-31) -----------------------------
+
+
+class _Contract:
+    """`won` 의 계산 함수들이 보는 것만 들고 있는 최소 계약."""
+
+    def __init__(self, **fields):
+        defaults = {
+            "starts_on": None, "ends_on": None, "plan_starts_on": None, "plan_ends_on": None,
+            "terminated_on": None, "revenue_from": None, "credits": None, "credits_used": None,
+            "currency": "KRW", "vat_applicable": False, "vat_included": True,
+            "deal_type": "MRR", "installments": None, "payment_type": None,
+            "amount_incl_vat": None, "amount_excl_vat": None, "seq": 1,
+        }
+        defaults.update(fields)
+        for key, value in defaults.items():
+            setattr(self, key, value)
+
+
+class _Client:
+    def __init__(self, *contracts):
+        self.contracts = list(contracts)
+        self.retired_on = None
+
+
+def test_a_contract_signed_early_is_not_in_use_until_the_plan_starts():
+    """**계약은 먼저 맺고 실제 사용은 늦게 시작합니다.** 계약서에 도장을 찍은 날부터
+    「사용중」이라고 적으면, 아직 아무것도 안 쓰는 고객이 활성 고객 수와 예상 MRR 에
+    들어갑니다 — 그 두 숫자를 보려고 만든 화면인데요 (2026-08-31 운영자 지시).
+    """
+    signed_early = _Contract(
+        starts_on="2026-01-01", ends_on="2026-12-31",
+        plan_starts_on="2026-03-01", plan_ends_on="2027-02-28",
+    )
+    client = _Client(signed_early)
+
+    # 계약은 시작했지만 플랜은 아직입니다.
+    assert won.plan_status(client, date(2026, 1, 15)) == "세팅중"
+    assert won.plan_status(client, date(2026, 3, 2)) == "사용중"
+    # 계약은 끝났지만 플랜은 도는 중입니다 — 여기서도 플랜이 이깁니다.
+    assert won.plan_status(client, date(2027, 1, 5)) == "사용중"
+    assert won.plan_status(client, date(2027, 3, 1)) == "사용 중단"
+
+
+def test_the_plan_period_defaults_to_the_contract_period():
+    """비워 두는 것이 대부분의 계약입니다 — 그때는 예전과 똑같이 동작해야 합니다."""
+    same = _Contract(starts_on="2026-01-01", ends_on="2026-12-31")
+    client = _Client(same)
+
+    assert won.plan_period(same) == ("2026-01-01", "2026-12-31")
+    assert won.plan_status(client, date(2026, 6, 1)) == "사용중"
+    assert won.plan_status(client, date(2025, 12, 31)) == "세팅중"
+    assert won.plan_status(client, date(2027, 1, 1)) == "사용 중단"
+
+
+def test_terminating_ends_the_plan_and_the_status_follows():
+    """중도 해지는 「언제까지인가」를 바꿉니다. 해지한 고객이 「사용중」으로 남아 있으면
+    활성 고객 수가 틀립니다."""
+    stopped = _Contract(
+        starts_on="2026-01-01", ends_on="2026-12-31",
+        plan_starts_on="2026-01-01", plan_ends_on="2026-12-31",
+        terminated_on="2026-05-31",
+    )
+    client = _Client(stopped)
+
+    assert won.plan_period(stopped)[1] == "2026-05-31"
+    assert won.plan_status(client, date(2026, 5, 1)) == "사용중"
+    assert won.plan_status(client, date(2026, 6, 1)) == "사용 중단"
+
+
+def test_mrr_is_divided_by_the_plan_months_not_the_contract_months():
+    """**분모와 인식 창이 둘 다 플랜 기간**이라 월별 합계가 총액과 정확히 맞습니다.
+    한쪽만 플랜으로 두면 마지막 달이 잘리고, 잘렸다는 표시는 화면 어디에도 없습니다."""
+    from decimal import Decimal
+
+    # 계약은 12개월인데 플랜은 6개월 — 월 요금은 플랜으로 나눈 값이어야 합니다.
+    contract = _Contract(
+        starts_on="2026-01-01", ends_on="2026-12-31",
+        plan_starts_on="2026-07-01", plan_ends_on="2026-12-31",
+        amount_incl_vat=Decimal("6000000"),
+    )
+
+    assert won.plan_months(contract) == 6
+    assert won.monthly_revenue(contract) == Decimal("1000000")
+    # 계약은 1월에 시작했지만 매출은 플랜이 시작하는 7월부터 잡힙니다.
+    assert won.revenue_start_month(contract) == "2026-07"
+    assert won.revenue_in_month(contract, "2026-03") == Decimal("0")
+    assert won.revenue_in_month(contract, "2026-07") == Decimal("1000000")
+    # 그리고 열두 달을 다 더해도 총액을 넘지 않습니다.
+    year = sum(won.revenue_in_month(contract, f"2026-{m:02d}") for m in range(1, 13))
+    assert year == Decimal("6000000")

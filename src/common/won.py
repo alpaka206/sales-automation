@@ -135,11 +135,19 @@ def contract_state(contract, today: date | None = None) -> str:
 
 
 def plan_status(client, today: date | None = None) -> str:
-    """플랜 상태 — **계약 기간이 정합니다.** 저장하지 않습니다.
+    """플랜 상태 — **플랜 기간이 정합니다.** 저장하지 않습니다.
 
-    오늘이 어느 계약 기간 안에 들면 사용중, 아직 시작하지 않았거나 날짜가 덜 적힌 계약이
+    계약 기간이 아닌 이유는 MRR 을 플랜 기간으로 나누는 이유와 같습니다(`plan_period`):
+    계약은 먼저 맺고 실제 사용은 늦게 시작하는 일이 흔합니다. 계약서에 도장을 찍은 날부터
+    「사용중」이라고 적으면, 아직 아무것도 안 쓰는 고객이 활성 고객 수와 예상 MRR 에
+    들어갑니다 — 그 두 숫자를 보려고 만든 화면인데요 (2026-08-31 운영자 지시).
+
+    오늘이 어느 플랜 기간 안에 들면 사용중, 아직 시작하지 않았거나 날짜가 덜 적힌 계약이
     있으면 세팅중, 있는 계약이 전부 지났으면 사용 중단입니다. 계약이 아직 하나도 없는
     고객(수주 전환만 된 상태)도 세팅중입니다 — 앞으로 채울 것이 있다는 뜻이므로.
+
+    중도 해지도 여기서 따라옵니다: `plan_period` 의 끝이 만료일과 해지일 중 빠른 쪽이라,
+    해지한 고객은 그날부터 「사용 중단」입니다.
 
     저장하지 않는 이유는 고객 종류를 저장하지 않는 이유와 같습니다: 날짜에서 나오는 값을
     따로 들고 있으면 반드시 어긋나고, 어긋난 뒤에는 어느 쪽이 맞는지 아무도 모릅니다.
@@ -160,7 +168,9 @@ def plan_status(client, today: date | None = None) -> str:
         return "세팅중"
     pending = False
     for contract in contracts:
-        start, end = parse_date(contract.starts_on), parse_date(contract.ends_on)
+        # **플랜 기간**입니다 — 비어 있으면 계약 기간으로 떨어집니다(`plan_period`).
+        plan_start, plan_end = plan_period(contract)
+        start, end = parse_date(plan_start), parse_date(plan_end)
         if end and end < today:
             continue                       # 지난 계약
         if start and start <= today and end:

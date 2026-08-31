@@ -25,7 +25,7 @@ import { type Contract, type ListData, type Row, addMonths, n } from "./shared";
  * 새로 씁니다.
  */
 const empty = {
-  deal_type: "MRR", starts_on: "", ends_on: "", ticket_id: "",
+  deal_type: "MRR", starts_on: "", ends_on: "", plan_starts_on: "", plan_ends_on: "", ticket_id: "",
   // 부가세가 붙는 계약인가(국내 법인이면 해당). **통화가 아니라 고객이 정합니다** — 이 값이
   // 금액 칸을 한 개 그릴지 두 개 그릴지 정합니다. 폼은 문자열만 나르므로 "1" / "" 입니다.
   vat_applicable: "1",
@@ -165,12 +165,19 @@ export function WonContractForm() {
 
   // 저장하면 플랜 상태가 무엇이 될지. 서버의 won.plan_status 와 같은 규칙을 이 계약 하나에
   // 적용한 것입니다 — 고르는 칸이 없어진 자리에, 날짜가 무슨 뜻인지 대신 적어 줍니다.
+  //
+  // **보는 것은 플랜 기간입니다** (2026-08-31). 비워 두면 계약 기간과 같다는 뜻이라 서버의
+  // 기본값과 같은 자리로 떨어집니다 — 그래야 미리보기와 저장 결과가 어긋나지 않습니다.
+  // 중도 해지일이 만료일보다 빠르면 그날 끝납니다(`won.plan_period` 와 같은 규칙).
   const planPreview = (() => {
     if (!draft) return "세팅중";
     const today = new Date().toISOString().slice(0, 10);
-    if (!draft.starts_on || !draft.ends_on) return "세팅중";
-    if (draft.ends_on < today) return "사용 중단";
-    if (draft.starts_on > today) return "세팅중";
+    const start = draft.plan_starts_on || draft.starts_on;
+    let end = draft.plan_ends_on || draft.ends_on;
+    if (draft.terminated_on && (!end || draft.terminated_on < end)) end = draft.terminated_on;
+    if (!start || !end) return "세팅중";
+    if (end < today) return "사용 중단";
+    if (start > today) return "세팅중";
     return "사용중";
   })();
 
@@ -541,7 +548,27 @@ export function WonContractForm() {
           </div>
 
           <div className="form-sec">Perso 계정 및 플랜</div>
+          <div className="note-box">
+            플랜 기간은 계약 기간과 다릅니다 — MRR 은 이 기간으로 나누고 이 기간에 인식하며,
+            「사용중」도 이 기간이 정합니다. <b>비우면 계약 기간과 같습니다.</b>
+          </div>
           <div className="form-grid3">
+            {/* **플랜 기간은 계약 기간과 다른 것입니다** (2026-08-31 운영자 지시). 계약은
+                먼저 맺고 실제 사용은 늦게 시작하는 일이 흔한데, 한동안 이 폼이 묻지 않고
+                계약 날짜를 그대로 복사했습니다 — 그래서 MRR 도 「사용중」도 계약 기간으로
+                계산됐습니다.
+
+                MRR 은 이 기간으로 나누고 이 기간에 인식합니다(`won.plan_period`), 그리고
+                「사용중」도 이 기간이 정합니다. 비워 두면 계약 기간과 같습니다 — 대부분의
+                계약이 그렇고, 그때는 아무것도 안 적으면 됩니다. */}
+            <Field label="플랜 시작일">
+              <input className="inp" type="date" value={draft.plan_starts_on}
+                     onChange={(e) => set("plan_starts_on", e.target.value)} />
+            </Field>
+            <Field label="플랜 만료일">
+              <input className="inp" type="date" value={draft.plan_ends_on}
+                     onChange={(e) => set("plan_ends_on", e.target.value)} />
+            </Field>
             <Field label="플랜">
               <Sel value={draft.plan} onChange={(v) => set("plan", v)} options={options.plans} />
             </Field>
@@ -569,7 +596,6 @@ export function WonContractForm() {
                      placeholder="여러 개면 쉼표로" />
             </div>
           </div>
-          <div className="note-box">플랜 시작일 · 만료일은 계약기간과 동일하게 저장됩니다.</div>
 
           <div className="form-sec">기타</div>
           <div>
@@ -631,6 +657,7 @@ const carryOverKeys = Object.keys(carryOver({} as Contract)) as (keyof Draft)[];
 function fromContract(contract: Contract): Draft {
   return {
     deal_type: contract.deal_type, starts_on: str(contract.starts_on), ends_on: str(contract.ends_on),
+    plan_starts_on: contract.plan_starts_on || "", plan_ends_on: contract.plan_ends_on || "",
     ticket_id: str(contract.ticket_id), currency: contract.currency,
     vat_applicable: contract.vat_applicable ? "1" : "",
     vat_included: contract.vat_included ? "1" : "",

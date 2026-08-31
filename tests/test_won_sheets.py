@@ -29,12 +29,14 @@ def _client(client_id: int, company: str = "서울대학교"):
         contact_name="유명준",
         contact_info="ghldtjd119@snu.ac.kr",
         first_won_on="2026-05-19",
-        # 플랜 상태는 저장된 값이 아니라 계약 기간에서 나옵니다(won.plan_status). 기간 안인
-        # 계약 하나를 주면 시트 J열이 「사용중」이 됩니다.
+        # 플랜 상태는 저장된 값이 아니라 **플랜 기간**에서 나옵니다(won.plan_status).
+        # 플랜 날짜를 비우면 계약 기간이 그 자리에 서므로(서버 기본값과 같은 규칙), 기간
+        # 안인 계약 하나를 주면 시트 J열이 「사용중」이 됩니다.
         contracts=[
             SimpleNamespace(
                 starts_on=(date.today() - timedelta(days=30)).isoformat(),
                 ends_on=(date.today() + timedelta(days=300)).isoformat(),
+                plan_starts_on=None, plan_ends_on=None, terminated_on=None,
             )
         ],
         owner="이혜람",
