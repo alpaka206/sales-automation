@@ -105,6 +105,7 @@ def test_monthly_revenue_matches_the_sheet():
 
 
 def test_contract_state_is_read_from_today_not_stored():
+    """플랜 날짜를 안 적으면 계약 날짜가 그 자리에 섭니다 — 대부분의 계약이 그렇습니다."""
     today = date(2026, 8, 6)
     running = ClientContract(client_id=1, seq=1, starts_on="2026-06-25", ends_on="2027-06-25")
     upcoming = ClientContract(client_id=1, seq=2, starts_on="2026-09-01", ends_on="2027-08-31")
@@ -112,6 +113,58 @@ def test_contract_state_is_read_from_today_not_stored():
     assert won.contract_state(running, today) == "진행 중"
     assert won.contract_state(upcoming, today) == "세팅중"
     assert won.contract_state(ended, today) == "종료"
+
+
+def test_contract_state_follows_the_plan_period_not_the_contract_period():
+    """계약 한 건의 상태도 **플랜 기간**이 정합니다 (2026-08-31 운영자 지시).
+
+    고객 단위(`plan_status`)와 같은 기간을 봐야, 한 화면에서 고객은 「세팅중」인데 그 밑의
+    계약 줄은 「진행 중」이라고 적히는 일이 없습니다.
+    """
+    today = date(2026, 8, 6)
+    # 계약은 도는 중인데 플랜은 아직 시작 전.
+    signed_early = ClientContract(client_id=1, seq=1, starts_on="2026-01-01",
+                                  ends_on="2026-12-31", plan_starts_on="2026-10-01",
+                                  plan_ends_on="2027-09-30")
+    assert won.contract_state(signed_early, today) == "세팅중"
+    # 계약은 아직 남았는데 플랜은 끝남.
+    plan_over = ClientContract(client_id=1, seq=2, starts_on="2026-01-01", ends_on="2026-12-31",
+                               plan_starts_on="2026-01-01", plan_ends_on="2026-06-30")
+    assert won.contract_state(plan_over, today) == "종료"
+
+
+def test_a_terminated_contract_reads_as_over_from_that_day():
+    """중도 해지는 「언제까지인가」를 바꿉니다. 전에는 만료일이 올 때까지 「진행 중」이었는데,
+    그건 매출 인식이 이미 멈춘 계약이었습니다."""
+    contract = ClientContract(client_id=1, seq=1, starts_on="2026-01-01", ends_on="2026-12-31",
+                              plan_starts_on="2026-01-01", plan_ends_on="2026-12-31",
+                              terminated_on="2026-05-31")
+    assert won.contract_state(contract, date(2026, 5, 1)) == "진행 중"
+    assert won.contract_state(contract, date(2026, 6, 1)) == "종료"
+
+
+def test_the_setup_count_and_the_contract_rows_count_the_same_thing():
+    """화면의 「세팅중 계약 n건」과 그 아래 계약 줄의 「세팅중」이 어긋나면, 둘 중 어느
+    쪽이 맞는지 화면만 봐서는 모릅니다. 같은 기간을 봐야 합니다."""
+    today = date(2026, 8, 6)
+    signed_early = ClientContract(client_id=1, seq=1, starts_on="2026-01-01",
+                                  ends_on="2026-12-31", plan_starts_on="2026-10-01",
+                                  plan_ends_on="2027-09-30")
+    from types import SimpleNamespace
+
+    client = SimpleNamespace(contracts=[signed_early], retired_on=None)
+
+    assert won.contract_state(signed_early, today) == "세팅중"
+    assert won.upcoming_contracts(client, today) == [signed_early]
+    # 기본으로 열리는 계약도 같은 기간으로 고릅니다 — 도는 계약이 없으니 최근 차수.
+    assert won.active_contract(client, today) is signed_early
+
+
+def test_a_contract_with_no_dates_still_reads_as_running():
+    """`plan_status` 와 다른 점입니다 — 고객 단위에서는 같은 상태가 「세팅중」(아직 채울
+    것이 있다)이지만, 계약 하나를 놓고 보는 자리에서는 「진행 중」이 맞습니다."""
+    blank = ClientContract(client_id=1, seq=1)
+    assert won.contract_state(blank, date(2026, 8, 6)) == "진행 중"
 
 
 def test_next_dates_are_the_earliest_unfinished_round():

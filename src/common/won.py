@@ -124,9 +124,24 @@ def months_between(start: str | None, end: str | None) -> int:
 
 
 def contract_state(contract, today: date | None = None) -> str:
-    """진행 중 / 세팅중 / 종료 — 오늘과 계약기간만 비교합니다."""
+    """진행 중 / 세팅중 / 종료 — 오늘과 **플랜 기간**을 비교합니다.
+
+    계약 기간이 아닌 이유는 `plan_status` 와 같습니다(2026-08-31 운영자 지시): 계약은 먼저
+    맺고 실제 사용은 늦게 시작하는 일이 흔한데, 계약서에 도장을 찍은 날부터 「진행 중」이라고
+    적으면 아직 아무것도 안 쓰는 계약이 진행 중으로 보입니다. 고객 단위(`plan_status`)와
+    계약 한 건이 같은 기간을 보게 해서, 한 화면 안에서 두 줄이 서로 다른 말을 하지 않습니다.
+
+    **중도 해지도 여기서 따라옵니다** — `plan_period` 의 끝이 만료일과 해지일 중 빠른
+    쪽이라, 해지한 계약은 그날부터 「종료」입니다. 전에는 만료일이 올 때까지 「진행 중」이었고,
+    그건 매출 인식이 이미 멈춘 계약이었습니다.
+
+    ``plan_status`` 와 다른 점 하나: **날짜가 없으면 「진행 중」입니다.** 계약 하나를 놓고
+    보는 자리라 그게 맞습니다 — 고객 단위에서는 같은 상태가 「세팅중」(아직 채울 것이 있다)
+    입니다.
+    """
     today = today or date.today()
-    start, end = parse_date(contract.starts_on), parse_date(contract.ends_on)
+    plan_start, plan_end = plan_period(contract)
+    start, end = parse_date(plan_start), parse_date(plan_end)
     if start and start > today:
         return "세팅중"
     if end and end < today:
@@ -180,19 +195,29 @@ def plan_status(client, today: date | None = None) -> str:
 
 
 def active_contract(client, today: date | None = None):
-    """화면이 기본으로 여는 계약 — 오늘이 기간에 든 것, 없으면 가장 최근 차수."""
+    """화면이 기본으로 여는 계약 — 오늘이 **플랜 기간**에 든 것, 없으면 가장 최근 차수.
+
+    `contract_state` 와 같은 기간을 봅니다. 다른 기간으로 고르면 화면이 「진행 중」이라고
+    적힌 계약 대신 다른 차수를 열어 놓게 됩니다.
+    """
     today = today or date.today()
     for contract in client.contracts:
-        start, end = parse_date(contract.starts_on), parse_date(contract.ends_on)
+        plan_start, plan_end = plan_period(contract)
+        start, end = parse_date(plan_start), parse_date(plan_end)
         if start and end and start <= today <= end:
             return contract
     return max(client.contracts, key=lambda c: c.seq, default=None)
 
 
 def upcoming_contracts(client, today: date | None = None) -> list:
-    """아직 시작 전인 계약 = 세팅중 계약. 1차가 도는 중에 2차를 미리 등록한 경우입니다."""
+    """아직 시작 전인 계약 = 세팅중 계약. 1차가 도는 중에 2차를 미리 등록한 경우입니다.
+
+    **플랜 기간 기준**입니다 — 화면의 「세팅중 계약 n건」과 그 아래 계약 줄의 「세팅중」이
+    같은 것을 세야 합니다. 계약 시작일로 세면 계약은 시작했는데 플랜이 아직인 건이 줄에는
+    「세팅중」으로 뜨고 개수에는 안 들어갑니다.
+    """
     today = today or date.today()
-    return [c for c in client.contracts if (parse_date(c.starts_on) or date.max) > today]
+    return [c for c in client.contracts if (parse_date(plan_period(c)[0]) or date.max) > today]
 
 
 def next_credit_grant(contract):
