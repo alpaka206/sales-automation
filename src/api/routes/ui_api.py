@@ -1079,9 +1079,16 @@ def ui_won_customers():
         # 묶음을 볼지 정하고, 그 고르개가 목록도 같이 거릅니다. 「전체」도 여기서 같이 만듭니다:
         # 화면이 부서별 값을 다시 더하면 그 덧셈이 두 곳에 생깁니다.
         today_rate = fx[0] if fx else Decimal(str(app_settings.MRR_FX_RATE))
+        # **오늘 고시가로 떨어진 계약이 몇 건인가.** 환율은 계약마다 박혀 있어야 하고
+        # (`_fill_contract_fx`, 이관 0102), 비어 있는 계약만 이 값으로 환산됩니다 — 그런
+        # 계약의 USD 숫자는 **매일 달라집니다.** 0건이면 화면은 아무 말도 안 하고, 있으면
+        # 그 수를 적습니다. 조용히 떨어지는 것이 문제이지 떨어지는 것 자체가 아닙니다.
+        without_rate = 0
         for client in clients:
             buckets = (won.department(client) or "미지정", won.ALL_DEPARTMENTS)
             for contract in client.contracts:
+                if won._decimal(getattr(contract, "fx_rate", None)) is None:
+                    without_rate += 1
                 _add_series(mrr_months, buckets, months, _mrr_cells(contract, months, today_rate))
                 _add_series(cash_months, buckets, months, _cash_cells(contract, months, today_rate))
         pending = (
@@ -1138,14 +1145,17 @@ def ui_won_customers():
         "rows": rows,
         "pending": waiting,
         "boards": {"credit": credit_due, "payment": pay_due},
-        # 예상 MRR 환산에 쓰는 환율. **오늘 고시가를 가져옵니다** — 손으로 적던 칸이
-        # 있었는데, 그러면 두 사람이 다른 숫자를 보고 회의에 들어가고 그 값이 언제
-        # 것인지 아무도 모릅니다. 못 가져오면 설정값으로 떨어집니다.
-        "fx_rate": float(fx[0]) if fx else app_settings.MRR_FX_RATE,
-        "fx_on": fx[1] if fx else None,
-        "fx_source": fx[2] if fx else "설정값",
-        # 왜 못 가져왔는지. 이유가 없으면 「설정값」이 막다른 길이 됩니다 —
-        # 망 문제인지 응답이 바뀐 것인지 아무도 모르고, 매번 코드를 열어야 합니다.
+        # **환율은 계약마다 박혀 있습니다** — 이 카드가 쓰는 「적용 환율」이라는 것은
+        # 없습니다. 한동안 오늘 고시가를 한 줄로 적어 뒀는데, 계약마다 환산하도록 바뀐
+        # 뒤로 그 줄은 **아무 숫자도 설명하지 않았습니다**(2026-08-31 운영자 지적).
+        #
+        # 남는 것은 하나: 환율이 비어 있어 오늘 고시가로 떨어진 계약이 몇 건인가. 그런
+        # 계약의 USD 숫자는 매일 달라지고, 그건 화면에 보여야 합니다. 0건이면 화면은
+        # 아무 말도 안 합니다.
+        "contracts_without_rate": without_rate,
+        # 그 계약들이 어느 날 값으로 환산됐는지. 없으면 설정값으로 떨어진 것이고, 왜
+        # 못 가져왔는지가 없으면 「설정값」이 막다른 길이 됩니다.
+        "fallback_fx_on": fx[1] if fx else None,
         "fx_error": None if fx else fx_error(),
         # 「월별 MRR」과 「월 매출」, 담당부서별 · 달별 · 두 통화.
         #

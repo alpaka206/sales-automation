@@ -86,7 +86,6 @@ export function WonCustomers() {
   // 다시 환산하면 같은 숫자가 화면마다 달라집니다.
 
   const today = data?.today ?? new Date().toISOString().slice(0, 10);
-  const rate = data?.fx_rate ?? 1380;
 
   const rows = useMemo(() => {
     const all = data?.rows ?? [];
@@ -225,29 +224,30 @@ export function WonCustomers() {
                       months={months} now={data.month} />
         </div>
 
-        {/* 환율 한 줄은 **두 카드 바깥에 한 번**입니다. 카드마다 넣으면 같은 문장이 화면에
-            둘이 되고, 그러면 둘이 다른 값일 수 있는 것처럼 읽힙니다 — 실제로는 서버가
-            계약마다 그 계약의 환율로 한 번 환산한 결과이고, 이 줄은 그중 오늘 고시가를
-            쓴 곳(예상 MRR 카드의 큰 숫자)이 어느 날 값인지를 말합니다.
+        {/* 「적용 환율 1,375원/USD」 한 줄이 여기 있었습니다. **아무 숫자도 설명하지
+            않았습니다** (2026-08-31 운영자 지적): 환산은 계약마다 그 계약에 박힌 환율로
+            하므로(`client_contracts.fx_rate`), 카드 전체에 적용되는 환율이라는 것이
+            없습니다. 오늘 고시가는 환율이 **비어 있는** 계약에만 쓰입니다.
 
-            손으로 적던 칸이었습니다. 이제 오늘 고시가를 가져오므로 적을 이유가 없고,
-            적게 두면 두 사람이 다른 환율로 다른 MRR 을 봅니다. */}
-        <div className="kpi-fx">
-          <div className="fx-row">
-            적용 환율 <b>{num(Math.round(rate))}</b> 원 / USD
-            {/* 한국에서 낮에 보면 거의 항상 어제 날짜입니다 — ECB 가 유럽 오후에 하루 한 번
-                내기 때문입니다. 그래서 "오늘" 이라고 쓰지 않고 실제 고시일을 적습니다. */}
-            <span style={{ color: "var(--faint)", marginLeft: 6 }}
-                  title={data.fx_on
-                    ? "ECB 기준환율은 유럽 시간 오후에 하루 한 번 고시되어, 한국에서는 낮에 전일자 값이 보입니다."
-                    : `환율을 가져오지 못해 설정값을 씁니다. 10분 뒤 다시 시도합니다.${
-                        data.fx_error ? `
-
-마지막 실패: ${data.fx_error}` : ""}`}>
-              {data.fx_on ? `${fmt(data.fx_on)} 고시 기준` : "설정값"}
-            </span>
+            그래서 남긴 것은 그 한 가지입니다: 비어 있는 계약이 몇 건인가. 그런 계약의
+            USD 숫자는 매일 달라지고, 조용히 그러는 것이 문제입니다. 0건이면 아무것도
+            안 그립니다 — 이제 그게 정상 상태입니다. */}
+        {data.contracts_without_rate > 0 && (
+          <div className="kpi-fx">
+            <div className="fx-row">
+              환율이 없는 계약 <b>{data.contracts_without_rate}건</b>
+              <span style={{ color: "var(--faint)", marginLeft: 6 }}
+                    title={data.fallback_fx_on
+                      ? "그 계약들만 오늘 고시가로 환산합니다 — 계약을 한 번 저장하면 그 시점 환율이 박히고, 그 뒤로 숫자가 안 움직입니다."
+                      : `환율을 가져오지 못해 설정값을 씁니다. 10분 뒤 다시 시도합니다.${
+                          data.fx_error ? `\n\n마지막 실패: ${data.fx_error}` : ""}`}>
+                {data.fallback_fx_on
+                  ? `${fmt(data.fallback_fx_on)} 고시가로 환산 — 매일 달라집니다`
+                  : "설정값으로 환산"}
+              </span>
+            </div>
           </div>
-        </div>
+        )}
 
 
         <div className="board">

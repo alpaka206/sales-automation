@@ -86,10 +86,15 @@ export type ListData = {
     payment: { client_id: number; company: string; on: string; amount: Money; currency: string;
                no: number | null; total: number | null }[];
   };
-  fx_rate: number;
-  fx_on: string | null;
-  fx_source: string;
-  /** 못 가져왔을 때 왜 — 「설정값」 옆 툴팁에 그대로 적습니다. */
+  /** 환율이 비어 있어 오늘 고시가로 환산된 계약 수. **0 이 정상입니다** — 환율은 계약마다
+   *  박혀 있어야 하고(이관 0102), 비어 있는 계약의 USD 숫자는 매일 달라집니다.
+   *
+   *  「적용 환율 n원/USD」 한 줄이 여기 있었습니다. 환산이 계약마다 일어나므로 카드 전체에
+   *  적용되는 환율이라는 것이 없고, 그 줄은 아무 숫자도 설명하지 않았습니다. */
+  contracts_without_rate: number;
+  /** 그 계약들을 환산한 고시일. null 이면 설정값으로 떨어진 것입니다. */
+  fallback_fx_on: string | null;
+  /** 못 가져왔을 때 왜 — 툴팁에 그대로 적습니다. */
   fx_error: string | null;
   /** 이번 달(YYYY-MM). 카드가 「이번달」이라고 말하는 그 달입니다. */
   month: string;

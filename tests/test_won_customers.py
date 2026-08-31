@@ -2387,3 +2387,50 @@ def test_0102_backfills_the_rate_per_contract_date(factory):
     assert rates[1] == Decimal("1380.5")
     assert rates[2] == Decimal("1380.5")   # 원화 계약도 채웁니다
     assert rates[3] == Decimal("1200")     # 이미 있던 값은 안 건드립니다
+
+
+def test_the_card_says_nothing_about_a_rate_it_does_not_apply():
+    """「적용 환율 1,375원/USD」 한 줄이 카드 밑에 있었습니다. **아무 숫자도 설명하지
+    않았습니다** — 환산은 계약마다 그 계약에 박힌 환율로 하므로, 카드 전체에 적용되는
+    환율이라는 것이 없습니다 (2026-08-31 운영자 지적).
+
+    남긴 것은 하나: 환율이 **비어 있는** 계약이 몇 건인가. 그런 계약만 오늘 고시가로
+    환산되고, 그 USD 숫자는 매일 달라집니다. 0건이면 화면은 아무 말도 안 합니다.
+    """
+    import pathlib
+
+    screen = pathlib.Path("frontend/src/screens/won/WonCustomers.tsx").read_text(encoding="utf-8")
+
+    assert "적용 환율 <b>" not in screen
+    assert "{data.contracts_without_rate > 0 && (" in screen, "0건이면 안 그려야 합니다"
+    # 화면이 스스로 환산하지 않습니다 — 서버가 두 통화를 다 채워 보냅니다.
+    assert "const rate = data?.fx_rate" not in screen
+
+
+def test_the_payload_counts_the_contracts_that_fell_back(factory):
+    """조용히 오늘 환율로 떨어지는 것이 문제이지, 떨어지는 것 자체가 아닙니다."""
+    from decimal import Decimal
+    from unittest.mock import patch
+
+    from fastapi.testclient import TestClient
+
+    from src.api.main import app
+
+    with factory() as session:
+        session.add(Client(client_id=1401, company="A"))
+        session.add_all([
+            ClientContract(client_id=1401, seq=1, currency="USD", starts_on="2026-01-01",
+                           ends_on="2026-12-31", fx_rate=Decimal("1380")),
+            ClientContract(client_id=1401, seq=2, currency="KRW", starts_on="2026-01-01",
+                           ends_on="2026-12-31"),
+        ])
+        session.commit()
+
+    with patch("src.db.session.SessionLocal", factory),          patch("src.integrations.fx.usd_krw_today",
+               return_value=(Decimal("1400"), "2026-08-28", "ecb")),          TestClient(app) as client:
+        payload = client.get("/api/ui/won-customers").json()
+
+    assert payload["contracts_without_rate"] == 1
+    assert payload["fallback_fx_on"] == "2026-08-28"
+    # 카드 전체에 적용되는 환율이라는 것은 이제 없습니다.
+    assert "fx_rate" not in payload and "fx_source" not in payload
