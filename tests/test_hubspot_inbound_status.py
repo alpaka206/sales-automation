@@ -169,7 +169,9 @@ async def test_send_bookkeeping_sets_meeting_link_sent(mock_hs_cls, mock_progres
     contact.hubspot_contact_id = "hs-500"
     profile = MagicMock(spec=CustomerProfile)
     session.get.side_effect = lambda model, _id: contact if model is Contact else profile
-    conv = MagicMock(id=2, contact_id=500, hubspot_ticket_id=None)
+    # 실제 호출부는 `conv.stage` 를 먼저 올리고 부릅니다 — 미러링은 그때만 돕니다.
+    conv = MagicMock(id=2, contact_id=500, hubspot_ticket_id=None,
+                     stage="meeting_link_sent")
     msg = MagicMock(subject="Meeting")
     client = mock_hs_cls.return_value
     client.update_inbound_status = AsyncMock()
@@ -195,7 +197,8 @@ async def test_send_bookkeeping_ignores_hubspot_status_failure(mock_hs_cls, _pro
     contact.hubspot_contact_id = "hs-501"
     profile = MagicMock(spec=CustomerProfile)
     session.get.side_effect = lambda model, _id: contact if model is Contact else profile
-    conv = MagicMock(id=3, contact_id=501, hubspot_ticket_id=None)
+    conv = MagicMock(id=3, contact_id=501, hubspot_ticket_id=None,
+                     stage="meeting_link_sent")
     client = mock_hs_cls.return_value
     client.update_inbound_status = AsyncMock(side_effect=RuntimeError("prop missing"))
     client.close = AsyncMock()
@@ -203,3 +206,38 @@ async def test_send_bookkeeping_ignores_hubspot_status_failure(mock_hs_cls, _pro
     await _post_send_bookkeeping(session, MagicMock(subject="Reply"), conv, 11)
 
     assert profile.pipeline_stage == "meeting_link_sent"
+
+
+@pytest.mark.asyncio
+@patch.object(settings, "HUBSPOT_UPDATE_CONTACT_INBOUND_STATUS", True)
+@patch("src.agents.send_worker.add_progress")
+@patch("src.integrations.hubspot.move_ticket_stage_after_send")
+@patch("src.integrations.hubspot.HubSpotClient")
+async def test_a_reply_on_a_negotiating_ticket_does_not_drag_the_stage_back(
+    mock_hs_cls, mock_move, _progress
+) -> None:
+    """**후속 회신이 협상 건을 Qualified 로 되돌리면 안 됩니다** (2026-08-31).
+
+    `_send_one` 은 `conv.stage` 를 앞으로만 올리는데(`_ADVANCES_FROM`), 여기 미러링 셋은
+    그 조건을 안 보고 언제나 `meeting_link_sent` 를 썼습니다. 자동 초안이 New 티켓에만
+    생기던 동안에는 드러나지 않았지만, 운영자가 직접 쓰는 후속 회신이 생기면 협상·수주
+    티켓에 한 통 보낼 때마다 허브스팟 티켓이 뒤로 끌려갑니다.
+    """
+    from src.agents.send_worker import _post_send_bookkeeping
+
+    session = MagicMock()
+    contact = MagicMock(spec=Contact)
+    contact.hubspot_contact_id = "hs-502"
+    profile = MagicMock(spec=CustomerProfile)
+    profile.pipeline_stage = "negotiation"
+    session.get.side_effect = lambda model, _id: contact if model is Contact else profile
+    conv = MagicMock(id=4, contact_id=502, hubspot_ticket_id="T-9", stage="negotiation")
+    client = mock_hs_cls.return_value
+    client.update_inbound_status = AsyncMock()
+    client.close = AsyncMock()
+
+    await _post_send_bookkeeping(session, MagicMock(subject="후속"), conv, 12)
+
+    mock_move.assert_not_called()
+    client.update_inbound_status.assert_not_awaited()
+    assert profile.pipeline_stage == "negotiation"

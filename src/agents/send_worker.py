@@ -111,8 +111,21 @@ async def _post_send_bookkeeping(session, msg, conv, message_id: int) -> None:
     from ..integrations.hubspot import move_ticket_stage_after_send
 
     errors: list[str] = []
+    # **이번 발송이 실제로 단계를 옮겼을 때만 미러링합니다** (2026-08-31).
+    #
+    # `_send_one` 은 `conv.stage` 를 `_ADVANCES_FROM` 으로 걸러 올리는데(협상·수주 건은
+    # 그대로 둡니다), 아래 셋 — 허브스팟 티켓 단계 · 연락처 상태 · 프로필과 워크북 — 은
+    # 그 조건을 안 보고 언제나 `meeting_link_sent` 를 썼습니다. 자동 초안은 New 티켓에만
+    # 생겨서 지금까지 드러나지 않았을 뿐입니다. **후속 회신이 생기는 순간 이건 사고입니다**:
+    # 협상 중인 티켓에 한 통 보내면 허브스팟 티켓이 Qualified 로 되돌아가고, 다음 스윕이
+    # 그 값을 우리 쪽으로 다시 가져옵니다.
+    #
+    # 위에서 이미 올렸으므로 지금 `meeting_link_sent` 라는 것이 곧 「올렸다」입니다.
+    advanced = bool(conv and conv.stage == "meeting_link_sent")
     ticket_id = conv.hubspot_ticket_id if conv else None
-    if ticket_id and not await asyncio.to_thread(move_ticket_stage_after_send, ticket_id):
+    if advanced and ticket_id and not await asyncio.to_thread(
+        move_ticket_stage_after_send, ticket_id
+    ):
         errors.append("hubspot_ticket_stage")
 
     hubspot_contact_id = None
@@ -120,7 +133,7 @@ async def _post_send_bookkeeping(session, msg, conv, message_id: int) -> None:
     if conv and conv.contact_id:
         contact = session.get(Contact, conv.contact_id)
         hubspot_contact_id = contact.hubspot_contact_id if contact else None
-    if hubspot_contact_id and settings.HUBSPOT_UPDATE_CONTACT_INBOUND_STATUS:
+    if advanced and hubspot_contact_id and settings.HUBSPOT_UPDATE_CONTACT_INBOUND_STATUS:
         client = None
         try:
             client = HubSpotClient()
@@ -139,24 +152,25 @@ async def _post_send_bookkeeping(session, msg, conv, message_id: int) -> None:
                 await client.close()
 
     if conv:
-        profile = session.get(CustomerProfile, conv.contact_id)
-        if profile:
-            profile.pipeline_stage = "meeting_link_sent"
-        sheet_client_id = conv.sheet_client_id or (contact.sheet_client_id if contact else None)
-        if not sheets_configured():
-            errors.append("google_sheets:not_configured")
-        elif not isinstance(sheet_client_id, int) or sheet_client_id <= 0:
-            errors.append("google_sheets:missing_client_id")
-        else:
-            sheet_ok = await asyncio.to_thread(
-                update_inbound_stage,
-                sheet_client_id,
-                "meeting_link_sent",
-                profile.qualification if profile else None,
-                conv.sheet_inquiry_key,
-            )
-            if not sheet_ok:
-                errors.append("google_sheets_stage")
+        if advanced:
+            profile = session.get(CustomerProfile, conv.contact_id)
+            if profile:
+                profile.pipeline_stage = "meeting_link_sent"
+            sheet_client_id = conv.sheet_client_id or (contact.sheet_client_id if contact else None)
+            if not sheets_configured():
+                errors.append("google_sheets:not_configured")
+            elif not isinstance(sheet_client_id, int) or sheet_client_id <= 0:
+                errors.append("google_sheets:missing_client_id")
+            else:
+                sheet_ok = await asyncio.to_thread(
+                    update_inbound_stage,
+                    sheet_client_id,
+                    "meeting_link_sent",
+                    profile.qualification if profile else None,
+                    conv.sheet_inquiry_key,
+                )
+                if not sheet_ok:
+                    errors.append("google_sheets_stage")
 
         now = datetime.now(timezone.utc)
         previous_attempts = msg.post_send_sync_attempts

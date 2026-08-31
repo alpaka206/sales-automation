@@ -26,6 +26,10 @@ WEB_UI_PREFIXES = (
     # 수주 고객. 화면이 세션 쿠키로 부르는 브라우저 경로입니다 — 여기 없으면 토큰을
     # 요구해서, 로그인한 운영자가 "invalid or missing token" 을 받습니다.
     "/won-customers",
+    # 티켓 화면이 후속 회신을 시작할 때 부르는 경로(`POST /tickets/{id}/reply`). 같은
+    # 이유로 여기 있습니다 — 없으면 로그인한 운영자가 "invalid or missing token" 을
+    # 받고, 화면에는 저장 실패로만 보입니다.
+    "/tickets",
     # The React screens: served from /app, reading /api/ui with the operator's
     # session cookie. Browser paths, not token-authenticated JSON API routes.
     "/app", "/api/ui",

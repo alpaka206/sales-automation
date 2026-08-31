@@ -260,3 +260,28 @@ def test_a_korean_inquiry_offers_no_original_view() -> None:
     assert needs_ko("We need dubbing for 600 minutes.", "Custom Quote") is True
     assert needs_ko("", "Custom Quote") is True
     assert needs_ko("", "맞춤 견적 문의") is False
+
+
+def test_a_hand_written_follow_up_shows_even_on_a_later_stage(db_session_factory, monkeypatch):
+    """**수동 후속 회신은 「New 만」 규칙의 예외입니다** (2026-08-31).
+
+    위 규칙의 뜻은 「자동 초안은 New 에서만 생기므로, 그 뒤 단계에 남은 대기 초안은 이미
+    늦은 것」입니다. 운영자가 협상 중인 티켓에 직접 쓴 회신은 늦은 것이 아니라 지금 하는
+    일이고, 걸러 내면 쓰다 만 초안을 다시 찾을 길이 그 티켓 화면 하나뿐입니다.
+    """
+    monkeypatch.setattr(messages_route, "SessionLocal", db_session_factory)
+    with db_session_factory() as session:
+        contact = Contact(normalized_email="nego@example.com", email="nego@example.com",
+                          full_name="협상 중")
+        session.add(contact)
+        session.flush()
+        conv = Conversation(contact_id=contact.id, stage="negotiation",
+                            inquiry_subject="협상 문의", last_incoming_at=_naive_utc(days=1))
+        session.add(conv)
+        session.flush()
+        session.add(Message(conversation_id=conv.id, direction="outgoing",
+                            subject="RE: 협상 문의", body="직접 쓴 글",
+                            status="pending_approval", prompt_variant="manual"))
+        session.commit()
+
+    assert _emails(status="awaiting") == {"nego@example.com"}

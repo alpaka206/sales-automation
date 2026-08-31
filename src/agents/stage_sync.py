@@ -258,6 +258,11 @@ def _delete_pending_drafts(session, conversation_id: int, *, why: str) -> int:
             Message.conversation_id == conversation_id,
             Message.direction == "outgoing",
             Message.status.in_(_SUPERSEDABLE),
+            # **운영자가 직접 쓴 후속 회신은 지우지 않습니다** (2026-08-31). 이 청소가
+            # 뜻하는 것은 「단계가 넘어갔으니 그때 만든 자동 초안은 이미 늦었다」인데,
+            # 수동 회신은 바로 그 단계에서 일부러 쓰는 글입니다 — 쓰는 도중에 스윕이
+            # 한 번 돌면 그대로 사라집니다.
+            (Message.prompt_variant.is_(None)) | (Message.prompt_variant != "manual"),
             # 접수확인은 초안이 아닙니다. 사람이 검토하는 회신이 아니라 문의를 받았다는
             # 자동 응답이고, ``approved`` 로 발송 큐에 들어가 있습니다 — 여기서 걸러 내지
             # 않으면 단계 한 번 옮기는 것이 아직 안 나간 고객 접수확인을 취소합니다.

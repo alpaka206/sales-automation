@@ -105,6 +105,11 @@ def approve(
                 f"Message {message_id} is {pending.status}, not pending_approval."
             )
         candidate_body = edited_body if edited_body is not None else pending.body
+        # **빈 글은 못 나갑니다.** 수동 후속 회신은 본문 없이 만들어지고(운영자가 검토
+        # 화면에서 씁니다), 그 상태로 발송을 누르면 고객에게 빈 메일이 갑니다. 자동 초안은
+        # 여기 걸릴 일이 없습니다.
+        if not (candidate_body or "").strip():
+            raise ApprovalError("본문이 비어 있습니다.")
         if translation_required(pending, candidate_body):
             raise ApprovalError(
                 "외국어 문의는 번역하기를 완료하고 번역문을 검토한 뒤 발송할 수 있습니다."
@@ -208,7 +213,12 @@ def mark_sent(message_id: int) -> None:
             msg.status = "sent"
             msg.sent_at = datetime.now(timezone.utc)
             conv = session.get(Conversation, msg.conversation_id) if msg.conversation_id else None
-            ticket_id = conv.hubspot_ticket_id if conv else None
+            # **앞으로만 갑니다** — 워커 경로(`send_worker._ADVANCES_FROM`)와 같은 규칙입니다.
+            # 협상·수주 건에 후속 회신을 보냈다고 티켓을 Qualified 로 되돌리면 안 됩니다.
+            from .send_worker import _ADVANCES_FROM
+
+            if conv and conv.stage in _ADVANCES_FROM:
+                ticket_id = conv.hubspot_ticket_id
             session.commit()
 
     if ticket_id:

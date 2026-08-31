@@ -14,7 +14,7 @@ from sqlalchemy.orm import joinedload
 
 from ...agents.approval import ApprovalError, approve, reject
 from ...common.config import settings
-from ...common.subjects import strip_reply_prefixes
+from ...common.subjects import reply_subject, strip_reply_prefixes
 from ...common.textwash import text_wash
 from ...db.conversation_history import ROUTINE_PROGRESS_KINDS, add_progress
 from ...common.inquiry import CATEGORY_LABELS, UNQUALIFIED, category_label, is_unqualified
@@ -561,7 +561,14 @@ def _messages_list_context(
         # it in HubSpot while ours sat here. Showing it asks the operator to send a reply
         # the customer already has. LIST_STAGES said "New only"; it only ever constrained
         # the chip, never the query, so the rows leaked in anyway.
-        q = q.where(Conversation.stage.in_(LIST_STAGES["awaiting"]))
+        # **수동 후속 회신은 예외입니다** (2026-08-31). 위 규칙은 「자동 초안은 New 에서만
+        # 생기므로 그 뒤 단계에 남은 대기 초안은 이미 늦은 것」이라는 뜻인데, 운영자가
+        # 협상 중인 티켓에 직접 쓴 회신은 늦은 것이 아니라 지금 하는 일입니다. 걸러 내면
+        # 쓰다 만 초안을 다시 찾을 길이 그 티켓 화면밖에 없습니다.
+        q = q.where(
+            (Conversation.stage.in_(LIST_STAGES["awaiting"]))
+            | (Message.prompt_variant == MANUAL_REPLY_VARIANT)
+        )
     # Sort by the column the 접수 시간 cell actually shows, not by our draft's
     # created_at — otherwise "오래된 순" produces a visibly unsorted date column.
     order_column = (
@@ -873,6 +880,87 @@ async def message_edit(
 
 
 _MAX_ROLE_DESC_LEN = 4000
+
+
+# 운영자가 직접 쓴 후속 회신. 자동 초안과 한 표에 살지만 출처가 다르고, 그 차이를 이 한
+# 글자가 나릅니다 — `stage_sync` 의 초안 청소가 이것만 비켜 가고, 아래 목록이 New 가 아닌
+# 티켓의 이것만 통과시킵니다.
+MANUAL_REPLY_VARIANT = "manual"
+
+# 아직 나가지 않은 회신. 하나라도 열려 있으면 새로 만들지 않고 그것을 엽니다 — 같은 티켓에
+# 초안이 둘이면 어느 것이 나갈지 화면만 봐서는 알 수 없습니다.
+_OPEN_DRAFT_STATUSES = ("drafting", "pending_approval", "approved", "send_failed")
+
+
+@router.post("/tickets/{conversation_id}/reply")
+async def start_manual_reply(
+    conversation_id: int,
+    subject: str = Form(""),
+    body: str = Form(""),
+):
+    """후속 회신 한 통을 **모델 없이** 만듭니다 — 본문은 운영자가 씁니다.
+
+    자동 초안은 New 티켓에만 생기고(`inbound.handle` 의 `skipped_not_new`), 한 번 회신이
+    나간 대화에는 다시 생기지 않습니다(`skipped_reply_exists`). 그래서 그 뒤의 대화는 전부
+    허브스팟에서 사람이 했고, 우리 화면에는 무엇이 오갔는지가 남지 않았습니다.
+
+    만들어진 뒤는 자동 초안과 **완전히 같은 길**입니다 — 편집·번역·승인·발송·거절 라우트를
+    그대로 쓰고, 그래서 발송 관문(언어·수신자·safe mode)도 그대로 걸립니다. 여기서 하는 일은
+    빈 초안 한 줄을 세우는 것뿐이라 모델을 부르지 않습니다.
+    """
+    with SessionLocal() as session:
+        conv = session.get(Conversation, conversation_id)
+        if conv is None:
+            return JSONResponse({"detail": "티켓을 찾을 수 없습니다"}, status_code=404)
+        # 발송 경로가 티켓 스레드 회신 하나뿐이라(CLAUDE.md), 티켓이 없으면 보낼 길이
+        # 없습니다. 여기서 막지 않으면 운영자가 다 쓰고 발송을 누른 뒤에야 알게 됩니다.
+        if not (conv.hubspot_ticket_id or "").strip():
+            return JSONResponse(
+                {"detail": "허브스팟 티켓이 없는 문의라 회신을 보낼 길이 없습니다"},
+                status_code=400,
+            )
+        contact = session.get(Contact, conv.contact_id) if conv.contact_id else None
+        to_address = (getattr(contact, "email", "") or "").strip()
+        if not to_address:
+            return JSONResponse(
+                {"detail": "이 연락처에는 이메일 주소가 없습니다"}, status_code=400
+            )
+
+        open_draft = (
+            session.query(Message)
+            .filter(
+                Message.conversation_id == conv.id,
+                Message.direction == "outgoing",
+                Message.status.in_(_OPEN_DRAFT_STATUSES),
+            )
+            .order_by(Message.id.desc())
+            .first()
+        )
+        if open_draft is not None:
+            return {"message_id": open_draft.id, "created": False}
+
+        # 나갈 언어는 문의가 정합니다 — 자동 초안과 같은 규칙입니다. `language` 를 같은
+        # 값으로 두면, 운영자가 그 언어로 쓰는 한 번역 관문이 뜨지 않고 한국어로 쓰면 뜹니다
+        # (`approval.translation_required`).
+        target = ((conv.inquiry_language or "ko").strip().lower()) or "ko"
+        msg = Message(
+            conversation_id=conv.id,
+            direction="outgoing",
+            channel="email",
+            to_address=to_address,
+            subject=subject.strip()
+            or reply_subject(conv.inquiry_subject, target_code=target),
+            body=body.strip(),
+            language=target,
+            target_language=target,
+            status="pending_approval",
+            prompt_variant=MANUAL_REPLY_VARIANT,
+        )
+        session.add(msg)
+        session.commit()
+        # 진행 기록은 남기지 않습니다 — 초안을 만든 것은 우리 안의 사정이고, 실제로 나가면
+        # 발송 경로가 「답변 발송 완료」를 적습니다(`send_worker._post_send_bookkeeping`).
+        return {"message_id": msg.id, "created": True}
 
 
 @router.post("/contacts/history-digest")

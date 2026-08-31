@@ -464,9 +464,28 @@ class HubSpotClient:
                 timestamp = str(message.get("createdAt") or "")
                 candidates.append((timestamp, thread_id, channel_id, account_id))
 
-        if candidates:
-            _timestamp, thread_id, channel_id, account_id = max(candidates)
-            await self._email_channel_account(account_id)
+        # **없어진 채널 계정을 만나면 다음 후보로 넘어갑니다** (2026-08-31).
+        #
+        # 스레드에 남은 옛 메시지가 지금은 존재하지 않는 채널 계정을 가리키는 일이 흔합니다 —
+        # 담당자가 바뀌면서 연결이 끊긴 개인 메일함이 그렇습니다. 예전에는 **가장 최근 후보
+        # 하나만** 검증했고, 그 조회가 404 면 `_lookup_error` 가 영구 실패를 던져 아래 폴백에
+        # 닿지도 못했습니다. 운영 티켓 329건에 이 규칙을 그대로 돌려 보면 **211건이 그
+        # 상태**였습니다(won 2 · negotiation 1 포함) — 발송을 누르는 순간
+        # 「channel-account lookup failed (HTTP 404)」로 죽습니다.
+        #
+        # 후보는 각자 자기 스레드를 들고 있으므로, 넘어가도 인박스를 넘나들지 않습니다.
+        for _timestamp, thread_id, channel_id, account_id in sorted(candidates, reverse=True):
+            try:
+                await self._email_channel_account(account_id)
+            except DeliveryPermanentError as exc:
+                # 일시 오류(429·5xx·네트워크)는 여기서 안 잡습니다 — 그건 「이 계정이
+                # 못 쓴다」가 아니라 「지금 못 물어봤다」라서, 넘어가면 멀쩡한 계정을
+                # 두고 엉뚱한 주소로 나갑니다.
+                logger.warning(
+                    "채널 계정 %s 는 쓸 수 없어 다음 후보로 넘어갑니다 (ticket=%s): %s",
+                    account_id, ticket_id, exc,
+                )
+                continue
             return ConversationReplyContext(thread_id, channel_id, account_id)
 
         # A brand-new form thread has no email message to copy yet. Use the configured

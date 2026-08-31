@@ -745,3 +745,26 @@ def test_a_ticket_renamed_in_hubspot_renames_our_inquiry(monkeypatch):
         # 이미 나간 메일의 제목은 그대로다.
         sent = session.query(Message).filter_by(conversation_id=conv_id).one()
         assert sent.subject == "RE: 옛 이름"
+
+
+def test_a_hand_written_follow_up_survives_the_purge(db, stages):
+    """**운영자가 직접 쓴 후속 회신은 청소가 비켜 갑니다** (2026-08-31).
+
+    이 청소의 뜻은 「단계가 넘어갔으니 그때 만들어진 자동 초안은 이미 늦었다」입니다. 그런데
+    수동 회신은 바로 그 넘어간 단계에서 일부러 쓰는 글이라, 같이 지우면 쓰는 도중에 2분
+    스윕이 한 번 도는 것만으로 사라집니다 — 그리고 화면에는 아무 말도 안 남습니다.
+    """
+    from src.db.models import Message
+
+    auto_id = _draft(db)
+    manual_id = _draft(db, variant="manual")
+
+    with db() as session:
+        conv = session.query(Conversation).filter_by(hubspot_ticket_id=TICKET).one()
+        # 자동 초안 하나만 셉니다 — 수동 회신은 「밀린 초안」이 아닙니다.
+        assert stage_sync._retire_superseded_drafts(session, conv.id, "negotiation") == 1
+        session.commit()
+
+    with db() as session:
+        assert session.get(Message, auto_id) is None
+        assert session.get(Message, manual_id).status == "pending_approval"

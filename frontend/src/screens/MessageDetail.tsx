@@ -1,6 +1,6 @@
 import { useLayoutEffect, useState, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { getJSON, postForm } from "../lib/api";
 import { kst } from "../lib/format";
 import { Icon } from "../ui/Icon";
@@ -155,6 +155,7 @@ export function MessageDetail() {
   // `/tickets/:conversationId` 는 보드 카드에서 **티켓**을 열 때 — 뒤엣것은 메일이 하나도
   // 없는 티켓(HubSpot 에서 들여온 것)도 엽니다. 질의 키가 둘을 가릅니다.
   const { id, conversationId } = useParams();
+  const navigate = useNavigate();
   const key = conversationId ? ["ticket", conversationId] : ["message", id];
   const path = conversationId ? `/api/ui/tickets/${conversationId}` : `/api/ui/messages/${id}`;
   const queryClient = useQueryClient();
@@ -376,6 +377,24 @@ export function MessageDetail() {
     }
   }
 
+  /** New 를 지난 티켓에 **직접 쓰는** 후속 회신. 모델을 부르지 않습니다.
+   *
+   *  자동 초안은 New 티켓에만 생기고 한 번 나가면 다시 안 생깁니다. 그 뒤의 대화는 지금까지
+   *  전부 허브스팟에서 이뤄졌고, 그래서 이 화면에는 무엇이 오갔는지가 남지 않았습니다.
+   *  서버가 빈 초안을 세우고(`POST /tickets/{id}/reply`), 그 글로 옮겨 가면 이미 있는
+   *  편집기가 그대로 열립니다 — 편집·번역·승인·발송은 자동 초안과 같은 길입니다. */
+  async function startReply() {
+    if (!ticket.id) return;
+    setNote("");
+    try {
+      const created = await postForm(`/tickets/${ticket.id}/reply`, {}).then((r) => r.json());
+      await queryClient.invalidateQueries({ queryKey: key });
+      navigate(`/messages/${created.message_id}`);
+    } catch (error) {
+      setNote(`실패: ${String(error)}`);
+    }
+  }
+
   // 되는 동안의 상태는 누른 버튼이 말합니다(ActionButton). 여기 남는 것은 결과뿐입니다 —
   // 진행 표시가 버튼과 다른 자리에 있으면 눌린 건지 몰라 한 번 더 누르게 됩니다.
   async function act(action: string, extra: Record<string, string> = {}) {
@@ -503,6 +522,21 @@ export function MessageDetail() {
 
       <div className="split">
         <div className="stack">
+          {/* **New 를 지난 티켓에서 답을 보내는 유일한 자리입니다.** 초안이 열려 있으면
+              안 그립니다 — 그때는 위에 편집기가 이미 있고, 티켓 하나에 초안이 둘이면
+              어느 것이 나갈지 화면만 봐서는 알 수 없습니다. */}
+          {afterNew && !isDraftOpen && ticket.id && ticket.ticket_id && (
+            <div className="empty">
+              <div className="empty__text">
+                이 티켓의 다음 답변을 여기서 쓸 수 있습니다. 초안은 만들지 않습니다 —
+                직접 쓰고, 검토·발송은 지금까지와 같은 길로 나갑니다.
+              </div>
+              <ActionButton className="btn btn--subtle btn--sm" style={{ marginTop: 10 }}
+                            pending="여는 중" onClick={startReply}>
+                회신 작성
+              </ActionButton>
+            </div>
+          )}
           {!afterNew && data.thread.length === 0 && (
             <div className="empty">
               <div className="empty__text">
