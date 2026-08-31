@@ -474,3 +474,44 @@ class TestRemoveInboundAutoAck:
         assert "ux_messages_one_auto_ack_per_conversation" not in {
             row["name"] for row in inspect(mem_engine).get_indexes("messages")
         }
+
+
+class Test0103ContactMovesToTheContract:
+    """담당자는 고객이 아니라 **계약**의 것입니다 (2026-08-31 운영자 지시).
+
+    옮기지 복사하지 않습니다 — 두 자리에 두면 콘솔이 계약 쪽을 쓰기 시작한 날부터 고객
+    쪽은 낡은 값이고, 어느 쪽이 맞는지 화면만 봐서는 알 수 없습니다.
+    """
+
+    MODULE = "src.db.migrations.0103_the_contact_belongs_to_the_contract"
+
+    def test_skips_when_the_table_does_not_exist(self, mem_engine):
+        importlib.import_module(self.MODULE).up(mem_engine)
+
+    def test_moves_the_value_onto_every_contract_and_drops_the_old_column(self, mem_engine):
+        with mem_engine.begin() as conn:
+            conn.execute(text(
+                "CREATE TABLE clients (client_id INTEGER PRIMARY KEY, company VARCHAR(255), "
+                "contact_name VARCHAR(120), contact_info VARCHAR(255))"
+            ))
+            conn.execute(text(
+                "CREATE TABLE client_contracts (id INTEGER PRIMARY KEY, client_id INTEGER, seq INTEGER)"
+            ))
+            conn.execute(text(
+                "INSERT INTO clients VALUES (2094, 'A', '박지훈', 'jh@a.kr'), (2095, 'B', NULL, NULL)"
+            ))
+            conn.execute(text(
+                "INSERT INTO client_contracts VALUES (1, 2094, 1), (2, 2094, 2), (3, 2095, 1)"
+            ))
+
+        migration = importlib.import_module(self.MODULE)
+        migration.up(mem_engine)
+        migration.up(mem_engine)   # 두 번 돌려도 같아야 합니다.
+
+        with mem_engine.connect() as conn:
+            rows = conn.execute(text(
+                "SELECT id, contact_name, contact_info FROM client_contracts ORDER BY id"
+            )).all()
+        # 같은 고객의 계약이 둘이면 둘 다 그 값에서 시작하고, 그 뒤로는 따로 움직입니다.
+        assert rows == [(1, "박지훈", "jh@a.kr"), (2, "박지훈", "jh@a.kr"), (3, None, None)]
+        assert "contact_name" not in {c["name"] for c in inspect(mem_engine).get_columns("clients")}

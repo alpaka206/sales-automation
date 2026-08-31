@@ -36,6 +36,8 @@ const empty = {
   fx_rate: "", terminated_on: "", credits_used: "",
   payment_method: "계좌이체", payment_type: "일시불", installments: "1",
   first_payment_on: "", billing_email: "", note: "",
+  // 고객사 측 담당자·연락처. 계약마다 다를 수 있어 고객이 아니라 계약이 듭니다(0103).
+  contact_name: "", contact_info: "",
   plan: "Business Tier 1", plan_name: "", perso_email: "",
   invite_limit: "", queue_limit: "", concurrent_jobs: "", space_count: "", space_seq: "",
   revenue_from: "",
@@ -387,6 +389,20 @@ export function WonContractForm() {
                      onChange={(e) => set("ticket_id", e.target.value)}
                      placeholder="인바운드 건은 자동 연동 · 그 외 직접 입력" />
             </Field>
+            {/* **고객마다가 아니라 계약마다입니다**(2026-08-31 운영자 지시). 고객 기본
+                정보에 한 벌만 있던 시절에는 두 번째 계약을 맺는 순간 첫 계약의 담당자가
+                덮여 사라졌고, 그것이 화면에서는 「담당자가 바뀌었다」와 같아 보였습니다.
+                재계약이면 직전 계약에서 물려받습니다 — 대개 같은 사람입니다. */}
+            <Field label="고객 담당자">
+              <input className="inp" value={draft.contact_name}
+                     onChange={(e) => set("contact_name", e.target.value)}
+                     placeholder="예: 박지훈 팀장" />
+            </Field>
+            <Field label="고객 연락처">
+              <input className="inp" value={draft.contact_info}
+                     onChange={(e) => set("contact_info", e.target.value)}
+                     placeholder="이메일 또는 전화번호" />
+            </Field>
             {/* 목업대로 손으로 적는 칸입니다. 계약서에 적히는 것이 금액과 크레딧이고,
                 분당 단가가 그 둘에서 나옵니다 — 한동안 반대로 두었는데, 그러면 반올림한
                 단가로 계산한 크레딧이 계약서의 크레딧과 어긋났습니다. */}
@@ -652,6 +668,7 @@ function carryOver(prev: Contract) {
     vat_included: prev.vat_included ? "1" : "",
     payment_method: str(prev.payment_method), payment_type: str(prev.payment_type),
     installments: str(prev.installments ?? 1), billing_email: str(prev.billing_email),
+    contact_name: str(prev.contact_name), contact_info: str(prev.contact_info),
     plan: str(prev.plan), plan_name: str(prev.plan_name), perso_email: str(prev.perso_email),
     invite_limit: str(prev.invite_limit), queue_limit: str(prev.queue_limit),
     concurrent_jobs: str(prev.concurrent_jobs), space_count: str(prev.space_count),
@@ -675,6 +692,7 @@ function fromContract(contract: Contract): Draft {
     payment_method: str(contract.payment_method), payment_type: str(contract.payment_type),
     installments: str(contract.installments ?? 1), first_payment_on: str(contract.first_payment_on),
     billing_email: str(contract.billing_email), note: str(contract.note),
+    contact_name: str(contract.contact_name), contact_info: str(contract.contact_info),
     plan: str(contract.plan), plan_name: str(contract.plan_name), perso_email: str(contract.perso_email),
     invite_limit: str(contract.invite_limit), queue_limit: str(contract.queue_limit),
     concurrent_jobs: str(contract.concurrent_jobs), space_count: str(contract.space_count),

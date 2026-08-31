@@ -26,7 +26,7 @@ const SECTIONS: [string, string][] = [
   ["sec-plan", "Perso 계정 · 플랜"],
   ["sec-credit", "크레딧 지급"],
   ["sec-pay", "결제 현황"],
-  ["sec-revenue", "매출 관리"],
+  ["sec-revenue", "MRR 관리"],
   ["sec-comm", "소통 히스토리"],
 ];
 
@@ -382,8 +382,6 @@ function BasicSection({ client, contracts, options, onDone }: {
     industry: client.industry ?? "",
     country: client.country ?? "",
     department: client.department ?? "",
-    contact_name: client.contact_name ?? "",
-    contact_info: client.contact_info ?? "",
     first_won_on: client.first_won_on ?? "",
     owner: client.owner ?? "",
   });
@@ -404,7 +402,6 @@ function BasicSection({ client, contracts, options, onDone }: {
   // 밖의 숫자가 조용히 달라집니다. 바뀐 것이 없으면 물을 것도 없어 바로 닫습니다.
   const LABELS: Record<keyof typeof form, string> = {
     company: "고객사", industry: "산업 분야", country: "국가", department: "담당부서",
-    contact_name: "고객 담당자", contact_info: "고객 연락처",
     first_won_on: "최초 수주일", owner: "담당",
   };
   const changed = (Object.keys(form) as (keyof typeof form)[])
@@ -439,8 +436,6 @@ function BasicSection({ client, contracts, options, onDone }: {
               : <span className="muted">연동 없음</span>
           } />
           <KV k="담당" v={client.owner} />
-          <KV k="고객 담당자" v={client.contact_name} />
-          <KV k="고객 연락처" v={client.contact_info} />
           <KV k="최초 수주일" v={<span className="mono">{fmt(client.first_won_on)}</span>} />
           <KV k="플랜 상태" v={<Tag tone={statusTone(client.plan_status)}>{client.plan_status}</Tag>} />
         </div>
@@ -483,14 +478,6 @@ function BasicSection({ client, contracts, options, onDone }: {
         <div>
           <label className="form-label">고객 종류</label>
           <div className="field-value">{client.customer_type} <span className="muted">(번호대에서 파생)</span></div>
-        </div>
-        <div>
-          <label className="form-label">고객 담당자</label>
-          <input className="inp" value={form.contact_name} onChange={(e) => set("contact_name", e.target.value)} />
-        </div>
-        <div>
-          <label className="form-label">고객 연락처</label>
-          <input className="inp" value={form.contact_info} onChange={(e) => set("contact_info", e.target.value)} />
         </div>
         <div>
           <label className="form-label">최초 수주일</label>
@@ -667,6 +654,11 @@ function ContractSection({ client, contracts, current, today, showAll, onToggleA
           </>} />
           <KV k="최초 결제일" v={<span className="mono">{fmt(current.first_payment_on)}</span>} />
           <KV k="Billing Email" v={current.billing_email} />
+          {/* **계약마다 다를 수 있어 여기 있습니다**(2026-08-31 운영자 지시). 고객 기본
+              정보에 한 벌만 두던 시절에는 두 번째 계약의 담당자가 첫 계약의 담당자를
+              덮었습니다 — 그리고 그것이 화면에서는 「담당자가 바뀌었다」와 같아 보였습니다. */}
+          <KV k="고객 담당자" v={current.contact_name} />
+          <KV k="고객 연락처" v={current.contact_info} />
           <KV k="계약 비고" span={2} v={current.note} />
         </div>
       </div>
@@ -1113,7 +1105,7 @@ function PayRow({ payment, currency, today, onAsk, onSave }: {
    (`WonCustomers.tsx` 의 sec-credit·sec-pay) 번호를 당겨도 어긋나는 자리가 없습니다.
    갱신 계획은 워크북의 열로만 남습니다 — 시트는 운영자의 것이라 콘솔이 안 건드립니다. */
 
-/** 6 매출 관리. 막대는 인식 시작월부터 최대 12개월 — 지난 달은 채워집니다. */
+/** 6 MRR 관리. 막대는 인식 시작월부터 최대 12개월 — 지난 달은 채워집니다. */
 function RevenueSection({ contract, today }: { contract: Contract; today: string }) {
   const mrr = contract.deal_type === "MRR";
   const months = contract.months || 1;
@@ -1130,16 +1122,16 @@ function RevenueSection({ contract, today }: { contract: Contract; today: string
       }));
 
   return (
-    <Section num={6} id="sec-revenue" title="매출 관리">
+    <Section num={6} id="sec-revenue" title="MRR 관리">
       <div className="field-grid">
         <KV k="계약 종류" v={<Tag tone={mrr ? "d-mrr" : "d-poc"}>{contract.deal_type}</Tag>} />
         <KV k="총 계약 금액 (VAT 포함)"
             v={<span className="mono">{money(contract.amount_incl_vat, contract.currency)}</span>} />
-        <KV k="월간 매출 (VAT 포함)" v={<span className="mono">
+        <KV k="월간 MRR (VAT 포함)" v={<span className="mono">
           {mrr ? <>{money(contract.monthly_revenue, contract.currency)} <span className="muted">/ 월</span></>
                : <span className="muted">결제월에 일시 인식</span>}
         </span>} />
-        <KV k="월간 매출 (공급가 기준)" v={<span className="mono">
+        <KV k="월간 MRR (공급가 기준)" v={<span className="mono">
           {mrr ? <>{money(n(contract.amount_excl_vat) / months, contract.currency)} <span className="muted">/ 월</span></>
                : <span className="muted">결제월에 일시 인식</span>}
         </span>} />

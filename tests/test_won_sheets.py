@@ -26,8 +26,6 @@ def _client(client_id: int, company: str = "서울대학교"):
         industry="교육",
         country="한국",
         department="GTM",
-        contact_name="유명준",
-        contact_info="ghldtjd119@snu.ac.kr",
         first_won_on="2026-05-19",
         # 플랜 상태는 저장된 값이 아니라 **플랜 기간**에서 나옵니다(won.plan_status).
         # 플랜 날짜를 비우면 계약 기간이 그 자리에 서므로(서버 기본값과 같은 규칙), 기간

@@ -1929,6 +1929,7 @@ def test_the_csv_supply_column_is_the_supply_price_not_the_written_amount(factor
 
     with factory() as session:
         session.add(Client(client_id=1108, company="총액으로 적힌 고객"))
+        session.add(Client(client_id=1109, company="계약이 아직 없는 고객"))
         session.flush()
         session.add(ClientContract(
             client_id=1108, seq=1, deal_type="MRR", currency="KRW", vat_included=True,
@@ -1952,6 +1953,10 @@ def test_the_csv_supply_column_is_the_supply_price_not_the_written_amount(factor
     assert float(supply) == 10_000_000
     # 분당 단가는 **적힌 금액** 기준입니다 — 총액으로 적혔으면 총액에서 나옵니다.
     assert float(row[header.index("분당 단가")]) == 11_000
+    # **모든 줄의 칸 수가 머리글과 같아야 합니다.** 계약이 없는 고객은 빈 칸을 세어서
+    # 채우는데(`[""] * 32`), 그 수를 안 고치면 다음 열부터 통째로 밀립니다 — 그리고
+    # 스프레드시트에 붙여 넣기 전까지는 아무도 모릅니다.
+    assert {len(line) for line in rows if line} == {len(header)}
 
 
 def test_the_mrr_divisor_is_the_plan_period_not_the_contract_period():
@@ -2506,3 +2511,53 @@ def test_the_payment_row_lets_the_rate_be_typed():
 
     assert 'void onSave({ fx_rate: next || "auto" })' in screen
     assert 'placeholder="비우면 그날 고시가"' in screen
+
+
+def test_the_customer_contact_is_stored_per_contract(factory):
+    """**계약마다 다를 수 있습니다** (2026-08-31 운영자 지시, 이관 0103).
+
+    고객 행에 한 벌만 두면 두 번째 계약을 맺는 순간 첫 계약의 담당자가 덮여 사라지고,
+    화면에서는 그것이 「담당자가 바뀌었다」와 구별되지 않습니다.
+    """
+    with factory() as session:
+        session.add(Client(client_id=1502, company="A"))
+        session.commit()
+
+    patcher, client = _console(factory)
+    with patcher, client:
+        for seq, (name, info) in enumerate(
+            [("박지훈", "jh@a.kr"), ("이서연", "sy@a.kr")], start=1
+        ):
+            created = client.post("/won-customers/1502/contracts", data={
+                "starts_on": "2026-01-01", "ends_on": "2026-12-31", "currency": "KRW",
+                "contact_name": name, "contact_info": info,
+            })
+            assert created.status_code == 200, created.text
+            assert created.json()["seq"] == seq
+
+    with factory() as session:
+        rows = (session.query(ClientContract).order_by(ClientContract.seq).all())
+    assert [(c.contact_name, c.contact_info) for c in rows] == [
+        ("박지훈", "jh@a.kr"), ("이서연", "sy@a.kr"),
+    ]
+    # 고객 행은 이제 그 칸을 아예 들지 않습니다 — 두 자리에 두면 한쪽이 낡습니다.
+    assert not hasattr(Client, "contact_name")
+
+
+def test_the_contact_moved_out_of_the_basic_panel_into_the_contract_form():
+    """묻는 자리가 곧 어느 것에 속하는지를 말합니다."""
+    import pathlib
+
+    detail = pathlib.Path(
+        "frontend/src/screens/won/WonCustomerDetail.tsx"
+    ).read_text(encoding="utf-8")
+    form = pathlib.Path(
+        "frontend/src/screens/won/WonContractForm.tsx"
+    ).read_text(encoding="utf-8")
+
+    assert 'v={client.contact_name}' not in detail
+    assert 'v={current.contact_name}' in detail
+    assert 'set("contact_name", e.target.value)' in form
+    # 워딩 — 이 화면이 보여 주는 것은 인식 매출(MRR)입니다.
+    assert 'title="MRR 관리"' in detail
+    assert 'k="월간 MRR (VAT 포함)"' in detail

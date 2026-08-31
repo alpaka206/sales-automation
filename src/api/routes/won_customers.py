@@ -164,8 +164,6 @@ async def create_client(request: Request):
             # 대기 건이 물고 온 3000·4000번대 번호에 GTM 이 박히고 — `won.department` 는
             # 저장된 값이 이기므로 — 그 고객의 매출이 남의 부서 묶음으로 들어갑니다.
             department=DEPARTMENT_BY_TYPE.get(won.client_type(given)),
-            contact_name=_text(form.get("contact_name")),
-            contact_info=_text(form.get("contact_info")),
             first_won_on=_text(form.get("first_won_on")) or date.today().isoformat(),
             owner=_text(form.get("owner")) or actor_name(request, fallback="") or None,
         )
@@ -183,8 +181,6 @@ async def update_client(
     industry: str = Form(""),
     country: str = Form(""),
     department: str = Form(""),
-    contact_name: str = Form(""),
-    contact_info: str = Form(""),
     first_won_on: str = Form(""),
     owner: str = Form(""),
 ):
@@ -197,8 +193,6 @@ async def update_client(
         client.industry = _text(industry)
         client.country = _text(country)
         client.department = _text(department)
-        client.contact_name = _text(contact_name)
-        client.contact_info = _text(contact_info)
         client.first_won_on = _text(first_won_on)
         client.owner = _text(owner)
         session.commit()
@@ -287,6 +281,8 @@ async def delete_client(client_id: int):
 _CONTRACT_FIELDS = (
     "ticket_id", "deal_type", "starts_on", "ends_on", "currency", "payment_method",
     "payment_type", "first_payment_on", "billing_email", "note",
+    # 고객사 측 담당자·연락처. 계약마다 다를 수 있어 고객이 아니라 계약이 듭니다(0103).
+    "contact_name", "contact_info",
     "revenue_from", "plan", "plan_name", "perso_email",
     "plan_starts_on", "plan_ends_on", "space_seq",
     # 중도 해지일. 플랜은 만료일과 이 날짜 중 빠른 쪽에서 끝납니다.
@@ -720,8 +716,8 @@ def export_csv():
     writer = csv.writer(buffer)
     writer.writerow([
         "Client ID", "고객사", "고객 종류", "산업 분야", "국가", "담당부서",
-        "고객 담당자", "고객 연락처", "최초 수주일", "플랜 상태", "담당",
-        "계약 차수", "계약 상태", "Ticket ID", "수주 유형",
+        "최초 수주일", "플랜 상태", "담당",
+        "계약 차수", "계약 상태", "Ticket ID", "수주 유형", "고객 담당자", "고객 연락처",
         "계약 시작일", "계약 종료일", "계약 개월수", "계약서 유형",
         "계약 크레딧", "누적 지급 크레딧", "통화",
         "총 계약금액 (VAT 포함)", "공급가 (VAT 제외)", "수금 완료 금액", "수금율",
@@ -745,12 +741,12 @@ def export_csv():
             base = [
                 client.client_id, client.company, won.client_type(client.client_id),
                 client.industry, client.country, client.department,
-                client.contact_name, client.contact_info, client.first_won_on,
+                client.first_won_on,
                 won.plan_status(client, today), client.owner,
             ]
             if not client.contracts:
                 # 계약이 아직 없는 고객도 한 줄 나갑니다 — 빠지면 명단이 아닙니다.
-                writer.writerow(base + [""] * 30)   # 머리글 41 − 고객 11
+                writer.writerow(base + [""] * 32)   # 머리글 41 − 고객 9
                 continue
             for contract in client.contracts:
                 total = float(won.total_amount(contract) or 0)
@@ -759,7 +755,8 @@ def export_csv():
                 payment = won.next_payment(contract)
                 writer.writerow(base + [
                     contract.seq, won.contract_state(contract, today), contract.ticket_id,
-                    contract.deal_type, contract.starts_on, contract.ends_on,
+                    contract.deal_type, contract.contact_name, contract.contact_info,
+                    contract.starts_on, contract.ends_on,
                     won.months_between(contract.starts_on, contract.ends_on),
                     " + ".join(contract.doc_types or []),
                     contract.credits, won.granted_credits(contract), contract.currency,

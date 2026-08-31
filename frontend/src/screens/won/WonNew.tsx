@@ -58,8 +58,6 @@ export function WonNew() {
   const [industry, setIndustry] = useState(back?.form?.industry ?? "");
   const [customIndustry, setCustomIndustry] = useState(back?.form?.customIndustry ?? "");
   const [country, setCountry] = useState(was?.country ?? "대한민국");
-  const [contactName, setContactName] = useState(was?.contact_name ?? "");
-  const [contactInfo, setContactInfo] = useState(was?.contact_info ?? "");
   const [wonOn, setWonOn] = useState(was?.first_won_on ?? "");
   const [owner, setOwner] = useState(was?.owner ?? "");
 
@@ -85,8 +83,6 @@ export function WonNew() {
             company,
             industry: industry === "__custom" ? customIndustry : industry,
             country,
-            contact_name: contactName,
-            contact_info: contactInfo,
             first_won_on: wonOn,
             owner,
           },
@@ -205,14 +201,6 @@ export function WonNew() {
                 </Field>
                 <Field label="국가" required>
                   <input className="inp" value={country} onChange={(e) => setCountry(e.target.value)} required />
-                </Field>
-                <Field label="고객 담당자">
-                  <input className="inp" value={contactName} onChange={(e) => setContactName(e.target.value)}
-                         placeholder="예: 박지훈 팀장" />
-                </Field>
-                <Field label="고객 연락처">
-                  <input className="inp" value={contactInfo} onChange={(e) => setContactInfo(e.target.value)}
-                         placeholder="이메일 또는 전화번호" />
                 </Field>
                 <Field label="최초 수주일">
                   <input className="inp" type="date" value={wonOn} onChange={(e) => setWonOn(e.target.value)} />

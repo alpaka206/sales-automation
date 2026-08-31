@@ -106,8 +106,6 @@ _CLIENT_FIELDS = (
     "industry",
     "country",
     "department",
-    "contact_name",
-    "contact_info",
     "first_won_on",
     "owner",
     "contact_id",

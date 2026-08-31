@@ -114,7 +114,8 @@ export function WonCustomers() {
         // 옵니다. 대신 이메일과 전화번호가 들어옵니다: 클레임이나 결제 문의는 회사
         // 이름이 아니라 메일 주소로 기억되는 일이 흔합니다. 담당부서·고객 종류는
         // 남습니다 — "GTM" 이나 "Inbound" 로 찾는 사람이 반드시 있습니다.
-        const hay = [row.company, row.client_id, row.contact_name, row.contact_info,
+        const hay = [row.company, row.client_id,
+                     row.active?.contact_name, row.active?.contact_info,
                      row.email, row.phone, row.department, row.customer_type]
           .join(" ").toLowerCase();
         if (!hay.includes(query)) return false;
@@ -382,7 +383,7 @@ export function WonCustomers() {
                 <th style={{ width: "7%" }}>수주 유형</th>
                 {/* MRR 은 계약 금액 ÷ 개월수, PoC 는 첫 결제가 이번 달일 때만 전액.
                     부서와 무관하게 모든 행에 나옵니다 — 위 카드만 GTM 으로 거릅니다. */}
-                <th style={{ width: "10%" }} className="moneycell">이번달 매출</th>
+                <th style={{ width: "10%" }} className="moneycell">이번달 MRR</th>
                 <th style={{ width: "12%" }}>계약 기간</th>
                 <th style={{ width: "11%" }}>다음 크레딧 지급</th>
                 <th style={{ width: "11%" }}>다음 결제</th>

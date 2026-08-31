@@ -818,6 +818,9 @@ def _won_contract(contract, today) -> dict:
         "installments": contract.installments,
         "first_payment_on": contract.first_payment_on,
         "billing_email": contract.billing_email,
+        # 고객사 측 담당자. 계약마다 다를 수 있어 고객이 아니라 여기 있습니다(0103).
+        "contact_name": contract.contact_name,
+        "contact_info": contract.contact_info,
         "note": contract.note,
         "revenue_from": won.revenue_start_month(contract),
         "revenue_from_set": bool(contract.revenue_from),
@@ -896,8 +899,6 @@ def _won_client(client, today, *, full: bool, contact=None) -> dict:
         # 내려보내던 시절에는, 부서 칸이 빈 고객이 카드에는 잡히고 담당부서 필터에는
         # 안 걸렸습니다 — 같은 화면의 두 숫자가 서로 다른 정의를 쓴 것입니다.
         "department": won.department(client),
-        "contact_name": client.contact_name,
-        "contact_info": client.contact_info,
         # 연결된 인바운드 연락처의 이메일·전화. 목록 검색이 씁니다 — 클레임이나 결제
         # 문의는 회사 이름이 아니라 메일 주소로 기억되는 일이 흔합니다. 아웃바운드·
         # Interactive·AX 고객은 연락처가 없어 비는 것이 정상입니다.

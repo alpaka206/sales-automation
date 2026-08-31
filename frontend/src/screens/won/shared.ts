@@ -36,6 +36,8 @@ export type Contract = {
   unit_price: Money;
   payment_method: string | null; payment_type: string | null; installments: number | null;
   first_payment_on: string | null; billing_email: string | null; note: string | null;
+  /** 고객사 **측** 담당자와 연락처. 계약마다 다를 수 있어 고객이 아니라 여기 삽니다. */
+  contact_name: string | null; contact_info: string | null;
   revenue_from: string | null; revenue_from_set: boolean; monthly_revenue: Money;
   plan: string | null; plan_name: string | null; perso_email: string | null;
   plan_starts_on: string | null; plan_ends_on: string | null; plan_days_left: number | null;
@@ -53,7 +55,6 @@ export type Row = {
   industry: string | null; country: string | null;
   /** 적어 둔 값이 없으면 Client ID 번호대에서 되짚은 값 — 서버가 정합니다(won.department). */
   department: string | null;
-  contact_name: string | null; contact_info: string | null;
   /** 연결된 인바운드 연락처의 것. 목록 검색이 씁니다. 아웃바운드 고객은 비어 있습니다. */
   email: string | null; phone: string | null;
   first_won_on: string | null; plan_status: string; owner: string | null;

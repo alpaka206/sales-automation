@@ -606,9 +606,9 @@ class Client(Base):
     industry: Mapped[str | None] = mapped_column(String(64), nullable=True)
     country: Mapped[str | None] = mapped_column(String(64), nullable=True)
     department: Mapped[str | None] = mapped_column(String(32), nullable=True)
-    # 고객사 **측** 담당자입니다. 우리 쪽 담당은 ``owner``.
-    contact_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
-    contact_info: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # 고객사 **측** 담당자는 여기 없습니다 — ``client_contracts`` 에 있습니다(이관 0103).
+    # 담당자는 계약마다 다를 수 있고(부서가 다르거나 사람이 바뀝니다), 고객 행에 두면 두
+    # 번째 계약을 맺는 순간 첫 계약의 담당자가 덮여 사라졌습니다. 우리 쪽 담당은 ``owner``.
     first_won_on: Mapped[str | None] = mapped_column(String(10), nullable=True)
     # **장부에서 내린 날.** NULL 이면 정상입니다. 계약이 없어 활성 고객이 아닌데 행과
     # 번호는 살려 둬야 하는 고객이 여기 옵니다 — Won 에 잘못 올라갔다가 다른 단계로
@@ -699,6 +699,9 @@ class ClientContract(Base):
     installments: Mapped[int | None] = mapped_column(Integer, nullable=True)
     first_payment_on: Mapped[str | None] = mapped_column(String(10), nullable=True)
     billing_email: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # 고객사 **측** 담당자와 그 연락처. 계약마다 다를 수 있어 여기 삽니다(이관 0103).
+    contact_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    contact_info: Mapped[str | None] = mapped_column(String(255), nullable=True)
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
     # `renewal_plan` · `stop_reason` · `memo` 가 여기 있었습니다 — 상세 화면의 「갱신 · 비고」
     # 패널이 쓰던 세 칸입니다. 콘솔에서 뺐고 열도 지웠습니다(이관 0073). 워크북의 그 세 열은
