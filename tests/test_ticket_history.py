@@ -221,3 +221,21 @@ def test_a_form_submission_is_always_inbound():
     assert classify_direction(submitted_by_us) == "inbound"
     # 이메일 채널에서는 그대로 주소 규칙입니다.
     assert classify_direction({"channelId": "1002", **_sender("mina14@estsoft.com")}) == "outgoing"
+
+
+def test_the_importer_never_touches_last_incoming_at():
+    """**그 칸은 워크북 append 대기열의 방아쇠입니다.**
+
+    `sheet_sync.sync_pending_inbound_rows` 가 매 폴러 회차마다
+    `sheet_inbound_row IS NULL AND last_incoming_at IS NOT NULL` 을 고릅니다. 백필이 만든
+    300건 넘는 티켓은 그 칸이 **일부러** NULL 인데(`hubspot_backfill` docstring), 수집기가
+    채우면 그 전부가 영업팀 공용 워크북에 한꺼번에 실려 나갑니다 — 운영은 시트 쓰기가
+    켜져 있습니다.
+
+    한 번 채웠다가 지운 코드라, 다시 들어오지 않게 여기서 막습니다.
+    """
+    import pathlib
+
+    source = pathlib.Path("src/agents/ticket_history.py").read_text(encoding="utf-8")
+    body = source[source.index("def _store("):]
+    assert "conversation.last_incoming_at" not in body

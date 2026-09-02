@@ -262,16 +262,20 @@ def _store(conversation_id: int, contact_id: int, rows: list[dict]) -> int:
         conversation = session.get(Conversation, conversation_id)
         if conversation is not None:
             conversation.history_synced_at = datetime.now(timezone.utc)
-            # **마지막 고객 연락 시각도 여기서 맞춥니다.** 워크북 append 대기와 액션 보드가
-            # 이 값을 보는데, 지금까지는 첫 문의 때 한 번 찍히고 그대로였습니다.
-            latest = max(
-                (r["happened_at"] for r in rows if r["direction"] == "inbound"), default=None
-            )
-            if latest is not None:
-                current = conversation.last_incoming_at
-                if current is None or current.replace(tzinfo=timezone.utc) < latest:
-                    conversation.last_incoming_at = latest
         session.commit()
+
+    # ------------------------------------------------------------------ #
+    # **`last_incoming_at` 은 건드리지 않습니다.** 한 번 채웠다가 지웠습니다.
+    #
+    # 그 칸은 「마지막 고객 연락 시각」처럼 보이지만 실제로는 **워크북 append 대기열의
+    # 방아쇠**입니다: `sheet_sync.sync_pending_inbound_rows` 가 매 폴러 회차마다
+    # `sheet_inbound_row IS NULL AND last_incoming_at IS NOT NULL` 을 고릅니다. 백필이
+    # 만든 300건 넘는 티켓은 그 칸이 일부러 NULL 인데(`hubspot_backfill` 모듈 docstring 이
+    # 그 이유를 적어 두었습니다), 이 수집기가 채우면 **그 전부가 영업팀 공용 워크북에
+    # 한꺼번에 실려 나갑니다.** 운영은 `LIVE_SHEETS_WRITES=true` 입니다.
+    #
+    # 히스토리를 보이게 하는 데 그 칸은 필요 없습니다 — 화면은 접점 기록을 읽습니다.
+    # ------------------------------------------------------------------ #
     return added
 
 
