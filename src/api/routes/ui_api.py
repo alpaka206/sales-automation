@@ -581,6 +581,10 @@ def ui_customer_detail(contact_id: int):
         # (`hubspot_reconcile._archive_messages`, handler 가 「지난 티켓」).
         "interactions": [
             {
+                # 어느 티켓의 대화인가. HubSpot 에서 받아온 기록은 티켓이 달려 있어
+                # (`agents/ticket_history`), 화면이 티켓별로 묶어 보여 줍니다. 손으로 적은
+                # 고객 단위 메모는 비어 있고, 그건 「티켓과 무관한 기록」이라는 뜻입니다.
+                "conversation_id": item.conversation_id,
                 "channel": item.channel,
                 "direction": item.direction,
                 "handler": item.handler,

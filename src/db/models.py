@@ -82,6 +82,13 @@ class Conversation(Base):
     deal_detail: Mapped[str | None] = mapped_column(String(32), nullable=True)
     last_outgoing_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     last_incoming_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # 그 티켓의 대화를 HubSpot 에서 마지막으로 받아온 시각 (이관 0106).
+    #
+    # **NULL 이 「아직 한 번도 안 받았다」**입니다. 수집기가 NULL 먼저, 그 다음 오래된
+    # 순으로 도므로 이 칸 하나가 진행 상황이자 이어하기 지점입니다 — 배포가 나가도 다음
+    # 회차가 그 자리에서 계속하고, 한 바퀴를 다 돌면 가장 오래된 것부터 다시 돌아 새로
+    # 쌓인 대화가 저절로 들어옵니다(`agents/ticket_history`).
+    history_synced_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     hubspot_ticket_id: Mapped[str | None] = mapped_column(
         String(64), nullable=True, unique=True, index=True
     )

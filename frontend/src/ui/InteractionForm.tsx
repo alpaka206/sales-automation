@@ -75,6 +75,9 @@ export function directionMark(value: string) {
 
 export type Interaction = {
   id?: number;
+  /** 어느 티켓의 대화인가. HubSpot 에서 받아온 기록은 티켓이 달려 있고, 손으로 적은
+   *  고객 단위 메모는 비어 있습니다 — 화면이 그것으로 묶습니다. */
+  conversation_id?: number | null;
   channel: string;
   direction: string;
   handler: string | null;

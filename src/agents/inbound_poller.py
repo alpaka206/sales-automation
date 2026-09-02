@@ -263,6 +263,7 @@ def _poller_steps() -> list[tuple[str, object]]:
         sync_pending_inbound_rows,
         sync_pending_order_rows,
     )
+    from .ticket_history import sync_pending_ticket_history
     from .worker_heartbeat import record_worker_heartbeat
 
     return [
@@ -272,6 +273,9 @@ def _poller_steps() -> list[tuple[str, object]]:
         # 접수 때 못 채운 문의 번역을 조금씩 메웁니다 — 이 기능이 생기기 전의 옛 행과,
         # 그때 모델이 안 되던 건입니다. 기다리는 사람이 없는 자리라 여기 둡니다.
         ("cache_korean", cache_korean_inquiries),
+        # 티켓별 대화를 조금씩 받아옵니다. 한 바퀴를 다 돌면 가장 오래된 것부터 다시
+        # 도므로, 지난 대화를 메우는 일과 새로 쌓인 대화를 따라잡는 일이 한 단계입니다.
+        ("ticket_history", sync_pending_ticket_history),
         ("hubspot_backfill", process_requested_hubspot_backfill),
         ("sheet_inbound", sync_pending_inbound_rows),
         ("sheet_orders", sync_pending_order_rows),

@@ -67,6 +67,41 @@ const PAYMENT_METHODS: [string, string][] = [
 const forInput = (value: string | null | undefined, length: number) =>
   value ? String(value).replace(" ", "T").slice(0, length) : "";
 
+/** 소통 기록을 **티켓별로** 묶습니다. 티켓 순서는 위 티켓 카드와 같고(최신이 위),
+ *  어느 티켓에도 안 달린 기록은 맨 끝에 「티켓과 무관」으로 모읍니다.
+ *
+ *  묶는 일을 화면이 하는 이유: 서버는 기록을 시간순으로 주고, 그 순서가 티켓 안에서도
+ *  맞아야 합니다. 서버에서 미리 묶어 보내면 같은 목록을 두 모양으로 유지하게 됩니다. */
+function groupByTicket(
+  items: Interaction[],
+  tickets: { conversation_id: number; subject: string | null; ticket_id: string | null }[],
+) {
+  const label = new Map(
+    tickets.map((t) => [
+      t.conversation_id,
+      t.subject || (t.ticket_id ? `티켓 ${t.ticket_id}` : `문의 ${t.conversation_id}`),
+    ]),
+  );
+  const groups = new Map<string, { key: string; label: string; items: Interaction[] }>();
+  for (const item of items) {
+    const id = item.conversation_id ?? null;
+    const key = id === null ? "none" : String(id);
+    if (!groups.has(key)) {
+      groups.set(key, {
+        key,
+        label: id === null ? "티켓과 무관한 기록" : (label.get(id) ?? `문의 ${id}`),
+        items: [],
+      });
+    }
+    groups.get(key)!.items.push(item);
+  }
+  // 티켓이 없는 묶음은 언제나 맨 끝입니다 — 티켓 이야기를 먼저 읽게.
+  return [...groups.values()].sort((a, b) =>
+    a.key === "none" ? 1 : b.key === "none" ? -1 : Number(b.key) - Number(a.key),
+  );
+}
+
+
 export function CustomerDetail() {
   const { id } = useParams();
   const queryClient = useQueryClient();
@@ -262,14 +297,27 @@ export function CustomerDetail() {
                 <Icon name="plus" size={14} /> 추가하기
               </button>
             </div>
-            {/* 메일은 위의 티켓 카드 안에 있습니다. 여기는 **사람에게 달린 기록**입니다 —
-                손으로 적은 메모, 통화·미팅, 허브스팟에서 가져온 것, 그리고 사라진 티켓에서
-                옮겨 온 옛 메일(작성자 「지난 티켓」). */}
-            <div className="history-list" style={{ marginTop: 16 }}>
+            {/* **티켓별로 묶어 보여 줍니다** (2026-09-02 운영자 지시). 허브스팟에서 받아온
+                대화는 어느 티켓의 것인지가 붙어 있어서(`agents/ticket_history`), 한 줄로
+                주르륵 늘어놓으면 어느 문의의 이야기인지 알 수 없습니다. 티켓이 없는 기록
+                (손으로 적은 고객 단위 메모)은 맨 아래 따로 섭니다. */}
+            <div style={{ marginTop: 16, display: "flex", flexDirection: "column", gap: 20 }}>
               {data.interactions.length === 0 ? (
                 <div className="empty"><div className="empty__text">아직 기록이 없습니다.</div></div>
               ) : (
-                data.interactions.map((item, index) => <InteractionItem key={index} item={item} />)
+                groupByTicket(data.interactions, data.tickets).map((group) => (
+                  <div key={group.key}>
+                    <div className="t-xs t-subtle" style={{ marginBottom: 6 }}>
+                      {group.label}
+                      <span className="tnum" style={{ marginLeft: 6 }}>{group.items.length}건</span>
+                    </div>
+                    <div className="history-list">
+                      {group.items.map((item, index) => (
+                        <InteractionItem key={item.id ?? `${group.key}-${index}`} item={item} />
+                      ))}
+                    </div>
+                  </div>
+                ))
               )}
             </div>
           </section>
