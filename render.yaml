@@ -59,6 +59,13 @@ services:
         value: "A-82843387"           # Perso Dubbing GTM Marketing
       - key: HUBSPOT_DEFAULT_EMAIL_CHANNEL_ACCOUNT_ID
         value: "2039804092"           # support@perso.ai, B2B Dubbing inbox fallback
+      # 모든 회신을 이 주소에서 내보낸다 (2026-09-02 운영자 지시).
+      # 3114216464 = perso.ai@estsoft.com. 지금은 GTM Marketing 인박스에 연결돼 있어서
+      # 그 인박스에 대화가 있는 티켓에서만 쓰입니다(실측 32%) — 나머지는 스레드가 정하는
+      # 주소로 물러섭니다. 그 주소를 「Inbox」 인박스로 옮기면 100% 가 됩니다
+      # (B2B 티켓 100건이 전부 Inbox 스레드를 갖습니다 — 2026-09-02 실측).
+      - key: HUBSPOT_PREFERRED_EMAIL_CHANNEL_ACCOUNT_ID
+        value: "3114216464"
       # [B2B] AI Dubbing pipeline (798618015) stage IDs — set here, no dashboard entry needed.
       # Names mirror the HubSpot stage labels. Stages get RENAMED without their id
       # changing, so the older env names still resolve as aliases (QUALIFIED was

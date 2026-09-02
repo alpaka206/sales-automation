@@ -434,3 +434,106 @@ async def test_the_picker_only_offers_addresses_from_that_thread_inbox(
     # 아무것도 안 골랐을 때 나갈 주소가 맨 앞에 오고, 그렇다고 표시됩니다.
     assert senders[0]["is_default"] is True
     assert senders[1]["is_default"] is False
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_the_chosen_sender_picks_a_thread_in_its_own_inbox(client: HubSpotClient) -> None:
+    """**계정이 먼저이고 스레드가 나중입니다** (2026-09-02 운영자 지시).
+
+    아무도 안 골랐을 때는 「가장 최근에 오간 스레드」가 이기고 계정은 그 스레드가 정합니다.
+    골랐을 때 같은 규칙을 쓰면, 고른 주소가 그 스레드의 인박스에 없다는 이유로 **늘**
+    거절됩니다 — 운영 실측으로 B2B 티켓의 32%만 `perso.ai@estsoft.com` 으로 나갔습니다.
+    그래서 고른 주소가 있으면 그 주소를 쓸 수 있는 스레드를 찾습니다.
+    """
+    respx.get(f"{BASE_URL}/conversations/v3/conversations/threads").mock(
+        return_value=httpx.Response(200, json={"results": [
+            {"id": "gtm", "inboxId": "inbox-gtm"},
+            {"id": "support", "inboxId": "inbox-support"},
+        ]})
+    )
+    # 가장 최근 메일은 support 스레드에 있습니다 — 안 골랐으면 이쪽이 이깁니다.
+    respx.get(f"{BASE_URL}/conversations/v3/conversations/threads/gtm/messages").mock(
+        return_value=httpx.Response(200, json={"results": [{
+            "type": "MESSAGE", "createdAt": "2026-01-01T00:00:00Z",
+            "channelId": "1002", "channelAccountId": "gtm-account",
+            "senders": [_party("buyer@example.com")],
+        }]})
+    )
+    respx.get(f"{BASE_URL}/conversations/v3/conversations/threads/support/messages").mock(
+        return_value=httpx.Response(200, json={"results": [{
+            "type": "MESSAGE", "createdAt": "2026-06-01T00:00:00Z",
+            "channelId": "1002", "channelAccountId": "support-account",
+            "senders": [_party("buyer@example.com")],
+        }]})
+    )
+    _account("gtm-account", "inbox-gtm")
+    _account("support-account", "inbox-support")
+
+    # 안 고르면 최신 스레드(support).
+    plain = await client.find_conversation_reply_context("ticket-1", "buyer@example.com")
+    assert plain == ConversationReplyContext("support", "1002", "support-account")
+
+    # 고르면 그 주소가 있는 스레드(gtm) — 더 오래된 스레드여도.
+    chosen = await client.find_conversation_reply_context(
+        "ticket-1", "buyer@example.com", preferred_account_id="gtm-account"
+    )
+    assert chosen == ConversationReplyContext("gtm", "1002", "gtm-account")
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_a_form_only_thread_in_that_inbox_is_usable_when_it_is_the_only_one(
+    client: HubSpotClient,
+) -> None:
+    """그 인박스에 메일이 오간 적이 없어도, 스레드가 하나뿐이면 거기로 답합니다.
+
+    폼·챗봇으로만 들어온 스레드가 이 경우입니다 — 운영 실측 50건 중 14건이 그랬고, 이걸
+    못 쓰면 그 티켓들은 고른 주소로 영영 답할 수 없습니다.
+    """
+    respx.get(f"{BASE_URL}/conversations/v3/conversations/threads").mock(
+        return_value=httpx.Response(200, json={"results": [
+            {"id": "gtm-form", "inboxId": "inbox-gtm"},
+            {"id": "support", "inboxId": "inbox-support"},
+        ]})
+    )
+    respx.get(f"{BASE_URL}/conversations/v3/conversations/threads/gtm-form/messages").mock(
+        # 폼으로 들어온 스레드 — 이메일(1002) 메시지가 없습니다.
+        return_value=httpx.Response(200, json={"results": [{
+            "type": "MESSAGE", "createdAt": "2026-05-01T00:00:00Z",
+            "channelId": "1003", "channelAccountId": "a-form",
+            "senders": [_party("buyer@example.com")],
+        }]})
+    )
+    respx.get(f"{BASE_URL}/conversations/v3/conversations/threads/support/messages").mock(
+        return_value=httpx.Response(200, json={"results": [{
+            "type": "MESSAGE", "createdAt": "2026-06-01T00:00:00Z",
+            "channelId": "1002", "channelAccountId": "support-account",
+            "senders": [_party("buyer@example.com")],
+        }]})
+    )
+    _account("gtm-account", "inbox-gtm")
+
+    chosen = await client.find_conversation_reply_context(
+        "ticket-1", "buyer@example.com", preferred_account_id="gtm-account"
+    )
+    assert chosen == ConversationReplyContext("gtm-form", "1002", "gtm-account")
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_a_sender_with_no_conversation_in_its_inbox_is_refused(
+    client: HubSpotClient,
+) -> None:
+    """그 주소의 인박스에 이 티켓의 대화가 아예 없으면 **실패합니다.**
+
+    운영 실측 50건 중 20건이 이 경우입니다(GTM Marketing 스레드 자체가 없음). 조용히 다른
+    주소로 내보내면 「그 주소로 보낸다」고 고른 의미가 없습니다.
+    """
+    _thread_with_one_email("t1", "inbox-support", "support-account")
+    _account("gtm-account", "inbox-gtm")
+
+    with pytest.raises(DeliveryPermanentError, match="인박스"):
+        await client.find_conversation_reply_context(
+            "ticket-1", "buyer@example.com", preferred_account_id="gtm-account"
+        )

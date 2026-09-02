@@ -446,7 +446,9 @@ class HubSpotClient:
                 f"HubSpot ticket {ticket_id} has no active Conversations thread"
             )
 
-        candidates: list[tuple[str, str, str, str]] = []
+        # 후보에 **스레드의 인박스**도 같이 싣습니다. 고른 발신 주소가 있을 때 「그 주소를
+        # 쓸 수 있는 스레드」를 고르려면 인박스를 알아야 합니다.
+        candidates: list[tuple[str, str, str, str, str]] = []
         target_threads: list[dict] = []
         for thread in threads:
             thread_id = str(thread.get("id") or "")
@@ -472,7 +474,10 @@ class HubSpotClient:
                 if channel_id != "1002" or not account_id:
                     continue
                 timestamp = str(message.get("createdAt") or "")
-                candidates.append((timestamp, thread_id, channel_id, account_id))
+                candidates.append((
+                    timestamp, thread_id, channel_id, account_id,
+                    str(thread.get("inboxId") or ""),
+                ))
 
         # **없어진 채널 계정을 만나면 다음 후보로 넘어갑니다** (2026-08-31).
         #
@@ -485,7 +490,11 @@ class HubSpotClient:
         #
         # 후보는 각자 자기 스레드를 들고 있으므로, 넘어가도 인박스를 넘나들지 않습니다.
         wanted = (preferred_account_id or "").strip()
-        for _timestamp, thread_id, channel_id, account_id in sorted(candidates, reverse=True):
+        if wanted:
+            return await self._thread_for_chosen_sender(
+                ticket_id, wanted, candidates, target_threads or threads
+            )
+        for _timestamp, thread_id, channel_id, account_id, _inbox in sorted(candidates, reverse=True):
             try:
                 await self._email_channel_account(account_id)
             except DeliveryPermanentError as exc:
@@ -497,9 +506,6 @@ class HubSpotClient:
                     account_id, ticket_id, exc,
                 )
                 continue
-            if wanted and wanted != account_id:
-                # 스레드는 위 규칙이 고르고, 계정만 운영자가 고른 것으로 바꿉니다.
-                account_id = await self._account_for_thread(thread_id, wanted, ticket_id)
             return ConversationReplyContext(thread_id, channel_id, account_id)
 
         # A brand-new form thread has no email message to copy yet. Use the configured
@@ -516,10 +522,6 @@ class HubSpotClient:
                 "HUBSPOT_DEFAULT_EMAIL_CHANNEL_ACCOUNT_ID is required for a form-only thread"
             )
         thread = fallback_threads[0]
-        if wanted:
-            # 운영자가 고른 것이 설정값을 이깁니다 — 같은 인박스 규칙은 그대로 겁니다.
-            account_id = await self._account_for_thread(str(thread["id"]), wanted, ticket_id)
-            return ConversationReplyContext(str(thread["id"]), "1002", account_id)
         account = await self._email_channel_account(account_id)
         if str(account.get("inboxId") or "") != str(thread.get("inboxId") or ""):
             raise DeliveryPermanentError(
@@ -527,31 +529,55 @@ class HubSpotClient:
             )
         return ConversationReplyContext(str(thread["id"]), "1002", account_id)
 
-    async def _account_for_thread(
-        self, thread_id: str, account_id: str, ticket_id: str
-    ) -> str:
-        """운영자가 고른 계정을 그 스레드에 쓸 수 있는지 확인하고 그대로 돌려줍니다.
+    async def _thread_for_chosen_sender(
+        self,
+        ticket_id: str,
+        account_id: str,
+        candidates: list[tuple[str, str, str, str, str]],
+        threads: list[dict],
+    ) -> ConversationReplyContext:
+        """운영자가 고른 주소로 보낼 수 있는 스레드를 고릅니다.
 
-        확인하는 것은 둘입니다 — 쓸 수 있는 이메일 계정인가(`_email_channel_account` 가
-        1002 · active · authorized · 안 archived 를 봅니다), 그리고 **그 스레드의
-        인박스인가.** 뒤엣것이 없으면 남의 인박스 주소로 답이 나가고, 그 대화는 그 팀
-        화면에 안 보입니다.
+        **스레드를 고르는 규칙이 뒤집힙니다.** 아무도 안 골랐을 때는 「가장 최근에 이 고객과
+        메일이 오간 스레드」가 이기고 계정은 그 스레드가 정합니다. 골랐을 때는 반대로 **계정이
+        먼저**이고, 그 계정을 쓸 수 있는 스레드를 찾습니다 — 안 그러면 고른 주소가 그 스레드의
+        인박스에 없다는 이유로 늘 거절됩니다(운영 실측: 그렇게 하면 B2B 티켓의 32%만
+        `perso.ai@estsoft.com` 으로 나갔습니다).
 
-        고른 계정이 못 쓰는 것이면 **조용히 기본값으로 떨어지지 않고 실패합니다.**
-        운영자가 「이 주소로 보낸다」고 고른 것이라, 다른 주소로 나가면 고른 의미가
-        없습니다 — 그리고 나간 뒤에는 되돌릴 수 없습니다.
+        찾는 순서는 둘입니다:
+
+        1. **그 인박스에서 이 고객과 이미 메일이 오간 스레드** — 가장 최근 것. 대화가 이어지는
+           자리라 제일 안전합니다.
+        2. 그런 스레드가 없으면, **그 인박스에 이 티켓의 스레드가 하나뿐일 때만** 그것.
+           폼·챗봇으로만 들어와 아직 메일이 오간 적 없는 스레드가 이 경우입니다. 둘 이상이면
+           어느 쪽인지 우리가 정할 수 없어 실패합니다 — 엉뚱한 스레드에 답이 붙으면 고객이
+           보는 대화가 두 갈래가 됩니다.
+
+        **같은 인박스 규칙은 그대로 겁니다.** 허브스팟이 다른 인박스의 계정을 받아 줄지는
+        **문서에도 없고 공개 사례도 없습니다** — 공식 문서는 스레드의 계정을 쓰라고 「권고」할
+        뿐이지만, 발송 시점에만 도는 관문이 따로 있습니다
+        (`CHANNEL_ACCOUNT_CANNOT_SEND_MESSAGE_ON_THREAD`). 읽기로는 못 가립니다. 받아 준다
+        해도 그건 남의 인박스에 우리 메일이 서는 것이고, 고객 답장이 그 팀으로 갑니다.
         """
         account = await self._email_channel_account(account_id)
-        thread = await self._get_conversation_json(
-            f"/conversations/v3/conversations/threads/{thread_id}",
-            action=f"thread {thread_id} lookup",
+        inbox_id = str(account.get("inboxId") or "")
+        same_inbox = sorted(
+            (item for item in candidates if item[4] == inbox_id), reverse=True
         )
-        if str(account.get("inboxId") or "") != str(thread.get("inboxId") or ""):
+        if same_inbox:
+            return ConversationReplyContext(same_inbox[0][1], same_inbox[0][2], account_id)
+        in_inbox = [t for t in threads if str(t.get("inboxId") or "") == inbox_id]
+        if len(in_inbox) == 1:
+            return ConversationReplyContext(str(in_inbox[0]["id"]), "1002", account_id)
+        if not in_inbox:
             raise DeliveryPermanentError(
-                f"고른 발신 계정 {account_id} 은 이 티켓({ticket_id}) 스레드의 인박스가 "
-                "아닙니다 — 같은 인박스에 연결된 주소만 고를 수 있습니다"
+                f"고른 발신 주소는 이 티켓({ticket_id})에 쓸 수 없습니다 — 그 주소가 연결된 "
+                "인박스에 이 티켓의 대화가 없습니다"
             )
-        return account_id
+        raise DeliveryPermanentError(
+            f"고른 발신 주소로 답할 스레드를 정할 수 없습니다 (티켓 {ticket_id}, 후보 "
+            f"{len(in_inbox)}개) — 그 인박스에 이 고객과 오간 메일이 아직 없습니다"
+        )
 
     async def list_reply_senders(self, ticket_id: str, recipient_email: str) -> list[dict]:
         """그 티켓에 **고를 수 있는** 발신 주소들. 읽기만 합니다 — 아무것도 안 보냅니다.

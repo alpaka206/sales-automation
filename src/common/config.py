@@ -51,6 +51,17 @@ class Settings(BaseSettings):
     # Used only for a form-only thread with no previous email message to copy. It must
     # be an active channelId=1002 account in the same inbox as the selected thread.
     HUBSPOT_DEFAULT_EMAIL_CHANNEL_ACCOUNT_ID: str = ""
+    # **모든 회신을 이 주소에서 내보낸다** (2026-09-02 운영자 지시). 채널 계정 id 하나.
+    #
+    # 비어 있으면 예전 그대로 — 스레드에 마지막으로 오간 계정이 정합니다. 값이 있으면 운영자가
+    # 따로 고르지 않은 초안도 이 주소로 나가고, 그 주소를 **쓸 수 없는 티켓에서만** 스레드가
+    # 정하는 값으로 떨어집니다(그 티켓은 그 인박스에 대화가 없다는 뜻이라, 여기서 막으면
+    # 답을 아예 못 보냅니다).
+    #
+    # 「쓸 수 있나」는 그 계정이 연결된 인박스에 이 티켓의 대화가 있느냐로 갈립니다 —
+    # 운영 실측(2026-09-02): `perso.ai@estsoft.com`(GTM Marketing)로 B2B 티켓의 32%,
+    # 그 주소를 `Inbox` 인박스로 옮기면 100%(모든 B2B 티켓이 Inbox 스레드를 갖습니다).
+    HUBSPOT_PREFERRED_EMAIL_CHANNEL_ACCOUNT_ID: str = ""
     # ----- [B2B] AI Dubbing ticket pipeline stage ids -----
     # The env names below mirror the stage labels in HubSpot (New / Qualified /
     # Negotiating / Reminder Sent / Won / Lost / Concluded). Stages get
