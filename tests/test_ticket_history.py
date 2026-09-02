@@ -239,3 +239,31 @@ def test_the_importer_never_touches_last_incoming_at():
     source = pathlib.Path("src/agents/ticket_history.py").read_text(encoding="utf-8")
     body = source[source.index("def _store("):]
     assert "conversation.last_incoming_at" not in body
+
+
+# --------------------------------------------------------------------------- #
+# 개인 사서함 메일 붙이기 — 잘못 붙이면 아무도 모릅니다
+# --------------------------------------------------------------------------- #
+def test_attaching_personal_email_is_reachable_and_guarded():
+    """**부르는 곳이 없으면 없는 기능입니다.**
+
+    이 기능은 한 번 「구현했다」고 커밋해 놓고 부르는 곳이 하나도 없었습니다 — 라우트도,
+    폴러 단계도, 화면 버튼도. 배포해도 아무 일이 안 일어나는 상태였습니다.
+
+    그리고 **티켓이 하나일 때만** 붙인다는 규칙이 주석에만 있고 코드에는 없었습니다.
+    그대로 두면 티켓이 둘인 연락처의 메일이 엉뚱한 티켓에 붙는데, 그건 허브스팟에 쓰는
+    동작이라 되돌리기 전까지 남고 아무도 잘못을 눈치채지 못합니다.
+    """
+    import pathlib
+
+    from src.api.routes import customer_ops
+
+    paths = [getattr(r, "path", "") for r in customer_ops.router.routes]
+    assert "/internal/tickets/{conversation_id}/attach-personal-emails" in paths
+
+    source = pathlib.Path("src/agents/ticket_history.py").read_text(encoding="utf-8")
+    body = source[source.index("async def attach_personal_emails("):]
+    # 규칙이 코드에 있어야 합니다 — 주석만으로는 안 됩니다.
+    assert "ticket_count != 1" in body
+    # 그리고 왜 안 붙였는지 돌려줘야 합니다.
+    assert '"skipped"' in body

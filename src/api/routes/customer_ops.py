@@ -1438,18 +1438,20 @@ def _sync_hubspot(contact_id: int, per_type: int = 20) -> int:
 
         # 티켓 번호 → 우리 대화. 허브스팟이 메일마다 알려 주는 값이라 짐작이 아닙니다.
         ticket_ids = {e.ticket_id for e in emails if e.ticket_id}
-        conv_of_ticket = (
-            {
-                str(row.hubspot_ticket_id): row.id
-                for row in session.execute(
-                    select(Conversation.id, Conversation.hubspot_ticket_id).where(
-                        Conversation.hubspot_ticket_id.in_(ticket_ids)
-                    )
-                ).all()
-            }
+        rows_for_tickets = (
+            session.execute(
+                select(
+                    Conversation.id,
+                    Conversation.hubspot_ticket_id,
+                    Conversation.history_synced_at,
+                ).where(Conversation.hubspot_ticket_id.in_(ticket_ids))
+            ).all()
             if ticket_ids
-            else {}
+            else []
         )
+        conv_of_ticket = {str(row.hubspot_ticket_id): row.id for row in rows_for_tickets}
+        # 대화를 통째로 받아온 티켓들. 그 티켓의 메일은 스레드 쪽이 이미 들고 있습니다.
+        history_synced = {row.id for row in rows_for_tickets if row.history_synced_at is not None}
         for email in emails:
             external_id = f"hubspot:email:{email.id}"
             conv_id = conv_of_ticket.get(email.ticket_id or "")
@@ -1467,6 +1469,18 @@ def _sync_hubspot(contact_id: int, per_type: int = 20) -> int:
                     )
                     .values(conversation_id=conv_id)
                 )
+            # **그 티켓의 대화를 이미 통째로 받아왔으면 여기서는 안 넣습니다** (이관 0106).
+            #
+            # 같은 메일이 허브스팟에 **객체 두 개**로 있습니다: CRM 이메일(여기가 읽는 것)과
+            # Conversations 스레드 메시지(`agents/ticket_history` 가 읽는 것). id 가 달라
+            # `external_id` 로는 서로를 못 알아보므로, 둘 다 넣으면 화면에 **모든 메일이
+            # 두 번** 뜹니다.
+            #
+            # 스레드 쪽이 더 완전합니다(실측 티켓 60건에서 265건 대 97건 — 채팅·폼은 CRM
+            # 이메일 객체가 아예 없습니다). 그래서 그 티켓을 수집기가 이미 훑었으면
+            # 스레드 쪽이 이깁니다. 아직 안 훑은 티켓과 티켓 없는 메일은 그대로 들어옵니다.
+            if exists is None and conv_id is not None and conv_id in history_synced:
+                continue
             if not exists:
                 direction = "incoming" if "incoming" in email.type else "outgoing"
                 # 한 번만 만듭니다 — 기록 목록의 미리보기와 티켓 요약의 불릿이 **같은
@@ -1653,6 +1667,23 @@ def _retire_drafts_for_replies_seen_in_hubspot(session, contact_id: int, emails)
     for conv_id, created_at, ticket_id in drafts:
         if created_at is not None and created_at <= sent_on_ticket[str(ticket_id)]:
             retire_drafts_answered_elsewhere(session, conv_id)
+
+
+@router.post("/internal/tickets/{conversation_id}/attach-personal-emails")
+async def internal_attach_personal_emails(conversation_id: int):
+    """개인 사서함으로 오간 메일을 그 티켓에 붙입니다 — **한 티켓씩, 눌러서.**
+
+    왜 필요한가(실측): 담당자가 자기 메일(`untae@estsoft.com` 같은)로 답하면 허브스팟이
+    그것을 **연락처에는 기록하지만 티켓에는 안 붙입니다** — 운영 표본 5건 전부가 그랬습니다
+    (연락처 5/5, 티켓 0/5). 그래서 그 대화가 티켓 화면에서 사라집니다.
+
+    **자동으로 안 돕니다.** 폴러에 안 답니다 — 허브스팟에 **쓰는** 동작이고, 붙일 대상이
+    맞는지는 그 연락처에 티켓이 하나뿐일 때만 확신할 수 있습니다. 사람이 그 티켓을 보고
+    누르는 자리가 맞습니다. 조건이 안 맞으면 붙이지 않고 **왜 안 붙였는지**를 돌려줍니다.
+    """
+    from ...agents.ticket_history import attach_personal_emails
+
+    return await attach_personal_emails(conversation_id)
 
 
 @router.post("/internal/customers/hubspot-history")

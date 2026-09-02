@@ -294,18 +294,28 @@ class HubSpotClient:
 
     async def emails_for_contact(self, contact_id: str, limit: int = 100) -> list[dict]:
         """그 연락처에 달린 CRM 이메일 기록 id 들. 읽기만 합니다."""
-        response = await self._retry(
-            "GET",
-            f"/crm/v4/objects/contacts/{contact_id}/associations/emails",
-            params={"limit": limit},
-        )
-        response.raise_for_status()
-        data = response.json()
-        return [
-            str(item.get("toObjectId"))
-            for item in (data.get("results") or [])
-            if item.get("toObjectId")
-        ]
+        out: list[str] = []
+        after: str | None = None
+        while True:
+            params: dict = {"limit": limit}
+            if after:
+                params["after"] = after
+            response = await self._retry(
+                "GET",
+                f"/crm/v4/objects/contacts/{contact_id}/associations/emails",
+                params=params,
+            )
+            response.raise_for_status()
+            data = response.json()
+            out.extend(
+                str(item.get("toObjectId"))
+                for item in (data.get("results") or [])
+                if item.get("toObjectId")
+            )
+            # 커서가 없을 때만 끝입니다 — 받아온 수를 세어 판단하면 조용히 절반만 봅니다.
+            after = ((data.get("paging") or {}).get("next") or {}).get("after")
+            if not after:
+                return out
 
     async def email_ticket_ids(self, email_id: str) -> list[str]:
         """그 이메일 기록이 이미 붙어 있는 티켓들. 붙일지 말지를 여기서 가릅니다."""
