@@ -292,6 +292,56 @@ class HubSpotClient:
         )
         r.raise_for_status()
 
+    async def emails_for_contact(self, contact_id: str, limit: int = 100) -> list[dict]:
+        """그 연락처에 달린 CRM 이메일 기록 id 들. 읽기만 합니다."""
+        response = await self._retry(
+            "GET",
+            f"/crm/v4/objects/contacts/{contact_id}/associations/emails",
+            params={"limit": limit},
+        )
+        response.raise_for_status()
+        data = response.json()
+        return [
+            str(item.get("toObjectId"))
+            for item in (data.get("results") or [])
+            if item.get("toObjectId")
+        ]
+
+    async def email_ticket_ids(self, email_id: str) -> list[str]:
+        """그 이메일 기록이 이미 붙어 있는 티켓들. 붙일지 말지를 여기서 가릅니다."""
+        response = await self._retry(
+            "GET", f"/crm/v4/objects/emails/{email_id}/associations/tickets"
+        )
+        response.raise_for_status()
+        data = response.json()
+        return [
+            str(item.get("toObjectId"))
+            for item in (data.get("results") or [])
+            if item.get("toObjectId")
+        ]
+
+    async def attach_email_to_ticket(self, email_id: str, ticket_id: str) -> None:
+        """개인 사서함으로 오간 메일 기록을 **티켓에 붙입니다** (2026-09-02 운영자 요청).
+
+        왜 필요한가 — 실측으로 확인한 것: 개인 연결 사서함(`untae@estsoft.com` 같은)으로
+        보낸 메일은 허브스팟이 **연락처에는 기록하지만 티켓에는 안 붙입니다**(운영 표본
+        5건 중 티켓 연결 0건, 연락처 연결 5건). 그래서 담당자가 자기 메일로 답하면 그
+        대화가 티켓 화면에서 사라집니다.
+
+        이 함수가 그 연결을 대신 만듭니다. **기록을 새로 만들지 않습니다** — 허브스팟이
+        이미 만들어 둔 기록을 티켓에 이어 붙일 뿐입니다.
+
+        기본 연결 유형(`HUBSPOT_DEFINED` 없이 default 엔드포인트)을 씁니다. 유형을 손으로
+        고르면 포털마다 다른 라벨 id 를 코드에 박게 되고, 그건 다음 포털에서 조용히
+        깨집니다.
+        """
+        guard_external_write("hubspot:attach_email_to_ticket")
+        response = await self._retry(
+            "PUT",
+            f"/crm/v4/objects/emails/{email_id}/associations/default/tickets/{ticket_id}",
+        )
+        response.raise_for_status()
+
     async def update_inbound_status(self, contact_id: str, status: str) -> None:
         """Update the inbound_status custom property on a contact."""
         try:

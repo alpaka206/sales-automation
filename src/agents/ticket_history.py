@@ -228,9 +228,11 @@ async def collect_ticket_history(client, ticket_id: str) -> list[dict]:
                 "external_id": f"hubspot:conv:{message_id}",
                 "channel": _channel_label(message),
                 "direction": classify_direction(message),
-                "subject": (str(message.get("subject") or "").strip() or None),
+                # `customer_interactions.subject` 는 300자입니다. 안 자르면 긴 제목 하나가
+                # DataError 로 그 회차를 통째로 죽입니다 — 그리고 그 티켓은 영영 안 들어옵니다.
+                "subject": (str(message.get("subject") or "").strip()[:300] or None),
                 "summary": text or "(본문 없음)",
-                "handler": senders[0] if senders else None,
+                "handler": (senders[0][:120] if senders else None),
                 "happened_at": _happened_at(message),
             })
     rows.sort(key=lambda row: row["happened_at"])
@@ -341,6 +343,22 @@ async def sync_pending_ticket_history(limit: int = TICKETS_PER_SWEEP) -> dict:
     return {"tickets": done, "added": added, "failed": failed}
 
 
+def run_pending_ticket_history(limit: int = TICKETS_PER_SWEEP) -> dict:
+    """10분 폴러가 부르는 **동기** 진입점.
+
+    **이 함수가 없으면 아무것도 안 돕니다.** 폴러는 단계를 `asyncio.to_thread(run)` 로
+    돌립니다 — 그 자리에 `async def` 를 두면 코루틴 객체만 만들어지고 **실행되지 않은 채**
+    버려집니다(경고 한 줄도 로그에 안 남을 수 있습니다). 배포하고 나서 「왜 아무 일도 안
+    일어나지」가 되는 종류의 실수라, 진입점을 따로 둡니다.
+
+    `asyncio.run` 이 안전한 이유: 폴러가 이미 별도 스레드로 넘겨 주므로 그 스레드에는
+    도는 이벤트 루프가 없습니다.
+    """
+    import asyncio
+
+    return asyncio.run(sync_pending_ticket_history(limit))
+
+
 def mark_ticket_history_stale(conversation_id: int) -> None:
     """이 티켓을 다음 회차의 맨 앞으로. 방금 무언가 오간 티켓에 씁니다.
 
@@ -355,9 +373,68 @@ def mark_ticket_history_stale(conversation_id: int) -> None:
 
 
 __all__ = [
+    "attach_personal_emails",
     "classify_direction",
+    "run_pending_ticket_history",
     "collect_ticket_history",
     "mark_ticket_history_stale",
     "sync_one_ticket",
     "sync_pending_ticket_history",
 ]
+
+
+# --------------------------------------------------------------------------- #
+# 개인 사서함으로 오간 메일을 티켓에 붙이기 (2026-09-02 운영자 요청)
+# --------------------------------------------------------------------------- #
+# **실측이 이 기능의 근거입니다.** 담당자가 자기 메일(`untae@estsoft.com` 등)로 고객에게
+# 답하면 허브스팟이 그 메일을 **연락처에는 기록하지만 티켓에는 안 붙입니다** — 운영 표본
+# 5건 전부가 그랬습니다(연락처 연결 5/5, 티켓 연결 0/5). 그래서 그 대화가 티켓 화면에서
+# 사라집니다.
+#
+# 여기서 하는 일은 **기록을 만드는 것이 아니라 이어 붙이는 것**입니다. 허브스팟이 이미
+# 만들어 둔 이메일 기록을 그 연락처의 티켓에 연결합니다.
+#
+# **티켓이 하나일 때만 붙입니다.** 그 연락처에 열린 티켓이 여럿이면 어느 대화인지 우리가
+# 알 수 없고, 잘못 붙이면 남의 티켓에 남의 메일이 섭니다 — 붙이는 것은 되돌릴 수 있지만
+# 아무도 그것이 잘못 붙었다는 것을 모릅니다. 담당자 가이드가 적어 둔 규칙과 같습니다.
+
+
+async def attach_personal_emails(conversation_id: int) -> dict:
+    """그 티켓의 연락처가 개인 사서함으로 주고받은 메일을 티켓에 붙입니다.
+
+    돌려주는 값: 살펴본 수 · 붙인 수 · 이미 붙어 있던 수.
+    """
+    from ..integrations.hubspot import HubSpotClient
+
+    with SessionLocal() as session:
+        conversation = session.get(Conversation, conversation_id)
+        if conversation is None:
+            return {"looked": 0, "attached": 0, "already": 0}
+        ticket_id = (conversation.hubspot_ticket_id or "").strip()
+        contact = conversation.contact
+        hubspot_contact_id = (contact.hubspot_contact_id or "").strip() if contact else ""
+    if not ticket_id or not hubspot_contact_id:
+        return {"looked": 0, "attached": 0, "already": 0}
+
+    client = HubSpotClient()
+    looked = attached = already = 0
+    try:
+        for email_id in await client.emails_for_contact(hubspot_contact_id):
+            looked += 1
+            tickets = await client.email_ticket_ids(email_id)
+            if ticket_id in tickets:
+                already += 1
+                continue
+            if tickets:
+                # 이미 **다른** 티켓의 것입니다. 건드리지 않습니다.
+                continue
+            await client.attach_email_to_ticket(email_id, ticket_id)
+            attached += 1
+    finally:
+        await client.close()
+    if attached:
+        logger.info(
+            "개인 사서함 메일 %d건을 티켓 %s 에 붙였습니다 (살펴본 %d건, 이미 붙어 있던 %d건).",
+            attached, ticket_id, looked, already,
+        )
+    return {"looked": looked, "attached": attached, "already": already}

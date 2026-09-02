@@ -181,6 +181,21 @@ def test_hubspot_update_contact_blocked(safe):
         asyncio.run(HubSpotClient().update_contact("123", {"x": "y"}))
 
 
+def test_attaching_an_email_to_a_ticket_is_blocked(safe):
+    """개인 사서함 메일을 티켓에 붙이는 것도 **허브스팟 쓰기**입니다 (2026-09-02).
+
+    새 외부 쓰기 경로가 생기면 이 파일에 한 줄이 같이 늡니다 — 그것이 이 파일의 규칙이고,
+    그래서 안전 모드가 「무엇을 막는지」를 세어 볼 수 있습니다. 막는 자리는 라우트가 아니라
+    `attach_email_to_ticket` 안이라, 다음 호출자도 그 앞을 지납니다.
+    """
+    import asyncio
+
+    from src.integrations.hubspot import HubSpotClient
+
+    with pytest.raises(ExternalWriteBlocked):
+        asyncio.run(HubSpotClient().attach_email_to_ticket("1", "2"))
+
+
 def test_hubspot_record_write_blocked(safe):
     """티켓 세부 내역의 「플랜 정보」 저장. 이 화면에서 유일하게 허브스팟에 쓰는 폼입니다.
 
