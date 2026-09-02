@@ -385,20 +385,38 @@ def test_order_retry_updates_existing_business_key_without_duplicate(monkeypatch
 
 
 def test_stage_update_touches_only_stage_cells(monkeypatch):
+    """단계 칸만 씁니다 — **Pipeline 칸에는 값을 안 씁니다.**
+
+    2026-09-02 운영자 지시. 예전에는 `pipeline` 인자를 받아 우리 DB 의
+    `customer_profiles.qualification` 을 그대로 적었습니다. 그 열은 워크북 전체 동기화가
+    시트의 **수식 결과를 베껴 온 사본**이라, 되돌려 쓰는 순간 그 행의 수식이 죽은 글자가
+    됐습니다 — 그 뒤로 구독 플랜을 아무리 고쳐도 그 행만 옛 값을 들고 있고, 수식이 없다는
+    것은 시트를 봐도 안 보입니다.
+
+    인자를 「안 넘긴다」가 아니라 **없앤** 이유는 남겨 두면 다음 호출자가 또 그리로 가기
+    때문입니다. 그래서 이 호출은 아예 위치 인자가 하나 줄었습니다.
+    """
     _configure(monkeypatch)
     store = {
-        "existing_header": [["Cluent ID", "Deal Stage", "Deal Stage Detail", "Pipeline", "고객사"]],
+        "existing_header": [
+            ["Cluent ID", "Deal Stage", "Deal Stage Detail", "Pipeline", "구독 플랜"]
+        ],
         "client_values": [[""]] * 40 + [["42"]],
     }
     monkeypatch.setattr(gs, "_build_service", lambda: _FakeService(store))
 
-    assert gs.update_inbound_stage(42, "negotiation", "PQL") is True
+    assert gs.update_inbound_stage(42, "negotiation") is True
     assert store["batch"]["data"] == [
         {"range": "'Inbound DB'!B42", "values": [["Negotiation"]]},
         {"range": "'Inbound DB'!C42", "values": [["Meeting"]]},
-        {"range": "'Inbound DB'!D42", "values": [["PQL"]]},
     ]
     assert store["batch"]["valueInputOption"] == "RAW"
+    # 값을 안 쓰는 데서 그치지 않고 **수식을 되돌려 놓습니다** — 그래야 이미 덮여 버린 행이
+    # 다음 단계 이동에서 스스로 낫습니다. 고쳐 놓고도 시트가 그대로면 고친 것이 아닙니다.
+    written = store["updates"][-1]
+    assert written["range"] == "'Inbound DB'!D42"
+    assert written["body"]["values"][0][0].startswith('=IF(OR(E42=""')
+    assert written["valueInputOption"] == "USER_ENTERED"
 
 
 def test_read_inbound_records_maps_real_headers_without_writing(monkeypatch):
@@ -471,7 +489,8 @@ def test_pipeline_is_written_as_a_formula_over_the_plan_cell():
         row=1,
     )
     assert _pipeline_formula(header, 168) == (
-        '=IF(F168="N/A","MQL",IF(F168="엔터프라이즈","재계약","PQL"))'
+        '=IF(OR(F168="",F168="free",F168="n/a",F168="na",F168="none",F168="무료",F168="없음"),'
+        '"MQL",IF(F168="엔터프라이즈","재계약","PQL"))'
     )
 
 
@@ -483,14 +502,33 @@ def test_a_sheet_without_a_plan_column_gets_no_formula():
 
 
 def test_the_formula_branches_match_the_operators_rule():
-    """N/A -> MQL, 엔터프라이즈 -> 재계약, everything else -> PQL. No blank branch: this
-    app always fills the plan cell (Free is written as N/A)."""
+    """빈칸 · N/A · Free 는 MQL, 엔터프라이즈는 재계약, 그 외는 PQL.
+
+    **빈칸 가지가 있어야 합니다** (2026-09-02 운영자 지시). 「이 앱이 플랜 칸을 늘 채우므로
+    빈칸은 생길 수 없다」가 사실이 아니었습니다 — `record_inbound` 경로만 `normalise_plan`
+    을 지나고, 허브스팟 연락처 동기화와 콘솔의 플랜 폼은 값을 그대로 써서 `Free` 가 그대로
+    들어갑니다. 그러면 그 고객이 시트에서 PQL 로 읽힙니다.
+    """
     from src.integrations.google_sheets import _pipeline_formula, _SheetHeader
 
     formula = _pipeline_formula(_SheetHeader(values=["Pipeline", "Plan"], row=1), 2)
-    assert '"N/A","MQL"' in formula
+    assert formula.startswith("=IF(OR(")
+    assert 'B2=""' in formula, "손으로 비운 칸도 MQL 입니다"
+    assert '),"MQL",' in formula
     assert '"엔터프라이즈","재계약"' in formula
     assert formula.endswith('"PQL"))')
+
+
+def test_the_formula_and_the_console_share_one_list_of_not_bought_spellings():
+    """「아직 아무것도 안 샀다」의 철자를 두 곳에서 세면, 같은 고객을 콘솔은 MQL 시트는
+    PQL 이라고 부릅니다 — 두 화면을 나란히 놓기 전에는 안 보입니다."""
+    from src.common.sheet_values import PLAN_AS_NOT_APPLICABLE, qualification_for_plan
+    from src.integrations.google_sheets import _pipeline_formula, _SheetHeader
+
+    formula = _pipeline_formula(_SheetHeader(values=["Pipeline", "Plan"], row=1), 2)
+    for word in PLAN_AS_NOT_APPLICABLE:
+        assert f'B2="{word}"' in formula, word
+        assert qualification_for_plan(word) == "MQL", word
 
 
 def test_a_new_company_gets_a_registry_row_before_its_inquiry_is_written(monkeypatch):

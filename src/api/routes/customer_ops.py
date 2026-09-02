@@ -317,8 +317,8 @@ async def _sync_stage(
     from ...integrations.google_sheets import is_configured, update_inbound_stage
 
     with SessionLocal() as session:
-        profile = session.get(CustomerProfile, contact_id)
-        qualification = profile.qualification if profile else None
+        # MQL/PQL 은 **안 보냅니다.** 그 칸은 시트의 수식이 구독 플랜에서 계산하고, 여기서
+        # 값을 적으면 그 행의 수식이 죽습니다(2026-09-02 운영자 지시).
         inquiry_query = select(Conversation).where(Conversation.contact_id == contact_id)
         if ticket_id:
             inquiry_query = inquiry_query.where(
@@ -337,7 +337,6 @@ async def _sync_stage(
                 update_inbound_stage,
                 sheet_client_id,
                 stage,
-                qualification,
                 inquiry_key,
             )
             if live_sheets_writes()

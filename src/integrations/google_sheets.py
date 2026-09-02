@@ -350,18 +350,29 @@ def _next_inbound_client_id(service, tab: str, header: _SheetHeader) -> int:
 # Pipeline (E on the current sheet) is a FORMULA, not a value the app decides once and
 # forgets. The sales team edits 구독 플랜 by hand as a deal moves, and a written-in
 # "MQL" would then contradict the plan sitting beside it — the formula re-reads that cell
-# forever. The operator's rule, 2026-08-04:
+# forever. The operator's rule, 2026-08-04, widened 2026-09-02:
 #
-#     N/A                    -> MQL      (nothing bought yet; Free is written as N/A)
-#     엔터프라이즈             -> 재계약    (already a customer; this is a renewal)
-#     pro / creator / starter / 사용중(플랜 미확인) -> PQL
+#     빈칸 / N/A / Free / 무료 …  -> MQL      (아직 아무것도 안 샀다)
+#     엔터프라이즈                 -> 재계약    (already a customer; this is a renewal)
+#     그 외 플랜                   -> PQL
 #
-# No blank branch: this app always fills the plan cell, so an empty one cannot arise from
-# the inbound path. A cell someone clears by hand therefore reads PQL.
+# **「아직 아무것도 안 샀다」의 철자는 `sheet_values.PLAN_AS_NOT_APPLICABLE` 한 곳에서
+# 옵니다.** 콘솔 화면도 같은 목록으로 MQL/PQL 을 정하므로(`qualification_for_plan`), 목록이
+# 둘이면 같은 고객을 한쪽은 MQL 다른 쪽은 PQL 이라고 부릅니다.
+#
+# **빈칸 가지가 생긴 이유** (2026-09-02 운영자 지시): 「이 앱이 플랜 칸을 늘 채우므로 빈칸은
+# 생길 수 없다」가 사실이 아니었습니다. `record_inbound` 경로만 `normalise_plan` 을 지나고,
+# 허브스팟 연락처 동기화와 콘솔의 플랜 폼은 값을 **그대로** 씁니다 — 허브스팟에 `Free` 라고
+# 적힌 고객이 시트에 `Free` 로 들어가 PQL 로 읽혔습니다. 사람이 손으로 비운 칸도 같습니다.
+# 수식이 그 세 철자를 다 받아 주면 어느 경로로 들어왔든 답이 같습니다.
+#
+# 비교는 Sheets 의 `=` 이라 대소문자를 안 가립니다 — `Free` 도 `free` 도 같이 걸립니다.
 #
 # The plan column is located by header rather than hardcoded as N, so inserting a column
 # does not silently point the formula at the wrong one.
 def _pipeline_formula(header: _SheetHeader, row: int) -> str | None:
+    from ..common.sheet_values import PLAN_AS_NOT_APPLICABLE
+
     lookup = _header_lookup({"plan": ""})
     plan_index = next(
         (i for i, cell in enumerate(header.values) if _key_for_header(cell, lookup) == "plan"),
@@ -370,7 +381,14 @@ def _pipeline_formula(header: _SheetHeader, row: int) -> str | None:
     if plan_index is None:
         return None
     cell = f"{_column_letter(plan_index)}{row}"
-    return f'=IF({cell}="N/A","MQL",IF({cell}="엔터프라이즈","재계약","PQL"))'
+    # 빈칸이 먼저입니다 — 목록은 정렬해서 붙입니다. 세트의 순서는 실행마다 달라지므로,
+    # 그대로 쓰면 같은 행에 같은 뜻의 수식이 매번 다른 글자로 다시 써집니다.
+    nothing_bought = ",".join(
+        f'{cell}="{word}"' for word in ("", *sorted(PLAN_AS_NOT_APPLICABLE))
+    )
+    return (
+        f'=IF(OR({nothing_bought}),"MQL",IF({cell}="엔터프라이즈","재계약","PQL"))'
+    )
 
 
 # 고객사·기업 종류·국가는 「고객 기본 정보」가 원본이다. 문의 행마다 값을 다시 적으면 같은
@@ -942,10 +960,24 @@ def delete_inbound_row(client_id: int | None, inquiry_key: str | None = None) ->
 def update_inbound_stage(
     client_id: int | None,
     stage: str,
-    pipeline: str | None = None,
     inquiry_key: str | None = None,
 ) -> bool:
-    """Find the stable Client ID and update only its current stage cells."""
+    """Find the stable Client ID and update only its current stage cells.
+
+    **Pipeline(MQL/PQL) 칸에는 값을 쓰지 않습니다 — 오히려 수식을 되돌려 놓습니다**
+    (2026-09-02 운영자 지시).
+
+    예전에는 `pipeline` 인자를 받아 `customer_profiles.qualification` 을 그대로 적었습니다.
+    그 열은 **워크북 전체 동기화가 시트의 수식 결과를 베껴 온 사본**이라, 여기서 되돌려
+    쓰는 순간 그 행의 수식이 죽은 글자로 바뀌었습니다. 그 뒤로 그 행은 구독 플랜을 아무리
+    고쳐도 옛 값을 그대로 들고 있고, 옆 행들과 달리 수식이 없다는 것은 시트를 봐도 안
+    보입니다. 인자를 「안 넘기면」이 아니라 **없애는** 이유는, 남겨 두면 다음 호출자가
+    언젠가 또 그리로 가기 때문입니다.
+
+    그래서 단계를 옮기는 김에 그 칸의 수식을 다시 깝니다 — 이미 덮여 버린 행이 다음 단계
+    이동에서 스스로 낫습니다. 그러지 않으면 「이제 값을 안 쓴다」로 고쳐 놓고도 시트는
+    그대로라, 화면에서는 고쳐진 것이 없어 보입니다.
+    """
     if not client_id or not writes_enabled():
         return False
     if stage not in _STAGE_VALUES:
@@ -981,8 +1013,6 @@ def update_inbound_stage(
             )
             return False
         values = {"deal_stage": words[0], "deal_stage_detail": words[1]}
-        if pipeline:
-            values["pipeline"] = pipeline
         if inquiry_key:
             values["inquiry_key"] = inquiry_key
         lookup = _header_lookup(values)
@@ -1008,6 +1038,10 @@ def update_inbound_stage(
             spreadsheetId=settings.GOOGLE_SHEETS_SPREADSHEET_ID.strip(),
             body={"valueInputOption": "RAW", "data": data},
         ).execute()
+        # 위 batch 에 못 싣는 이유는 `valueInputOption` 입니다: 단계 값들은 RAW 로 가야
+        # 하고(`+82 10-…` 같은 글자가 수식이 되면 안 됩니다) 수식은 USER_ENTERED 로 가야
+        # 합니다 — 한 요청에 하나뿐이라 호출이 둘입니다.
+        _write_pipeline_formula(service, tab, header, row)
         return True
     except Exception as exc:
         # **이유를 메시지에 넣습니다.** `/logs` 는 메시지 한 줄만 보관하므로 exc_info 는

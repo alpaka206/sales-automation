@@ -31,13 +31,18 @@ UNKNOWN_COMPANY_TYPE = "확인 안 됨"
 
 # 구독 플랜. Free is written as N/A on the operator's instruction: the Pipeline formula
 # reads this cell, and "nothing bought yet" is one state there, not two.
-_PLAN_AS_NOT_APPLICABLE = {"free", "n/a", "na", "none", "없음", "무료"}
+#
+# **공개 이름인 이유**: 워크북의 Pipeline 수식도 이 목록으로 만듭니다
+# (`google_sheets._pipeline_formula`). 「아직 아무것도 안 샀다」의 철자를 콘솔과 시트가 따로
+# 세면, 같은 고객을 한쪽은 MQL 다른 쪽은 PQL 이라고 부릅니다 — 그리고 그건 두 화면을 나란히
+# 놓고 보기 전에는 안 보입니다.
+PLAN_AS_NOT_APPLICABLE = frozenset({"free", "n/a", "na", "none", "없음", "무료"})
 
 
 def normalise_plan(value: str | None) -> str:
     """The plan as the workbook spells it. Free and blank both become N/A."""
     text = (value or "").strip()
-    return "N/A" if text.lower() in _PLAN_AS_NOT_APPLICABLE or not text else text
+    return "N/A" if text.lower() in PLAN_AS_NOT_APPLICABLE or not text else text
 
 
 def qualification_for_plan(value: str | None) -> str:

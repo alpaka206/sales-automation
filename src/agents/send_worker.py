@@ -166,7 +166,7 @@ async def _post_send_bookkeeping(session, msg, conv, message_id: int) -> None:
                     update_inbound_stage,
                     sheet_client_id,
                     "meeting_link_sent",
-                    profile.qualification if profile else None,
+                    # MQL/PQL 은 안 보냅니다 — 시트의 수식이 구독 플랜에서 계산합니다.
                     conv.sheet_inquiry_key,
                 )
                 if not sheet_ok:
