@@ -82,11 +82,15 @@ def approve(
     *,
     edited_subject: str | None = None,
     signature_key: str | None | object = _UNSET,
+    channel_account_id: str | None | object = _UNSET,
 ) -> Message:
     """Atomically freeze the operator-reviewed message and approve it.
 
     ``signature_key`` 를 안 넘기면 행의 값을 그대로 둡니다. **넘기면 그 값으로 씁니다 —
     None 이어도.** None 은 「서명 없음」이고, 그것도 운영자가 고른 것입니다.
+
+    ``channel_account_id`` 도 같은 규칙입니다(이관 0105) — 운영자가 고른 **발신 주소**이고,
+    None 은 「고르지 않음」이라 스레드가 정하는 예전 동작입니다.
     """
     session = SessionLocal()
     try:
@@ -126,6 +130,8 @@ def approve(
             values["subject"] = edited_subject
         if signature_key is not _UNSET:
             values["signature_key"] = signature_key
+        if channel_account_id is not _UNSET:
+            values["channel_account_id"] = channel_account_id
 
         result = session.execute(
             update(Message)

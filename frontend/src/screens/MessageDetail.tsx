@@ -117,6 +117,8 @@ type Detail = {
     /** 번역이 덮어쓰기 전의 한국어 초안. 번역 전에는 `null`. */
     body_ko: string | null;
     language: string | null; target_language: string | null; signature_key: string;
+    /** 운영자가 고른 발신 계정 id. 빈 문자열이면 「안 고름」 = 스레드가 정합니다. */
+    channel_account_id: string;
     to_address: string; score_snapshot: number | null; created_at: string;
     sent_at: string | null; scheduled_at: string | null; category: string | null;
   } | null;
@@ -172,6 +174,18 @@ export function MessageDetail() {
 
   // 허브스팟에 물어야 나오는 값이라 본문과 따로 받습니다. 같이 받으면 답을 읽는 일이
   // 허브스팟 응답을 기다리게 됩니다 — 패널만 늦게 채워지는 편이 낫습니다.
+  // 고를 수 있는 발신 주소. 허브스팟에 물어야 나오므로 본문과 따로 받습니다 — 같이
+  // 받으면 답을 읽는 일이 이 조회를 기다립니다. 못 가져오면 고르개가 안 뜰 뿐, 발송은
+  // 예전대로 됩니다(스레드가 정합니다).
+  const msgId = data?.msg?.id;
+  const { data: senders } = useQuery({
+    queryKey: ["reply-senders", msgId],
+    queryFn: () => getJSON<{ senders: { id: string; address: string; is_default: boolean }[];
+                             error: string | null }>(`/api/ui/messages/${msgId}/senders`),
+    enabled: !!msgId,
+    staleTime: 5 * 60_000,
+  });
+
   const contactId = data?.contact?.id;
   const { data: hubspot, isPending: hubspotPending } = useQuery({
     queryKey: ["hubspot-record", contactId],
@@ -192,6 +206,9 @@ export function MessageDetail() {
   const [subject, setSubject] = useState("");
   const [body, setBody] = useState("");
   const [signature, setSignature] = useState("");
+  // 어느 주소에서 나갈까. 빈 문자열은 「고르지 않음」이고, 그때는 그 스레드에 이미 있던
+  // 계정이 정합니다 — 예전 동작 그대로입니다.
+  const [sender, setSender] = useState("");
   const [draftLanguage, setDraftLanguage] = useState("");
   // 번역 전의 한국어 초안. 번역은 되돌릴 수 없는 한 번의 누름이라, 무엇을 승인했는지
   // 다시 읽을 자리가 있어야 합니다.
@@ -256,6 +273,7 @@ export function MessageDetail() {
     setSubject(data.msg.subject);
     setBody(data.msg.body);
     setSignature(data.msg.signature_key);
+    setSender(data.msg.channel_account_id);
     setDraftLanguage(data.msg.language || "");
     setKoreanDraft(data.msg.body_ko);
   }
@@ -404,7 +422,8 @@ export function MessageDetail() {
     if (!msg) return;
     setNote("");
     try {
-      await postForm(`/messages/${msg.id}/${action}`, { subject, body, signature_key: signature, ...extra });
+      await postForm(`/messages/${msg.id}/${action}`,
+                     { subject, body, signature_key: signature, channel_account_id: sender, ...extra });
       setNote("완료되었습니다.");
       // 허브스팟 패널은 빼고 무효화합니다 — 우리가 저장한다고 저쪽 값이 바뀌지 않는데,
       // 같이 걸면 콘솔의 모든 저장이 열려 있는 티켓 탭마다 외부 왕복을 한 번씩 냅니다.
@@ -423,7 +442,7 @@ export function MessageDetail() {
       method: "POST",
       credentials: "same-origin",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({ body, subject, signature_key: signature }),
+      body: new URLSearchParams({ body, subject, signature_key: signature, channel_account_id: sender }),
     });
     const result = await response.json();
     if (result.error) return setNote(result.error);
@@ -439,7 +458,7 @@ export function MessageDetail() {
       method: "POST",
       credentials: "same-origin",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({ body, signature_key: signature }),
+      body: new URLSearchParams({ body, signature_key: signature, channel_account_id: sender }),
     });
     // 실패 응답을 그대로 넣으면 「이메일 미리보기」 라는 제목 아래 오류 페이지가 메일처럼
     // 그려집니다 — 운영자는 그걸 고객에게 나갈 본문으로 읽습니다.
@@ -608,6 +627,27 @@ export function MessageDetail() {
                     {/* 골라야 붙습니다. 예전에는 여기에 "기본 (텍스트 서명)" 이 하나 더
                         있었는데, 그건 모델이 본문에 써 넣은 서명을 그대로 두라는 뜻이었습니다
                         — 고르지 않아도 서명이 붙던 자리입니다. 이제 없습니다. */}
+                    {/* **어느 주소에서 나가나.** 예전에는 고를 수 없었습니다 — 그 스레드에
+                        이미 있던 계정이 정했고, 화면에는 그게 무엇인지도 안 보였습니다.
+                        목록은 서버가 만듭니다(`/senders`): 그 스레드의 인박스에 연결된
+                        살아 있는 주소만 들어갑니다. 화면이 스스로 목록을 지으면 고를 수는
+                        있는데 발송이 거절하는 값이 생깁니다. */}
+                    {(senders?.senders?.length ?? 0) > 0 && (
+                      <>
+                        <label className="field-label" htmlFor="msg-sender"
+                               style={{ marginTop: 12 }}>발신 주소</label>
+                        <select className="select" id="msg-sender" value={sender}
+                                onChange={(e) => setSender(e.target.value)}>
+                          <option value="">
+                            자동 — {senders?.senders?.find((x) => x.is_default)?.address ?? "이 대화의 주소"}
+                          </option>
+                          {senders?.senders?.map((x) => (
+                            <option key={x.id} value={x.id}>{x.address}</option>
+                          ))}
+                        </select>
+                      </>
+                    )}
+
                     <label className="field-label" htmlFor="msg-signature" style={{ marginTop: 12 }}>서명</label>
                     <select className="select" id="msg-signature" value={signature}
                             onChange={(e) => setSignature(e.target.value)} style={{ marginBottom: 12 }}>

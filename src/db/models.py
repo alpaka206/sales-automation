@@ -142,6 +142,17 @@ class Message(Base):
     # key (e.g. 'signature_html_ko') whose branded HTML card is attached at send
     # time, replacing the text signature. See integrations/email_html.py.
     signature_key: Mapped[str | None] = mapped_column(String, nullable=True)
+    # **어느 주소에서 나갈까** — 운영자가 발송 시점에 고르는 값입니다(이관 0105).
+    # HubSpot Conversations 의 채널 계정 id 이고, 그 계정의 주소가 곧 고객이 보는 From
+    # 입니다(`HUBSPOT_SENDER_ACTOR_ID` 는 감사용 액터라 From 을 안 정합니다).
+    #
+    # **NULL 이 기본이고, 그건 「예전처럼」입니다** — 그 스레드에 이미 있던 메시지의 계정을
+    # 그대로 씁니다. 그래서 손대지 않은 행은 동작이 하나도 안 바뀝니다.
+    #
+    # 주소가 아니라 **id** 를 듭니다: 같은 주소가 인박스마다 따로 연결될 수 있고, 발송
+    # payload 가 받는 것도 id 입니다. `from_address` 에 넣지 않는 이유는 그 칸이 목록에
+    # 주소로 그려지기 때문입니다 — 거기 번호가 들어가면 메일 주소 자리에 숫자가 뜹니다.
+    channel_account_id: Mapped[str | None] = mapped_column(String, nullable=True)
     score_snapshot: Mapped[int | None] = mapped_column(Integer, nullable=True)
     prompt_variant: Mapped[str | None] = mapped_column(String, nullable=True)
     draft_provider: Mapped[str | None] = mapped_column(String, nullable=True)

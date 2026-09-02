@@ -434,6 +434,43 @@ def ui_logs(request: Request, view: str = "all"):
     return {"rows": _events(view)}
 
 
+@router.get("/api/ui/messages/{message_id}/senders")
+async def ui_reply_senders(message_id: int):
+    """그 회신을 **어느 주소에서** 보낼 수 있나 — 검토 화면의 발신 고르개가 읽습니다.
+
+    본문 payload 와 **따로** 가져옵니다. 허브스팟에 물어야 나오는 값이라 같이 담으면
+    답을 읽는 일이 이 조회를 기다리게 됩니다(「플랜 정보」 카드와 같은 이유).
+
+    **읽기만 합니다.** `list_reply_senders` 는 GET 만 하고 쓰기 관문을 안 지납니다 —
+    그래서 이 라우트를 여는 것만으로 메일이 나갈 길은 없습니다.
+
+    못 가져와도 200 에 빈 목록입니다. 고르개가 안 뜰 뿐 발송은 예전대로 되고(스레드가
+    정합니다), 여기서 404 를 내면 화면이 오류를 그리는데 「고를 것이 없다」는 오류가
+    아닙니다. 이유는 `error` 에 실어 화면이 적을 수 있게 합니다.
+    """
+    from ...db.models import Message
+    from ...db.session import SessionLocal
+    from ...integrations.hubspot import HubSpotClient
+
+    def _target() -> tuple[str, str, str]:
+        with SessionLocal() as session:
+            msg = session.get(Message, message_id)
+            if msg is None:
+                return "", "", ""
+            conversation = session.get(Conversation, msg.conversation_id)
+            ticket = (conversation.hubspot_ticket_id if conversation else "") or ""
+            return ticket, (msg.to_address or ""), (msg.channel_account_id or "")
+
+    ticket_id, recipient, chosen = await asyncio.to_thread(_target)
+    if not ticket_id or not recipient:
+        return {"senders": [], "chosen": chosen, "error": None}
+    try:
+        senders = await HubSpotClient().list_reply_senders(ticket_id, recipient)
+    except Exception as exc:  # 조회 실패가 검토 화면을 막으면 안 됩니다
+        return {"senders": [], "chosen": chosen, "error": f"{type(exc).__name__}: {exc}"}
+    return {"senders": senders, "chosen": chosen, "error": None}
+
+
 @router.get("/api/ui/contacts/{contact_id}/hubspot-record")
 def ui_hubspot_record(contact_id: int):
     """허브스팟 연락처 레코드의 「기본 그룹」 — 티켓 세부 내역 오른쪽 카드들.

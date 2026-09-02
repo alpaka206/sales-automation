@@ -149,7 +149,12 @@ async def send(message: Message) -> None:
     rich_text = to_html_email(message.body or "", signature_html=signature_html)
     client = HubSpotClient()
     try:
-        context = await client.find_conversation_reply_context(ticket_id, recipients[0])
+        # 운영자가 고른 발신 주소. 비어 있으면 예전처럼 스레드가 정합니다(이관 0105).
+        context = await client.find_conversation_reply_context(
+            ticket_id,
+            recipients[0],
+            preferred_account_id=getattr(message, "channel_account_id", None) or "",
+        )
         hubspot_message_id = await client.send_conversation_message(
             context,
             recipient_email=recipients[0],

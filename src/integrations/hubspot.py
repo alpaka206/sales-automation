@@ -402,7 +402,7 @@ class HubSpotClient:
         return actor
 
     async def find_conversation_reply_context(
-        self, ticket_id: str, recipient_email: str
+        self, ticket_id: str, recipient_email: str, *, preferred_account_id: str = ""
     ) -> ConversationReplyContext:
         """Select the newest safe email reply route for a ticket.
 
@@ -410,6 +410,16 @@ class HubSpotClient:
         account selection. A form-only thread has no email route to copy, so it may use
         the configured default email account only when that account belongs to the same
         inbox. Ambiguous tickets fail closed instead of replying on the wrong thread.
+
+        ``preferred_account_id`` 는 **운영자가 고른 발신 주소**입니다(이관 0105). 비어 있으면
+        예전 그대로 — 스레드가 정합니다. 값이 있으면 스레드는 아래 규칙이 똑같이 고르고
+        **계정만** 그것으로 바뀝니다: 어느 스레드에 붙일지는 운영자가 판단할 일이 아니고,
+        엉뚱한 스레드에 답이 붙으면 고객이 보는 대화가 두 갈래가 됩니다.
+
+        고른 계정은 **그 스레드의 인박스에 속해야** 합니다 — 아래 폼 폴백이 이미 지키는
+        규칙과 같은 규칙입니다. 인박스가 다르면 HubSpot 이 받아 줄지 알 수 없고, 받아
+        준다면 그건 그것대로 남의 인박스에 우리 메일이 서는 것입니다. 실패는 **닫는 쪽**
+        으로 냅니다.
         """
         target = recipient_email.strip().lower()
         if not ticket_id:
@@ -474,6 +484,7 @@ class HubSpotClient:
         # 「channel-account lookup failed (HTTP 404)」로 죽습니다.
         #
         # 후보는 각자 자기 스레드를 들고 있으므로, 넘어가도 인박스를 넘나들지 않습니다.
+        wanted = (preferred_account_id or "").strip()
         for _timestamp, thread_id, channel_id, account_id in sorted(candidates, reverse=True):
             try:
                 await self._email_channel_account(account_id)
@@ -486,6 +497,9 @@ class HubSpotClient:
                     account_id, ticket_id, exc,
                 )
                 continue
+            if wanted and wanted != account_id:
+                # 스레드는 위 규칙이 고르고, 계정만 운영자가 고른 것으로 바꿉니다.
+                account_id = await self._account_for_thread(thread_id, wanted, ticket_id)
             return ConversationReplyContext(thread_id, channel_id, account_id)
 
         # A brand-new form thread has no email message to copy yet. Use the configured
@@ -501,13 +515,80 @@ class HubSpotClient:
             raise DeliveryPermanentError(
                 "HUBSPOT_DEFAULT_EMAIL_CHANNEL_ACCOUNT_ID is required for a form-only thread"
             )
-        account = await self._email_channel_account(account_id)
         thread = fallback_threads[0]
+        if wanted:
+            # 운영자가 고른 것이 설정값을 이깁니다 — 같은 인박스 규칙은 그대로 겁니다.
+            account_id = await self._account_for_thread(str(thread["id"]), wanted, ticket_id)
+            return ConversationReplyContext(str(thread["id"]), "1002", account_id)
+        account = await self._email_channel_account(account_id)
         if str(account.get("inboxId") or "") != str(thread.get("inboxId") or ""):
             raise DeliveryPermanentError(
                 f"HubSpot email channel account {account_id} does not belong to thread inbox"
             )
         return ConversationReplyContext(str(thread["id"]), "1002", account_id)
+
+    async def _account_for_thread(
+        self, thread_id: str, account_id: str, ticket_id: str
+    ) -> str:
+        """운영자가 고른 계정을 그 스레드에 쓸 수 있는지 확인하고 그대로 돌려줍니다.
+
+        확인하는 것은 둘입니다 — 쓸 수 있는 이메일 계정인가(`_email_channel_account` 가
+        1002 · active · authorized · 안 archived 를 봅니다), 그리고 **그 스레드의
+        인박스인가.** 뒤엣것이 없으면 남의 인박스 주소로 답이 나가고, 그 대화는 그 팀
+        화면에 안 보입니다.
+
+        고른 계정이 못 쓰는 것이면 **조용히 기본값으로 떨어지지 않고 실패합니다.**
+        운영자가 「이 주소로 보낸다」고 고른 것이라, 다른 주소로 나가면 고른 의미가
+        없습니다 — 그리고 나간 뒤에는 되돌릴 수 없습니다.
+        """
+        account = await self._email_channel_account(account_id)
+        thread = await self._get_conversation_json(
+            f"/conversations/v3/conversations/threads/{thread_id}",
+            action=f"thread {thread_id} lookup",
+        )
+        if str(account.get("inboxId") or "") != str(thread.get("inboxId") or ""):
+            raise DeliveryPermanentError(
+                f"고른 발신 계정 {account_id} 은 이 티켓({ticket_id}) 스레드의 인박스가 "
+                "아닙니다 — 같은 인박스에 연결된 주소만 고를 수 있습니다"
+            )
+        return account_id
+
+    async def list_reply_senders(self, ticket_id: str, recipient_email: str) -> list[dict]:
+        """그 티켓에 **고를 수 있는** 발신 주소들. 읽기만 합니다 — 아무것도 안 보냅니다.
+
+        기본값(아무것도 안 고르면 나갈 주소)을 먼저 정하고, 그 스레드의 인박스에 연결된
+        살아 있는 이메일 계정을 전부 돌려줍니다. 화면이 스스로 목록을 만들면 그 목록이
+        발송이 실제로 받아 주는 것과 언젠가 갈라집니다 — 여기서 만든 것만 고를 수 있습니다.
+        """
+        context = await self.find_conversation_reply_context(ticket_id, recipient_email)
+        thread = await self._get_conversation_json(
+            f"/conversations/v3/conversations/threads/{context.thread_id}",
+            action=f"thread {context.thread_id} lookup",
+        )
+        inbox_id = str(thread.get("inboxId") or "")
+        data = await self._get_conversation_json(
+            "/conversations/v3/conversations/channel-accounts",
+            params={"limit": 200},
+            action="channel-account list",
+        )
+        out: list[dict] = []
+        for account in data.get("results") or ():
+            if str(account.get("channelId") or "") != "1002":
+                continue
+            if account.get("archived") or not account.get("active"):
+                continue
+            if not account.get("authorized"):
+                continue
+            if str(account.get("inboxId") or "") != inbox_id:
+                continue
+            address = (account.get("deliveryIdentifier") or {}).get("value") or ""
+            out.append({
+                "id": str(account.get("id") or ""),
+                "address": address or (account.get("name") or ""),
+                "is_default": str(account.get("id") or "") == context.channel_account_id,
+            })
+        out.sort(key=lambda item: (not item["is_default"], item["address"]))
+        return out
 
     async def send_conversation_message(
         self,

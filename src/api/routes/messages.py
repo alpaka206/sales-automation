@@ -59,6 +59,19 @@ _MAX_EDIT_BODY_BYTES = 100_000
 _MAX_EDIT_SUBJECT_LEN = 300
 
 
+def _clean_channel_account_id(value: str | None) -> str | None:
+    """운영자가 고른 발신 계정 id, 안 골랐으면 None(= 예전처럼 스레드가 정함).
+
+    여기서는 **모양만** 봅니다 — 숫자로 된 id 인가. 그 계정을 정말 쓸 수 있는지(이메일
+    채널인가 · 살아 있나 · 그 스레드의 인박스인가)는 발송 직전 HubSpot 에 물어서 정합니다
+    (`hubspot._account_for_thread`). 여기서 목록을 한 번 더 만들면 그 목록이 발송이 실제로
+    받아 주는 것과 언젠가 갈라지고, 그때 화면에는 고를 수 있는데 발송은 거절하는 값이
+    생깁니다. 그리고 이 라우트는 HubSpot 왕복 없이 끝나야 합니다.
+    """
+    v = (value or "").strip()
+    return v if v.isdigit() else None
+
+
 def _clean_signature_key(value: str | None) -> str | None:
     """The posted signature choice, or None for 서명 없음.
 
@@ -370,6 +383,9 @@ def _message_detail_context(
                 "language": msg.language,
                 "target_language": msg.target_language,
                 "signature_key": msg.signature_key or "",
+                # 고른 발신 주소(HubSpot 채널 계정 id). 빈 값이면 「고르지 않음」이고,
+                # 그때는 스레드가 정합니다 — 화면의 고르개가 그 뜻을 적습니다.
+                "channel_account_id": msg.channel_account_id or "",
                 "to_address": msg.to_address or "",
                 "from_address": msg.from_address or "",
                 "score_snapshot": msg.score_snapshot,
@@ -654,6 +670,7 @@ async def message_translate(
     body: str = Form(""),
     subject: str = Form(""),
     signature_key: str = Form(""),
+    channel_account_id: str = Form(""),
 ):
     """Put the draft into the inquiry's language when it is not already there.
 
@@ -687,6 +704,8 @@ async def message_translate(
         # 모델이 본문에 서명을 쓰지 않으므로 뗄 것이 없습니다(0061). 서명은 발송할 때
         # 본문 아래로 붙습니다.
         msg.signature_key = _clean_signature_key(signature_key)
+        # 고른 발신 주소도 같이 붙듭니다 — 안 그러면 번역하기 한 번에 조용히 사라집니다.
+        msg.channel_account_id = _clean_channel_account_id(channel_account_id)
 
         # Decide from the BODY's actual language, not the (possibly stale) msg.language
         # flag — so re-editing the draft back to Korean and pressing 번역하기 again
@@ -750,6 +769,7 @@ async def message_send(
     body: str = Form(""),
     subject: str = Form(""),
     signature_key: str = Form(""),
+    channel_account_id: str = Form(""),
 ):
     """Approve (and optionally edit) a message, then send it immediately.
 
@@ -776,6 +796,7 @@ async def message_send(
             edited_body=clean_body,
             edited_subject=clean_subject,
             signature_key=_clean_signature_key(signature_key),
+            channel_account_id=_clean_channel_account_id(channel_account_id),
         )
     except ApprovalError as exc:
         return HTMLResponse(
@@ -859,8 +880,9 @@ async def message_edit(
     body: str = Form(""),
     subject: str = Form(""),
     signature_key: str = Form(""),
+    channel_account_id: str = Form(""),
 ):
-    """Save edits to a pending message without sending (body, subject, signature)."""
+    """Save edits to a pending message without sending (body, subject, signature, sender)."""
     if len(body.encode("utf-8")) > _MAX_EDIT_BODY_BYTES:
         return HTMLResponse(
             '<div class="text-red-600 text-sm">본문이 너무 깁니다 (100KB 초과)</div>',
@@ -888,6 +910,7 @@ async def message_edit(
         if subject.strip():
             msg.subject = subject.strip()
         msg.signature_key = _clean_signature_key(signature_key)
+        msg.channel_account_id = _clean_channel_account_id(channel_account_id)
         session.commit()
     return HTMLResponse('<div class="text-blue-600 text-sm font-medium">저장 완료</div>')
 
