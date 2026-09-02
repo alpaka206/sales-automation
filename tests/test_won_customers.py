@@ -1174,6 +1174,169 @@ def test_the_first_credit_date_is_the_form_s_not_the_contract_start(factory):
         assert sorted(g.grant_on for g in other.credit_grants) == ["2026-08-01", "2026-09-01"]
 
 
+def _contract_with_schedule(factory, client_id: int, rounds: int = 3) -> int:
+    """계약 하나 + 크레딧 회차. 지급 완료 하나와 손으로 넣은 한 줄이 섞여 있습니다."""
+    from src.api.routes.won_customers import _seed_schedules
+
+    with factory() as session:
+        session.add(Client(client_id=client_id, company="테스트"))
+        contract = ClientContract(
+            client_id=client_id, seq=1, starts_on="2026-08-01", ends_on="2027-08-01",
+            currency="KRW", vat_applicable=False, amount_incl_vat=1_200_000, credits=1200,
+            # 채워 두면 저장이 환율을 조회하지 않습니다 — 테스트가 밖으로 나가지 않게.
+            fx_rate=1300, fx_on="2026-08-01",
+        )
+        session.add(contract)
+        session.flush()
+        _seed_schedules(session, contract, credit_rounds=rounds)
+        first = sorted(contract.credit_grants, key=lambda g: g.no)[0]
+        first.done, first.granted_by = True, "운영자"
+        session.commit()
+        return contract.id
+
+
+def test_the_credit_schedule_is_recalculated_when_the_two_fields_change(factory):
+    """「총 지급 회차 · 첫 지급 예정일」이 지급 예정 목록을 **만드는** 값입니다.
+
+    2026-09-02 운영자 지시: 계약 수정에서 그 둘을 고치면 목록도 함께 다시 계산됩니다.
+    손으로 추가·수정한 회차와 지급 완료 표시는 그때 사라지고, 되돌릴 수 없으므로 화면 두
+    곳(계약 수정 폼, 상세 4번 「크레딧 지급」)이 저장 전에 그렇게 안내합니다.
+    """
+    contract_id = _contract_with_schedule(factory, 2105)
+    with factory() as session:
+        session.add(ContractCreditGrant(contract_id=contract_id, no=4, total=4,
+                                        grant_on="2027-01-01", amount=500, memo="손으로 추가"))
+        session.commit()
+
+    patched, client = _console(factory)
+    with patched, client:
+        answer = client.post(f"/won-customers/contracts/{contract_id}", data={
+            "credit_reseed": "1", "credit_rounds": "4", "first_credit_on": "2026-10-15",
+        })
+    assert answer.status_code == 200, answer.text
+
+    with factory() as session:
+        grants = sorted(session.get(ClientContract, contract_id).credit_grants, key=lambda g: g.no)
+        assert [g.no for g in grants] == [1, 2, 3, 4]
+        assert [g.total for g in grants] == [4, 4, 4, 4]
+        assert [g.grant_on for g in grants] == [
+            "2026-10-15", "2026-11-15", "2026-12-15", "2027-01-15",
+        ]
+        # 나머지는 마지막 회차에 붙습니다 — 합계가 계약 크레딧이어야 합니다.
+        assert sum(g.amount for g in grants) == 1200
+        # 지급 완료 표시도, 손으로 만든 회차도 남지 않습니다. 옛 행은 정말 지워집니다 —
+        # 계약에서만 떨어져 나온 고아 행이 남으면 워크북 동기화가 그것까지 들고 갑니다.
+        assert not any(g.done or g.memo or g.granted_by for g in grants)
+        assert session.query(ContractCreditGrant).count() == 4
+
+
+def test_an_unrelated_save_leaves_the_credit_schedule_alone(factory):
+    """표(`credit_reseed`)가 없으면 회차에 손대지 않습니다.
+
+    이 라우트는 폼에 온 칸만 건드립니다. 회차만 예외로 두면 `_settle_amounts` 가 겪은 일이
+    그대로 반복됩니다 — 그때는 몇 칸만 보내는 폼 한 번에 옛 계약의 금액이 통째로
+    사라졌습니다. 되돌릴 방법이 없었습니다.
+
+    **날짜가 없는 회차로 검사합니다.** 서버가 폼 값과 행을 비교해 「바뀌었나」를 스스로
+    판단하던 판이 여기서 무너졌습니다: 폼은 빈 첫 지급일 자리에 계약 시작일을 넣어 보내는데
+    (빈 칸을 보여 줄 수는 없으니까) 서버는 그것을 행의 NULL 과 비교해 「바뀌었다」로 읽었고,
+    워크북에서 날짜 없이 들어온 계약은 비고 한 줄 고치는 저장마다 일정이 갈아엎혔습니다.
+    경고는 뜨지 않았습니다 — 화면 눈에는 아무것도 안 바뀌었으니까요.
+    """
+    contract_id = _contract_with_schedule(factory, 2106)
+    with factory() as session:
+        contract = session.get(ClientContract, contract_id)
+        for grant in contract.credit_grants:      # 워크북에서 날짜 없이 들어온 회차
+            grant.grant_on = None
+        session.commit()
+        before = {
+            g.id: (g.no, g.grant_on, g.amount, g.done, g.granted_by)
+            for g in contract.credit_grants
+        }
+
+    patched, client = _console(factory)
+    with patched, client:
+        answer = client.post(f"/won-customers/contracts/{contract_id}", data={
+            # 폼이 늘 같이 보내는 두 칸. 표가 없으므로 아무 일도 일어나면 안 됩니다.
+            "credit_rounds": "3", "first_credit_on": "2026-08-01", "note": "비고 한 줄",
+        })
+    assert answer.status_code == 200, answer.text
+
+    with factory() as session:
+        contract = session.get(ClientContract, contract_id)
+        assert contract.note == "비고 한 줄"
+        assert {
+            g.id: (g.no, g.grant_on, g.amount, g.done, g.granted_by)
+            for g in contract.credit_grants
+        } == before
+
+
+def test_the_round_count_has_a_floor_and_a_ceiling(factory):
+    """0·음수·만 회차는 400 입니다.
+
+    `max(1, …)` 로 받아 주면 「12회차로 다시 깝니다」라고 적힌 확인 창을 지나고도 1회차가
+    되고, 그 차이는 화면 어디에도 안 보입니다.
+    """
+    contract_id = _contract_with_schedule(factory, 2108)
+    patched, client = _console(factory)
+    with patched, client:
+        for bad in ("0", "-3", "121", ""):
+            answer = client.post(f"/won-customers/contracts/{contract_id}", data={
+                "credit_reseed": "1", "credit_rounds": bad, "first_credit_on": "2026-09-01",
+            })
+            assert answer.status_code == 400, (bad, answer.text)
+
+    with factory() as session:
+        grants = session.get(ClientContract, contract_id).credit_grants
+        assert [g.no for g in sorted(grants, key=lambda g: g.no)] == [1, 2, 3]
+
+
+def test_deleting_a_grant_renumbers_the_rest(factory):
+    """3회차 중 2회차를 지우면 「1/2」와 「3/2」가 나란히 서면 안 됩니다."""
+    contract_id = _contract_with_schedule(factory, 2107)
+    with factory() as session:
+        second = sorted(
+            session.get(ClientContract, contract_id).credit_grants, key=lambda g: g.no
+        )[1]
+        target, kept = second.id, second.grant_on
+
+    patched, client = _console(factory)
+    with patched, client:
+        answer = client.post(f"/won-customers/credits/{target}/delete")
+    assert answer.status_code == 200, answer.text
+
+    with factory() as session:
+        grants = sorted(session.get(ClientContract, contract_id).credit_grants, key=lambda g: g.no)
+        assert [(g.no, g.total) for g in grants] == [(1, 2), (2, 2)]
+        assert kept not in [g.grant_on for g in grants]
+        # 지운 회차의 크레딧은 다른 회차로 옮겨 가지 않습니다 — 나눠 담는 것은 「다시 깔기」의
+        # 몫이고, 삭제는 한 줄을 빼는 일입니다.
+        assert sum(g.amount for g in grants) == 800
+
+
+def test_the_two_credit_fields_are_editable_and_a_grant_can_be_removed():
+    """라우트만 있고 버튼이 없으면 없는 기능입니다.
+
+    고정하는 것은 셋입니다: ① 계약 수정에서 두 칸이 잠기지 않는다 ② 바꾸면 무슨 일이
+    일어나는지 저장 전에 적는다 ③ 지급 예정 회차에 「삭제」가 있다.
+    """
+    import pathlib
+
+    form = pathlib.Path(
+        "frontend/src/screens/won/WonContractForm.tsx"
+    ).read_text(encoding="utf-8")
+    assert "disabled={editing}" not in form
+    assert "creditChanged" in form and "모두 사라집니다" in form
+    # 경고를 띄우는 조건이 곧 다시 까는 조건이어야 합니다 — 서버는 이 표만 봅니다.
+    assert 'if (creditChanged) body.credit_reseed = "1";' in form
+
+    detail = pathlib.Path(
+        "frontend/src/screens/won/WonCustomerDetail.tsx"
+    ).read_text(encoding="utf-8")
+    assert "/delete`" in detail and ">삭제</button>" in detail
+    assert "지급 일정 다시 깔기" in detail
+
+
 def test_the_mockup_css_does_not_claim_the_console_button_variants():
     """목업의 일반 버튼 규칙이 `btn--danger` 같은 **콘솔 변형**까지 가져가면 안 됩니다.
 

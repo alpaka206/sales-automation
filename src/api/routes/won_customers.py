@@ -486,26 +486,78 @@ def _seed_schedules(
                 contract_id=contract.id, no=index + 1, total=count, paid_on=when, amount=per
             )
         )
-    # 크레딧도 같은 이유로 회차를 깔아 둡니다. 나눗셈의 나머지는 **마지막 회차**에 붙입니다 —
-    # 회차마다 반올림하면 합계가 계약 크레딧과 어긋나고, 그 차이는 화면에서 안 보입니다.
-    rounds = max(1, credit_rounds)
+    _reseed_credit_grants(session, contract, credit_rounds, first_credit_on)
+
+
+def _reseed_credit_grants(
+    session, contract: ClientContract, rounds: int, first_credit_on: str | None
+) -> None:
+    """크레딧 지급 회차를 **처음부터 다시** 깝니다 — 있던 회차는 전부 지웁니다.
+
+    지급 예정 목록은 「총 지급 회차 · 첫 지급 예정일 · 계약 크레딧」에서 나오는 계산값이라,
+    그 값을 고치면 목록도 같이 다시 계산됩니다(2026-09-02 운영자 지시). 손으로 추가·수정한
+    회차도, 지급 완료 표시도 같이 사라집니다 — 되돌릴 수 없으므로 두 화면(계약 수정 폼,
+    상세 4번 「크레딧 지급」)이 저장 전에 그렇게 안내합니다.
+
+    나눗셈의 나머지는 **마지막 회차**에 붙입니다: 회차마다 반올림하면 합계가 계약 크레딧과
+    어긋나고, 그 차이는 화면 어디에도 안 보입니다.
+    """
+    # 지우고 넣는 순서를 flush 로 못박습니다. delete-orphan 이 알아서 지우긴 하지만,
+    # INSERT 가 먼저 나가면 같은 (contract, no) 가 잠깐 둘이 됩니다.
+    contract.credit_grants.clear()
+    session.flush()
+    rounds = max(1, rounds)
     credits = contract.credits or 0
     per = credits // rounds if credits else 0
     # 첫 지급일은 폼이 받습니다. 계약 시작일과 다른 계약이 흔합니다 — 세팅 기간을 두고
     # 다음 달 1일부터 주는 식으로. 안 주면 예전처럼 계약 시작일부터입니다.
     base_credit = first_credit_on or contract.starts_on
-    start_date = date.fromisoformat(base_credit) if base_credit else None
+    # 워크북에서 온 날짜는 ISO 가 아닐 수 있습니다(`2026/08/01`). 그걸로 저장이 500 이 되면
+    # 화면에는 이유 없는 실패만 남으므로, 못 읽는 날짜는 날짜 없는 회차로 깝니다 — 비어
+    # 있는 칸은 보이고, 500 은 안 보입니다.
+    try:
+        start_date = date.fromisoformat(base_credit) if base_credit else None
+    except ValueError:
+        logger.warning("크레딧 첫 지급일을 읽을 수 없습니다 (contract=%s)", contract.id)
+        start_date = None
     for index in range(rounds):
         amount = per if index < rounds - 1 else credits - per * (rounds - 1)
-        session.add(
+        # `session.add` 가 아니라 관계에 붙입니다 — 방금 비운 컬렉션이 메모리에 남아 있어서,
+        # 따로 add 하면 이 세션에서는 회차가 0개로 보입니다(부르는 쪽이 바로 셉니다).
+        contract.credit_grants.append(
             ContractCreditGrant(
-                contract_id=contract.id,
                 no=index + 1,
                 total=rounds,
                 grant_on=_add_months(start_date, index).isoformat() if start_date else None,
                 amount=amount or None,
             )
         )
+
+
+def _resync_credit_grants(session, contract: ClientContract, form: dict) -> None:
+    """`credit_reseed` 가 붙어 있을 때**만** 다시 깝니다. 없으면 회차에 손대지 않습니다.
+
+    **「바뀌었나」는 화면이 판단합니다.** 서버가 폼 값과 행을 비교해 알아내려 했다가 한 번
+    당했습니다: 폼은 첫 지급일이 비어 있으면 계약 시작일을 대신 넣어 보내는데(빈 칸을
+    보여 줄 수는 없으니까), 서버는 그것을 행의 NULL 과 비교해 「바뀌었다」로 읽었습니다.
+    그래서 워크북에서 날짜 없이 들어온 계약은 **비고 한 줄 고치는 저장마다** 일정이
+    통째로 다시 깔렸고, 지급 완료 표시와 메모가 경고 한 줄 없이 사라졌습니다. 화면은
+    자기가 불러온 값과 지금 칸의 값을 비교하므로 그런 어긋남이 없고, **운영자에게 경고를
+    띄우는 조건과 실제로 일어나는 일이 같은 조건**이 됩니다.
+
+    이 라우트는 폼에 온 칸만 건드립니다(`_fill_contract`). 회차만 예외로 두면
+    `_settle_amounts` 가 겪은 일 — 몇 칸만 보내는 폼 한 번에 옛 값이 사라지는 일 — 이
+    그대로 반복됩니다.
+    """
+    if not _flag(form.get("credit_reseed")):
+        return
+    rounds = _int(form.get("credit_rounds"))
+    # 0 과 음수는 막습니다. `max(1, ...)` 로 받아 주면 「12회차로 다시 깝니다」라고 적힌
+    # 확인 창을 지나고도 1회차가 되고, 화면에는 그 차이가 안 보입니다. 위쪽 한도는
+    # 월 단위 10년치입니다 — 손이 미끄러져 만 줄을 만드는 길은 없어야 합니다.
+    if rounds is None or not 1 <= rounds <= 120:
+        raise HTTPException(status_code=400, detail="총 지급 회차는 1~120 사이여야 합니다")
+    _reseed_credit_grants(session, contract, rounds, _text(form.get("first_credit_on")))
 
 
 def _add_months(base: date, months: int) -> date:
@@ -528,6 +580,8 @@ async def update_contract(contract_id: int, request: Request):
     with SessionLocal() as session:
         contract = _get_contract(session, contract_id)
         _fill_contract(contract, form)
+        # 계약 크레딧이 이 저장에서 바뀌었을 수 있으므로 `_fill_contract` **뒤**입니다.
+        _resync_credit_grants(session, contract, form)
         client = session.get(Client, contract.client_id)
         if client is not None:
             _claim_ticket(session, contract, client)
@@ -562,6 +616,29 @@ async def add_credit_grant(
         )
         for grant in existing:
             grant.total = total
+        session.commit()
+    return {"ok": True}
+
+
+@router.post("/won-customers/credits/{grant_id}/delete")
+async def delete_credit_grant(grant_id: int):
+    """지급 회차 한 줄을 지웁니다 — 남은 회차는 1부터 다시 번호를 답니다.
+
+    번호를 안 고치면 3회차 중 2회차를 지웠을 때 목록에 「1/2」와 「3/2」가 나란히 섭니다.
+    """
+    with SessionLocal() as session:
+        grant = session.get(ContractCreditGrant, grant_id)
+        if grant is None:
+            raise HTTPException(status_code=404, detail="지급 회차를 찾을 수 없습니다")
+        contract_id = grant.contract_id
+        session.delete(grant)
+        session.flush()
+        rows = sorted(
+            session.query(ContractCreditGrant).filter_by(contract_id=contract_id).all(),
+            key=lambda g: (g.no, g.id),
+        )
+        for index, row in enumerate(rows, start=1):
+            row.no, row.total = index, len(rows)
         session.commit()
     return {"ok": True}
 

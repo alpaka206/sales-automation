@@ -91,6 +91,10 @@ export function WonContractForm() {
   const [copyPrev, setCopyPrev] = useState(true);
   const [creditRounds, setCreditRounds] = useState("12");
   const [firstCreditOn, setFirstCreditOn] = useState("");
+  // 열었을 때의 지급 일정. 이 둘이 바뀌면 저장이 지급 예정 목록을 다시 깝니다 — 그래서
+  // 화면이 미리 안내해야 하고, 안내하려면 「무엇이 바뀌었나」를 알아야 합니다. 매 렌더
+  // 계약에서 다시 읽지 않는 이유는 초안과 같습니다: 남의 저장 하나에 SSE 로 값이 갈립니다.
+  const [creditBase, setCreditBase] = useState(["", ""]);
   const [note, setNote] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
 
@@ -145,8 +149,14 @@ export function WonContractForm() {
     if (target) {
       setDraft(fromContract(target));
       setDocTypes(target.doc_types || []);
-      setCreditRounds(String(target.credit_grants?.length || 12));
-      setFirstCreditOn(target.credit_grants?.[0]?.grant_on || target.starts_on || "");
+      // **지금 깔려 있는 그대로**를 보여 줍니다(없으면 1). 12 로 채우면 이 두 칸을
+      // 건드리지 않은 저장이 서버 눈에는 「1회차 → 12회차」로 보여, 비고 한 줄 고치는
+      // 저장이 지급 일정을 통째로 다시 깝니다.
+      const rounds = String(target.credit_grants?.length || 1);
+      const first = target.credit_grants?.[0]?.grant_on || target.starts_on || "";
+      setCreditRounds(rounds);
+      setFirstCreditOn(first);
+      setCreditBase([rounds, first]);
     } else {
       const start = prev?.ends_on || new Date().toISOString().slice(0, 10);
       setDraft({
@@ -165,6 +175,11 @@ export function WonContractForm() {
 
   const set = (key: keyof Draft, value: string) =>
     setDraft((current) => (current ? { ...current, [key]: value } : current));
+
+  /** 지급 일정을 건드렸는가. 건드렸으면 저장이 회차 목록을 통째로 다시 깔므로, 누르기
+   *  전에 그렇게 적어 줍니다 — 되돌릴 방법이 없습니다. */
+  const creditChanged =
+    editing && (creditRounds !== creditBase[0] || firstCreditOn !== creditBase[1]);
 
   // 저장하면 플랜 상태가 무엇이 될지. 서버의 won.plan_status 와 같은 규칙을 이 계약 하나에
   // 적용한 것입니다 — 고르는 칸이 없어진 자리에, 날짜가 무슨 뜻인지 대신 적어 줍니다.
@@ -247,6 +262,10 @@ export function WonContractForm() {
       credit_rounds: creditRounds,
       first_credit_on: firstCreditOn,
     };
+    // **경고를 띄우는 조건이 곧 다시 까는 조건입니다.** 서버는 이 표가 있을 때만 회차를
+    // 다시 깝니다 — 폼 값과 행을 비교해 스스로 알아내게 두면, 폼이 빈 첫 지급일 자리에
+    // 계약 시작일을 넣어 보내는 것을 「바뀌었다」로 읽고 경고 없이 일정을 갈아엎습니다.
+    if (creditChanged) body.credit_reseed = "1";
     if (!editing && pendingId) body.pending_id = pendingId;
     try {
       if (editing) {
@@ -546,15 +565,16 @@ export function WonContractForm() {
           <div className="form-grid3">
             <Field label="총 지급 회차">
               <input className="inp" type="number" min={1} value={creditRounds}
-                     onChange={(e) => setCreditRounds(e.target.value)} disabled={editing} />
+                     onChange={(e) => setCreditRounds(e.target.value)} />
             </Field>
             <Field label="첫 지급 예정일">
               <input className="inp" type="date" value={firstCreditOn}
-                     onChange={(e) => setFirstCreditOn(e.target.value)} disabled={editing} />
+                     onChange={(e) => setFirstCreditOn(e.target.value)} />
             </Field>
-            <div style={{ display: "flex", alignItems: "flex-end", fontSize: 12, color: "var(--faint)" }}>
-              {editing
-                ? "회차는 크레딧 지급 섹션에서 고칩니다."
+            <div style={{ display: "flex", alignItems: "flex-end", fontSize: 12,
+                          color: creditChanged ? "var(--red-fg)" : "var(--faint)" }}>
+              {creditChanged
+                ? "저장하면 지급 예정 목록을 다시 깝니다 — 손으로 추가·수정한 회차와 지급 완료 표시가 모두 사라집니다."
                 : "회차별 크레딧은 균등 분배로 자동 생성됩니다."}
             </div>
           </div>

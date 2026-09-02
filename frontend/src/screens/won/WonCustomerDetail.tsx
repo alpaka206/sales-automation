@@ -705,6 +705,7 @@ function CreditSection({ contract, today, onDone }: {
   const left = (contract.credits ?? 0) - contract.granted_credits;
 
   const [ask, setAsk] = useState<Grant | null>(null);
+  const [removing, setRemoving] = useState<Grant | null>(null);
   const [editing, setEditing] = useState<number | null>(null);
   const [adding, setAdding] = useState(false);
 
@@ -730,6 +731,7 @@ function CreditSection({ contract, today, onDone }: {
         <td className="num">{num(grant.amount)}</td>
         <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
           <button className="btn btn-sm btn-ghost" type="button" onClick={() => setEditing(grant.no)}>수정</button>{" "}
+          <button className="btn btn-sm btn-ghost" type="button" onClick={() => setRemoving(grant)}>삭제</button>{" "}
           <button className="btn btn-sm" type="button" onClick={() => setAsk(grant)}>지급 완료</button>
         </td>
       </tr>
@@ -778,6 +780,13 @@ function CreditSection({ contract, today, onDone }: {
           <Stat label={left < 0 ? "계약 외 추가 지급" : "잔여 크레딧"} value={num(Math.abs(left))}
                 tone={left < 0 ? "var(--amber-fg)" : undefined} />
         </div>
+        {/* `key` 에 일정까지 넣습니다. 계약 id 만으로는 **앞 계약의** 회차 수가 남고(상세는
+            드롭다운으로 계약을 갈아 끼우는 화면이라 리마운트가 없습니다), 그것도 없으면
+            다른 사람이 방금 고친 일정 위에 내 화면의 옛 숫자가 그대로 앉아 있습니다.
+            타이핑 중에는 계약이 안 바뀌므로 글자를 치는 사이에 초기화되지 않습니다. */}
+        <ScheduleForm contract={contract} onDone={onDone}
+                      key={`${contract.id}:${contract.credit_grants.length}:${
+                        contract.credit_grants[0]?.grant_on ?? ""}`} />
       </div>
 
       {adding && (
@@ -795,7 +804,7 @@ function CreditSection({ contract, today, onDone }: {
           {pending.length ? (
             <div className="table-wrap"><table className="mini">
               <thead><tr>
-                <th>회차</th><th>지급 예정일</th><th className="num">크레딧</th><th style={{ width: 96 }} />
+                <th>회차</th><th>지급 예정일</th><th className="num">크레딧</th><th style={{ width: 150 }} />
               </tr></thead>
               <tbody>{pending.map((g) => row(g, "pending"))}</tbody>
             </table></div>
@@ -835,7 +844,83 @@ function CreditSection({ contract, today, onDone }: {
           onClose={() => setAsk(null)}
         />
       )}
+
+      {removing && (
+        <Confirm
+          title="이 지급 회차를 지웁니다"
+          rows={[
+            ["회차", `${removing.no}/${removing.total}`],
+            ["지급 예정일", fmt(removing.grant_on)],
+            ["크레딧", `${num(removing.amount)} 크레딧`],
+          ]}
+          note="남은 회차는 1부터 다시 번호가 매겨집니다. 지운 회차의 크레딧은 다른 회차로 옮겨 가지 않습니다 — 나눠 담으려면 지급 일정을 다시 까세요."
+          okLabel="삭제"
+          danger
+          onOk={() => postForm(`/won-customers/credits/${removing.id}/delete`, {}).then(onDone)}
+          onClose={() => setRemoving(null)}
+        />
+      )}
     </Section>
+  );
+}
+
+/** 지급 일정 다시 깔기 — 「총 지급 회차 · 첫 지급 예정일」이 지급 예정 목록을 만드는 값입니다.
+ *
+ * 계약 수정 폼의 같은 두 칸과 **같은 라우트**로 갑니다(`POST /won-customers/contracts/{id}`).
+ * 목록은 그 둘과 계약 크레딧에서 나오는 계산값이라 여기서 고치면 목록도 다시 계산되고,
+ * 손으로 추가·수정한 회차와 지급 완료 표시는 그때 사라집니다 — 확인 창이 그렇게 적습니다.
+ *
+ * 기준값은 매 렌더 계약에서 다시 읽습니다. 저장하고 나면 그 값이 방금 적은 값이 되어
+ * 버튼이 저절로 잠깁니다 — 「바뀐 것이 있을 때만 눌린다」가 상태 하나로 지켜집니다.
+ */
+function ScheduleForm({ contract, onDone }: { contract: Contract; onDone: () => void }) {
+  const rounds0 = String(contract.credit_grants.length || 1);
+  const first0 = contract.credit_grants[0]?.grant_on || contract.starts_on || "";
+  const [rounds, setRounds] = useState(rounds0);
+  const [first, setFirst] = useState(first0);
+  const [ask, setAsk] = useState(false);
+  /** 서버가 받는 범위(1~120)와 같은 조건입니다. **「바뀌었을 때만」이 아닙니다** — 계약
+   *  크레딧만 고친 뒤 회차 금액을 다시 나누는 길이 이 버튼뿐이라, 값이 그대로여도 눌려야
+   *  합니다. 무슨 일이 일어나는지는 확인 창이 말합니다. */
+  const valid = Number(rounds) >= 1 && Number(rounds) <= 120;
+  return (
+    <>
+      <div className="form-row"
+           style={{ gridTemplateColumns: "1fr 1fr auto", alignItems: "end", marginTop: 12 }}>
+        <div>
+          <label className="form-label">총 지급 회차</label>
+          <input className="inp" type="number" min={1} value={rounds}
+                 onChange={(e) => setRounds(e.target.value)} />
+        </div>
+        <div>
+          <label className="form-label">첫 지급 예정일</label>
+          <input className="inp" type="date" value={first}
+                 onChange={(e) => setFirst(e.target.value)} />
+        </div>
+        <button className="btn btn-sm btn-primary" type="button" disabled={!valid}
+                onClick={() => setAsk(true)}>지급 일정 다시 깔기</button>
+      </div>
+      {ask && (
+        <Confirm
+          title="지급 일정을 다시 깝니다"
+          rows={[
+            ["총 지급 회차", `${rounds0}회 → ${rounds.trim()}회`],
+            ["첫 지급 예정일", `${fmt(first0)} → ${fmt(first)}`],
+            ["계약 크레딧", `${num(contract.credits)} · 회차에 균등 분배`],
+          ]}
+          note="지금 있는 회차를 모두 지우고 다시 만듭니다 — 손으로 추가·수정한 회차와 지급 완료 표시가 함께 사라집니다."
+          okLabel="다시 깔기"
+          danger
+          onOk={() => postForm(`/won-customers/contracts/${contract.id}`, {
+            // 누른 사람이 「다시 깔기」라고 적힌 버튼을 눌렀습니다 — 서버가 값을 비교해
+            // 「안 바뀌었으니 넘어간다」고 판단하면, 확인 창을 지나고도 아무 일이 안
+            // 일어납니다. 계약 크레딧만 고친 뒤 다시 나누는 길도 이것뿐입니다.
+            credit_reseed: "1", credit_rounds: rounds.trim(), first_credit_on: first,
+          }).then(onDone)}
+          onClose={() => setAsk(false)}
+        />
+      )}
+    </>
   );
 }
 
