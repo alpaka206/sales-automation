@@ -474,7 +474,9 @@ class CustomerProfile(Base):
     plan_tier: Mapped[str | None] = mapped_column(String(64), nullable=True)
     space_seq: Mapped[str | None] = mapped_column(String(128), nullable=True)
     plan_seq: Mapped[str | None] = mapped_column(String(128), nullable=True)
-    qualification: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    # `qualification` 칸이 여기 있었습니다 (이관 0104). MQL / PQL 은 **구독 플랜이 정하는
+    # 계산값**입니다 — 콘솔은 `sheet_values.qualification_for_plan`, 워크북은 같은 목록으로
+    # 만든 Pipeline 수식. 저장해 두던 시절에는 그 사본이 시트로 돌아가 수식을 덮었습니다.
     lost_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     source: Mapped[str | None] = mapped_column(String(64), nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)

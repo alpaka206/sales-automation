@@ -62,19 +62,31 @@ def test_the_plan_decides_mql_or_pql(plan, expected):
     assert qualification_for_plan(plan) == expected
 
 
-def test_the_three_screens_derive_it_from_the_plan():
-    """리드 히스토리 · 티켓 상세의 연락처 정보 · 고객 상세 — 셋 다 이 함수를 지납니다.
+def test_nothing_stores_the_qualification_any_more():
+    """저장하는 칸이 아예 없어야 합니다 (이관 0104).
 
-    저장한 열(`customer_profiles.qualification`)을 읽으면 안 됩니다. 그것은 워크북에서
-    읽어 온 **거울**이고(`sheet_sync`) 콘솔에서 채우는 길이 없어 운영 데이터에서 늘 비어
-    있었습니다 — 그래서 고객 상세의 「MQL / PQL」은 언제나 「-」였습니다(2026-09-02 운영자
-    지적). 저장하기 시작하면 플랜을 고친 뒤 이 값을 안 고친 행이 반드시 생기고, 그건
-    화면에 안 보입니다.
+    `customer_profiles.qualification` 은 워크북에서 읽어 온 **거울**이라 콘솔에서 채우는
+    길이 없었고, 운영 데이터에서 늘 비어 있어 고객 상세의 「MQL / PQL」은 언제나 「-」였습니다.
+    그런데 안 읽히는 것으로 끝나지 않았습니다 — 그 사본이 단계 동기화를 타고 시트로 돌아가
+    Pipeline **수식**을 죽은 글자로 덮었습니다. 그래서 칸째로 지웠습니다.
 
-    워크북으로 나가는 길(`update_inbound_stage(pipeline=...)`)은 그대로 그 열을 봅니다.
-    거기서는 시트의 Pipeline **수식**이 같은 판단을 하고 있고, 우리가 값을 써 넣으면 그
-    수식이 지워집니다 — 콘솔이 그리는 값과 시트가 계산하는 값은 서로 다른 길입니다.
+    되살리기 전에 **어느 화면이 저장된 값을 읽는지부터 정하십시오.** 그게 없어서 이렇게
+    됐습니다: 아무도 안 읽는 칸이 조용히 시트의 수식을 지우고 있었습니다.
     """
+    import pathlib
+
+    from src.db.models import CustomerProfile
+
+    assert not hasattr(CustomerProfile, "qualification")
+    # 워크북 행에도 안 싣습니다 — 그 칸은 행을 쓴 직후 수식으로 덮이므로, 무엇을 보내든
+    # 시트에 남은 적이 없었습니다.
+    for path in ("src/agents/inbound.py", "src/agents/sheet_sync.py"):
+        source = pathlib.Path(path).read_text(encoding="utf-8")
+        assert '"pipeline":' not in source, path
+
+
+def test_the_three_screens_derive_it_from_the_plan():
+    """리드 히스토리 · 티켓 상세의 연락처 정보 · 고객 상세 — 셋 다 이 함수를 지납니다."""
     import pathlib
 
     for path in (

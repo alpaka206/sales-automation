@@ -863,7 +863,6 @@ async def customer_profile_save(
     industry: str = Form(""),
     user_seq: str = Form(""),
     current_plan: str = Form(""),
-    qualification: str = Form(""),
     lost_reason: str = Form(""),
     source: str = Form(""),
     notes: str = Form(""),
@@ -887,7 +886,6 @@ async def customer_profile_save(
         profile.industry = industry.strip() or None
         profile.user_seq = user_seq.strip() or None
         profile.current_plan = current_plan.strip() or None
-        profile.qualification = qualification.strip() or None
         profile.lost_reason = lost_reason.strip() or None
         profile.source = source.strip() or None
         profile.notes = notes.strip() or None

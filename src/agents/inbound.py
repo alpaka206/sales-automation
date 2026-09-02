@@ -406,10 +406,6 @@ class InboundAgent:
                 logger.debug("Could not parse inbound occurred_at=%r; using now.", raw_when)
 
             excerpt = (contact_info.get("last_message") or "").strip().replace("\n", " ")
-            qualification = profile.qualification if profile else None
-            if not qualification:
-                lifecycle = str(contact_info.get("lifecycle_stage") or "").lower()
-                qualification = "PQL" if lifecycle in {"customer", "opportunity"} else "MQL"
             result = record_inbound(
                 {
                     "client_id": reserved_client_id,
@@ -419,7 +415,9 @@ class InboundAgent:
                     "inquiry_date": when.date().isoformat(),
                     "deal_stage": "New",
                     "deal_stage_detail": "Inquiry",
-                    "pipeline": qualification,
+                    # `pipeline` 은 안 보냅니다 (이관 0104). 그 칸은 구독 플랜을 읽는
+                    # 수식이고, 행을 쓴 직후 `_write_pipeline_formula` 가 다시 깝니다 —
+                    # 여기서 무엇을 실어 보내든 시트에 남은 적이 없습니다.
                     "company": contact_info.get("company") or "알 수 없음",
                     "full_name": contact_info.get("full_name", ""),
                     "phone": contact_info.get("phone") or "알 수 없음",

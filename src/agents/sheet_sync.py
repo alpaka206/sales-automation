@@ -506,9 +506,10 @@ def _import_inbound_records(records: list[dict]) -> int:
                 profile.pipeline_stage = stage
                 profile.customer_state = _customer_state(stage)
             record = item["record"]
-            profile.qualification = (
-                _clean_sheet_value(record.get("pipeline")) or profile.qualification
-            )
+            # `pipeline`(MQL/PQL) 은 안 받습니다 (이관 0104). 그것은 시트가 구독 플랜에서
+            # **계산한 결과**라, 우리 쪽에 글자로 베껴 두면 플랜이 바뀌어도 안 따라옵니다 —
+            # 그리고 그 사본이 단계 동기화를 타고 시트로 돌아가 수식을 덮었습니다.
+            # 콘솔이 그리는 값은 `sheet_values.qualification_for_plan` 이 그때그때 냅니다.
             profile.industry = _clean_sheet_value(record.get("company_type")) or profile.industry
             profile.current_plan = _clean_sheet_value(record.get("plan")) or profile.current_plan
             profile.user_seq = _clean_sheet_value(record.get("user_seq")) or profile.user_seq
@@ -767,7 +768,6 @@ def sync_pending_inbound_rows(limit: int = 50) -> int:
             if not contact or not inbound:
                 continue
             when = inbound.created_at
-            qualification = (profile.qualification if profile else None) or "MQL"
             # 고객사 이름·산업·국가는 「고객 기본 정보」가 원본입니다. 그 Client ID 가 이미
             # 수주 고객이면 거기 적힌 철자를 씁니다 — 같은 회사가 세 번 문의해도 서울대학교 /
             # 서울대 / SNU 로 갈라지지 않도록. 시트 수식으로는 이걸 못 합니다: Inbound DB 가
@@ -794,7 +794,8 @@ def sync_pending_inbound_rows(limit: int = 50) -> int:
                 # 단계는 New 로 두되(행 자체는 있어야 합니다) 어긋난다고 남깁니다.
                 "deal_stage": _stage_words(conv.stage)[0],
                 "deal_stage_detail": _stage_words(conv.stage)[1],
-                "pipeline": qualification,
+                # `pipeline` 은 안 보냅니다 (이관 0104) — 그 칸은 구독 플랜을 읽는 수식이고,
+                # 행을 쓴 직후 `_write_pipeline_formula` 가 다시 깝니다.
                 "company": (master.company if master else None) or contact.company or "알 수 없음",
                 "full_name": contact.full_name,
                 "phone": contact.phone or "알 수 없음",

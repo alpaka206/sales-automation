@@ -148,7 +148,6 @@ def seed(force: bool = False) -> None:
                     next_action="견적 검토 후 미팅 링크 발송",
                     next_action_at=now + timedelta(days=1),
                     industry="미디어",
-                    qualification="MQL",
                     source="HubSpot",
                 ),
                 CustomerProfile(

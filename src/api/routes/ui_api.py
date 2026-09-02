@@ -487,8 +487,8 @@ def ui_customer_detail(contact_id: int):
         else None,
         # MQL / PQL 은 프로필 **밖에** 있습니다. 플랜에서 나오는 계산값이라 프로필 행이
         # 없는 연락처에도 답이 있고(산 적이 없으니 MQL), 안에 두면 그 사람만 「-」가
-        # 됩니다 — 실제로 그랬습니다. 열(`qualification`)은 워크북에서 읽어 온 거울이라
-        # 콘솔이 채우지 않았고, 그래서 이 화면은 늘 비어 있었습니다.
+        # 됩니다 — 실제로 그랬습니다. 저장하던 열은 워크북에서 읽어 온 거울이라 콘솔이
+        # 채우지 않았고, 그래서 이 화면은 늘 비어 있었습니다(그 열은 이관 0104 가 지웠습니다).
         "qualification": qualification_for_plan(profile.current_plan if profile else None),
         "stage_options": [
             {"key": key, "label": label} for key, label, _ in context["stage_options"]
