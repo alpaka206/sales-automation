@@ -103,6 +103,11 @@ def classify_direction(message: dict) -> str:
     `V-` 는 방문자라 고객, `A-`(상담원)·`B-`(봇)는 우리입니다. 그것도 없으면 그때서야
     HubSpot 이 적어 준 방향으로 떨어집니다.
     """
+    # **폼 제출은 언제나 받은 것입니다.** 채널이 곧 방향입니다 — 폼은 고객이 우리에게
+    # 내는 것이지 우리가 보내는 통로가 아닙니다. 이 줄이 없으면 우리 직원 주소로 제출된
+    # 폼이 「우리가 보낸 것」이 됩니다(실측: 티켓 330705398519 의 `mina14@estsoft.com`).
+    if str(message.get("channelId") or "") == "1003":
+        return "inbound"
     senders = message.get("senders") or []
     for address in _addresses(senders):
         return "outgoing" if _is_ours(address) else "inbound"

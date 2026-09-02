@@ -208,3 +208,16 @@ async def test_records_are_keyed_so_a_rerun_adds_nothing():
     again = await collect_ticket_history(_FakeClient(pages), "ticket-1")
 
     assert [r["external_id"] for r in first] == [r["external_id"] for r in again]
+
+
+def test_a_form_submission_is_always_inbound():
+    """폼은 고객이 우리에게 내는 것입니다 — 채널이 곧 방향입니다.
+
+    실측으로 잡힌 버그입니다: 티켓 330705398519 의 폼에 제출자 주소가
+    `mina14@estsoft.com` 이라, 주소 규칙만으로는 「우리가 보낸 것」이 됐습니다. 우리 직원이
+    고객을 대신해 폼을 넣는 일이 실제로 있습니다.
+    """
+    submitted_by_us = {"channelId": "1003", **_sender("mina14@estsoft.com")}
+    assert classify_direction(submitted_by_us) == "inbound"
+    # 이메일 채널에서는 그대로 주소 규칙입니다.
+    assert classify_direction({"channelId": "1002", **_sender("mina14@estsoft.com")}) == "outgoing"
