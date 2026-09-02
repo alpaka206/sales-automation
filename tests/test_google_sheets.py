@@ -490,7 +490,7 @@ def test_pipeline_is_written_as_a_formula_over_the_plan_cell():
     )
     assert _pipeline_formula(header, 168) == (
         '=IF(OR(F168="",F168="free",F168="n/a",F168="na",F168="none",F168="무료",F168="없음"),'
-        '"MQL",IF(F168="엔터프라이즈","재계약","PQL"))'
+        '"MQL","PQL")'
     )
 
 
@@ -501,27 +501,34 @@ def test_a_sheet_without_a_plan_column_gets_no_formula():
     assert _pipeline_formula(_SheetHeader(values=["Client ID", "Pipeline"], row=1), 5) is None
 
 
-def test_the_formula_branches_match_the_operators_rule():
-    """빈칸 · N/A · Free 는 MQL, 엔터프라이즈는 재계약, 그 외는 PQL.
+def test_the_formula_has_exactly_two_branches():
+    """빈칸 · N/A · Free 는 MQL, **그 외는 전부 PQL — 엔터프라이즈 포함** (2026-09-02 지시).
 
-    **빈칸 가지가 있어야 합니다** (2026-09-02 운영자 지시). 「이 앱이 플랜 칸을 늘 채우므로
-    빈칸은 생길 수 없다」가 사실이 아니었습니다 — `record_inbound` 경로만 `normalise_plan`
-    을 지나고, 허브스팟 연락처 동기화와 콘솔의 플랜 폼은 값을 그대로 써서 `Free` 가 그대로
-    들어갑니다. 그러면 그 고객이 시트에서 PQL 로 읽힙니다.
+    `엔터프라이즈 -> 재계약` 가지가 하나 더 있었습니다. 그러면 같은 고객을 콘솔은 PQL
+    시트는 재계약이라고 부르는데, 두 화면을 나란히 놓기 전에는 안 보이는 어긋남입니다.
+    그리고 **재계약인지는 이 콘솔이 더 정확하게 압니다**: 그 Client ID 아래 계약이 이미
+    있으면 재계약이고, 그건 플랜 이름으로 짐작할 일이 아닙니다.
+
+    **빈칸 가지가 있어야 하는 이유**: 「이 앱이 플랜 칸을 늘 채우므로 빈칸은 생길 수 없다」가
+    사실이 아니었습니다 — `record_inbound` 경로만 `normalise_plan` 을 지나고, 허브스팟 연락처
+    동기화와 콘솔의 플랜 폼은 값을 그대로 써서 `Free` 가 그대로 들어갑니다.
     """
     from src.integrations.google_sheets import _pipeline_formula, _SheetHeader
 
     formula = _pipeline_formula(_SheetHeader(values=["Pipeline", "Plan"], row=1), 2)
     assert formula.startswith("=IF(OR(")
     assert 'B2=""' in formula, "손으로 비운 칸도 MQL 입니다"
-    assert '),"MQL",' in formula
-    assert '"엔터프라이즈","재계약"' in formula
-    assert formula.endswith('"PQL"))')
+    assert formula.endswith('),"MQL","PQL")')
+    assert "재계약" not in formula
+    assert formula.count("IF(") == 1, "가지는 둘뿐입니다"
 
 
-def test_the_formula_and_the_console_share_one_list_of_not_bought_spellings():
-    """「아직 아무것도 안 샀다」의 철자를 두 곳에서 세면, 같은 고객을 콘솔은 MQL 시트는
-    PQL 이라고 부릅니다 — 두 화면을 나란히 놓기 전에는 안 보입니다."""
+def test_the_formula_and_the_console_answer_the_same_thing():
+    """콘솔과 시트가 **한 규칙**입니다 — 철자 목록도, 가지도.
+
+    두 곳에서 따로 세면 같은 고객을 한쪽은 MQL 다른 쪽은 PQL 이라고 부르고, 그건 두 화면을
+    나란히 놓기 전에는 안 보입니다.
+    """
     from src.common.sheet_values import PLAN_AS_NOT_APPLICABLE, qualification_for_plan
     from src.integrations.google_sheets import _pipeline_formula, _SheetHeader
 
@@ -529,6 +536,10 @@ def test_the_formula_and_the_console_share_one_list_of_not_bought_spellings():
     for word in PLAN_AS_NOT_APPLICABLE:
         assert f'B2="{word}"' in formula, word
         assert qualification_for_plan(word) == "MQL", word
+    # 그 목록에 없는 것은 양쪽 다 PQL 입니다 — 엔터프라이즈가 그래서 여기 있습니다.
+    for word in ("엔터프라이즈", "Enterprise", "Pro", "Starter"):
+        assert f'B2="{word}"' not in formula, word
+        assert qualification_for_plan(word) == "PQL", word
 
 
 def test_a_new_company_gets_a_registry_row_before_its_inquiry_is_written(monkeypatch):
@@ -576,7 +587,7 @@ def test_a_formula_column_is_never_written_by_field_sync():
     워크북에서 「고객 상태」의 값처럼 보이는 칸 둘이 수식이다:
 
         기업 종류(산업군) = 「고객 기본 정보」를 Client ID 로 조회
-        Pipeline(MQL/PQL) = IF(구독 플랜="N/A","MQL",IF(...,"재계약","PQL"))
+        Pipeline(MQL/PQL) = IF(OR(구독 플랜="", ="N/A", ="Free" …),"MQL","PQL")
 
     뒤엣것은 구독 플랜을 쓰면 저절로 따라오므로 여기서 할 일이 애초에 없다.
     울타리는 화면도 부르는 쪽도 아닌 ``SYNCABLE_INBOUND_FIELDS`` 한 곳이다.

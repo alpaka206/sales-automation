@@ -350,11 +350,15 @@ def _next_inbound_client_id(service, tab: str, header: _SheetHeader) -> int:
 # Pipeline (E on the current sheet) is a FORMULA, not a value the app decides once and
 # forgets. The sales team edits 구독 플랜 by hand as a deal moves, and a written-in
 # "MQL" would then contradict the plan sitting beside it — the formula re-reads that cell
-# forever. The operator's rule, 2026-08-04, widened 2026-09-02:
+# forever. The operator's rule, 2026-09-02:
 #
 #     빈칸 / N/A / Free / 무료 …  -> MQL      (아직 아무것도 안 샀다)
-#     엔터프라이즈                 -> 재계약    (already a customer; this is a renewal)
-#     그 외 플랜                   -> PQL
+#     그 외 플랜                   -> PQL      (엔터프라이즈 포함)
+#
+# **가지는 둘뿐입니다.** 예전에는 `엔터프라이즈 -> 재계약` 이 하나 더 있었는데, 그러면 같은
+# 고객을 콘솔은 PQL 시트는 재계약이라고 불렀습니다 — 두 화면을 나란히 놓기 전에는 안 보이는
+# 어긋남입니다. 그리고 **재계약인지는 이 콘솔이 더 정확하게 압니다**: 그 Client ID 아래
+# 계약이 이미 있으면 재계약이고(수주 고객), 그건 플랜 이름으로 짐작할 일이 아닙니다.
 #
 # **「아직 아무것도 안 샀다」의 철자는 `sheet_values.PLAN_AS_NOT_APPLICABLE` 한 곳에서
 # 옵니다.** 콘솔 화면도 같은 목록으로 MQL/PQL 을 정하므로(`qualification_for_plan`), 목록이
@@ -386,9 +390,7 @@ def _pipeline_formula(header: _SheetHeader, row: int) -> str | None:
     nothing_bought = ",".join(
         f'{cell}="{word}"' for word in ("", *sorted(PLAN_AS_NOT_APPLICABLE))
     )
-    return (
-        f'=IF(OR({nothing_bought}),"MQL",IF({cell}="엔터프라이즈","재계약","PQL"))'
-    )
+    return f'=IF(OR({nothing_bought}),"MQL","PQL")'
 
 
 # 고객사·기업 종류·국가는 「고객 기본 정보」가 원본이다. 문의 행마다 값을 다시 적으면 같은
@@ -1062,7 +1064,7 @@ def update_inbound_stage(
 # 계산하던 것이 그 행에서만 멈추고, 화면 어디에도 그게 안 보입니다. 특히 두 칸이 그렇습니다:
 #
 #   기업 종류(산업군) = 「고객 기본 정보」를 Client ID 로 조회하는 수식
-#   Pipeline(MQL/PQL) = IF(구독 플랜="N/A","MQL",IF(...,"재계약","PQL"))
+#   Pipeline(MQL/PQL) = IF(OR(구독 플랜="", ="N/A", ="Free" …),"MQL","PQL")
 #
 # 뒤엣것은 **구독 플랜을 쓰면 저절로 따라옵니다.** 그래서 여기서 할 일이 없습니다.
 # (2026-08-26 운영자 지시: 수식 칸은 안 건드린다.)
