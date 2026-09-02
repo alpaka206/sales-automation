@@ -26,6 +26,7 @@ from decimal import Decimal
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
+from ...common.sheet_values import qualification_for_plan
 from ...db.models import Contact, Conversation
 
 router = APIRouter(tags=["ui-api"])
@@ -251,6 +252,8 @@ def ui_customers(stage: str = "", q: str = ""):
                 "next_action_at": row["next_action_at"],
                 "last_activity": row["last_activity"],
                 "conversation_count": row["conversation_count"],
+                # 플랜에서 나오는 계산값입니다 — 열이 아닙니다(2026-09-02 운영자 지시).
+                "qualification": row["qualification"],
                 # 수주 DB·워크북·시트가 전부 이 번호로 엮입니다. 목록에 없으면 같은 고객을
                 # 다른 화면에서 회사 이름으로 찾아야 합니다(2026-08-19 운영자 지시).
                 "client_id": row["client_id"],
@@ -475,13 +478,18 @@ def ui_customer_detail(contact_id: int):
         "profile": {
             field: getattr(profile, field)
             for field in (
-                "customer_state", "pipeline_stage", "lead_temperature", "qualification",
+                "customer_state", "pipeline_stage", "lead_temperature",
                 "industry", "user_seq", "current_plan", "source", "next_action",
                 "next_action_at", "lost_reason", "notes", "last_synced_at",
             )
         }
         if profile
         else None,
+        # MQL / PQL 은 프로필 **밖에** 있습니다. 플랜에서 나오는 계산값이라 프로필 행이
+        # 없는 연락처에도 답이 있고(산 적이 없으니 MQL), 안에 두면 그 사람만 「-」가
+        # 됩니다 — 실제로 그랬습니다. 열(`qualification`)은 워크북에서 읽어 온 거울이라
+        # 콘솔이 채우지 않았고, 그래서 이 화면은 늘 비어 있었습니다.
+        "qualification": qualification_for_plan(profile.current_plan if profile else None),
         "stage_options": [
             {"key": key, "label": label} for key, label, _ in context["stage_options"]
         ],
@@ -1001,6 +1009,12 @@ def _add_series(target: dict, buckets, months: list[str], cells: dict) -> None:
                 cell[currency] += value
 
 
+def _only(cells: dict, month: str | None) -> dict:
+    """그 한 달의 칸만. New 계열은 「고객이 된 달」의 값만 세므로 나머지를 여기서 버립니다."""
+    cell = cells.get(month) if month else None
+    return {month: cell} if cell else {}
+
+
 def _series_floats(series: dict) -> dict:
     return {
         bucket: {
@@ -1041,6 +1055,11 @@ def ui_won_customers():
     # 고르고, 환산은 여기서 계약마다 그 계약의 환율로 한 번만 합니다.
     mrr_months: dict[str, dict[str, dict[str, Decimal]]] = {}
     cash_months: dict[str, dict[str, dict[str, Decimal]]] = {}
+    # 같은 모양의 「New」 두 벌. **그 달에 고객이 된 고객만** 담습니다 — 각 달의 총액 중
+    # 신규가 얼마인지가 이 화면에서 가장 자주 묻는 질문이고, 화면이 행을 걸러 세면 그
+    # 필터가 곧 정의가 됩니다(그리고 정의가 둘이 됩니다).
+    mrr_new_months: dict[str, dict[str, dict[str, Decimal]]] = {}
+    cash_new_months: dict[str, dict[str, dict[str, Decimal]]] = {}
     with SessionLocal() as session:
         clients = (
             session.query(Client)
@@ -1087,11 +1106,24 @@ def ui_won_customers():
         without_rate = 0
         for client in clients:
             buckets = (won.department(client) or "미지정", won.ALL_DEPARTMENTS)
+            # 그 고객이 처음 잡히는 달. 그 달의 칸만 New 로도 셉니다 — 다음 달부터 그
+            # 고객은 신규가 아니고, 그때는 총액에만 남습니다.
+            #
+            # **계열마다 자가 다릅니다.** MRR 은 인식하는 달로, 매출은 입금하는 달로 칸을
+            # 만들고 그 둘은 흔히 다른 달입니다(계약은 먼저 맺고 사용은 늦게 시작합니다).
+            # 한 자로 재면 그 차이만큼 신규 고객이 **어느 달의 New 에도** 안 잡히는데,
+            # 화면에는 큰 막대 옆에 「New ₩0」 이 설 뿐 틀렸다는 표시가 없습니다.
+            new_revenue = won.first_revenue_month(client)
+            new_cash = won.first_cash_month(client)
             for contract in client.contracts:
                 if won._decimal(getattr(contract, "fx_rate", None)) is None:
                     without_rate += 1
-                _add_series(mrr_months, buckets, months, _mrr_cells(contract, months, today_rate))
-                _add_series(cash_months, buckets, months, _cash_cells(contract, months, today_rate))
+                mrr_cells = _mrr_cells(contract, months, today_rate)
+                cash_cells = _cash_cells(contract, months, today_rate)
+                _add_series(mrr_months, buckets, months, mrr_cells)
+                _add_series(cash_months, buckets, months, cash_cells)
+                _add_series(mrr_new_months, buckets, months, _only(mrr_cells, new_revenue))
+                _add_series(cash_new_months, buckets, months, _only(cash_cells, new_cash))
         pending = (
             session.query(PendingWon)
             .filter(PendingWon.status == "pending")
@@ -1177,6 +1209,12 @@ def ui_won_customers():
         "months": months,
         "mrr_months": _series_floats(mrr_months),
         "cash_months": _series_floats(cash_months),
+        # **그 달에 고객이 된 고객만** (2026-09-02 운영자 지시). 같은 모양이라 화면이
+        # 같은 자로 재고, 총액 막대 위에 얹힙니다 — 그래서 언제나 총액의 부분집합이어야
+        # 합니다. 「고객이 된 달」을 `won.acquired_month` 가 인식 시작월로 재는 이유가
+        # 그것입니다: 다른 자로 재면 New 가 총액보다 커지는 달이 생깁니다.
+        "mrr_new_months": _series_floats(mrr_new_months),
+        "cash_new_months": _series_floats(cash_new_months),
         "options": {
             "industries": list(won.INDUSTRIES),
             "plans": list(won.PLANS),

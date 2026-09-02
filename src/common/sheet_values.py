@@ -40,6 +40,24 @@ def normalise_plan(value: str | None) -> str:
     return "N/A" if text.lower() in _PLAN_AS_NOT_APPLICABLE or not text else text
 
 
+def qualification_for_plan(value: str | None) -> str:
+    """MQL / PQL — **플랜이 정합니다** (2026-09-02 운영자 지시).
+
+    아직 아무것도 안 산 상태(플랜 없음 · Free · N/A)가 MQL 이고, 그 외 플랜은 전부
+    PQL 입니다. 플랜 정보가 아예 없는 연락처도 MQL 입니다 — 산 적이 없다는 뜻이니까요.
+
+    **저장하지 않고 플랜에서 파생합니다.** 둘 다 저장하면 플랜을 고친 뒤 이 값을 안 고친
+    행이 반드시 생기고, 그건 화면에 안 보입니다(고객 종류를 번호대에서 되짚는 것과 같은
+    이유, 0065). `customer_profiles.qualification` 열은 남아 있지만 그건 **워크북에서
+    읽어 온 거울**이고(`sheet_sync`), 콘솔이 그리는 값은 이 함수입니다.
+
+    「없음」의 철자를 여기서 다시 세지 않습니다 — `normalise_plan` 이 이미 그 목록을 들고
+    있고(free · n/a · na · none · 없음 · 무료 · 빈칸), 워크북의 Pipeline 수식도 그것이
+    만든 `N/A` 를 보고 갈라집니다. 목록이 둘이면 콘솔과 시트가 다른 답을 냅니다.
+    """
+    return "MQL" if normalise_plan(value) == "N/A" else "PQL"
+
+
 # IP country. HubSpot reports the IP-derived country in English ("South Korea", "Japan");
 # the column is Korean, and the two spellings in one column cannot be counted together.
 # Only the countries this inbound funnel actually sees are listed — an unmapped one is

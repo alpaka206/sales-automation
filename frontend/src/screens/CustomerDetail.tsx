@@ -24,6 +24,9 @@ type Data = {
     hubspot_contact_id: string | null;
   };
   profile: Record<string, string | null> | null;
+  /** MQL / PQL. 플랜이 정하는 계산값이라 프로필 밖에 있고, 언제나 값이 있습니다 —
+   *  플랜 정보가 없는 연락처는 MQL 입니다(산 적이 없다는 뜻). */
+  qualification: string;
   stage_options: { key: string; label: string }[];
   conversations: { id: number; created_at: string; inquiry_subject: string | null; stage: string; sheet_client_id: number | null }[];
   client_ids: number[];
@@ -288,7 +291,11 @@ export function CustomerDetail() {
             <div className="field-grid">
               <KV k="파이프라인" v={labelFor(data.stage_options, profile?.pipeline_stage)} />
               <KV k="리드 온도" v={profile?.lead_temperature || "-"} />
-              <KV k="MQL / PQL" v={profile?.qualification || "-"} />
+              {/* **프로필 밖**에서 옵니다. 플랜이 정하는 계산값이라 프로필 행이 없는
+                  연락처에도 답이 있고(산 적이 없으니 MQL), 프로필 안에 두면 그런 사람만
+                  「-」가 됩니다. 예전에는 저장된 열을 읽었는데 그 열을 채우는 길이 워크북
+                  전체 임포트뿐이라 화면에는 늘 「-」였습니다(2026-09-02 운영자 지적). */}
+              <KV k="MQL / PQL" v={data.qualification} />
               <KV k="산업군" v={profile?.industry || "-"} />
               <KV k="현재 플랜" v={profile?.current_plan || "-"} />
               <KV k="user-seq" v={profile?.user_seq || "-"} />

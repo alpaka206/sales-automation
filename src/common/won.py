@@ -528,6 +528,55 @@ def revenue_start_month(contract) -> str | None:
     return f"{start.year}-{start.month:02d}" if start else None
 
 
+def _first_payment_month(contract) -> str | None:
+    """그 계약의 결제 회차 중 가장 이른 달. 날짜 없는 회차는 세지 않습니다."""
+    months = [
+        str(p.paid_on)[:7]
+        for p in getattr(contract, "payments", None) or ()
+        if p.paid_on
+    ]
+    return min(months, default=None)
+
+
+def first_revenue_month(client) -> str | None:
+    """그 고객의 매출이 **처음 잡히는 달**. New MRR 이 어느 달에 서는지 정합니다.
+
+    **그 계열과 같은 자로 재야 합니다.** New 는 그 달 총액의 일부로 그려지므로, 자가 다르면
+    신규 고객이 어느 달의 New 에도 안 잡히고 — 화면에는 큰 막대 옆에 「New ₩0」 이 서는데,
+    그게 틀렸다는 표시는 어디에도 없습니다.
+
+    그래서 `revenue_in_month` 와 **같은 갈래**를 탑니다: PoC 는 플랜 기간이 아니라 첫 회차의
+    달에 전액을 인식하므로(균등 배분할 기간이 없습니다) 그 달로 재고, MRR 은 인식 시작월로
+    잽니다. 한 자로 재던 동안에는 신규 PoC 고객이 New 에서 통째로 빠져 있었습니다.
+
+    `clients.first_won_on` 을 쓰지 않는 이유: 그 칸을 채우는 곳이 워크북 임포트 하나뿐이라
+    (`sheet_to_db`) 콘솔에서 만든 고객은 전부 비어 있습니다.
+    """
+    months = [
+        _first_payment_month(contract)
+        if contract.deal_type == "PoC"
+        else revenue_start_month(contract)
+        for contract in getattr(client, "contracts", None) or ()
+    ]
+    return min((month for month in months if month), default=None)
+
+
+def first_cash_month(client) -> str | None:
+    """그 고객의 입금이 **처음 잡히는 달**. New 매출이 어느 달에 서는지 정합니다.
+
+    MRR 쪽과 자가 다른 이유: 월 매출은 **결제 회차의 날짜**로 칸을 만드는데, 그 날짜는
+    계약일에서 나오고(`first_payment_on or starts_on`) 플랜 시작일과 다릅니다 — 계약은 먼저
+    맺고 사용은 늦게 시작하는 일이 흔해서 `plan_starts_on` 이 생긴 것입니다. 두 계열을 한
+    자로 재던 동안에는, 8월에 입금받고 9월에 플랜이 시작한 신규 고객이 8월 New 매출에도
+    9월 New 매출에도 안 잡혔습니다.
+    """
+    months = [
+        _first_payment_month(contract)
+        for contract in getattr(client, "contracts", None) or ()
+    ]
+    return min((month for month in months if month), default=None)
+
+
 def collected(contract) -> Decimal:
     """입금 완료된 금액 합계. 수금율은 **항상 계약 통화 기준**입니다 — 환율 환산은
     대시보드의 예상 MRR 에서만 씁니다."""

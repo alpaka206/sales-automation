@@ -387,12 +387,25 @@ def _message_detail_context(
                     "company": contact.company,
                     "domain": contact.domain,
                     "role_description": contact.role_description,
+                    # MQL / PQL. **플랜에서 나오는 계산값**이라 저장한 열을 읽지 않습니다
+                    # (2026-09-02 운영자 지시) — `customer_profiles.qualification` 은
+                    # 워크북에서 읽어 온 거울이고 콘솔에서 채우는 길이 없어 늘 비어
+                    # 있었습니다. 그래서 화면에도 「-」만 떴습니다.
+                    "qualification": _qualification_of(customer),
                 }
                 if contact
                 else None
             ),
             "customer": customer,
         }
+
+
+def _qualification_of(customer: dict | None) -> str:
+    """그 연락처의 MQL / PQL. 프로필 행이 없으면 MQL — 산 적이 없다는 뜻입니다."""
+    from ...common.sheet_values import qualification_for_plan
+
+    profile = (customer or {}).get("profile") or {}
+    return qualification_for_plan(profile.get("current_plan"))
 
 
 def _customer_history(session, contact_id: int, exclude_conversation_id: int | None = None) -> dict:

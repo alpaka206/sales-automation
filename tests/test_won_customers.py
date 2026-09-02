@@ -1841,8 +1841,8 @@ def test_the_card_does_not_filter_by_plan_status():
     screen = pathlib.Path("frontend/src/screens/won/WonCustomers.tsx").read_text(encoding="utf-8")
     # 지표 카드가 둘로 갈린 뒤로 이 코드는 두 곳에 삽니다: 어느 계열을 넘기는지는 부르는
     # 자리에, 그것으로 무엇을 하는지는 MetricCard 안에. 둘 다 봐야 합니다.
-    호출 = screen[screen.index('<MetricCard title="월별 MRR"') :]
-    호출 = 호출[: 호출.index("/>", 호출.index('<MetricCard title="월 매출"')) + 2]
+    호출 = screen[screen.index('<MetricCard uid="mrr"') :]
+    호출 = 호출[: 호출.index("/>", 호출.index('<MetricCard uid="cash"')) + 2]
     카드 = 호출 + screen[screen.index("function MetricCard") :]
     assert "data.mrr_months" in 카드 and "data.cash_months" in 카드
     assert "plan_status" not in 카드 and "activeRows" not in 카드
@@ -1882,29 +1882,62 @@ def test_the_card_counts_gtm_only():
 
 
 def test_the_cards_say_which_department_they_counted():
-    """거른 숫자에 무엇으로 걸렀는지 안 적으면, 아래 목록을 더한 값과 안 맞을 때 어느 쪽이
-    틀린 건지 알 수 없습니다. 이제 담당부서 고르개가 그 값을 정하므로 **고른 값**을 적습니다.
+    """거른 숫자에 무엇으로 걸렀는지 화면이 말해야 합니다 — 아래 목록을 더한 값과 안 맞을
+    때 어느 쪽이 틀린 건지 알 수 없습니다.
 
-    카드 둘이 **같은 모집단**이어야 합니다: 「고객 12곳에 MRR 3천만원」이 서로 다른 팀의
-    숫자면 그 문장은 아무 뜻이 없습니다.
+    **말하는 자리가 칩으로 옮겨졌습니다** (2026-09-02 운영자 지시). 접힌 셀렉트는 지금
+    어느 팀을 보고 있는지 열어 봐야 알았고, 옆 필터 셋과 생김새가 같아 「목록 필터겠거니」로
+    읽혔습니다. 그래서 지표 카드의 제목 옆 괄호에서도 담당부서가 빠졌습니다 — 한 화면에
+    네 번 적히던 값이라, 지금 켜져 있는 칩 하나가 그 자리를 대신합니다.
+
+    카드 둘이 **같은 모집단**이어야 하는 것은 그대로입니다: 「고객 12곳에 MRR 3천만원」이
+    서로 다른 팀의 숫자면 그 문장은 아무 뜻이 없습니다.
     """
     import pathlib
 
     screen = pathlib.Path("frontend/src/screens/won/WonCustomers.tsx").read_text(encoding="utf-8")
     label = screen[screen.index('<G name="person" /> 활성 고객') :][:240]
     assert "{deptLabel}" in label
-    # 지표 카드 **둘 다** 적어야 합니다. 하나만 적혀 있으면 옆에 나란히 선 다른 카드가
-    # 어느 팀 숫자인지 화면에 없습니다.
-    for title in ("월별 MRR", "월 매출"):
-        call = screen[screen.index(f'<MetricCard title="{title}"') :][:240]
-        assert "${deptLabel}" in call, title
-    # 넘긴 값을 카드가 실제로 그리는지 — 안 그리면 위 검사는 문자열 검사일 뿐입니다.
-    assert "{note}" in screen[screen.index("function MetricCard") :]
+    # 지표 카드 **둘 다** 그 담당부서의 계열을 읽어야 합니다. 하나가 다른 묶음을 읽으면
+    # 나란히 선 두 카드가 다른 팀의 숫자가 되고, 그건 화면에 안 보입니다.
+    호출 = screen[screen.index('<MetricCard uid="mrr"') :]
+    호출 = 호출[: 호출.index("/>", 호출.index('<MetricCard uid="cash"')) + 2]
+    assert 호출.count("[deptLabel]") == 4, 호출   # 총액 둘 + New 둘
+    # 담당부서를 고르는 것은 이제 칩입니다. 넷뿐이라 다 펼쳐 두고, 고른 것이 곧 보입니다.
+    assert 'aria-label="담당부서"' in screen and 'id="won-dept"' not in screen
     # 기본값은 GTM 입니다 — 이 화면을 매일 여는 쪽이고, 「전체」로 두면 세 팀을 합친
     # 숫자로 시작합니다.
     assert 'useState("GTM")' in screen
     # 고르개는 CSV 내보내기 왼쪽, 즉 아래 필터들이 아니라 제목 옆입니다.
-    assert screen.index('id="won-dept"') < screen.index("/won-customers/export.csv")
+    assert screen.index('aria-label="담당부서"') < screen.index("/won-customers/export.csv")
+
+
+def test_the_card_says_what_its_numbers_are_and_follows_the_hovered_month():
+    """운영자가 지시한 세 가지가 화면에 실제로 있는지 (2026-09-02).
+
+    ① 「VAT 포함」·「입금 기준」은 **카드 왼쪽 아래**에 작게 — 제목 옆 괄호에서 내려왔습니다.
+    ② 「이번 달」 옆에 그 달의 **New**.
+    ③ 차트에서 어느 달을 짚으면 그 두 숫자가 **그 달 것으로** 바뀝니다. 없으면 지난 달을
+       보려고 툴팁의 작은 글씨를 읽어야 합니다.
+    """
+    import pathlib
+
+    screen = pathlib.Path("frontend/src/screens/won/WonCustomers.tsx").read_text(encoding="utf-8")
+    card = screen[screen.index("function MetricCard") :]
+    # ① 단서는 카드가 그리는 것이 아니라 차트의 caption 으로 내려갑니다 — 범례와 한 줄입니다.
+    assert 'note="VAT 포함"' in screen and 'note="입금 기준"' in screen
+    assert "caption={note}" in card
+    # ② · ③ 큰 숫자와 New 가 **같은 달**(`shown`)을 보고, 그 달은 차트가 정합니다.
+    assert "onHover={setLook}" in card
+    assert "const shown = look ?? now;" in card
+    assert card.count("(shown)") == 2, "총액과 New 둘 다 짚은 달을 따라가야 합니다"
+
+    chart = pathlib.Path("frontend/src/screens/won/MonthlyArea.tsx").read_text(encoding="utf-8")
+    # 짚은 달을 카드로 돌려주고, 손을 떼면 이번 달로 되돌립니다.
+    assert "onHover?.(index === null ? null : months[index])" in chart
+    assert "onMouseLeave={() => move(null)}" in chart
+    # 면 차트입니다 — 막대가 아니라. New 는 총액 아래에 얹혀 위쪽으로 보입니다.
+    assert "bandPath(total, rest)" in chart and "<figure className=\"marea\"" in chart
 
 
 def test_the_row_shows_what_this_customer_added_this_month():
@@ -2317,6 +2350,130 @@ def test_the_series_is_bucketed_per_department_and_a_total():
     assert target["GTM"]["2026-06"]["KRW"] == Decimal("100")
     assert target["AX"]["2026-06"]["KRW"] == Decimal("300")
     assert target[won.ALL_DEPARTMENTS]["2026-06"]["KRW"] == Decimal("400")
+
+
+def test_each_new_series_is_measured_with_its_own_ruler(factory):
+    """New MRR 과 New 매출은 **자기 계열과 같은 자**로 잽니다.
+
+    한 자(플랜 시작월)로 재던 동안 두 가지가 통째로 빠져 있었습니다. 화면에는 큰 면 옆에
+    「New ₩0」 이 설 뿐, 틀렸다는 표시가 어디에도 없습니다:
+
+    1. **선입금 신규 고객의 New 매출.** 월 매출 칸은 **입금한 달**에 서는데, 그 날짜는
+       계약일에서 나오고 플랜 시작일과 다릅니다 — `plan_starts_on` 이 생긴 이유가 「계약은
+       먼저 맺고 사용은 늦게 시작한다」입니다. 그래서 8월에 입금받고 9월에 시작한 고객은
+       8월에도 9월에도 New 매출에 안 잡혔습니다.
+    2. **PoC 신규 고객의 New MRR.** PoC 는 균등 배분할 기간이 없어 **첫 회차의 달**에
+       전액을 인식하는데(`revenue_in_month`), 플랜 시작월로 재니 그 달에 값이 없었습니다.
+       PoC 는 두 가지 수주 유형 중 하나입니다.
+    """
+    with factory() as session:
+        # 계약은 8월, 플랜은 10월부터, 입금은 8월 — 자마다 답이 다릅니다.
+        선입금 = Client(client_id=1801, company="선입금 고객")
+        session.add(선입금)
+        session.flush()
+        계약 = ClientContract(
+            client_id=1801, seq=1, deal_type="MRR",
+            starts_on="2026-08-01", ends_on="2027-08-01",
+            plan_starts_on="2026-10-01", plan_ends_on="2027-10-01",
+        )
+        session.add(계약)
+        session.flush()
+        session.add(ContractPayment(contract_id=계약.id, no=1, total=1, paid_on="2026-08-28"))
+        session.flush()
+        session.refresh(선입금)
+        assert won.first_revenue_month(선입금) == "2026-10", "MRR 은 인식하는 달"
+        assert won.first_cash_month(선입금) == "2026-08", "매출은 입금하는 달"
+
+        poc = Client(client_id=1802, company="PoC 고객")
+        session.add(poc)
+        session.flush()
+        시범 = ClientContract(
+            client_id=1802, seq=1, deal_type="PoC",
+            starts_on="2026-08-01", ends_on="2026-10-31",
+            plan_starts_on="2026-08-01", plan_ends_on="2026-10-31",
+        )
+        session.add(시범)
+        session.flush()
+        session.add(ContractPayment(contract_id=시범.id, no=1, total=1, paid_on="2026-09-10"))
+        session.flush()
+        session.refresh(poc)
+        # 플랜은 8월에 시작하지만 PoC 의 매출은 **9월**에 통째로 잡힙니다.
+        assert won.first_revenue_month(poc) == "2026-09"
+        assert won.revenue_in_month(시범, "2026-08") == 0
+
+    # 계약이 없으면 아직 고객이 된 적이 없습니다 — 어느 달의 New 에도 안 들어갑니다.
+    빈고객 = Client(client_id=1803, company="빈 고객")
+    assert won.first_revenue_month(빈고객) is None
+    assert won.first_cash_month(빈고객) is None
+
+
+def test_the_new_series_reaches_the_screen_through_the_route(factory):
+    """계열 둘이 실제로 payload 에 실려 나가는지 — 라우트를 두드려 확인합니다.
+
+    화면은 없는 키를 `?? {}` 로 받아 모든 달을 0 으로 그리므로, 서버가 New 를 통째로 빠뜨려도
+    **화면은 멀쩡히 그려집니다**(「New ₩0」). 그래서 이 검사는 라우트 밖에서는 못 합니다.
+    """
+    from datetime import date
+    from unittest.mock import patch
+
+    from src.api.routes.ui_api import ui_won_customers
+
+    today = date.today()
+
+    def month_back(back: int) -> str:
+        total = today.year * 12 + today.month - 1 - back
+        return f"{total // 12}-{total % 12 + 1:02d}"
+
+    now, prev = month_back(0), month_back(1)
+    with factory() as session:
+        # 1000번대 = GTM Inbound → 담당부서 GTM.
+        session.add(Client(client_id=1804, company="이번달 신규"))
+        session.flush()
+        contract = ClientContract(
+            client_id=1804, seq=1, deal_type="MRR", currency="KRW", vat_applicable=False,
+            starts_on=f"{prev}-01", ends_on=f"{today.year + 1}-{today.month:02d}-01",
+            plan_starts_on=f"{now}-01", plan_ends_on=f"{today.year + 1}-{today.month:02d}-01",
+            amount_incl_vat=12_000_000,
+            # 채워 두면 라우트가 환율을 조회하지 않습니다.
+            fx_rate=1000, fx_on=f"{prev}-01",
+        )
+        session.add(contract)
+        session.flush()
+        # 입금은 **지난달**, 인식은 **이번달** — 두 계열이 서로 다른 달에 섭니다.
+        session.add(ContractPayment(
+            contract_id=contract.id, no=1, total=1, paid_on=f"{prev}-28", amount=12_000_000,
+        ))
+        session.commit()
+
+    with patch("src.db.session.SessionLocal", factory), \
+            patch("src.integrations.fx.usd_krw_today", return_value=None):
+        data = ui_won_customers()
+
+    assert data["mrr_new_months"]["GTM"][now]["KRW"] == 1_000_000, "12개월 계약의 한 달치"
+    assert data["cash_new_months"]["GTM"][prev]["KRW"] == 12_000_000, "입금은 지난달에 통째로"
+    # 「전체」 묶음도 서버가 같이 만듭니다 — 화면이 부서별 값을 다시 더하지 않습니다.
+    assert data["mrr_new_months"][won.ALL_DEPARTMENTS][now]["KRW"] == 1_000_000
+    # New 는 총액의 한 달을 골라 담은 것이라, 그 달에는 두 값이 같습니다.
+    assert data["mrr_months"]["GTM"][now]["KRW"] == 1_000_000
+
+
+def test_the_new_series_is_only_the_month_the_customer_arrived():
+    """New 는 **그 달**의 칸만 세고, 그 다음 달부터는 총액에만 남습니다.
+
+    총액 계열에서 한 달을 골라 담는 것이 전부라, New 는 정의상 총액의 부분집합입니다 —
+    화면이 그림을 쌓을 수 있는 이유입니다.
+    """
+    from src.api.routes.ui_api import _only
+
+    cells = {
+        "2026-05": {"KRW": Decimal("100"), "USD": Decimal("1")},
+        "2026-06": {"KRW": Decimal("100"), "USD": Decimal("1")},
+    }
+    assert _only(cells, "2026-05") == {"2026-05": cells["2026-05"]}
+    # 그 달에 그 계약의 값이 없으면 New 도 없습니다(빈 칸을 만들지 않습니다).
+    assert _only(cells, "2026-04") == {}
+    # 고객이 된 달을 모르면 아무것도 안 셉니다 — 지어내면 총액보다 큰 New 가 생깁니다.
+    assert _only(cells, None) == {}
 
 
 def test_the_renewal_list_sits_with_the_other_due_boards():

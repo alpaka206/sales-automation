@@ -18,6 +18,10 @@ type Row = {
   last_activity: string;
   conversation_count: number;
   client_id: number | null;
+  /** MQL / PQL — 구독 플랜이 정합니다. 플랜이 없으면 MQL(아직 아무것도 안 샀다는 뜻).
+   *  서버가 계산해서 내려줍니다(`sheet_values.qualification_for_plan`): 화면이 플랜을
+   *  보고 판단하면 그 규칙이 콘솔 세 곳에 따로 생깁니다. */
+  qualification: string;
 };
 type CustomersData = {
   rows: Row[];
@@ -68,13 +72,13 @@ export function Customers() {
       </form>
 
       <div className="card card--flush">
-        {isPending || !data ? <Loading columns={5} /> : (
+        {isPending || !data ? <Loading columns={6} /> : (
         <Refreshing active={isFetching}>
         <DataTable
           columns={[
             {
               label: "고객",
-              width: "32%",
+              width: "30%",
               cell: (row) => (
                 <>
                   {/* A real link, not a row onClick: that gave no keyboard access and no
@@ -117,13 +121,21 @@ export function Customers() {
                   </select>
                 </>
               ),
-              width: "16%",
+              width: "14%",
               cell: (row) => labels[row.stage] ?? row.stage,
             },
-            { label: "리드 온도", width: "10%", cell: (row) => row.temperature || "-" },
+            {
+              // 구독 플랜이 정합니다 — N/A·Free·플랜 없음이 MQL, 그 외가 PQL. 서버가
+              // 계산해서 내려주므로 여기서는 그리기만 합니다. 「-」가 없는 열입니다:
+              // 플랜을 모르는 것도 답(MQL)이라, 빈칸이면 그게 곧 버그입니다.
+              label: "MQL / PQL",
+              width: "9%",
+              cell: (row) => row.qualification,
+            },
+            { label: "리드 온도", width: "9%", cell: (row) => row.temperature || "-" },
             {
               label: "다음 액션",
-              width: "24%",
+              width: "22%",
               cell: (row) => (
                 <>
                   <div>{row.next_action || "-"}</div>
@@ -135,7 +147,7 @@ export function Customers() {
             },
             {
               label: "최근 활동",
-              width: "18%",
+              width: "16%",
               className: "tnum t-subtle",
               cell: (row) => (
                 <>

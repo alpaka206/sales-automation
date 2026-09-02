@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useLocation, useNavigate } from "react-router-dom";
 import { getJSON } from "../../lib/api";
-import { MonthlyBars } from "./MonthlyBars";
+import { MonthlyArea } from "./MonthlyArea";
 import { pendingContractPath } from "./pending";
 import { WonContractForm } from "./WonContractForm";
 import {
@@ -172,15 +172,24 @@ export function WonCustomers() {
           <div><h1 className="page-title">수주 고객</h1></div>
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
             {/* **이 화면의 축입니다.** 아래 필터들과 달리 목록만 거르는 것이 아니라 위 카드
-                둘의 모집단까지 정하므로, 그것들 사이가 아니라 제목 옆에 있습니다. */}
-            <label className="sr-only" htmlFor="won-dept">담당부서</label>
-            <select className="select" id="won-dept" value={dept}
-                    onChange={(event) => setDept(event.target.value)}>
-              <option value="all">담당부서 {data.options.all_departments}</option>
-              {data.options.departments.map((item) => (
-                <option key={item} value={item}>{item}</option>
+                둘의 모집단까지 정하므로, 그것들 사이가 아니라 제목 옆에 있습니다.
+
+                셀렉트에서 **칩**으로 바꿨습니다 (2026-09-02 운영자 지시). 접힌 목록은
+                지금 어느 팀을 보고 있는지 열어 봐야 알고, 옆 필터 셋과 생김새가 같아
+                「이것도 목록 필터겠거니」로 읽혔습니다. 넷뿐이라 다 펼쳐 둘 수 있고,
+                펼쳐 두면 고른 것과 안 고른 것이 한눈에 보입니다. */}
+            {/* `radiogroup` 이지 토글 넷이 아닙니다 — 하나만 켜지는 축이라, `aria-pressed`
+                로 두면 화면 낭독기가 「누름 버튼 4개」로 읽고 셋을 동시에 켤 수 있는 것처럼
+                들립니다. */}
+            <div className="chips" role="radiogroup" aria-label="담당부서">
+              {["all", ...data.options.departments].map((item) => (
+                <button key={item} type="button" role="radio" aria-checked={dept === item}
+                        className={`chip${dept === item ? " is-on" : ""}`}
+                        onClick={() => setDept(item)}>
+                  {item === "all" ? data.options.all_departments : item}
+                </button>
               ))}
-            </select>
+            </div>
             {/* 브라우저의 다운로드가 기능 전부입니다 — fetch 로 돌리면 Save As 를 다시 짜게 됩니다. */}
             <a className="btn" href="/won-customers/export.csv">CSV 내보내기</a>
             <button className="btn btn-primary" type="button"
@@ -217,11 +226,13 @@ export function WonCustomers() {
               (2026-08-19, 운영자 지시). y축은 카드마다 따로입니다 — 인식 매출은 고르게
               깔리고 현금은 한 달에 몰려서, 축을 합치면 MRR 쪽이 바닥에 눌립니다. 눈금에
               단위(만·억)가 붙어 있어 두 축을 헷갈릴 일은 없습니다. */}
-          <MetricCard title="월별 MRR" note={`${deptLabel} · VAT 포함`}
+          <MetricCard uid="mrr" title="월별 MRR" note="VAT 포함" newLabel="New MRR"
                       series={data.mrr_months?.[deptLabel] ?? {}}
+                      newSeries={data.mrr_new_months?.[deptLabel] ?? {}}
                       months={months} now={data.month} />
-          <MetricCard title="월 매출" note={`${deptLabel} · 입금 기준`}
+          <MetricCard uid="cash" title="월 매출" note="입금 기준" newLabel="New 매출"
                       series={data.cash_months?.[deptLabel] ?? {}}
+                      newSeries={data.cash_new_months?.[deptLabel] ?? {}}
                       months={months} now={data.month} />
         </div>
 
@@ -575,10 +586,19 @@ function Donut({ cap, slices }: {
  *  통화도 카드마다 따로 고릅니다. 축이 이미 따로라 두 카드는 같은 자로 재는 그림이
  *  아니고, 어느 단위인지는 눈금과 큰 숫자가 각자 말합니다.
  */
-function MetricCard({ title, note, series, months, now }: {
+function MetricCard({ uid, title, note, newLabel, series, newSeries, months, now }: {
+  /** 카드마다 다른 문자열. 차트가 clipPath id 를 만드는 데 씁니다 — 두 카드가 같은 id 를
+   *  쓰면 둘째 카드의 음수 면이 첫째 카드의 0선에서 잘립니다. */
+  uid: string;
   title: string;
+  /** 「VAT 포함」·「입금 기준」. 카드 **왼쪽 아래**에 작게 답니다 (2026-09-02 운영자 지시) —
+   *  제목 옆 괄호에 담당부서까지 들어가 있어서, 어디까지가 지표 이름인지 흐렸습니다.
+   *  담당부서는 이제 화면 위의 칩이 말합니다. */
   note: string;
+  newLabel: string;
   series: Record<string, Record<string, number>>;
+  /** 그 달에 고객이 된 고객의 몫. 총액의 **부분**이라 차트에서 위에 얹힙니다. */
+  newSeries: Record<string, Record<string, number>>;
   months: string[];
   now: string;
 }) {
@@ -587,19 +607,26 @@ function MetricCard({ title, note, series, months, now }: {
   // 입금을 원화로 보고 싶은 때가 있습니다. 두 카드는 y축도 이미 따로라 같은 자로 재는
   // 그림이 아니었고, 단위는 눈금과 큰 숫자에 그때그때 적혀 있습니다.
   const [unit, setUnit] = useState<"KRW" | "USD">("USD");
+  // 짚고 있는 달. 차트가 알려 주고, 손을 떼면 null 로 돌아옵니다 — 그때 큰 숫자는 다시
+  // 이번 달입니다. 「이번 달」과 「New」를 나란히 두면 그 다음 질문이 언제나 「지난 달은?」
+  // 인데, 예전에는 그걸 보려고 툴팁의 작은 글씨를 읽어야 했습니다(2026-09-02 운영자 지시).
+  const [look, setLook] = useState<string | null>(null);
+  const shown = look ?? now;
   const at = (month: string) => series[month]?.[unit] ?? 0;
+  // **자르지 않습니다.** 한동안 총액을 넘지 못하게 눌러 두었는데, 그러면 신규 고객이 온
+  // 달에 다른 고객이 중도 해지했을 때 New 가 그 해지 정산만큼 깎여 나옵니다 — 신규 1,000만
+  // + 해지 −700만이면 「New ₩300만」. 두 값은 **다른 것을 셉니다**: New 는 신규 고객이 번
+  // 돈이고 총액은 해지까지 반영한 순액이라, New 가 총액보다 큰 달은 틀린 것이 아니라
+  // 그 달에 있었던 일입니다. 0선 위로만 쌓는 그림에서 자리가 없을 뿐이고, 그건 차트가
+  // 자기 안에서 처리합니다.
+  const newAt = (month: string) => newSeries[month]?.[unit] ?? 0;
   // **단위는 그 구간(6개월) 최댓값 하나로 정합니다.** 눈금마다 따로 접으면 50만 옆에
   // 1,000만이 서고, 그러면 두 눈금을 비교하려고 자릿수를 세어야 합니다.
   const scale = scaleFor(Math.max(...months.map((month) => Math.abs(at(month))), 0), unit);
   return (
     <div className="kpi">
       <div className="kpi-head">
-        {/* GTM 이라고 적혀 있어야 합니다. 서버가 담당부서로 거르는데 화면이 말하지 않으면,
-            아래 목록을 더한 값과 안 맞을 때 어느 쪽이 틀린 건지 알 수 없습니다. */}
-        <div className="kpi-label">
-          <G name="trend" /> {title}
-          <span style={{ color: "var(--faint)" }}> ({note})</span>
-        </div>
+        <div className="kpi-label"><G name="trend" /> {title}</div>
         <div className="seg">
           <button type="button" className={unit === "KRW" ? "on" : ""}
                   onClick={() => setUnit("KRW")}>KRW</button>
@@ -609,11 +636,19 @@ function MetricCard({ title, note, series, months, now }: {
       </div>
       {/* **이번 달** 값입니다. 안 적어 두면 이번 달에 잡힌 것이 없을 때(월 매출은 결제
           회차가 있는 달에만 잡히므로 흔합니다) 큰 「0」 이 「매출 없음」으로 읽힙니다 —
-          정작 옆 막대에는 지난 달들이 서 있는데. */}
+          정작 옆 차트에는 지난 달들이 서 있는데.
+
+          짚은 달이 있으면 그 달 값입니다. 라벨이 「이번 달」에서 그 달로 바뀌므로, 큰
+          숫자가 어느 달 것인지 헷갈릴 자리가 없습니다. */}
       <div className="kpi-value money">
-        {amount(at(now), unit, scale)}<span className="unit">이번 달</span>
+        {amount(at(shown), unit, scale)}
+        <span className="unit">{look ? look.slice(2) : "이번 달"}</span>
+        <span className="kpi-new">
+          <span className="cap">New</span>{amount(newAt(shown), unit, scale)}
+        </span>
       </div>
-      <MonthlyBars months={months} valueAt={at} now={now}
+      <MonthlyArea uid={uid} months={months} valueAt={at} newAt={newAt} now={now}
+                   newLabel={newLabel} onHover={setLook} caption={note}
                    format={(value) => amount(value, unit, scale)}
                    formatTick={(value) => tickLabel(value, scale)}
                    negativeNote="중도 해지 정산" />

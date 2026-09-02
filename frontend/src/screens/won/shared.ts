@@ -99,7 +99,7 @@ export type ListData = {
   fx_error: string | null;
   /** 이번 달(YYYY-MM). 카드가 「이번달」이라고 말하는 그 달입니다. */
   month: string;
-  /** 이번 달로 끝나는 최근 12개월, 오래된 것부터. */
+  /** 이번 달로 끝나는 최근 6개월, 오래된 것부터. 구간을 정하는 곳은 서버 한 곳입니다. */
   months: string[];
   /** 담당부서 → 달 → 통화 → 금액.
    *
@@ -112,6 +112,13 @@ export type ListData = {
    *  같이 만듭니다: 화면이 부서별 값을 다시 더하면 그 덧셈이 두 곳에 생깁니다. */
   mrr_months: Record<string, Record<string, Record<string, number>>>;
   cash_months: Record<string, Record<string, Record<string, number>>>;
+  /** 같은 모양의 「New」 — **그 달에 고객이 된 고객의 몫**만 (2026-09-02 운영자 지시).
+   *
+   *  언제나 위 두 계열의 **부분집합**입니다. 서버가 같은 자로 재기 때문입니다
+   *  (`won.acquired_month` = 그 고객의 가장 이른 인식 시작월). 화면이 「신규」를 스스로
+   *  판별하면 그 필터가 곧 정의가 되고, 총액보다 큰 New 가 생겨도 아무도 모릅니다. */
+  mrr_new_months: Record<string, Record<string, Record<string, number>>>;
+  cash_new_months: Record<string, Record<string, Record<string, number>>>;
   options: Options;
 };
 

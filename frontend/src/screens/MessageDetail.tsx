@@ -120,7 +120,10 @@ type Detail = {
     to_address: string; score_snapshot: number | null; created_at: string;
     sent_at: string | null; scheduled_at: string | null; category: string | null;
   } | null;
-  contact: { id: number; name: string; email: string | null; company: string | null; domain: string | null; role_description: string | null } | null;
+  contact: { id: number; name: string; email: string | null; company: string | null; domain: string | null; role_description: string | null;
+    /** MQL / PQL — 구독 플랜이 정합니다(플랜 없음·Free·N/A → MQL, 그 외 → PQL). 서버가
+     *  계산해서 내려주므로 언제나 값이 있습니다. */
+    qualification: string } | null;
   customer: { profile: Record<string, unknown> | null; interactions: Interaction[] } | null;
   stage_labels: Record<string, string>;
   /** 소통 히스토리를 남길 수 있는 단계 — 보드의 + 버튼과 같은 목록, 같은 출처. */
@@ -936,6 +939,12 @@ export function MessageDetail() {
                 {hubspot?.groups
                   ?.find((group) => group.key === "contact")
                   ?.rows.map((row) => <CompanyRow key={row.label} row={row} />)}
+                {/* 이 사람이 리드인지 제품을 쓰는 고객인지 — 구독 플랜이 정합니다
+                    (2026-09-02 운영자 지시). 옆 「플랜 정보」 카드가 그 플랜을 들고
+                    있으므로 두 카드가 같은 사실의 두 면입니다. 허브스팟에는 대응 속성이
+                    없어 그 카드의 행으로 넣지 않았습니다 — 저기 서면 「허브스팟이 아는
+                    값」으로 읽히고, 고칠 수 있는 칸처럼 보입니다. */}
+                <div className="info-row"><dt>MQL / PQL</dt><dd>{contact.qualification}</dd></div>
                 {!editingContact && (
                   <div className="info-row"><dt>회사</dt>
                     <dd className="truncate">{contact.company || "—"}</dd></div>

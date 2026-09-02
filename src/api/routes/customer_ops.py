@@ -21,6 +21,7 @@ from ...agents.stage_sync import (
     retire_drafts_answered_elsewhere,
 )
 from ...common.config import settings
+from ...common.sheet_values import qualification_for_plan
 from ...common.subjects import strip_reply_prefixes
 from ...db.conversation_history import ROUTINE_PROGRESS_KINDS
 from ...db.models import (
@@ -439,6 +440,12 @@ def _customer_rows() -> list[dict]:
             {
                 "contact": contact,
                 "profile": profile,
+                # MQL / PQL 은 **플랜에서 나옵니다** — 저장한 열이 아니라 계산값입니다
+                # (`sheet_values.qualification_for_plan`, 2026-09-02 운영자 지시).
+                # 프로필 행이 아예 없는 연락처도 답이 있습니다: 산 적이 없으니 MQL.
+                "qualification": qualification_for_plan(
+                    profile.current_plan if profile else None
+                ),
                 "state": profile.customer_state if profile else "negotiation",
                 "stage": profile.pipeline_stage if profile else "new",
                 "temperature": profile.lead_temperature if profile else None,
