@@ -51,6 +51,15 @@ _RETRY_STATUS = {429, 500, 502, 503, 504}
 _MAX_RETRIES = 4
 
 
+# 허브스팟이 인박스마다 자동 발급하는 전달 주소. 사람이 고를 주소가 아닙니다.
+_RELAY_SUFFIXES = (".hs-inbox.com", ".hubspot-inbox.com")
+
+
+def _is_hubspot_relay(address: str) -> bool:
+    domain = (address or "").rsplit("@", 1)[-1].strip().lower()
+    return domain.endswith(_RELAY_SUFFIXES)
+
+
 @dataclass(frozen=True)
 class ConversationReplyContext:
     """The existing HubSpot thread and connected email account used for a reply."""
@@ -668,6 +677,17 @@ class HubSpotClient:
             if str(account.get("inboxId") or "") != inbox_id:
                 continue
             address = (account.get("deliveryIdentifier") or {}).get("value") or ""
+            # **허브스팟 내부 전달 주소는 고르개에 안 넣습니다** (2026-09-03 운영자 지시).
+            # `support@45169260.hubspot-inbox.com` · `support@perso.co.kr.hs-inbox.com`
+            # 같은 것들입니다 — 인박스를 연결하면 허브스팟이 자동으로 발급하는 주소라
+            # 채널 계정 목록에는 뜨지만, 고객이 받는 메일의 보낸사람이 저 기계 주소가
+            # 됩니다. 고를 수 있게 두면 언젠가 골라집니다.
+            #
+            # **자동(기본값)까지 막지는 않습니다**: 그 스레드에 실제로 저 주소로 오간
+            # 메일이 있으면 회신도 거기서 나가야 대화가 이어집니다. 여기서 거르는 것은
+            # 「사람이 일부러 고르는 것」뿐입니다.
+            if _is_hubspot_relay(address):
+                continue
             out.append({
                 "id": str(account.get("id") or ""),
                 "address": address or (account.get("name") or ""),

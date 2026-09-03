@@ -537,3 +537,32 @@ async def test_a_sender_with_no_conversation_in_its_inbox_is_refused(
         await client.find_conversation_reply_context(
             "ticket-1", "buyer@example.com", preferred_account_id="gtm-account"
         )
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_hubspot_relay_addresses_are_not_offered(client: HubSpotClient) -> None:
+    """**허브스팟 내부 전달 주소는 고를 수 없습니다** (2026-09-03 운영자 지시).
+
+    인박스를 연결하면 허브스팟이 `support@45169260.hubspot-inbox.com` 같은 주소를 자동으로
+    발급합니다. 채널 계정 목록에는 뜨지만 고객이 받는 메일의 보낸사람이 저 기계 주소가
+    되므로, 사람이 고를 자리에 두면 안 됩니다 — 두면 언젠가 골라집니다.
+    """
+    _thread_with_one_email("t1", "inbox-1", "team-account")
+    respx.get(f"{BASE_URL}/conversations/v3/conversations/channel-accounts").mock(
+        return_value=httpx.Response(200, json={"results": [
+            {"id": "team-account", "channelId": "1002", "inboxId": "inbox-1",
+             "active": True, "authorized": True, "archived": False,
+             "deliveryIdentifier": {"value": "support@perso.ai"}},
+            {"id": "relay-1", "channelId": "1002", "inboxId": "inbox-1",
+             "active": True, "authorized": True, "archived": False,
+             "deliveryIdentifier": {"value": "support@45169260.hubspot-inbox.com"}},
+            {"id": "relay-2", "channelId": "1002", "inboxId": "inbox-1",
+             "active": True, "authorized": True, "archived": False,
+             "deliveryIdentifier": {"value": "support@perso.co.kr.hs-inbox.com"}},
+        ]})
+    )
+
+    senders = await client.list_reply_senders("ticket-1", "buyer@example.com")
+
+    assert [s["address"] for s in senders] == ["support@perso.ai"]
