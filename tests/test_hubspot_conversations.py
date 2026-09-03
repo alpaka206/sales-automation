@@ -428,7 +428,8 @@ async def test_the_picker_only_offers_addresses_from_that_thread_inbox(
         ]})
     )
 
-    senders = await client.list_reply_senders("ticket-1", "buyer@example.com")
+    found = await client.list_reply_senders("ticket-1", "buyer@example.com")
+    senders = found["senders"]
 
     assert [s["address"] for s in senders] == ["perso.ai@estsoft.com", "untae@estsoft.com"]
     # 아무것도 안 골랐을 때 나갈 주소가 맨 앞에 오고, 그렇다고 표시됩니다.
@@ -491,7 +492,8 @@ async def test_the_picker_default_is_what_the_send_would_actually_use(
             })
         )
 
-    senders = await client.list_reply_senders("ticket-1", "buyer@example.com")
+    found = await client.list_reply_senders("ticket-1", "buyer@example.com")
+    senders = found["senders"]
 
     default = next(x for x in senders if x["is_default"])
     assert default["address"] == "perso.ai@estsoft.com"
@@ -609,6 +611,35 @@ async def test_a_sender_with_no_conversation_in_its_inbox_is_refused(
 
 @respx.mock
 @pytest.mark.asyncio
+async def test_a_relay_default_is_still_named_on_screen(client: HubSpotClient) -> None:
+    """**고를 수 없는 주소가 기본값일 때도 화면은 그 이름을 적습니다** (2026-09-03).
+
+    기계 주소는 고르개에서 빼지만 기본값일 수는 있습니다(운영 실측: 티켓 103건 중 2건).
+    목록에서만 빼고 끝내면 그 티켓에서는 `is_default` 인 줄이 하나도 없어, 화면의
+    「자동 — …」이 「이 대화의 주소」라는 두루뭉술한 말로 떨어집니다 — 그러면 **어느 주소로
+    나갈지가 화면 어디에도 안 적힙니다.** 목록과 별개로 이름을 돌려줍니다.
+    """
+    _thread_with_one_email("t1", "inbox-1", "relay-1")
+    respx.get(f"{BASE_URL}/conversations/v3/conversations/channel-accounts").mock(
+        return_value=httpx.Response(200, json={"results": [
+            {"id": "relay-1", "channelId": "1002", "inboxId": "inbox-1",
+             "active": True, "authorized": True, "archived": False,
+             "deliveryIdentifier": {"value": "support@45169260.hubspot-inbox.com"}},
+            {"id": "team-account", "channelId": "1002", "inboxId": "inbox-1",
+             "active": True, "authorized": True, "archived": False,
+             "deliveryIdentifier": {"value": "support@perso.ai"}},
+        ]})
+    )
+
+    found = await client.list_reply_senders("ticket-1", "buyer@example.com")
+
+    assert found["default_address"] == "support@45169260.hubspot-inbox.com"
+    assert [s["address"] for s in found["senders"]] == ["support@perso.ai"]
+    assert all(not s["is_default"] for s in found["senders"])
+
+
+@respx.mock
+@pytest.mark.asyncio
 async def test_hubspot_relay_addresses_are_not_offered(client: HubSpotClient) -> None:
     """**허브스팟 내부 전달 주소는 고를 수 없습니다** (2026-09-03 운영자 지시).
 
@@ -631,6 +662,7 @@ async def test_hubspot_relay_addresses_are_not_offered(client: HubSpotClient) ->
         ]})
     )
 
-    senders = await client.list_reply_senders("ticket-1", "buyer@example.com")
+    found = await client.list_reply_senders("ticket-1", "buyer@example.com")
+    senders = found["senders"]
 
     assert [s["address"] for s in senders] == ["support@perso.ai"]

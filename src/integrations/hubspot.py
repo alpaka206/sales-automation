@@ -729,7 +729,7 @@ class HubSpotClient:
             f"{len(in_inbox)}개) — 그 인박스에 이 고객과 오간 메일이 아직 없습니다"
         )
 
-    async def list_reply_senders(self, ticket_id: str, recipient_email: str) -> list[dict]:
+    async def list_reply_senders(self, ticket_id: str, recipient_email: str) -> dict:
         """그 티켓에 **고를 수 있는** 발신 주소들. 읽기만 합니다 — 아무것도 안 보냅니다.
 
         기본값(아무것도 안 고르면 나갈 주소)을 먼저 정하고, **그 티켓에 실제로 쓸 수 있는**
@@ -741,6 +741,10 @@ class HubSpotClient:
         넣고 부르므로 둘의 답이 갈렸고, 화면은 「자동 — support@perso.ai」라고 적는데 메일은
         `perso.ai@estsoft.com` 으로 나갔습니다(실측: 티켓 48건 중 41건). 눈에 보이는 것과
         실제로 나가는 것이 다르면 운영자가 화면을 믿을 수 없습니다.
+
+        ``default_address`` 는 **아무것도 안 골랐을 때 실제로 나갈 주소**입니다. 목록에
+        없을 수 있습니다 — 기계 주소는 고를 수 없지만 기본값일 수는 있어서, 그때도 화면이
+        무엇으로 나가는지 적을 수 있어야 합니다.
 
         **목록은 한 인박스에 갇히지 않습니다.** 티켓 하나가 인박스 여러 곳에 스레드를 갖는
         일이 흔한데(폼은 `Inbox`, 메일은 `GTM Marketing`), 기본값이 정해진 스레드의 인박스만
@@ -760,6 +764,7 @@ class HubSpotClient:
             action="channel-account list",
         )
         out: list[dict] = []
+        default_address = ""
         for account in data.get("results") or ():
             if str(account.get("channelId") or "") != "1002":
                 continue
@@ -785,15 +790,22 @@ class HubSpotClient:
             # **자동(기본값)까지 막지는 않습니다**: 그 스레드에 실제로 저 주소로 오간
             # 메일이 있으면 회신도 거기서 나가야 대화가 이어집니다. 여기서 거르는 것은
             # 「사람이 일부러 고르는 것」뿐입니다.
+            is_default = str(account.get("id") or "") == context.channel_account_id
+            if is_default:
+                # **기본값의 주소는 거르기 전에 적어 둡니다.** 기계 주소가 기본값인 티켓이
+                # 있는데(실측 103건 중 2건), 목록에서만 빼고 끝내면 화면의 「자동 — …」이
+                # 적을 것을 잃고 「이 대화의 주소」라는 두루뭉술한 말로 떨어집니다 —
+                # 그러면 그 티켓만 **어느 주소로 나갈지 화면에 안 적힙니다.**
+                default_address = address or (account.get("name") or "")
             if _is_hubspot_relay(address):
                 continue
             out.append({
                 "id": str(account.get("id") or ""),
                 "address": address or (account.get("name") or ""),
-                "is_default": str(account.get("id") or "") == context.channel_account_id,
+                "is_default": is_default,
             })
         out.sort(key=lambda item: (not item["is_default"], item["address"]))
-        return out
+        return {"senders": out, "default_address": default_address}
 
     async def send_conversation_message(
         self,

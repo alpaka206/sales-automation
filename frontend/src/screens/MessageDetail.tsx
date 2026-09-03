@@ -181,6 +181,7 @@ export function MessageDetail() {
   const { data: senders } = useQuery({
     queryKey: ["reply-senders", msgId],
     queryFn: () => getJSON<{ senders: { id: string; address: string; is_default: boolean }[];
+                             default_address: string;
                              error: string | null }>(`/api/ui/messages/${msgId}/senders`),
     enabled: !!msgId,
     staleTime: 5 * 60_000,
@@ -628,8 +629,14 @@ export function MessageDetail() {
                                style={{ marginTop: 12 }}>발신 주소</label>
                         <select className="select" id="msg-sender" value={sender}
                                 onChange={(e) => setSender(e.target.value)}>
+                          {/* **「자동」이 무엇인지 서버가 말해 줍니다.** 목록에서 찾지
+                              않는 이유: 기본값이 허브스팟 기계 주소일 때가 있는데(실측
+                              103건 중 2건) 그건 고를 수 없어 목록에 없습니다 — 목록에서만
+                              찾으면 그 티켓은 어느 주소로 나갈지가 화면에 안 적힙니다. */}
                           <option value="">
-                            자동 — {senders?.senders?.find((x) => x.is_default)?.address ?? "이 대화의 주소"}
+                            자동 — {senders?.default_address
+                              || senders?.senders?.find((x) => x.is_default)?.address
+                              || "이 대화의 주소"}
                           </option>
                           {senders?.senders?.map((x) => (
                             <option key={x.id} value={x.id}>{x.address}</option>

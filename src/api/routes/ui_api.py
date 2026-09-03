@@ -502,13 +502,14 @@ async def ui_reply_senders(message_id: int):
             return ticket, (msg.to_address or ""), (msg.channel_account_id or "")
 
     ticket_id, recipient, chosen = await asyncio.to_thread(_target)
+    empty = {"senders": [], "default_address": "", "chosen": chosen, "error": None}
     if not ticket_id or not recipient:
-        return {"senders": [], "chosen": chosen, "error": None}
+        return empty
     try:
-        senders = await HubSpotClient().list_reply_senders(ticket_id, recipient)
+        found = await HubSpotClient().list_reply_senders(ticket_id, recipient)
     except Exception as exc:  # 조회 실패가 검토 화면을 막으면 안 됩니다
-        return {"senders": [], "chosen": chosen, "error": f"{type(exc).__name__}: {exc}"}
-    return {"senders": senders, "chosen": chosen, "error": None}
+        return {**empty, "error": f"{type(exc).__name__}: {exc}"}
+    return {**found, "chosen": chosen, "error": None}
 
 
 @router.get("/api/ui/contacts/{contact_id}/hubspot-record")
