@@ -262,12 +262,18 @@ def test_a_korean_inquiry_offers_no_original_view() -> None:
     assert needs_ko("", "맞춤 견적 문의") is False
 
 
-def test_a_hand_written_follow_up_shows_even_on_a_later_stage(db_session_factory, monkeypatch):
-    """**수동 후속 회신은 「New 만」 규칙의 예외입니다** (2026-08-31).
+def test_the_awaiting_bucket_is_new_only_even_for_a_hand_written_reply(
+    db_session_factory, monkeypatch
+):
+    """**발송 대기는 New 만입니다. 예외 없습니다** (2026-09-03 운영자 지시).
 
-    위 규칙의 뜻은 「자동 초안은 New 에서만 생기므로, 그 뒤 단계에 남은 대기 초안은 이미
-    늦은 것」입니다. 운영자가 협상 중인 티켓에 직접 쓴 회신은 늦은 것이 아니라 지금 하는
-    일이고, 걸러 내면 쓰다 만 초안을 다시 찾을 길이 그 티켓 화면 하나뿐입니다.
+    2026-08-31 에 수동 후속 회신을 예외로 둔 적이 있습니다 — 「운영자가 협상 중인 티켓에
+    직접 쓴 회신은 늦은 것이 아니라 지금 하는 일이다」. 맞는 말이지만 그 예외가 이 목록을
+    「New 만」이 아니게 만들었고, 대시보드 카운터는 New 만 세므로
+    (`dashboard._awaiting_counters` 가 `LIST_STAGES["awaiting"]` 로 좁힙니다)
+    **같은 화면의 숫자와 목록이 어긋났습니다.**
+
+    쓰다 만 수동 초안은 그 티켓 화면에서 이어 씁니다 — 그 자리에 편집기가 있습니다.
     """
     monkeypatch.setattr(messages_route, "SessionLocal", db_session_factory)
     with db_session_factory() as session:
@@ -284,4 +290,43 @@ def test_a_hand_written_follow_up_shows_even_on_a_later_stage(db_session_factory
                             status="pending_approval", prompt_variant="manual"))
         session.commit()
 
-    assert _emails(status="awaiting") == {"nego@example.com"}
+    assert _emails(status="awaiting") == set()
+
+def test_the_dashboard_number_and_the_list_below_it_agree(db_session_factory, monkeypatch):
+    """**「답변 대기」 숫자와 그 아래 목록은 같은 것을 세야 합니다** (2026-09-03 운영자 지시).
+
+    한 화면에 나란히 서 있어서, 어긋나면 운영자가 없는 일감을 찾아 나섭니다. 둘이 갈리는
+    길은 하나뿐이었습니다 — 카운터는 `LIST_STAGES["awaiting"]` 로 좁히는데 목록 쿼리에만
+    예외가 붙어 있던 것. 그래서 여기서 **둘을 같이** 고정합니다.
+
+    New 가 아닌 단계의 대기 초안은 자동이든 수동이든 어느 쪽에도 안 잡힙니다.
+    """
+    from src.api.routes import dashboard as dashboard_route
+
+    monkeypatch.setattr(messages_route, "SessionLocal", db_session_factory)
+    monkeypatch.setattr(dashboard_route, "SessionLocal", db_session_factory)
+    with db_session_factory() as session:
+        for email, stage, variant in (
+            ("new-auto@example.com", "new", None),
+            ("new-manual@example.com", "new", "manual"),
+            ("nego-auto@example.com", "negotiation", None),
+            ("nego-manual@example.com", "negotiation", "manual"),
+            ("won-manual@example.com", "won", "manual"),
+        ):
+            contact = Contact(normalized_email=email, email=email, full_name=email)
+            session.add(contact)
+            session.flush()
+            conv = Conversation(contact_id=contact.id, stage=stage,
+                                inquiry_subject="문의", last_incoming_at=_naive_utc(days=1))
+            session.add(conv)
+            session.flush()
+            session.add(Message(conversation_id=conv.id, direction="outgoing",
+                                subject="RE: 문의", body="초안", status="pending_approval",
+                                prompt_variant=variant))
+        session.commit()
+
+    listed = _emails(status="awaiting")
+    counted = dashboard_route._awaiting_counters()["awaiting_total"]
+
+    assert listed == {"new-auto@example.com", "new-manual@example.com"}
+    assert counted == len(listed), "카운터와 목록이 같은 것을 세야 합니다"

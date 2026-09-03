@@ -585,19 +585,18 @@ def _messages_list_context(
     if stage:
         q = q.where(Conversation.stage == stage)
     elif status == "awaiting":
-        # 발송 대기 is New, always. Drafts are only ever generated for New tickets, so a
-        # waiting draft on any later stage means the ticket moved on — somebody answered
-        # it in HubSpot while ours sat here. Showing it asks the operator to send a reply
-        # the customer already has. LIST_STAGES said "New only"; it only ever constrained
-        # the chip, never the query, so the rows leaked in anyway.
-        # **수동 후속 회신은 예외입니다** (2026-08-31). 위 규칙은 「자동 초안은 New 에서만
-        # 생기므로 그 뒤 단계에 남은 대기 초안은 이미 늦은 것」이라는 뜻인데, 운영자가
-        # 협상 중인 티켓에 직접 쓴 회신은 늦은 것이 아니라 지금 하는 일입니다. 걸러 내면
-        # 쓰다 만 초안을 다시 찾을 길이 그 티켓 화면밖에 없습니다.
-        q = q.where(
-            (Conversation.stage.in_(LIST_STAGES["awaiting"]))
-            | (Message.prompt_variant == MANUAL_REPLY_VARIANT)
-        )
+        # **발송 대기는 New 만입니다. 예외 없습니다** (2026-09-03 운영자 지시).
+        #
+        # 자동 초안은 New 에서만 생기므로, 그 뒤 단계에 남은 대기 초안은 이미 늦은 것입니다 —
+        # 누군가 허브스팟에서 답한 사이에 우리 초안이 여기 앉아 있던 것이고, 그걸 보여 주면
+        # 고객이 이미 받은 답을 한 번 더 보내라고 청하는 셈입니다.
+        #
+        # **수동 후속 회신도 여기 안 옵니다.** 2026-08-31 에 한 번 예외를 뒀었습니다 —
+        # 「운영자가 협상 중인 티켓에 직접 쓴 회신은 늦은 것이 아니라 지금 하는 일이다」.
+        # 맞는 말이지만 그 예외가 이 목록을 「New 만」이 아니게 만들었고, 대시보드 카운터는
+        # New 만 세므로(`dashboard._awaiting_counters`) **숫자와 목록이 어긋났습니다.**
+        # 쓰다 만 수동 초안은 그 티켓 화면에서 이어 쓰면 됩니다 — 그 자리에 편집기가 있습니다.
+        q = q.where(Conversation.stage.in_(LIST_STAGES["awaiting"]))
     # Sort by the column the 접수 시간 cell actually shows, not by our draft's
     # created_at — otherwise "오래된 순" produces a visibly unsorted date column.
     order_column = (

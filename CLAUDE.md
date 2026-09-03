@@ -483,6 +483,15 @@ PERSO Inbound is a FastAPI workflow for inbound inquiry handling and customer op
   단계를 감싸서 앞 단계가 터지면 뒤 단계가 그 회차를 통째로 굶었다. 지금은 단계마다 따로
   잡는다. 그리고 페이지가 꽉 차면 워터마크를 `now` 로 밀지 않는다 — 정렬이 오름차순이라
   **안 읽은 쪽이 더 최신**이고, 밀어 버리면 그 티켓들은 다음 창 밖으로 나가 영영 안 돌아온다.
+- **「발송 대기」와 대시보드 「답변 대기중인 문의」는 New 만 뜬다 — 예외 없다**
+  (2026-09-03 운영자 지시). 목록은 `messages._messages_list_context`, 숫자는
+  `dashboard._awaiting_counters` 인데 **둘이 같은 것을 세야 한다**: 한 화면에 나란히 서
+  있어서 어긋나면 운영자가 없는 일감을 찾아 나선다. 2026-08-31 에 수동 후속 회신
+  (`prompt_variant='manual'`)을 목록에만 예외로 뒀다가 그 어긋남이 생겼다 — 카운터는
+  `LIST_STAGES["awaiting"]` 로 좁히는데 목록 쿼리에만 `| manual` 이 붙어 있었다.
+  쓰다 만 수동 초안은 그 티켓 화면에서 이어 쓴다(그 자리에 편집기가 있다).
+  `tests/test_messages_list.py::test_the_dashboard_number_and_the_list_below_it_agree`
+  가 둘을 같이 고정한다.
 - **초안은 New 티켓에만 있다 — 단계가 넘어가면 종료된다.** 미팅 링크가 나갔거나 협상·수주·종료로 옮겨졌다는 것은 답이 이미 다른 경로로 나갔다는 뜻이고, 그 초안을 발송 대기에 두면 운영자에게 고객이 이미 받은 답을 한 번 더 보내라고 청하는 셈이다. 종료하는 곳은 `stage_sync._retire_superseded_drafts` **한 곳**이고, 단계를 옮기는 쪽(HubSpot 동기화 · 콘솔 보드 · 고객 상세 폼 · 워크북 · 백필)과 초안을 완성하는 쪽(`inbound._finalize_draft`)이 전부 여기를 지난다. 화면·집계·발송이 모두 `Message.status` 하나만 보므로, 여기서 한 번 `superseded` 로 닫으면 목록에서 빠지고 검토 화면이 읽기 전용이 되고 `approve()` 가 거부하는 것까지 따라온다 — 라우트마다 단계를 확인하지 않는 이유다.
   - **`!= "new"` 가 아니라 매핑된 단계인지로 가른다**(`_PAST_NEW`). 모델 기본값 `initial` 이나 뜻을 모르는 값은 단계가 움직인 것이 아니라서, `!= "new"` 로 세면 아직 아무도 손대지 않은 티켓의 초안까지 지운다.
   - 과거 데이터의 `prompt_variant='auto_ack'`는 호환을 위해 일반 회신 집계와 발송 큐에서 제외한다. 새 자동 접수확인은 생성되지 않는다.
