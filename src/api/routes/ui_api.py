@@ -509,6 +509,12 @@ async def ui_reply_senders(message_id: int):
         found = await HubSpotClient().list_reply_senders(ticket_id, recipient)
     except Exception as exc:  # 조회 실패가 검토 화면을 막으면 안 됩니다
         return {**empty, "error": f"{type(exc).__name__}: {exc}"}
+    # `reason` 은 「기본 발신 주소를 못 정했다」입니다. 목록까지 비었으면 그 티켓은 발송도
+    # 같은 이유로 실패하므로 화면이 적을 수 있게 `error` 로 올립니다 — 목록이 있으면 고를 수
+    # 있으니 굳이 경고하지 않습니다.
+    reason = found.pop("reason", "")
+    if not found["senders"] and reason:
+        return {**found, "chosen": chosen, "error": reason}
     return {**found, "chosen": chosen, "error": None}
 
 

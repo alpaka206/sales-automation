@@ -623,6 +623,16 @@ export function MessageDetail() {
                         목록은 서버가 만듭니다(`/senders`): 그 스레드의 인박스에 연결된
                         살아 있는 주소만 들어갑니다. 화면이 스스로 목록을 지으면 고를 수는
                         있는데 발송이 거절하는 값이 생깁니다. */}
+                    {/* **고르개가 안 뜨는 이유는 화면에 적습니다** (2026-09-03).
+                        예전에는 조회가 실패하면 라우트가 `{senders: [], error}` 로 200 을
+                        돌려주는데 화면이 그 `error` 를 아무 데도 안 그려서, 고르개가 이유
+                        없이 사라졌습니다 — 운영자는 「왜 안 뜨지」밖에 알 수 없었습니다.
+                        고를 것이 없는 것과 못 가져온 것은 다른 이야기입니다. */}
+                    {(senders?.senders?.length ?? 0) === 0 && senders?.error && (
+                      <div className="t-xs t-subtle" style={{ marginTop: 12 }}>
+                        발신 주소를 고를 수 없습니다 — {senders.error}
+                      </div>
+                    )}
                     {(senders?.senders?.length ?? 0) > 0 && (
                       <>
                         <label className="field-label" htmlFor="msg-sender"

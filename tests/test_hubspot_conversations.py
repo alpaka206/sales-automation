@@ -694,6 +694,48 @@ async def test_the_machine_address_is_still_used_rather_than_failing(
 
 @respx.mock
 @pytest.mark.asyncio
+async def test_an_undecidable_ticket_says_why_instead_of_going_quiet(
+    client: HubSpotClient, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """**고를 것이 없는 것과 못 가져온 것은 다릅니다** (2026-09-03).
+
+    같은 인박스에 스레드가 둘인데 그 고객과 오간 메일이 없으면 어느 쪽에 붙일지 정할 수
+    없어 기본값 결정이 실패합니다(운영 3건: 35003648794 · 35313028142 · 37308868745).
+    예전에는 그 예외가 `list_reply_senders` 전체를 죽여 라우트가 `{senders: []}` 를 돌려줬고,
+    화면은 이유를 안 그려 **고르개가 소리 없이 사라졌습니다.** 그 티켓은 발송도 같은 이유로
+    실패하므로, 운영자가 눌러 보기 전에 알아야 합니다.
+    """
+    monkeypatch.setattr(settings, "HUBSPOT_PREFERRED_EMAIL_CHANNEL_ACCOUNT_ID", "")
+    monkeypatch.setattr(settings, "HUBSPOT_DEFAULT_EMAIL_CHANNEL_ACCOUNT_ID", "team-account")
+    respx.get(f"{BASE_URL}/conversations/v3/conversations/threads").mock(
+        return_value=httpx.Response(200, json={"results": [
+            {"id": "t1", "inboxId": "inbox-1"},
+            {"id": "t2", "inboxId": "inbox-1"},
+        ]})
+    )
+    for thread_id in ("t1", "t2"):
+        respx.get(
+            f"{BASE_URL}/conversations/v3/conversations/threads/{thread_id}/messages"
+        ).mock(return_value=httpx.Response(200, json={"results": [
+            {"type": "MESSAGE", "createdAt": "2026-02-01T00:00:00Z", "channelId": "1003"},
+        ]}))
+    respx.get(f"{BASE_URL}/conversations/v3/conversations/channel-accounts").mock(
+        return_value=httpx.Response(200, json={"results": [
+            {"id": "team-account", "channelId": "1002", "inboxId": "inbox-1",
+             "active": True, "authorized": True, "archived": False,
+             "deliveryIdentifier": {"value": "support@perso.ai"}},
+        ]})
+    )
+
+    found = await client.list_reply_senders("ticket-1", "buyer@example.com")
+
+    # 예외로 죽지 않습니다 — 목록은 비지만 이유가 실려 옵니다.
+    assert found["senders"] == []
+    assert "2 possible threads" in found["reason"]
+
+
+@respx.mock
+@pytest.mark.asyncio
 async def test_a_relay_default_is_still_named_on_screen(client: HubSpotClient) -> None:
     """**고를 수 없는 주소가 기본값일 때도 화면은 그 이름을 적습니다** (2026-09-03).
 

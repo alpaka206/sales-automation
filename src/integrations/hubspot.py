@@ -788,9 +788,27 @@ class HubSpotClient:
             ticket_id, recipient_email
         )
         preferred = settings.HUBSPOT_PREFERRED_EMAIL_CHANNEL_ACCOUNT_ID.strip()
-        context = await self._resolve_reply_context(
-            ticket_id, preferred, candidates, threads, target_threads
-        )
+        # **기본값을 못 정해도 목록은 만듭니다** (2026-09-03). 예전에는 이 한 줄이 실패하면
+        # 함수 전체가 예외로 죽었고, 라우트가 그것을 `{senders: [], error}` 로 삼켰습니다 —
+        # 화면은 그 `error` 를 안 그리므로 **고르개가 이유 없이 사라졌습니다.** 운영 티켓
+        # 3건이 그 상태였습니다(35003648794 · 35313028142 · 37308868745: 같은 인박스에
+        # 스레드가 둘인데 그 고객과 오간 메일이 없어 어느 쪽인지 정할 수 없는 경우).
+        # 기본값이 없다고 고를 수 있는 주소까지 없어질 이유는 없습니다.
+        reason = ""
+        try:
+            context = await self._resolve_reply_context(
+                ticket_id, preferred, candidates, threads, target_threads
+            )
+        except DeliveryPermanentError as exc:
+            logger.warning(
+                "티켓 %s 은 기본 발신 주소를 정할 수 없습니다 — 고를 수 있는 주소만 돌려줍니다: %s",
+                ticket_id, exc,
+            )
+            context = None
+            # **이유를 들고 갑니다.** 목록까지 비면 화면에 아무 말도 안 남는데, 그 티켓은
+            # 발송도 같은 이유로 실패합니다 — 「고를 것이 없다」와 「보낼 수 없다」를 운영자가
+            # 눌러 보기 전에 알아야 합니다.
+            reason = str(exc)
         data = await self._get_conversation_json(
             "/conversations/v3/conversations/channel-accounts",
             params={"limit": 200},
@@ -823,7 +841,10 @@ class HubSpotClient:
             # **자동(기본값)까지 막지는 않습니다**: 그 스레드에 실제로 저 주소로 오간
             # 메일이 있으면 회신도 거기서 나가야 대화가 이어집니다. 여기서 거르는 것은
             # 「사람이 일부러 고르는 것」뿐입니다.
-            is_default = str(account.get("id") or "") == context.channel_account_id
+            is_default = (
+                context is not None
+                and str(account.get("id") or "") == context.channel_account_id
+            )
             if is_default:
                 # **기본값의 주소는 거르기 전에 적어 둡니다.** 기계 주소가 기본값인 티켓이
                 # 있는데(실측 103건 중 2건), 목록에서만 빼고 끝내면 화면의 「자동 — …」이
@@ -838,7 +859,7 @@ class HubSpotClient:
                 "is_default": is_default,
             })
         out.sort(key=lambda item: (not item["is_default"], item["address"]))
-        return {"senders": out, "default_address": default_address}
+        return {"senders": out, "default_address": default_address, "reason": reason}
 
     async def send_conversation_message(
         self,
