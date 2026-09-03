@@ -611,6 +611,89 @@ async def test_a_sender_with_no_conversation_in_its_inbox_is_refused(
 
 @respx.mock
 @pytest.mark.asyncio
+async def test_a_form_thread_does_not_reply_from_the_machine_address(
+    client: HubSpotClient, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """**기계 주소는 맨 뒤로 미룹니다** (2026-09-03 운영자 보고).
+
+    폼으로 들어온 문의의 첫 메일은 허브스팟이 자동 발급한 주소
+    (`support@45169260.hubspot-inbox.com`)로 기록됩니다 — 폼 채널에 「Customer agent reply
+    email」이 설정돼 있지 않아서입니다. 가장 최근 후보를 그대로 고르면 **고객이 받는 메일의
+    보낸사람이 그 기계 주소**가 됩니다. 실측 103건 중 2건이 그 상태였습니다.
+
+    설정의 기본 발신 주소가 같은 인박스에 있으면 그쪽으로 갑니다.
+    """
+    monkeypatch.setattr(
+        settings, "HUBSPOT_DEFAULT_EMAIL_CHANNEL_ACCOUNT_ID", "team-account"
+    )
+    monkeypatch.setattr(settings, "HUBSPOT_PREFERRED_EMAIL_CHANNEL_ACCOUNT_ID", "")
+    _thread_with_one_email("t1", "inbox-1", "relay-1")
+    respx.get(
+        f"{BASE_URL}/conversations/v3/conversations/channel-accounts/relay-1"
+    ).mock(
+        return_value=httpx.Response(200, json={
+            "id": "relay-1", "channelId": "1002", "inboxId": "inbox-1",
+            "active": True, "authorized": True, "archived": False,
+            "deliveryIdentifier": {"value": "support@45169260.hubspot-inbox.com"},
+        })
+    )
+    respx.get(
+        f"{BASE_URL}/conversations/v3/conversations/channel-accounts/team-account"
+    ).mock(
+        return_value=httpx.Response(200, json={
+            "id": "team-account", "channelId": "1002", "inboxId": "inbox-1",
+            "active": True, "authorized": True, "archived": False,
+            "deliveryIdentifier": {"value": "support@perso.ai"},
+        })
+    )
+
+    context = await client.find_default_reply_context("ticket-1", "buyer@example.com")
+
+    assert context.channel_account_id == "team-account"
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_the_machine_address_is_still_used_rather_than_failing(
+    client: HubSpotClient, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """**못 보내는 것이 더 나쁩니다.** 사람이 쓰는 주소가 하나도 없으면 기계 주소로 갑니다.
+
+    설정의 기본 발신 주소가 **다른 인박스**라 쓸 수 없는 상황입니다. 여기서 실패로 닫으면
+    그 티켓은 답을 아예 못 보냅니다 — 기계 주소로라도 나가면 고객은 답을 받고 대화도 그
+    자리에 이어집니다. 화면에는 그 주소가 그대로 적힙니다.
+    """
+    monkeypatch.setattr(
+        settings, "HUBSPOT_DEFAULT_EMAIL_CHANNEL_ACCOUNT_ID", "elsewhere"
+    )
+    monkeypatch.setattr(settings, "HUBSPOT_PREFERRED_EMAIL_CHANNEL_ACCOUNT_ID", "")
+    _thread_with_one_email("t1", "inbox-1", "relay-1")
+    respx.get(
+        f"{BASE_URL}/conversations/v3/conversations/channel-accounts/relay-1"
+    ).mock(
+        return_value=httpx.Response(200, json={
+            "id": "relay-1", "channelId": "1002", "inboxId": "inbox-1",
+            "active": True, "authorized": True, "archived": False,
+            "deliveryIdentifier": {"value": "support@45169260.hubspot-inbox.com"},
+        })
+    )
+    respx.get(
+        f"{BASE_URL}/conversations/v3/conversations/channel-accounts/elsewhere"
+    ).mock(
+        return_value=httpx.Response(200, json={
+            "id": "elsewhere", "channelId": "1002", "inboxId": "inbox-9",
+            "active": True, "authorized": True, "archived": False,
+            "deliveryIdentifier": {"value": "support@perso.ai"},
+        })
+    )
+
+    context = await client.find_default_reply_context("ticket-1", "buyer@example.com")
+
+    assert context.channel_account_id == "relay-1"
+
+
+@respx.mock
+@pytest.mark.asyncio
 async def test_a_relay_default_is_still_named_on_screen(client: HubSpotClient) -> None:
     """**고를 수 없는 주소가 기본값일 때도 화면은 그 이름을 적습니다** (2026-09-03).
 

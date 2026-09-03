@@ -592,10 +592,24 @@ class HubSpotClient:
         threads: list[dict],
         target_threads: list[dict],
     ) -> ConversationReplyContext:
-        """아무도 안 골랐을 때 — **스레드가 계정을 정합니다.** 예전부터의 동작입니다."""
+        """아무도 안 골랐을 때 — **스레드가 계정을 정합니다.** 예전부터의 동작입니다.
+
+        **기계 주소는 맨 뒤로 미룹니다** (2026-09-03 운영자 보고). 인박스를 연결하면 허브스팟이
+        `support@45169260.hubspot-inbox.com` 같은 주소를 자동으로 발급하는데, 폼으로 들어온
+        문의의 첫 메일이 **그 주소로 기록됩니다**(폼 채널에 「Customer agent reply email」이
+        설정돼 있지 않아서입니다). 그러면 여기서 가장 최근 후보를 그대로 고르는 순간 회신의
+        보낸사람이 그 기계 주소가 되고, **고객이 받는 메일에 그것이 찍힙니다.** 실측: 티켓
+        103건 중 2건이 그 상태였고 둘 다 `Inbox` 인박스의 폼 스레드였습니다.
+
+        그래서 순서가 셋입니다: ① 사람이 쓰는 주소 중 가장 최근 것 ② 없으면 설정의 기본
+        발신 주소(같은 인박스일 때만 — 아래 폼 폴백) ③ 그래도 없으면 기계 주소.
+        **③을 남기는 이유는 못 보내는 것이 더 나쁘기 때문입니다** — 기계 주소로라도 나가면
+        고객은 답을 받고, 대화도 그 자리에 이어집니다.
+        """
+        relay_route: ConversationReplyContext | None = None
         for _timestamp, thread_id, channel_id, account_id, _inbox in sorted(candidates, reverse=True):
             try:
-                await self._email_channel_account(account_id)
+                account = await self._email_channel_account(account_id)
             except DeliveryPermanentError as exc:
                 # 일시 오류(429·5xx·네트워크)는 여기서 안 잡습니다 — 그건 「이 계정이
                 # 못 쓴다」가 아니라 「지금 못 물어봤다」라서, 넘어가면 멀쩡한 계정을
@@ -605,10 +619,29 @@ class HubSpotClient:
                     account_id, ticket_id, exc,
                 )
                 continue
+            if _is_hubspot_relay((account.get("deliveryIdentifier") or {}).get("value") or ""):
+                if relay_route is None:
+                    relay_route = ConversationReplyContext(thread_id, channel_id, account_id)
+                continue
             return ConversationReplyContext(thread_id, channel_id, account_id)
 
         # A brand-new form thread has no email message to copy yet. Use the configured
         # support channel only when one matching thread is unambiguous and shares its inbox.
+        try:
+            return await self._configured_route(ticket_id, threads, target_threads)
+        except DeliveryPermanentError:
+            if relay_route is not None:
+                logger.warning(
+                    "티켓 %s 은 사람이 쓰는 발신 주소를 못 찾아 허브스팟 기계 주소로 나갑니다.",
+                    ticket_id,
+                )
+                return relay_route
+            raise
+
+    async def _configured_route(
+        self, ticket_id: str, threads: list[dict], target_threads: list[dict]
+    ) -> ConversationReplyContext:
+        """설정의 기본 발신 주소로 답할 자리 — 스레드가 하나이고 같은 인박스일 때만."""
         fallback_threads = target_threads or threads
         if len(fallback_threads) != 1:
             raise DeliveryPermanentError(
