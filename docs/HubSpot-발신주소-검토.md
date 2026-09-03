@@ -22,6 +22,49 @@
 
 ---
 
+## 0. 포털 화면에서 직접 확인한 것 (2026-09-03)
+
+아래 문서의 근거는 API 조회만이 아닙니다. **HubSpot 화면을 하나씩 눌러** 확인했고,
+두 결과가 값까지 일치합니다.
+
+**① 대화 답장창의 보내는사람 목록 = 그 대화가 속한 인박스의 이메일 채널뿐**
+
+`[Perso Dubbing] B2B 1:1 문의 form` 으로 들어온 티켓의 답장창에는 3개가 뜨고,
+`perso.ai@estsoft.com` 도 `untae@estsoft.com` 도 **없습니다.**
+반대로 GTM Marketing 인박스의 대화에서는 `perso.ai@estsoft.com` **하나만** 뜹니다.
+→ 화면이 콘솔과 **같은 규칙**을 씁니다.
+
+**② 티켓 상단 [Email] 버튼은 다른 기능입니다**
+
+거기서는 5개가 뜨고 `perso.ai@estsoft.com`(기본값)과 `untae@estsoft.com` 이 있습니다.
+하지만 화면이 배너로 명시합니다 — *"You're currently composing a **new email**.
+To reply to an existing thread, find the email in the timeline and click 'reply' there instead."*
+**스레드 회신이 아니라 새 메일**이고, 이 경로에는 발송 API 가 없습니다(4장).
+
+**③ 같은 주소를 두 인박스에 붙일 수 없습니다** (직접 시도해 받은 문구)
+
+> This email address is already connected to another inbox.
+
+**④ 폼 채널을 GTM Marketing 으로 옮길 수 없습니다**
+
+폼 채널의 이동 선택지는 **Help Desk 하나뿐**입니다. GTM Marketing · Interactive 는 아예 없습니다.
+그래서 「폼을 옮긴다」가 아니라 「주소를 옮긴다」가 요청 1입니다.
+
+**⑤ 다만 「대화」 단위 이동은 됩니다**
+
+대화 화면 ⋯ → Move conversation → Help Desk / Interactive / GTM Marketing.
+안내: *"Any associated tickets will remain associated to this conversation and in their
+current pipelines."* — 티켓은 그대로 두고 대화만 옮깁니다. **한 건씩 손으로** 하는 일이고
+API 에는 없습니다(스레드 PATCH 는 status · archived 만 받습니다).
+
+**⑥ 아직 확인되지 않은 것 하나 — 정직하게 적어 둡니다**
+
+발송 **API** 가 다른 인박스의 채널 계정을 거절하는지는 **모릅니다.** 화면이 안 보여 주는 것과
+API 가 거절하는 것은 다른 이야기이고, 실제 발송을 한 번 해 보는 것 말고는 판별할 방법이
+없습니다(→ 3장 「대안」, 5장 ②). 지금 콘솔은 화면과 **같은 규칙**으로 막아 두었습니다.
+
+---
+
 ## 1. 지금 포털의 인박스 구조
 
 HubSpot API 로 직접 조회한 이메일 채널 계정 전체입니다. 회신은 **여기 있는 주소로만** 나갈 수 있습니다.
@@ -75,6 +118,14 @@ B2B 티켓의 대화는 **전부 Inbox 인박스에 있는데** `perso.ai@estsof
 - ➖ **GTM Marketing 대화에서는 그 주소를 못 쓰게 됩니다.** 다만 모든 티켓이 Inbox 대화를 함께
   갖고 있고 콘솔이 그쪽을 고르므로 **실질적인 손실은 없습니다.**
 
+**순서가 중요합니다.** GTM Marketing 에서 **먼저 연결을 해제**한 뒤 Inbox 에 붙여야 합니다 —
+붙어 있는 채로 추가하려 하면 화면이 그 자리에서 막습니다(0장 ③).
+
+**같이 따라오는 것:** GTM Marketing 인박스에는 지금 대화가 **4,354건** 있고, 내용은 대부분
+PERSO 회원 · 크레딧 통계 자동 메일과 벤더 메일(Futurepedia · Rewardful · OpenAI Ads)입니다.
+주소를 옮기면 **그 메일들이 앞으로 Inbox 인박스로 들어옵니다** — Inbox 는 이미 열린 대화가
+9,595건입니다. 이것이 이 결정의 실질적인 비용이고, 아래 ①의 판단 포인트입니다.
+
 ### 대안 — 옮기지 않고 확인하는 방법
 
 다른 인박스의 주소를 써도 HubSpot 이 받아 주는지는 **문서에 없고 공개 사례도 없습니다.**
@@ -94,6 +145,15 @@ B2B 티켓의 대화는 **전부 Inbox 인박스에 있는데** `perso.ai@estsof
 |---|---|---|---|
 | `perso.ai@estsoft.com` | 설정 › CRM › 받은 편지함 › 채널 연결 | 대화(Conversations) 채널 | ✅ 가능 |
 | `untae@estsoft.com` | 설정 › 일반 › 이메일 › 계정 연결 | 개인 연결 이메일 | ❌ **불가** |
+
+**화면에서도 확인했습니다** (2026-09-03). `untae@estsoft.com` 은 Settings › General ›
+Email 에 G Suite · Enabled 로 연결돼 있고, 티켓 [Email] 버튼의 보내는사람 목록에 **인박스
+라벨 없이** 단독으로 뜹니다(다른 항목에는 `Inbox` · `GTM Marketing` 라벨이 붙습니다).
+대화 답장창에는 **없습니다.**
+
+발송 API 가 요구하는 값은 `channelAccountId` 인데 이 주소에는 그 id 가 **존재하지 않습니다**
+(채널 계정 8개를 조회해 확인). 콘솔이 넣을 값 자체가 없습니다 — 이건 추론이 아니라
+「없는 값을 못 넣는다」입니다.
 
 개인 연결 이메일로 보내는 기능의 API 는 **기록만 하고 발송하지 않습니다.**
 
