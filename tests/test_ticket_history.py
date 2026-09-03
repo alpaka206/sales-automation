@@ -267,3 +267,25 @@ def test_attaching_personal_email_is_reachable_and_guarded():
     assert "ticket_count != 1" in body
     # 그리고 왜 안 붙였는지 돌려줘야 합니다.
     assert '"skipped"' in body
+
+
+def test_the_operator_can_see_how_far_the_import_got():
+    """**진행 상황이 화면에 없으면 「아직 안 왔다」와 「안 돌고 있다」가 구별되지 않습니다.**
+
+    이 저장소가 옛 백필에서 겪은 그대로입니다(CLAUDE.md: 「누른 직후에는 아무 일도 안
+    일어난 것처럼 보인다」). 로그는 30분이면 스크롤 밖이고, 운영자는 로그를 볼 수 없습니다.
+
+    다 끝나면 화면은 아무 말도 안 합니다 — 조용한 것이 정상 상태입니다(「환율 없는 계약
+    수」가 쓰는 규칙과 같습니다).
+    """
+    import pathlib
+
+    from src.api.routes import ui_api
+
+    paths = [getattr(r, "path", "") for r in ui_api.router.routes]
+    assert "/api/ui/ticket-history/progress" in paths
+
+    screen = pathlib.Path("frontend/src/screens/Customers.tsx").read_text(encoding="utf-8")
+    assert "ticket-history/progress" in screen
+    # 남은 것이 없으면 그리지 않습니다.
+    assert "sync.remaining > 0" in screen

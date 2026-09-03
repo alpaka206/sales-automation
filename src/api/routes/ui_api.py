@@ -434,6 +434,46 @@ def ui_logs(request: Request, view: str = "all"):
     return {"rows": _events(view)}
 
 
+@router.get("/api/ui/ticket-history/progress")
+def ui_ticket_history_progress():
+    """티켓 대화 수집이 어디까지 왔나 — 화면이 읽는 한 줄.
+
+    **긴 백필은 진행 상황이 보여야 합니다.** 안 보이면 「아직 안 왔다」와 「안 돌고 있다」가
+    구별되지 않고, 로그는 30분이면 스크롤 밖입니다(이 저장소가 옛 백필에서 겪은 그대로).
+
+    다 끝나면 화면은 아무 말도 안 합니다 — 조용한 것이 정상 상태입니다.
+    """
+    from sqlalchemy import func, select
+
+    from ...db.models import Conversation, CustomerInteraction
+    from ...db.session import SessionLocal
+
+    with SessionLocal() as session:
+        total = session.scalar(
+            select(func.count()).select_from(Conversation)
+            .where(Conversation.hubspot_ticket_id.isnot(None))
+        ) or 0
+        done = session.scalar(
+            select(func.count()).select_from(Conversation)
+            .where(
+                Conversation.hubspot_ticket_id.isnot(None),
+                Conversation.history_synced_at.isnot(None),
+            )
+        ) or 0
+        records = session.scalar(
+            select(func.count()).select_from(CustomerInteraction)
+            .where(CustomerInteraction.external_id.like("hubspot:conv:%"))
+        ) or 0
+    return {
+        "total": total,
+        "done": done,
+        "remaining": max(0, total - done),
+        "records": records,
+        # 회차당 8건 · 10분 간격. 남은 시간을 분으로 — 화면이 계산을 두 번 하지 않게.
+        "minutes_left": (max(0, total - done) + 7) // 8 * 10,
+    }
+
+
 @router.get("/api/ui/messages/{message_id}/senders")
 async def ui_reply_senders(message_id: int):
     """그 회신을 **어느 주소에서** 보낼 수 있나 — 검토 화면의 발신 고르개가 읽습니다.

@@ -41,6 +41,16 @@ export function Customers() {
     placeholderData: keepPreviousData,
   });
 
+  // 티켓 대화 수집이 도는 동안만 뜨는 줄. 다 끝나면 아무 말도 안 합니다 — 조용한 것이
+  // 정상 상태이고, 「환율 없는 계약 수」가 같은 규칙을 씁니다.
+  const { data: sync } = useQuery({
+    queryKey: ["ticket-history-progress"],
+    queryFn: () => getJSON<{ total: number; done: number; remaining: number;
+                             records: number; minutes_left: number }>(
+      "/api/ui/ticket-history/progress"),
+    refetchInterval: 60_000,
+  });
+
   const labels = Object.fromEntries((data?.stage_options ?? []).map((s) => [s.key, s.label]));
   return (
     <>
@@ -49,6 +59,22 @@ export function Customers() {
           두 이름으로 서 있었을 뿐이라 지웠습니다(운영자 지시). 단계는 아래 열에서 고릅니다. */}
       <div className="page-header">
         <div><h1 className="page-title">리드 히스토리</h1></div>
+        {/* 지난 대화를 허브스팟에서 받아오는 중일 때만 뜹니다. 진행 중인지 끝났는지가
+            화면에 없으면 「아직 안 왔다」와 「안 돌고 있다」를 구별할 수 없습니다. */}
+        {sync && sync.remaining > 0 && (
+          <div className="t-xs t-subtle" style={{ textAlign: "right", lineHeight: 1.5 }}>
+            지난 대화 받아오는 중{" "}
+            <b className="tnum">{sync.done}/{sync.total}</b> 티켓
+            <div>
+              기록 <span className="tnum">{sync.records.toLocaleString()}</span>건 ·
+              남은 시간 약 <span className="tnum">
+                {sync.minutes_left >= 60
+                  ? `${Math.round(sync.minutes_left / 60)}시간`
+                  : `${sync.minutes_left}분`}
+              </span>
+            </div>
+          </div>
+        )}
       </div>
 
       <form
