@@ -5,7 +5,6 @@ from __future__ import annotations
 import logging
 from email.utils import getaddresses
 
-from ...common.config import settings
 from ...common.textwash import text_wash
 from ...db.models import Message
 from ..delivery import DeliveryPermanentError, SendingDisabled
@@ -155,23 +154,17 @@ async def send(message: Message) -> None:
         #   ② 아무도 안 골랐으면 설정의 기본 발신 주소
         #   ③ 그것도 없으면 예전처럼 스레드가 정하는 값
         chosen = (getattr(message, "channel_account_id", None) or "").strip()
-        preferred = chosen or settings.HUBSPOT_PREFERRED_EMAIL_CHANNEL_ACCOUNT_ID.strip()
-        try:
+        if chosen:
+            # **고른 것은 안 물러섭니다.** 「이 주소로 보낸다」고 고른 것이라, 다른 주소로
+            # 나가면 고른 의미가 없고 나간 뒤에는 못 되돌립니다.
             context = await client.find_conversation_reply_context(
-                ticket_id, recipients[0], preferred_account_id=preferred
+                ticket_id, recipients[0], preferred_account_id=chosen
             )
-        except DeliveryPermanentError:
-            # **기본값은 못 쓰면 물러섭니다.** 그 티켓은 그 주소가 연결된 인박스에 대화가
-            # 없다는 뜻이라, 여기서 막으면 답을 아예 못 보냅니다 — 「가능하면 이 주소로」가
-            # 설정의 뜻입니다. **운영자가 직접 고른 것은 안 물러섭니다**: 「이 주소로
-            # 보낸다」고 고른 것이라, 다른 주소로 나가면 고른 의미가 없습니다.
-            if chosen or not preferred:
-                raise
-            logger.warning(
-                "기본 발신 주소 %s 를 티켓 %s 에 쓸 수 없어 스레드가 정하는 주소로 보냅니다.",
-                preferred, ticket_id,
-            )
-            context = await client.find_conversation_reply_context(ticket_id, recipients[0])
+        else:
+            # 안 골랐을 때의 정책(설정의 기본 발신 → 안 되면 스레드)은 한 곳에 있습니다 —
+            # **고르개가 화면에 적는 「자동 — …」이 같은 함수를 씁니다.** 예전에는 여기에만
+            # 있어서 화면과 실제 발송이 갈렸습니다(2026-09-03).
+            context = await client.find_default_reply_context(ticket_id, recipients[0])
         hubspot_message_id = await client.send_conversation_message(
             context,
             recipient_email=recipients[0],

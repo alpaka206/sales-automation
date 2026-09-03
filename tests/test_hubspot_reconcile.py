@@ -129,6 +129,33 @@ def test_the_confirmed_pass_deletes_the_thread(monkeypatch, waiting_draft):
         assert session.get(Conversation, conversation_id) is None
 
 
+def test_a_draft_that_was_approved_can_still_be_deleted(waiting_draft):
+    """**승인 기록이 붙은 초안도 지워집니다** (2026-09-03, 운영자 500 재현).
+
+    `approvals` 는 모델에 `ondelete="CASCADE"` 라고 적혀 있지만 **운영 DB 의 제약에는 그것이
+    없습니다** — 그 표를 만든 옛 마이그레이션이 안 걸었고, 모델의 선언은 이미 만들어진 제약을
+    바꾸지 않습니다. 그래서 「허브스팟 최신화」가 승인을 한 번이라도 받은 대화를 만나면
+    `ForeignKeyViolation ... still referenced from table "approvals"` 로 죽었고, **그 한 건
+    때문에 최신화 전체가 아무 일도 못 했습니다.**
+
+    이 테스트는 SQLite 로 도는데 거기서는 제약이 안 걸려 실패를 재현하지 못합니다. 그래서
+    **행이 실제로 사라지는지**를 봅니다 — 남겨 두는 구현으로 되돌리면 여기서 걸립니다.
+    """
+    from src.agents.hubspot_reconcile import delete_conversation
+    from src.db.models import Approval
+
+    _contact_id, conversation_id, message_id = waiting_draft
+    with SessionLocal() as session:
+        session.add(Approval(message_id=message_id, approver="운영자", action="approve"))
+        session.commit()
+
+    delete_conversation(conversation_id, "99999999")
+
+    with SessionLocal() as session:
+        assert session.get(Message, message_id) is None
+        assert session.query(Approval).filter_by(message_id=message_id).count() == 0
+
+
 def test_deleting_a_thread_never_takes_the_customer_or_the_money(waiting_draft):
     """The blast radius, asserted rather than assumed. A ticket deleted in HubSpot says
     nothing about whether the customer is real or whether they signed something."""

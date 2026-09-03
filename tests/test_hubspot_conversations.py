@@ -438,6 +438,74 @@ async def test_the_picker_only_offers_addresses_from_that_thread_inbox(
 
 @respx.mock
 @pytest.mark.asyncio
+async def test_the_picker_default_is_what_the_send_would_actually_use(
+    client: HubSpotClient, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """**화면에 적힌 「자동 — …」이 실제로 나갈 주소여야 합니다** (2026-09-03).
+
+    고르개가 `find_conversation_reply_context` 를 **기본 발신 주소 없이** 부르고 있었습니다.
+    발송 경로는 넣고 부르므로 둘의 답이 갈렸고, 화면은 「자동 — support@perso.ai」라고 적는데
+    메일은 `perso.ai@estsoft.com` 으로 나갔습니다 — 운영 실측으로 티켓 48건 중 41건입니다.
+    나간 뒤에나 알 수 있는 종류의 어긋남이라 여기서 고정합니다.
+
+    **목록도 한 인박스에 갇히면 안 됩니다.** 티켓 하나가 인박스 여러 곳에 스레드를 갖는
+    일이 흔한데(폼은 `Inbox`, 메일은 `GTM Marketing`), 기본값이 정해진 스레드의 인박스만
+    보면 나머지가 통째로 사라져 「원래 오던 주소」를 고를 길이 없어집니다.
+    """
+    monkeypatch.setattr(
+        settings, "HUBSPOT_PREFERRED_EMAIL_CHANNEL_ACCOUNT_ID", "gtm-account"
+    )
+    respx.get(f"{BASE_URL}/conversations/v3/conversations/threads").mock(
+        return_value=httpx.Response(200, json={"results": [
+            {"id": "t-inbox", "inboxId": "inbox-1"},
+            {"id": "t-gtm", "inboxId": "inbox-gtm"},
+        ]})
+    )
+    for thread_id, account in (("t-inbox", "support-account"), ("t-gtm", "gtm-account")):
+        respx.get(
+            f"{BASE_URL}/conversations/v3/conversations/threads/{thread_id}/messages"
+        ).mock(
+            return_value=httpx.Response(200, json={"results": [{
+                "type": "MESSAGE", "createdAt": "2026-02-01T00:00:00Z",
+                "channelId": "1002", "channelAccountId": account,
+                "senders": [_party("buyer@example.com")],
+            }]})
+        )
+    respx.get(f"{BASE_URL}/conversations/v3/conversations/channel-accounts").mock(
+        return_value=httpx.Response(200, json={"results": [
+            {"id": "support-account", "channelId": "1002", "inboxId": "inbox-1",
+             "active": True, "authorized": True, "archived": False,
+             "deliveryIdentifier": {"value": "support@perso.ai"}},
+            {"id": "gtm-account", "channelId": "1002", "inboxId": "inbox-gtm",
+             "active": True, "authorized": True, "archived": False,
+             "deliveryIdentifier": {"value": "perso.ai@estsoft.com"}},
+        ]})
+    )
+    for account, inbox in (("support-account", "inbox-1"), ("gtm-account", "inbox-gtm")):
+        respx.get(
+            f"{BASE_URL}/conversations/v3/conversations/channel-accounts/{account}"
+        ).mock(
+            return_value=httpx.Response(200, json={
+                "id": account, "channelId": "1002", "inboxId": inbox,
+                "active": True, "authorized": True, "archived": False,
+            })
+        )
+
+    senders = await client.list_reply_senders("ticket-1", "buyer@example.com")
+
+    default = next(x for x in senders if x["is_default"])
+    assert default["address"] == "perso.ai@estsoft.com"
+    # 그리고 실제 발송이 고르는 것과 **같아야** 합니다.
+    context = await client.find_default_reply_context("ticket-1", "buyer@example.com")
+    assert context.channel_account_id == default["id"]
+    # 원래 오던 주소도 여전히 고를 수 있습니다 — 인박스가 다르다고 사라지지 않습니다.
+    assert {x["address"] for x in senders} == {
+        "perso.ai@estsoft.com", "support@perso.ai",
+    }
+
+
+@respx.mock
+@pytest.mark.asyncio
 async def test_the_chosen_sender_picks_a_thread_in_its_own_inbox(client: HubSpotClient) -> None:
     """**계정이 먼저이고 스레드가 나중입니다** (2026-09-02 운영자 지시).
 

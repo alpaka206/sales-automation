@@ -185,9 +185,15 @@ def delete_conversation(conversation_id: int, ticket_id: str) -> int:
     otherwise try to satisfy by nulling a NOT NULL column. Being explicit also makes the
     blast radius readable, which for a delete is the point.
     """
-    from sqlalchemy import delete, update
+    from sqlalchemy import delete, select, update
 
-    from ..db.models import Contact, ContractRecord, ConversationProgress, CustomerInteraction
+    from ..db.models import (
+        Approval,
+        Contact,
+        ContractRecord,
+        ConversationProgress,
+        CustomerInteraction,
+    )
 
     with SessionLocal() as session:
         conversation = session.get(Conversation, conversation_id)
@@ -216,6 +222,20 @@ def delete_conversation(conversation_id: int, ticket_id: str) -> int:
         session.execute(
             delete(ConversationProgress).where(
                 ConversationProgress.conversation_id == conversation_id
+            )
+        )
+        # **승인 기록을 먼저 지웁니다.** 모델에는 `ondelete="CASCADE"` 라고 적혀 있지만
+        # **운영 DB 의 제약에는 그것이 없습니다** — 그 표를 만든 옛 마이그레이션이 안 걸었고,
+        # 모델의 선언은 이미 만들어진 제약을 바꾸지 않습니다. 그래서 승인을 한 번이라도 받은
+        # 초안이 있는 대화를 지우려 하면 그 자리에서 죽었습니다:
+        # `ForeignKeyViolation: ... still referenced from table "approvals"` (2026-09-03,
+        # 운영자가 「허브스팟 최신화」를 눌러 500). 제약을 고치는 대신 여기서 지우는 이유는
+        # **어느 DB 에서도 같게 동작하기 때문**입니다 — 제약의 상태에 기대지 않습니다.
+        session.execute(
+            delete(Approval).where(
+                Approval.message_id.in_(
+                    select(Message.id).where(Message.conversation_id == conversation_id)
+                )
             )
         )
         session.execute(delete(Message).where(Message.conversation_id == conversation_id))

@@ -470,25 +470,20 @@ class HubSpotClient:
             )
         return actor
 
-    async def find_conversation_reply_context(
-        self, ticket_id: str, recipient_email: str, *, preferred_account_id: str = ""
-    ) -> ConversationReplyContext:
-        """Select the newest safe email reply route for a ticket.
+    async def _reply_routes(
+        self, ticket_id: str, recipient_email: str
+    ) -> tuple[list[tuple[str, str, str, str, str]], list[dict], list[dict]]:
+        """이 티켓의 회신 후보들 — 발송과 고르개가 **같은 재료**를 쓰게 합니다.
 
-        Existing outbound/inbound email messages are the source of truth for channel
-        account selection. A form-only thread has no email route to copy, so it may use
-        the configured default email account only when that account belongs to the same
-        inbox. Ambiguous tickets fail closed instead of replying on the wrong thread.
+        돌려주는 셋: ``candidates`` 는 이 고객과 실제로 메일이 오간 자리
+        ``(시각, 스레드, 채널, 계정, 인박스)``, ``threads`` 는 살아 있는 스레드 전부,
+        ``target_threads`` 는 그중 이 고객이 등장하는 것들입니다.
 
-        ``preferred_account_id`` 는 **운영자가 고른 발신 주소**입니다(이관 0105). 비어 있으면
-        예전 그대로 — 스레드가 정합니다. 값이 있으면 스레드는 아래 규칙이 똑같이 고르고
-        **계정만** 그것으로 바뀝니다: 어느 스레드에 붙일지는 운영자가 판단할 일이 아니고,
-        엉뚱한 스레드에 답이 붙으면 고객이 보는 대화가 두 갈래가 됩니다.
-
-        고른 계정은 **그 스레드의 인박스에 속해야** 합니다 — 아래 폼 폴백이 이미 지키는
-        규칙과 같은 규칙입니다. 인박스가 다르면 HubSpot 이 받아 줄지 알 수 없고, 받아
-        준다면 그건 그것대로 남의 인박스에 우리 메일이 서는 것입니다. 실패는 **닫는 쪽**
-        으로 냅니다.
+        **왜 따로 뺐나.** 고르개(`list_reply_senders`)가 발송과 다른 답을 내고 있었습니다 —
+        목록을 만들려고 `find_conversation_reply_context` 를 **기본 발신 주소 없이** 불렀고,
+        그래서 화면은 「자동 — support@perso.ai」라고 적는데 발송은
+        `perso.ai@estsoft.com` 으로 나갔습니다(2026-09-03 실측: 티켓 48건 중 41건).
+        재료가 하나면 그 어긋남이 안 생깁니다.
         """
         target = recipient_email.strip().lower()
         if not ticket_id:
@@ -547,6 +542,31 @@ class HubSpotClient:
                     timestamp, thread_id, channel_id, account_id,
                     str(thread.get("inboxId") or ""),
                 ))
+        return candidates, threads, target_threads
+
+    async def find_conversation_reply_context(
+        self, ticket_id: str, recipient_email: str, *, preferred_account_id: str = ""
+    ) -> ConversationReplyContext:
+        """Select the newest safe email reply route for a ticket.
+
+        Existing outbound/inbound email messages are the source of truth for channel
+        account selection. A form-only thread has no email route to copy, so it may use
+        the configured default email account only when that account belongs to the same
+        inbox. Ambiguous tickets fail closed instead of replying on the wrong thread.
+
+        ``preferred_account_id`` 는 **운영자가 고른 발신 주소**입니다(이관 0105). 비어 있으면
+        예전 그대로 — 스레드가 정합니다. 값이 있으면 스레드는 아래 규칙이 똑같이 고르고
+        **계정만** 그것으로 바뀝니다: 어느 스레드에 붙일지는 운영자가 판단할 일이 아니고,
+        엉뚱한 스레드에 답이 붙으면 고객이 보는 대화가 두 갈래가 됩니다.
+
+        고른 계정은 **그 스레드의 인박스에 속해야** 합니다 — 아래 폼 폴백이 이미 지키는
+        규칙과 같은 규칙입니다. 인박스가 다르면 HubSpot 이 받아 줄지 알 수 없고, 받아
+        준다면 그건 그것대로 남의 인박스에 우리 메일이 서는 것입니다. 실패는 **닫는 쪽**
+        으로 냅니다.
+        """
+        candidates, threads, target_threads = await self._reply_routes(
+            ticket_id, recipient_email
+        )
 
         # **없어진 채널 계정을 만나면 다음 후보로 넘어갑니다** (2026-08-31).
         #
@@ -563,6 +583,16 @@ class HubSpotClient:
             return await self._thread_for_chosen_sender(
                 ticket_id, wanted, candidates, target_threads or threads
             )
+        return await self._thread_route(ticket_id, candidates, threads, target_threads)
+
+    async def _thread_route(
+        self,
+        ticket_id: str,
+        candidates: list[tuple[str, str, str, str, str]],
+        threads: list[dict],
+        target_threads: list[dict],
+    ) -> ConversationReplyContext:
+        """아무도 안 골랐을 때 — **스레드가 계정을 정합니다.** 예전부터의 동작입니다."""
         for _timestamp, thread_id, channel_id, account_id, _inbox in sorted(candidates, reverse=True):
             try:
                 await self._email_channel_account(account_id)
@@ -598,12 +628,59 @@ class HubSpotClient:
             )
         return ConversationReplyContext(str(thread["id"]), "1002", account_id)
 
+    async def _resolve_reply_context(
+        self,
+        ticket_id: str,
+        preferred: str,
+        candidates: list[tuple[str, str, str, str, str]],
+        threads: list[dict],
+        target_threads: list[dict],
+    ) -> ConversationReplyContext:
+        """운영자가 **아무것도 안 골랐을 때** 나갈 주소. 설정의 기본 발신 → 안 되면 스레드.
+
+        **기본값은 못 쓰면 물러섭니다.** 그 티켓은 그 주소가 연결된 인박스에 대화가 없다는
+        뜻이라, 여기서 막으면 답을 아예 못 보냅니다 — 「가능하면 이 주소로」가 설정의 뜻입니다.
+        운영자가 **직접 고른** 값은 이 길로 안 옵니다(`find_conversation_reply_context` 가
+        그대로 실패시킵니다): 「이 주소로 보낸다」고 고른 것이라 다른 주소로 나가면 고른
+        의미가 없고, 나간 뒤에는 못 되돌립니다.
+
+        **이 함수가 하나여야 하는 이유.** 예전에는 이 정책이 발송 경로에만 있었고 고르개는
+        기본 발신 주소를 아예 안 봤습니다. 그래서 화면은 「자동 — support@perso.ai」라고
+        적는데 메일은 `perso.ai@estsoft.com` 으로 나갔습니다(2026-09-03 실측, 48건 중 41건).
+        """
+        if preferred:
+            try:
+                return await self._thread_for_chosen_sender(
+                    ticket_id, preferred, candidates, target_threads or threads
+                )
+            except DeliveryPermanentError as exc:
+                logger.warning(
+                    "기본 발신 주소 %s 를 티켓 %s 에 쓸 수 없어 스레드가 정하는 주소로 갑니다: %s",
+                    preferred, ticket_id, exc,
+                )
+        return await self._thread_route(ticket_id, candidates, threads, target_threads)
+
+    async def find_default_reply_context(
+        self, ticket_id: str, recipient_email: str
+    ) -> ConversationReplyContext:
+        """아무도 안 골랐을 때 이 티켓의 회신이 나갈 자리. 발송과 고르개가 같이 씁니다."""
+        candidates, threads, target_threads = await self._reply_routes(
+            ticket_id, recipient_email
+        )
+        return await self._resolve_reply_context(
+            ticket_id,
+            settings.HUBSPOT_PREFERRED_EMAIL_CHANNEL_ACCOUNT_ID.strip(),
+            candidates, threads, target_threads,
+        )
+
     async def _thread_for_chosen_sender(
         self,
         ticket_id: str,
         account_id: str,
         candidates: list[tuple[str, str, str, str, str]],
         threads: list[dict],
+        *,
+        inbox_id: str = "",
     ) -> ConversationReplyContext:
         """운영자가 고른 주소로 보낼 수 있는 스레드를 고릅니다.
 
@@ -628,8 +705,12 @@ class HubSpotClient:
         `perso.ai@estsoft.com`(GTM Marketing)은 **없으며**, 반대로 GTM Marketing 대화에서는
         그것 하나만 뜹니다. 우리 규칙은 그 화면과 같은 규칙입니다.
         """
-        account = await self._email_channel_account(account_id)
-        inbox_id = str(account.get("inboxId") or "")
+        # ``inbox_id`` 는 **이미 알고 있으면 넘기는** 값입니다. 고르개는 계정 목록을 통째로
+        # 들고 돌므로 계정마다 다시 조회할 이유가 없습니다 — 규칙은 그대로 이 함수 하나이고,
+        # 아끼는 것은 왕복뿐입니다.
+        if not inbox_id:
+            account = await self._email_channel_account(account_id)
+            inbox_id = str(account.get("inboxId") or "")
         same_inbox = sorted(
             (item for item in candidates if item[4] == inbox_id), reverse=True
         )
@@ -651,16 +732,28 @@ class HubSpotClient:
     async def list_reply_senders(self, ticket_id: str, recipient_email: str) -> list[dict]:
         """그 티켓에 **고를 수 있는** 발신 주소들. 읽기만 합니다 — 아무것도 안 보냅니다.
 
-        기본값(아무것도 안 고르면 나갈 주소)을 먼저 정하고, 그 스레드의 인박스에 연결된
-        살아 있는 이메일 계정을 전부 돌려줍니다. 화면이 스스로 목록을 만들면 그 목록이
-        발송이 실제로 받아 주는 것과 언젠가 갈라집니다 — 여기서 만든 것만 고를 수 있습니다.
+        기본값(아무것도 안 고르면 나갈 주소)을 먼저 정하고, **그 티켓에 실제로 쓸 수 있는**
+        이메일 계정을 전부 돌려줍니다. 화면이 스스로 목록을 만들면 그 목록이 발송이 실제로
+        받아 주는 것과 언젠가 갈라집니다 — 여기서 만든 것만 고를 수 있습니다.
+
+        **기본값은 발송과 같은 순서로 정합니다** (2026-09-03). 예전에는 이 함수가
+        `find_conversation_reply_context` 를 **기본 발신 주소 없이** 불렀습니다. 발송 경로는
+        넣고 부르므로 둘의 답이 갈렸고, 화면은 「자동 — support@perso.ai」라고 적는데 메일은
+        `perso.ai@estsoft.com` 으로 나갔습니다(실측: 티켓 48건 중 41건). 눈에 보이는 것과
+        실제로 나가는 것이 다르면 운영자가 화면을 믿을 수 없습니다.
+
+        **목록은 한 인박스에 갇히지 않습니다.** 티켓 하나가 인박스 여러 곳에 스레드를 갖는
+        일이 흔한데(폼은 `Inbox`, 메일은 `GTM Marketing`), 기본값이 정해진 스레드의 인박스만
+        보면 나머지가 통째로 사라집니다. 계정마다 `_thread_for_chosen_sender` 를 그대로
+        돌려 **붙일 스레드가 있는 것만** 남기므로, 목록에 있는 값은 전부 발송이 받습니다.
         """
-        context = await self.find_conversation_reply_context(ticket_id, recipient_email)
-        thread = await self._get_conversation_json(
-            f"/conversations/v3/conversations/threads/{context.thread_id}",
-            action=f"thread {context.thread_id} lookup",
+        candidates, threads, target_threads = await self._reply_routes(
+            ticket_id, recipient_email
         )
-        inbox_id = str(thread.get("inboxId") or "")
+        preferred = settings.HUBSPOT_PREFERRED_EMAIL_CHANNEL_ACCOUNT_ID.strip()
+        context = await self._resolve_reply_context(
+            ticket_id, preferred, candidates, threads, target_threads
+        )
         data = await self._get_conversation_json(
             "/conversations/v3/conversations/channel-accounts",
             params={"limit": 200},
@@ -674,7 +767,13 @@ class HubSpotClient:
                 continue
             if not account.get("authorized"):
                 continue
-            if str(account.get("inboxId") or "") != inbox_id:
+            try:
+                await self._thread_for_chosen_sender(
+                    ticket_id, str(account.get("id") or ""),
+                    candidates, target_threads or threads,
+                    inbox_id=str(account.get("inboxId") or ""),
+                )
+            except DeliveryPermanentError:
                 continue
             address = (account.get("deliveryIdentifier") or {}).get("value") or ""
             # **허브스팟 내부 전달 주소는 고르개에 안 넣습니다** (2026-09-03 운영자 지시).

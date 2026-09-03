@@ -35,19 +35,24 @@ def _make_message(**overrides) -> MagicMock:
 @patch("src.integrations.hubspot.HubSpotClient")
 async def test_sends_on_existing_hubspot_thread(mock_client_class) -> None:
     client = mock_client_class.return_value
-    client.find_conversation_reply_context = AsyncMock(
+    client.find_default_reply_context = AsyncMock(
         return_value=ConversationReplyContext("thread-1", "1002", "account-1")
     )
+    client.find_conversation_reply_context = AsyncMock()
     client.send_conversation_message = AsyncMock(return_value="message-1")
     client.close = AsyncMock()
     msg = _make_message()
 
     await send(msg)
 
-    # 안 고르면 빈 문자열로 넘어갑니다 — 받는 쪽에서 「예전처럼」이라는 뜻입니다.
-    client.find_conversation_reply_context.assert_awaited_once_with(
-        "ticket-1", "to@example.com", preferred_account_id=""
+    # **안 골랐으면 「기본」 쪽으로 갑니다.** 그 함수 하나가 설정의 기본 발신 주소를 보고,
+    # 못 쓰면 스레드로 물러섭니다 — 그리고 **고르개가 화면에 적는 「자동 — …」이 같은
+    # 함수를 씁니다.** 예전에는 이 정책이 발송 경로에만 있어서, 화면은
+    # 「support@perso.ai」라고 적는데 메일은 `perso.ai@estsoft.com` 으로 나갔습니다.
+    client.find_default_reply_context.assert_awaited_once_with(
+        "ticket-1", "to@example.com"
     )
+    client.find_conversation_reply_context.assert_not_awaited()
     client.send_conversation_message.assert_awaited_once()
     assert msg.hubspot_thread_id == "thread-1"
     assert msg.hubspot_message_id == "message-1"
