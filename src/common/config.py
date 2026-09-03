@@ -58,10 +58,23 @@ class Settings(BaseSettings):
     # 정하는 값으로 떨어집니다(그 티켓은 그 인박스에 대화가 없다는 뜻이라, 여기서 막으면
     # 답을 아예 못 보냅니다).
     #
-    # 「쓸 수 있나」는 그 계정이 연결된 인박스에 이 티켓의 대화가 있느냐로 갈립니다 —
-    # 운영 실측(2026-09-02): `perso.ai@estsoft.com`(GTM Marketing)로 B2B 티켓의 32%,
-    # 그 주소를 `Inbox` 인박스로 옮기면 100%(모든 B2B 티켓이 Inbox 스레드를 갖습니다).
+    # **인박스가 달라도 나갑니다** (2026-09-03 실발송 확인). 오래 「같은 인박스여야 한다」로
+    # 막아 두었는데, 근거가 허브스팟 답장창 드롭다운이라는 **화면 관찰**이었습니다 — 화면이
+    # 안 보여 주는 것과 API 가 거절하는 것은 다른 이야기였습니다. 폼으로 들어온(=`Inbox`)
+    # 티켓에 `perso.ai@estsoft.com`(GTM Marketing)으로 보냈고 그대로 나갔습니다. 그래서 이
+    # 주소는 이제 **모든 티켓에서** 쓰입니다(예전에는 폼으로만 들어온 93건이 원천 불가였습니다).
     HUBSPOT_PREFERRED_EMAIL_CHANNEL_ACCOUNT_ID: str = ""
+    # **고르개에 뜰 주소를 운영자가 정합니다.** 쉼표로 나열한 채널 계정 id 이고, 비어 있으면
+    # 예전처럼 쓸 수 있는 주소가 전부 뜹니다.
+    #
+    # 왜 필요한가: 포털에 연결된 주소가 곧 「우리가 쓰는 주소」는 아닙니다. `support@perso.ai`
+    # 는 연결돼 있지만 이 팀이 **안 씁니다**(2026-09-03 운영자). 목록에 두면 언젠가 골라지고,
+    # 그건 고객이 받는 메일의 보낸사람이 바뀐다는 뜻입니다. 주소를 코드에 박지 않는 이유는
+    # 늘 같습니다 — 포털 설정이 바뀌면 코드가 조용히 틀려집니다.
+    #
+    # **기본 발신 주소는 이 목록과 무관하게 나갑니다.** 이건 「사람이 고를 수 있는 것」의
+    # 울타리이지 「나갈 수 있는 것」의 울타리가 아닙니다.
+    HUBSPOT_REPLY_SENDER_ACCOUNT_IDS: str = ""
     # ----- [B2B] AI Dubbing ticket pipeline stage ids -----
     # The env names below mirror the stage labels in HubSpot (New / Qualified /
     # Negotiating / Reminder Sent / Won / Lost / Concluded). Stages get

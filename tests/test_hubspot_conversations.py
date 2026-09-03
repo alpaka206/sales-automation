@@ -364,19 +364,25 @@ async def test_nothing_chosen_keeps_the_old_behaviour(client: HubSpotClient) -> 
 
 @respx.mock
 @pytest.mark.asyncio
-async def test_a_sender_from_another_inbox_is_refused(client: HubSpotClient) -> None:
-    """**다른 인박스의 주소는 못 씁니다.** 폼 폴백이 이미 지키던 규칙과 같은 규칙입니다.
+async def test_a_sender_from_another_inbox_is_allowed(client: HubSpotClient) -> None:
+    """**다른 인박스의 주소도 씁니다 — 실발송으로 확인했습니다** (2026-09-03 운영자 실측).
 
-    허브스팟이 받아 줄지 알 수 없고, 받아 준다면 그건 그것대로 남의 인박스에 우리 메일이
-    서는 것입니다 — 그 대화는 그 팀 화면에 안 보입니다. 그래서 닫는 쪽으로 실패합니다.
+    오래 「같은 인박스여야 한다」로 막아 두었습니다. 근거는 허브스팟 답장창 드롭다운이 그
+    대화의 인박스 계정만 보여 준다는 **화면 관찰**이었는데, 화면이 안 보여 주는 것과 API 가
+    거절하는 것은 다른 이야기였습니다. 폼으로 들어온(=`Inbox`) 티켓에
+    `perso.ai@estsoft.com`(GTM Marketing)으로 보냈고 **그대로 나갔습니다.**
+
+    스레드는 이 고객과 가장 최근에 메일이 오간 자리 그대로이고, 계정만 바뀝니다.
     """
     _thread_with_one_email("t1", "inbox-1", "team-account")
     _account("other-inbox-account", "inbox-2")
 
-    with pytest.raises(DeliveryPermanentError, match="인박스"):
-        await client.find_conversation_reply_context(
-            "ticket-1", "buyer@example.com", preferred_account_id="other-inbox-account"
-        )
+    context = await client.find_conversation_reply_context(
+        "ticket-1", "buyer@example.com", preferred_account_id="other-inbox-account"
+    )
+
+    assert context.channel_account_id == "other-inbox-account"
+    assert context.thread_id == "t1", "붙는 자리는 안 바뀝니다 — 계정만 바뀝니다"
 
 
 @respx.mock
@@ -398,13 +404,22 @@ async def test_a_dead_chosen_sender_fails_instead_of_falling_back(client: HubSpo
 
 @respx.mock
 @pytest.mark.asyncio
-async def test_the_picker_only_offers_addresses_from_that_thread_inbox(
-    client: HubSpotClient,
+async def test_the_picker_offers_only_what_the_operator_allowed(
+    client: HubSpotClient, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """고르개 목록은 서버가 만듭니다 — 그 스레드의 인박스에 연결된 살아 있는 주소만.
+    """**고르개에 뜰 주소는 운영자가 정합니다**(`HUBSPOT_REPLY_SENDER_ACCOUNT_IDS`).
 
-    화면이 스스로 목록을 지으면 고를 수는 있는데 발송이 거절하는 값이 생깁니다.
+    포털에 연결된 주소가 곧 「우리가 쓰는 주소」는 아닙니다 — `support@perso.ai` 는 연결돼
+    있지만 이 팀이 안 씁니다(2026-09-03 운영자). 목록에 두면 언젠가 골라지고, 그건 고객이
+    받는 메일의 보낸사람이 바뀐다는 뜻입니다. 주소를 코드에 박지 않는 이유는 늘 같습니다 —
+    포털 설정이 바뀌면 코드가 조용히 틀려집니다.
+
+    인박스는 더 이상 울타리가 아닙니다(실발송으로 확인). 그래서 `inbox-9` 의 주소도
+    허락하면 뜹니다.
     """
+    monkeypatch.setattr(
+        settings, "HUBSPOT_REPLY_SENDER_ACCOUNT_IDS", "team-account, elsewhere"
+    )
     _thread_with_one_email("t1", "inbox-1", "team-account")
     respx.get(f"{BASE_URL}/conversations/v3/conversations/channel-accounts").mock(
         return_value=httpx.Response(200, json={"results": [
@@ -431,7 +446,9 @@ async def test_the_picker_only_offers_addresses_from_that_thread_inbox(
     found = await client.list_reply_senders("ticket-1", "buyer@example.com")
     senders = found["senders"]
 
-    assert [s["address"] for s in senders] == ["perso.ai@estsoft.com", "untae@estsoft.com"]
+    # 허락한 둘만 뜹니다 — `personal-account`(허락 안 함)와 `revoked`(연결 끊김)는 빠지고,
+    # 다른 인박스의 `elsewhere` 는 이제 막히지 않으므로 뜹니다.
+    assert [s["address"] for s in senders] == ["perso.ai@estsoft.com", "support@perso.ai"]
     # 아무것도 안 골랐을 때 나갈 주소가 맨 앞에 오고, 그렇다고 표시됩니다.
     assert senders[0]["is_default"] is True
     assert senders[1]["is_default"] is False
@@ -592,21 +609,24 @@ async def test_a_form_only_thread_in_that_inbox_is_usable_when_it_is_the_only_on
 
 @respx.mock
 @pytest.mark.asyncio
-async def test_a_sender_with_no_conversation_in_its_inbox_is_refused(
+async def test_a_sender_with_no_conversation_in_its_inbox_still_sends(
     client: HubSpotClient,
 ) -> None:
-    """그 주소의 인박스에 이 티켓의 대화가 아예 없으면 **실패합니다.**
+    """그 주소의 인박스에 이 티켓의 대화가 없어도 **나갑니다** (2026-09-03 실발송 확인).
 
-    운영 실측 50건 중 20건이 이 경우입니다(GTM Marketing 스레드 자체가 없음). 조용히 다른
-    주소로 내보내면 「그 주소로 보낸다」고 고른 의미가 없습니다.
+    이것이 운영에서 가장 흔한 모양입니다 — 폼으로만 들어온 티켓 93건(전수 328건 중)이 전부
+    이 경우이고, 예전 규칙에서는 그 전부가 `perso.ai@estsoft.com` 으로 **한 건도** 못
+    나갔습니다. 붙는 자리는 이 고객과 메일이 오간 스레드 그대로입니다.
     """
     _thread_with_one_email("t1", "inbox-support", "support-account")
     _account("gtm-account", "inbox-gtm")
 
-    with pytest.raises(DeliveryPermanentError, match="인박스"):
-        await client.find_conversation_reply_context(
-            "ticket-1", "buyer@example.com", preferred_account_id="gtm-account"
-        )
+    context = await client.find_conversation_reply_context(
+        "ticket-1", "buyer@example.com", preferred_account_id="gtm-account"
+    )
+
+    assert context.channel_account_id == "gtm-account"
+    assert context.thread_id == "t1"
 
 
 @respx.mock

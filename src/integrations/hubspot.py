@@ -754,11 +754,15 @@ class HubSpotClient:
            어느 쪽인지 우리가 정할 수 없어 실패합니다 — 엉뚱한 스레드에 답이 붙으면 고객이
            보는 대화가 두 갈래가 됩니다.
 
-        **같은 인박스 규칙은 우리가 지어낸 것이 아닙니다** (2026-09-03 포털 화면 확인).
-        허브스팟 대화 답장창의 보내는사람 드롭다운이 **그 대화가 속한 인박스에 연결된 이메일
-        채널만** 보여 줍니다 — 폼으로 들어온 `Inbox` 인박스 대화에서는 3개가 뜨고 그중에
-        `perso.ai@estsoft.com`(GTM Marketing)은 **없으며**, 반대로 GTM Marketing 대화에서는
-        그것 하나만 뜹니다. 우리 규칙은 그 화면과 같은 규칙입니다.
+        **인박스가 달라도 됩니다 — 실발송으로 확인했습니다** (2026-09-03 운영자 실측).
+        오랫동안 「같은 인박스여야 한다」로 막아 두었습니다. 근거는 허브스팟 답장창 드롭다운이
+        그 대화의 인박스 계정만 보여 준다는 화면 관찰이었는데, **화면이 안 보여 주는 것과 API
+        가 거절하는 것은 다른 이야기였습니다.** 운영자가 폼으로 들어온(=`Inbox` 인박스) 티켓에
+        `perso.ai@estsoft.com`(GTM Marketing)으로 보냈고 **그대로 나갔습니다.**
+
+        그래서 인박스는 스레드를 고르는 **우선순위**로만 씁니다: 같은 인박스에 붙일 자리가
+        있으면 그쪽이 먼저이고(대화가 이어지는 자리라 제일 안전합니다), 없으면 이 고객과 가장
+        최근에 메일이 오간 스레드에 그 계정을 얹습니다. **막지는 않습니다.**
         """
         # ``inbox_id`` 는 **이미 알고 있으면 넘기는** 값입니다. 고르개는 계정 목록을 통째로
         # 들고 돌므로 계정마다 다시 조회할 이유가 없습니다 — 규칙은 그대로 이 함수 하나이고,
@@ -774,14 +778,18 @@ class HubSpotClient:
         in_inbox = [t for t in threads if str(t.get("inboxId") or "") == inbox_id]
         if len(in_inbox) == 1:
             return ConversationReplyContext(str(in_inbox[0]["id"]), "1002", account_id)
-        if not in_inbox:
-            raise DeliveryPermanentError(
-                f"고른 발신 주소는 이 티켓({ticket_id})에 쓸 수 없습니다 — 그 주소가 연결된 "
-                "인박스에 이 티켓의 대화가 없습니다"
-            )
+
+        # 같은 인박스에 자리가 없으면 **인박스를 넘어갑니다.** 붙을 스레드는 아래 순서로
+        # 고릅니다 — 그 계정을 어디에 얹든 고객이 보는 대화는 하나여야 하기 때문입니다.
+        any_inbox = sorted(candidates, reverse=True)
+        if any_inbox:
+            return ConversationReplyContext(any_inbox[0][1], any_inbox[0][2], account_id)
+        if len(threads) == 1:
+            return ConversationReplyContext(str(threads[0]["id"]), "1002", account_id)
         raise DeliveryPermanentError(
             f"고른 발신 주소로 답할 스레드를 정할 수 없습니다 (티켓 {ticket_id}, 후보 "
-            f"{len(in_inbox)}개) — 그 인박스에 이 고객과 오간 메일이 아직 없습니다"
+            f"{len(threads)}개) — 이 고객과 오간 메일이 아직 없어 어느 대화에 붙일지 "
+            "정할 수 없습니다"
         )
 
     async def list_reply_senders(self, ticket_id: str, recipient_email: str) -> dict:
@@ -836,6 +844,14 @@ class HubSpotClient:
             params={"limit": 200},
             action="channel-account list",
         )
+        # **고르개에 뜰 주소는 운영자가 정합니다**(`HUBSPOT_REPLY_SENDER_ACCOUNT_IDS`).
+        # 비어 있으면 예전처럼 쓸 수 있는 주소가 전부 뜹니다. 기본 발신 주소는 이 울타리와
+        # 무관하게 나갑니다 — 이건 「고를 수 있는 것」이지 「나갈 수 있는 것」이 아닙니다.
+        allowed = {
+            item.strip()
+            for item in settings.HUBSPOT_REPLY_SENDER_ACCOUNT_IDS.split(",")
+            if item.strip()
+        }
         out: list[dict] = []
         default_address = ""
         for account in data.get("results") or ():
@@ -874,6 +890,11 @@ class HubSpotClient:
                 # 그러면 그 티켓만 **어느 주소로 나갈지 화면에 안 적힙니다.**
                 default_address = address or (account.get("name") or "")
             if _is_hubspot_relay(address):
+                continue
+            # **울타리는 여기입니다 — `default_address` 를 잡은 뒤.** 앞에서 걸러 버리면
+            # 기본 발신 주소가 목록에 없을 때 화면의 「자동 — …」이 적을 것을 잃습니다.
+            # 릴레이가 이미 겪은 그 자리이고, 이유도 같습니다.
+            if allowed and str(account.get("id") or "") not in allowed:
                 continue
             out.append({
                 "id": str(account.get("id") or ""),

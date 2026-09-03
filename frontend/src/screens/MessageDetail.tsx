@@ -641,14 +641,18 @@ export function MessageDetail() {
                         <select className="select" id="msg-sender" value={sender}
                                 onChange={(e) => setSender(e.target.value)}>
                           {/* **「자동」이 무엇인지 서버가 말해 줍니다.** 목록에서 찾지
-                              않는 이유: 기본값이 허브스팟 기계 주소일 때가 있는데(실측
-                              103건 중 2건) 그건 고를 수 없어 목록에 없습니다 — 목록에서만
-                              찾으면 그 티켓은 어느 주소로 나갈지가 화면에 안 적힙니다. */}
+                              않는 이유: 기본값이 고르개에 없는 주소일 때가 있습니다(허브스팟
+                              기계 주소, 또는 운영자가 고르개에서 뺀 주소) — 목록에서만
+                              찾으면 그 티켓은 어느 주소로 나갈지가 화면에 안 적힙니다.
+
+                              **「이 대화의 주소」 같은 두루뭉술한 말은 안 씁니다**
+                              (2026-09-03 운영자 지시). 주소를 못 가져왔으면 못 가져왔다고
+                              적습니다 — 그건 조회가 실패했다는 뜻이라 다른 이야기입니다. */}
                           <option value="">
-                            자동 — {senders?.default_address
-                              || senders?.senders?.find((x) => x.is_default)?.address
-                              || "이 대화의 주소"}
-                            {senders?.fallback_address
+                            {senders?.default_address
+                              ? `자동 — ${senders.default_address}`
+                              : "자동 (발신 주소를 확인하지 못했습니다)"}
+                            {senders?.default_address && senders?.fallback_address
                               ? ` (거절되면 ${senders.fallback_address})` : ""}
                           </option>
                           {senders?.senders?.map((x) => (
