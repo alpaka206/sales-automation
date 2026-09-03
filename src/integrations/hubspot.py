@@ -69,6 +69,28 @@ class ConversationReplyContext:
     channel_account_id: str
 
 
+def cross_inbox_attempt(context: ConversationReplyContext) -> ConversationReplyContext | None:
+    """기본 발신 주소가 이미 정해진 것과 다르면, **같은 스레드에 그 계정만 얹은** 한 번의 시도.
+
+    「같은 인박스여야 한다」는 허브스팟의 규칙이 아니라 우리가 건 안전장치입니다. 폼으로
+    들어온 문의는 대화가 `Inbox` 인박스에만 서는데 기본 발신 주소는 `GTM Marketing` 에 있어서,
+    그 안전장치 때문에 **한 건도** 그 주소로 못 나갔습니다. 읽기로는 가릴 수 없으므로
+    (actor 때와 같습니다: 조회 200, 발송 400) 발송이 직접 답하게 합니다.
+
+    ``None`` 이면 시도할 것이 없다는 뜻입니다 — 설정이 비었거나, 이미 그 주소로 나가고
+    있거나, 채널이 이메일이 아닌 경우입니다.
+
+    **발송과 고르개가 이 함수 하나를 같이 씁니다.** 화면의 「자동 — …」이 실제로 시도할
+    주소를 적어야 하기 때문입니다.
+    """
+    preferred = settings.HUBSPOT_PREFERRED_EMAIL_CHANNEL_ACCOUNT_ID.strip()
+    if not preferred or preferred == context.channel_account_id:
+        return None
+    if context.channel_id != "1002":
+        return None
+    return ConversationReplyContext(context.thread_id, "1002", preferred)
+
+
 async def _request_with_retries(
     client: httpx.AsyncClient,
     method: str,
@@ -859,7 +881,28 @@ class HubSpotClient:
                 "is_default": is_default,
             })
         out.sort(key=lambda item: (not item["is_default"], item["address"]))
-        return {"senders": out, "default_address": default_address, "reason": reason}
+        # **화면의 「자동 — …」이 실제로 시도할 주소를 적어야 합니다.** 발송은 기본 발신
+        # 주소를 다른 인박스에도 한 번 두드려 보고(`cross_inbox_attempt`) 거절당할 때만
+        # 물러섭니다. 그 시도를 화면이 모르면 「자동 — support@perso.ai」라고 적어 놓고
+        # `perso.ai@estsoft.com` 으로 나가는, 방금 고친 그 어긋남이 되돌아옵니다.
+        fallback_address = ""
+        if context is not None:
+            attempt = cross_inbox_attempt(context)
+            if attempt is not None:
+                wanted = attempt.channel_account_id
+                for account in data.get("results") or ():
+                    if str(account.get("id") or "") != wanted:
+                        continue
+                    address = (account.get("deliveryIdentifier") or {}).get("value") or ""
+                    if address:
+                        fallback_address, default_address = default_address, address
+                    break
+        return {
+            "senders": out,
+            "default_address": default_address,
+            "fallback_address": fallback_address,
+            "reason": reason,
+        }
 
     async def send_conversation_message(
         self,

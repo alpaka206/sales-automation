@@ -502,7 +502,8 @@ async def ui_reply_senders(message_id: int):
             return ticket, (msg.to_address or ""), (msg.channel_account_id or "")
 
     ticket_id, recipient, chosen = await asyncio.to_thread(_target)
-    empty = {"senders": [], "default_address": "", "chosen": chosen, "error": None}
+    empty = {"senders": [], "default_address": "", "fallback_address": "",
+             "chosen": chosen, "error": None}
     if not ticket_id or not recipient:
         return empty
     try:

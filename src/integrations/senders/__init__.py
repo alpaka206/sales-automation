@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from email.utils import getaddresses
+from functools import partial
 
 from ...common.textwash import text_wash
 from ...db.models import Message
@@ -112,6 +113,7 @@ def enforce_first_reply_no_price(message: Message) -> None:
         )
 
 
+
 async def send(message: Message) -> None:
     """Reply on the ticket's existing HubSpot Conversations email thread."""
     from ...common.safe_mode import email_delivery_enabled
@@ -143,7 +145,7 @@ async def send(message: Message) -> None:
         raise DeliveryPermanentError("The message has no HubSpot ticket ID")
 
     from ..email_html import branded_signature_html, to_html_email
-    from ..hubspot import HubSpotClient
+    from ..hubspot import HubSpotClient, cross_inbox_attempt
 
     signature_html = branded_signature_html(getattr(message, "signature_key", None))
     rich_text = to_html_email(message.body or "", signature_html=signature_html)
@@ -165,13 +167,46 @@ async def send(message: Message) -> None:
             # **고르개가 화면에 적는 「자동 — …」이 같은 함수를 씁니다.** 예전에는 여기에만
             # 있어서 화면과 실제 발송이 갈렸습니다(2026-09-03).
             context = await client.find_default_reply_context(ticket_id, recipients[0])
-        hubspot_message_id = await client.send_conversation_message(
-            context,
+
+        send = partial(
+            client.send_conversation_message,
             recipient_email=recipients[0],
             subject=message.subject or "",
             text=message.body or "",
             rich_text=rich_text,
         )
+        attempt = None if chosen else cross_inbox_attempt(context)
+        if attempt is None:
+            hubspot_message_id = await send(context)
+        else:
+            # **한 번 두드려 보고, 거절하면 원래 주소로 보냅니다** (2026-09-03 운영자 요청).
+            #
+            # 「같은 인박스여야 한다」는 **허브스팟의 규칙이 아니라 우리가 건 안전장치**입니다
+            # (CLAUDE.md). 폼으로 들어온 문의는 대화가 `Inbox` 인박스에만 서는데 기본 발신
+            # 주소는 `GTM Marketing` 에 있어서, 그 안전장치 때문에 **한 건도** 그 주소로 못
+            # 나갔습니다. 읽기 조회로는 가릴 수 없습니다 — actor 때와 같습니다(조회 200,
+            # 발송 400). 그래서 발송이 직접 답하게 합니다.
+            #
+            # **스레드는 안 바꿉니다.** 계정만 바꿔 같은 자리에 붙입니다 — 엉뚱한 스레드에
+            # 답이 붙으면 고객이 보는 대화가 두 갈래가 됩니다.
+            #
+            # 되돌아올 수 있는 이유: 4xx(429 제외)는 `_lookup_error` 가 영구 실패로 올리는데
+            # 그건 **거절이라 아무것도 안 나갔다**는 뜻입니다. 5xx·타임아웃은
+            # `DeliveryUnknown` 이라 여기서 안 잡습니다 — 이미 나갔을 수 있어서 다시 보내면
+            # 고객이 같은 메일을 두 번 받습니다.
+            try:
+                hubspot_message_id = await send(attempt)
+                context = attempt
+                logger.info(
+                    "티켓 %s: 다른 인박스의 발신 주소(%s)를 허브스팟이 받아 주었습니다.",
+                    ticket_id, attempt.channel_account_id,
+                )
+            except DeliveryPermanentError as exc:
+                logger.warning(
+                    "티켓 %s: 허브스팟이 발신 주소 %s 를 거절해 %s 로 보냅니다 — %s",
+                    ticket_id, attempt.channel_account_id, context.channel_account_id, exc,
+                )
+                hubspot_message_id = await send(context)
     finally:
         await client.close()
 

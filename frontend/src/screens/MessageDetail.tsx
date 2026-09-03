@@ -182,6 +182,7 @@ export function MessageDetail() {
     queryKey: ["reply-senders", msgId],
     queryFn: () => getJSON<{ senders: { id: string; address: string; is_default: boolean }[];
                              default_address: string;
+                             fallback_address: string;
                              error: string | null }>(`/api/ui/messages/${msgId}/senders`),
     enabled: !!msgId,
     staleTime: 5 * 60_000,
@@ -647,6 +648,8 @@ export function MessageDetail() {
                             자동 — {senders?.default_address
                               || senders?.senders?.find((x) => x.is_default)?.address
                               || "이 대화의 주소"}
+                            {senders?.fallback_address
+                              ? ` (거절되면 ${senders.fallback_address})` : ""}
                           </option>
                           {senders?.senders?.map((x) => (
                             <option key={x.id} value={x.id}>{x.address}</option>
