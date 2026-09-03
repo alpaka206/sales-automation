@@ -544,21 +544,11 @@ export function MessageDetail() {
 
       <div className="split">
         <div className="stack">
-          {/* **New 를 지난 티켓에서 답을 보내는 유일한 자리입니다.** 초안이 열려 있으면
-              안 그립니다 — 그때는 위에 편집기가 이미 있고, 티켓 하나에 초안이 둘이면
-              어느 것이 나갈지 화면만 봐서는 알 수 없습니다. */}
-          {afterNew && !isDraftOpen && ticket.id && ticket.ticket_id && (
-            <div className="empty">
-              <div className="empty__text">
-                이 티켓의 다음 답변을 여기서 쓸 수 있습니다. 초안은 만들지 않습니다 —
-                직접 쓰고, 검토·발송은 지금까지와 같은 길로 나갑니다.
-              </div>
-              <ActionButton className="btn btn--subtle btn--sm" style={{ marginTop: 10 }}
-                            pending="여는 중" onClick={startReply}>
-                회신 작성
-              </ActionButton>
-            </div>
-          )}
+          {/* 「회신 작성」 안내 상자가 여기 있었습니다 (2026-09-03 운영자 지시로 옮김).
+              **자리를 늘 차지했습니다** — New 를 지난 티켓이면 초안이 없을 때마다 본문
+              칼럼 맨 위에 네 줄짜리 상자가 서 있었고, 운영자 화면은 세로 640px 입니다.
+              버튼은 아래 「이 티켓의 기록」 머리로 갔습니다: 「추가하기」 바로 옆이라
+              **이 티켓에 무언가를 남기는 두 가지가 한자리**에 섭니다. */}
           {!afterNew && data.thread.length === 0 && (
             <div className="empty">
               <div className="empty__text">
@@ -757,16 +747,30 @@ export function MessageDetail() {
                   <span className="section-header__icon"><Icon name="history" size={16} /></span>
                   <div className="section-header__title">이 티켓의 기록</div>
                 </div>
-                {canLog && (
-                  <button
-                    type="button"
-                    className="btn btn--subtle btn--sm"
-                    aria-haspopup="dialog"
-                    onClick={() => setLogging(true)}
-                  >
-                    <Icon name="plus" size={14} /> 추가하기
-                  </button>
-                )}
+                <div className="row" style={{ gap: 6 }}>
+                  {/* **메일과 기록이 한자리에 섭니다** (2026-09-03 운영자 지시).
+                      이 티켓에 무언가를 남기는 길이 둘인데 화면의 양 끝에 떨어져
+                      있었습니다 — 메일은 본문 위 안내 상자, 기록은 여기.
+
+                      초안이 열려 있으면 안 그립니다: 그때는 위에 편집기가 이미 있고,
+                      티켓 하나에 초안이 둘이면 어느 것이 나갈지 화면만 봐서는 모릅니다. */}
+                  {!isDraftOpen && ticket.ticket_id && (
+                    <ActionButton className="btn btn--subtle btn--sm" pending="여는 중"
+                                  onClick={startReply}>
+                      <Icon name="mail" size={14} /> 메일 발송
+                    </ActionButton>
+                  )}
+                  {canLog && (
+                    <button
+                      type="button"
+                      className="btn btn--subtle btn--sm"
+                      aria-haspopup="dialog"
+                      onClick={() => setLogging(true)}
+                    >
+                      <Icon name="plus" size={14} /> 추가하기
+                    </button>
+                  )}
+                </div>
               </div>
               <div className="history-list">
                 {ticketLog.length === 0 ? (

@@ -128,3 +128,29 @@ def test_the_console_can_actually_reach_it():
     from src.api.security import is_web_ui_path
 
     assert is_web_ui_path("/tickets/1/reply")
+
+
+def test_the_send_button_sits_next_to_the_log_button():
+    """**메일과 기록이 한자리에 섭니다** (2026-09-03 운영자 지시).
+
+    이 티켓에 무언가를 남기는 길은 둘인데 화면의 양 끝에 떨어져 있었습니다 — 메일은 본문
+    칼럼 맨 위의 네 줄짜리 안내 상자, 기록은 아래 카드의 「추가하기」. 그 상자는 New 를
+    지난 티켓에서 초안이 없을 때마다 늘 서 있었고, 운영자 화면은 세로 640px 입니다.
+
+    **모달을 따로 만들지 않았습니다.** 발송에는 번역 관문·서명·발신 주소·미리보기가 붙는데
+    (`approval.translation_required`, `enforce_send_language`), 모달에 그 절반만 담으면
+    외국어 티켓에서 운영자가 갇힙니다 — 번역 버튼이 없는 화면에서 발송이 거절당합니다.
+    그래서 버튼은 옮기되 누르면 지금까지와 같은 편집기로 갑니다: **발송 화면은 하나입니다.**
+    """
+    import pathlib
+
+    screen = pathlib.Path("frontend/src/screens/MessageDetail.tsx").read_text(encoding="utf-8")
+    header = screen[screen.index('<div className="section-header__title">이 티켓의 기록</div>'):]
+    header = header[: header.index("</div>\n              <div className=\"history-list\">")]
+    assert "메일 발송" in header and "추가하기" in header, "두 버튼이 같은 머리에 있어야 합니다"
+    assert "startReply" in header
+
+    # 초안이 열려 있으면 안 그립니다 — 티켓 하나에 초안이 둘이면 어느 것이 나갈지 모릅니다.
+    assert "!isDraftOpen" in header
+    # 옛 안내 상자는 사라졌습니다.
+    assert "이 티켓의 다음 답변을 여기서 쓸 수 있습니다" not in screen
