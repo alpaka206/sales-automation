@@ -4,7 +4,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { getJSON, postForm } from "../lib/api";
 import { kst } from "../lib/format";
 import { Icon } from "../ui/Icon";
-import { channelLabel, directionMark, interactionMark } from "../ui/InteractionForm";
+import { directionMark, interactionMark } from "../ui/InteractionForm";
 import { Modal } from "../ui/Modal";
 import { ConfirmModal } from "../ui/ConfirmModal";
 import { ActionButton, useAction } from "../ui/ActionButton";
@@ -94,7 +94,10 @@ type Detail = {
   customer_requests: string | null;
   other_tickets: {
     conversation_id: number; ticket_id: string | null; subject: string | null;
-    stage: string; created_at: string; requests: string | null;
+    stage: string; created_at: string;
+    /** 그 티켓에 오간 것마다 쌓인 요약(`conversations.summary`). 접수만 되고 아무 일도
+     *  없었던 티켓에서는 접수 때 뽑은 `customer_requests` 로 떨어집니다. */
+    summary: string | null;
   }[];
   won: {
     client_id: number; company: string; plan_status: string; department: string | null;
@@ -109,6 +112,8 @@ type Detail = {
     /** Won Type / Lost Reason. 보드 카드와 같은 값 — 지금 단계의 목록에 있을 때만 옵니다. */
     deal_detail: string | null;
     inquiry_subject: string | null; inquiry_language: string | null; client_id: number | null;
+    /** 티켓이 만들어진 날. 백필분은 허브스팟의 생성일 그대로입니다. */
+    created_at: string | null;
   };
   ticket_interactions: Interaction[];
   /** 메일이 하나도 없는 티켓은 `null` 입니다 — HubSpot 에서 들여온 티켓이 그렇습니다. */
@@ -126,7 +131,12 @@ type Detail = {
     /** MQL / PQL — 구독 플랜이 정합니다(플랜 없음·Free·N/A → MQL, 그 외 → PQL). 서버가
      *  계산해서 내려주므로 언제나 값이 있습니다. */
     qualification: string } | null;
-  customer: { profile: Record<string, unknown> | null; interactions: Interaction[] } | null;
+  customer: {
+    profile: Record<string, unknown> | null;
+    /** 어느 티켓에도 안 달린 접점 기록의 **개수**. 줄은 안 옵니다 — 이 화면의 리드
+     *  히스토리는 티켓마다 요약 한 문단이라 기록 줄이 필요 없습니다. */
+    loose_count: number;
+  } | null;
   stage_labels: Record<string, string>;
   /** 소통 히스토리를 남길 수 있는 단계 — 보드의 + 버튼과 같은 목록, 같은 출처. */
   manual_log_stages: string[];
@@ -347,6 +357,12 @@ export function MessageDetail() {
   const visibleBubbles = afterNew
     ? data.thread.filter((b) => b.is_current && isDraftOpen)
     : data.thread;
+  // **이 티켓의 접점 기록은 여기 섭니다** (2026-09-04 운영자 지시: 「둘을 기존처럼 따로」).
+  //
+  // 하루 동안 반대로 돌려 봤습니다 — 이 목록에서 빼고 「리드 히스토리」가 티켓별로 묶어
+  // 전부 보여 주게. 그건 답을 쓰는 화면에 메일함을 하나 더 세우는 일이었습니다. 지금은
+  // 둘이 **세는 것 자체가 다릅니다**: 여기는 이 티켓에서 실제로 오간 것(메일 · 접점 기록 ·
+  // 진행 기록), 「리드 히스토리」는 **다른 티켓들의 요약 한 문단씩**.
   const ticketLog = [
     ...data.ticket_interactions.map((item, index) => ({
       key: `i${item.id ?? index}`,
@@ -479,11 +495,6 @@ export function MessageDetail() {
         <Link to={conversationId ? "/" : "/messages"} className="chip">
           <Icon name="chevron" size={14} /> {conversationId ? "문의 대시보드" : "회신 및 검토 목록"}
         </Link>
-        {contact && (
-          <Link to={`/customers/${contact.id}`} className="chip">
-            <Icon name="users" size={14} /> 이 고객 히스토리
-          </Link>
-        )}
       </div>
 
       {/* 큰 글씨는 **누구인가** 입니다. 오래 「문의와 답변 · 제목」이었고 티켓 번호가 맨 위
@@ -555,7 +566,7 @@ export function MessageDetail() {
             <div className="empty">
               <div className="empty__text">
                 이 티켓에는 이 콘솔이 주고받은 메일이 없습니다 — HubSpot 에서 들여온
-                티켓입니다. 오간 연락은 아래 소통 히스토리에 남겨주세요.
+                티켓입니다. 오간 연락은 아래 「이 티켓의 기록」에 남겨주세요.
               </div>
             </div>
           )}
@@ -572,7 +583,19 @@ export function MessageDetail() {
                       {/* 이 칸의 글이 곧 고객이 받는 글입니다 — 예전처럼 「검토용 한국어」가
                           아닙니다. 한국어 대역은 아래 접힌 줄에 저장돼 있습니다. */}
                       <span className="bubble__dir">
-                        <Icon name="send" size={14} /> 회신 초안 (고객이 받을 글)
+                        <Icon name="send" size={14} /> 문의 회신 초안
+                        {/* **원어를 같이 적습니다** (2026-09-03 운영자 지시). 초안은 이제
+                            나갈 언어로 쓰이므로(0045 이후) 「이 글이 무슨 말로 쓰여 있나」가
+                            제목 옆에 있어야 합니다. 값은 문의가 들어온 언어입니다 —
+                            `msg.language` 는 「번역하기」를 누르면 바뀌는 값이라, 제목 옆에
+                            두면 같은 티켓이 누를 때마다 다른 말을 합니다.
+                            `.chip--xs` 를 씁니다 — 누를 수 없는 짧은 값이고, 옆의
+                            아이콘·시각과 크기가 맞습니다. */}
+                        {ticket.inquiry_language && (
+                          <span className="chip chip--xs" style={{ marginLeft: 6 }}>
+                            {languageLabel(ticket.inquiry_language)}
+                          </span>
+                        )}
                       </span>
                       <span className="bubble__time tnum">{kst(bubble.created_at)}</span>
                     </div>
@@ -820,10 +843,12 @@ export function MessageDetail() {
           )}
           {/* **고객 기록도 메인입니다** — New 이후에는 이 화면의 본론이 「이 사람과 무슨
               이야기가 오갔나」이기 때문입니다. New 에서는 오른쪽에 둡니다: 그때는 본론이
-              초안이고, 이건 그 초안을 쓰기 위한 참고입니다. */}
-          {afterNew && data.customer?.interactions && data.customer.interactions.length > 0 && (
-            <HistoryDigest items={data.customer.interactions} />
-          )}
+              초안이고, 이건 그 초안을 쓰기 위한 참고입니다.
+
+              **비어 있어도 그립니다** (2026-09-03 운영자 지시). 예전에는 `length > 0` 이라
+              기록이 없으면 카드가 통째로 사라졌고, 그래서 「추가하기」로 적은 첫 기록이
+              어디로 갔는지 알 수 없었습니다. 연락처가 없는 티켓(`customer` 자체가 null)도
+              빈 목록으로 그립니다 — 「없다」와 「자리가 없다」는 다른 말입니다. */}
         </div>
 
         <div className="stack" style={{ gap: "var(--gap)" }}>
@@ -851,25 +876,72 @@ export function MessageDetail() {
               받습니다. */}
           {/* **이 티켓 밖의 것들.** 지금 처리할 것(왼쪽의 스레드·초안)과 섞지 않고 오른쪽에
               둡니다 — 판단에 필요한 맥락이지 이 티켓에서 일어난 일이 아닙니다. */}
-          {data.other_tickets.length > 0 && (
+          {/* **리드 히스토리 — 이전 티켓의 요약만** (2026-09-04 운영자 지시).
+              「세부 이메일 내용 아예 x」. 답을 쓰는 자리에서 필요한 것은 「이 사람과 전에
+              무슨 이야기가 있었나」 한 문단이지 그때 오간 메일의 본문이 아닙니다. 본문은
+              「전체보기」가 가는 고객 상세에 있고, 그 화면은 **같은 값을 같은 모양으로**
+              그립니다(`CustomerDetail` 의 `ticket.summary`).
+
+              **지금 보고 있는 티켓은 안 넣습니다.** 그 요약 불릿은 바로 왼쪽 「이 티켓의
+              기록」 각 줄의 둘째 줄과 **같은 문자열**이라(한 줄을 만들어 `messages.
+              summary_line` 과 `conversations.summary` 에 같이 씁니다), 넣으면 2026-08-25 에
+              지운 요약 카드가 그대로 부활합니다. 「**이전** 히스토리」라는 말도 그 뜻입니다.
+
+              머리글 오른쪽의 「전체보기」가 예전의 떠 있던 칩을 대신합니다 — 같은 곳으로
+              가는데, 카드 안에 있으면 「무엇의 전체인가」가 붙습니다. */}
+          {contact && (
             <div className="card">
-              <div className="section-label" style={{ marginBottom: 12 }}>
-                이 고객의 다른 티켓 {data.other_tickets.length}건
+              <div className="section-header" style={{ marginBottom: 12 }}>
+                <div className="section-header__l">
+                  <span className="section-header__icon"><Icon name="history" size={16} /></span>
+                  <div className="section-header__title">리드 히스토리</div>
+                </div>
+                <Link className="btn btn--subtle btn--sm" to={`/customers/${contact.id}`}>
+                  전체보기
+                </Link>
               </div>
-              <div className="stack" style={{ gap: 8 }}>
-                {data.other_tickets.map((other) => (
-                  <Link key={other.conversation_id} className="link--plain"
-                        to={`/tickets/${other.conversation_id}`}>
-                    <div className="row-between" style={{ gap: 8 }}>
-                      <strong className="t-sm">{other.subject || "제목 없는 문의"}</strong>
-                      <span className="tag">{data.stage_labels[other.stage] ?? other.stage}</span>
-                    </div>
+              {data.other_tickets.length === 0 && !data.customer?.loose_count ? (
+                /* **눈에 띄어야 합니다** (2026-09-04 운영자 지시). 「없다」는 이 화면에서
+                   판단에 쓰는 사실입니다 — 처음 연락하는 사람인지, 오래 이야기해 온
+                   사람인지가 답의 톤을 바꿉니다. 흐린 작은 글씨로 적으면 「아직 안
+                   불러왔다」로 읽힙니다. */
+                <div className="empty">
+                  <div className="empty__text empty__text--lead">
+                    이전 히스토리가 존재하지 않습니다.
+                  </div>
+                </div>
+              ) : (
+                <div className="stack" style={{ gap: 12 }}>
+                  {data.other_tickets.map((other) => (
+                    <Link key={other.conversation_id} className="link--plain"
+                          to={`/tickets/${other.conversation_id}`}>
+                      <div className="row-between" style={{ gap: 8 }}>
+                        <strong className="t-sm">{other.subject || "제목 없는 문의"}</strong>
+                        <span className="tag">{data.stage_labels[other.stage] ?? other.stage}</span>
+                      </div>
+                      <div className="t-xs t-subtle">
+                        {kst(other.created_at)}{other.ticket_id ? ` · #${other.ticket_id}` : ""}
+                      </div>
+                      {/* **자르지 않습니다** (2026-09-04 운영자 지시: 「전부 보여줌」).
+                          오간 것마다 한 줄씩 쌓인 값이라 오래된 티켓은 길어질 수 있는데,
+                          그게 그 티켓의 이야기 전부입니다. */}
+                      {other.summary && (
+                        <div className="t-sm" style={{ marginTop: 4, whiteSpace: "pre-line" }}>
+                          {other.summary}
+                        </div>
+                      )}
+                    </Link>
+                  ))}
+                  {/* 티켓에 안 달린 접점 — 허브스팟 딜·노트, 지난 티켓에서 떨어져 나온 메일,
+                      수주 화면에서 적은 소통 기록. 티켓 이야기가 아니라 줄로 설 자리가
+                      없지만, 없는 척하면 고객 상세와 건수가 안 맞습니다. */}
+                  {!!data.customer?.loose_count && (
                     <div className="t-xs t-subtle">
-                      {kst(other.created_at)}{other.ticket_id ? ` · #${other.ticket_id}` : ""}
+                      그 외 {data.customer.loose_count}건
                     </div>
-                  </Link>
-                ))}
-              </div>
+                  )}
+                </div>
+              )}
             </div>
           )}
 
@@ -878,6 +950,25 @@ export function MessageDetail() {
             <dl className="info-list">
               <div className="info-row"><dt>티켓</dt><dd className="mono">{ticket.ticket_id ? `#${ticket.ticket_id}` : "— (없음)"}</dd></div>
               <div className="info-row"><dt>Client ID</dt><dd className="tnum">{ticket.client_id ?? "미동기화"}</dd></div>
+              {/* 티켓이 만들어진 날 (2026-09-03 운영자 요청). 백필이 허브스팟의 생성일을
+                  그대로 복사해 두므로 우리 값이 곧 허브스팟 값입니다 — 이 화면을 열 때마다
+                  허브스팟에 물으러 가지 않습니다. */}
+              {ticket.created_at && (
+                <div className="info-row"><dt>생성</dt><dd className="tnum">{kst(ticket.created_at)}</dd></div>
+              )}
+              {/* 「발송 정보」 카드를 지우면서(2026-09-03 운영자 지시) **수신자 한 줄만**
+                  여기로 옮겼습니다. 나머지(채널·발송 언어·생성)는 다른 데서도 볼 수 있는데
+                  수신 주소는 이 콘솔에서 볼 곳이 여기와 발송 확인 창뿐이었습니다 — 확인
+                  창은 초안이 열려 있을 때만 잠깐 뜨므로, 이미 나간 메일의 수신 주소를 볼
+                  자리가 통째로 사라질 뻔했습니다. */}
+              {msg?.to_address && (
+                <div className="info-row"><dt>수신자</dt>
+                  <dd className="mono truncate" style={{ maxWidth: 170 }}>{msg.to_address}</dd>
+                </div>
+              )}
+              {msg?.sent_at && (
+                <div className="info-row"><dt>발송</dt><dd className="tnum">{kst(msg.sent_at)}</dd></div>
+              )}
               {ticket.stage && <div className="info-row"><dt>Stage</dt><dd>{data.stage_labels[ticket.stage] ?? ticket.stage}</dd></div>}
               {/* Won 과 Lost 일 때만 나옵니다 — 왜 이겼나 / 왜 졌나는 결말이 난 건에만
                   있는 정보입니다. 보드 카드에도 같은 고르개가 있고, 값 목록과 「지금
@@ -1067,27 +1158,17 @@ export function MessageDetail() {
             </div>
           )}
 
-          {msg && (
-          <div className="card">
-            <div className="section-label" style={{ marginBottom: 12 }}>발송 정보</div>
-            <dl className="info-list">
-              <div className="info-row"><dt>채널</dt><dd>{msg.channel}</dd></div>
-              {msg.target_language && <div className="info-row"><dt>발송 언어</dt><dd>{msg.target_language}</dd></div>}
-              <div className="info-row"><dt>수신자</dt><dd className="mono truncate" style={{ maxWidth: 170 }}>{msg.to_address || "—"}</dd></div>
-              <div className="info-row"><dt>생성</dt><dd className="tnum">{kst(msg.created_at)}</dd></div>
-              {msg.sent_at && <div className="info-row"><dt>발송</dt><dd className="tnum">{kst(msg.sent_at)}</dd></div>}
-            </dl>
-          </div>
-          )}
+          {/* 「발송 정보」 카드는 지웠습니다 (2026-09-03 운영자 지시). 채널은 행마다
+              `email` 한 값이고, 발송 언어는 「번역하기」 버튼이 이미 적으며, 생성 시각은
+              초안 말풍선에 붙어 있습니다. 살아남을 이유가 있던 **수신자와 발송 시각은 위
+              「티켓 정보」로 옮겼습니다.** 발송 실패 사유는 애초에 이 카드에 없었습니다 —
+              빨간 배너가 따로 그립니다. */}
 
           {/* **이 티켓 밖의 접점은 한 곳입니다.** 한동안 「다른 접점 기록」과 「고객
               히스토리」 두 카드가 거의 같은 것을 나눠 들고 있었습니다 — 앞엣것은 이 티켓을
               뺀 모든 기록, 뒤엣것은 그중 어느 티켓에도 안 달린 것. 읽는 사람에게는 둘 다
               「이 사람과 전에 오간 것」이라 가를 이유가 없습니다. 앞엣것 하나로 남깁니다.
               허브스팟에서 끌어온 옛 메일도 여기 들어옵니다. */}
-          {!afterNew && data.customer?.interactions && data.customer.interactions.length > 0 && (
-            <HistoryDigest items={data.customer.interactions} />
-          )}
         </div>
       </div>
 
@@ -1171,7 +1252,7 @@ export function MessageDetail() {
       {/* 보드 카드의 + 가 띄우는 것과 같은 모달, 같은 폼입니다. */}
       {logging && ticket.id && contact && (
         <Modal
-          title="소통 히스토리 추가"
+          title="히스토리 추가"
           hideCancel
           wide
           onClose={() => setLogging(false)}
@@ -1274,154 +1355,18 @@ function MessageRow({ bubble, isFirstReply = false }: {
   );
 }
 
-/** 연락처 단위 기록 한 줄 — 제목과 첫 줄만, 본문은 「전체보기」로.
- *
- *  ``unanswered`` 는 **혼자 있는 줄**이 쓰는 표입니다. 여러 줄짜리 대화에서는 바깥
- *  묶음이 「문의 n건 · 답변 없음」을 적어 주는데, 줄이 하나면 그 묶음이 없기 때문입니다
- *  (아래 참조). 이 화면에서 가장 손이 가야 하는 신호라 묶음이 사라진다고 같이 사라지면
- *  안 됩니다.
- */
-function HistoryRow({ item, unanswered = false }: {
-  item: {
-    channel: string; direction: string; handler: string | null;
-    subject: string | null; summary: string | null; happened_at: string | null;
-    digest?: string | null;
-  };
-  unanswered?: boolean;
-}) {
-  // 요약이 있으면 그것이 미리보기입니다. 없을 때만 본문 앞머리를 씁니다 — 인사말로
-  // 시작하는 메일에서는 앞머리가 아무것도 안 알려 줍니다.
-  const body = (item.summary || "").trim();
-  const dir = directionMark(item.direction);
-  // 두 줄이면 「무슨 이야기였나」는 알 수 있고, 그 이상은 펼쳐서 읽을 일입니다.
-  const flat = body.replace(/\s+/g, " ");
-  const preview = (item.digest || flat).slice(0, 110);
-  const truncated = !!item.digest || flat.length > 110;
-  return (
-    <details style={{ borderTop: "1px solid var(--border)", paddingTop: 6 }}>
-      <summary style={{ cursor: "pointer", listStyle: "none" }}>
-        <div className="row" style={{ gap: 6, flexWrap: "wrap" }}>
-          {/* 방향은 색으로도 말합니다 — 목록을 훑을 때 「누가 보낸 것인가」가 글자를 읽기
-              전에 보여야 합니다. 말풍선·소통 기록과 같은 두 색입니다. 채널 태그는
-              이메일이 아닐 때만: 거의 모든 줄이 이메일이라 붙여 봐야 같은 말입니다. */}
-          <span className={`t-xs history-item__dir history-item--${dir.tone}`}>
-            <Icon name={dir.icon} size={12} />
-            {dir.label}
-          </span>
-          {item.channel !== "email" && <span className="tag">{channelLabel(item.channel)}</span>}
-          {unanswered && <span className="tag">답변 없음</span>}
-          {item.handler && <span className="t-xs t-subtle">{item.handler}</span>}
-          <span className="t-xs t-subtle tnum">{item.happened_at ? kst(item.happened_at) : ""}</span>
-        </div>
-        {item.subject && <div className="t-sm" style={{ marginTop: 3 }}><strong>{item.subject}</strong></div>}
-        <div className="t-xs t-subtle" style={{ marginTop: 2 }}>
-          {preview}{truncated ? "… " : " "}
-          {truncated && <span style={{ color: "var(--accent)" }}>전체보기</span>}
-        </div>
-      </summary>
-      {truncated && (
-        <div className="t-sm msg-body--inset" style={{ marginTop: 8, whiteSpace: "pre-line" }}>
-          {body}
-        </div>
-      )}
-    </details>
-  );
-}
-
-/** 제목에서 회신 접두사를 떼어 **한 대화**로 묶을 이름을 만듭니다. RE: / FW: / [태그] 는
- *  같은 이야기의 다음 통이지 새 이야기가 아닙니다. */
-function threadKey(subject: string | null): string {
-  return (subject || "(제목 없음)")
-    .replace(/^\s*(\[[^\]]*\]|re|fw|fwd|답장|회신)\s*[:：]?\s*/gi, "")
-    .replace(/^\s*(\[[^\]]*\]|re|fw|fwd)\s*[:：]\s*/gi, "")
-    .trim() || "(제목 없음)";
-}
-
-const RECEIVED = new Set(["inbound", "incoming"]);
+/** 우리가 보낸 메일의 방향 값들. 옛 행이 `outbound` 를 들고 있습니다. */
 const SENT = new Set(["outgoing", "outbound"]);
 
-/** 고객 히스토리 — **스무 줄이 아니라 이야기 단위로.**
- *
- *  스무 건을 시간순으로 늘어놓으면 「이 사람과 무슨 이야기를 했나」를 알려면 스무 번을
- *  읽어야 합니다. 같은 제목끼리 묶으면 대화 한 건이 한 줄이 되고, 받은 것과 보낸 것의
- *  수가 그 자리에서 보입니다 — **답이 안 나간 문의**(문의 1 · 답변 0)가 특히 그렇게 해야
- *  보입니다. 본문은 눌러야 나옵니다.
- *
- *  요약은 계산으로 만듭니다. 화면을 여는 길에는 모델이 없습니다 — 그건 이 저장소의
- *  규칙이고(`_translate_inbound_bubbles` 를 지운 것과 같은 이유), 요약 한 줄 때문에
- *  티켓 열 때마다 외부 왕복을 낼 수는 없습니다.
- */
-function HistoryDigest({ items }: {
-  items: {
-    channel: string; direction: string; handler: string | null;
-    subject: string | null; summary: string | null; happened_at: string | null;
-    digest?: string | null;
-  }[];
-}) {
-  const groups = new Map<string, typeof items>();
-  for (const item of items) {
-    const key = threadKey(item.subject);
-    groups.set(key, [...(groups.get(key) || []), item]);
-  }
-  const threads = [...groups.entries()].map(([subject, rows]) => {
-    const times = rows.map((r) => r.happened_at).filter(Boolean).sort() as string[];
-    return {
-      subject,
-      rows,
-      received: rows.filter((r) => RECEIVED.has(r.direction)).length,
-      sent: rows.filter((r) => SENT.has(r.direction)).length,
-      first: times[0],
-      last: times[times.length - 1],
-    };
-  });
-  threads.sort((a, b) => (b.last || "").localeCompare(a.last || ""));
-
-  return (
-    <div className="card">
-      {/* 「이 티켓의 기록」과 **같은 머리글 모양**입니다 — 같은 아이콘, 같은 구조. 둘 다 이
-          화면의 기록 줄기라 다르게 생길 이유가 없습니다.
-
-          합계 줄(대화 n건 · 받은 문의 n · 보낸 답변 n)은 뺐습니다(2026-08-26 운영자 지시).
-          바로 아래에 그 대화들이 줄로 서 있어서 세면 나오는 값이고, 각 줄이 이미 답이
-          나갔는지 아닌지를 말로 적습니다 — 숫자를 세어 읽게 하는 자리가 아닙니다. */}
-      <div className="section-header" style={{ marginBottom: 12 }}>
-        <div className="section-header__l">
-          <span className="section-header__icon"><Icon name="history" size={16} /></span>
-          <div className="section-header__title">리드 히스토리</div>
-        </div>
-      </div>
-      <div className="stack" style={{ gap: 6 }}>
-        {/* **줄이 하나인 대화는 묶지 않습니다.** 묶음은 「스무 건을 이야기 단위로」 하려고
-            있는 것인데, 안에 메일이 하나뿐이면 하는 일이 없습니다 — 눌러서 편 자리에
-            같은 제목이 한 번 더 적힌 줄 하나가 있고, 본문을 읽으려면 「전체보기」를 또
-            눌러야 했습니다. 한 통을 읽는 데 두 번입니다(2026-08-26 운영자 지적).
-            묶음이 사라지면서 같이 사라질 뻔한 「답변 없음」은 줄이 직접 답니다. */}
-        {threads.map((thread) => (thread.rows.length === 1 ? (
-          <HistoryRow key={thread.subject} item={thread.rows[0]}
-                      unanswered={thread.sent === 0 && thread.received > 0} />
-        ) : (
-          <details key={thread.subject}
-                   style={{ borderTop: "1px solid var(--border)", paddingTop: 6 }}>
-            <summary style={{ cursor: "pointer", listStyle: "none" }}>
-              <div className="t-sm"><strong>{thread.subject}</strong></div>
-              <div className="t-xs t-subtle" style={{ marginTop: 2 }}>
-                {thread.first ? kst(thread.first, "date") : "-"}
-                {thread.last && thread.last !== thread.first && ` ~ ${kst(thread.last, "date")}`}
-                {" · "}
-                {/* 답이 안 나간 대화는 그렇게 적습니다 — 「문의 1 · 답변 0」 을 세어 읽게
-                    하지 않고. 이 화면에서 가장 손이 가야 하는 줄입니다. */}
-                {thread.sent === 0 && thread.received > 0
-                  ? `문의 ${thread.received}건 · 답변 없음`
-                  : `문의 ${thread.received} · 답변 ${thread.sent}`}
-                <span style={{ color: "var(--accent)", marginLeft: 6 }}>전체보기</span>
-              </div>
-            </summary>
-            <div className="stack" style={{ gap: 6, marginTop: 6 }}>
-              {thread.rows.map((row, index) => <HistoryRow key={index} item={row} />)}
-            </div>
-          </details>
-        )))}
-      </div>
-    </div>
-  );
+/** 언어 코드를 사람이 읽는 말로. 값은 `ko`·`en` 같은 두 글자 코드라 그대로 두면 칩에
+ *  소문자 두 글자가 뜹니다. 표를 크게 만들지 않는 이유: 여기 뜰 수 있는 언어는 문의가
+ *  실제로 들어온 언어이고, 목록을 늘려 봐야 안 오는 말이 대부분입니다 — 모르는 코드는
+ *  대문자로 적으면 그 자체로 읽힙니다(`PT`·`ES`). */
+const LANGUAGE_LABELS: Record<string, string> = {
+  ko: "한국어", en: "English", ja: "日本語", zh: "中文",
+};
+function languageLabel(code: string) {
+  const key = code.trim().toLowerCase();
+  return LANGUAGE_LABELS[key] ?? code.trim().toUpperCase();
 }
+

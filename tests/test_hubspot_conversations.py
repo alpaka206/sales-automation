@@ -811,3 +811,49 @@ async def test_hubspot_relay_addresses_are_not_offered(client: HubSpotClient) ->
     senders = found["senders"]
 
     assert [s["address"] for s in senders] == ["support@perso.ai"]
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_the_picker_follows_the_paging_cursor(
+    client: HubSpotClient, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """채널 계정 목록은 **커서를 끝까지 따라갑니다.**
+
+    예전에는 `limit=200` 한 번으로 끝냈습니다. 이 포털은 66개라 아직 안 물렸지만, 넘는
+    순간 뒤쪽 계정이 고르개에서 **조용히** 사라집니다 — 에러도 경고도 없이 목록만 짧아지고,
+    운영자는 그 주소를 못 고르는 이유를 알 방법이 없습니다. 페이지 크기는 우리가 정하는
+    값이 아니라, 끝을 아는 길은 커서뿐입니다.
+    """
+    monkeypatch.setattr(
+        settings, "HUBSPOT_REPLY_SENDER_ACCOUNT_IDS", "team-account, second-page"
+    )
+    _thread_with_one_email("t1", "inbox-1", "team-account")
+
+    pages = [
+        httpx.Response(200, json={
+            "results": [
+                {"id": "team-account", "channelId": "1002", "inboxId": "inbox-1",
+                 "active": True, "authorized": True, "archived": False,
+                 "deliveryIdentifier": {"value": "perso.ai@estsoft.com"}},
+            ],
+            "paging": {"next": {"after": "CURSOR-1"}},
+        }),
+        httpx.Response(200, json={
+            "results": [
+                # 둘째 페이지에만 있는 주소. 커서를 안 따라가면 이 줄이 사라집니다.
+                {"id": "second-page", "channelId": "1002", "inboxId": "inbox-1",
+                 "active": True, "authorized": True, "archived": False,
+                 "deliveryIdentifier": {"value": "later@estsoft.com"}},
+            ],
+        }),
+    ]
+    route = respx.get(
+        f"{BASE_URL}/conversations/v3/conversations/channel-accounts"
+    ).mock(side_effect=pages)
+
+    found = await client.list_reply_senders("ticket-1", "buyer@example.com")
+
+    assert route.call_count == 2, "커서가 있으면 다음 페이지를 받아야 합니다"
+    assert "after=CURSOR-1" in str(route.calls[1].request.url)
+    assert "later@estsoft.com" in {s["address"] for s in found["senders"]}

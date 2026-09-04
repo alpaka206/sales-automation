@@ -528,7 +528,6 @@ class CustomerInteraction(Base):
     summary: Mapped[str] = mapped_column(Text, nullable=False)
     context: Mapped[str | None] = mapped_column(Text, nullable=True)
     external_id: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
-    artifact_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     # 수주 고객의 몇 차 계약에 대한 기록인지. 비어 있으면 협상 단계(계약 전) 기록입니다 —
     # 이 타임라인은 고객 단위라 계약보다 먼저 시작합니다.
     contract_seq: Mapped[int | None] = mapped_column(Integer, nullable=True)

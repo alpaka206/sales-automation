@@ -258,6 +258,7 @@ def _poller_steps() -> list[tuple[str, object]]:
 
     from .hubspot_backfill import process_requested_hubspot_backfill
     from .inbound import cache_korean_inquiries
+    from .summaries import backfill_interaction_digests
     from .sheet_sync import (
         process_requested_sheet_sync,
         sync_pending_inbound_rows,
@@ -273,6 +274,12 @@ def _poller_steps() -> list[tuple[str, object]]:
         # 접수 때 못 채운 문의 번역을 조금씩 메웁니다 — 이 기능이 생기기 전의 옛 행과,
         # 그때 모델이 안 되던 건입니다. 기다리는 사람이 없는 자리라 여기 둡니다.
         ("cache_korean", cache_korean_inquiries),
+        # 요약이 비어 있는 기록에 한 줄을 채웁니다 — 화면이 본문 앞머리를 대신 보여 주던
+        # 줄들입니다. **길이와 무관하게 줄마다 모델을 부릅니다**(`one_line(always=True)`,
+        # 2026-09-03 운영자 지시) — 회차마다 flash 호출 20건이고, 남은 건수가 0 이 되면
+        # 저절로 멎습니다. 위 번역 백필과 같은 성격이라 나란히 둡니다: 기다리는 사람이
+        # 없고, 한 회차가 실패해도 다음 회차가 이어서 합니다.
+        ("interaction_digests", backfill_interaction_digests),
         # 티켓별 대화를 조금씩 받아옵니다. 한 바퀴를 다 돌면 가장 오래된 것부터 다시
         # 도므로, 지난 대화를 메우는 일과 새로 쌓인 대화를 따라잡는 일이 한 단계입니다.
         ("ticket_history", run_pending_ticket_history),

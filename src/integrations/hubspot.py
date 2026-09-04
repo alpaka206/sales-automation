@@ -460,6 +460,39 @@ class HubSpotClient:
             raise self._lookup_error(response, action)
         return response.json()
 
+    async def _all_channel_accounts(self) -> list[dict]:
+        """연결된 채널 계정 **전부**. 커서를 끝까지 따라갑니다.
+
+        예전에는 `limit=200` 한 번으로 끝냈습니다. 이 포털은 66개라 아직 안 물렸지만,
+        넘는 순간 **뒤쪽 계정이 발신 주소 고르개에서 조용히 사라집니다** — 에러도 경고도
+        없이 그냥 목록이 짧아지고, 운영자는 그 주소를 못 고르는 이유를 알 방법이 없습니다.
+        허브스팟의 페이지 크기는 우리가 정하는 값이 아니므로, 끝을 아는 길은 커서뿐입니다
+        (실측: `limit=2` 요청이 결과 1건과 `paging.next.after` 를 같이 돌려줍니다).
+
+        한 바퀴 상한을 둡니다 — 커서가 안 끝나는 응답에 걸려 영원히 도는 것보다 목록이
+        조금 짧은 편이 낫습니다.
+        """
+        out: list[dict] = []
+        after: str | None = None
+        for _ in range(20):
+            params: dict[str, object] = {"limit": 200}
+            if after:
+                params["after"] = after
+            data = await self._get_conversation_json(
+                "/conversations/v3/conversations/channel-accounts",
+                params=params,
+                action="channel-account list",
+            )
+            out.extend(data.get("results") or ())
+            after = ((data.get("paging") or {}).get("next") or {}).get("after")
+            if not after:
+                break
+        else:
+            logger.warning(
+                "채널 계정 목록이 20페이지에서 끊겼습니다 — 고르개에 안 뜨는 주소가 있을 수 있습니다."
+            )
+        return out
+
     async def _email_channel_account(self, account_id: str) -> dict:
         data = await self._get_conversation_json(
             f"/conversations/v3/conversations/channel-accounts/{account_id}",
@@ -839,11 +872,7 @@ class HubSpotClient:
             # 발송도 같은 이유로 실패합니다 — 「고를 것이 없다」와 「보낼 수 없다」를 운영자가
             # 눌러 보기 전에 알아야 합니다.
             reason = str(exc)
-        data = await self._get_conversation_json(
-            "/conversations/v3/conversations/channel-accounts",
-            params={"limit": 200},
-            action="channel-account list",
-        )
+        accounts = await self._all_channel_accounts()
         # **고르개에 뜰 주소는 운영자가 정합니다**(`HUBSPOT_REPLY_SENDER_ACCOUNT_IDS`).
         # 비어 있으면 예전처럼 쓸 수 있는 주소가 전부 뜹니다. 기본 발신 주소는 이 울타리와
         # 무관하게 나갑니다 — 이건 「고를 수 있는 것」이지 「나갈 수 있는 것」이 아닙니다.
@@ -854,7 +883,7 @@ class HubSpotClient:
         }
         out: list[dict] = []
         default_address = ""
-        for account in data.get("results") or ():
+        for account in accounts:
             if str(account.get("channelId") or "") != "1002":
                 continue
             if account.get("archived") or not account.get("active"):
@@ -911,7 +940,7 @@ class HubSpotClient:
             attempt = cross_inbox_attempt(context)
             if attempt is not None:
                 wanted = attempt.channel_account_id
-                for account in data.get("results") or ():
+                for account in accounts:
                     if str(account.get("id") or "") != wanted:
                         continue
                     address = (account.get("deliveryIdentifier") or {}).get("value") or ""
@@ -1335,7 +1364,11 @@ class HubSpotClient:
                     params={
                         "properties": (
                             "hs_email_subject,hs_email_text,hs_email_timestamp,hs_timestamp,"
-                            "hs_email_direction"
+                            # **보낸 주소**. 방향을 이것으로 정합니다 — `hs_email_direction`
+                            # 만 믿으면 우리 쪽 사람이 자기 메일함에서 답한 것이 「고객이 한
+                            # 말」로 뒤집힙니다(실측: `untae@estsoft.com` 발신 81건이 전부
+                            # `INCOMING_EMAIL` 이었습니다).
+                            "hs_email_direction,hs_email_from_email"
                         )
                     },
                 )
@@ -1356,6 +1389,7 @@ class HubSpotClient:
                             else None
                         ),
                         ticket_id=ticket_of.get(email_id),
+                        from_email=ep.get("hs_email_from_email"),
                     )
                 )
         return engagements

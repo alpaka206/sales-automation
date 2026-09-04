@@ -15,6 +15,9 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import func, select, update
 
 from ...agents.summaries import append_line, rebuild_summary
+# 「우리가 보낸 것인가」는 스레드 수집기와 **같은 규칙**을 씁니다 — 두 벌이면 같은 메일을
+# 두 화면이 다르게 부릅니다.
+from ...agents.ticket_history import is_our_address
 from ...agents.stage_sync import (
     _retire_superseded_drafts,
     customer_state_for,
@@ -813,7 +816,6 @@ def _customer_context(contact_id: int) -> dict | None:
                 "subject": m.subject,
                 "summary": m.body,
                 "context": None,
-                "artifact_url": None,
                 "happened_at": m.sent_at or m.created_at,
                 "source": "message",
             }
@@ -827,7 +829,6 @@ def _customer_context(contact_id: int) -> dict | None:
                 "subject": item.subject,
                 "summary": item.summary,
                 "context": item.context,
-                "artifact_url": item.artifact_url,
                 "happened_at": item.happened_at,
                 "source": "interaction",
             }
@@ -973,8 +974,8 @@ def _linked_conversation(session, raw: str, contact_id: int) -> Conversation | N
 # slightly different word in a note, which is cheaper than a round trip to fetch labels.
 _CHANNEL_LABELS = {
     "email": "이메일", "whatsapp": "WhatsApp", "phone": "전화", "sms": "문자",
-    "kakao": "카카오톡", "meeting": "미팅", "hubspot": "HubSpot",
-    "invoice": "Invoice", "contract": "계약", "manual": "메모",
+    "kakao": "카카오톡", "meeting": "미팅 진행", "hubspot": "HubSpot",
+    "invoice": "Invoice 발송", "contract": "계약", "manual": "메모",
 }
 
 
@@ -1033,7 +1034,6 @@ async def interaction_add(
     subject: str = Form(""),
     summary: str = Form(""),
     context: str = Form(""),
-    artifact_url: str = Form(""),
     happened_at: str = Form(""),
     conversation_id: str = Form(""),
     contract_seq: str = Form(""),
@@ -1084,7 +1084,6 @@ async def interaction_add(
                 subject=subject.strip()[:300] or None,
                 summary=summary.strip(),
                 context=context.strip() or None,
-                artifact_url=artifact_url.strip() or None,
                 happened_at=_parse_dt(happened_at) or datetime.now(timezone.utc),
                 # 수주 고객의 몇 차 계약에 대한 기록인지. 비면 협상 단계(계약 전)이고,
                 # 이 타임라인은 고객 단위라 계약보다 먼저 시작합니다.
@@ -1115,6 +1114,19 @@ async def interaction_add(
                     profile.pipeline_stage = "negotiation"
                     session.add(profile)
                     advance_contact = True
+        # **방금 적은 기록이 그 티켓 요약에도 한 줄로 섭니다** (2026-09-04 운영자 지시:
+        # 「요약본은 소통이 추가되면 내용 반영해서 업데이트」).
+        #
+        # 티켓 화면의 「리드 히스토리」는 이제 티켓마다 이 요약 문단 하나를 그립니다. 여기서
+        # 안 붙이면 운영자가 통화를 적고 새로고침해도 그 카드가 안 변합니다 — 10분 폴러의
+        # 요약 백필은 `CustomerInteraction.context` 만 채우고 대화는 안 건드립니다.
+        #
+        # **모델을 안 부릅니다.** 운영자가 쓴 문장을 그대로 씁니다 — `append_line` 은 완성된
+        # 문자열만 받습니다. `[:200]` 은 `one_line` 이 자기 줄에 거는 것과 같은 상한인데
+        # `append_line` 에는 없어서 여기서 겁니다: 안 자르면 긴 메모 하나가 8000자 상한을
+        # 밀어 **앞쪽의 옛 불릿을 밖으로 밀어냅니다**.
+        if conversation is not None:
+            append_line(session, conversation.id, " ".join(summary.split())[:200])
         session.commit()
 
     await _log_interaction_to_hubspot(
@@ -1482,7 +1494,27 @@ def _sync_hubspot(contact_id: int, per_type: int = 20) -> int:
             if exists is None and conv_id is not None and conv_id in history_synced:
                 continue
             if not exists:
-                direction = "incoming" if "incoming" in email.type else "outgoing"
+                # **방향은 보낸 주소가 정합니다** (2026-09-03 운영자 규칙).
+                #
+                # 예전에는 `hs_email_direction` 라벨을 그대로 믿었습니다
+                # (`"incoming" in email.type`). 그런데 그 라벨은 **허브스팟 사서함에
+                # 도착했는가**를 말할 뿐이라, 우리 쪽 사람이 자기 메일함에서 고객에게 답한
+                # 메일에도 `INCOMING_EMAIL` 이 찍힙니다 — 그 메일들이 리드 히스토리에
+                # 「고객이 한 말」로 떴습니다(실측: `untae@estsoft.com` 발신 81건 전부,
+                # 80건이 `INCOMING_EMAIL`).
+                #
+                # 규칙은 `ticket_history.is_our_address` **한 곳**입니다: `@estsoft.com` ·
+                # `perso.ai` · `perso.co.kr` 과 허브스팟 전달 주소면 우리가 보낸 것, 그
+                # 외는 상대가 보낸 것. 스레드 수집기가 쓰는 것과 같은 함수라 같은 메일을
+                # 두 화면이 다르게 부를 수 없습니다.
+                #
+                # 주소를 못 받았으면 예전 규칙으로 떨어집니다 — 메일이 아닌 접점에는
+                # 보낸 주소가 없습니다.
+                direction = (
+                    ("outgoing" if is_our_address(email.from_email) else "incoming")
+                    if email.from_email
+                    else ("incoming" if "incoming" in email.type else "outgoing")
+                )
                 # 한 번만 만듭니다 — 기록 목록의 미리보기와 티켓 요약의 불릿이 **같은
                 # 줄**이라 두 번 부르면 모델 왕복만 두 배가 됩니다.
                 line = _one_line(direction, email.subject, email.body)

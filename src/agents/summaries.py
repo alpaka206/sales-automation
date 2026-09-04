@@ -28,12 +28,20 @@ logger = logging.getLogger(__name__)
 _MAX_SUMMARY = 8000
 
 
-def one_line(direction: str, subject: str | None, body: str | None) -> str | None:
-    """기록 한 건을 한 줄로. 실패하면 None — 요약 한 줄 때문에 기록을 잃지 않습니다."""
+def one_line(
+    direction: str, subject: str | None, body: str | None, *, always: bool = False
+) -> str | None:
+    """기록 한 건을 한 줄로. 실패하면 None — 요약 한 줄 때문에 기록을 잃지 않습니다.
+
+    ``always`` 는 **짧은 본문도 모델에 맡깁니다** (2026-09-03 운영자 지시: 「다 쓰길 원해」).
+    기본값은 예전 그대로 — 티켓 요약(`append_summary_line`)은 오간 것마다 그때그때 도는
+    자리라, 짧은 줄까지 모델을 부르면 문의 한 건에 왕복이 하나씩 더 붙습니다. 뒤늦게 메우는
+    백필은 기다리는 사람이 없으므로 켭니다.
+    """
     text = (body or "").strip()
     if not text:
         return None
-    if len(text) < 80:
+    if len(text) < 80 and not always:
         # 이미 짧은 것은 줄일 것이 없습니다. 모델 왕복만 늘어납니다.
         return " ".join(text.split())[:200]
     try:
@@ -54,6 +62,133 @@ def one_line(direction: str, subject: str | None, body: str | None) -> str | Non
     except Exception:
         logger.warning("기록 한 줄 요약 실패", exc_info=True)
         return None
+
+
+def backfill_interaction_digests(limit: int = 20) -> int:
+    """한 줄 요약이 비어 있는 기록을 조금씩 채웁니다. 채운 건수를 돌려줍니다.
+
+    **왜 필요한가.** 기록이 들어오는 길이 여럿인데 요약을 만드는 길은 일부뿐입니다 —
+    허브스팟 메일 임포트(`customer_ops`)와 지난 티켓 이관(`hubspot_reconcile`)은 채우지만,
+    티켓 대화를 통째로 받아오는 `ticket_history` 는 ``context=None`` 으로 넣습니다(그
+    경로는 티켓 수백 건을 도는 자리라 줄마다 모델을 부를 수 없습니다). 그래서 화면이
+    요약 대신 **본문 앞머리**를 보여 주는 줄이 쌓였습니다. 여기서 뒤늦게 메웁니다.
+
+    **티켓이 없는 기록도 같이 돕니다** (2026-09-03 운영자 지시) — 조건은 ``conversation_id``
+    가 아니라 「요약이 비었나」 하나입니다.
+
+    **이어하기는 `context IS NULL` 그 자체입니다.** 따로 진행 위치를 적지 않습니다 — 비어
+    있다는 것이 곧 「아직 안 했다」이고, 배포가 끼어들어도 다음 순회가 이어서 합니다.
+
+    **이미 값이 있으면 안 건드립니다.** 그 칸은 사람이 적을 수도 있는 자리라, 덮어쓰면
+    운영자가 쓴 메모가 모델 한 줄로 바뀝니다.
+
+    **순서가 무작위인 이유** — 이 저장소가 이미 한 번 당한 자리입니다. NULL 을 「아직 안
+    했다」로 쓰면서 순서를 고정하면, 앞머리에 **계속 실패하는 행**이 회차 크기만큼 모이는
+    순간 뒤엣것은 한 번도 안 불립니다(`ticket_history` 에서 12건 중 8건이 실패해 나머지 4건이
+    영영 안 돌았던 그 일). 백필이라 순서에는 아무 뜻이 없으므로, 무작위로 집으면 그 굶주림이
+    구조적으로 안 생깁니다 — 도장을 찍을 칸을 새로 만들지 않고도.
+
+    **길이와 무관하게 전부 모델이 씁니다** (2026-09-03 운영자 지시). 짧은 본문을 그대로
+    눌러 쓰던 지름길은 이 경로에서만 끕니다(`one_line(always=True)`) — 티켓 요약은 오간
+    것마다 그때그때 도는 자리라 그대로 둡니다.
+
+    그래서 **실패한 행은 값이 없는 채로 남고 다음 회차에 다시 집힙니다.** 본문을 그대로
+    적어 두고 끝내지 않는 이유: 그러면 모델이 잠깐 죽어 있던 동안의 행들만 영영 요약 없이
+    굳는데, 화면에서는 그 차이가 안 보입니다. 남은 건수가 0 으로 안 내려가면 그건 모델이
+    아프다는 뜻이고, 그 편이 조용히 굳는 것보다 낫습니다.
+    """
+    from sqlalchemy import func as sa_func, select
+
+    from ..db.models import CustomerInteraction
+
+    with SessionLocal() as session:
+        rows = (
+            session.execute(
+                select(CustomerInteraction)
+                .where(
+                    CustomerInteraction.context.is_(None),
+                    # **공백만 있는 요약은 빼야 합니다.** `!= ""` 만으로는 " " 가 통과하는데,
+                    # `one_line` 은 그것을 strip 해서 빈 문자열로 보고 None 을 돌려줍니다 —
+                    # 그러면 그 행은 영원히 다시 집히고 「남은 N건」이 0 으로 안 내려갑니다.
+                    sa_func.trim(CustomerInteraction.summary) != "",
+                )
+                .order_by(sa_func.random())
+                .limit(max(1, min(limit, 200)))
+            )
+            .scalars()
+            .all()
+        )
+        # 세션을 붙들고 모델을 기다리지 않습니다 — 값만 들고 나옵니다.
+        targets = [(r.id, r.direction or "", r.subject, r.summary) for r in rows]
+        remaining = session.scalar(
+            select(sa_func.count(CustomerInteraction.id)).where(
+                CustomerInteraction.context.is_(None),
+                sa_func.trim(CustomerInteraction.summary) != "",
+            )
+        )
+
+    digests: dict[int, str] = {}
+    for row_id, direction, subject, body in targets:
+        # `always=True` — **짧은 기록도 모델이 씁니다** (2026-09-03 운영자 지시).
+        # 그래서 실패하면 그 행은 `context IS NULL` 로 남아 다음 회차에 다시 집힙니다.
+        # 본문을 그대로 적어 두고 끝내지 않는 이유: 그러면 모델이 잠깐 죽어 있던 동안의
+        # 행들만 영영 요약 없이 굳고, 화면에서는 그 차이가 안 보입니다.
+        line = one_line(direction, subject, body, always=True)
+        if line:
+            digests[row_id] = line
+
+    filled = 0
+    rebuilt = 0
+    if digests:
+        with SessionLocal() as session:
+            touched: set[int] = set()
+            for row_id, line in digests.items():
+                row = session.get(CustomerInteraction, row_id)
+                # 그 사이에 사람이 적었을 수 있습니다. 그러면 그쪽이 이깁니다.
+                if row is not None and row.context is None:
+                    row.context = line
+                    filled += 1
+                    if row.conversation_id is not None:
+                        touched.add(row.conversation_id)
+            session.flush()
+            # **줄이 다 채워진 티켓의 요약을 다시 만듭니다** (2026-09-04 운영자 지시:
+            # 「요약을 만들어」).
+            #
+            # 왜 필요한가: 티켓 화면의 「리드 히스토리」가 이제 `conversations.summary`
+            # 하나를 그립니다. 그런데 그 칸을 채우는 자동 경로는 셋뿐이고(실시간 문의 ·
+            # 실제로 나간 회신 · CRM 메일 임포트), **대화를 통째로 받아오는 수집기
+            # (`ticket_history`)는 한 줄도 안 붙입니다.** 그래서 기록이 가장 많은 티켓의
+            # 요약이 가장 비어 있었습니다(실측 321건 중 106건이 빈 칸).
+            #
+            # `rebuild_summary` 는 접점 기록의 `context` 를 **먼저** 씁니다. 그래서 이
+            # 자리에서 부르면 방금 채운 줄들이 그대로 쓰이고 **모델을 다시 안 부릅니다.**
+            #
+            # **그 대화에 빈 줄이 하나도 안 남았을 때만** 부릅니다. 남아 있으면
+            # `rebuild_summary` 가 그 줄을 모델로 만들었다가 행에는 안 남기고 버려서
+            # (`Message` 에만 적습니다) 회차마다 같은 값을 다시 삽니다.
+            for conv_id in touched:
+                unfinished = session.scalar(
+                    select(sa_func.count(CustomerInteraction.id)).where(
+                        CustomerInteraction.conversation_id == conv_id,
+                        CustomerInteraction.context.is_(None),
+                        sa_func.trim(CustomerInteraction.summary) != "",
+                    )
+                )
+                if unfinished:
+                    continue
+                try:
+                    rebuild_summary(session, conv_id)
+                    rebuilt += 1
+                except Exception:
+                    # 요약 하나 때문에 방금 채운 줄들을 잃지 않습니다.
+                    logger.warning("티켓 %s 요약 재생성 실패", conv_id, exc_info=True)
+            session.commit()
+    if targets:
+        logger.info(
+            "기록 요약 백필: %d건 시도, %d건 채움, 티켓 요약 %d건 재생성, 남은 %d건",
+            len(targets), filled, rebuilt, max(0, (remaining or 0) - filled),
+        )
+    return filled
 
 
 def append_line(session, conv_id: int | None, line: str | None) -> None:

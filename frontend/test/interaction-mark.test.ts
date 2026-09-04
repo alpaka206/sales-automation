@@ -21,9 +21,17 @@ describe("티켓 기록의 라벨", () => {
 
   it("그 뒤로 오간 것은 고를 때 쓴 말 그대로다", () => {
     expect(interactionMark("email", "outgoing").label).toBe("이메일 발송");
-    expect(interactionMark("whatsapp", "inbound").label).toBe("WhatsApp 수신");
-    expect(interactionMark("phone", "note").label).toBe("전화 주고받음");
-    expect(interactionMark("meeting", "note").label).toBe("미팅 주고받음");
+    expect(interactionMark("email", "inbound").label).toBe("이메일 수신");
+    // **방향을 안 묻는 타입에는 꼬리말이 없습니다** (2026-09-03). 폼이 이메일에만 방향을
+    // 물으므로 나머지는 전부 `note` 가 되는데, 그대로 이으면 타입 이름에 이미 들어 있는
+    // 동사와 겹쳐 「미팅 진행 주고받음」·「Invoice 발송 주고받음」이 됩니다.
+    expect(interactionMark("whatsapp", "inbound").label).toBe("WhatsApp");
+    expect(interactionMark("phone", "note").label).toBe("전화");
+    expect(interactionMark("meeting", "note").label).toBe("미팅 진행");
+    expect(interactionMark("invoice", "note").label).toBe("Invoice 발송");
+    // 고르개에서 내린 값도 한글로 남습니다 — 사전과 고르개 목록이 갈라져 있어서입니다.
+    expect(interactionMark("hubspot", "note").label).toBe("HubSpot");
+    expect(interactionMark("kakao", "note").label).toBe("카카오톡");
   });
 
   it("채널마다 앞에 서는 모양이 다르다", () => {

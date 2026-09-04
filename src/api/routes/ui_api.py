@@ -639,7 +639,6 @@ def ui_customer_detail(contact_id: int):
                 "subject": item.subject,
                 "summary": item.summary,
                 "context": item.context,
-                "artifact_url": item.artifact_url,
                 "happened_at": item.happened_at,
                 "source": "interaction",
             }

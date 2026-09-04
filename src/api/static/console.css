@@ -561,6 +561,29 @@ a.kpi:hover { border-color: var(--accent); }
 .chip.is-active { background: var(--accent-soft); color: var(--accent); border-color: var(--accent-soft-border); }
 .chip__count { font-variant-numeric: tabular-nums; opacity: .8; }
 
+/* 읽기 전용 배지 — 단계 · 도메인 · 담당자 · 권한처럼 **누를 수 없는** 짧은 값.
+   `.chip` 과 다른 점은 그것뿐입니다(그쪽은 링크·필터라 hover 와 32px 높이가 있습니다).
+
+   **이 규칙은 2026-09-03 에야 생겼습니다.** 그전까지 `.tag` 는 어느 스타일시트에도 없었고,
+   있는 것은 `won.css` 의 `.won .tag` 뿐이었습니다 — 그래서 수주 화면 밖 여섯 화면 열두
+   자리(리드 히스토리의 담당자, 연락처의 라이프사이클·도메인, 계약 상태, 티켓 단계, 사용자
+   권한과 「나」)가 전부 **배경 없는 맨 글씨**로 나오고 있었습니다. 옆의 회색 글씨와 구별이
+   안 돼서 배지인 줄도 몰랐습니다.
+
+   모양은 `.won .tag` 에서 그대로 가져왔습니다 — 두 화면이 같은 것을 다르게 그릴 이유가
+   없습니다. 다른 점 하나는 **기본 배경이 있다는 것**입니다: 수주 쪽은 `.st-live` 같은
+   색 클래스가 항상 따라붙지만 콘솔 쪽은 맨 `.tag` 로만 쓰므로, 바탕이 없으면 여기서
+   고쳐도 여전히 맨 글씨입니다.
+
+   `.won .tag` 는 선택자가 더 구체적이라(0,2,0 대 0,1,0) 로드 순서와 무관하게 이깁니다 —
+   수주 화면은 한 픽셀도 안 바뀝니다. */
+.tag {
+  display: inline-flex; align-items: center; gap: 5px;
+  border-radius: 6px; padding: 3px 8px;
+  font-size: 11.5px; font-weight: 600; white-space: nowrap;
+  background: var(--surface-3); color: var(--text-muted);
+}
+
 .field-label { font-size: 12px; font-weight: 600; color: var(--text-muted); margin-bottom: 6px; display: block; }
 .input, .select, .textarea {
   width: 100%; background: var(--surface); color: var(--text);
@@ -613,6 +636,13 @@ a.kpi:hover { border-color: var(--accent); }
   display: grid; place-items: center; background: var(--surface-2); color: var(--text-subtle);
 }
 .empty__text { font-size: 13.5px; }
+/* 「없다」가 **판단에 쓰이는** 자리 (2026-09-04 운영자 지시). 티켓 화면의 리드 히스토리가
+   그렇습니다 — 처음 연락하는 사람인지 오래 이야기해 온 사람인지가 답의 톤을 바꿉니다.
+   기본 `.empty__text` 는 흐린 작은 글씨라 「아직 안 불러왔다」로 읽힙니다. `.empty` 가
+   이미 가운데 정렬·상하 56px 이라 「박스 중앙」은 그대로 따라옵니다.
+   **기본 클래스를 키우지 않는 이유**: 여섯 화면 열 곳이 그걸 쓰는데, 거기서는 「없다」가
+   그냥 없다는 뜻이라 크게 적을 이유가 없습니다. */
+.empty__text--lead { font-size: 15px; font-weight: 600; color: var(--text); }
 
 /* ---------------------------------------------------------------
    Layout helpers

@@ -65,7 +65,16 @@ OUR_DOMAIN_SUFFIXES = ("hs-inbox.com", "hubspot-inbox.com")
 TICKETS_PER_SWEEP = 8
 
 
-def _is_ours(address: str) -> bool:
+def is_our_address(address: str) -> bool:
+    """이 주소가 **우리 쪽**인가. 방향을 정하는 유일한 규칙입니다.
+
+    공개 이름인 이유(2026-09-03): 같은 판단을 하는 자리가 둘입니다 — 스레드 메시지를
+    받아오는 여기, 그리고 CRM 이메일을 받아오는 `api/routes/customer_ops`. 저쪽은 오래
+    허브스팟의 `hs_email_direction` 라벨을 그대로 믿었고, 그래서 우리 쪽 사람이 자기
+    메일함에서 답한 메일이 리드 히스토리에 **「고객이 한 말」로** 떴습니다(실측:
+    `untae@estsoft.com` 발신 81건 전부). 규칙이 두 벌이면 같은 메일을 두 화면이 다르게
+    부릅니다.
+    """
     domain = address.rsplit("@", 1)[-1].strip().lower()
     if not domain:
         return False
@@ -112,7 +121,7 @@ def classify_direction(message: dict) -> str:
         return "inbound"
     senders = message.get("senders") or []
     for address in _addresses(senders):
-        return "outgoing" if _is_ours(address) else "inbound"
+        return "outgoing" if is_our_address(address) else "inbound"
     for party in senders:
         actor = str((party or {}).get("actorId") or "")
         if actor.startswith("V-"):

@@ -5,7 +5,7 @@ import { getJSON, postForm } from "../lib/api";
 import { Icon } from "../ui/Icon";
 import { SubmitButton, useAction } from "../ui/ActionButton";
 import { kst } from "../lib/format";
-import { InteractionForm, InteractionItem, type Interaction } from "../ui/InteractionForm";
+import { InteractionForm, InteractionItem, groupByTicket, type Interaction } from "../ui/InteractionForm";
 import { LoadingBlock } from "../ui/Loading";
 import { Modal } from "../ui/Modal";
 
@@ -66,40 +66,6 @@ const PAYMENT_METHODS: [string, string][] = [
 /** datetime-local / date inputs need the stored value trimmed to their own shape. */
 const forInput = (value: string | null | undefined, length: number) =>
   value ? String(value).replace(" ", "T").slice(0, length) : "";
-
-/** 소통 기록을 **티켓별로** 묶습니다. 티켓 순서는 위 티켓 카드와 같고(최신이 위),
- *  어느 티켓에도 안 달린 기록은 맨 끝에 「티켓과 무관」으로 모읍니다.
- *
- *  묶는 일을 화면이 하는 이유: 서버는 기록을 시간순으로 주고, 그 순서가 티켓 안에서도
- *  맞아야 합니다. 서버에서 미리 묶어 보내면 같은 목록을 두 모양으로 유지하게 됩니다. */
-function groupByTicket(
-  items: Interaction[],
-  tickets: { conversation_id: number; subject: string | null; ticket_id: string | null }[],
-) {
-  const label = new Map(
-    tickets.map((t) => [
-      t.conversation_id,
-      t.subject || (t.ticket_id ? `티켓 ${t.ticket_id}` : `문의 ${t.conversation_id}`),
-    ]),
-  );
-  const groups = new Map<string, { key: string; label: string; items: Interaction[] }>();
-  for (const item of items) {
-    const id = item.conversation_id ?? null;
-    const key = id === null ? "none" : String(id);
-    if (!groups.has(key)) {
-      groups.set(key, {
-        key,
-        label: id === null ? "티켓과 무관한 기록" : (label.get(id) ?? `문의 ${id}`),
-        items: [],
-      });
-    }
-    groups.get(key)!.items.push(item);
-  }
-  // 티켓이 없는 묶음은 언제나 맨 끝입니다 — 티켓 이야기를 먼저 읽게.
-  return [...groups.values()].sort((a, b) =>
-    a.key === "none" ? 1 : b.key === "none" ? -1 : Number(b.key) - Number(a.key),
-  );
-}
 
 
 export function CustomerDetail() {
@@ -287,7 +253,7 @@ export function CustomerDetail() {
                 여는 이유(무슨 이야기가 오갔나)가 스크롤 아래로 밀려 있었습니다.
                 세 자리가 같은 모달·같은 폼을 쓰니 고칠 곳도 하나입니다. */}
             <div className="section-header" style={{ marginBottom: 12 }}>
-              <div className="section-header__title">소통 히스토리</div>
+              <div className="section-header__title">리드 히스토리</div>
               <button
                 type="button"
                 className="btn btn--subtle btn--sm"
@@ -313,7 +279,8 @@ export function CustomerDetail() {
                     </div>
                     <div className="history-list">
                       {group.items.map((item, index) => (
-                        <InteractionItem key={item.id ?? `${group.key}-${index}`} item={item} />
+                        <InteractionItem key={item.id ?? `${group.key}-${index}`} item={item}
+                                         hideSubject />
                       ))}
                     </div>
                   </div>
@@ -445,7 +412,7 @@ export function CustomerDetail() {
           달린 것이지 한 문의에 달린 것이 아닙니다. */}
       {logging && (
         <Modal
-          title="소통 히스토리 추가"
+          title="히스토리 추가"
           hideCancel
           wide
           onClose={() => setLogging(false)}
@@ -548,7 +515,6 @@ function TicketBlock({ ticket, open, stages }: {
                 subject: message.subject,
                 summary: message.body,
                 context: null,
-                artifact_url: null,
                 happened_at: message.happened_at,
                 source: "message",
               } as Interaction}

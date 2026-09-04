@@ -431,11 +431,12 @@ def test_message_detail_embeds_customer_history(_use_test_db):
     customer = payload["customer"]
     assert customer["profile"]["customer_state"] == "service"
     assert customer["profile"]["next_action"] == "금요일 재연락"
-    assert "킥오프 미팅" in [row["subject"] for row in customer["interactions"]]
-    # The panel is scoped to THIS customer and no longer links out: the full history
-    # lives in its own sidebar section (고객 히스토리 → 인바운드 고객 히스토리) now.
-    # The panel is scoped to THIS customer: the ticket's own log is separate from the
-    # contact-wide one, so a record cannot render twice on one screen.
+    # 티켓에 안 달린 기록은 **개수로만** 옵니다 (2026-09-04). 이 화면의 리드 히스토리는
+    # 티켓마다 요약 한 문단을 그리므로 기록 줄이 필요 없고, 가장 자주 열리는 화면에서
+    # 50행을 매번 읽고 버리던 것이 이 숫자 하나로 바뀌었습니다. 「그 외 n건」이 그 값입니다.
+    assert customer["loose_count"] == 1
+    assert "interactions" not in customer
+    # 티켓의 줄은 따로입니다 — 이 기록은 티켓에 안 달렸으므로 여기 안 옵니다.
     assert payload["ticket_interactions"] == []
 
 

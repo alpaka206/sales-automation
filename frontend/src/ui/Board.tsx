@@ -281,8 +281,8 @@ export function Board({ stages, manualLogStages, dealDetails = {} }: {
                             type="button"
                             className="pipeline-card__log"
                             draggable={false}
-                            title="소통 히스토리 추가"
-                            aria-label="소통 히스토리 추가"
+                            title="히스토리 추가"
+                            aria-label="히스토리 추가"
                             aria-haspopup="dialog"
                             onClick={() => setLogging(card)}
                           >
@@ -320,7 +320,7 @@ export function Board({ stages, manualLogStages, dealDetails = {} }: {
 
       {logging && (
         <Modal
-          title="소통 히스토리 추가"
+          title="히스토리 추가"
           hideCancel
           wide
           onClose={() => setLogging(null)}

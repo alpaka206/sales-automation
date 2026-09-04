@@ -3,6 +3,11 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { getJSON, postForm } from "../../lib/api";
 import { useAction } from "../../ui/ActionButton";
+// **타입 목록은 한 곳에서 옵니다** (2026-09-03 운영자 지시). 이 화면은 모달이 아니고
+// 「관련 계약」 칸이 따로 있어 폼 자체는 합치지 않지만, 고르개 목록까지 따로 들고 있으면
+// 같은 값을 두 화면이 다르게 부릅니다 — 여기는 「메일」·「왓츠앱」·「기타」였고 저쪽은
+// 「이메일」·「WhatsApp」·「메모」였습니다.
+import { CHANNELS } from "../../ui/InteractionForm";
 import { Confirm } from "./Confirm";
 import { WonContractForm } from "./WonContractForm";
 import {
@@ -1268,10 +1273,9 @@ export function CommForm({ contactId, contracts, onDone, onCancel }: {
     <div style={{ paddingBottom: 16, marginBottom: 14, borderBottom: "1px solid var(--line-soft)" }}>
       <div className="form-row">
         <div>
-          <label className="form-label">소통 플랫폼</label>
+          <label className="form-label">타입</label>
           <select className="inp" value={channel} onChange={(e) => setChannel(e.target.value)}>
-            {[["email", "메일"], ["phone", "전화"], ["whatsapp", "왓츠앱"],
-              ["meeting", "미팅"], ["sms", "문자"], ["manual", "기타"]].map(([value, label]) => (
+            {CHANNELS.map(([value, label]) => (
               <option key={value} value={value}>{label}</option>
             ))}
           </select>

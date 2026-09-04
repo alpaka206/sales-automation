@@ -8,7 +8,7 @@ from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse, JSONResponse
-from sqlalchemy import select
+from sqlalchemy import func as sa_func, select
 from starlette.concurrency import run_in_threadpool
 from sqlalchemy.orm import joinedload
 
@@ -224,13 +224,7 @@ def _message_detail_context(
         # Customer-level history (CRM state, contract, cross-channel touchpoints)
         # surfaced inline so the operator sees who this customer is without leaving
         # the reply screen. Full editable view stays at /customers/{id}.
-        customer = (
-            _customer_history(
-                session, contact.id, exclude_conversation_id=conv.id if conv else None
-            )
-            if contact
-            else None
-        )
+        customer = _customer_history(session, contact.id) if contact else None
 
         # The customer's inquiry is shown TRANSLATED (Korean) by default with the
         # original behind an expand toggle. ``needs_ko`` flags inbound non-Korean
@@ -296,10 +290,14 @@ def _message_detail_context(
                     "subject": other.inquiry_subject,
                     "stage": other.stage,
                     "created_at": other.created_at,
-                    # **이미 있는 요약을 씁니다.** 접수할 때 모델이 뽑아 둔 값이라
-                    # (`conversations.customer_requests`) 여기서 다시 만들 이유가 없습니다.
-                    # 제목만 있으면 「자막 번역 견적」이 무엇을 물은 건지 알 수 없습니다.
-                    "requests": other.customer_requests or other.summary,
+                    # **오간 것마다 쌓인 요약이 먼저입니다** (2026-09-04 운영자 지시).
+                    # 순서가 뒤집혀 있었습니다 — `customer_requests` 는 접수할 때 고객이
+                    # 무엇을 물었는지만 뽑은 값이라(프롬프트가 「우리가 무엇을 할지는 쓰지
+                    # 않는다」고 못 박습니다) 그 뒤에 무슨 일이 있었는지를 말하지 못하고,
+                    # 접수 때 한 번 쓰고 끝이라 **기록이 늘어도 안 바뀝니다.**
+                    # `summary` 는 사건마다 한 줄씩 붙습니다 — 이 카드가 보여 줄 값입니다.
+                    # 접수만 되고 아무 일도 없었던 티켓에서만 뒤엣것으로 떨어집니다.
+                    "summary": other.summary or other.customer_requests,
                 }
                 for other in other_conversations
             ],
@@ -327,6 +325,12 @@ def _message_detail_context(
                 ),
                 "inquiry_subject": conv.inquiry_subject if conv else None,
                 "inquiry_language": conv.inquiry_language if conv else None,
+                # 티켓이 만들어진 날. **허브스팟을 다시 부르지 않습니다** — 백필이 허브스팟의
+                # `createdate` 를 그대로 복사해 두었고(`hubspot_backfill`: `created_at=
+                # ticket.created_at`), 실시간으로 들어온 티켓만 우리가 받은 시각이라 몇 초
+                # 늦습니다. 이 화면은 가장 자주 열리는 자리라, 이미 있는 값을 두고 왕복을
+                # 하나 더 얹을 이유가 없습니다.
+                "created_at": conv.created_at if conv else None,
                 # The Inbound DB workbook's stable key for this inquiry (e.g. 1330).
                 # Threads this app appended carry it on the conversation; ones imported
                 # from the sheet carry it on the contact — same fallback order every
@@ -350,7 +354,6 @@ def _message_detail_context(
                         "subject": it.subject,
                         "summary": it.summary,
                         "context": it.context,
-                        "artifact_url": it.artifact_url,
                         "happened_at": it.happened_at,
                     }
                     # 위에서 이미 읽어 둔 같은 행들입니다(오래된 순). 여기서 최신순으로
@@ -424,41 +427,30 @@ def _qualification_of(customer: dict | None) -> str:
     return qualification_for_plan(profile.get("current_plan"))
 
 
-def _customer_history(session, contact_id: int, exclude_conversation_id: int | None = None) -> dict:
-    """Read-only customer-level history for the message-detail sidebar.
+def _customer_history(session, contact_id: int) -> dict:
+    """Read-only customer-level facts for the ticket screen — **줄이 아니라 숫자입니다.**
 
-    Mirrors the pieces of the /customers/{id} page that are NOT already on the
-    reply screen: the CustomerProfile snapshot (pipeline/state/temperature/next
-    action), the latest contract, and the cross-channel touchpoint log
-    (CustomerInteraction — manual notes + HubSpot-synced emails/deals/notes).
-    Everything is serialized to plain dicts before the session closes, so the
-    template never touches a detached ORM object. Editing lives at /customers/{id}.
+    프로필 스냅샷(단계·상태·온도·다음 액션)과, 어느 티켓에도 안 달린 접점 기록의 **개수**
+    하나. 그게 전부입니다.
 
-    ``exclude_conversation_id`` drops the records THIS ticket already lists in its own
-    소통 히스토리 card — otherwise every call the operator logs here would render twice on
-    one screen.
+    **기록 줄 50개를 보내던 것을 지웠습니다** (2026-09-04 운영자 지시). 이 화면의
+    「리드 히스토리」는 이제 접점 기록을 한 줄씩 그리지 않고 **티켓마다 요약 한 문단**을
+    그립니다(`other_tickets[].summary`) — 답을 쓰는 자리에서 필요한 것은 「이 사람과 전에
+    무슨 이야기가 있었나」이지 그때 오간 메일의 본문이 아닙니다. 본문은 「전체보기」가
+    가는 고객 상세에 있습니다. 그래서 이 콘솔에서 가장 자주 열리는 화면이 매번 읽고
+    버리던 50행이 없어졌습니다.
 
-    계약(`ContractRecord`)도 여기서 같이 실어 보냈습니다. 화면이 읽지 않아 지웠습니다 —
-    티켓 하나 열 때마다 계약 테이블을 한 번 더 읽고 버리는 값이었습니다. 계약을 보는 곳은
-    고객 상세입니다.
+    남은 숫자 하나(`loose_count`)가 「그 외 n건」입니다 — 허브스팟 딜·노트, 지난 티켓에서
+    떨어져 나온 메일, 수주 화면에서 적은 소통 기록처럼 **티켓에 안 달린** 접점입니다.
+    티켓 이야기가 아니라 티켓 카드에 줄로 설 자리가 없고, 그렇다고 없는 척하면 고객
+    상세와 건수가 안 맞습니다.
     """
     profile = session.get(CustomerProfile, contact_id)
-    interaction_q = select(CustomerInteraction).where(
-        CustomerInteraction.contact_id == contact_id
-    )
-    if exclude_conversation_id is not None:
-        interaction_q = interaction_q.where(
-            (CustomerInteraction.conversation_id.is_(None))
-            | (CustomerInteraction.conversation_id != exclude_conversation_id)
+    loose_count = session.scalar(
+        select(sa_func.count(CustomerInteraction.id)).where(
+            CustomerInteraction.contact_id == contact_id,
+            CustomerInteraction.conversation_id.is_(None),
         )
-    interactions = (
-        session.execute(
-            # 6 → 20 (2026-08-19). 허브스팟에서 옛 기록을 끌어온 뒤로 6건은 최근 며칠
-            # 밖에 못 보여 줍니다. 화면에서는 접혀 있으므로 길어도 자리를 안 먹습니다.
-            interaction_q.order_by(CustomerInteraction.happened_at.desc()).limit(20)
-        )
-        .scalars()
-        .all()
     )
     profile_data = (
         {
@@ -472,24 +464,7 @@ def _customer_history(session, contact_id: int, exclude_conversation_id: int | N
         if profile
         else None
     )
-    interaction_rows = [
-        {
-            "channel": it.channel,
-            "direction": it.direction,
-            "handler": it.handler,
-            "subject": it.subject,
-            "summary": it.summary,
-            # 가져올 때 만들어 둔 한 줄. 목록은 이것을 먼저 보여 주고 본문은 눌러야 나옵니다 —
-            # 제목만으로는 「자막 번역 견적」이 무엇을 물은 건지 알 수 없습니다.
-            "digest": it.context,
-            "happened_at": it.happened_at,
-        }
-        for it in interactions
-    ]
-    return {
-        "profile": profile_data,
-        "interactions": interaction_rows,
-    }
+    return {"profile": profile_data, "loose_count": int(loose_count or 0)}
 
 
 # 여기 있던 `_translate_inbound_bubbles` 는 지웠습니다. **화면을 여는 길에는 모델이 없습니다.**
@@ -1002,63 +977,25 @@ async def start_manual_reply(
 async def contact_history_digest(limit: int = 40):
     """이미 가져다 둔 기록에 **한 줄 요약만** 채웁니다 — 허브스팟에 다시 다녀오지 않습니다.
 
-    옛 기록을 끌어올 때는 요약을 안 만들었습니다. 그 값들은 이미 우리 DB 에 본문째로 있고,
-    필요한 것은 줄이는 일뿐이라 밖으로 나갈 이유가 없습니다(운영자 지적).
+    **일은 10분 폴러가 이미 합니다** (2026-09-03, `summaries.backfill_interaction_digests`).
+    이 라우트는 그것을 손으로 한 번 더 밀 뿐이고, **같은 함수**를 부릅니다 — 규칙(무엇을
+    고르나 · 순서 · 이미 값이 있으면 안 건드린다)이 두 벌이면 손으로 민 것과 저절로 도는
+    것이 다른 행을 다르게 채웁니다.
 
-    한 번에 ``limit`` 건씩 하고 남은 수를 돌려줍니다. 다 될 때까지 다시 부르면 됩니다 —
-    진행 위치는 따로 기록하지 않습니다. **`context` 가 비어 있다는 것이 곧 「아직 안 했다」**
-    이고, 그것이 이어하기입니다.
-
-    이미 값이 있는 행은 건드리지 않습니다. 그 칸은 사람이 적을 수도 있는 자리라, 덮어쓰면
-    운영자가 쓴 메모가 모델 한 줄로 바뀝니다.
-
-    짧은 기록은 건너뜁니다(`_one_line` 이 그 판단을 합니다). 세 줄짜리 메모를 한 줄로
-    줄여 봐야 같은 말이고, 그 왕복만 늘어납니다.
+    한 번에 ``limit`` 건씩 하고 남은 수를 돌려줍니다. 진행 위치는 따로 기록하지 않습니다 —
+    **`context` 가 비어 있다는 것이 곧 「아직 안 했다」**이고, 그것이 이어하기입니다.
     """
-    from sqlalchemy import func as sa_func
+    from ...agents.summaries import backfill_interaction_digests
 
-    from .customer_ops import _one_line
-
+    filled = await asyncio.to_thread(backfill_interaction_digests, limit)
     with SessionLocal() as session:
-        rows = (
-            session.execute(
-                select(CustomerInteraction)
-                .where(
-                    CustomerInteraction.context.is_(None),
-                    sa_func.length(CustomerInteraction.summary) >= 80,
-                )
-                .order_by(CustomerInteraction.happened_at.desc())
-                .limit(max(1, min(limit, 200)))
-            )
-            .scalars()
-            .all()
-        )
-        targets = [(row.id, row.direction, row.subject, row.summary) for row in rows]
         remaining = session.scalar(
             select(sa_func.count(CustomerInteraction.id)).where(
                 CustomerInteraction.context.is_(None),
-                sa_func.length(CustomerInteraction.summary) >= 80,
+                sa_func.trim(CustomerInteraction.summary) != "",
             )
         )
-
-    filled = 0
-    digests: dict[int, str] = {}
-    for row_id, direction, subject, body in targets:
-        line = await asyncio.to_thread(_one_line, direction or "", subject, body)
-        if line:
-            digests[row_id] = line
-    if digests:
-        with SessionLocal() as session:
-            for row_id, line in digests.items():
-                row = session.get(CustomerInteraction, row_id)
-                if row is not None and row.context is None:
-                    row.context = line
-                    filled += 1
-            session.commit()
-    logger.info("기록 요약: %d건 시도, %d건 채움, 남은 %d건", len(targets), filled, remaining or 0)
-    return JSONResponse(
-        {"processed": len(targets), "filled": filled, "remaining": max(0, (remaining or 0) - len(targets))}
-    )
+    return JSONResponse({"filled": filled, "remaining": remaining or 0})
 
 
 def _write_local_plan_fields(

@@ -47,6 +47,10 @@ class EngagementDTO(BaseModel):
     # 한동안 시각으로 「그때 열려 있던 티켓」을 골랐는데, New 티켓에 몇 달 전 메일이
     # 붙었습니다. 없으면 None: 티켓 없이 연락처에만 달린 메일도 있습니다.
     ticket_id: str | None = None
+    # 보낸 주소. **방향을 정하는 값**입니다 — `type`(=`hs_email_direction`)은 허브스팟이
+    # 붙인 라벨이라, 우리 쪽 사람이 자기 메일함에서 답한 메일에도 `INCOMING_EMAIL` 이
+    # 찍힙니다. 메일이 아닌 접점(통화·미팅·메모)에는 없으므로 None 입니다.
+    from_email: str | None = None
 
 
 class DealDTO(BaseModel):

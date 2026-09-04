@@ -490,10 +490,17 @@ def test_a_protocol_relative_return_address_is_refused(log_db):
 # ---------- the ticket screen shows its own log ----------
 
 
-def test_the_ticket_screen_separates_its_own_records_from_the_rest(log_db):
-    """The ticket's 소통 히스토리 holds this inquiry's records; the sidebar keeps the rest of
-    the customer. A record must appear in exactly one of the two, or every call logged
-    here would render twice on one screen."""
+def test_the_two_lists_on_the_ticket_screen_count_different_things(log_db):
+    """「이 티켓의 기록」은 이 문의의 **줄**, 「리드 히스토리」는 다른 티켓의 **요약**.
+
+    하루 동안 반대로 돌려 봤습니다(2026-09-03): 리드 히스토리가 이 티켓 것까지 티켓별로
+    묶어 전부 보여 주게. 그건 답을 쓰는 화면에 메일함을 하나 더 세우는 일이었고, 운영자가
+    되돌리라고 했습니다(2026-09-04).
+
+    지금 겹칠 수 없는 이유는 **세는 것이 다르기 때문**입니다: 이쪽은 이 티켓의 접점 기록
+    줄, 저쪽은 **다른** 티켓의 요약 한 문단씩. 그래서 리드 히스토리는 기록 줄을 아예 안
+    받습니다 — 티켓에 안 달린 것의 개수 하나뿐입니다.
+    """
     factory, ids = log_db
     with factory() as session:
         session.add_all(
@@ -512,15 +519,26 @@ def test_the_ticket_screen_separates_its_own_records_from_the_rest(log_db):
                     direction="incoming",
                     summary="작년 건 문자 확인",
                 ),
+                # 티켓에 안 달린 기록 — 「그 외 n건」으로만 셉니다.
+                CustomerInteraction(
+                    contact_id=ids["contact"],
+                    channel="hubspot",
+                    direction="note",
+                    summary="허브스팟 딜 메모",
+                ),
             ]
         )
         session.commit()
     from src.api.routes.messages import _message_detail_context
 
     ctx = _message_detail_context(ids["negotiating_message"])
+    # 이 티켓의 줄은 이 티켓 것만.
     assert [row["summary"] for row in ctx["ticket_interactions"]] == ["전화로 납기 협의"]
-    sidebar = [row["summary"] for row in ctx["customer"]["interactions"]]
-    assert sidebar == ["작년 건 문자 확인"]
+    # 리드 히스토리는 **줄을 안 받습니다** — 가장 자주 열리는 화면에서 매번 읽고 버리던
+    # 50행이 사라진 자리입니다.
+    assert "interactions" not in ctx["customer"]
+    # 티켓에 안 달린 것만 셉니다. 티켓에 달린 둘은 여기 안 들어갑니다.
+    assert ctx["customer"]["loose_count"] == 1
 
     with TestClient(app) as client:
         payload = client.get(f"/api/ui/messages/{ids['negotiating_message']}").json()
@@ -562,3 +580,30 @@ def test_a_meeting_still_advances_a_thread_that_has_not_started_negotiating(log_
         )
     with factory() as session:
         assert session.get(Conversation, ids["negotiating"]).stage == "negotiation"
+
+
+# ---------- 방향은 보낸 주소가 정한다 ----------
+
+
+def test_our_own_address_is_never_read_as_the_customer():
+    """`@estsoft.com` 이 보냈으면 **우리가 보낸 것**입니다 — 허브스팟 라벨과 무관하게.
+
+    2026-09-03 운영자 규칙. 예전에는 `hs_email_direction` 을 그대로 믿었는데, 그 라벨은
+    「허브스팟 사서함에 도착했는가」를 말할 뿐이라 우리 쪽 사람이 자기 메일함에서 고객에게
+    답한 메일에도 `INCOMING_EMAIL` 이 찍힙니다 — 실측으로 `untae@estsoft.com` 발신 81건
+    중 80건이 그랬고, 그 메일들이 리드 히스토리에 「고객이 한 말」로 떴습니다.
+
+    규칙은 한 곳(`ticket_history.is_our_address`)이고 스레드 수집기가 쓰는 것과 같습니다.
+    """
+    from src.agents.ticket_history import is_our_address
+
+    # 우리 것 — 개인 사서함도, 팀 주소도, 허브스팟 전달 주소도.
+    assert is_our_address("untae@estsoft.com")
+    assert is_our_address("support@perso.ai")
+    assert is_our_address("perso.ai@estsoft.com")
+    assert is_our_address("support-1@estsoft.com.hs-inbox.com")
+    assert is_our_address("support@45169260.hubspot-inbox.com")
+    # 그 외는 전부 상대가 보낸 것.
+    assert not is_our_address("customer@gmail.com")
+    assert not is_our_address("buyer@holywater.tech")
+    assert not is_our_address("")
