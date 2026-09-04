@@ -510,7 +510,7 @@ export function MessageDetail() {
         <div className="section-header" style={{ marginBottom: 12 }}>
           <div className="section-header__l">
             <span className="section-header__icon"><Icon name="history" size={16} /></span>
-            <div className="section-header__title">리드 히스토리</div>
+            <div className="section-header__title">이전 히스토리</div>
           </div>
           <Link className="btn btn--subtle btn--sm" to={`/customers/${contact.id}`}>
             전체보기
@@ -530,12 +530,21 @@ export function MessageDetail() {
           </div>
         ) : (
           <div className="stack" style={{ gap: 12 }}>
+            {/* **한 문의가 한 상자입니다** (2026-09-04 운영자 지시: 「티켓 있으면 테두리
+                한번 치도록」). 요약을 자르지 않기로 하면서 줄이 여러 줄이 됐고, 테두리가
+                없으면 어디까지가 한 티켓 이야기인지 안 보입니다.
+
+                **눌러서 그 티켓으로 갑니다.** 오른쪽 `›` 가 그것을 미리 말합니다 — 상자가
+                통째로 링크라 어디를 눌러도 됩니다. */}
             {data.other_tickets.map((other) => (
-              <Link key={other.conversation_id} className="link--plain"
+              <Link key={other.conversation_id} className="link--plain history-box"
                     to={`/tickets/${other.conversation_id}`}>
                 <div className="row-between" style={{ gap: 8 }}>
                   <strong className="t-sm">{other.subject || "제목 없는 문의"}</strong>
-                  <span className="tag">{data.stage_labels[other.stage] ?? other.stage}</span>
+                  <span className="row" style={{ gap: 6 }}>
+                    <span className="tag">{data.stage_labels[other.stage] ?? other.stage}</span>
+                    <Icon name="chevron" size={15} />
+                  </span>
                 </div>
                 <div className="t-xs t-subtle">
                   {kst(other.created_at)}{other.ticket_id ? ` · #${other.ticket_id}` : ""}
@@ -556,20 +565,28 @@ export function MessageDetail() {
                 티켓 행이 없어 묶는 열쇠는 제목이고, 그래서 눌러 갈 곳도 없습니다 —
                 내용은 「전체보기」에 있습니다. 모양은 살아 있는 티켓과 같습니다. */}
             {data.customer?.past_tickets?.map((past) => (
-              <div key={past.subject}>
+              /* **눌러 갈 티켓이 없습니다** — 그 대화 행은 지워졌습니다. 그래서 여기서는
+                 「자세히 보기」가 고객 상세로 갑니다. 그 메일들이 실제로 사는 자리이고,
+                 머리글의 「전체보기」와 같은 곳입니다.
+
+                 「지난 티켓」 칩은 뗐습니다(2026-09-04 운영자 지시) — 그 사실은 아래
+                 메타 줄이 적습니다. 오른쪽 자리는 **어디로 갈 수 있는지**를 말하는 데
+                 씁니다. */
+              <Link key={past.subject} className="link--plain history-box"
+                    to={`/customers/${contact.id}`}>
                 <div className="row-between" style={{ gap: 8 }}>
                   <strong className="t-sm">{past.subject}</strong>
-                  <span className="tag">지난 티켓</span>
+                  <Icon name="chevron" size={15} />
                 </div>
                 <div className="t-xs t-subtle">
-                  {past.last_at ? kst(past.last_at) : ""} · {past.count}건
+                  {past.last_at ? kst(past.last_at) : ""} · {past.count}건 · 지난 티켓
                 </div>
                 {past.summary && (
                   <div className="t-sm" style={{ marginTop: 4, whiteSpace: "pre-line" }}>
                     {past.summary}
                   </div>
                 )}
-              </div>
+              </Link>
             ))}
             {/* **진짜 티켓이 없던 것만** 여기 셉니다 — 허브스팟 딜·노트, 손으로 적은
                 고객 단위 메모, 수주 화면에서 적은 소통 기록. 줄로 설 자리는 없지만

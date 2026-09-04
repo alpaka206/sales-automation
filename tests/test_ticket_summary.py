@@ -337,16 +337,22 @@ def test_the_lead_history_card_draws_summaries_not_rows():
     screen = pathlib.Path("frontend/src/screens/MessageDetail.tsx").read_text(
         encoding="utf-8"
     )
-    card = screen[screen.index('<div className="section-header__title">리드 히스토리</div>'):]
-    card = card[: card.index("티켓 정보")]
+    card = screen[screen.index('<div className="section-header__title">이전 히스토리</div>'):]
+    card = card[: card.index("  return (")]
     assert "other.summary" in card, "티켓마다 요약 문단을 그려야 합니다"
-    assert "InteractionItem" not in card, "리드 히스토리에 기록 줄이 서면 안 됩니다"
-    # 「그 외 n건」 · 「전체보기」 · 눈에 띄는 빈 상태.
+    assert "InteractionItem" not in card, "이전 히스토리에 기록 줄이 서면 안 됩니다"
+    # 「티켓 외 n건」 · 「전체보기」 · 눈에 띄는 빈 상태.
     assert "loose_count" in card and "전체보기" in card
     assert "이전 히스토리가 존재하지 않습니다." in card
     assert "empty__text--lead" in card
     # 지금 보고 있는 티켓은 안 들어갑니다 — 그 요약은 왼쪽 「이 티켓의 기록」과 같은 글자입니다.
     assert "data.other_tickets.map" in card
+    # **한 문의가 한 상자**이고, 누르면 그 티켓으로 갑니다 (2026-09-04 운영자 지시).
+    assert card.count("history-box") == 2, "살아 있는 티켓과 지난 티켓 둘 다 상자입니다"
+    assert "to={`/tickets/${other.conversation_id}`}" in card
+    # 지난 티켓은 눌러 갈 티켓이 없어 고객 상세로 갑니다. 칩 대신 `›` 가 섭니다.
+    assert "지난 티켓" in card and 'className="tag">지난 티켓' not in card
+    assert card.count('name="chevron" size={15}') == 2
 
 
 def test_the_bold_empty_state_has_a_rule_of_its_own():
