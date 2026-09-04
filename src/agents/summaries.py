@@ -64,7 +64,7 @@ def one_line(
         return None
 
 
-def backfill_interaction_digests(limit: int = 20) -> int:
+def backfill_interaction_digests(limit: int = 120) -> int:
     """한 줄 요약이 비어 있는 기록을 조금씩 채웁니다. 채운 건수를 돌려줍니다.
 
     **왜 필요한가.** 기록이 들어오는 길이 여럿인데 요약을 만드는 길은 일부뿐입니다 —
@@ -82,11 +82,17 @@ def backfill_interaction_digests(limit: int = 20) -> int:
     **이미 값이 있으면 안 건드립니다.** 그 칸은 사람이 적을 수도 있는 자리라, 덮어쓰면
     운영자가 쓴 메모가 모델 한 줄로 바뀝니다.
 
-    **순서가 무작위인 이유** — 이 저장소가 이미 한 번 당한 자리입니다. NULL 을 「아직 안
-    했다」로 쓰면서 순서를 고정하면, 앞머리에 **계속 실패하는 행**이 회차 크기만큼 모이는
-    순간 뒤엣것은 한 번도 안 불립니다(`ticket_history` 에서 12건 중 8건이 실패해 나머지 4건이
-    영영 안 돌았던 그 일). 백필이라 순서에는 아무 뜻이 없으므로, 무작위로 집으면 그 굶주림이
-    구조적으로 안 생깁니다 — 도장을 찍을 칸을 새로 만들지 않고도.
+    **티켓 하나씩, 티켓 고르기는 무작위로.** 두 가지를 동시에 만족해야 합니다.
+
+    *티켓 단위인 이유*: 티켓 요약은 그 티켓의 줄이 **전부** 채워졌을 때만 다시 만듭니다.
+    표 전체에서 무작위로 집던 때에는 한 티켓의 열네 줄이 다 뽑힐 때까지 몇 시간이 걸려
+    **요약이 하나도 안 만들어졌습니다**(운영 로그: 「20건 채움, 티켓 요약 0건 재생성, 남은
+    1864건」). 티켓 단위면 첫 회차부터 하나씩 완성됩니다.
+
+    *무작위인 이유*: 이 저장소가 이미 당한 자리입니다. NULL 을 「아직 안 했다」로 쓰면서
+    순서를 고정하면 앞머리의 **계속 실패하는** 것이 뒤엣것을 영영 굶깁니다(`ticket_history`
+    에서 12건 중 8건이 실패해 나머지 4건이 한 번도 안 불렸던 그 일). 이제 그 무작위가
+    행이 아니라 **티켓**에 걸립니다.
 
     **길이와 무관하게 전부 모델이 씁니다** (2026-09-03 운영자 지시). 짧은 본문을 그대로
     눌러 쓰던 지름길은 이 경로에서만 끕니다(`one_line(always=True)`) — 티켓 요약은 오간
@@ -101,30 +107,60 @@ def backfill_interaction_digests(limit: int = 20) -> int:
 
     from ..db.models import CustomerInteraction
 
+    # **공백만 있는 요약은 빼야 합니다.** `!= ""` 만으로는 " " 가 통과하는데, `one_line` 은
+    # 그것을 strip 해서 빈 문자열로 보고 None 을 돌려줍니다 — 그러면 그 행은 영원히 다시
+    # 집히고 「남은 N건」이 0 으로 안 내려갑니다.
+    pending = (
+        CustomerInteraction.context.is_(None),
+        sa_func.trim(CustomerInteraction.summary) != "",
+    )
+    budget = max(1, min(limit, 400))
     with SessionLocal() as session:
-        rows = (
-            session.execute(
-                select(CustomerInteraction)
-                .where(
-                    CustomerInteraction.context.is_(None),
-                    # **공백만 있는 요약은 빼야 합니다.** `!= ""` 만으로는 " " 가 통과하는데,
-                    # `one_line` 은 그것을 strip 해서 빈 문자열로 보고 None 을 돌려줍니다 —
-                    # 그러면 그 행은 영원히 다시 집히고 「남은 N건」이 0 으로 안 내려갑니다.
-                    sa_func.trim(CustomerInteraction.summary) != "",
-                )
+        # **티켓 하나씩 통째로 채웁니다** (2026-09-04).
+        #
+        # 처음에는 표 전체에서 무작위로 집었습니다. 굶주림은 안 생겼지만 **요약이 하나도 안
+        # 만들어졌습니다** — 티켓 요약은 그 티켓의 줄이 **전부** 채워졌을 때만 다시 만드는데,
+        # 무작위로 집으면 한 티켓의 열네 줄이 다 뽑힐 때까지 몇 시간이 걸립니다. 운영 로그가
+        # 그대로 말해 줬습니다: 「20건 채움, 티켓 요약 **0건** 재생성, 남은 1864건」. 그동안
+        # 화면에서는 이전 티켓들이 제목·날짜만 남아 「히스토리가 사라진」 것처럼 보입니다.
+        #
+        # 티켓 단위로 집으면 **첫 회차부터 요약이 하나씩 완성됩니다.** 티켓 고르기는 여전히
+        # 무작위라, 계속 실패하는 티켓이 뒤엣것을 굶기지 않습니다.
+        conv_ids = [
+            row
+            for row in session.scalars(
+                select(CustomerInteraction.conversation_id)
+                .where(*pending, CustomerInteraction.conversation_id.is_not(None))
+                .group_by(CustomerInteraction.conversation_id)
                 .order_by(sa_func.random())
-                .limit(max(1, min(limit, 200)))
+                .limit(40)
             )
-            .scalars()
-            .all()
-        )
+        ]
+        rows: list = []
+        for conv_id in conv_ids:
+            if len(rows) >= budget:
+                break
+            rows.extend(
+                session.scalars(
+                    select(CustomerInteraction)
+                    .where(*pending, CustomerInteraction.conversation_id == conv_id)
+                ).all()
+            )
+        # 티켓에 안 달린 줄은 다시 만들 요약이 없으므로 남는 자리만 씁니다. 그래도
+        # 채웁니다 — 고객 상세의 미리보기가 그 값을 읽습니다.
+        if len(rows) < budget:
+            rows.extend(
+                session.scalars(
+                    select(CustomerInteraction)
+                    .where(*pending, CustomerInteraction.conversation_id.is_(None))
+                    .order_by(sa_func.random())
+                    .limit(budget - len(rows))
+                ).all()
+            )
         # 세션을 붙들고 모델을 기다리지 않습니다 — 값만 들고 나옵니다.
         targets = [(r.id, r.direction or "", r.subject, r.summary) for r in rows]
         remaining = session.scalar(
-            select(sa_func.count(CustomerInteraction.id)).where(
-                CustomerInteraction.context.is_(None),
-                sa_func.trim(CustomerInteraction.summary) != "",
-            )
+            select(sa_func.count(CustomerInteraction.id)).where(*pending)
         )
 
     digests: dict[int, str] = {}

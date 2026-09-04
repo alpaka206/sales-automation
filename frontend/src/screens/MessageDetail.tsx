@@ -486,6 +486,79 @@ export function MessageDetail() {
     setPreview(await response.text());
   }
 
+  // **리드 히스토리는 한 벌이고 자리가 둘입니다** (2026-09-04 운영자 지시).
+  // New 에서는 오른쪽 — 그때 본론은 초안이고 이건 그것을 쓰기 위한 참고입니다. New 를
+  // 지나면 본론이 「이 사람과 무슨 이야기가 오갔나」로 바뀌므로 「이 티켓의 기록」 **아래**,
+  // 본문 칼럼에 섭니다. 같은 것을 두 벌 적으면 한쪽만 고치는 날이 옵니다.
+  // **리드 히스토리 — 이전 티켓의 요약만** (2026-09-04 운영자 지시).
+  //        「세부 이메일 내용 아예 x」. 답을 쓰는 자리에서 필요한 것은 「이 사람과 전에
+  //        무슨 이야기가 있었나」 한 문단이지 그때 오간 메일의 본문이 아닙니다. 본문은
+  //        「전체보기」가 가는 고객 상세에 있고, 그 화면은 **같은 값을 같은 모양으로**
+  //        그립니다(`CustomerDetail` 의 `ticket.summary`).
+  //
+  //        **지금 보고 있는 티켓은 안 넣습니다.** 그 요약 불릿은 바로 왼쪽 「이 티켓의
+  //        기록」 각 줄의 둘째 줄과 **같은 문자열**이라(한 줄을 만들어 `messages.
+  //        summary_line` 과 `conversations.summary` 에 같이 씁니다), 넣으면 2026-08-25 에
+  //        지운 요약 카드가 그대로 부활합니다. 「**이전** 히스토리」라는 말도 그 뜻입니다.
+  //
+  //        머리글 오른쪽의 「전체보기」가 예전의 떠 있던 칩을 대신합니다 — 같은 곳으로
+  //        가는데, 카드 안에 있으면 「무엇의 전체인가」가 붙습니다.
+  const leadHistoryCard = contact && (
+      <div className="card">
+        <div className="section-header" style={{ marginBottom: 12 }}>
+          <div className="section-header__l">
+            <span className="section-header__icon"><Icon name="history" size={16} /></span>
+            <div className="section-header__title">리드 히스토리</div>
+          </div>
+          <Link className="btn btn--subtle btn--sm" to={`/customers/${contact.id}`}>
+            전체보기
+          </Link>
+        </div>
+        {data.other_tickets.length === 0 && !data.customer?.loose_count ? (
+          /* **눈에 띄어야 합니다** (2026-09-04 운영자 지시). 「없다」는 이 화면에서
+             판단에 쓰는 사실입니다 — 처음 연락하는 사람인지, 오래 이야기해 온
+             사람인지가 답의 톤을 바꿉니다. 흐린 작은 글씨로 적으면 「아직 안
+             불러왔다」로 읽힙니다. */
+          <div className="empty">
+            <div className="empty__text empty__text--lead">
+              이전 히스토리가 존재하지 않습니다.
+            </div>
+          </div>
+        ) : (
+          <div className="stack" style={{ gap: 12 }}>
+            {data.other_tickets.map((other) => (
+              <Link key={other.conversation_id} className="link--plain"
+                    to={`/tickets/${other.conversation_id}`}>
+                <div className="row-between" style={{ gap: 8 }}>
+                  <strong className="t-sm">{other.subject || "제목 없는 문의"}</strong>
+                  <span className="tag">{data.stage_labels[other.stage] ?? other.stage}</span>
+                </div>
+                <div className="t-xs t-subtle">
+                  {kst(other.created_at)}{other.ticket_id ? ` · #${other.ticket_id}` : ""}
+                </div>
+                {/* **자르지 않습니다** (2026-09-04 운영자 지시: 「전부 보여줌」).
+                    오간 것마다 한 줄씩 쌓인 값이라 오래된 티켓은 길어질 수 있는데,
+                    그게 그 티켓의 이야기 전부입니다. */}
+                {other.summary && (
+                  <div className="t-sm" style={{ marginTop: 4, whiteSpace: "pre-line" }}>
+                    {other.summary}
+                  </div>
+                )}
+              </Link>
+            ))}
+            {/* 티켓에 안 달린 접점 — 허브스팟 딜·노트, 지난 티켓에서 떨어져 나온 메일,
+                수주 화면에서 적은 소통 기록. 티켓 이야기가 아니라 줄로 설 자리가
+                없지만, 없는 척하면 고객 상세와 건수가 안 맞습니다. */}
+            {!!data.customer?.loose_count && (
+              <div className="t-xs t-subtle">
+                그 외 {data.customer.loose_count}건
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+  );
+
   return (
     <>
       {/* 나가는 문 둘. 왼쪽은 온 곳으로, 오른쪽은 **이 고객의 히스토리**입니다 —
@@ -841,14 +914,9 @@ export function MessageDetail() {
               </div>
             </div>
           )}
-          {/* **고객 기록도 메인입니다** — New 이후에는 이 화면의 본론이 「이 사람과 무슨
-              이야기가 오갔나」이기 때문입니다. New 에서는 오른쪽에 둡니다: 그때는 본론이
-              초안이고, 이건 그 초안을 쓰기 위한 참고입니다.
-
-              **비어 있어도 그립니다** (2026-09-03 운영자 지시). 예전에는 `length > 0` 이라
-              기록이 없으면 카드가 통째로 사라졌고, 그래서 「추가하기」로 적은 첫 기록이
-              어디로 갔는지 알 수 없었습니다. 연락처가 없는 티켓(`customer` 자체가 null)도
-              빈 목록으로 그립니다 — 「없다」와 「자리가 없다」는 다른 말입니다. */}
+          {/* New 를 지나면 본론이 「이 사람과 무슨 이야기가 오갔나」로 바뀝니다 —
+              그래서 「이 티켓의 기록」 바로 아래, 본문 칼럼에 섭니다 (2026-09-04 운영자 지시). */}
+          {afterNew && leadHistoryCard}
         </div>
 
         <div className="stack" style={{ gap: "var(--gap)" }}>
@@ -874,76 +942,10 @@ export function MessageDetail() {
               **값은 그대로 쌓입니다** — 초안 프롬프트가 「기존 대화 요약」으로 읽습니다
               (`inbound.py`). 그래서 지운 것은 카드뿐이고, 이 화면은 그 값을 이제 안
               받습니다. */}
-          {/* **이 티켓 밖의 것들.** 지금 처리할 것(왼쪽의 스레드·초안)과 섞지 않고 오른쪽에
-              둡니다 — 판단에 필요한 맥락이지 이 티켓에서 일어난 일이 아닙니다. */}
-          {/* **리드 히스토리 — 이전 티켓의 요약만** (2026-09-04 운영자 지시).
-              「세부 이메일 내용 아예 x」. 답을 쓰는 자리에서 필요한 것은 「이 사람과 전에
-              무슨 이야기가 있었나」 한 문단이지 그때 오간 메일의 본문이 아닙니다. 본문은
-              「전체보기」가 가는 고객 상세에 있고, 그 화면은 **같은 값을 같은 모양으로**
-              그립니다(`CustomerDetail` 의 `ticket.summary`).
 
-              **지금 보고 있는 티켓은 안 넣습니다.** 그 요약 불릿은 바로 왼쪽 「이 티켓의
-              기록」 각 줄의 둘째 줄과 **같은 문자열**이라(한 줄을 만들어 `messages.
-              summary_line` 과 `conversations.summary` 에 같이 씁니다), 넣으면 2026-08-25 에
-              지운 요약 카드가 그대로 부활합니다. 「**이전** 히스토리」라는 말도 그 뜻입니다.
-
-              머리글 오른쪽의 「전체보기」가 예전의 떠 있던 칩을 대신합니다 — 같은 곳으로
-              가는데, 카드 안에 있으면 「무엇의 전체인가」가 붙습니다. */}
-          {contact && (
-            <div className="card">
-              <div className="section-header" style={{ marginBottom: 12 }}>
-                <div className="section-header__l">
-                  <span className="section-header__icon"><Icon name="history" size={16} /></span>
-                  <div className="section-header__title">리드 히스토리</div>
-                </div>
-                <Link className="btn btn--subtle btn--sm" to={`/customers/${contact.id}`}>
-                  전체보기
-                </Link>
-              </div>
-              {data.other_tickets.length === 0 && !data.customer?.loose_count ? (
-                /* **눈에 띄어야 합니다** (2026-09-04 운영자 지시). 「없다」는 이 화면에서
-                   판단에 쓰는 사실입니다 — 처음 연락하는 사람인지, 오래 이야기해 온
-                   사람인지가 답의 톤을 바꿉니다. 흐린 작은 글씨로 적으면 「아직 안
-                   불러왔다」로 읽힙니다. */
-                <div className="empty">
-                  <div className="empty__text empty__text--lead">
-                    이전 히스토리가 존재하지 않습니다.
-                  </div>
-                </div>
-              ) : (
-                <div className="stack" style={{ gap: 12 }}>
-                  {data.other_tickets.map((other) => (
-                    <Link key={other.conversation_id} className="link--plain"
-                          to={`/tickets/${other.conversation_id}`}>
-                      <div className="row-between" style={{ gap: 8 }}>
-                        <strong className="t-sm">{other.subject || "제목 없는 문의"}</strong>
-                        <span className="tag">{data.stage_labels[other.stage] ?? other.stage}</span>
-                      </div>
-                      <div className="t-xs t-subtle">
-                        {kst(other.created_at)}{other.ticket_id ? ` · #${other.ticket_id}` : ""}
-                      </div>
-                      {/* **자르지 않습니다** (2026-09-04 운영자 지시: 「전부 보여줌」).
-                          오간 것마다 한 줄씩 쌓인 값이라 오래된 티켓은 길어질 수 있는데,
-                          그게 그 티켓의 이야기 전부입니다. */}
-                      {other.summary && (
-                        <div className="t-sm" style={{ marginTop: 4, whiteSpace: "pre-line" }}>
-                          {other.summary}
-                        </div>
-                      )}
-                    </Link>
-                  ))}
-                  {/* 티켓에 안 달린 접점 — 허브스팟 딜·노트, 지난 티켓에서 떨어져 나온 메일,
-                      수주 화면에서 적은 소통 기록. 티켓 이야기가 아니라 줄로 설 자리가
-                      없지만, 없는 척하면 고객 상세와 건수가 안 맞습니다. */}
-                  {!!data.customer?.loose_count && (
-                    <div className="t-xs t-subtle">
-                      그 외 {data.customer.loose_count}건
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          )}
+          {/* New 에서는 오른쪽입니다 — 그때 본론은 초안이고, 이건 그 초안을 쓰기 위한
+              참고입니다 (2026-09-04 운영자 지시). */}
+          {!afterNew && leadHistoryCard}
 
           <div className="card">
             <div className="section-label" style={{ marginBottom: 12 }}>티켓 정보</div>

@@ -358,3 +358,53 @@ def test_the_bold_empty_state_has_a_rule_of_its_own():
     rule = css[css.index(".empty__text--lead"):]
     rule = rule[: rule.index("}") + 1]
     assert "font-weight" in rule and "font-size" in rule
+
+
+def test_the_lead_history_sits_beside_the_draft_on_new_and_below_the_log_after():
+    """**자리가 둘입니다** (2026-09-04 운영자 지시).
+
+    New 에서는 오른쪽 — 그때 본론은 초안이고 이건 그것을 쓰기 위한 참고입니다. New 를
+    지나면 본론이 「이 사람과 무슨 이야기가 오갔나」로 바뀌므로 「이 티켓의 기록」 **아래**,
+    본문 칼럼에 섭니다.
+
+    카드는 **한 벌**이라야 합니다 — 두 벌 적으면 한쪽만 고치는 날이 옵니다.
+    """
+    import pathlib
+
+    screen = pathlib.Path("frontend/src/screens/MessageDetail.tsx").read_text(
+        encoding="utf-8"
+    )
+    assert screen.count("const leadHistoryCard") == 1, "카드는 한 벌입니다"
+    assert "{afterNew && leadHistoryCard}" in screen, "New 이후에는 본문 칼럼"
+    assert "{!afterNew && leadHistoryCard}" in screen, "New 에서는 오른쪽"
+
+    # 본문 칼럼 쪽은 「이 티켓의 기록」 **뒤**에 와야 합니다.
+    log_at = screen.index('<div className="section-header__title">이 티켓의 기록</div>')
+    main_at = screen.index("{afterNew && leadHistoryCard}")
+    assert log_at < main_at, "「이 티켓의 기록」 아래에 서야 합니다"
+
+
+def test_the_backfill_finishes_one_ticket_at_a_time(db_session, db_session_factory):
+    """**티켓 하나를 통째로** 채웁니다 — 그래야 요약이 그 회차에 완성됩니다.
+
+    표 전체에서 무작위로 집던 때에는 한 티켓의 줄이 다 뽑힐 때까지 몇 시간이 걸려 요약이
+    하나도 안 만들어졌습니다(운영 로그: 「20건 채움, 티켓 요약 0건 재생성, 남은 1864건」).
+    """
+    from src.agents import summaries
+    from src.db.models import Conversation as Conv
+
+    conv_id = _conv(db_session)
+    for index in range(5):
+        _interaction(db_session, summary="가" * 200, conversation_id=conv_id)
+    # 한 회차 예산이 그 티켓의 줄 수보다 커야 완성됩니다. 줄마다 다른 값이라야 합니다 —
+    # `append_line` 은 똑같은 불릿을 두 번 안 붙입니다(웹훅과 폴러가 같은 이벤트를 두 번
+    # 나르는 길이 있어서).
+    with patch.object(summaries, "SessionLocal", db_session_factory), patch.object(
+        summaries, "one_line", side_effect=[f"{i}번째 접점" for i in range(5)]
+    ):
+        assert summaries.backfill_interaction_digests(limit=120) == 5
+
+    db_session.expire_all()
+    # 줄이 다 찼으니 그 티켓 요약이 그 자리에서 만들어집니다.
+    summary = db_session.get(Conv, conv_id).summary or ""
+    assert summary.count("번째 접점") == 5, summary
