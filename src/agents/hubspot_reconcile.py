@@ -26,6 +26,13 @@ from ..integrations.hubspot import HubSpotClient, HubSpotNotConfigured
 
 logger = logging.getLogger(__name__)
 
+# 사라진 티켓에서 옮겨 온 메일의 표. **화면이 이 글자로 그 기록들을 알아봅니다** — 티켓 행이
+# 지워져(`delete(Conversation)`) `conversation_id` 로는 어느 티켓이었는지 알 수 없으므로,
+# 남은 단서가 이 표와 메일 제목뿐입니다. 리드 히스토리가 그 둘로 「지난 티켓 · <제목>」
+# 묶음을 다시 세웁니다(`messages._customer_history`). 글자를 바꾸면 그 묶음이 조용히
+# 「티켓 외」로 흩어지므로 **여기 한 곳에서만** 정합니다.
+PAST_TICKET_HANDLER = "(지난 티켓)"
+
 # The statuses that mean "we are still holding an answer nobody has sent".
 _UNSENT = ("pending_approval", "approved", "drafting", "draft_failed", "send_failed")
 
@@ -142,7 +149,7 @@ def _archive_messages(session, contact_id: int, conversation_id: int) -> int:
                 conversation_id=None,
                 channel=message.channel or "email",
                 direction=message.direction or "note",
-                handler="(지난 티켓)",
+                handler=PAST_TICKET_HANDLER,
                 subject=message.subject,
                 # NOT NULL 입니다. 본문 없는 메일은 없지만, 있다면 빈 문자열보다 이 편이
                 # 화면에서 「무엇이 있었는지」를 말해 줍니다.

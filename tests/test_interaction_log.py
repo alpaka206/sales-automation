@@ -607,3 +607,73 @@ def test_our_own_address_is_never_read_as_the_customer():
     assert not is_our_address("customer@gmail.com")
     assert not is_our_address("buyer@holywater.tech")
     assert not is_our_address("")
+
+
+def test_a_deleted_tickets_mail_stays_grouped_as_that_ticket(log_db):
+    """**지워진 티켓의 메일은 그 티켓끼리 섭니다** (2026-09-04 운영자 지시).
+
+    허브스팟에서 티켓을 지우면 그 메일이 연락처 기록으로 옮겨지고 대화 행은 사라집니다
+    (`hubspot_reconcile._archive_messages`). 그것들을 「티켓 외」에 같이 쓸어 담으면 한
+    문의였던 메일 세 통이 **출처 없는 세 건**이 됩니다.
+
+    티켓 행이 없으니 묶는 열쇠는 제목이고, 회신 접두사는 떼야 같은 이야기가 두 묶음으로
+    안 갈립니다. 요약은 살아 있는 티켓과 같은 모양(불릿 목록)입니다.
+    """
+    from src.agents.hubspot_reconcile import PAST_TICKET_HANDLER
+    from src.api.routes.messages import _customer_history
+
+    factory, ids = log_db
+    with factory() as session:
+        for subject, context in (
+            ("자막 번역 견적 문의", "견적을 물어 왔다"),
+            ("RE: 자막 번역 견적 문의", "단가를 안내했다"),
+        ):
+            session.add(
+                CustomerInteraction(
+                    contact_id=ids["contact"],
+                    conversation_id=None,
+                    handler=PAST_TICKET_HANDLER,
+                    channel="email",
+                    direction="inbound",
+                    subject=subject,
+                    summary="본문",
+                    context=context,
+                    happened_at=datetime.now(),
+                )
+            )
+        # 진짜로 티켓이 없던 것 — 이건 「티켓 외」로 남습니다.
+        session.add(
+            CustomerInteraction(
+                contact_id=ids["contact"],
+                conversation_id=None,
+                channel="hubspot",
+                direction="note",
+                summary="허브스팟 딜 메모",
+            )
+        )
+        session.commit()
+
+        history = _customer_history(session, ids["contact"])
+
+    # 회신 접두사를 뗀 제목 하나로 묶입니다 — 두 묶음이 아닙니다.
+    assert [g["subject"] for g in history["past_tickets"]] == ["자막 번역 견적 문의"]
+    group = history["past_tickets"][0]
+    assert group["count"] == 2
+    # 살아 있는 티켓과 같은 모양 — 불릿 목록.
+    assert group["summary"] == "- 견적을 물어 왔다\n- 단가를 안내했다"
+    # 「티켓 외」에는 진짜 티켓이 없던 것만 남습니다.
+    assert history["loose_count"] == 1
+
+
+def test_the_past_ticket_marker_is_defined_once():
+    """화면이 그 글자로 지난 티켓을 알아봅니다 — 두 곳에 적으면 한쪽만 바뀌는 날이 오고,
+    그때 그 묶음이 조용히 「티켓 외」로 흩어집니다."""
+    import pathlib
+
+    from src.agents.hubspot_reconcile import PAST_TICKET_HANDLER
+
+    assert PAST_TICKET_HANDLER == "(지난 티켓)"
+    for path in ("src/agents/hubspot_reconcile.py", "src/api/routes/messages.py"):
+        body = pathlib.Path(path).read_text(encoding="utf-8")
+        # 상수를 정하는 한 줄 말고는 글자를 직접 쓰지 않습니다.
+        assert body.count('"(지난 티켓)"') <= 1, path

@@ -440,16 +440,74 @@ def _customer_history(session, contact_id: int) -> dict:
     가는 고객 상세에 있습니다. 그래서 이 콘솔에서 가장 자주 열리는 화면이 매번 읽고
     버리던 50행이 없어졌습니다.
 
-    남은 숫자 하나(`loose_count`)가 「그 외 n건」입니다 — 허브스팟 딜·노트, 지난 티켓에서
-    떨어져 나온 메일, 수주 화면에서 적은 소통 기록처럼 **티켓에 안 달린** 접점입니다.
-    티켓 이야기가 아니라 티켓 카드에 줄로 설 자리가 없고, 그렇다고 없는 척하면 고객
-    상세와 건수가 안 맞습니다.
+    티켓에 안 달린 접점은 **두 종류로 갈라 보냅니다** (2026-09-04 운영자 지시).
+
+    `past_tickets` — 티켓에서 나왔는데 그 티켓이 지워진 것. 제목으로 다시 묶어 살아 있는
+    티켓과 **같은 모양**(제목 + 요약 한 문단)으로 세웁니다. 한 덩어리로 쓸어 담으면 한
+    문의였던 메일 세 통이 출처 없는 세 건이 됩니다.
+
+    `loose_count` — **진짜 티켓이 없던 것만**. 허브스팟 딜·노트, 손으로 적은 고객 단위
+    메모, 수주 화면에서 적은 소통 기록. 줄로 설 자리는 없지만 없는 척하면 고객 상세와
+    건수가 안 맞아서 「티켓 외 n건」으로 셉니다.
     """
+    from ...agents.hubspot_reconcile import PAST_TICKET_HANDLER
+
     profile = session.get(CustomerProfile, contact_id)
+
+    # **티켓이 지워진 기록은 그 티켓끼리 묶습니다** (2026-09-04 운영자 지시).
+    #
+    # 허브스팟에서 티켓을 지우면 그 메일이 연락처 기록으로 옮겨지는데
+    # (`hubspot_reconcile._archive_messages`), 그때 대화 행 자체가 지워져
+    # `conversation_id` 가 비고 `handler` 에 표가 붙습니다. 그것들을 「티켓 외」에 같이
+    #쓸어 담으면 **한 문의였던 메일 세 통이 출처 없는 세 건**이 됩니다.
+    #
+    # 묶는 열쇠는 **메일 제목**입니다 — 티켓 행이 없으니 남은 단서가 그것뿐입니다.
+    # 회신 접두사(`RE:` · `FW:`)는 떼어야 같은 이야기가 두 묶음으로 갈리지 않습니다.
+    past_rows = (
+        session.execute(
+            select(CustomerInteraction)
+            .where(
+                CustomerInteraction.contact_id == contact_id,
+                CustomerInteraction.conversation_id.is_(None),
+                CustomerInteraction.handler == PAST_TICKET_HANDLER,
+            )
+            .order_by(CustomerInteraction.happened_at.asc(), CustomerInteraction.id.asc())
+        )
+        .scalars()
+        .all()
+    )
+    past: dict[str, dict] = {}
+    for row in past_rows:
+        label = strip_reply_prefixes(row.subject) or "제목 없는 문의"
+        group = past.setdefault(
+            label, {"subject": label, "lines": [], "count": 0, "last_at": None}
+        )
+        group["count"] += 1
+        # 살아 있는 티켓과 **같은 모양**입니다 — 한 줄씩 붙인 불릿 목록
+        # (`conversations.summary`). 그래야 「지워졌다」가 표시일 뿐 다른 종류로 안 읽힙니다.
+        # 아직 요약이 없는 줄은 건너뜁니다(10분 폴러가 채우는 중입니다).
+        if row.context:
+            group["lines"].append(f"- {row.context}")
+        if row.happened_at and (group["last_at"] is None or row.happened_at > group["last_at"]):
+            group["last_at"] = row.happened_at
+    past_tickets = [
+        {
+            "subject": g["subject"],
+            "summary": "\n".join(g["lines"]) or None,
+            "count": g["count"],
+            "last_at": g["last_at"],
+        }
+        # 최신이 위 — 살아 있는 티켓 목록과 같은 순서입니다.
+        for g in sorted(past.values(), key=lambda g: (g["last_at"] is None, g["last_at"]), reverse=True)
+    ]
+
+    # 「티켓 외」에는 **진짜 티켓이 없던 것만** 남습니다 — 허브스팟 딜·노트, 손으로 적은
+    # 고객 단위 메모, 수주 화면에서 적은 소통 기록.
     loose_count = session.scalar(
         select(sa_func.count(CustomerInteraction.id)).where(
             CustomerInteraction.contact_id == contact_id,
             CustomerInteraction.conversation_id.is_(None),
+            CustomerInteraction.handler.is_distinct_from(PAST_TICKET_HANDLER),
         )
     )
     profile_data = (
@@ -464,7 +522,11 @@ def _customer_history(session, contact_id: int) -> dict:
         if profile
         else None
     )
-    return {"profile": profile_data, "loose_count": int(loose_count or 0)}
+    return {
+        "profile": profile_data,
+        "past_tickets": past_tickets,
+        "loose_count": int(loose_count or 0),
+    }
 
 
 # 여기 있던 `_translate_inbound_bubbles` 는 지웠습니다. **화면을 여는 길에는 모델이 없습니다.**

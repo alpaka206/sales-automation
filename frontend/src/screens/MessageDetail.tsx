@@ -133,8 +133,10 @@ type Detail = {
     qualification: string } | null;
   customer: {
     profile: Record<string, unknown> | null;
-    /** 어느 티켓에도 안 달린 접점 기록의 **개수**. 줄은 안 옵니다 — 이 화면의 리드
-     *  히스토리는 티켓마다 요약 한 문단이라 기록 줄이 필요 없습니다. */
+    /** 티켓에서 나왔는데 그 티켓이 지워진 기록 — 제목으로 다시 묶은 것. 살아 있는
+     *  티켓과 같은 모양(제목 + 요약)으로 섭니다. */
+    past_tickets: { subject: string; summary: string | null; count: number; last_at: string | null }[];
+    /** **진짜 티켓이 없던** 접점의 개수 — 허브스팟 딜·노트, 고객 단위 메모, 수주 기록. */
     loose_count: number;
   } | null;
   stage_labels: Record<string, string>;
@@ -514,7 +516,9 @@ export function MessageDetail() {
             전체보기
           </Link>
         </div>
-        {data.other_tickets.length === 0 && !data.customer?.loose_count ? (
+        {data.other_tickets.length === 0
+       && !data.customer?.past_tickets?.length
+       && !data.customer?.loose_count ? (
           /* **눈에 띄어야 합니다** (2026-09-04 운영자 지시). 「없다」는 이 화면에서
              판단에 쓰는 사실입니다 — 처음 연락하는 사람인지, 오래 이야기해 온
              사람인지가 답의 톤을 바꿉니다. 흐린 작은 글씨로 적으면 「아직 안
@@ -546,12 +550,33 @@ export function MessageDetail() {
                 )}
               </Link>
             ))}
-            {/* 티켓에 안 달린 접점 — 허브스팟 딜·노트, 지난 티켓에서 떨어져 나온 메일,
-                수주 화면에서 적은 소통 기록. 티켓 이야기가 아니라 줄로 설 자리가
-                없지만, 없는 척하면 고객 상세와 건수가 안 맞습니다. */}
+            {/* **지워진 티켓도 그 티켓끼리 섭니다** (2026-09-04 운영자 지시).
+                허브스팟에서 티켓을 지우면 그 메일이 연락처 기록으로 옮겨지는데, 한
+                덩어리로 쓸어 담으면 한 문의였던 메일 세 통이 출처 없는 세 건이 됩니다.
+                티켓 행이 없어 묶는 열쇠는 제목이고, 그래서 눌러 갈 곳도 없습니다 —
+                내용은 「전체보기」에 있습니다. 모양은 살아 있는 티켓과 같습니다. */}
+            {data.customer?.past_tickets?.map((past) => (
+              <div key={past.subject}>
+                <div className="row-between" style={{ gap: 8 }}>
+                  <strong className="t-sm">{past.subject}</strong>
+                  <span className="tag">지난 티켓</span>
+                </div>
+                <div className="t-xs t-subtle">
+                  {past.last_at ? kst(past.last_at) : ""} · {past.count}건
+                </div>
+                {past.summary && (
+                  <div className="t-sm" style={{ marginTop: 4, whiteSpace: "pre-line" }}>
+                    {past.summary}
+                  </div>
+                )}
+              </div>
+            ))}
+            {/* **진짜 티켓이 없던 것만** 여기 셉니다 — 허브스팟 딜·노트, 손으로 적은
+                고객 단위 메모, 수주 화면에서 적은 소통 기록. 줄로 설 자리는 없지만
+                없는 척하면 고객 상세와 건수가 안 맞습니다. */}
             {!!data.customer?.loose_count && (
               <div className="t-xs t-subtle">
-                그 외 {data.customer.loose_count}건
+                티켓 외 {data.customer.loose_count}건
               </div>
             )}
           </div>
