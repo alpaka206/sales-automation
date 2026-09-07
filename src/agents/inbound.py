@@ -6,7 +6,7 @@ import hashlib
 import logging
 import re
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, NamedTuple
 
 from pydantic import BaseModel
 from sqlalchemy import select
@@ -17,7 +17,14 @@ from ..common.pricing_guard import strip_price_sentences
 from ..common.subjects import reply_subject
 from ..common.textwash import text_wash
 from ..db.conversation_history import add_progress
-from ..db.models import Contact, Conversation, CustomerProfile, InboundJob, Message
+from ..db.models import (
+    Contact,
+    Conversation,
+    CustomerInteraction,
+    CustomerProfile,
+    InboundJob,
+    Message,
+)
 from ..db.session import SessionLocal
 from ..integrations.hubspot import HubSpotClient, HubSpotNotConfigured
 from ..common.sheet_values import (
@@ -28,7 +35,7 @@ from ..common.sheet_values import (
     normalise_plan,
 )
 from ..llm.client import LLMClient
-from ..llm.knowledge import select_relevant_docs
+from ..llm.knowledge import FIRST, FOLLOWUP, select_relevant_docs
 from ..llm.prompts import apply_editable_tokens, canonicalize_contact_links, get_reply_format
 from ._notify import notify_approval_once
 from .inbound_scoring import (  # noqa: F401 — re-exported for callers/tests
@@ -56,6 +63,25 @@ def _default_signature() -> str | None:
 
 
 _DEFAULT_HUBSPOT = object()
+
+# 이 회신이 무엇인지 한 줄로 (2026-09-07 운영자 지시). New 이후의 회신에는 두 경우가
+# 있고, 둘은 **다른 글**입니다 — 새 질문에 답하는 것과, 답이 없는데 한 번 더 자세히
+# 쓰는 것. 하나로 두면 뒤엣것이 앞 메일을 고쳐 쓴 판본이 됩니다.
+#
+# `pricing_rule` 과 같은 방식입니다: 프롬프트 파일에 변수 한 자리를 두고 코드가 갈아
+# 끼웁니다. **프롬프트 파일을 새로 만들지 않는 이유**는 CLAUDE.md 의 규칙과 같습니다 —
+# 회신의 형식·톤 규칙은 한 벌이어야 하고, 파일이 둘이면 그 규칙이 두 곳에서 갈립니다.
+_FOLLOWUP_RULE_ANSWER = (
+    "이 대화에는 이미 우리가 보낸 회신이 있습니다. 이번 글은 그 뒤에 **고객이 새로 보낸 "
+    "메시지에 대한 답**입니다. 위의 '가장 최근 문의'가 그 메시지이고, 그것에 답하세요 — "
+    "처음부터 다시 소개하거나 이미 안내한 것을 되풀이하지 마세요."
+)
+_FOLLOWUP_RULE_ELABORATE = (
+    "이 대화에는 이미 우리가 보낸 회신이 있고, **고객의 답장은 아직 없습니다.** 이번 글은 "
+    "같은 문의에 대해 **더 자세히** 안내하는 후속 메일입니다. 지난 회신에 이미 적은 말을 "
+    "되풀이하지 말고, 참고 문서에서 그때 다루지 못한 구체적인 내용(세부 조건·절차·사례 "
+    "등)을 더해 주세요. 답장을 재촉하는 말은 쓰지 마세요.\n\n지난 회신 본문:\n"
+)
 
 # Pricing guidance handed to the draft prompt. The FIRST reply must not state any
 # amount (a hard rule also enforced by strip_price_sentences); later replies may
@@ -120,6 +146,134 @@ def _subject_in_inquiry_language(subject: str | None, inquiry_language: str | No
 # Kept for compatibility with older extensions/tests; durable queue keys now
 # provide production deduplication and this set is intentionally not consulted.
 _processed: set[str] = set()
+
+
+# --------------------------------------------------------------------------- #
+# 이 티켓에서 실제로 오간 것 (2026-09-07, `docs/후속-회신-자동생성-설계.md` 3장)
+# --------------------------------------------------------------------------- #
+class _Turn(NamedTuple):
+    at: datetime
+    direction: str  # "inbound" | "outgoing" | "note"
+    subject: str | None
+    body: str
+
+
+_TURN_LABELS = {"inbound": "고객", "outgoing": "우리", "note": "기록"}
+# 실제로 나간 회신. 초안·승인 대기는 아직 고객이 못 본 글이라 「우리가 한 말」이 아닙니다.
+_SENT_STATUSES = ("sent", "test_sent")
+
+
+def thread_events(conv_id: int | None) -> list[_Turn]:
+    """이 티켓에서 오간 것 전부, 오래된 순. **두 표를 합칩니다.**
+
+    ``messages`` 에는 이 콘솔이 만든 것만 있습니다 — 최초 문의 하나와 우리가 여기서 보낸
+    회신. New 이후의 실제 대화(고객 답장, 허브스팟 화면에서 사람이 보낸 회신, 채팅·폼)는
+    ``customer_interactions`` 에 있고, 그것은 허브스팟 스레드 수집기가 넣습니다
+    (``agents/ticket_history``). **한쪽만 보면 New 이후가 통째로 빕니다** — 그래서 후속
+    초안이 최초 문의에 다시 답하고, 「첫 회신인가」 판정이 틀립니다.
+
+    **같은 메시지를 두 번 세지 않습니다.** 우리가 여기서 보낸 회신은 수집기가 허브스팟에서
+    도로 가져오므로 두 표에 다 있습니다. 가르는 것은 짐작이 아니라 같은 id 입니다 — 발송
+    응답이 돌려준 스레드 메시지 id 가 ``messages.hubspot_message_id`` 이고, 수집기는
+    그것으로 ``external_id`` 를 만듭니다(티켓 화면이 중복을 거를 때와 같은 규칙).
+
+    읽기 전용이고, 실패하면 빈 목록입니다 — 맥락이 없다고 초안을 못 쓰는 것보다는 낫습니다.
+    """
+    if not conv_id:
+        return []
+    try:
+        with SessionLocal() as session:
+            messages = (
+                session.query(Message)
+                .filter(
+                    Message.conversation_id == conv_id,
+                    Message.body != "",
+                    (Message.direction == "inbound")
+                    | (
+                        (Message.direction == "outgoing")
+                        & Message.status.in_(_SENT_STATUSES)
+                        & (
+                            (Message.prompt_variant.is_(None))
+                            | (Message.prompt_variant != "auto_ack")
+                        )
+                    ),
+                )
+                .all()
+            )
+            interactions = (
+                session.query(CustomerInteraction)
+                .filter(CustomerInteraction.conversation_id == conv_id)
+                .all()
+            )
+
+        drawn_by_messages = {
+            f"hubspot:conv:{m.hubspot_message_id}" for m in messages if m.hubspot_message_id
+        }
+        turns: list[_Turn] = []
+        for row in messages:
+            at = row.sent_at or row.created_at
+            turns.append(_Turn(
+                at=_naive(at),
+                direction="inbound" if row.direction == "inbound" else "outgoing",
+                subject=row.subject,
+                body=row.body or "",
+            ))
+        for item in interactions:
+            if item.external_id in drawn_by_messages:
+                continue
+            body = (item.summary or "").strip() or (item.subject or "").strip()
+            if not body:
+                continue
+            turns.append(_Turn(
+                at=_naive(item.happened_at),
+                # 옛 철자를 같은 말로. CRM 수집기는 `incoming`/`outbound` 를 씁니다.
+                direction={"incoming": "inbound", "outbound": "outgoing"}.get(
+                    item.direction or "note", item.direction or "note"
+                ),
+                subject=item.subject,
+                body=body,
+            ))
+        turns.sort(key=lambda turn: turn.at)
+        return turns
+    except Exception:
+        logger.warning("대화 이력을 못 읽었습니다 (conv=%s).", conv_id, exc_info=True)
+        return []
+
+
+def _naive(value: datetime | None) -> datetime:
+    """정렬만 하면 되므로 시간대를 떼어 맞춥니다.
+
+    한 표는 시간대가 붙은 값을, 다른 표는 안 붙은 값을 돌려줄 수 있습니다(수집기는 UTC
+    aware 로 쓰고, 열은 시간대 없는 DateTime 입니다). 섞이면 정렬이 TypeError 로 죽습니다.
+    """
+    if value is None:
+        return datetime.min
+    return value.replace(tzinfo=None) if value.tzinfo else value
+
+
+def latest_customer_message(conv_id: int | None) -> _Turn | None:
+    """마지막으로 나간 우리 회신 **뒤에** 온 고객 메시지. 없으면 None.
+
+    이것이 후속 초안의 갈림길입니다 (운영자 지시): 있으면 **그 메시지에 답하고**, 없으면
+    같은 문의를 더 자세히 씁니다.
+    """
+    events = thread_events(conv_id)
+    after = 0
+    for index, turn in enumerate(events):
+        if turn.direction == "outgoing":
+            after = index + 1
+    for turn in reversed(events[after:]):
+        if turn.direction == "inbound":
+            return turn
+    return None
+
+
+def last_sent_reply(conv_id: int | None) -> _Turn | None:
+    """마지막으로 나간 우리 회신. 「이미 적은 말을 되풀이하지 마라」의 근거입니다."""
+    for turn in reversed(thread_events(conv_id)):
+        if turn.direction == "outgoing":
+            return turn
+    return None
 
 
 class ClassifyResult(BaseModel):
@@ -767,29 +921,18 @@ class InboundAgent:
         return "email" if contact_info.get("email") else "none"
 
     def _is_first_reply(self, conv_id: int | None) -> bool:
-        """True if no real reply has been SENT in this thread yet (auto-ack excluded).
+        """True if no real reply has gone out in this thread yet (auto-ack excluded).
 
         Drives the "no pricing in the first email" rule. Pending drafts don't count
-        as "already replied" — only an actually-sent operator reply does.
+        as "already replied" — only an actually-sent reply does.
+
+        **허브스팟 화면에서 보낸 회신도 셉니다** (2026-09-07). ``messages`` 만 세던 동안
+        저쪽에서 사람이 답한 티켓이 「첫 회신」으로 판정됐고, 그래서 금액 금지 가드가
+        엉뚱한 자리에 걸렸습니다 — 이 표에는 이 콘솔이 보낸 것만 있습니다.
         """
         if not conv_id:
             return True
-        try:
-            with SessionLocal() as session:
-                sent = (
-                    session.query(Message)
-                    .filter(
-                        Message.conversation_id == conv_id,
-                        Message.direction == "outgoing",
-                        Message.status == "sent",
-                        (Message.prompt_variant.is_(None)) | (Message.prompt_variant != "auto_ack"),
-                    )
-                    .count()
-                )
-            return sent == 0
-        except Exception:
-            logger.warning("first-reply check failed for conv %s; assuming first.", conv_id)
-            return True
+        return not any(turn.direction == "outgoing" for turn in thread_events(conv_id))
 
     def _build_conversation_context(
         self,
@@ -810,47 +953,37 @@ class InboundAgent:
         try:
             with SessionLocal() as session:
                 conv = session.get(Conversation, conv_id)
-                rows = (
-                    session.query(Message)
-                    .filter(
-                        Message.conversation_id == conv_id,
-                        Message.body != "",
-                        Message.status != "drafting",
-                    )
-                    .order_by(Message.created_at.desc(), Message.id.desc())
-                    .limit(limit + 1)
-                    .all()
-                )
+                summary = (conv.summary or "").strip() if conv else ""
+                requests = (conv.customer_requests or "").strip() if conv else ""
 
             latest = text_wash(latest_message)
             skipped_latest = False
-            prior_rows: list[Message] = []
-            for row in rows:
-                body = text_wash(row.body)
+            prior: list[_Turn] = []
+            # 최신부터 거꾸로 담습니다 — 긴 스레드에서 잘려 나가야 할 쪽은 오래된 쪽입니다.
+            for turn in reversed(thread_events(conv_id)):
                 if (
                     not skipped_latest
                     and latest
-                    and row.direction == "inbound"
-                    and body == latest
+                    and turn.direction == "inbound"
+                    and text_wash(turn.body) == latest
                 ):
                     skipped_latest = True
                     continue
-                prior_rows.append(row)
-                if len(prior_rows) >= limit:
+                prior.append(turn)
+                if len(prior) >= limit:
                     break
 
             parts: list[str] = []
-            if conv and (conv.summary or "").strip():
-                parts.append(f"기존 대화 요약:\n{conv.summary.strip()}")
-            if conv and (conv.customer_requests or "").strip():
-                parts.append(f"기존 고객 요청사항:\n{conv.customer_requests.strip()}")
-            if prior_rows:
+            if summary:
+                parts.append(f"기존 대화 요약:\n{summary}")
+            if requests:
+                parts.append(f"기존 고객 요청사항:\n{requests}")
+            if prior:
                 turns: list[str] = []
-                for row in reversed(prior_rows):
-                    label = "고객" if row.direction == "inbound" else "우리"
-                    body = text_wash(row.body)[:1200]
-                    subject = f" [{row.subject}]" if row.subject else ""
-                    turns.append(f"{label}{subject}: {body}")
+                for turn in reversed(prior):
+                    subject = f" [{turn.subject}]" if turn.subject else ""
+                    turns.append(f"{_TURN_LABELS[turn.direction]}{subject}: "
+                                 f"{text_wash(turn.body)[:1200]}")
                 parts.append("최근 대화:\n" + "\n\n".join(turns))
             return "\n\n".join(parts)[:max_chars]
         except Exception:
@@ -882,8 +1015,27 @@ class InboundAgent:
         from ..llm.reply import ensure_language, korean_reading
         from ..llm.translate import is_mostly_korean
 
+        first_reply = self._is_first_reply(conv_id)
+        # **후속 회신은 두 갈래입니다** (2026-09-07 운영자 지시).
+        #
+        #   마지막 회신 뒤에 고객 메시지가 있다 → 그 메시지에 답한다
+        #   없다                                → 같은 문의를 더 자세히 쓴다
+        #
+        # `last_message` 를 여기서 갈아 끼우는 것이 요점입니다. 그 값은 허브스팟이 준
+        # **티켓 본문** = 최초 문의라, 그대로 두면 후속 초안이 처음 문의에 다시 답합니다.
+        last_message = contact_info["last_message"]
+        followup_rule = ""
+        if not first_reply:
+            newer = latest_customer_message(conv_id)
+            previous = last_sent_reply(conv_id)
+            if newer is not None:
+                followup_rule = _FOLLOWUP_RULE_ANSWER
+                last_message = newer.body or last_message
+            elif previous is not None:
+                followup_rule = _FOLLOWUP_RULE_ELABORATE + text_wash(previous.body)[:2000]
+
         knowledge_docs, doc_subject = select_relevant_docs(
-            inquiry=contact_info["last_message"],
+            inquiry=last_message,
             category=classification.category,
             llm=self.llm,
             # 한국어 문의에는 KR 문서, 그 외에는 ENG 문서. 기본 메일 템플릿이 두 벌이라
@@ -891,8 +1043,10 @@ class InboundAgent:
             language=inquiry_lang,
             # 그 문서가 메일 제목을 들고 있으면 같이 받습니다 — 아래 CODE GUARD 3 에서 씁니다.
             with_subject=True,
+            # 「후속 회신에만」 문서는 첫 회신의 인덱스에 아예 안 실립니다 (0108). 모델에게
+            # 「고르지 마라」라고 부탁하는 대신 보여 주지 않습니다.
+            stage=FIRST if first_reply else FOLLOWUP,
         )
-        first_reply = self._is_first_reply(conv_id)
         draft = self.llm.complete(
             "inbound/draft_reply",
             {
@@ -901,10 +1055,12 @@ class InboundAgent:
                 "country": contact_info["country"],
                 "category": classification.category,
                 "score": str(score),
-                "last_message": contact_info["last_message"],
+                "last_message": last_message,
                 "conversation_context": self._build_conversation_context(
-                    conv_id, contact_info["last_message"]
+                    conv_id, last_message
                 ),
+                # 이 회신이 무엇인가 — 첫 회신에서는 빈 문자열입니다.
+                "followup_rule": followup_rule,
                 "enrichment_context": _build_enrichment_context(contact_info),
                 "knowledge_docs": knowledge_docs,
                 "pricing_rule": _PRICING_RULE_FIRST if first_reply else _PRICING_RULE_NORMAL,
@@ -1118,7 +1274,17 @@ class InboundAgent:
             inbound_message_id: int | None = None
             # A durable retry of the same HubSpot ticket may replace a failed
             # draft, but it must not append the customer's inquiry a second time.
-            if inbound_body and (not ticket_id or is_first_inbound):
+            #
+            # **이어 쓰는 작업은 문의를 만들지 않습니다** (2026-09-07). 위의 `is_first_inbound`
+            # 로는 부족합니다 — 백필로 들여온 티켓 300여 건에는 `messages` 행이 **하나도**
+            # 없어서 언제나 「첫 문의」로 보이고, 그러면 「메일 발송」을 누를 때마다 문의 행이
+            # 새로 서고 `conv.last_incoming_at` 이 채워집니다. 그 칸은 **워크북 append 대기열의
+            # 방아쇠**라(`sheet_sync.sync_pending_inbound_rows`), 그 티켓이 영업팀 공용 시트로
+            # 실려 나갑니다. 운영은 시트 쓰기가 켜져 있습니다.
+            #
+            # 이어 쓰기(`resume_message_id`)에서 잃는 것은 없습니다: 그 초안이 이미 있다는 것은
+            # 이 대화가 이미 우리 화면에 있다는 뜻입니다.
+            if inbound_body and not resume_message_id and (not ticket_id or is_first_inbound):
                 # If this is a later customer message, the latest detailed reply was
                 # answered. Auto acknowledgements do not count as sales replies.
                 # "test_sent" is the safe-mode counterpart of "sent" (the mail was

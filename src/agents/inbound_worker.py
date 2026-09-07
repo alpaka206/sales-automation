@@ -129,17 +129,33 @@ def request_redraft(message_id: int) -> int:
         conv_id = msg.conversation_id
         session.commit()
 
-    # 누를 때마다 새 작업이어야 합니다 — 이벤트 키가 같으면 두 번째 누름이 조용히 버려집니다.
+    enqueue_draft(ticket_id, message_id, source="console_redraft")
+    add_progress(conv_id, "draft", "회신 초안을 다시 작성합니다.")
+    return conv_id
+
+
+def enqueue_draft(ticket_id: str, message_id: int, *, source: str) -> None:
+    """이 메시지에 초안을 쓰라고 큐에 올립니다.
+
+    **부르는 곳이 둘입니다** — 「초안 다시 쓰기」(`request_redraft`)와 「메일 발송」이 여는
+    후속 초안(`messages.start_manual_reply`). 둘 다 결과가 같습니다: 워커가
+    ``_draft_message_id`` 를 싣고 `InboundAgent.handle` 을 불러 **그 메시지를 덮어씁니다.**
+    새 행을 만들지 않으므로 한 티켓의 회신은 하나로 남습니다.
+
+    **상태 관문은 여기 없습니다.** 「다시 쓰기」는 실패한 초안에만 걸려야 하고 「메일
+    발송」은 갓 만든 빈 초안에 걸려야 해서, 받아 주는 상태가 서로 다릅니다 — 관문을 여기
+    두면 둘 중 하나는 반드시 틀립니다. 부르는 쪽이 각자 지킵니다.
+
+    누를 때마다 새 작업이어야 합니다 — 이벤트 키가 같으면 두 번째 누름이 조용히 버려집니다.
+    """
     stamp = _utcnow().strftime("%Y%m%d%H%M%S%f")
     enqueue_inbound_ticket(
         ticket_id,
-        source="console_redraft",
+        source=source,
         event_type="redraft",
         occurrence_key=f"redraft:{message_id}:{stamp}",
         draft_message_id=message_id,
     )
-    add_progress(conv_id, "draft", "회신 초안을 다시 작성합니다.")
-    return conv_id
 
 
 # 연락처 필드 동기화 작업임을 알아보는 표. payload 에 ticket_id 대신 이것이 들어 있다.

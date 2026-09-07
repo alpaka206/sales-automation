@@ -2,7 +2,8 @@
 
 자동 초안은 New 티켓에만 생기고 한 번 나가면 다시 안 생깁니다. 그래서 그 뒤의 대화는 전부
 허브스팟에서 사람이 했고, 우리 화면에는 무엇이 오갔는지가 남지 않았습니다. 이 라우트는
-**모델 없이** 빈 초안 한 줄을 세우는 일만 하고, 그 뒤는 자동 초안과 완전히 같은 길입니다.
+초안 한 줄을 세우고 **초안 기계에 넘깁니다**(2026-09-07), 그 뒤는 자동 초안과 완전히 같은
+길입니다.
 """
 
 from __future__ import annotations
@@ -53,15 +54,31 @@ def _client():
     return TestClient(app)
 
 
-def test_it_makes_an_empty_draft_in_the_inquiry_language(ticket, db_session_factory):
-    with _client() as client:
-        created = client.post(f"/tickets/{ticket}/reply")
+def test_it_hands_the_draft_to_the_same_machine_that_writes_the_first_one(
+    ticket, db_session_factory
+):
+    """**빈 편집기가 아니라 쓰인 초안**입니다 (2026-09-07 운영자 지시).
+
+    모델은 이 요청 안에서 안 부릅니다 — pro 티어 한 통이라 20~30초가 걸리고, 그동안 요청이
+    열려 있으면 프록시가 끊습니다. `drafting` 으로 세워 두고 워커가 채웁니다. 화면은 그
+    상태를 이미 그릴 줄 압니다(「초안 다시 쓰기」와 같은 상태).
+
+    큐에 올릴 때 **그 메시지 id 를 실어야** 합니다. 안 실으면 워커가 새 초안을 따로 만들고,
+    한 티켓에 회신이 둘이 됩니다.
+    """
+    from src.agents import inbound_worker
+
+    with patch.object(inbound_worker, "enqueue_draft") as queued:
+        with _client() as client:
+            created = client.post(f"/tickets/{ticket}/reply")
     assert created.status_code == 200, created.text
     assert created.json()["created"] is True
+    message_id = created.json()["message_id"]
+    assert queued.call_args.args[1] == message_id
 
     with db_session_factory() as session:
-        msg = session.get(Message, created.json()["message_id"])
-    assert msg.status == "pending_approval"
+        msg = session.get(Message, message_id)
+    assert msg.status == "drafting"
     assert msg.prompt_variant == "manual"
     assert msg.direction == "outgoing"
     assert msg.to_address == "buyer@example.com"
@@ -110,13 +127,22 @@ def test_a_ticketless_inquiry_is_refused_before_the_operator_writes_anything(
         assert session.query(Message).count() == 0
 
 
-def test_an_empty_body_cannot_be_approved(ticket, db_session_factory):
-    """수동 회신은 빈 채로 만들어집니다 — 그대로 발송을 누르면 빈 메일이 갑니다."""
-    from src.agents import approval
+def test_a_queue_failure_leaves_a_writable_draft_not_a_stuck_one(ticket, db_session_factory):
+    """**큐가 안 받아도 버튼은 듣습니다** — 예전처럼 빈 편집기가 열립니다.
 
-    with _client() as client:
-        message_id = client.post(f"/tickets/{ticket}/reply").json()["message_id"]
+    여기서 500 을 내면 「메일 발송」이 통째로 안 듣고, `drafting` 인 채로 두면 화면이
+    영원히 「쓰는 중」입니다. 둘 다 초안을 직접 쓰는 것보다 나쁩니다.
 
+    그리고 그 빈 초안은 **그대로 승인되지 않습니다** — 누르면 빈 메일이 나갑니다.
+    """
+    from src.agents import approval, inbound_worker
+
+    with patch.object(inbound_worker, "enqueue_draft", side_effect=RuntimeError("큐 없음")):
+        with _client() as client:
+            message_id = client.post(f"/tickets/{ticket}/reply").json()["message_id"]
+
+    with db_session_factory() as session:
+        assert session.get(Message, message_id).status == "pending_approval"
     with patch.object(approval, "SessionLocal", db_session_factory):
         with pytest.raises(approval.ApprovalError, match="본문이 비어 있습니다"):
             approval.approve(message_id, approver="tester")

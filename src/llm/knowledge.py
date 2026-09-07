@@ -108,8 +108,22 @@ def _format_docs(docs: list[PolicySource]) -> str:
     return "## Relevant knowledge base documents\n\n" + "\n\n---\n\n".join(parts)
 
 
-def router_docs() -> list[PolicySource]:
-    """초안이 고를 수 있는 문서 전부 — 「문의별 참고」 행.
+# 이 회신이 첫 회신인가 후속인가. `PolicySource.scope` 와 짝입니다(0108).
+FIRST = "first"
+FOLLOWUP = "followup"
+_SCOPES_FOR = {FIRST: ("all", FIRST), FOLLOWUP: ("all", FOLLOWUP)}
+
+
+def router_docs(stage: str = FIRST) -> list[PolicySource]:
+    """그 회신에서 고를 수 있는 문서 — 「문의별 참고」 행 중 이 단계에 해당하는 것.
+
+    ``stage`` 는 ``first``(첫 회신) 또는 ``followup``(그 뒤의 회신)입니다. 문서의 ``scope``
+    가 ``all`` 이면 둘 다에, ``first``/``followup`` 이면 그 한쪽에만 붙습니다 — 첫 회신에는
+    간단히 답하고 고객이 더 물어오면 깊은 문서를 붙여 자세히 쓰기 위한 칸입니다
+    (2026-09-07 운영자 지시, ``docs/후속-회신-자동생성-설계.md``).
+
+    **모르는 ``stage`` 는 안 거릅니다.** 이 칸을 덜 보여 주는 쪽으로 틀리면 초안이 근거
+    없이 답하는데, 그건 화면 어디에도 안 보입니다.
 
     **상태를 안 봅니다** (0101). 지우면 행이 사라지므로(0100) 표에 있는 행이 곧 살아 있는
     행입니다 — 「항상 쓰는 것이니 항상 가져옵니다」. 캐시도 없습니다: 행이 몇 개뿐이고,
@@ -118,14 +132,15 @@ def router_docs() -> list[PolicySource]:
     ``mode='rules'`` 는 여기 안 옵니다 — 그쪽은 고르는 대상이 아니라 모든 프롬프트에
     통째로 들어갑니다(``llm.prompts._rules_from_db``).
     """
+    allowed = _SCOPES_FOR.get(stage)
     session = SessionLocal()
     try:
-        return (
-            session.query(PolicySource)
-            .filter(PolicySource.mode == KNOWLEDGE)
-            .order_by(PolicySource.title, PolicySource.label, PolicySource.id)
-            .all()
-        )
+        query = session.query(PolicySource).filter(PolicySource.mode == KNOWLEDGE)
+        if allowed:
+            query = query.filter(PolicySource.scope.in_(allowed))
+        return query.order_by(
+            PolicySource.title, PolicySource.label, PolicySource.id
+        ).all()
     finally:
         session.close()
 
@@ -156,6 +171,7 @@ def select_relevant_docs(
     llm: object | None = None,
     language: str | None = None,
     with_subject: bool = False,
+    stage: str = FIRST,
 ):
     """어떤 문서를 보고 답할지 **모델이** 고릅니다.
 
@@ -167,13 +183,17 @@ def select_relevant_docs(
     라우터가 실패하거나 아무것도 못 고르면 **문서 전부**로 떨어집니다.
 
     ``with_subject=True`` 면 (본문, 그 문서들이 들고 온 메일 제목) 을 돌려줍니다.
+
+    ``stage`` 는 후보를 먼저 좁힙니다 — 「후속 회신에만」 문서는 첫 회신의 인덱스에 아예
+    안 실립니다. 모델에게 「이건 첫 회신이니 고르지 마라」라고 부탁하는 대신 보여 주지
+    않습니다: 부탁은 지켜질 때도 있고 안 지켜질 때도 있습니다.
     """
 
     def done(docs: list[PolicySource]):
         text = _format_docs(docs)
         return (text, subject_from_docs(docs)) if with_subject else text
 
-    candidates = router_docs()
+    candidates = router_docs(stage)
     if not candidates:
         return done([])
     if llm is None:

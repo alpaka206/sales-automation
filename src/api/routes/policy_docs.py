@@ -40,6 +40,19 @@ MODES = (
 )
 _MODE_KEYS = {key for key, _label in MODES}
 
+# **어느 회신에 붙는 문서인가** (0108). `MODES` 와 같은 자리에 두는 이유도 같습니다 —
+# 폼의 고르개와 목록의 라벨이 **한 튜플**을 읽어야, 값을 늘렸을 때 화면 한쪽만 모르는
+# 상태가 안 생깁니다(`ui_api` 가 이것을 import 합니다).
+#
+# `mode='knowledge'` 일 때만 뜻이 있습니다. 「항상 적용」 문서는 고르는 대상이 아니라
+# 모든 프롬프트에 통째로 들어갑니다.
+SCOPES = (
+    ("all", "모두"),
+    ("first", "첫 회신에만"),
+    ("followup", "후속 회신에만"),
+)
+_SCOPE_KEYS = {key for key, _label in SCOPES}
+
 
 def _doc_key(title: str) -> str:
     """이 문서의 신원. 제목에서 만들어 냅니다.
@@ -58,6 +71,7 @@ async def policy_docs_create(
     label: str = Form(...),
     body: str = Form(""),
     mode: str = Form("knowledge"),
+    scope: str = Form("all"),
     subject: str = Form(""),
     usage_note: str = Form(""),
 ):
@@ -75,6 +89,8 @@ async def policy_docs_create(
         raise HTTPException(status_code=400, detail="문서 이름을 입력해 주세요")
     if mode not in _MODE_KEYS:
         mode = "knowledge"
+    if scope not in _SCOPE_KEYS:
+        scope = "all"
 
     key = _doc_key(label)
     with SessionLocal() as session:
@@ -88,6 +104,7 @@ async def policy_docs_create(
             title=label,
             doc_key=key,
             mode=mode,
+            scope=scope,
             body=body,
             subject=subject.strip() or None,
             usage_note=usage_note.strip() or None,
@@ -109,6 +126,7 @@ async def policy_docs_update(
     label: str = Form(""),
     body: str = Form(""),
     mode: str = Form(""),
+    scope: str = Form(""),
     subject: str = Form(""),
     usage_note: str = Form(""),
 ):
@@ -133,6 +151,10 @@ async def policy_docs_update(
             source.title = label.strip()
         if mode in _MODE_KEYS:
             source.mode = mode
+        # 빈 값은 「안 보냈다」입니다 — 안 고칩니다. `mode` 와 같은 규칙이라, 이 칸을
+        # 모르는 옛 폼이 저장해도 문서가 조용히 「모두」로 되돌아가지 않습니다.
+        if scope in _SCOPE_KEYS:
+            source.scope = scope
         source.subject = subject.strip() or None
         source.usage_note = usage_note.strip() or None
         if body.strip():

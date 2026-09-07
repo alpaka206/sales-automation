@@ -788,7 +788,7 @@ def ui_policy_docs():
     from ...agents.policy_sync import knowledge_slug
     from ...db.models import PolicySource
     from ...db.session import SessionLocal
-    from .policy_docs import MODES
+    from .policy_docs import MODES, SCOPES
 
     with SessionLocal() as session:
         rows = (
@@ -798,12 +798,25 @@ def ui_policy_docs():
         )
         return {
             "modes": [{"key": key, "label": label} for key, label in MODES],
+            # 어느 회신에 붙는 문서인가 (0108). 라벨의 출처는 `policy_docs` 한 곳입니다 —
+            # 화면이 목록을 스스로 지으면 폼에서 고를 수는 있는데 서버가 안 받는 값이 생깁니다.
+            "scopes": [{"key": key, "label": label} for key, label in SCOPES],
             "rows": [
                 {
                     "id": row.id,
                     "label": row.label,
                     "title": row.title,
                     "mode": row.mode,
+                    "scope": row.scope or "all",
+                    # 목록에 붙일 글자. **기본값과 「항상 적용」에는 빈 문자열**입니다 —
+                    # 모든 줄에 「모두」가 하나씩 붙으면 아무것도 안 알려 줍니다. 라벨을
+                    # 여기서 만드는 이유는 표의 열이 모듈 상수라 서버 목록에 못 닿기
+                    # 때문입니다: 화면에 사전을 하나 더 두면 라벨의 출처가 둘이 됩니다.
+                    "scope_label": (
+                        dict(SCOPES).get(row.scope or "all", "")
+                        if row.mode == "knowledge" and (row.scope or "all") != "all"
+                        else ""
+                    ),
                     # 라우터가 이 문서를 고를 때 부르는 이름. 「항상 적용」 문서에는 없습니다
                     # — 그건 고르는 대상이 아니라 모든 프롬프트에 통째로 들어갑니다.
                     "slug": knowledge_slug(row) if row.mode == "knowledge" else "",

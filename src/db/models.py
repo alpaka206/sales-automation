@@ -337,6 +337,16 @@ class PolicySource(Base):
     # 지식 문서 사본이 따라오도록 슬러그는 이 값에서 나옵니다.
     doc_key: Mapped[str] = mapped_column(String, unique=True, nullable=False, index=True)
     mode: Mapped[str] = mapped_column(String, nullable=False, default="knowledge")
+    # **어느 회신에 붙는 문서인가** (0108). ``all``(기본) · ``first``(첫 회신에만) ·
+    # ``followup``(후속 회신에만). 첫 회신에는 간단히 답하고, 고객이 더 물어오면 깊은
+    # 문서를 붙여 자세히 쓰기 위한 칸입니다 — 그 깊은 문서가 ``followup`` 입니다.
+    #
+    # ``mode='rules'`` 행에서는 뜻이 없습니다(그쪽은 고르는 대상이 아니라 모든 프롬프트에
+    # 통째로 들어갑니다). ``mode`` 를 늘리는 대신 칸을 나눈 이유는 0108 에 적혀 있습니다 —
+    # 기본이 「모두」라, 이 칸을 안 보는 코드는 많이 보여 줄 뿐 덜 보여 주지 않습니다.
+    scope: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="all", server_default=text("'all'")
+    )
     # ``order_index`` 와 ``status`` 가 여기 있었습니다 (0101). 순서는 읽히기만 하고 정할
     # 방법이 없어서 늘 100 이었고 결국 id 순이었습니다 — 이제 그것을 사실대로 적습니다.
     # 상태는 0100 이 삭제를 하드 삭제로 바꾸면서 뜻을 잃었습니다: 표에 있는 행이 곧 살아

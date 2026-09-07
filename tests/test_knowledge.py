@@ -207,3 +207,33 @@ def test_the_copy_table_is_gone() -> None:
     assert "knowledge_documents" not in Base.metadata.tables
     for gone in ("refresh_knowledge_copy", "_upsert_knowledge", "_tags_for"):
         assert not hasattr(policy_sync, gone), gone
+
+
+# ---- 어느 회신에 붙는 문서인가 (0108) ------------------------------------------------
+
+
+def test_a_follow_up_only_document_never_reaches_the_first_reply(db) -> None:
+    """**첫 회신에는 간단히, 더 물어오면 자세히** (2026-09-07 운영자 지시).
+
+    깊은 문서는 후속 회신에만 붙습니다. 모델에게 「첫 회신이니 고르지 마라」라고 부탁하는
+    대신 인덱스에 **아예 안 싣습니다** — 부탁은 지켜질 때도 있고 안 지켜질 때도 있습니다.
+    """
+    _doc(db, "always", "지원 언어 정책")
+    _doc(db, "deep", "엔터프라이즈 계약 조건 상세", scope="followup")
+    _doc(db, "intro", "첫 인사 서식", scope="first")
+
+    # 순서는 제목 가나다순 그대로입니다 — `scope` 는 거를 뿐 줄을 세우지 않습니다.
+    assert [d.doc_key for d in knowledge.router_docs(knowledge.FIRST)] == ["always", "intro"]
+    assert [d.doc_key for d in knowledge.router_docs(knowledge.FOLLOWUP)] == ["deep", "always"]
+
+
+def test_the_default_scope_is_every_reply(db) -> None:
+    """기존 문서는 전부 이 자리입니다 — 이 칸이 생겨도 **오늘 동작이 안 바뀝니다.**
+
+    `mode` 를 늘리는 대신 칸을 나눈 이유가 이것입니다: 기본이 「모두」라, 이 칸을 안 보는
+    코드는 많이 보여 줄 뿐 덜 보여 주지 않습니다.
+    """
+    _doc(db, "k1", "지원 언어 정책")
+
+    assert [d.doc_key for d in knowledge.router_docs(knowledge.FIRST)] == ["k1"]
+    assert [d.doc_key for d in knowledge.router_docs(knowledge.FOLLOWUP)] == ["k1"]

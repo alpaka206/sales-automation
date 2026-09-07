@@ -13,11 +13,14 @@ import { DeleteDialog } from "../ui/DeleteDialog";
 type Mode = { key: string; label: string };
 type Row = {
   id: number; label: string; title: string | null; mode: string; slug: string;
+  /** 어느 회신에 붙는가 (0108). `scope_label` 은 기본값(`all`)과 「항상 적용」에서 빕니다 —
+   *  모든 줄에 「모두」가 하나씩 붙으면 아무것도 안 알려 줍니다. */
+  scope: string; scope_label: string;
   body: string | null; chars: number;
   subject: string; usage_note: string; updated_at: string;
   version: number;
 };
-type Data = { modes: Mode[]; rows: Row[] };
+type Data = { modes: Mode[]; scopes: Mode[]; rows: Row[] };
 
 /** 만들기·고치기·지우기가 모두 form-encoded 로 갑니다 — 화면이 쓰는 라우트 계열입니다. */
 async function send(path: string, method: string, fields: Record<string, string> = {}) {
@@ -43,6 +46,7 @@ const COLUMNS: Column<Row>[] = [
             「언제 쓰는가」이지 이 글자가 아니지만, 로그에 남는 것이 이것이라 화면과 로그를
             맞춰 보려면 여기 있어야 합니다. 「항상 적용」 문서에는 없습니다 — 고르는 대상이
             아니라 모든 프롬프트에 통째로 들어갑니다. */}
+        {row.scope_label && <span className="tag" style={{ marginLeft: 6 }}>{row.scope_label}</span>}
         {row.slug && <div className="t-xs mono t-subtle">{row.slug}</div>}
       </>
     ) },
@@ -57,13 +61,15 @@ const COLUMNS: Column<Row>[] = [
  *  전에는 만드는 폼(목록 위에 펼쳐지는 카드)과 고치는 폼(상세 안의 또 다른 카드)이 따로
  *  있었습니다. 같은 것을 두 가지 모양으로 물으면 어느 칸이 어디 있는지 매번 다시 찾아야 하고,
  *  칸을 하나 더할 때 고칠 곳이 둘이 됩니다. 이메일 템플릿과 같은 배치로 맞췄습니다. */
-function DocEditor({ doc, modes, onDone }: {
+function DocEditor({ doc, modes, scopes, onDone }: {
   doc: Row | null;
   modes: Mode[];
+  scopes: Mode[];
   onDone: () => void;
 }) {
   const [label, setLabel] = useState(doc?.title || doc?.label || "");
   const [mode, setMode] = useState(doc?.mode || "knowledge");
+  const [scope, setScope] = useState(doc?.scope || "all");
   const [subject, setSubject] = useState(doc?.subject || "");
   const [usageNote, setUsageNote] = useState(doc?.usage_note || "");
   const [body, setBody] = useState(doc?.body || "");
@@ -73,7 +79,8 @@ function DocEditor({ doc, modes, onDone }: {
   // 이메일 템플릿 편집기와 같은 규칙입니다 — 바꾼 것이 있을 때만 저장이 뜨고, 판 번호는
   // 화면에서만 앞서 보입니다. 실제로 올라가는 것은 저장을 눌렀을 때뿐입니다.
   const dirty = doc
-    ? label !== (doc.title || doc.label) || mode !== doc.mode || subject !== (doc.subject || "")
+    ? label !== (doc.title || doc.label) || mode !== doc.mode || scope !== (doc.scope || "all")
+      || subject !== (doc.subject || "")
       || usageNote !== (doc.usage_note || "") || body !== (doc.body || "")
     : Boolean(label.trim() || body.trim());
   const shownVersion = (doc?.version ?? 1) + (dirty && doc ? 1 : 0);
@@ -81,7 +88,7 @@ function DocEditor({ doc, modes, onDone }: {
   async function save() {
     setNote(null);
     try {
-      const fields = { label, mode, subject, usage_note: usageNote, body };
+      const fields = { label, mode, scope, subject, usage_note: usageNote, body };
       if (doc) await send(`/policy-docs/${doc.id}`, "PUT", fields);
       else await send("/policy-docs", "POST", fields);
       onDone();
@@ -126,9 +133,25 @@ function DocEditor({ doc, modes, onDone }: {
               {modes.map((m) => <option key={m.key} value={m.key}>{m.label}</option>)}
             </select>
           </div>
-          {/* 「기준일」 칸이 여기 있었습니다 (0101). 「언제 기준인가」는 결국 마지막으로
+          {/* **어느 회신에 붙는가** (0108). 첫 회신에는 간단히 답하고, 고객이 더 물어오면
+              깊은 문서를 붙여 자세히 씁니다 — 그 깊은 문서가 「후속 회신에만」입니다.
+
+              「항상 적용」에는 안 묻습니다: 그 문서는 고르는 대상이 아니라 모든 프롬프트에
+              통째로 들어가므로 답이 없는 질문입니다. 안 물을 때는 **칸을 안 그립니다** —
+              숨겨 두면 그 값이 그대로 전송됩니다.
+
+              「기준일」 칸이 여기 있었습니다 (0101). 「언제 기준인가」는 결국 마지막으로
               저장한 시각이고, 그건 저장할 때마다 자동으로 움직입니다 — 사람이 채워야 하는
               칸으로 두었더니 마이그레이션이 심은 한 행 말고는 아무도 안 채웠습니다. */}
+          {mode === "knowledge" && (
+            <div>
+              <label className="field-label" htmlFor="pd-scope">어느 회신에</label>
+              <select className="select" id="pd-scope" value={scope}
+                      onChange={(e) => setScope(e.target.value)}>
+                {scopes.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
+              </select>
+            </div>
+          )}
         </div>
 
         {/* 이 문서를 근거로 회신할 때의 메일 제목. 본문 안에 "Subject: ..." 로 적으면 모델이
@@ -228,7 +251,7 @@ export function PolicyDocs({ onBack }: { onBack?: () => void }) {
 
   if (open) {
     const doc = open === "new" ? null : data.rows.find((row) => String(row.id) === open) ?? null;
-    return <DocEditor doc={doc} modes={data.modes} onDone={backToList} />;
+    return <DocEditor doc={doc} modes={data.modes} scopes={data.scopes} onDone={backToList} />;
   }
 
   return (

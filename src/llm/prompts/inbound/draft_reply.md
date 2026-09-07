@@ -24,6 +24,8 @@ output: json
 이전 대화 맥락(없으면 비어 있음):
 {{conversation_context}}
 
+{{followup_rule}}
+
 {{enrichment_context}}
 
 {{knowledge_docs}}

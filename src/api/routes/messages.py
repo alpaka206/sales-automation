@@ -989,15 +989,26 @@ async def start_manual_reply(
     subject: str = Form(""),
     body: str = Form(""),
 ):
-    """후속 회신 한 통을 **모델 없이** 만듭니다 — 본문은 운영자가 씁니다.
+    """후속 회신 한 통을 만들고 **초안을 쓰게 큐에 올립니다** (2026-09-07 운영자 지시).
 
     자동 초안은 New 티켓에만 생기고(`inbound.handle` 의 `skipped_not_new`), 한 번 회신이
-    나간 대화에는 다시 생기지 않습니다(`skipped_reply_exists`). 그래서 그 뒤의 대화는 전부
-    허브스팟에서 사람이 했고, 우리 화면에는 무엇이 오갔는지가 남지 않았습니다.
+    나간 대화에는 다시 생기지 않습니다(`skipped_reply_exists`). 그래서 이 버튼이 오래
+    **빈 편집기**를 열었습니다 — 그 뒤의 회신은 전부 사람이 처음부터 썼습니다.
+
+    이제 같은 초안 기계를 씁니다. 새 길을 내지 않습니다: 「초안 다시 쓰기」가 이미 단계
+    관문을 **일부러** 비켜 가고(`inbound.py` 의 `_draft_message_id`), 그 길이 기존 메시지를
+    덮어쓰도록 되어 있습니다. 여기서 하는 일은 그 길에 메시지 하나를 세워 올리는 것뿐입니다.
+
+    **모델은 여기서 안 부릅니다.** pro 티어 한 통이라 20~30초가 걸리고, 그동안 이 요청이
+    열려 있으면 프록시가 끊습니다. 대신 `drafting` 으로 세워 두고 워커가 채웁니다 — 화면은
+    그 상태를 이미 그릴 줄 압니다(「다시 쓰기」와 같은 상태이고, 다 되면 SSE 가 갱신합니다).
 
     만들어진 뒤는 자동 초안과 **완전히 같은 길**입니다 — 편집·번역·승인·발송·거절 라우트를
-    그대로 쓰고, 그래서 발송 관문(언어·수신자·safe mode)도 그대로 걸립니다. 여기서 하는 일은
-    빈 초안 한 줄을 세우는 것뿐이라 모델을 부르지 않습니다.
+    그대로 쓰고, 그래서 발송 관문(언어·수신자·safe mode)도 그대로 걸립니다. 나가는 것은
+    여전히 사람이 승인한 뒤입니다.
+
+    **큐에 못 올려도 초안 행은 남깁니다.** 그때는 예전처럼 빈 편집기이고, 운영자가 직접
+    쓰면 됩니다 — 여기서 실패로 되돌리면 「메일 발송」 버튼이 통째로 안 듣습니다.
     """
     with SessionLocal() as session:
         conv = session.get(Conversation, conversation_id)
@@ -1034,6 +1045,9 @@ async def start_manual_reply(
         # 값으로 두면, 운영자가 그 언어로 쓰는 한 번역 관문이 뜨지 않고 한국어로 쓰면 뜹니다
         # (`approval.translation_required`).
         target = ((conv.inquiry_language or "ko").strip().lower()) or "ko"
+        # 운영자가 본문을 직접 주면 그 글이 초안입니다 — 모델을 부르지 않습니다.
+        # 빈 채로 열었을 때만 `drafting` 으로 세워 워커가 채웁니다.
+        written = body.strip()
         msg = Message(
             conversation_id=conv.id,
             direction="outgoing",
@@ -1041,17 +1055,34 @@ async def start_manual_reply(
             to_address=to_address,
             subject=subject.strip()
             or reply_subject(conv.inquiry_subject, target_code=target),
-            body=body.strip(),
+            body=written,
             language=target,
             target_language=target,
-            status="pending_approval",
+            status="pending_approval" if written else "drafting",
             prompt_variant=MANUAL_REPLY_VARIANT,
         )
         session.add(msg)
         session.commit()
+        message_id, ticket_id = msg.id, (conv.hubspot_ticket_id or "").strip()
         # 진행 기록은 남기지 않습니다 — 초안을 만든 것은 우리 안의 사정이고, 실제로 나가면
         # 발송 경로가 「답변 발송 완료」를 적습니다(`send_worker._post_send_bookkeeping`).
-        return {"message_id": msg.id, "created": True}
+
+    if not written:
+        from ...agents.inbound_worker import enqueue_draft
+
+        try:
+            enqueue_draft(ticket_id, message_id, source="console_followup")
+        except Exception:
+            # 큐가 안 받아도 초안 행은 남습니다 — 예전처럼 빈 편집기이고, 운영자가 직접
+            # 쓰면 됩니다. 여기서 500 을 내면 버튼이 통째로 안 듣습니다.
+            logger.warning("후속 초안을 큐에 못 올렸습니다 (msg=%s)", message_id, exc_info=True)
+            with SessionLocal() as session:
+                stuck = session.get(Message, message_id)
+                if stuck is not None and stuck.status == "drafting":
+                    # `drafting` 인 채로 두면 화면이 영원히 「쓰는 중」입니다.
+                    stuck.status = "pending_approval"
+                    session.commit()
+    return {"message_id": message_id, "created": True}
 
 
 @router.post("/contacts/history-digest")
