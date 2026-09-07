@@ -353,7 +353,29 @@ export function MessageDetail() {
   // **첫 번째로 나간 답변**이 어느 줄인지. 그 한 줄만 「문의 회신」이고, 그 뒤의 우리
   // 메일은 「이메일 발송」입니다 — 「문의 회신」은 이 티켓에서 한 번 일어나는 사건이라
   // 두 번 세 번 적히면 어느 것이 그 사건인지 알 수 없습니다 (2026-08-26 운영자 지시).
-  const firstReplyId = data.thread.find((b) => SENT.has(b.direction))?.id;
+  // **실제로 나간 것만 셉니다** (`sent_at`). 방향만 보면 검토 중인 초안·발송 실패한 줄도
+  // `outgoing` 이라, 나간 적 없는 줄이 「문의 회신」을 가져가고 진짜 첫 회신은 「이메일
+  // 발송」으로 밀립니다 — 그 티켓에서 그 사건이 어느 줄인지 화면에서 사라집니다.
+  const firstReplyId = data.thread.find((b) => SENT.has(b.direction) && !!b.sent_at)?.id;
+  // **문의가 접수되기 전에 오간 것**은 이 티켓의 이야기가 아니라 그 전부터 돌던 CS 대화
+  // 입니다 (2026-09-07 운영자 지시). 이 티켓의 스레드에 그런 줄이 섞여 있는 이유는 간단
+  // 합니다 — 이미 오가던 메일 스레드에 나중에 티켓이 붙습니다.
+  //
+  // 기준 시각은 허브스팟이 티켓을 만든 날이고, **한 시간을 봐 줍니다.** 문의 자체가
+  // 티켓보다 몇 초 이른 것이 정상이기 때문입니다: 티켓을 만든 것이 그 문의이고, 실시간
+  // 으로 받은 티켓은 웹훅이 도착한 시각으로 행이 섭니다. 그 여유가 없으면 **문의 자기
+  // 자신이** CS 로 찍힙니다.
+  // ponytail: 한 시간은 눈금이지 규칙이 아닙니다. 진짜 CS 대화는 며칠~몇 주 전이라 이
+  // 눈금이 어디쯤이든 갈리지 않습니다. 정확히 하려면 허브스팟에서 단계 이력
+  // (`propertiesWithHistory=hs_pipeline_stage`)을 받아 New 진입 시각을 열로 두면 됩니다.
+  const inquiryAt = data.ticket.created_at
+    ? Date.parse(data.ticket.created_at) - 60 * 60 * 1000
+    : NaN;
+  // 폼은 뺍니다 (운영자 지시) — 폼 제출이 곧 문의 접수라 CS 일 수가 없습니다.
+  const isPreInquiry = (item: Interaction) =>
+    !Number.isNaN(inquiryAt)
+    && item.channel !== "폼"
+    && Date.parse(item.happened_at) < inquiryAt;
   // New 를 지나면 말풍선은 「이 티켓의 기록」 줄기로 내려가고, 위에는 검토 중인 초안만
   // 남습니다. 그 초안마저 없으면 그릴 것이 없습니다.
   const visibleBubbles = afterNew
@@ -949,7 +971,8 @@ export function MessageDetail() {
                                   isFirstReply={entry.bubble.id === firstReplyId} />
                     ) : (
                       <InteractionItem key={entry.key} item={entry.item as Interaction}
-                                       hideSubject hideHandler />
+                                       hideSubject hideHandler
+                                       preInquiry={isPreInquiry(entry.item as Interaction)} />
                     ),
                   )
                 )}

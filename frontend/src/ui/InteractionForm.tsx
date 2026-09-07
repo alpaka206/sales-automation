@@ -277,9 +277,18 @@ export function InteractionForm({
  *
  *  제목은 **버려지지 않습니다**: 요약이 빈 기록에서는 아래 `body` 가 제목을 대신 씁니다.
  *  그 줄에는 제목이 가진 전부이기 때문입니다. */
-export function InteractionItem({ item, hideSubject = false, hideHandler = false }: {
+export function InteractionItem({
+  item, hideSubject = false, hideHandler = false, preInquiry = false,
+}: {
   item: Interaction;
   hideSubject?: boolean;
+  /** 이 문의가 접수되기 **전에** 오간 줄인가. 그러면 빨간 「CS」 칩이 붙습니다
+   *  (2026-09-07 운영자 지시). 이 티켓의 이야기가 아니라 그 전부터 돌던 대화라,
+   *  섞여 있으면 「이 문의에 우리가 뭐라고 답했나」를 읽을 때 오해합니다.
+   *
+   *  **판단은 부르는 쪽이 합니다.** 기준이 그 티켓의 접수 시각이라 줄 혼자서는 알 수
+   *  없고, 이 컴포넌트는 티켓 없는 목록(고객 상세)에도 서기 때문입니다. */
+  preInquiry?: boolean;
   /** 담당자를 빼고 그립니다. **티켓 기록이 그렇게 씁니다** (2026-08-26 운영자 지시) —
    *  그 목록은 「이 티켓에 무슨 일이 있었나」를 훑는 자리라 누가 했는지는 줄마다 붙을
    *  값이 아닙니다.
@@ -311,6 +320,12 @@ export function InteractionItem({ item, hideSubject = false, hideHandler = false
         </span>
         {/* 채널 태그는 뺐습니다 — 라벨이 이미 「왓츠앱 수신」이라 바로 옆에 「WhatsApp」을
             한 번 더 다는 셈입니다. */}
+        {/* 이 문의보다 먼저 오간 줄. **빨강입니다** (운영자 지시: 「눈에 잘 띄게」) —
+            이 목록에서 유일하게 「이 티켓의 이야기가 아니다」라고 말하는 표시라, 훑을 때
+            건너뛸 줄을 색만 보고 가려낼 수 있어야 합니다. 콘솔에 이미 있는 상태 칩 모양을
+            그대로 씁니다(`pill--danger`) — 여기서만 쓰는 빨강을 새로 만들면 같은 뜻의
+            빨강이 두 개가 됩니다. */}
+        {preInquiry && <span className="pill pill--danger pill--sm">CS</span>}
         {!hideHandler && item.handler && <span className="tag">{item.handler}</span>}
         {/* **`kst()` 로 찍습니다.** API 가 주는 것은 오프셋 없는 UTC 라, 잘라서 그대로
             쓰면 한국 시각보다 9시간 이른 값이 찍힙니다 — 같은 목록의 메일 줄은 변환해서

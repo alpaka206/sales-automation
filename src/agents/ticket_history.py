@@ -250,6 +250,59 @@ async def collect_ticket_history(client, ticket_id: str) -> list[dict]:
     return rows
 
 
+def _same_direction(value: str | None) -> str:
+    """옛 철자를 같은 말로. CRM 수집기는 `incoming`, 스레드 수집기는 `inbound` 를 씁니다."""
+    return {"incoming": "inbound", "outbound": "outgoing"}.get(value or "", value or "")
+
+
+def _merge_crm_twins(session, conversation_id: int) -> int:
+    """같은 메일의 **CRM 쪽 줄**을 스레드 줄에 합칩니다. 합친 수를 돌려줍니다.
+
+    한 메일이 허브스팟에 객체 두 개로 삽니다(CRM 이메일 · Conversations 메시지). 이제
+    `hs_email_message_id` 로 열쇠를 맞추므로 **앞으로는** 두 줄이 안 생기지만, 그 전에
+    들어온 줄들은 이미 두 벌로 쌓여 있습니다 — 운영자가 본 「같은 메일이 세 번」의 한
+    자리입니다.
+
+    **이관이 아니라 여기서 치웁니다.** 히스토리 수집기는 티켓을 끝없이 한 바퀴씩 돌므로
+    (`sync_pending_ticket_history`), 여기 두면 한 바퀴 안에 모든 티켓이 저절로 정리되고
+    그 뒤로도 계속 유지됩니다. 이관은 한 번 돌고 끝이라 그때 아직 안 들어와 있던 줄은
+    영영 못 만납니다.
+
+    짝을 찾는 열쇠는 **같은 티켓 · 같은 초 · 같은 방향**입니다. 옛 CRM 줄에는 스레드
+    id 가 없어서(그 칸을 안 물어보던 시절의 줄입니다) 이것 말고 이을 방법이 없습니다.
+    한 티켓에서 같은 초에 다른 메일이 둘 오갈 일은 없고, 틀려도 남는 쪽이 더 완전한
+    스레드 줄이라 잃는 내용이 없습니다.
+
+    한 줄 요약(`context`)은 **살려서 옮깁니다** — 백필이 이미 만들어 둔 것이라, 그냥
+    지우면 그 티켓만 다시 모델을 부르게 됩니다.
+    """
+    rows = session.scalars(
+        select(CustomerInteraction).where(
+            CustomerInteraction.conversation_id == conversation_id
+        )
+    ).all()
+    twins: dict[tuple, CustomerInteraction] = {}
+    for row in rows:
+        if row.happened_at and (row.external_id or "").startswith("hubspot:conv:"):
+            twins.setdefault(
+                (row.happened_at.replace(microsecond=0), _same_direction(row.direction)), row
+            )
+    merged = 0
+    for row in rows:
+        if not row.happened_at or not (row.external_id or "").startswith("hubspot:email:"):
+            continue
+        twin = twins.get(
+            (row.happened_at.replace(microsecond=0), _same_direction(row.direction))
+        )
+        if twin is None:
+            continue
+        if not twin.context and row.context:
+            twin.context = row.context
+        session.delete(row)
+        merged += 1
+    return merged
+
+
 def _store(conversation_id: int, contact_id: int, rows: list[dict]) -> int:
     """새 기록만 넣습니다. 이미 있는 것은 건드리지 않습니다 — 몇 번을 돌려도 같은 결과."""
     added = 0
@@ -277,10 +330,15 @@ def _store(conversation_id: int, contact_id: int, rows: list[dict]) -> int:
             ))
             known.add(row["external_id"])
             added += 1
+        # 넣은 뒤에 합칩니다 — 방금 들어온 스레드 줄이 옛 CRM 줄의 짝일 수 있습니다.
+        merged = _merge_crm_twins(session, conversation_id)
         conversation = session.get(Conversation, conversation_id)
         if conversation is not None:
             conversation.history_synced_at = datetime.now(timezone.utc)
         session.commit()
+    if merged:
+        logger.info("중복된 CRM 메일 %d줄을 스레드 줄에 합쳤습니다 (conversation=%s).",
+                    merged, conversation_id)
 
     # ------------------------------------------------------------------ #
     # **`last_incoming_at` 은 건드리지 않습니다.** 한 번 채웠다가 지웠습니다.

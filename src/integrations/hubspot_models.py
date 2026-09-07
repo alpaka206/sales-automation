@@ -51,6 +51,13 @@ class EngagementDTO(BaseModel):
     # 붙인 라벨이라, 우리 쪽 사람이 자기 메일함에서 답한 메일에도 `INCOMING_EMAIL` 이
     # 찍힙니다. 메일이 아닌 접점(통화·미팅·메모)에는 없으므로 None 입니다.
     from_email: str | None = None
+    # **같은 메일의 Conversations 쪽 id.** 한 메일이 허브스팟에 객체 두 개로 삽니다 —
+    # CRM 이메일(이 DTO)과 스레드 메시지(`agents/ticket_history`). id 체계가 달라 서로를
+    # 못 알아봤고, 그래서 같은 메일이 화면에 두 줄로 떴습니다. 잇는 열쇠는
+    # `hs_email_message_id` 안에 박힌 `-cv-<스레드 메시지 id>` 입니다(실측 발신 40건 중
+    # 39건 일치 — 나머지 1건은 개인 사서함 메일이라 스레드 쌍둥이가 아예 없습니다).
+    # 없으면 None: 통화·미팅·메모, 그리고 스레드를 안 지난 메일.
+    conversation_message_id: str | None = None
 
 
 class DealDTO(BaseModel):

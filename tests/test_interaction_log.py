@@ -677,3 +677,38 @@ def test_the_past_ticket_marker_is_defined_once():
         body = pathlib.Path(path).read_text(encoding="utf-8")
         # 상수를 정하는 한 줄 말고는 글자를 직접 쓰지 않습니다.
         assert body.count('"(지난 티켓)"') <= 1, path
+
+
+def test_a_sent_reply_is_one_row_not_two(log_db):
+    """**말풍선이 그리는 메일은 접점 기록에서 뺍니다** (2026-09-07 운영자 지적:
+    「이거 다 같은건데 3번이나 기록되었어」).
+
+    우리가 보낸 회신은 이 화면에 두 벌로 있습니다 — 발송이 남긴 `messages` 행과, 히스토리
+    수집기가 같은 메시지를 허브스팟에서 받아 넣은 접점 기록. 짐작이 아니라 **같은 id** 로
+    가릅니다: 발송 응답이 돌려준 스레드 메시지 id 가 `messages.hubspot_message_id` 이고,
+    수집기는 그것으로 `external_id` 를 만듭니다.
+
+    **행을 지우지는 않습니다.** 고객 상세의 히스토리에는 말풍선이 없어서, 지우면 그
+    화면에서 우리 회신이 통째로 사라집니다 — 그래서 화면에서만 뺍니다.
+    """
+    factory, ids = log_db
+    with factory() as session:
+        message = session.get(Message, ids["negotiating_message"])
+        message.hubspot_message_id = "d0945b6b"
+        session.add_all([
+            CustomerInteraction(
+                contact_id=ids["contact"], conversation_id=ids["negotiating"],
+                external_id="hubspot:conv:d0945b6b", channel="이메일",
+                direction="outgoing", summary="같은 메일", happened_at=datetime.now(),
+            ),
+            # 말풍선이 없는 줄(허브스팟 화면에서 보낸 메일·고객 답장)은 그대로 남습니다.
+            CustomerInteraction(
+                contact_id=ids["contact"], conversation_id=ids["negotiating"],
+                external_id="hubspot:conv:other", channel="이메일",
+                direction="inbound", summary="고객 답장", happened_at=datetime.now(),
+            ),
+        ])
+        session.commit()
+    with TestClient(app) as client:
+        payload = client.get(f"/api/ui/messages/{ids['negotiating_message']}").json()
+    assert [i["summary"] for i in payload["ticket_interactions"]] == ["고객 답장"]

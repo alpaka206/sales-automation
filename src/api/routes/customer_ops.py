@@ -1465,7 +1465,17 @@ def _sync_hubspot(contact_id: int, per_type: int = 20) -> int:
         # 대화를 통째로 받아온 티켓들. 그 티켓의 메일은 스레드 쪽이 이미 들고 있습니다.
         history_synced = {row.id for row in rows_for_tickets if row.history_synced_at is not None}
         for email in emails:
-            external_id = f"hubspot:email:{email.id}"
+            # **스레드 쪽 id 가 있으면 그것으로 적습니다** (2026-09-07). 같은 메일이
+            # 허브스팟에 객체 두 개로 사는데(CRM 이메일 · Conversations 메시지) 두
+            # 수집기가 각자의 id 로 적어서 접점 기록에 **같은 메일이 두 줄** 남았습니다.
+            # 열쇠를 하나로 맞추면 0106 의 유니크 인덱스가 나머지를 알아서 막습니다 —
+            # 어느 수집기가 먼저 도착하든 결과가 같습니다. 짝이 없는 메일(개인 사서함
+            # 발신 등)만 예전 열쇠로 남습니다.
+            external_id = (
+                f"hubspot:conv:{email.conversation_message_id}"
+                if email.conversation_message_id
+                else f"hubspot:email:{email.id}"
+            )
             conv_id = conv_of_ticket.get(email.ticket_id or "")
             exists = session.scalar(
                 select(CustomerInteraction.id).where(CustomerInteraction.external_id == external_id)

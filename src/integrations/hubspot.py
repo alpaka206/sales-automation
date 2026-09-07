@@ -146,6 +146,26 @@ async def _request_with_retries(
 
 # Private apps allow ~100 requests / 10s. A bulk walk issues its calls back to back
 # and will trip that within a couple of seconds, so pace them as well as retry.
+# CRM 이메일의 `hs_email_message_id` 에 박혀 있는 **스레드 메시지 id**.
+# `facsimile-3-cv-d0945b6b-6462-4558-ab05-0eacc94f9530@facsimile.hubspot-networks.net`
+_CONVERSATION_TWIN_RE = re.compile(r"-cv-([0-9a-fA-F][0-9a-fA-F-]{6,})@")
+
+
+def conversation_message_id(hs_email_message_id: str | None) -> str | None:
+    """이 CRM 이메일과 **같은 메일**인 Conversations 메시지의 id. 없으면 None.
+
+    한 메일이 허브스팟에 객체 두 개로 삽니다(CRM 이메일 · 스레드 메시지). 이 값이 없던
+    동안 두 수집기가 서로를 못 알아봐서 같은 메일이 접점 기록에 **두 줄**로 남았습니다.
+    이 함수가 그 둘의 `external_id` 를 하나로 만듭니다 — 유니크 인덱스(0106)가 나머지를
+    합니다.
+
+    스레드를 안 지난 메일(개인 사서함 발신 등)에는 이 조각이 없습니다. 그때는 None 이고
+    예전처럼 `hubspot:email:<id>` 로 남습니다 — 그런 메일에는 합칠 짝이 없습니다.
+    """
+    match = _CONVERSATION_TWIN_RE.search(hs_email_message_id or "")
+    return match.group(1) if match else None
+
+
 _BULK_PACE_SECONDS = 0.12
 
 
@@ -1368,7 +1388,12 @@ class HubSpotClient:
                             # 만 믿으면 우리 쪽 사람이 자기 메일함에서 답한 것이 「고객이 한
                             # 말」로 뒤집힙니다(실측: `untae@estsoft.com` 발신 81건이 전부
                             # `INCOMING_EMAIL` 이었습니다).
-                            "hs_email_direction,hs_email_from_email"
+                            # **같은 메일의 스레드 쪽 id 가 이 안에 있습니다.**
+                            # `facsimile-3-cv-<스레드 메시지 id>@facsimile.hubspot-
+                            # networks.net` 꼴이라, 이 한 칸이 CRM 이메일과 Conversations
+                            # 메시지를 잇는 유일한 열쇠입니다. 안 물어보던 동안 같은 메일이
+                            # 두 줄로 저장됐습니다.
+                            "hs_email_direction,hs_email_from_email,hs_email_message_id"
                         )
                     },
                 )
@@ -1390,6 +1415,9 @@ class HubSpotClient:
                         ),
                         ticket_id=ticket_of.get(email_id),
                         from_email=ep.get("hs_email_from_email"),
+                        conversation_message_id=conversation_message_id(
+                            ep.get("hs_email_message_id")
+                        ),
                     )
                 )
         return engagements

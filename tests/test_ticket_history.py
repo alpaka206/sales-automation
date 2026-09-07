@@ -289,3 +289,92 @@ def test_the_operator_can_see_how_far_the_import_got():
     assert "ticket-history/progress" in screen
     # 남은 것이 없으면 그리지 않습니다.
     assert "sync.remaining > 0" in screen
+
+
+# --------------------------------------------------------------------------- #
+# 같은 메일이 세 번 — 한 메일, 객체 셋 (2026-09-07 운영자 지적)
+# --------------------------------------------------------------------------- #
+# 운영자가 본 것: 2026-09-01 11:05 에 나간 회신 한 통이 「이 티켓의 기록」에 세 줄로.
+# 셋의 출처가 다 다릅니다 — 발송이 남긴 `messages` 행(말풍선), CRM 이메일 수집,
+# 스레드 수집. 앞의 둘을 잇는 열쇠가 없어서 서로를 못 알아봤습니다.
+def test_the_crm_email_and_the_thread_message_share_one_key():
+    """CRM 이메일과 스레드 메시지를 잇는 **유일한** 열쇠입니다.
+
+    `hs_email_message_id` 안에 `-cv-<스레드 메시지 id>` 가 박혀 있습니다(실측 발신 40건
+    중 39건 일치, 나머지 1건은 개인 사서함 메일이라 스레드 쌍둥이가 없습니다). 이 칸을
+    안 물어보던 동안 두 수집기가 각자의 id 로 같은 메일을 두 번 저장했습니다.
+    """
+    from src.integrations.hubspot import conversation_message_id
+
+    assert conversation_message_id(
+        "facsimile-3-cv-d0945b6b-6462-4558-ab05-0eacc94f9530"
+        "@facsimile.hubspot-networks.net"
+    ) == "d0945b6b-6462-4558-ab05-0eacc94f9530"
+    # 스레드를 안 지난 메일에는 그 조각이 없습니다 — 그때는 옛 열쇠로 남아야 합니다.
+    assert conversation_message_id("<CAF=abc@mail.gmail.com>") is None
+    assert conversation_message_id(None) is None
+
+
+def test_the_old_crm_row_is_folded_into_the_thread_row():
+    """열쇠를 맞추기 **전에** 쌓인 두 벌은 수집기가 돌면서 치웁니다.
+
+    이관으로 한 번 돌고 끝내지 않는 이유: 수집기는 티켓을 끝없이 한 바퀴씩 돌므로
+    (`sync_pending_ticket_history`) 여기 두면 한 바퀴 안에 전부 정리되고 그 뒤로도
+    유지됩니다. 이관은 그때 아직 안 들어와 있던 줄을 영영 못 만납니다.
+
+    한 줄 요약은 **살려서 옮깁니다** — 백필이 이미 만들어 둔 것이라, 지우면 그 티켓만
+    다시 모델을 부릅니다.
+    """
+    from datetime import datetime, timezone
+    from unittest.mock import patch
+
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from sqlalchemy.pool import StaticPool
+
+    from src.agents import ticket_history
+    from src.db.base import Base
+    from src.db.models import Contact, Conversation, CustomerInteraction
+
+    engine = create_engine(
+        "sqlite:///:memory:", connect_args={"check_same_thread": False}, poolclass=StaticPool
+    )
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine, expire_on_commit=False)
+    at = datetime(2026, 9, 1, 2, 5, 38, 979000, tzinfo=timezone.utc)
+    with factory() as session:
+        contact = Contact(
+            normalized_email="buyer@acme.com", email="buyer@acme.com",
+            full_name="Acme Buyer",
+        )
+        session.add(contact)
+        session.flush()
+        conv = Conversation(contact_id=contact.id, stage="negotiation")
+        session.add(conv)
+        session.flush()
+        session.add_all([
+            # CRM 쪽 줄 — 한 줄 요약은 이쪽에만 있습니다.
+            CustomerInteraction(
+                contact_id=contact.id, conversation_id=conv.id,
+                external_id="hubspot:email:395992827622", channel="이메일",
+                direction="outgoing", summary="Thanks for reaching out…",
+                context="견적 안내와 미팅 링크를 보냈습니다.", happened_at=at,
+            ),
+            # 스레드 쪽 줄 — 같은 메일, 같은 초. 본문은 이쪽이 더 완전합니다.
+            CustomerInteraction(
+                contact_id=contact.id, conversation_id=conv.id,
+                external_id="hubspot:conv:d0945b6b", channel="이메일",
+                direction="outgoing", summary="Thanks for reaching out…",
+                context=None, happened_at=at.replace(microsecond=0),
+            ),
+        ])
+        session.commit()
+        ids = (conv.id, contact.id)
+
+    with patch.object(ticket_history, "SessionLocal", factory):
+        ticket_history._store(ids[0], ids[1], [])
+
+    with factory() as session:
+        rows = session.query(CustomerInteraction).all()
+        assert [r.external_id for r in rows] == ["hubspot:conv:d0945b6b"], "한 줄만 남습니다"
+        assert rows[0].context == "견적 안내와 미팅 링크를 보냈습니다.", "요약은 옮겨 탑니다"

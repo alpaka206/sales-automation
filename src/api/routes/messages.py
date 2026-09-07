@@ -221,6 +221,24 @@ def _message_detail_context(
                 .all()
             )
 
+        # **말풍선이 이미 그리는 메시지는 접점 기록에서 뺍니다** (2026-09-07 운영자 지적:
+        # 「이거 다 같은건데 3번이나 기록되었어」).
+        #
+        # 우리가 보낸 회신은 이 화면에 두 벌로 있습니다 — 발송이 남긴 `messages` 행(말풍선)
+        # 과, 히스토리 수집기가 같은 메시지를 허브스팟에서 받아 넣은 접점 기록. 둘 다 그리면
+        # 한 메일이 두 줄입니다. 이기는 쪽은 **말풍선**입니다: 번역·원문·「문의 회신」 라벨을
+        # 그쪽만 들고 있습니다.
+        #
+        # 짐작이 아니라 **같은 id** 로 가릅니다 — 발송 응답이 돌려준 스레드 메시지 id 가
+        # `messages.hubspot_message_id` 이고, 수집기는 그것으로 `external_id` 를 만듭니다.
+        # 접점 기록에서 **지우지는 않습니다**: 고객 상세의 히스토리에는 말풍선이 없어서,
+        # 지우면 그 화면에서 우리 회신이 통째로 사라집니다.
+        drawn_by_thread = {
+            f"hubspot:conv:{tm.hubspot_message_id}"
+            for tm in thread_rows
+            if tm.hubspot_message_id
+        }
+
         # Customer-level history (CRM state, contract, cross-channel touchpoints)
         # surfaced inline so the operator sees who this customer is without leaving
         # the reply screen. Full editable view stays at /customers/{id}.
@@ -361,6 +379,7 @@ def _message_detail_context(
                     # — 뒤집기만 하면 됩니다. 왕복 하나가 200ms 인 데다 이 화면이 제일 자주
                     # 열립니다.
                     for it in reversed(interaction_rows)
+                    if it.external_id not in drawn_by_thread
                 ]
                 if conv
                 else []
