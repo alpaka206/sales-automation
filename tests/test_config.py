@@ -41,7 +41,6 @@ def test_ticket_stage_env_names_match_hubspot_labels() -> None:
         "HUBSPOT_TICKET_STAGE_NEW": "1",
         "HUBSPOT_TICKET_STAGE_MEETING_LINK_SENT": "2",
         "HUBSPOT_TICKET_STAGE_NEGOTIATING": "3",
-        "HUBSPOT_TICKET_STAGE_REMINDER_SENT": "4",
         "HUBSPOT_TICKET_STAGE_WON": "5",
         "HUBSPOT_TICKET_STAGE_LOST": "6",
         "HUBSPOT_TICKET_STAGE_CLOSED": "7",
@@ -51,7 +50,6 @@ def test_ticket_stage_env_names_match_hubspot_labels() -> None:
     assert s.HUBSPOT_TICKET_STAGE_NEW == "1"
     assert s.HUBSPOT_TICKET_STAGE_AFTER_SEND == "2"
     assert s.HUBSPOT_TICKET_STAGE_NEGOTIATION == "3"
-    assert s.HUBSPOT_TICKET_STAGE_REMINDER_SENT == "4"
     assert s.HUBSPOT_TICKET_STAGE_WON == "5"
     assert s.HUBSPOT_TICKET_STAGE_CLOSED_LOST == "6"
     assert s.HUBSPOT_TICKET_STAGE_CLOSED == "7"

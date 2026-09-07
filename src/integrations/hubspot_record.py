@@ -82,6 +82,12 @@ class Field(NamedTuple):
     - ``column``     : 우리 DB 의 자리(`profile.<칸>` 또는 `contact.<칸>`). **읽기는 여기서**
       한다 — 0094 이후 이 패널은 허브스팟이 아니라 우리 행을 읽는다. `candidates` 는 그
       반대편, 즉 **되쓸 때** 허브스팟 속성 이름을 찾는 데만 쓰인다.
+    - ``on_ticket``  : 티켓 상세에도 서는가 (2026-09-07 운영자 지시). 거짓이면 고객 상세
+      에서만 보인다.
+
+    **``on_ticket`` 이 화면 코드가 아니라 여기 있는 이유**: 목록이 두 곳에 생기면 필드를
+    하나 더할 때 한쪽만 늘어나고, 그 어긋남은 화면을 나란히 놓기 전에는 안 보인다. 이
+    저장소가 같은 이유로 여러 번 당했다 — 화면이 아는 목록은 서버가 준다.
     """
 
     group: str
@@ -90,6 +96,7 @@ class Field(NamedTuple):
     candidates: tuple[str, ...]
     editable: bool = False
     column: str = ""
+    on_ticket: bool = True
 
 
 # 순서가 곧 화면 순서다 — 운영자가 정한 대로 위에서 아래로 그려진다.
@@ -101,12 +108,22 @@ class Field(NamedTuple):
 # 회사 이름은 아예 넣지 않는다: 연락처 정보 카드에 이미 **고칠 수 있는** 회사 칸이 있고, 그건
 # gmail·미확인 고객이 회사 이름을 갖는 유일한 자리다. 옆에 사본을 세우면 둘 중 어느 것이
 # 진짜인지 화면만 봐서는 알 수 없다.
+# **`plan_tier` 는 여기 없습니다** (2026-09-07 운영자 실측). 운영 데이터에서 그 칸이 채워진
+# 연락처가 **하나뿐**이었고, 그 하나마저 값이 `plan` 과 같았습니다 — 모든 줄에 같은 말을
+# 하나씩 더 얹거나 「—」를 하나 더 세울 뿐입니다.
+#
+# **받아오는 것은 그대로입니다**(`agents/contact_sync.FIELDS` · `profile.plan_tier`).
+# 화면에서 뺀 것과 칸이 죽은 것은 다른 이야기고, 나중에 제품 쪽이 그 값을 채우기 시작하면
+# 여기 한 줄만 되돌리면 됩니다 — 그때 데이터가 비어 있으면 되살릴 수가 없습니다.
 RECORD_FIELDS: tuple[Field, ...] = (
     Field("plan", "plan", "플랜 (Plan)", ("plan",), True, "profile.current_plan"),
-    Field("plan", "plan_tier", "플랜 티어 (plan tier)", ("plan tier",), True, "profile.plan_tier"),
-    Field("plan", "user_seq", "user seq", ("user seq",), True, "profile.user_seq"),
-    Field("plan", "space_seq", "space seq", ("space seq",), True, "profile.space_seq"),
-    Field("plan", "plan_seq", "plan seq", ("plan seq",), True, "profile.plan_seq"),
+    # **제품 내부 번호 셋은 티켓 상세에 안 섭니다** (2026-09-07 운영자 지시). 그 화면이
+    # 묻는 것은 「이 문의를 어떻게 판단할까」이고, 거기에 답하는 것은 플랜이지 seq 번호가
+    # 아닙니다 — 세 줄이 대개 「—」로 서서 자리만 먹었습니다. 고객 상세에는 그대로 있고,
+    # 거기가 그 값을 고쳐 허브스팟으로 되쓰는 자리입니다.
+    Field("plan", "user_seq", "user seq", ("user seq",), True, "profile.user_seq", False),
+    Field("plan", "space_seq", "space seq", ("space seq",), True, "profile.space_seq", False),
+    Field("plan", "plan_seq", "plan seq", ("plan seq",), True, "profile.plan_seq", False),
     Field(
         "contact", "ip_country", "국가 (IP Country)",
         ("ip country", "ip_country", "hs_ip_country", "ip"), False, "contact.ip_country",
@@ -283,8 +300,65 @@ def update_record_fields(hubspot_contact_id: str, values: dict[str, str]) -> Non
     response.raise_for_status()
 
 
-def fetch_record_groups(contact_id: int) -> dict:
+SNAPSHOT_GROUP = "plan"
+
+
+def snapshot_of(session, contact_id: int) -> dict[str, str | None]:
+    """지금 이 연락처의 플랜 값들 — 티켓이 문의 시점 값으로 얼려 둘 사본 (0110).
+
+    `RECORD_FIELDS` 의 「플랜」 묶음만 담는다. 국가·전화번호는 연락처 정보 카드의 값이고,
+    운영자가 얼려 달라고 한 것은 플랜과 MQL/PQL 이다.
+
+    **세션을 받는다.** 부르는 곳 둘이 다 자기 트랜잭션 한가운데다(접수 · 연락처 스윕) —
+    새 세션을 열면 방금 쓴 값이 아직 커밋되지 않아 안 보이고, 그러면 갓 들어온 문의의
+    스냅샷이 통째로 빈다.
+    """
+    from ..db.models import Contact, CustomerProfile
+
+    sources = {
+        "contact": session.get(Contact, int(contact_id)),
+        "profile": session.get(CustomerProfile, int(contact_id)),
+    }
+    out: dict[str, str | None] = {}
+    for field in RECORD_FIELDS:
+        if field.group != SNAPSHOT_GROUP:
+            continue
+        table, _, column = field.column.partition(".")
+        row = sources.get(table)
+        raw = getattr(row, column, None) if row is not None else None
+        out[field.key] = (str(raw).strip() or None) if raw is not None else None
+    return out
+
+
+def stamp_plan_snapshot(session, conversation) -> bool:
+    """아직 값이 없는 티켓에 지금 플랜을 박는다. 찍었으면 True (0110).
+
+    **부르는 곳이 둘이다.** 접수(`inbound._persist_placeholder`)와 연락처 스윕
+    (`contact_sync.apply_contact_fields`). 접수 하나로는 부족하다 — 처음 보는 고객은 그
+    시점에 프로필 행이 아직 비어 있고, 플랜 값은 그 뒤 연락처 스윕이 채운다. 그러면 갓
+    들어온 문의의 카드가 영원히 빈 채로 굳는다.
+
+    그래서 **아는 것이 하나도 없으면 안 찍는다** — NULL 로 두어 다음 기회를 남긴다. 반대로
+    한 번 찍은 값은 다시 안 건드린다: 티켓 하나에 이벤트가 여러 번 오므로 매번 덮으면
+    「문의 시점」이 아니라 「마지막 이벤트 시점」이 된다.
+
+    **New 를 지난 티켓에는 안 찍는다.** 답이 나간 뒤의 플랜은 그 문의를 판단할 때의 값이
+    아니다. 그때는 NULL 로 남고, 화면이 「지금 값」이라고 적는다.
+    """
+    if conversation is None or conversation.plan_snapshot or conversation.stage != "new":
+        return False
+    values = snapshot_of(session, conversation.contact_id)
+    if not any(values.values()):
+        return False
+    conversation.plan_snapshot = values
+    return True
+
+
+def fetch_record_groups(contact_id: int, overrides: dict | None = None) -> dict:
     """**우리 행**을 읽어 화면이 그릴 그룹으로 돌려준다.
+
+    ``overrides`` 는 티켓이 들고 있는 **문의 시점 플랜**이다(0110). 주면 그 키의 값이
+    이긴다 — 티켓 화면은 얼린 값을, 고객 상세는 지금 값을 본다. 안 주면 예전 그대로다.
 
     돌려주는 모양은 예전 그대로다: `{"groups": [...], "error": str|None}`. 바뀐 것은 값이
     어디서 오느냐 하나다.
@@ -313,10 +387,14 @@ def fetch_record_groups(contact_id: int) -> dict:
             profile = session.get(CustomerProfile, int(contact_id))
             sources = {"contact": contact, "profile": profile}
             rows_by_group: dict[str, list[dict]] = {}
+            frozen = overrides or {}
             for field in RECORD_FIELDS:
-                table, _, column = field.column.partition(".")
-                row = sources.get(table)
-                raw = getattr(row, column, None) if row is not None else None
+                if field.key in frozen:
+                    raw = frozen.get(field.key)
+                else:
+                    table, _, column = field.column.partition(".")
+                    row = sources.get(table)
+                    raw = getattr(row, column, None) if row is not None else None
                 value = "" if raw is None else str(raw).strip()
                 rows_by_group.setdefault(field.group, []).append(
                     {
@@ -325,6 +403,8 @@ def fetch_record_groups(contact_id: int) -> dict:
                         "value": value or None,
                         "found": True,
                         "editable": field.editable,
+                        # 티켓 상세에도 서는가. 화면이 아는 목록은 서버가 줍니다.
+                        "on_ticket": field.on_ticket,
                     }
                 )
             synced_at = getattr(profile, "last_synced_at", None) if profile else None
@@ -344,4 +424,11 @@ def fetch_record_groups(contact_id: int) -> dict:
     ]
     # **언제 것인지가 곧 믿어도 되느냐다.** 저쪽을 그때그때 읽던 시절에는 물어볼 필요가
     # 없던 질문이고, 지금은 화면이 답할 수 있어야 한다.
-    return {"groups": groups, "error": None, "synced_at": synced_at}
+    return {
+        "groups": groups,
+        "error": None,
+        "synced_at": synced_at,
+        # 이 값이 **얼려 둔 것**인가. 화면이 카드 제목과 안내 한 줄을 이것으로 가른다 —
+        # 같은 카드가 두 화면에서 다른 것을 뜻하므로, 어느 쪽인지 화면에 적혀야 한다.
+        "frozen": bool(overrides),
+    }

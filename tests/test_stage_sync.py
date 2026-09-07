@@ -26,7 +26,6 @@ STAGE_IDS = {
     "HUBSPOT_TICKET_STAGE_NEW": "1172180243",
     "HUBSPOT_TICKET_STAGE_AFTER_SEND": "1193842435",
     "HUBSPOT_TICKET_STAGE_NEGOTIATION": "1193733925",
-    "HUBSPOT_TICKET_STAGE_REMINDER_SENT": "1196621584",
     "HUBSPOT_TICKET_STAGE_WON": "1196772135",
     "HUBSPOT_TICKET_STAGE_CLOSED_LOST": "1172180246",
     "HUBSPOT_TICKET_STAGE_CLOSED": "1404814097",
@@ -59,12 +58,11 @@ def db(monkeypatch):
 
 
 def test_every_pipeline_stage_is_mapped(stages):
-    """All 7 stages of [B2B] AI Dubbing must resolve — an unmapped one is invisible."""
+    """All stages of [B2B] AI Dubbing must resolve — an unmapped one is invisible."""
     expected = {
         "1172180243": "new",
         "1193842435": "meeting_link_sent",
         "1193733925": "negotiation",
-        "1196621584": "reminder_sent",
         "1196772135": "won",
         "1172180246": "closed_lost",
         "1404814097": "closed",
@@ -89,18 +87,16 @@ def test_board_columns_are_exactly_the_seven_stages_in_flow_order():
         "new",
         "meeting_link_sent",
         "negotiation",
-        "reminder_sent",
         "won",
         "closed_lost",
         "closed",
     ]
     assert [label for _, label, _ in PIPELINE_STAGES] == [
         "New",
-        "Qualified",
+        "Contacted",
         "Negotiating",
-        "Reminder Sent",
-        "Won",
-        "Lost",
+        "Closed Won",
+        "Closed Lost",
         "Concluded",
     ]
 
@@ -110,6 +106,7 @@ def test_board_and_hubspot_maps_hold_the_same_keys():
     from src.api.routes.customer_ops import VALID_PIPELINE_STAGES
 
     assert set(stage_sync.LOCAL_STAGE_TO_SETTING) == VALID_PIPELINE_STAGES
+
 
 
 def test_the_workbook_round_trip_uses_one_vocabulary():
@@ -153,7 +150,6 @@ def test_blank_stage_ids_do_not_collide(monkeypatch):
     ("stage_id", "expected_stage", "expected_state"),
     [
         ("1193733925", "negotiation", "negotiation"),
-        ("1196621584", "reminder_sent", None),
         ("1196772135", "won", "service"),
         ("1172180246", "closed_lost", "lost"),
         ("1404814097", "closed", "lost"),

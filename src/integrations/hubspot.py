@@ -1216,6 +1216,70 @@ class HubSpotClient:
                     )
         return out
 
+    def company_websites_sync(self, contact_ids: list[str]) -> dict[str, str]:
+        """연락처 id → 연결된 회사의 Website URL. **물어본 사람은 전부 답에 있습니다.**
+
+        회사가 없거나 회사에 주소가 없으면 빈 문자열입니다 — 부르는 쪽이 그것을 「물어봤고
+        없었다」로 저장해 다시 묻지 않습니다. 빠뜨리면 그 사람은 영원히 대기열에 남습니다.
+
+        왕복은 배치 둘입니다(연결 100명 → 회사 100개). 그래서 사람당 두 번이 아니라 백 명당
+        두 번이고, 스윕 한 회차가 이것 때문에 길어지지 않습니다.
+
+        회사가 여럿이면 **첫 번째**를 씁니다. 허브스팟은 「주 회사」를 association label 로
+        표시하는데, 이 값이 하는 일은 사이드바에 한 줄 그리는 것이라 라벨을 읽어 가릴 만큼의
+        일이 아닙니다.
+        ponytail: 첫 회사. 담당자 하나가 회사 여럿에 걸린 건이 문제가 되면 그때 primary 라벨을 본다.
+        """
+        unique = [str(c) for c in dict.fromkeys(contact_ids) if c]
+        if not unique:
+            return {}
+        out: dict[str, str] = dict.fromkeys(unique, "")
+        headers = {"Authorization": f"Bearer {self.token}"}
+        with httpx.Client(headers=headers, timeout=60.0) as client:
+            for start in range(0, len(unique), 100):
+                if start:
+                    time.sleep(_BULK_PACE_SECONDS)
+                chunk = unique[start : start + 100]
+                r = _sync_request_with_retries(
+                    client,
+                    "POST",
+                    f"{BASE_URL}/crm/v4/associations/contacts/companies/batch/read",
+                    json={"inputs": [{"id": cid} for cid in chunk]},
+                )
+                if r.status_code not in (200, 207):
+                    raise HubSpotAPIError(
+                        f"contact→company associations failed ({r.status_code}): {r.text[:200]}"
+                    )
+                company_of: dict[str, str] = {}
+                for item in r.json().get("results", []):
+                    linked = item.get("to") or []
+                    if linked:
+                        company_of[str(item["from"]["id"])] = str(linked[0]["toObjectId"])
+                if not company_of:
+                    continue
+
+                time.sleep(_BULK_PACE_SECONDS)
+                r = _sync_request_with_retries(
+                    client,
+                    "POST",
+                    f"{BASE_URL}/crm/v3/objects/companies/batch/read",
+                    json={
+                        "properties": ["website"],
+                        "inputs": [{"id": cid} for cid in dict.fromkeys(company_of.values())],
+                    },
+                )
+                if r.status_code not in (200, 207):
+                    raise HubSpotAPIError(
+                        f"companies batch read failed ({r.status_code}): {r.text[:200]}"
+                    )
+                sites = {
+                    str(item["id"]): str((item.get("properties") or {}).get("website") or "").strip()
+                    for item in r.json().get("results", [])
+                }
+                for contact_id, company_id in company_of.items():
+                    out[contact_id] = sites.get(company_id, "")
+        return out
+
     def existing_ticket_ids_sync(self, ticket_ids: list[str]) -> set[str]:
         """Which of these ticket ids HubSpot still has, in 100-id batches.
 

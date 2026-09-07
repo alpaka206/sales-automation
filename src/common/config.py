@@ -77,7 +77,7 @@ class Settings(BaseSettings):
     HUBSPOT_REPLY_SENDER_ACCOUNT_IDS: str = ""
     # ----- [B2B] AI Dubbing ticket pipeline stage ids -----
     # The env names below mirror the stage labels in HubSpot (New / Qualified /
-    # Negotiating / Reminder Sent / Won / Lost / Concluded). Stages get
+    # Negotiating / Closed Won / Closed Lost / Concluded). Stages get
     # RENAMED in HubSpot without changing their id — "Meeting link sent" became
     # "Qualified", and "Closed" became "Not a Fit" then "Concluded" — so every former
     # spelling stays as an
@@ -112,7 +112,6 @@ class Settings(BaseSettings):
     )
     # Stages that exist in the real pipeline. Declared so the values are actually read
     # (pydantic's extra="ignore" silently drops anything undeclared).
-    HUBSPOT_TICKET_STAGE_REMINDER_SENT: str = ""
     HUBSPOT_TICKET_STAGE_WON: str = ""
     # 지금 이름은 "Concluded" 입니다(2026-08-19). 그 전엔 "Not a Fit", 그 전엔 "Closed",
     # 그 전엔 "Unqualified" — 전부 alias 로 남습니다. **id 는 한 번도 안 바뀌었습니다**

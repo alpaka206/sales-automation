@@ -69,7 +69,6 @@ def test_properties_are_found_by_their_hubspot_label():
     """`user_seq_c` 를 코드가 알 리 없습니다. 아는 것은 라벨 `user seq` 뿐입니다."""
     assert hr.resolve_property_names(LABELS) == {
         "plan": "plan",
-        "plan_tier": "plan_tier_c",
         "user_seq": "user_seq_c",
         "space_seq": "space_seq_c",
         "plan_seq": "plan_seq_c",
@@ -103,7 +102,7 @@ def test_the_screen_label_is_not_the_search_key():
 
 def test_the_plan_card_is_drawn_in_the_order_the_operator_set():
     assert [f.label for f in hr.RECORD_FIELDS if f.group == "plan"] == [
-        "플랜 (Plan)", "플랜 티어 (plan tier)", "user seq", "space seq", "plan seq",
+        "플랜 (Plan)", "user seq", "space seq", "plan seq",
     ]
 
 
@@ -119,7 +118,7 @@ def test_the_label_beats_a_retired_property_that_shares_the_name():
 
 def test_a_renamed_label_still_matches_by_internal_name():
     """라벨이 우리가 모르는 말로 바뀌어도 내부 이름이 그대로면 계속 잡힙니다."""
-    assert hr.resolve_property_names({"plan_tier": "요금제 등급"}) == {"plan_tier": "plan_tier"}
+    assert hr.resolve_property_names({"space_seq": "공간 번호"}) == {"space_seq": "space_seq"}
 
 
 def test_punctuation_and_casing_do_not_matter():
@@ -143,7 +142,7 @@ def test_the_record_becomes_the_card_and_the_fields_become_its_rows():
     assert groups[0]["title"] == "플랜 정보"
     # 운영자 표의 순서 그대로이고, 빈 값도 줄로 섭니다 — 허브스팟 사이드바의 `--` 자리.
     assert [row["label"] for row in groups[0]["rows"]] == [
-        "플랜 (Plan)", "플랜 티어 (plan tier)", "user seq", "space seq", "plan seq",
+        "플랜 (Plan)", "user seq", "space seq", "plan seq",
     ]
     assert all(row["found"] and row["value"] is None for row in groups[0]["rows"])
 
@@ -238,11 +237,16 @@ def test_the_panel_reads_our_own_rows_and_never_touches_hubspot(monkeypatch):
     assert [group["title"] for group in result["groups"]] == ["플랜 정보", "연락처 정보"]
     assert result["groups"][0]["rows"][0] == {
         "key": "plan", "label": "플랜 (Plan)", "value": "Enterprise",
-        "found": True, "editable": True,
+        "found": True, "editable": True, "on_ticket": True,
     }
-    # 빈 값도 줄을 만듭니다 — 허브스팟 사이드바가 `--` 를 그리는 그 자리입니다.
+    # 제품 내부 번호는 고객 상세에만 섭니다 (2026-09-07 운영자 지시) — 티켓 상세가 묻는
+    # 것은 「이 문의를 어떻게 판단할까」이고, 거기에 답하는 것은 플랜입니다.
+    assert [row["key"] for row in result["groups"][0]["rows"] if row["on_ticket"]] == ["plan"]
+    # 빈 값도 줄을 만듭니다. **플랜 티어는 줄이 아예 없습니다** (2026-09-07 운영자 실측:
+    # 그 칸이 채워진 연락처가 하나뿐이고 값이 `plan` 과 같았습니다) — 받아는 오지만 안
+    # 그립니다.
     assert [row["value"] for row in result["groups"][0]["rows"]] == [
-        "Enterprise", None, "184920", None, None,
+        "Enterprise", "184920", None, None,
     ]
     assert result["groups"][1]["rows"][0]["value"] == "south korea"
 

@@ -8,6 +8,7 @@ import { kst } from "../lib/format";
 import { InteractionForm, InteractionItem, groupByTicket, type Interaction } from "../ui/InteractionForm";
 import { LoadingBlock } from "../ui/Loading";
 import { Modal } from "../ui/Modal";
+import { PlanCard } from "../ui/PlanCard";
 
 type Contract = {
   id: number; plan: string | null; status: string; amount: number | null; currency: string;
@@ -291,6 +292,16 @@ export function CustomerDetail() {
         </div>
 
         <aside className="stack">
+          {/* **지금 플랜입니다 — 고칠 수 있습니다** (0110, 2026-09-07 운영자 지시).
+              티켓 상세의 같은 카드는 그 문의가 들어온 시점의 값을 보여 주고, 한쪽을
+              고쳐도 다른 쪽은 안 바뀝니다. 이 화면 것이 허브스팟까지 나가는 쪽입니다.
+
+              **여기에 카드가 생긴 이유**: 그 전까지 콘솔에서 플랜 다섯 칸을 고칠 수 있는
+              자리가 티켓 화면 하나뿐이었습니다. 그 카드가 문의 시점 값으로 바뀌면 지금
+              값을 고칠 길이 통째로 사라집니다 — 제품 쪽 연동이 100% 가 아니라 사람이
+              채워야 할 때가 있다는 것이 그 폼이 열려 있던 이유였습니다. */}
+          <PlanCard contactId={contact.id} />
+
           {/* **읽기 전용입니다** (2026-08-19 운영자 지시). 단계·다음 액션·리드 온도의
               원본은 티켓과 수주 고객이고, 이 화면에서 또 고를 수 있으면 같은 값이 두
               곳에서 갈라집니다 — 실제로 이 폼이 저장할 때 대화 단계까지 같이 옮겨서,
@@ -310,7 +321,7 @@ export function CustomerDetail() {
                   연락처에도 답이 있고(산 적이 없으니 MQL), 프로필 안에 두면 그런 사람만
                   「-」가 됩니다. 예전에는 저장된 열을 읽었는데 그 열을 채우는 길이 워크북
                   전체 임포트뿐이라 화면에는 늘 「-」였습니다(2026-09-02 운영자 지적). */}
-              <KV k="MQL / PQL" v={data.qualification} />
+              <KV k="Lead Stage" v={data.qualification} />
               <KV k="산업군" v={profile?.industry || "-"} />
               <KV k="현재 플랜" v={profile?.current_plan || "-"} />
               <KV k="user-seq" v={profile?.user_seq || "-"} />

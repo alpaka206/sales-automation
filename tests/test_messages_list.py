@@ -125,7 +125,6 @@ def test_stage_chips_differ_by_status_bucket(queue):
         "",
         "meeting_link_sent",
         "negotiation",
-        "reminder_sent",
         "won",
         "closed_lost",
         "closed",
@@ -133,11 +132,10 @@ def test_stage_chips_differ_by_status_bucket(queue):
     # Labels and order are the board's, not a second hand-written list.
     assert [label for _, label in sent] == [
         "전체",
-        "Qualified",
+        "Contacted",
         "Negotiating",
-        "Reminder Sent",
-        "Won",
-        "Lost",
+        "Closed Won",
+        "Closed Lost",
         "Concluded",
     ]
 

@@ -423,13 +423,22 @@ def _message_detail_context(
                     "name": contact.full_name,
                     "email": contact.email,
                     "company": contact.company,
+                    # 연결된 **회사**의 Website URL (0111). 연락처 자신의 속성이 아니라
+                    # association 을 한 번 더 읽어야 나오는 값이라 연락처 스윕이 채웁니다.
+                    # 빈 문자열은 「물어봤고 없었다」라서 화면에서는 없는 것과 같습니다.
+                    "website": contact.website or None,
                     "domain": contact.domain,
                     "role_description": contact.role_description,
                     # MQL / PQL. **플랜에서 나오는 계산값**이라 저장한 열을 읽지 않습니다
                     # (2026-09-02 운영자 지시) — `customer_profiles.qualification` 은
                     # 워크북에서 읽어 온 거울이고 콘솔에서 채우는 길이 없어 늘 비어
                     # 있었습니다. 그래서 화면에도 「-」만 떴습니다.
-                    "qualification": _qualification_of(customer),
+                    # **이 문의가 들어온 시점의 플랜이 정합니다** (0110). 옆 「플랜 정보」
+                    # 카드와 같은 값을 봐야 두 칸이 같은 사실의 두 면으로 읽힙니다 — 하나는
+                    # 얼려 두고 다른 하나만 최신이면 화면이 스스로 어긋나 보입니다.
+                    "qualification": _qualification_of(
+                        customer, conv.plan_snapshot if conv else None
+                    ),
                 }
                 if contact
                 else None
@@ -438,10 +447,20 @@ def _message_detail_context(
         }
 
 
-def _qualification_of(customer: dict | None) -> str:
-    """그 연락처의 MQL / PQL. 프로필 행이 없으면 MQL — 산 적이 없다는 뜻입니다."""
+def _qualification_of(customer: dict | None, snapshot: dict | None = None) -> str:
+    """그 연락처의 MQL / PQL. 프로필 행이 없으면 MQL — 산 적이 없다는 뜻입니다.
+
+    ``snapshot`` 은 그 티켓이 들고 있는 **문의 시점 플랜**입니다(0110). 있으면 그것이
+    이깁니다 — 이 화면은 그때 이 사람이 무엇을 쓰고 있었는지를 묻는 자리입니다. 리드
+    히스토리는 이 인자를 안 넘기므로 지금처럼 최신 플랜으로 셉니다.
+
+    **`plan` 키가 아예 없을 때만** 프로필로 떨어집니다. 값이 비어 있는 것은 「그때 플랜이
+    없었다」는 사실이라, 그걸 최신 값으로 메우면 얼려 둔 의미가 없습니다.
+    """
     from ...common.sheet_values import qualification_for_plan
 
+    if snapshot and "plan" in snapshot:
+        return qualification_for_plan(snapshot.get("plan"))
     profile = (customer or {}).get("profile") or {}
     return qualification_for_plan(profile.get("current_plan"))
 
@@ -589,7 +608,7 @@ LIST_STAGES: dict[str, tuple[str, ...]] = {
     # Negotiating chip here could only ever return an empty table.
     "awaiting": ("new",),
     "sent": (
-        "meeting_link_sent", "negotiation", "reminder_sent",
+        "meeting_link_sent", "negotiation",
         "won", "closed_lost", "closed",
     ),
 }
@@ -1198,6 +1217,45 @@ async def contact_hubspot_record_edit(contact_id: int, request: Request):
     incoming = {prop: values[prop].strip() for prop in FIELDS if prop in values}
     if incoming:
         await run_in_threadpool(_write_local_plan_fields, contact_id, incoming, sheet_client_id)
+    return JSONResponse({"ok": True})
+
+
+@router.post("/tickets/{conversation_id}/plan-snapshot")
+async def ticket_plan_snapshot_edit(conversation_id: int, request: Request):
+    """이 티켓이 들고 있는 **문의 시점 플랜**을 고칩니다 (0110, 2026-09-07 운영자 지시).
+
+    **바깥으로 나가지 않습니다.** 위의 `contact_hubspot_record_edit` 와 여기는 이름만
+    비슷하고 하는 일이 반대입니다 — 저쪽은 지금 값을 허브스팟·프로필·워크북에 되쓰고,
+    여기는 이 티켓 행 하나만 고칩니다. 운영자 지시가 「값을 따로 관리해서 둘 다 편집은
+    가능하게, 한쪽이 바뀐다고 다른 쪽이 적용될 필요는 없다」라, 여기서 저쪽으로 번지면
+    「따로」가 아닙니다.
+
+    **받는 칸은 서버가 정합니다.** 화면이 보낸 키 중 `RECORD_FIELDS` 의 플랜 묶음에 있는
+    것만 담습니다 — 브라우저가 보낸 이름을 그대로 담으면 이 JSON 칸이 아무 값이나 받는
+    자루가 됩니다.
+
+    빈 칸은 「지워라」입니다(위 라우트와 같은 규칙). 잘못 들어간 값을 되돌릴 길이 있어야
+    합니다.
+    """
+    from ...integrations.hubspot_record import RECORD_FIELDS, SNAPSHOT_GROUP
+
+    allowed = {f.key for f in RECORD_FIELDS if f.group == SNAPSHOT_GROUP and f.editable}
+    form = await request.form()
+    values = {
+        key: (str(value).strip() or None) for key, value in form.items() if key in allowed
+    }
+    if not values:
+        return JSONResponse({"error": "저장할 플랜 칸이 없습니다"}, status_code=400)
+
+    with SessionLocal() as session:
+        conv = session.get(Conversation, conversation_id)
+        if conv is None:
+            return JSONResponse({"error": "티켓을 찾을 수 없습니다"}, status_code=404)
+        # 아직 얼린 값이 없는 티켓(이 칸이 생기기 전의 건)은 이 저장으로 자기 값을 갖습니다.
+        # **dict 를 통째로 바꿔 넣습니다** — JSON 칸은 제자리에서 고치면 SQLAlchemy 가
+        # 바뀐 것을 모르고 지나갑니다.
+        conv.plan_snapshot = {**(conv.plan_snapshot or {}), **values}
+        session.commit()
     return JSONResponse({"ok": True})
 
 

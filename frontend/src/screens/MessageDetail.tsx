@@ -7,9 +7,10 @@ import { Icon } from "../ui/Icon";
 import { directionMark, interactionMark } from "../ui/InteractionForm";
 import { Modal } from "../ui/Modal";
 import { ConfirmModal } from "../ui/ConfirmModal";
-import { ActionButton, useAction } from "../ui/ActionButton";
+import { ActionButton } from "../ui/ActionButton";
 import { InteractionForm, InteractionItem, type Interaction } from "../ui/InteractionForm";
 import { LoadingBlock } from "../ui/Loading";
+import { RecordValueRow, useHubSpotRecord } from "../ui/PlanCard";
 
 type Bubble = {
   id: number;
@@ -30,60 +31,6 @@ type Bubble = {
 /** 한 줄 = 운영자 표의 「필드」 하나. 값은 자유 입력이라 `truncate` 로 감쌉니다 —
  *  `.info-row` 는 flex 라 `plan-2026-kr-renewal` 같은 한 덩어리 글자가 320px 카드를
  *  뚫고 나갑니다. 옆의 이메일·수신자 줄이 같은 이유로 이미 그렇게 하고 있습니다. */
-type RecordRow = {
-  key: string; label: string; value: string | null; found: boolean; editable: boolean;
-};
-
-function CompanyRow({ row, editing }: { row: RecordRow; editing?: boolean }) {
-  // 고칠 수 없는 줄은 수정 중에도 그냥 글자입니다 — 「국가」는 허브스팟이 접속 IP 로 뽑는
-  // 값이고, 못 찾은 필드는 쓸 대상 자체가 없습니다.
-  if (editing && row.editable) {
-    return (
-      <div className="info-row">
-        <dt><label htmlFor={`hs-${row.key}`}>{row.label}</label></dt>
-        <dd style={{ maxWidth: 168 }}>
-          <input className="input" id={`hs-${row.key}`} name={row.key}
-                 defaultValue={row.value ?? ""} style={{ height: 30, fontSize: 13 }} />
-        </dd>
-      </div>
-    );
-  }
-  return (
-    <div className="info-row">
-      <dt>{row.label}</dt>
-      <dd className="truncate">
-        {!row.found ? <span className="t-subtle">필드를 찾지 못했습니다</span>
-         : row.value ?? <span className="t-subtle">—</span>}
-      </dd>
-    </div>
-  );
-}
-
-/** 플랜·연락처 칸. **값은 우리 DB 에서 옵니다** (0094) — 티켓을 열 때마다 허브스팟을 읽던
- *  것을 그만뒀습니다. 저쪽에서 값이 들어오는 문은 셋입니다: 웹훅 · 10분 스윕 · 고객 상세의
- *  「HubSpot 동기화」(`src/agents/contact_sync.py`).
- *
- *  카드를 나누는 것도 줄 이름도 서버가 정합니다 — 필드가 늘 때 고칠 곳이 한 곳이어야
- *  합니다(`src/integrations/hubspot_record.py`). */
-type HubSpotRecord = {
-  /** 마지막으로 허브스팟에서 받아온 시각. 저쪽을 그때그때 읽던 시절에는 물어볼 필요가
-   *  없던 질문이고, 지금은 화면이 답할 수 있어야 합니다 — 언제 것이냐가 곧 믿어도
-   *  되느냐입니다. 한 번도 못 받아왔으면 `null`. */
-  synced_at?: string | null;
-  groups: {
-    key: string;
-    title: string;
-    /** `found: false` 는 「그 회사에 값이 없다」가 아니라 「허브스팟에서 그 속성을 못 찾았다」
-     *  입니다. 값이 빈 것은 `—` 로 서고(허브스팟 사이드바가 `--` 를 그리는 그 자리),
-     *  못 찾은 것은 그렇다고 적습니다 — 앞엣것은 이 고객 이야기이고 뒤엣것은 설정
-     *  이야기라, 화면에서 같아 보이면 안 됩니다. */
-    rows: { key: string; label: string; value: string | null; found: boolean; editable: boolean }[];
-    /** 이 카드에 연필을 달까. 못 찾은 필드는 쓸 수도 없으므로 서버가 그것까지 빼고 셉니다 —
-     *  연필만 달아 두면 저장이 아무 일도 안 하고 성공한 척합니다. */
-    editable: boolean;
-  }[];
-  error: string | null;
-};
 
 type Detail = {
   thread: Bubble[];
@@ -128,6 +75,9 @@ type Detail = {
     sent_at: string | null; scheduled_at: string | null; category: string | null;
   } | null;
   contact: { id: number; name: string; email: string | null; company: string | null; domain: string | null; role_description: string | null;
+    /** 연결된 **회사**의 Website URL (0111). 연락처 자신의 속성이 아니라 스윕이 채우는
+     *  값이라, 아직 안 물어봤거나 회사에 주소가 없으면 null 입니다. */
+    website: string | null;
     /** MQL / PQL — 구독 플랜이 정합니다(플랜 없음·Free·N/A → MQL, 그 외 → PQL). 서버가
      *  계산해서 내려주므로 언제나 값이 있습니다. */
     qualification: string } | null;
@@ -201,13 +151,11 @@ export function MessageDetail() {
   });
 
   const contactId = data?.contact?.id;
-  const { data: hubspot, isPending: hubspotPending } = useQuery({
-    queryKey: ["hubspot-record", contactId],
-    queryFn: () => getJSON<HubSpotRecord>(`/api/ui/contacts/${contactId}/hubspot-record`),
-    enabled: !!contactId,
-    // 플랜은 티켓 하나 읽는 동안 바뀌지 않습니다.
-    staleTime: 5 * 60_000,
-  });
+  const ticketId = data?.ticket?.id;
+  // **이 티켓이 들고 있는 값을 달라고 합니다** (0110). 같은 훅이 고객 상세에서는 지금 값을
+  // 줍니다 — 「티켓은 처음 들어온 거, 리드 히스토리는 지금처럼」이 그 뜻입니다. 아래
+  // `PlanCard` 도 같은 키를 쓰므로 왕복은 하나입니다.
+  const { data: hubspot, isPending: hubspotPending } = useHubSpotRecord(contactId, ticketId);
 
   const [editingContact, setEditingContact] = useState(false);
   // 저장 **전에** 묻습니다. 예전에는 끝난 뒤 「저장했습니다」를 띄웠는데, 그건 이미 벌어진
@@ -216,7 +164,6 @@ export function MessageDetail() {
   const [confirm, setConfirm] = useState<
     { description: React.ReactNode; run: () => Promise<void> } | null
   >(null);
-  const [editingRecord, setEditingRecord] = useState<string | null>(null);
   const [subject, setSubject] = useState("");
   const [body, setBody] = useState("");
   const [signature, setSignature] = useState("");
@@ -245,35 +192,29 @@ export function MessageDetail() {
   // 훅은 아래 early return 보다 **위**에서 부릅니다. 아래에 두면 로딩 렌더에서는 건너뛰고
   // 데이터가 온 렌더에서는 부르게 되어, 훅 수가 달라졌다고 React 가 터집니다(#310) — 화면이
   // 통째로 안 뜹니다. 그래서 data 가 아직 없을 수 있다는 전제로 씁니다.
-  async function saveContactFields(fields: Record<string, string>) {
+  /** 「문의 정보」 카드의 저장 — **한 번 누르면 두 곳으로 갑니다.**
+   *
+   *  카드는 하나지만 값이 사는 곳은 둘입니다: 플랜은 **이 티켓**이 들고 있는 문의 시점
+   *  값이고(0110), 회사·메모는 **이 사람**의 값입니다. 운영자가 하는 일은 「이 카드를
+   *  고친다」 하나라 연필도 저장도 하나여야 하고, 어디로 가는지는 서버가 압니다 —
+   *  두 라우트 모두 자기가 아는 칸만 집습니다(플랜 쪽은 `RECORD_FIELDS` 로 거릅니다).
+   *
+   *  **플랜을 먼저 보냅니다.** 뒤엣것이 실패해도 앞엣것은 남고, 그 반대보다 낫습니다 —
+   *  플랜은 이 화면에서만 고칠 수 있고 회사·메모는 고객 상세에도 자리가 있습니다. */
+  async function saveTicketCard(fields: Record<string, string>) {
     try {
+      if (ticketId) await postForm(`/tickets/${ticketId}/plan-snapshot`, fields);
       await postForm(`/contacts/${data?.contact?.id}/edit`, fields);
     } catch (error) {
       // 실패하면 말합니다. 확인 창을 지나온 뒤의 침묵은 「눌렀는데 아무 일도 안 일어난다」로
       // 읽혀서 한 번 더 누르게 만듭니다. 옆의 saveDealDetailNow 와 같은 모양입니다.
-      setNotice({ title: "연락처를 저장하지 못했습니다", body: String(error) });
+      setNotice({ title: "저장하지 못했습니다", body: String(error) });
       return;
     }
     setEditingContact(false);
     await queryClient.invalidateQueries({ queryKey: key });
+    await queryClient.invalidateQueries({ queryKey: ["hubspot-record"] });
   }
-
-  /** 플랜 값을 허브스팟에 되씁니다.
-   *
-   *  저장한 뒤 이 질의만 따로 무효화합니다 — 다른 저장들이 쓰는 일괄 무효화에서 허브스팟
-   *  패널은 일부러 빼 두었기 때문입니다(우리가 저장한다고 저쪽 값이 바뀌지 않는데, 같이
-   *  걸면 콘솔의 모든 저장이 열려 있는 티켓 탭마다 외부 왕복을 냅니다). 여기서는 저쪽 값이
-   *  **정말로** 바뀌었으므로 다시 읽는 것이 맞습니다. */
-  const [saveRecord, savingRecord] = useAction(async (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    const fields = Object.fromEntries(new FormData(event.currentTarget) as never) as Record<string, string>;
-    await postForm(`/contacts/${data?.contact?.id}/hubspot-record`, fields);
-    setEditingRecord(null);
-    // 「어디에」는 버튼이 아니라 결과가 말합니다 — 누를 때 알아야 할 것은 「저장한다」
-    // 하나뿐이고, 어디에 갔는지는 누른 뒤에 알면 됩니다.
-    setNotice({ title: "저장했습니다 (콘솔 · 허브스팟)", body: null });
-    await queryClient.invalidateQueries({ queryKey: ["hubspot-record", data?.contact?.id] });
-  });
 
   // Fill the editor once per message. Re-syncing on every refetch would overwrite what
   // the operator is typing while the queue revalidates underneath them.
@@ -1012,172 +953,173 @@ export function MessageDetail() {
               참고입니다 (2026-09-04 운영자 지시). */}
           {!afterNew && leadHistoryCard}
 
+          {/* **세 카드를 한 상자로 합쳤습니다** (2026-09-07 운영자 지시). 티켓 정보 ·
+              플랜 정보 · 연락처 정보가 각자 상자였는데, 셋 다 「이 문의를 판단하는 데
+              필요한 사실」 한 종류이고 운영자 화면은 세로 640px 입니다 — 상자 머리글 셋과
+              그 사이 여백이 화면의 한 뼘을 먹고 있었습니다.
+
+              **안에서는 갈라 둡니다.** 플랜은 이제 이 티켓이 들고 있는 문의 시점 값이고
+              (0110) 연락처는 이 사람의 지금 값이라, 한 줄이 무엇을 뜻하는지가 자리마다
+              다릅니다. 상자는 하나여도 그 경계는 보여야 합니다.
+
+              **연필도 하나입니다.** 저장은 두 곳으로 갈라져 나가지만(이 티켓의 플랜 ·
+              연락처) 운영자가 하는 일은 「이 카드를 고친다」 하나입니다. */}
           <div className="card">
-            <div className="section-label" style={{ marginBottom: 12 }}>티켓 정보</div>
-            <dl className="info-list">
-              <div className="info-row"><dt>티켓</dt><dd className="mono">{ticket.ticket_id ? `#${ticket.ticket_id}` : "— (없음)"}</dd></div>
-              <div className="info-row"><dt>Client ID</dt><dd className="tnum">{ticket.client_id ?? "미동기화"}</dd></div>
-              {/* 티켓이 만들어진 날 (2026-09-03 운영자 요청). 백필이 허브스팟의 생성일을
-                  그대로 복사해 두므로 우리 값이 곧 허브스팟 값입니다 — 이 화면을 열 때마다
-                  허브스팟에 물으러 가지 않습니다. */}
-              {ticket.created_at && (
-                <div className="info-row"><dt>생성</dt><dd className="tnum">{kst(ticket.created_at)}</dd></div>
-              )}
-              {/* 「발송 정보」 카드를 지우면서(2026-09-03 운영자 지시) **수신자 한 줄만**
-                  여기로 옮겼습니다. 나머지(채널·발송 언어·생성)는 다른 데서도 볼 수 있는데
-                  수신 주소는 이 콘솔에서 볼 곳이 여기와 발송 확인 창뿐이었습니다 — 확인
-                  창은 초안이 열려 있을 때만 잠깐 뜨므로, 이미 나간 메일의 수신 주소를 볼
-                  자리가 통째로 사라질 뻔했습니다. */}
-              {msg?.to_address && (
-                <div className="info-row"><dt>수신자</dt>
-                  <dd className="mono truncate" style={{ maxWidth: 170 }}>{msg.to_address}</dd>
-                </div>
-              )}
-              {msg?.sent_at && (
-                <div className="info-row"><dt>발송</dt><dd className="tnum">{kst(msg.sent_at)}</dd></div>
-              )}
-              {ticket.stage && <div className="info-row"><dt>Stage</dt><dd>{data.stage_labels[ticket.stage] ?? ticket.stage}</dd></div>}
-              {/* Won 과 Lost 일 때만 나옵니다 — 왜 이겼나 / 왜 졌나는 결말이 난 건에만
-                  있는 정보입니다. 보드 카드에도 같은 고르개가 있고, 값 목록과 「지금
-                  단계의 값인가」 판단은 둘 다 서버에서 옵니다. 여기 둔 이유: 이 화면에서
-                  대화를 다 읽고 결론을 내리는데, 그걸 적으려고 대시보드로 나가 카드를
-                  찾아야 했습니다. */}
-              {dealOptions && (
-                <div className="info-row"><dt>Deal Detail</dt>
-                  <dd>
-                    <select className="select select--inline" value={ticket.deal_detail ?? ""}
-                            aria-label={ticket.stage === "won" ? "Won Type" : "Lost Reason"}
-                            onChange={(event) => {
-                              const detail = event.target.value;
-                              setConfirm({
-                                description: (
-                                  <>
-                                    Deal Detail 을 <strong>{detail || "선택 안 함"}</strong> 로
-                                    바꿉니다.
-                                  </>
-                                ),
-                                run: () => saveDealDetailNow(detail),
-                              });
-                            }}>
-                      <option value="">선택 안 함</option>
-                      {dealOptions.map((option) => (
-                        <option key={option} value={option}>{option}</option>
-                      ))}
-                    </select>
-                  </dd></div>
-              )}
-            </dl>
-          </div>
-
-          {/* 허브스팟 Company 레코드. 카드가 곧 「레코드」, 줄이 곧 「필드」입니다.
-              `contact` 로 표시된 묶음은 제 카드를 만들지 않고 아래 연락처 정보 카드에
-              얹힙니다 — 같은 제목의 카드가 둘 서지 않도록. 그 키의 출처는 서버의
-              `GROUPS`(`src/integrations/hubspot_record.py`)이고, 이름을 바꾸면 여기도
-              같이 바뀌어야 합니다. */}
-          {contact && hubspotPending && (
-            <div className="card">
-              <div className="section-label">플랜 정보</div>
-              <div className="t-xs t-subtle" style={{ marginTop: 10 }}>
-                <span className="spinner" role="status" /> 허브스팟에서 읽는 중
-              </div>
-            </div>
-          )}
-
-          {hubspot?.error && (
-            <div className="card">
-              <div className="section-label" style={{ marginBottom: 10 }}>플랜 정보</div>
-              <p className="t-xs t-subtle" style={{ margin: 0 }}>{hubspot.error}</p>
-            </div>
-          )}
-
-          {hubspot?.groups
-            ?.filter((group) => group.key !== "contact")
-            .map((group) => {
-              const editing = editingRecord === group.key;
-              return (
-                <div className="card" key={group.key}>
-                  <div className="row-between" style={{ marginBottom: 12 }}>
-                    <div className="section-label">{group.title}</div>
-                    {group.editable && (
-                      <button type="button" className="btn btn--subtle btn--sm"
-                              onClick={() => setEditingRecord(editing ? null : group.key)}
-                              aria-pressed={editing}
-                              aria-label={editing ? `${group.title} 수정 취소` : `${group.title} 수정`}
-                              title={editing ? "수정 취소" : "수정"}>
-                        <Icon name={editing ? "x" : "edit"} size={14} />
-                      </button>
-                    )}
-                  </div>
-                  {/* 저장은 허브스팟 연락처로 갑니다 — 이 화면에서 유일하게 바깥으로 쓰는
-                      폼입니다. 제품 쪽 연동이 100% 가 아니라 사람이 채워야 할 때가 있어
-                      열었습니다(운영자 판단). 안전 모드는 서버가 봅니다. */}
-                  <form onSubmit={(event) => void saveRecord(event)}>
-                    <dl className="info-list">
-                      {group.rows.map((row) => (
-                        <CompanyRow key={row.key} row={row} editing={editing} />
-                      ))}
-                    </dl>
-                    {/* **언제 것인지가 곧 믿어도 되느냐입니다.** 값이 있을 때만 적습니다 —
-                        한 번도 못 받아온 상태를 한 줄로 설명할 이유는 없습니다. */}
-                    {hubspot?.synced_at && (
-                      <div className="t-xs t-subtle" style={{ marginTop: 10 }}>
-                        마지막 HubSpot 수신 {kst(hubspot.synced_at)}
-                      </div>
-                    )}
-                    {editing && (
-                      <button className="btn btn--subtle btn--sm" type="submit"
-                              style={{ marginTop: 12, width: "100%" }}
-                              disabled={savingRecord} aria-busy={savingRecord || undefined}>
-                        {savingRecord ? <><span className="spinner" role="status" /> 저장 중</>
-                                      : <><Icon name="check" size={14} /> 저장</>}
-                      </button>
-                    )}
-                  </form>
-                </div>
-              );
-            })}
-
-          {contact && (
-            <div className="card">
-              {/* 평소에는 읽기만 하는 카드입니다. 늘 펼쳐 둔 폼이 있으면 사이드바 절반이
-                  입력칸이고, 저장 버튼은 누를 일이 없는 날에도 자리를 차지합니다. 연필을
-                  누른 동안만 폼이 되고, 저장 버튼도 그때만 섭니다. */}
-              <div className="row-between" style={{ marginBottom: 12 }}>
-                <div className="section-label">연락처 정보</div>
+            <div className="row-between" style={{ marginBottom: 12 }}>
+              <div className="section-label">문의 정보</div>
+              {contact && (
                 <button type="button" className="btn btn--subtle btn--sm"
                         onClick={() => setEditingContact((on) => !on)}
                         aria-pressed={editingContact}
-                        aria-label={editingContact ? "연락처 수정 취소" : "연락처 수정"}
+                        aria-label={editingContact ? "수정 취소" : "수정"}
                         title={editingContact ? "수정 취소" : "수정"}>
                   <Icon name={editingContact ? "x" : "edit"} size={14} />
                 </button>
-              </div>
+              )}
+            </div>
+            <form
+              onSubmit={(event) => {
+                event.preventDefault();
+                // FormData 는 이 시점의 스냅숏입니다 — 확인 창을 지나면
+                // event.currentTarget 은 이미 없습니다.
+                const fields = Object.fromEntries(
+                  new FormData(event.currentTarget) as never,
+                ) as Record<string, string>;
+                setConfirm({
+                  description: (
+                    <>
+                      이 문의의 플랜 정보와 이 고객의 회사·메모를 저장합니다. 회사:{" "}
+                      <strong>{fields.company?.trim() || "—"}</strong>
+                    </>
+                  ),
+                  run: () => saveTicketCard(fields),
+                });
+              }}
+            >
               <dl className="info-list">
-                <div className="info-row"><dt>이름</dt><dd>{contact.name}</dd></div>
-                {contact.email && (
-                  <div className="info-row"><dt>이메일</dt>
-                    <dd className="mono truncate" style={{ maxWidth: 170 }}>{contact.email}</dd></div>
+                <div className="info-row"><dt>티켓</dt><dd className="mono">{ticket.ticket_id ? `#${ticket.ticket_id}` : "— (없음)"}</dd></div>
+                <div className="info-row"><dt>Client ID</dt><dd className="tnum">{ticket.client_id ?? "미동기화"}</dd></div>
+                {/* 티켓이 만들어진 날 (2026-09-03 운영자 요청). 백필이 허브스팟의 생성일을
+                    그대로 복사해 두므로 우리 값이 곧 허브스팟 값입니다 — 이 화면을 열 때마다
+                    허브스팟에 물으러 가지 않습니다. */}
+                {ticket.created_at && (
+                  <div className="info-row"><dt>생성</dt><dd className="tnum">{kst(ticket.created_at)}</dd></div>
                 )}
-                {contact.domain && (
-                  <div className="info-row"><dt>도메인</dt>
-                    <dd><Link className="mono" to={`/companies/${contact.domain}`}>{contact.domain}</Link></dd></div>
+                {/* 「발송 정보」 카드를 지우면서(2026-09-03 운영자 지시) **수신자 한 줄만**
+                    여기로 옮겼습니다. 나머지(채널·발송 언어·생성)는 다른 데서도 볼 수 있는데
+                    수신 주소는 이 콘솔에서 볼 곳이 여기와 발송 확인 창뿐이었습니다 — 확인
+                    창은 초안이 열려 있을 때만 잠깐 뜨므로, 이미 나간 메일의 수신 주소를 볼
+                    자리가 통째로 사라질 뻔했습니다. */}
+                {/* 아래 연락처 칸의 「이메일」 줄은 지웠습니다 (2026-09-07 운영자 지시) —
+                    같은 주소를 한 상자에서 두 번 적고 있었습니다. **메일이 없는 티켓에서도
+                    주소는 남아야** 하므로(백필로 들여온 건은 `msg` 가 없습니다) 연락처
+                    주소로 떨어집니다. */}
+                {(msg?.to_address || contact?.email) && (
+                  <div className="info-row"><dt>수신자</dt>
+                    <dd className="mono truncate" style={{ maxWidth: 170 }}>
+                      {msg?.to_address || contact?.email}
+                    </dd>
+                  </div>
+                )}
+                {msg?.sent_at && (
+                  <div className="info-row"><dt>발송</dt><dd className="tnum">{kst(msg.sent_at)}</dd></div>
+                )}
+                {ticket.stage && <div className="info-row"><dt>Stage</dt><dd>{data.stage_labels[ticket.stage] ?? ticket.stage}</dd></div>}
+                {/* Won 과 Lost 일 때만 나옵니다 — 왜 이겼나 / 왜 졌나는 결말이 난 건에만
+                    있는 정보입니다. 보드 카드에도 같은 고르개가 있고, 값 목록과 「지금
+                    단계의 값인가」 판단은 둘 다 서버에서 옵니다. 여기 둔 이유: 이 화면에서
+                    대화를 다 읽고 결론을 내리는데, 그걸 적으려고 대시보드로 나가 카드를
+                    찾아야 했습니다. */}
+                {dealOptions && (
+                  <div className="info-row"><dt>Deal Detail</dt>
+                    <dd>
+                      <select className="select select--inline" value={ticket.deal_detail ?? ""}
+                              aria-label={ticket.stage === "won" ? "Won Type" : "Lost Reason"}
+                              onChange={(event) => {
+                                const detail = event.target.value;
+                                setConfirm({
+                                  description: (
+                                    <>
+                                      Deal Detail 을 <strong>{detail || "선택 안 함"}</strong> 로
+                                      바꿉니다.
+                                    </>
+                                  ),
+                                  run: () => saveDealDetailNow(detail),
+                                });
+                              }}>
+                        <option value="">선택 안 함</option>
+                        {dealOptions.map((option) => (
+                          <option key={option} value={option}>{option}</option>
+                        ))}
+                      </select>
+                    </dd></div>
+                )}
+
+                {/* ── 플랜 ─────────────────────────────────────────────────
+                    **이 티켓이 들고 있는 문의 시점 값입니다** (0110). 같은 값이 리드
+                    히스토리에서는 지금 값이고, 한쪽을 고쳐도 다른 쪽은 안 바뀝니다 —
+                    어느 쪽을 보고 있는지 여기 안 적으면 둘이 다를 때 하나를 버그로
+                    읽게 됩니다. 얼려 둔 값이 없는 옛 티켓은 그렇게 적습니다. */}
+                <div className="info-row info-row--head">
+                  <dt>플랜</dt>
+                  <dd className="t-xs t-subtle">
+                    {hubspot?.frozen ? "이 문의 시점" : "현재 값"}
+                  </dd>
+                </div>
+                {hubspotPending && (
+                  <div className="info-row"><dt>&nbsp;</dt>
+                    <dd className="t-xs t-subtle"><span className="spinner" role="status" /> 읽는 중</dd>
+                  </div>
                 )}
                 {hubspot?.groups
-                  ?.find((group) => group.key === "contact")
-                  ?.rows.map((row) => <CompanyRow key={row.label} row={row} />)}
-                {/* 이 사람이 리드인지 제품을 쓰는 고객인지 — 구독 플랜이 정합니다
-                    (2026-09-02 운영자 지시). 옆 「플랜 정보」 카드가 그 플랜을 들고
-                    있으므로 두 카드가 같은 사실의 두 면입니다. 허브스팟에는 대응 속성이
-                    없어 그 카드의 행으로 넣지 않았습니다 — 저기 서면 「허브스팟이 아는
-                    값」으로 읽히고, 고칠 수 있는 칸처럼 보입니다. */}
-                <div className="info-row"><dt>MQL / PQL</dt><dd>{contact.qualification}</dd></div>
-                {!editingContact && (
-                  <div className="info-row"><dt>회사</dt>
-                    <dd className="truncate">{contact.company || "—"}</dd></div>
-                )}
-              </dl>
+                  ?.filter((group) => group.key !== "contact")
+                  .flatMap((group) => group.rows)
+                  .filter((row) => row.on_ticket)
+                  .map((row) => (
+                    <RecordValueRow key={row.key} row={row} editing={editingContact} />
+                  ))}
 
-              {!editingContact && contact.role_description && (
+                {contact && (<>
+                  <div className="info-row info-row--head"><dt>연락처</dt><dd /></div>
+                  {/* **머리글이 적은 것을 여기서 또 적지 않습니다** (2026-09-07 운영자
+                      지시). 왼쪽 위 제목은 `회사 || 이름` 이라, 회사가 없으면 거기 이름이
+                      서 있습니다 — 그때 이 줄은 같은 말을 두 번 하는 것입니다. 회사가
+                      있을 때만 남기는 이유는 그때 이름이 화면 어디에도 없어서입니다. */}
+                  {contact.company && (
+                    <div className="info-row"><dt>이름</dt><dd>{contact.name}</dd></div>
+                  )}
+                  {contact.domain && (
+                    <div className="info-row"><dt>도메인</dt>
+                      <dd><Link className="mono" to={`/companies/${contact.domain}`}>{contact.domain}</Link></dd></div>
+                  )}
+                  {hubspot?.groups
+                    ?.find((group) => group.key === "contact")
+                    ?.rows.map((row) => <RecordValueRow key={row.label} row={row} />)}
+                  {/* 이 사람이 리드인지 제품을 쓰는 고객인지 — 구독 플랜이 정합니다
+                      (2026-09-02 운영자 지시). 바로 위 플랜 줄이 그 플랜이라, 같은 사실의
+                      두 면이 한 상자 안에 나란히 섭니다. **플랜 묶음의 줄로 넣지는
+                      않습니다**: 허브스팟에 대응 속성이 없어서, 저기 서면 「허브스팟이 아는
+                      값」으로 읽히고 고칠 수 있는 칸처럼 보입니다. */}
+                  <div className="info-row"><dt>Lead Stage</dt><dd>{contact.qualification}</dd></div>
+                    {!editingContact && (
+                      <div className="info-row"><dt>회사</dt>
+                        <dd className="truncate">{contact.company || "—"}</dd></div>
+                    )}
+                    {/* 허브스팟 「Company Record」의 Website URL (0111). **빈 줄을 세우지
+                        않습니다** — 플랜 칸들과 달리 이건 허브스팟 사이드바를 옮겨 놓은
+                        묶음이 아니라 우리가 한 줄 얹은 것이고, 실측상 회사 열에 아홉 중
+                        여덟이 비어 있어 언제나 「—」인 줄이 하나 더 서게 됩니다. */}
+                    {contact.website && (
+                      <div className="info-row"><dt>웹사이트</dt>
+                        <dd className="truncate">
+                          <a href={contact.website} target="_blank" rel="noreferrer noopener">
+                            {contact.website}
+                          </a>
+                        </dd></div>
+                    )}
+                </>)}
+              </dl>
+              {!editingContact && contact?.role_description && (
                 <div style={{ marginTop: 12 }}>
                   <div className="field-label">하는 일 / 메모</div>
                   <p className="t-xs" style={{ margin: 0, whiteSpace: "pre-line" }}>
@@ -1186,44 +1128,25 @@ export function MessageDetail() {
                 </div>
               )}
 
-              {/* What the operator learns mid-conversation goes here — it is the only
-                  place a gmail/unverified contact gets a company name at all. */}
+              {/* 대화하며 알게 되는 값들. **gmail·미확인 고객이 회사 이름을 갖는
+                  유일한 자리입니다.** 위의 플랜 칸과 같은 폼 안에 있어서 저장은 한 번입니다. */}
               {editingContact && (
-                <form
-                  style={{ marginTop: 12 }}
-                  onSubmit={(event) => {
-                    event.preventDefault();
-                    // FormData 는 이 시점의 스냅숏입니다 — 확인 창을 지나면
-                    // event.currentTarget 은 이미 없습니다.
-                    const fields = Object.fromEntries(
-                      new FormData(event.currentTarget) as never,
-                    ) as Record<string, string>;
-                    setConfirm({
-                      description: (
-                        <>
-                          이 고객의 회사와 메모를 저장합니다. 회사:{" "}
-                          <strong>{fields.company?.trim() || "—"}</strong>
-                        </>
-                      ),
-                      run: () => saveContactFields(fields),
-                    });
-                  }}
-                >
+                <div style={{ marginTop: 12 }}>
                   <label className="field-label" htmlFor="c-company">회사</label>
                   <input className="input" id="c-company" name="company"
-                         defaultValue={contact.company ?? ""} style={{ marginBottom: 10 }} />
+                         defaultValue={contact?.company ?? ""} style={{ marginBottom: 10 }} />
                   <label className="field-label" htmlFor="c-role">하는 일 / 메모</label>
                   <textarea className="textarea" id="c-role" name="role_description" rows={3}
-                            defaultValue={contact.role_description ?? ""}
+                            defaultValue={contact?.role_description ?? ""}
                             placeholder="이 고객·회사가 어떤 일을 하는지 (대화하며 알게 된 내용 포함). gmail·미확인이어도 입력해 저장됩니다." />
                   <button className="btn btn--subtle btn--sm" type="submit"
                           style={{ marginTop: 10, width: "100%" }}>
                     <Icon name="check" size={14} /> 저장
                   </button>
-                </form>
+                </div>
               )}
-            </div>
-          )}
+            </form>
+          </div>
 
           {/* 「발송 정보」 카드는 지웠습니다 (2026-09-03 운영자 지시). 채널은 행마다
               `email` 한 값이고, 발송 언어는 「번역하기」 버튼이 이미 적으며, 생성 시각은

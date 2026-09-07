@@ -756,6 +756,12 @@ a.kpi:hover { border-color: var(--accent); }
 .info-row { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; font-size: 13px; }
 .info-row dt, .info-row__k { color: var(--text-subtle); flex-shrink: 0; }
 .info-row dd, .info-row__v { margin: 0; color: var(--text); text-align: right; min-width: 0; }
+/* 한 상자 안의 구분선 (2026-09-07). 티켓 정보·플랜·연락처를 한 카드로 합치면서 생겼습니다 —
+   상자는 하나여도 한 줄이 무엇을 뜻하는지는 자리마다 다릅니다(플랜은 이 티켓의 값, 연락처는
+   이 사람의 값). 카드 머리글을 하나 더 두지 않는 이유는 그것을 없애려고 합쳤기 때문입니다. */
+.info-row--head { margin-top: 6px; padding-top: 10px; border-top: 1px solid var(--border); }
+.info-row--head dt { color: var(--text); font-weight: 600; }
+
 .info-stack { display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
 .info-stack__k { color: var(--text-subtle); }
 .info-stack__v { color: var(--text); }

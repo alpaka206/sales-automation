@@ -453,22 +453,22 @@ def test_board_move_finds_the_sheet_row_on_the_contact(customer_db, customer_id)
     assert sheet_client_id == 4321
 
 
-def test_the_workbook_has_no_wording_for_one_board_stage() -> None:
-    """A KNOWN gap, pinned so it cannot be mistaken for working.
+def test_every_board_stage_has_workbook_wording() -> None:
+    """보드의 여섯 단계 전부에 시트가 쓸 말이 있어야 합니다.
 
-    보드는 일곱 단계이고 워크북의 Deal Stage 열에는 그중 여섯의 말이 있습니다. Reminder Sent
-    로 카드를 옮기면 이 DB 와 허브스팟은 따라오지만 시트는 옛 단계에 남습니다(쓰기가 경고를
-    남기고 실패로 보고하므로 침묵이 아니라 동기화 실패로 보입니다). 채우려면 영업팀이 그
-    열에서 실제로 쓰는 값이 있어야 합니다 — 지어낸 말은 그들의 필터를 망가뜨립니다.
+    없으면 그 단계로 카드를 옮길 때 이 DB 와 허브스팟은 따라오는데 **시트만 옛 값에 남습니다**
+    (쓰기가 경고를 남기고 실패로 보고합니다). 오래 `reminder_sent` 하나가 그 구멍이었고,
+    이관 0109 가 그 단계를 없애면서 닫혔습니다.
 
-    `closed` 는 2026-08-19 에 채웠습니다(운영자 결정): 허브스팟에서 No Response 와
-    Not a Fit 이 Concluded 하나로 합쳐지면서 시트에도 그 한 마디를 적기로 했습니다.
+    **표시 이름이 바뀌어도 이 목록은 안 바뀝니다** (2026-09-07: Qualified → Contacted,
+    Won → Closed Won, Lost → Closed Lost). 이 열은 영업팀이 필터로 쓰는 시트의 값 목록이라,
+    허브스팟 화면 이름을 따라 바꾸면 그 행이 그들의 필터에 안 걸립니다. 시트를 바꾸는 것은
+    영업팀이 정할 일입니다.
     """
     from src.api.routes.customer_ops import PIPELINE_STAGES
     from src.integrations.google_sheets import _STAGE_VALUES
 
-    missing = [key for key, _label, _description in PIPELINE_STAGES if key not in _STAGE_VALUES]
-    assert missing == ["reminder_sent"]
+    assert [key for key, _l, _d in PIPELINE_STAGES if key not in _STAGE_VALUES] == []
     # Detail 열에는 새 말을 만들지 않았습니다 — 못 딴 채로 끝난 건이라는 뜻의 칸이 이미
     # 있고, 같은 뜻의 값이 둘이 되면 어느 쪽으로도 필터가 안 걸립니다.
     assert _STAGE_VALUES["closed"] == ("Concluded", "Closed Lost")
@@ -875,6 +875,17 @@ def test_hubspot_sync_does_not_blank_a_field_the_operator_filled_in():
         def get(self, model, _id):
             return _Contact() if model.__name__ == "Contact" else profile
 
+        def query(self, *_a, **_k):
+            # 이 연락처의 New 문의에 플랜 스냅샷을 박는 조회입니다(0110). 여기 검사와
+            # 무관하므로 빈 목록입니다 — 스냅샷 쪽은 `test_plan_snapshot` 이 봅니다.
+            return self
+
+        def filter(self, *_a, **_k):
+            return self
+
+        def all(self):
+            return []
+
         def add(self, obj):
             saved.update({k: getattr(obj, k) for k in ("current_plan", "user_seq", "industry")})
 
@@ -975,6 +986,9 @@ def test_the_sweep_pulls_history_and_stops_at_its_quota(monkeypatch):
     monkeypatch.setattr(cs, "SessionLocal", _Session)
     monkeypatch.setattr(cs, "_last_sweep_at", lambda: base - timedelta(hours=1))
     monkeypatch.setattr(cs, "apply_contact_fields", lambda *_a, **_k: {})
+    # 회사 주소 채우기(0111)는 같은 회차에 있지만 다른 대기열이다 — 여기서 재는 것은 기록
+    # 몫과 워터마크다. 그쪽은 `tests/test_company_website.py` 가 따로 고정한다.
+    monkeypatch.setattr(cs, "fill_missing_websites", lambda *_a, **_k: 0)
 
     with patch("src.integrations.hubspot.HubSpotClient", lambda: _Client()), patch(
         "src.api.routes.customer_ops._sync_hubspot",

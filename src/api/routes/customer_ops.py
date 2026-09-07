@@ -59,11 +59,17 @@ GOOGLE_SHEETS_STATE_COOKIE = "perso_sheets_oauth_state"
 # stage id 는 1404814097 한 번도 안 바뀌었습니다.
 PIPELINE_STAGES: tuple[tuple[str, str, str], ...] = (
     ("new", "New", "새 문의"),
-    ("meeting_link_sent", "Qualified", "답변 발송"),
+    # 표시 이름만 바뀝니다 (2026-09-07 운영자 지시): Qualified → Contacted,
+    # Won → Closed Won, Lost → Closed Lost. **키는 그대로입니다** — 키를 따라 바꾸면
+    # `conversations.stage` 와 `customer_profiles.pipeline_stage` 두 열을 옮기는 이관이
+    # 필요하고, 다음에 이름이 또 바뀌면 그걸 또 합니다.
+    ("meeting_link_sent", "Contacted", "답변 발송"),
     ("negotiation", "Negotiating", "협의 중"),
-    ("reminder_sent", "Reminder Sent", "리마인더 발송"),
-    ("won", "Won", "계약 성사"),
-    ("closed_lost", "Lost", "실패"),
+    # `reminder_sent` 가 여기 있었습니다 (이관 0109, 운영자 지시로 삭제). 리마인더는 이
+    # 앱이 보내지 않습니다 — 허브스팟 워크플로가 보냅니다. 우리 화면에 그 단계 칸만 있고
+    # 그 일은 저쪽에서 일어나서, 보드에는 아무도 안 옮기는 열이 하나 서 있었습니다.
+    ("won", "Closed Won", "계약 성사"),
+    ("closed_lost", "Closed Lost", "실패"),
     # No Response 가 없어지면서 이 단계가 「끝난 문의」 전부를 받습니다(이관 0076) —
     # 이름이 Not a Fit 에서 Concluded 로 넓어진 것도 그래서입니다.
     ("closed", "Concluded", "종결"),

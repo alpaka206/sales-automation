@@ -33,15 +33,16 @@ logger = logging.getLogger(__name__)
 # agent would be a circular import.
 #
 # **키는 우리 것이고, 화면에 보이는 이름은 HubSpot 것입니다.** 둘은 따로 움직입니다:
-# "Meeting link sent" 는 "Qualified" 로, "Closed" 는 "Not a Fit" 을 거쳐 "Concluded" 로 이름만 바뀌었고
+# "Meeting link sent" 는 "Qualified"(지금은 "Contacted") 로, "Closed" 는 "Not a Fit" 을 거쳐 "Concluded" 로 이름만 바뀌었고
 # stage id 는 그대로입니다. 그래서 여기 키도 그대로 둡니다 — 키를 따라 바꾸면 대화·프로필
 # 두 테이블의 값을 옮기는 마이그레이션이 필요하고, 다음에 이름이 또 바뀌면 그걸 또 합니다.
 # 사람이 읽는 이름은 ``customer_ops.PIPELINE_STAGES`` 한 곳에만 있습니다.
 LOCAL_STAGE_TO_SETTING: dict[str, str] = {
     "new": "HUBSPOT_TICKET_STAGE_NEW",
-    "meeting_link_sent": "HUBSPOT_TICKET_STAGE_AFTER_SEND",       # 화면 이름: Qualified
+    "meeting_link_sent": "HUBSPOT_TICKET_STAGE_AFTER_SEND",       # 화면 이름: Contacted
     "negotiation": "HUBSPOT_TICKET_STAGE_NEGOTIATION",
-    "reminder_sent": "HUBSPOT_TICKET_STAGE_REMINDER_SENT",
+    # `reminder_sent` 가 여기 있었습니다 (이관 0109). 허브스팟 파이프라인에서도 같이
+    # 없앴으므로 접어 둘 stage id 가 아예 없습니다 — 남은 행은 그 이관이 옮겼습니다.
     "won": "HUBSPOT_TICKET_STAGE_WON",
     "closed_lost": "HUBSPOT_TICKET_STAGE_CLOSED_LOST",
     "closed": "HUBSPOT_TICKET_STAGE_CLOSED",                      # 화면 이름: Concluded

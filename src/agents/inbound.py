@@ -1260,6 +1260,26 @@ class InboundAgent:
             if not conv.inquiry_subject and inbound_subject:
                 conv.inquiry_subject = inbound_subject
 
+            # **문의가 들어온 시점의 플랜을 이 티켓에 박습니다** (0110, 2026-09-07 운영자
+            # 지시). 이 값이 없으면 티켓 상세의 「플랜 정보」와 MQL/PQL 이 `customer_profiles`
+            # 를 읽는데, 그 행은 고객이 플랜을 올릴 때마다 바뀝니다 — 몇 달 전 문의를
+            # 판단하려고 여는 화면에서 그때 값이 사라집니다.
+            #
+            # **한 번만 찍습니다.** 티켓 하나에 이벤트가 여러 번 오므로(웹훅 + 10분 폴러 +
+            # 티켓 변경) 매번 덮으면 「문의 시점」이 아니라 「마지막 이벤트 시점」이 됩니다.
+            # 바로 위에서 연락처를 저장한 뒤라, 이 문의가 들고 온 값이 이미 반영돼 있습니다.
+            # **아직 아무것도 모르면 안 찍습니다.** 처음 보는 고객은 이 시점에 프로필이
+            # 비어 있고 플랜 값은 그 뒤 연락처 스윕이 채웁니다 — 그때 같은 함수가 다시
+            # 찍습니다(`contact_sync.apply_contact_fields`).
+            try:
+                from ..integrations.hubspot_record import stamp_plan_snapshot
+
+                stamp_plan_snapshot(session, conv)
+            except Exception:
+                # 못 찍어도 접수는 갑니다 — NULL 은 「그때 값을 모른다」이고, 화면이 그때는
+                # 지금 값을 그리며 그렇게 적습니다.
+                logger.warning("플랜 스냅샷을 못 남겼습니다 (conv=%s)", conv.id, exc_info=True)
+
             # First inbound in the thread? (count BEFORE inserting this one.)
             prior_inbound = (
                 session.query(Message)

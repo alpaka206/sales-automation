@@ -23,8 +23,9 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timedelta, timezone
 
-from ..db.models import Contact, CustomerProfile
+from ..db.models import Contact, Conversation, CustomerProfile
 from ..db.session import SessionLocal
+from ..integrations.hubspot_record import stamp_plan_snapshot
 
 logger = logging.getLogger(__name__)
 
@@ -102,6 +103,16 @@ def apply_contact_fields(contact_id: int, incoming: dict[str, str | None]) -> di
         # 행을 읽으므로, 마지막으로 받아온 시각이 화면에 설 수 있어야 합니다.
         profile.last_synced_at = datetime.now(timezone.utc)
         session.add(profile)
+        # **아직 답이 안 나간 문의에는 지금 플랜을 박아 둡니다** (0110). 접수 시점에
+        # 찍으려 해도 처음 보는 고객은 그때 프로필이 비어 있어 찍을 것이 없습니다 — 그
+        # 값을 채우는 것이 바로 이 함수라, 여기가 「알게 된 첫 순간」입니다.
+        # 한 번 찍힌 티켓과 New 를 지난 티켓은 그냥 지나갑니다(`stamp_plan_snapshot`).
+        for conv in (
+            session.query(Conversation)
+            .filter(Conversation.contact_id == contact_id, Conversation.stage == "new")
+            .all()
+        ):
+            stamp_plan_snapshot(session, conv)
         sheet_client_id = contact.sheet_client_id
         session.commit()
 
@@ -168,6 +179,79 @@ _SWEEP_LIMIT = 200
 _HISTORY_PER_SWEEP = 15
 
 
+# 한 회차에 회사 주소를 물어볼 사람 수 (0111). 왕복은 인원수와 무관하게 **둘**이라
+# (연결 배치 + 회사 배치) 100명이 1명보다 비싸지 않고, 허브스팟 배치 상한도 100입니다.
+_WEBSITES_PER_SWEEP = 100
+
+
+def _safe_url(raw: str) -> str:
+    """저장할 모양으로 다듬습니다 — 화면이 이 값을 `<a href>` 에 그대로 넣습니다 (0111).
+
+    허브스팟의 회사 주소 칸은 자유 입력이라 `perso.ai` 처럼 스킴 없이 적힌 것이 흔합니다.
+    그대로 두면 링크가 **콘솔 안의 상대 경로**가 되어 엉뚱한 화면으로 갑니다. 그리고
+    `javascript:` 로 시작하는 값은 통째로 버립니다 — 우리가 쓴 글자가 아니라 저쪽에서 온
+    글자이고, 링크로 그리는 순간 그것이 실행 경로가 됩니다.
+
+    **들어올 때 한 번만 다듬습니다.** 그리는 곳마다 다듬으면 한 곳을 빼먹고, 그 한 곳이
+    하필 링크입니다.
+    """
+    value = (raw or "").strip()
+    if not value:
+        return ""
+    lowered = value.lower()
+    if lowered.startswith(("http://", "https://")):
+        return value
+    return "" if "://" in lowered or ":" in lowered.split("/")[0] else f"https://{value}"
+
+
+def fill_missing_websites(client, limit: int = _WEBSITES_PER_SWEEP) -> int:
+    """아직 안 물어본 연락처의 회사 주소를 채웁니다. 채운 사람 수를 돌려줍니다 (0111).
+
+    **대기열은 `website IS NULL` 그 자체입니다.** 표식 열도, 한 번 훑고 마는 스크립트도
+    없습니다 — 모든 연락처가 NULL 로 시작하므로 이 스윕 하나가 옛 행을 메우는 일과 새로
+    들어온 사람을 따라잡는 일을 같이 합니다(티켓 대화 수집기가 `history_synced_at` 로 하는
+    것과 같은 규칙입니다). 2분마다 100명이라 몇 천 명이어도 한두 시간이면 한 바퀴입니다.
+
+    **답이 없어도 빈 문자열을 적습니다.** 회사가 없거나 회사에 주소가 없는 사람이 다수인데
+    (실측: 회사에 `website` 가 있는 것은 100건 중 9건) 그들을 NULL 로 두면 대기열이 그
+    사람들로 영영 막혀 뒤에 있는 사람 차례가 안 옵니다.
+
+    **한 번 채운 값은 다시 안 봅니다.** 회사 쪽에서 주소가 바뀌어도 연락처의
+    `lastmodifieddate` 는 안 움직여서 이 스윕이 알아챌 길이 없고, 사이드바에 한 줄 그리는
+    값을 위해 전수 재조회를 매일 돌 이유는 없습니다.
+    ponytail: 갱신 없음. 주소가 바뀌어 문제가 되면 그때 `website` 를 비우는 자리를 만든다.
+    """
+    with SessionLocal() as session:
+        pending = {
+            str(row.hubspot_contact_id): row.id
+            for row in session.query(Contact.id, Contact.hubspot_contact_id)
+            .filter(Contact.hubspot_contact_id.is_not(None), Contact.website.is_(None))
+            .limit(limit)
+            .all()
+        }
+    if not pending:
+        return 0
+
+    try:
+        found = client.company_websites_sync(list(pending))
+    except Exception:
+        logger.warning("회사 주소 조회 실패 (%d명)", len(pending), exc_info=True)
+        return 0
+
+    filled = 0
+    with SessionLocal() as session:
+        for hubspot_id, contact_id in pending.items():
+            contact = session.get(Contact, contact_id)
+            if contact is None:
+                continue
+            contact.website = _safe_url(found.get(hubspot_id, ""))
+            filled += 1 if contact.website else 0
+        session.commit()
+    if filled:
+        logger.info("회사 주소: %d명 채웠습니다 (%d명 조회).", filled, len(pending))
+    return filled
+
+
 def _changed_at(dto) -> datetime | None:
     """그 연락처가 마지막으로 바뀐 시각. 몫에서 끊겼을 때 워터마크를 여기까지만 옮깁니다."""
     raw = getattr(dto, "updated_at", None)
@@ -207,6 +291,11 @@ def sync_changed_contacts_once() -> int:
         client = HubSpotClient()
     except HubSpotNotConfigured:
         return 0
+
+    # **워터마크와 무관하고, 검색보다 앞입니다** (0111). 이쪽 대기열은 「마지막 스윕 이후
+    # 바뀐 사람」이 아니라 「아직 안 물어본 사람」이라 아무도 안 바뀐 조용한 회차에도 한
+    # 몫씩 나아가야 하고, 아래 검색이 실패해 되돌아가는 회차에도 굶으면 안 됩니다.
+    fill_missing_websites(client)
 
     since = _last_sweep_at() - _SWEEP_OVERLAP
     now = datetime.now(timezone.utc)

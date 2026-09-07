@@ -520,7 +520,7 @@ async def ui_reply_senders(message_id: int):
 
 
 @router.get("/api/ui/contacts/{contact_id}/hubspot-record")
-def ui_hubspot_record(contact_id: int):
+def ui_hubspot_record(contact_id: int, conversation_id: int | None = None):
     """허브스팟 연락처 레코드의 「기본 그룹」 — 티켓 세부 내역 오른쪽 카드들.
 
     티켓 본문 payload 와 **따로** 가져온다. 이 값은 허브스팟에 물어야 나오는데, 그걸
@@ -531,12 +531,28 @@ def ui_hubspot_record(contact_id: int):
     없다. 그때도 200 에 빈 그룹이다 — 404 로 답하면 화면이 오류를 그리는데, 「이 고객은
     허브스팟에 없다」는 오류가 아니다.
     """
+    from ...db.models import Conversation
+    from ...db.session import SessionLocal
     from ...integrations.hubspot_record import fetch_record_groups
+
+    # **티켓이 물어보면 그 티켓이 들고 있는 값입니다** (0110). 문의가 들어온 시점의 플랜이라,
+    # 고객이 나중에 플랜을 올려도 몇 달 전 문의 화면은 안 바뀝니다. 고객 상세는 이 인자를
+    # 안 보내므로 예전대로 지금 값을 봅니다 — 한 라우트가 두 화면에 다른 답을 하는 것이
+    # 이번 요구사항입니다(「티켓은 처음 들어온 거, 리드 히스토리는 지금처럼」).
+    #
+    # **없으면 예전 동작입니다.** 이 칸이 생기기 전의 티켓 300여 건은 그때 값이 어디에도
+    # 안 남아 있어 만들어 낼 수 없습니다 — 지금 값을 그리고 화면이 그렇게 적습니다.
+    overrides = None
+    if conversation_id:
+        with SessionLocal() as session:
+            conv = session.get(Conversation, conversation_id)
+            if conv is not None and conv.contact_id == contact_id:
+                overrides = conv.plan_snapshot or None
 
     # **우리 행을 읽습니다** (0094). 허브스팟 연락처 ID 가 있든 없든 상관없어졌습니다 —
     # 손으로 만든 행도 워크북에서 온 행도 자기 칸을 갖고, 비어 있으면 비어 있는 채로
     # 그려집니다. 저쪽에서 값이 들어오는 문은 `agents/contact_sync` 의 셋입니다.
-    return fetch_record_groups(contact_id)
+    return fetch_record_groups(contact_id, overrides)
 
 
 @router.get("/api/ui/customers/{contact_id}")

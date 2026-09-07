@@ -40,6 +40,10 @@ class Contact(Base):
     # 허브스팟이 접속 IP 로 뽑은 국가 (0094). 위 `country` 와 다른 값이다 — 저쪽은 사람이
     # 폼에 적은 값이라 대개 비어 있고, 워크북의 IP Country 열이 뜻하는 것은 이쪽이다.
     ip_country: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # 연결된 **회사**의 Website URL (0111). 연락처 자신의 속성이 아니라 association 을 한 번
+    # 더 읽어야 나오는 값이라, 화면이 아니라 연락처 스윕이 채웁니다. 빈 문자열은 「물어봤고
+    # 없었다」 — NULL 이 그 스윕의 대기열입니다.
+    website: Mapped[str | None] = mapped_column(String(512), nullable=True)
     lifecycle_stage: Mapped[str | None] = mapped_column(String, nullable=True)
     score: Mapped[int | None] = mapped_column(Integer, nullable=True)
     phone: Mapped[str | None] = mapped_column(String, nullable=True)
@@ -99,6 +103,17 @@ class Conversation(Base):
     # regenerated as the thread evolves (unlike the append-only progress log).
     summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     customer_requests: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # **이 문의가 들어온 시점의 플랜** (0110). 티켓 상세의 「플랜 정보」와 MQL/PQL 이
+    # 읽습니다. 리드 히스토리는 여전히 `customer_profiles` 의 최신 값을 보므로, 고객이
+    # 나중에 플랜을 올려도 몇 달 전 문의 화면은 그때 값을 그대로 듭니다.
+    #
+    # **둘은 서로에게 번지지 않습니다** (2026-09-07 운영자 지시): 한쪽을 고쳐도 다른 쪽은
+    # 그대로입니다. 이 칸을 고치는 곳은 티켓 화면 하나이고, 그 저장은 허브스팟에 안
+    # 나갑니다 — 나가면 「따로」가 아닙니다.
+    #
+    # 모양은 `hubspot_record.RECORD_FIELDS` 의 `{key: 값}` 입니다. NULL 은 「그때 값을
+    # 모른다」이고(이 칸이 생기기 전의 티켓), 그때는 화면이 최신 값을 그리며 그렇게 적습니다.
+    plan_snapshot: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     # Exact row written for this inquiry. Pipeline moves update only that row's
     # stage cells and never rewrite the operator-owned sheet layout.
     sheet_inbound_row: Mapped[int | None] = mapped_column(Integer, nullable=True)
