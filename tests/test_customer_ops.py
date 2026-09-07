@@ -1082,3 +1082,80 @@ def test_every_stage_has_a_lifecycle_name_except_new():
     assert lifecycle_stage_for("initial", "MQL") == "MQL"
     assert lifecycle_stage_for(None, "MQL") == "MQL"
     assert lifecycle_stage_for("won", "MQL") == "Customer"
+
+
+def test_only_a_hand_written_record_can_be_edited(customer_db, customer_id) -> None:
+    """메모는 고칠 수 있다 — **사람이 적은 것만** (2026-09-07 운영자 지시).
+
+    나머지 줄은 허브스팟에서 들여온 메일·채팅·폼이고 **일어난 일의 사본**이다. 고치면
+    화면이 저쪽과 다른 이야기를 하는데 어느 쪽이 사실인지는 화면만 봐서는 알 수 없다.
+    그리고 조용히 갈라진다: 수집기는 `external_id` 가 이미 있으면 건너뛰므로 고친 값이
+    그대로 남는다.
+    """
+    with customer_db() as session:
+        mine = CustomerInteraction(
+            contact_id=customer_id, channel="manual", direction="note",
+            summary="통화함", happened_at=datetime(2026, 9, 1, 3, 0),
+        )
+        theirs = CustomerInteraction(
+            contact_id=customer_id, channel="이메일", direction="inbound",
+            summary="고객이 보낸 메일", external_id="hubspot:conv:abc",
+            happened_at=datetime(2026, 9, 1, 3, 0),
+        )
+        session.add_all([mine, theirs])
+        session.commit()
+        mine_id, theirs_id = mine.id, theirs.id
+
+    with TestClient(app) as client:
+        ok = client.post(
+            f"/customers/{customer_id}/interactions/{mine_id}",
+            data={"channel": "phone", "summary": "통화함 — 견적 문의", "handler": "배운태"},
+            follow_redirects=False,
+        )
+        refused = client.post(
+            f"/customers/{customer_id}/interactions/{theirs_id}",
+            data={"channel": "manual", "summary": "고쳐진 메일"},
+            follow_redirects=False,
+        )
+        empty = client.post(
+            f"/customers/{customer_id}/interactions/{mine_id}",
+            data={"summary": "   "}, follow_redirects=False,
+        )
+
+    assert ok.status_code == 303
+    assert refused.status_code == 400
+    assert empty.status_code == 400
+    with customer_db() as session:
+        assert session.get(CustomerInteraction, mine_id).summary == "통화함 — 견적 문의"
+        assert session.get(CustomerInteraction, mine_id).channel == "phone"
+        assert session.get(CustomerInteraction, theirs_id).summary == "고객이 보낸 메일"
+
+
+def test_editing_a_record_does_not_move_the_ticket(customer_db, customer_id) -> None:
+    """**「미팅」으로 고쳤다고 단계가 움직이면 안 된다.**
+
+    그 규칙(`if channel == "meeting"`)이 답하는 물음은 「미팅이 있었나」이고, 그건 적을
+    때 이미 답했다. 고칠 때 다시 돌면 몇 달 전 기록의 오타를 고친 사람이 그 티켓을
+    협상 중으로 되돌려 놓는다 — 그리고 그건 워크북과 허브스팟까지 나간다.
+    """
+    with customer_db() as session:
+        conversation = session.query(Conversation).filter_by(contact_id=customer_id).one()
+        conversation.stage = "won"
+        row = CustomerInteraction(
+            contact_id=customer_id, conversation_id=conversation.id,
+            channel="manual", direction="note", summary="메모",
+            happened_at=datetime(2026, 9, 1, 3, 0),
+        )
+        session.add(row)
+        session.commit()
+        row_id, conversation_id = row.id, conversation.id
+
+    with TestClient(app) as client:
+        client.post(
+            f"/customers/{customer_id}/interactions/{row_id}",
+            data={"channel": "meeting", "summary": "미팅 진행함"},
+            follow_redirects=False,
+        )
+
+    with customer_db() as session:
+        assert session.get(Conversation, conversation_id).stage == "won"

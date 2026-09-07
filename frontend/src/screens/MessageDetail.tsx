@@ -203,6 +203,8 @@ export function MessageDetail() {
   const [showOrig, setShowOrig] = useState<Record<number, boolean>>({});
   const [loadedId, setLoadedId] = useState<number | null>(null);
   const [logging, setLogging] = useState(false);
+  // 고치는 중인 기록 — 「추가하기」와 같은 모달, 같은 폼입니다.
+  const [editing, setEditing] = useState<Interaction | null>(null);
   /** 이 화면의 확인 창 하나. 오른쪽 칸의 저장은 **검토 중인 초안 밖**에서 일어나는데,
    *  결과를 적던 `note` 는 그 초안 안에서만 그려집니다 — 이미 답이 나간 티켓에서는 눌러도
    *  화면이 아무 말도 하지 않았습니다. 성공도 실패도 여기로 옵니다. */
@@ -978,7 +980,7 @@ export function MessageDetail() {
                                   isFirstReply={entry.bubble.id === firstReplyId} />
                     ) : (
                       <InteractionItem key={entry.key} item={entry.item as Interaction}
-                                       hideSubject hideHandler
+                                       hideSubject hideHandler onEdit={setEditing}
                                        preInquiry={isPreInquiry(entry.item as Interaction)} />
                     ),
                   )
@@ -1123,15 +1125,16 @@ export function MessageDetail() {
 
                 {/* ── 플랜 ─────────────────────────────────────────────────
                     **이 티켓이 들고 있는 문의 시점 값입니다** (0110). 같은 값이 리드
-                    히스토리에서는 지금 값이고, 한쪽을 고쳐도 다른 쪽은 안 바뀝니다 —
-                    어느 쪽을 보고 있는지 여기 안 적으면 둘이 다를 때 하나를 버그로
-                    읽게 됩니다. 얼려 둔 값이 없는 옛 티켓은 그렇게 적습니다. */}
-                <div className="info-row info-row--head">
-                  <dt>플랜</dt>
-                  <dd className="t-xs t-subtle">
-                    {hubspot?.frozen ? "이 문의 시점" : "현재 값"}
-                  </dd>
-                </div>
+                    히스토리에서는 지금 값이고, 한쪽을 고쳐도 다른 쪽은 안 바뀝니다.
+
+                    **머리글 옆에 「이 문의 시점 / 현재 값」을 적던 자리입니다**
+                    (2026-09-07 운영자 지시로 뺐습니다). 이관 0110 뒤에 들어온 문의는
+                    전부 얼린 값을 들고 있어서 그 글자는 모든 티켓에 같은 말을 하나씩 더
+                    얹을 뿐이고, 「현재 값」이 뜨는 옛 티켓에서는 오히려 **틀린 값을 보고
+                    있나** 하고 읽혔습니다. 그 300여 건은 문의 시점 값이 어디에도 안
+                    남아 있어 만들어 낼 수 없습니다 — 한 번 고쳐 저장하면 그때부터 자기
+                    값을 갖습니다. */}
+                <div className="info-row info-row--head"><dt>플랜</dt><dd /></div>
                 {hubspotPending && (
                   <div className="info-row"><dt>&nbsp;</dt>
                     <dd className="t-xs t-subtle"><span className="spinner" role="status" /> 읽는 중</dd>
@@ -1310,20 +1313,25 @@ export function MessageDetail() {
       )}
 
       {/* 보드 카드의 + 가 띄우는 것과 같은 모달, 같은 폼입니다. */}
-      {logging && ticket.id && contact && (
+      {(logging || editing) && ticket.id && contact && (
         <Modal
-          title="히스토리 추가"
+          title={editing ? "히스토리 수정" : "히스토리 추가"}
           hideCancel
           wide
-          onClose={() => setLogging(false)}
+          onClose={() => { setLogging(false); setEditing(null); }}
         >
           <div style={{ marginTop: 16 }}>
+            {/* `key` 가 있어야 다른 줄을 이어서 열 때 칸이 새로 그려집니다 — 안 그러면
+                `defaultValue` 는 처음 한 번만 읽히고 앞 줄의 내용이 남습니다. */}
             <InteractionForm
-              onCancel={() => setLogging(false)}
+              key={editing?.id ?? "new"}
+              item={editing}
+              onCancel={() => { setLogging(false); setEditing(null); }}
               contactId={contact.id}
               conversationId={ticket.id}
               onSaved={() => {
                 setLogging(false);
+                setEditing(null);
                 void queryClient.invalidateQueries({ queryKey: key });
               }}
             />

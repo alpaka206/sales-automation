@@ -1186,6 +1186,58 @@ async def interaction_add(
     return RedirectResponse(back, status_code=303)
 
 
+@router.post("/customers/{contact_id}/interactions/{interaction_id}")
+async def interaction_edit(
+    contact_id: int,
+    interaction_id: int,
+    channel: str = Form("manual"),
+    direction: str = Form("note"),
+    handler: str = Form(""),
+    summary: str = Form(""),
+    happened_at: str = Form(""),
+    redirect_to: str = Form(""),
+):
+    """손으로 적은 기록을 고칩니다 (2026-09-07 운영자 지시).
+
+    **고칠 수 있는 것은 사람이 적은 줄뿐입니다**(`external_id IS NULL`). 나머지는
+    허브스팟에서 들여온 메일·채팅·폼이라 **일어난 일의 사본**이고, 그걸 고치면 화면이
+    허브스팟과 다른 이야기를 하는데 어느 쪽이 사실인지는 화면만 봐서는 알 수 없습니다.
+    (수집기는 `external_id` 가 이미 있으면 건너뛰므로 고친 값이 그대로 남습니다 — 조용히
+    갈라진다는 뜻이라 더 나쁩니다.)
+
+    **세 가지를 일부러 안 합니다**(추가할 때는 하는 일입니다):
+
+    - **단계를 안 옮깁니다.** 「미팅」으로 고쳤다고 티켓이 협상 중으로 가면, 몇 달 전
+      기록의 오타를 고친 사람이 그 티켓을 되돌려 놓게 됩니다. 그 규칙이 답하는 물음은
+      「미팅이 있었나」이고, 그건 적을 때 이미 답했습니다.
+    - **티켓 요약에 줄을 더 붙이지 않습니다.** 그 문단은 append-only 라, 고칠 때마다
+      붙이면 같은 이야기가 고친 횟수만큼 쌓입니다.
+    - **허브스팟에 다시 안 적습니다.** 처음 적을 때 만든 노트의 id 를 우리가 안 들고
+      있어서, 다시 적으면 고치는 것이 아니라 노트가 하나 더 생깁니다.
+
+    그래서 이 라우트는 **우리 행 하나만** 고칩니다. 어느 티켓의 기록인지도 안 바꿉니다 —
+    그건 고치기가 아니라 옮기기입니다.
+    """
+    if not summary.strip():
+        return HTMLResponse("내용을 입력해 주세요.", status_code=400)
+    back = _internal_path(redirect_to, f"/customers/{contact_id}#history")
+    with SessionLocal() as session:
+        row = session.get(CustomerInteraction, interaction_id)
+        if row is None or row.contact_id != contact_id:
+            raise HTTPException(status_code=404, detail="기록을 찾을 수 없습니다")
+        if row.external_id is not None:
+            return HTMLResponse(
+                "허브스팟에서 들여온 기록은 고칠 수 없습니다.", status_code=400
+            )
+        row.channel = channel[:32]
+        row.direction = direction[:16]
+        row.handler = handler.strip()[:120] or None
+        row.summary = summary.strip()
+        row.happened_at = _parse_dt(happened_at) or row.happened_at
+        session.commit()
+    return RedirectResponse(back, status_code=303)
+
+
 @router.post("/customers/{contact_id}/contracts")
 async def contract_add(
     contact_id: int,

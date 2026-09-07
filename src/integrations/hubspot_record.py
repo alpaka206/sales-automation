@@ -428,7 +428,8 @@ def fetch_record_groups(contact_id: int, overrides: dict | None = None) -> dict:
         "groups": groups,
         "error": None,
         "synced_at": synced_at,
-        # 이 값이 **얼려 둔 것**인가. 화면이 카드 제목과 안내 한 줄을 이것으로 가른다 —
-        # 같은 카드가 두 화면에서 다른 것을 뜻하므로, 어느 쪽인지 화면에 적혀야 한다.
-        "frozen": bool(overrides),
+        # `frozen` 이 여기 있었다 — 티켓 화면이 「이 문의 시점 / 현재 값」을 적는 데 썼다.
+        # 2026-09-07 에 운영자 지시로 그 글자를 뺐고, **읽는 코드가 없어진 칸은 남기지
+        # 않는다**(0101 이 정리한 그 규칙이다). 되살릴 거면 어느 화면이 그것을 읽는지부터
+        # 정할 것. 얼린 값인지는 `conversations.plan_snapshot` 이 NULL 인지로 여전히 안다.
     }

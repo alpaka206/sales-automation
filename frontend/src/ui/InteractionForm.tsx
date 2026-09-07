@@ -162,16 +162,36 @@ export type Interaction = {
   summary: string;
   context: string | null;
   happened_at: string;
+  /** 고칠 수 있는 줄인가 — **사람이 적은 것만**입니다 (2026-09-07 운영자 지시). 허브스팟
+   *  에서 들여온 메일·채팅·폼은 일어난 일의 사본이라 고치면 화면이 저쪽과 다른 이야기를
+   *  합니다. **서버가 정합니다** — 화면이 판단하면 그 규칙이 두 곳에 생깁니다. */
+  editable?: boolean;
 };
+
+/** `datetime-local` 이 받는 모양(`YYYY-MM-DDTHH:mm`)으로. API 가 주는 것은 오프셋 없는
+ *  UTC 라 그대로 넣으면 9시간 이른 값이 칸에 뜨고, 고치지 않고 저장만 해도 기록이
+ *  9시간 앞으로 갑니다. */
+function toLocalInput(value: string) {
+  const at = new Date(value.endsWith("Z") ? value : `${value}Z`);
+  if (Number.isNaN(at.getTime())) return "";
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())}`
+    + `T${pad(at.getHours())}:${pad(at.getMinutes())}`;
+}
 
 export function InteractionForm({
   contactId,
   conversationId,
+  item,
   onSaved,
   onCancel,
 }: {
   contactId: number;
   conversationId?: number | null;
+  /** 주면 **고치기**입니다 (2026-09-07 운영자 지시). 폼을 두 벌로 만들지 않는 이유는
+   *  묻는 칸이 같아서입니다 — 갈라 두면 칸을 하나 더할 때 한쪽만 늘어나고, 그러면 적은
+   *  것과 고친 것이 다른 모양의 기록이 됩니다. */
+  item?: Interaction | null;
   onSaved: () => void;
   /** 창을 닫는 길. **선택이 아닙니다** — 이 폼이 사는 자리는 셋 다 모달입니다(티켓 세부
    *  내역 · 보드 카드의 + · 고객 상세). 한동안 고객 상세만 카드 안에 펼쳐 둬서 여기가
@@ -181,17 +201,23 @@ export function InteractionForm({
 }) {
   // 방향 칸을 그릴지 말지가 이 값에 달려 있어서, 고르개만 제어 컴포넌트입니다. 나머지
   // 칸은 예전 그대로 DOM 이 들고 있습니다 — 그것까지 상태로 올릴 이유가 없습니다.
-  const [channel, setChannel] = useState(CHANNELS[0][0]);
+  const [channel, setChannel] = useState(item?.channel || CHANNELS[0][0]);
   const [save, saving] = useAction(async (event: React.FormEvent<HTMLFormElement>) => {
         event.preventDefault();
         const form = event.currentTarget;
         const data = Object.fromEntries(new FormData(form) as never) as Record<string, string>;
         // Posted to the route the Jinja form posts to, so the 미팅 stage rule and the
         // contact check live in one place.
-        await postForm(`/customers/${contactId}/interactions`, {
-          ...data,
-          conversation_id: conversationId ? String(conversationId) : "",
-        });
+        //
+        // **고칠 때는 어느 티켓의 기록인지 안 보냅니다.** 그건 고치기가 아니라 옮기기이고,
+        // 라우트도 그 칸을 안 받습니다.
+        await postForm(
+          `/customers/${contactId}/interactions${item?.id ? `/${item.id}` : ""}`,
+          item?.id ? data : {
+            ...data,
+            conversation_id: conversationId ? String(conversationId) : "",
+          },
+        );
         form.reset();
         // `form.reset()` 은 DOM 만 되돌립니다 — 고르개는 제어 컴포넌트라 손으로 되돌립니다.
         setChannel(CHANNELS[0][0]);
@@ -216,22 +242,25 @@ export function InteractionForm({
         <label><span className="field-label">방향</span>
           {/* 기본은 「주고받음」입니다 — 한 건을 통째로 적는 것이 이 폼의 원래 쓰임이라,
               안 고르고 저장한 기록의 뜻이 바뀌면 안 됩니다. */}
-          <select className="select" name="direction" defaultValue="note">
+          <select className="select" name="direction" defaultValue={item?.direction || "note"}>
             {DIRECTIONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
           </select>
         </label>
       )}
       <label><span className="field-label">담당자</span>
-        <input className="input" name="handler" maxLength={120} placeholder="이 건을 진행한 사람" />
+        <input className="input" name="handler" maxLength={120} placeholder="이 건을 진행한 사람"
+               defaultValue={item?.handler ?? ""} />
       </label>
       <label><span className="field-label">일시</span>
-        <input className="input" type="datetime-local" name="happened_at" />
+        <input className="input" type="datetime-local" name="happened_at"
+               defaultValue={item ? toLocalInput(item.happened_at) : ""} />
       </label>
       {/* One record = one exchange, written up once. 방향은 그 기록이 무엇인지 말할
           뿐, 한 대화를 「누가 말했나」 줄로 쪼개라는 뜻이 아닙니다 — 그래서 기본이
           「주고받음」이고 본문은 여전히 한 칸입니다. */}
       <label className="quick-form__wide"><span className="field-label">오간 내용</span>
         <textarea className="textarea" name="summary" rows={4} required
+                  defaultValue={item?.summary ?? ""}
                   placeholder="고객이 요청한 내용과 우리가 답한 내용을 한 번에 정리해서 적어주세요." />
       </label>
       {/* 주제 · 맥락·다음 액션 · 관련 자료 URL 세 칸은 뺐습니다 (2026-09-03 운영자 지시,
@@ -249,7 +278,7 @@ export function InteractionForm({
       <div className="quick-form__wide"
            style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
         <button type="button" className="btn btn--subtle" onClick={onCancel}>취소</button>
-        <SubmitButton busy={saving}>기록 저장</SubmitButton>
+        <SubmitButton busy={saving}>{item ? "기록 수정" : "기록 저장"}</SubmitButton>
       </div>
     </form>
   );
@@ -278,9 +307,13 @@ export function InteractionForm({
  *  제목은 **버려지지 않습니다**: 요약이 빈 기록에서는 아래 `body` 가 제목을 대신 씁니다.
  *  그 줄에는 제목이 가진 전부이기 때문입니다. */
 export function InteractionItem({
-  item, hideSubject = false, hideHandler = false, preInquiry = false,
+  item, hideSubject = false, hideHandler = false, preInquiry = false, onEdit,
 }: {
   item: Interaction;
+  /** 주면 고칠 수 있는 줄에 연필이 붙습니다 (2026-09-07 운영자 지시). **줄이 스스로
+   *  고치지 않는 이유**: 고치는 폼은 모달이고 모달은 화면이 엽니다 — 그 자리를 이 줄이
+   *  들면 목록을 그리는 곳마다 모달이 하나씩 생깁니다. 안 주면 예전 그대로입니다. */
+  onEdit?: (item: Interaction) => void;
   hideSubject?: boolean;
   /** 이 문의가 접수되기 **전에** 오간 줄인가. 그러면 빨간 「CS」 칩이 붙습니다
    *  (2026-09-07 운영자 지시). 이 티켓의 이야기가 아니라 그 전부터 돌던 대화라,
@@ -333,6 +366,17 @@ export function InteractionItem({
             쓰면 한국 시각보다 9시간 이른 값이 찍힙니다 — 같은 목록의 메일 줄은 변환해서
             쓰고 있어서, 1분 차이로 오간 두 건이 9시간 떨어져 보였습니다. */}
         <time className="t-xs t-subtle tnum">{kst(item.happened_at)}</time>
+        {/* **사람이 적은 줄에만 뜹니다.** 허브스팟에서 들여온 메일·채팅·폼은 일어난 일의
+            사본이라 고칠 것이 아니고, 그 판단은 서버가 내려 줍니다(`editable`).
+            `details` 안이라 누르면 접힘이 같이 토글됩니다 — 그래서 막습니다. */}
+        {onEdit && item.editable && item.id && (
+          <button type="button" className="btn btn--subtle btn--sm" title="기록 수정"
+                  aria-label="기록 수정"
+                  onClick={(event) => { event.preventDefault(); event.stopPropagation();
+                                        onEdit(item); }}>
+            <Icon name="edit" size={12} />
+          </button>
+        )}
       </div>
       {item.subject && !hideSubject && (
         <strong className="history-item__title">{item.subject}</strong>

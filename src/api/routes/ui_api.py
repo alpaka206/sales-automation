@@ -697,6 +697,9 @@ def ui_customer_detail(contact_id: int):
                 # (`agents/ticket_history`), 화면이 티켓별로 묶어 보여 줍니다. 손으로 적은
                 # 고객 단위 메모는 비어 있고, 그건 「티켓과 무관한 기록」이라는 뜻입니다.
                 "conversation_id": item.conversation_id,
+                "id": item.id,
+                # 고칠 수 있는 줄인가 — 사람이 적은 것만입니다 (2026-09-07 운영자 지시).
+                "editable": item.external_id is None,
                 "channel": item.channel,
                 "direction": item.direction,
                 "handler": item.handler,

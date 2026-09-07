@@ -71,9 +71,10 @@ def test_the_ticket_shows_the_plan_it_arrived_with(db):
 
     assert _rows(ticket)["plan"] == "Free", "티켓은 문의 시점 값"
     assert _rows(live)["plan"] == "business", "리드 히스토리는 지금 값"
-    # 화면이 어느 쪽인지 적을 수 있어야 합니다 — 두 화면의 값이 다를 때 무엇이 맞는지
-    # 화면에 없으면 하나를 버그로 읽게 됩니다.
-    assert ticket["frozen"] is True and live["frozen"] is False
+    # 「이 문의 시점 / 현재 값」을 적던 `frozen` 은 뺐습니다 (2026-09-07 운영자 지시).
+    # 0110 뒤에 들어온 문의는 전부 얼린 값을 들고 있어 그 글자가 모든 티켓에 같은 말을
+    # 하나씩 더 얹었고, 읽는 코드가 없어진 칸은 남기지 않습니다.
+    assert "frozen" not in ticket
 
 
 def test_a_ticket_with_no_snapshot_falls_back_to_today(db):
@@ -86,7 +87,6 @@ def test_a_ticket_with_no_snapshot_falls_back_to_today(db):
         ).json()
 
     assert _rows(payload)["plan"] == "business"
-    assert payload["frozen"] is False
 
 
 def test_editing_the_ticket_does_not_touch_the_live_record(db):

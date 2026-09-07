@@ -383,6 +383,12 @@ def _message_detail_context(
                 [
                     {
                         "id": it.id,
+                        # 고칠 수 있는 줄인가 — **사람이 적은 것만**입니다
+                        # (2026-09-07 운영자 지시). 나머지는 허브스팟에서 들여온
+                        # 일어난 일의 사본이라, 고치면 화면이 저쪽과 다른 이야기를
+                        # 합니다. 판단은 서버가 합니다 — 화면이 `external_id` 를
+                        # 보고 정하면 그 규칙이 두 곳에 생깁니다.
+                        "editable": it.external_id is None,
                         "channel": it.channel,
                         "direction": it.direction,
                         "handler": it.handler,

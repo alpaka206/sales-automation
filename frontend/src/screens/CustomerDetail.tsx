@@ -81,6 +81,9 @@ export function CustomerDetail() {
   });
   const refresh = () => queryClient.invalidateQueries();
   const [logging, setLogging] = useState(false);
+  // 고치는 중인 기록. **같은 모달, 같은 폼**입니다 — 적을 때와 고칠 때가 묻는 칸이 같아서,
+  // 갈라 두면 칸을 하나 더할 때 한쪽만 늘어납니다.
+  const [editing, setEditing] = useState<Interaction | null>(null);
 
   // Every write goes to the route the Jinja form posts to: the stage sync, the sheet
   // mirror and the contract validation all stay server-side, in one copy.
@@ -284,7 +287,7 @@ export function CustomerDetail() {
                     <div className="history-list">
                       {group.items.map((item, index) => (
                         <InteractionItem key={item.id ?? `${group.key}-${index}`} item={item}
-                                         hideSubject />
+                                         hideSubject onEdit={setEditing} />
                       ))}
                     </div>
                   </div>
@@ -428,19 +431,24 @@ export function CustomerDetail() {
       {/* 티켓 세부 내역·보드의 + 버튼과 **같은 모달, 같은 폼**입니다. 다른 것은 하나뿐:
           여기는 `conversation_id` 를 안 넘깁니다 — 이 화면에서 남기는 기록은 그 사람에게
           달린 것이지 한 문의에 달린 것이 아닙니다. */}
-      {logging && (
+      {(logging || editing) && (
         <Modal
-          title="히스토리 추가"
+          title={editing ? "히스토리 수정" : "히스토리 추가"}
           hideCancel
           wide
-          onClose={() => setLogging(false)}
+          onClose={() => { setLogging(false); setEditing(null); }}
         >
           <div style={{ marginTop: 16 }}>
+            {/* `key` 가 있어야 다른 줄을 이어서 열 때 칸이 새로 그려집니다 — 안 그러면
+                `defaultValue` 는 처음 한 번만 읽히고 앞 줄의 내용이 남습니다. */}
             <InteractionForm
-              onCancel={() => setLogging(false)}
+              key={editing?.id ?? "new"}
+              item={editing}
+              onCancel={() => { setLogging(false); setEditing(null); }}
               contactId={contact.id}
               onSaved={() => {
                 setLogging(false);
+                setEditing(null);
                 refresh();
               }}
             />

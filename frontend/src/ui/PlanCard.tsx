@@ -32,9 +32,6 @@ export type RecordRow = {
 export type HubSpotRecord = {
   /** 마지막으로 허브스팟에서 받아온 시각. 언제 것이냐가 곧 믿어도 되느냐입니다. */
   synced_at?: string | null;
-  /** 이 값이 티켓이 들고 있는 **문의 시점 플랜**인가. 고객 상세는 언제나 거짓이고, 티켓
-   *  이라도 이 칸이 생기기 전의 건은 얼려 둔 값이 없어 거짓입니다. */
-  frozen?: boolean;
   groups: {
     key: string;
     title: string;

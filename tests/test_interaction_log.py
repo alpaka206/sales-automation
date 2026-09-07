@@ -108,7 +108,9 @@ def test_the_form_asks_who_handled_it_and_which_way_it_went():
     )
     assert 'name="handler"' in form
     assert 'name="direction"' in form
-    assert 'defaultValue="note"' in form
+    # 고칠 때는 그 줄의 값으로 열리고, **새로 적을 때는 여전히 `note`** 입니다
+    # (2026-09-07, 같은 폼이 두 일을 합니다).
+    assert 'defaultValue={item?.direction || "note"}' in form
     assert '["outgoing", "발송"], ["inbound", "수신"], ["note", "주고받음"]' in form
 
 
