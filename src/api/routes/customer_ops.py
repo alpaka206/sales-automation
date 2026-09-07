@@ -632,7 +632,19 @@ def _pipeline_rows(
     return rows, totals
 
 
-def _set_conversation_stage(conversation_id: int, stage: str) -> tuple[str | None, int, int | None]:
+def _set_conversation_stage(
+    conversation_id: int, stage: str, *, retire_drafts: bool = True
+) -> tuple[str | None, int, int | None]:
+    """이 문의의 단계를 옮기고, 옮긴 값을 미러링할 재료를 돌려줍니다.
+
+    ``retire_drafts=False`` 는 **고객이 답장해서 옮기는 자리 하나**를 위한 것입니다
+    (`ticket_history`, 2026-09-07 운영자 지시). 초안을 지우는 규칙이 근거로 삼는 문장은
+    「단계가 넘어갔다는 것은 **답이 다른 경로로 나갔다**는 뜻」인데, 이 전환은 정반대입니다 —
+    우리가 답한 것이 아니라 **고객이 쓴 것**이라 지울 근거가 없습니다.
+
+    그리고 실제로 사고가 납니다: 운영자가 「메일 발송」으로 후속 초안을 열어 두고 쓰는
+    중에 그 고객의 답장이 10분 수집기에 들어오면, 방금 쓰던 초안이 **말없이 사라집니다.**
+    """
     if stage not in VALID_PIPELINE_STAGES:
         raise HTTPException(status_code=400, detail="지원하지 않는 파이프라인 단계입니다")
     with SessionLocal() as session:
@@ -643,7 +655,8 @@ def _set_conversation_stage(conversation_id: int, stage: str) -> tuple[str | Non
         if not contact:
             raise HTTPException(status_code=404, detail="고객을 찾을 수 없습니다")
         conversation.stage = stage
-        _retire_superseded_drafts(session, conversation.id, stage)
+        if retire_drafts:
+            _retire_superseded_drafts(session, conversation.id, stage)
         latest_id = session.scalar(
             select(Conversation.id)
             .where(Conversation.contact_id == contact.id)

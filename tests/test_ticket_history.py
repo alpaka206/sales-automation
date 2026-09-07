@@ -378,3 +378,59 @@ def test_the_old_crm_row_is_folded_into_the_thread_row():
         rows = session.query(CustomerInteraction).all()
         assert [r.external_id for r in rows] == ["hubspot:conv:d0945b6b"], "한 줄만 남습니다"
         assert rows[0].context == "견적 안내와 미팅 링크를 보냈습니다.", "요약은 옮겨 탑니다"
+
+
+# --------------------------------------------------------------------------- #
+# 고객이 답장하면 협의 중으로 (2026-09-07 운영자 지시)
+# --------------------------------------------------------------------------- #
+def _reply_row(direction: str, when):
+    return {"external_id": f"hubspot:conv:{direction}", "channel": "이메일",
+            "direction": direction, "subject": None, "summary": "…",
+            "handler": None, "happened_at": when}
+
+
+def test_a_new_customer_reply_moves_contacted_to_negotiating():
+    """운영자 지시: 「보내는 기준이 아니고 그 사람한테 답변이 오면 negotiating 으로 가는 것」.
+
+    이 사실을 아는 자리가 수집기뿐입니다 — 접수(폴러·웹훅)는 **New 티켓만** 보므로
+    Contacted 로 넘어간 티켓에 온 답장은 그 문을 아예 안 지납니다.
+    """
+    from datetime import datetime, timedelta, timezone
+
+    from src.agents.ticket_history import reply_advances_stage
+
+    seen = datetime(2026, 9, 5)
+    later = (seen + timedelta(hours=1)).replace(tzinfo=timezone.utc)
+    earlier = (seen - timedelta(days=30)).replace(tzinfo=timezone.utc)
+
+    assert reply_advances_stage("meeting_link_sent", seen, [_reply_row("inbound", later)])
+
+    # **첫 수집(도장 NULL)에서는 안 옮깁니다.** 수집기는 티켓을 끝없이 한 바퀴씩 도는데
+    # 첫 바퀴에는 그 티켓의 과거가 통째로 들어옵니다 — 기준이 없으면 몇 달 전 답장 하나로
+    # Contacted 에 서 있던 티켓 수백 건이 한 회차에 옮겨지고, 허브스팟과 영업팀 워크북까지
+    # 나갑니다. 잃는 것은 없습니다: 다음 바퀴부터 정상으로 판정됩니다.
+    assert not reply_advances_stage("meeting_link_sent", None, [_reply_row("inbound", later)])
+    # 마지막으로 본 때보다 오래된 것은 새 답장이 아닙니다 — 매 회차 다시 옮기게 됩니다.
+    assert not reply_advances_stage("meeting_link_sent", seen, [_reply_row("inbound", earlier)])
+    # 우리가 보낸 것은 이미 Contacted 를 만든 사건입니다.
+    assert not reply_advances_stage("meeting_link_sent", seen, [_reply_row("outgoing", later)])
+    # New 는 우리가 아직 답을 안 한 자리입니다 — 그 티켓에는 검토할 초안이 대기 중입니다.
+    assert not reply_advances_stage("new", seen, [_reply_row("inbound", later)])
+    # 이미 지나간 단계는 되돌리지 않습니다(발송 워커가 「앞으로만 간다」로 막은 그 사고).
+    for stage in ("negotiation", "won", "closed_lost", "closed"):
+        assert not reply_advances_stage(stage, seen, [_reply_row("inbound", later)])
+
+
+def test_the_reply_advance_never_deletes_a_draft():
+    """운영자가 「메일 발송」으로 열어 둔 후속 초안이 고객 답장 한 통에 사라지면 안 됩니다.
+
+    초안을 지우는 규칙의 근거는 「단계가 넘어갔다는 것은 **답이 다른 경로로 나갔다**는
+    뜻」인데, 이 전환은 정반대입니다 — 우리가 답한 것이 아니라 고객이 쓴 것이라 지울 근거가
+    없습니다. 그리고 실제로 사고가 납니다: 후속 초안은 Contacted 티켓에 서고, 그 티켓이
+    바로 이 전환의 출발점입니다.
+    """
+    import pathlib
+
+    source = pathlib.Path("src/agents/ticket_history.py").read_text(encoding="utf-8")
+    body = source[source.index("async def _advance_on_customer_reply"):]
+    assert "retire_drafts=False" in body

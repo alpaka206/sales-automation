@@ -419,8 +419,67 @@ def _stamp(conversation_id: int) -> None:
             session.commit()
 
 
+# 고객이 답장하면 이 단계에서만 협의 중으로 올라갑니다 (2026-09-07 운영자 지시).
+#
+# **Contacted 하나뿐입니다.** New 에 온 답장은 우리가 아직 답을 안 한 것이라 여전히 New 이고
+# (그 티켓에는 검토할 초안이 대기 중입니다), 협의 중·수주·종료는 이미 지나간 자리라
+# 되돌리면 안 됩니다 — 발송 워커가 「앞으로만 간다」로 같은 사고를 이미 한 번 막았습니다.
+_REPLY_ADVANCES_FROM = "meeting_link_sent"
+
+
+def _naive(value: datetime | None) -> datetime | None:
+    """tz 를 떼어 같은 자로 비교합니다. 열은 tz 없는 `DateTime` 이라 읽으면 naive 로 오고,
+    수집기가 만드는 시각은 aware 입니다 — 그냥 비교하면 TypeError 입니다."""
+    if value is None:
+        return None
+    return value.replace(tzinfo=None) if value.tzinfo else value
+
+
+def reply_advances_stage(
+    stage: str | None, seen_upto: datetime | None, rows: list[dict]
+) -> bool:
+    """이번에 가져온 것 중에 **새로 온 고객 답장**이 있어서 단계를 올려야 하는가.
+
+    순수 함수인 이유: 이 한 줄이 규칙 전부라, DB 없이 다섯 가지 경우를 그대로 읽고 검사할
+    수 있어야 합니다(`tests/test_ticket_history.py`).
+
+    - ``seen_upto`` 는 **`_store` 가 도장을 새로 찍기 전에** 읽은 `history_synced_at` —
+      「우리가 마지막으로 본 때」입니다. **NULL 이면 안 올립니다**: 수집기는 티켓을 끝없이
+      한 바퀴씩 도는데 첫 바퀴에는 그 티켓의 과거가 통째로 들어와서, 기준이 없으면 몇 달
+      전 답장 하나로 Contacted 에 서 있던 티켓 수백 건이 한 회차에 옮겨지고 그게
+      허브스팟과 영업팀 워크북까지 나갑니다. 잃는 것은 없습니다 — 다음 바퀴부터 정상으로
+      판정됩니다.
+    - ``stage`` 는 Contacted 하나뿐입니다. New 에 온 답장은 우리가 아직 답을 안 한 것이라
+      여전히 New 이고(그 티켓에는 검토할 초안이 대기 중입니다), 협의 중·수주·종료는 이미
+      지나간 자리라 되돌리면 안 됩니다.
+    - 방향은 **고객이 보낸 것**만. 우리가 보내는 것은 이미 Contacted 를 만든 사건입니다.
+    """
+    if not seen_upto or stage != _REPLY_ADVANCES_FROM:
+        return False
+    return any(
+        row["direction"] == "inbound"
+        and (_naive(row["happened_at"]) or seen_upto) > seen_upto
+        for row in rows
+    )
+
+
 async def sync_one_ticket(conversation_id: int) -> int:
-    """티켓 하나의 히스토리를 맞춥니다. 넣은 기록 수를 돌려줍니다."""
+    """티켓 하나의 히스토리를 맞춥니다. 넣은 기록 수를 돌려줍니다.
+
+    **고객이 답장했으면 단계를 올립니다** (2026-09-07 운영자 지시: 「그 사람한테 답변이
+    오면 negotiating 으로 가는 것」). 그 사실을 아는 자리가 여기뿐입니다 — 접수
+    (`inbound_poller` · 웹훅)는 **New 티켓만** 보므로 Contacted 로 넘어간 티켓에 온 답장은
+    그 문을 아예 안 지납니다.
+
+    **「새로 온 답장」의 기준은 `history_synced_at` 입니다** — 「우리가 마지막으로 본 때」.
+    그보다 나중에 도착한 고객 메시지만 셉니다.
+
+    그래서 **처음 수집하는 티켓(도장이 NULL)에서는 안 올립니다.** 수집기는 티켓을 끝없이 한
+    바퀴씩 도는데, 첫 바퀴에는 그 티켓의 **모든 과거 메시지**가 한꺼번에 들어옵니다 —
+    기준이 없으면 몇 달 전 답장 하나 때문에 Contacted 에 서 있던 티켓 수백 건이 한 회차에
+    협의 중으로 옮겨지고, 그게 허브스팟과 영업팀 워크북까지 나갑니다. 잃는 것은 없습니다:
+    그 티켓은 다음 바퀴부터 정상으로 판정됩니다.
+    """
     from ..integrations.hubspot import HubSpotClient
 
     with SessionLocal() as session:
@@ -429,6 +488,9 @@ async def sync_one_ticket(conversation_id: int) -> int:
             return 0
         ticket_id = (conversation.hubspot_ticket_id or "").strip()
         contact_id = conversation.contact_id
+        # **`_store` 가 도장을 새로 찍기 전에** 읽습니다 — 이 값이 「새 답장」의 기준입니다.
+        seen_upto = _naive(conversation.history_synced_at)
+        stage = conversation.stage
     if not ticket_id or not contact_id:
         # 티켓이나 연락처가 없으면 가져올 자리가 없습니다. 다시 고르지 않게 도장은 찍습니다.
         _stamp(conversation_id)
@@ -439,7 +501,38 @@ async def sync_one_ticket(conversation_id: int) -> int:
         rows = await collect_ticket_history(client, ticket_id)
     finally:
         await client.close()
-    return _store(conversation_id, contact_id, rows)
+    added = _store(conversation_id, contact_id, rows)
+
+    if reply_advances_stage(stage, seen_upto, rows):
+        await _advance_on_customer_reply(conversation_id, contact_id)
+    return added
+
+
+async def _advance_on_customer_reply(conversation_id: int, contact_id: int) -> None:
+    """Contacted → 협의 중. 허브스팟과 워크북까지 같이 갑니다.
+
+    콘솔 보드가 카드를 옮길 때와 **같은 두 함수**를 씁니다 — 단계를 옮기는 방법이 둘이면
+    하나는 프로필을 안 고치거나 시트를 안 건드리고, 그 차이는 화면에 안 보입니다.
+
+    **초안은 안 지웁니다**(`retire_drafts=False`). 그 규칙의 근거는 「답이 다른 경로로
+    나갔다」인데 여기는 정반대입니다 — 우리가 답한 것이 아니라 고객이 쓴 것이라, 지우면
+    운영자가 「메일 발송」으로 열어 두고 쓰던 후속 초안이 말없이 사라집니다.
+
+    실패해도 수집은 성공입니다. 기록은 이미 들어갔고, 단계는 다음 답장이나 사람이 다시
+    맞춥니다 — 여기서 터지면 그 티켓이 회차마다 같은 자리에서 죽습니다.
+    """
+    from ..api.routes.customer_ops import _set_conversation_stage, _sync_stage
+
+    try:
+        ticket_id, _contact, sheet_client_id = await asyncio.to_thread(
+            _set_conversation_stage, conversation_id, "negotiation", retire_drafts=False
+        )
+        await _sync_stage(ticket_id, "negotiation", contact_id, sheet_client_id)
+        logger.info(
+            "문의 %s: 고객 답장이 와서 협의 중으로 옮겼습니다.", conversation_id
+        )
+    except Exception:
+        logger.warning("문의 %s: 단계 이동 실패", conversation_id, exc_info=True)
 
 
 async def sync_pending_ticket_history(limit: int = TICKETS_PER_SWEEP) -> dict:
