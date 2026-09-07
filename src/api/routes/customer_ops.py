@@ -223,12 +223,10 @@ MANUAL_LOG_STAGES: tuple[str, ...] = tuple(_STAGE_ORDER[_STAGE_ORDER.index("meet
 # 「더보기」가 같은 수만큼씩 이어 붙입니다(`/api/ui/pipeline/{stage}/cards?offset=`).
 BOARD_CARDS_PER_STAGE = 15
 
-# Logging a 미팅 means the deal is live, and it used to move the thread to 협의 중 from
-# WHEREVER it was. That was harmless while the only way to log one was the customer page;
-# with a + button on every board card past 답변 발송 it would drag a Won card backwards on
-# the next call note. A meeting only ever advances a thread that has not started
-# negotiating yet.
-_MEETING_ADVANCES_FROM = {"new", "meeting_link_sent"}
+# `_MEETING_ADVANCES_FROM` 이 여기 있었습니다 — 「미팅 진행」 기록이 New·Contacted 를 협의
+# 중으로 올리던 규칙입니다. **2026-09-07 에 지웠습니다**: 협의 중으로 가는 기준은 고객이
+# 답장했는가이고(`ticket_history.reply_advances_stage`), 그 길이 생긴 이상 이쪽은 같은
+# 티켓을 다른 규칙으로 옮기는 두 번째 손입니다.
 
 # Days of customer silence (measured from our last outgoing mail) at which each rung
 # of the B2B follow-up ladder becomes due: reply -> +3d 1st reminder -> +7d 2nd reminder
@@ -1109,10 +1107,6 @@ async def interaction_add(
     if not summary.strip():
         return HTMLResponse("내용을 입력해 주세요.", status_code=400)
     back = _internal_path(redirect_to, f"/customers/{contact_id}#history")
-    # Which thread (if any) the 미팅 rule below should advance. Decided inside the
-    # session, applied after the commit — _set_* open their own sessions.
-    advance_conversation_id: int | None = None
-    advance_contact = False
     # Read inside the session, used after it closes — see _log_interaction_to_hubspot.
     hubspot_contact_id: str | None = None
     hubspot_ticket_id: str | None = None
@@ -1139,30 +1133,16 @@ async def interaction_add(
                 contract_seq=int(contract_seq) if contract_seq.strip().isdigit() else None,
             )
         )
-        if channel == "meeting":
-            if conversation is not None:
-                # A record filed against one ticket moves THAT ticket, never the
-                # contact's newest — the operator clicked a specific card. Unknown
-                # stages ("initial", pre-0040 keys) read as 새 문의, exactly as the
-                # board renders them.
-                current = (
-                    conversation.stage
-                    if conversation.stage in VALID_PIPELINE_STAGES
-                    else "new"
-                )
-                if current in _MEETING_ADVANCES_FROM:
-                    advance_conversation_id = conversation.id
-            else:
-                profile = session.get(CustomerProfile, contact_id) or CustomerProfile(
-                    contact_id=contact_id
-                )
-                # A profile built a line ago has no stage yet — the column default is
-                # applied on INSERT, so read it as the 새 문의 it is about to become.
-                if (profile.pipeline_stage or "new") in _MEETING_ADVANCES_FROM:
-                    profile.customer_state = "negotiation"
-                    profile.pipeline_stage = "negotiation"
-                    session.add(profile)
-                    advance_contact = True
+        # **「미팅 진행」을 적어도 단계는 안 움직입니다** (2026-09-07 운영자 지시).
+        #
+        # 여기 `if channel == "meeting"` 이 있었습니다 — New·Contacted 를 협의 중으로
+        # 올리던 규칙입니다. 협의 중으로 가는 기준은 **고객이 답장했는가**이지 우리가 무엇을
+        # 했는가가 아닙니다(운영자: 「보내는 기준이 아니고 그 사람한테 답변이 오면
+        # negotiating 으로 가는 것」). 그 판단은 이제 `ticket_history` 가 합니다.
+        #
+        # 길이 둘이면 같은 티켓을 두 규칙이 다르게 옮기고, **적기만 해도 옮겨진다는 것이 더
+        # 나쁩니다**: 기록은 지난 일을 적는 자리라 어제 한 미팅을 오늘 적으면 그 순간 단계가
+        # 움직이고, 그게 허브스팟과 영업팀 워크북까지 나갑니다.
         # **방금 적은 기록이 그 티켓 요약에도 한 줄로 섭니다** (2026-09-04 운영자 지시:
         # 「요약본은 소통이 추가되면 내용 반영해서 업데이트」).
         #
@@ -1188,14 +1168,6 @@ async def interaction_add(
         happened_at=_parse_dt(happened_at) or datetime.now(timezone.utc),
     )
 
-    if advance_conversation_id is not None:
-        ticket_id, _contact_id, sheet_client_id = _set_conversation_stage(
-            advance_conversation_id, "negotiation"
-        )
-        await _sync_stage(ticket_id, "negotiation", contact_id, sheet_client_id)
-    elif advance_contact:
-        ticket_id, sheet_client_id = _set_local_stage(contact_id, "negotiation")
-        await _sync_stage(ticket_id, "negotiation", contact_id, sheet_client_id)
     return RedirectResponse(back, status_code=303)
 
 

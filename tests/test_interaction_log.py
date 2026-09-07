@@ -567,7 +567,18 @@ def test_a_meeting_logged_on_a_won_ticket_leaves_it_where_it_is(log_db):
         assert session.get(Conversation, ids["won"]).stage == "won"
 
 
-def test_a_meeting_still_advances_a_thread_that_has_not_started_negotiating(log_db):
+def test_a_meeting_note_no_longer_advances_anything(log_db):
+    """**적는 것으로는 단계가 안 움직입니다** (2026-09-07 운영자 지시).
+
+    「미팅 진행」을 적으면 Contacted 가 협의 중으로 올라갔습니다. 협의 중으로 가는 기준은
+    **고객이 답장했는가**이고(`ticket_history.reply_advances_stage`), 우리가 무엇을
+    했는가가 아닙니다. 길이 둘이면 같은 티켓을 두 규칙이 다르게 옮기고, **적기만 해도
+    옮겨진다는 것이 더 나쁩니다**: 기록은 지난 일을 적는 자리라 어제 한 미팅을 오늘 적으면
+    그 순간 단계가 움직이고, 그게 허브스팟과 영업팀 워크북까지 나갑니다.
+
+    단계를 옮기는 길은 그대로 남아 있습니다 — 보드에서 카드를 끌거나, 고객 상세의 폼,
+    허브스팟에서 옮기면 동기화.
+    """
     factory, ids = log_db
     with factory() as session:
         session.get(Conversation, ids["negotiating"]).stage = "meeting_link_sent"
@@ -581,7 +592,7 @@ def test_a_meeting_still_advances_a_thread_that_has_not_started_negotiating(log_
             conversation_id=str(ids["negotiating"]),
         )
     with factory() as session:
-        assert session.get(Conversation, ids["negotiating"]).stage == "negotiation"
+        assert session.get(Conversation, ids["negotiating"]).stage == "meeting_link_sent"
 
 
 # ---------- 방향은 보낸 주소가 정한다 ----------

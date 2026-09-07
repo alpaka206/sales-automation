@@ -19,8 +19,9 @@ from ..db.session import SessionLocal
 
 logger = logging.getLogger(__name__)
 
-# 발송 뒤 단계를 올려도 되는 출발점. 보드의 미팅 링크 버튼이 쓰는 규칙과 같은 모양입니다
-# (`customer_ops._MEETING_ADVANCES_FROM`). `None`·`initial` 은 아직 아무도 안 만진 값입니다.
+# 발송 뒤 단계를 올려도 되는 출발점. `None`·`initial` 은 아직 아무도 안 만진 값입니다.
+# 협상·수주 건은 여기 없습니다 — **앞으로만 갑니다**(고객 답장이 협의 중으로 올린 티켓에
+# 한 통 더 보냈다고 Contacted 로 되돌아가면 안 됩니다).
 _ADVANCES_FROM = {None, "", "initial", "new", "meeting_link_sent"}
 
 POLL_INTERVAL_SECONDS = 60

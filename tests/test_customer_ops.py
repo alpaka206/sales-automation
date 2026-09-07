@@ -112,11 +112,20 @@ def test_recent_activity_is_the_latest_thing_that_happened(customer_db) -> None:
     assert rows[0]["last_activity"] == datetime(2026, 8, 4)
 
 
-def test_profile_and_meeting_move_pipeline(customer_db, customer_id) -> None:
+def test_the_profile_form_moves_the_pipeline_and_a_meeting_note_does_not(
+    customer_db, customer_id
+) -> None:
+    """**단계를 옮기는 것은 폼이고, 기록은 기록일 뿐입니다** (2026-09-07 운영자 지시).
+
+    「미팅 진행」을 적으면 New·Contacted 가 협의 중으로 올라갔습니다. 이제 안 올라갑니다 —
+    협의 중으로 가는 기준은 **고객이 답장했는가**이고(`ticket_history`), 우리가 무엇을
+    했는가가 아닙니다. 기록은 지난 일을 적는 자리라 어제 한 미팅을 오늘 적으면 그 순간
+    단계가 움직였고, 그게 허브스팟과 영업팀 워크북까지 나갔습니다.
+    """
     with TestClient(app) as client:
         response = client.post(
             f"/customers/{customer_id}/profile",
-            data={"customer_state": "negotiation", "pipeline_stage": "new"},
+            data={"customer_state": "negotiation", "pipeline_stage": "negotiation"},
             follow_redirects=False,
         )
         meeting = client.post(
@@ -128,7 +137,7 @@ def test_profile_and_meeting_move_pipeline(customer_db, customer_id) -> None:
     assert meeting.status_code == 303
     with customer_db() as session:
         profile = session.get(CustomerProfile, customer_id)
-        assert profile.pipeline_stage == "negotiation"
+        assert profile.pipeline_stage == "negotiation", "폼이 옮긴 값은 그대로"
         assert session.query(CustomerInteraction).count() == 1
 
 
