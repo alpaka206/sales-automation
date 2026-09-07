@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Icon } from "./Icon";
 import { postForm } from "../lib/api";
-import { kst } from "../lib/format";
+import { kst, stripQuotedReply } from "../lib/format";
 import { SubmitButton, useAction } from "./ActionButton";
 
 // The 소통·미팅 기록 form, defined ONCE — the port of partials/interaction_form.html.
@@ -302,7 +302,9 @@ export function InteractionItem({
   const dir = interactionMark(item.channel, item.direction);
   // 제목을 안 그리는 자리에서는 본문 없는 줄이 통째로 빈칸이 됩니다 — 그때는 제목이
   // 그 기록의 전부라 본문 자리에 씁니다.
-  const body = (item.summary || "").trim() || (hideSubject ? item.subject || "" : "");
+  // 인용된 지난 메일은 뺍니다 — 그 문의는 이 목록에 자기 줄로 이미 서 있습니다.
+  const body = stripQuotedReply((item.summary || "").trim())
+    || (hideSubject ? item.subject || "" : "");
   // 미리보기는 `context` 가 있으면 그것입니다. 가져온 메일에서는 한 줄 요약이고,
   // 사람이 적은 기록에서는 「맥락·다음 액션」이라 어느 쪽이든 한 줄로 읽힙니다.
   // 없으면 본문 앞머리 — 인사말로 시작하는 메일에서는 이게 아무것도 안 알려 줍니다.

@@ -2,7 +2,7 @@ import { useLayoutEffect, useState, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { getJSON, postForm } from "../lib/api";
-import { kst } from "../lib/format";
+import { kst, stripQuotedReply } from "../lib/format";
 import { Icon } from "../ui/Icon";
 import { directionMark, interactionMark } from "../ui/InteractionForm";
 import { Modal } from "../ui/Modal";
@@ -1381,7 +1381,11 @@ function MessageRow({ bubble, isFirstReply = false }: {
   // `body_ko` 는 **번역해서 보여 주는 고객 문의**의 자리입니다(`needs_ko`). 우리 회신에도
   // 같은 칸이 차는데(번역 전 한국어 초안), 거기서 그 값을 쓰면 이 줄이 고객에게 실제로 나간
   // 글 대신 그 전 판본을 보여 줍니다.
-  const body = ((bubble.needs_ko ? bubble.body_ko : "") || bubble.body || "").trim() || title;
+  // 인용된 지난 메일은 뺍니다 — 그 문의는 이 목록에 자기 줄로 이미 서 있고, 답장이
+  // 쌓일수록 같은 글이 줄마다 반복됩니다 (2026-09-07 운영자 지적).
+  const body = stripQuotedReply(
+    ((bubble.needs_ko ? bubble.body_ko : "") || bubble.body || "").trim(),
+  ) || title;
   const preview = (bubble.summary_line || body).replace(/\s+/g, " ");
   return (
     <article className={`history-item history-item--${dir.tone}`}>
