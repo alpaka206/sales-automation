@@ -18,6 +18,29 @@ PERSO Inbound is a FastAPI workflow for inbound inquiry handling and customer op
     test_hubspot_conversations.py::test_the_recipient_is_an_address_not_an_email_actor`
     가 고정한다(기존 발송 테스트는 `senderActorId`·`channelAccountId`·`deliveryIdentifiers`
     만 봐서 `actorId` 가 있든 없든 통과했다 — 그게 뚫린 구멍이었다).
+  - **참조(CC)는 얹기만 한다 — 받는 주소도 보내는 계정도 안 바뀐다** (2026-09-07 지시,
+    이관 0112). `messages.cc_addresses` 가 `channel_account_id` 와 **같은 길**을 다닌다
+    (고르개 → 라우트 → 열 → 발송). **NULL 이 「참조 없음」**이고 그때 payload 는 이 칸이
+    생기기 전과 **한 글자도 다르지 않다** —
+    `tests/test_reply_cc.py::test_no_cc_sends_exactly_what_it_always_sent` 가 그 한 줄을
+    고정한다. 「이미 나가고 있는 것은 안 건드린다」가 그 뜻이다.
+    - **된다는 근거는 실측이다.** 스레드 600개·메시지 666건을 읽어 `recipientField` 를
+      셌다: `TO` 546 · `BCC` 6 · `CC` 5, CC 가 붙은 **OUTGOING** 4건(한 건은 CC 가 넷).
+      모양은 `TO` 와 같다 — `HS_EMAIL_ADDRESS` + 주소, **`actorId` 없음**. 위 규칙을 그대로
+      따랐다: 기준은 문서가 아니라 그 포털에서 실제로 나간 메시지다.
+    - **철자를 다듬는 곳은 `senders.parse_cc_addresses` 한 곳**이다. 라우트가 저장할 때와
+      발송이 payload 를 지을 때가 같은 함수를 지난다 — 둘로 나누면 화면에 적힌 것과 실제로
+      나가는 것이 갈리고, 그 어긋남은 **메일이 나간 뒤에** 알게 된다. 상한 `MAX_CC` 가
+      있는 이유도 같다: 붙여넣기 사고 하나가 고객 메일에 주소 수백 개를 노출하고 되돌릴 수
+      없다. **받는 사람과 겹치는지는 발송 시점에** 본다(저장 때 걸러 두면 그 사이에 받는
+      사람이 바뀐 초안에서 틀린다).
+    - **후보 목록은 서버가 만든다**(`ticket_history.list_cc_candidates`,
+      `GET /api/ui/messages/{id}/cc-candidates`). 그 티켓의 스레드에서 **보낸 사람과 받는
+      사람을 둘 다** 세는데, 보낸 사람만 세면 지금까지 조용히 참조로만 있던 사람이
+      목록에서 빠진다 — 그 사람이야말로 다음에도 참조에 있어야 할 사람이다. 읽기만 하므로
+      그 라우트로는 메일이 안 나가고, 못 가져오면 고르개가 안 뜰 뿐 손으로 적는 길은
+      그대로다. **칸이 글자 입력인 것도 그래서다**: 이 대화에 처음 들어오는 담당자를 넣어야
+      할 때가 반드시 온다.
   - **HubSpot 400 의 이유는 `message` 가 아니라 `errors[]` 에 있다.** `message` 는 원인이
     무엇이든 언제나 `"Multiple errors validating request."` 한 문장이라, 그것만 로그에 남기면
     「무언가 틀렸다」까지만 말하고 무엇이 틀렸는지는 어디에도 안 남는다. `_lookup_error` 가

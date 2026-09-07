@@ -175,6 +175,11 @@ class Message(Base):
     # payload 가 받는 것도 id 입니다. `from_address` 에 넣지 않는 이유는 그 칸이 목록에
     # 주소로 그려지기 때문입니다 — 거기 번호가 들어가면 메일 주소 자리에 숫자가 뜹니다.
     channel_account_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    # **참조(CC)** — 운영자가 발송 시점에 고르는 주소들입니다(이관 0112). 쉼표로 이은 한
+    # 문자열이고 **NULL 이 「참조 없음」**이라, 손대지 않은 초안은 예전과 같은 payload 로
+    # 나갑니다. 받는 주소(`to_address`)와 보내는 계정(`channel_account_id`)은 이 칸이
+    # 있든 없든 그대로입니다 — 얹기만 하지 바꾸지 않습니다.
+    cc_addresses: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     score_snapshot: Mapped[int | None] = mapped_column(Integer, nullable=True)
     prompt_variant: Mapped[str | None] = mapped_column(String, nullable=True)
     draft_provider: Mapped[str | None] = mapped_column(String, nullable=True)

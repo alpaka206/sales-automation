@@ -72,6 +72,21 @@ def _clean_channel_account_id(value: str | None) -> str | None:
     return v if v.isdigit() else None
 
 
+def _clean_cc_addresses(value: str | None) -> str | None:
+    """운영자가 적은 참조 주소들, 없으면 None(= 참조 없음, 예전과 같은 발송).
+
+    **철자 규칙은 여기 있지 않습니다** — `senders.parse_cc_addresses` 한 곳이고 발송도
+    같은 함수를 지납니다. 규칙이 둘이면 화면에 적힌 것과 실제로 나가는 것이 갈리고, 그
+    어긋남은 메일이 나간 뒤에 알게 됩니다.
+
+    **받는 사람과 겹치는지는 여기서 안 봅니다.** 그 판단은 발송 시점의 `to_address` 로
+    해야 맞습니다 — 여기서 걸러 두면 그 사이에 받는 사람이 바뀐 초안에서 틀립니다.
+    """
+    from ...integrations.senders import parse_cc_addresses
+
+    return ", ".join(parse_cc_addresses(value)) or None
+
+
 def _clean_signature_key(value: str | None) -> str | None:
     """The posted signature choice, or None for 서명 없음.
 
@@ -410,6 +425,9 @@ def _message_detail_context(
                 # 고른 발신 주소(HubSpot 채널 계정 id). 빈 값이면 「고르지 않음」이고,
                 # 그때는 스레드가 정합니다 — 화면의 고르개가 그 뜻을 적습니다.
                 "channel_account_id": msg.channel_account_id or "",
+                # 참조(CC). 빈 문자열이면 「참조 없음」이고, 그때 발송 payload 는
+                # 예전과 한 글자도 다르지 않습니다 (이관 0112).
+                "cc_addresses": msg.cc_addresses or "",
                 "to_address": msg.to_address or "",
                 "from_address": msg.from_address or "",
                 "score_snapshot": msg.score_snapshot,
@@ -752,6 +770,7 @@ async def message_translate(
     subject: str = Form(""),
     signature_key: str = Form(""),
     channel_account_id: str = Form(""),
+    cc_addresses: str = Form(""),
 ):
     """Put the draft into the inquiry's language when it is not already there.
 
@@ -787,6 +806,7 @@ async def message_translate(
         msg.signature_key = _clean_signature_key(signature_key)
         # 고른 발신 주소도 같이 붙듭니다 — 안 그러면 번역하기 한 번에 조용히 사라집니다.
         msg.channel_account_id = _clean_channel_account_id(channel_account_id)
+        msg.cc_addresses = _clean_cc_addresses(cc_addresses)
 
         # Decide from the BODY's actual language, not the (possibly stale) msg.language
         # flag — so re-editing the draft back to Korean and pressing 번역하기 again
@@ -851,6 +871,7 @@ async def message_send(
     subject: str = Form(""),
     signature_key: str = Form(""),
     channel_account_id: str = Form(""),
+    cc_addresses: str = Form(""),
 ):
     """Approve (and optionally edit) a message, then send it immediately.
 
@@ -878,6 +899,7 @@ async def message_send(
             edited_subject=clean_subject,
             signature_key=_clean_signature_key(signature_key),
             channel_account_id=_clean_channel_account_id(channel_account_id),
+            cc_addresses=_clean_cc_addresses(cc_addresses),
         )
     except ApprovalError as exc:
         return HTMLResponse(
@@ -962,6 +984,7 @@ async def message_edit(
     subject: str = Form(""),
     signature_key: str = Form(""),
     channel_account_id: str = Form(""),
+    cc_addresses: str = Form(""),
 ):
     """Save edits to a pending message without sending (body, subject, signature, sender)."""
     if len(body.encode("utf-8")) > _MAX_EDIT_BODY_BYTES:
@@ -992,6 +1015,7 @@ async def message_edit(
             msg.subject = subject.strip()
         msg.signature_key = _clean_signature_key(signature_key)
         msg.channel_account_id = _clean_channel_account_id(channel_account_id)
+        msg.cc_addresses = _clean_cc_addresses(cc_addresses)
         session.commit()
     return HTMLResponse('<div class="text-blue-600 text-sm font-medium">저장 완료</div>')
 

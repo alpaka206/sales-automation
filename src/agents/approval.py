@@ -83,6 +83,7 @@ def approve(
     edited_subject: str | None = None,
     signature_key: str | None | object = _UNSET,
     channel_account_id: str | None | object = _UNSET,
+    cc_addresses: str | None | object = _UNSET,
 ) -> Message:
     """Atomically freeze the operator-reviewed message and approve it.
 
@@ -91,6 +92,9 @@ def approve(
 
     ``channel_account_id`` 도 같은 규칙입니다(이관 0105) — 운영자가 고른 **발신 주소**이고,
     None 은 「고르지 않음」이라 스레드가 정하는 예전 동작입니다.
+
+    ``cc_addresses`` 도 같은 규칙입니다(이관 0112) — None 은 「참조 없음」이고, 그때
+    발송 payload 는 이 칸이 생기기 전과 한 글자도 다르지 않습니다.
     """
     session = SessionLocal()
     try:
@@ -132,6 +136,8 @@ def approve(
             values["signature_key"] = signature_key
         if channel_account_id is not _UNSET:
             values["channel_account_id"] = channel_account_id
+        if cc_addresses is not _UNSET:
+            values["cc_addresses"] = cc_addresses
 
         result = session.execute(
             update(Message)

@@ -114,6 +114,52 @@ def enforce_first_reply_no_price(message: Message) -> None:
 
 
 
+# 한 회신에 걸 수 있는 참조 수. 자동으로 채워지는 값이 아니라 사람이 고르는 값이라 상한이
+# 넉넉해도 되지만, 상한이 아예 없으면 붙여넣기 사고 하나가 고객 메일에 주소 수백 개를
+# 노출합니다 — 그리고 나간 뒤에는 못 되돌립니다.
+MAX_CC = 10
+
+
+def parse_cc_addresses(value: str | None, *, exclude: str = "") -> list[str]:
+    """참조 주소들. **철자를 다듬는 곳은 여기 한 곳입니다** (이관 0112).
+
+    라우트가 저장할 때와 발송이 payload 를 지을 때가 같은 함수를 지납니다. 둘로 나누면
+    화면에 적힌 것과 실제로 나가는 것이 갈리고, 그 어긋남은 메일이 나간 뒤에 알게 됩니다.
+
+    `getaddresses` 로 읽으므로 `이름 <a@b.com>` 도 받고, **쉼표·세미콜론·줄바꿈**을 다
+    구분자로 봅니다 — 운영자가 메일 클라이언트나 시트에서 그대로 복사해 붙일 수 있어야
+    합니다(아웃룩은 세미콜론, 시트는 줄바꿈으로 줍니다).
+
+    거르는 것 넷:
+
+    - `@` 가 없는 것. 주소가 아닙니다.
+    - **CR/LF 가 든 것.** 줄바꿈은 위에서 이미 구분자로 갈라지므로 여기까지 오지
+      않습니다. 그래도 남겨 둡니다 — 이 값은 결국 메일 헤더가 되고(우리는 JSON 을 주고
+      허브스팟이 헤더를 짓습니다), 나중에 누가 구분자 규칙을 고쳐도 그 사실은 안 바뀝니다.
+    - **받는 사람과 같은 주소**(`exclude`). 같은 사람이 To 와 Cc 에 같이 서면 메일이
+      두 통 가는 것처럼 보입니다.
+    - 중복. 대소문자는 무시하고 **처음 적힌 철자를 남깁니다** — 로컬 파트는 원칙적으로
+      대소문자를 가리므로 우리가 눕혀 쓸 값이 아닙니다.
+    """
+    from email.utils import getaddresses
+
+    skip = {exclude.strip().lower()} if exclude.strip() else set()
+    out: list[str] = []
+    separated = (value or "").replace(";", ",").replace("\r", ",").replace("\n", ",")
+    for _name, address in getaddresses([separated]):
+        clean = address.strip()
+        key = clean.lower()
+        if "@" not in clean or "\r" in clean or "\n" in clean or len(clean) > 254:
+            continue
+        if key in skip:
+            continue
+        skip.add(key)
+        out.append(clean)
+        if len(out) >= MAX_CC:
+            break
+    return out
+
+
 async def send(message: Message) -> None:
     """Reply on the ticket's existing HubSpot Conversations email thread."""
     from ...common.safe_mode import email_delivery_enabled
@@ -171,6 +217,11 @@ async def send(message: Message) -> None:
         send = partial(
             client.send_conversation_message,
             recipient_email=recipients[0],
+            # **받는 사람은 그대로입니다** — 참조는 얹기만 합니다(이관 0112). 비어 있으면
+            # payload 가 예전과 한 글자도 다르지 않습니다.
+            cc=parse_cc_addresses(
+                getattr(message, "cc_addresses", None), exclude=recipients[0]
+            ),
             subject=message.subject or "",
             text=message.body or "",
             rich_text=rich_text,

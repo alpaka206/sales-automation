@@ -71,6 +71,8 @@ type Detail = {
     language: string | null; target_language: string | null; signature_key: string;
     /** 운영자가 고른 발신 계정 id. 빈 문자열이면 「안 고름」 = 스레드가 정합니다. */
     channel_account_id: string;
+    /** 참조(CC), 쉼표로 이은 주소들. 빈 문자열이면 참조 없음입니다. */
+    cc_addresses: string;
     to_address: string; score_snapshot: number | null; created_at: string;
     sent_at: string | null; scheduled_at: string | null; category: string | null;
   } | null;
@@ -154,6 +156,18 @@ export function MessageDetail() {
     staleTime: 5 * 60_000,
   });
 
+  /** 참조 후보 — **이 티켓의 대화에 이미 있던 사람들**입니다 (0112). 서버가 허브스팟
+   *  스레드를 읽어 만들고(보낸 사람 + 받는 사람), 받는 사람 본인과 허브스팟 릴레이 주소는
+   *  빼고 옵니다. 읽기 전용 라우트라 이걸 여는 것만으로 메일이 나갈 길은 없습니다.
+   *  못 가져와도 200 에 빈 목록입니다 — 그때는 손으로 적습니다. */
+  const { data: ccOptions } = useQuery({
+    queryKey: ["cc-candidates", msgId],
+    queryFn: () => getJSON<{ candidates: { address: string; name: string; ours: boolean }[];
+                             error: string | null }>(`/api/ui/messages/${msgId}/cc-candidates`),
+    enabled: !!msgId,
+    staleTime: 5 * 60_000,
+  });
+
   const contactId = data?.contact?.id;
   const ticketId = data?.ticket?.id;
   // **이 티켓이 들고 있는 값을 달라고 합니다** (0110). 같은 훅이 고객 상세에서는 지금 값을
@@ -174,6 +188,9 @@ export function MessageDetail() {
   // 어느 주소에서 나갈까. 빈 문자열은 「고르지 않음」이고, 그때는 그 스레드에 이미 있던
   // 계정이 정합니다 — 예전 동작 그대로입니다.
   const [sender, setSender] = useState("");
+  // 참조(CC). 빈 문자열이 「참조 없음」이고, 그때 발송은 이 칸이 생기기 전과 똑같습니다
+  // — 받는 주소도 보내는 주소도 안 건드리고 얹기만 합니다.
+  const [cc, setCc] = useState("");
   const [draftLanguage, setDraftLanguage] = useState("");
   // 번역 전의 한국어 초안. 번역은 되돌릴 수 없는 한 번의 누름이라, 무엇을 승인했는지
   // 다시 읽을 자리가 있어야 합니다.
@@ -233,6 +250,7 @@ export function MessageDetail() {
     setBody(data.msg.body);
     setSignature(data.msg.signature_key);
     setSender(data.msg.channel_account_id);
+    setCc(data.msg.cc_addresses);
     setDraftLanguage(data.msg.language || "");
     setKoreanDraft(data.msg.body_ko);
   }
@@ -410,7 +428,7 @@ export function MessageDetail() {
     setNote("");
     try {
       await postForm(`/messages/${msg.id}/${action}`,
-                     { subject, body, signature_key: signature, channel_account_id: sender, ...extra });
+                     { subject, body, signature_key: signature, channel_account_id: sender, cc_addresses: cc, ...extra });
       setNote("완료되었습니다.");
       // 허브스팟 패널은 빼고 무효화합니다 — 우리가 저장한다고 저쪽 값이 바뀌지 않는데,
       // 같이 걸면 콘솔의 모든 저장이 열려 있는 티켓 탭마다 외부 왕복을 한 번씩 냅니다.
@@ -429,7 +447,7 @@ export function MessageDetail() {
       method: "POST",
       credentials: "same-origin",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({ body, subject, signature_key: signature, channel_account_id: sender }),
+      body: new URLSearchParams({ body, subject, signature_key: signature, channel_account_id: sender, cc_addresses: cc }),
     });
     const result = await response.json();
     if (result.error) return setNote(result.error);
@@ -765,6 +783,50 @@ export function MessageDetail() {
                           ))}
                         </select>
                       </>
+                    )}
+
+                    {/* **참조(CC)** — 받는 주소도 보내는 주소도 안 건드리고 얹기만 합니다
+                        (2026-09-07 운영자 지시, 이관 0112). 비워 두면 이 칸이 생기기 전과
+                        똑같이 나갑니다.
+
+                        칸이 **글자 입력**인 이유: 목록에 없는 사람을 넣어야 할 때가 반드시
+                        옵니다(이 대화에 처음 들어오는 담당자). 아래 후보는 그 칸을 **채워
+                        주는 것**이지 대신하는 것이 아닙니다. 철자를 다듬는 곳은 서버
+                        한 곳이라(`parse_cc_addresses`) 붙여넣기도 그대로 받습니다. */}
+                    <label className="field-label" htmlFor="msg-cc" style={{ marginTop: 12 }}>
+                      참조 (CC)
+                    </label>
+                    <input className="input" id="msg-cc" value={cc}
+                           onChange={(e) => setCc(e.target.value)}
+                           placeholder="비워 두면 참조 없이 나갑니다. 여러 명은 쉼표로." />
+                    {(ccOptions?.candidates?.length ?? 0) > 0 && (
+                      <div className="chip-row" style={{ marginTop: 6 }}>
+                        {ccOptions?.candidates?.map((person) => {
+                          const already = cc.toLowerCase().includes(person.address.toLowerCase());
+                          return (
+                            <button key={person.address} type="button"
+                                    className={`chip chip--xs${already ? " is-active" : ""}`}
+                                    aria-pressed={already}
+                                    title={person.address}
+                                    onClick={() => setCc((current) => {
+                                      const kept = current
+                                        .split(/[,;]/).map((one) => one.trim()).filter(Boolean)
+                                        .filter((one) =>
+                                          one.toLowerCase() !== person.address.toLowerCase());
+                                      // 누르면 붙고 다시 누르면 빠집니다 — 붙이기만 되면
+                                      // 잘못 누른 주소를 글자로 지워야 합니다.
+                                      return (already ? kept : [...kept, person.address]).join(", ");
+                                    })}>
+                              {person.name || person.address}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                    {(ccOptions?.candidates?.length ?? 0) === 0 && ccOptions?.error && (
+                      <div className="t-xs t-subtle" style={{ marginTop: 6 }}>
+                        참조 후보를 가져오지 못했습니다 — 주소를 직접 적어 주세요.
+                      </div>
                     )}
 
                     <label className="field-label" htmlFor="msg-signature" style={{ marginTop: 12 }}>서명</label>

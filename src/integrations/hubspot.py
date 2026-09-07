@@ -8,6 +8,7 @@ import logging
 import random
 import re
 import time
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
@@ -982,6 +983,7 @@ class HubSpotClient:
         subject: str,
         text: str,
         rich_text: str,
+        cc: Sequence[str] = (),
     ) -> str:
         """Send one reply to an existing thread and return the HubSpot message ID.
 
@@ -1019,7 +1021,25 @@ class HubSpotClient:
                     "deliveryIdentifiers": [
                         {"type": "HS_EMAIL_ADDRESS", "value": recipient}
                     ],
-                }
+                },
+                # **참조는 같은 모양으로 얹습니다** (이관 0112). 비어 있으면 이 목록에
+                # 아무것도 안 붙어 payload 가 예전과 한 글자도 다르지 않습니다 — 이미
+                # 나가고 있는 발송을 건드리지 않는다는 것이 그 뜻입니다.
+                #
+                # **문서가 아니라 이 포털에서 실제로 나간 메시지로 확인했습니다**
+                # (2026-09-07, 스레드 600개·메시지 666건 읽기 전용 조사): `recipientField`
+                # 가 `TO` 546 · `BCC` 6 · `CC` 5 이고, CC 가 붙은 OUTGOING 이 4건, 그중
+                # 하나는 CC 가 넷입니다. 모양은 `TO` 와 같습니다 — `HS_EMAIL_ADDRESS` +
+                # 주소, `actorId` 없음. actorId 때 배운 규칙을 그대로 따랐습니다.
+                *(
+                    {
+                        "recipientField": "CC",
+                        "deliveryIdentifiers": [
+                            {"type": "HS_EMAIL_ADDRESS", "value": address}
+                        ],
+                    }
+                    for address in cc
+                ),
             ],
         }
         http = await self._http()

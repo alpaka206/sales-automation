@@ -1,0 +1,147 @@
+"""회신에 참조(CC)를 건다 — 나가던 것은 하나도 안 건드리고 (2026-09-07 운영자 지시).
+
+**됩니까**: 됩니다. 문서가 아니라 이 포털에서 실제로 나간 메시지로 확인했습니다
+(스레드 600개·메시지 666건 읽기 전용 조사): `recipientField` 가 `TO` 546 · `BCC` 6 ·
+`CC` 5, CC 가 붙은 OUTGOING 이 4건이고 그중 하나는 CC 가 넷입니다. 모양은 우리가 이미
+보내는 `TO` 와 같습니다 — `HS_EMAIL_ADDRESS` + 주소, `actorId` 없음. actorId 때 배운
+규칙(「기준은 그 포털에서 실제로 나간 메시지다」)을 그대로 따랐습니다.
+
+이 파일이 지키는 것은 둘입니다: 참조가 **붙는다**, 그리고 참조가 없으면 payload 가
+**예전과 한 글자도 다르지 않다**.
+"""
+
+from __future__ import annotations
+
+import json
+
+import httpx
+import pytest
+import respx
+
+from src.common.config import settings
+from src.integrations.hubspot import BASE_URL, ConversationReplyContext, HubSpotClient
+from src.integrations.senders import MAX_CC, parse_cc_addresses
+
+
+@pytest.fixture()
+def client() -> HubSpotClient:
+    return HubSpotClient(token="test-token")
+
+
+def _send_route():
+    respx.get(f"{BASE_URL}/conversations/v3/conversations/actors/A-1").mock(
+        return_value=httpx.Response(200, json={"id": "A-1", "type": "AGENT"})
+    )
+    return respx.post(
+        f"{BASE_URL}/conversations/v3/conversations/threads/t-1/messages"
+    ).mock(return_value=httpx.Response(201, json={"id": "m-1"}))
+
+
+async def _send(client, **kwargs):
+    return await client.send_conversation_message(
+        ConversationReplyContext("t-1", "1002", "acct-1"),
+        recipient_email="buyer@example.com",
+        subject="Re: Inquiry",
+        text="Hello",
+        rich_text="<p>Hello</p>",
+        **kwargs,
+    )
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_no_cc_sends_exactly_what_it_always_sent(client, monkeypatch) -> None:
+    """**이것이 「기존에 보내던 거는 건들지 말고」입니다.**
+
+    참조가 비었을 때 payload 가 이 칸이 생기기 전과 다르면, 이미 나가고 있는 발송을
+    건드린 것입니다 — 그리고 그 차이는 고객이 메일을 받은 뒤에야 드러납니다.
+    """
+    monkeypatch.setattr(settings, "HUBSPOT_SENDER_ACTOR_ID", "A-1")
+    route = _send_route()
+    await _send(client)
+    await client.close()
+
+    payload = json.loads(route.calls[0].request.content)
+    assert payload["recipients"] == [
+        {
+            "recipientField": "TO",
+            "deliveryIdentifiers": [
+                {"type": "HS_EMAIL_ADDRESS", "value": "buyer@example.com"}
+            ],
+        }
+    ]
+    # 보내는 계정도 그대로입니다. 참조는 **얹기만** 합니다.
+    assert payload["channelAccountId"] == "acct-1"
+    assert payload["senderActorId"] == "A-1"
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_cc_rides_along_in_the_shape_the_portal_uses(client, monkeypatch) -> None:
+    """받는 사람은 첫 줄에 그대로 있고, 참조가 뒤에 붙는다 — 여러 명도.
+
+    `actorId` 를 안 넣는 것이 핵심입니다. 문서 예시에는 있는데 **발송 엔드포인트가
+    거부합니다**(`Actor type EMAIL is not supported for receiving`). 읽기 조회로는 절대 못
+    잡는 자리라, 이 검사가 그 자리를 지킵니다.
+    """
+    monkeypatch.setattr(settings, "HUBSPOT_SENDER_ACTOR_ID", "A-1")
+    route = _send_route()
+    await _send(client, cc=["boss@estsoft.com", "peer@acme.com"])
+    await client.close()
+
+    recipients = json.loads(route.calls[0].request.content)["recipients"]
+    assert [r["recipientField"] for r in recipients] == ["TO", "CC", "CC"]
+    assert recipients[0]["deliveryIdentifiers"][0]["value"] == "buyer@example.com"
+    assert [r["deliveryIdentifiers"][0]["value"] for r in recipients[1:]] == [
+        "boss@estsoft.com",
+        "peer@acme.com",
+    ]
+    assert not any("actorId" in r for r in recipients)
+
+
+@pytest.mark.parametrize(
+    "raw,expected",
+    [
+        ("a@x.com, b@y.com", ["a@x.com", "b@y.com"]),
+        # 메일 클라이언트에서 그대로 복사해 붙일 수 있어야 합니다.
+        ("Kim <a@x.com>; b@y.com\nc@z.com", ["a@x.com", "b@y.com", "c@z.com"]),
+        # 대소문자만 다른 중복은 하나로, 처음 적힌 철자를 남깁니다 — 로컬 파트는 원칙적으로
+        # 대소문자를 가리므로 우리가 눕혀 쓸 값이 아닙니다.
+        ("A@x.com, a@X.com", ["A@x.com"]),
+        ("not an address", []),
+        ("", []),
+        (None, []),
+    ],
+)
+def test_the_spelling_rule_lives_in_one_place(raw, expected) -> None:
+    assert parse_cc_addresses(raw) == expected
+
+
+def test_no_address_can_carry_a_line_break() -> None:
+    """줄바꿈은 **구분자**입니다 — 시트에서 한 열을 복사하면 그렇게 옵니다.
+
+    그래서 한 주소 안에 CR/LF 가 남을 수 없고, 그 사실을 여기서 못 박습니다: 이 값은
+    결국 메일 헤더가 되고(우리는 JSON 을 주고 허브스팟이 헤더를 짓습니다), 나중에 누가
+    구분자 규칙을 고쳐도 그건 안 바뀝니다.
+    """
+    got = parse_cc_addresses("a@x.com\r\nb@y.com")
+    assert got == ["a@x.com", "b@y.com"]
+    assert all("\r" not in one and "\n" not in one for one in got)
+
+
+def test_the_recipient_is_never_also_a_cc() -> None:
+    """같은 사람이 To 와 Cc 에 같이 서면 메일이 두 통 가는 것처럼 보입니다.
+
+    거르는 시점이 **발송**인 것이 중요합니다: 저장할 때 걸러 두면 그 사이에 받는 사람이
+    바뀐 초안에서 틀립니다.
+    """
+    assert parse_cc_addresses(
+        "Buyer@example.com, boss@estsoft.com", exclude="buyer@example.com"
+    ) == ["boss@estsoft.com"]
+
+
+def test_a_paste_accident_cannot_expose_a_hundred_addresses() -> None:
+    """상한이 없으면 붙여넣기 사고 하나가 고객 메일에 주소 수백 개를 노출하고, 나간
+    뒤에는 못 되돌립니다."""
+    many = ", ".join(f"p{i}@x.com" for i in range(MAX_CC + 20))
+    assert len(parse_cc_addresses(many)) == MAX_CC

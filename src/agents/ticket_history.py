@@ -194,12 +194,13 @@ async def _full_text(client, thread_id: str, message: dict) -> str:
     return str(full.get("text") or full.get("richText") or text).strip() or text
 
 
-async def collect_ticket_history(client, ticket_id: str) -> list[dict]:
-    """그 티켓의 모든 스레드 × 모든 메시지를, 접점 기록 한 줄씩으로.
+async def _live_thread_ids(client, ticket_id: str) -> list[str]:
+    """그 티켓의 스레드 id 들 — 보관·스팸은 뺍니다. 읽기만 합니다.
 
-    읽기만 합니다 — 이 함수로는 아무것도 나가지 않습니다.
+    페이징은 **커서로만 끝을 압니다**: `limit=2` 요청이 결과 1건과 `paging.next.after` 를
+    같이 주는 것을 실측했습니다. 그래서 결과 수로 끊지 않고 커서가 없어질 때까지 돕니다.
     """
-    threads: list[dict] = []
+    ids: list[str] = []
     after: str | None = None
     while True:
         params: dict[str, object] = {
@@ -214,19 +215,25 @@ async def collect_ticket_history(client, ticket_id: str) -> list[dict]:
             params=params,
             action=f"ticket {ticket_id} threads",
         )
-        threads.extend(page.get("results") or [])
+        for thread in page.get("results") or []:
+            # 보관·스팸 스레드는 건너뜁니다 — 화면에서 치운 대화를 되살릴 이유가 없습니다.
+            if thread.get("archived") or thread.get("spam"):
+                continue
+            thread_id = str(thread.get("id") or "")
+            if thread_id:
+                ids.append(thread_id)
         after = ((page.get("paging") or {}).get("next") or {}).get("after")
         if not after:
-            break
+            return ids
 
+
+async def collect_ticket_history(client, ticket_id: str) -> list[dict]:
+    """그 티켓의 모든 스레드 × 모든 메시지를, 접점 기록 한 줄씩으로.
+
+    읽기만 합니다 — 이 함수로는 아무것도 나가지 않습니다.
+    """
     rows: list[dict] = []
-    for thread in threads:
-        # 보관·스팸 스레드는 건너뜁니다 — 화면에서 치운 대화를 되살릴 이유가 없습니다.
-        if thread.get("archived") or thread.get("spam"):
-            continue
-        thread_id = str(thread.get("id") or "")
-        if not thread_id:
-            continue
+    for thread_id in await _live_thread_ids(client, ticket_id):
         for message in await _thread_messages(client, thread_id):
             if message.get("type") != "MESSAGE":
                 continue
@@ -247,6 +254,54 @@ async def collect_ticket_history(client, ticket_id: str) -> list[dict]:
                 "happened_at": _happened_at(message),
             })
     rows.sort(key=lambda row: row["happened_at"])
+    return rows
+
+
+async def list_cc_candidates(client, ticket_id: str) -> list[dict]:
+    """이 티켓의 대화에 **이미 있던 사람들** — 참조 고르개가 읽습니다 (이관 0112).
+
+    **읽기만 합니다.** 이 함수로는 아무것도 안 나갑니다 — 그래서 고르개를 여는 것만으로
+    메일이 갈 길이 없습니다(`list_reply_senders` 와 같은 규칙).
+
+    보낸 사람과 받는 사람을 **둘 다** 셉니다. 보낸 사람만 세면 지금까지 조용히 참조로만
+    있던 사람이 목록에서 빠지는데, 그 사람이야말로 다음에도 참조에 있어야 할 사람입니다.
+
+    거르는 것 둘: 허브스팟 릴레이 주소(`*.hs-inbox.com` — 사람이 아니라 인박스 주소라
+    거기로 보내면 대화가 자기 자신에게 돌아갑니다), 그리고 **받는 사람 본인**은 화면이
+    거릅니다(그 값은 초안마다 다르고 여기서는 티켓만 압니다).
+
+    최근에 나타난 순입니다 — 오래된 대화의 한 번 스친 주소보다 지난주에 오간 사람이 먼저
+    보여야 합니다.
+    """
+    seen: dict[str, dict] = {}
+    for thread_id in await _live_thread_ids(client, ticket_id):
+        for message in await _thread_messages(client, thread_id):
+            if message.get("type") != "MESSAGE":
+                continue
+            when = _happened_at(message)
+            for party in (message.get("senders") or []) + (message.get("recipients") or []):
+                if not isinstance(party, dict):
+                    continue
+                for address in _addresses([party]):
+                    if address.rsplit("@", 1)[-1].endswith(OUR_DOMAIN_SUFFIXES):
+                        continue
+                    row = seen.get(address)
+                    name = str(party.get("name") or "").strip()
+                    if row is None:
+                        seen[address] = {
+                            "address": address,
+                            "name": name,
+                            "ours": is_our_address(address),
+                            "last_seen": when,
+                        }
+                    else:
+                        # 이름은 **한 번이라도 있으면** 남깁니다 — 같은 사람이 어떤
+                        # 메시지에는 이름 없이 주소로만 적혀 옵니다(실측).
+                        row["name"] = row["name"] or name
+                        row["last_seen"] = max(row["last_seen"], when)
+    rows = sorted(seen.values(), key=lambda row: row["last_seen"], reverse=True)
+    for row in rows:
+        row["last_seen"] = row["last_seen"].isoformat()
     return rows
 
 
