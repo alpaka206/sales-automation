@@ -154,10 +154,14 @@ export function Customers() {
               // 구독 플랜이 정합니다 — N/A·Free·플랜 없음이 MQL, 그 외가 PQL. 서버가
               // 계산해서 내려주므로 여기서는 그리기만 합니다. 「-」가 없는 열입니다:
               // 플랜을 모르는 것도 답(MQL)이라, 빈칸이면 그게 곧 버그입니다.
-              // 열 이름은 「Lead Stage」입니다 (2026-09-07 운영자 지시). 값은 그대로
+              // 열 이름은 「Lead Type」입니다 (2026-09-07 운영자 지시). 값은 그대로
               // MQL/PQL 이고, 세 화면이 같은 이름으로 부릅니다 — 같은 값을 화면마다 다르게
               // 부르면 두 개인 줄 압니다.
-              label: "Lead Stage",
+              //
+              // **Lifecycle Stage 열은 여기 없습니다.** 그 값은 왼쪽 Stage 열의 다른
+              // 이름이라(Contacted=SAL · Negotiating=SQL …) 나란히 두면 한 사실이 두 열을
+              // 먹습니다. 상세 두 화면에는 파이프라인 칸이 접혀 있어 사정이 다릅니다.
+              label: "Lead Type",
               width: "9%",
               cell: (row) => row.qualification,
             },

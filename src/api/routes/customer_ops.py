@@ -76,6 +76,36 @@ PIPELINE_STAGES: tuple[tuple[str, str, str], ...] = (
 )
 VALID_PIPELINE_STAGES = {stage for stage, _, _ in PIPELINE_STAGES}
 
+# Lifecycle Stage — **파이프라인 단계를 영업이 부르는 이름** (2026-09-07 운영자 지시).
+# 위 표시 이름과 짝입니다: Contacted=SAL · Negotiating=SQL · Closed Won=Customer ·
+# Closed Lost=Lost · Concluded=Unqualified.
+#
+# **`new` 가 여기 없는 것이 규칙입니다.** 아직 아무도 안 만난 리드라 그 자리에는 플랜이
+# 정하는 값(MQL / PQL)이 섭니다 — 그래서 New 인 티켓은 Lead Type 과 Lifecycle Stage 가
+# 같은 말을 합니다(운영자: 「new일때 두번 표시되도 상관없음」). 뜻을 모르는 값(모델 기본값
+# `initial`, 매핑에 없는 단계)도 같은 자리로 떨어집니다 — 단계가 움직인 적이 없다는 뜻이라
+# New 와 같은 답이 맞습니다.
+#
+# **`PIPELINE_STAGES` 에 넷째 칸을 붙이지 않습니다**: 그 튜플을 세 칸으로 푸는 곳이
+# 여럿이고, 늘리면 그 전부가 같이 바뀌어야 합니다.
+LIFECYCLE_STAGES: dict[str, str] = {
+    "meeting_link_sent": "SAL",
+    "negotiation": "SQL",
+    "won": "Customer",
+    "closed_lost": "Lost",
+    "closed": "Unqualified",
+}
+
+
+def lifecycle_stage_for(stage: str | None, qualification: str) -> str:
+    """그 단계의 Lifecycle Stage. 아직 New 면 MQL / PQL 이 그 자리에 선다.
+
+    **화면이 이 표를 들고 있으면 안 됩니다.** 지금 이 값을 그리는 자리가 둘(티켓 상세 ·
+    고객 상세)이고, 목록이 화면마다 있으면 단계 하나가 늘거나 이름이 바뀔 때 한쪽만
+    바뀝니다 — 그 어긋남은 두 화면을 나란히 놓기 전에는 안 보입니다.
+    """
+    return LIFECYCLE_STAGES.get(stage or "") or qualification
+
 
 @router.post("/internal/clients/merge")
 async def internal_merge_client_ids(

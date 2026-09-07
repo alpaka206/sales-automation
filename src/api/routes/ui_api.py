@@ -558,7 +558,7 @@ def ui_hubspot_record(contact_id: int, conversation_id: int | None = None):
 @router.get("/api/ui/customers/{contact_id}")
 def ui_customer_detail(contact_id: int):
     """고객 상세. The builder returns ORM rows; the screen needs their fields."""
-    from .customer_ops import _customer_context, won_block
+    from .customer_ops import _customer_context, lifecycle_stage_for, won_block
 
     context = _customer_context(contact_id)
     if context is None:
@@ -591,6 +591,13 @@ def ui_customer_detail(contact_id: int):
         # 됩니다 — 실제로 그랬습니다. 저장하던 열은 워크북에서 읽어 온 거울이라 콘솔이
         # 채우지 않았고, 그래서 이 화면은 늘 비어 있었습니다(그 열은 이관 0104 가 지웠습니다).
         "qualification": qualification_for_plan(profile.current_plan if profile else None),
+        # Lifecycle Stage — 파이프라인 단계를 영업이 부르는 이름 (2026-09-07 운영자 지시).
+        # 이 화면은 **연락처**의 값을 보는 자리라 `pipeline_stage` 로 셉니다(티켓 상세는
+        # 그 문의의 `conv.stage`). 아직 New 면 위 줄과 같은 MQL / PQL 이 섭니다.
+        "lifecycle": lifecycle_stage_for(
+            profile.pipeline_stage if profile else None,
+            qualification_for_plan(profile.current_plan if profile else None),
+        ),
         "stage_options": [
             {"key": key, "label": label} for key, label, _ in context["stage_options"]
         ],

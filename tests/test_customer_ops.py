@@ -1045,3 +1045,40 @@ def test_the_sweep_runs_on_its_own_clock_not_the_ten_minute_poller():
 
     poller = pathlib.Path("src/agents/inbound_poller.py").read_text(encoding="utf-8")
     assert "sync_changed_contacts_once" not in poller, "10분 폴러에 남아 두 번 돌면 안 된다"
+
+
+def test_every_stage_has_a_lifecycle_name_except_new():
+    """Lifecycle Stage 는 파이프라인 단계를 영업이 부르는 이름이다 (2026-09-07 운영자 지시).
+
+    **`new` 만 예외다.** 아직 아무도 안 만난 리드라 그 자리에는 플랜이 정하는 값(MQL /
+    PQL)이 서고, 그래서 New 인 티켓은 Lead Type 과 Lifecycle Stage 가 같은 말을 한다
+    (운영자: 「new일때 두번 표시되도 상관없음」).
+
+    단계가 하나 늘 때 이름을 안 붙이면 그 단계의 티켓만 MQL/PQL 로 되돌아가는데, 그건
+    「아직 New 다」와 화면에서 구별되지 않는다 — 이 검사가 그 자리를 잡는다.
+    """
+    from src.api.routes.customer_ops import (
+        LIFECYCLE_STAGES,
+        PIPELINE_STAGES,
+        lifecycle_stage_for,
+    )
+
+    named = {stage for stage, _, _ in PIPELINE_STAGES} - {"new"}
+    assert set(LIFECYCLE_STAGES) == named
+
+    # 운영자가 준 짝 — 표시 이름과 나란히 읽어야 맞는지 알 수 있다.
+    assert [(label, LIFECYCLE_STAGES.get(stage, "MQL / PQL")) for stage, label, _ in PIPELINE_STAGES] == [
+        ("New", "MQL / PQL"),
+        ("Contacted", "SAL"),
+        ("Negotiating", "SQL"),
+        ("Closed Won", "Customer"),
+        ("Closed Lost", "Lost"),
+        ("Concluded", "Unqualified"),
+    ]
+
+    # New 와 **뜻을 모르는 값**은 둘 다 그 사람의 MQL/PQL 로 떨어진다. 모델 기본값
+    # `initial` 은 단계가 움직인 적이 없다는 뜻이라 New 와 같은 답이 맞다.
+    assert lifecycle_stage_for("new", "PQL") == "PQL"
+    assert lifecycle_stage_for("initial", "MQL") == "MQL"
+    assert lifecycle_stage_for(None, "MQL") == "MQL"
+    assert lifecycle_stage_for("won", "MQL") == "Customer"

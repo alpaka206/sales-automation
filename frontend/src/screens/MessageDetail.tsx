@@ -80,7 +80,11 @@ type Detail = {
     website: string | null;
     /** MQL / PQL — 구독 플랜이 정합니다(플랜 없음·Free·N/A → MQL, 그 외 → PQL). 서버가
      *  계산해서 내려주므로 언제나 값이 있습니다. */
-    qualification: string } | null;
+    qualification: string;
+    /** Lifecycle Stage — **이 티켓의 단계**를 영업이 부르는 이름입니다(SAL · SQL ·
+     *  Customer · Lost · Unqualified). New 면 위 `qualification` 과 같은 값입니다.
+     *  목록은 서버가 정합니다(`customer_ops.LIFECYCLE_STAGES`). */
+    lifecycle: string } | null;
   customer: {
     profile: Record<string, unknown> | null;
     /** 티켓에서 나왔는데 그 티켓이 지워진 기록 — 제목으로 다시 묶은 것. 살아 있는
@@ -1100,7 +1104,11 @@ export function MessageDetail() {
                       두 면이 한 상자 안에 나란히 섭니다. **플랜 묶음의 줄로 넣지는
                       않습니다**: 허브스팟에 대응 속성이 없어서, 저기 서면 「허브스팟이 아는
                       값」으로 읽히고 고칠 수 있는 칸처럼 보입니다. */}
-                  <div className="info-row"><dt>Lead Stage</dt><dd>{contact.qualification}</dd></div>
+                  <div className="info-row"><dt>Lead Type</dt><dd>{contact.qualification}</dd></div>
+                  {/* 같은 사실의 셋째 면 — **이 티켓의 단계**를 영업이 부르는 이름입니다
+                      (2026-09-07 운영자 지시). New 면 바로 위 줄과 같은 말을 합니다:
+                      아직 아무도 안 만난 리드라 그 자리에 설 다른 이름이 없습니다. */}
+                  <div className="info-row"><dt>Lifecycle Stage</dt><dd>{contact.lifecycle}</dd></div>
                     {!editingContact && (
                       <div className="info-row"><dt>회사</dt>
                         <dd className="truncate">{contact.company || "—"}</dd></div>

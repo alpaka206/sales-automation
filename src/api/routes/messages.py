@@ -31,7 +31,7 @@ from ...db.models import (
 from ...db.session import SessionLocal
 from ...llm.translate import is_mostly_korean, needs_korean, translate_to
 from ..auth import actor_name
-from .customer_ops import won_block
+from .customer_ops import lifecycle_stage_for, won_block
 from ._shared import esc
 
 logger = logging.getLogger(__name__)
@@ -243,6 +243,8 @@ def _message_detail_context(
         # surfaced inline so the operator sees who this customer is without leaving
         # the reply screen. Full editable view stays at /customers/{id}.
         customer = _customer_history(session, contact.id) if contact else None
+        # 한 번만 셉니다 — 아래에서 Lead Type 과 Lifecycle Stage 두 줄이 같이 씁니다.
+        qualification = _qualification_of(customer, conv.plan_snapshot if conv else None)
 
         # The customer's inquiry is shown TRANSLATED (Korean) by default with the
         # original behind an expand toggle. ``needs_ko`` flags inbound non-Korean
@@ -436,8 +438,13 @@ def _message_detail_context(
                     # **이 문의가 들어온 시점의 플랜이 정합니다** (0110). 옆 「플랜 정보」
                     # 카드와 같은 값을 봐야 두 칸이 같은 사실의 두 면으로 읽힙니다 — 하나는
                     # 얼려 두고 다른 하나만 최신이면 화면이 스스로 어긋나 보입니다.
-                    "qualification": _qualification_of(
-                        customer, conv.plan_snapshot if conv else None
+                    "qualification": qualification,
+                    # Lifecycle Stage — 이 **티켓의 단계**를 영업이 부르는 이름입니다
+                    # (2026-09-07 운영자 지시). 연락처의 값이 아니라 이 문의의 값이라
+                    # `conv.stage` 로 셉니다 — 한 사람에게 티켓이 여럿이면 각자 다른
+                    # 자리에 있습니다. New 면 위 줄과 같은 말을 합니다(그러기로 했습니다).
+                    "lifecycle": lifecycle_stage_for(
+                        conv.stage if conv else None, qualification
                     ),
                 }
                 if contact

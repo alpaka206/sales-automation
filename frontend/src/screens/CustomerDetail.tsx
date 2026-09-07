@@ -28,6 +28,9 @@ type Data = {
   /** MQL / PQL. 플랜이 정하는 계산값이라 프로필 밖에 있고, 언제나 값이 있습니다 —
    *  플랜 정보가 없는 연락처는 MQL 입니다(산 적이 없다는 뜻). */
   qualification: string;
+  /** Lifecycle Stage — 파이프라인 단계를 영업이 부르는 이름(SAL · SQL · Customer ·
+   *  Lost · Unqualified). New 면 위 `qualification` 과 같은 값입니다. */
+  lifecycle: string;
   stage_options: { key: string; label: string }[];
   conversations: { id: number; created_at: string; inquiry_subject: string | null; stage: string; sheet_client_id: number | null }[];
   client_ids: number[];
@@ -321,7 +324,11 @@ export function CustomerDetail() {
                   연락처에도 답이 있고(산 적이 없으니 MQL), 프로필 안에 두면 그런 사람만
                   「-」가 됩니다. 예전에는 저장된 열을 읽었는데 그 열을 채우는 길이 워크북
                   전체 임포트뿐이라 화면에는 늘 「-」였습니다(2026-09-02 운영자 지적). */}
-              <KV k="Lead Stage" v={data.qualification} />
+              <KV k="Lead Type" v={data.qualification} />
+              {/* 바로 위 「파이프라인」을 영업이 부르는 이름입니다 (2026-09-07 운영자
+                  지시). 아직 New 면 그 자리에 설 이름이 없어 Lead Type 과 같은 말을
+                  합니다. 목록은 서버가 정합니다. */}
+              <KV k="Lifecycle Stage" v={data.lifecycle} />
               <KV k="산업군" v={profile?.industry || "-"} />
               <KV k="현재 플랜" v={profile?.current_plan || "-"} />
               <KV k="user-seq" v={profile?.user_seq || "-"} />
