@@ -244,6 +244,9 @@ def _login_or_pending(email: str, name: str | None, picture: str | None) -> tupl
                 "email": user.email,
                 "name": user.name or user.email,
                 "role": normalize_role(user.role),
+                # 접근 승인 화면에서 체크한 사람인가 (이관 0114). 참이면 로그인 직후
+                # **아직 토큰이 없을 때만** 구글 동의를 한 번 더 물어봅니다.
+                "collect_mailbox": bool(user.collect_mailbox),
             },
             bool(user.approved),
         )
@@ -367,7 +370,26 @@ async def auth_callback(request: Request, code: str = "", state: str = "", error
     if not approved:
         return _sign_in_document(status_code=403)
 
-    resp = RedirectResponse("/", status_code=302)
+    # **체크된 사람은 여기서 한 번 더 동의를 받습니다** (이관 0114, 운영자 지시:
+    # 「접근 승인에서 체크해서 해당 계정의 토큰 받아오도록 다음 로그인에」).
+    #
+    # 로그인 요청 자체에 Gmail 스코프를 얹지 않는 이유가 둘입니다. ① 누가 로그인할지는
+    # **끝나 봐야** 압니다 — 앞에서는 체크된 사람인지 알 수 없어서, 얹으면 전원이 매번
+    # 메일 권한을 요구받습니다. ② refresh token 을 받으려면 `prompt=consent` 가 필요한데,
+    # 그걸 로그인에 상시로 달면 **모든 로그인마다** 동의 화면이 한 장 더 뜹니다.
+    #
+    # **이미 토큰이 있으면 안 묻습니다.** 그래서 그 사람이 겪는 것은 딱 한 번입니다.
+    next_url = "/"
+    if user.get("collect_mailbox"):
+        try:
+            from ..integrations.gmail import has_token
+
+            if not has_token(email):
+                next_url = f"/integrations/mailboxes/self-connect?email={quote(email)}"
+        except Exception:  # 이 부속이 로그인을 막으면 안 됩니다
+            logger.warning("메일함 연결 확인 실패: %s", email, exc_info=True)
+
+    resp = RedirectResponse(next_url, status_code=302)
     _set_session(resp, request, make_session(user["email"], user["name"], user["role"]))
     resp.delete_cookie(STATE_COOKIE, path="/")
     logger.info("Web UI login: %s (role=%s)", email, user["role"])

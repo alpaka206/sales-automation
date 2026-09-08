@@ -1,3 +1,5 @@
+import { useQuery } from "@tanstack/react-query";
+import { getJSON } from "../lib/api";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { Icon } from "../ui/Icon";
 
@@ -43,6 +45,7 @@ const SECTIONS: Section[] = [
     icon: "settings",
     items: [
       { to: "/settings/users", label: "접근 승인", icon: "shield" },
+      { to: "/settings/mailboxes", label: "메일함 연결", icon: "mail" },
       { to: "/logs", label: "운영 로그", icon: "file" },
     ],
   },
@@ -79,9 +82,32 @@ function NavItem({ entry, pending }: { entry: Entry; pending?: number }) {
 
 export function Shell({ pending }: { pending?: number }) {
   const location = useLocation();
+  /** 내 사서함을 내줘야 하나 (이관 0114). **로그인 직후 우회로는 못 잡는 두 경우**를
+   *  여기서 잡습니다: 배포 시점에 이미 로그인해 둔 사람(세션이 7일이라 그때까지 로그인
+   *  흐름을 안 지납니다), 그리고 비밀번호를 바꿔 토큰이 죽은 사람.
+   *
+   *  **모달이 아니라 띠입니다.** 이 화면을 열 때마다 창이 가로막으면 「나중에」를 누를
+   *  방법이 없고, 그건 승인 대기 목록을 보러 온 사람의 일을 막습니다. 눌러야 넘어가는
+   *  것은 구글 동의 화면이지 우리 화면이 아닙니다. */
+  const { data: mailbox } = useQuery({
+    queryKey: ["mailbox-me"],
+    queryFn: () => getJSON<{ needs_connect: boolean; email: string }>("/api/ui/mailboxes/me"),
+    staleTime: 10 * 60_000,
+    retry: false,
+  });
   return (
     <>
       <a href="#main" className="skip-link">본문으로 건너뛰기</a>
+      {mailbox?.needs_connect && (
+        <div className="banner banner--warn" style={{ padding: "10px 16px" }}>
+          <strong>{mailbox.email}</strong> 메일함 연결이 필요합니다 — 구글 동의 화면이 한 번
+          뜨고, 그 뒤로는 다시 묻지 않습니다.{" "}
+          <a className="btn btn--subtle btn--sm" style={{ marginLeft: 8 }}
+             href={`/integrations/mailboxes/self-connect?email=${encodeURIComponent(mailbox.email)}`}>
+            연결하기
+          </a>
+        </div>
+      )}
       <div className="app-shell">
         <aside className="sidebar">
           <div className="sidebar__top">

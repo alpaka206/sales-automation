@@ -342,6 +342,9 @@ def ui_settings_users(request: Request):
         raise HTTPException(status_code=403, detail="관리자만 접근할 수 있습니다.")
 
     me = session_user(request) or {}
+    from ...integrations.gmail import list_accounts
+
+    connected = {row.email for row in list_accounts() if not row.last_error}
     with SessionLocal() as session:
         rows = (
             session.query(User)
@@ -357,6 +360,12 @@ def ui_settings_users(request: Request):
                 # 전체 접근으로 풀리는데, 화면이 'member' 라고 적으면 조회 전용처럼 읽힙니다.
                 "role": normalize_role(user.role),
                 "approved": bool(user.approved),
+                # 메일함을 받아올 사람인가 (이관 0114). `mailbox_connected` 는 **이미
+                # 붙었나** — 둘은 다른 이야기입니다: 체크는 「다음 로그인에 물어본다」이고,
+                # 연결은 「그래서 받았다」입니다. 화면이 「체크했는데 아직 로그인 안 함」을
+                # 말할 수 있어야 운영자가 기다릴지 채근할지 압니다.
+                "collect_mailbox": bool(user.collect_mailbox),
+                "mailbox_connected": user.email in connected,
                 "last_login_at": user.last_login_at,
             }
             for user in rows
@@ -519,6 +528,80 @@ async def ui_reply_senders(message_id: int):
     return {**found, "chosen": chosen, "error": None}
 
 
+@router.get("/api/ui/mailboxes/me")
+def ui_mailbox_me(request: Request):
+    """**지금 로그인한 사람**이 자기 사서함을 내줘야 하나 (이관 0114).
+
+    로그인 직후 우회로 잡지 못하는 두 경우를 여기서 잡습니다:
+
+    1. **배포 시점에 이미 로그인해 둔 사람.** 세션이 7일이라 그때까지 로그인 흐름을 안
+       지나고, 그동안 체크해 놓고도 아무 일이 안 일어납니다.
+    2. **비밀번호를 바꿔 토큰이 죽은 사람.** 다음 로그인까지 기다릴 이유가 없습니다.
+
+    **비밀은 안 실립니다** — 물어보는 것은 「내줘야 하나」 하나뿐입니다.
+    """
+    from ...db.models import User
+    from ...db.session import SessionLocal
+    from ...integrations.gmail import has_token
+    from ..auth import current_user
+
+    me = current_user(request) or {}
+    email = (me.get("email") or "").lower()
+    if not email:
+        return {"needs_connect": False, "email": ""}
+    with SessionLocal() as session:
+        row = session.get(User, email)
+        wanted = bool(row and row.collect_mailbox)
+    return {
+        "needs_connect": bool(wanted and not has_token(email)),
+        "email": email,
+    }
+
+
+@router.get("/api/ui/mailboxes")
+def ui_mailboxes():
+    """연결된 Gmail 사서함들 — 「메일함 연결」 화면이 읽습니다 (이관 0113).
+
+    **토큰은 안 내려보냅니다.** 화면이 그 값으로 할 일이 없고, 브라우저에 한 번 닿은
+    비밀은 그때부터 브라우저의 것입니다.
+
+    `ready` 는 「지금 수집 대상인가」입니다 — 켜져 있고 끊기지 않았을 때만 참입니다.
+    화면이 두 조건을 각각 그리지만 **판단은 서버가 합니다**: 화면이 조합하면 수집기가
+    보는 목록과 화면이 그리는 목록이 언젠가 갈립니다.
+    """
+    from ...integrations.gmail import READ_SCOPE, delegation_configured, list_accounts
+    from ...integrations.google_oauth import client_is_configured
+
+    from ...agents.mailbox_sync import pending_links
+
+    rows = list_accounts()
+    return {
+        # 「연결할까요?」 — 아직 티켓에 안 붙었고 아직 안 물어본 개인함 메일.
+        # 연락처는 아는데 티켓이 없는 메일은 여기 안 뜹니다: 그건 이미 리드 히스토리의
+        # 한 줄이고(운영자 지시), 그게 답입니다.
+        "pending_links": pending_links(),
+        # 클라이언트가 없으면 「연결」이 아무 데도 안 갑니다. 버튼을 눌러 보고 알게 하는
+        # 대신 화면이 미리 적습니다.
+        "configured": client_is_configured(),
+        # 주소만으로 추가할 수 있나 — 그 사람이 로그인할 필요가 없는 길입니다
+        # (도메인 전체 위임). 서비스 계정 열쇠가 있으면 화면이 그 폼을 그립니다.
+        "delegation": delegation_configured(),
+        "scope": READ_SCOPE,
+        "accounts": [
+            {
+                "email": row.email,
+                "enabled": row.enabled,
+                "ready": bool(row.enabled and not row.last_error),
+                "last_error": row.last_error,
+                "connected_by": row.connected_by,
+                "connected_at": row.updated_at,
+                "last_polled_at": row.last_polled_at,
+            }
+            for row in rows
+        ],
+    }
+
+
 @router.get("/api/ui/messages/{message_id}/cc-candidates")
 async def ui_cc_candidates(message_id: int):
     """이 티켓의 대화에 이미 있던 사람들 — 검토 화면의 **참조 고르개**가 읽습니다 (0112).
@@ -532,7 +615,9 @@ async def ui_cc_candidates(message_id: int):
     것은 「고를 수 없게」가 아니라 「보여 주지 않게」입니다.
     """
     from ...agents.ticket_history import list_cc_candidates
+    from ...common.config import settings as app_settings
     from ...db.models import Message
+    from ...integrations.gmail import list_accounts
     from ...db.session import SessionLocal
     from ...integrations.hubspot import HubSpotClient
 
@@ -556,8 +641,26 @@ async def ui_cc_candidates(message_id: int):
         return {**empty, "error": f"{type(exc).__name__}: {exc}"}
     finally:
         await client.close()
-    skip = recipient.strip().lower()
-    return {**empty, "candidates": [row for row in found if row["address"] != skip]}
+    # **받는 사람**과 **이 팀이 안 쓰는 주소**를 뺍니다 (2026-09-08 운영자 지시:
+    # 「support@perso.ai 는 우린 아예 안 써」). 스레드에 남아 있다는 것과 우리가 쓴다는
+    # 것은 다른 이야기이고, 목록에 두면 언젠가 눌러서 고객이 받는 메일에 붙습니다.
+    skip = {recipient.strip().lower()} | {
+        one.strip().lower()
+        for one in app_settings.CC_EXCLUDED_ADDRESSES.split(",")
+        if one.strip()
+    }
+    rows = [row for row in found if row["address"] not in skip]
+
+    # **연결된 개인 사서함도 후보입니다** (같은 지시: 「차라리 개인메일
+    # untae@estsoft.com 불러와서 할 수 있으면」). 스레드에 없던 사람이라도 이 회신에
+    # 참조로 넣고 싶을 수 있고, 그 주소는 우리가 이미 알고 있습니다.
+    seen = {row["address"] for row in rows} | skip
+    for account in list_accounts():
+        if account.email in seen:
+            continue
+        rows.append({"address": account.email, "name": "", "ours": True,
+                     "last_seen": ""})
+    return {**empty, "candidates": rows}
 
 
 @router.get("/api/ui/contacts/{contact_id}/hubspot-record")

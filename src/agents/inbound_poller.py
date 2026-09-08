@@ -264,6 +264,7 @@ def _poller_steps() -> list[tuple[str, object]]:
         sync_pending_inbound_rows,
         sync_pending_order_rows,
     )
+    from .mailbox_sync import sync_mailboxes_once
     from .ticket_history import run_pending_ticket_history
     from .worker_heartbeat import record_worker_heartbeat
 
@@ -283,6 +284,10 @@ def _poller_steps() -> list[tuple[str, object]]:
         # 티켓별 대화를 조금씩 받아옵니다. 한 바퀴를 다 돌면 가장 오래된 것부터 다시
         # 도므로, 지난 대화를 메우는 일과 새로 쌓인 대화를 따라잡는 일이 한 단계입니다.
         ("ticket_history", run_pending_ticket_history),
+        # 연결된 개인 사서함에서 **우리가 아는 연락처의 메일만** 주워 옵니다 (0115).
+        # 허브스팟이 못 보는 자리이고, 티켓에 붙일지는 화면에서 사람이 누릅니다.
+        # 연결된 사서함이 없으면 아무 일도 안 합니다 — 조회조차 안 나갑니다.
+        ("personal_mailboxes", sync_mailboxes_once),
         ("hubspot_backfill", process_requested_hubspot_backfill),
         ("sheet_inbound", sync_pending_inbound_rows),
         ("sheet_orders", sync_pending_order_rows),

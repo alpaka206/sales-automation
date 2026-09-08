@@ -145,3 +145,30 @@ def test_a_paste_accident_cannot_expose_a_hundred_addresses() -> None:
     뒤에는 못 되돌립니다."""
     many = ", ".join(f"p{i}@x.com" for i in range(MAX_CC + 20))
     assert len(parse_cc_addresses(many)) == MAX_CC
+
+
+def test_an_address_this_team_does_not_use_is_not_offered(monkeypatch):
+    """**`support@perso.ai` 는 이 팀이 안 씁니다** (2026-09-08 운영자 지시).
+
+    그 주소는 포털에 연결돼 있어서 지난 스레드에 남아 있고, 그래서 참조 후보로 떴습니다.
+    「연결돼 있다」와 「우리가 쓴다」는 다른 이야기이고 그 판단은 코드가 아니라 팀이
+    합니다 — 목록에 두면 언젠가 눌러서 **고객이 받는 메일의 참조에 붙습니다.**
+
+    거르는 곳이 설정인 이유도 같습니다(`HUBSPOT_REPLY_SENDER_ACCOUNT_IDS` 와 같은 성격).
+    """
+    from src.common.config import settings as app_settings
+
+    assert "support@perso.ai" in app_settings.CC_EXCLUDED_ADDRESSES
+
+    excluded = {
+        one.strip().lower()
+        for one in app_settings.CC_EXCLUDED_ADDRESSES.split(",")
+        if one.strip()
+    }
+    found = [
+        {"address": "buyer@acme.com"},
+        {"address": "support@perso.ai"},
+        {"address": "boss@estsoft.com"},
+    ]
+    kept = [row["address"] for row in found if row["address"] not in excluded]
+    assert kept == ["buyer@acme.com", "boss@estsoft.com"]

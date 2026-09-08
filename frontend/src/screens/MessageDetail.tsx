@@ -773,16 +773,27 @@ export function MessageDetail() {
                               **「이 대화의 주소」 같은 두루뭉술한 말은 안 씁니다**
                               (2026-09-03 운영자 지시). 주소를 못 가져왔으면 못 가져왔다고
                               적습니다 — 그건 조회가 실패했다는 뜻이라 다른 이야기입니다. */}
+                          {/* **같은 주소가 두 번 뜨지 않습니다** (2026-09-08 운영자 지시).
+                              예전에는 「자동 — perso.ai@estsoft.com」과 목록의
+                              `perso.ai@estsoft.com` 이 나란히 서서, 무엇이 다른지 화면만
+                              봐서는 알 수 없었습니다.
+
+                              **없앤 쪽이 목록입니다.** 남긴 「자동」은 값이 비어 있고
+                              (`channel_account_id = NULL`), 그건 「그 주소로 보내되 그
+                              티켓에서 못 쓰면 스레드가 정하는 값으로 물러선다」는 뜻입니다.
+                              명시로 고른 값은 **안 물러섭니다** — 폼으로만 들어온 티켓은
+                              그 인박스에 대화가 없어서 발송이 그대로 실패합니다. 화면에서
+                              지운 것은 글자이지 안전장치가 아닙니다. */}
                           <option value="">
-                            {senders?.default_address
-                              ? `자동 — ${senders.default_address}`
-                              : "자동 (발신 주소를 확인하지 못했습니다)"}
+                            {senders?.default_address || "발신 주소를 확인하지 못했습니다"}
                             {senders?.default_address && senders?.fallback_address
                               ? ` (거절되면 ${senders.fallback_address})` : ""}
                           </option>
-                          {senders?.senders?.map((x) => (
-                            <option key={x.id} value={x.id}>{x.address}</option>
-                          ))}
+                          {senders?.senders
+                            ?.filter((x) => x.address !== senders?.default_address)
+                            .map((x) => (
+                              <option key={x.id} value={x.id}>{x.address}</option>
+                            ))}
                         </select>
                       </>
                     )}
@@ -1250,6 +1261,18 @@ export function MessageDetail() {
             <>
               승인 즉시 <strong>{msg.channel}</strong>로 발송됩니다.
               {msg.to_address && <> 수신자: <span className="mono">{msg.to_address}</span>.</>}
+              {/* **어느 주소에서 나가는지 여기서 말합니다** (2026-09-08 운영자 지시:
+                  「모든 발송에는 모달 떠서 한 번 더 확인하도록」). 고르개는 화면 위쪽에
+                  있고 확인 창은 아래쪽에 뜹니다 — 누르기 직전에 보이는 것이 그 값이어야
+                  「고른 대로 나가나」를 여기서 가릅니다. 참조도 같은 이유입니다: 고객이
+                  받는 메일에 누가 더 실리는지는 되돌릴 수 없는 사실입니다. */}
+              <br />
+              발신: <span className="mono">
+                {sender
+                  ? (senders?.senders?.find((x) => x.id === sender)?.address ?? sender)
+                  : (senders?.default_address || "확인하지 못했습니다")}
+              </span>
+              {cc.trim() && <> · 참조: <span className="mono">{cc.trim()}</span></>}
               {msg.target_language && <><br />확인한 {msg.target_language} 번역문이 그대로 발송됩니다.</>}
               {" 이 동작은 되돌릴 수 없습니다."}
             </>

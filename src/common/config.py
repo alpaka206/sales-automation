@@ -75,6 +75,15 @@ class Settings(BaseSettings):
     # **기본 발신 주소는 이 목록과 무관하게 나갑니다.** 이건 「사람이 고를 수 있는 것」의
     # 울타리이지 「나갈 수 있는 것」의 울타리가 아닙니다.
     HUBSPOT_REPLY_SENDER_ACCOUNT_IDS: str = ""
+    # **이 팀이 안 쓰는 주소** — 참조 고르개에서 뺍니다 (2026-09-08 운영자 지시:
+    # 「support@perso.ai 는 우린 아예 안 써」). 스레드에 그 주소가 남아 있으면 후보로
+    # 뜨는데, 누르면 고객이 받는 메일의 참조에 그 주소가 붙습니다.
+    #
+    # **설정인 이유**: 「연결돼 있다」와 「우리가 쓴다」는 다른 이야기이고, 그 판단은
+    # 코드가 아니라 팀이 합니다 — `HUBSPOT_REPLY_SENDER_ACCOUNT_IDS` 와 같은 성격입니다.
+    # 기본값에 그 주소를 적어 두는 것은 지금 사실을 적어 두는 것이고, 바뀌면 `.env` 로
+    # 덮습니다. 쉼표로 나열합니다.
+    CC_EXCLUDED_ADDRESSES: str = "support@perso.ai"
     # ----- [B2B] AI Dubbing ticket pipeline stage ids -----
     # The env names below mirror the stage labels in HubSpot (New / Qualified /
     # Negotiating / Closed Won / Closed Lost / Concluded). Stages get

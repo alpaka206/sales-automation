@@ -111,6 +111,14 @@ async def settings_user_update(request: Request, email: str, action: str = Form(
                 u.approved = True
             elif action == "make_viewer":
                 u.role = "viewer"
+            # **이 사람 메일함도 읽을까** (이관 0114, 운영자 지시). 뜻은 「다음 로그인에
+            # 구글 동의를 한 번 더 물어본다」이고, 이미 붙어 있으면 안 묻습니다.
+            #
+            # **끄기가 연결을 끊지는 않습니다.** 실수로 눌렀다 되돌린 순간 수집이 조용히
+            # 멈추면 안 되고, 끊는 자리는 「메일함 연결」의 해제입니다 — 거기서는 무엇이
+            # 사라지는지 이름을 옮겨 적어야 합니다.
+            elif action in ("collect_mailbox_on", "collect_mailbox_off"):
+                u.collect_mailbox = action.endswith("_on")
             session.commit()
     # htmx: reload the page to reflect the change
     return Response(status_code=204, headers={"HX-Redirect": "/settings/users"})

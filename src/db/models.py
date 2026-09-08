@@ -332,6 +332,61 @@ class IntegrationCredential(Base):
     )
 
 
+class MailboxAccount(Base):
+    """연결된 Gmail 사서함 하나 (이관 0113).
+
+    **주소가 기본키입니다.** 같은 사서함을 다시 연결하면 새 토큰이 옛 줄을 덮어씁니다 —
+    줄이 둘이면 어느 토큰이 살아 있는지 화면만 봐서는 모릅니다.
+
+    **주소는 사람이 적지 않습니다**: 동의가 끝나면 구글 userinfo 가 「실제로 로그인한
+    계정」을 알려주고 그 값을 씁니다. 폼에 적게 두면 라벨과 실제가 어긋날 수 있고, 그건
+    남의 사서함을 읽는다는 뜻입니다.
+    """
+
+    __tablename__ = "mailbox_accounts"
+
+    email: Mapped[str] = mapped_column(String(320), primary_key=True)
+    # `refresh_token` · `access_token` · `expires_at` · `scopes` 가 든 dict 를
+    # `google_oauth._encrypt` 와 **같은 열쇠**로 암호화한 것입니다.
+    encrypted_payload: Mapped[str] = mapped_column(Text, nullable=False)
+    # 이 사서함을 지금 쓸 것인가 (운영자 지시: 「이메일을 골라서 쓸 수도 있게」). 끄면
+    # 수집이 건너뜁니다 — **연결은 살아 있습니다**, 다시 켜는 데 재동의가 필요 없게.
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    connected_by: Mapped[str | None] = mapped_column(String(320), nullable=True)
+    # **끊긴 이유**. 값이 있으면 그 사서함은 지금 못 읽습니다. Gmail 토큰은 다른 스코프와
+    # 달리 **비밀번호를 바꾸면 죽습니다**(구글 문서: "The user changed passwords and the
+    # refresh token contains Gmail scopes"). 그때 로그만 남기면 운영자는 수집이 멈춘 줄
+    # 모르므로, 화면이 읽을 수 있게 행에 적습니다.
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # **여기서부터 봅니다** (2026-09-07 운영자 지시: 「동의한 이후 메일을 가져오도록」).
+    # 토큰에는 시점 제한이 없어 몇 년 전 메일까지 읽히므로, 어디부터 가져올지는 구글이
+    # 아니라 우리가 정합니다. 동의가 끝난 순간을 찍습니다.
+    #
+    # **다시 연결해도 안 밀립니다** — 비밀번호를 바꿔 재동의한 사람의 그 사이 메일이
+    # 통째로 사라지면 안 됩니다.
+    collect_from: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_polled_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=_utcnow, onupdate=_utcnow, nullable=False
+    )
+
+
+class MailboxLinkDecision(Base):
+    """개인함 메일 한 통을 티켓에 붙일지 정한 기록 (이관 0115).
+
+    `conversation_id` 가 차 있으면 **그 티켓에 붙였다**, 비어 있으면 **안 붙이기로 했다**
+    입니다. 둘 다 적는 이유: 안 적으면 거절한 메일이 회차마다 다시 물어봅니다.
+    """
+
+    __tablename__ = "mailbox_link_decisions"
+
+    external_id: Mapped[str] = mapped_column(String(255), primary_key=True)
+    conversation_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    decided_by: Mapped[str | None] = mapped_column(String(320), nullable=True)
+    decided_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+
+
 class PolicySource(Base):
     """정책·지식 문서 한 편. **원본이 여기 있습니다.**
 
@@ -626,6 +681,13 @@ class User(Base):
     picture: Mapped[str | None] = mapped_column(Text, nullable=True)
     role: Mapped[str] = mapped_column(String(16), nullable=False, default="member")
     approved: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # **이 사람 메일함도 읽을까** (이관 0114, 2026-09-07 운영자 지시). 접근 승인 화면의
+    # 체크 한 칸이고, 뜻은 「다음 로그인에 구글 동의를 한 번 더 물어본다」입니다 — 그
+    # 사람이 평소처럼 콘솔에 로그인하는 김에 받으므로 따로 할 일이 없습니다.
+    #
+    # 체크를 풀면 다음부터 안 묻습니다. **이미 받은 토큰은 안 지웁니다** — 실수로 눌렀다
+    # 되돌린 순간 연결이 조용히 끊기면 안 되고, 끊는 자리는 「메일함 연결」입니다.
+    collect_mailbox: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 

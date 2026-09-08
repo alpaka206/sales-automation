@@ -8,7 +8,14 @@ import { DataTable } from "../ui/DataTable";
 import { ActionButton, useAction } from "../ui/ActionButton";
 import { Loading } from "../ui/Loading";
 
-type User = { email: string; name: string; role: string; approved: boolean; last_login_at: string | null };
+type User = {
+  email: string; name: string; role: string; approved: boolean; last_login_at: string | null;
+  /** 이 사람 메일함도 읽을까 — **「다음 로그인에 구글 동의를 한 번 더 물어본다」**는 뜻입니다. */
+  collect_mailbox: boolean;
+  /** 그래서 실제로 받았나. 체크와 **다른 이야기**라 따로 옵니다 — 체크했는데 아직
+   *  로그인을 안 한 사람을 화면이 구별할 수 있어야 기다릴지 채근할지 압니다. */
+  mailbox_connected: boolean;
+};
 type Data = { approved_users: User[]; me_email: string; domain: string };
 
 export function SettingsUsers() {
@@ -106,10 +113,30 @@ export function SettingsUsers() {
             },
             { label: "이름", width: "18%", cell: (user) => user.name || "-" },
             { label: "권한", width: "12%", cell: (user) => <span className="tag">{user.role}</span> },
-            { label: "마지막 로그인", width: "16%", className: "tnum td-subtle",
+            { label: "마지막 로그인", width: "14%", className: "tnum td-subtle",
               cell: (user) => (user.last_login_at ? kst(user.last_login_at) : "—") },
             {
-              width: "20%",
+              // **메일함 수집 대상인가** (2026-09-07 운영자 지시). 체크하면 그 사람이
+              // 다음에 콘솔에 로그인할 때 구글 동의가 한 번 끼어들고, 받은 뒤로는 안
+              // 뜹니다 — 관리자 결재도 서비스 계정도 필요 없는 이유가 이것입니다.
+              label: "메일 수집",
+              width: "14%",
+              cell: (user) => (
+                <label className="row" style={{ gap: 6, cursor: "pointer" }}>
+                  <input type="checkbox" checked={user.collect_mailbox}
+                         onChange={() => act(user.email,
+                           user.collect_mailbox ? "collect_mailbox_off" : "collect_mailbox_on")} />
+                  {/* 「체크했다」와 「받았다」는 다릅니다. 그 사람이 아직 로그인을 안 했으면
+                      기다리면 되고, 그걸 화면이 말해야 운영자가 채근할지 압니다. */}
+                  <span className="t-xs t-subtle">
+                    {user.mailbox_connected ? "연결됨"
+                     : user.collect_mailbox ? "다음 로그인에" : ""}
+                  </span>
+                </label>
+              ),
+            },
+            {
+              width: "18%",
               // Never for your own row: the server refuses it anyway (an admin cannot
               // lock themselves out), so offering the button would only be an error
               // message waiting to happen.

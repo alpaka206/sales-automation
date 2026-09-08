@@ -14,6 +14,7 @@ import { PolicyDocs } from "./screens/PolicyDocs";
 import { Operations } from "./screens/Operations";
 import { CompanyDetail } from "./screens/CompanyDetail";
 import { SettingsUsers } from "./screens/SettingsUsers";
+import { SettingsMailboxes } from "./screens/SettingsMailboxes";
 import { Logs } from "./screens/Simple";
 import { WonCustomers } from "./screens/won/WonCustomers";
 import { WonCustomerDetail } from "./screens/won/WonCustomerDetail";
@@ -61,6 +62,7 @@ function mountConsole() {
             <Route path="operations" element={<Operations />} />
             <Route path="companies/:domain" element={<CompanyDetail />} />
             <Route path="settings/users" element={<SettingsUsers />} />
+            <Route path="settings/mailboxes" element={<SettingsMailboxes />} />
             <Route path="logs" element={<Logs />} />
             <Route path="outbound-history" element={<WonCustomers />} />
             <Route path="won-customers" element={<WonCustomers />} />
