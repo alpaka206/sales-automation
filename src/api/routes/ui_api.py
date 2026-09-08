@@ -542,6 +542,51 @@ async def ui_reply_senders(message_id: int):
     return {**found, "chosen": chosen, "error": None}
 
 
+@router.get("/api/ui/contacts/search")
+def ui_contact_search(q: str = ""):
+    """기존 고객 찾기 — 티켓 만들기 폼의 「기존 고객 불러오기」 (2026-09-08 운영자 지시).
+
+    이름·회사·이메일 아무 조각으로나 찾습니다. 전화를 받는 중에는 상대 주소를 정확히 모를
+    때가 많고, 회사 이름만 기억날 때가 흔합니다 — 주소로만 찾게 하면 그때 새 연락처를
+    만들게 되고, 같은 사람이 둘로 갈립니다.
+
+    **적게 돌려줍니다.** 고르개는 훑는 자리가 아니라 집는 자리라, 여덟 개가 넘으면 더
+    적어 좁히는 편이 빠릅니다.
+    """
+    from sqlalchemy import func
+
+    from ...db.models import Contact as _Contact
+    from ...db.session import SessionLocal
+
+    text = (q or "").strip()
+    if len(text) < 2:
+        return {"rows": []}
+    like = f"%{text.lower()}%"
+    with SessionLocal() as session:
+        rows = (
+            session.query(_Contact)
+            .filter(
+                func.lower(_Contact.full_name).like(like)
+                | func.lower(_Contact.company).like(like)
+                | _Contact.normalized_email.like(like)
+            )
+            .order_by(_Contact.updated_at.desc())
+            .limit(8)
+            .all()
+        )
+        return {
+            "rows": [
+                {
+                    "id": row.id,
+                    "email": row.email or row.normalized_email,
+                    "full_name": row.full_name or "",
+                    "company": row.company or "",
+                }
+                for row in rows
+            ]
+        }
+
+
 @router.get("/api/ui/contacts/lookup")
 def ui_contact_lookup(email: str = ""):
     """이 주소를 우리가 이미 아는가 — 티켓 만들기 폼이 이름·회사를 채웁니다 (2026-09-08).

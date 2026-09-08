@@ -9,6 +9,7 @@ import { InteractionForm, InteractionItem, groupByTicket, type Interaction } fro
 import { LoadingBlock } from "../ui/Loading";
 import { Modal } from "../ui/Modal";
 import { PlanCard } from "../ui/PlanCard";
+import { NewTicketForm } from "../ui/NewTicketForm";
 
 type Contract = {
   id: number; plan: string | null; status: string; amount: number | null; currency: string;
@@ -84,6 +85,9 @@ export function CustomerDetail() {
   // 고치는 중인 기록. **같은 모달, 같은 폼**입니다 — 적을 때와 고칠 때가 묻는 칸이 같아서,
   // 갈라 두면 칸을 하나 더할 때 한쪽만 늘어납니다.
   const [editing, setEditing] = useState<Interaction | null>(null);
+  // 이 고객의 티켓을 손으로 만듭니다 (2026-09-08 운영자 지시). 보드 New 열의 `+` 와
+  // **같은 폼**이고, 다른 점은 누구의 티켓인지가 이미 정해져 있다는 것뿐입니다.
+  const [creatingTicket, setCreatingTicket] = useState(false);
 
   // Every write goes to the route the Jinja form posts to: the stage sync, the sheet
   // mirror and the contract validation all stay server-side, in one copy.
@@ -174,7 +178,22 @@ export function CustomerDetail() {
             <span className="tag">{contact.lifecycle_stage || "HubSpot 단계 없음"}</span>
             {contact.domain && <span className="tag"><Icon name="building" size={13} /> {contact.domain}</span>}
           </div>
-          <h1 className="page-title" style={{ marginTop: 10 }}>{contact.company || contact.full_name}</h1>
+          <div className="row-between" style={{ marginTop: 10, gap: 12 }}>
+            <h1 className="page-title" style={{ margin: 0 }}>
+              {contact.company || contact.full_name}
+            </h1>
+            {/* **여기서도 티켓을 만듭니다** (운영자 지시). 이 화면을 보다가 「이건 새
+                문의구나」 싶은 순간이 있고, 그때 보드로 건너가 주소를 다시 적게 하면
+                같은 사람이 둘로 갈릴 자리가 하나 더 생깁니다. 이메일은 이미 정해져
+                있으므로 제목만 적으면 됩니다. */}
+            {contact.email && (
+              <button type="button" className="btn btn--subtle btn--sm"
+                      aria-haspopup="dialog"
+                      onClick={() => setCreatingTicket(true)}>
+                <Icon name="plus" size={14} /> 티켓 생성
+              </button>
+            )}
+          </div>
           <p className="page-sub">{contact.full_name} · {contact.email || "-"} · {contact.phone || "전화번호 없음"}</p>
           {/* 수주 DB·워크북·시트가 전부 이 번호로 엮입니다. 문의마다 붙는 값이라 한 사람에게
               여럿일 수 있고, 그때는 전부 보여 줍니다 — 어느 번호로 저쪽 화면을 찾아야 하는지가
@@ -431,6 +450,19 @@ export function CustomerDetail() {
       {/* 티켓 세부 내역·보드의 + 버튼과 **같은 모달, 같은 폼**입니다. 다른 것은 하나뿐:
           여기는 `conversation_id` 를 안 넘깁니다 — 이 화면에서 남기는 기록은 그 사람에게
           달린 것이지 한 문의에 달린 것이 아닙니다. */}
+      {creatingTicket && contact.email && (
+        <Modal title="티켓 만들기" hideCancel wide onClose={() => setCreatingTicket(false)}>
+          <div style={{ marginTop: 16 }}>
+            <NewTicketForm
+              contact={{ email: contact.email, full_name: contact.full_name,
+                         company: contact.company }}
+              onCancel={() => setCreatingTicket(false)}
+              onSaved={() => { setCreatingTicket(false); refresh(); }}
+            />
+          </div>
+        </Modal>
+      )}
+
       {(logging || editing) && (
         <Modal
           title={editing ? "히스토리 수정" : "히스토리 추가"}

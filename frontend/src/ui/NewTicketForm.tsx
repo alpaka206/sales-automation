@@ -3,6 +3,7 @@ import { getJSON, postForm } from "../lib/api";
 import { SubmitButton, useAction } from "./ActionButton";
 
 type Known = { found: boolean; full_name?: string; company?: string; tickets?: number };
+type Match = { id: number; email: string; full_name: string; company: string };
 
 /** 티켓을 손으로 만드는 폼 — 보드 New 열의 `+` 가 띄웁니다 (2026-09-08 운영자 지시).
  *
@@ -14,13 +15,46 @@ type Known = { found: boolean; full_name?: string; company?: string; tickets?: n
  *  필수로 만들면 「지금 아는 것만 적고 나중에 채운다」가 안 됩니다 — 전화를 받는 중에
  *  회사 이름을 물어봐야 하는 폼입니다.
  */
-export function NewTicketForm({ onSaved, onCancel }: {
+export function NewTicketForm({ contact, onSaved, onCancel }: {
+  /** 이미 정해진 고객. 고객 상세의 「티켓 생성」이 넘깁니다 — 그 화면에서는 누구의
+   *  티켓인지가 이미 정해져 있어서, 찾기도 이메일 칸도 물을 이유가 없습니다. */
+  contact?: { email: string; full_name: string; company: string | null };
   onSaved: () => void;
   onCancel: () => void;
 }) {
   const [known, setKnown] = useState<Known | null>(null);
-  const [name, setName] = useState("");
-  const [company, setCompany] = useState("");
+  const [email, setEmail] = useState(contact?.email ?? "");
+  const [name, setName] = useState(contact?.full_name ?? "");
+  const [company, setCompany] = useState(contact?.company ?? "");
+  const [query, setQuery] = useState("");
+  const [matches, setMatches] = useState<Match[] | null>(null);
+
+  /** **기존 고객 불러오기** (2026-09-08 운영자 지시). 이름·회사·이메일 아무 조각으로나
+   *  찾습니다 — 전화를 받는 중에는 상대 주소를 정확히 모르고 회사 이름만 기억날 때가
+   *  흔한데, 주소로만 찾게 하면 그때 새 연락처를 만들게 되고 같은 사람이 둘로 갈립니다. */
+  async function search(text: string) {
+    setQuery(text);
+    if (text.trim().length < 2) return setMatches(null);
+    try {
+      const found = await getJSON<{ rows: Match[] }>(
+        `/api/ui/contacts/search?q=${encodeURIComponent(text)}`,
+      );
+      setMatches(found.rows);
+    } catch {
+      setMatches(null);
+    }
+  }
+
+  /** 고른 사람으로 **덮어씁니다** — 찾기는 「이 사람이다」라고 집는 동작이라, 앞서 친
+   *  글자를 남겨 두면 반쯤 섞인 연락처가 만들어집니다. 이메일 blur 조회와 다른 점입니다. */
+  function pick(row: Match) {
+    setEmail(row.email);
+    setName(row.full_name);
+    setCompany(row.company);
+    setKnown({ found: true });
+    setMatches(null);
+    setQuery("");
+  }
 
   /** **이미 아는 주소면 채워 줍니다** (운영자: 「기존에 리드 히스토리에 있을 수도 있으니
    *  정보 불러올 수도 있도록」). 같은 사람을 두 번 적으면 이름 철자가 갈리고, 그때
@@ -57,8 +91,38 @@ export function NewTicketForm({ onSaved, onCancel }: {
 
   return (
     <form className="record-form" onSubmit={save}>
+      {/* **고객이 정해져 있으면 찾기를 안 그립니다** — 고객 상세에서 들어온 경우입니다.
+          그 화면에서 누구의 티켓인지는 이미 정해져 있고, 거기서 다른 사람을 고를 수 있게
+          두면 「이 고객의 티켓을 만든다」가 아니게 됩니다. */}
+      {!contact && (
+        <label className="quick-form__wide"><span className="field-label">기존 고객 불러오기</span>
+          <input className="input" value={query} autoComplete="off"
+                 onChange={(e) => void search(e.target.value)}
+                 placeholder="이름 · 회사 · 이메일 일부" />
+          {matches !== null && (
+            <div className="history-list" style={{ marginTop: 6 }}>
+              {matches.length === 0 ? (
+                <div className="t-xs t-subtle" style={{ padding: "6px 0" }}>
+                  없습니다 — 아래에 직접 적으시면 새로 만듭니다.
+                </div>
+              ) : matches.map((row) => (
+                <button key={row.id} type="button" className="btn btn--subtle btn--sm"
+                        style={{ display: "block", width: "100%", textAlign: "left",
+                                 marginBottom: 4 }}
+                        onClick={() => pick(row)}>
+                  {row.full_name || row.email}
+                  {row.company ? ` · ${row.company}` : ""}
+                  <span className="t-xs t-subtle"> · {row.email}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </label>
+      )}
       <label className="quick-form__wide"><span className="field-label">이메일 *</span>
         <input className="input" name="email" type="email" required
+               value={email} onChange={(e) => setEmail(e.target.value)}
+               readOnly={!!contact}
                onBlur={(e) => lookup(e.target.value)}
                placeholder="buyer@example.com" />
       </label>

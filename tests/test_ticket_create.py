@@ -144,3 +144,53 @@ def test_the_form_can_fill_itself_from_what_we_already_know(db):
                      "company": "Acme", "tickets": 1}
     assert missing == {"found": False}
     assert invalid == {"found": False}
+
+
+def test_an_existing_customer_can_be_found_by_any_fragment(db):
+    """**기존 고객 불러오기** (2026-09-08 운영자 지시) — 이름·회사·이메일 아무 조각으로나.
+
+    전화를 받는 중에는 상대 주소를 정확히 모르고 회사 이름만 기억날 때가 흔합니다.
+    주소로만 찾게 하면 그때 새 연락처를 만들게 되고, 같은 사람이 둘로 갈립니다.
+
+    **두 글자부터** 찾습니다 — 한 글자로는 거의 모든 행이 걸려서 고르개가 목록이 됩니다.
+    """
+    with db() as session:
+        session.add_all([
+            Contact(normalized_email="buyer@acme.com", email="buyer@acme.com",
+                    full_name="Acme Buyer", company="Acme Corp"),
+            Contact(normalized_email="other@zeta.com", email="other@zeta.com",
+                    full_name="Zeta Person", company="Zeta"),
+        ])
+        session.commit()
+
+    with TestClient(app) as client:
+        by_company = client.get("/api/ui/contacts/search?q=acme%20co").json()["rows"]
+        by_name = client.get("/api/ui/contacts/search?q=zeta%20per").json()["rows"]
+        by_email = client.get("/api/ui/contacts/search?q=buyer@").json()["rows"]
+        too_short = client.get("/api/ui/contacts/search?q=a").json()["rows"]
+
+    assert [r["email"] for r in by_company] == ["buyer@acme.com"]
+    assert [r["email"] for r in by_name] == ["other@zeta.com"]
+    assert [r["email"] for r in by_email] == ["buyer@acme.com"]
+    assert too_short == [], "한 글자로는 안 찾습니다"
+
+
+def test_the_customer_screen_makes_a_ticket_with_the_same_form():
+    """고객 상세의 「티켓 생성」은 보드 `+` 와 **같은 폼**입니다 — 다른 점은 누구의
+    티켓인지가 이미 정해져 있다는 것뿐입니다.
+
+    폼이 두 벌이면 필수 칸이 한쪽만 늘어나고, 그 어긋남은 둘을 나란히 놓기 전에는 안
+    보입니다. 그리고 그 화면에서 다른 사람을 고를 수 있게 두면 「이 고객의 티켓을
+    만든다」가 아니게 됩니다.
+    """
+    import pathlib
+
+    screen = pathlib.Path("frontend/src/screens/CustomerDetail.tsx").read_text(encoding="utf-8")
+    board = pathlib.Path("frontend/src/ui/Board.tsx").read_text(encoding="utf-8")
+    for source in (screen, board):
+        assert "NewTicketForm" in source
+
+    form = pathlib.Path("frontend/src/ui/NewTicketForm.tsx").read_text(encoding="utf-8")
+    # 고객이 정해져 있으면 찾기를 안 그리고 이메일을 못 고칩니다.
+    assert "{!contact && (" in form
+    assert "readOnly={!!contact}" in form
