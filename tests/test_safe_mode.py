@@ -523,3 +523,20 @@ def test_personal_mailbox_send_blocked(safe):
     with pytest.raises(ExternalWriteBlocked):
         send_mail("untae@estsoft.com", to="buyer@acme.com", subject="테스트",
                   html="<p>나가면 안 됩니다</p>")
+
+
+def test_ticket_and_contact_creation_blocked(safe):
+    """티켓·연락처를 **만드는** 것도 쓰기입니다 (2026-09-08, 보드 New 열의 `+`).
+
+    지금까지 허브스팟에 쓰는 것은 고치는 동작뿐이었습니다(단계 이동·플랜 되쓰기). 만드는
+    동작이 생겼으니 같은 관문을 지나야 합니다 — 안전 모드에서 티켓이 하나라도 만들어지면
+    그 대전제는 대전제가 아닙니다. 막는 자리가 라우트가 아니라 함수 첫 줄이라, 다음
+    호출자(배치·재시도)가 생겨도 그 앞을 지납니다.
+    """
+    from src.integrations.hubspot import HubSpotClient
+
+    client = HubSpotClient(token="test-token")
+    with pytest.raises(ExternalWriteBlocked):
+        client.find_or_create_contact_sync("buyer@acme.com", full_name="Acme Buyer")
+    with pytest.raises(ExternalWriteBlocked):
+        client.create_ticket_sync(subject="s", content="", stage_id="x", contact_id="1")

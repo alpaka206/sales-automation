@@ -38,7 +38,10 @@ from ..common.config import settings
 from ..common.domains import is_personal_domain
 from ..db.models import Contact, Conversation, CustomerProfile, Event
 from ..db.session import SessionLocal
-from ..integrations.hubspot import HubSpotClient, HubSpotNotConfigured
+# `B2B_PIPELINE_ID` 의 값은 저쪽에 있습니다 — 티켓을 **만드는** 쪽이 그 파일이라 거기서
+# 필요하고, 그쪽이 여기를 import 하면 순환이 됩니다. 이 이름으로 읽는 곳이 넷이라 그대로
+# 다시 내보냅니다.
+from ..integrations.hubspot import B2B_PIPELINE_ID, HubSpotClient, HubSpotNotConfigured
 from .stage_sync import _retire_superseded_drafts, local_stage_for
 
 logger = logging.getLogger(__name__)
@@ -51,8 +54,7 @@ BACKFILL_COMPLETED = "hubspot_backfill_completed"
 BACKFILL_FAILED = "hubspot_backfill_failed"
 BACKFILL_TERMINAL_KINDS = (BACKFILL_COMPLETED, BACKFILL_FAILED)
 
-# The [B2B] AI Dubbing ticket pipeline.
-B2B_PIPELINE_ID = "798618015"
+
 
 
 def request_hubspot_backfill(actor: str) -> str:

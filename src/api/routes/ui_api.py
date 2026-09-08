@@ -542,6 +542,42 @@ async def ui_reply_senders(message_id: int):
     return {**found, "chosen": chosen, "error": None}
 
 
+@router.get("/api/ui/contacts/lookup")
+def ui_contact_lookup(email: str = ""):
+    """이 주소를 우리가 이미 아는가 — 티켓 만들기 폼이 이름·회사를 채웁니다 (2026-09-08).
+
+    「기존에 리드 히스토리에 있을 수도 있으니 정보 불러올 수도 있도록」(운영자). 같은
+    사람을 두 번 적으면 이름 철자가 갈리고, 그때 화면에는 같은 회사가 둘로 보입니다.
+
+    **없으면 빈 답입니다** — 404 가 아닙니다. 처음 보는 주소는 오류가 아니라 흔한 경우고,
+    화면은 그때 빈 칸을 그대로 둡니다.
+    """
+    from ...db.models import Contact as _Contact
+    from ...db.session import SessionLocal
+
+    clean = (email or "").strip().lower()
+    if "@" not in clean:
+        return {"found": False}
+    with SessionLocal() as session:
+        row = session.query(_Contact).filter(_Contact.normalized_email == clean).first()
+        if row is None:
+            return {"found": False}
+        # 그 사람의 티켓이 이미 몇 건인지도 같이 말합니다 — 같은 문의를 또 만들려는
+        # 것인지 화면에서 알아챌 수 있어야 합니다.
+        tickets = (
+            session.query(Conversation)
+            .filter(Conversation.contact_id == row.id)
+            .count()
+        )
+    return {
+        "found": True,
+        "id": row.id,
+        "full_name": row.full_name or "",
+        "company": row.company or "",
+        "tickets": tickets,
+    }
+
+
 @router.get("/api/ui/mailboxes/me")
 def ui_mailbox_me(request: Request):
     """**지금 로그인한 사람**이 자기 사서함을 내줘야 하나 (이관 0114).

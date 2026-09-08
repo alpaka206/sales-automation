@@ -6,6 +6,7 @@ import { kst } from "../lib/format";
 import { Icon } from "./Icon";
 import { ActionButton } from "./ActionButton";
 import { Modal } from "./Modal";
+import { NewTicketForm } from "./NewTicketForm";
 import { ConfirmModal } from "./ConfirmModal";
 import { InteractionForm } from "./InteractionForm";
 import { SyncBanner, syncStateFrom, type SyncState } from "./SyncBanner";
@@ -60,6 +61,7 @@ export function Board({ stages, manualLogStages, dealDetails = {} }: {
   const [extra, setExtra] = useState<Record<string, Card[]>>({});
   const [dragging, setDragging] = useState<Card | null>(null);
   const [over, setOver] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
   const [sync, setSync] = useState<SyncState>(null);
   const [logging, setLogging] = useState<Card | null>(null);
   // 저장 **전에** 묻습니다. 여기서 고치는 값은 우리 DB 에서 끝나지 않고 허브스팟 티켓과 영업
@@ -153,6 +155,18 @@ export function Board({ stages, manualLogStages, dealDetails = {} }: {
             <section key={stage.key} className="kanban-column" id={`stage-${stage.key}`}>
               <header className="kanban-column__header">
                 <strong>{stage.label}</strong>
+                {/* **New 열에만 `+` 가 있습니다** (2026-09-08 운영자 지시). 전화로 받은
+                    문의·명함·영업이 먼저 연락한 건은 허브스팟 폼도 메일도 안 지나서 이
+                    콘솔에 행이 안 생겼습니다. 다른 열에 두지 않는 이유: 새로 만드는
+                    문의는 New 로 들어옵니다 — 협상 중인 문의를 처음부터 만들 일은
+                    없고, 있다면 만든 뒤 카드를 끌면 됩니다. */}
+                {stage.key === "new" && (
+                  <button type="button" className="btn btn--subtle btn--sm"
+                          aria-haspopup="dialog" title="티켓 만들기" aria-label="티켓 만들기"
+                          onClick={() => setCreating(true)}>
+                    <Icon name="plus" size={14} />
+                  </button>
+                )}
                 {/* The column's real size, not how many cards it drew. */}
                 <span className="kanban-column__count tnum">{stage.total}</span>
               </header>
@@ -308,6 +322,20 @@ export function Board({ stages, manualLogStages, dealDetails = {} }: {
           );
         })}
       </div>
+
+      {/* 티켓 만들기 — New 열 머리의 `+`. 라우트가 만든 티켓 화면으로 303 하므로
+          `postForm` 이 그 페이지를 따라가고, 저장 뒤 할 일은 창을 닫는 것뿐입니다. */}
+      {creating && (
+        <Modal title="티켓 만들기" hideCancel wide onClose={() => setCreating(false)}>
+          <div style={{ marginTop: 16 }}>
+            <NewTicketForm onCancel={() => setCreating(false)}
+                           onSaved={() => {
+                             setCreating(false);
+                             void queryClient.invalidateQueries();
+                           }} />
+          </div>
+        </Modal>
+      )}
 
       {/* ONE form for the whole board, pointed at the card whose + was clicked. */}
       {confirm && (

@@ -21,6 +21,12 @@ from .delivery import DeliveryPermanentError, DeliveryTransientError, DeliveryUn
 
 logger = logging.getLogger(__name__)
 
+# [B2B] AI Dubbing 티켓 파이프라인. **여기 있는 이유**: 티켓을 만들 때 어느 파이프라인에
+# 넣을지가 이 파일의 일인데, 원래 `agents/hubspot_backfill` 에 있어서 그리로 import 하면
+# 순환이 됩니다(그 모듈이 이 파일을 씁니다). 쓰는 곳이 다섯인데 값은 하나여야 하므로,
+# 저쪽은 여기서 가져다 다시 내보냅니다.
+B2B_PIPELINE_ID = "798618015"
+
 BASE_URL = "https://api.hubapi.com"
 
 # HubSpot stores rich-text fields (notes, emails sometimes) as HTML. We want plain
@@ -1776,6 +1782,96 @@ class HubSpotClient:
         if not results:
             return None
         return str(results[0].get("id") or "") or None
+
+    def find_or_create_contact_sync(
+        self, email: str, *, full_name: str = "", company: str = ""
+    ) -> str:
+        """그 주소의 허브스팟 연락처 id. 없으면 만듭니다.
+
+        **찾기가 먼저입니다.** 같은 사람이 연락처 둘로 갈리면 그 뒤로 티켓·메일·플랜이
+        두 갈래로 쌓이고, 합치는 것은 저쪽 화면에서 사람이 할 일이 됩니다. 이 앱이
+        지금까지 그것을 피해 온 이유이기도 합니다(Client ID 가 회사 하나에 하나인 것과
+        같은 이야기).
+
+        만들 때 이름을 성/이름으로 자릅니다 — 허브스팟에 「전체 이름」 칸이 없습니다.
+        공백이 없으면 통째로 성에 넣습니다: 이름 칸에 넣으면 목록이 성으로만 정렬될 때
+        그 사람만 맨 앞이나 맨 뒤에 섭니다.
+        """
+        guard_external_write("hubspot:create_contact")
+        clean = email.strip().lower()
+        headers = {"Authorization": f"Bearer {self.token}"}
+        with httpx.Client(headers=headers, timeout=30.0) as client:
+            found = _sync_request_with_retries(
+                client, "POST", f"{BASE_URL}/crm/v3/objects/contacts/search",
+                json={
+                    "filterGroups": [{"filters": [
+                        {"propertyName": "email", "operator": "EQ", "value": clean}
+                    ]}],
+                    "properties": ["email"],
+                    "limit": 1,
+                },
+            )
+            if found.status_code == 200:
+                results = found.json().get("results") or []
+                if results:
+                    return str(results[0]["id"])
+
+            first, _, last = full_name.strip().partition(" ")
+            properties = {"email": clean}
+            if last:
+                properties["firstname"], properties["lastname"] = first, last
+            elif first:
+                properties["lastname"] = first
+            if company.strip():
+                properties["company"] = company.strip()
+            created = _sync_request_with_retries(
+                client, "POST", f"{BASE_URL}/crm/v3/objects/contacts",
+                json={"properties": properties},
+            )
+        if created.status_code not in (200, 201):
+            raise HubSpotAPIError(
+                f"contact create failed ({created.status_code}): {created.text[:200]}"
+            )
+        return str(created.json()["id"])
+
+    def create_ticket_sync(
+        self, *, subject: str, content: str, stage_id: str, contact_id: str
+    ) -> str:
+        """파이프라인에 티켓 하나를 만들고 연락처에 붙입니다. 티켓 id 를 돌려줍니다.
+
+        **연결까지가 한 동작입니다.** 연락처 없는 티켓은 이 앱이 자리 표시 연락처를 지어
+        붙여야 하는 상태이고(`hubspot_backfill._placeholder_contact`), 방금 사람이 주소를
+        적어 만든 티켓이 그렇게 되면 안 됩니다. 연결이 실패하면 티켓은 남습니다 —
+        지우면 저쪽에 만들어진 것을 우리가 지우는 셈이고, 그건 다음 스윕이 주워 옵니다.
+        """
+        guard_external_write("hubspot:create_ticket")
+        headers = {"Authorization": f"Bearer {self.token}"}
+        with httpx.Client(headers=headers, timeout=30.0) as client:
+            created = _sync_request_with_retries(
+                client, "POST", f"{BASE_URL}/crm/v3/objects/tickets",
+                json={"properties": {
+                    "subject": subject,
+                    "content": content,
+                    "hs_pipeline": B2B_PIPELINE_ID,
+                    "hs_pipeline_stage": stage_id,
+                }},
+            )
+            if created.status_code not in (200, 201):
+                raise HubSpotAPIError(
+                    f"ticket create failed ({created.status_code}): {created.text[:200]}"
+                )
+            ticket_id = str(created.json()["id"])
+            link = _sync_request_with_retries(
+                client, "PUT",
+                f"{BASE_URL}/crm/v4/objects/tickets/{ticket_id}"
+                f"/associations/default/contacts/{contact_id}",
+            )
+        if link.status_code not in (200, 201, 204):
+            logger.warning(
+                "티켓 %s 를 만들었지만 연락처 %s 에 못 붙였습니다 (%s).",
+                ticket_id, contact_id, link.status_code,
+            )
+        return ticket_id
 
     def update_ticket_stage_sync(self, ticket_id: str, stage_id: str) -> None:
         """Move a ticket to a different pipeline stage. Raises on HTTP error."""

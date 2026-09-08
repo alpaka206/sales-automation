@@ -1072,6 +1072,94 @@ async def _log_interaction_to_hubspot(
         )
 
 
+@router.post("/pipeline/tickets")
+async def ticket_create(
+    request: Request,
+    email: str = Form(""),
+    full_name: str = Form(""),
+    company: str = Form(""),
+    subject: str = Form(""),
+    content: str = Form(""),
+):
+    """운영자가 티켓을 **직접** 만듭니다 (2026-09-08 지시). 보드 New 열의 `+` 가 부릅니다.
+
+    전화로 받은 문의, 행사장에서 받은 명함, 영업이 먼저 연락한 건 — 허브스팟 폼도 메일도
+    안 지나서 이 콘솔에 행이 안 생기던 것들입니다.
+
+    **허브스팟에 먼저 만듭니다.** 우리 쪽에만 만들면 그 문의는 티켓 번호가 없어서 회신을
+    보낼 스레드도, 단계를 미러링할 곳도 없습니다 — 화면에는 카드가 서는데 아무것도 못
+    하는 상태입니다. 저쪽이 실패하면 여기도 안 만듭니다.
+
+    **연락처는 찾고 나서 만듭니다** — 양쪽 다. 같은 사람이 둘로 갈리면 그 뒤로 티켓·메일·
+    플랜이 두 갈래로 쌓이고, 합치는 것은 사람이 할 일이 됩니다.
+
+    필수는 셋입니다: 이메일 · 이름 · 제목. 이메일은 연락처의 신원이고, 이름은 우리 열이
+    비을 수 없으며, 제목은 티켓의 이름이자 목록에 그려지는 글자입니다.
+    """
+    _require_integration_admin(request)
+    clean_email = email.strip().lower()
+    clean_name = full_name.strip()
+    clean_subject = subject.strip()
+    if "@" not in clean_email or not clean_name or not clean_subject:
+        return HTMLResponse("이메일 · 이름 · 제목은 필수입니다.", status_code=400)
+
+    from ...common.domains import is_personal_domain
+    from ...integrations.hubspot import HubSpotClient
+
+    client = HubSpotClient()
+    hubspot_contact_id = await asyncio.to_thread(
+        client.find_or_create_contact_sync,
+        clean_email, full_name=clean_name, company=company.strip(),
+    )
+    ticket_id = await asyncio.to_thread(
+        client.create_ticket_sync,
+        subject=clean_subject,
+        content=content.strip(),
+        stage_id=settings.HUBSPOT_TICKET_STAGE_NEW.strip(),
+        contact_id=hubspot_contact_id,
+    )
+
+    with SessionLocal() as session:
+        contact = (
+            session.query(Contact)
+            .filter(Contact.normalized_email == clean_email)
+            .first()
+        )
+        if contact is None:
+            domain = clean_email.rsplit("@", 1)[-1]
+            contact = Contact(
+                normalized_email=clean_email,
+                email=clean_email,
+                full_name=clean_name,
+                company=company.strip() or None,
+                # 개인 메일 도메인은 회사로 묶지 않습니다 — gmail 둘을 한 회사로 묶으면
+                # 남의 계약이 보입니다(CLAUDE.md).
+                domain=None if is_personal_domain(domain) else domain,
+            )
+            session.add(contact)
+        # **있던 연락처는 안 덮어씁니다.** 이 폼은 티켓을 만드는 자리이지 연락처를 고치는
+        # 자리가 아니고, 고치는 곳은 고객 상세입니다 — 여기서 덮으면 거기서 채운 값이
+        # 티켓 하나 만들 때마다 지워집니다. 빈 칸만 채웁니다.
+        contact.hubspot_contact_id = contact.hubspot_contact_id or hubspot_contact_id
+        contact.company = contact.company or (company.strip() or None)
+        session.flush()
+        conversation = Conversation(
+            contact_id=contact.id,
+            stage="new",
+            hubspot_ticket_id=ticket_id,
+            inquiry_subject=clean_subject,
+            # **`last_incoming_at` 은 비웁니다.** 그 칸은 워크북 append 대기열의
+            # 방아쇠라(CLAUDE.md), 채우면 이 티켓이 영업팀 공용 시트로 실려 나갑니다.
+            # 백필이 주워 온 티켓과 같은 규칙입니다.
+        )
+        session.add(conversation)
+        session.commit()
+        conversation_id = conversation.id
+
+    logger.info("티켓 %s 를 콘솔에서 만들었습니다 (문의 %s).", ticket_id, conversation_id)
+    return RedirectResponse(f"/app/tickets/{conversation_id}", status_code=303)
+
+
 @router.post("/customers/{contact_id}/interactions")
 async def interaction_add(
     contact_id: int,
