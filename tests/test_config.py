@@ -91,3 +91,25 @@ def test_literal_validation() -> None:
     s = Settings()
     assert s.LLM_PROVIDER == "gemini_vertex"
     assert s.APPROVAL_CHANNEL in ("slack", "none")
+
+
+def test_the_sending_address_needs_no_env_var():
+    """**기본값이 곧 운영값입니다** (2026-09-08 운영자 지시: 「언제나
+    perso.ai@estsoft.com 이 우선이니깐 저런 거 따로 안 해도 돼」).
+
+    `3114216464` 가 그 주소의 채널 계정 id 입니다. 비어 있으면 「우선 주소 없음」이라
+    회신이 스레드가 정하는 대로 나가는데, **그건 화면 어디에도 안 보입니다** — 실제로
+    개발 머신에서 그 상태였습니다.
+
+    그래도 **코드에 박지 않고 설정으로 둡니다**: 주소가 아니라 포털이 발급한 id 라 계정을
+    다시 연결하면 바뀌고, 박아 두면 그날 발송이 조용히 다른 주소로 나가거나 실패하며
+    고치려면 배포를 해야 합니다 — `.env` 한 줄이면 되는 일에.
+
+    (`conftest` 가 이 둘을 비우므로 여기서는 필드 기본값을 직접 봅니다.)
+    """
+    from src.common.config import Settings
+
+    fields = Settings.model_fields
+    assert fields["HUBSPOT_PREFERRED_EMAIL_CHANNEL_ACCOUNT_ID"].default == "3114216464"
+    # 고르개도 그 하나입니다 — 비우면 이 팀이 안 쓰는 `support@perso.ai` 가 섞입니다.
+    assert fields["HUBSPOT_REPLY_SENDER_ACCOUNT_IDS"].default == "3114216464"

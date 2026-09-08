@@ -55,6 +55,11 @@ os.environ.setdefault("LIVE_SHEETS_WRITES", "true")
 # fake so a developer's real Private App can never receive a write during `pytest`.
 os.environ["HUBSPOT_SENDER_ACTOR_ID"] = "A-test"
 os.environ["HUBSPOT_DEFAULT_EMAIL_CHANNEL_ACCOUNT_ID"] = "account-test"
+# 발신 주소 둘은 **비웁니다** — 2026-09-08 부터 기본값이 운영값(`3114216464`)이라, 안
+# 비우면 가짜 계정 id 로 세운 발송 시나리오가 그 울타리에 전부 걸립니다. 그 기본값이
+# 맞는지는 `tests/test_config.py` 가 따로 봅니다.
+os.environ["HUBSPOT_PREFERRED_EMAIL_CHANNEL_ACCOUNT_ID"] = ""
+os.environ["HUBSPOT_REPLY_SENDER_ACCOUNT_IDS"] = ""
 # A developer's real PUBLIC_BASE_URL (e.g. the Render URL) must not leak in — it is
 # the same-origin baseline for the CSRF check, so a non-empty value 403s the web
 # POST tests (recovery, customer ops) whose Origin is http://testserver.
