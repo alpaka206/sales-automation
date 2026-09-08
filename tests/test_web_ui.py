@@ -777,3 +777,27 @@ def test_the_event_stream_never_drops_someone_elses_change():
     api = pathlib.Path("frontend/src/lib/api.ts").read_text(encoding="utf-8")
     source = api[api.index("source.onmessage") :]
     assert "lastLocalWrite" not in source
+
+
+def test_background_work_tells_the_open_screens():
+    """**끝났다고 화면에 알려야 합니다** (2026-09-08 운영자 지적: 「답변 생성까지는 된 거
+    같은데 창 새로고침을 해야 불러오는 거 같아」).
+
+    SSE 를 쏘는 곳이 오래 **HTTP 미들웨어 하나뿐**이었습니다. 사람이 누른 저장은 알렸지만,
+    백그라운드가 초안을 다 써도 아무도 안 알려서 열려 있는 검토 화면이 그대로였습니다 —
+    그리고 운영자가 기다리는 것이 바로 그 화면입니다. 발송 워커도 같은 구멍이라, 나간
+    메일이 목록에 계속 「발송 대기」로 서 있었습니다.
+
+    **부르는 자리가 중요합니다.** `publish` 는 asyncio 큐에 넣는 일이라 `to_thread` 안에서
+    부르면 안 됩니다 — 작업이 끝나 이벤트 루프로 돌아온 자리여야 합니다.
+    """
+    import pathlib
+
+    for path, marker in (
+        ("src/agents/inbound_worker.py", "inbound-worker"),
+        ("src/agents/send_worker.py", "send-worker"),
+    ):
+        source = pathlib.Path(path).read_text(encoding="utf-8")
+        assert f'publish("{marker}")' in source, path
+        # `to_thread(...)` 로 넘기는 함수 안이 아니라 루프에서 직접 불러야 합니다.
+        assert "asyncio.to_thread(publish" not in source, path

@@ -397,6 +397,20 @@ async def run_inbound_worker() -> None:
 
             await asyncio.to_thread(record_worker_heartbeat, "inbound")
             handled = await asyncio.to_thread(process_one_inbound_job)
+            if handled:
+                # **끝났다고 화면에 알립니다** (2026-09-08 운영자 지적: 「답변 생성까지는
+                # 된 거 같은데 창 새로고침을 해야 불러오는 거 같아」).
+                #
+                # SSE 를 쏘는 곳이 **HTTP 미들웨어 하나뿐**이었습니다. 사람이 누른 저장은
+                # 알렸지만, 백그라운드가 초안을 다 써도 아무도 안 알려서 열려 있는 검토
+                # 화면이 그대로였습니다 — 그리고 운영자가 기다리는 것이 바로 그 화면입니다.
+                #
+                # **여기가 이벤트 루프입니다.** `publish` 는 asyncio 큐에 넣는 일이라
+                # `to_thread` 안에서 부르면 안 됩니다. 작업이 끝나 루프로 돌아온 이 자리가
+                # 맞습니다.
+                from ..api.routes.ui_api import publish
+
+                publish("inbound-worker")
         except asyncio.CancelledError:
             raise
         except Exception:

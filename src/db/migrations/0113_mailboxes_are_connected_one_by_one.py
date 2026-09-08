@@ -39,13 +39,20 @@ def up(engine: Engine) -> None:
         return
     # `enabled` 의 기본값은 참입니다 — 방금 연결한 사서함이 꺼져 있으면 「연결했는데 아무
     # 일도 안 일어난다」가 됩니다.
-    boolean = "BOOLEAN" if engine.dialect.name != "sqlite" else "INTEGER"
+    #
+    # **타입과 기본값을 같이 갈라야 합니다.** 타입만 갈랐다가 배포가 깨졌습니다 —
+    # Postgres 는 `BOOLEAN ... DEFAULT 1` 을 거부합니다(`column "enabled" is of type
+    # boolean but default expression is of type integer`). SQLite 는 불리언이 정수라
+    # 로컬에서는 통과했고, 그래서 **운영 첫 배포에서야 드러났습니다.**
+    sqlite = engine.dialect.name == "sqlite"
+    boolean = "INTEGER" if sqlite else "BOOLEAN"
+    yes = "1" if sqlite else "TRUE"
     with engine.begin() as conn:
         conn.execute(text(f"""
             CREATE TABLE mailbox_accounts (
                 email VARCHAR(320) PRIMARY KEY,
                 encrypted_payload TEXT NOT NULL,
-                enabled {boolean} NOT NULL DEFAULT 1,
+                enabled {boolean} NOT NULL DEFAULT {yes},
                 connected_by VARCHAR(320),
                 last_error TEXT,
                 collect_from TIMESTAMP,

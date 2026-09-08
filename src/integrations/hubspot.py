@@ -590,15 +590,26 @@ class HubSpotClient:
         # 쓸 수 있는 스레드」를 고르려면 인박스를 알아야 합니다.
         candidates: list[tuple[str, str, str, str, str]] = []
         target_threads: list[dict] = []
-        for thread in threads:
-            thread_id = str(thread.get("id") or "")
-            if not thread_id:
-                continue
-            messages_data = await self._get_conversation_json(
-                f"/conversations/v3/conversations/threads/{thread_id}/messages",
+
+        # **스레드들을 동시에 읽습니다** (2026-09-08 운영자 지적: 「발송 주소는 왜 이렇게
+        # 늦게 떠」). 실측상 티켓 하나에 스레드가 최대 7개인데 하나씩 순서대로 물어서,
+        # 왕복 하나가 200ms 인 환경에서는 그것만으로 1.5초가 넘었습니다 — 그 시간 동안
+        # 화면에는 발신 고르개가 아예 없습니다.
+        #
+        # **순서는 그대로입니다**: `gather` 가 넘긴 순서대로 돌려주므로 아래 루프가 보던
+        # 것과 같은 차례로 돕니다. 뒤에서 시각으로 다시 정렬하지만, 같은 초에 오간 메시지의
+        # 앞뒤가 회차마다 바뀌면 고르개의 기본값이 흔들립니다.
+        live = [t for t in threads if str(t.get("id") or "")]
+        pages = await asyncio.gather(*(
+            self._get_conversation_json(
+                f"/conversations/v3/conversations/threads/{str(t['id'])}/messages",
                 params={"limit": 100},
-                action=f"thread {thread_id} message lookup",
+                action=f"thread {t['id']} message lookup",
             )
+            for t in live
+        ))
+        for thread, messages_data in zip(live, pages, strict=True):
+            thread_id = str(thread.get("id") or "")
             messages = [
                 message
                 for message in (messages_data.get("results") or [])

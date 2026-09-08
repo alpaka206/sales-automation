@@ -34,9 +34,14 @@ def up(engine: Engine) -> None:
         return
     if "collect_mailbox" in {c["name"] for c in inspector.get_columns("users")}:
         return
-    boolean = "BOOLEAN" if engine.dialect.name != "sqlite" else "INTEGER"
+    # 타입과 기본값을 **같이** 갈라야 합니다 — Postgres 는 `BOOLEAN ... DEFAULT 0` 을
+    # 거부합니다. SQLite 는 불리언이 정수라 로컬에서는 통과합니다(0113 이 그것으로 운영
+    # 배포에서 깨졌습니다).
+    sqlite = engine.dialect.name == "sqlite"
+    boolean = "INTEGER" if sqlite else "BOOLEAN"
+    no = "0" if sqlite else "FALSE"
     with engine.begin() as conn:
         conn.execute(text(
-            f"ALTER TABLE users ADD COLUMN collect_mailbox {boolean} NOT NULL DEFAULT 0"
+            f"ALTER TABLE users ADD COLUMN collect_mailbox {boolean} NOT NULL DEFAULT {no}"
         ))
     logger.info("0114: users.collect_mailbox 를 더했습니다.")

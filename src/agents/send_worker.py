@@ -520,6 +520,13 @@ async def run_send_worker() -> None:
 
             if sent_this_tick:
                 logger.info("Send worker tick: dispatched %d message(s).", sent_this_tick)
+                # **나갔다고 화면에 알립니다** (2026-09-08). 초안 워커와 같은 구멍이었습니다 —
+                # SSE 를 쏘는 곳이 HTTP 미들웨어뿐이라, 백그라운드가 메일을 보내도 열려 있는
+                # 목록은 그 초안을 계속 「발송 대기」로 그렸습니다. 여기는 이벤트 루프라
+                # `publish` 를 바로 부를 수 있습니다.
+                from ..api.routes.ui_api import publish
+
+                publish("send-worker")
 
         except Exception:
             logger.exception("Send worker tick error.")
