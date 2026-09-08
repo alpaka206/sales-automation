@@ -506,3 +506,20 @@ async def test_safe_mode_still_records_local_send_bookkeeping(safe, monkeypatch)
 # reply must still set Message.replied — is pinned by
 # tests/test_inbound_flow.py::test_test_sent_reply_is_marked_answered_in_safe_mode,
 # which already has the LLM/knowledge fixtures that path needs.
+
+
+def test_personal_mailbox_send_blocked(safe):
+    """개인 사서함 발송도 **같은 관문**을 지납니다 (2026-09-08, 이관 0113).
+
+    회신이 나가는 문이 둘이 됐습니다 — 허브스팟 Conversations 와 연결된 Gmail 사서함.
+    **문이 둘인데 관문이 하나뿐이면 그 대전제는 대전제가 아닙니다.** 허브스팟 발송이
+    `guard_external_write` 를 함수 첫 줄에서 지나듯 이쪽도 같은 자리에서 지납니다.
+
+    막는 자리가 라우트가 아니라 `send_mail` 안이라서, 다음 호출자(재시도·배치)가 생겨도
+    그 앞을 지납니다. 안전 모드에서는 네트워크에 닿기 전에 끝나므로 토큰도 필요 없습니다.
+    """
+    from src.integrations.gmail import send_mail
+
+    with pytest.raises(ExternalWriteBlocked):
+        send_mail("untae@estsoft.com", to="buyer@acme.com", subject="테스트",
+                  html="<p>나가면 안 됩니다</p>")

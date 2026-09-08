@@ -69,7 +69,17 @@ def _clean_channel_account_id(value: str | None) -> str | None:
     생깁니다. 그리고 이 라우트는 HubSpot 왕복 없이 끝나야 합니다.
     """
     v = (value or "").strip()
-    return v if v.isdigit() else None
+    if v.isdigit():
+        return v
+    # **개인 사서함은 `gmail:<주소>` 입니다** (2026-09-08 운영자 지시). 허브스팟 계정 id 는
+    # 숫자라 두 형식이 절대 안 겹치고, 그래서 발송이 어느 문으로 나갈지 이 값 하나로
+    # 갈립니다 — 「어느 주소로 보낼까」와 「어느 경로로 보낼까」가 같은 질문이기 때문입니다.
+    #
+    # 여기서는 **모양만** 봅니다. 그 사서함이 정말 연결돼 있는지는 발송 직전에 압니다 —
+    # 숫자 id 때와 같은 이유입니다(목록을 두 곳에서 만들면 언젠가 갈립니다).
+    if v.startswith("gmail:") and "@" in v[6:]:
+        return f"gmail:{v[6:].strip().lower()}"
+    return None
 
 
 def _clean_cc_addresses(value: str | None) -> str | None:

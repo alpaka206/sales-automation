@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from email.utils import getaddresses
 from functools import partial
@@ -195,6 +196,15 @@ async def send(message: Message) -> None:
 
     signature_html = branded_signature_html(getattr(message, "signature_key", None))
     rich_text = to_html_email(message.body or "", signature_html=signature_html)
+
+    # **개인 사서함을 고르면 그 문으로 나갑니다** (2026-09-08 운영자 지시).
+    #
+    # 「어느 주소로 보낼까」와 「어느 경로로 보낼까」는 같은 질문이라 값 하나로 갈립니다:
+    # 숫자면 허브스팟 채널 계정, `gmail:` 이면 그 사서함. 두 형식이 절대 안 겹칩니다.
+    chosen_raw = (getattr(message, "channel_account_id", None) or "").strip()
+    if chosen_raw.startswith("gmail:"):
+        await _send_from_mailbox(message, chosen_raw[6:], recipients[0], rich_text)
+        return
     client = HubSpotClient()
     try:
         # 발신 주소는 세 단계로 정해집니다 (이관 0105):
@@ -269,3 +279,92 @@ async def send(message: Message) -> None:
         context.thread_id,
         hubspot_message_id,
     )
+
+
+async def _send_from_mailbox(
+    message: Message, mailbox: str, recipient: str, rich_text: str
+) -> None:
+    """개인 사서함에서 한 통. **원본이 있으면 답장, 없으면 새 메일입니다.**
+
+    원본을 찾는 자는 「이 티켓에 개인함으로 들어온 마지막 고객 메일」입니다. 허브스팟으로
+    온 문의에 개인 주소를 골라 보내는 경우에는 그런 원본이 없고, 그때는 붙일 스레드도
+    `In-Reply-To` 도 없으니 **새 메일**이 유일하게 정직한 결과입니다(운영자 확인).
+
+    **나간 뒤 허브스팟 티켓에 노트로 남깁니다.** 안 그러면 고객이 받은 메일이 티켓에
+    없고, 그건 이 앱이 지금까지 피해 온 상태입니다 — 대화가 두 갈래가 됩니다.
+    """
+    from sqlalchemy import select
+
+    from ...db.models import Contact, CustomerInteraction
+    from ...db.session import SessionLocal
+    from ..gmail import send_mail, source_message
+
+    conversation = message.conversation
+    conversation_id = getattr(conversation, "id", None)
+    ticket_id = getattr(conversation, "hubspot_ticket_id", None)
+
+    # **원본의 id 만 들고 나옵니다** — 세션 밖에서 ORM 객체를 만지면 그 속성을 읽는
+    # 순간 DetachedInstanceError 이고, 그건 발송 직전에 터집니다.
+    origin_id = ""
+    if conversation_id is not None:
+        with SessionLocal() as session:
+            found_id = session.scalar(
+                select(CustomerInteraction.external_id)
+                .where(
+                    CustomerInteraction.conversation_id == conversation_id,
+                    CustomerInteraction.external_id.like("gmail:%"),
+                    CustomerInteraction.direction == "inbound",
+                )
+                .order_by(CustomerInteraction.happened_at.desc())
+                .limit(1)
+            )
+            origin_id = (found_id or "")[6:]
+
+    thread_id = in_reply_to = ""
+    if origin_id:
+        try:
+            found = await asyncio.to_thread(source_message, mailbox, origin_id)
+            thread_id, in_reply_to = found["thread_id"], found["message_id"]
+        except Exception:
+            # 원본을 못 읽어도 **보냅니다** — 답장이 새 메일이 될 뿐이고, 못 보내는 것보다
+            # 낫습니다. 그리고 이유는 로그에 남습니다.
+            logger.warning("원본 메일을 못 읽어 새 메일로 보냅니다 (%s)", mailbox,
+                           exc_info=True)
+
+    cc = parse_cc_addresses(getattr(message, "cc_addresses", None), exclude=recipient)
+    sent_id = await asyncio.to_thread(
+        partial(
+            send_mail,
+            mailbox,
+            to=recipient,
+            subject=message.subject or "",
+            html=rich_text,
+            cc=cc,
+            thread_id=thread_id,
+            in_reply_to=in_reply_to,
+        )
+    )
+    # 허브스팟 메시지가 아니라 **Gmail 메시지**입니다. `hubspot_message_id` 에 넣으면
+    # 티켓 화면이 그 id 로 스레드를 찾다가 못 찾습니다 — SMTP 시절 유물인 이 칸이 뜻이
+    # 정확히 맞습니다(우리가 보낸 메일의 provider id).
+    message.smtp_message_id = sent_id
+    message.in_reply_to = in_reply_to or None
+    logger.info(
+        "개인 사서함 %s 에서 %s 로 보냈습니다 (%s).",
+        mailbox, recipient, "답장" if in_reply_to else "새 메일",
+    )
+
+    if ticket_id:
+        with SessionLocal() as session:
+            contact = session.get(Contact, conversation.contact_id)
+            hubspot_contact_id = contact.hubspot_contact_id if contact else None
+        if hubspot_contact_id:
+            from ...agents.mailbox_sync import _note_on_ticket
+
+            await _note_on_ticket(
+                hubspot_contact_id,
+                ticket_id,
+                f"[개인 메일함 {mailbox} 에서 발송] {message.subject or ''}"
+                f"\n\n{message.body or ''}",
+                None,
+            )

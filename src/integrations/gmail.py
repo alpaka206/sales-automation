@@ -25,14 +25,17 @@
 
 from __future__ import annotations
 
+import base64
 import logging
 import time
+from collections.abc import Sequence
 from datetime import datetime, timezone
 from urllib.parse import urlencode
 
 import httpx
 
 from ..common.config import settings
+from ..common.safe_mode import guard_external_write
 from ..db.models import MailboxAccount
 from ..db.session import SessionLocal
 from .google_oauth import (
@@ -380,3 +383,98 @@ def mark_polled(email: str) -> None:
         if row is not None:
             row.last_polled_at = datetime.now(timezone.utc)
             session.commit()
+
+
+# --------------------------------------------------------------------------- #
+# 발송 — 개인 사서함에서 (2026-09-08 운영자 지시)
+#
+# 「개인함으로 온 메일에는 개인함으로 답한다」가 규칙입니다. 여기서 읽고 Gmail 로 가서
+# 답장을 쓰라고 하면 화면을 둘로 쪼개는 것이고, 중요한 메일 한 통을 그냥 보내야 할
+# 때도 있습니다.
+#
+# **원본이 있으면 답장, 없으면 새 메일입니다.** 허브스팟으로 온 문의에 개인 주소를 골라
+# 보내는 경우가 뒤엣것입니다 — 붙일 스레드도 `In-Reply-To` 도 없으니 새 메일이 유일하게
+# 정직한 결과입니다(운영자 확인).
+# --------------------------------------------------------------------------- #
+
+SEND_URL = "https://gmail.googleapis.com/gmail/v1/users/me/messages/send"
+_MESSAGE_URL = "https://gmail.googleapis.com/gmail/v1/users/me/messages"
+
+
+def source_message(mailbox: str, gmail_message_id: str) -> dict:
+    """답장할 원본의 `threadId` 와 `Message-ID`.
+
+    **저장해 두지 않고 그때 물어봅니다.** 수집할 때 베껴 두면 열이 둘 늘고, 그 사본은
+    원본과 갈릴 수 있습니다 — 그리고 이 값이 필요한 순간은 발송 직전 한 번뿐이라 왕복
+    하나가 아깝지 않습니다.
+    """
+    with httpx.Client(
+        headers={"Authorization": f"Bearer {access_token(mailbox)}"}, timeout=30.0
+    ) as client:
+        response = client.get(
+            f"{_MESSAGE_URL}/{gmail_message_id}",
+            params={"format": "metadata", "metadataHeaders": "Message-ID"},
+        )
+    response.raise_for_status()
+    body = response.json()
+    headers = {
+        str(h.get("name", "")).lower(): str(h.get("value", ""))
+        for h in ((body.get("payload") or {}).get("headers") or [])
+    }
+    return {"thread_id": str(body.get("threadId") or ""),
+            "message_id": headers.get("message-id", "")}
+
+
+def send_mail(
+    mailbox: str,
+    *,
+    to: str,
+    subject: str,
+    html: str,
+    cc: Sequence[str] = (),
+    thread_id: str = "",
+    in_reply_to: str = "",
+) -> str:
+    """그 사서함에서 한 통 보냅니다. 보낸 메시지의 Gmail id 를 돌려줍니다.
+
+    **쓰기 관문을 가장 먼저 지납니다** — 안전 모드에서는 네트워크에 닿기도 전에
+    막힙니다. 허브스팟 발송과 **같은 규칙**이어야 합니다: 문이 둘인데 관문이 하나뿐이면
+    그 대전제는 대전제가 아닙니다.
+
+    `thread_id` 와 `in_reply_to` 는 **둘 다 있어야 답장이 됩니다.** 헤더만 넣으면 받는
+    쪽에서는 묶이는데 우리 사서함에서는 새 대화로 서고, `threadId` 만 넣으면 Gmail 이
+    거절합니다(그 스레드의 메시지와 헤더가 안 맞습니다).
+    """
+    guard_external_write("gmail:send_mail")
+
+    from email.message import EmailMessage
+
+    mail = EmailMessage()
+    mail["To"] = to
+    mail["From"] = mailbox
+    mail["Subject"] = subject
+    if cc:
+        mail["Cc"] = ", ".join(cc)
+    if in_reply_to:
+        mail["In-Reply-To"] = in_reply_to
+        # `References` 도 같이 넣습니다 — 어떤 메일 클라이언트는 이쪽만 봅니다.
+        mail["References"] = in_reply_to
+    # 본문은 HTML 한 벌입니다. 글자 대역을 같이 실으면 두 벌을 맞춰 두어야 하고, 이
+    # 저장소는 이미 HTML 로 보내고 있습니다(`to_html_email`).
+    mail.set_content(html, subtype="html")
+
+    payload: dict[str, str] = {
+        "raw": base64.urlsafe_b64encode(mail.as_bytes()).decode("ascii")
+    }
+    if thread_id and in_reply_to:
+        payload["threadId"] = thread_id
+
+    with httpx.Client(
+        headers={"Authorization": f"Bearer {access_token(mailbox)}"}, timeout=30.0
+    ) as client:
+        response = client.post(SEND_URL, json=payload)
+    if response.is_error:
+        raise MailboxTokenError(
+            f"{mailbox}: 발송 실패 (HTTP {response.status_code}) {response.text[:200]}"
+        )
+    return str(response.json().get("id") or "")

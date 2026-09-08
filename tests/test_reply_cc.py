@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import json
+from unittest.mock import patch
 
 import httpx
 import pytest
@@ -172,3 +173,76 @@ def test_an_address_this_team_does_not_use_is_not_offered(monkeypatch):
     ]
     kept = [row["address"] for row in found if row["address"] not in excluded]
     assert kept == ["buyer@acme.com", "boss@estsoft.com"]
+
+
+# --------------------------------------------------------------------------- #
+# 개인 사서함에서 보내기 (2026-09-08 운영자 지시)
+# --------------------------------------------------------------------------- #
+def test_the_picker_value_decides_which_door_the_mail_leaves_by():
+    """**「어느 주소로」와 「어느 경로로」는 같은 질문입니다.**
+
+    허브스팟 채널 계정 id 는 숫자고 개인 사서함은 `gmail:<주소>` 라 두 형식이 절대
+    안 겹칩니다. 그래서 값 하나로 갈리고, 화면은 고르기만 합니다.
+    """
+    from src.api.routes.messages import _clean_channel_account_id
+
+    assert _clean_channel_account_id("3114216464") == "3114216464"
+    assert _clean_channel_account_id("gmail:UnTae@Estsoft.com") == "gmail:untae@estsoft.com"
+    # 모양이 아니면 「안 고름」입니다 — 그때는 예전처럼 스레드가 정합니다.
+    assert _clean_channel_account_id("gmail:notanaddress") is None
+    assert _clean_channel_account_id("support@perso.ai") is None
+    assert _clean_channel_account_id("") is None
+
+
+@respx.mock
+def test_a_personal_mailbox_send_is_a_reply_only_when_there_is_an_original():
+    """**원본이 있으면 답장, 없으면 새 메일** (운영자 확인).
+
+    허브스팟으로 온 문의에 개인 주소를 골라 보내는 경우가 뒤엣것입니다 — 붙일 스레드도
+    `In-Reply-To` 도 없으니 새 메일이 유일하게 정직한 결과입니다.
+
+    `threadId` 는 **헤더와 함께일 때만** 넣습니다: 헤더 없이 threadId 만 주면 Gmail 이
+    거절하고, threadId 없이 헤더만 주면 받는 쪽에서는 묶이는데 우리 사서함에서 새
+    대화로 섭니다.
+    """
+    import base64
+
+    from src.integrations import gmail
+
+    route = respx.post(gmail.SEND_URL).mock(
+        return_value=httpx.Response(200, json={"id": "g-1"})
+    )
+    respx.post(gmail.TOKEN_URL).mock(
+        return_value=httpx.Response(200, json={"access_token": "t", "expires_in": 3600})
+    )
+
+    with patch.object(gmail, "access_token", return_value="t"):
+        gmail.send_mail("untae@estsoft.com", to="buyer@acme.com", subject="Re: 문의",
+                        html="<p>안녕하세요</p>", cc=["boss@estsoft.com"],
+                        thread_id="th-1", in_reply_to="<abc@mail>")
+        gmail.send_mail("untae@estsoft.com", to="buyer@acme.com", subject="안내",
+                        html="<p>새 메일</p>")
+
+    reply = json.loads(route.calls[0].request.content)
+    fresh = json.loads(route.calls[1].request.content)
+    assert reply["threadId"] == "th-1", "원본이 있으면 그 스레드에 붙습니다"
+    assert "threadId" not in fresh, "원본이 없으면 새 메일입니다"
+
+    raw = base64.urlsafe_b64decode(reply["raw"]).decode("utf-8", "replace")
+    assert "In-Reply-To: <abc@mail>" in raw and "References: <abc@mail>" in raw
+    assert "From: untae@estsoft.com" in raw
+    assert "Cc: boss@estsoft.com" in raw
+
+
+def test_the_gmail_door_passes_the_same_write_guard():
+    """**문이 둘인데 관문이 하나뿐이면 그 대전제는 대전제가 아닙니다.**
+
+    허브스팟 발송이 `guard_external_write` 를 함수 첫 줄에서 지나듯, Gmail 발송도
+    같습니다 — 안전 모드에서는 네트워크에 닿기도 전에 막힙니다.
+    """
+    import pathlib
+
+    source = pathlib.Path("src/integrations/gmail.py").read_text(encoding="utf-8")
+    body = source[source.index("def send_mail("):]
+    body = body[: body.index("\n    from email.message")]
+    assert 'guard_external_write("gmail:send_mail")' in body

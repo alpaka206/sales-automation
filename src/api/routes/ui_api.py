@@ -523,6 +523,20 @@ async def ui_reply_senders(message_id: int):
     # 같은 이유로 실패하므로 화면이 적을 수 있게 `error` 로 올립니다 — 목록이 있으면 고를 수
     # 있으니 굳이 경고하지 않습니다.
     reason = found.pop("reason", "")
+    # **연결된 개인 사서함도 고를 수 있습니다** (2026-09-08 운영자 지시). 고르면 그
+    # 사서함에서 나가고, 그 티켓에 개인함으로 온 원본이 있으면 **그 메일의 답장으로**
+    # 갑니다 — 없으면 새 메일입니다.
+    #
+    # **목록은 서버가 만듭니다.** 화면이 두 종류를 스스로 섞으면 발송이 거절하는 값이
+    # 생깁니다 — 허브스팟 계정 목록을 서버가 만드는 이유와 같습니다.
+    from ...integrations.gmail import list_accounts as mailbox_accounts
+
+    found["senders"] = list(found["senders"]) + [
+        {"id": f"gmail:{row.email}", "address": f"{row.email} (개인 메일함)",
+         "is_default": False}
+        for row in mailbox_accounts()
+        if row.enabled and not row.last_error
+    ]
     if not found["senders"] and reason:
         return {**found, "chosen": chosen, "error": reason}
     return {**found, "chosen": chosen, "error": None}
