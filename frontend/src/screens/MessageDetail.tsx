@@ -55,7 +55,6 @@ type Detail = {
                  total_amount: number | null; next_pay_on: string | null;
                  next_pay_amount: number | null }[];
   } | null;
-  signatures: { key: string; name: string }[];
   ticket: {
     id: number | null; ticket_id: string | null; stage: string | null;
     /** Won Type / Lost Reason. 보드 카드와 같은 값 — 지금 단계의 목록에 있을 때만 옵니다. */
@@ -144,6 +143,16 @@ export function MessageDetail() {
   // 받으면 답을 읽는 일이 이 조회를 기다립니다. 못 가져오면 고르개가 안 뜰 뿐, 발송은
   // 예전대로 됩니다(스레드가 정합니다).
   const msgId = data?.msg?.id;
+  /** 서명 목록 — **세션에 한 번만** 받습니다 (2026-09-08). 어디서나 같은 값이라
+   *  티켓마다 다시 물을 이유가 없고, DB 가 도쿄에 있어서 그 한 번이 곧 왕복 하나입니다.
+   *  `staleTime: Infinity` 라 이 콘솔이 열려 있는 동안 다시 안 갑니다 — 서명을 고치면
+   *  그 화면의 저장이 SSE 를 쏘고, 그때 무효화되어 다시 받습니다. */
+  const { data: signatureList } = useQuery({
+    queryKey: ["signatures"],
+    queryFn: () => getJSON<{ signatures: { key: string; name: string }[] }>("/api/ui/signatures"),
+    staleTime: Infinity,
+  });
+
   const { data: senders } = useQuery({
     queryKey: ["reply-senders", msgId],
     queryFn: () => getJSON<{ senders: { id: string; address: string; is_default: boolean }[];
@@ -175,7 +184,7 @@ export function MessageDetail() {
    *  이 파일에서 셋을 따로 쓰는 자리가 하나도 없습니다.
    *
    *  묶으니 딸려 오는 것 둘: 초안이 바뀔 때 렌더 중 setState 가 다섯 번에서 한 번이
-   *  되고(아래 `loadedId` 블록), 편집기를 컴포넌트로 뺄 때 넘길 값이 열 개에서 둘이
+   *  되고(아래 `loadedKey` 블록), 편집기를 컴포넌트로 뺄 때 넘길 값이 열 개에서 둘이
    *  됩니다(`draft` · `patch`).
    *
    *  **읽는 이름은 그대로 둡니다** — 바로 아래에서 풀어 쓰므로 이 파일의 나머지 60여
@@ -202,7 +211,15 @@ export function MessageDetail() {
   const [rejecting, setRejecting] = useState(false);
   const [reason, setReason] = useState("");
   const [showOrig, setShowOrig] = useState<Record<number, boolean>>({});
-  const [loadedId, setLoadedId] = useState<number | null>(null);
+  /** 화면에 실어 둔 초안이 **어느 행의 어느 상태**였나. id 만으로는 부족합니다 —
+   *  「메일 발송」이 만든 빈 행을 초안 기계가 **같은 행에 덮어쓰므로** id 가 안 바뀌고,
+   *  그래서 본문이 채워져도 화면이 그것을 무시했습니다. 새로고침해야 보이던 이유가
+   *  이것입니다: 컴포넌트가 다시 마운트되면서 이 값이 비어야 다시 실었습니다
+   *  (2026-09-08 운영자 지적).
+   *
+   *  상태를 같이 보는 이유: 초안이 다 써지면 `drafting` → `pending_approval` 로 바뀝니다.
+   *  운영자가 고치는 동안에는 상태가 안 바뀌므로 타이핑 중에 덮일 일이 없습니다. */
+  const [loadedKey, setLoadedKey] = useState<string | null>(null);
   const [logging, setLogging] = useState(false);
   // 고치는 중인 기록 — 「추가하기」와 같은 모달, 같은 폼입니다.
   const [editing, setEditing] = useState<Interaction | null>(null);
@@ -247,8 +264,9 @@ export function MessageDetail() {
   // first frame showed an empty 제목/본문 and the text appeared a moment later — the page
   // visibly changing after it had already loaded. Setting state while rendering makes
   // React re-render before paint instead; nothing is ever shown empty.
-  if (data?.msg && loadedId !== data.msg.id) {
-    setLoadedId(data.msg.id);
+  const draftKey = data?.msg ? `${data.msg.id}:${data.msg.status}` : null;
+  if (data?.msg && draftKey && loadedKey !== draftKey) {
+    setLoadedKey(draftKey);
     // 다섯 번이던 렌더 중 setState 가 한 번입니다.
     setDraft({
       subject: data.msg.subject,
@@ -452,11 +470,19 @@ export function MessageDetail() {
       await postForm(`/messages/${msg.id}/${action}`,
                      { subject, body, signature_key: signature, channel_account_id: sender, cc_addresses: cc, ...extra });
       setNote("완료되었습니다.");
-      // 허브스팟 패널은 빼고 무효화합니다 — 우리가 저장한다고 저쪽 값이 바뀌지 않는데,
-      // 같이 걸면 콘솔의 모든 저장이 열려 있는 티켓 탭마다 외부 왕복을 한 번씩 냅니다.
-      await queryClient.invalidateQueries({
-        predicate: (query) => query.queryKey[0] !== "hubspot-record",
-      });
+      // **이 티켓 하나만 다시 읽습니다** (2026-09-08 운영자 지적: 「거절이든 메일 발송이든
+      // 바로바로 떠야 할 거 아냐」).
+      //
+      // 예전에는 허브스팟 패널만 빼고 **나머지 전부**를 무효화하고 그것을 기다렸습니다.
+      // 그 「나머지」에 발신 주소 목록(`reply-senders`)이 있었고, 그건 **허브스팟에 묻는
+      // 질의**입니다 — 스레드 목록 + 스레드마다 메시지. 그래서 거절 한 번이 우리 DB 쓰기
+      // 하나가 아니라 **허브스팟 왕복 여러 번**을 기다렸습니다. 그동안 버튼은 계속
+      // 돌고 있습니다. (`staleTime` 은 소용이 없습니다 — 무효화는 그걸 무시하고 다시
+      // 가져옵니다.)
+      //
+      // 고친 뒤로 무효화되는 것은 이 티켓의 payload 하나입니다. 발신 주소도 플랜 카드도
+      // 우리가 회신을 거절한다고 바뀌지 않습니다.
+      await queryClient.invalidateQueries({ queryKey: key });
     } catch (error) {
       setNote(`실패: ${String(error)}`);
     }
@@ -713,7 +739,7 @@ export function MessageDetail() {
                     msg={{ ...msg!, created_at: bubble.created_at }}
                     ticket={{ inquiry_language: ticket.inquiry_language }}
                     senders={senders}
-                    signatures={data.signatures}
+                    signatures={signatureList?.signatures ?? []}
                     note={note}
                     koreanDraft={koreanDraft}
                     translationRequired={translationRequired}

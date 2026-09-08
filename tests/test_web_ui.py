@@ -801,3 +801,28 @@ def test_background_work_tells_the_open_screens():
         assert f'publish("{marker}")' in source, path
         # `to_thread(...)` 로 넘기는 함수 안이 아니라 루프에서 직접 불러야 합니다.
         assert "asyncio.to_thread(publish" not in source, path
+
+
+def test_a_write_does_not_wait_on_hubspot():
+    """**거절도 발송도 우리 DB 쓰기 하나입니다** (2026-09-08 운영자 지적: 「거절이든 메일
+    발송이든 바로바로 떠야 할 거 아냐」).
+
+    티켓 화면의 동작들은 저장한 뒤 화면을 다시 읽는데, 예전에는 **허브스팟 패널만 빼고
+    나머지 전부**를 무효화하고 그것을 기다렸습니다. 그 「나머지」에 발신 주소 목록이
+    있었고 그건 허브스팟에 묻는 질의입니다 — 스레드 목록 + 스레드마다 메시지. 그래서
+    거절 한 번이 허브스팟 왕복 여러 번을 기다렸고, 그동안 버튼은 계속 돌았습니다.
+
+    `staleTime` 은 이걸 못 막습니다 — 무효화는 그걸 무시하고 다시 가져옵니다.
+    """
+    import pathlib
+
+    screen = pathlib.Path("frontend/src/screens/MessageDetail.tsx").read_text(encoding="utf-8")
+    act = screen[screen.index("async function act(action"):]
+    act = act[: act.index("\n  }\n")]
+    assert "invalidateQueries({ queryKey: key })" in act, "이 티켓 하나만 다시 읽습니다"
+    assert "predicate" not in act, "전부 무효화하면 허브스팟 질의가 딸려 옵니다"
+
+    # SSE 도 같은 이유로 그 질의를 뺍니다 — 이제 워커까지 이벤트를 쏘므로, 안 빼면 열려
+    # 있는 모든 콘솔이 초안 완료·발송 완료 때마다 허브스팟 왕복을 냅니다.
+    api = pathlib.Path("frontend/src/lib/api.ts").read_text(encoding="utf-8")
+    assert '!== "reply-senders"' in api

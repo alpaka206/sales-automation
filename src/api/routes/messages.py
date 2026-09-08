@@ -157,14 +157,7 @@ def _message_detail_context(
             )
             if conv is None:
                 return {}
-            # 마지막 메일이 「현재」 글입니다. 그것이 검토 대기 중인 초안이면 편집기가
-            # 열리는데, 보드에서 눌러 들어온 사람에게도 그게 맞는 화면입니다.
-            msg = session.scalars(
-                select(Message)
-                .where(Message.conversation_id == conv.id)
-                .order_by(Message.id.desc())
-                .limit(1)
-            ).first()
+            # 마지막 메일이 「현재」 글입니다 — 아래 `thread_rows` 를 읽은 뒤에 고릅니다.
 
         contact = conv.contact if conv else None
 
@@ -185,6 +178,16 @@ def _message_detail_context(
                 .scalars()
                 .all()
             )
+            # **「현재」 글은 여기서 고릅니다** (2026-09-08). 예전에는 바로 위에서
+            # `ORDER BY id DESC LIMIT 1` 로 한 번 더 물었는데, 방금 그 대화의 메일을
+            # **전부** 읽었으므로 물어볼 이유가 없습니다 — DB 가 도쿄에 있어서 조회
+            # 하나가 곧 태평양 왕복 하나입니다.
+            #
+            # `max(id)` 입니다, 마지막 원소가 아니라: 이 목록은 `created_at` 순이고 옛
+            # 날짜로 들여온 메일이 큰 id 를 가질 수 있어서 둘이 갈릴 수 있습니다. 옛
+            # 조회와 **정확히 같은 답**을 내야 화면이 안 바뀝니다.
+            if message_id is None and thread_rows:
+                msg = max(thread_rows, key=lambda row: row.id)
             # 처리 경과, oldest → newest. Filtered on READ, never deleted: progress rows
             # are append-only, and what the machine did to itself is still worth having
             # in the row when something has to be explained.
@@ -377,7 +380,9 @@ def _message_detail_context(
             "category": conv.inquiry_category if conv else None,
             "category_label": category_label(conv.inquiry_category if conv else None),
             "unqualified": is_unqualified(conv.inquiry_category if conv else None),
-            "signatures": list_signature_templates(),
+            # `signatures` 가 여기 있었습니다 (2026-09-08). 어디서나 같은 값이라 티켓마다
+            # 다시 물을 이유가 없어서 `GET /api/ui/signatures` 로 옮겼습니다 — 화면이
+            # 세션에 한 번만 받습니다.
             "ticket": {
                 "id": conv.id if conv else None,
                 "ticket_id": conv.hubspot_ticket_id if conv else None,

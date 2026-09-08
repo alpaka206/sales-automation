@@ -542,6 +542,21 @@ async def ui_reply_senders(message_id: int):
     return {**found, "chosen": chosen, "error": None}
 
 
+@router.get("/api/ui/signatures")
+def ui_signatures():
+    """서명 목록 — **어디서나 같은 값이라 한 번만 가져옵니다** (2026-09-08 운영자 지시).
+
+    예전에는 티켓 payload 에 실려 왔습니다. 티켓을 열 때마다 같은 답을 다시 물은 셈이고,
+    DB 가 도쿄에 있어서 그 한 번이 곧 태평양 왕복 하나입니다.
+
+    서명은 티켓과 아무 상관이 없습니다 — 운영자가 콘솔에서 고치는 목록이고, 어느 티켓에서
+    열어도 같습니다. 화면이 세션에 한 번만 받아 두면 됩니다.
+    """
+    from ...db.email_templates import list_signature_templates
+
+    return {"signatures": list_signature_templates()}
+
+
 @router.get("/api/ui/contacts/search")
 def ui_contact_search(q: str = ""):
     """기존 고객 찾기 — 티켓 만들기 폼의 「기존 고객 불러오기」 (2026-09-08 운영자 지시).

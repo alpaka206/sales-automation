@@ -54,7 +54,20 @@ export function listenForChanges(client: QueryClient) {
     if (pending) clearTimeout(pending);
     pending = setTimeout(() => {
       pending = null;
-      void client.invalidateQueries();
+      // **허브스팟에 묻는 질의는 빼고** 무효화합니다 (2026-09-08). 이 이벤트는 「우리 DB
+      // 가 바뀌었다」는 뜻이고, 저쪽 값은 우리가 저장한다고 안 바뀝니다.
+      //
+      // 빼는 것은 `reply-senders` **하나**입니다 — 발신 주소 목록은 스레드 목록과
+      // 스레드마다의 메시지를 허브스팟에 물어서 만듭니다. 이제 워커까지 이 이벤트를
+      // 쏘므로(초안 완료 · 발송 완료), 안 빼면 **열려 있는 모든 콘솔이 그때마다 허브스팟
+      // 왕복을 냅니다.**
+      //
+      // 연락처 레코드(`hubspot-record`)는 **안 뺍니다**: 이름과 달리 이관 0094 이후로
+      // 우리 행만 읽습니다 — 허브스팟이 바뀔 때 이쪽으로 밀어 넣는 구조라, 화면이 저쪽에
+      // 물어볼 일이 없습니다.
+      void client.invalidateQueries({
+        predicate: (query) => query.queryKey[0] !== "reply-senders",
+      });
     }, 300);
   };
   return () => {
