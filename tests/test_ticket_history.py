@@ -456,21 +456,30 @@ def test_a_conversation_event_puts_that_customers_tickets_at_the_front():
     source = pathlib.Path("src/api/webhook.py").read_text(encoding="utf-8")
     assert "conversation.newMessage" in source
     block = source[source.index("def _refresh_conversation"):]
-    block = block[: block.index("\ndef ")]
-    assert "ticket_for_thread_sync" in block, "연결로 티켓을 정확히 되짚습니다"
-    assert "associatedContactId" in block, "티켓이 안 붙은 옛 스레드는 연락처로 물러섭니다"
+    block = block[: block.index("\n\ndef ")]
     assert "mark_ticket_history_stale" in block, "큐 맨 앞으로 올립니다"
     # 웹훅 안에서 대화를 통째로 받아오면 안 됩니다 — 느리면 배치가 재전송됩니다.
     assert "collect_ticket_history" not in block
 
 
-def test_the_round_robin_became_a_safety_net():
-    """웹훅이 실시간을 맡았으니 순환은 **혹시 놓친 것을 줍는** 자리입니다.
+def test_the_collector_is_a_queue_not_a_round_robin():
+    """**같은 일을 하는 기계를 둘로 두지 않습니다** (2026-09-08 운영자 지적: 「같은 행동을
+    하는 걸 굳이 여러 개로 나눠야 하나… 인수인계했을 때 혼란만 줄 것 같은데」).
 
-    한 바퀴가 길어지는 것이 대가인데(327건 기준 7시간 → 18시간) 안전망에는 맞는 속도이고,
-    그만큼 회차마다 쓰는 메모리와 왕복이 줄어듭니다 — 무료 플랜 512MB 에 웹과 워커가 한
-    프로세스로 사는 동안에는 그게 실질적인 이득입니다.
+    수집기는 이제 **대기열만** 비웁니다 — 조건이  하나입니다.
+    NULL 이 되는 길이 둘이지만(한 번도 안 받았다 / 웹훅이 도장을 지웠다) 둘 다 같은
+    말이라 코드에는 갈래가 없습니다.
+
+    그래서 **평소에는 아무 일도 안 합니다** — 대기열이 비면 허브스팟 왕복이 0 이고
+    메모리도 안 씁니다. 무료로 운영하는 동안 이게 가장 큰 절약입니다.
     """
+    import pathlib
+
     from src.agents.ticket_history import TICKETS_PER_SWEEP
 
-    assert TICKETS_PER_SWEEP <= 3
+    source = pathlib.Path('src/agents/ticket_history.py').read_text(encoding='utf-8')
+    assert 'Conversation.history_synced_at.is_(None),' in source, '대기열은 NULL 하나'
+    # 「가장 오래된 것부터 다시」가 남아 있으면 순환이 그대로라는 뜻입니다.
+    assert 'Conversation.history_synced_at.asc()' not in source
+    # 할 일이 있을 때만 무는 상한이라 작게 둘 이유가 없습니다.
+    assert TICKETS_PER_SWEEP >= 8

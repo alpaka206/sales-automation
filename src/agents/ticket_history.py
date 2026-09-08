@@ -60,17 +60,12 @@ logger = logging.getLogger(__name__)
 OUR_DOMAINS = ("estsoft.com", "perso.ai", "perso.co.kr")
 OUR_DOMAIN_SUFFIXES = ("hs-inbox.com", "hubspot-inbox.com")
 
-# 한 회차에 처리할 티켓 수. 티켓 하나가 스레드 1~7개 × 메시지 목록이라 호출이 여러 번입니다.
+# 한 회차에 비울 대기열 크기. 티켓 하나가 스레드 1~7개 × 메시지 목록이라 호출이 여러
+# 번이고, **대기열이 비어 있으면 아무 일도 안 합니다** — 그게 평소 상태입니다.
 #
-# **8 → 3 으로 낮췄습니다** (2026-09-08, 대화 웹훅을 켠 뒤). 이 순환은 오래 「고객 답장을
-# 보는 유일한 길」이라 서둘러야 했는데, 이제 `conversation.newMessage` 가 그 일을 합니다 —
-# 뭔가 오간 티켓은 웹훅이 큐 맨 앞으로 올려 주므로(`mark_ticket_history_stale`) 이 순환은
-# **혹시 놓친 것을 줍는 안전망**입니다.
-#
-# 한 바퀴가 길어지는 것이 대가입니다(운영 327건 기준 약 7시간 → 약 18시간). 안전망에는
-# 맞는 속도이고, 그만큼 회차마다 쓰는 메모리와 왕복이 줄어듭니다 — 무료 플랜 512MB 에
-# 웹과 워커가 한 프로세스로 사는 동안에는 그게 실질적인 이득입니다.
-TICKETS_PER_SWEEP = 3
+# 그래서 상한을 작게 둘 이유가 없습니다. 이 값이 무는 것은 백필이 남았거나 답장이 몰린
+# 때뿐이고, 그때는 빨리 비우는 편이 낫습니다.
+TICKETS_PER_SWEEP = 8
 
 
 def is_our_address(address: str) -> bool:
@@ -496,26 +491,38 @@ async def _advance_on_customer_reply(conversation_id: int, contact_id: int) -> N
 
 
 async def sync_pending_ticket_history(limit: int = TICKETS_PER_SWEEP) -> dict:
-    """아직 안 받았거나 가장 오래 전에 받은 티켓부터 조금씩. 10분 폴러가 부릅니다.
+    """**대기열을 비웁니다.** 대기열은 `history_synced_at` 이 NULL 인 티켓입니다.
 
-    **이어하기가 곧 순서입니다**: `history_synced_at` 이 NULL 인 것이 먼저(아직 한 번도 안
-    받은 티켓), 그 다음은 오래된 순. 도중에 배포가 나가도 다음 회차가 그 자리에서
-    계속합니다 — 어디까지 했는지 따로 적어 둘 곳이 필요 없습니다.
+    NULL 이 되는 길은 둘이고, 둘 다 「이 티켓의 대화를 받아야 한다」는 같은 말입니다:
 
-    한 바퀴를 다 돌면 가장 오래된 것부터 다시 도므로, **새로 쌓인 대화도 저절로
-    들어옵니다.** 급한 티켓은 `mark_ticket_history_stale` 이 맨 앞으로 올립니다.
+    1. 한 번도 안 받았다 (백필)
+    2. **방금 뭔가 오갔다** — `conversation.newMessage` 웹훅이 `mark_ticket_history_stale`
+       로 도장을 지웁니다
+
+    **끝없이 도는 순환이었던 것을 2026-09-08 에 이렇게 바꿨습니다.** 그전에는 한 바퀴를
+    다 돌면 가장 오래된 것부터 다시 돌았습니다 — 고객 답장을 보는 길이 그것뿐이라 그래야
+    했습니다. 이제 웹훅이 그 일을 하므로 **같은 일을 하는 기계가 둘**이 됐고, 둘이면
+    인수인계 때 어느 쪽이 진짜인지 설명해야 합니다(운영자 지적).
+
+    합치니 **평소에 아무 일도 안 합니다** — 대기열이 비면 허브스팟 왕복이 0 이고 메모리도
+    안 씁니다. 무료 플랜 512MB 에 웹과 워커가 한 프로세스로 사는 동안 이게 가장 큰
+    절약입니다. 회차 크기를 다시 키운 이유도 같습니다: 할 일이 있을 때만 무는 상한이라
+    작게 둘 이유가 없고, 답장이 몰리면 빨리 비우는 편이 낫습니다.
+
+    **대가는 「저절로 낫지 않는다」입니다.** 웹훅이 유실되면 그 대화는 안 들어오고, 빠진
+    것을 화면이 말해 주지 않습니다. 그때는 사람이 다시 요청합니다
+    (`POST /internal/tickets/{id}/refresh-history`) — 운영자 판단입니다.
     """
     from ..integrations.hubspot import HubSpotNotConfigured
 
     with SessionLocal() as session:
         pending = session.scalars(
             select(Conversation.id)
-            .where(Conversation.hubspot_ticket_id.isnot(None))
-            .order_by(
-                Conversation.history_synced_at.is_(None).desc(),
-                Conversation.history_synced_at.asc(),
-                Conversation.id.asc(),
+            .where(
+                Conversation.hubspot_ticket_id.isnot(None),
+                Conversation.history_synced_at.is_(None),
             )
+            .order_by(Conversation.id.asc())
             .limit(max(1, limit))
         ).all()
     done = added = failed = 0
@@ -557,10 +564,14 @@ def run_pending_ticket_history(limit: int = TICKETS_PER_SWEEP) -> dict:
 
 
 def mark_ticket_history_stale(conversation_id: int) -> None:
-    """이 티켓을 다음 회차의 맨 앞으로. 방금 무언가 오간 티켓에 씁니다.
+    """이 티켓을 **대기열에 넣습니다.** 방금 무언가 오간 티켓에 씁니다.
 
-    한 바퀴가 도는 데 걸리는 시간을 기다리지 않게 하는 장치입니다 — 단계가 움직였다는 것은
-    대개 대화가 오갔다는 뜻입니다.
+    도장(`history_synced_at`)을 지우는 것이 곧 「받아야 한다」입니다 — 한 번도 안 받은
+    티켓과 **똑같은 상태**가 됩니다. 그래서 수집기에 조건이 하나뿐이고, 「백필」과 「새
+    대화 따라잡기」가 두 기계가 아니라 한 대기열의 두 입구입니다.
+
+    부르는 곳은 셋입니다: 대화 웹훅(`conversation.newMessage`), 단계 이동(대개 대화가
+    오갔다는 뜻), 그리고 사람이 다시 요청할 때.
     """
     with SessionLocal() as session:
         conversation = session.get(Conversation, conversation_id)

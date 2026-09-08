@@ -1872,6 +1872,27 @@ def _retire_drafts_for_replies_seen_in_hubspot(session, contact_id: int, emails)
             retire_drafts_answered_elsewhere(session, conv_id)
 
 
+@router.post("/internal/tickets/{conversation_id}/refresh-history")
+async def internal_refresh_ticket_history(conversation_id: int):
+    """이 티켓의 대화를 **다시 받아옵니다** — 사람이 요청할 때 (2026-09-08).
+
+    수집기는 이제 대기열만 비웁니다(`history_synced_at IS NULL`). 평소에는 웹훅이
+    그 대기열을 채우고, **웹훅이 유실되면 아무도 안 채웁니다** — 그때 이 라우트가
+    사람의 손입니다.
+
+    받아오는 것은 여기서 안 합니다. 도장만 지우고 **다음 회차에 수집기가 가져갑니다** —
+    같은 일을 하는 코드가 둘이 되면 인수인계 때 어느 쪽이 진짜인지 설명해야 합니다.
+    """
+    from ...agents.ticket_history import mark_ticket_history_stale
+
+    with SessionLocal() as session:
+        conversation = session.get(Conversation, conversation_id)
+        if conversation is None or not conversation.hubspot_ticket_id:
+            raise HTTPException(status_code=404, detail="티켓이 없는 문의입니다")
+    await asyncio.to_thread(mark_ticket_history_stale, conversation_id)
+    return {"queued": conversation_id}
+
+
 @router.post("/internal/tickets/{conversation_id}/attach-personal-emails")
 async def internal_attach_personal_emails(conversation_id: int):
     """개인 사서함으로 오간 메일을 그 티켓에 붙입니다 — **한 티켓씩, 눌러서.**
