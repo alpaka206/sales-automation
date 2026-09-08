@@ -257,54 +257,6 @@ async def collect_ticket_history(client, ticket_id: str) -> list[dict]:
     return rows
 
 
-async def list_cc_candidates(client, ticket_id: str) -> list[dict]:
-    """이 티켓의 대화에 **이미 있던 사람들** — 참조 고르개가 읽습니다 (이관 0112).
-
-    **읽기만 합니다.** 이 함수로는 아무것도 안 나갑니다 — 그래서 고르개를 여는 것만으로
-    메일이 갈 길이 없습니다(`list_reply_senders` 와 같은 규칙).
-
-    보낸 사람과 받는 사람을 **둘 다** 셉니다. 보낸 사람만 세면 지금까지 조용히 참조로만
-    있던 사람이 목록에서 빠지는데, 그 사람이야말로 다음에도 참조에 있어야 할 사람입니다.
-
-    거르는 것 둘: 허브스팟 릴레이 주소(`*.hs-inbox.com` — 사람이 아니라 인박스 주소라
-    거기로 보내면 대화가 자기 자신에게 돌아갑니다), 그리고 **받는 사람 본인**은 화면이
-    거릅니다(그 값은 초안마다 다르고 여기서는 티켓만 압니다).
-
-    최근에 나타난 순입니다 — 오래된 대화의 한 번 스친 주소보다 지난주에 오간 사람이 먼저
-    보여야 합니다.
-    """
-    seen: dict[str, dict] = {}
-    for thread_id in await _live_thread_ids(client, ticket_id):
-        for message in await _thread_messages(client, thread_id):
-            if message.get("type") != "MESSAGE":
-                continue
-            when = _happened_at(message)
-            for party in (message.get("senders") or []) + (message.get("recipients") or []):
-                if not isinstance(party, dict):
-                    continue
-                for address in _addresses([party]):
-                    if address.rsplit("@", 1)[-1].endswith(OUR_DOMAIN_SUFFIXES):
-                        continue
-                    row = seen.get(address)
-                    name = str(party.get("name") or "").strip()
-                    if row is None:
-                        seen[address] = {
-                            "address": address,
-                            "name": name,
-                            "ours": is_our_address(address),
-                            "last_seen": when,
-                        }
-                    else:
-                        # 이름은 **한 번이라도 있으면** 남깁니다 — 같은 사람이 어떤
-                        # 메시지에는 이름 없이 주소로만 적혀 옵니다(실측).
-                        row["name"] = row["name"] or name
-                        row["last_seen"] = max(row["last_seen"], when)
-    rows = sorted(seen.values(), key=lambda row: row["last_seen"], reverse=True)
-    for row in rows:
-        row["last_seen"] = row["last_seen"].isoformat()
-    return rows
-
-
 def _same_direction(value: str | None) -> str:
     """옛 철자를 같은 말로. CRM 수집기는 `incoming`, 스레드 수집기는 `inbound` 를 씁니다."""
     return {"incoming": "inbound", "outbound": "outgoing"}.get(value or "", value or "")

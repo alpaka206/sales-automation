@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import time
+from datetime import timezone
 
 import httpx
 import pytest
@@ -446,3 +447,63 @@ def test_a_contact_without_a_ticket_never_reaches_the_queue(sync_db):
         session.commit()
 
     assert mailbox_sync.pending_links() == []
+
+
+def test_the_window_is_since_we_last_looked_not_since_consent(sync_db, monkeypatch):
+    """**한 회차에 넘친 메일이 영영 안 들어오면 안 됩니다** (2026-09-08).
+
+    「동의 이후」로 물으면 창이 날마다 넓어지는데 한 회차에 받는 것은 50통뿐이라, 한 창에
+    그보다 많이 오면 넘친 것을 다음 회차도 못 봅니다 — 같은 조건으로 물어 같은 쪽만
+    돌려받기 때문입니다. 그리고 **빠졌다는 표시가 아무 데도 안 남습니다.**
+
+    도장은 수집이 성공했을 때만 찍히므로 실패한 회차의 메일도 안 놓칩니다.
+    """
+    from datetime import datetime, timedelta
+
+    from src.agents import mailbox_sync
+    from src.db.models import MailboxAccount
+
+    consent = datetime(2026, 9, 1, 0, 0)
+    polled = datetime(2026, 9, 8, 12, 0)
+    with sync_db() as session:
+        session.add(MailboxAccount(email="untae@estsoft.com",
+                                   encrypted_payload=gmail._encrypt({"refresh_token": "r"}),
+                                   collect_from=consent))
+        session.commit()
+
+    asked: list[str] = []
+
+    class _Response:
+        is_error = False
+        status_code = 200
+
+        def __init__(self, payload):
+            self._payload = payload
+
+        def json(self):
+            return self._payload
+
+        def raise_for_status(self):
+            return None
+
+    class _Client:
+        def __enter__(self): return self
+        def __exit__(self, *_): return False
+        def get(self, url, params=None):
+            asked.append((params or {}).get("q", ""))
+            return _Response({"messages": []})
+
+    monkeypatch.setattr(mailbox_sync, "access_token", lambda email: "t")
+    monkeypatch.setattr(mailbox_sync.httpx, "Client", lambda **_k: _Client())
+
+    # 아직 한 번도 안 돌았으면 동의 시각이 바닥입니다.
+    mailbox_sync._sync_one("untae@estsoft.com")
+    assert asked[-1] == f"after:{int(consent.replace(tzinfo=timezone.utc).timestamp())}"
+
+    with sync_db() as session:
+        session.get(MailboxAccount, "untae@estsoft.com").last_polled_at = polled
+        session.commit()
+
+    mailbox_sync._sync_one("untae@estsoft.com")
+    expected = (polled - timedelta(minutes=5)).replace(tzinfo=timezone.utc)
+    assert asked[-1] == f"after:{int(expected.timestamp())}", "겹침을 두고 그때부터"

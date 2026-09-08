@@ -616,67 +616,6 @@ def ui_mailboxes():
     }
 
 
-@router.get("/api/ui/messages/{message_id}/cc-candidates")
-async def ui_cc_candidates(message_id: int):
-    """이 티켓의 대화에 이미 있던 사람들 — 검토 화면의 **참조 고르개**가 읽습니다 (0112).
-
-    `/senders` 와 같은 규칙입니다: 본문 payload 와 따로 가져오고(허브스팟에 물어야 나오는
-    값이라 같이 담으면 답을 읽는 일이 이 조회를 기다립니다), **읽기만 하고**, 못 가져와도
-    200 에 빈 목록입니다 — 고르개가 안 뜰 뿐 손으로 적어 넣는 길은 그대로입니다.
-
-    **받는 사람은 목록에서 뺍니다.** To 와 Cc 에 같은 사람이 서면 메일이 두 통 가는 것처럼
-    보입니다. 실제로 겹쳤을 때 거르는 곳은 발송(`parse_cc_addresses`)이고, 여기서 미리 빼는
-    것은 「고를 수 없게」가 아니라 「보여 주지 않게」입니다.
-    """
-    from ...agents.ticket_history import list_cc_candidates
-    from ...common.config import settings as app_settings
-    from ...db.models import Message
-    from ...integrations.gmail import list_accounts
-    from ...db.session import SessionLocal
-    from ...integrations.hubspot import HubSpotClient
-
-    def _target() -> tuple[str, str, str]:
-        with SessionLocal() as session:
-            msg = session.get(Message, message_id)
-            if msg is None:
-                return "", "", ""
-            conversation = session.get(Conversation, msg.conversation_id)
-            ticket = (conversation.hubspot_ticket_id if conversation else "") or ""
-            return ticket, (msg.to_address or ""), (msg.cc_addresses or "")
-
-    ticket_id, recipient, chosen = await asyncio.to_thread(_target)
-    empty = {"candidates": [], "chosen": chosen, "error": None}
-    if not ticket_id:
-        return empty
-    client = HubSpotClient()
-    try:
-        found = await list_cc_candidates(client, ticket_id)
-    except Exception as exc:  # 조회 실패가 검토 화면을 막으면 안 됩니다
-        return {**empty, "error": f"{type(exc).__name__}: {exc}"}
-    finally:
-        await client.close()
-    # **받는 사람**과 **이 팀이 안 쓰는 주소**를 뺍니다 (2026-09-08 운영자 지시:
-    # 「support@perso.ai 는 우린 아예 안 써」). 스레드에 남아 있다는 것과 우리가 쓴다는
-    # 것은 다른 이야기이고, 목록에 두면 언젠가 눌러서 고객이 받는 메일에 붙습니다.
-    skip = {recipient.strip().lower()} | {
-        one.strip().lower()
-        for one in app_settings.CC_EXCLUDED_ADDRESSES.split(",")
-        if one.strip()
-    }
-    rows = [row for row in found if row["address"] not in skip]
-
-    # **연결된 개인 사서함도 후보입니다** (같은 지시: 「차라리 개인메일
-    # untae@estsoft.com 불러와서 할 수 있으면」). 스레드에 없던 사람이라도 이 회신에
-    # 참조로 넣고 싶을 수 있고, 그 주소는 우리가 이미 알고 있습니다.
-    seen = {row["address"] for row in rows} | skip
-    for account in list_accounts():
-        if account.email in seen:
-            continue
-        rows.append({"address": account.email, "name": "", "ours": True,
-                     "last_seen": ""})
-    return {**empty, "candidates": rows}
-
-
 @router.get("/api/ui/contacts/{contact_id}/hubspot-record")
 def ui_hubspot_record(contact_id: int, conversation_id: int | None = None):
     """허브스팟 연락처 레코드의 「기본 그룹」 — 티켓 세부 내역 오른쪽 카드들.

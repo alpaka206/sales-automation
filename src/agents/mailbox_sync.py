@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import base64
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from email.utils import getaddresses, parsedate_to_datetime
 
 import httpx
@@ -46,6 +46,8 @@ logger = logging.getLogger(__name__)
 _API = "https://gmail.googleapis.com/gmail/v1/users/me"
 # 한 회차에 사서함당 볼 메일 수. 개인함은 하루 수십 통이고 3시간마다 도므로 넉넉합니다.
 MESSAGES_PER_SWEEP = 50
+# 창을 조금 겹칩니다 — 경계에 걸친 메일을 놓치지 않게. 다시 읽는 것은 무해합니다.
+_SWEEP_OVERLAP = timedelta(minutes=5)
 _TIMEOUT = 30.0
 
 
@@ -147,9 +149,23 @@ def _sync_one(email: str) -> int:
         from ..db.models import MailboxAccount as _Account
 
         account = session.get(_Account, email)
-        since = account.collect_from if account else None
-    if since is None:
-        return 0
+        if account is None or account.collect_from is None:
+            return 0
+        # **묻는 창은 「마지막으로 본 이후」입니다** (2026-09-08).
+        #
+        # 「동의 이후」로 물으면 창이 날마다 넓어지는데 한 회차에 받는 것은
+        # `MESSAGES_PER_SWEEP` 통뿐이라, 한 창에 그보다 많이 오면 **넘친 것이 영영 안
+        # 들어옵니다** — 다음 회차도 같은 조건으로 물어 같은 쪽만 돌려받기 때문입니다.
+        # 그리고 빠졌다는 표시가 아무 데도 안 남습니다. 개인함에 광고가 한꺼번에 쏟아지면
+        # 실제로 나는 일입니다.
+        #
+        # 도장은 **수집이 성공했을 때만** 찍히므로(`mark_polled`) 실패한 회차의 메일도
+        # 안 놓칩니다. 연락처 스윕이 쓰는 것과 같은 방식이고, 겹침을 두는 이유도 같습니다 —
+        # 경계에 걸친 메일을 놓치지 않게. 다시 읽는 것은 무해합니다(`external_id` 가
+        # 유니크라 같은 메일이 두 줄이 안 됩니다).
+        since = account.collect_from
+        if account.last_polled_at is not None:
+            since = max(since, account.last_polled_at - _SWEEP_OVERLAP)
 
     token = access_token(email)
     headers = {"Authorization": f"Bearer {token}"}
