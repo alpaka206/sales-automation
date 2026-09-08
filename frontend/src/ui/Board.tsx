@@ -160,8 +160,14 @@ export function Board({ stages, manualLogStages, dealDetails = {} }: {
                     콘솔에 행이 안 생겼습니다. 다른 열에 두지 않는 이유: 새로 만드는
                     문의는 New 로 들어옵니다 — 협상 중인 문의를 처음부터 만들 일은
                     없고, 있다면 만든 뒤 카드를 끌면 됩니다. */}
+                {/* **숫자 바로 왼쪽에 붙습니다** (2026-09-08 운영자 지시). 머리줄이
+                    `space-between` 이라 아무 데나 두면 셋이 균등하게 벌어져 `+` 가
+                    가운데에 섭니다 — 제목과도 숫자와도 안 붙어서 무엇에 딸린 버튼인지
+                    안 보입니다. `margin-left:auto` 가 남는 공간을 왼쪽으로 몰아 이
+                    버튼부터 오른쪽 무리로 만듭니다. */}
                 {stage.key === "new" && (
                   <button type="button" className="btn btn--subtle btn--sm"
+                          style={{ marginLeft: "auto" }}
                           aria-haspopup="dialog" title="티켓 만들기" aria-label="티켓 만들기"
                           onClick={() => setCreating(true)}>
                     <Icon name="plus" size={14} />
