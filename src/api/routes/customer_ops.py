@@ -1872,7 +1872,7 @@ def _retire_drafts_for_replies_seen_in_hubspot(session, contact_id: int, emails)
             retire_drafts_answered_elsewhere(session, conv_id)
 
 
-@router.post("/internal/tickets/{conversation_id}/refresh-history")
+@router.post("/tickets/{conversation_id}/refresh-history")
 async def internal_refresh_ticket_history(conversation_id: int):
     """이 티켓의 대화를 **다시 받아옵니다** — 사람이 요청할 때 (2026-09-08).
 
@@ -1880,8 +1880,12 @@ async def internal_refresh_ticket_history(conversation_id: int):
     그 대기열을 채우고, **웹훅이 유실되면 아무도 안 채웁니다** — 그때 이 라우트가
     사람의 손입니다.
 
+    **이 티켓 하나만** 다시 받습니다. 전체를 훑는 동작이 아니라서 화면의 버튼으로 둡니다 —
+    파이프라인 전체 백필처럼 몇 분씩 걸리는 것이었다면 운영 화면에 두는 게 맞았습니다.
+
     받아오는 것은 여기서 안 합니다. 도장만 지우고 **다음 회차에 수집기가 가져갑니다** —
     같은 일을 하는 코드가 둘이 되면 인수인계 때 어느 쪽이 진짜인지 설명해야 합니다.
+    `/internal/` 이 아닌 이유도 그것입니다: 콘솔이 부르는 자리여야 합니다.
     """
     from ...agents.ticket_history import mark_ticket_history_stale
 

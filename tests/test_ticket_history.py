@@ -483,3 +483,29 @@ def test_the_collector_is_a_queue_not_a_round_robin():
     assert 'Conversation.history_synced_at.asc()' not in source
     # 할 일이 있을 때만 무는 상한이라 작게 둘 이유가 없습니다.
     assert TICKETS_PER_SWEEP >= 8
+
+
+def test_refreshing_one_ticket_is_one_ticket_not_a_full_scan():
+    """**이 티켓 하나만** 다시 받습니다 (2026-09-08 운영자 확인).
+
+    전체를 훑는 동작이었다면 운영 화면의 백필처럼 두는 게 맞았을 겁니다 — 몇 분씩 걸리고
+    「누른 직후에는 아무 일도 안 일어난 것처럼」 보이니까요. 이건 티켓 하나라 그 티켓
+    화면의 버튼이 맞는 자리입니다.
+
+    그리고 **여기서 받아오지 않습니다.** 도장만 지우고 다음 회차에 수집기가 가져갑니다 —
+    받아오는 코드가 두 벌이 되면 어느 쪽이 진짜인지 인수인계 때 설명해야 합니다.
+    """
+    import pathlib
+
+    routes = pathlib.Path("src/api/routes/customer_ops.py").read_text(encoding="utf-8")
+    block = routes[routes.index("async def internal_refresh_ticket_history"):]
+    block = block[: block.index("@router.post")]
+    assert "mark_ticket_history_stale" in block
+    # 받아오는 함수를 여기서 부르면 두 벌이 됩니다.
+    assert "collect_ticket_history" not in block and "sync_one_ticket" not in block
+
+    # 콘솔이 부를 수 있는 자리여야 합니다 — `/internal/` 은 웹 UI 에서 못 닿습니다.
+    assert '"/tickets/{conversation_id}/refresh-history"' in routes
+
+    screen = pathlib.Path("frontend/src/screens/MessageDetail.tsx").read_text(encoding="utf-8")
+    assert "refresh-history" in screen, "티켓 화면에 버튼이 있습니다"

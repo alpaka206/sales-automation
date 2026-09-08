@@ -413,6 +413,19 @@ export function MessageDetail() {
 
   // 되는 동안의 상태는 누른 버튼이 말합니다(ActionButton). 여기 남는 것은 결과뿐입니다 —
   // 진행 표시가 버튼과 다른 자리에 있으면 눌린 건지 몰라 한 번 더 누르게 됩니다.
+  /** 이 티켓의 대화를 다시 받아 달라고 **대기열에 넣습니다.** `act()` 를 안 쓰는 이유:
+   *  저건 초안(`/messages/{id}/…`)에 대고 본문·서명까지 같이 보내는 함수인데, 이 동작은
+   *  티켓의 일이고 초안이 없는 티켓(백필로 들여온 300여 건)에서도 눌러야 합니다. */
+  async function refreshHistory() {
+    setNote("");
+    try {
+      await postForm(`/tickets/${ticketId}/refresh-history`, {});
+      setNote("대화를 다시 받는 중입니다 — 다음 수집 회차에 들어옵니다.");
+    } catch (error) {
+      setNote(`실패: ${String(error)}`);
+    }
+  }
+
   async function act(action: string, extra: Record<string, string> = {}) {
     if (!msg) return;
     setNote("");
@@ -935,6 +948,20 @@ export function MessageDetail() {
                     >
                       <Icon name="plus" size={14} /> 추가하기
                     </button>
+                  )}
+                  {/* **이 티켓의 대화만** 다시 받습니다 (2026-09-08). 수집기는 대기열만
+                      비우고 그 대기열은 `conversation.newMessage` 웹훅이 채우는데,
+                      웹훅이 유실되면 아무도 안 채웁니다 — 그때 누르는 손입니다.
+
+                      **여기서 받아오지 않습니다.** 도장만 지우고 다음 회차에 수집기가
+                      가져갑니다 — 받아오는 코드가 두 벌이 되면 어느 쪽이 진짜인지
+                      인수인계 때 설명해야 합니다. 그래서 「받았습니다」가 아니라
+                      「곧 받습니다」라고 적습니다. */}
+                  {ticket.ticket_id && (
+                    <ActionButton className="btn btn--subtle btn--sm" pending="요청 중"
+                                  onClick={refreshHistory}>
+                      <Icon name="history" size={14} /> 대화 다시 받기
+                    </ActionButton>
                   )}
                 </div>
               </div>
