@@ -1783,6 +1783,27 @@ class HubSpotClient:
             return None
         return str(results[0].get("id") or "") or None
 
+    def get_conversation_thread_sync(self, thread_id: str) -> dict:
+        """스레드 하나. 읽기만 합니다 — 웹훅이 티켓을 되짚는 데 씁니다.
+
+        **스레드에는 티켓 id 가 없습니다** (실측): 돌려주는 키는 `associatedContactId` ·
+        `inboxId` · `originalChannelId` · `latestMessageTimestamp` 등이고 티켓은 없습니다.
+        그래서 부르는 쪽이 연락처로 되짚습니다.
+
+        못 읽으면 빈 dict 입니다 — 웹훅 안에서 도는 조회라 여기서 터지면 허브스팟이 그
+        배치를 통째로 다시 보냅니다.
+        """
+        headers = {"Authorization": f"Bearer {self.token}"}
+        try:
+            with httpx.Client(headers=headers, timeout=10.0) as client:
+                r = client.get(
+                    f"{BASE_URL}/conversations/v3/conversations/threads/{thread_id}"
+                )
+            return r.json() if r.status_code == 200 else {}
+        except Exception:
+            logger.warning("스레드 %s 를 못 읽었습니다", thread_id, exc_info=True)
+            return {}
+
     def find_or_create_contact_sync(
         self, email: str, *, full_name: str = "", company: str = ""
     ) -> str:

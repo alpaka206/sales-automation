@@ -60,9 +60,17 @@ logger = logging.getLogger(__name__)
 OUR_DOMAINS = ("estsoft.com", "perso.ai", "perso.co.kr")
 OUR_DOMAIN_SUFFIXES = ("hs-inbox.com", "hubspot-inbox.com")
 
-# 한 회차에 처리할 티켓 수. 티켓 하나가 스레드 1~7개 × 메시지 목록이라 호출이 여러 번이고,
-# 10분마다 도는 자리라 서두를 이유가 없습니다 — 운영자 지시도 「천천히 해도 되니 완벽하게」.
-TICKETS_PER_SWEEP = 8
+# 한 회차에 처리할 티켓 수. 티켓 하나가 스레드 1~7개 × 메시지 목록이라 호출이 여러 번입니다.
+#
+# **8 → 3 으로 낮췄습니다** (2026-09-08, 대화 웹훅을 켠 뒤). 이 순환은 오래 「고객 답장을
+# 보는 유일한 길」이라 서둘러야 했는데, 이제 `conversation.newMessage` 가 그 일을 합니다 —
+# 뭔가 오간 티켓은 웹훅이 큐 맨 앞으로 올려 주므로(`mark_ticket_history_stale`) 이 순환은
+# **혹시 놓친 것을 줍는 안전망**입니다.
+#
+# 한 바퀴가 길어지는 것이 대가입니다(운영 327건 기준 약 7시간 → 약 18시간). 안전망에는
+# 맞는 속도이고, 그만큼 회차마다 쓰는 메모리와 왕복이 줄어듭니다 — 무료 플랜 512MB 에
+# 웹과 워커가 한 프로세스로 사는 동안에는 그게 실질적인 이득입니다.
+TICKETS_PER_SWEEP = 3
 
 
 def is_our_address(address: str) -> bool:

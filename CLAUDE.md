@@ -569,6 +569,20 @@ PERSO Inbound is a FastAPI workflow for inbound inquiry handling and customer op
     흔들린다. 접점 기록은 읽기 전용이고 `conversation_id` 가 있어 티켓 상세에 바로 뜬다.
   - **`external_id = hubspot:conv:<메시지 id>`** 라 몇 번을 다시 돌려도 중복이 안 생긴다 —
     「지우고 새로 받기」가 필요 없고 실패한 회차는 그냥 다시 돌리면 된다(0106 이 유니크).
+  - **고객이 답장하면 웹훅이 온다** (2026-09-08, 운영자가 비공개 앱 설정에서
+    `conversation.newMessage` 를 켰다). 오래 「웹훅에 conversation 구독이 없다」로
+    적혀 있었는데, **없던 것은 플랫폼이 아니라 우리 포털 설정**이었다 — 비공개 앱도
+    구독할 수 있고, 다만 API 가 아니라 앱 설정 화면에서만 켠다.
+    - **이 이벤트가 하는 일은 둘이다**: 서비스를 깨우고(무료 플랜은 15분 무접속이면
+      잔다 — 밤에 온 답장이 아침까지 안 들어오던 이유), 그 티켓을 수집 큐 맨 앞으로
+      올린다(`mark_ticket_history_stale`). **대화를 받아오지는 않는다** — 웹훅이 느리면
+      허브스팟이 배치를 통째로 재전송한다.
+    - **스레드에는 티켓 id 가 없다** (실측: 키가 `associatedContactId` · `inboxId` ·
+      `originalChannelId` · `latestMessageTimestamp` …). 그래서 연락처로 되짚고 그
+      사람의 티켓을 전부 표시한다 — 어느 티켓의 스레드인지는 수집기가 받아 보며 가리고,
+      `external_id` 가 유니크라 잘못 표시해도 줄이 겹치지 않는다.
+    - **그래서 순환은 안전망이 됐다** — `TICKETS_PER_SWEEP` 8 → 3. 한 바퀴가 7시간에서
+      18시간으로 길어지는 것이 대가인데, 실시간은 웹훅이 맡으므로 맞는 속도다.
   - **이어하기는 `conversations.history_synced_at` 한 칸이다.** NULL 이 「아직 안 받았다」이고
     NULL 먼저·오래된 순으로 돈다. 한 바퀴를 다 돌면 다시 오래된 것부터라, **메우는 일과
     새로 쌓인 것을 따라잡는 일이 같은 한 단계**다(10분 폴러의 `ticket_history`).

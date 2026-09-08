@@ -178,6 +178,69 @@ def _handle_deletion(event: HubSpotWebhookEvent) -> int:
         return 0
 
 
+# 대화 이벤트. **비공개 앱 설정에서 켭니다** (2026-09-08 운영자가 켰습니다) — 오래
+# 「구독이 없다」로 알고 있었는데, 없던 것은 플랫폼이 아니라 우리 포털 설정이었습니다.
+#
+# **이것이 막는 구멍이 큽니다.** 고객이 스레드에 답장해도 이벤트가 안 와서, 그 답장을
+# 보는 코드가 10분 순환 수집기 하나뿐이었습니다. 그리고 무료 플랜은 15분 무접속이면
+# 서비스가 자므로, 밤에 온 답장은 아침에 누가 콘솔을 열 때까지 안 들어왔습니다.
+_CONVERSATION_SUBSCRIPTIONS = frozenset(
+    {"conversation.newMessage", "conversation.creation"}
+)
+
+
+def _refresh_conversation(event: HubSpotWebhookEvent) -> int:
+    """스레드에 뭔가 오갔다 — 그 고객의 티켓을 다음 회차 맨 앞으로. 표시한 수를 돌려줍니다.
+
+    **스레드에는 티켓 id 가 없습니다** (실측: 스레드 객체의 키는 `associatedContactId` ·
+    `inboxId` · `originalChannelId` … 이고 티켓은 없습니다). 그래서 연락처로 되짚고, 그
+    사람의 티켓을 전부 표시합니다 — 어느 티켓의 스레드인지는 수집기가 실제로 받아 보면서
+    가립니다(`external_id` 가 유니크라 잘못 표시해도 줄이 겹치지 않습니다).
+
+    **여기서 대화를 받아오지는 않습니다.** 웹훅은 빨리 답해야 하고(느리면 허브스팟이
+    배치를 통째로 재전송합니다), 받아오는 일은 이미 10분 수집기가 합니다. 이 이벤트가 하는
+    일은 둘입니다 — **서비스를 깨우고**, 그 티켓을 큐 맨 앞으로 옮기는 것.
+
+    절대 안 터집니다. 여기서 500 을 내면 허브스팟이 그 배치를 통째로 다시 보냅니다.
+    """
+    if event.subscriptionType not in _CONVERSATION_SUBSCRIPTIONS:
+        return 0
+    try:
+        from ..agents.ticket_history import mark_ticket_history_stale
+        from ..db.models import Contact, Conversation
+        from ..db.session import SessionLocal
+        from ..integrations.hubspot import HubSpotClient
+
+        thread_id = str(event.objectId)
+        thread = HubSpotClient().get_conversation_thread_sync(thread_id)
+        contact_id = str((thread or {}).get("associatedContactId") or "")
+        if not contact_id:
+            return 0
+        with SessionLocal() as session:
+            contact = (
+                session.query(Contact)
+                .filter(Contact.hubspot_contact_id == contact_id)
+                .first()
+            )
+            if contact is None:
+                return 0
+            ids = [
+                row.id
+                for row in session.query(Conversation)
+                .filter(
+                    Conversation.contact_id == contact.id,
+                    Conversation.hubspot_ticket_id.is_not(None),
+                )
+                .all()
+            ]
+        for conversation_id in ids:
+            mark_ticket_history_stale(conversation_id)
+        return len(ids)
+    except Exception:
+        logger.exception("Conversation webhook handling failed for %s", event.objectId)
+        return 0
+
+
 def _sync_stage_change(event: HubSpotWebhookEvent) -> str | None:
     """Record a HubSpot-side stage move on our copy of the conversation.
 
@@ -288,6 +351,15 @@ async def webhook_hubspot_inbound(request: Request) -> dict:
             continue
         if _queue_contact_sync(event):
             results.append({"objectId": event.objectId, "status": "contact_queued"})
+            continue
+        marked = _refresh_conversation(event)
+        if event.subscriptionType in _CONVERSATION_SUBSCRIPTIONS:
+            # 표시할 티켓을 못 찾아도 「무시」가 아닙니다 — **이 요청이 서비스를 깨운 것**
+            # 자체가 이 구독의 절반이고, 그 사실이 로그에 남아야 켜졌는지 확인됩니다.
+            results.append({
+                "objectId": event.objectId, "status": "conversation_refreshed",
+                "tickets": marked,
+            })
             continue
         event_type = _map_hubspot_event(event)
         if event_type is None:

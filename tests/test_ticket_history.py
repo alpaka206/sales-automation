@@ -434,3 +434,42 @@ def test_the_reply_advance_never_deletes_a_draft():
     source = pathlib.Path("src/agents/ticket_history.py").read_text(encoding="utf-8")
     body = source[source.index("async def _advance_on_customer_reply"):]
     assert "retire_drafts=False" in body
+
+
+# --------------------------------------------------------------------------- #
+# 대화 웹훅 (2026-09-08, 운영자가 비공개 앱에서 구독을 켰습니다)
+# --------------------------------------------------------------------------- #
+def test_a_conversation_event_puts_that_customers_tickets_at_the_front():
+    """**고객이 답장하면 웹훅이 옵니다** — 오래 「구독이 없다」로 알고 있었는데, 없던 것은
+    플랫폼이 아니라 우리 포털 설정이었습니다.
+
+    이 이벤트가 하는 일은 둘입니다: **서비스를 깨우고**(무료 플랜은 15분 무접속이면
+    잡니다), 그 티켓을 수집 큐 맨 앞으로 옮기는 것. 대화를 받아오는 일은 여기서 안
+    합니다 — 웹훅이 느리면 허브스팟이 배치를 통째로 재전송합니다.
+
+    **스레드에는 티켓 id 가 없습니다**(실측: 키가 `associatedContactId` · `inboxId` …).
+    그래서 연락처로 되짚고 그 사람의 티켓을 전부 표시합니다 — 어느 티켓의 스레드인지는
+    수집기가 실제로 받아 보면서 가립니다.
+    """
+    import pathlib
+
+    source = pathlib.Path("src/api/webhook.py").read_text(encoding="utf-8")
+    assert "conversation.newMessage" in source
+    block = source[source.index("def _refresh_conversation"):]
+    block = block[: block.index("\ndef ")]
+    assert "associatedContactId" in block, "스레드에서 연락처로 되짚습니다"
+    assert "mark_ticket_history_stale" in block, "큐 맨 앞으로 올립니다"
+    # 웹훅 안에서 대화를 통째로 받아오면 안 됩니다 — 느리면 배치가 재전송됩니다.
+    assert "collect_ticket_history" not in block
+
+
+def test_the_round_robin_became_a_safety_net():
+    """웹훅이 실시간을 맡았으니 순환은 **혹시 놓친 것을 줍는** 자리입니다.
+
+    한 바퀴가 길어지는 것이 대가인데(327건 기준 7시간 → 18시간) 안전망에는 맞는 속도이고,
+    그만큼 회차마다 쓰는 메모리와 왕복이 줄어듭니다 — 무료 플랜 512MB 에 웹과 워커가 한
+    프로세스로 사는 동안에는 그게 실질적인 이득입니다.
+    """
+    from src.agents.ticket_history import TICKETS_PER_SWEEP
+
+    assert TICKETS_PER_SWEEP <= 3
