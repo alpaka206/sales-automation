@@ -9,8 +9,10 @@ import { Modal } from "../ui/Modal";
 import { ConfirmModal } from "../ui/ConfirmModal";
 import { ActionButton } from "../ui/ActionButton";
 import { InteractionForm, InteractionItem, type Interaction } from "../ui/InteractionForm";
+import { DraftEditor } from "../ui/DraftEditor";
+import { TicketInfoCard } from "../ui/TicketInfoCard";
 import { LoadingBlock } from "../ui/Loading";
-import { RecordValueRow, useHubSpotRecord } from "../ui/PlanCard";
+import { useHubSpotRecord } from "../ui/PlanCard";
 
 type Bubble = {
   id: number;
@@ -73,6 +75,9 @@ type Detail = {
     channel_account_id: string;
     /** 참조(CC), 쉼표로 이은 주소들. 빈 문자열이면 참조 없음입니다. */
     cc_addresses: string;
+    /** 「메일 발송」으로 사람이 시작한 후속 초안인가. 참이면 편집기가 **접힌 채로**
+     *  열립니다 — New 티켓의 자동 초안은 거짓이라 예전처럼 펼쳐집니다. */
+    is_manual: boolean;
     to_address: string; score_snapshot: number | null; created_at: string;
     sent_at: string | null; scheduled_at: string | null; category: string | null;
   } | null;
@@ -108,13 +113,6 @@ type Detail = {
  *
  *  버튼에 글자 대신 그 서식이 걸린 **표시**를 씁니다(B·I·U·고리). 메일 편집기에서 늘 보던
  *  자리·모양이라 읽지 않아도 무엇인지 압니다. */
-const MARKS: { key: string; mark: ReactNode; wrap: [string, string]; title: string }[] = [
-  { key: "b", mark: <b>B</b>, wrap: ["**", "**"], title: "굵게 (**글자**)" },
-  { key: "i", mark: <i style={{ fontFamily: "Georgia,serif" }}>I</i>, wrap: ["*", "*"], title: "기울임 (*글자*)" },
-  { key: "u", mark: <u>U</u>, wrap: ["__", "__"], title: "밑줄 (__글자__)" },
-  { key: "a", mark: <Icon name="link" size={14} />, wrap: ["[", "](https://)"],
-    title: "링크 ([글자](주소)) — 고른 글자가 링크 글자가 됩니다" },
-];
 
 function isMostlyKoreanText(text: string): boolean {
   const letters = text.match(/\p{L}/gu) ?? [];
@@ -170,15 +168,30 @@ export function MessageDetail() {
   const [confirm, setConfirm] = useState<
     { description: React.ReactNode; run: () => Promise<void> } | null
   >(null);
-  const [subject, setSubject] = useState("");
-  const [body, setBody] = useState("");
-  const [signature, setSignature] = useState("");
-  // 어느 주소에서 나갈까. 빈 문자열은 「고르지 않음」이고, 그때는 그 스레드에 이미 있던
-  // 계정이 정합니다 — 예전 동작 그대로입니다.
-  const [sender, setSender] = useState("");
-  // 참조(CC). 빈 문자열이 「참조 없음」이고, 그때 발송은 이 칸이 생기기 전과 똑같습니다
-  // — 받는 주소도 보내는 주소도 안 건드리고 얹기만 합니다.
-  const [cc, setCc] = useState("");
+  /** **고치는 중인 초안 한 벌.** 다섯 값이 따로 있던 것을 묶었습니다 (2026-09-08).
+   *
+   *  묶는 이유는 크기가 아니라 **하나이기 때문**입니다 — 제목·본문·서명·발신 주소·참조는
+   *  전부 「지금 이 초안」의 일부이고, 언제나 같이 실려 나가고 같이 초기화됩니다. 실제로
+   *  이 파일에서 셋을 따로 쓰는 자리가 하나도 없습니다.
+   *
+   *  묶으니 딸려 오는 것 둘: 초안이 바뀔 때 렌더 중 setState 가 다섯 번에서 한 번이
+   *  되고(아래 `loadedId` 블록), 편집기를 컴포넌트로 뺄 때 넘길 값이 열 개에서 둘이
+   *  됩니다(`draft` · `patch`).
+   *
+   *  **읽는 이름은 그대로 둡니다** — 바로 아래에서 풀어 쓰므로 이 파일의 나머지 60여
+   *  곳이 한 글자도 안 바뀝니다. 바뀐 것은 세터 13곳뿐입니다.
+   *
+   *  `sender` 의 빈 문자열은 「고르지 않음」이고 그때는 스레드가 정합니다. `cc` 의 빈
+   *  문자열은 「참조 없음」이고 그때 발송은 그 칸이 생기기 전과 똑같습니다 — 받는 주소도
+   *  보내는 주소도 안 건드리고 얹기만 합니다. */
+  const [draft, setDraft] = useState({
+    subject: "", body: "", signature: "", sender: "", cc: "",
+  });
+  const { subject, body, signature, sender, cc } = draft;
+  /** 초안의 한 칸만 고칩니다. 함수형으로 넘기는 이유: 본문 서식 버튼처럼 **직전 값을
+   *  읽어 쓰는** 자리가 있어서, 그때 오래된 값을 덮으면 방금 친 글자가 사라집니다. */
+  const patch = (part: Partial<typeof draft>) =>
+    setDraft((current) => ({ ...current, ...part }));
   const [draftLanguage, setDraftLanguage] = useState("");
   // 번역 전의 한국어 초안. 번역은 되돌릴 수 없는 한 번의 누름이라, 무엇을 승인했는지
   // 다시 읽을 자리가 있어야 합니다.
@@ -236,25 +249,18 @@ export function MessageDetail() {
   // React re-render before paint instead; nothing is ever shown empty.
   if (data?.msg && loadedId !== data.msg.id) {
     setLoadedId(data.msg.id);
-    setSubject(data.msg.subject);
-    setBody(data.msg.body);
-    setSignature(data.msg.signature_key);
-    setSender(data.msg.channel_account_id);
-    setCc(data.msg.cc_addresses);
+    // 다섯 번이던 렌더 중 setState 가 한 번입니다.
+    setDraft({
+      subject: data.msg.subject,
+      body: data.msg.body,
+      signature: data.msg.signature_key,
+      sender: data.msg.channel_account_id,
+      cc: data.msg.cc_addresses,
+    });
     setDraftLanguage(data.msg.language || "");
     setKoreanDraft(data.msg.body_ko);
   }
 
-  /** 본문에서 고른 글자를 표기로 감쌉니다. 아무것도 안 골랐으면 커서 자리에 껍데기만
-   *  넣고 그 안에 커서를 둡니다 — 표기를 외우지 않아도 쓸 수 있게. */
-  function wrapSelection([before, after]: [string, string]) {
-    const field = document.getElementById("msg-body") as HTMLTextAreaElement | null;
-    if (!field) return;
-    const { selectionStart: from, selectionEnd: to } = field;
-    const picked = body.slice(from, to);
-    setBody(body.slice(0, from) + before + picked + after + body.slice(to));
-    setPendingSel([from + before.length, from + before.length + picked.length]);
-  }
 
   // 선택 복원은 **커밋 뒤**에 해야 합니다. 제어된 textarea 는 React 가 value 를 다시 넣을
   // 때 선택이 끝으로 풀리는데, requestAnimationFrame 으로 미루면 그 둘의 순서가 React 의
@@ -277,6 +283,19 @@ export function MessageDetail() {
   // 줄기에 섞여 들어가고 다시 보낼 길이 복구 화면밖에 없었습니다(2026-08-26 운영자 지시).
   const isDraftOpen =
     msg?.status === "pending_approval" || msg?.status === "send_failed";
+  /** **후속 초안은 접힌 채로 옵니다** (2026-09-08 운영자 지시: 「다시 들어왔을 때 생성된
+   *  채로 펼쳐져 있는 게 싫어서」).
+   *
+   *  New 티켓의 자동 초안은 그대로 펼칩니다 — 그 화면에 온 이유 자체가 그 초안을 읽고
+   *  보내는 것이라, 접어 두면 매번 한 번씩 더 눌러야 합니다. 「메일 발송」으로 사람이
+   *  시작한 후속 초안만 다릅니다: 그건 쓰다 말고 나갔다가 「이 티켓의 기록」을 보러 다시
+   *  들어오는 일이 흔한데, 그때 편집기가 화면을 가로막습니다.
+   *
+   *  **어느 쪽인지는 서버가 말합니다**(`is_manual`) — 화면이 상태로 짐작하면 초안 종류가
+   *  하나 늘 때 여기만 안 바뀝니다. */
+  const manualDraft = !!data?.msg?.is_manual;
+  const [draftExpanded, setDraftExpanded] = useState(false);
+  const showEditor = isDraftOpen && (!manualDraft || draftExpanded);
   const sendFailed = msg?.status === "send_failed";
   // 보드가 어느 열에 + 를 그릴지 정하는 것과 **같은 목록**입니다. 서버가 주므로
   // 단계 이름이 바뀌어도 두 화면이 어긋나지 않습니다.
@@ -332,7 +351,7 @@ export function MessageDetail() {
   // New 를 지나면 말풍선은 「이 티켓의 기록」 줄기로 내려가고, 위에는 검토 중인 초안만
   // 남습니다. 그 초안마저 없으면 그릴 것이 없습니다.
   const visibleBubbles = afterNew
-    ? data.thread.filter((b) => b.is_current && isDraftOpen)
+    ? data.thread.filter((b) => b.is_current && showEditor)
     : data.thread;
   // **이 티켓의 접점 기록은 여기 섭니다** (2026-09-04 운영자 지시: 「둘을 기존처럼 따로」).
   //
@@ -357,7 +376,7 @@ export function MessageDetail() {
     })),
     ...(afterNew
       ? data.thread
-          .filter((b) => !(b.is_current && isDraftOpen))
+          .filter((b) => !(b.is_current && showEditor))
           .map((b) => ({
             key: `m${b.id}`,
             at: b.sent_at || b.created_at,
@@ -454,8 +473,8 @@ export function MessageDetail() {
     });
     const result = await response.json();
     if (result.error) return setNote(result.error);
-    setBody(result.body);
-    if (result.subject !== undefined) setSubject(result.subject);
+    patch({ body: result.body });
+    if (result.subject !== undefined) patch({ subject: result.subject });
     if (result.language) setDraftLanguage(result.language);
     setKoreanDraft(result.body_ko ?? null);
     setNote(result.translated ? `번역됨 → ${result.language}` : "번역할 내용이 없습니다.");
@@ -679,178 +698,31 @@ export function MessageDetail() {
           {visibleBubbles.length > 0 && (
           <div className="thread">
             {visibleBubbles.map((bubble) => {
-              if (bubble.is_current && isDraftOpen) {
+              if (bubble.is_current && showEditor) {
+                // **초안 편집기는 컴포넌트입니다** (2026-09-08). 이 자리에 170줄이
+                // 있었습니다 — 화면 함수가 1,270줄이던 가장 큰 이유입니다.
+                //
+                // 뗀 순서가 중요했습니다: 초안 상태를 `draft` 한 벌로 묶기 전에는 넘길
+                // 값이 스물이 넘어서, 그때 뗐다면 지금보다 나빴습니다.
                 return (
-                  <div key={bubble.id} className="bubble bubble--out bubble--current">
-                    <div className="bubble__head">
-                      {/* 이 칸의 글이 곧 고객이 받는 글입니다 — 예전처럼 「검토용 한국어」가
-                          아닙니다. 한국어 대역은 아래 접힌 줄에 저장돼 있습니다. */}
-                      <span className="bubble__dir">
-                        <Icon name="send" size={14} /> 문의 회신 초안
-                        {/* **원어를 같이 적습니다** (2026-09-03 운영자 지시). 초안은 이제
-                            나갈 언어로 쓰이므로(0045 이후) 「이 글이 무슨 말로 쓰여 있나」가
-                            제목 옆에 있어야 합니다. 값은 문의가 들어온 언어입니다 —
-                            `msg.language` 는 「번역하기」를 누르면 바뀌는 값이라, 제목 옆에
-                            두면 같은 티켓이 누를 때마다 다른 말을 합니다.
-                            `.chip--xs` 를 씁니다 — 누를 수 없는 짧은 값이고, 옆의
-                            아이콘·시각과 크기가 맞습니다. */}
-                        {ticket.inquiry_language && (
-                          <span className="chip chip--xs" style={{ marginLeft: 6 }}>
-                            {languageLabel(ticket.inquiry_language)}
-                          </span>
-                        )}
-                      </span>
-                      <span className="bubble__time tnum">{kst(bubble.created_at)}</span>
-                    </div>
-                    <label className="field-label" htmlFor="msg-subject">제목</label>
-                    <input className="input" id="msg-subject" value={subject}
-                           onChange={(e) => setSubject(e.target.value)} style={{ marginBottom: 12 }} />
-                    <label className="field-label" htmlFor="msg-body">본문</label>
-                    {/* 도구는 메일 편집기처럼 **본문 상자 안쪽 아래**입니다 — 글자를 고른
-                        손이 곧바로 닿는 자리. 상자 테두리는 이 wrapper 가 그리고 textarea 는
-                        테두리를 벗습니다(안에 든 것처럼 보이도록).
-
-                        WYSIWYG 이 아닌 이유: 이 칸의 글자가 그대로 메일이 되는 것이 이 화면의
-                        전제입니다(모델이 쓰고, 번역이 지나가고, 사람이 고칩니다). 숨은 서식을
-                        들고 있으면 그 셋이 서로 모르는 상태가 되고, 화면과 나간 메일이 갈립니다. */}
-                    <div className="draft-editor">
-                      <textarea className="draft-textarea" id="msg-body" value={body}
-                                onChange={(e) => setBody(e.target.value)} />
-                      <div className="draft-tools">
-                        {MARKS.map(({ key, mark, wrap, title }) => (
-                          <button key={key} type="button" className="draft-tool"
-                                  title={title} aria-label={title}
-                                  /* 누르는 순간 본문의 선택이 풀리면 감쌀 것이 없어집니다. */
-                                  onMouseDown={(e) => e.preventDefault()}
-                                  onClick={() => wrapSelection(wrap)}>
-                            {mark}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                    {/* 한국어 대역. **초안 때 한 번 만들어 행에 저장한 것**이라 여기를
-                        펼쳐도 모델을 부르지 않습니다. 접어 두는 이유는 지금 고치는 것이
-                        나갈 본문이고 이것은 대조용이기 때문입니다. */}
-                    {koreanDraft && !isMostlyKoreanText(body) && (
-                      <details style={{ marginTop: 10 }}>
-                        <summary className="t-xs t-subtle" style={{ cursor: "pointer" }}>
-                          <Icon name="translate" size={12} /> 한국어로 보기
-                        </summary>
-                        <div className="msg-body msg-body--inset" style={{ marginTop: 6 }}>
-                          {koreanDraft}
-                        </div>
-                      </details>
-                    )}
-
-                    {/* 골라야 붙습니다. 예전에는 여기에 "기본 (텍스트 서명)" 이 하나 더
-                        있었는데, 그건 모델이 본문에 써 넣은 서명을 그대로 두라는 뜻이었습니다
-                        — 고르지 않아도 서명이 붙던 자리입니다. 이제 없습니다. */}
-                    {/* **어느 주소에서 나가나.** 예전에는 고를 수 없었습니다 — 그 스레드에
-                        이미 있던 계정이 정했고, 화면에는 그게 무엇인지도 안 보였습니다.
-                        목록은 서버가 만듭니다(`/senders`): 그 스레드의 인박스에 연결된
-                        살아 있는 주소만 들어갑니다. 화면이 스스로 목록을 지으면 고를 수는
-                        있는데 발송이 거절하는 값이 생깁니다. */}
-                    {/* **고르개가 안 뜨는 이유는 화면에 적습니다** (2026-09-03).
-                        예전에는 조회가 실패하면 라우트가 `{senders: [], error}` 로 200 을
-                        돌려주는데 화면이 그 `error` 를 아무 데도 안 그려서, 고르개가 이유
-                        없이 사라졌습니다 — 운영자는 「왜 안 뜨지」밖에 알 수 없었습니다.
-                        고를 것이 없는 것과 못 가져온 것은 다른 이야기입니다. */}
-                    {(senders?.senders?.length ?? 0) === 0 && senders?.error && (
-                      <div className="t-xs t-subtle" style={{ marginTop: 12 }}>
-                        발신 주소를 고를 수 없습니다 — {senders.error}
-                      </div>
-                    )}
-                    {(senders?.senders?.length ?? 0) > 0 && (
-                      <>
-                        <label className="field-label" htmlFor="msg-sender"
-                               style={{ marginTop: 12 }}>발신 주소</label>
-                        <select className="select" id="msg-sender" value={sender}
-                                onChange={(e) => setSender(e.target.value)}>
-                          {/* **「자동」이 무엇인지 서버가 말해 줍니다.** 목록에서 찾지
-                              않는 이유: 기본값이 고르개에 없는 주소일 때가 있습니다(허브스팟
-                              기계 주소, 또는 운영자가 고르개에서 뺀 주소) — 목록에서만
-                              찾으면 그 티켓은 어느 주소로 나갈지가 화면에 안 적힙니다.
-
-                              **「이 대화의 주소」 같은 두루뭉술한 말은 안 씁니다**
-                              (2026-09-03 운영자 지시). 주소를 못 가져왔으면 못 가져왔다고
-                              적습니다 — 그건 조회가 실패했다는 뜻이라 다른 이야기입니다. */}
-                          {/* **같은 주소가 두 번 뜨지 않습니다** (2026-09-08 운영자 지시).
-                              예전에는 「자동 — perso.ai@estsoft.com」과 목록의
-                              `perso.ai@estsoft.com` 이 나란히 서서, 무엇이 다른지 화면만
-                              봐서는 알 수 없었습니다.
-
-                              **없앤 쪽이 목록입니다.** 남긴 「자동」은 값이 비어 있고
-                              (`channel_account_id = NULL`), 그건 「그 주소로 보내되 그
-                              티켓에서 못 쓰면 스레드가 정하는 값으로 물러선다」는 뜻입니다.
-                              명시로 고른 값은 **안 물러섭니다** — 폼으로만 들어온 티켓은
-                              그 인박스에 대화가 없어서 발송이 그대로 실패합니다. 화면에서
-                              지운 것은 글자이지 안전장치가 아닙니다. */}
-                          <option value="">
-                            {senders?.default_address || "발신 주소를 확인하지 못했습니다"}
-                            {senders?.default_address && senders?.fallback_address
-                              ? ` (거절되면 ${senders.fallback_address})` : ""}
-                          </option>
-                          {senders?.senders
-                            ?.filter((x) => x.address !== senders?.default_address)
-                            .map((x) => (
-                              <option key={x.id} value={x.id}>{x.address}</option>
-                            ))}
-                        </select>
-                      </>
-                    )}
-
-                    {/* **참조(CC)** — 받는 주소도 보내는 주소도 안 건드리고 얹기만 합니다
-                        (2026-09-07 운영자 지시, 이관 0112). 비워 두면 이 칸이 생기기 전과
-                        똑같이 나갑니다.
-
-                        **후보 목록은 없습니다** (2026-09-08 운영자 지시). 한동안 그 티켓의
-                        스레드 참여자를 칩으로 띄웠는데, 그 목록을 만들려고 티켓의 모든
-                        스레드 × 모든 메시지를 받아 메모리에 쌓고는 주소 몇 개만 쓰고
-                        버렸습니다 — 그것도 티켓을 **열 때마다**. 참조에 넣을 사람은
-                        운영자가 이미 알고 있어서, 적는 편이 고르는 것보다 빠릅니다.
-
-                        철자를 다듬는 곳은 서버 한 곳이라(`parse_cc_addresses`) 메일
-                        클라이언트에서 복사해 붙인 것도 그대로 받습니다. */}
-                    <label className="field-label" htmlFor="msg-cc" style={{ marginTop: 12 }}>
-                      참조 (CC)
-                    </label>
-                    <input className="input" id="msg-cc" value={cc}
-                           onChange={(e) => setCc(e.target.value)}
-                           placeholder="비워 두면 참조 없이 나갑니다. 여러 명은 쉼표로." />
-                    <label className="field-label" htmlFor="msg-signature" style={{ marginTop: 12 }}>서명</label>
-                    <select className="select" id="msg-signature" value={signature}
-                            onChange={(e) => setSignature(e.target.value)} style={{ marginBottom: 12 }}>
-                      <option value="">서명 없음</option>
-                      {data.signatures.map((s) => (
-                        <option key={s.key} value={s.key}>{s.name}</option>
-                      ))}
-                    </select>
-
-                    <div className="action-bar">
-                      {translationRequired ? (
-                        <ActionButton className="btn btn--subtle" pending="번역 중" onClick={translate}>
-                          <Icon name="translate" size={15} /> 번역하기 ({msg.target_language})
-                        </ActionButton>
-                      ) : (
-                        <button type="button" className="btn btn--ok"
-                                aria-haspopup="dialog" onClick={() => setConfirmSend(true)}>
-                          <Icon name="check" size={15} /> 검토 완료 · 발송
-                        </button>
-                      )}
-                      <ActionButton className="btn btn--subtle" pending="여는 중" onClick={openPreview}>
-                        <Icon name="file" size={15} /> 미리보기
-                      </ActionButton>
-                      <ActionButton className="btn btn--subtle" pending="저장 중"
-                                    onClick={() => act("edit")}>
-                        <Icon name="edit" size={15} /> 저장
-                      </ActionButton>
-                      <button type="button" className="btn btn--danger"
-                              aria-haspopup="dialog" onClick={() => setRejecting(true)}>
-                        <Icon name="x" size={15} /> 거절
-                      </button>
-                    </div>
-                    {note && <div style={{ marginTop: 14 }} role="status" className="t-sm">{note}</div>}
-                  </div>
+                  <DraftEditor
+                    key={bubble.id}
+                    bubbleKey={bubble.id}
+                    draft={draft}
+                    patch={patch}
+                    msg={{ ...msg!, created_at: bubble.created_at }}
+                    ticket={{ inquiry_language: ticket.inquiry_language }}
+                    senders={senders}
+                    signatures={data.signatures}
+                    note={note}
+                    koreanDraft={koreanDraft}
+                    translationRequired={translationRequired}
+                    onAct={act}
+                    onTranslate={translate}
+                    onPreview={openPreview}
+                    onSend={() => setConfirmSend(true)}
+                    onReject={() => setRejecting(true)}
+                  />
                 );
               }
               const inbound = bubble.direction === "inbound";
@@ -933,6 +805,14 @@ export function MessageDetail() {
 
                       초안이 열려 있으면 안 그립니다: 그때는 위에 편집기가 이미 있고,
                       티켓 하나에 초안이 둘이면 어느 것이 나갈지 화면만 봐서는 모릅니다. */}
+                  {/* 접혀 있는 후속 초안을 여는 자리입니다. 「메일 발송」과 같은 자리에
+                      두는 이유: 그 버튼을 눌러 만든 초안이라, 다시 찾을 곳도 여기입니다. */}
+                  {isDraftOpen && manualDraft && !draftExpanded && (
+                    <button type="button" className="btn btn--subtle btn--sm"
+                            onClick={() => setDraftExpanded(true)}>
+                      <Icon name="edit" size={14} /> 작성 중인 회신 열기
+                    </button>
+                  )}
                   {!isDraftOpen && ticket.ticket_id && (
                     <ActionButton className="btn btn--subtle btn--sm" pending="여는 중"
                                   onClick={startReply}>
@@ -1032,194 +912,25 @@ export function MessageDetail() {
 
               **연필도 하나입니다.** 저장은 두 곳으로 갈라져 나가지만(이 티켓의 플랜 ·
               연락처) 운영자가 하는 일은 「이 카드를 고친다」 하나입니다. */}
-          <div className="card">
-            <div className="row-between" style={{ marginBottom: 12 }}>
-              <div className="section-label">문의 정보</div>
-              {contact && (
-                <button type="button" className="btn btn--subtle btn--sm"
-                        onClick={() => setEditingContact((on) => !on)}
-                        aria-pressed={editingContact}
-                        aria-label={editingContact ? "수정 취소" : "수정"}
-                        title={editingContact ? "수정 취소" : "수정"}>
-                  <Icon name={editingContact ? "x" : "edit"} size={14} />
-                </button>
-              )}
-            </div>
-            <form
-              onSubmit={(event) => {
-                event.preventDefault();
-                // FormData 는 이 시점의 스냅숏입니다 — 확인 창을 지나면
-                // event.currentTarget 은 이미 없습니다.
-                const fields = Object.fromEntries(
-                  new FormData(event.currentTarget) as never,
-                ) as Record<string, string>;
-                setConfirm({
-                  description: (
-                    <>
-                      이 문의의 플랜 정보와 이 고객의 회사·메모를 저장합니다. 회사:{" "}
-                      <strong>{fields.company?.trim() || "—"}</strong>
-                    </>
-                  ),
-                  run: () => saveTicketCard(fields),
-                });
-              }}
-            >
-              <dl className="info-list">
-                <div className="info-row"><dt>티켓</dt><dd className="mono">{ticket.ticket_id ? `#${ticket.ticket_id}` : "— (없음)"}</dd></div>
-                <div className="info-row"><dt>Client ID</dt><dd className="tnum">{ticket.client_id ?? "미동기화"}</dd></div>
-                {/* 티켓이 만들어진 날 (2026-09-03 운영자 요청). 백필이 허브스팟의 생성일을
-                    그대로 복사해 두므로 우리 값이 곧 허브스팟 값입니다 — 이 화면을 열 때마다
-                    허브스팟에 물으러 가지 않습니다. */}
-                {ticket.created_at && (
-                  <div className="info-row"><dt>생성</dt><dd className="tnum">{kst(ticket.created_at)}</dd></div>
-                )}
-                {/* 「발송 정보」 카드를 지우면서(2026-09-03 운영자 지시) **수신자 한 줄만**
-                    여기로 옮겼습니다. 나머지(채널·발송 언어·생성)는 다른 데서도 볼 수 있는데
-                    수신 주소는 이 콘솔에서 볼 곳이 여기와 발송 확인 창뿐이었습니다 — 확인
-                    창은 초안이 열려 있을 때만 잠깐 뜨므로, 이미 나간 메일의 수신 주소를 볼
-                    자리가 통째로 사라질 뻔했습니다. */}
-                {/* 아래 연락처 칸의 「이메일」 줄은 지웠습니다 (2026-09-07 운영자 지시) —
-                    같은 주소를 한 상자에서 두 번 적고 있었습니다. **메일이 없는 티켓에서도
-                    주소는 남아야** 하므로(백필로 들여온 건은 `msg` 가 없습니다) 연락처
-                    주소로 떨어집니다. */}
-                {(msg?.to_address || contact?.email) && (
-                  <div className="info-row"><dt>수신자</dt>
-                    <dd className="mono truncate" style={{ maxWidth: 170 }}>
-                      {msg?.to_address || contact?.email}
-                    </dd>
-                  </div>
-                )}
-                {msg?.sent_at && (
-                  <div className="info-row"><dt>발송</dt><dd className="tnum">{kst(msg.sent_at)}</dd></div>
-                )}
-                {ticket.stage && <div className="info-row"><dt>Stage</dt><dd>{data.stage_labels[ticket.stage] ?? ticket.stage}</dd></div>}
-                {/* Won 과 Lost 일 때만 나옵니다 — 왜 이겼나 / 왜 졌나는 결말이 난 건에만
-                    있는 정보입니다. 보드 카드에도 같은 고르개가 있고, 값 목록과 「지금
-                    단계의 값인가」 판단은 둘 다 서버에서 옵니다. 여기 둔 이유: 이 화면에서
-                    대화를 다 읽고 결론을 내리는데, 그걸 적으려고 대시보드로 나가 카드를
-                    찾아야 했습니다. */}
-                {dealOptions && (
-                  <div className="info-row"><dt>Deal Detail</dt>
-                    <dd>
-                      <select className="select select--inline" value={ticket.deal_detail ?? ""}
-                              aria-label={ticket.stage === "won" ? "Won Type" : "Lost Reason"}
-                              onChange={(event) => {
-                                const detail = event.target.value;
-                                setConfirm({
-                                  description: (
-                                    <>
-                                      Deal Detail 을 <strong>{detail || "선택 안 함"}</strong> 로
-                                      바꿉니다.
-                                    </>
-                                  ),
-                                  run: () => saveDealDetailNow(detail),
-                                });
-                              }}>
-                        <option value="">선택 안 함</option>
-                        {dealOptions.map((option) => (
-                          <option key={option} value={option}>{option}</option>
-                        ))}
-                      </select>
-                    </dd></div>
-                )}
-
-                {/* ── 플랜 ─────────────────────────────────────────────────
-                    **이 티켓이 들고 있는 문의 시점 값입니다** (0110). 같은 값이 리드
-                    히스토리에서는 지금 값이고, 한쪽을 고쳐도 다른 쪽은 안 바뀝니다.
-
-                    **머리글 옆에 「이 문의 시점 / 현재 값」을 적던 자리입니다**
-                    (2026-09-07 운영자 지시로 뺐습니다). 이관 0110 뒤에 들어온 문의는
-                    전부 얼린 값을 들고 있어서 그 글자는 모든 티켓에 같은 말을 하나씩 더
-                    얹을 뿐이고, 「현재 값」이 뜨는 옛 티켓에서는 오히려 **틀린 값을 보고
-                    있나** 하고 읽혔습니다. 그 300여 건은 문의 시점 값이 어디에도 안
-                    남아 있어 만들어 낼 수 없습니다 — 한 번 고쳐 저장하면 그때부터 자기
-                    값을 갖습니다. */}
-                <div className="info-row info-row--head"><dt>플랜</dt><dd /></div>
-                {hubspotPending && (
-                  <div className="info-row"><dt>&nbsp;</dt>
-                    <dd className="t-xs t-subtle"><span className="spinner" role="status" /> 읽는 중</dd>
-                  </div>
-                )}
-                {hubspot?.groups
-                  ?.filter((group) => group.key !== "contact")
-                  .flatMap((group) => group.rows)
-                  .filter((row) => row.on_ticket)
-                  .map((row) => (
-                    <RecordValueRow key={row.key} row={row} editing={editingContact} />
-                  ))}
-
-                {contact && (<>
-                  <div className="info-row info-row--head"><dt>연락처</dt><dd /></div>
-                  {/* **머리글이 적은 것을 여기서 또 적지 않습니다** (2026-09-07 운영자
-                      지시). 왼쪽 위 제목은 `회사 || 이름` 이라, 회사가 없으면 거기 이름이
-                      서 있습니다 — 그때 이 줄은 같은 말을 두 번 하는 것입니다. 회사가
-                      있을 때만 남기는 이유는 그때 이름이 화면 어디에도 없어서입니다. */}
-                  {contact.company && (
-                    <div className="info-row"><dt>이름</dt><dd>{contact.name}</dd></div>
-                  )}
-                  {contact.domain && (
-                    <div className="info-row"><dt>도메인</dt>
-                      <dd><Link className="mono" to={`/companies/${contact.domain}`}>{contact.domain}</Link></dd></div>
-                  )}
-                  {hubspot?.groups
-                    ?.find((group) => group.key === "contact")
-                    ?.rows.map((row) => <RecordValueRow key={row.label} row={row} />)}
-                  {/* 이 사람이 리드인지 제품을 쓰는 고객인지 — 구독 플랜이 정합니다
-                      (2026-09-02 운영자 지시). 바로 위 플랜 줄이 그 플랜이라, 같은 사실의
-                      두 면이 한 상자 안에 나란히 섭니다. **플랜 묶음의 줄로 넣지는
-                      않습니다**: 허브스팟에 대응 속성이 없어서, 저기 서면 「허브스팟이 아는
-                      값」으로 읽히고 고칠 수 있는 칸처럼 보입니다. */}
-                  <div className="info-row"><dt>Lead Type</dt><dd>{contact.qualification}</dd></div>
-                  {/* 같은 사실의 셋째 면 — **이 티켓의 단계**를 영업이 부르는 이름입니다
-                      (2026-09-07 운영자 지시). New 면 바로 위 줄과 같은 말을 합니다:
-                      아직 아무도 안 만난 리드라 그 자리에 설 다른 이름이 없습니다. */}
-                  <div className="info-row"><dt>Lifecycle Stage</dt><dd>{contact.lifecycle}</dd></div>
-                    {!editingContact && (
-                      <div className="info-row"><dt>회사</dt>
-                        <dd className="truncate">{contact.company || "—"}</dd></div>
-                    )}
-                    {/* 허브스팟 「Company Record」의 Website URL (0111). **빈 줄을 세우지
-                        않습니다** — 플랜 칸들과 달리 이건 허브스팟 사이드바를 옮겨 놓은
-                        묶음이 아니라 우리가 한 줄 얹은 것이고, 실측상 회사 열에 아홉 중
-                        여덟이 비어 있어 언제나 「—」인 줄이 하나 더 서게 됩니다. */}
-                    {contact.website && (
-                      <div className="info-row"><dt>웹사이트</dt>
-                        <dd className="truncate">
-                          <a href={contact.website} target="_blank" rel="noreferrer noopener">
-                            {contact.website}
-                          </a>
-                        </dd></div>
-                    )}
-                </>)}
-              </dl>
-              {!editingContact && contact?.role_description && (
-                <div style={{ marginTop: 12 }}>
-                  <div className="field-label">하는 일 / 메모</div>
-                  <p className="t-xs" style={{ margin: 0, whiteSpace: "pre-line" }}>
-                    {contact.role_description}
-                  </p>
-                </div>
-              )}
-
-              {/* 대화하며 알게 되는 값들. **gmail·미확인 고객이 회사 이름을 갖는
-                  유일한 자리입니다.** 위의 플랜 칸과 같은 폼 안에 있어서 저장은 한 번입니다. */}
-              {editingContact && (
-                <div style={{ marginTop: 12 }}>
-                  <label className="field-label" htmlFor="c-company">회사</label>
-                  <input className="input" id="c-company" name="company"
-                         defaultValue={contact?.company ?? ""} style={{ marginBottom: 10 }} />
-                  <label className="field-label" htmlFor="c-role">하는 일 / 메모</label>
-                  <textarea className="textarea" id="c-role" name="role_description" rows={3}
-                            defaultValue={contact?.role_description ?? ""}
-                            placeholder="이 고객·회사가 어떤 일을 하는지 (대화하며 알게 된 내용 포함). gmail·미확인이어도 입력해 저장됩니다." />
-                  <button className="btn btn--subtle btn--sm" type="submit"
-                          style={{ marginTop: 10, width: "100%" }}>
-                    <Icon name="check" size={14} /> 저장
-                  </button>
-                </div>
-              )}
-            </form>
-          </div>
+          {/* **문의 정보 한 상자는 컴포넌트입니다** (2026-09-08). 이 자리에 188줄이
+              있었습니다 — 티켓 정보·플랜·연락처를 한 상자로 합친 뒤(2026-09-07) 가장
+              커진 덩어리입니다.
+              저장이 두 곳으로 갈라져 나가는 규칙(플랜은 이 티켓, 회사·메모는 이 사람)은
+              **화면에 남깁니다** — 카드는 누른 것을 알리기만 합니다. */}
+          <TicketInfoCard
+            data={{ stage_labels: data.stage_labels }}
+            contact={contact}
+            ticket={ticket}
+            msg={msg}
+            hubspot={hubspot}
+            hubspotPending={hubspotPending}
+            editing={editingContact}
+            setEditing={setEditingContact}
+            onSave={saveTicketCard}
+            dealOptions={dealOptions}
+            onSaveDealDetail={saveDealDetailNow}
+            confirm={setConfirm}
+          />
 
           {/* 「발송 정보」 카드는 지웠습니다 (2026-09-03 운영자 지시). 채널은 행마다
               `email` 한 값이고, 발송 언어는 「번역하기」 버튼이 이미 적으며, 생성 시각은
@@ -1446,11 +1157,4 @@ const SENT = new Set(["outgoing", "outbound"]);
  *  소문자 두 글자가 뜹니다. 표를 크게 만들지 않는 이유: 여기 뜰 수 있는 언어는 문의가
  *  실제로 들어온 언어이고, 목록을 늘려 봐야 안 오는 말이 대부분입니다 — 모르는 코드는
  *  대문자로 적으면 그 자체로 읽힙니다(`PT`·`ES`). */
-const LANGUAGE_LABELS: Record<string, string> = {
-  ko: "한국어", en: "English", ja: "日本語", zh: "中文",
-};
-function languageLabel(code: string) {
-  const key = code.trim().toLowerCase();
-  return LANGUAGE_LABELS[key] ?? code.trim().toUpperCase();
-}
 

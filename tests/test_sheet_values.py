@@ -102,8 +102,15 @@ def test_the_three_screens_derive_it_from_the_plan():
     assert "profile?.qualification" not in detail and "{data.qualification}" in detail
     leads = pathlib.Path("frontend/src/screens/Customers.tsx").read_text(encoding="utf-8")
     assert "row.qualification" in leads and "MQL / PQL" in leads
-    ticket = pathlib.Path("frontend/src/screens/MessageDetail.tsx").read_text(encoding="utf-8")
-    assert "contact.qualification" in ticket and "MQL / PQL" in ticket
+    # 티켓 화면의 그 줄은 `ui/TicketInfoCard` 로 옮겨졌습니다 (2026-09-08, 화면 분할).
+    # **그리는 자리를 따라갑니다** — 화면 파일만 보면 옮긴 순간 이 검사가 조용히 통과하고,
+    # 그러면 「세 화면이 그린다」를 아무도 안 지키게 됩니다.
+    ticket = pathlib.Path("frontend/src/ui/TicketInfoCard.tsx").read_text(encoding="utf-8")
+    # **그리는 줄을 봅니다.** 예전에는 `"MQL / PQL"` 이라는 글자도 같이 봤는데, 그건
+    # 2026-09-07 에 라벨이 「Lead Type」으로 바뀐 뒤로 **타입 주석에만** 남아 있어서
+    # 화면이 그리는지와 무관해졌습니다 — 주석을 지우면 통과하고 줄을 지워도 통과하는
+    # 검사는 아무것도 안 지킵니다.
+    assert "{contact.qualification}" in ticket
 
 
 @pytest.mark.parametrize(
