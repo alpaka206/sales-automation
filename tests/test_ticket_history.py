@@ -457,7 +457,8 @@ def test_a_conversation_event_puts_that_customers_tickets_at_the_front():
     assert "conversation.newMessage" in source
     block = source[source.index("def _refresh_conversation"):]
     block = block[: block.index("\ndef ")]
-    assert "associatedContactId" in block, "스레드에서 연락처로 되짚습니다"
+    assert "ticket_for_thread_sync" in block, "연결로 티켓을 정확히 되짚습니다"
+    assert "associatedContactId" in block, "티켓이 안 붙은 옛 스레드는 연락처로 물러섭니다"
     assert "mark_ticket_history_stale" in block, "큐 맨 앞으로 올립니다"
     # 웹훅 안에서 대화를 통째로 받아오면 안 됩니다 — 느리면 배치가 재전송됩니다.
     assert "collect_ticket_history" not in block

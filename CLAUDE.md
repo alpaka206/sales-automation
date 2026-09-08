@@ -577,10 +577,12 @@ PERSO Inbound is a FastAPI workflow for inbound inquiry handling and customer op
       잔다 — 밤에 온 답장이 아침까지 안 들어오던 이유), 그 티켓을 수집 큐 맨 앞으로
       올린다(`mark_ticket_history_stale`). **대화를 받아오지는 않는다** — 웹훅이 느리면
       허브스팟이 배치를 통째로 재전송한다.
-    - **스레드에는 티켓 id 가 없다** (실측: 키가 `associatedContactId` · `inboxId` ·
-      `originalChannelId` · `latestMessageTimestamp` …). 그래서 연락처로 되짚고 그
-      사람의 티켓을 전부 표시한다 — 어느 티켓의 스레드인지는 수집기가 받아 보며 가리고,
-      `external_id` 가 유니크라 잘못 표시해도 줄이 겹치지 않는다.
+    - **스레드 객체로는 티켓을 못 찾는다** (실측: 키가 `associatedContactId` · `inboxId` ·
+      `originalChannelId` · `latestMessageTimestamp` 뿐). 찾는 길은 **연결**이다 —
+      `GET /crm/v4/objects/conversation/{thread}/associations/tickets` 가 그 티켓을
+      돌려준다(실측 3/3 정확, `typeId 31`). 티켓이 안 붙은 옛 스레드가 실제로 있어서, 그
+      때만 연락처로 물러서 그 사람의 티켓을 전부 표시한다 — `external_id` 가 유니크라
+      넉넉히 표시해도 줄이 겹치지 않는다.
     - **그래서 순환은 안전망이 됐다** — `TICKETS_PER_SWEEP` 8 → 3. 한 바퀴가 7시간에서
       18시간으로 길어지는 것이 대가인데, 실시간은 웹훅이 맡으므로 맞는 속도다.
   - **이어하기는 `conversations.history_synced_at` 한 칸이다.** NULL 이 「아직 안 받았다」이고

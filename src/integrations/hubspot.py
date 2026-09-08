@@ -1783,16 +1783,37 @@ class HubSpotClient:
             return None
         return str(results[0].get("id") or "") or None
 
-    def get_conversation_thread_sync(self, thread_id: str) -> dict:
-        """스레드 하나. 읽기만 합니다 — 웹훅이 티켓을 되짚는 데 씁니다.
+    def ticket_for_thread_sync(self, thread_id: str) -> str:
+        """그 스레드가 붙어 있는 **티켓 id**. 웹훅이 이걸로 되짚습니다. 읽기만 합니다.
 
-        **스레드에는 티켓 id 가 없습니다** (실측): 돌려주는 키는 `associatedContactId` ·
-        `inboxId` · `originalChannelId` · `latestMessageTimestamp` 등이고 티켓은 없습니다.
-        그래서 부르는 쪽이 연락처로 되짚습니다.
+        **스레드 객체로는 못 찾습니다** — 실측으로 돌려주는 키가 `associatedContactId` ·
+        `inboxId` · `originalChannelId` · `latestMessageTimestamp` 뿐이고 티켓이 없습니다.
+        찾는 길은 **연결(association)** 입니다: 스레드는 `conversation` 객체이고, 거기서
+        티켓으로 가는 연결이 있습니다(실측 3/3 정확, `typeId 31`).
 
-        못 읽으면 빈 dict 입니다 — 웹훅 안에서 도는 조회라 여기서 터지면 허브스팟이 그
-        배치를 통째로 다시 보냅니다.
+        빈 문자열이면 「이 스레드에 붙은 티켓이 없다」입니다 — 실제로 그런 스레드가
+        있습니다(티켓이 생기기 전의 옛 대화). 부르는 쪽이 연락처로 물러섭니다.
+
+        못 읽어도 빈 문자열입니다 — 웹훅 안에서 도는 조회라 여기서 터지면 허브스팟이
+        그 배치를 통째로 다시 보냅니다.
         """
+        headers = {"Authorization": f"Bearer {self.token}"}
+        try:
+            with httpx.Client(headers=headers, timeout=10.0) as client:
+                r = client.get(
+                    f"{BASE_URL}/crm/v4/objects/conversation/{thread_id}"
+                    "/associations/tickets"
+                )
+            if r.status_code != 200:
+                return ""
+            results = r.json().get("results") or []
+            return str(results[0]["toObjectId"]) if results else ""
+        except Exception:
+            logger.warning("스레드 %s 의 티켓을 못 찾았습니다", thread_id, exc_info=True)
+            return ""
+
+    def get_conversation_thread_sync(self, thread_id: str) -> dict:
+        """스레드 하나. 위 연결 조회가 빈손일 때 연락처로 물러서는 길입니다."""
         headers = {"Authorization": f"Bearer {self.token}"}
         try:
             with httpx.Client(headers=headers, timeout=10.0) as client:

@@ -190,16 +190,21 @@ _CONVERSATION_SUBSCRIPTIONS = frozenset(
 
 
 def _refresh_conversation(event: HubSpotWebhookEvent) -> int:
-    """스레드에 뭔가 오갔다 — 그 고객의 티켓을 다음 회차 맨 앞으로. 표시한 수를 돌려줍니다.
+    """스레드에 뭔가 오갔다 — 그 티켓을 다음 회차 맨 앞으로. 표시한 수를 돌려줍니다.
 
-    **스레드에는 티켓 id 가 없습니다** (실측: 스레드 객체의 키는 `associatedContactId` ·
-    `inboxId` · `originalChannelId` … 이고 티켓은 없습니다). 그래서 연락처로 되짚고, 그
-    사람의 티켓을 전부 표시합니다 — 어느 티켓의 스레드인지는 수집기가 실제로 받아 보면서
-    가립니다(`external_id` 가 유니크라 잘못 표시해도 줄이 겹치지 않습니다).
+    **티켓을 정확히 찾습니다.** 웹훅이 주는 것은 스레드 id 인데, 스레드 **객체**에는 티켓이
+    안 적혀 있습니다(실측: `associatedContactId` · `inboxId` · `originalChannelId` …).
+    대신 **연결(association)** 로 되짚습니다 —
+    `GET /crm/v4/objects/conversation/{thread}/associations/tickets` 가 그 티켓을
+    돌려줍니다(실측 3/3 정확).
+
+    **티켓이 안 붙은 스레드도 있습니다**(티켓이 생기기 전의 옛 대화). 그때만 연락처로
+    물러서서 그 사람의 티켓을 전부 표시합니다 — 어느 것인지는 수집기가 실제로 받아 보며
+    가리고, `external_id` 가 유니크라 넉넉히 표시해도 줄이 겹치지 않습니다.
 
     **여기서 대화를 받아오지는 않습니다.** 웹훅은 빨리 답해야 하고(느리면 허브스팟이
-    배치를 통째로 재전송합니다), 받아오는 일은 이미 10분 수집기가 합니다. 이 이벤트가 하는
-    일은 둘입니다 — **서비스를 깨우고**, 그 티켓을 큐 맨 앞으로 옮기는 것.
+    배치를 통째로 재전송합니다), 받아오는 일은 10분 수집기가 합니다. 이 이벤트가 하는 일은
+    둘입니다 — **서비스를 깨우고**, 그 티켓을 큐 맨 앞으로 옮기는 것.
 
     절대 안 터집니다. 여기서 500 을 내면 허브스팟이 그 배치를 통째로 다시 보냅니다.
     """
@@ -211,28 +216,41 @@ def _refresh_conversation(event: HubSpotWebhookEvent) -> int:
         from ..db.session import SessionLocal
         from ..integrations.hubspot import HubSpotClient
 
+        client = HubSpotClient()
         thread_id = str(event.objectId)
-        thread = HubSpotClient().get_conversation_thread_sync(thread_id)
-        contact_id = str((thread or {}).get("associatedContactId") or "")
-        if not contact_id:
-            return 0
+        ticket_id = client.ticket_for_thread_sync(thread_id)
+
         with SessionLocal() as session:
-            contact = (
-                session.query(Contact)
-                .filter(Contact.hubspot_contact_id == contact_id)
-                .first()
-            )
-            if contact is None:
-                return 0
-            ids = [
-                row.id
-                for row in session.query(Conversation)
-                .filter(
-                    Conversation.contact_id == contact.id,
-                    Conversation.hubspot_ticket_id.is_not(None),
+            if ticket_id:
+                ids = [
+                    row.id
+                    for row in session.query(Conversation)
+                    .filter(Conversation.hubspot_ticket_id == ticket_id)
+                    .all()
+                ]
+            else:
+                contact_id = str(
+                    (client.get_conversation_thread_sync(thread_id) or {})
+                    .get("associatedContactId") or ""
                 )
-                .all()
-            ]
+                if not contact_id:
+                    return 0
+                contact = (
+                    session.query(Contact)
+                    .filter(Contact.hubspot_contact_id == contact_id)
+                    .first()
+                )
+                if contact is None:
+                    return 0
+                ids = [
+                    row.id
+                    for row in session.query(Conversation)
+                    .filter(
+                        Conversation.contact_id == contact.id,
+                        Conversation.hubspot_ticket_id.is_not(None),
+                    )
+                    .all()
+                ]
         for conversation_id in ids:
             mark_ticket_history_stale(conversation_id)
         return len(ids)
