@@ -180,3 +180,61 @@ def test_the_send_button_sits_next_to_the_log_button():
     assert "!isDraftOpen" in header
     # 옛 안내 상자는 사라졌습니다.
     assert "이 티켓의 다음 답변을 여기서 쓸 수 있습니다" not in screen
+
+
+def test_a_rejected_draft_leaves_the_ticket_log(db_session_factory, ticket):
+    """**고객이 본 적 없는 글은 그 대화의 기록이 아닙니다.**
+
+    이 저장소가 초안을 「닫지 않고 지우는」 이유로 이미 적어 둔 문장인데
+    (`_delete_pending_drafts`), **거절한 초안에는 안 걸려 있었습니다** — 거절은 행을
+    남기므로(`status='rejected'`) 그 글이 「이메일 발송」이라는 라벨을 달고 티켓 기록에
+    섰습니다. 나가지도 않은 글을 나중에 읽는 사람은 「이 답변은 나갔다」로 셉니다
+    (2026-09-08 운영자 지적).
+
+    **사라지는 것은 아닙니다** — 목록과 승인 이력에는 그대로 있고, 이 티켓의 대화
+    줄기에서만 빠집니다.
+    """
+    conv_id = ticket
+    with db_session_factory() as session:
+        session.add_all([
+            Message(conversation_id=conv_id, direction="outgoing", subject="거절한 초안",
+                    body="이 글은 안 나갔습니다", status="rejected"),
+            Message(conversation_id=conv_id, direction="outgoing", subject="나간 회신",
+                    body="이 글은 나갔습니다", status="sent"),
+        ])
+        session.commit()
+
+    with TestClient(app) as client:
+        payload = client.get(f"/api/ui/tickets/{conv_id}").json()
+
+    subjects = [b["subject"] for b in payload["thread"]]
+    assert "나간 회신" in subjects
+    assert "거절한 초안" not in subjects, "거절한 초안은 대화 줄기에 안 섭니다"
+
+
+def test_the_follow_up_draft_says_it_was_started_by_hand(db_session_factory, ticket):
+    """화면이 편집기를 **접은 채로** 열지 정하는 값입니다 (2026-09-08 운영자 지시).
+
+    New 티켓의 자동 초안은 그 화면에 온 이유 자체라 펼쳐 두고, 「메일 발송」으로 사람이
+    시작한 후속 초안만 접습니다 — 쓰다 말고 나갔다가 「이 티켓의 기록」을 보러 다시
+    들어오는 일이 흔한데, 그때 편집기가 화면을 가로막습니다.
+
+    **어느 쪽인지는 서버가 말합니다.** 화면이 상태로 짐작하면 초안 종류가 하나 늘 때
+    거기만 안 바뀝니다.
+    """
+    conv_id = ticket
+    with db_session_factory() as session:
+        session.add_all([
+            Message(conversation_id=conv_id, direction="outgoing", subject="자동 초안",
+                    body="a", status="sent"),
+            Message(conversation_id=conv_id, direction="outgoing", subject="후속 초안",
+                    body="b", status="sent", prompt_variant="manual"),
+        ])
+        session.commit()
+
+    with TestClient(app) as client:
+        payload = client.get(f"/api/ui/tickets/{conv_id}").json()
+
+    by_subject = {b["subject"]: b["is_manual"] for b in payload["thread"]}
+    assert by_subject["후속 초안"] is True
+    assert by_subject["자동 초안"] is False

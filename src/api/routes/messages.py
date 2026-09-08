@@ -275,6 +275,18 @@ def _message_detail_context(
         # original behind an expand toggle. ``needs_ko`` flags inbound non-Korean
         # bubbles; ``body_ko``/``subject_ko`` are filled by the route (concurrently)
         # so the page already shows Korean without a click.
+        # **고객이 본 적 없는 글은 그 대화의 기록이 아닙니다.** 이 저장소가 이미 초안을
+        # 「닫지 않고 지우는」 이유로 적어 둔 문장인데(`_delete_pending_drafts`), 거절한
+        # 초안에는 안 걸려 있었습니다 — 거절은 행을 남기므로(`approval.reject` 가
+        # `status='rejected'` 로 바꿉니다) 그 글이 「이메일 발송」이라는 라벨을 달고 티켓
+        # 기록에 섰습니다. 나가지도 않은 글을 나중에 읽는 사람은 「이 답변은 나갔다」로
+        # 셉니다 (2026-09-08 운영자 지적).
+        #
+        # **지금 검토 중인 것은 남깁니다** — 그게 이 화면의 편집기입니다.
+        # `delivery_unknown` 도 남깁니다: 「갔는지 모른다」라서 안 갔다고 칠 수 없습니다.
+        # 거절한 초안은 사라지지 않습니다 — `/messages?status=…` 목록과 승인 이력
+        # (`Approval`)에 그대로 있습니다. 이 티켓의 대화 줄기에서만 빠집니다.
+        _DELIVERED = {"sent", "test_sent", "delivery_unknown"}
         thread = [
             {
                 "id": tm.id,
@@ -297,6 +309,11 @@ def _message_detail_context(
                 "body_ko": tm.body_ko,
                 "subject_ko": tm.subject_ko,
                 "is_auto_ack": tm.prompt_variant == "auto_ack",
+                # 「메일 발송」으로 사람이 시작한 후속 회신인가 (2026-09-08). 화면이 이
+                # 값으로 편집기를 **접은 채로 엽니다** — New 티켓의 자동 초안은 그 화면에
+                # 온 이유 자체라 펼쳐 두지만, 후속 초안은 다시 들어왔을 때 펼쳐져 있으면
+                # 「이 티켓의 기록」을 보러 온 사람의 화면을 가로막습니다(운영자 지적).
+                "is_manual": tm.prompt_variant == MANUAL_REPLY_VARIANT,
                 # 한 줄 요약. New 를 지난 화면은 본문 대신 이것을 보여 주고,
                 # 「전체보기」를 눌렀을 때 본문이 나옵니다.
                 "summary_line": tm.summary_line,
@@ -309,6 +326,9 @@ def _message_detail_context(
                 "is_current": msg is not None and tm.id == msg.id,
             }
             for tm in thread_rows
+            if tm.direction == "inbound"
+            or tm.status in _DELIVERED
+            or (msg is not None and tm.id == msg.id)
         ]
 
         return {
