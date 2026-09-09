@@ -102,6 +102,15 @@ async def lifespan(app: FastAPI):
     workers are enabled; scale them as separate services instead.
     """
     validate_startup_settings()
+
+    # **512Mi 안에서 삽니다** (2026-09-09 실측: 실제로 두 번 OOM 으로 죽었습니다).
+    # 기본 실 묶음은 `min(32, cpu_count()+4)` 인데 컨테이너 안의 `cpu_count()` 는 호스트의
+    # 코어 수라, 0.1 CPU 인스턴스가 열두 실까지 자랄 수 있습니다 — 그만큼 아레나와 DB
+    # 커넥션을 동시에 잡습니다. 여기 `to_thread` 는 전부 기다리는 일이라 넷이면 넉넉합니다.
+    from ..common.memory import cap_thread_pool
+
+    cap_thread_pool(4)
+
     tasks: list[asyncio.Task] = []
 
     if settings.INBOUND_WORKER_ENABLED:
@@ -115,15 +124,6 @@ async def lifespan(app: FastAPI):
 
         tasks.append(asyncio.create_task(run_poller(), name="inbound_poller"))
         logger.info("Inbound poller background task started.")
-
-    if settings.INBOUND_POLL_ENABLED:
-        # 10분 폴러와 **따로** 돕니다(2분). 이 스윕이 가져오는 것 중에 사람이 읽기만 하는
-        # 값이 아닌 것이 있습니다 — 영업이 허브스팟에서 직접 회신하면 우리 대기 초안이
-        # 종료됩니다. 그 사이가 곧 「고객이 같은 질문에 두 번째 답을 받는」 창입니다.
-        from ..agents.contact_sync import run_contact_sweep
-
-        tasks.append(asyncio.create_task(run_contact_sweep(), name="contact_sweep"))
-        logger.info("Contact sweep background task started.")
 
     if settings.SEND_WORKER_ENABLED:
         from ..agents.send_worker import run_send_worker

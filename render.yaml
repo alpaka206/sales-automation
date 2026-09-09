@@ -43,6 +43,19 @@ services:
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.9
+      # **512Mi 안에서 삽니다 — 실제로 두 번 OOM 으로 죽었습니다** (2026-09-07 12:57,
+      # 2026-09-08 14:24, Render 이벤트에 `oomKilled: {memoryLimit: "512Mi"}`).
+      #
+      # glibc 는 **실마다 따로 아레나**를 만들고(64비트에서 하나가 최대 64 MB) 그것들은
+      # 서로 반납을 안 도와줍니다. 파이썬 웹앱은 실을 여럿 쓰므로 빈 자리가 여러 군데로
+      # 흩어지고, 그래서 갓 뜬 인스턴스 120 MB 가 하루 만에 350 MB 에서 평평해집니다
+      # (CPU 는 0 인 채로 — 즉 일하는 것이 아니라 안 돌려준 자리입니다).
+      #
+      # 둘로 묶으면 그 흩어짐이 없어집니다. 대가는 실들이 같은 잠금을 다투는 것인데,
+      # 이 앱의 작업 실은 전부 **기다리는 일**(DB·HTTP)이라 다툴 일이 거의 없습니다.
+      # 코드 쪽 짝은 `src/common/memory.py`(회차가 끝나면 `malloc_trim`)입니다.
+      - key: MALLOC_ARENA_MAX
+        value: "2"
       # For the console build above. Matches the version CI builds with.
       - key: NODE_VERSION
         value: "24"

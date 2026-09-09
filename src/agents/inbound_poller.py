@@ -246,7 +246,25 @@ async def run_poller() -> None:
                 await asyncio.to_thread(run)
             except Exception:
                 logger.exception("Inbound poller step %s failed", name)
+        # **회차가 끝나면 남는 자리를 돌려줍니다.** 한 바퀴에 허브스팟 응답 수십 건을
+        # 파싱하는데, 그게 끝나도 glibc 는 그 페이지를 자기 힙에 쥐고 있습니다 — 갓 뜬
+        # 인스턴스 120 MB 가 하루 만에 350 MB 에서 평평해지던 이유입니다(2026-09-09 실측).
+        from ..common.memory import release
+
+        await asyncio.to_thread(release, "폴러 회차")
         await asyncio.sleep(interval)
+
+
+def _fill_company_websites() -> int:
+    """연락처의 회사 주소 백필 한 회차. 허브스팟이 설정 안 돼 있으면 아무 일도 안 합니다."""
+    from ..integrations.hubspot import HubSpotClient, HubSpotNotConfigured
+    from .contact_sync import fill_missing_websites
+
+    try:
+        client = HubSpotClient()
+    except HubSpotNotConfigured:
+        return 0
+    return fill_missing_websites(client)
 
 
 def _poller_steps() -> list[tuple[str, object]]:
@@ -284,6 +302,10 @@ def _poller_steps() -> list[tuple[str, object]]:
         # 티켓별 대화를 조금씩 받아옵니다. 한 바퀴를 다 돌면 가장 오래된 것부터 다시
         # 도므로, 지난 대화를 메우는 일과 새로 쌓인 대화를 따라잡는 일이 한 단계입니다.
         ("ticket_history", run_pending_ticket_history),
+        # 연락처의 회사 주소를 조금씩 채웁니다 (0111). 2026-09-09 에 2분 연락처 스윕을
+        # 없애면서 여기로 왔습니다 — 대기열이 `website IS NULL` 이라 다 채우면 저절로
+        # 멎고, 그때는 허브스팟 왕복이 0 입니다. 급한 값이 아니라 10분이면 넉넉합니다.
+        ("contact_websites", _fill_company_websites),
         # 연결된 개인 사서함에서 **우리가 아는 연락처의 메일만** 주워 옵니다 (0115).
         # 허브스팟이 못 보는 자리이고, 티켓에 붙일지는 화면에서 사람이 누릅니다.
         # 연결된 사서함이 없으면 아무 일도 안 합니다 — 조회조차 안 나갑니다.

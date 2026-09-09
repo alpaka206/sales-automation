@@ -411,6 +411,13 @@ async def run_inbound_worker() -> None:
                 from ..api.routes.ui_api import publish
 
                 publish("inbound-worker")
+
+                # **여기가 가장 크게 부푸는 자리입니다** (2026-09-09 실측). 14:22:23 에
+                # Vertex 호출 한 건이 나가고 1분 뒤 RSS 가 350 → 487 MB, 2분 뒤 OOM 이었습니다.
+                # 파이썬이 놓아도 glibc 가 그 페이지를 쥐고 있어서 저절로는 안 내려옵니다.
+                from ..common.memory import release
+
+                await asyncio.to_thread(release, "초안 완료")
         except asyncio.CancelledError:
             raise
         except Exception:
