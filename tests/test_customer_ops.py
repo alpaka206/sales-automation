@@ -10,7 +10,7 @@ from unittest.mock import patch
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import Numeric, create_engine, inspect, text
+from sqlalchemy import Numeric, create_engine, func, inspect, select, text
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -1063,3 +1063,69 @@ def test_editing_a_record_does_not_move_the_ticket(customer_db, customer_id) -> 
 
     with customer_db() as session:
         assert session.get(Conversation, conversation_id).stage == "won"
+
+
+def test_a_record_can_be_deleted_from_the_ticket(customer_db, customer_id) -> None:
+    """**붙이는 것이 자동이면 지우는 길이 있어야 합니다** (2026-09-09 운영자 지시).
+
+    개인 메일함이 티켓에 바로 붙게 되면서(확인 단계를 없앴습니다) 잘못 붙은 줄을 되돌릴
+    길이 없어졌습니다. 판단이 「붙이기 전」에서 「붙은 뒤」로 옮겨진 것입니다.
+
+    **가져온 줄도 지웁니다.** 고치기는 사람이 적은 줄만 되는데(`external_id IS NULL`),
+    그 규칙의 이유는 「고치면 저쪽과 조용히 갈린다」입니다. 지우기는 갈라지는 것이 아니라
+    우리 화면에서 안 보이게 하는 것이고, 저쪽 원본은 그대로입니다.
+
+    **개인함 메일은 묘비를 남깁니다** — 안 남기면 수집기가 다음 회차에 다시 가져옵니다.
+    """
+    from src.db.models import CustomerInteraction, MailboxLinkDecision
+
+    with customer_db() as session:
+        session.add(CustomerInteraction(
+            contact_id=customer_id, channel="이메일", direction="inbound",
+            summary="개인함으로 온 메일", external_id="gmail:zz",
+            context="perso.ai@estsoft.com 개인 메일함",
+            happened_at=datetime(2026, 9, 9, 12, 0)))
+        session.commit()
+        row_id = session.scalar(
+            select(CustomerInteraction.id).where(CustomerInteraction.external_id == "gmail:zz")
+        )
+
+    with TestClient(app) as client:
+        response = client.post(
+            f"/customers/{customer_id}/interactions/{row_id}/delete",
+            data={"redirect_to": "/tickets/1"},
+            follow_redirects=False,
+        )
+    assert response.status_code == 303
+
+    with customer_db() as session:
+        assert session.get(CustomerInteraction, row_id) is None
+        tomb = session.get(MailboxLinkDecision, "gmail:zz")
+        assert tomb is not None, "묘비가 없으면 다음 회차에 되살아납니다"
+
+
+def test_deleting_a_hand_written_record_leaves_no_tombstone(customer_db, customer_id) -> None:
+    """묘비는 **개인함 메일에만** 답니다. 손으로 적은 줄은 수집기가 다시 만들 일이
+    없으므로 그 표에 남길 이유가 없습니다 — 남기면 그 표가 「지운 것 전부」가 되고,
+    수집기가 읽는 목록이 쓸데없이 커집니다."""
+    from src.db.models import CustomerInteraction, MailboxLinkDecision
+
+    with customer_db() as session:
+        session.add(CustomerInteraction(
+            contact_id=customer_id, channel="manual", direction="note",
+            summary="손으로 적은 메모", happened_at=datetime(2026, 9, 9, 13, 0)))
+        session.commit()
+        row_id = session.scalar(
+            select(CustomerInteraction.id)
+            .where(CustomerInteraction.summary == "손으로 적은 메모")
+        )
+
+    with TestClient(app) as client:
+        gone = client.post(
+            f"/customers/{customer_id}/interactions/{row_id}/delete",
+            data={}, follow_redirects=False,
+        )
+    assert gone.status_code == 303
+    with customer_db() as session:
+        assert session.get(CustomerInteraction, row_id) is None
+        assert session.scalar(select(func.count()).select_from(MailboxLinkDecision)) == 0

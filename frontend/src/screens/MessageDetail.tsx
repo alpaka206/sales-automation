@@ -467,6 +467,37 @@ export function MessageDetail() {
     }
   }
 
+  /** 기록 한 줄 지우기 — **확인 창을 반드시 지납니다** (2026-09-09 운영자 지시).
+   *
+   *  이 화면이 이미 쓰는 `confirm` 상태를 그대로 씁니다: 창을 새로 만들면 같은 뜻의
+   *  확인이 두 모양이 되고, 하나만 고쳐지는 날이 옵니다. 문장을 옮겨 적게 하는
+   *  `DeleteDialog` 는 안 씁니다 — 그건 지우면 되돌릴 수 없는 정책 문서용이고, 여기는
+   *  기록 한 줄입니다. 다만 개인 메일함에서 온 줄은 **다시 안 들어온다**는 것을 문장에
+   *  적습니다: 지우면 수집기가 그 메일을 영영 건너뜁니다(묘비). */
+  function askDeleteInteraction(item: Interaction) {
+    if (!item.id || !contact) return;
+    const fromMailbox = (item.context || "").includes("개인 메일함");
+    setConfirm({
+      description: (
+        <>
+          이 기록을 지웁니다: <strong>{item.subject || item.summary || "(내용 없음)"}</strong>
+          <div className="t-sm t-subtle" style={{ marginTop: 6 }}>
+            {fromMailbox
+              ? "개인 메일함에서 들어온 줄입니다 — 지우면 다시 가져오지 않습니다."
+              : "이 티켓의 기록에서 사라집니다. 허브스팟 원본은 그대로입니다."}
+          </div>
+        </>
+      ),
+      run: async () => {
+        await postForm(
+          `/customers/${contact.id}/interactions/${item.id}/delete`,
+          { redirect_to: `/tickets/${ticket.id}` },
+        );
+        await queryClient.invalidateQueries({ queryKey: key });
+      },
+    });
+  }
+
   async function act(action: string, extra: Record<string, string> = {}) {
     if (!msg) return;
     setNote("");
@@ -891,6 +922,7 @@ export function MessageDetail() {
                     ) : (
                       <InteractionItem key={entry.key} item={entry.item as Interaction}
                                        hideSubject hideHandler onEdit={setEditing}
+                                       onDelete={askDeleteInteraction}
                                        preInquiry={isPreInquiry(entry.item as Interaction)} />
                     ),
                   )

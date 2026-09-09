@@ -307,13 +307,22 @@ export function InteractionForm({
  *  제목은 **버려지지 않습니다**: 요약이 빈 기록에서는 아래 `body` 가 제목을 대신 씁니다.
  *  그 줄에는 제목이 가진 전부이기 때문입니다. */
 export function InteractionItem({
-  item, hideSubject = false, hideHandler = false, preInquiry = false, onEdit,
+  item, hideSubject = false, hideHandler = false, preInquiry = false, onEdit, onDelete,
 }: {
   item: Interaction;
   /** 주면 고칠 수 있는 줄에 연필이 붙습니다 (2026-09-07 운영자 지시). **줄이 스스로
    *  고치지 않는 이유**: 고치는 폼은 모달이고 모달은 화면이 엽니다 — 그 자리를 이 줄이
    *  들면 목록을 그리는 곳마다 모달이 하나씩 생깁니다. 안 주면 예전 그대로입니다. */
   onEdit?: (item: Interaction) => void;
+  /** 주면 **모든 줄**에 휴지통이 붙습니다 (2026-09-09 운영자 지시). 연필(`onEdit`)과
+   *  달리 `editable` 을 안 봅니다: 고치기는 저쪽 사본을 우리 쪽에서만 바꿔 조용히
+   *  갈라 놓는 일이라 막았지만, 지우기는 우리 화면에서 안 보이게 하는 것이고 저쪽
+   *  원본은 그대로입니다. 그리고 지워야 하는 것이 정확히 그 가져온 줄들입니다 —
+   *  개인 메일함이 티켓에 바로 붙게 되면서 잘못 붙은 줄을 되돌릴 길이 필요해졌습니다.
+   *
+   *  **확인 창은 부르는 쪽이 띄웁니다.** 모달은 화면이 여는 것이고, 그 자리를 이 줄이
+   *  들면 목록을 그리는 곳마다 모달이 하나씩 생깁니다(`onEdit` 과 같은 이유). */
+  onDelete?: (item: Interaction) => void;
   hideSubject?: boolean;
   /** 이 문의가 접수되기 **전에** 오간 줄인가. 그러면 빨간 「CS」 칩이 붙습니다
    *  (2026-09-07 운영자 지시). 이 티켓의 이야기가 아니라 그 전부터 돌던 대화라,
@@ -375,6 +384,14 @@ export function InteractionItem({
                   onClick={(event) => { event.preventDefault(); event.stopPropagation();
                                         onEdit(item); }}>
             <Icon name="edit" size={12} />
+          </button>
+        )}
+        {onDelete && item.id && (
+          <button type="button" className="btn btn--subtle btn--sm" title="기록 삭제"
+                  aria-label="기록 삭제"
+                  onClick={(event) => { event.preventDefault(); event.stopPropagation();
+                                        onDelete(item); }}>
+            <Icon name="trash" size={12} />
           </button>
         )}
       </div>

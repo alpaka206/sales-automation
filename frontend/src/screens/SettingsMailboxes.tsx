@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { getJSON, postForm, HttpError } from "../lib/api";
-import { Link } from "react-router-dom";
+
 import { Icon } from "../ui/Icon";
 import { kst } from "../lib/format";
 import { Loading } from "../ui/Loading";
@@ -19,15 +19,7 @@ type Account = {
   connected_at: string;
   last_polled_at: string | null;
 };
-type PendingLink = {
-  external_id: string; mailbox: string; contact: string; contact_email: string;
-  subject: string; preview: string; happened_at: string;
-  conversation_id: number; ticket_id: string | null; ticket_subject: string;
-};
 type Data = {
-  /** 「연결할까요?」 — 후보 티켓은 **가장 최근 것 하나**입니다(운영자 지시). 연락처는
-   *  아는데 티켓이 없는 메일은 여기 안 뜹니다: 그건 이미 리드 히스토리의 한 줄입니다. */
-  pending_links: PendingLink[];
   configured: boolean;
   /** 주소만으로 추가할 수 있나 — **그 사람이 로그인할 필요가 없는 길**입니다
    *  (도메인 전체 위임). 서비스 계정 열쇠가 있을 때만 참입니다. */
@@ -127,61 +119,13 @@ export function SettingsMailboxes() {
         </div>
       )}
 
-      {/* **개인함으로 온 메일 한 통에 한 번 묻습니다** (2026-09-08 운영자 지시).
-          붙이는 코드는 원래 있었고 안 돌던 이유가 하나였습니다 — 그 연락처에 티켓이
-          여럿이면 어느 대화의 것인지 코드가 알 수 없고, **잘못 붙으면 남의 티켓에 남의
-          메일이 서는데 아무도 그걸 모릅니다.** 그 한 번의 판단을 사람이 합니다. */}
-      {data.pending_links.length > 0 && (
-        <div className="card" style={{ marginBottom: 12 }}>
-          <div className="section-label" style={{ marginBottom: 10 }}>
-            티켓에 연결할까요? <span className="tnum">{data.pending_links.length}건</span>
-          </div>
-          <div className="history-list">
-            {data.pending_links.map((item) => (
-              <div key={item.external_id} className="row-between"
-                   style={{ padding: "10px 0", borderTop: "1px solid var(--border)", gap: 12 }}>
-                <div style={{ minWidth: 0 }}>
-                  <div className="t-xs t-subtle">
-                    {item.mailbox} · {kst(item.happened_at)}
-                  </div>
-                  <strong className="truncate">{item.subject || "(제목 없음)"}</strong>
-                  <div className="t-xs t-subtle truncate">
-                    {item.contact || item.contact_email} — {item.preview}
-                  </div>
-                  <div className="t-xs">
-                    →{" "}
-                    <Link to={`/tickets/${item.conversation_id}`}>
-                      {item.ticket_subject || `티켓 ${item.ticket_id ?? item.conversation_id}`}
-                    </Link>
-                  </div>
-                </div>
-                <div className="row" style={{ gap: 6, flexShrink: 0 }}>
-                  {/* 「연결」은 우리 줄에 티켓을 채우고 **허브스팟 티켓에도 노트를
-                      남깁니다**. 「아니요」도 저장합니다 — 안 적으면 회차마다 다시
-                      물어봅니다. */}
-                  <ActionButton className="btn btn--subtle btn--sm" pending="연결 중"
-                                onClick={() => act("/integrations/mailboxes/link",
-                                                   { external_id: item.external_id,
-                                                     conversation_id: String(item.conversation_id) })}>
-                    연결
-                  </ActionButton>
-                  <ActionButton className="btn btn--ghost btn--sm" pending="처리 중"
-                                onClick={() => act("/integrations/mailboxes/link",
-                                                   { external_id: item.external_id,
-                                                     conversation_id: "" })}>
-                    아니요
-                  </ActionButton>
-                </div>
-              </div>
-            ))}
-          </div>
-          <p className="t-xs t-subtle" style={{ marginBottom: 0 }}>
-            연결하면 이 티켓의 기록에 서고 허브스팟 티켓에도 노트로 남습니다.
-            「아니요」를 눌러도 그 메일은 리드 히스토리에 그대로 있습니다 — 티켓에만 안
-            붙습니다.
-          </p>
-        </div>
-      )}
+      {/* **「연결할까요?」는 없앴습니다** (2026-09-09 운영자 지시: 「티켓으로 바로
+          연결하게 해줘 확인 안 누르고 최신 티켓 혹은 최신 수주로 들어가게」). 운영자가
+          그 목록을 보고 「좀 애매한 느낌」이라고 했습니다 — 답이 거의 언제나 「가장 최근
+          그 건」이라 묻는 것 자체가 일이었습니다.
+
+          이제 수집기가 넣으면서 붙이고, 잘못 붙은 줄은 **티켓 화면에서 지웁니다**. 판단이
+          「붙이기 전」에서 「붙은 뒤」로 옮겨진 것입니다. */}
 
       {!data.configured && (
         <div className="card" style={{ marginBottom: 12 }}>

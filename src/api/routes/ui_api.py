@@ -664,14 +664,8 @@ def ui_mailboxes():
     from ...integrations.gmail import READ_SCOPE, delegation_configured, list_accounts
     from ...integrations.google_oauth import client_is_configured
 
-    from ...agents.mailbox_sync import pending_links
-
     rows = list_accounts()
     return {
-        # 「연결할까요?」 — 아직 티켓에 안 붙었고 아직 안 물어본 개인함 메일.
-        # 연락처는 아는데 티켓이 없는 메일은 여기 안 뜹니다: 그건 이미 리드 히스토리의
-        # 한 줄이고(운영자 지시), 그게 답입니다.
-        "pending_links": pending_links(),
         # 클라이언트가 없으면 「연결」이 아무 데도 안 갑니다. 버튼을 눌러 보고 알게 하는
         # 대신 화면이 미리 적습니다.
         "configured": client_is_configured(),

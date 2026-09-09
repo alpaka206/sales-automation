@@ -1305,6 +1305,53 @@ async def interaction_edit(
     return RedirectResponse(back, status_code=303)
 
 
+@router.post("/customers/{contact_id}/interactions/{interaction_id}/delete")
+async def interaction_delete(
+    contact_id: int,
+    interaction_id: int,
+    redirect_to: str = Form(""),
+):
+    """기록 한 줄을 지웁니다 (2026-09-09 운영자 지시).
+
+    **왜 필요해졌나.** 개인 메일함 수집이 티켓에 **바로** 붙게 되면서(확인 단계를 없앴습니다)
+    잘못 붙은 줄을 되돌릴 길이 없어졌습니다. 자동으로 붙이는 대신 지울 수 있어야 짝이
+    맞습니다 — 운영자가 화면에서 보고 판단하는 자리가 「붙이기 전」에서 「붙은 뒤」로
+    옮겨진 것입니다.
+
+    **가져온 줄도 지웁니다.** `interaction_edit` 은 사람이 적은 줄만 고치게 막는데
+    (`external_id IS NULL`), 그 규칙의 이유는 「고치면 저쪽과 조용히 갈린다」입니다. 지우기는
+    다릅니다: 갈라지는 것이 아니라 **우리 화면에서 안 보이게** 하는 것이고, 저쪽 원본은
+    그대로입니다. 그리고 지금 지워야 하는 것이 정확히 그 가져온 줄들입니다.
+
+    **개인함 메일은 묘비를 남깁니다.** 안 남기면 수집기가 다음 회차에 그대로 다시
+    가져옵니다 — `external_id` 로 중복을 거르는데 행을 지우면 그 열쇠가 사라지기
+    때문입니다. 지우기가 10분짜리가 되면 지운 것이 아닙니다. 표는
+    `mailbox_link_decisions` 를 그대로 씁니다(모양이 같고, 확인 단계가 없어지면서 그 표의
+    뜻이 「물어본 적 있다」에서 「운영자가 지웠다」로 바뀌었습니다).
+
+    **허브스팟에는 손대지 않습니다.** 저쪽 노트·메일은 저쪽 기록이고, 우리 화면에서
+    지운다고 없어질 것이 아닙니다. 지우는 것은 우리 줄 하나입니다.
+    """
+    from ...db.models import MailboxLinkDecision
+
+    back = _internal_path(redirect_to, f"/customers/{contact_id}#history")
+    with SessionLocal() as session:
+        row = session.get(CustomerInteraction, interaction_id)
+        if row is None or row.contact_id != contact_id:
+            raise HTTPException(status_code=404, detail="기록을 찾을 수 없습니다")
+        external_id = row.external_id or ""
+        session.delete(row)
+        if external_id.startswith("gmail:"):
+            session.merge(MailboxLinkDecision(
+                external_id=external_id,
+                conversation_id=None,
+                decided_by="deleted",
+                decided_at=datetime.now(timezone.utc),
+            ))
+        session.commit()
+    return RedirectResponse(back, status_code=303)
+
+
 @router.post("/customers/{contact_id}/contracts")
 async def contract_add(
     contact_id: int,

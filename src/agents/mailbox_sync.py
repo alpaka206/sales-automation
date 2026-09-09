@@ -13,16 +13,21 @@
 3. **허브스팟과 겹치면 허브스팟 것만.** 같은 메일이 두 줄로 서면 화면이 대화를 두 번
    합니다. 가리는 자를 새로 만들지 않고 `ticket_history._merge_crm_twins` 가 쓰는 규칙을
    그대로 씁니다 — **같은 연락처 · 같은 초 · 같은 방향**.
-4. **티켓 연결은 사람이 누릅니다.** 후보가 여럿이면 **가장 최근 티켓**을 제안하고
-   (운영자 지시), 연락처는 아는데 티켓이 없으면 리드 히스토리에만 남깁니다.
+4. **티켓 연결은 자동입니다** (2026-09-09 지시: 「확인 안 누르고 최신 티켓 혹은 최신
+   수주로 들어가게」). 넣으면서 그 고객의 **가장 최근 기록**에 붙입니다 — 단계도 허브스팟
+   번호도 안 봅니다. 붙을 자리가 아예 없는 고객만 「티켓 외」로 남습니다.
+5. **우리가 보낸 사본은 안 가져옵니다.** `perso.ai@estsoft.com` 은 허브스팟 이메일 채널
+   계정이라 콘솔에서 나간 회신이 그 사서함에 그대로 남습니다 — 안 거르면 우리 답장이
+   티켓 기록에 두 번 섭니다(`_we_already_sent_it`).
 
-**메일은 먼저 들어가고, 연결은 나중에 붙습니다.** `customer_interactions` 에
-`conversation_id` 없이 넣어 두면 그 자체로 리드 히스토리의 한 줄이고(그게 티켓 없는
-연락처의 답입니다), 「연결」은 그 칸을 채우는 일이 됩니다. 확인 대기 표를 따로 만들지
-않는 이유이고, 운영자가 거절해도 기록은 남는다는 뜻이기도 합니다.
+**잘못 들어온 줄은 티켓 화면에서 지웁니다**(`customer_ops.interaction_delete`). 지울 때
+`mailbox_link_decisions` 에 묘비를 남기므로 다음 회차에 되살아나지 않습니다 — 그 표는
+원래 「물어본 적 있다」였고, 확인 단계가 없어지면서 뜻만 바뀌었습니다.
 """
 
 from __future__ import annotations
+
+import asyncio
 
 import base64
 import logging
@@ -119,6 +124,45 @@ def _newest_conversation(session, contact_id: int) -> Conversation | None:
     )
 
 
+def _we_already_sent_it(session, contact_id: int, when: datetime) -> bool:
+    """콘솔에서 **우리가 보낸 회신**이 개인함에 사본으로 돌아온 것인가 (2026-09-09).
+
+    운영자가 잡은 실제 사고: 사이트에서 써서 허브스팟으로 나간 답장(`RE: Test Custom
+    Quote`)이 `perso.ai@estsoft.com` 개인함에도 남아, 같은 글이 티켓 기록에 **두 번**
+    섰습니다. 그 주소가 곧 허브스팟 이메일 채널 계정이라 나가는 메일이 전부 그 사서함을
+    지납니다 — 개인함 수집을 켜는 순간 우리 회신이 통째로 되돌아옵니다.
+
+    **`_hubspot_already_has_it` 로는 못 잡습니다.** 그쪽은 `customer_interactions` 만
+    보고 **같은 초**를 요구하는데, 우리 회신은 `messages` 에 있고 지메일이 찍는 시각은
+    허브스팟이 보낸 시각과 몇 초 어긋납니다.
+
+    그래서 우리 발송 기록을 봅니다. 창을 넉넉히(±10분) 잡는 이유: 맞히려는 것이 「이
+    고객에게 그 무렵 우리가 보낸 답장」이고, 한 고객에게 10분 안에 답장을 두 번 보내는
+    일은 없습니다. 좁게 잡아 놓치면 대가가 **중복 표시**이고, 그건 나중에 읽는 사람이
+    「답을 두 번 보냈다」로 셉니다.
+
+    **`hubspot_message_id` 가 있는 것만 셉니다** — 실제로 나간 것이라는 뜻입니다. 초안과
+    거절한 글은 고객에게 안 갔으므로 개인함에 사본이 있을 수 없습니다.
+    """
+    from ..db.models import Message
+
+    window = timedelta(minutes=10)
+    stamp = when.replace(tzinfo=None)
+    return session.scalar(
+        select(Message.id)
+        .join(Conversation, Conversation.id == Message.conversation_id)
+        .where(
+            Conversation.contact_id == contact_id,
+            Message.direction == "outgoing",
+            Message.hubspot_message_id.is_not(None),
+            Message.sent_at.is_not(None),
+            Message.sent_at >= stamp - window,
+            Message.sent_at <= stamp + window,
+        )
+        .limit(1)
+    ) is not None
+
+
 def _hubspot_already_has_it(session, contact_id: int, when: datetime, direction: str) -> bool:
     """허브스팟이 이미 잡은 메일인가 — **겹치면 허브스팟 것만** (운영자 지시).
 
@@ -146,16 +190,17 @@ def _hubspot_already_has_it(session, contact_id: int, when: datetime, direction:
     )
 
 
-def _sync_one(email: str) -> int:
-    """사서함 하나. 새로 넣은 줄 수를 돌려줍니다."""
+def _sync_one(email: str) -> tuple[int, list[tuple[str, str, str, datetime]]]:
+    """사서함 하나. (새로 넣은 줄 수, 허브스팟에 남길 노트들)."""
     from .ticket_history import is_our_address
 
+    notes: list[tuple[str, str, str, datetime]] = []
     with SessionLocal() as session:
         from ..db.models import MailboxAccount as _Account
 
         account = session.get(_Account, email)
         if account is None or account.collect_from is None:
-            return 0
+            return 0, notes
         # **묻는 창은 「마지막으로 본 이후」입니다** (2026-09-08).
         #
         # 「동의 이후」로 물으면 창이 날마다 넓어지는데 한 회차에 받는 것은
@@ -183,13 +228,24 @@ def _sync_one(email: str) -> int:
         listing.raise_for_status()
         ids = [item["id"] for item in (listing.json().get("messages") or [])]
         if not ids:
-            return 0
+            return 0, notes
 
+        candidates = [f"gmail:{i}" for i in ids]
         with SessionLocal() as session:
             known = set(
                 session.scalars(
                     select(CustomerInteraction.external_id).where(
-                        CustomerInteraction.external_id.in_([f"gmail:{i}" for i in ids])
+                        CustomerInteraction.external_id.in_(candidates)
+                    )
+                ).all()
+            )
+            # **운영자가 지운 메일은 다시 안 가져옵니다** (2026-09-09). 행을 지우면 그
+            # `external_id` 가 위 목록에서 사라지므로, 묘비가 없으면 **다음 회차에 그대로
+            # 되살아납니다** — 지우기가 10분짜리가 되는 셈입니다.
+            known |= set(
+                session.scalars(
+                    select(MailboxLinkDecision.external_id).where(
+                        MailboxLinkDecision.external_id.in_(candidates)
                     )
                 ).all()
             )
@@ -216,6 +272,23 @@ def _sync_one(email: str) -> int:
             sender = next(
                 (a for _n, a in getaddresses([head.get("from", "")]) if a), ""
             )
+            # **참조로만 온 메일은 안 가져옵니다** (2026-09-09 운영자 지시).
+            #
+            # 참조는 「알아 두라」는 뜻이지 이 사람이 그 대화의 당사자라는 뜻이 아닙니다.
+            # 사내 공유·전체 회신에 담당자가 얹혀 있는 일이 흔한데, 그것까지 담으면 그
+            # 고객의 티켓 기록에 우리끼리 주고받은 줄이 섞입니다.
+            #
+            # 기준은 **이 사서함 주소가 보낸사람이나 받는사람에 있나**입니다 — 참조 칸에만
+            # 있으면 건너뜁니다. 상대가 누구인지(`_known_contact`)는 참조까지 봐서 찾습니다:
+            # 그건 「이 메일이 누구 이야기인가」이고, 여기서 묻는 것은 「우리가 당사자인가」라
+            # 서로 다른 물음입니다.
+            direct = {
+                address.strip().lower()
+                for _n, address in getaddresses([head.get("from", ""), head.get("to", "")])
+                if address
+            }
+            if email.strip().lower() not in direct:
+                continue
             direction = "outgoing" if is_our_address(sender) else "inbound"
             try:
                 when = parsedate_to_datetime(head.get("date", ""))
@@ -235,14 +308,17 @@ def _sync_one(email: str) -> int:
                     continue
                 if _hubspot_already_has_it(session, contact.id, when, direction):
                     continue
+                # 사이트에서 써서 나간 우리 답장이 이 사서함에 사본으로 남습니다 —
+                # 그 주소가 곧 허브스팟 이메일 채널 계정이기 때문입니다.
+                if direction == "outgoing" and _we_already_sent_it(session, contact.id, when):
+                    continue
                 # **붙일 자리가 있으면 그 자리에 넣습니다** (2026-09-09 운영자 지시:
                 # 「최신 티켓이 있으면 무조건 거기다가 넣도록」). 예전에는 언제나 비워
                 # 두고 화면에서 사람이 누르기를 기다렸는데, 그 사이 그 메일은 「티켓 외」에
                 # 서서 무관한 연락처럼 보였습니다 — 붙을 자리를 아는데도 그랬습니다.
                 #
-                # **아직 아무 기록도 없는 고객은 그대로 비어 있습니다.** 그 경우는 나중에
-                # 티켓이 생기면 「연결할까요?」가 물어봅니다(`pending_links`) — 메일이
-                # 먼저 오고 티켓이 나중에 생기는 순서가 실제로 있습니다.
+                # **아직 아무 기록도 없는 고객은 그대로 비어 있습니다** — 붙일 자리가
+                # 없다는 뜻이고, 그때는 고객 상세의 「티켓 외」에 남습니다.
                 conversation = _newest_conversation(session, contact.id)
                 session.add(CustomerInteraction(
                     contact_id=contact.id,
@@ -259,7 +335,20 @@ def _sync_one(email: str) -> int:
                 ))
                 session.commit()
                 added += 1
-    return added
+                # **허브스팟에도 남깁니다** — 「개인 gmail 로 온 거여도 hubspot 에 기록은
+                # 남겨야 해」(운영자). 예전에는 운영자가 「연결할까요?」를 누를 때 했는데,
+                # 그 확인이 없어졌으니(2026-09-09) 붙이는 이 자리로 왔습니다. 커밋 뒤에
+                # 모아 두고 세션 밖에서 보냅니다 — 저쪽 왕복을 세션이 붙들고 기다리면 안
+                # 됩니다.
+                if conversation is not None and conversation.hubspot_ticket_id:
+                    notes.append((
+                        contact.hubspot_contact_id or "",
+                        conversation.hubspot_ticket_id,
+                        f"[개인 메일함 {email}] {head.get('subject', '')}\n\n"
+                        f"{_plain_text(payload).strip() or body.get('snippet') or ''}",
+                        when,
+                    ))
+    return added, notes
 
 
 def sync_mailboxes_once() -> dict:
@@ -269,9 +358,12 @@ def sync_mailboxes_once() -> dict:
     일이라(비밀번호 변경), 하나 때문에 회차가 통째로 죽으면 안 됩니다.
     """
     added = 0
+    notes: list[tuple[str, str, str, datetime]] = []
     for email in enabled_accounts():
         try:
-            added += _sync_one(email)
+            gained, mine = _sync_one(email)
+            added += gained
+            notes.extend(mine)
             mark_polled(email)
         except MailboxTokenError as exc:
             # 이유는 이미 행에 적혔습니다(`gmail._mark_broken`). 화면이 그것을 그립니다.
@@ -280,91 +372,31 @@ def sync_mailboxes_once() -> dict:
             logger.warning("사서함 %s 수집 실패", email, exc_info=True)
     if added:
         logger.info("개인 메일함: %d줄 들여왔습니다.", added)
+    # **노트는 마지막에, 한 번에.** 수집 중에 보내면 저쪽이 느린 날 사서함 한 바퀴가
+    # 그만큼 길어지고, 그 사이 세션이 열려 있습니다. 실패해도 우리 줄은 그대로입니다 —
+    # 「이 메일은 이 티켓 것이다」는 저쪽에 못 써도 유효한 판단입니다.
+    for hubspot_contact_id, ticket_id, body, when in notes:
+        if not hubspot_contact_id:
+            continue
+        try:
+            asyncio.run(_note_on_ticket(hubspot_contact_id, ticket_id, body[:60_000], when))
+        except Exception:
+            logger.warning("티켓 %s 에 노트를 못 남겼습니다", ticket_id, exc_info=True)
     return {"added": added}
 
 
-def pending_links(limit: int = 50) -> list[dict]:
-    """**연결할까요?** — 아직 아무 티켓에도 안 붙었고 아직 안 물어본 개인함 메일.
-
-    후보 티켓은 **가장 최근 것 하나**입니다(운영자 지시). 연락처는 아는데 티켓이 없는
-    메일은 여기 안 뜹니다 — 그건 이미 리드 히스토리의 한 줄이고, 그게 답입니다.
-    """
-    out: list[dict] = []
-    with SessionLocal() as session:
-        decided = set(session.scalars(select(MailboxLinkDecision.external_id)).all())
-        rows = session.scalars(
-            select(CustomerInteraction)
-            .where(
-                CustomerInteraction.conversation_id.is_(None),
-                CustomerInteraction.external_id.like("gmail:%"),
-            )
-            .order_by(CustomerInteraction.happened_at.desc())
-            .limit(limit * 4)
-        ).all()
-        for row in rows:
-            if row.external_id in decided:
-                continue
-            ticket = _newest_conversation(session, row.contact_id)
-            if ticket is None:
-                continue
-            contact = session.get(Contact, row.contact_id)
-            out.append({
-                "external_id": row.external_id,
-                "mailbox": row.context or "",
-                "contact": (contact.full_name if contact else "") or "",
-                "contact_email": (contact.email if contact else "") or "",
-                "subject": row.subject or "",
-                "preview": " ".join((row.summary or "").split())[:160],
-                "happened_at": row.happened_at,
-                "conversation_id": ticket.id,
-                "ticket_id": ticket.hubspot_ticket_id,
-                "ticket_subject": ticket.inquiry_subject or "",
-            })
-            if len(out) >= limit:
-                break
-    return out
-
-
-async def decide_link(external_id: str, conversation_id: int | None, by: str) -> None:
-    """운영자의 한 번. `conversation_id` 가 있으면 붙이고, 없으면 안 붙이기로 적습니다.
-
-    **거절도 적습니다** — 안 적으면 그 메일이 회차마다 다시 물어봅니다.
-
-    붙일 때 하는 일이 둘입니다: 우리 줄에 티켓을 채우고, **허브스팟 티켓에도 노트로
-    남깁니다**(운영자 지시: 「개인 gmail 로 온 거여도 hubspot 에 기록은 남겨야 해」).
-    노트인 이유는 이 토큰이 메일 기록(engagement)을 **만들 수 없기** 때문입니다 —
-    `sales-email-read` 는 읽기 전용입니다.
-    """
-    with SessionLocal() as session:
-        row = session.scalar(
-            select(CustomerInteraction).where(
-                CustomerInteraction.external_id == external_id
-            )
-        )
-        if row is None:
-            return
-        ticket_id = None
-        hubspot_contact_id = None
-        when = row.happened_at
-        if conversation_id is not None:
-            conversation = session.get(Conversation, conversation_id)
-            if conversation is None or conversation.contact_id != row.contact_id:
-                raise ValueError("그 티켓의 연락처가 아닙니다.")
-            row.conversation_id = conversation_id
-            ticket_id = conversation.hubspot_ticket_id
-            contact = session.get(Contact, row.contact_id)
-            hubspot_contact_id = contact.hubspot_contact_id if contact else None
-        session.merge(MailboxLinkDecision(
-            external_id=external_id,
-            conversation_id=conversation_id,
-            decided_by=by or None,
-            decided_at=datetime.now(timezone.utc),
-        ))
-        note = f"[개인 메일함 {row.context or ''}] {row.subject or ''}\n\n{row.summary or ''}"
-        session.commit()
-
-    if conversation_id is not None and ticket_id and hubspot_contact_id:
-        await _note_on_ticket(hubspot_contact_id, ticket_id, note, when)
+# **「연결할까요?」는 없앴습니다** (2026-09-09 운영자 지시: 「티켓으로 바로 연결하게 해줘
+# 확인 안 누르고 최신 티켓 혹은 최신 수주로 들어가게」).
+#
+# `pending_links` 가 후보를 모으고 `decide_link` 가 운영자의 한 번을 받았는데, 운영자가
+# 그 화면을 보고 「좀 애매한 느낌」이라고 했습니다 — 물음에 답하려면 그 티켓이 맞는지
+# 판단해야 하는데, 답은 거의 언제나 「가장 최근 그 건」이라 묻는 것 자체가 일이었습니다.
+# 이제 `_sync_one` 이 넣으면서 바로 붙입니다.
+#
+# **`mailbox_link_decisions` 표는 남았고 뜻이 바뀌었습니다** — 「물어본 적 있다」에서
+# **「운영자가 지웠다」**로. 지우기가 되살아나지 않게 하는 묘비입니다
+# (`customer_ops.interaction_delete` 가 적고 `_sync_one` 이 읽습니다). 표를 새로 만들지
+# 않은 이유는 모양이 똑같기 때문입니다: `external_id` 하나가 기본키.
 
 
 async def _note_on_ticket(hubspot_contact_id: str, ticket_id: str, body: str,

@@ -427,59 +427,6 @@ def test_a_mail_hubspot_already_has_is_skipped(sync_db):
         assert _hubspot_already_has_it(session, contact_id, when, "outgoing") is False
 
 
-@pytest.mark.asyncio
-async def test_the_queue_asks_once_and_remembers_the_answer(sync_db, monkeypatch):
-    """**거절도 저장합니다** — 안 적으면 그 메일이 회차마다 다시 물어봅니다.
-
-    그리고 「아니요」를 눌러도 **기록은 남습니다**: 메일은 이미 리드 히스토리의 한 줄이고,
-    연결은 그 줄에 티켓을 채우는 일일 뿐입니다.
-    """
-    from datetime import datetime
-
-    from src.agents import mailbox_sync
-    from src.db.models import CustomerInteraction
-
-    contact_id = _seed(sync_db, with_ticket=True)
-    with sync_db() as session:
-        session.add(CustomerInteraction(
-            contact_id=contact_id, channel="이메일", direction="inbound",
-            summary="개인함으로 온 메일", external_id="gmail:m1",
-            context="untae@estsoft.com 개인 메일함",
-            happened_at=datetime(2026, 9, 7, 5, 0),
-        ))
-        session.commit()
-
-    pending = mailbox_sync.pending_links()
-    assert len(pending) == 1 and pending[0]["ticket_id"] == "T-2", "가장 최근 티켓을 제안"
-
-    await mailbox_sync.decide_link("gmail:m1", None, "ronald")
-    assert mailbox_sync.pending_links() == [], "거절한 것은 다시 안 묻습니다"
-    with sync_db() as session:
-        row = session.query(CustomerInteraction).one()
-        assert row.conversation_id is None
-        assert row.summary == "개인함으로 온 메일", "기록은 남습니다"
-
-
-def test_a_contact_without_a_ticket_never_reaches_the_queue(sync_db):
-    """연락처는 아는데 티켓이 없으면 **리드 히스토리에만** 남습니다 (운영자 지시).
-    물어볼 티켓이 없는데 물어보면 답할 수 없는 질문이 화면에 섭니다."""
-    from datetime import datetime
-
-    from src.agents import mailbox_sync
-    from src.db.models import CustomerInteraction
-
-    contact_id = _seed(sync_db, with_ticket=False)
-    with sync_db() as session:
-        session.add(CustomerInteraction(
-            contact_id=contact_id, channel="이메일", direction="inbound",
-            summary="티켓 없는 고객 메일", external_id="gmail:m2",
-            happened_at=datetime(2026, 9, 7, 5, 0),
-        ))
-        session.commit()
-
-    assert mailbox_sync.pending_links() == []
-
-
 def test_the_window_is_since_we_last_looked_not_since_consent(sync_db, monkeypatch):
     """**한 회차에 넘친 메일이 영영 안 들어오면 안 됩니다** (2026-09-08).
 
@@ -548,8 +495,8 @@ def test_a_collected_mail_lands_on_the_newest_record(sync_db, monkeypatch):
     그 사이 그 메일은 「티켓 외」에 서서 **무관한 연락처럼** 보였습니다 — 붙을 자리를
     아는데도 그랬습니다.
 
-    아직 아무 기록도 없는 고객은 그대로 비어 있고, 나중에 티켓이 생기면
-    `pending_links` 가 물어봅니다. 그 순서도 실제로 있습니다.
+    아직 아무 기록도 없는 고객만 그대로 비어 있습니다 — 붙일 자리가 없다는 뜻이고,
+    그때는 고객 상세의 「티켓 외」에 남습니다.
     """
     from datetime import datetime
 
@@ -611,5 +558,159 @@ def test_a_collected_mail_lands_on_the_newest_record(sync_db, monkeypatch):
         landed = session.get(Conversation, row.conversation_id)
         assert landed.hubspot_ticket_id == "T-2", "가장 최근 기록에 붙습니다"
 
-    # 이미 붙었으니 「연결할까요?」에는 안 뜹니다 — 물어볼 것이 없습니다.
-    assert mailbox_sync.pending_links() == []
+
+def _one_mail(monkeypatch, headers: list[dict], *, snippet: str = "본문"):
+    """지메일 한 통을 돌려주는 가짜 클라이언트를 걸어 둡니다."""
+    from src.agents import mailbox_sync
+
+    class _Response:
+        is_error = False
+        status_code = 200
+
+        def __init__(self, payload):
+            self._payload = payload
+
+        def json(self):
+            return self._payload
+
+        def raise_for_status(self):
+            return None
+
+    mail = {"id": "m9", "internalDate": "1789000000000", "snippet": snippet,
+            "payload": {"headers": headers}}
+
+    class _Client:
+        def __enter__(self): return self
+        def __exit__(self, *_): return False
+        def get(self, url, params=None):
+            if url.endswith("/messages"):
+                return _Response({"messages": [{"id": "m9"}]})
+            return _Response(mail)
+
+    monkeypatch.setattr(mailbox_sync, "access_token", lambda email: "t")
+    monkeypatch.setattr(mailbox_sync.httpx, "Client", lambda **_k: _Client())
+
+
+def _mailbox(factory, address="perso.ai@estsoft.com"):
+    from datetime import datetime
+
+    from src.db.models import MailboxAccount
+
+    with factory() as session:
+        session.add(MailboxAccount(
+            email=address,
+            encrypted_payload=gmail._encrypt({"refresh_token": "r"}),
+            collect_from=datetime(2026, 9, 1)))
+        session.commit()
+
+
+def test_our_own_reply_does_not_come_back_as_a_second_copy(sync_db, monkeypatch):
+    """**콘솔에서 나간 회신이 개인함에 사본으로 남습니다** (2026-09-09 운영자 보고).
+
+    `perso.ai@estsoft.com` 이 곧 허브스팟 이메일 채널 계정이라, 사이트에서 써서 나간
+    답장이 그 사서함을 지납니다. 안 거르면 우리 답장이 티켓 기록에 **두 번** 섭니다 —
+    나중에 읽는 사람은 「답을 두 번 보냈다」로 셉니다.
+
+    `_hubspot_already_has_it` 로는 못 잡습니다: 그쪽은 `customer_interactions` 만 보고
+    같은 초를 요구하는데, 우리 회신은 `messages` 에 있고 지메일이 찍는 시각은 몇 초
+    어긋납니다.
+    """
+    from datetime import datetime
+
+    from src.agents import mailbox_sync
+    from src.db.models import CustomerInteraction, Message
+
+    contact_id = _seed(sync_db, with_ticket=True)
+    _mailbox(sync_db)
+    with sync_db() as session:
+        conversation = session.scalar(
+            select(Conversation).where(Conversation.hubspot_ticket_id == "T-2")
+        )
+        session.add(Message(
+            conversation_id=conversation.id, direction="outgoing", status="sent",
+            channel="email", subject="RE: Test Custom Quote", body="Hi Minha,",
+            hubspot_message_id="hs-1",
+            # 지메일이 찍은 시각(10:00:07)과 몇 초 어긋납니다 — 그래도 같은 메일입니다.
+            sent_at=datetime(2026, 9, 9, 1, 0, 0)))
+        session.commit()
+
+    _one_mail(monkeypatch, [
+        {"name": "From", "value": "perso.ai@estsoft.com"},
+        {"name": "To", "value": "buyer@acme.com"},
+        {"name": "Subject", "value": "RE: Test Custom Quote"},
+        {"name": "Date", "value": "Wed, 9 Sep 2026 10:00:07 +0900"},
+    ])
+
+    assert mailbox_sync.sync_mailboxes_once() == {"added": 0}
+    with sync_db() as session:
+        assert session.scalar(
+            select(CustomerInteraction).where(CustomerInteraction.external_id == "gmail:m9")
+        ) is None, "우리가 보낸 답장이 개인함 사본으로 다시 들어오면 안 됩니다"
+    assert contact_id  # 연락처는 있었습니다 — 걸러진 이유가 「모르는 사람」이 아닙니다
+
+
+def test_a_mail_we_were_only_copied_on_is_skipped(sync_db, monkeypatch):
+    """**참조로만 온 메일은 안 가져옵니다** (2026-09-09 운영자 지시).
+
+    참조는 「알아 두라」는 뜻이지 이 사람이 그 대화의 당사자라는 뜻이 아닙니다. 사내
+    공유나 전체 회신에 담당자가 얹혀 있는 일이 흔한데, 그것까지 담으면 그 고객의 티켓
+    기록에 우리끼리 주고받은 줄이 섞입니다.
+    """
+    from src.agents import mailbox_sync
+    from src.db.models import CustomerInteraction
+
+    _seed(sync_db, with_ticket=True)
+    _mailbox(sync_db, "untae@estsoft.com")
+
+    _one_mail(monkeypatch, [
+        {"name": "From", "value": "buyer@acme.com"},
+        {"name": "To", "value": "someone.else@estsoft.com"},
+        # 이 사서함은 참조에만 있습니다.
+        {"name": "Cc", "value": "untae@estsoft.com"},
+        {"name": "Subject", "value": "전체 회신"},
+        {"name": "Date", "value": "Wed, 9 Sep 2026 11:00:00 +0900"},
+    ])
+
+    assert mailbox_sync.sync_mailboxes_once() == {"added": 0}
+    with sync_db() as session:
+        assert session.scalar(
+            select(CustomerInteraction).where(CustomerInteraction.external_id == "gmail:m9")
+        ) is None
+
+
+def test_a_deleted_mail_does_not_come_back(sync_db, monkeypatch):
+    """**지운 메일은 되살아나지 않습니다** (2026-09-09).
+
+    수집기는 `external_id` 로 중복을 거르는데, 행을 지우면 그 열쇠가 사라져서 **다음
+    회차에 그대로 다시 들어옵니다** — 지우기가 10분짜리가 되면 지운 것이 아닙니다.
+    그래서 `mailbox_link_decisions` 에 묘비를 남깁니다. 그 표는 원래 「물어본 적 있다」
+    였고, 확인 단계가 없어지면서 뜻만 바뀌었습니다.
+    """
+    from datetime import datetime, timezone
+
+    from src.agents import mailbox_sync
+    from src.db.models import CustomerInteraction, MailboxLinkDecision
+
+    _seed(sync_db, with_ticket=True)
+    _mailbox(sync_db)
+    _one_mail(monkeypatch, [
+        {"name": "From", "value": "buyer@acme.com"},
+        {"name": "To", "value": "perso.ai@estsoft.com"},
+        {"name": "Subject", "value": "문의"},
+        {"name": "Date", "value": "Wed, 9 Sep 2026 12:00:00 +0900"},
+    ])
+
+    assert mailbox_sync.sync_mailboxes_once() == {"added": 1}
+
+    # 운영자가 티켓 화면에서 지웁니다 — 라우트가 하는 일 그대로.
+    with sync_db() as session:
+        row = session.scalar(
+            select(CustomerInteraction).where(CustomerInteraction.external_id == "gmail:m9")
+        )
+        session.delete(row)
+        session.merge(MailboxLinkDecision(
+            external_id="gmail:m9", conversation_id=None,
+            decided_by="deleted", decided_at=datetime.now(timezone.utc)))
+        session.commit()
+
+    assert mailbox_sync.sync_mailboxes_once() == {"added": 0}, "지운 메일이 되살아났습니다"

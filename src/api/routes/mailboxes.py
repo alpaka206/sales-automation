@@ -180,32 +180,10 @@ async def mailbox_add(request: Request, email: str = Form("")):
     return RedirectResponse(f"{_BACK}?mailbox=added&email={quote(email.strip())}", status_code=303)
 
 
-@router.post("/integrations/mailboxes/link")
-async def mailbox_link(request: Request, external_id: str = Form(""),
-                       conversation_id: str = Form("")):
-    """「이 메일을 그 티켓에 연결할까요?」에 대한 답 (이관 0115).
-
-    **거절도 저장합니다** — 안 적으면 그 메일이 회차마다 다시 물어봅니다.
-
-    관리자 관문을 둡니다: 붙이면 **허브스팟 티켓에 노트가 남고**, 잘못 붙은 것은 되돌리기
-    전까지 남아 아무도 눈치채지 못합니다(`attach_personal_emails` 가 여럿일 때 손대지
-    않는 이유와 같습니다).
-    """
-    _require_admin(request)
-    from ...agents.mailbox_sync import decide_link
-    from ..auth import actor_name
-
-    try:
-        await decide_link(
-            external_id,
-            int(conversation_id) if conversation_id.strip().isdigit() else None,
-            actor_name(request, "local-admin"),
-        )
-    except Exception as exc:
-        return RedirectResponse(
-            f"{_BACK}?mailbox=error&detail={quote(str(exc)[:180])}", status_code=303
-        )
-    return RedirectResponse(_BACK, status_code=303)
+# **「연결할까요?」 라우트는 없앴습니다** (2026-09-09 운영자 지시: 「티켓으로 바로 연결하게
+# 해줘 확인 안 누르고 최신 티켓 혹은 최신 수주로 들어가게」). 붙이는 일은 수집기가 넣으면서
+# 합니다(`mailbox_sync._sync_one`), 허브스팟 노트도 거기서 남깁니다. 잘못 붙은 줄은 티켓
+# 화면에서 지웁니다(`customer_ops.interaction_delete`).
 
 
 @router.post("/integrations/mailboxes/toggle")
