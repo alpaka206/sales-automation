@@ -19,7 +19,6 @@ _CALL_KWARGS = dict(
     message_id=42,
     subject="Hello",
     body_snippet="Test body",
-    score=75,
     category="inquiry",
 )
 
@@ -29,7 +28,7 @@ def test_sends_to_slack_when_configured(mock_slack) -> None:
     notify_approval(**_CALL_KWARGS)
 
     mock_slack.post_approval_card.assert_called_once_with(
-        42, "Hello", "Test body", 75, "inquiry",
+        42, "Hello", "Test body", "inquiry",
         title=None, inquiry=None, contact_name=None,
         contact_company=None, contact_email=None,
     )

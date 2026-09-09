@@ -19,7 +19,7 @@ def test_post_approval_card_not_configured() -> None:
         s.SLACK_BOT_TOKEN = ""
         s.SLACK_APPROVAL_CHANNEL_ID = ""
         with pytest.raises(SlackNotConfigured):
-            post_approval_card(1, "Sub", "Body", 80, "inquiry")
+            post_approval_card(1, "Sub", "Body", "inquiry")
 
 
 @respx.mock
@@ -30,7 +30,7 @@ def test_post_approval_card_success() -> None:
     with patch("src.integrations.slack.settings") as s:
         s.SLACK_BOT_TOKEN = "xoxb-test"
         s.SLACK_APPROVAL_CHANNEL_ID = "C123"
-        post_approval_card(42, "Hello", "Body snippet", 90, "purchase_inquiry")
+        post_approval_card(42, "Hello", "Body snippet", "purchase_inquiry")
 
 
 @respx.mock
@@ -42,7 +42,7 @@ def test_post_approval_card_api_error_raises() -> None:
         s.SLACK_BOT_TOKEN = "xoxb-test"
         s.SLACK_APPROVAL_CHANNEL_ID = "C999"
         with pytest.raises(RuntimeError, match="channel_not_found"):
-            post_approval_card(1, "Sub", "Body", None, "general")
+            post_approval_card(1, "Sub", "Body", "general")
 
 
 @respx.mock
@@ -58,7 +58,7 @@ def test_post_approval_card_enriched_korean_card() -> None:
         s.SLACK_APPROVAL_CHANNEL_ID = "C123"
         s.PUBLIC_BASE_URL = "https://sales.example.com"
         post_approval_card(
-            42, "Re: 견적", "안녕하세요, 답변 초안입니다.", 78, "purchase_inquiry",
+            42, "Re: 견적", "안녕하세요, 답변 초안입니다.", "purchase_inquiry",
             title="새 인바운드 문의 — 회신 검토 요청",
             inquiry="Hello, what is your pricing?",
             contact_name="Tanaka Yuki",
@@ -85,7 +85,7 @@ def test_post_approval_card_http_error() -> None:
         s.SLACK_BOT_TOKEN = "xoxb-test"
         s.SLACK_APPROVAL_CHANNEL_ID = "C123"
         with pytest.raises(httpx.HTTPStatusError):
-            post_approval_card(1, "Sub", "Body", 50, "support")
+            post_approval_card(1, "Sub", "Body", "support")
 
 
 # ---------- post_message ----------

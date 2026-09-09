@@ -471,7 +471,6 @@ def _message_detail_context(
                 "cc_addresses": msg.cc_addresses or "",
                 "to_address": msg.to_address or "",
                 "from_address": msg.from_address or "",
-                "score_snapshot": msg.score_snapshot,
                 "scheduled_at": msg.scheduled_at,
                 "sent_at": msg.sent_at,
                 "created_at": msg.created_at,
@@ -618,7 +617,6 @@ def _customer_history(session, contact_id: int) -> dict:
         {
             "customer_state": profile.customer_state,
             "pipeline_stage": profile.pipeline_stage,
-            "lead_temperature": profile.lead_temperature,
             "current_plan": profile.current_plan,
             "next_action": profile.next_action,
             "next_action_at": profile.next_action_at,

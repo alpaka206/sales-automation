@@ -54,7 +54,7 @@ def test_an_english_draft_stays_english_and_keeps_a_korean_reading(_docs):
     cls = MagicMock()
     cls.category = "pricing_question"
 
-    draft = agent._draft_reply(_CI, cls, 80, conv_id=None, inquiry_lang="en")
+    draft = agent._draft_reply(_CI, cls, conv_id=None, inquiry_lang="en")
 
     assert draft.language == "en"
     assert draft.body == "Hello, here are our plans."
@@ -69,7 +69,7 @@ def test_a_korean_draft_for_a_korean_inquiry_has_no_second_copy(_docs):
     cls = MagicMock()
     cls.category = "pricing_question"
 
-    draft = agent._draft_reply({**_CI, "inquiry_language": "ko"}, cls, 80, conv_id=None,
+    draft = agent._draft_reply({**_CI, "inquiry_language": "ko"}, cls, conv_id=None,
                                inquiry_lang="ko")
 
     assert draft.language == "ko"
@@ -88,7 +88,7 @@ def test_a_model_that_wrote_korean_anyway_is_moved_to_the_send_language(_docs):
     cls = MagicMock()
     cls.category = "pricing_question"
 
-    draft = agent._draft_reply(_CI, cls, 80, conv_id=None, inquiry_lang="en")
+    draft = agent._draft_reply(_CI, cls, conv_id=None, inquiry_lang="en")
 
     assert draft.language == "en"
     assert draft.body == "Hello, here is the plan."
@@ -100,7 +100,7 @@ def test_subject_is_re_customer_subject(_docs):
     cls = MagicMock()
     cls.category = "pricing_question"
 
-    draft = agent._draft_reply(_CI, cls, 80, conv_id=None)
+    draft = agent._draft_reply(_CI, cls, conv_id=None)
 
     assert draft.subject == "RE: Pricing for dubbing"
 
@@ -112,7 +112,7 @@ def test_subject_does_not_stack_re(_docs):
     cls = MagicMock()
     cls.category = "pricing_question"
 
-    draft = agent._draft_reply(ci, cls, 80, conv_id=None)
+    draft = agent._draft_reply(ci, cls, conv_id=None)
 
     assert draft.subject == "RE: Pricing for dubbing"
 
@@ -125,7 +125,7 @@ def test_first_reply_strips_prices(_docs):
     cls.category = "pricing_question"
 
     # conv_id=None → treated as the first reply → price line removed in code.
-    draft = agent._draft_reply(_CI, cls, 80, conv_id=None)
+    draft = agent._draft_reply(_CI, cls, conv_id=None)
 
     assert "$29" not in draft.body
     assert "미팅" in draft.body

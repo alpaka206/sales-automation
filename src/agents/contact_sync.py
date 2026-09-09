@@ -21,7 +21,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 from ..db.models import Contact, Conversation, CustomerProfile
 from ..db.session import SessionLocal
@@ -160,24 +160,26 @@ def sync_contact_from_hubspot(hubspot_contact_id: str) -> dict[str, str]:
     return changed
 
 
-# 폴러가 훑는 창. 티켓 스윕과 같은 이유로 조금 겹칩니다 — 경계에 걸친 변경을 놓치지 않게.
-_SWEEP_OVERLAP = timedelta(minutes=2)
-_SWEEP_MARKER_KIND = "contact_field_poll"
-_SWEEP_LIMIT = 200
-
-# 한 회차에 **기록까지** 당겨올 사람 수. 필드 반영은 검색 결과에 이미 값이 들어 있어 공짜지만,
-# 기록(메일·통화·미팅·노트·Deal)은 사람당 왕복 다섯 번입니다.
+# **2분 연락처 스윕은 2026-09-09 에 없앴습니다** (운영자 지시: 「이제 우리 사이트에서만
+# 변경할 거라 연락처 변경은 감지 안 해도 됨」).
 #
-# **웹훅을 안 쓰는 이유가 여기 있습니다.** 허브스팟에 Note/Call/Meeting/Email 구독이 있긴
-# 한데(expanded object support), 그걸 켜면 한 엔드포인트가 두 가지 payload 스키마를 받게
-# 되고 스코프도 늘어납니다. 얻는 것은 「10분 → 즉시」뿐인데, 통화 기록이 10분 늦게 보이는
-# 것은 아무 문제가 아닙니다.
+# 그 루프는 「마지막 스윕 이후 허브스팟에서 바뀐 연락처」를 찾아, 걸린 사람마다 최근 메일
+# 10건·통화·미팅·노트·Deal 을 **다시 읽었습니다** — 사람당 왕복 약 14회, 회차당 최대 15명.
+# 이미 우리 DB 에 있는 것들이고 `external_id` 로 중복만 걸러 버렸습니다. 운영 로그가 그
+# 낭비를 그대로 적고 있었습니다: 「연락처 스윕: **플랜 칸 0명**, 기록 2명 가져옴」 —
+# 우리가 보는 값은 하나도 안 바뀌었는데 두 사람분을 다시 읽은 것입니다.
 #
-# 그리고 **활동을 남기면 그 연락처의 `lastmodifieddate` 가 같이 밀립니다** — 2026-08-26 실측:
-# 활동 10:39:33 → 연락처 수정 10:40:13. 그래서 이 스윕이 이미 그 사람들을 보고 있고, 구독을
-# 하나도 안 만들어도 됩니다.
-_HISTORY_PER_SWEEP = 15
-
+# 왜 자꾸 「바뀜」으로 잡혔나: 허브스팟은 아주 사소한 변경에도 `lastmodifieddate` 를
+# 올립니다 — **우리가 티켓 단계를 옮기거나 플랜 칸을 되쓰는 것 포함.** 즉 우리 쓰기가
+# 다음 스윕의 읽기를 부르고 있었습니다.
+#
+# 남은 길은 **웹훅**입니다(`contact.propertyChange` → `sync_contact_from_hubspot`).
+# 그쪽은 연락처 한 번 읽고 행 하나 쓰는 게 전부라, 이 루프가 하던 일 중 실제로 필요한
+# 것은 거기서 다 합니다.
+#
+# 같이 나간 것: `_retire_drafts_for_replies_seen_in_hubspot` — 영업이 허브스팟에서 직접
+# 답장했을 때 우리 초안을 지우던 장치입니다. 개발 중 불안정성 때문에 「허브스팟에서
+# 답장하라」고 두었던 임시 장치이고, 이제 회신은 콘솔에서만 나갑니다(2026-09-09 운영자).
 
 # 한 회차에 회사 주소를 물어볼 사람 수 (0111). 왕복은 인원수와 무관하게 **둘**이라
 # (연결 배치 + 회사 배치) 100명이 1명보다 비싸지 않고, 허브스팟 배치 상한도 100입니다.
@@ -210,7 +212,7 @@ def fill_missing_websites(client, limit: int = _WEBSITES_PER_SWEEP) -> int:
     **대기열은 `website IS NULL` 그 자체입니다.** 표식 열도, 한 번 훑고 마는 스크립트도
     없습니다 — 모든 연락처가 NULL 로 시작하므로 이 스윕 하나가 옛 행을 메우는 일과 새로
     들어온 사람을 따라잡는 일을 같이 합니다(티켓 대화 수집기가 `history_synced_at` 로 하는
-    것과 같은 규칙입니다). 2분마다 100명이라 몇 천 명이어도 한두 시간이면 한 바퀴입니다.
+    것과 같은 규칙입니다). 10분마다 100명이라 몇 천 명이어도 반나절이면 한 바퀴입니다.
 
     **답이 없어도 빈 문자열을 적습니다.** 회사가 없거나 회사에 주소가 없는 사람이 다수인데
     (실측: 회사에 `website` 가 있는 것은 100건 중 9건) 그들을 NULL 로 두면 대기열이 그
@@ -250,151 +252,3 @@ def fill_missing_websites(client, limit: int = _WEBSITES_PER_SWEEP) -> int:
     if filled:
         logger.info("회사 주소: %d명 채웠습니다 (%d명 조회).", filled, len(pending))
     return filled
-
-
-def _changed_at(dto) -> datetime | None:
-    """그 연락처가 마지막으로 바뀐 시각. 몫에서 끊겼을 때 워터마크를 여기까지만 옮깁니다."""
-    raw = getattr(dto, "updated_at", None)
-    return raw if isinstance(raw, datetime) else None
-
-
-def _last_sweep_at() -> datetime:
-    from ..db.models import Event
-
-    with SessionLocal() as session:
-        row = (
-            session.query(Event)
-            .filter(Event.kind == _SWEEP_MARKER_KIND)
-            .order_by(Event.created_at.desc())
-            .first()
-        )
-    if row and row.payload and "poll_at" in row.payload:
-        return datetime.fromisoformat(row.payload["poll_at"])
-    # 첫 회차는 한 시간만 봅니다. 포털 전체를 훑는 자리가 아닙니다 — 그건 사람이 고객
-    # 상세에서 「HubSpot 동기화」를 누를 때 할 일입니다.
-    return datetime.now(timezone.utc) - timedelta(hours=1)
-
-
-def sync_changed_contacts_once() -> int:
-    """마지막 스윕 이후 바뀐 연락처를 훑어 반영합니다. 고친 연락처 수를 돌려줍니다.
-
-    **웹훅이 있어도 이것이 필요합니다.** 구독이 꺼져 있을 수도 있고, 한 건이 유실될 수도
-    있고, 우리가 배포 중일 수도 있습니다. 티켓 쪽이 이미 같은 이유로 폴러를 둡니다.
-
-    우리가 아는 연락처만 고칩니다 — 포털의 연락처는 수만 개이고, 그중 이 콘솔에 행이 있는
-    것만이 화면에 그려질 수 있습니다.
-    """
-    from ..db.models import Event
-    from ..integrations.hubspot import HubSpotClient, HubSpotNotConfigured
-
-    try:
-        client = HubSpotClient()
-    except HubSpotNotConfigured:
-        return 0
-
-    # **워터마크와 무관하고, 검색보다 앞입니다** (0111). 이쪽 대기열은 「마지막 스윕 이후
-    # 바뀐 사람」이 아니라 「아직 안 물어본 사람」이라 아무도 안 바뀐 조용한 회차에도 한
-    # 몫씩 나아가야 하고, 아래 검색이 실패해 되돌아가는 회차에도 굶으면 안 됩니다.
-    fill_missing_websites(client)
-
-    since = _last_sweep_at() - _SWEEP_OVERLAP
-    now = datetime.now(timezone.utc)
-    try:
-        rows = client.search_contacts_changed_since(since, limit=_SWEEP_LIMIT)
-    except Exception:
-        logger.warning("HubSpot 연락처 스윕 검색 실패", exc_info=True)
-        return 0
-
-    with SessionLocal() as session:
-        known = {
-            str(row.hubspot_contact_id): row.id
-            for row in session.query(Contact.id, Contact.hubspot_contact_id)
-            .filter(Contact.hubspot_contact_id.is_not(None))
-            .all()
-        }
-
-    touched = 0
-    pulled = 0
-    reached: datetime | None = None
-    for dto in rows:
-        contact_id = known.get(str(dto.id))
-        if contact_id is None:
-            continue
-        try:
-            if apply_contact_fields(contact_id, values_from(dto)):
-                touched += 1
-        except Exception:
-            logger.warning("연락처 %d 반영 실패", contact_id, exc_info=True)
-
-        # 기록까지 당겨옵니다 — 메일·통화·미팅·노트·Deal. 손으로 누르던 「HubSpot 동기화」가
-        # 하던 일이고, 그 버튼은 이제 「지금 당장」이 필요할 때만 씁니다.
-        #
-        # **한 회차의 몫이 있습니다.** 대량 임포트가 아는 연락처 이백 명을 건드리면 왕복이
-        # 천 번이 넘고, 허브스팟 한도(10초 100회)에 걸려 스윕 한 회차가 몇 분이 됩니다.
-        # 몫을 넘기면 워터마크를 **여기까지**로 두어 다음 회차가 이어서 훑습니다 — 티켓
-        # 스윕이 페이지가 꽉 찼을 때 하는 것과 같은 규칙입니다.
-        if pulled >= _HISTORY_PER_SWEEP:
-            break
-        try:
-            from ..api.routes.customer_ops import _sync_hubspot
-
-            _sync_hubspot(contact_id, per_type=10)
-        except Exception:
-            logger.warning("연락처 %d 기록 가져오기 실패", contact_id, exc_info=True)
-        pulled += 1
-        reached = _changed_at(dto) or reached
-
-    # **워터마크는 끝에 한 번만.** 중간에 터지면 안 밀리고, 다음 회차가 같은 창을 다시
-    # 훑습니다 — 같은 값을 다시 넣는 것은 무해합니다(바뀐 것이 없으면 아무 데도 안 씁니다).
-    #
-    # **못 읽은 것이 남았으면 워터마크를 끝까지 밀지 않습니다.** 두 가지로 남습니다:
-    #
-    #   ① 검색 페이지가 꽉 찼다 — 허브스팟에 더 있다는 뜻이고, 정렬이 오름차순이라 **안 읽은
-    #      쪽이 더 최신**입니다. `now` 로 밀면 그 사람들은 다음 창 밖으로 나가 영영 안
-    #      돌아옵니다. 대량 임포트에서만 나는 일이라 평소에는 안 걸리지만, 나는 그날
-    #      조용히 유실됩니다 (2026-08-26 지적).
-    #   ② 기록 몫에서 끊겼다 — 같은 이유입니다.
-    #
-    # 티켓 스윕이 ①을 이미 그렇게 합니다. 그때 옮기는 자리는 **읽은 것 중 가장 최신**입니다.
-    read_upto = [stamp for stamp in map(_changed_at, rows) if stamp]
-    if len(rows) >= _SWEEP_LIMIT and read_upto:
-        now = min(now, max(read_upto))
-    if pulled >= _HISTORY_PER_SWEEP and reached:
-        now = min(now, reached)
-    with SessionLocal() as session:
-        session.add(Event(kind=_SWEEP_MARKER_KIND, payload={"poll_at": now.isoformat()}))
-        session.commit()
-    if touched or pulled:
-        logger.info(
-            "연락처 스윕: 플랜 칸 %d명, 기록 %d명 가져옴.", touched, pulled
-        )
-    return touched
-
-
-# 이 스윕만 따로, 더 자주 돕니다. 10분짜리 폴러에 얹혀 있던 것을 떼어낸 이유는 **이것이
-# 사람이 읽기만 하는 값이 아니기 때문**입니다: 영업이 허브스팟에서 직접 회신하면
-# `_retire_drafts_for_replies_seen_in_hubspot` 이 우리 대기 초안을 종료시킵니다. 그 사이가
-# 곧 「고객이 같은 질문에 두 번째 답을 받는」 창이라, 10분과 2분은 체감이 다릅니다.
-#
-# **30초로는 안 내립니다.** 허브스팟 Search 는 새 레코드가 색인에 뜨기까지 5~10초가
-# 걸립니다("It may take a few moments for newly created or updated CRM objects to appear
-# in search results"). 주기가 30초면 그 지연이 주기의 1/3이라 창 설계가 예민해지는데,
-# 2분 대비 얻는 것이 없습니다. 지금 창은 `주기 + _SWEEP_OVERLAP(2분)` 이라 색인 지연보다
-# 한참 넉넉하고, 다시 읽는 것은 무해합니다(바뀐 것이 없으면 아무 데도 안 씁니다).
-#
-# Search 는 일반 한도(10초 100회)와 **별개로 초당 4회**가 걸립니다. 2분에 1~2회라 여유가
-# 큽니다 — 페이지가 둘 이상이 되는 것은 2분 안에 100명 넘게 바뀔 때뿐입니다.
-CONTACT_SWEEP_SECONDS = 120
-
-
-async def run_contact_sweep() -> None:
-    """연락처 스윕만 따로 도는 루프."""
-    import asyncio
-
-    logger.info("연락처 스윕 시작 (주기 %ds)", CONTACT_SWEEP_SECONDS)
-    while True:
-        try:
-            await asyncio.to_thread(sync_changed_contacts_once)
-        except Exception:
-            logger.exception("연락처 스윕 회차 실패")
-        await asyncio.sleep(CONTACT_SWEEP_SECONDS)

@@ -21,7 +21,6 @@ from ...agents.ticket_history import is_our_address
 from ...agents.stage_sync import (
     _retire_superseded_drafts,
     customer_state_for,
-    retire_drafts_answered_elsewhere,
 )
 from ...common.config import settings
 from ...common.sheet_values import qualification_for_plan
@@ -484,7 +483,6 @@ def _customer_rows() -> list[dict]:
                 ),
                 "state": profile.customer_state if profile else "negotiation",
                 "stage": profile.pipeline_stage if profile else "new",
-                "temperature": profile.lead_temperature if profile else None,
                 "next_action": profile.next_action if profile else None,
                 "next_action_at": profile.next_action_at if profile else None,
                 "last_activity": last_activity,
@@ -523,10 +521,8 @@ def _pipeline_rows(
     filtered LIMIT/OFFSET. Both then join Contact in the same trip and look up
     newest-message ids only for the rows that survived.
 
-    CustomerProfile 도 같이 조인했습니다. 카드가 그 프로필에서 읽는 값이 리드 온도 하나뿐
-    이었고 화면은 그것을 그리지 않아서, 대시보드를 그릴 때마다 아무도 안 보는 조인이
-    따라왔습니다. 리드 온도가 보이는 곳(리드 히스토리·고객 인사이트)은 `_customer_rows`
-    의 자기 조인을 씁니다.
+CustomerProfile 조인도 같이 빠졌습니다 — 카드가 그 프로필에서 읽던 값이 리드 온도
+    하나뿐이었는데, 그 값은 2026-09-09 에 지웠습니다(운영자 지시).
 
     The window function needs SQLite >= 3.25 (2018) and any supported PostgreSQL.
     """
@@ -905,7 +901,6 @@ def _customer_context(contact_id: int) -> dict | None:
 async def customer_profile_save(
     contact_id: int,
     pipeline_stage: str = Form("new"),
-    lead_temperature: str = Form(""),
     next_action: str = Form(""),
     next_action_at: str = Form(""),
     industry: str = Form(""),
@@ -928,7 +923,6 @@ async def customer_profile_save(
         # 나오는 값이라 둘이 어긋난 행이 생겼습니다(Won 인데 Negotiation 인 고객). 이제
         # 보드 드롭·HubSpot 동기화·워크북이 쓰는 것과 **같은 규칙**으로 여기서도 정합니다.
         profile.customer_state = customer_state_for(pipeline_stage, profile.customer_state)
-        profile.lead_temperature = lead_temperature.strip() or None
         profile.next_action = next_action.strip() or None
         profile.next_action_at = _parse_dt(next_action_at)
         profile.industry = industry.strip() or None
@@ -1766,7 +1760,6 @@ def _sync_hubspot(contact_id: int, per_type: int = 20) -> int:
                     )
                 )
                 inserted += 1
-        _retire_drafts_for_replies_seen_in_hubspot(session, contact_id, emails)
         session.commit()
     # 커밋 뒤입니다 — 단계 반영은 자기 세션에서 커밋하고, 실패해도 위에서 가져온 것을
     # 되돌리지 않습니다.
@@ -1784,92 +1777,18 @@ def _sync_hubspot(contact_id: int, per_type: int = 20) -> int:
     return inserted
 
 
-def _retire_drafts_for_replies_seen_in_hubspot(session, contact_id: int, emails) -> None:
-    """허브스팟에 **우리가 보낸 메일**이 있으면 그 문의의 대기 초안을 지웁니다.
-
-    영업이 허브스팟에서 직접 회신하면 티켓은 New 에 그대로 있는 일이 흔합니다 — 카드를
-    옮기는 것은 나중이거나 아예 안 합니다. 그동안 우리 초안은 발송 대기에 남아 있고, 그걸
-    누르면 고객은 같은 질문에 두 번째 답을 받습니다(2026-08-20 운영자 지시).
-
-    **우리가 보낸 것은 세지 않습니다.** 예전 CRM 이메일 기록은
-    `hubspot_engagement_id`로, 현재 Conversations 답장은 티켓·제목·발송 시각으로
-    대조합니다. 그렇지 않으면 우리 발송을 상담원의 별도 답변으로 오인합니다.
-    """
-    ours = {
-        str(row)
-        for row in session.scalars(
-            select(Message.hubspot_engagement_id).where(
-                Message.hubspot_engagement_id.isnot(None)
-            )
-        ).all()
-    }
-    our_conversation_sends = session.execute(
-        select(
-            Conversation.hubspot_ticket_id,
-            Message.subject,
-            Message.sent_at,
-        )
-        .join(Conversation, Conversation.id == Message.conversation_id)
-        .where(
-            Message.hubspot_message_id.isnot(None),
-            Message.status == "sent",
-            Message.sent_at.isnot(None),
-            Conversation.hubspot_ticket_id.isnot(None),
-        )
-    ).all()
-
-    def _is_our_conversation_send(email) -> bool:
-        if not email.ticket_id or not email.timestamp:
-            return False
-        email_time = (
-            email.timestamp.replace(tzinfo=None)
-            if email.timestamp.tzinfo
-            else email.timestamp
-        )
-        email_subject = (email.subject or "").strip().casefold()
-        for ticket_id, subject, sent_at in our_conversation_sends:
-            if str(ticket_id) != str(email.ticket_id) or sent_at is None:
-                continue
-            local_time = sent_at.replace(tzinfo=None) if sent_at.tzinfo else sent_at
-            if abs((email_time - local_time).total_seconds()) > 300:
-                continue
-            local_subject = (subject or "").strip().casefold()
-            if not email_subject or not local_subject or email_subject == local_subject:
-                return True
-        return False
-    # 티켓별로 「우리 쪽에서 마지막으로 나간 시각」. 허브스팟이 메일마다 티켓을 알려
-    # 주므로 어느 문의의 답인지 짐작하지 않습니다.
-    sent_on_ticket: dict[str, datetime] = {}
-    for e in emails:
-        if (
-            "incoming" in e.type
-            or str(e.id) in ours
-            or _is_our_conversation_send(e)
-            or not e.timestamp
-            or not e.ticket_id
-        ):
-            continue
-        when = e.timestamp.replace(tzinfo=None) if e.timestamp.tzinfo else e.timestamp
-        if when > sent_on_ticket.get(e.ticket_id, when.min):
-            sent_on_ticket[e.ticket_id] = when
-    if not sent_on_ticket:
-        return
-    # **그 초안보다 나중에 나간 메일**만 셉니다. 초안이 만들어진 뒤에 우리 쪽에서 메일이
-    # 나갔으면 그 답은 이미 다른 경로로 간 것입니다. 먼저 나간 메일은 다른 이야기입니다.
-    drafts = session.execute(
-        select(Message.conversation_id, Message.created_at, Conversation.hubspot_ticket_id)
-        .join(Conversation, Conversation.id == Message.conversation_id)
-        .where(
-            Conversation.contact_id == contact_id,
-            Conversation.hubspot_ticket_id.in_(sent_on_ticket.keys()),
-            Message.direction == "outgoing",
-            Message.status.in_(("pending_approval", "approved", "drafting")),
-            (Message.prompt_variant.is_(None)) | (Message.prompt_variant != "auto_ack"),
-        )
-    ).all()
-    for conv_id, created_at, ticket_id in drafts:
-        if created_at is not None and created_at <= sent_on_ticket[str(ticket_id)]:
-            retire_drafts_answered_elsewhere(session, conv_id)
+# **「허브스팟에서 직접 답장하면 우리 초안을 지운다」는 2026-09-09 에 없앴습니다**
+# (운영자: 「직접 답장할 일 없음 — 개발 중 불안정성 때문에 허브스팟에서 답장하라고
+# 임시로 만들어 두었던 장치야」). 회신은 이제 콘솔에서만 나갑니다.
+#
+# 그 장치가 판단 재료로 쓰던 것이 「그 연락처의 최근 메일 10건을 허브스팟에서 다시 읽기」
+# 였고, 그것 때문에 연락처 스윕이 2분마다 돌면서 사람당 왕복 열넷을 냈습니다. 장치가
+# 없어지니 그 스윕도 같이 나갔습니다(`agents/contact_sync` 의 주석을 보세요).
+#
+# 단계가 넘어가서 초안을 종료하는 길은 그대로입니다 — `stage_sync._retire_superseded_drafts`
+# 가 보드·허브스팟 동기화·고객 상세 폼·워크북·백필 다섯 경로를 전부 지납니다.
+# `retire_drafts_answered_elsewhere` 도 같이 지웠습니다: 부르는 곳이 하나도 없는 함수를
+# 남겨 두면 다음 사람이 「이건 어디서 쓰나」를 다시 조사합니다.
 
 
 @router.post("/tickets/{conversation_id}/refresh-history")

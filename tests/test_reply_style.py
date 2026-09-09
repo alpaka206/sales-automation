@@ -16,7 +16,6 @@ def test_draft_prompt_requires_scannable_plain_text_layout() -> None:
             "company": "Example",
             "country": "KR",
             "category": "support",
-            "score": "70",
             "last_message": "기능 두 가지를 문의합니다.",
             "conversation_context": "이전 문의가 있습니다.",
             "enrichment_context": "",

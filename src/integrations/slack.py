@@ -42,7 +42,6 @@ def post_approval_card(
     message_id: int,
     subject: str,
     body_snippet: str,
-    score: int | None,
     category: str,
     *,
     title: str | None = None,
@@ -90,7 +89,6 @@ def post_approval_card(
                 {"type": "mrkdwn", "text": f"*문의자:* {who_line}"},
                 {"type": "mrkdwn", "text": f"*이메일:* {email_line}"},
                 {"type": "mrkdwn", "text": f"*분류:* {cat_safe}"},
-                {"type": "mrkdwn", "text": f"*점수:* {score if score is not None else 'N/A'}"},
             ],
         },
     ]

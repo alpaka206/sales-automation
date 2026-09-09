@@ -14,7 +14,6 @@ output: json
 맥락:
 - 고객: {{contact_name}} ({{company}}, {{country}})
 - 분류: {{category}}
-- 점수: {{score}}
 
 가장 최근 문의(원문 그대로):
 """

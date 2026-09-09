@@ -45,7 +45,6 @@ class Contact(Base):
     # 없었다」 — NULL 이 그 스윕의 대기열입니다.
     website: Mapped[str | None] = mapped_column(String(512), nullable=True)
     lifecycle_stage: Mapped[str | None] = mapped_column(String, nullable=True)
-    score: Mapped[int | None] = mapped_column(Integer, nullable=True)
     phone: Mapped[str | None] = mapped_column(String, nullable=True)
     # Operator-editable free-text note on what this person/company does. Filled in
     # over the course of a conversation even for gmail/unverified senders.
@@ -180,7 +179,6 @@ class Message(Base):
     # 나갑니다. 받는 주소(`to_address`)와 보내는 계정(`channel_account_id`)은 이 칸이
     # 있든 없든 그대로입니다 — 얹기만 하지 바꾸지 않습니다.
     cc_addresses: Mapped[str | None] = mapped_column(String(1000), nullable=True)
-    score_snapshot: Mapped[int | None] = mapped_column(Integer, nullable=True)
     prompt_variant: Mapped[str | None] = mapped_column(String, nullable=True)
     draft_provider: Mapped[str | None] = mapped_column(String, nullable=True)
     approved_by: Mapped[str | None] = mapped_column(String, nullable=True)
@@ -565,7 +563,6 @@ class CustomerProfile(Base):
     )
     customer_state: Mapped[str] = mapped_column(String(32), nullable=False, default="negotiation")
     pipeline_stage: Mapped[str] = mapped_column(String(32), nullable=False, default="new")
-    lead_temperature: Mapped[str | None] = mapped_column(String(16), nullable=True)
     next_action: Mapped[str | None] = mapped_column(Text, nullable=True)
     next_action_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     industry: Mapped[str | None] = mapped_column(String(128), nullable=True)

@@ -6,7 +6,7 @@ import { LoadingBlock } from "../ui/Loading";
 
 type Lead = {
   contact_id: number; company: string | null; name: string; email: string | null;
-  stage: string; state: string; temperature: string | null;
+  stage: string; state: string;
   next_action: string | null; last_activity: string;
 };
 type Data = {
@@ -35,7 +35,6 @@ function LeadList({ title, hint, rows }: { title: string; hint: string; rows: Le
             <Link key={row.contact_id} className="domain-hist__link" to={`/customers/${row.contact_id}`}>
               <div className="row" style={{ gap: 6 }}>
                 <strong className="t-sm truncate">{row.company || row.name}</strong>
-                {row.temperature && <span className="tag" style={{ height: 18, fontSize: 10 }}>{row.temperature}</span>}
                 <span className="t-xs t-subtle" style={{ marginLeft: "auto" }}>{kst(row.last_activity, "md-hm")}</span>
               </div>
               {row.next_action && <div className="t-xs t-subtle">{row.next_action}</div>}

@@ -10,10 +10,8 @@ from unittest.mock import patch, MagicMock
 from src.agents.inbound import (
     InboundAgent,
     ClassifyResult,
-    ScoreAdjustResult,
     DraftResult,
     _RequestsResult,
-    _base_score,
     _normalize_email,
     _processed,
 )
@@ -47,8 +45,6 @@ def _mock_llm():
     def side_effect(prompt_name, variables=None, schema=None, **kw):
         if "classify" in prompt_name:
             return ClassifyResult(category="purchase_inquiry", reasoning="Wants to buy")
-        if "score_adjust" in prompt_name:
-            return ScoreAdjustResult(adjustment=10, reasoning="High urgency")
         if "draft_reply" in prompt_name:
             return DraftResult(
                 subject="Re: Inquiry",
@@ -75,16 +71,6 @@ def test_normalize_email() -> None:
     assert _normalize_email("user@example.com") == "user@example.com"
 
 
-def test_base_score_enterprise() -> None:
-    score = _base_score("ceo@company.co.kr", "korea")
-    assert score == 80  # 50 + 15 (enterprise) + 15 (country)
-
-
-def test_base_score_personal() -> None:
-    score = _base_score("person@gmail.com", "us")
-    assert score == 40  # 50 - 10 (personal)
-
-
 def test_inbound_handle_creates_db_rows(db_session) -> None:
     llm = _mock_llm()
 
@@ -106,7 +92,6 @@ def test_inbound_handle_creates_db_rows(db_session) -> None:
     assert result is not None
     assert result["category"] == "purchase_inquiry"
     assert result["channel"] == "email"
-    assert result["score"] > 0
 
     # 유형은 저장됩니다(0049). 목록이 채널 자리에 이것을 보여주고 — 채널은 전 행이 "email"
     # 이라 아무것도 구분하지 못했습니다 — "검토 필요" 문구가 하던 일도 이쪽이 합니다.
@@ -152,8 +137,8 @@ def test_a_draft_that_finishes_after_the_ticket_moved_is_closed_on_the_spot(db_s
     """
     real_draft_reply = InboundAgent._draft_reply
 
-    def move_the_stage_while_drafting(self, contact_info, classification, score, conv_id, lang):
-        draft = real_draft_reply(self, contact_info, classification, score, conv_id, lang)
+    def move_the_stage_while_drafting(self, contact_info, classification, conv_id, lang):
+        draft = real_draft_reply(self, contact_info, classification, conv_id, lang)
         conversation = db_session.get(Conversation, conv_id)
         conversation.stage = "meeting_link_sent"
         db_session.commit()
@@ -496,8 +481,6 @@ def test_a_spam_classification_still_gets_documents(db_session) -> None:
     def side_effect(prompt_name, variables=None, schema=None, **kw):
         if "classify" in prompt_name:
             return ClassifyResult(category="spam", reasoning="Junk")
-        if "score_adjust" in prompt_name:
-            return ScoreAdjustResult(adjustment=-50, reasoning="spam")
         if "draft_reply" in prompt_name:
             return DraftResult(subject="", body="", language="en")
         return "ok"

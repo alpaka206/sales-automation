@@ -77,7 +77,7 @@ type Detail = {
     /** 「메일 발송」으로 사람이 시작한 후속 초안인가. 참이면 편집기가 **접힌 채로**
      *  열립니다 — New 티켓의 자동 초안은 거짓이라 예전처럼 펼쳐집니다. */
     is_manual: boolean;
-    to_address: string; score_snapshot: number | null; created_at: string;
+    to_address: string; created_at: string;
     sent_at: string | null; scheduled_at: string | null; category: string | null;
   } | null;
   contact: { id: number; name: string; email: string | null; company: string | null; domain: string | null; role_description: string | null;

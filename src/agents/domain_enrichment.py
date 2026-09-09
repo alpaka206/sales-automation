@@ -76,10 +76,23 @@ def analyze_domain(
                 logger.warning("Homepage fetch error for %s", domain, exc_info=True)
                 meta = HomepageMeta(status="blocked")
 
-        # Web-search grounding fallback — resolves well-known companies even when
-        # their homepage is blocked/parked/timed out (the common failure we saw).
+        # **웹검색은 폴백입니다 — 홈페이지를 못 가져왔을 때만 돕니다** (2026-09-09).
+        #
+        # 주석은 처음부터 "fallback"이라고 적혀 있었는데 코드는 **성공 여부와 무관하게
+        # 항상** 돌고 있었습니다. 이 저장소의 규칙은 문서와 코드가 같은 말을 하는
+        # 것이고(가격 가드레일이 정확히 그 이유로 한 번 뒤집혔습니다), 여기서는 그
+        # 어긋남의 대가가 눈에 보입니다: 이 호출은 **Pro 티어 웹검색**이라 인바운드
+        # 경로에서 가장 비싼 한 번이고, 홈페이지가 잘 열린 건에서는 얹을 것이 거의
+        # 없습니다.
+        #
+        # 잃는 것은 홈페이지에 안 적힌 정보(투자·규모)인데, 그것을 읽던 유일한 소비처가
+        # `size_hint` → 리드 점수였고 그 점수는 같은 날 지웠습니다(이관 0116). 남은
+        # 소비처(업종·서비스)는 홈페이지에 적혀 있습니다.
+        #
+        # 아래 confidence 강등 규칙이 이미 둘을 짝으로 보고 있었습니다 — 「홈페이지도
+        # 실패하고 검색도 빈손이면 low」. 이제 그 두 조건이 실제로 배타적입니다.
         search_findings = ""
-        if settings.INBOUND_DOMAIN_SEARCH_GROUNDING:
+        if settings.INBOUND_DOMAIN_SEARCH_GROUNDING and meta.status != "ok":
             try:
                 raw = client.search(
                     "inbound/search_company",

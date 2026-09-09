@@ -1,4 +1,4 @@
-"""Inbound agent - classifies, scores, drafts reply, and queues for approval."""
+"""Inbound agent - classifies, drafts a reply, and queues it for approval."""
 
 from __future__ import annotations
 
@@ -39,8 +39,6 @@ from ..llm.knowledge import FIRST, FOLLOWUP, select_relevant_docs
 from ..llm.prompts import apply_editable_tokens, canonicalize_contact_links, get_reply_format
 from ._notify import notify_approval_once
 from .inbound_scoring import (  # noqa: F401 — re-exported for callers/tests
-    _TARGET_COUNTRIES,
-    _base_score,
     _build_enrichment_context,
     _domain_from_email,
     _normalize_email,
@@ -287,11 +285,6 @@ class CompanyTypeResult(BaseModel):
     reason: str = ""
 
 
-class ScoreAdjustResult(BaseModel):
-    adjustment: int
-    reasoning: str
-
-
 class DraftResult(BaseModel):
     subject: str
     body: str
@@ -436,7 +429,6 @@ class InboundAgent:
         self._enrich_draft_context(contact_info)
 
         classification = None
-        score = None
         draft = None
         try:
             classification = self._classify(contact_info)
@@ -455,10 +447,9 @@ class InboundAgent:
                         exc_info=True,
                     )
 
-            score = self._score(contact_info, classification.category)
-            draft = self._draft_reply(contact_info, classification, score, conv_id, inquiry_lang)
+            draft = self._draft_reply(contact_info, classification, conv_id, inquiry_lang)
             awaiting_review = self._finalize_draft(
-                message_id, contact_info, classification, score, draft, conv_id, inquiry_lang
+                message_id, contact_info, classification, draft, conv_id, inquiry_lang
             )
         except Exception:
             # Don't leave the card spinning forever — surface the failure.
@@ -480,7 +471,6 @@ class InboundAgent:
                     message_id=message_id,
                     subject=draft.subject,
                     body_snippet=draft.body,
-                    score=score,
                     category=classification.category,
                     title="새 인바운드 문의 — 회신 검토 요청",
                     inquiry=contact_info.get("last_message"),
@@ -508,17 +498,15 @@ class InboundAgent:
                 )
 
         logger.info(
-            "Inbound processed: contact_id=%s category=%s score=%d msg_id=%d",
+            "Inbound processed: contact_id=%s category=%s msg_id=%d",
             contact_info.get("object_id", "unknown"),
             classification.category,
-            score,
             message_id,
         )
 
         return {
             "message_id": message_id,
             "category": classification.category,
-            "score": score,
             "channel": channel,
         }
 
@@ -825,6 +813,29 @@ class InboundAgent:
                 logger.warning("HubSpot deals fetch failed.", exc_info=True)
 
         email = info.get("email", "")
+        # **회사를 알든 모르든 돕니다 — 실측이 그렇게 정했습니다** (2026-09-09).
+        #
+        # 한 번은 「허브스팟에 회사가 있으면 건너뛰자」로 바꿨다가 되돌렸습니다. 포털을
+        # 세어 보니 그 전제가 틀렸습니다 (최근 연락처 100명):
+        #
+        #     contact.company    18/100 (18%)
+        #     contact.industry    0/100 (0%)     ← 「기업 종류」에 쓸 값이 저쪽에 없습니다
+        #     회사 레코드 연결    37/100
+        #       그중 industry      1/36 (3%)
+        #       그중 description   1/36 (3%)
+        #       그중 website      33/36 (92%)
+        #
+        # 즉 **허브스팟은 「어떤 회사인지」를 사실상 모릅니다** — 이름조차 82%가 비어
+        # 있고, 업종은 0%입니다. 건너뛰기로 아끼는 것은 문의 다섯 건에 하나 정도인데,
+        # 그 하나에서 잃는 것은 초안이 참고할 유일한 회사 정보입니다.
+        #
+        # **비싸지도 않습니다**: 결과가 도메인당 90일 캐시라 새 회사에서만 돕니다
+        # (`INBOUND_DOMAIN_REANALYZE_DAYS`). 실측으로 3일에 문의 5건 중 분석은 1건이었고
+        # 나머지는 캐시 적중이었습니다.
+        #
+        # 허브스팟이 아는 것은 이미 넘기고 있습니다 — `hint_company` 로 들어가서 모델이
+        # 홈페이지와 대조합니다. 그 힌트가 82% 비어 있다는 것이, 홈페이지가 사실상 유일한
+        # 정보원이라는 뜻입니다.
         if email and settings.INBOUND_DOMAIN_ENRICHMENT_ENABLED:
             dom = _domain_from_email(email)
             if not is_personal_domain(dom):
@@ -891,30 +902,6 @@ class InboundAgent:
             },
             schema=ClassifyResult,
         )
-
-    def _score(self, contact_info: dict, category: str) -> int:
-        base = _base_score(
-            contact_info.get("email"),
-            contact_info.get("country"),
-            contact_info.get("domain_profile"),
-        )
-        try:
-            adj = self.llm.complete(
-                "inbound/score_adjust",
-                {
-                    "contact_name": contact_info["full_name"],
-                    "company": contact_info["company"],
-                    "country": contact_info["country"],
-                    "category": category,
-                    "base_score": str(base),
-                    "last_message": contact_info["last_message"],
-                },
-                schema=ScoreAdjustResult,
-            )
-            return max(0, min(100, base + adj.adjustment))
-        except Exception:
-            logger.warning("LLM score adjustment failed, using base score.", exc_info=True)
-            return base
 
     def _pick_channel(self, contact_info: dict) -> str:
         # Email is the only reply channel.
@@ -994,7 +981,6 @@ class InboundAgent:
         self,
         contact_info: dict,
         classification: ClassifyResult,
-        score: int,
         conv_id: int | None = None,
         inquiry_lang: str | None = None,
     ) -> DraftResult:
@@ -1054,7 +1040,6 @@ class InboundAgent:
                 "company": contact_info["company"],
                 "country": contact_info["country"],
                 "category": classification.category,
-                "score": str(score),
                 "last_message": last_message,
                 "conversation_context": self._build_conversation_context(
                     conv_id, last_message
@@ -1422,7 +1407,6 @@ class InboundAgent:
         message_id: int,
         contact_info: dict,
         classification: ClassifyResult,
-        score: int,
         draft: DraftResult,
         conv_id: int | None = None,
         inquiry_lang: str | None = None,
@@ -1451,16 +1435,12 @@ class InboundAgent:
             # and the immediate receipt acknowledgement have both been removed, so no
             # configuration value can make an inbound message send by itself.
             msg.status = "pending_approval"
-            msg.score_snapshot = score
             conv = session.get(Conversation, msg.conversation_id)
             if conv:
                 # 목록이 보여줄 값. 유형은 스레드의 성질이라 대화에 답니다 — 그리고 이것이
                 # "검토 필요" 문구를 대신합니다: CS 문의인지 스팸인지가 "확인이 필요합니다"
                 # 보다 무엇을 먼저 열어야 하는지를 정확히 말해 줍니다.
                 conv.inquiry_category = classification.category
-                contact = session.get(Contact, conv.contact_id) if conv.contact_id else None
-                if contact:
-                    contact.score = score
                 # No progress entry: "초안 작성 완료. 검토 대기." is exactly what the
                 # pending_approval status already says, on the same screen.
 

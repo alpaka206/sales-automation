@@ -912,11 +912,15 @@ def test_hubspot_sync_does_not_blank_a_field_the_operator_filled_in():
         }
 
 
-def test_the_three_doors_share_one_sync():
-    """손으로 누른 동기화 · 웹훅 · 10분 스윕이 **같은 함수**를 지난다.
+def test_the_two_doors_share_one_sync():
+    """손으로 누른 동기화와 웹훅이 **같은 함수**를 지난다.
 
     각자 반영하면 어느 문으로 들어왔느냐에 따라 시트에 갈지 말지가 달라지고, 그건 화면만
     봐서는 절대 안 보이는 종류의 어긋남이다.
+
+    **문이 셋에서 둘로 줄었다** (2026-09-09 운영자 지시: 「이제 우리 사이트에서만 변경할
+    거라 연락처 변경은 감지 안 해도 됨」). 2분 스윕이 나갔고, 남은 자동 경로는 웹훅
+    하나다 — 그쪽은 연락처 한 번 읽고 행 하나 쓰는 것이 전부다.
     """
     import pathlib
 
@@ -925,10 +929,16 @@ def test_the_three_doors_share_one_sync():
     for path in (
         "src/api/routes/customer_ops.py",   # 손으로 누른 동기화
         "src/api/webhook.py",               # contact.propertyChange
-        "src/api/main.py",                  # 2분 스윕 (자기 루프로 돕니다)
     ):
         source = pathlib.Path(path).read_text(encoding="utf-8")
         assert "contact_sync" in source, path
+
+    # 되돌아오지 않게 못을 박는다: 2분 루프도, 그 안에서 돌던 기록 재조회도 없다.
+    contact_sync = pathlib.Path("src/agents/contact_sync.py").read_text(encoding="utf-8")
+    assert "run_contact_sweep" not in contact_sync
+    assert "sync_changed_contacts_once" not in contact_sync
+    main = pathlib.Path("src/api/main.py").read_text(encoding="utf-8")
+    assert "contact_sweep" not in main
 
     # 플랜 패널 다섯 + 산업군. 리드 온도·다음 액션은 저쪽에 속성이 아예 없다.
     assert set(FIELDS) == {
@@ -939,121 +949,6 @@ def test_the_three_doors_share_one_sync():
     from src.agents.contact_sync import SHEET_FIELDS
 
     assert set(SHEET_FIELDS.values()) == {"plan", "user_seq", "space_seq"}
-
-
-def test_the_sweep_pulls_history_and_stops_at_its_quota(monkeypatch):
-    """10분 스윕이 기록(메일·통화·미팅·노트·Deal)까지 당겨온다 — 구독 없이.
-
-    허브스팟에 Note/Call/Meeting/Email 웹훅이 있긴 하지만(expanded object support) 켜면 한
-    엔드포인트가 두 payload 스키마를 받게 되고 스코프도 늘어난다. 얻는 것은 「10분 → 즉시」
-    뿐인데, 통화 기록이 10분 늦게 보이는 것은 문제가 아니다.
-
-    그리고 **활동을 남기면 그 연락처의 lastmodifieddate 가 같이 밀린다** (2026-08-26 실측:
-    활동 10:39:33 → 연락처 수정 10:40:13). 그래서 이 스윕이 이미 그 사람들을 보고 있다.
-
-    **몫이 있는 이유**: 기록은 사람당 왕복 다섯 번이 넘는다. 대량 임포트가 아는 연락처
-    이백 명을 건드리면 스윕 한 회차가 몇 분이 되고 허브스팟 한도에 걸린다. 몫에서 끊기면
-    워터마크를 거기까지만 옮겨 다음 회차가 이어 훑는다 — 안 그러면 남은 사람들이 다음 창
-    밖으로 나가 기록을 영영 못 받는다.
-    """
-    from datetime import datetime, timedelta, timezone
-    from unittest.mock import patch
-
-    from src.agents import contact_sync as cs
-
-    base = datetime(2026, 8, 26, 10, 0, tzinfo=timezone.utc)
-    total = cs._HISTORY_PER_SWEEP + 5
-    rows = [
-        type("Dto", (), {
-            "id": str(1000 + i), "plan": None, "plan_tier": None, "plan_seq": None,
-            "user_seq": None, "space_seq": None, "industry": None, "ip_country": None,
-            "phone": None, "updated_at": base + timedelta(minutes=i),
-        })()
-        for i in range(total)
-    ]
-    contacts = [
-        type("Row", (), {"id": 1000 + i, "hubspot_contact_id": str(1000 + i)})()
-        for i in range(total)
-    ]
-    pulled: list[int] = []
-    marker: dict = {}
-
-    class _Query:
-        def filter(self, *_a, **_k): return self
-        def all(self): return contacts
-
-    class _Session:
-        def __enter__(self): return self
-        def __exit__(self, *_): return False
-        def query(self, *_a, **_k): return _Query()
-        def add(self, obj): marker["poll_at"] = obj.payload["poll_at"]
-        def commit(self): pass
-
-    class _Client:
-        def search_contacts_changed_since(self, *_a, **_k): return rows
-
-    monkeypatch.setattr(cs, "SessionLocal", _Session)
-    monkeypatch.setattr(cs, "_last_sweep_at", lambda: base - timedelta(hours=1))
-    monkeypatch.setattr(cs, "apply_contact_fields", lambda *_a, **_k: {})
-    # 회사 주소 채우기(0111)는 같은 회차에 있지만 다른 대기열이다 — 여기서 재는 것은 기록
-    # 몫과 워터마크다. 그쪽은 `tests/test_company_website.py` 가 따로 고정한다.
-    monkeypatch.setattr(cs, "fill_missing_websites", lambda *_a, **_k: 0)
-
-    with patch("src.integrations.hubspot.HubSpotClient", lambda: _Client()), patch(
-        "src.api.routes.customer_ops._sync_hubspot",
-        side_effect=lambda cid, per_type=10: pulled.append(cid),
-    ):
-        cs.sync_changed_contacts_once()
-
-    # 몫만큼만 당겨왔다 — 스무 명이 바뀌어도 한 회차는 열다섯이다.
-    assert len(pulled) == cs._HISTORY_PER_SWEEP
-    assert pulled[0] == 1000
-
-    # 워터마크는 **마지막으로 당겨온 사람까지만** 갔다. `now` 로 밀면 나머지 다섯이
-    # 다음 창 밖으로 나가 기록을 영영 못 받는다.
-    last_pulled_at = base + timedelta(minutes=cs._HISTORY_PER_SWEEP - 1)
-    assert marker["poll_at"] == last_pulled_at.isoformat()
-
-
-def test_a_full_search_page_holds_the_watermark_back():
-    """못 읽은 것이 남았으면 워터마크를 끝까지 밀지 않는다.
-
-    Search 는 페이지당 100건이고 이 스윕은 200건에서 자른다. 대량 임포트가 그보다 많이
-    건드리면 **안 읽은 쪽이 더 최신**인데(정렬이 오름차순), `now` 로 밀면 그 사람들은
-    다음 창 밖으로 나가 영영 안 돌아온다. 평소에는 안 걸리고, 나는 그날 조용히 유실된다
-    (2026-08-26 지적). 티켓 스윕이 같은 이유로 이미 그렇게 한다.
-    """
-    import pathlib
-
-    source = pathlib.Path("src/agents/contact_sync.py").read_text(encoding="utf-8")
-    block = source[source.index("read_upto = ["):source.index("with SessionLocal() as session:", source.index("read_upto = ["))]
-
-    # 페이지가 꽉 찼을 때와 기록 몫에서 끊겼을 때, 둘 다 워터마크를 잡아 둔다.
-    assert "len(rows) >= _SWEEP_LIMIT" in block
-    assert "pulled >= _HISTORY_PER_SWEEP" in block
-    assert block.count("now = min(now,") == 2
-
-
-def test_the_sweep_runs_on_its_own_clock_not_the_ten_minute_poller():
-    """이 스윕이 가져오는 것 중에 **사람이 읽기만 하는 값이 아닌 것**이 있다.
-
-    영업이 허브스팟에서 직접 회신하면 `_retire_drafts_for_replies_seen_in_hubspot` 이 우리
-    대기 초안을 종료시킨다. 그 사이가 곧 「고객이 같은 질문에 두 번째 답을 받는」 창이라,
-    10분과 2분은 체감이 다르다.
-
-    30초로는 안 내린다 — 허브스팟 Search 는 새 레코드가 색인에 뜨기까지 5~10초가 걸린다.
-    지금 창은 `주기 + _SWEEP_OVERLAP` 이라 그 지연보다 넉넉하다.
-    """
-    import pathlib
-
-    from src.agents.contact_sync import CONTACT_SWEEP_SECONDS, _SWEEP_OVERLAP
-
-    assert CONTACT_SWEEP_SECONDS == 120
-    # 창이 색인 지연(5~10초)보다 한참 넉넉해야 한다.
-    assert _SWEEP_OVERLAP.total_seconds() >= 60
-
-    poller = pathlib.Path("src/agents/inbound_poller.py").read_text(encoding="utf-8")
-    assert "sync_changed_contacts_once" not in poller, "10분 폴러에 남아 두 번 돌면 안 된다"
 
 
 def test_every_stage_has_a_lifecycle_name_except_new():

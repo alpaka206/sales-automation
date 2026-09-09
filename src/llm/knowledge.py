@@ -218,7 +218,29 @@ def select_relevant_docs(
 
     selected = [doc for doc in candidates if (doc.doc_key or "").lower() in wanted]
     if not selected:
-        logger.info("Doc router selected nothing; falling back to every document.")
+        # **한 줄이 두 가지 실패를 같이 덮고 있었습니다** (2026-09-09 실측: 문의 5건 중
+        # 5건이 이 줄이었는데, 어느 쪽인지는 로그 어디에도 없었습니다).
+        #
+        #   ① 모델이 정말 아무것도 안 골랐다 — 프롬프트를 고칠 일입니다.
+        #   ② 모델이 고른 slug 가 `doc_key` 와 안 맞는다 — 제목을 돌려줬거나 철자가
+        #      다른 것이고, 그건 **설정/데이터** 문제라 프롬프트를 아무리 고쳐도 안 낫습니다.
+        #
+        # 둘은 정반대 방향의 수리인데 화면에도 로그에도 구별이 없었습니다. 허브스팟 400 의
+        # `errors[]` 를 남기는 것과 같은 이유로 여기서 갈라 적습니다 — **이 한 줄이 없으면
+        # 원인을 알아내는 데 실제 문의를 한 건 태워야 합니다.**
+        if wanted:
+            logger.warning(
+                "Doc router picked %d slug(s) that match no document (%s); "
+                "known keys: %s. Falling back to every document.",
+                len(wanted), ", ".join(sorted(wanted)),
+                ", ".join(sorted((d.doc_key or "") for d in candidates)),
+            )
+        else:
+            logger.info(
+                "Doc router chose no document out of %d; falling back to every one. "
+                "Model said: %s",
+                len(candidates), (getattr(result, "reasoning", "") or "(no reason given)")[:200],
+            )
         return done(candidates)
 
     logger.info(

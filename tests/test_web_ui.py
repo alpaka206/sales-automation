@@ -414,8 +414,7 @@ def test_message_detail_embeds_customer_history(_use_test_db):
     )
     session.add(msg)
     session.add(CustomerProfile(
-        contact_id=contact_id, customer_state="service", pipeline_stage="active",
-        lead_temperature="hot", current_plan="PERSO Pro", next_action="금요일 재연락",
+        contact_id=contact_id, customer_state="service", pipeline_stage="active", current_plan="PERSO Pro", next_action="금요일 재연락",
     ))
     session.add(CustomerInteraction(
         contact_id=contact_id, channel="meeting", direction="outgoing",

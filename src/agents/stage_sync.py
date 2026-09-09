@@ -234,19 +234,6 @@ def _retire_empty_client(session, row, conversation_id: int) -> None:
     )
 
 
-def retire_drafts_answered_elsewhere(session, conversation_id: int) -> int:
-    """허브스팟에 **우리가 보낸 메일**이 잡히면 그 답은 이미 나갔습니다 — 초안을 지웁니다.
-
-    단계와 무관합니다. 영업이 허브스팟에서 직접 회신하면 티켓이 New 에 그대로 있는 일이
-    흔하고(카드를 옮기는 것은 나중이거나 아예 안 합니다), 그동안 우리 초안은 발송 대기에
-    남아 있습니다. 그걸 누르면 고객은 같은 질문에 두 번째 답을 받습니다.
-
-    지우는 일 자체는 `_delete_pending_drafts` 한 곳입니다 — 단계 이동이든 이쪽이든
-    초안이 없어지는 길은 하나여야 화면·집계·발송이 따로 확인할 것이 없습니다.
-    """
-    return _delete_pending_drafts(session, conversation_id, why="허브스팟 발송 기록 확인")
-
-
 def _delete_pending_drafts(session, conversation_id: int, *, why: str) -> int:
     """나가지 않은 초안과 그 승인 기록을 지웁니다. 지운 수를 돌려줍니다."""
     from sqlalchemy import delete as sql_delete

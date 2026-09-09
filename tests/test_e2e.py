@@ -5,7 +5,7 @@ from __future__ import annotations
 from unittest.mock import MagicMock, patch
 
 
-from src.agents.inbound import ClassifyResult, DraftResult, InboundAgent, ScoreAdjustResult
+from src.agents.inbound import ClassifyResult, DraftResult, InboundAgent
 from src.agents.approval import approve
 from src.agents.report import ReportAgent
 from src.db.models import Message
@@ -17,8 +17,6 @@ def _stub_llm():
     def side_effect(prompt_name, variables=None, schema=None, **kw):
         if "classify" in prompt_name:
             return ClassifyResult(category="purchase_inquiry", reasoning="Wants to buy")
-        if "score_adjust" in prompt_name:
-            return ScoreAdjustResult(adjustment=5, reasoning="Good fit")
         if "draft_reply" in prompt_name:
             return DraftResult(
                 subject="Re: Your Inquiry",

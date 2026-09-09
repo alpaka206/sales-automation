@@ -41,12 +41,11 @@ def _disable_approval_token_and_send_worker():
         return_value=(1, 1, False),
 )
 @patch("src.agents.inbound.InboundAgent._draft_reply")
-@patch("src.agents.inbound.InboundAgent._score", return_value=70)
 @patch("src.agents.inbound.InboundAgent._classify")
 @patch("src.agents.inbound.InboundAgent._fetch_contact")
 @patch("src.agents.inbound.notify_approval_once")
 def test_handle_sets_analyzed_status(
-    mock_notify, mock_fetch, mock_classify, mock_score, mock_draft, mock_placeholder, mock_finalize
+    mock_notify, mock_fetch, mock_classify, mock_draft, mock_placeholder, mock_finalize
 ):
     """After classification, inbound_status should be updated to 'analyzed'."""
     mock_fetch.return_value = {
@@ -84,12 +83,11 @@ def test_handle_sets_analyzed_status(
         return_value=(2, 2, False),
 )
 @patch("src.agents.inbound.InboundAgent._draft_reply")
-@patch("src.agents.inbound.InboundAgent._score", return_value=60)
 @patch("src.agents.inbound.InboundAgent._classify")
 @patch("src.agents.inbound.InboundAgent._fetch_contact")
 @patch("src.agents.inbound.notify_approval_once")
 def test_handle_continues_on_status_update_failure(
-    mock_notify, mock_fetch, mock_classify, mock_score, mock_draft, mock_placeholder, mock_finalize
+    mock_notify, mock_fetch, mock_classify, mock_draft, mock_placeholder, mock_finalize
 ):
     """If status update fails, handle() should still complete."""
     mock_fetch.return_value = {
@@ -130,7 +128,6 @@ def test_no_hubspot_skips_status_update():
             InboundAgent, "_fetch_contact", return_value={"object_id": "702", "email": "z@test.com"}
         ),
         patch.object(InboundAgent, "_classify") as mock_c,
-        patch.object(InboundAgent, "_score", return_value=50),
         patch.object(InboundAgent, "_pick_channel", return_value="email"),
         patch.object(InboundAgent, "_draft_reply"),
         patch.object(InboundAgent, "_persist_placeholder", return_value=(3, 3, False, False)),

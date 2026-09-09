@@ -1,16 +1,17 @@
-"""Pure helpers for inbound lead scoring, email normalization, and the
-LLM enrichment-context block. Kept separate from the InboundAgent orchestration
-so the scoring rules are easy to find, test, and tweak in isolation.
+"""이메일 정규화와, 초안 프롬프트에 실을 보강 정보 블록.
+
+**리드 점수는 2026-09-09 에 지웠습니다** (운영자 지시: 「리드 점수가 안 중요했던 것
+같아서」). 그 값은 사람이 보는 자리가 하나도 없었습니다 — `contacts.score` 는 쓰기만
+하고 읽는 코드가 0, `messages.score_snapshot` 은 API 가 내려보내는데 그리는 화면이
+없었습니다. 유일한 소비처가 초안 프롬프트의 「점수: 80」 한 줄이었고, 그 한 줄을 위해
+문의마다 Gemini 왕복이 하나 더 났습니다(512Mi 인스턴스에서 그 왕복 하나가 공짜가
+아닙니다). 되살릴 거면 **어느 화면이 그 숫자를 읽는지부터 정하세요** — 그게 없어서
+이렇게 됐습니다.
 """
 
 from __future__ import annotations
 
 import re
-
-from ..common.domains import is_personal_domain
-
-_TARGET_COUNTRIES = {"kr", "korea", "jp", "japan", "sg", "th", "vn", "id", "ph", "my"}
-
 
 def _normalize_email(email: str) -> str:
     local, _, domain = email.lower().partition("@")
@@ -20,23 +21,6 @@ def _normalize_email(email: str) -> str:
 
 def _domain_from_email(email: str) -> str:
     return email.lower().split("@")[-1]
-
-
-def _base_score(email: str | None, country: str | None, domain_profile: dict | None = None) -> int:
-    score = 50
-    if email:
-        dom = _domain_from_email(email)
-        if is_personal_domain(dom):
-            score -= 10
-        else:
-            score += 15
-    if country and country.lower() in _TARGET_COUNTRIES:
-        score += 15
-    if domain_profile:
-        size = domain_profile.get("size_hint", "")
-        if size in ("midmarket", "enterprise"):
-            score += 5
-    return max(0, min(100, score))
 
 
 def _build_enrichment_context(contact_info: dict) -> str:

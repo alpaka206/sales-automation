@@ -159,8 +159,15 @@ def backfill_interaction_digests(limit: int = 120) -> int:
             )
         # 세션을 붙들고 모델을 기다리지 않습니다 — 값만 들고 나옵니다.
         targets = [(r.id, r.direction or "", r.subject, r.summary) for r in rows]
-        remaining = session.scalar(
-            select(sa_func.count(CustomerInteraction.id)).where(*pending)
+        # **대기열이 비면 세지 않습니다** (2026-09-09). 이 백필은 **새로 들어온 줄만**
+        # 봅니다 — 이미 채워진 줄은 `context IS NULL` 에서 빠지므로 두 번 집히지 않습니다.
+        # 그래서 평소에는 할 일이 없는데, 그때도 개수를 세느라 표를 한 번 더 훑고 있었고
+        # 그 숫자는 로그에 「남은 0건」으로 적힐 뿐이었습니다. 집은 것이 없으면 남은 것도
+        # 없습니다.
+        remaining = (
+            session.scalar(select(sa_func.count(CustomerInteraction.id)).where(*pending))
+            if rows
+            else 0
         )
 
     digests: dict[int, str] = {}

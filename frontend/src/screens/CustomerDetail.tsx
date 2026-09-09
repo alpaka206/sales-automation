@@ -327,7 +327,7 @@ export function CustomerDetail() {
               채워야 할 때가 있다는 것이 그 폼이 열려 있던 이유였습니다. */}
           <PlanCard contactId={contact.id} />
 
-          {/* **읽기 전용입니다** (2026-08-19 운영자 지시). 단계·다음 액션·리드 온도의
+          {/* **읽기 전용입니다** (2026-08-19 운영자 지시). 단계와 다음 액션의
               원본은 티켓과 수주 고객이고, 이 화면에서 또 고를 수 있으면 같은 값이 두
               곳에서 갈라집니다 — 실제로 이 폼이 저장할 때 대화 단계까지 같이 옮겨서,
               보드에서 옮긴 것과 여기서 고른 것이 서로 덮어썼습니다. 보는 자리와 정하는
@@ -341,7 +341,6 @@ export function CustomerDetail() {
             </div>
             <div className="field-grid">
               <KV k="파이프라인" v={labelFor(data.stage_options, profile?.pipeline_stage)} />
-              <KV k="리드 온도" v={profile?.lead_temperature || "-"} />
               {/* **프로필 밖**에서 옵니다. 플랜이 정하는 계산값이라 프로필 행이 없는
                   연락처에도 답이 있고(산 적이 없으니 MQL), 프로필 안에 두면 그런 사람만
                   「-」가 됩니다. 예전에는 저장된 열을 읽었는데 그 열을 채우는 길이 워크북

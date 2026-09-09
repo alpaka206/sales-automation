@@ -12,11 +12,7 @@ type Row = {
   name: string;
   email: string | null;
   stage: string;
-  temperature: string | null;
-  next_action: string | null;
-  next_action_at: string | null;
   last_activity: string;
-  conversation_count: number;
   client_id: number | null;
   /** MQL / PQL — 구독 플랜이 정합니다. 플랜이 없으면 MQL(아직 아무것도 안 샀다는 뜻).
    *  서버가 계산해서 내려줍니다(`sheet_values.qualification_for_plan`): 화면이 플랜을
@@ -103,8 +99,12 @@ export function Customers() {
         <DataTable
           columns={[
             {
+              /* **신원 셋이 각자 열입니다** (2026-09-09 운영자 지시). 예전에는 회사 이름
+                 아래에 `#번호 · 이름 · 이메일` 한 줄이 `t-xs t-subtle` 로 접혀 있었습니다 —
+                 목록에서 사람을 찾는 데 쓰는 값 셋이 전부 가장 작은 글자였고, 자리를
+                 차지하던 「다음 액션」은 정작 아무도 안 채우는 칸이었습니다. */
               label: "고객",
-              width: "30%",
+              width: "20%",
               cell: (row) => (
                 <>
                   {/* A real link, not a row onClick: that gave no keyboard access and no
@@ -112,19 +112,26 @@ export function Customers() {
                   <Link to={`/customers/${row.contact_id}`}>
                     <strong>{row.company || row.name}</strong>
                   </Link>
-                  <div className="t-xs t-subtle">
-                    {/* Client ID 를 이름 옆에 답니다. 수주 DB·워크북·시트가 전부 이 번호로
-                        엮여 있어서, 이 화면에만 없으면 같은 고객을 다른 화면에서 회사
-                        이름으로 눈대중해 찾게 됩니다(2026-08-19 운영자 지시). */}
-                    {row.client_id != null && (
-                      <span className="tnum" style={{ marginRight: 6, color: "var(--text)" }}>
-                        #{row.client_id}
-                      </span>
-                    )}
-                    {row.name} · {row.email || "-"}
-                  </div>
                 </>
               ),
+            },
+            {
+              /* 수주 DB·워크북·시트가 전부 이 번호로 엮여 있습니다. 이 화면에만 없으면 같은
+                 고객을 다른 화면에서 회사 이름으로 눈대중해 찾게 됩니다(2026-08-19). */
+              label: "Client ID",
+              width: "9%",
+              className: "tnum",
+              cell: (row) => (row.client_id != null ? `#${row.client_id}` : "-"),
+            },
+            {
+              label: "담당자",
+              width: "17%",
+              cell: (row) => row.name || "-",
+            },
+            {
+              label: "이메일",
+              width: "22%",
+              cell: (row) => row.email || "-",
             },
             {
               // 이 컬럼이 곧 필터입니다 — 단계를 보여주는 열이 단계로 거르는 열이기도 한 것.
@@ -147,7 +154,7 @@ export function Customers() {
                   </select>
                 </>
               ),
-              width: "14%",
+              width: "13%",
               cell: (row) => labels[row.stage] ?? row.stage,
             },
             {
@@ -165,29 +172,11 @@ export function Customers() {
               width: "9%",
               cell: (row) => row.qualification,
             },
-            { label: "리드 온도", width: "9%", cell: (row) => row.temperature || "-" },
-            {
-              label: "다음 액션",
-              width: "22%",
-              cell: (row) => (
-                <>
-                  <div>{row.next_action || "-"}</div>
-                  {row.next_action_at && (
-                    <div className="t-xs t-subtle tnum">{kst(row.next_action_at)}</div>
-                  )}
-                </>
-              ),
-            },
             {
               label: "최근 활동",
-              width: "16%",
+              width: "10%",
               className: "tnum t-subtle",
-              cell: (row) => (
-                <>
-                  {kst(row.last_activity)}
-                  <div className="t-xs">대화 {row.conversation_count}건</div>
-                </>
-              ),
+              cell: (row) => kst(row.last_activity),
             },
           ]}
           rows={data.rows}

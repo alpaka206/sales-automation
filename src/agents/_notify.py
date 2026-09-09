@@ -58,7 +58,6 @@ def notify_approval(
     message_id: int,
     subject: str,
     body_snippet: str,
-    score: int | None,
     category: str,
     *,
     title: str | None = None,
@@ -75,7 +74,7 @@ def notify_approval(
     """
     try:
         slack.post_approval_card(
-            message_id, subject, body_snippet, score, category,
+            message_id, subject, body_snippet, category,
             title=title,
             inquiry=inquiry,
             contact_name=contact_name,
@@ -150,7 +149,6 @@ def retry_pending_approval_notifications(limit: int = 20) -> int:
                     "message_id": message.id,
                     "subject": message.subject or "",
                     "body_snippet": message.body,
-                    "score": message.score_snapshot,
                     # The AI category is transient now — nothing stores it, so a retry
                     # cannot recover the one used on the first attempt. The subject is
                     # what an operator actually reads in the Slack card anyway.

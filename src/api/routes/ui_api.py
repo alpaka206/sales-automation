@@ -247,7 +247,6 @@ def ui_customers(stage: str = "", q: str = ""):
                 "name": row["contact"].full_name,
                 "email": row["contact"].email,
                 "stage": row["stage"],
-                "temperature": row["temperature"],
                 "next_action": row["next_action"],
                 "next_action_at": row["next_action_at"],
                 "last_activity": row["last_activity"],
@@ -274,7 +273,6 @@ def _lead(row: dict) -> dict:
         "email": contact.email,
         "stage": row["stage"],
         "state": row["state"],
-        "temperature": row["temperature"],
         "next_action": row["next_action"],
         "last_activity": row["last_activity"],
     }
@@ -756,7 +754,7 @@ def ui_customer_detail(contact_id: int):
         "profile": {
             field: getattr(profile, field)
             for field in (
-                "customer_state", "pipeline_stage", "lead_temperature",
+                "customer_state", "pipeline_stage",
                 "industry", "user_seq", "current_plan", "source", "next_action",
                 "next_action_at", "lost_reason", "notes", "last_synced_at",
             )

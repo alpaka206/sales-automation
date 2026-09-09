@@ -162,7 +162,7 @@ def test_the_two_branches_reach_the_prompt(thread, monkeypatch):
     classification = inbound_module.ClassifyResult(category="pricing_question", reasoning="")
 
     # ① 답장이 없다 → 같은 문의를 더 자세히, 지난 회신을 실어서
-    agent._draft_reply(contact_info, classification, 50, conv_id, "en")
+    agent._draft_reply(contact_info, classification, conv_id, "en")
     assert "고객의 답장은 아직 없습니다" in seen["followup_rule"]
     assert "미팅으로 안내드리겠습니다" in seen["followup_rule"]
     assert seen["last_message"] == "크레딧 가격이 궁금합니다"
@@ -171,6 +171,6 @@ def test_the_two_branches_reach_the_prompt(thread, monkeypatch):
     _interaction(factory, conv_id, contact_id, external_id="hubspot:conv:c-9",
                  direction="incoming", summary="인도 루피로는 얼마인가요?",
                  happened_at=BASE + timedelta(hours=3))
-    agent._draft_reply(contact_info, classification, 50, conv_id, "en")
+    agent._draft_reply(contact_info, classification, conv_id, "en")
     assert "고객이 새로 보낸" in seen["followup_rule"]
     assert seen["last_message"] == "인도 루피로는 얼마인가요?"
