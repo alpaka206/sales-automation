@@ -323,15 +323,17 @@ def _fill_contract(contract: ClientContract, form: dict) -> None:
         contract.doc_types = [part.strip() for part in raw.split("|") if part.strip()] or None
     contract.deal_type = contract.deal_type or "MRR"
     contract.currency = contract.currency or "KRW"
-    # **플랜 기간은 계약 기간과 다른 것입니다** (2026-08-31 운영자 지시). 계약은 먼저 맺고
-    # 실제 사용은 늦게 시작하는 일이 흔한데, 한동안 폼이 묻지 않고 계약 날짜를 그대로
-    # 복사했습니다 — 그래서 MRR 도 「사용중」도 계약 기간으로 계산되고 있었습니다.
+    # **플랜 날짜를 계약 날짜로 채우지 않습니다** (2026-09-09 운영자 보고로 되돌림).
     #
-    # 이 두 줄은 이제 **기본값**입니다: 비워 두면 계약 기간과 같다는 뜻이고, 그게 대부분의
-    # 계약입니다. 폼이 값을 보내면 그대로 저장됩니다. 옛 행과 워크북에서 온 행도 이 기본값
-    # 덕분에 빈 채로 남지 않습니다.
-    contract.plan_starts_on = contract.plan_starts_on or contract.starts_on
-    contract.plan_ends_on = contract.plan_ends_on or contract.ends_on
+    # 여기 두 줄이 `plan_starts_on = plan_starts_on or starts_on` 이었습니다. 「비우면
+    # 계약 기간과 같다」를 저장 시점에 **값으로 굳힌** 것인데, 그러면 그 뒤로 계약 날짜를
+    # 고쳐도 플랜 날짜는 옛 값 그대로입니다. MRR 은 플랜 기간으로 나누므로 **계약 날짜를
+    # 바꿔도 MRR 이 안 움직입니다** — 운영자가 정확히 그것을 보고 알려 줬습니다.
+    #
+    # 파생값을 저장하면 원본이 바뀔 때 조용히 어긋난다 — 이 저장소가 이미 두 번 겪은
+    # 자리입니다(`customer_profiles.qualification` 0104, 고객 종류 0065). 기본값은
+    # 읽을 때 정합니다: `won.plan_period` 와 `won.plan_months` 가 비어 있으면 계약
+    # 날짜로 떨어집니다. 이미 굳어 있는 행은 이관 0117 이 되돌립니다.
     _fill_contract_fx(contract)
     _settle_amounts(contract)
 

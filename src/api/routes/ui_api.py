@@ -1094,7 +1094,11 @@ def _won_contract(contract, today) -> dict:
         "deal_type": contract.deal_type,
         "starts_on": contract.starts_on,
         "ends_on": contract.ends_on,
+        # **계약 개월수입니다** — 화면의 「계약 기간 (N개월)」이 읽습니다.
         "months": won.months_between(contract.starts_on, contract.ends_on),
+        # **MRR 을 나누는 개월수는 이쪽입니다** (2026-09-09). 둘이 다를 수 있어서
+        # 화면이 `months` 로 나누면 옆 칸의 서버 계산과 어긋납니다.
+        "plan_months": won.plan_months(contract),
         "doc_types": contract.doc_types or [],
         "credits": contract.credits,
         "currency": contract.currency,
@@ -1129,6 +1133,8 @@ def _won_contract(contract, today) -> dict:
         "revenue_from": won.revenue_start_month(contract),
         "revenue_from_set": bool(contract.revenue_from),
         "monthly_revenue": won.monthly_revenue(contract),
+        # 화면이 `공급가 ÷ months` 로 직접 나누던 값. 자가 갈리지 않게 서버가 냅니다.
+        "monthly_supply_revenue": won.monthly_supply_revenue(contract),
         "plan": contract.plan,
         "plan_name": contract.plan_name,
         "perso_email": contract.perso_email,

@@ -17,7 +17,12 @@ export type Payment = {
 export type Contract = {
   id: number; seq: number; label: string; state: string;
   ticket_id: string | null; deal_type: string;
-  starts_on: string | null; ends_on: string | null; months: number;
+  starts_on: string | null; ends_on: string | null;
+  /** 계약 개월수 — 「계약 기간 (N개월)」이 읽습니다. */
+  months: number;
+  /** **MRR 을 나누는 개월수.** 계약 개월수와 다를 수 있습니다(플랜은 늦게 시작하는 일이
+   *  흔합니다). 이 둘을 섞으면 같은 계약의 두 MRR 이 서로 다른 기간을 말합니다. */
+  plan_months: number;
   doc_types: string[]; credits: number | null; currency: string;
   amount_incl_vat: Money; amount_excl_vat: Money;
   /** **분당 단가의 기준이 VAT 포함 금액인가.** 화면의 「공급가 선택」이 고른 값입니다.
@@ -39,6 +44,8 @@ export type Contract = {
   /** 고객사 **측** 담당자와 연락처. 계약마다 다를 수 있어 고객이 아니라 여기 삽니다. */
   contact_name: string | null; contact_info: string | null;
   revenue_from: string | null; revenue_from_set: boolean; monthly_revenue: Money;
+  /** 공급가로 본 월 매출. **서버가 냅니다** — 화면이 나누면 옆 칸과 자가 갈립니다. */
+  monthly_supply_revenue: Money;
   plan: string | null; plan_name: string | null; perso_email: string | null;
   plan_starts_on: string | null; plan_ends_on: string | null; plan_days_left: number | null;
   invite_limit: number | null; queue_limit: number | null; concurrent_jobs: number | null;

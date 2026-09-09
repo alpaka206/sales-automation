@@ -2881,3 +2881,118 @@ def test_the_contact_moved_out_of_the_basic_panel_into_the_contract_form():
     # 워딩 — 이 화면이 보여 주는 것은 인식 매출(MRR)입니다.
     assert 'title="MRR 관리"' in detail
     assert 'k="월간 MRR (VAT 포함)"' in detail
+
+
+def test_saving_does_not_freeze_the_plan_dates(factory):
+    """**저장이 「비우면 계약 기간과 같다」를 값으로 굳히면 안 됩니다** (2026-09-09
+    운영자 보고: 「계약 날짜를 변경하면 공급가 기준 MRR 은 변경이 되는데 나머지 MRR 도
+    밖의 리스트도 안 된다」).
+
+    저장 경로에 `plan_starts_on = plan_starts_on or starts_on` 두 줄이 있었습니다. MRR 은
+    플랜 기간으로 나누므로(`won.plan_months`), 한 번 굳고 나면 계약 날짜를 아무리 고쳐도
+    **분모가 안 움직입니다.** 화면의 「공급가 기준」만 계약 개월수로 직접 나누고 있어서
+    그것만 따라 움직였고, 두 숫자가 갈린 덕에 운영자가 알아챘습니다.
+
+    파생값을 저장하면 원본이 바뀔 때 조용히 어긋납니다 — 이 저장소가 이미 두 번 겪은
+    자리입니다(`customer_profiles.qualification` 0104, 고객 종류 0065).
+    """
+    from src.common import won
+
+    with factory() as session:
+        session.add(Client(client_id=2199, company="기간 테스트"))
+        contract = ClientContract(
+            client_id=2199, seq=1, starts_on="2026-01-01", ends_on="2026-06-30",
+            currency="KRW", vat_applicable=False, amount_incl_vat=6_000_000,
+            fx_rate=1300, fx_on="2026-01-01",
+        )
+        session.add(contract)
+        session.commit()
+        contract_id = contract.id
+
+    patched, client = _console(factory)
+    with patched, client:
+        # 계약 기간을 6개월 → 12개월로. 플랜 칸은 **비운 채로** 보냅니다.
+        answer = client.post(f"/won-customers/contracts/{contract_id}", data={
+            "starts_on": "2026-01-01", "ends_on": "2026-12-31",
+            "plan_starts_on": "", "plan_ends_on": "",
+        })
+    assert answer.status_code == 200, answer.text
+
+    with factory() as session:
+        saved = session.get(ClientContract, contract_id)
+        # 굳지 않았습니다 — 비어 있는 것이 곧 「계약 기간과 같다」입니다.
+        assert saved.plan_starts_on is None
+        assert saved.plan_ends_on is None
+        # 그래서 분모가 새 계약 기간을 따라옵니다.
+        assert won.plan_months(saved) == 12
+        assert won.monthly_revenue(saved) == Decimal(6_000_000) / 12
+
+
+def test_changing_the_contract_dates_moves_every_mrr_figure():
+    """**계약 날짜를 고치면 MRR 이 따라와야 합니다** (2026-09-09 운영자 보고).
+
+    증상은 「공급가 기준 MRR 만 바뀌고 나머지도 밖의 목록도 그대로」였습니다. 원인은
+    저장 경로가 `plan_starts_on = plan_starts_on or starts_on` 으로 **「비우면 계약
+    기간과 같다」를 값으로 굳힌** 것이었습니다 — MRR 은 플랜 기간으로 나누므로, 한 번
+    굳고 나면 계약 날짜를 아무리 고쳐도 분모가 안 움직입니다.
+
+    파생값을 저장하면 원본이 바뀔 때 조용히 어긋납니다. 이 저장소가 이미 두 번 겪은
+    자리입니다(`customer_profiles.qualification` 0104, 고객 종류 0065).
+    """
+    from types import SimpleNamespace
+
+    from src.common import won
+
+    def contract(start, end):
+        return SimpleNamespace(
+            deal_type="MRR", currency="KRW", vat_applicable=True, vat_included=True,
+            amount_incl_vat=Decimal("11000000"), amount_excl_vat=None,
+            starts_on=start, ends_on=end,
+            # **비어 있습니다** — 「계약 기간과 같다」는 뜻이고, 그게 대부분의 계약입니다.
+            plan_starts_on=None, plan_ends_on=None,
+            terminated_on=None, revenue_from=None, credits_used=None, credits=None,
+        )
+
+    six = contract("2026-01-01", "2026-06-30")
+    twelve = contract("2026-01-01", "2026-12-31")
+
+    assert won.plan_months(six) == 6
+    assert won.plan_months(twelve) == 12
+    # 세 값이 **전부** 따라옵니다 — 화면의 두 MRR 과 목록이 읽는 값입니다.
+    assert won.monthly_revenue(six) != won.monthly_revenue(twelve)
+    assert won.monthly_supply_revenue(six) != won.monthly_supply_revenue(twelve)
+    assert won.revenue_start_month(six) == "2026-01"
+
+
+def test_the_two_mrr_figures_use_the_same_divisor():
+    """**한 계약의 두 MRR 이 서로 다른 기간을 말하면 안 됩니다** (2026-09-09).
+
+    화면의 「월간 MRR (공급가 기준)」이 `공급가 ÷ contract.months`(계약 개월수)로 직접
+    나눴고, 옆의 「월간 MRR (VAT 포함)」은 서버가 플랜 개월수로 나눈 값이었습니다. 플랜이
+    계약보다 늦게 시작하면 둘이 갈리고, 계약 날짜를 고치면 한쪽만 움직입니다.
+
+    자를 한 곳에 두는 것이 유일한 방법입니다 — 환율을 서버가 한 번만 환산하는 것과 같은
+    이유입니다.
+    """
+    from types import SimpleNamespace
+
+    from src.common import won
+
+    # 계약 12개월인데 플랜은 10개월(사용을 두 달 늦게 시작).
+    contract = SimpleNamespace(
+        deal_type="MRR", currency="KRW", vat_applicable=True, vat_included=True,
+        amount_incl_vat=Decimal("11000000"), amount_excl_vat=None,
+        starts_on="2026-01-01", ends_on="2026-12-31",
+        plan_starts_on="2026-03-01", plan_ends_on="2026-12-31",
+        terminated_on=None, revenue_from=None, credits_used=None, credits=None,
+    )
+
+    assert won.months_between(contract.starts_on, contract.ends_on) == 12
+    assert won.plan_months(contract) == 10
+
+    # 총액 ÷ 10, 공급가 ÷ 10 — **같은 10** 입니다.
+    assert won.monthly_revenue(contract) == Decimal("11000000") / 10
+    assert won.monthly_supply_revenue(contract) == won.supply_amount(contract) / 10
+    # 그래서 둘의 비는 언제나 1.1 입니다 — 기간이 갈리면 이 값이 깨집니다.
+    ratio = won.monthly_revenue(contract) / won.monthly_supply_revenue(contract)
+    assert round(float(ratio), 6) == 1.1

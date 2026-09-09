@@ -510,6 +510,28 @@ def monthly_revenue(contract) -> Decimal:
     return amount / plan_months(contract)
 
 
+def monthly_supply_revenue(contract) -> Decimal:
+    """월간 매출을 **공급가로** 본 값 — 공급가 ÷ **플랜** 개월수 (2026-09-09).
+
+    **화면이 스스로 나누던 값입니다.** 상세의 「월간 MRR (공급가 기준)」이
+    `공급가 ÷ contract.months` 로 계산했는데, 그 `months` 는 **계약 개월수**였습니다.
+    바로 옆의 「월간 MRR (VAT 포함)」은 서버가 **플랜 개월수**로 나눈 값이라, 두 숫자가
+    같은 계약을 서로 다른 기간으로 말했습니다 — 계약 날짜를 고치면 한쪽만 움직였고,
+    운영자가 그걸로 잡았습니다.
+
+    같은 자를 쓰게 하는 방법은 자를 한 곳에 두는 것뿐입니다. 환율을 서버가 한 번만
+    환산하는 것과 같은 이유입니다 — 화면이 다시 계산하면 같은 숫자가 화면마다 달라집니다.
+
+    부가세 미해당 계약은 공급가라는 것이 없으므로 ``None`` 입니다(금액이 하나뿐입니다).
+    """
+    if contract is None or contract.deal_type != "MRR":
+        return Decimal(0)
+    supply = supply_amount(contract)
+    if not supply:
+        return Decimal(0)
+    return supply / plan_months(contract)
+
+
 def revenue_start_month(contract) -> str | None:
     """매출을 인식하기 시작하는 달. 지정이 없으면 **플랜 시작월**.
 

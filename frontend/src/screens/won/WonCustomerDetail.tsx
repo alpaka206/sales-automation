@@ -1198,7 +1198,13 @@ function PayRow({ payment, currency, today, onAsk, onSave }: {
 /** 6 MRR 관리. 막대는 인식 시작월부터 최대 12개월 — 지난 달은 채워집니다. */
 function RevenueSection({ contract, today }: { contract: Contract; today: string }) {
   const mrr = contract.deal_type === "MRR";
-  const months = contract.months || 1;
+  /** **MRR 을 나누는 개월수는 계약 개월수가 아니라 플랜 개월수입니다** (2026-09-09).
+   *
+   *  여기가 `contract.months`(계약 개월수)였습니다. 바로 아래 「월간 MRR (VAT 포함)」은
+   *  서버가 플랜 개월수로 나눈 값을 그대로 그리는데, 그 옆의 「공급가 기준」만 이 값으로
+   *  화면이 직접 나눴습니다 — 그래서 계약 날짜를 고치면 **한쪽만 움직였습니다.**
+   *  운영자가 그걸로 잡았습니다. 인식 개월수를 적는 아래 문장도 같은 값을 씁니다. */
+  const months = contract.plan_months || contract.months || 1;
   const base = contract.revenue_from ? `${contract.revenue_from}-01` : contract.starts_on || today;
   const bars = mrr
     ? Array.from({ length: Math.min(months, 12) }, (_, i) => {
@@ -1222,7 +1228,9 @@ function RevenueSection({ contract, today }: { contract: Contract; today: string
                : <span className="muted">결제월에 일시 인식</span>}
         </span>} />
         <KV k="월간 MRR (공급가 기준)" v={<span className="mono">
-          {mrr ? <>{money(n(contract.amount_excl_vat) / months, contract.currency)} <span className="muted">/ 월</span></>
+          {/* **서버가 낸 값입니다.** 화면이 나누면 옆 칸과 자가 갈립니다 — 환율을
+              서버가 한 번만 환산하는 것과 같은 이유입니다. */}
+          {mrr ? <>{money(contract.monthly_supply_revenue, contract.currency)} <span className="muted">/ 월</span></>
                : <span className="muted">결제월에 일시 인식</span>}
         </span>} />
         <KV k="매출 인식 시작 월" v={<span className="mono">
