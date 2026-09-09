@@ -1940,7 +1940,12 @@ def test_the_card_says_what_its_numbers_are_and_follows_the_hovered_month():
     assert "onHover?.(index === null ? null : months[index])" in chart
     assert "onMouseLeave={() => move(null)}" in chart
     # 면 차트입니다 — 막대가 아니라. New 는 총액 아래에 얹혀 위쪽으로 보입니다.
-    assert "bandPath(total, rest)" in chart and "<figure className=\"marea\"" in chart
+    assert "bandPath(total, rest, run)" in chart and "<figure className=\"marea\"" in chart
+    # **New 가 0 인 구간은 경로를 안 만듭니다** (2026-09-09 운영자 지시: 「0이면 아예
+    # 안 보여야 하는데 지금은 조오금 남아 있어」). 한 폴리곤으로 전체를 덮으면 0 인
+    # 달에서 위·아래 변이 겹치고, 겹친 변은 안티에일리어싱 때문에 얇은 띠로 남습니다.
+    assert "newBands" in chart
+    assert "const newArea" not in chart, "전 구간을 한 번에 덮으면 0 인 달에 띠가 남습니다"
 
 
 def test_the_row_shows_what_this_customer_added_this_month():

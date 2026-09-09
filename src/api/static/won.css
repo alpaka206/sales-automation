@@ -147,6 +147,12 @@
 .won .kpi-value {font-size:36px;font-weight:700;letter-spacing:-.04em;margin-top:12px;line-height:1.05;font-variant-numeric:tabular-nums;}
 .won .kpi-value.money {font-size:27px;letter-spacing:-.035em;}
 .won .kpi-value .unit {font-size:14px;font-weight:600;color:var(--muted);margin-left:4px;letter-spacing:0;}
+/* 어느 달의 숫자인가 — **큰 숫자 위**입니다 (2026-09-09 운영자 지시). 오른쪽에 붙여 두면
+   숫자가 길어질 때 밀리고, 읽는 순서도 거꾸로입니다(숫자를 먼저 읽고 나서 어느 달인지
+   알게 됩니다). `kpi-value` 의 위 여백을 이 줄이 가져갑니다. */
+.won .kpi-when {margin-top:12px;font-size:12px;font-weight:600;color:var(--muted);
+  letter-spacing:0;font-variant-numeric:tabular-nums;}
+.won .kpi-when + .kpi-value {margin-top:2px;}
 .won .kpi-foot {margin-top:7px;font-size:12px;display:flex;align-items:center;gap:11px;color:var(--muted);}
 .won .kpi-foot i {font-style:normal;display:inline-flex;align-items:center;gap:5px;}
 .won .kpi-foot b {color:var(--ink-2);font-weight:600;font-variant-numeric:tabular-nums;}

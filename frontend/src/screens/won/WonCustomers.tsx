@@ -646,9 +646,13 @@ function MetricCard({ uid, title, note, newLabel, series, newSeries, stripeSerie
 
           짚은 달이 있으면 그 달 값입니다. 라벨이 「이번 달」에서 그 달로 바뀌므로, 큰
           숫자가 어느 달 것인지 헷갈릴 자리가 없습니다. */}
+      {/* **어느 달인지가 숫자 위에 섭니다** (2026-09-09 운영자 지시). 금액 오른쪽에
+          붙여 두면 숫자가 길어질 때(억 단위·USD) 라벨이 카드 밖으로 밀리고, 무엇보다
+          **읽는 순서가 거꾸로**입니다 — 큰 숫자를 먼저 읽고 나서야 그게 어느 달 것인지
+          알게 됩니다. 짚으면 이 줄만 그 달로 바뀝니다. */}
+      <div className="kpi-when">{look ? look.slice(2) : "이번 달"}</div>
       <div className="kpi-value money">
         {amount(at(shown), unit, scale)}
-        <span className="unit">{look ? look.slice(2) : "이번 달"}</span>
         <span className="kpi-new">
           <span className="cap">New</span>{amount(newAt(shown), unit, scale)}
         </span>

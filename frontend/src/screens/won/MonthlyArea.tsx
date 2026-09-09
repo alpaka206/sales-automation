@@ -136,14 +136,23 @@ export function MonthlyArea({
    *  사이에 실제로 있던 적 없는 최고점이 생깁니다. */
   const line = (at: (index: number) => number) =>
     months.map((_, index) => `${index ? "L" : "M"}${x(index)} ${y(at(index))}`).join(" ");
-  /** 두 선 사이를 채운 면. 위 선을 따라 갔다가 아래 선을 거꾸로 돌아옵니다. */
-  const bandPath = (upper: (i: number) => number, lower: (i: number) => number) =>
-    `${line(upper)} ${months
-      .map((_, index) => {
-        const back = months.length - 1 - index;
-        return `L${x(back)} ${y(lower(back))}`;
-      })
-      .join(" ")} Z`;
+  /** 두 선 사이를 채운 면. 위 선을 따라 갔다가 아래 선을 거꾸로 돌아옵니다.
+   *  `over` 를 주면 그 달들만 — 안 주면 전체입니다. */
+  const bandPath = (
+    upper: (i: number) => number,
+    lower: (i: number) => number,
+    over?: number[],
+  ) => {
+    const idx = over ?? months.map((_, index) => index);
+    const forward = idx
+      .map((index, n) => `${n ? "L" : "M"}${x(index)} ${y(upper(index))}`)
+      .join(" ");
+    const backward = [...idx]
+      .reverse()
+      .map((index) => `L${x(index)} ${y(lower(index))}`)
+      .join(" ");
+    return `${forward} ${backward} Z`;
+  };
 
   /** 그 달의 손닿는 사각형 `[x, width]` — 플롯 안으로 자릅니다. */
   const hit = (index: number): [number, number] => {
@@ -155,7 +164,32 @@ export function MonthlyArea({
   const total = (index: number) => values[index];
   const rest = (index: number) => values[index] - news[index];
   const area = bandPath(total, () => 0);
-  const newArea = bandPath(total, rest);
+  /** New 면은 **0인 구간을 아예 안 그립니다** (2026-09-09 운영자 지시: 「0이면 아예 안
+   *  보여야 하는데 지금은 조오금 남아 있어」).
+   *
+   *  한 폴리곤으로 여섯 달을 통째로 덮으면 New 가 0 인 달에서 위(총액)와 아래(총액−New)
+   *  선이 **같은 자리에 겹칩니다.** 높이가 0 이니 안 보여야 할 것 같지만, 겹친 두 변이
+   *  같은 픽셀을 두 번 칠하면서 안티에일리어싱이 얇은 띠를 남깁니다 — 0.62 불투명도가
+   *  그것을 더 눈에 띄게 합니다.
+   *
+   *  그래서 New 가 있는 **구간마다** 따로 그립니다. 구간 양옆의 0인 달 하나씩은
+   *  포함합니다 — 거기가 면이 0 으로 내려앉는 기울기라, 빼면 면이 허공에서 잘립니다.
+   *  전 구간이 0 이면 경로가 하나도 안 만들어집니다. */
+  const newBands: string[] = [];
+  {
+    let run: number[] = [];
+    months.forEach((_, index) => {
+      if (news[index] > 0) {
+        if (!run.length && index > 0) run.push(index - 1);
+        run.push(index);
+      } else if (run.length) {
+        run.push(index);
+        newBands.push(bandPath(total, rest, run));
+        run = [];
+      }
+    });
+    if (run.length) newBands.push(bandPath(total, rest, run));
+  }
   const hasNew = news.some((value) => value > 0);
   const hasNegative = values.some((value) => value < 0);
 
@@ -189,7 +223,9 @@ export function MonthlyArea({
         <path d={area} fill={NEGATIVE} opacity={0.16} clipPath={`url(#${uid}-neg)`} />
         {/* 신규 몫은 총액 선 **바로 아래**에 얹힙니다 — 위로 자란 것이 곧 그 달의 신규분
             입니다. 진한 면이라 아래 옅은 면과 겹쳐도 경계가 남습니다. */}
-        {hasNew && <path d={newArea} fill={NEW} opacity={0.62} clipPath={`url(#${uid}-pos)`} />}
+        {newBands.map((d, index) => (
+          <path key={index} d={d} fill={NEW} opacity={0.62} clipPath={`url(#${uid}-pos)`} />
+        ))}
         <path d={line(total)} fill="none" stroke={POSITIVE} strokeWidth={1.75}
               strokeLinejoin="round" clipPath={`url(#${uid}-pos)`} />
         <path d={line(total)} fill="none" stroke={NEGATIVE} strokeWidth={1.75}
@@ -248,7 +284,10 @@ export function MonthlyArea({
       <figcaption className="marea__legend">
         {caption && <span className="cap">{caption}</span>}
         <span><i style={{ background: POSITIVE, opacity: 0.45 }} />전체</span>
-        <span><i style={{ background: NEW, opacity: 0.75 }} />{newLabel}</span>
+        {/* **한 달도 없으면 범례에서도 뺍니다** (2026-09-09). 그림에 없는 색을 범례가
+            설명하고 있으면, 보는 사람은 어딘가 있는데 못 찾는 것으로 읽습니다 —
+            바로 아래 「해지 정산」이 같은 이유로 이미 그렇게 합니다. */}
+        {hasNew && <span><i style={{ background: NEW, opacity: 0.75 }} />{newLabel}</span>}
         {hasNegative && <span className="is-neg"><i style={{ background: NEGATIVE }} />{negativeNote}</span>}
       </figcaption>
     </figure>

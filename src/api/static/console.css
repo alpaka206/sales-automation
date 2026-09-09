@@ -980,6 +980,20 @@ input[type="checkbox"].cb:checked::after {
    Accessibility (WCAG 2.1 AA)
    --------------------------------------------------------------- */
 
+/* **표 안의 링크는 언제나 본문 색입니다** (2026-09-09 운영자 지시: 「리드 히스토리에
+   들어갔어도 보라색으로 표시 안 되고 항상 검은색이도록」).
+
+   브라우저 기본값은 방문한 링크를 보라색으로 칠합니다. 웹 문서에서는 「읽은 것」을
+   말해 주는 유용한 표시지만, 목록 화면에서는 **틀린 말**입니다 — 여기서 색이 뜻하는
+   것은 상태(발송 완료·실패)이지 「내가 열어 봤나」가 아니고, 한 사람이 열어 본 행만
+   다른 색이면 옆자리 사람과 같은 화면을 봐도 다르게 보입니다.
+
+   이 저장소가 이미 쓰는 방식이기도 합니다 — `.insight-list a`·`.opportunity-split a`·
+   `.pipeline-card > a` 가 전부 `color: inherit` 입니다. 표만 빠져 있었습니다.
+   누를 수 있다는 것은 밑줄과 커서가 말합니다. */
+.table a { color: inherit; }
+.table a:hover { text-decoration: underline; }
+
 /* 2.4.7 Focus Visible — every interactive element gets a visible keyboard
    focus ring. Mouse clicks don't trigger :focus-visible, so this is keyboard-only. */
 a:focus-visible,
