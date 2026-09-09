@@ -415,12 +415,14 @@ async def test_the_picker_offers_only_what_the_operator_allowed(
     포털 설정이 바뀌면 코드가 조용히 틀려집니다.
 
     인박스는 더 이상 울타리가 아닙니다(실발송으로 확인). 그래서 `inbox-9` 의 주소도
-    허락하면 뜹니다.
+    허락하면 뜹니다 — 목록이 티켓과 무관해진 뒤로는 인박스를 아예 안 봅니다.
     """
     monkeypatch.setattr(
         settings, "HUBSPOT_REPLY_SENDER_ACCOUNT_IDS", "team-account, elsewhere"
     )
-    _thread_with_one_email("t1", "inbox-1", "team-account")
+    monkeypatch.setattr(
+        settings, "HUBSPOT_PREFERRED_EMAIL_CHANNEL_ACCOUNT_ID", "team-account"
+    )
     respx.get(f"{BASE_URL}/conversations/v3/conversations/channel-accounts").mock(
         return_value=httpx.Response(200, json={"results": [
             {"id": "team-account", "channelId": "1002", "inboxId": "inbox-1",
@@ -443,7 +445,7 @@ async def test_the_picker_offers_only_what_the_operator_allowed(
         ]})
     )
 
-    found = await client.list_reply_senders("ticket-1", "buyer@example.com")
+    found = await client.list_sender_accounts()
     senders = found["senders"]
 
     # 허락한 둘만 뜹니다 — `personal-account`(허락 안 함)와 `revoked`(연결 끊김)는 빠지고,
@@ -466,9 +468,14 @@ async def test_the_picker_default_is_what_the_send_would_actually_use(
     메일은 `perso.ai@estsoft.com` 으로 나갔습니다 — 운영 실측으로 티켓 48건 중 41건입니다.
     나간 뒤에나 알 수 있는 종류의 어긋남이라 여기서 고정합니다.
 
-    **목록도 한 인박스에 갇히면 안 됩니다.** 티켓 하나가 인박스 여러 곳에 스레드를 갖는
-    일이 흔한데(폼은 `Inbox`, 메일은 `GTM Marketing`), 기본값이 정해진 스레드의 인박스만
-    보면 나머지가 통째로 사라져 「원래 오던 주소」를 고를 길이 없어집니다.
+    목록이 티켓과 무관해진 뒤로 둘은 **같은 설정 하나**를 봅니다
+    (`HUBSPOT_PREFERRED_EMAIL_CHANNEL_ACCOUNT_ID`). 그래도 여기서 계속 대조하는 이유는
+    갈라진 적이 있기 때문입니다 — 화면이 적는 주소와 발송이 고르는 계정은 눈으로 보면
+    같아 보이고, 다를 때는 메일이 나간 뒤에 압니다.
+
+    **목록은 한 인박스에 갇히지 않습니다.** 티켓 하나가 인박스 여러 곳에 스레드를 갖는
+    일이 흔한데(폼은 `Inbox`, 메일은 `GTM Marketing`), 인박스로 거르면 「원래 오던 주소」를
+    고를 길이 없어집니다.
     """
     monkeypatch.setattr(
         settings, "HUBSPOT_PREFERRED_EMAIL_CHANNEL_ACCOUNT_ID", "gtm-account"
@@ -509,11 +516,12 @@ async def test_the_picker_default_is_what_the_send_would_actually_use(
             })
         )
 
-    found = await client.list_reply_senders("ticket-1", "buyer@example.com")
+    found = await client.list_sender_accounts()
     senders = found["senders"]
 
     default = next(x for x in senders if x["is_default"])
     assert default["address"] == "perso.ai@estsoft.com"
+    assert found["default_address"] == "perso.ai@estsoft.com"
     # 그리고 실제 발송이 고르는 것과 **같아야** 합니다.
     context = await client.find_default_reply_context("ticket-1", "buyer@example.com")
     assert context.channel_account_id == default["id"]
@@ -714,49 +722,9 @@ async def test_the_machine_address_is_still_used_rather_than_failing(
 
 @respx.mock
 @pytest.mark.asyncio
-async def test_an_undecidable_ticket_says_why_instead_of_going_quiet(
+async def test_a_relay_default_is_still_named_on_screen(
     client: HubSpotClient, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """**고를 것이 없는 것과 못 가져온 것은 다릅니다** (2026-09-03).
-
-    같은 인박스에 스레드가 둘인데 그 고객과 오간 메일이 없으면 어느 쪽에 붙일지 정할 수
-    없어 기본값 결정이 실패합니다(운영 3건: 35003648794 · 35313028142 · 37308868745).
-    예전에는 그 예외가 `list_reply_senders` 전체를 죽여 라우트가 `{senders: []}` 를 돌려줬고,
-    화면은 이유를 안 그려 **고르개가 소리 없이 사라졌습니다.** 그 티켓은 발송도 같은 이유로
-    실패하므로, 운영자가 눌러 보기 전에 알아야 합니다.
-    """
-    monkeypatch.setattr(settings, "HUBSPOT_PREFERRED_EMAIL_CHANNEL_ACCOUNT_ID", "")
-    monkeypatch.setattr(settings, "HUBSPOT_DEFAULT_EMAIL_CHANNEL_ACCOUNT_ID", "team-account")
-    respx.get(f"{BASE_URL}/conversations/v3/conversations/threads").mock(
-        return_value=httpx.Response(200, json={"results": [
-            {"id": "t1", "inboxId": "inbox-1"},
-            {"id": "t2", "inboxId": "inbox-1"},
-        ]})
-    )
-    for thread_id in ("t1", "t2"):
-        respx.get(
-            f"{BASE_URL}/conversations/v3/conversations/threads/{thread_id}/messages"
-        ).mock(return_value=httpx.Response(200, json={"results": [
-            {"type": "MESSAGE", "createdAt": "2026-02-01T00:00:00Z", "channelId": "1003"},
-        ]}))
-    respx.get(f"{BASE_URL}/conversations/v3/conversations/channel-accounts").mock(
-        return_value=httpx.Response(200, json={"results": [
-            {"id": "team-account", "channelId": "1002", "inboxId": "inbox-1",
-             "active": True, "authorized": True, "archived": False,
-             "deliveryIdentifier": {"value": "support@perso.ai"}},
-        ]})
-    )
-
-    found = await client.list_reply_senders("ticket-1", "buyer@example.com")
-
-    # 예외로 죽지 않습니다 — 목록은 비지만 이유가 실려 옵니다.
-    assert found["senders"] == []
-    assert "2 possible threads" in found["reason"]
-
-
-@respx.mock
-@pytest.mark.asyncio
-async def test_a_relay_default_is_still_named_on_screen(client: HubSpotClient) -> None:
     """**고를 수 없는 주소가 기본값일 때도 화면은 그 이름을 적습니다** (2026-09-03).
 
     기계 주소는 고르개에서 빼지만 기본값일 수는 있습니다(운영 실측: 티켓 103건 중 2건).
@@ -764,7 +732,7 @@ async def test_a_relay_default_is_still_named_on_screen(client: HubSpotClient) -
     「자동 — …」이 「이 대화의 주소」라는 두루뭉술한 말로 떨어집니다 — 그러면 **어느 주소로
     나갈지가 화면 어디에도 안 적힙니다.** 목록과 별개로 이름을 돌려줍니다.
     """
-    _thread_with_one_email("t1", "inbox-1", "relay-1")
+    monkeypatch.setattr(settings, "HUBSPOT_PREFERRED_EMAIL_CHANNEL_ACCOUNT_ID", "relay-1")
     respx.get(f"{BASE_URL}/conversations/v3/conversations/channel-accounts").mock(
         return_value=httpx.Response(200, json={"results": [
             {"id": "relay-1", "channelId": "1002", "inboxId": "inbox-1",
@@ -776,7 +744,7 @@ async def test_a_relay_default_is_still_named_on_screen(client: HubSpotClient) -
         ]})
     )
 
-    found = await client.list_reply_senders("ticket-1", "buyer@example.com")
+    found = await client.list_sender_accounts()
 
     assert found["default_address"] == "support@45169260.hubspot-inbox.com"
     assert [s["address"] for s in found["senders"]] == ["support@perso.ai"]
@@ -792,7 +760,6 @@ async def test_hubspot_relay_addresses_are_not_offered(client: HubSpotClient) ->
     발급합니다. 채널 계정 목록에는 뜨지만 고객이 받는 메일의 보낸사람이 저 기계 주소가
     되므로, 사람이 고를 자리에 두면 안 됩니다 — 두면 언젠가 골라집니다.
     """
-    _thread_with_one_email("t1", "inbox-1", "team-account")
     respx.get(f"{BASE_URL}/conversations/v3/conversations/channel-accounts").mock(
         return_value=httpx.Response(200, json={"results": [
             {"id": "team-account", "channelId": "1002", "inboxId": "inbox-1",
@@ -807,7 +774,7 @@ async def test_hubspot_relay_addresses_are_not_offered(client: HubSpotClient) ->
         ]})
     )
 
-    found = await client.list_reply_senders("ticket-1", "buyer@example.com")
+    found = await client.list_sender_accounts()
     senders = found["senders"]
 
     assert [s["address"] for s in senders] == ["support@perso.ai"]
@@ -828,7 +795,6 @@ async def test_the_picker_follows_the_paging_cursor(
     monkeypatch.setattr(
         settings, "HUBSPOT_REPLY_SENDER_ACCOUNT_IDS", "team-account, second-page"
     )
-    _thread_with_one_email("t1", "inbox-1", "team-account")
 
     pages = [
         httpx.Response(200, json={
@@ -852,8 +818,46 @@ async def test_the_picker_follows_the_paging_cursor(
         f"{BASE_URL}/conversations/v3/conversations/channel-accounts"
     ).mock(side_effect=pages)
 
-    found = await client.list_reply_senders("ticket-1", "buyer@example.com")
+    found = await client.list_sender_accounts()
 
     assert route.call_count == 2, "커서가 있으면 다음 페이지를 받아야 합니다"
     assert "after=CURSOR-1" in str(route.calls[1].request.url)
     assert "later@estsoft.com" in {s["address"] for s in found["senders"]}
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_the_picker_asks_hubspot_once_not_once_per_ticket(
+    client: HubSpotClient, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """**발신 주소 목록은 티켓과 무관하고, 답은 캐시합니다** (2026-09-09 운영자 지시).
+
+    예전에는 티켓마다 물었습니다 — 스레드 목록 한 번 + 스레드마다 메시지 한 번(실측 최대
+    7개) + 채널 계정 목록. 티켓 하나를 **열 때마다** 허브스팟 왕복 서넛에서 아홉이었고,
+    그 시간 동안 화면에는 발신 고르개가 아예 없었습니다.
+
+    이 목록이 바뀌는 것은 운영자가 허브스팟 포털에서 인박스를 연결하거나 끊을 때뿐이라,
+    티켓을 열 때마다 물을 값이 아닙니다. **스레드는 아예 안 봅니다** — 그 왕복이 사던
+    것은 「이 티켓에 붙을 스레드가 있는 계정만」인데, 허용 목록이 계정 하나라 그 검사는
+    거의 아무것도 안 거르면서 쓸 수 있는 주소를 숨기는 쪽으로 작동했습니다.
+    """
+    monkeypatch.setattr(
+        settings, "HUBSPOT_PREFERRED_EMAIL_CHANNEL_ACCOUNT_ID", "team-account"
+    )
+    accounts = respx.get(
+        f"{BASE_URL}/conversations/v3/conversations/channel-accounts"
+    ).mock(return_value=httpx.Response(200, json={"results": [
+        {"id": "team-account", "channelId": "1002", "inboxId": "inbox-1",
+         "active": True, "authorized": True, "archived": False,
+         "deliveryIdentifier": {"value": "perso.ai@estsoft.com"}},
+    ]}))
+    threads = respx.get(f"{BASE_URL}/conversations/v3/conversations/threads").mock(
+        return_value=httpx.Response(200, json={"results": []})
+    )
+
+    first = await client.list_sender_accounts()
+    second = await client.list_sender_accounts()
+
+    assert first == second
+    assert accounts.call_count == 1, "두 번째는 캐시에서 나와야 합니다"
+    assert threads.call_count == 0, "스레드는 안 봅니다 — 목록이 티켓과 무관합니다"

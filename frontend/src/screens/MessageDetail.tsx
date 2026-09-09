@@ -137,12 +137,6 @@ export function MessageDetail() {
       (query.state.data as Detail | undefined)?.msg?.status === "drafting" ? 4_000 : false,
   });
 
-  // 허브스팟에 물어야 나오는 값이라 본문과 따로 받습니다. 같이 받으면 답을 읽는 일이
-  // 허브스팟 응답을 기다리게 됩니다 — 패널만 늦게 채워지는 편이 낫습니다.
-  // 고를 수 있는 발신 주소. 허브스팟에 물어야 나오므로 본문과 따로 받습니다 — 같이
-  // 받으면 답을 읽는 일이 이 조회를 기다립니다. 못 가져오면 고르개가 안 뜰 뿐, 발송은
-  // 예전대로 됩니다(스레드가 정합니다).
-  const msgId = data?.msg?.id;
   /** 서명 목록 — **세션에 한 번만** 받습니다 (2026-09-08). 어디서나 같은 값이라
    *  티켓마다 다시 물을 이유가 없고, DB 가 도쿄에 있어서 그 한 번이 곧 왕복 하나입니다.
    *  `staleTime: Infinity` 라 이 콘솔이 열려 있는 동안 다시 안 갑니다 — 서명을 고치면
@@ -153,14 +147,18 @@ export function MessageDetail() {
     staleTime: Infinity,
   });
 
+  /** 발신 주소 목록 — **세션에 한 번만** 받습니다 (2026-09-09 운영자 지시). 서명과 같은
+   *  성격입니다: 어느 티켓에서 열어도 같은 답이고, 티켓과 아무 상관이 없습니다.
+   *
+   *  예전에는 `/api/ui/messages/{id}/senders` 라 티켓마다 허브스팟에 물었습니다 — 스레드
+   *  목록 + 스레드마다 메시지 + 채널 계정 목록. 티켓 하나를 **열 때마다** 허브스팟 왕복
+   *  서넛에서 아홉이었고, 그동안 화면에는 고르개가 아예 없었습니다. */
   const { data: senders } = useQuery({
-    queryKey: ["reply-senders", msgId],
+    queryKey: ["reply-senders"],
     queryFn: () => getJSON<{ senders: { id: string; address: string; is_default: boolean }[];
                              default_address: string;
-                             fallback_address: string;
-                             error: string | null }>(`/api/ui/messages/${msgId}/senders`),
-    enabled: !!msgId,
-    staleTime: 5 * 60_000,
+                             error: string | null }>("/api/ui/senders"),
+    staleTime: Infinity,
   });
 
   const contactId = data?.contact?.id;

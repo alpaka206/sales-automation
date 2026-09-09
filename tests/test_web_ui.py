@@ -822,7 +822,9 @@ def test_a_write_does_not_wait_on_hubspot():
     assert "invalidateQueries({ queryKey: key })" in act, "이 티켓 하나만 다시 읽습니다"
     assert "predicate" not in act, "전부 무효화하면 허브스팟 질의가 딸려 옵니다"
 
-    # SSE 도 같은 이유로 그 질의를 뺍니다 — 이제 워커까지 이벤트를 쏘므로, 안 빼면 열려
-    # 있는 모든 콘솔이 초안 완료·발송 완료 때마다 허브스팟 왕복을 냅니다.
-    api = pathlib.Path("frontend/src/lib/api.ts").read_text(encoding="utf-8")
-    assert '!== "reply-senders"' in api
+    # 그리고 발신 주소 목록은 **티켓별이 아닙니다** (2026-09-09). 예전에는
+    # `/api/ui/messages/{id}/senders` 라 티켓을 열 때마다 허브스팟 왕복 서넛에서
+    # 아홉이었습니다 — 스레드 목록 + 스레드마다 메시지 + 채널 계정 목록. 티켓별로
+    # 되돌아가면 이 화면의 어떤 동작도 다시 그 왕복을 기다립니다.
+    assert '"/api/ui/senders"' in screen
+    assert "${msgId}/senders" not in screen, "발신 주소 목록은 티켓별이 아닙니다"

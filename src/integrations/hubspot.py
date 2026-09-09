@@ -67,6 +67,13 @@ def _is_hubspot_relay(address: str) -> bool:
     return domain.endswith(_RELAY_SUFFIXES)
 
 
+# 고를 수 있는 발신 주소 목록의 캐시. 이 목록이 바뀌는 것은 운영자가 허브스팟 포털에서
+# 인박스를 연결하거나 끊을 때뿐이라, 티켓을 열 때마다 물을 값이 아닙니다.
+# 프로세스 안에만 삽니다 — 워커가 여럿이면 워커마다 한 시간에 한 번입니다.
+_SENDER_ACCOUNTS_TTL = 3600.0
+_SENDER_ACCOUNTS_CACHE: tuple[float, dict] | None = None
+
+
 @dataclass(frozen=True)
 class ConversationReplyContext:
     """The existing HubSpot thread and connected email account used for a reply."""
@@ -863,57 +870,37 @@ class HubSpotClient:
             "정할 수 없습니다"
         )
 
-    async def list_reply_senders(self, ticket_id: str, recipient_email: str) -> dict:
-        """그 티켓에 **고를 수 있는** 발신 주소들. 읽기만 합니다 — 아무것도 안 보냅니다.
+    async def list_sender_accounts(self) -> dict:
+        """고를 수 있는 발신 주소들 — **티켓과 무관합니다.** 읽기만 합니다.
 
-        기본값(아무것도 안 고르면 나갈 주소)을 먼저 정하고, **그 티켓에 실제로 쓸 수 있는**
-        이메일 계정을 전부 돌려줍니다. 화면이 스스로 목록을 만들면 그 목록이 발송이 실제로
-        받아 주는 것과 언젠가 갈라집니다 — 여기서 만든 것만 고를 수 있습니다.
+        예전에는 티켓마다 물었습니다(`list_reply_senders`): 스레드 목록 한 번 + 스레드마다
+        메시지 한 번(실측 최대 7개) + 채널 계정 목록. 티켓 하나를 **열 때마다** 허브스팟
+        왕복 서넛에서 아홉이었고, 그 시간 동안 화면에는 발신 고르개가 아예 없었습니다.
 
-        **기본값은 발송과 같은 순서로 정합니다** (2026-09-03). 예전에는 이 함수가
-        `find_conversation_reply_context` 를 **기본 발신 주소 없이** 불렀습니다. 발송 경로는
-        넣고 부르므로 둘의 답이 갈렸고, 화면은 「자동 — support@perso.ai」라고 적는데 메일은
-        `perso.ai@estsoft.com` 으로 나갔습니다(실측: 티켓 48건 중 41건). 눈에 보이는 것과
-        실제로 나가는 것이 다르면 운영자가 화면을 믿을 수 없습니다.
+        **그 왕복이 사던 것은 「이 티켓에 붙을 스레드가 있는 계정만 남긴다」였습니다.**
+        지금 그 검사는 거의 아무것도 안 거릅니다 — 허용 목록
+        (`HUBSPOT_REPLY_SENDER_ACCOUNT_IDS`)이 계정 하나라 결과가 「그 주소 하나 또는
+        없음」뿐이고, **없다고 나와도 발송은 성공할 수 있습니다**(`cross_inbox_attempt`
+        가 다른 인박스에 한 번 두드립니다 — 폼으로만 들어온 티켓 93건이 그 경우입니다).
+        즉 쓸 수 있는 주소를 숨기는 쪽으로 작동하고 있었습니다.
 
-        ``default_address`` 는 **아무것도 안 골랐을 때 실제로 나갈 주소**입니다. 목록에
-        없을 수 있습니다 — 기계 주소는 고를 수 없지만 기본값일 수는 있어서, 그때도 화면이
-        무엇으로 나가는지 적을 수 있어야 합니다.
+        **울타리는 그대로 서버에 있습니다.** 목록을 만드는 곳이 여기 한 곳이라 화면이
+        스스로 섞지 않고, 살아 있는 이메일 채널·허용 목록·기계 주소 제외가 전부 남습니다.
+        빠진 것은 「이 티켓에서 쓸 수 있나」 하나이고, 그 판단은 어차피 발송이 다시 합니다 —
+        고른 계정을 못 쓰면 조용히 다른 주소로 나가지 않고 실패합니다.
 
-        **목록은 한 인박스에 갇히지 않습니다.** 티켓 하나가 인박스 여러 곳에 스레드를 갖는
-        일이 흔한데(폼은 `Inbox`, 메일은 `GTM Marketing`), 기본값이 정해진 스레드의 인박스만
-        보면 나머지가 통째로 사라집니다. 계정마다 `_thread_for_chosen_sender` 를 그대로
-        돌려 **붙일 스레드가 있는 것만** 남기므로, 목록에 있는 값은 전부 발송이 받습니다.
+        답은 **한 시간 캐시**합니다. 이 목록이 바뀌는 것은 운영자가 허브스팟 포털에서
+        인박스를 연결하거나 끊을 때뿐입니다.
         """
-        candidates, threads, target_threads = await self._reply_routes(
-            ticket_id, recipient_email
-        )
+        global _SENDER_ACCOUNTS_CACHE
+        cached = _SENDER_ACCOUNTS_CACHE
+        if cached is not None and time.monotonic() - cached[0] < _SENDER_ACCOUNTS_TTL:
+            return cached[1]
+
         preferred = settings.HUBSPOT_PREFERRED_EMAIL_CHANNEL_ACCOUNT_ID.strip()
-        # **기본값을 못 정해도 목록은 만듭니다** (2026-09-03). 예전에는 이 한 줄이 실패하면
-        # 함수 전체가 예외로 죽었고, 라우트가 그것을 `{senders: [], error}` 로 삼켰습니다 —
-        # 화면은 그 `error` 를 안 그리므로 **고르개가 이유 없이 사라졌습니다.** 운영 티켓
-        # 3건이 그 상태였습니다(35003648794 · 35313028142 · 37308868745: 같은 인박스에
-        # 스레드가 둘인데 그 고객과 오간 메일이 없어 어느 쪽인지 정할 수 없는 경우).
-        # 기본값이 없다고 고를 수 있는 주소까지 없어질 이유는 없습니다.
-        reason = ""
-        try:
-            context = await self._resolve_reply_context(
-                ticket_id, preferred, candidates, threads, target_threads
-            )
-        except DeliveryPermanentError as exc:
-            logger.warning(
-                "티켓 %s 은 기본 발신 주소를 정할 수 없습니다 — 고를 수 있는 주소만 돌려줍니다: %s",
-                ticket_id, exc,
-            )
-            context = None
-            # **이유를 들고 갑니다.** 목록까지 비면 화면에 아무 말도 안 남는데, 그 티켓은
-            # 발송도 같은 이유로 실패합니다 — 「고를 것이 없다」와 「보낼 수 없다」를 운영자가
-            # 눌러 보기 전에 알아야 합니다.
-            reason = str(exc)
-        accounts = await self._all_channel_accounts()
         # **고르개에 뜰 주소는 운영자가 정합니다**(`HUBSPOT_REPLY_SENDER_ACCOUNT_IDS`).
-        # 비어 있으면 예전처럼 쓸 수 있는 주소가 전부 뜹니다. 기본 발신 주소는 이 울타리와
-        # 무관하게 나갑니다 — 이건 「고를 수 있는 것」이지 「나갈 수 있는 것」이 아닙니다.
+        # 비어 있으면 쓸 수 있는 주소가 전부 뜹니다. 기본 발신 주소는 이 울타리와 무관하게
+        # 나갑니다 — 이건 「고를 수 있는 것」이지 「나갈 수 있는 것」이 아닙니다.
         allowed = {
             item.strip()
             for item in settings.HUBSPOT_REPLY_SENDER_ACCOUNT_IDS.split(",")
@@ -921,76 +908,36 @@ class HubSpotClient:
         }
         out: list[dict] = []
         default_address = ""
-        for account in accounts:
+        for account in await self._all_channel_accounts():
+            account_id = str(account.get("id") or "")
             if str(account.get("channelId") or "") != "1002":
                 continue
             if account.get("archived") or not account.get("active"):
                 continue
             if not account.get("authorized"):
                 continue
-            try:
-                await self._thread_for_chosen_sender(
-                    ticket_id, str(account.get("id") or ""),
-                    candidates, target_threads or threads,
-                    inbox_id=str(account.get("inboxId") or ""),
-                )
-            except DeliveryPermanentError:
-                continue
             address = (account.get("deliveryIdentifier") or {}).get("value") or ""
-            # **허브스팟 내부 전달 주소는 고르개에 안 넣습니다** (2026-09-03 운영자 지시).
-            # `support@45169260.hubspot-inbox.com` · `support@perso.co.kr.hs-inbox.com`
-            # 같은 것들입니다 — 인박스를 연결하면 허브스팟이 자동으로 발급하는 주소라
-            # 채널 계정 목록에는 뜨지만, 고객이 받는 메일의 보낸사람이 저 기계 주소가
-            # 됩니다. 고를 수 있게 두면 언젠가 골라집니다.
-            #
-            # **자동(기본값)까지 막지는 않습니다**: 그 스레드에 실제로 저 주소로 오간
-            # 메일이 있으면 회신도 거기서 나가야 대화가 이어집니다. 여기서 거르는 것은
-            # 「사람이 일부러 고르는 것」뿐입니다.
-            is_default = (
-                context is not None
-                and str(account.get("id") or "") == context.channel_account_id
-            )
+            is_default = bool(preferred) and account_id == preferred
             if is_default:
-                # **기본값의 주소는 거르기 전에 적어 둡니다.** 기계 주소가 기본값인 티켓이
-                # 있는데(실측 103건 중 2건), 목록에서만 빼고 끝내면 화면의 「자동 — …」이
-                # 적을 것을 잃고 「이 대화의 주소」라는 두루뭉술한 말로 떨어집니다 —
-                # 그러면 그 티켓만 **어느 주소로 나갈지 화면에 안 적힙니다.**
+                # **기본값의 주소는 거르기 전에 적어 둡니다.** 기계 주소가 기본값일 수
+                # 있는데, 목록에서만 빼고 끝내면 화면의 「자동 — …」이 적을 것을 잃습니다.
                 default_address = address or (account.get("name") or "")
+            # **허브스팟 내부 전달 주소는 고르개에 안 넣습니다** (2026-09-03 운영자 지시).
+            # 인박스를 연결하면 자동으로 발급되는 기계 주소라, 고를 수 있게 두면 언젠가
+            # 골라지고 고객이 받는 메일의 보낸사람이 그것이 됩니다.
             if _is_hubspot_relay(address):
                 continue
-            # **울타리는 여기입니다 — `default_address` 를 잡은 뒤.** 앞에서 걸러 버리면
-            # 기본 발신 주소가 목록에 없을 때 화면의 「자동 — …」이 적을 것을 잃습니다.
-            # 릴레이가 이미 겪은 그 자리이고, 이유도 같습니다.
-            if allowed and str(account.get("id") or "") not in allowed:
+            if allowed and account_id not in allowed:
                 continue
             out.append({
-                "id": str(account.get("id") or ""),
+                "id": account_id,
                 "address": address or (account.get("name") or ""),
                 "is_default": is_default,
             })
         out.sort(key=lambda item: (not item["is_default"], item["address"]))
-        # **화면의 「자동 — …」이 실제로 시도할 주소를 적어야 합니다.** 발송은 기본 발신
-        # 주소를 다른 인박스에도 한 번 두드려 보고(`cross_inbox_attempt`) 거절당할 때만
-        # 물러섭니다. 그 시도를 화면이 모르면 「자동 — support@perso.ai」라고 적어 놓고
-        # `perso.ai@estsoft.com` 으로 나가는, 방금 고친 그 어긋남이 되돌아옵니다.
-        fallback_address = ""
-        if context is not None:
-            attempt = cross_inbox_attempt(context)
-            if attempt is not None:
-                wanted = attempt.channel_account_id
-                for account in accounts:
-                    if str(account.get("id") or "") != wanted:
-                        continue
-                    address = (account.get("deliveryIdentifier") or {}).get("value") or ""
-                    if address:
-                        fallback_address, default_address = default_address, address
-                    break
-        return {
-            "senders": out,
-            "default_address": default_address,
-            "fallback_address": fallback_address,
-            "reason": reason,
-        }
+        found = {"senders": out, "default_address": default_address}
+        _SENDER_ACCOUNTS_CACHE = (time.monotonic(), found)
+        return found
 
     async def send_conversation_message(
         self,

@@ -63,7 +63,7 @@ export function DraftEditor({
   ticket: { inquiry_language: string | null };
   senders?: {
     senders: { id: string; address: string; is_default: boolean }[];
-    default_address: string; fallback_address: string; error: string | null;
+    default_address: string; error: string | null;
   };
   signatures: { key: string; name: string }[];
   note: string;
@@ -162,9 +162,15 @@ export function DraftEditor({
             — 고르지 않아도 서명이 붙던 자리입니다. 이제 없습니다. */}
         {/* **어느 주소에서 나가나.** 예전에는 고를 수 없었습니다 — 그 스레드에
             이미 있던 계정이 정했고, 화면에는 그게 무엇인지도 안 보였습니다.
-            목록은 서버가 만듭니다(`/senders`): 그 스레드의 인박스에 연결된
-            살아 있는 주소만 들어갑니다. 화면이 스스로 목록을 지으면 고를 수는
-            있는데 발송이 거절하는 값이 생깁니다. */}
+            목록은 서버가 만듭니다(`/api/ui/senders`): 살아 있는 이메일 채널
+            중 운영자가 허락한 것과 연결된 개인 사서함입니다. 화면이 스스로
+            목록을 지으면 고를 수는 있는데 발송이 거절하는 값이 생깁니다.
+
+            **티켓별이 아닙니다** (2026-09-09). 예전에는 티켓마다 물어서 「그
+            티켓에 붙을 스레드가 있는 계정」만 남겼는데, 허용 목록이 계정 하나라
+            그 검사는 거의 아무것도 안 거르면서 — 없다고 나와도 발송은
+            `cross_inbox_attempt` 로 성공합니다 — 티켓을 열 때마다 허브스팟
+            왕복 서넛에서 아홉을 냈습니다. */}
         {/* **고르개가 안 뜨는 이유는 화면에 적습니다** (2026-09-03).
             예전에는 조회가 실패하면 라우트가 `{senders: [], error}` 로 200 을
             돌려주는데 화면이 그 `error` 를 아무 데도 안 그려서, 고르개가 이유
@@ -202,8 +208,6 @@ export function DraftEditor({
                   지운 것은 글자이지 안전장치가 아닙니다. */}
               <option value="">
                 {senders?.default_address || "발신 주소를 확인하지 못했습니다"}
-                {senders?.default_address && senders?.fallback_address
-                  ? ` (거절되면 ${senders.fallback_address})` : ""}
               </option>
               {senders?.senders
                 ?.filter((x) => x.address !== senders?.default_address)

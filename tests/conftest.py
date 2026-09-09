@@ -140,6 +140,21 @@ def _allow_send_in_tests(monkeypatch):
     monkeypatch.setattr(safe_mode, "EMAIL_SENDING_ENABLED", True)
 
 
+@pytest.fixture(autouse=True)
+def _forget_the_sender_list():
+    """발신 주소 목록의 프로세스 캐시를 회차마다 비웁니다.
+
+    한 시간 캐시라 실제로는 거의 안 도는 값인데, 테스트에서는 그게 곧 **앞 테스트의 답이
+    다음 테스트로 새는 것**입니다 — 그러면 계정 목록을 다르게 깔아 놓은 테스트가 통과하고,
+    무엇이 왜 통과했는지 아무도 모릅니다.
+    """
+    from src.integrations import hubspot
+
+    hubspot._SENDER_ACCOUNTS_CACHE = None
+    yield
+    hubspot._SENDER_ACCOUNTS_CACHE = None
+
+
 @pytest.fixture()
 def db_engine():
     """In-memory SQLite engine with all tables created."""

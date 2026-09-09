@@ -483,63 +483,47 @@ def ui_ticket_history_progress():
     }
 
 
-@router.get("/api/ui/messages/{message_id}/senders")
-async def ui_reply_senders(message_id: int):
-    """그 회신을 **어느 주소에서** 보낼 수 있나 — 검토 화면의 발신 고르개가 읽습니다.
+@router.get("/api/ui/senders")
+async def ui_reply_senders():
+    """회신을 **어느 주소에서** 보낼 수 있나 — 검토 화면의 발신 고르개가 읽습니다.
 
-    본문 payload 와 **따로** 가져옵니다. 허브스팟에 물어야 나오는 값이라 같이 담으면
-    답을 읽는 일이 이 조회를 기다리게 됩니다(「플랜 정보」 카드와 같은 이유).
+    **티켓과 무관합니다** (2026-09-09 운영자 지시: 「한 번만 가져오면 다른 곳에서 할 필요
+    없잖아」). 예전에는 `/api/ui/messages/{id}/senders` 라 티켓을 열 때마다 허브스팟에
+    물었습니다 — 스레드 목록 + 스레드마다 메시지 + 채널 계정 목록으로 왕복 서넛에서
+    아홉이었고, 그 시간 동안 화면에는 고르개가 아예 없었습니다. 답은 어느 티켓에서 열어도
+    같습니다: 설정이 정한 기본 주소, 운영자가 허락한 계정, 연결된 개인 사서함.
 
-    **읽기만 합니다.** `list_reply_senders` 는 GET 만 하고 쓰기 관문을 안 지납니다 —
-    그래서 이 라우트를 여는 것만으로 메일이 나갈 길은 없습니다.
+    **읽기만 합니다** — 이 라우트로는 메일이 나갈 길이 없습니다.
 
     못 가져와도 200 에 빈 목록입니다. 고르개가 안 뜰 뿐 발송은 예전대로 되고(스레드가
     정합니다), 여기서 404 를 내면 화면이 오류를 그리는데 「고를 것이 없다」는 오류가
     아닙니다. 이유는 `error` 에 실어 화면이 적을 수 있게 합니다.
     """
-    from ...db.models import Message
-    from ...db.session import SessionLocal
+    from ...integrations.gmail import list_accounts as mailbox_accounts
     from ...integrations.hubspot import HubSpotClient
 
-    def _target() -> tuple[str, str, str]:
-        with SessionLocal() as session:
-            msg = session.get(Message, message_id)
-            if msg is None:
-                return "", "", ""
-            conversation = session.get(Conversation, msg.conversation_id)
-            ticket = (conversation.hubspot_ticket_id if conversation else "") or ""
-            return ticket, (msg.to_address or ""), (msg.channel_account_id or "")
-
-    ticket_id, recipient, chosen = await asyncio.to_thread(_target)
-    empty = {"senders": [], "default_address": "", "fallback_address": "",
-             "chosen": chosen, "error": None}
-    if not ticket_id or not recipient:
-        return empty
+    error: str | None = None
     try:
-        found = await HubSpotClient().list_reply_senders(ticket_id, recipient)
+        found = await HubSpotClient().list_sender_accounts()
     except Exception as exc:  # 조회 실패가 검토 화면을 막으면 안 됩니다
-        return {**empty, "error": f"{type(exc).__name__}: {exc}"}
-    # `reason` 은 「기본 발신 주소를 못 정했다」입니다. 목록까지 비었으면 그 티켓은 발송도
-    # 같은 이유로 실패하므로 화면이 적을 수 있게 `error` 로 올립니다 — 목록이 있으면 고를 수
-    # 있으니 굳이 경고하지 않습니다.
-    reason = found.pop("reason", "")
+        found = {"senders": [], "default_address": ""}
+        error = f"{type(exc).__name__}: {exc}"
     # **연결된 개인 사서함도 고를 수 있습니다** (2026-09-08 운영자 지시). 고르면 그
     # 사서함에서 나가고, 그 티켓에 개인함으로 온 원본이 있으면 **그 메일의 답장으로**
     # 갑니다 — 없으면 새 메일입니다.
     #
     # **목록은 서버가 만듭니다.** 화면이 두 종류를 스스로 섞으면 발송이 거절하는 값이
     # 생깁니다 — 허브스팟 계정 목록을 서버가 만드는 이유와 같습니다.
-    from ...integrations.gmail import list_accounts as mailbox_accounts
-
-    found["senders"] = list(found["senders"]) + [
+    mailboxes = await asyncio.to_thread(mailbox_accounts)
+    senders = list(found["senders"]) + [
         {"id": f"gmail:{row.email}", "address": f"{row.email} (개인 메일함)",
          "is_default": False}
-        for row in mailbox_accounts()
+        for row in mailboxes
         if row.enabled and not row.last_error
     ]
-    if not found["senders"] and reason:
-        return {**found, "chosen": chosen, "error": reason}
-    return {**found, "chosen": chosen, "error": None}
+    # 고를 것이 있으면 굳이 경고하지 않습니다 — 개인 사서함만으로도 보낼 수 있습니다.
+    return {"senders": senders, "default_address": found["default_address"],
+            "error": None if senders else error}
 
 
 @router.get("/api/ui/signatures")
