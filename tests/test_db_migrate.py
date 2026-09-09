@@ -515,3 +515,127 @@ class Test0103ContactMovesToTheContract:
         # 같은 고객의 계약이 둘이면 둘 다 그 값에서 시작하고, 그 뒤로는 따로 움직입니다.
         assert rows == [(1, "박지훈", "jh@a.kr"), (2, "박지훈", "jh@a.kr"), (3, None, None)]
         assert "contact_name" not in {c["name"] for c in inspect(mem_engine).get_columns("clients")}
+
+
+# ---------- Supabase 의 공개 API 를 잠그는 자물쇠 (2026-09-09) ----------
+
+
+class _FakeConn:
+    """`SELECT`/`ALTER` 를 받아 적기만 하는 접속."""
+
+    def __init__(self, rows, executed, counts=None):
+        self._rows, self._executed = rows, executed
+        # 카나리아가 세는 값. 기본은 「켜도 그대로 읽힌다」입니다.
+        self._counts = list(counts if counts is not None else [3, 3])
+
+    def scalar(self, statement):
+        self._executed.append(str(statement))
+        return self._counts.pop(0) if self._counts else 0
+
+    def execute(self, statement, *_args):
+        sql = str(statement)
+        self._executed.append(sql)
+        return list(self._rows) if "pg_class" in sql else None
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_exc):
+        return False
+
+
+class _FakeEngine:
+    def __init__(self, name, rows=(), counts=None):
+        self.dialect = type("D", (), {"name": name})()
+        self.rows, self.executed = rows, []
+        self._counts = counts
+
+    def connect(self):
+        return _FakeConn(self.rows, self.executed, self._counts)
+
+    def begin(self):
+        return _FakeConn(self.rows, self.executed, self._counts)
+
+
+def test_sqlite_is_left_alone():
+    """로컬은 Supabase 가 아닙니다 — 공개 API 도 `anon` 역할도 없습니다."""
+    from src.db.rls import enable_rls_on_public_tables
+
+    engine = _FakeEngine("sqlite")
+    assert enable_rls_on_public_tables(engine) == []
+    assert engine.executed == []
+
+
+def test_every_public_table_we_own_gets_locked():
+    """Supabase 는 `public` 스키마를 **REST API 로 자동 공개**합니다. 우리가 그 API 를
+    안 쓰는 것과 그것이 안 열려 있는 것은 다른 이야기입니다 — `anon` 역할은 RLS 가 없는
+    표를 전부 읽고 쓰고 지울 수 있고, 그 표에 고객 메일 본문과 계약 금액이 있습니다."""
+    from src.db.rls import enable_rls_on_public_tables
+
+    engine = _FakeEngine("postgresql", rows=[("messages", True), ("contacts", True)])
+
+    assert enable_rls_on_public_tables(engine) == ["messages", "contacts"]
+    alters = [sql for sql in engine.executed if "ALTER TABLE" in sql]
+    # 카나리아(`_migrations`)를 먼저 켜 보고, 계속 읽히니 나머지를 켭니다.
+    assert alters == [
+        'ALTER TABLE public."_migrations" ENABLE ROW LEVEL SECURITY',
+        'ALTER TABLE public."messages" ENABLE ROW LEVEL SECURITY',
+        'ALTER TABLE public."contacts" ENABLE ROW LEVEL SECURITY',
+    ]
+
+
+def test_a_table_this_connection_does_not_own_is_never_touched():
+    """**여기가 이 파일에서 유일하게 위험한 줄입니다.**
+
+    RLS 를 우회하는 것은 슈퍼유저·`BYPASSRLS`·**표의 소유자**뿐입니다. 소유자가 아닌
+    역할로 붙는 배포에서 RLS 를 켜면 그 순간부터 **모든 조회가 0행**입니다 — 에러도 없이
+    콘솔이 통째로 빈 화면이 되고, 되돌리려면 DB 에 직접 붙어야 합니다. 그래서 표마다
+    `pg_has_role(...)` 를 묻고, 거짓인 표는 이름만 경고로 남기고 지나갑니다.
+    """
+    from src.db.rls import enable_rls_on_public_tables
+
+    engine = _FakeEngine("postgresql", rows=[("ours", True), ("someone_elses", False)])
+
+    assert enable_rls_on_public_tables(engine) == ["ours"]
+    assert not any("someone_elses" in sql for sql in engine.executed if "ALTER" in sql)
+
+
+def test_the_lock_runs_on_every_deploy_not_once():
+    """이관 파일에 두면 **한 번만** 돕니다. 내일 표가 하나 더 생기면 그 표만 열린 채로
+    서고, 그건 화면 어디에도 안 보입니다 — Supabase 가 메일을 보낼 뿐입니다."""
+    import pathlib
+
+    source = pathlib.Path("src/db/migrate.py").read_text(encoding="utf-8")
+    assert "enable_rls_on_public_tables(engine)" in source
+    moved = [
+        p.name
+        for p in pathlib.Path("src/db/migrations").glob("*.py")
+        if "enable_rls_on_public_tables" in p.read_text(encoding="utf-8")
+    ]
+    assert not moved, f"이관 파일로 옮기면 새 표가 안 잠깁니다: {moved}"
+
+
+def test_it_refuses_to_lock_us_out_of_our_own_database():
+    """**켜기 전에 표 하나로 확인합니다** (2026-09-09).
+
+    소유자 우회는 Postgres 의 확정된 동작이고 위 `pg_has_role` 검사도 그것을 묻는다.
+    그래도 확인을 한 번 더 하는 이유는 **틀렸을 때의 대가**다: 콘솔이 에러 없이 통째로
+    빈 화면이 되고, 되돌리려면 Postgres 에 직접 붙어야 하는데 **사무실 망이 그 포트를
+    막고 있다.** 되돌릴 수 없는 자리에서는 확인이 싸다.
+
+    카나리아는 `_migrations` 다 — 이 함수가 이관 직후에 도므로 그 표에는 반드시 행이
+    있고, 켠 뒤에 0행이면 그건 빈 표가 아니라 「우리가 우회를 못 한다」는 뜻이다.
+    """
+    from src.db.rls import enable_rls_on_public_tables
+
+    # 카나리아를 켰더니 3행 → 0행. 우회를 못 하고 있다.
+    engine = _FakeEngine("postgresql", rows=[("messages", True)], counts=[3, 0])
+
+    assert enable_rls_on_public_tables(engine) == []
+    alters = [sql for sql in engine.executed if "ALTER TABLE" in sql]
+    # 카나리아를 켰다가 **그 자리에서 다시 껐고**, 다른 표는 건드리지 않았다.
+    assert alters == [
+        'ALTER TABLE public."_migrations" ENABLE ROW LEVEL SECURITY',
+        'ALTER TABLE public."_migrations" DISABLE ROW LEVEL SECURITY',
+    ]
+    assert not any("messages" in sql for sql in alters)

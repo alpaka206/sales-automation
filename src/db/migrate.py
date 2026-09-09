@@ -93,6 +93,13 @@ def run_migrations() -> list[str]:
             applied_now.append(name)
             logger.info("Migration %s applied.", name)
 
+        # **`public` 을 잠그는 것은 이관이 아니라 여기입니다.** 이관은 한 번만 돌아서,
+        # 내일 표가 하나 더 생기면 그 표만 Supabase 의 공개 REST API 에 열린 채로 섭니다 —
+        # 그리고 그건 화면 어디에도 안 보입니다. 자세한 것은 `src/db/rls.py`.
+        from .rls import enable_rls_on_public_tables
+
+        enable_rls_on_public_tables(engine)
+
         return applied_now
 
 
