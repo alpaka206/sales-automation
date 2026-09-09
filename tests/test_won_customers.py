@@ -3001,39 +3001,43 @@ def test_the_two_mrr_figures_use_the_same_divisor():
     assert round(float(ratio), 6) == 1.1
 
 
-def test_the_month_splits_into_paid_and_unpaid(factory):
-    """**짚은 달의 결제 완료 · 미결제** (2026-09-09 운영자 지시: 「stripe 로 결제된 거
-    얼마 결제 안 된 거 얼마」).
+def test_the_month_splits_by_stripe(factory):
+    """**Stripe 로 받은 것과 그 외** (2026-09-09 운영자 지시: 「stripe 유무로 구분 —
+    결제 안 된 거나 stripe 로 결제 안 된 거」).
 
     월 매출은 **날짜가 잡힌 회차**를 그 달에 통째로 얹습니다 — 아직 입금 전이어도 셉니다.
-    그래서 그 달 숫자 안에 「받은 돈」과 「받을 돈」이 섞여 있고, 카드는 짚었을 때 그 둘을
-    갈라 적습니다.
+    그래서 그 달 숫자 안에 「Stripe 로 받은 돈」과 「아직 못 받았거나 다른 수단으로 받은
+    돈」이 섞여 있고, 카드는 짚었을 때 그 둘을 갈라 적습니다.
 
-    **같은 함수를 지나야 합니다.** 나눈 값과 총액이 다른 셈법을 쓰면 둘을 더한 것이 총액과
-    안 맞고, 그 어긋남은 화면에서 「결제 완료 + 미결제 ≠ 그 달 매출」로 나타납니다.
+    조건이 **둘**입니다: 계약의 결제 수단이 Stripe 이고, 그 회차가 입금까지 끝났을 것.
+    수단은 계약에 달려 있어서(회차별 칸이 없습니다) Stripe 계약이 아니면 그 계약의 몫은
+    전부 「그 외」로 갑니다.
     """
     from src.api.routes.ui_api import _cash_cells
 
-    contract = SimpleNamespace(
-        currency="KRW", fx_rate=Decimal(1300),
-        payments=[
-            SimpleNamespace(paid_on="2026-09-10", amount=Decimal(3_000_000), done=True, fx_rate=None),
-            SimpleNamespace(paid_on="2026-09-20", amount=Decimal(2_000_000), done=False, fx_rate=None),
-            SimpleNamespace(paid_on="2026-08-05", amount=Decimal(1_000_000), done=True, fx_rate=None),
-        ],
-    )
-    months = ["2026-08", "2026-09"]
+    def contract(method, payments):
+        return SimpleNamespace(currency="KRW", fx_rate=Decimal(1300),
+                               payment_method=method, payments=payments)
+
+    months = ["2026-09"]
     rate = Decimal(1300)
 
-    every = _cash_cells(contract, months, rate)
-    paid = _cash_cells(contract, months, rate, settled=True)
+    stripe = contract("Stripe", [
+        SimpleNamespace(paid_on="2026-09-10", amount=Decimal(3_000_000), done=True, fx_rate=None),
+        # 같은 Stripe 계약이어도 **아직 안 들어온 회차**는 그 외입니다.
+        SimpleNamespace(paid_on="2026-09-20", amount=Decimal(2_000_000), done=False, fx_rate=None),
+    ])
+    transfer = contract("계좌이체", [
+        # 입금은 끝났지만 Stripe 가 아닙니다 — 그 외입니다.
+        SimpleNamespace(paid_on="2026-09-15", amount=Decimal(4_000_000), done=True, fx_rate=None),
+    ])
 
-    # 9월 총액 500만 = 결제 완료 300만 + 미결제 200만.
-    assert every["2026-09"]["KRW"] == Decimal(5_000_000)
-    assert paid["2026-09"]["KRW"] == Decimal(3_000_000)
-    assert every["2026-09"]["KRW"] - paid["2026-09"]["KRW"] == Decimal(2_000_000)
-    # 8월은 전부 입금됐습니다 — 미결제 0.
-    assert every["2026-08"]["KRW"] == paid["2026-08"]["KRW"] == Decimal(1_000_000)
+    assert _cash_cells(stripe, months, rate)["2026-09"]["KRW"] == Decimal(5_000_000)
+    assert _cash_cells(stripe, months, rate, stripe_only=True)["2026-09"]["KRW"] == Decimal(3_000_000)
+
+    assert _cash_cells(transfer, months, rate)["2026-09"]["KRW"] == Decimal(4_000_000)
+    # 계좌이체 계약은 입금이 끝났어도 Stripe 몫이 0 입니다.
+    assert _cash_cells(transfer, months, rate, stripe_only=True) == {}
 
 
 def test_the_split_only_shows_while_a_month_is_pointed_at():
@@ -3049,9 +3053,10 @@ def test_the_split_only_shows_while_a_month_is_pointed_at():
     source = pathlib.Path("frontend/src/screens/won/WonCustomers.tsx").read_text(encoding="utf-8")
 
     # 짚은 달이 있을 때만 그립니다.
-    assert "{paidSeries && look && (() => {" in source
-    # 미결제는 **빼서** 냅니다 — 각각 세면 반올림이 갈려 합이 큰 숫자와 안 맞습니다.
-    assert "const unpaid = at(look) - paid;" in source
+    assert "{stripeSeries && look && (() => {" in source
+    # 「미결제·타 수단」은 **빼서** 냅니다 — 각각 세면 반올림이 갈려 합이 큰 숫자와
+    # 안 맞습니다.
+    assert "const rest = at(look) - stripe;" in source
     # 월 매출 카드에만 넘어갑니다.
-    assert source.count("paidSeries={data.cash_paid_months") == 1
-    assert "paidSeries={data.mrr" not in source
+    assert source.count("stripeSeries={data.cash_stripe_months") == 1
+    assert "stripeSeries={data.mrr" not in source
