@@ -96,19 +96,24 @@ def _known_contact(session, addresses: list[str]) -> Contact | None:
     return None
 
 
-def _newest_ticket(session, contact_id: int) -> Conversation | None:
-    """후보가 여럿이면 **가장 최근 티켓** (2026-09-08 운영자 지시).
+def _newest_conversation(session, contact_id: int) -> Conversation | None:
+    """이 고객의 **가장 최근 기록** — 그 메일이 붙을 자리 (2026-09-09 운영자 지시).
 
-    고르게 하지 않는 이유: 고르개를 띄우면 운영자가 매번 판단해야 하고, 그 판단의 답은
-    거의 언제나 「지금 진행 중인 그 건」입니다. 틀렸으면 안 누르면 됩니다 — **누르기
-    전에는 아무것도 안 붙습니다.**
+    「티켓, 수주 등 아무거나 최신으로 기록을 추가하도록」이 그 지시입니다. 그래서 단계도
+    안 보고 **허브스팟 티켓 번호가 있는지도 안 봅니다.**
+
+    **번호를 요구하던 것이 실제 사고였습니다** (2026-09-09). 예전에는
+    `hubspot_ticket_id IS NOT NULL` 이 붙어 있어서, 워크북에서만 사는 문의나 번호가 아직
+    안 달린 대화밖에 없는 고객은 후보가 **0개**가 됐습니다. 그러면 개인함으로 온 메일이
+    티켓에 안 붙고 「티켓 외」로 떨어졌고, 화면에서는 그것이 「무관한 연락」처럼 보였습니다.
+    붙을 자리가 있는데 못 붙은 것이라 그건 정보가 아니라 손실입니다.
+
+    후보가 여럿이면 가장 최근 것입니다. 고르개를 안 띄우는 이유: 답이 거의 언제나
+    「지금 진행 중인 그 건」이고, 매번 묻는 것은 그 판단을 사람에게 떠넘기는 것입니다.
     """
     return session.scalar(
         select(Conversation)
-        .where(
-            Conversation.contact_id == contact_id,
-            Conversation.hubspot_ticket_id.is_not(None),
-        )
+        .where(Conversation.contact_id == contact_id)
         .order_by(Conversation.created_at.desc(), Conversation.id.desc())
         .limit(1)
     )
@@ -230,10 +235,18 @@ def _sync_one(email: str) -> int:
                     continue
                 if _hubspot_already_has_it(session, contact.id, when, direction):
                     continue
+                # **붙일 자리가 있으면 그 자리에 넣습니다** (2026-09-09 운영자 지시:
+                # 「최신 티켓이 있으면 무조건 거기다가 넣도록」). 예전에는 언제나 비워
+                # 두고 화면에서 사람이 누르기를 기다렸는데, 그 사이 그 메일은 「티켓 외」에
+                # 서서 무관한 연락처럼 보였습니다 — 붙을 자리를 아는데도 그랬습니다.
+                #
+                # **아직 아무 기록도 없는 고객은 그대로 비어 있습니다.** 그 경우는 나중에
+                # 티켓이 생기면 「연결할까요?」가 물어봅니다(`pending_links`) — 메일이
+                # 먼저 오고 티켓이 나중에 생기는 순서가 실제로 있습니다.
+                conversation = _newest_conversation(session, contact.id)
                 session.add(CustomerInteraction(
                     contact_id=contact.id,
-                    # **티켓은 아직 안 붙입니다** — 사람이 누르면 이 칸이 찹니다.
-                    conversation_id=None,
+                    conversation_id=conversation.id if conversation else None,
                     channel="이메일",
                     direction=direction,
                     handler=(sender[:120] or None),
@@ -291,7 +304,7 @@ def pending_links(limit: int = 50) -> list[dict]:
         for row in rows:
             if row.external_id in decided:
                 continue
-            ticket = _newest_ticket(session, row.contact_id)
+            ticket = _newest_conversation(session, row.contact_id)
             if ticket is None:
                 continue
             contact = session.get(Contact, row.contact_id)

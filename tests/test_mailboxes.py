@@ -12,13 +12,13 @@ from datetime import timezone
 import httpx
 import pytest
 import respx
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from src.common.config import settings
 from src.db.base import Base
-from src.db.models import MailboxAccount
+from src.db.models import Conversation, MailboxAccount
 from src.integrations import gmail
 
 
@@ -364,14 +364,45 @@ def test_only_a_known_contact_is_kept(sync_db):
         assert found is not None and found.id == contact_id
 
 
-def test_the_newest_ticket_is_the_one_proposed(sync_db):
-    """후보가 여럿이면 **가장 최근 티켓** (운영자 지시). 고르개를 안 띄우는 이유: 답은
-    거의 언제나 「지금 진행 중인 그 건」이고, 틀렸으면 안 누르면 됩니다."""
-    from src.agents.mailbox_sync import _newest_ticket
+def test_the_newest_record_is_the_one_it_lands_on(sync_db):
+    """후보가 여럿이면 **가장 최근 것** (운영자 지시). 답이 거의 언제나 「지금 진행 중인
+    그 건」이라 고르개를 안 띄웁니다."""
+    from src.agents.mailbox_sync import _newest_conversation
 
     contact_id = _seed(sync_db, with_ticket=True)
     with sync_db() as session:
-        assert _newest_ticket(session, contact_id).hubspot_ticket_id == "T-2"
+        assert _newest_conversation(session, contact_id).hubspot_ticket_id == "T-2"
+
+
+def test_a_conversation_without_a_hubspot_number_still_counts(sync_db):
+    """**허브스팟 번호를 요구하던 것이 사고였습니다** (2026-09-09 운영자 보고: 「이메일
+    들어는 왔는데 티켓에 연동된 게 아니라 무관한 연락으로 들어갔어」).
+
+    예전 조건에는 `hubspot_ticket_id IS NOT NULL` 이 붙어 있었습니다. 워크북에서만 사는
+    문의나 번호가 아직 안 달린 대화밖에 없는 고객은 후보가 **0개**가 되어, 개인함으로 온
+    메일이 「티켓 외」로 떨어졌습니다 — 붙을 자리를 아는데도 그랬으니 그건 정보가 아니라
+    손실입니다. 「티켓, 수주 등 아무거나 최신으로」가 그 지시입니다.
+    """
+    from datetime import datetime
+
+    from src.db.models import Contact, Conversation
+    from src.agents.mailbox_sync import _newest_conversation
+
+    with sync_db() as session:
+        contact = Contact(normalized_email="sheet@acme.com", email="sheet@acme.com",
+                          full_name="Sheet Only")
+        session.add(contact)
+        session.flush()
+        session.add(Conversation(contact_id=contact.id, stage="negotiation",
+                                 hubspot_ticket_id=None, inquiry_subject="워크북 문의",
+                                 created_at=datetime(2026, 5, 1)))
+        session.commit()
+        contact_id = contact.id
+
+    with sync_db() as session:
+        found = _newest_conversation(session, contact_id)
+        assert found is not None, "번호가 없다고 붙을 자리가 없는 것은 아닙니다"
+        assert found.inquiry_subject == "워크북 문의"
 
 
 def test_a_mail_hubspot_already_has_is_skipped(sync_db):
@@ -507,3 +538,78 @@ def test_the_window_is_since_we_last_looked_not_since_consent(sync_db, monkeypat
     mailbox_sync._sync_one("untae@estsoft.com")
     expected = (polled - timedelta(minutes=5)).replace(tzinfo=timezone.utc)
     assert asked[-1] == f"after:{int(expected.timestamp())}", "겹침을 두고 그때부터"
+
+
+def test_a_collected_mail_lands_on_the_newest_record(sync_db, monkeypatch):
+    """**붙일 자리가 있으면 수집하면서 바로 붙입니다** (2026-09-09 운영자 지시:
+    「최신 티켓이 있으면 무조건 거기다가 넣도록」).
+
+    예전에는 언제나 `conversation_id=None` 으로 넣고 화면에서 사람이 누르기를 기다렸는데,
+    그 사이 그 메일은 「티켓 외」에 서서 **무관한 연락처럼** 보였습니다 — 붙을 자리를
+    아는데도 그랬습니다.
+
+    아직 아무 기록도 없는 고객은 그대로 비어 있고, 나중에 티켓이 생기면
+    `pending_links` 가 물어봅니다. 그 순서도 실제로 있습니다.
+    """
+    from datetime import datetime
+
+    from src.agents import mailbox_sync
+    from src.db.models import CustomerInteraction, MailboxAccount
+
+    contact_id = _seed(sync_db, with_ticket=True)   # T-1(2026-01) · T-2(2026-09)
+    with sync_db() as session:
+        session.add(MailboxAccount(
+            email="untae@estsoft.com",
+            encrypted_payload=gmail._encrypt({"refresh_token": "r"}),
+            collect_from=datetime(2026, 9, 1)))
+        session.commit()
+
+    class _Response:
+        is_error = False
+        status_code = 200
+
+        def __init__(self, payload):
+            self._payload = payload
+
+        def json(self):
+            return self._payload
+
+        def raise_for_status(self):
+            return None
+
+    mail = {
+        "id": "m1",
+        "internalDate": "1789000000000",
+        "snippet": "견적 문의드립니다",
+        "payload": {"headers": [
+            {"name": "From", "value": "buyer@acme.com"},
+            {"name": "To", "value": "untae@estsoft.com"},
+            {"name": "Subject", "value": "재문의"},
+            {"name": "Date", "value": "Tue, 9 Sep 2026 10:00:00 +0900"},
+        ]},
+    }
+
+    class _Client:
+        def __enter__(self): return self
+        def __exit__(self, *_): return False
+        def get(self, url, params=None):
+            if url.endswith("/messages"):
+                return _Response({"messages": [{"id": "m1"}]})
+            return _Response(mail)
+
+    monkeypatch.setattr(mailbox_sync, "access_token", lambda email: "t")
+    monkeypatch.setattr(mailbox_sync.httpx, "Client", lambda **_k: _Client())
+
+    assert mailbox_sync.sync_mailboxes_once() == {"added": 1}
+
+    with sync_db() as session:
+        row = session.scalar(
+            select(CustomerInteraction).where(CustomerInteraction.external_id == "gmail:m1")
+        )
+        assert row is not None and row.contact_id == contact_id
+        assert row.conversation_id is not None, "붙을 자리를 아는데 「티켓 외」로 두면 안 됩니다"
+        landed = session.get(Conversation, row.conversation_id)
+        assert landed.hubspot_ticket_id == "T-2", "가장 최근 기록에 붙습니다"
+
+    # 이미 붙었으니 「연결할까요?」에는 안 뜹니다 — 물어볼 것이 없습니다.
+    assert mailbox_sync.pending_links() == []
