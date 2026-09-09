@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
 import { getJSON, postForm } from "../lib/api";
@@ -8,6 +8,7 @@ import { kst } from "../lib/format";
 import { InteractionForm, InteractionItem, groupByTicket, type Interaction } from "../ui/InteractionForm";
 import { LoadingBlock } from "../ui/Loading";
 import { Modal } from "../ui/Modal";
+import { ConfirmModal } from "../ui/ConfirmModal";
 import { PlanCard } from "../ui/PlanCard";
 import { NewTicketForm } from "../ui/NewTicketForm";
 
@@ -85,6 +86,34 @@ export function CustomerDetail() {
   // 고치는 중인 기록. **같은 모달, 같은 폼**입니다 — 적을 때와 고칠 때가 묻는 칸이 같아서,
   // 갈라 두면 칸을 하나 더할 때 한쪽만 늘어납니다.
   const [editing, setEditing] = useState<Interaction | null>(null);
+  const [confirm, setConfirm] = useState<
+    { description: ReactNode; run: () => Promise<void> } | null
+  >(null);
+
+  /** 기록 한 줄 지우기 — **확인 창을 반드시 지납니다** (2026-09-09 운영자 지시).
+   *  티켓 상세와 **같은 라우트·같은 문구**입니다: 같은 일을 두 화면이 다르게 물으면
+   *  어느 쪽이 무엇을 지우는지 화면마다 달라집니다. */
+  function askDeleteInteraction(item: Interaction) {
+    if (!item.id) return;
+    const fromMailbox = (item.context || "").includes("개인 메일함");
+    setConfirm({
+      description: (
+        <>
+          이 기록을 지웁니다: <strong>{item.subject || item.summary || "(내용 없음)"}</strong>
+          <div className="t-sm t-subtle" style={{ marginTop: 6 }}>
+            {fromMailbox
+              ? "개인 메일함에서 들어온 줄입니다 — 지우면 다시 가져오지 않습니다."
+              : "리드 히스토리에서 사라집니다. 허브스팟 원본은 그대로입니다."}
+          </div>
+        </>
+      ),
+      run: async () => {
+        await postForm(`/customers/${id}/interactions/${item.id}/delete`,
+                       { redirect_to: `/customers/${id}` });
+        refresh();
+      },
+    });
+  }
   // 이 고객의 티켓을 손으로 만듭니다 (2026-09-08 운영자 지시). 보드 New 열의 `+` 와
   // **같은 폼**이고, 다른 점은 누구의 티켓인지가 이미 정해져 있다는 것뿐입니다.
   const [creatingTicket, setCreatingTicket] = useState(false);
@@ -306,7 +335,8 @@ export function CustomerDetail() {
                     <div className="history-list">
                       {group.items.map((item, index) => (
                         <InteractionItem key={item.id ?? `${group.key}-${index}`} item={item}
-                                         hideSubject onEdit={setEditing} />
+                                         hideSubject onEdit={setEditing}
+                                         onDelete={askDeleteInteraction} />
                       ))}
                     </div>
                   </div>
@@ -485,6 +515,14 @@ export function CustomerDetail() {
             />
           </div>
         </Modal>
+      )}
+
+      {confirm && (
+        <ConfirmModal
+          description={confirm.description}
+          onConfirm={confirm.run}
+          onClose={() => setConfirm(null)}
+        />
       )}
     </>
   );

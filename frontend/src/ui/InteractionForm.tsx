@@ -386,9 +386,13 @@ export function InteractionItem({
             <Icon name="edit" size={12} />
           </button>
         )}
+        {/* **휴지통은 줄 오른쪽 끝입니다** (2026-09-09 운영자 지시). 앞쪽 칩·시각
+            사이에 두면 줄마다 위치가 달라서(칩 개수가 제각각입니다) 눈으로 찾아야 하고,
+            그 옆의 것을 누를 뻔합니다 — 되돌릴 수 없는 버튼에 어울리는 자리가 아닙니다.
+            `margin-left: auto` 라 앞이 몇 칸이든 언제나 같은 자리에 섭니다. */}
         {onDelete && item.id && (
           <button type="button" className="btn btn--subtle btn--sm" title="기록 삭제"
-                  aria-label="기록 삭제"
+                  aria-label="기록 삭제" style={{ marginLeft: "auto" }}
                   onClick={(event) => { event.preventDefault(); event.stopPropagation();
                                         onDelete(item); }}>
             <Icon name="trash" size={12} />
