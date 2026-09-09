@@ -218,6 +218,13 @@ export function MessageDetail() {
    *  상태를 같이 보는 이유: 초안이 다 써지면 `drafting` → `pending_approval` 로 바뀝니다.
    *  운영자가 고치는 동안에는 상태가 안 바뀌므로 타이핑 중에 덮일 일이 없습니다. */
   const [loadedKey, setLoadedKey] = useState<string | null>(null);
+  /** 후속 초안을 펼쳤나. **훅이라 이른 return 위에 있어야 합니다** — 이 줄이 아래
+   *  `if (isPending || !data) return` 뒤에 있어서 티켓 화면이 통째로 죽었습니다
+   *  (2026-09-09, React #310 "Rendered more hooks than during the previous render").
+   *  로딩 중 렌더는 훅을 N개 부르고 데이터가 온 렌더는 N+1개를 불러서, 그 어긋남을
+   *  React 가 막습니다. 쓰는 자리(`showEditor`)는 그대로 아래에 있습니다 — 훅만
+   *  올라왔습니다. */
+  const [draftExpanded, setDraftExpanded] = useState(false);
   const [logging, setLogging] = useState(false);
   // 고치는 중인 기록 — 「추가하기」와 같은 모달, 같은 폼입니다.
   const [editing, setEditing] = useState<Interaction | null>(null);
@@ -310,7 +317,6 @@ export function MessageDetail() {
    *  **어느 쪽인지는 서버가 말합니다**(`is_manual`) — 화면이 상태로 짐작하면 초안 종류가
    *  하나 늘 때 여기만 안 바뀝니다. */
   const manualDraft = !!data?.msg?.is_manual;
-  const [draftExpanded, setDraftExpanded] = useState(false);
   const showEditor = isDraftOpen && (!manualDraft || draftExpanded);
   const sendFailed = msg?.status === "send_failed";
   // 보드가 어느 열에 + 를 그릴지 정하는 것과 **같은 목록**입니다. 서버가 주므로
