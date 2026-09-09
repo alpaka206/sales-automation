@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { getJSON } from "../lib/api";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
+import { ErrorBoundary } from "../ui/ErrorBoundary";
 import { Icon } from "../ui/Icon";
 
 // The sidebar, one definition. Same order and wording as partials/nav.html — 전체
@@ -169,7 +170,12 @@ export function Shell({ pending }: { pending?: number }) {
             id="main"
             tabIndex={-1}
           >
-            <Outlet />
+            {/* 화면 하나가 죽어도 사이드바는 남습니다 — 다른 화면으로 갈 수 있어야
+                합니다. 통째로 죽으면 벗어날 길이 새로고침뿐인데, 새로고침해도 같은
+                자리로 돌아옵니다. `key` 가 경로라 화면을 옮기면 저절로 초기화됩니다. */}
+            <ErrorBoundary key={location.pathname}>
+              <Outlet />
+            </ErrorBoundary>
           </main>
         </div>
       </div>
