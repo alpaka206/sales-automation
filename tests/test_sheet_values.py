@@ -85,8 +85,14 @@ def test_nothing_stores_the_qualification_any_more():
         assert '"pipeline":' not in source, path
 
 
-def test_the_three_screens_derive_it_from_the_plan():
-    """리드 히스토리 · 티켓 상세의 연락처 정보 · 고객 상세 — 셋 다 이 함수를 지납니다."""
+def test_the_two_detail_screens_derive_it_from_the_plan():
+    """티켓 상세의 연락처 정보 · 고객 상세 — 둘 다 이 함수를 지납니다.
+
+    **리드 히스토리 목록에서는 뺐습니다** (2026-09-09 운영자 지시). 그 목록은 사람을
+    찾는 자리라 Client ID·담당자·이메일이 자리를 갖고, MQL/PQL 은 한 고객을 열어 볼 때
+    보는 값입니다. 서버는 그대로 내려줍니다 — 계산이 한 곳(`qualification_for_plan`)이라는
+    것이 이 검사의 요점이고, 어느 화면이 그리느냐는 운영자가 정할 일입니다.
+    """
     import pathlib
 
     for path in (
@@ -97,14 +103,12 @@ def test_the_three_screens_derive_it_from_the_plan():
         source = pathlib.Path(path).read_text(encoding="utf-8")
         assert "qualification_for_plan" in source, path
 
-    # 화면 셋이 실제로 그립니다 — payload 에만 있으면 없는 기능입니다.
+    # 화면 둘이 실제로 그립니다 — payload 에만 있으면 없는 기능입니다.
     detail = pathlib.Path("frontend/src/screens/CustomerDetail.tsx").read_text(encoding="utf-8")
     assert "profile?.qualification" not in detail and "{data.qualification}" in detail
-    leads = pathlib.Path("frontend/src/screens/Customers.tsx").read_text(encoding="utf-8")
-    assert "row.qualification" in leads and "MQL / PQL" in leads
     # 티켓 화면의 그 줄은 `ui/TicketInfoCard` 로 옮겨졌습니다 (2026-09-08, 화면 분할).
     # **그리는 자리를 따라갑니다** — 화면 파일만 보면 옮긴 순간 이 검사가 조용히 통과하고,
-    # 그러면 「세 화면이 그린다」를 아무도 안 지키게 됩니다.
+    # 그러면 「화면이 그린다」를 아무도 안 지키게 됩니다.
     ticket = pathlib.Path("frontend/src/ui/TicketInfoCard.tsx").read_text(encoding="utf-8")
     # **그리는 줄을 봅니다.** 예전에는 `"MQL / PQL"` 이라는 글자도 같이 봤는데, 그건
     # 2026-09-07 에 라벨이 「Lead Type」으로 바뀐 뒤로 **타입 주석에만** 남아 있어서
