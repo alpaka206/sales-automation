@@ -379,13 +379,27 @@ async def auth_callback(request: Request, code: str = "", state: str = "", error
     # 그걸 로그인에 상시로 달면 **모든 로그인마다** 동의 화면이 한 장 더 뜹니다.
     #
     # **이미 토큰이 있으면 안 묻습니다.** 그래서 그 사람이 겪는 것은 딱 한 번입니다.
+    #
+    # **구글로 곧장 보내지 않고 콘솔의 메일함 화면으로 보냅니다** (2026-09-09).
+    # 예전에는 `/integrations/mailboxes/self-connect` 로 바로 튕겨서 구글 동의 화면을
+    # 열었는데, 그 요청이 구글에서 거절되면 **로그인한 사람이 콘솔 밖에 갇혔습니다** —
+    # 화면에는 구글의 오류만 뜨고 돌아올 링크가 없어서, 다시 로그인해도 같은 자리로
+    # 튕깁니다. 실제로 그렇게 됐습니다(2026-09-09 05:06~05:07, 로그인 성공 4회 ·
+    # 전부 `redirect_uri_mismatch`): 이 콜백 주소가 구글 콘솔에 등록돼 있지 않았습니다.
+    #
+    # 이제 착지점은 **우리 화면**이고 동의는 거기서 버튼으로 시작합니다. 「다음 로그인에
+    # 물어본다」는 그대로입니다 — 로그인하면 그 화면이 열립니다. 달라진 것은 저쪽이
+    # 거절했을 때 **콘솔 안에 남는다**는 것뿐입니다.
+    #
+    # 부속 하나가 로그인을 막으면 안 된다는 규칙이 이 자리에도 적용됩니다. 아래 `except`
+    # 는 우리 DB 조회 실패만 막았고, 정작 갇히게 만든 것은 그 뒤의 리다이렉트였습니다.
     next_url = "/"
     if user.get("collect_mailbox"):
         try:
             from ..integrations.gmail import has_token
 
             if not has_token(email):
-                next_url = f"/integrations/mailboxes/self-connect?email={quote(email)}"
+                next_url = "/app/settings/mailboxes"
         except Exception:  # 이 부속이 로그인을 막으면 안 됩니다
             logger.warning("메일함 연결 확인 실패: %s", email, exc_info=True)
 
