@@ -22,6 +22,13 @@ import { useEffect, useRef, useState } from "react";
  *  **New 는 다른 색이 아니라 같은 색의 진한 쪽입니다**(`--teal-700` #0F766E). 전체의
  *  일부이지 다른 종류가 아니므로 색상(hue)을 바꾸면 「두 지표」로 읽힙니다 — 부분·전체는
  *  명도로 가르는 것이 맞고, 명도차는 색각과 무관하게 남습니다.
+ *
+ *  **그래서 명도가 실제로 갈려 있어야 합니다** (2026-09-09 운영자 지적: 「8월은 금액이
+ *  있고 9월은 0인데 둘이 같아 보여」). 한동안 New 면이 0.62 이고 전체 선이 불투명도 1 ·
+ *  1.75px 이었는데, 그러면 둘 다 「진한 청록 2px」이라 New 가 얇아지는 순간부터 구별이
+ *  안 됩니다 — 그 선은 끊기지 않으므로 얇은 New 면처럼 읽힙니다. 지금은 New 가 거의
+ *  불투명하고(0.95) 전체 선이 그보다 연합니다(0.55) — 세 층의 명도가 옅은 면 → 선 →
+ *  New 순으로 확실히 벌어져 있어야 이 그림이 제 일을 합니다.
  */
 const POSITIVE = "#2A9D8F";
 const NEGATIVE = "#B42318";
@@ -224,11 +231,26 @@ export function MonthlyArea({
         {/* 신규 몫은 총액 선 **바로 아래**에 얹힙니다 — 위로 자란 것이 곧 그 달의 신규분
             입니다. 진한 면이라 아래 옅은 면과 겹쳐도 경계가 남습니다. */}
         {newBands.map((d, index) => (
-          <path key={index} d={d} fill={NEW} opacity={0.62} clipPath={`url(#${uid}-pos)`} />
+          <path key={index} d={d} fill={NEW} opacity={0.95} clipPath={`url(#${uid}-pos)`} />
         ))}
-        <path d={line(total)} fill="none" stroke={POSITIVE} strokeWidth={1.75}
-              strokeLinejoin="round" clipPath={`url(#${uid}-pos)`} />
-        <path d={line(total)} fill="none" stroke={NEGATIVE} strokeWidth={1.75}
+        {/* **전체 선은 New 면보다 연합니다** (2026-09-09 운영자 지시: 「8월은 금액이 있고
+            9월은 0인데 둘이 같아 보여」).
+            
+            예전에는 이 선이 `POSITIVE` 불투명도 1 · 1.75px 이고 New 면이 `NEW` 0.62
+            였습니다. 둘 다 「진한 청록 2px」이라, New 가 얇아지는 순간부터 **선과 면이
+            구별되지 않았습니다** — 그래서 New 가 있는 달과 0 인 달이 같아 보였습니다.
+            그 선은 04부터 09까지 끊기지 않으므로, 얇은 New 면처럼 읽힙니다.
+            
+            가른 것은 색상이 아니라 **명도**입니다. New 는 거의 불투명한 딥 청록이고
+            전체 선은 그보다 연한 중간 톤이라, 겹쳐 있어도 어느 쪽이 면인지 보입니다.
+            색상을 바꾸지 않는 이유는 원래와 같습니다: New 는 전체의 **부분**이지 다른
+            종류가 아니고, 명도차는 색각과 무관하게 남습니다. */}
+        <path d={line(total)} fill="none" stroke={POSITIVE} strokeWidth={1.6}
+              opacity={0.55} strokeLinejoin="round" clipPath={`url(#${uid}-pos)`} />
+        {/* 굵기는 위 선과 같습니다 — 0선에서 만나는데 폭이 다르면 그 자리가 이음매로
+            보입니다. 불투명도는 그대로 1 입니다: 음수는 중도 해지 정산이라 옅게 만들
+            값이 아닙니다. */}
+        <path d={line(total)} fill="none" stroke={NEGATIVE} strokeWidth={1.6}
               strokeLinejoin="round" clipPath={`url(#${uid}-neg)`} />
 
         {months.map((month, index) => (
@@ -283,11 +305,11 @@ export function MonthlyArea({
           말하는 문장이라 `figcaption` 이 제자리입니다. */}
       <figcaption className="marea__legend">
         {caption && <span className="cap">{caption}</span>}
-        <span><i style={{ background: POSITIVE, opacity: 0.45 }} />전체</span>
+        <span><i style={{ background: POSITIVE, opacity: 0.4 }} />전체</span>
         {/* **한 달도 없으면 범례에서도 뺍니다** (2026-09-09). 그림에 없는 색을 범례가
             설명하고 있으면, 보는 사람은 어딘가 있는데 못 찾는 것으로 읽습니다 —
             바로 아래 「해지 정산」이 같은 이유로 이미 그렇게 합니다. */}
-        {hasNew && <span><i style={{ background: NEW, opacity: 0.75 }} />{newLabel}</span>}
+        {hasNew && <span><i style={{ background: NEW, opacity: 0.95 }} />{newLabel}</span>}
         {hasNegative && <span className="is-neg"><i style={{ background: NEGATIVE }} />{negativeNote}</span>}
       </figcaption>
     </figure>
