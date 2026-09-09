@@ -1903,9 +1903,9 @@ def test_the_cards_say_which_department_they_counted():
     # 나란히 선 두 카드가 다른 팀의 숫자가 되고, 그건 화면에 안 보입니다.
     호출 = screen[screen.index('<MetricCard uid="mrr"') :]
     호출 = 호출[: 호출.index("/>", 호출.index('<MetricCard uid="cash"')) + 2]
-    # 총액 둘 + New 둘 + 월 매출의 결제 완료 하나(2026-09-09). MRR 쪽에는 그 계열이
-    # 없습니다 — 인식한 매출에 「결제됐나」라는 물음은 성립하지 않습니다.
-    assert 호출.count("[deptLabel]") == 5, 호출
+    # 총액 둘 + New 둘 + Stripe 둘 (2026-09-09). 두 카드가 재는 것은 다르지만
+    # (월 매출은 실제 입금, MRR 은 Stripe 계약의 인식 매출) 담당부서는 같아야 합니다.
+    assert 호출.count("[deptLabel]") == 6, 호출
     # 담당부서를 고르는 것은 이제 칩입니다. 넷뿐이라 다 펼쳐 두고, 고른 것이 곧 보입니다.
     assert 'aria-label="담당부서"' in screen and 'id="won-dept"' not in screen
     # 기본값은 GTM 입니다 — 이 화면을 매일 여는 쪽이고, 「전체」로 두면 세 팀을 합친
@@ -3062,6 +3062,45 @@ def test_the_split_only_shows_while_a_month_is_pointed_at():
     # 「미결제·타 수단」은 **빼서** 냅니다 — 각각 세면 반올림이 갈려 합이 큰 숫자와
     # 안 맞습니다.
     assert "const rest = at(look) - stripe;" in source
-    # 월 매출 카드에만 넘어갑니다.
+    # 두 카드 다 받습니다 — 각자 자기 계열로 (2026-09-09 운영자 지시).
     assert source.count("stripeSeries={data.cash_stripe_months") == 1
-    assert "stripeSeries={data.mrr" not in source
+    assert source.count("stripeSeries={data.mrr_stripe_months") == 1
+    # **큰 숫자 오른쪽**입니다 — 아래 줄이 아니라. `kpi-value` 안에 들어 있어야 합니다.
+    value = source[source.index('<div className="kpi-value money">') :]
+    value = value[: value.index("</div>")]
+    assert "kpi-split" in value, "쪼갠 값은 큰 숫자와 같은 줄에 섭니다"
+
+
+def test_the_mrr_split_looks_at_the_contract_not_the_payment():
+    """**두 카드가 재는 것이 다릅니다** (2026-09-09 운영자 지시로 MRR 에도 붙임).
+
+    월 매출은 「Stripe 로 **실제 입금된** 것」이고, MRR 은 「**Stripe 계약**의 인식
+    매출」입니다 — 인식한 매출에는 회차라는 것이 없어서 입금 여부를 볼 자리가 없습니다.
+    그래서 Stripe 계약인데 아직 안 들어온 달은 **MRR 에서는 Stripe 몫이고 월 매출에서는
+    아닙니다.** 두 카드가 세는 것이 원래 다르다는 것이 이 화면의 요점입니다.
+    """
+    from src.api.routes.ui_api import _cash_cells, _mrr_cells
+
+    months = ["2026-09"]
+    rate = Decimal(1300)
+    # Stripe 계약, 9월 회차는 아직 미입금.
+    contract = SimpleNamespace(
+        deal_type="MRR", currency="KRW", vat_applicable=False, vat_included=False,
+        amount_incl_vat=Decimal(12_000_000), amount_excl_vat=None,
+        starts_on="2026-01-01", ends_on="2026-12-31",
+        plan_starts_on=None, plan_ends_on=None, terminated_on=None,
+        revenue_from=None, credits_used=None, credits=None,
+        fx_rate=rate, payment_method="Stripe",
+        payments=[SimpleNamespace(paid_on="2026-09-10", amount=Decimal(1_000_000),
+                                  done=False, fx_rate=None)],
+    )
+
+    # MRR: Stripe 계약이므로 그 달 인식 매출이 통째로 Stripe 몫입니다.
+    assert _mrr_cells(contract, months, rate, stripe_only=True) == _mrr_cells(contract, months, rate)
+    # 월 매출: 아직 안 들어왔으므로 Stripe 몫이 0 입니다.
+    assert _cash_cells(contract, months, rate)["2026-09"]["KRW"] == Decimal(1_000_000)
+    assert _cash_cells(contract, months, rate, stripe_only=True) == {}
+
+    # Stripe 가 아닌 계약은 MRR 쪽도 0 입니다.
+    other = SimpleNamespace(**{**contract.__dict__, "payment_method": "계좌이체"})
+    assert _mrr_cells(other, months, rate, stripe_only=True) == {}

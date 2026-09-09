@@ -229,6 +229,7 @@ export function WonCustomers() {
           <MetricCard uid="mrr" title="월별 MRR" note="VAT 포함" newLabel="New MRR"
                       series={data.mrr_months?.[deptLabel] ?? {}}
                       newSeries={data.mrr_new_months?.[deptLabel] ?? {}}
+                      stripeSeries={data.mrr_stripe_months?.[deptLabel] ?? {}}
                       months={months} now={data.month} />
           <MetricCard uid="cash" title="월 매출" note="입금 기준" newLabel="New 매출"
                       series={data.cash_months?.[deptLabel] ?? {}}
@@ -600,10 +601,16 @@ function MetricCard({ uid, title, note, newLabel, series, newSeries, stripeSerie
   series: Record<string, Record<string, number>>;
   /** 그 달에 고객이 된 고객의 몫. 총액의 **부분**이라 차트에서 위에 얹힙니다. */
   newSeries: Record<string, Record<string, number>>;
-  /** 그 달 매출 중 **Stripe 로 실제 입금된** 몫 (2026-09-09 운영자 지시: 「stripe 유무로
-   *  구분 — 결제 안 된 거나 stripe 로 결제 안 된 거」). 안 주면 그 줄이 아예 안 뜹니다 —
-   *  MRR 은 인식한 매출이라 「결제됐나」라는 물음 자체가 없습니다. 나머지(총액 − 이 값)가
-   *  「미결제·타 수단」입니다: 둘을 각각 세면 반올림이 갈려 합이 총액과 안 맞습니다. */
+  /** 그 달의 **Stripe 몫** (2026-09-09 운영자 지시: 「stripe 유무로 구분」).
+   *
+   *  **두 카드가 재는 것이 다릅니다.** 월 매출은 「Stripe 로 **실제 입금된** 것」이고,
+   *  MRR 은 「**Stripe 계약**의 인식 매출」입니다 — 인식한 매출에는 회차라는 것이 없어서
+   *  입금 여부를 볼 자리가 없습니다. 그래서 Stripe 계약인데 아직 안 들어온 달은 MRR
+   *  에서는 Stripe 몫이고 월 매출에서는 아닙니다. 두 카드가 세는 것이 원래 다르다는 것이
+   *  이 화면의 요점입니다.
+   *
+   *  나머지(총액 − 이 값)가 「그 외」입니다: 둘을 각각 세면 반올림이 갈려 합이 총액과
+   *  안 맞습니다. */
   stripeSeries?: Record<string, Record<string, number>>;
   months: string[];
   now: string;
@@ -656,28 +663,26 @@ function MetricCard({ uid, title, note, newLabel, series, newSeries, stripeSerie
         <span className="kpi-new">
           <span className="cap">New</span>{amount(newAt(shown), unit, scale)}
         </span>
-      </div>
-      {/* **결제 완료 · 미결제는 짚었을 때만 뜹니다** (2026-09-09 운영자 지시). 늘 띄우면
-          카드에 숫자가 넷이 되어 무엇이 그 카드의 지표인지 흐려지고, 손을 안 댔을 때
-          보이는 것은 어차피 이번 달 하나입니다 — 이번 달을 짚어도 뜹니다.
+        {/* **Stripe · 그 외는 짚었을 때만, 큰 숫자 오른쪽에** (2026-09-09 운영자 지시).
+            늘 띄우면 카드에 숫자가 넷이 되어 무엇이 그 카드의 지표인지 흐려지고, 손을
+            안 댔을 때 보이는 것은 어차피 이번 달 하나입니다 — 이번 달을 짚어도 뜹니다.
 
-          **미결제는 빼서 냅니다**(총액 − 결제 완료). 각각 세면 반올림이 갈려 둘을 더한
-          것이 위의 큰 숫자와 안 맞고, 그 어긋남은 화면에서 설명할 길이 없습니다.
-
-          MRR 카드에는 `paidSeries` 를 안 넘기므로 이 줄이 없습니다 — 인식한 매출에
-          「결제됐나」라는 물음은 성립하지 않습니다. */}
-      {stripeSeries && look && (() => {
-        const stripe = stripeSeries[look]?.[unit] ?? 0;
-        const rest = at(look) - stripe;
-        return (
-          <div className="kpi-split">
-            <span><i className="dot dot--paid" />Stripe 결제 {amount(stripe, unit, scale)}</span>
-            <span className={rest > 0 ? "is-open" : undefined}>
-              <i className="dot dot--open" />미결제·타 수단 {amount(rest, unit, scale)}
+            **「그 외」는 빼서 냅니다**(총액 − Stripe). 각각 세면 반올림이 갈려 둘을 더한
+            것이 왼쪽의 큰 숫자와 안 맞고, 그 어긋남은 화면에서 설명할 길이 없습니다. */}
+        {stripeSeries && look && (() => {
+          const stripe = stripeSeries[look]?.[unit] ?? 0;
+          const rest = at(look) - stripe;
+          return (
+            <span className="kpi-split">
+              <span><i className="dot dot--paid" />Stripe {amount(stripe, unit, scale)}</span>
+              <span className={rest > 0 ? "is-open" : undefined}>
+                <i className="dot dot--open" />그 외 {amount(rest, unit, scale)}
+              </span>
             </span>
-          </div>
-        );
-      })()}
+          );
+        })()}
+      </div>
+
       <MonthlyArea uid={uid} months={months} valueAt={at} newAt={newAt} now={now}
                    newLabel={newLabel} onHover={setLook} caption={note}
                    format={(value) => amount(value, unit, scale)}

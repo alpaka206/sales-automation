@@ -1256,9 +1256,25 @@ def _contract_rate(contract, fallback: Decimal) -> Decimal:
     return won._decimal(getattr(contract, "fx_rate", None)) or fallback
 
 
-def _mrr_cells(contract, months: list[str], fallback: Decimal) -> dict[str, dict[str, Decimal]]:
+def _is_stripe(contract) -> bool:
+    """이 계약을 Stripe 로 받나. 수단은 **계약**에 달려 있습니다 — 회차별 칸이 없습니다."""
+    return (getattr(contract, "payment_method", None) or "").strip().lower() == "stripe"
+
+
+def _mrr_cells(
+    contract, months: list[str], fallback: Decimal, *, stripe_only: bool = False
+) -> dict[str, dict[str, Decimal]]:
+    """월별 인식 매출. ``stripe_only`` 면 **Stripe 계약의 몫만** (2026-09-09 운영자 지시).
+
+    **입금 여부를 안 봅니다** — 여기는 인식한 매출이라 회차라는 것이 없습니다. 갈리는 것은
+    「그 계약을 Stripe 로 받나」 하나이고, 그래서 월 매출 쪽과 답이 다를 수 있습니다:
+    Stripe 계약인데 아직 안 들어온 달은 MRR 에서는 Stripe 몫이고 월 매출에서는 아닙니다.
+    두 카드가 세는 것이 원래 다르다는 것이 이 화면의 요점입니다.
+    """
     from ...common import won
 
+    if stripe_only and not _is_stripe(contract):
+        return {}
     code = (contract.currency or "KRW").upper()
     rate = _contract_rate(contract, fallback)
     cells: dict[str, dict[str, Decimal]] = {}
@@ -1267,11 +1283,6 @@ def _mrr_cells(contract, months: list[str], fallback: Decimal) -> dict[str, dict
         if amount:
             cells[month] = _both_currencies(amount, code, rate)
     return cells
-
-
-def _is_stripe(contract) -> bool:
-    """이 계약을 Stripe 로 받나. 수단은 **계약**에 달려 있습니다 — 회차별 칸이 없습니다."""
-    return (getattr(contract, "payment_method", None) or "").strip().lower() == "stripe"
 
 
 def _cash_cells(
@@ -1389,6 +1400,7 @@ def ui_won_customers():
     # 다른 수단」이라, 둘을 다 보내지 않고 하나만 보냅니다 — 각각 세면 반올림이 갈려
     # 합이 총액과 안 맞습니다.
     cash_stripe_months: dict[str, dict[str, dict[str, Decimal]]] = {}
+    mrr_stripe_months: dict[str, dict[str, dict[str, Decimal]]] = {}
     with SessionLocal() as session:
         clients = (
             session.query(Client)
@@ -1455,6 +1467,8 @@ def ui_won_customers():
                 _add_series(cash_new_months, buckets, months, _only(cash_cells, new_cash))
                 _add_series(cash_stripe_months, buckets, months,
                             _cash_cells(contract, months, today_rate, stripe_only=True))
+                _add_series(mrr_stripe_months, buckets, months,
+                            _mrr_cells(contract, months, today_rate, stripe_only=True))
         pending = (
             session.query(PendingWon)
             .filter(PendingWon.status == "pending")
@@ -1547,6 +1561,7 @@ def ui_won_customers():
         "mrr_new_months": _series_floats(mrr_new_months),
         "cash_new_months": _series_floats(cash_new_months),
         "cash_stripe_months": _series_floats(cash_stripe_months),
+        "mrr_stripe_months": _series_floats(mrr_stripe_months),
         "options": {
             "industries": list(won.INDUSTRIES),
             "plans": list(won.PLANS),

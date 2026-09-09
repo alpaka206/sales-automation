@@ -126,9 +126,12 @@ export type ListData = {
    *  판별하면 그 필터가 곧 정의가 되고, 총액보다 큰 New 가 생겨도 아무도 모릅니다. */
   mrr_new_months: Record<string, Record<string, Record<string, number>>>;
   cash_new_months: Record<string, Record<string, Record<string, number>>>;
-  /** 그 달 매출 중 **Stripe 로 실제 입금된** 몫. 나머지(총액 − 이 값)가 「미결제이거나
-   *  다른 수단」입니다 — 둘을 각각 세면 반올림이 갈려 합이 총액과 안 맞습니다. */
+  /** 그 달 매출 중 **Stripe 로 실제 입금된** 몫. 나머지(총액 − 이 값)가 「그 외」입니다 —
+   *  둘을 각각 세면 반올림이 갈려 합이 총액과 안 맞습니다. */
   cash_stripe_months: Record<string, Record<string, Record<string, number>>>;
+  /** 그 달 인식 매출 중 **Stripe 계약의 몫**. 이쪽은 입금 여부를 안 봅니다 — 인식한
+   *  매출이라 회차라는 것이 없고, 갈리는 것은 「그 계약을 Stripe 로 받나」 하나입니다. */
+  mrr_stripe_months: Record<string, Record<string, Record<string, number>>>;
   options: Options;
 };
 
