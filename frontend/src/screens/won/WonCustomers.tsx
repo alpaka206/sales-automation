@@ -233,6 +233,7 @@ export function WonCustomers() {
           <MetricCard uid="cash" title="월 매출" note="입금 기준" newLabel="New 매출"
                       series={data.cash_months?.[deptLabel] ?? {}}
                       newSeries={data.cash_new_months?.[deptLabel] ?? {}}
+                      paidSeries={data.cash_paid_months?.[deptLabel] ?? {}}
                       months={months} now={data.month} />
         </div>
 
@@ -586,7 +587,7 @@ function Donut({ cap, slices }: {
  *  통화도 카드마다 따로 고릅니다. 축이 이미 따로라 두 카드는 같은 자로 재는 그림이
  *  아니고, 어느 단위인지는 눈금과 큰 숫자가 각자 말합니다.
  */
-function MetricCard({ uid, title, note, newLabel, series, newSeries, months, now }: {
+function MetricCard({ uid, title, note, newLabel, series, newSeries, paidSeries, months, now }: {
   /** 카드마다 다른 문자열. 차트가 clipPath id 를 만드는 데 씁니다 — 두 카드가 같은 id 를
    *  쓰면 둘째 카드의 음수 면이 첫째 카드의 0선에서 잘립니다. */
   uid: string;
@@ -599,6 +600,11 @@ function MetricCard({ uid, title, note, newLabel, series, newSeries, months, now
   series: Record<string, Record<string, number>>;
   /** 그 달에 고객이 된 고객의 몫. 총액의 **부분**이라 차트에서 위에 얹힙니다. */
   newSeries: Record<string, Record<string, number>>;
+  /** 그 달 매출 중 **실제로 입금된** 몫 (2026-09-09 운영자 지시: 「결제된 거 얼마 결제
+   *  안 된 거 얼마」). 안 주면 그 줄이 아예 안 뜹니다 — MRR 은 인식한 매출이라 「결제
+   *  됐나」라는 물음 자체가 없습니다. 나머지(총액 − 이 값)가 미결제입니다: 둘을 각각
+   *  세면 반올림이 갈려 합이 총액과 안 맞습니다. */
+  paidSeries?: Record<string, Record<string, number>>;
   months: string[];
   now: string;
 }) {
@@ -647,6 +653,27 @@ function MetricCard({ uid, title, note, newLabel, series, newSeries, months, now
           <span className="cap">New</span>{amount(newAt(shown), unit, scale)}
         </span>
       </div>
+      {/* **결제 완료 · 미결제는 짚었을 때만 뜹니다** (2026-09-09 운영자 지시). 늘 띄우면
+          카드에 숫자가 넷이 되어 무엇이 그 카드의 지표인지 흐려지고, 손을 안 댔을 때
+          보이는 것은 어차피 이번 달 하나입니다 — 이번 달을 짚어도 뜹니다.
+
+          **미결제는 빼서 냅니다**(총액 − 결제 완료). 각각 세면 반올림이 갈려 둘을 더한
+          것이 위의 큰 숫자와 안 맞고, 그 어긋남은 화면에서 설명할 길이 없습니다.
+
+          MRR 카드에는 `paidSeries` 를 안 넘기므로 이 줄이 없습니다 — 인식한 매출에
+          「결제됐나」라는 물음은 성립하지 않습니다. */}
+      {paidSeries && look && (() => {
+        const paid = paidSeries[look]?.[unit] ?? 0;
+        const unpaid = at(look) - paid;
+        return (
+          <div className="kpi-split">
+            <span><i className="dot dot--paid" />결제 완료 {amount(paid, unit, scale)}</span>
+            <span className={unpaid > 0 ? "is-open" : undefined}>
+              <i className="dot dot--open" />미결제 {amount(unpaid, unit, scale)}
+            </span>
+          </div>
+        );
+      })()}
       <MonthlyArea uid={uid} months={months} valueAt={at} newAt={newAt} now={now}
                    newLabel={newLabel} onHover={setLook} caption={note}
                    format={(value) => amount(value, unit, scale)}

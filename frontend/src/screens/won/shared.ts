@@ -126,6 +126,9 @@ export type ListData = {
    *  판별하면 그 필터가 곧 정의가 되고, 총액보다 큰 New 가 생겨도 아무도 모릅니다. */
   mrr_new_months: Record<string, Record<string, Record<string, number>>>;
   cash_new_months: Record<string, Record<string, Record<string, number>>>;
+  /** 그 달 매출 중 **실제로 입금된** 몫. 나머지(총액 − 이 값)가 미결제입니다 —
+   *  둘을 각각 세면 반올림이 갈려 합이 총액과 안 맞습니다. */
+  cash_paid_months: Record<string, Record<string, Record<string, number>>>;
   options: Options;
 };
 

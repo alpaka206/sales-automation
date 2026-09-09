@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from datetime import date
 from decimal import Decimal
+from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import create_engine
@@ -1902,7 +1903,9 @@ def test_the_cards_say_which_department_they_counted():
     # 나란히 선 두 카드가 다른 팀의 숫자가 되고, 그건 화면에 안 보입니다.
     호출 = screen[screen.index('<MetricCard uid="mrr"') :]
     호출 = 호출[: 호출.index("/>", 호출.index('<MetricCard uid="cash"')) + 2]
-    assert 호출.count("[deptLabel]") == 4, 호출   # 총액 둘 + New 둘
+    # 총액 둘 + New 둘 + 월 매출의 결제 완료 하나(2026-09-09). MRR 쪽에는 그 계열이
+    # 없습니다 — 인식한 매출에 「결제됐나」라는 물음은 성립하지 않습니다.
+    assert 호출.count("[deptLabel]") == 5, 호출
     # 담당부서를 고르는 것은 이제 칩입니다. 넷뿐이라 다 펼쳐 두고, 고른 것이 곧 보입니다.
     assert 'aria-label="담당부서"' in screen and 'id="won-dept"' not in screen
     # 기본값은 GTM 입니다 — 이 화면을 매일 여는 쪽이고, 「전체」로 두면 세 팀을 합친
@@ -2996,3 +2999,59 @@ def test_the_two_mrr_figures_use_the_same_divisor():
     # 그래서 둘의 비는 언제나 1.1 입니다 — 기간이 갈리면 이 값이 깨집니다.
     ratio = won.monthly_revenue(contract) / won.monthly_supply_revenue(contract)
     assert round(float(ratio), 6) == 1.1
+
+
+def test_the_month_splits_into_paid_and_unpaid(factory):
+    """**짚은 달의 결제 완료 · 미결제** (2026-09-09 운영자 지시: 「stripe 로 결제된 거
+    얼마 결제 안 된 거 얼마」).
+
+    월 매출은 **날짜가 잡힌 회차**를 그 달에 통째로 얹습니다 — 아직 입금 전이어도 셉니다.
+    그래서 그 달 숫자 안에 「받은 돈」과 「받을 돈」이 섞여 있고, 카드는 짚었을 때 그 둘을
+    갈라 적습니다.
+
+    **같은 함수를 지나야 합니다.** 나눈 값과 총액이 다른 셈법을 쓰면 둘을 더한 것이 총액과
+    안 맞고, 그 어긋남은 화면에서 「결제 완료 + 미결제 ≠ 그 달 매출」로 나타납니다.
+    """
+    from src.api.routes.ui_api import _cash_cells
+
+    contract = SimpleNamespace(
+        currency="KRW", fx_rate=Decimal(1300),
+        payments=[
+            SimpleNamespace(paid_on="2026-09-10", amount=Decimal(3_000_000), done=True, fx_rate=None),
+            SimpleNamespace(paid_on="2026-09-20", amount=Decimal(2_000_000), done=False, fx_rate=None),
+            SimpleNamespace(paid_on="2026-08-05", amount=Decimal(1_000_000), done=True, fx_rate=None),
+        ],
+    )
+    months = ["2026-08", "2026-09"]
+    rate = Decimal(1300)
+
+    every = _cash_cells(contract, months, rate)
+    paid = _cash_cells(contract, months, rate, settled=True)
+
+    # 9월 총액 500만 = 결제 완료 300만 + 미결제 200만.
+    assert every["2026-09"]["KRW"] == Decimal(5_000_000)
+    assert paid["2026-09"]["KRW"] == Decimal(3_000_000)
+    assert every["2026-09"]["KRW"] - paid["2026-09"]["KRW"] == Decimal(2_000_000)
+    # 8월은 전부 입금됐습니다 — 미결제 0.
+    assert every["2026-08"]["KRW"] == paid["2026-08"]["KRW"] == Decimal(1_000_000)
+
+
+def test_the_split_only_shows_while_a_month_is_pointed_at():
+    """**늘 띄우지 않습니다** (2026-09-09 운영자 지시: 「이번 달 것은 안 보이다가 이번 달
+    것을 hover 하면 보이도록」).
+
+    늘 띄우면 카드에 숫자가 넷이 되어 무엇이 그 카드의 지표인지 흐려집니다. 그리고
+    **MRR 카드에는 아예 없습니다** — 인식한 매출에 「결제됐나」라는 물음은 성립하지
+    않습니다(`paidSeries` 를 안 넘깁니다).
+    """
+    import pathlib
+
+    source = pathlib.Path("frontend/src/screens/won/WonCustomers.tsx").read_text(encoding="utf-8")
+
+    # 짚은 달이 있을 때만 그립니다.
+    assert "{paidSeries && look && (() => {" in source
+    # 미결제는 **빼서** 냅니다 — 각각 세면 반올림이 갈려 합이 큰 숫자와 안 맞습니다.
+    assert "const unpaid = at(look) - paid;" in source
+    # 월 매출 카드에만 넘어갑니다.
+    assert source.count("paidSeries={data.cash_paid_months") == 1
+    assert "paidSeries={data.mrr" not in source

@@ -1269,7 +1269,9 @@ def _mrr_cells(contract, months: list[str], fallback: Decimal) -> dict[str, dict
     return cells
 
 
-def _cash_cells(contract, months: list[str], fallback: Decimal) -> dict[str, dict[str, Decimal]]:
+def _cash_cells(
+    contract, months: list[str], fallback: Decimal, *, settled: bool | None = None
+) -> dict[str, dict[str, Decimal]]:
     """월 매출 — **결제 회차가 잡힌 달**에 그 회차 금액을 통째로. 현금흐름 관점입니다.
 
     일시불이면 한 달에 전액, 할부면 회차마다 그 달에. MRR 처럼 기간에 나누지 않습니다 —
@@ -1280,6 +1282,13 @@ def _cash_cells(contract, months: list[str], fallback: Decimal) -> dict[str, dic
 
     날짜가 있는 회차는 아직 입금 전이어도 셉니다: 이 표는 「받은 돈」이 아니라 「그 달에
     잡히는 매출」이고, 수금 여부는 상세 화면의 수금율이 따로 말합니다.
+
+    ``settled`` 는 그 안에서 **입금된 것만/안 된 것만** 고릅니다 (2026-09-09 운영자 지시:
+    「결제된 거 얼마 결제 안 된 거 얼마」). ``None`` 이면 예전 그대로 전부입니다 — 차트가
+    그리는 면은 여전히 총액이고, 나뉜 값은 짚었을 때만 카드가 적습니다.
+
+    **같은 함수를 지나야 합니다.** 나눈 값과 총액이 다른 셈법을 쓰면 둘을 더한 것이 총액과
+    안 맞고, 그 어긋남은 화면에서 「결제 완료 + 미결제 ≠ 그 달 매출」로 나타납니다.
     """
     from ...common import won
 
@@ -1290,6 +1299,8 @@ def _cash_cells(contract, months: list[str], fallback: Decimal) -> dict[str, dic
         month = str(payment.paid_on or "")[:7]
         amount = won._decimal(payment.amount)
         if month not in wanted or not amount:
+            continue
+        if settled is not None and bool(payment.done) is not settled:
             continue
         rate = won._decimal(payment.fx_rate) or _contract_rate(contract, fallback)
         cell = cells.setdefault(month, {"KRW": Decimal(0), "USD": Decimal(0)})
@@ -1362,6 +1373,9 @@ def ui_won_customers():
     # 필터가 곧 정의가 됩니다(그리고 정의가 둘이 됩니다).
     mrr_new_months: dict[str, dict[str, dict[str, Decimal]]] = {}
     cash_new_months: dict[str, dict[str, dict[str, Decimal]]] = {}
+    # 그 달 매출 중 **실제로 입금된** 몫. 나머지(총액 − 이것)가 미결제라, 둘을 다
+    # 보내지 않고 하나만 보냅니다 — 두 값을 각각 세면 반올림이 갈려 합이 총액과 안 맞습니다.
+    cash_paid_months: dict[str, dict[str, dict[str, Decimal]]] = {}
     with SessionLocal() as session:
         clients = (
             session.query(Client)
@@ -1426,6 +1440,8 @@ def ui_won_customers():
                 _add_series(cash_months, buckets, months, cash_cells)
                 _add_series(mrr_new_months, buckets, months, _only(mrr_cells, new_revenue))
                 _add_series(cash_new_months, buckets, months, _only(cash_cells, new_cash))
+                _add_series(cash_paid_months, buckets, months,
+                            _cash_cells(contract, months, today_rate, settled=True))
         pending = (
             session.query(PendingWon)
             .filter(PendingWon.status == "pending")
@@ -1517,6 +1533,7 @@ def ui_won_customers():
         # 그것입니다: 다른 자로 재면 New 가 총액보다 커지는 달이 생깁니다.
         "mrr_new_months": _series_floats(mrr_new_months),
         "cash_new_months": _series_floats(cash_new_months),
+        "cash_paid_months": _series_floats(cash_paid_months),
         "options": {
             "industries": list(won.INDUSTRIES),
             "plans": list(won.PLANS),
