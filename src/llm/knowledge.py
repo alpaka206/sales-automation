@@ -134,6 +134,24 @@ FOLLOWUP = "followup"
 _SCOPES_FOR = {FIRST: ("all", FIRST), FOLLOWUP: ("all", FOLLOWUP)}
 
 
+def scopes_for_stage(stage: str | None) -> tuple[str, ...]:
+    """이 단계에서 볼 수 있는 ``scope`` 들. **규칙 문서와 참고 문서가 같이 씁니다.**
+
+    표가 둘이면 「첫 회신에만」인 규칙 문서와 참고 문서가 서로 다른 단계에 붙습니다.
+
+    **모르는 값은 거절합니다.** 예전에는 ``router_docs`` 가 필터를 통째로 생략했는데,
+    그러면 「후속 회신에만」 문서가 첫 회신 후보에 들어가고 화면에는 안 보입니다.
+    넓히는 쪽으로 틀리는 것이 좁히는 쪽으로 틀리는 것보다 나쁩니다 — 사람용 문서가
+    새는 길도 같은 자리입니다.
+    """
+    if stage is None:
+        return ("all",)
+    allowed = _SCOPES_FOR.get(stage)
+    if allowed is None:
+        raise ValueError(f"모르는 회신 단계입니다: {stage!r}")
+    return allowed
+
+
 def router_docs(stage: str = FIRST) -> list[PolicySource]:
     """그 회신에서 고를 수 있는 문서 — 「문의별 참고」 행 중 이 단계에 해당하는 것.
 
@@ -152,7 +170,7 @@ def router_docs(stage: str = FIRST) -> list[PolicySource]:
     ``mode='rules'`` 는 여기 안 옵니다 — 그쪽은 고르는 대상이 아니라 모든 프롬프트에
     통째로 들어갑니다(``llm.prompts._rules_from_db``).
     """
-    allowed = _SCOPES_FOR.get(stage)
+    allowed = scopes_for_stage(stage)
     session = SessionLocal()
     try:
         query = (
@@ -161,9 +179,8 @@ def router_docs(stage: str = FIRST) -> list[PolicySource]:
             # 「언제 쓰는가」만 담지만, 그 둘도 그 문서의 내용입니다.
             .filter(PolicySource.model_access == "customer_context")
             .filter(PolicySource.mode == KNOWLEDGE)
+            .filter(PolicySource.scope.in_(allowed))
         )
-        if allowed:
-            query = query.filter(PolicySource.scope.in_(allowed))
         return query.order_by(
             PolicySource.title, PolicySource.label, PolicySource.id
         ).all()

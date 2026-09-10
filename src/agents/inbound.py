@@ -1024,6 +1024,10 @@ class InboundAgent:
             schema=DraftResult,
             tier="pro",
             max_tokens=4000,
+            # **회사 규칙이 실리는 유일한 호출입니다** (2026-09-10). 「첫 회신에만」·
+            # 「그 이후 회신에」 문서가 여기서 갈립니다. 나머지 호출(분류·라우팅·요약·
+            # 번역)은 `stage` 를 안 주므로 규칙을 아예 안 받습니다.
+            stage=FIRST if first_reply else FOLLOWUP,
         )
 
         # CODE GUARD 1 — the draft is in the language it will be sent in.

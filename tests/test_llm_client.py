@@ -63,19 +63,35 @@ def test_schema_fails_twice_raises(mock_gemini, mock_log, client: LLMClient) -> 
 
 @patch("src.llm.client.LLMClient._log_event")
 @patch("src.llm.client.call_gemini")
-def test_prompt_includes_company_rules(mock_gemini, mock_log, client: LLMClient) -> None:
-    """Whatever the rules resolve to must reach Gemini as the system instruction.
+def test_the_reply_rules_go_only_to_the_call_that_writes_a_reply(
+    mock_gemini, mock_log, client: LLMClient
+) -> None:
+    """회신 규칙은 **초안 호출에만** 실리고, 그 회신의 단계로 실린다.
 
-    The rules come from the database now (policy_sources, synced from Notion), so this
-    asserts the WIRING rather than a non-empty string: patch the loader and check the
-    exact value lands in the call. Asserting non-empty would only prove a test database
-    happened to be seeded.
+    예전에는 `complete()` 가 무조건 실었습니다 — 분류·라우팅·요약·번역·언어 판별·회사
+    분석까지 규칙 블록(운영 55,296자)을 매 호출 지고 다녔고, 그중 어느 것도 회신 규칙이
+    필요 없습니다. 이제 `stage` 를 준 호출만 받습니다.
+
+    값이 아니라 **배선**을 봅니다: 로더를 갈아 끼우고 그 값이 그대로 도착하는지, 그리고
+    단계가 로더까지 넘어가는지.
     """
-    rules = "## Company rules (must follow)\n항상 존댓말."
     mock_gemini.return_value = _result("ok")
-    with patch("src.llm.client.get_company_rules", return_value=rules):
+    seen: list = []
+
+    def _rules(stage=None):
+        seen.append(stage)
+        return "RULES-FOR:" + str(stage)
+
+    with patch("src.llm.client.get_company_rules", _rules):
+        # 유틸리티 — 규칙을 아예 안 받는다. 로더를 부르지도 않는다.
         client.complete("test/hello", {"name": "F"})
-    assert mock_gemini.call_args.kwargs["system"] == rules
+        assert mock_gemini.call_args.kwargs["system"] == ""
+        assert seen == []
+
+        # 초안 — 그 회신의 단계로 받는다.
+        client.complete("test/hello", {"name": "F"}, stage="followup")
+        assert mock_gemini.call_args.kwargs["system"] == "RULES-FOR:followup"
+        assert seen == ["followup"]
 
 
 # ---- hybrid model tier tests ----

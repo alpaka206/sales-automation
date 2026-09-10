@@ -118,16 +118,24 @@ class LLMClient:
         schema: type[T] | None = None,
         max_tokens: int = 2000,
         tier: str = "flash",
+        stage: str | None = None,
     ) -> str | T:
         """Render a prompt and call Gemini.
 
         ``tier`` selects the model: ``"flash"`` (fast/cheap, the default for
         classification/scoring/routing) or ``"pro"`` (high quality, used for
         customer-facing drafting). Unknown tiers fall back to flash.
+
+        ``stage`` 는 **이 호출이 어느 회신을 쓰는가**입니다 — ``'first'`` 또는
+        ``'followup'``. 회신 규칙(회사 규칙)은 그때만 실립니다.
+
+        **안 주면 규칙이 하나도 안 갑니다.** 분류·라우팅·요약·번역·언어 판별·회사 분석은
+        회신 규칙이 필요 없는데, 그동안 55,000자짜리 규칙 블록을 매 호출 지고 다녔습니다.
+        「필요한 곳에만 준다」가 기본값이라, 새 호출자가 아무것도 안 해도 안 실립니다.
         """
         model = settings.gemini_model_for.get(tier, settings.GEMINI_MODEL)
         thinking_budget = _THINKING_BUDGET_BY_TIER.get(tier, 0)
-        system = get_company_rules()
+        system = get_company_rules(stage) if stage is not None else ""
         prompt = load_prompt(prompt_name, variables, include_rules=False)
 
         if schema is not None:

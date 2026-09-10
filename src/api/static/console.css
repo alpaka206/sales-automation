@@ -115,8 +115,14 @@
 .content { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow-y: auto; }
 .nav-section .nav-item { height: 36px; padding-left: 35px; font-size: 12.5px; }
 .nav-section .nav-item .ic { display: none; }
-/* Desktop-only operator console — use the full width, no centered max-width. */
-.main { flex: 1; padding: 28px 34px 80px; width: 100%; min-width: 0; }
+/* Desktop-only operator console — use the full width, no centered max-width.
+   **아래 패딩은 위와 같습니다.** 예전에는 80px 이었고, 마지막 블록의 `mb-gap`(20px)이
+   그 위에 얹혀 **100px 짜리 빈 자리**가 화면 끝에 남았습니다 — 운영자 화면이 세로
+   695px 라 그 100px 이 스크롤을 만들었습니다(2026-09-10 실측). */
+.main { flex: 1; padding: 28px 34px; width: 100%; min-width: 0; }
+/* 마지막 블록의 아래 여백은 패딩과 겹칩니다. 블록 **사이**를 벌리는 값이지 끝에 붙이는
+   값이 아닙니다. */
+.main > *:last-child { margin-bottom: 0; }
 /* A page that FITS the screen instead of running past it: the last block takes
    whatever height the blocks above it leave, and scrolls inside itself. The dashboard
    uses it because the pipeline board is sized as if it started at the top of the
@@ -1084,3 +1090,8 @@ body.modal-open .content { overflow: hidden; }
 .wait-dot--ok { background: var(--ok-dot); }
 .wait-dot--warn { background: var(--warn-dot); }
 .wait-dot--danger { background: var(--danger-dot); }
+
+/* 정책 문서·템플릿 편집기의 본문 칸. **화면 안에서 끝나야 합니다** — 고정 420px 이었을
+   때 운영자 화면(세로 695px)에서 편집기가 화면 밖으로 나갔습니다. 빼는 값은 이 화면의
+   나머지(칩 줄·카드 패딩·제목 줄·라벨·액션 바)를 실측한 것입니다. */
+.doc-body { height: calc(100dvh - 320px); min-height: 220px; }

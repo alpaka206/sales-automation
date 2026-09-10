@@ -147,22 +147,144 @@ def test_the_usage_note_is_only_made_for_documents_the_router_reads(policy_db, m
     assert calls == ["본문"]
 
 
-def test_the_system_prompt_size_is_logged_separately(monkeypatch):
-    """회사 규칙은 `prompt` 가 아니라 `system` 으로 간다.
+def test_the_scope_actually_decides_which_reply_gets_the_rules(policy_db):
+    """**이 필터가 없던 동안 화면은 거짓말을 하고 있었습니다.**
 
-    이 칸이 없던 동안 로그의 `prompt_len` 은 실제로 보낸 입력의 절반도 안 됐고,
-    그래서 「프롬프트를 줄였다」를 로그만으로는 증명할 수 없었다.
+    「첫 회신에만」과 「그 이후 회신에」를 고르게 해 놓고 `_rules_from_db` 는 `scope` 를
+    안 봤습니다 — 고른 것이 아무 일도 안 하는데 화면에는 저장됐다고 보입니다. 화면을
+    로더보다 먼저 내놓아서 생긴 일이고, 외부 검토가 재현해 알려 줬습니다.
     """
+    from src.llm.prompts import _rules_from_db
+
+    with policy_db() as session:
+        _doc(session, label="공통", mode="rules", body="언제나 이 규칙.")
+        _doc(session, label="첫 회신", mode="rules", body="처음에만 이 규칙.", scope="first")
+        _doc(session, label="후속", mode="rules", body="그 뒤에만 이 규칙.", scope="followup")
+
+    first = _rules_from_db("first")
+    assert "언제나" in first and "처음에만" in first and "그 뒤에만" not in first
+
+    later = _rules_from_db("followup")
+    assert "언제나" in later and "그 뒤에만" in later and "처음에만" not in later
+
+    # 유틸리티(분류·번역·요약)는 「모두」만 본다.
+    util = _rules_from_db()
+    assert "언제나" in util and "처음에만" not in util and "그 뒤에만" not in util
+
+
+def test_an_unknown_stage_is_refused_rather_than_widened(policy_db):
+    """넓히는 쪽으로 틀리면 사람용 문서가 새고, 그건 화면 어디에도 안 보인다.
+
+    `router_docs` 가 모르는 stage 에서 **필터를 통째로 생략**하고 있었다 — `scope` 로
+    「사람만 본다」를 막으면 안 되는 이유가 바로 그 자리였다.
+    """
+    import pytest as _pytest
+
+    from src.llm.knowledge import router_docs, scopes_for_stage
+    from src.llm.prompts import _rules_from_db
+
+    assert scopes_for_stage(None) == ("all",)
+    for call in (lambda: scopes_for_stage("second"),
+                 lambda: router_docs("second"),
+                 lambda: _rules_from_db("second")):
+        with _pytest.raises(ValueError):
+            call()
+
+
+def test_editing_only_the_title_keeps_a_follow_up_only_document_out_of_the_first_reply(
+    policy_db, monkeypatch
+):
+    """**제목 한 번 고친 것으로 후속 전용 문서가 첫 회신 후보가 됐습니다.**
+
+    다섯 값 고르개가 `knowledge/followup` 을 표현할 수 없어서 `placement_of` 가 그것을
+    `"knowledge"` 라고 답했고, 화면이 그 값을 담아 두었다가 제목만 고친 저장에 같이
+    보냈고, 서버가 `knowledge/all` 로 적었습니다. 세 자리가 각자 맞는데 이어 붙이니
+    틀린 자리입니다 — 외부 검토가 재현해 알려 줬습니다.
+    """
+    monkeypatch.setattr(
+        "src.api.routes.policy_docs.usage_note_from_body",
+        lambda title, body, llm=None: "",
+    )
+    from src.llm.knowledge import FIRST, FOLLOWUP, router_docs
+
+    with policy_db() as session:
+        doc = _doc(session, label="깊은 참고", mode="knowledge", body="본문", scope="followup")
+
+    assert [d.label for d in router_docs(FOLLOWUP)] == ["깊은 참고"]
+    assert router_docs(FIRST) == []
+
+    # 화면이 제목만 고쳐 저장한다 — `placement` 는 안 보낸다(바뀐 것이 없으므로).
+    with TestClient(app) as client:
+        assert client.put(
+            f"/policy-docs/{doc}", data={"label": "깊은 참고 (개정)", "body": "본문"}
+        ).status_code == 200
+
+    assert router_docs(FIRST) == [], "제목만 고쳤는데 첫 회신 후보가 됐습니다"
+    assert [d.label for d in router_docs(FOLLOWUP)] == ["깊은 참고 (개정)"]
+
+
+def test_a_placement_round_trip_never_moves_a_document():
+    """**화면이 무엇을 보내든 서버가 안전해야 합니다.**
+
+    옛 버그는 세 자리의 합이었습니다 — `placement_of` 가 `knowledge/followup` 에
+    `"knowledge"` 라는 이름을 지어 줬고, 화면이 그것을 담아 두었다가 제목만 고친 저장에
+    같이 보냈고, 서버가 `knowledge/all` 로 적었습니다. 화면을 고쳐 그 사슬을 끊었지만,
+    **화면 하나에 기대는 안전은 다음 화면에서 깨집니다.**
+
+    그래서 여기서 고정하는 것은 순수 불변식입니다: **읽은 값을 그대로 되돌려 적으면
+    행이 안 움직인다.** 표현 못 하는 조합이면 빈 문자열이고, 빈 문자열은 아무것도
+    안 바꿉니다.
+    """
+    import types
+
+    from src.api.routes.policy_docs import PLACEMENTS, apply_placement, placement_of
+
+    combos = [(access, mode, scope)
+              for access in ("customer_context", "human_only")
+              for mode in ("rules", "knowledge")
+              for scope in ("all", "first", "followup")]
+    for access, mode, scope in combos:
+        row = types.SimpleNamespace(model_access=access, mode=mode, scope=scope)
+        apply_placement(row, placement_of(row))
+        assert (row.model_access, row.mode, row.scope) == (access, mode, scope), (
+            f"{access}/{mode}/{scope} 가 되돌려 적는 것만으로 움직였습니다"
+        )
+
+    # 그리고 다섯 값은 전부 실제로 표현됩니다 — 하나라도 못 돌려주면 그 칸을 고를 수
+    # 없거나, 고른 뒤 다시 열었을 때 다른 값이 보입니다.
+    for key, _label, access, mode, scope in PLACEMENTS:
+        row = types.SimpleNamespace(
+            model_access=access, mode=mode or "knowledge", scope=scope or "all"
+        )
+        assert placement_of(row) == key
+
+
+def test_an_unknown_placement_is_refused(policy_db):
+    """조용히 기본값으로 떨어지면 사람용 문서가 고객용으로 저장된다."""
+    with TestClient(app) as client:
+        assert client.post(
+            "/policy-docs", data={"label": "새 문서", "body": "본문", "placement": "무엇"}
+        ).status_code == 400
+
+
+def test_the_real_log_event_records_the_system_size(policy_db):
+    """**검사 대상을 lambda 로 갈아 끼우고 그 lambda 를 부르던 테스트였습니다.**
+
+    실제 `_log_event` 가 없어져도 통과했습니다 — 외부 검토가 지적했고 맞습니다.
+    이제 진짜 함수를 부르고 저장된 payload 를 봅니다.
+    """
+    from src.db.models import Event
     from src.llm.client import LLMClient
 
-    seen: dict = {}
     llm = LLMClient.__new__(LLMClient)
     llm.provider = "test"
-    monkeypatch.setattr(
-        LLMClient, "_log_event",
-        lambda self, prompt, result, system=None: seen.update(
-            prompt_len=len(prompt), system_len=len(system or "")
-        ),
-    )
-    LLMClient._log_event(llm, "1234", "ok", "rules" * 10)
-    assert seen == {"prompt_len": 4, "system_len": 50}
+    with patch("src.llm.client.SessionLocal", policy_db):
+        LLMClient._log_event(llm, "1234", "ok", "rules" * 10)
+
+    with policy_db() as session:
+        payload = session.query(Event).filter(Event.kind == "llm_call").one().payload
+
+    # 회사 규칙은 `prompt` 가 아니라 `system` 으로 갑니다. 이 칸이 없던 동안 로그의
+    # `prompt_len` 은 실제로 보낸 입력의 절반도 안 됐습니다.
+    assert payload["prompt_len"] == 4
+    assert payload["system_len"] == 50

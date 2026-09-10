@@ -86,7 +86,11 @@ function DocEditor({ doc, placements, onDone }: {
   async function save() {
     setNote(null);
     try {
-      const fields = { label, placement, body };
+      // **안 바꿨으면 안 보냅니다.** 보내면 서버가 그 값을 적고, 다섯으로 표현이 안 되는
+      // 조합(`knowledge/first`·`knowledge/followup`)은 그때 조용히 「모두」가 됩니다 —
+      // 제목만 고친 저장이 후속 전용 문서를 첫 회신 후보로 만들었습니다.
+      const fields: Record<string, string> = { label, body };
+      if (!doc || placement !== doc.placement) fields.placement = placement;
       if (doc) await send(`/policy-docs/${doc.id}`, "PUT", fields);
       else await send("/policy-docs", "POST", fields);
       onDone();
@@ -133,8 +137,12 @@ function DocEditor({ doc, placements, onDone }: {
           </div>
           <div style={{ width: 200 }}>
             <label className="field-label" htmlFor="pd-placement">어느 회신에</label>
+            {/* 서버가 빈 값을 주면 이 다섯으로 표현이 안 되는 조합입니다. **고르개를
+                비워 두고**, 운영자가 직접 고르지 않는 한 아무것도 안 보냅니다 — 골라야
+                바뀌고, 안 고르면 지금 범위가 그대로 남습니다. */}
             <select className="select" id="pd-placement" value={placement}
                     onChange={(e) => setPlacement(e.target.value)}>
+              {!placement && <option value="">— 지금 설정 유지 —</option>}
               {placements.map((p) => <option key={p.key} value={p.key}>{p.label}</option>)}
             </select>
           </div>
@@ -152,21 +160,29 @@ function DocEditor({ doc, placements, onDone }: {
             두면 다음 저장에 덮입니다. */}
 
         <label className="field-label" htmlFor="pd-body">본문</label>
-        <textarea className="draft-textarea mono" id="pd-body" value={body}
+        {/* **화면 안에서 끝납니다** — 높이를 고정값(420px)으로 두었더니 운영자 화면
+            (세로 695px)에서 편집기가 화면 밖으로 나가 스크롤을 만들었습니다. 이제 위아래
+            요소가 쓰고 남은 만큼 차지합니다. 짧은 창에서는 `min-height` 가 받칩니다. */}
+        <textarea className="draft-textarea mono doc-body" id="pd-body" value={body}
                   onChange={(e) => setBody(e.target.value)}
-                  style={{ minHeight: 420, fontSize: 12.5, lineHeight: 1.7 }}
+                  style={{ fontSize: 12.5, lineHeight: 1.7 }}
                   placeholder="노션에서 복사해 그대로 붙여넣으세요. 표와 목록은 그대로 읽힙니다." />
 
         {/* 저장은 왼쪽, 삭제는 오른쪽 끝에 휴지통 하나 — 이메일 템플릿과 같은 배치입니다.
             나란히 두면 둘이 같은 무게로 보입니다. */}
         <div className="action-bar row-between">
           <div className="row" style={{ gap: 8 }}>
-            {dirty && (
-              <ActionButton className="btn btn--primary btn--editor"
-                            pending={doc ? "저장 중" : "만드는 중"} onClick={save}>
-                <Icon name="check" size={15} /> {doc ? "저장" : "만들기"}
-              </ActionButton>
-            )}
+            {/* **버튼은 항상 자리에 있습니다** (2026-09-10 운영자 지시). 바뀐 것이
+                있을 때만 뜨게 해 두었더니 버튼이 나타났다 사라져 자리가 흔들렸고,
+                「저장이 어디 갔지」가 됩니다. 지금은 **비활성으로 보입니다** — 있는데
+                지금은 못 누른다는 것이 없는 것보다 알려 주는 것이 많습니다.
+
+                「만들기」도 「저장하기」로 통일했습니다. 만드는 것과 고치는 것이 같은
+                화면인데 버튼 글자만 다르면 같은 자리를 두 이름으로 부르게 됩니다. */}
+            <ActionButton className="btn btn--primary btn--editor" disabled={!dirty}
+                          pending="저장 중" onClick={save}>
+              <Icon name="check" size={15} /> 저장하기
+            </ActionButton>
             {doc && (
               <RevisionHistoryButton kind="policy_source" documentId={doc.id}
                                      title={doc.title || doc.label} />
@@ -234,24 +250,29 @@ export function PolicyDocs({ onBack }: { onBack?: () => void }) {
         <div><h1 className="page-title">정책 문서</h1></div>
       </div>
 
-      {/* **칸이 곧 섹션입니다.** 머리에 편수와 **글자수**를 적는 이유: 이 화면에서 가장
-          중요한 숫자가 「이 칸이 프롬프트에 얼마를 싣는가」입니다. 「사람만 본다」가 생긴
-          것도 그래서입니다 — 비공개 단가 문서 16,831자가 모든 호출에 실리고 있었습니다.
+      {/* **칸이 곧 섹션입니다.**
 
-          **빈 칸도 0편으로 그립니다.** 「그 이후 회신에 문서가 없다」는 것이 정보입니다. */}
-      {data.placements.map((placement) => {
-        const rows = data.rows.filter((row) => row.placement === placement.key);
-        const chars = rows.reduce((sum, row) => sum + row.chars, 0);
+          머리에 편수와 글자수를 적어 두었다가 뺐습니다(2026-09-10). 편수는 표에 행이
+          보이니 같은 말을 두 번 하는 것이고, 글자수는 **재배치하는 동안에만** 쓸모가
+          있었습니다 — 상시로는 아무도 안 보는 숫자가 매 줄 위에 한 자리씩 앉습니다.
+          「이 문서가 프롬프트를 얼마나 차지하나」를 말해야 할 자리는 문서 점검입니다.
+
+          **빈 칸은 안 그립니다.** 「0편」 한 줄을 위해 머리와 빈 표가 세 줄을 먹고,
+          어느 칸이 비었는지는 고르개에서 이미 보입니다. 운영자 화면이 세로 695px 라
+          안 쓰는 줄 하나가 곧 스크롤입니다. */}
+      {/* **고르개에 없는 조합은 「분류 안 됨」에 모입니다.** 안 그리면 그 문서가 목록
+          어디에도 안 뜨고, 화면에서 사라진 문서는 고칠 수도 옮길 수도 없습니다.
+          지금은 `mode='knowledge'` 행이 여기 옵니다 — 「문의별 참고」를 고르개에서
+          뺐기 때문입니다(라우터가 잠든 동안 그 칸은 「모든 회신에 적용」과 동작이 같습니다). */}
+      {[...data.placements, { key: "", label: "분류 안 됨 — 옛 설정" }].map((placement) => {
+        const rows = data.rows.filter((row) => (row.placement || "") === placement.key);
+        if (rows.length === 0) return null;
         return (
           <section key={placement.key} className="mb-gap">
             <div className="section-header table-heading">
               <div className="section-header__l">
                 <span className="section-header__icon"><Icon name="file" size={16} /></span>
                 <div className="section-header__title">{placement.label}</div>
-              </div>
-              <div className="section-header__r t-sm td-subtle tnum">
-                {rows.length}편{chars > 0 && ` · ${chars.toLocaleString()}자`}
-                {placement.key === "human_only" && " · 모델에게 안 갑니다"}
               </div>
             </div>
             <div className="card card--flush">

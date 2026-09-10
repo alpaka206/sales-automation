@@ -34,8 +34,23 @@ PROMPTS_DIR = Path(__file__).resolve().parent / "prompts"
 _PLACEHOLDER = re.compile(r"\{\{\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\}\}")
 
 
-def _rules_from_db() -> str:
-    """The always-applied policy, from ``policy_sources`` (mode='rules').
+def _rules_from_db(stage: str | None = None) -> str:
+    """The rules for THIS reply, from ``policy_sources`` (mode='rules').
+
+    **`scope` 가 여기서 듣습니다** (2026-09-10). 이 필터가 없던 동안 화면은 「첫 회신에만」
+    과 「그 이후 회신에」를 고르게 해 놓고 **두 회신에 다 넣고 있었습니다** — 고른 것이
+    아무 일도 안 하는데 화면에는 저장됐다고 보입니다. 이 저장소가 가장 싫어하는 종류의
+    상태이고, 화면을 로더보다 먼저 내놓아서 생긴 문제입니다.
+
+    ``stage`` 는 ``knowledge.router_docs`` 와 **같은 표**를 씁니다 — 「모두」에 그 단계의
+    문서를 더합니다. 표가 둘이면 규칙 문서와 참고 문서가 서로 다른 단계에 붙습니다.
+
+    - ``None`` — 유틸리티(분류·번역·요약·언어 판별). **「모두」만** 봅니다.
+      부르는 쪽에서 아예 안 부르는 것이 기본이고(``client.complete``), 이 값은 옛
+      호출자를 위한 자리입니다.
+    - ``'first'`` / ``'followup'`` — 그 회신의 규칙.
+    - 그 밖의 문자열 — **입력 오류입니다.** 조용히 「모두」로 넓히지 않습니다.
+      넓히는 쪽으로 틀리면 사람용 문서가 새고, 그건 화면 어디에도 안 보입니다.
 
     Read per call, not cached: the whole point of moving these out of the repo is that an
     edit in the console takes effect on the next draft. One indexed query against a
@@ -43,6 +58,11 @@ def _rules_from_db() -> str:
 
     Nothing here reaches the network — the rows ARE the policy, not a cache of it.
     """
+    # 단계 표는 `knowledge` 한 곳입니다. 늦게 import 하는 이유는 순환을 피하려는 것이고,
+    # 이 파일의 다른 DB 접근과 같은 방식입니다.
+    from .knowledge import scopes_for_stage
+
+    allowed = scopes_for_stage(stage)
     try:
         from ..db.models import PolicySource
         from ..db.session import SessionLocal
@@ -56,6 +76,7 @@ def _rules_from_db() -> str:
                 # 원가·이익률·승인 하한을 싣고 있었습니다.
                 .filter(PolicySource.model_access == "customer_context")
                 .filter(PolicySource.mode == "rules")
+                .filter(PolicySource.scope.in_(allowed))
                 # 순서는 만든 순서입니다. `order_index` 라는 칸이 있었지만 정할 방법이
                 # 없어서 늘 같은 값이었고, 결국 이 정렬이었습니다 (0101).
                 .order_by(PolicySource.id)
@@ -72,9 +93,9 @@ def _rules_from_db() -> str:
     return "\n\n".join(parts)
 
 
-def get_company_rules() -> str:
-    """The always-applied policy, with the section header the prompts refer to."""
-    body = _rules_from_db()
+def get_company_rules(stage: str | None = None) -> str:
+    """The rules for this reply, with the section header the prompts refer to."""
+    body = _rules_from_db(stage)
     if not body:
         return ""
     return "## Company rules (must follow)\n\n" + body
@@ -269,12 +290,19 @@ def canonicalize_contact_links(body: str, language: str | None = None) -> str:
 get_company_rules.cache_clear = lambda: None  # type: ignore[attr-defined]
 
 
-def load_prompt(name: str, variables: dict[str, object] | None = None, *, include_rules: bool = True) -> str:
+def load_prompt(
+    name: str, variables: dict[str, object] | None = None, *, include_rules: bool = False
+) -> str:
     """
     Load a prompt by dotted/slashed name (e.g. 'inbound/draft_reply' or 'inbound.draft_reply').
 
     Substitutes {{ key }} placeholders with `variables[key]`. Unknown placeholders are left as-is
     so the model can complain rather than silently dropping context.
+
+    **``include_rules`` 의 기본값이 False 입니다** (2026-09-10). 부르는 곳은
+    ``client.complete`` 하나이고 거기는 규칙을 ``system`` 으로 따로 싣습니다 — 기본값이
+    True 이면 **규칙이 실리는 문이 둘**이 되고, 그중 하나는 단계를 모릅니다. 회신 규칙은
+    ``complete(stage=...)`` 한 문으로만 들어갑니다.
     """
     rel = name.replace(".", "/")
     path = PROMPTS_DIR / f"{rel}.md"

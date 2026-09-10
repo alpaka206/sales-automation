@@ -70,9 +70,33 @@ PLACEMENTS = (
     ("rules_all", "모든 회신에 적용", "customer_context", "rules", "all"),
     ("rules_first", "첫 회신에만", "customer_context", "rules", "first"),
     ("rules_followup", "그 이후 회신에", "customer_context", "rules", "followup"),
-    ("knowledge", "문의별 참고", "customer_context", "knowledge", "all"),
-    ("human_only", "사람만 본다", "human_only", None, None),
 )
+
+# **「사람만 본다」도 고르개에서 뺐습니다** (2026-09-10 운영자 지시: 「사람만 보는 걸
+# 여기 굳이 적을 필요 없으니깐」). 이 콘솔에 있는 문서는 초안이 읽으라고 넣은 것이고,
+# 사람만 볼 자료는 여기 둘 이유가 없습니다. 남는 고르개는 운영자가 처음 말한 셋입니다 —
+# 모든 회신 · 첫 회신에만 · 그 이후 회신에.
+#
+# **`model_access` 칸과 네 자리 필터는 남습니다.** 고를 수 없을 뿐이고, 「이 문서만은
+# 모델에 안 보낸다」를 표현할 수 있는 유일한 장치입니다. 필터는 쿼리 한 줄씩이고, 값이
+# 안 서면 아무 일도 안 합니다. 지우려면 이관이 하나 더 필요합니다.
+#
+# **내용이 이상한 것은 배치로 숨기지 않습니다** (같은 지시: 「내용이 다르다고 되어
+# 있는데 그건 이상한 부분을 따로 표시해야지」). 고객 회신에 나가면 안 되는 구간이
+# 문서에 섞여 있으면 그 **구간을 짚는 것**이 문서 점검의 일이고, 문서를 통째로 빼는
+# 것은 다른 문제를 푸는 것입니다.
+
+# **「문의별 참고」는 고르개에서 뺐습니다** (2026-09-10 운영자 지시).
+#
+# 그 칸의 뜻은 「이 문의에 필요할 때만 붙는다」인데 **지금은 그렇게 동작하지 않습니다** —
+# 라우터가 실패·빈 선택에 **전체 후보로 폴백**하고(`knowledge.select_relevant_docs`)
+# 후보가 한 편이라, 고르든 실패하든 결과가 그 한 편으로 같습니다. 화면에 두 칸으로
+# 보이는데 동작이 같으면 그건 화면이 거짓말을 하는 것입니다.
+#
+# **`mode='knowledge'` 자체는 남습니다** — 라우터도, 그 행을 읽는 코드도 그대로입니다.
+# 문서가 늘어 예산을 넘고 `_fits_budget` 를 붙일 때 이 값을 고르개에 되돌립니다.
+# 그때까지 그런 행은 `placement_of` 가 빈 문자열로 답하고, 목록의 「분류 안 됨」에
+# 모입니다 — **화면에서 사라지면 고칠 수도 옮길 수도 없습니다.**
 _PLACEMENT_BY_KEY = {row[0]: row for row in PLACEMENTS}
 
 
@@ -85,9 +109,17 @@ def placement_of(source: PolicySource) -> str:
     for key, _label, _access, want_mode, want_scope in PLACEMENTS:
         if want_mode == mode and want_scope == scope:
             return key
-    # `knowledge/first`·`knowledge/followup` 처럼 다섯에 없는 조합. **덮어쓰지 않습니다** —
-    # 제목만 고친 저장이 그 문서를 조용히 「문의별 참고(모두)」로 되돌리면 안 됩니다.
-    return "knowledge" if mode == "knowledge" else "rules_all"
+    # `knowledge/first`·`knowledge/followup` 처럼 다섯에 없는 조합입니다.
+    #
+    # **여기서 이름을 지어 주면 안 됩니다.** 한 번 그렇게 했다가 버그를 만들었습니다:
+    # `knowledge/followup` 에 `"knowledge"` 를 돌려줬더니 화면이 그 값을 담아 두었다가
+    # 제목만 고친 저장에 같이 보냈고, 서버가 그것을 `knowledge/all` 로 적었습니다 —
+    # **후속 전용 문서가 제목 한 번 고친 것으로 첫 회신 후보가 됐습니다.** 바로 위
+    # 주석이 「덮어쓰지 않습니다」라고 적혀 있었는데 실제로는 덮어썼습니다.
+    #
+    # 빈 문자열은 「이 다섯으로 표현이 안 된다」는 뜻입니다. 화면은 그때 고르개를 비워
+    # 두고, 운영자가 **직접 고르지 않는 한** 아무것도 안 보냅니다.
+    return ""
 
 
 def apply_placement(source: PolicySource, key: str) -> bool:
@@ -138,6 +170,10 @@ async def policy_docs_create(
         raise HTTPException(status_code=400, detail="문서 이름을 입력해 주세요")
     # 화면은 칸 하나를 보냅니다. 옛 폼(`mode`+`scope`)도 그대로 받습니다 — 새 값을
     # 모르는 곳에서 저장해도 동작이 안 바뀝니다.
+    if placement and placement not in _PLACEMENT_BY_KEY:
+        # **조용히 기본값으로 떨어지지 않습니다.** 넓히는 쪽으로 틀리면 사람용 문서가
+        # 고객용으로 저장되고, 그건 화면 어디에도 안 보입니다.
+        raise HTTPException(status_code=400, detail=f"모르는 값입니다: {placement}")
     chosen = _PLACEMENT_BY_KEY.get(placement)
     if chosen is not None:
         _k, _l, access, mode, scope = chosen
@@ -212,6 +248,9 @@ async def policy_docs_update(
     if not admin_required(request):
         raise HTTPException(status_code=403, detail="관리자만 접근할 수 있습니다.")
 
+    if placement and placement not in _PLACEMENT_BY_KEY:
+        raise HTTPException(status_code=400, detail=f"모르는 값입니다: {placement}")
+
     # **부르기 전에 이 문서가 어떤 문서인지 먼저 봅니다** (0119).
     #
     # 이 호출은 문서 **본문을 모델에게 보냅니다**. 그래서 「사람만 본다」로 둔 문서는
@@ -251,13 +290,19 @@ async def policy_docs_update(
         if label.strip():
             source.label = label.strip()
             source.title = label.strip()
-        # 칸 하나로 왔으면 그것이 이깁니다. 옛 폼의 `mode`·`scope` 는 그대로 받습니다.
-        if not apply_placement(source, placement) and mode in _MODE_KEYS:
-            source.mode = mode
-        # 빈 값은 「안 보냈다」입니다 — 안 고칩니다. `mode` 와 같은 규칙이라, 이 칸을
-        # 모르는 옛 폼이 저장해도 문서가 조용히 「모두」로 되돌아가지 않습니다.
-        if scope in _SCOPE_KEYS:
-            source.scope = scope
+        # **칸 하나로 왔으면 그것이 끝까지 이깁니다.** 옛 폼의 `mode`·`scope` 는 그때
+        # 무시합니다 — 둘이 같이 오면 뒤에 적는 쪽이 이기고, 그러면 고른 것과 저장된
+        # 것이 갈립니다.
+        #
+        # **안 왔으면 아무것도 안 고칩니다.** 제목이나 본문만 고친 저장이 이 문서의
+        # 적용 범위를 다시 쓰면 안 됩니다 — 화면도 바뀐 것이 없으면 안 보냅니다.
+        if not apply_placement(source, placement):
+            # 빈 값은 「안 보냈다」입니다. 이 칸을 모르는 옛 폼이 저장해도 문서가 조용히
+            # 「모두」로 되돌아가지 않습니다.
+            if mode in _MODE_KEYS:
+                source.mode = mode
+            if scope in _SCOPE_KEYS:
+                source.scope = scope
         # **본문이 바뀌면 「언제 쓰는가」도 다시 만듭니다.** 본문에서 나온 값이라 본문이
         # 바뀌면 낡습니다 — 파생값을 저장할 때의 규칙이고, 이 저장소가 그 어긋남으로 이미
         # 두 번 당했습니다(`plan_starts_on` 0117 · `qualification` 0104).
