@@ -72,7 +72,8 @@ def snapshot_policy(session, source: PolicySource, *, change_note: str, edited_b
                 key: value
                 for key, value in (
                     ("mode", source.mode),
-                    ("subject", source.subject),
+                    # ``subject`` 가 여기 있었습니다 (이관 0118). 판본에 남은 옛 스냅샷은
+                    # 그 키를 그대로 들고 있고, 그건 그때의 사실이라 손대지 않습니다.
                     ("usage_note", source.usage_note),
                 )
                 if value

@@ -103,10 +103,15 @@ def test_the_only_date_is_the_last_save(policy_db):
 
 def test_nothing_can_overwrite_a_document_behind_the_operators_back(policy_db):
     """이 콘솔이 원본입니다. 노션에서 읽어 오는 경로가 하나라도 남아 있으면 "여기서 고쳤는데
-    다음 동기화가 되돌려 놓는" 상태가 다시 생깁니다."""
-    from src.agents import policy_sync
+    다음 동기화가 되돌려 놓는" 상태가 다시 생깁니다.
 
-    assert not hasattr(policy_sync, "sync_policy_sources")
+    **`agents/policy_sync.py` 자체가 없어졌습니다** (2026-09-10). 마지막까지 남아 있던
+    `knowledge_slug` 가 `notion-<해시>` 를 돌려주는데 그것이 정책 문서 목록에 그대로
+    찍혀 있었고, 함수 docstring 이 직접 「아무것도 가리키지 않습니다」라고 적고 있었습니다
+    (운영자 지적). 그 파일을 살려 둔 이유는 이관 0097 이 같은 식으로 사본 행을 가렸기
+    때문인데, 그 이관은 처음부터 자기 안에서 해시를 계산합니다.
+    """
+    assert not pathlib.Path("src/agents/policy_sync.py").exists()
     assert not pathlib.Path("src/integrations/notion.py").exists()
 
 

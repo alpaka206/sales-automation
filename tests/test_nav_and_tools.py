@@ -56,9 +56,11 @@ def test_a_document_arrives_with_its_text_and_can_be_edited_here():
     # 칸을 하나 더할 때 고칠 곳이 둘이 됩니다 — 실제로 메일 제목 칸이 그랬습니다.
     # (본문 칸이 하나라는 것으로 셉니다. 폼 안의 textarea 는 그 뒤로 늘었습니다.)
     assert policy.count('id="pd-body"') == 1
-    # 라우터가 이 문서를 고를 때 읽는 한 줄. 본문 맨 위에 적어 두면 노션에서 다시 붙여넣을
-    # 때마다 날아갑니다.
-    assert 'id="pd-usage"' in policy
+    # 폼이 묻는 것은 제목과 본문 둘뿐입니다 (2026-09-10 지시). 메일 제목 칸은 DB 에서도
+    # 나갔고(0118), 「언제 사용하는가」는 사람이 아니라 본문을 보고 모델이 적습니다
+    # (`knowledge.usage_note_from_body`). 칸을 다시 넣으려면 그 값을 누가 읽는지부터
+    # 정하세요 — 라우터가 읽는 그 한 줄은 이미 서버가 만듭니다.
+    assert 'id="pd-usage"' not in policy and 'id="pd-subject"' not in policy
     assert 'doc: "new"' in policy
     assert not pathlib.Path("src/integrations/notion_export.py").exists()
 

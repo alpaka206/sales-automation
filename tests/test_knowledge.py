@@ -150,47 +150,33 @@ def test_spam_still_gets_documents(db) -> None:
     assert "Business 플랜 홍보" in knowledge.select_relevant_docs("광고입니다", "spam")
 
 
-# ---- 메일 제목 ---------------------------------------------------------------------
+# ---- 메일 제목은 문서가 정하지 않는다 (2026-09-10) --------------------------------
 
 
-def test_the_document_can_carry_the_mail_subject(db) -> None:
-    """제목은 코드가 읽습니다 — 모델에게 묻지 않습니다. 짧은 줄일수록 모델이 지어냅니다."""
-    _doc(db, "k1", "견적 안내", subject="[Perso Dubbing] Next steps")
+def test_a_document_cannot_name_the_mail_any_more() -> None:
+    """**문서가 회신 제목을 정하던 길은 없앴습니다** (운영자 지시, 이관 0118).
 
-    body, subject = knowledge.select_relevant_docs(
-        "견적", "pricing_question", llm=_FakeLLM(["k1"]), with_subject=True
-    )
+    그 길은 두 번 사고를 냈습니다. ① 제목을 든 문서가 둘이면 **가나다순으로 앞선 쪽**이
+    이겼는데 그것이 「메일 템플릿」이라는 보장이 없었습니다 — 2026-08-26 에 「B2B 플랜
+    비교표」(참고 문서)가 「견적 및 맞춤형 플랜 안내」(실제 회신 서식)를 제쳤고, 코드는
+    이긴 쪽을 지목할 수 없어 경고만 남겼습니다. ② 문서 제목은 운영자가 쓴 **고정 문장**
+    이라 문의 언어와 무관하게 그 문서의 언어로 나갔습니다(한국어 문의에 영어 제목, msg 62).
 
-    assert "견적 안내" in body
-    assert subject == "[Perso Dubbing] Next steps"
+    이제 제목은 `common.subjects.reply_subject` 하나가 정합니다. **CODE GUARD 3 은
+    그대로입니다** — 없어진 것은 문서가 제목을 덮어쓰는 길이고, 모델이 제목을 쓰는 길이
+    열린 것이 아닙니다.
+    """
+    import pathlib
 
+    from src.db.models import PolicySource
 
-def test_a_document_with_no_subject_leaves_the_reply_on_re(db) -> None:
-    _doc(db, "k1", "지원 언어 정책")
-
-    subject = knowledge.select_relevant_docs(
-        "언어", "support", llm=_FakeLLM(["k1"]), with_subject=True
-    )[1]
-
-    assert subject is None
-
-
-def test_two_documents_carrying_a_subject_is_logged_not_silently_resolved(db, caplog) -> None:
-    """순서는 제목 가나다순이라 **이긴 문서가 메일 템플릿이라는 보장이 없습니다** —
-    2026-08-26 에 「B2B 플랜 비교표」(참고 문서)가 「견적 및 맞춤형 플랜 안내」(실제 회신
-    서식)를 제치고 제목을 정했습니다. 그래서 경고는 어느 쪽이 옳다고 지목하지 않고 제목을
-    든 문서를 전부 나열합니다 — 어느 것이 메일 템플릿인지는 운영자가 압니다."""
-    _doc(db, "k1", "B2B 플랜 비교표", subject="비교표 제목")
-    _doc(db, "k2", "견적 및 맞춤형 플랜 안내", subject="견적 제목")
-
-    with caplog.at_level("WARNING"):
-        subject = knowledge.select_relevant_docs(
-            "견적", "pricing_question", llm=_FakeLLM(["k1", "k2"]), with_subject=True
-        )[1]
-
-    assert subject == "비교표 제목"
-    logged = caplog.text
-    assert "B2B 플랜 비교표" in logged and "견적 및 맞춤형 플랜 안내" in logged
+    assert not hasattr(PolicySource, "subject"), "문서는 더 이상 제목을 들지 않습니다"
+    assert not hasattr(knowledge, "subject_from_docs")
+    # 초안 경로에도 그 갈래가 남아 있으면 안 됩니다.
+    inbound = pathlib.Path("src/agents/inbound.py").read_text(encoding="utf-8")
+    assert "doc_subject" not in inbound
+    assert "_subject_in_inquiry_language(" not in inbound
+    assert "draft.subject = reply_subject(" in inbound
 
 
 # ---- 사본 표는 없다 ----------------------------------------------------------------
@@ -200,13 +186,16 @@ def test_the_copy_table_is_gone() -> None:
     """``knowledge_documents`` 는 파생물이었습니다 — 칸이 하나도 자기 것이 아니었고,
     그래서 원본과 어긋날 수 있었습니다(0097 의 ``perso_refund_policy`` 가 그 결과입니다).
     표도, 그 표를 채우던 코드도 없어야 합니다(0098)."""
-    import src.agents.policy_sync as policy_sync
+    import pathlib
+
     from src.db import models
 
     assert not hasattr(models, "KnowledgeDocument")
     assert "knowledge_documents" not in Base.metadata.tables
-    for gone in ("refresh_knowledge_copy", "_upsert_knowledge", "_tags_for"):
-        assert not hasattr(policy_sync, gone), gone
+    # 그 표를 채우던 파일도 없습니다 (2026-09-10). 마지막까지 남아 있던 `knowledge_slug` 가
+    # `notion-<해시>` 를 돌려주는데 그것이 정책 문서 목록에 찍혀 있었고, 함수 docstring 이
+    # 직접 「아무것도 가리키지 않습니다」라고 적고 있었습니다(운영자 지적).
+    assert not pathlib.Path("src/agents/policy_sync.py").exists()
 
 
 # ---- 어느 회신에 붙는 문서인가 (0108) ------------------------------------------------

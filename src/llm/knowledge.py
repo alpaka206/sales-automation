@@ -68,36 +68,56 @@ def title_of(source: PolicySource) -> str:
     return source.title or source.label or ""
 
 
-def subject_from_docs(docs: list[PolicySource]) -> str | None:
-    """근거로 쓴 문서가 들고 온 메일 제목.
+def usage_note_from_body(title: str, body: str, llm: object | None = None) -> str:
+    """본문을 읽고 **라우터가 읽을 한 줄**을 만듭니다 (2026-09-10 운영자 지시).
 
-    코드가 읽습니다 — 모델에게 묻지 않습니다(CODE GUARD 3 과 같은 이유). 제목은 모델이
-    기꺼이 지어내는 종류의 짧은 줄이고, 그러면 RE: 가 쌓이거나 언어가 뒤집힙니다.
+    「언제 쓰는가」는 사람이 적던 칸이었습니다. 비워 두면 `summary_of` 가 본문 앞 400자를
+    자르는데, **바로 표로 시작하는 문서에서는 그 400자가 아무것도 안 말합니다** — 그러면
+    라우터가 그 문서를 못 고르고, 그것이 실측 「Doc router selected nothing」 5/5 의
+    재료였습니다. 그렇다고 사람이 매번 적게 하면 안 적힌 행이 반드시 생깁니다.
 
-    **메일 제목은 메일 템플릿 문서에만 채웁니다.** 지원 언어·크레딧 같은 근거 문서는
-    내용을 제공할 뿐 그 메일의 제목을 정하지 않습니다 — 그 문서들의 제목 칸은 비워 둡니다.
-    코드가 이름으로 「메일 템플릿」을 알아보게 하지는 않았습니다: 문서 이름은 바뀌고,
-    이름을 조건에 넣으면 이름을 바꾸는 순간 조용히 끊깁니다.
+    형식을 프롬프트가 고정합니다(`policy/usage_note.md`) — 「쓰는 경우: … / 담긴 것: …」.
+    라우터가 보는 것은 본문이 아니라 이 한 줄이므로, **어떤 문의가 이 문서를 끌어와야
+    하는지**를 고객이 쓸 말로 적어야 합니다.
+
+    **실패하면 빈 문자열입니다.** 그때 그 칸은 NULL 로 남고 `summary_of` 가 예전처럼 본문
+    앞부분으로 떨어집니다 — 문서를 저장하는 일이 모델 사정으로 막히면 안 됩니다.
     """
-    carrying = [(doc, (doc.subject or "").strip()) for doc in docs]
-    carrying = [(doc, subject) for doc, subject in carrying if subject]
-    if not carrying:
-        return None
-    if len(carrying) > 1:
-        # **어느 쪽이 옳은지 여기서는 모릅니다.** 순서는 제목 가나다순이라, 이긴 문서가
-        # 「메일 템플릿」이라는 보장이 없습니다 — 2026-08-26 에 「B2B 플랜 비교표」(참고
-        # 문서)가 「견적 및 맞춤형 플랜 안내」(실제 회신 서식)를 제치고 제목을 정했습니다.
-        # 그때 이 경고는 이긴 쪽을 옳다고 가정하고 진 쪽을 비우라고 적었는데, 비워야 할
-        # 것은 반대였습니다. 그래서 지목하지 않고 전부 나열합니다.
-        logger.warning(
-            "%d documents carry a mail subject (%s); 가나다순으로 앞선 「%s」의 제목을 "
-            "씁니다. 메일 제목은 메일 템플릿에만 채우고, 내용만 제공하는 근거 문서는 "
-            "제목 칸을 비워 두세요.",
-            len(carrying),
-            ", ".join(title_of(doc) for doc, _ in carrying),
-            title_of(carrying[0][0]),
+    text = (body or "").strip()
+    if not text:
+        return ""
+    try:
+        from .client import LLMClient
+
+        line = (llm or LLMClient()).complete(
+            "policy/usage_note",
+            {"title": title or "", "body": text[:8000]},
+            tier="flash",
+            max_tokens=200,
         )
-    return carrying[0][1]
+    except Exception:
+        logger.warning("「언제 쓰는가」를 만들지 못했습니다: %s", title, exc_info=True)
+        return ""
+    line = " ".join(str(line or "").split()).strip()
+    if not line or line == "(없음)":
+        return ""
+    return line[:_SUMMARY_CHARS]
+
+
+# **메일 제목 칸은 없앴습니다** (2026-09-10 운영자 지시: 「메일 제목은 아예 db 자체에도
+# 없어도 될 것 같고」). `subject_from_docs` 가 여기 있었습니다 — 근거로 쓴 문서가 들고 온
+# 제목으로 회신 제목을 정하던 함수입니다.
+#
+# **그 길은 두 번 사고를 냈습니다.** ① 제목을 든 문서가 둘이면 가나다순으로 앞선 쪽이
+# 이겼는데, 그것이 「메일 템플릿」이라는 보장이 없었다 — 2026-08-26 에 참고 문서가 실제
+# 회신 서식을 제쳤다. ② 문서 제목은 운영자가 쓴 고정 문장이라 문서의 언어로 나갔다 —
+# 한국어 문의에 영어 제목이 나간 것이 그것이다(msg 62). 두 번째는 `_subject_in_inquiry_
+# language` 로 덧대었고, 그 함수도 같이 나갔습니다.
+#
+# 이제 제목은 `common.subjects.reply_subject` **하나**가 정합니다 — 「RE: <고객이 쓴
+# 제목>」이고 RE: 가 쌓이지 않으며 문의의 언어입니다. CODE GUARD 3(제목을 모델에게 묻지
+# 않는다)은 그대로입니다: 없어진 것은 **문서가 제목을 덮어쓰는 길**이고, 모델이 제목을
+# 쓰는 길이 열린 것이 아닙니다.
 
 
 def _format_docs(docs: list[PolicySource]) -> str:
@@ -170,7 +190,6 @@ def select_relevant_docs(
     category: str,
     llm: object | None = None,
     language: str | None = None,
-    with_subject: bool = False,
     stage: str = FIRST,
 ):
     """어떤 문서를 보고 답할지 **모델이** 고릅니다.
@@ -182,16 +201,13 @@ def select_relevant_docs(
 
     라우터가 실패하거나 아무것도 못 고르면 **문서 전부**로 떨어집니다.
 
-    ``with_subject=True`` 면 (본문, 그 문서들이 들고 온 메일 제목) 을 돌려줍니다.
-
     ``stage`` 는 후보를 먼저 좁힙니다 — 「후속 회신에만」 문서는 첫 회신의 인덱스에 아예
     안 실립니다. 모델에게 「이건 첫 회신이니 고르지 마라」라고 부탁하는 대신 보여 주지
     않습니다: 부탁은 지켜질 때도 있고 안 지켜질 때도 있습니다.
     """
 
-    def done(docs: list[PolicySource]):
-        text = _format_docs(docs)
-        return (text, subject_from_docs(docs)) if with_subject else text
+    def done(docs: list[PolicySource]) -> str:
+        return _format_docs(docs)
 
     candidates = router_docs(stage)
     if not candidates:

@@ -20,6 +20,7 @@ still using the previous copy. An operator must be able to see "정책이 3일�
 
 from __future__ import annotations
 
+import asyncio
 import logging
 
 from fastapi import APIRouter, Form, HTTPException, Request
@@ -28,6 +29,7 @@ from fastapi.responses import RedirectResponse
 from ...db.models import PolicySource
 from ...db.revisions import snapshot_policy
 from ...db.session import SessionLocal
+from ...llm.knowledge import usage_note_from_body
 from ..auth import actor_name, admin_required
 
 logger = logging.getLogger(__name__)
@@ -72,8 +74,6 @@ async def policy_docs_create(
     body: str = Form(""),
     mode: str = Form("knowledge"),
     scope: str = Form("all"),
-    subject: str = Form(""),
-    usage_note: str = Form(""),
 ):
     """제목과 본문을 붙여넣어 문서를 하나 만듭니다.
 
@@ -92,6 +92,10 @@ async def policy_docs_create(
     if scope not in _SCOPE_KEYS:
         scope = "all"
 
+    # **모델을 세션 밖에서 부릅니다.** 열어 둔 세션이 저쪽 응답을 기다리면, DB 가 도쿄에
+    # 있고 모델이 느린 날 그 커넥션이 몇 초씩 잡혀 있습니다.
+    usage_note = await asyncio.to_thread(usage_note_from_body, label, body)
+
     key = _doc_key(label)
     with SessionLocal() as session:
         if (
@@ -106,8 +110,11 @@ async def policy_docs_create(
             mode=mode,
             scope=scope,
             body=body,
-            subject=subject.strip() or None,
-            usage_note=usage_note.strip() or None,
+            # **「언제 쓰는가」는 본문을 읽어 만듭니다** (2026-09-10 운영자 지시: 「사람이
+            # 쓰는 게 아니라 본문을 보고 알아서 정리하도록, ai 가 읽기 좋은 형식으로」).
+            # 실패하면 빈 값이고 그때는 `summary_of` 가 본문 앞부분으로 떨어집니다 —
+            # 문서를 저장하는 일이 모델 사정으로 막히면 안 됩니다.
+            usage_note=usage_note or None,
         )
         session.add(source)
         # 만든 직후에는 이력을 남기지 않습니다 — 이 표는 「이전 판본」을 들고 있고,
@@ -127,8 +134,6 @@ async def policy_docs_update(
     body: str = Form(""),
     mode: str = Form(""),
     scope: str = Form(""),
-    subject: str = Form(""),
-    usage_note: str = Form(""),
 ):
     """본문을 고칩니다. 어떤 문서든 고칠 수 있습니다.
 
@@ -138,6 +143,13 @@ async def policy_docs_update(
     """
     if not admin_required(request):
         raise HTTPException(status_code=403, detail="관리자만 접근할 수 있습니다.")
+
+    # 본문이 안 왔으면 만들 것도 없습니다 — 빈 값은 「안 보냈다」입니다.
+    usage_note = (
+        await asyncio.to_thread(usage_note_from_body, label.strip(), body)
+        if body.strip()
+        else ""
+    )
 
     with SessionLocal() as session:
         source = session.get(PolicySource, source_id)
@@ -155,10 +167,12 @@ async def policy_docs_update(
         # 모르는 옛 폼이 저장해도 문서가 조용히 「모두」로 되돌아가지 않습니다.
         if scope in _SCOPE_KEYS:
             source.scope = scope
-        source.subject = subject.strip() or None
-        source.usage_note = usage_note.strip() or None
+        # **본문이 바뀌면 「언제 쓰는가」도 다시 만듭니다.** 본문에서 나온 값이라 본문이
+        # 바뀌면 낡습니다 — 파생값을 저장할 때의 규칙이고, 이 저장소가 그 어긋남으로 이미
+        # 두 번 당했습니다(`plan_starts_on` 0117 · `qualification` 0104).
         if body.strip():
             source.body = body
+            source.usage_note = usage_note or None
         session.commit()
 
     _publish(source_id)

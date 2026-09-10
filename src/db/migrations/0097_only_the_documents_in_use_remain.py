@@ -47,7 +47,13 @@ logger = logging.getLogger(__name__)
 
 
 def _live_copy_slugs(conn) -> set[str]:
-    """``policy_sources`` 가 지금 가리키는 사본 slug. ``policy_sync.knowledge_slug`` 와 같은 식."""
+    """``policy_sources`` 가 지금 가리키는 사본 slug. 규칙을 여기 그대로 둡니다.
+
+    한동안 `agents/policy_sync.knowledge_slug` 가 같은 식을 들고 있었고 이 이관이 그것을
+    「읽을 수 있게」 그 파일을 살려 두는 이유였습니다. 그 함수는 2026-09-10 에 지웠습니다 —
+    돌려주는 `notion-<해시>` 가 아무것도 안 가리키는데 정책 문서 목록에 그대로 찍혀
+    있었습니다(운영자 지적). 이 이관은 처음부터 자기 안에서 해시를 계산하므로 그 파일에
+    의존한 적이 없습니다."""
     slugs: set[str] = set()
     for (doc_key,) in conn.execute(text("SELECT doc_key FROM policy_sources")).fetchall():
         key = (doc_key or "").strip()

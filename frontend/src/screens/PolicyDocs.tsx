@@ -12,12 +12,12 @@ import { DeleteDialog } from "../ui/DeleteDialog";
 
 type Mode = { key: string; label: string };
 type Row = {
-  id: number; label: string; title: string | null; mode: string; slug: string;
+  id: number; label: string; title: string | null; mode: string;
   /** 어느 회신에 붙는가 (0108). `scope_label` 은 기본값(`all`)과 「항상 적용」에서 빕니다 —
    *  모든 줄에 「모두」가 하나씩 붙으면 아무것도 안 알려 줍니다. */
   scope: string; scope_label: string;
   body: string | null; chars: number;
-  subject: string; usage_note: string; updated_at: string;
+  usage_note: string; updated_at: string;
   version: number;
 };
 type Data = { modes: Mode[]; scopes: Mode[]; rows: Row[] };
@@ -42,12 +42,11 @@ const COLUMNS: Column<Row>[] = [
   { label: "문서", width: "66%", cell: (row) => (
       <>
         <strong>{row.title || row.label}</strong>
-        {/* 라우터가 "이 문서를 보고 답해라" 라고 할 때 부르는 이름. 고르는 근거는 제목과
-            「언제 쓰는가」이지 이 글자가 아니지만, 로그에 남는 것이 이것이라 화면과 로그를
-            맞춰 보려면 여기 있어야 합니다. 「항상 적용」 문서에는 없습니다 — 고르는 대상이
-            아니라 모든 프롬프트에 통째로 들어갑니다. */}
         {row.scope_label && <span className="tag" style={{ marginLeft: 6 }}>{row.scope_label}</span>}
-        {row.slug && <div className="t-xs mono t-subtle">{row.slug}</div>}
+        {/* **`notion-…` 줄은 없앴습니다** (2026-09-10 운영자 지적). 그 값은
+            `notion-<doc_key 앞 12자>` 였고, 함수 docstring 이 직접 「아무것도 가리키지
+            않습니다」라고 적고 있었습니다 — 노션에서 받아오던 시절의 사본 표 slug 이고
+            그 표는 2026-08-27 에 없어졌습니다. 라우터가 부르는 이름은 `doc_key` 입니다. */}
       </>
     ) },
   // **날짜는 하나입니다** (0101). 「기준일」이라는 칸이 따로 있었는데 마이그레이션이 심은
@@ -70,8 +69,6 @@ function DocEditor({ doc, modes, scopes, onDone }: {
   const [label, setLabel] = useState(doc?.title || doc?.label || "");
   const [mode, setMode] = useState(doc?.mode || "knowledge");
   const [scope, setScope] = useState(doc?.scope || "all");
-  const [subject, setSubject] = useState(doc?.subject || "");
-  const [usageNote, setUsageNote] = useState(doc?.usage_note || "");
   const [body, setBody] = useState(doc?.body || "");
   const [note, setNote] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
@@ -80,15 +77,14 @@ function DocEditor({ doc, modes, scopes, onDone }: {
   // 화면에서만 앞서 보입니다. 실제로 올라가는 것은 저장을 눌렀을 때뿐입니다.
   const dirty = doc
     ? label !== (doc.title || doc.label) || mode !== doc.mode || scope !== (doc.scope || "all")
-      || subject !== (doc.subject || "")
-      || usageNote !== (doc.usage_note || "") || body !== (doc.body || "")
+      || body !== (doc.body || "")
     : Boolean(label.trim() || body.trim());
   const shownVersion = (doc?.version ?? 1) + (dirty && doc ? 1 : 0);
 
   async function save() {
     setNote(null);
     try {
-      const fields = { label, mode, scope, subject, usage_note: usageNote, body };
+      const fields = { label, mode, scope, body };
       if (doc) await send(`/policy-docs/${doc.id}`, "PUT", fields);
       else await send("/policy-docs", "POST", fields);
       onDone();
@@ -154,41 +150,16 @@ function DocEditor({ doc, modes, scopes, onDone }: {
           )}
         </div>
 
-        {/* 이 문서를 근거로 회신할 때의 메일 제목. 본문 안에 "Subject: ..." 로 적으면 모델이
-            그 줄을 본문에 옮겨 적어 첫 줄이 "Subject: ..." 인 메일이 나갑니다.
+        {/* **「메일 제목」과 「언제 쓰는가」 칸은 없앴습니다** (2026-09-10 운영자 지시).
 
-            아래 "언제 쓰는가" 와 함께 문의별 참고에만 묻습니다: 둘 다 라우터에 넘어가는 사본에만
-            실리는 값이라, 항상 적용 문서에서는 채워도 아무 데도 가 닿지 않습니다. */}
-        {mode === "knowledge" && (
-          <>
-            <label className="field-label" htmlFor="pd-subject">
-              메일 제목 <span className="t-subtle">(비우면 RE: 고객이 쓴 제목)</span>
-            </label>
-            <input className="input" id="pd-subject" value={subject}
-                   onChange={(e) => setSubject(e.target.value)}
-                   placeholder="예: Next Steps on Your custom Perso Dubbing plan"
-                   style={{ marginBottom: 12 }} />
-          </>
-        )}
+            메일 제목은 DB 에서도 나갔습니다(이관 0118) — 그 고정 제목이 두 번 사고를 냈고,
+            지금 제목은 「RE: <고객이 쓴 제목>」 하나입니다.
 
-        {/* 문의별 참고에만 묻습니다. 항상 적용 문서는 라우터를 거치지 않고 무조건 들어가므로,
-            "언제 쓰는가" 는 그쪽에 답이 없는 질문입니다.
-
-            문서를 고르는 것은 모델이고, 모델이 보는 것은 본문이 아니라 인덱스 한 줄입니다.
-            비우면 본문 앞 400자가 그 자리에 들어갑니다 — 바로 표로 시작하는 문서는 그래서
-            안 골라졌습니다. 본문 맨 위에 적어 두던 방식은 노션에서 다시 붙여넣을 때마다
-            날아갔습니다. */}
-        {mode === "knowledge" && (
-          <>
-            <label className="field-label" htmlFor="pd-usage">
-              언제 쓰는가 <span className="t-subtle">(AI가 이 문서를 고를 때 읽는 설명. 비우면 본문 앞부분)</span>
-            </label>
-            <textarea className="draft-textarea" id="pd-usage" value={usageNote}
-                      onChange={(e) => setUsageNote(e.target.value)}
-                      style={{ minHeight: 72, marginBottom: 12 }}
-                      placeholder="예: Quote, Price, pricing, cost, estimate, 추천 플랜 등 가격·견적·플랜 추천을 직접 묻는 문의에 씁니다." />
-          </>
-        )}
+            「언제 쓰는가」는 **저장할 때 본문에서 만듭니다**(`knowledge.usage_note_from_body`).
+            사람이 적게 두면 안 적힌 행이 반드시 생기고, 바로 표로 시작하는 문서에서는 본문
+            앞 400자가 아무것도 안 말해서 라우터가 그 문서를 못 골랐습니다. 만들어진 줄은
+            목록에서 볼 수 있습니다 — 고칠 수는 없습니다: 본문에서 나온 값이라 손으로 고쳐
+            두면 다음 저장에 덮입니다. */}
 
         <label className="field-label" htmlFor="pd-body">본문</label>
         <textarea className="draft-textarea mono" id="pd-body" value={body}

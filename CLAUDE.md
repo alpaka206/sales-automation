@@ -718,6 +718,19 @@ PERSO Inbound is a FastAPI workflow for inbound inquiry handling and customer op
 - **답변의 형식·톤 규칙은 콘솔에 한 벌만 둔다.** `policy_sources(mode='rules')` 의 「공통 원칙 및 가드레일」이 그 한 벌이고, `draft_reply.md` 는 그것을 따르라고 가리키기만 한다. 양쪽에 적으면 운영자가 콘솔에서 고친 쪽과 배포해야 바뀌는 파일이 조용히 어긋난다. `tests/test_reply_style.py::test_the_layout_rules_live_in_exactly_one_place` 가 고정한다.
   - **가격은 문서와 코드가 같은 말을 해야 한다.** 문서의 가드레일이 "구체적 가격 숫자를 쓰지 않는다" 이므로 `_PRICING_RULE_NORMAL` 도 그렇게 말한다. 예전에는 정반대였고(코드는 "금액을 명시하라"), 그때 이기는 쪽은 코드였다. `enforce_first_reply_no_price` 는 첫 회신에만 도는 하드 가드로 남는다 — 모든 회신에 걸면 운영자가 일부러 적은 금액을 조용히 지운다.
   - **어떤 문서를 쓸지는 모델이 고른다.** 매핑을 코드에 박으면 문서 이름이 바뀌거나 지워질 때마다 흔적 없이 끊긴다. 모델이 보는 것은 본문이 아니라 인덱스 한 줄(`slug·title·categories·tags·summary`)이고, `summary` 는 정책 문서의 **「언제 쓰는가」 칸**(0064)이다 — 비면 본문 앞 400자. 사본의 `categories` 는 `["all"]` 이어야 한다: 라우터가 실패해 유형 매칭으로 떨어질 때 후보가 0개가 되면 **문서 없이** 답을 쓴다.
+    - **그 「언제 쓰는가」는 사람이 안 쓴다 — 본문을 보고 모델이 적는다** (2026-09-10 지시,
+      `knowledge.usage_note_from_body`). 폼에서 칸을 뺐다: 운영자가 본문을 붙여넣고 이
+      한 줄을 또 쓰는 일은 같은 것을 두 번 적는 것이고, 안 적으면 라우터가 보는 것이 본문
+      앞 400자로 떨어졌다. 저장할 때 flash 한 번(`policy/usage_note`)으로 만들고 실패하면
+      **빈 칸으로 둔다** — 그때는 예전처럼 본문 앞 400자다. 문서 저장이 모델 때문에 실패하면
+      안 되고, 본문을 안 고친 수정에서는 다시 만들지도 않는다.
+    - **문서는 메일 제목을 정하지 않는다** (이관 0118). `policy_sources.subject` 가 있었고
+      `subject_from_docs` 가 그것으로 `draft.subject` 를 덮었다. 두 번 사고를 냈다 — 제목을
+      든 문서가 둘일 때 **가나다순**이 이겨서 참고 문서가 회신 서식을 제쳤고(2026-08-26),
+      그 고정 제목은 운영자가 쓴 문장이라 한국어 문의에 영어 제목이 나갔다(msg 62). 지금
+      제목은 `common.subjects.reply_subject` 하나가 정한다 — 「RE: <고객이 쓴 제목>」이라
+      **언제나 고객의 언어**이고, 그래서 제목을 번역하던 `_subject_in_inquiry_language` 도
+      같이 나갔다. 되살리려면 「어느 문서가 제목을 정하는가」를 코드가 알 방법부터 정해라.
 - Every outbound reply requires human approval. `_finalize_draft` always writes `pending_approval`, and migration 0087 retires any legacy queued acknowledgement.
 - **The inquiry category is stored and shown; which document answers it is NOT.** `Conversation.inquiry_category` (0049) is what the 회신 및 검토 list shows where 채널 used to be — channel was `email` on every row. `support` / `spam` / `recruiting` render as **UnQualified**, which means "not a sales lead", not "do not reply": those still get an answer, from the CS guide or the intro document. It also replaced the 검토 필요 flag (0047, dropped in 0049) — "CS 문의" says which one to open first far better than "확인이 필요합니다" did. `Conversation.inquiry_subject` (renamed from `topic` in 0041) still holds the customer's own subject line.
   - **The category→document mapping is deliberately not in code.** The model reads the document index (title · summary · tags) and picks; the category and the inquiry language are hints in the prompt, not a lookup table. Policy changes and Notion titles change — a mapping frozen in Python breaks on both, with nothing on screen to show it broke. `spam` no longer short-circuits to "no documents" for the same reason.
@@ -739,8 +752,10 @@ PERSO Inbound is a FastAPI workflow for inbound inquiry handling and customer op
     똑같던 `categories: all` 과 `tags: notion` 두 줄이다.
   - **라우터에게 보이는 이름은 `doc_key` 다.** 제목이 아니다 — 제목을 바꿔도 같은 문서여야
     하고, 이름으로 만들면 바꾼 순간 옛 것이 남아 한 정책을 두 번 인용한다.
-  - `policy_sync` 는 `knowledge_slug` 하나만 남았다. 만드는 곳은 없고, 0097 이 「어느 행이
-    사본인가」를 그 규칙으로 갈랐기 때문에 읽을 수 있게 남긴다.
+  - `policy_sync` 는 **지웠다** (2026-09-10). 마지막 남은 `knowledge_slug` 는 `f"notion-{doc_key[:12]}"`
+    를 돌려주는 함수였는데, 그 값이 가리키던 사본 표는 0098 이 이미 없앴고 0097 은 같은
+    해시를 자기 안에서 계산한다 — 부르는 곳이 하나도 없었다. 그 문자열이 마지막으로 보이던
+    자리는 정책 문서 목록의 제목 밑(`notion-61dd…`)이었고, 그것도 같이 나갔다.
 - **정책·지식 문서의 원본은 이 콘솔이다. 노션에서 받아오는 코드는 하나도 없다.**
   `이메일 템플릿 → 정책 문서 → 직접 추가`(제목+본문), 어떤 문서든 `수정` 가능. 다섯 가지를
   시도했고 전부 막혔다 — 통합 토큰 발급 불가, 쿠키는 `file.notion.com`에서 403, 로컬

@@ -980,7 +980,6 @@ def ui_policy_docs():
     이유였고, 그건 지금도 사실입니다. 다만 zip 을 만들기 귀찮은 경우가 더 잦아서, 고치는
     것을 막는 대신 **고친 사실을 화면이 말하도록** 바꿨습니다(``edited_at``).
     """
-    from ...agents.policy_sync import knowledge_slug
     from ...db.models import PolicySource
     from ...db.session import SessionLocal
     from .policy_docs import MODES, SCOPES
@@ -1012,12 +1011,10 @@ def ui_policy_docs():
                         if row.mode == "knowledge" and (row.scope or "all") != "all"
                         else ""
                     ),
-                    # 라우터가 이 문서를 고를 때 부르는 이름. 「항상 적용」 문서에는 없습니다
-                    # — 그건 고르는 대상이 아니라 모든 프롬프트에 통째로 들어갑니다.
-                    "slug": knowledge_slug(row) if row.mode == "knowledge" else "",
                     "body": row.body,
                     "chars": len(row.body or ""),
-                        # 라우터가 이 문서를 고를 때 읽는 한 줄. 비면 본문 앞부분이 대신합니다.
+                    # 라우터가 이 문서를 고를 때 읽는 한 줄. 저장할 때 본문에서 만듭니다
+                    # (2026-09-10) — 비면 본문 앞부분이 대신합니다.
                     "usage_note": row.usage_note or "",
                     "updated_at": row.updated_at,
                     "version": row.version or 1,
