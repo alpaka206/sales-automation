@@ -420,6 +420,26 @@ class PolicySource(Base):
     scope: Mapped[str] = mapped_column(
         String(16), nullable=False, default="all", server_default=text("'all'")
     )
+    # **이 문서를 모델에게 보내도 되는가** (0119). ``scope`` 와 **다른 축**입니다 —
+    # 저쪽은 「어느 회신에」이고 이쪽은 「보내도 되나」입니다. 한 칸으로 합치려다
+    # 틀렸습니다: ``scope`` 로 거르면 ``router_docs`` 가 **모르는 stage 에서 필터를
+    # 통째로 생략**하므로(그 함수 참고) 제외가 보장되지 않습니다.
+    #
+    # ``human_only`` 는 본문·제목·요약·라우터 인덱스가 **어떤 모델 호출에도** 안 들어
+    # 간다는 뜻입니다. 거는 자리가 넷이고(``prompts._rules_from_db`` ·
+    # ``knowledge.router_docs`` · 저장 시 요약 생성 · 문서 점검) 전부 **쿼리에서 직접**
+    # 겁니다. 「프롬프트에 안 넣는다」를 코드 흐름으로 지키면 새 호출자가 그 앞을 안 지납니다.
+    #
+    # 왜 필요했나: 운영 문서 `Perso Dubbing Enterprise 판매 단가` 가 「항상 적용」이라
+    # **원가·이익률·최소 연 약정액·승인 하한이 매 호출 프롬프트에 들어가고 있었습니다.**
+    # 같은 세트의 `00_README` 기밀 등급표와 `02_금지어` §A·§D 가 그것을 전부 대외 금지로
+    # 못박는데도 그랬습니다. 첫 회신 금액 가드는 후속에서 안 돌아 막지도 못합니다.
+    model_access: Mapped[str] = mapped_column(
+        String(16),
+        nullable=False,
+        default="customer_context",
+        server_default=text("'customer_context'"),
+    )
     # ``order_index`` 와 ``status`` 가 여기 있었습니다 (0101). 순서는 읽히기만 하고 정할
     # 방법이 없어서 늘 100 이었고 결국 id 순이었습니다 — 이제 그것을 사실대로 적습니다.
     # 상태는 0100 이 삭제를 하드 삭제로 바꾸면서 뜻을 잃었습니다: 표에 있는 행이 곧 살아

@@ -155,7 +155,13 @@ def router_docs(stage: str = FIRST) -> list[PolicySource]:
     allowed = _SCOPES_FOR.get(stage)
     session = SessionLocal()
     try:
-        query = session.query(PolicySource).filter(PolicySource.mode == KNOWLEDGE)
+        query = (
+            session.query(PolicySource)
+            # 0119 — 「사람만 본다」는 라우터 인덱스에도 안 실립니다. 인덱스는 제목과
+            # 「언제 쓰는가」만 담지만, 그 둘도 그 문서의 내용입니다.
+            .filter(PolicySource.model_access == "customer_context")
+            .filter(PolicySource.mode == KNOWLEDGE)
+        )
         if allowed:
             query = query.filter(PolicySource.scope.in_(allowed))
         return query.order_by(

@@ -16,11 +16,15 @@ type Row = {
   /** 어느 회신에 붙는가 (0108). `scope_label` 은 기본값(`all`)과 「항상 적용」에서 빕니다 —
    *  모든 줄에 「모두」가 하나씩 붙으면 아무것도 안 알려 줍니다. */
   scope: string; scope_label: string;
+  /** 다섯 칸 중 하나. `model_access`·`mode`·`scope` 셋을 합친 값이고 매핑은 서버
+   *  (`policy_docs.PLACEMENTS`) 한 곳입니다 — 화면이 자기 사전을 들면 서버가 안 받는
+   *  값이 생깁니다. */
+  placement: string;
   body: string | null; chars: number;
   usage_note: string; updated_at: string;
   version: number;
 };
-type Data = { modes: Mode[]; scopes: Mode[]; rows: Row[] };
+type Data = { modes: Mode[]; scopes: Mode[]; placements: Mode[]; rows: Row[] };
 
 /** 만들기·고치기·지우기가 모두 form-encoded 로 갑니다 — 화면이 쓰는 라우트 계열입니다. */
 async function send(path: string, method: string, fields: Record<string, string> = {}) {
@@ -60,15 +64,13 @@ const COLUMNS: Column<Row>[] = [
  *  전에는 만드는 폼(목록 위에 펼쳐지는 카드)과 고치는 폼(상세 안의 또 다른 카드)이 따로
  *  있었습니다. 같은 것을 두 가지 모양으로 물으면 어느 칸이 어디 있는지 매번 다시 찾아야 하고,
  *  칸을 하나 더할 때 고칠 곳이 둘이 됩니다. 이메일 템플릿과 같은 배치로 맞췄습니다. */
-function DocEditor({ doc, modes, scopes, onDone }: {
+function DocEditor({ doc, placements, onDone }: {
   doc: Row | null;
-  modes: Mode[];
-  scopes: Mode[];
+  placements: Mode[];
   onDone: () => void;
 }) {
   const [label, setLabel] = useState(doc?.title || doc?.label || "");
-  const [mode, setMode] = useState(doc?.mode || "knowledge");
-  const [scope, setScope] = useState(doc?.scope || "all");
+  const [placement, setPlacement] = useState(doc?.placement || "knowledge");
   const [body, setBody] = useState(doc?.body || "");
   const [note, setNote] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
@@ -76,7 +78,7 @@ function DocEditor({ doc, modes, scopes, onDone }: {
   // 이메일 템플릿 편집기와 같은 규칙입니다 — 바꾼 것이 있을 때만 저장이 뜨고, 판 번호는
   // 화면에서만 앞서 보입니다. 실제로 올라가는 것은 저장을 눌렀을 때뿐입니다.
   const dirty = doc
-    ? label !== (doc.title || doc.label) || mode !== doc.mode || scope !== (doc.scope || "all")
+    ? label !== (doc.title || doc.label) || placement !== doc.placement
       || body !== (doc.body || "")
     : Boolean(label.trim() || body.trim());
   const shownVersion = (doc?.version ?? 1) + (dirty && doc ? 1 : 0);
@@ -84,7 +86,7 @@ function DocEditor({ doc, modes, scopes, onDone }: {
   async function save() {
     setNote(null);
     try {
-      const fields = { label, mode, scope, body };
+      const fields = { label, placement, body };
       if (doc) await send(`/policy-docs/${doc.id}`, "PUT", fields);
       else await send("/policy-docs", "POST", fields);
       onDone();
@@ -116,38 +118,26 @@ function DocEditor({ doc, modes, scopes, onDone }: {
           <div><h1 className="page-title">{doc ? label || "편집" : "새 문서"}</h1></div>
         </div>
 
-        <label className="field-label" htmlFor="pd-label">문서 이름</label>
-        <input className="input" id="pd-label" value={label}
-               onChange={(e) => setLabel(e.target.value)}
-               placeholder="예: CS 문의 대응 가이드" style={{ marginBottom: 12 }} />
+        {/* **묻는 것은 둘뿐입니다 — 이름과 어느 회신에** (2026-09-10 운영자 지시:
+            「어느 회신에 이거 하나만 고르면 되도록, 그리고 문서 이름이랑 같은 줄에」).
 
-        <div className="grid grid-2" style={{ marginBottom: 12 }}>
-          <div>
-            <label className="field-label" htmlFor="pd-mode">쓰임</label>
-            <select className="select" id="pd-mode" value={mode}
-                    onChange={(e) => setMode(e.target.value)}>
-              {modes.map((m) => <option key={m.key} value={m.key}>{m.label}</option>)}
+            예전에는 「쓰임」과 「범위」 두 고르개였습니다. 저장되는 칸은 지금도 셋이지만
+            (`model_access`·`mode`·`scope`) 뜻이 있는 조합은 다섯뿐이고, 셋을 따로
+            맞추게 하면 운영자가 조합을 틀립니다. */}
+        <div className="row" style={{ gap: 12, alignItems: "flex-end", marginBottom: 12 }}>
+          <div style={{ flex: 1 }}>
+            <label className="field-label" htmlFor="pd-label">문서 이름</label>
+            <input className="input" id="pd-label" value={label}
+                   onChange={(e) => setLabel(e.target.value)}
+                   placeholder="예: CS 문의 대응 가이드" />
+          </div>
+          <div style={{ width: 200 }}>
+            <label className="field-label" htmlFor="pd-placement">어느 회신에</label>
+            <select className="select" id="pd-placement" value={placement}
+                    onChange={(e) => setPlacement(e.target.value)}>
+              {placements.map((p) => <option key={p.key} value={p.key}>{p.label}</option>)}
             </select>
           </div>
-          {/* **어느 회신에 붙는가** (0108). 첫 회신에는 간단히 답하고, 고객이 더 물어오면
-              깊은 문서를 붙여 자세히 씁니다 — 그 깊은 문서가 「후속 회신에만」입니다.
-
-              「항상 적용」에는 안 묻습니다: 그 문서는 고르는 대상이 아니라 모든 프롬프트에
-              통째로 들어가므로 답이 없는 질문입니다. 안 물을 때는 **칸을 안 그립니다** —
-              숨겨 두면 그 값이 그대로 전송됩니다.
-
-              「기준일」 칸이 여기 있었습니다 (0101). 「언제 기준인가」는 결국 마지막으로
-              저장한 시각이고, 그건 저장할 때마다 자동으로 움직입니다 — 사람이 채워야 하는
-              칸으로 두었더니 마이그레이션이 심은 한 행 말고는 아무도 안 채웠습니다. */}
-          {mode === "knowledge" && (
-            <div>
-              <label className="field-label" htmlFor="pd-scope">어느 회신에</label>
-              <select className="select" id="pd-scope" value={scope}
-                      onChange={(e) => setScope(e.target.value)}>
-                {scopes.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
-              </select>
-            </div>
-          )}
         </div>
 
         {/* **「메일 제목」과 「언제 쓰는가」 칸은 없앴습니다** (2026-09-10 운영자 지시).
@@ -222,7 +212,7 @@ export function PolicyDocs({ onBack }: { onBack?: () => void }) {
 
   if (open) {
     const doc = open === "new" ? null : data.rows.find((row) => String(row.id) === open) ?? null;
-    return <DocEditor doc={doc} modes={data.modes} scopes={data.scopes} onDone={backToList} />;
+    return <DocEditor doc={doc} placements={data.placements} onDone={backToList} />;
   }
 
   return (
@@ -244,29 +234,42 @@ export function PolicyDocs({ onBack }: { onBack?: () => void }) {
         <div><h1 className="page-title">정책 문서</h1></div>
       </div>
 
-      {data.modes.map((mode) => (
-        <section key={mode.key} className="mb-gap">
-          <div className="section-header table-heading">
-            <div className="section-header__l">
-              <span className="section-header__icon"><Icon name="file" size={16} /></span>
-              <div className="section-header__title">{mode.label}</div>
+      {/* **칸이 곧 섹션입니다.** 머리에 편수와 **글자수**를 적는 이유: 이 화면에서 가장
+          중요한 숫자가 「이 칸이 프롬프트에 얼마를 싣는가」입니다. 「사람만 본다」가 생긴
+          것도 그래서입니다 — 비공개 단가 문서 16,831자가 모든 호출에 실리고 있었습니다.
+
+          **빈 칸도 0편으로 그립니다.** 「그 이후 회신에 문서가 없다」는 것이 정보입니다. */}
+      {data.placements.map((placement) => {
+        const rows = data.rows.filter((row) => row.placement === placement.key);
+        const chars = rows.reduce((sum, row) => sum + row.chars, 0);
+        return (
+          <section key={placement.key} className="mb-gap">
+            <div className="section-header table-heading">
+              <div className="section-header__l">
+                <span className="section-header__icon"><Icon name="file" size={16} /></span>
+                <div className="section-header__title">{placement.label}</div>
+              </div>
+              <div className="section-header__r t-sm td-subtle tnum">
+                {rows.length}편{chars > 0 && ` · ${chars.toLocaleString()}자`}
+                {placement.key === "human_only" && " · 모델에게 안 갑니다"}
+              </div>
             </div>
-          </div>
-          <div className="card card--flush">
-            {/* The SAME columns object for both groups. Two tables measuring their own
-                widths put the same column in two different places. */}
-            <DataTable
-              columns={COLUMNS}
-              rows={data.rows.filter((row) => row.mode === mode.key)}
-              rowKey={(row) => row.id}
-              empty="등록된 문서가 없습니다."
-              // Pushed: opening a document must leave the list in history so the
-              // browser's back button returns to it instead of leaving the screen.
-              onRowClick={(row) => setParams({ kind: "policy", doc: String(row.id) })}
-            />
-          </div>
-        </section>
-      ))}
+            <div className="card card--flush">
+              {/* The SAME columns object for every group. Two tables measuring their own
+                  widths put the same column in two different places. */}
+              <DataTable
+                columns={COLUMNS}
+                rows={rows}
+                rowKey={(row) => row.id}
+                empty="등록된 문서가 없습니다."
+                // Pushed: opening a document must leave the list in history so the
+                // browser's back button returns to it instead of leaving the screen.
+                onRowClick={(row) => setParams({ kind: "policy", doc: String(row.id) })}
+              />
+            </div>
+          </section>
+        );
+      })}
     </>
   );
 }

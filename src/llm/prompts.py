@@ -50,6 +50,11 @@ def _rules_from_db() -> str:
         with SessionLocal() as session:
             rows = (
                 session.query(PolicySource)
+                # **「사람만 본다」는 여기서 빠집니다** (0119). 프롬프트에 안 넣는 것을
+                # 코드 흐름이 아니라 **쿼리**로 지킵니다 — 흐름으로 두면 다음 호출자가
+                # 그 앞을 안 지납니다. 운영 단가 문서가 이 자리로 매 호출 프롬프트에
+                # 원가·이익률·승인 하한을 싣고 있었습니다.
+                .filter(PolicySource.model_access == "customer_context")
                 .filter(PolicySource.mode == "rules")
                 # 순서는 만든 순서입니다. `order_index` 라는 칸이 있었지만 정할 방법이
                 # 없어서 늘 같은 값이었고, 결국 이 정렬이었습니다 (0101).

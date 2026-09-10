@@ -242,10 +242,10 @@ class LLMClient:
             grounded=grounded,
         )
 
-        self._log_event(prompt, llm_result.text)
+        self._log_event(prompt, llm_result.text, system)
         return llm_result.text
 
-    def _log_event(self, prompt: str, result: str) -> None:
+    def _log_event(self, prompt: str, result: str, system: str | None = None) -> None:
         try:
             with SessionLocal() as session:
                 session.add(
@@ -254,6 +254,11 @@ class LLMClient:
                         payload={
                             "provider": self.provider,
                             "prompt_len": len(prompt),
+                            # **회사 규칙은 `prompt` 에 없습니다** — `system` 으로 따로
+                            # 갑니다. 이 칸이 없던 동안 로그의 `prompt_len` 은 실제로
+                            # 보낸 입력의 절반도 안 됐고, 그래서 「프롬프트를 줄였다」를
+                            # 로그만으로는 증명할 수 없었습니다.
+                            "system_len": len(system or ""),
                             "result_len": len(result),
                         },
                     )

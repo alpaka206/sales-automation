@@ -249,7 +249,10 @@ class CompanyTypeResult(BaseModel):
 
 
 class DraftResult(BaseModel):
-    subject: str
+    # **모델이 주는 제목은 쓰지 않습니다** — `_draft_reply` 가 `reply_subject` 로 다시
+    # 만듭니다(CODE GUARD 3). 그래서 프롬프트도 이 칸을 안 묻고, 기본값이 있습니다:
+    # 옛 응답이나 테스트 더미가 제목을 실어 보내도 파싱은 통과해야 합니다.
+    subject: str = ""
     body: str
     language: str
     tone_notes: str = ""

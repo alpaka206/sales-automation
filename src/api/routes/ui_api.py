@@ -982,7 +982,7 @@ def ui_policy_docs():
     """
     from ...db.models import PolicySource
     from ...db.session import SessionLocal
-    from .policy_docs import MODES, SCOPES
+    from .policy_docs import MODES, PLACEMENTS, SCOPES, placement_of
 
     with SessionLocal() as session:
         rows = (
@@ -992,6 +992,12 @@ def ui_policy_docs():
         )
         return {
             "modes": [{"key": key, "label": label} for key, label in MODES],
+            # **화면의 고르개는 이 하나입니다** (2026-09-10). 저장되는 칸은 셋인데
+            # 뜻이 있는 조합은 다섯뿐이라, 운영자에게 셋을 맞추게 하면 조합을 틀린다.
+            # 라벨과 매핑의 출처는 `policy_docs.PLACEMENTS` 한 곳입니다.
+            "placements": [
+                {"key": key, "label": label} for key, label, *_rest in PLACEMENTS
+            ],
             # 어느 회신에 붙는 문서인가 (0108). 라벨의 출처는 `policy_docs` 한 곳입니다 —
             # 화면이 목록을 스스로 지으면 폼에서 고를 수는 있는데 서버가 안 받는 값이 생깁니다.
             "scopes": [{"key": key, "label": label} for key, label in SCOPES],
@@ -1002,6 +1008,7 @@ def ui_policy_docs():
                     "title": row.title,
                     "mode": row.mode,
                     "scope": row.scope or "all",
+                    "placement": placement_of(row),
                     # 목록에 붙일 글자. **기본값과 「항상 적용」에는 빈 문자열**입니다 —
                     # 모든 줄에 「모두」가 하나씩 붙으면 아무것도 안 알려 줍니다. 라벨을
                     # 여기서 만드는 이유는 표의 열이 모듈 상수라 서버 목록에 못 닿기

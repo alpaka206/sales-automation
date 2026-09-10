@@ -46,7 +46,6 @@ output: json
 
 엄격한 JSON만 반환:
 {
-  "subject": "<제목({{reply_language}}). 시스템이 'RE: 원문 제목'으로 다시 만들 수 있으니 내용 위주로>",
   "body": "<회신 본문({{reply_language}} 평문, 실제 줄바꿈 사용)>",
   "language": "<이 본문의 언어 코드 (예: en, ko)>",
   "tone_notes": "<선택: 톤 관련 한 줄 메모>"
