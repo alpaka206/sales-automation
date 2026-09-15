@@ -217,9 +217,10 @@ export function WonCustomers() {
             {/* 이 PC 의 데이터 에이전트 — 사용 현황 열과 상세의 크레딧·작업·구성 탭이 이것으로
                 채워집니다. **여기서 바로 내려받습니다**(2026-09-15 운영자: 「app/data 는 노출도 안
                 되는데 굳이 거기로?」) — 이 PC 의 OS 에 맞는 파일 하나. 그 화면은 에이전트가 켜질 때
-                착지하는 곳이지 메뉴가 아닙니다. 켜져 있으면 이 버튼은 안 보이고 왼쪽 「사용량」
-                꼬리표가 상태를 말합니다. */}
-            {!agent.pair && (
+                착지하는 곳이지 메뉴가 아닙니다. 에이전트가 **지금 답하면** 안 보이고(저장된 연결
+                정보가 있어도 꺼져 있으면 보인다) 왼쪽 「사용량」 꼬리표가 상태를 말합니다. 상태를
+                확인하는 동안(첫 요청)은 안 그린다 — 깜빡임이 그것이었다. */}
+            {!agent.busy && !agent.live && (
               <a className="btn" href={isMac ? AGENT_DOWNLOADS.macArm : AGENT_DOWNLOADS.windows}
                  title="내려받은 파일을 스냅샷 폴더(perso-data-snapshot) 옆에서 실행하면 이 화면과 연결됩니다.">
                 <G name="inbound" size={15} /> 에이전트 내려받기 ({isMac ? "Mac" : "Windows"})

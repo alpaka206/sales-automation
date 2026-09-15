@@ -37,6 +37,13 @@ export function readPairing(): Pair | null {
     window.history.replaceState(null, "", window.location.pathname + window.location.search);
     return pair;
   }
+  return savedPairing();
+}
+
+/** 저장된 연결 정보만 읽습니다 — 해시를 소비하지 않는 순수 읽기라 상태 초기값에 씁니다.
+ *  `useState(null)` 로 시작하면 첫 프레임에 「에이전트 없음」이 그려졌다가 effect 뒤에 사라집니다
+ *  (운영자가 본 깜빡임, 2026-09-15). */
+export function savedPairing(): Pair | null {
   try {
     const saved = localStorage.getItem(KEY);
     return saved ? (JSON.parse(saved) as Pair) : null;
@@ -75,7 +82,7 @@ export async function agentFetch<T>(pair: Pair, path: string, method = "GET"): P
  *  다시 안 돕니다. 에이전트가 다시 켜져 새 토큰으로 이 주소를 열면 옛 토큰을 붙들고 401 만
  *  받습니다 — 실측으로 잡은 버그입니다. */
 export function useAgent() {
-  const [pair, setPair] = useState<Pair | null>(null);
+  const [pair, setPair] = useState<Pair | null>(savedPairing);
   const [status, setStatus] = useState<AgentStatus | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   const [busy, setBusy] = useState(true);
@@ -97,7 +104,10 @@ export function useAgent() {
     return () => window.removeEventListener("hashchange", connect);
   }, [connect]);
 
-  return { pair, status, problem, busy, reconnect: connect };
+  /** 에이전트가 **지금 답하는가.** 연결 정보가 있어도 꺼져 있으면 false — 「내려받기·켜기」 안내는
+   *  이 값을 봐야 한다. 저장값만 보면 꺼진 에이전트가 「있음」으로 보인다. */
+  const live = !busy && status !== null;
+  return { pair, status, problem, busy, live, reconnect: connect };
 }
 
 /** 스페이스 단위 지표 하나. `spaces` 가 비면 부르지 않습니다. */
