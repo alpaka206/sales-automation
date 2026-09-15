@@ -407,11 +407,12 @@ def test_a_conversation_without_a_hubspot_number_still_counts(sync_db):
 
 def test_a_mail_hubspot_already_has_is_skipped(sync_db):
     """**겹치면 먼저 있던 것만** (운영자 지시). 자는 `ticket_history.same_mail` 하나입니다 —
-    같은 연락처 · 같은 방향 · 같은 제목 · 10분 안.
+    같은 연락처 · 같은 방향 · 같은 본문 · 하루 안.
 
     **같은 초만 보던 시절에는 한 번도 안 잡혔습니다** (2026-09-15): 지메일 `Date` 는 보낸 쪽
     시계이고 허브스팟 `createdAt` 은 받아들인 시각이라 몇 초씩 어긋납니다 — 운영자가 지메일에서
-    직접 답장한 한 통이 세 줄로 선 사고의 한 자리입니다.
+    직접 답장한 한 통이 세 줄로 선 사고의 한 자리입니다. **제목은 열쇠가 아닙니다**: 답장은
+    스레드 안에서 전부 「Re: 같은 제목」이라, 제목으로 맞추면 이어 보낸 다른 메일이 접힙니다.
     """
     from datetime import datetime, timedelta, timezone
 
@@ -421,31 +422,38 @@ def test_a_mail_hubspot_already_has_is_skipped(sync_db):
     contact_id = _seed(sync_db, with_ticket=True)
     when = datetime(2026, 9, 7, 1, 2, 3, tzinfo=timezone.utc)
     with sync_db() as session:
+        # 허브스팟은 HTML 을 글자로 푼 것, 지메일은 text/plain — 줄바꿈·공백만 다르고 글자는 같다.
+        hubspot_text = "안녕하세요 민하님,\n\n견적서 첨부드립니다.\n확인 부탁드립니다.\n\n감사합니다.\n김담당 드림"
+        gmail_text = "안녕하세요 민하님, 견적서 첨부드립니다. 확인 부탁드립니다.\n\n감사합니다.\n김담당 드림\n\nOn Mon, Sep 7 2026, buyer wrote:\n> 견적 부탁드립니다"
         session.add(CustomerInteraction(
             contact_id=contact_id, channel="이메일", direction="inbound",
-            subject="RE: Perso 견적 문의", summary="허브스팟이 들여온 같은 메일",
+            subject="RE: Perso 견적 문의", summary=hubspot_text,
             external_id="hubspot:conv:x", happened_at=when.replace(tzinfo=None),
         ))
         session.commit()
         # 같은 초 — 예전 규칙 그대로 잡힙니다.
-        assert _hubspot_already_has_it(session, contact_id, when, "inbound", "Re: Perso 견적 문의") is True
-        # 7초 뒤, 같은 제목 — 지메일과 허브스팟의 시계 차이. 이것이 안 잡히던 구멍입니다.
+        assert _hubspot_already_has_it(session, contact_id, when, "inbound", gmail_text) is True
+        # 7초 뒤, 같은 본문 — 지메일과 허브스팟의 시계 차이. 이것이 안 잡히던 구멍입니다.
         assert _hubspot_already_has_it(
-            session, contact_id, when + timedelta(seconds=7), "inbound", "RE: Perso 견적 문의") is True
+            session, contact_id, when + timedelta(seconds=7), "inbound", gmail_text) is True
+        # 허브스팟이 참조 메일을 늦게 받아도(배달 지연) 본문이 같으면 같은 메일입니다.
+        assert _hubspot_already_has_it(
+            session, contact_id, when + timedelta(minutes=40), "inbound", gmail_text) is True
         # 방향이 다르면 다른 메일입니다.
-        assert _hubspot_already_has_it(session, contact_id, when, "outgoing", "RE: Perso 견적 문의") is False
-        # 제목이 다르면 다른 메일입니다 — 같은 고객이 10분 안에 다른 이야기를 보낼 수 있습니다.
+        assert _hubspot_already_has_it(session, contact_id, when, "outgoing", gmail_text) is False
+        # **같은 스레드에서 이어 보낸 다른 메일**(제목은 똑같이 Re:)은 본문이 달라 안 접힙니다.
         assert _hubspot_already_has_it(
-            session, contact_id, when + timedelta(seconds=7), "inbound", "첨부 파일 다시 보냅니다") is False
-        # 11분 뒤는 다른 메일입니다.
+            session, contact_id, when + timedelta(seconds=30), "inbound",
+            "앗, 첨부를 빠뜨렸네요. 다시 보냅니다.") is False
+        # 본문이 없는 줄끼리는 같은 초일 때만 — 시각만으로 넓게 접지는 않습니다.
         assert _hubspot_already_has_it(
-            session, contact_id, when + timedelta(minutes=11), "inbound", "RE: Perso 견적 문의") is False
+            session, contact_id, when + timedelta(seconds=7), "inbound", "") is False
 
 
 def test_two_mailboxes_keep_one_copy_of_the_same_mail(sync_db):
     """운영자의 답장이 두 사서함(보낸 사람 · 받는 사람에 둘 다 우리 주소)에 남으면 예전에는 두 줄이
-    섰습니다 — `gmail:` 줄끼리는 일부러 안 맞대던 자리입니다. 같은 메일은 두 사서함에서 `Date` 가
-    글자까지 같으므로 **같은 초**로 잡습니다(제목이 없어도)."""
+    섰습니다 — `gmail:` 줄끼리는 일부러 안 맞대던 자리입니다. 같은 메일은 두 사서함에서 본문도
+    `Date` 도 같습니다 — 본문이 없어도 **같은 초**면 접습니다."""
     from datetime import datetime, timedelta, timezone
 
     from src.agents.mailbox_sync import _hubspot_already_has_it
@@ -456,14 +464,14 @@ def test_two_mailboxes_keep_one_copy_of_the_same_mail(sync_db):
     with sync_db() as session:
         session.add(CustomerInteraction(
             contact_id=contact_id, channel="이메일", direction="outgoing", subject=None,
-            summary="첫 사서함이 가져온 우리 답장", external_id="gmail:aaa",
+            summary="(본문 없음)", external_id="gmail:aaa",
             context="untae@estsoft.com 개인 메일함", happened_at=when.replace(tzinfo=None),
         ))
         session.commit()
-        assert _hubspot_already_has_it(session, contact_id, when, "outgoing", None) is True
-        # 다른 사서함의 줄에는 넓은 창을 안 씁니다 — 다른 초면 다른 메일입니다.
+        assert _hubspot_already_has_it(session, contact_id, when, "outgoing", "(본문 없음)") is True
+        # 본문이 없으면 시각만으로는 넓게 안 접습니다 — 다른 초면 다른 메일입니다.
         assert _hubspot_already_has_it(
-            session, contact_id, when + timedelta(seconds=3), "outgoing", None) is False
+            session, contact_id, when + timedelta(seconds=3), "outgoing", "(본문 없음)") is False
 
 
 def test_the_window_is_since_we_last_looked_not_since_consent(sync_db, monkeypatch):

@@ -383,8 +383,9 @@ def test_the_old_crm_row_is_folded_into_the_thread_row():
 def test_a_mailbox_copy_is_folded_into_the_thread_row_and_stays_gone():
     """웹훅이 늦거나 유실돼 **개인함 수집이 먼저** 돌면 `gmail:` 줄이 먼저 서고, 허브스팟 줄은 그
     뒤에 옵니다 — 그때 이 자리가 유일한 만남입니다(2026-09-15, 「지메일에서 직접 답장하니 세 번
-    기록」). 열쇠는 `same_mail`: 같은 방향 · 같은 제목(Re: 뗀 것) · 10분 안. 지운 줄은 묘비를
-    남깁니다 — 안 남기면 다음 회차의 개인함 수집이 같은 메일을 그대로 되살립니다."""
+    기록」). 열쇠는 `same_mail`: 같은 방향 · 같은 본문 · 하루 안 — 제목이 아닙니다(답장은 전부
+    「Re: 같은 제목」). 지운 줄은 묘비를 남깁니다 — 안 남기면 다음 회차의 개인함 수집이 같은 메일을
+    그대로 되살립니다."""
     from datetime import datetime, timedelta
     from unittest.mock import patch
 
@@ -414,21 +415,22 @@ def test_a_mailbox_copy_is_folded_into_the_thread_row_and_stays_gone():
             CustomerInteraction(
                 contact_id=contact.id, conversation_id=conv.id, external_id="gmail:m1",
                 channel="이메일", direction="outgoing", subject="Re: 견적 문의",
-                summary="지메일에서 직접 보낸 답장", context="untae@estsoft.com 개인 메일함",
-                happened_at=sent,
+                summary="견적서 보내드립니다.\n확인 부탁드립니다.\n\nOn Sep 15, buyer wrote:\n> 견적 요청",
+                context="untae@estsoft.com 개인 메일함", happened_at=sent,
             ),
-            # 같은 고객에게 같은 시각에 온 **다른** 메일 — 제목이 달라 접히면 안 됩니다.
+            # 같은 스레드에서 이어 보낸 **다른** 메일 — 제목은 똑같이 Re: 지만 본문이 달라 접히면 안 됩니다.
             CustomerInteraction(
                 contact_id=contact.id, conversation_id=conv.id, external_id="gmail:m2",
-                channel="이메일", direction="outgoing", subject="계약서 초안",
-                summary="다른 이야기", context="untae@estsoft.com 개인 메일함", happened_at=sent,
+                channel="이메일", direction="outgoing", subject="Re: 견적 문의",
+                summary="첨부를 빠뜨렸네요, 다시 보냅니다.", context="untae@estsoft.com 개인 메일함",
+                happened_at=sent + timedelta(minutes=3),
             ),
         ])
         session.commit()
         ids = (conv.id, contact.id)
 
     thread_row = {"external_id": "hubspot:conv:t1", "channel": "이메일", "direction": "outgoing",
-                  "subject": "RE: 견적 문의", "summary": "지메일에서 직접 보낸 답장",
+                  "subject": "RE: 견적 문의", "summary": "견적서 보내드립니다. 확인 부탁드립니다.",
                   "handler": "untae@estsoft.com", "happened_at": ingested}
     with patch.object(ticket_history, "SessionLocal", factory):
         ticket_history._store(ids[0], ids[1], [thread_row])

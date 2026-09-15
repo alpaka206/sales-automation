@@ -44,11 +44,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import func, select
 
-from ..common.subjects import strip_reply_prefixes
 from ..db.models import MailboxLinkDecision, Conversation, CustomerInteraction
 from ..integrations.hubspot import _BULK_PACE_SECONDS
 from ..db.session import SessionLocal
@@ -267,33 +267,57 @@ def _same_direction(value: str | None) -> str:
 
 
 # 같은 메일의 두 사본이 서로 다른 시각을 들고 있을 수 있는 폭. 지메일 `Date` 는 보낸 쪽 시계이고
-# 허브스팟 `createdAt` 은 받아들인 시각이라 몇 초에서 몇 분 어긋난다. `_we_already_sent_it` 이
-# 같은 이유로 ±10분을 쓴다 — 한 사람에게 같은 제목의 메일을 10분 안에 두 번 보내는 일은 없다.
-SAME_MAIL_WINDOW = timedelta(minutes=10)
+# 허브스팟 `createdAt` 은 받아들인 시각이라 몇 초에서, 배달이 밀리면 몇십 분까지 어긋난다. 열쇠가
+# 본문이라 창은 넉넉해도 된다 — 같은 사람이 같은 글을 하루 안에 두 번 보내면 그건 어차피 사본이다.
+SAME_MAIL_WINDOW = timedelta(hours=24)
+
+_QUOTE_HEAD = re.compile(
+    r"^(>|On .{0,120} wrote:|.{0,40}(님이|이|가) 작성:|-{2,}\s*(Original Message|원본 메일)|From:\s|보낸 사람:\s|"
+    r"Sent from my|--\s*$|_{5,}|Best regards|Kind regards|감사합니다\.?$|드림$)",
+    re.IGNORECASE,
+)
+FINGERPRINT_CHARS = 300
+
+
+def mail_fingerprint(text: str | None) -> str:
+    """메일 본문의 **새 글 부분** 앞 300자 — 인용(`>` · 「… wrote:」)과 서명 앞까지, 공백을 접고
+    소문자로. 같은 메일의 두 사본은 한쪽이 HTML 을 글자로 푼 것이고 다른 쪽이 text/plain 이라
+    줄바꿈·공백이 다를 뿐 글자는 같다. 「(본문 없음)」 같은 빈 본문은 빈 문자열 — 그걸로는 안 맞춘다."""
+    lines: list[str] = []
+    for raw in (text or "").splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        if _QUOTE_HEAD.match(line):
+            break
+        lines.append(line)
+    body = re.sub(r"\s+", " ", " ".join(lines)).strip().lower()
+    if body in {"", "(본문 없음)"}:
+        return ""
+    return body[:FINGERPRINT_CHARS]
 
 
 def same_mail(
-    a_when: datetime | None, a_direction: str | None, a_subject: str | None, a_external_id: str | None,
-    b_when: datetime | None, b_direction: str | None, b_subject: str | None,
+    a_when: datetime | None, a_direction: str | None, a_text: str | None,
+    b_when: datetime | None, b_direction: str | None, b_text: str | None,
 ) -> bool:
     """두 줄이 **같은 메일의 사본**인가 — 지메일 수집(`gmail:`)과 허브스팟 스레드 수집(`hubspot:conv:`)이
     같은 규칙을 씁니다(2026-09-15, 운영자가 지메일에서 직접 답장한 한 통이 세 줄로 선 사고).
 
-    열쇠는 **같은 방향 · 같은 제목(Re:/Fwd: 뗀 것) · 10분 안**입니다. 예외 하나: 상대 줄이 다른
-    사서함의 `gmail:` 줄이면 **같은 초**를 요구합니다 — 같은 메일은 두 사서함에서 `Date` 가 글자까지
-    같고, 다른 메일이 같은 초에 오갈 일은 없어서 이쪽은 더 좁게 잡아도 잃는 것이 없습니다.
-    제목이 어느 한쪽이라도 비어 있으면 시각만으로는 안 접습니다 — 같은 초일 때만.
+    열쇠는 **같은 방향 · 같은 본문(`mail_fingerprint`) · 하루 안**입니다. 제목은 열쇠가 못 됩니다 —
+    답장은 스레드 안에서 전부 「Re: 같은 제목」이라, 제목으로 맞추면 같은 스레드에서 이어 보낸 다른
+    메일이 접힙니다(운영자 지적). 본문이 어느 한쪽이라도 비어 있으면 **같은 초**일 때만 — 두 사서함이
+    같은 메일을 각자 가져온 경우가 그것이고, 그 둘은 `Date` 가 글자까지 같습니다.
     """
     if not a_when or not b_when or _same_direction(a_direction) != _same_direction(b_direction):
         return False
     a_at, b_at = a_when.replace(tzinfo=None), b_when.replace(tzinfo=None)
-    same_second = a_at.replace(microsecond=0) == b_at.replace(microsecond=0)
-    if (a_external_id or "").startswith("gmail:"):
-        return same_second
-    a_sub, b_sub = strip_reply_prefixes(a_subject), strip_reply_prefixes(b_subject)
-    if not a_sub or not b_sub:
-        return same_second
-    return a_sub == b_sub and abs(a_at - b_at) <= SAME_MAIL_WINDOW
+    if abs(a_at - b_at) > SAME_MAIL_WINDOW:
+        return False
+    a_fp, b_fp = mail_fingerprint(a_text), mail_fingerprint(b_text)
+    if a_fp and b_fp:
+        return a_fp == b_fp
+    return a_at.replace(microsecond=0) == b_at.replace(microsecond=0)
 
 
 def _merge_crm_twins(session, conversation_id: int) -> int:
@@ -337,11 +361,11 @@ def _merge_crm_twins(session, conversation_id: int) -> int:
         elif ext.startswith("gmail:"):
             # **개인함 줄도 스레드 줄에 접습니다** (2026-09-15). 웹훅이 늦거나 유실돼 개인함 수집이
             # 먼저 돌면 `gmail:` 줄이 먼저 서고, 허브스팟 줄은 그 뒤에 온다 — 그때 이 자리가 유일한
-            # 만남입니다. 열쇠는 `same_mail`(제목 · 방향 · 10분). 지운 줄은 묘비를 남깁니다 —
+            # 만남입니다. 열쇠는 `same_mail`(본문 · 방향 · 하루). 지운 줄은 묘비를 남깁니다 —
             # 안 남기면 다음 회차의 개인함 수집이 같은 메일을 그대로 되살립니다.
             twin = next((t for t in thread_rows if same_mail(
-                t.happened_at, t.direction, t.subject, t.external_id,
-                row.happened_at, row.direction, row.subject)), None)
+                t.happened_at, t.direction, t.summary,
+                row.happened_at, row.direction, row.summary)), None)
             if twin is not None:
                 session.merge(MailboxLinkDecision(
                     external_id=ext, conversation_id=conversation_id, decided_by="merged",

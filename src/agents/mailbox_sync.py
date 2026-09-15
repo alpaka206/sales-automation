@@ -164,17 +164,17 @@ def _we_already_sent_it(session, contact_id: int, when: datetime) -> bool:
 
 
 def _hubspot_already_has_it(
-    session, contact_id: int, when: datetime, direction: str, subject: str | None = None,
+    session, contact_id: int, when: datetime, direction: str, text: str | None = None,
 ) -> bool:
     """이미 잡힌 메일인가 — **겹치면 먼저 있던 것만** (운영자 지시).
 
-    자는 `ticket_history.same_mail` 하나입니다: 같은 연락처에서 **같은 방향 · 같은 제목 · 10분
+    자는 `ticket_history.same_mail` 하나입니다: 같은 연락처에서 **같은 방향 · 같은 본문 · 하루
     안**이면 같은 메일의 사본으로 봅니다. 한동안 「같은 초」만 봤는데, 지메일 `Date`(보낸 쪽
     시계)와 허브스팟 `createdAt`(받아들인 시각)은 같은 초인 적이 없어 **한 번도 안 잡혔습니다** —
     운영자가 지메일에서 직접 답장한 한 통이 세 줄로 선 사고(2026-09-15)의 한 자리입니다.
 
     다른 사서함의 `gmail:` 줄도 봅니다(예전에는 일부러 뺐습니다). 두 사서함이 같은 메일을
-    각자 가져오면 두 줄이 서는데, 그 둘은 `Date` 가 글자까지 같아 **같은 초**로 잡힙니다.
+    각자 가져오면 두 줄이 서는데, 그 둘은 본문도 `Date` 도 같습니다.
 
     Message-ID 로 맞추면 더 정확하겠지만, 허브스팟 쪽 줄에 그 값이 **없습니다** — 그걸
     담으려면 이미 들어온 수천 줄을 다시 받아야 합니다.
@@ -191,8 +191,7 @@ def _hubspot_already_has_it(
         )
     ).all()
     return any(
-        same_mail(row.happened_at, row.direction, row.subject, row.external_id,
-                  stamp, direction, subject)
+        same_mail(row.happened_at, row.direction, row.summary, stamp, direction, text)
         for row in rows
     )
 
@@ -324,7 +323,7 @@ def _sync_one(email: str) -> tuple[int, list[tuple[str, str, str, datetime]]]:
                 if contact is None:
                     continue
                 if _hubspot_already_has_it(session, contact.id, when, direction,
-                                           head.get("subject", "")):
+                                           _plain_text(payload).strip() or body.get("snippet")):
                     continue
                 # 사이트에서 써서 나간 우리 답장이 이 사서함에 사본으로 남습니다 —
                 # 그 주소가 곧 허브스팟 이메일 채널 계정이기 때문입니다.
