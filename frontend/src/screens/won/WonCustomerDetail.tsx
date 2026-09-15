@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { getJSON, postForm } from "../../lib/api";
 import { useAgent, useSpaceMetric } from "../../lib/agent";
-import { useAction } from "../../ui/ActionButton";
+import { SubmitButton, useAction } from "../../ui/ActionButton";
 // **타입 목록은 한 곳에서 옵니다** (2026-09-03 운영자 지시). 이 화면은 모달이 아니고
 // 「관련 계약」 칸이 따로 있어 폼 자체는 합치지 않지만, 고르개 목록까지 따로 들고 있으면
 // 같은 값을 두 화면이 다르게 부릅니다 — 여기는 「메일」·「왓츠앱」·「기타」였고 저쪽은
@@ -16,6 +16,8 @@ import { useAutoReconcile } from "./reconcile";
 import { useEvidence, usageFor, useUsageIndex } from "./useUsage";
 import { matchGrants, matchPayments, mergeEvidence, parseSpaceSeqs, type GrantEvidence, type PaymentEvidence } from "./usage";
 import { WonContractForm } from "./WonContractForm";
+import { ContractFields, PlanFields, scheduleLabel, useContractDraft } from "./ContractFields";
+import { validate } from "./contractDraft";
 import { CreditUsageSection, JobsSection, MixSection, type CreditsData } from "./WonUsageSections";
 import {
   RETIRED,
@@ -62,6 +64,11 @@ export function WonCustomerDetail() {
   // 계약 폼은 이 화면 위의 모달입니다. 주소로 판단하므로 새로고침해도 열려 있고,
   // 뒤로가기가 곧 닫기입니다 — 모달을 상태로만 들면 둘 다 안 됩니다.
   const contractRoute = useLocation().pathname.includes("/contracts");
+  // 「계약 · 플랜」 탭의 제자리 편집. 버튼(편집 · 취소 · 저장)은 탭바 오른쪽에 서고 폼은 탭
+  // 본문에 있어서, 상태는 둘을 다 보는 여기가 듭니다. 저장 버튼은 `form=` 으로 그 폼을
+  // 가리킵니다 — 모달 푸터의 제출 버튼과 같은 방식입니다.
+  const [editingContract, setEditingContract] = useState(false);
+  const [savingContract, setSavingContract] = useState(false);
   const queryClient = useQueryClient();
   const { data } = useQuery({
     queryKey: ["won-customer", clientId],
@@ -98,6 +105,8 @@ export function WonCustomerDetail() {
   };
   // 이 화면에 있는 채로 해시만 바뀌면(보드에서 또 누름) 그 탭으로.
   useEffect(() => { if (known(wanted)) setPicked(wanted); }, [wanted]);
+  // 탭을 떠나면 편집도 끝납니다 — 폼이 내려가 초안이 사라지는데 버튼만 「저장」으로 남으면 안 됩니다.
+  useEffect(() => setEditingContract(false), [section]);
 
   const refresh = () => queryClient.invalidateQueries();
 
@@ -183,7 +192,8 @@ export function WonCustomerDetail() {
               안이 아니라 탭들 옆에 서야 합니다. */}
           {current && (
             <div className="ct-sel">
-              <select className="sel-pill" value={current.seq}
+              {/* 편집 중에는 계약을 못 바꿉니다 — 바꾸면 치던 초안이 다른 계약 위에 섭니다. */}
+              <select className="sel-pill" value={current.seq} disabled={editingContract}
                       onChange={(event) => setPickedSeq(Number(event.target.value))}>
                 {contracts.slice().reverse().map((c) => (
                   <option key={c.seq} value={c.seq}>
@@ -191,6 +201,20 @@ export function WonCustomerDetail() {
                   </option>
                 ))}
               </select>
+              {/* **편집 하나가 두 카드를 같이 입력칸으로 바꿉니다** (2026-09-15 운영자 확인).
+                  「계약 및 결제 정보」와 「Perso 계정 및 플랜」은 한 계약 행이고 칸들이 서로
+                  얽혀 있어서(VAT → 통화 → 금액 → 공급가, 크레딧 ↔ 단가, 플랜 기간 → MRR),
+                  카드마다 따로 저장하면 반쪽짜리 계약이 남습니다. 저장·취소도 한 번입니다. */}
+              {section === "sec-contract" && (editingContract ? (
+                <>
+                  <button className="btn btn-sm" type="button" disabled={savingContract}
+                          onClick={() => setEditingContract(false)}>취소</button>
+                  <SubmitButton form={CONTRACT_FORM_ID} busy={savingContract}
+                                className="btn btn-sm btn-primary">저장</SubmitButton>
+                </>
+              ) : (
+                <button className="btn btn-sm" type="button" onClick={() => setEditingContract(true)}>편집</button>
+              ))}
             </div>
           )}
         </div>
@@ -233,10 +257,16 @@ export function WonCustomerDetail() {
         ) : current ? (
           <>
             {section === "sec-contract" && (
-              <>
-                <ContractSection client={data} current={current} today={today} />
-                <PlanSection contract={current} />
-              </>
+              editingContract ? (
+                <ContractEditor key={current.id} contract={current} options={list?.options}
+                                onBusy={setSavingContract}
+                                onDone={() => { setEditingContract(false); refresh(); }} />
+              ) : (
+                <>
+                  <ContractSection current={current} today={today} />
+                  <PlanSection contract={current} />
+                </>
+              )
             )}
             {section === "sec-credit" && (
               <CreditSection contract={current} today={today} onDone={refresh} evidence={grantEvidence} />
@@ -658,30 +688,19 @@ function BasicSection({ client, contracts, options, onDone }: {
   );
 }
 
-/** 2 계약 및 결제 정보 — 이 화면의 축.
+/** 계약 및 결제 정보 — 이 화면의 축. 읽기 전용입니다.
  *
- * 오른쪽 액션이 둘입니다: 계약 추가 · 편집. 계약 고르개는 탭바 오른쪽에 있습니다(2026-09-15) —
- * 고르면 계약 단위 탭 전부가 그 계약의 값으로 바뀝니다.
+ * 카드 머리에 버튼이 없습니다(2026-09-15 운영자 확인): 「+ 계약 추가」는 이 고객의 동작이라
+ * 페이지 머리에만 있고, 「편집」은 탭바 오른쪽에서 이 카드와 「Perso 계정 및 플랜」을 같이
+ * 입력칸으로 바꿉니다(`ContractEditor`). 계약 고르개도 탭바 오른쪽입니다.
  */
-function ContractSection({ client, current, today }: {
-  client: Row; current: Contract; today: string;
-}) {
-  const navigate = useNavigate();
+function ContractSection({ current, today }: { current: Contract; today: string }) {
   const docs = current.doc_types || [];
   return (
     <section className="sec" id="sec-contract">
       <div className="sec-head">
         <span className="sec-title">계약 및 결제 정보</span>
-        <div className="sec-actions">
-          {/* 계약 고르개는 탭바 오른쪽으로 갔고 「전체 계약 내역」 표는 뺐습니다(2026-09-15 운영자:
-              「필요 없는 것 같아」) — 고르개가 곧 목록입니다. 여기는 이 계약에 대한 동작만. */}
-          <button className="btn btn-sm" type="button"
-                  onClick={() => navigate(`/won-customers/${client.client_id}/contracts/new`)}>+ 계약 추가</button>
-          <button className="btn btn-sm" type="button"
-                  onClick={() => navigate(`/won-customers/${client.client_id}/contracts/${current.id}`)}>편집</button>
-        </div>
       </div>
-
 
       <div className="panel">
         <div className="field-grid">
@@ -744,6 +763,73 @@ function ContractSection({ client, current, today }: {
       {/* 오늘 기준 상태를 아래 섹션들이 함께 씁니다. */}
       <span hidden data-today={today} />
     </section>
+  );
+}
+
+// 제자리 편집 폼의 id — 저장 버튼이 탭바에 있어 폼 밖입니다.
+const CONTRACT_FORM_ID = "won-contract-inline";
+
+/** 「계약 · 플랜」 탭의 제자리 편집 — 두 카드가 같은 자리에서 입력칸이 됩니다.
+ *
+ *  칸과 규칙은 모달과 **같은 한 벌**(`ContractFields` · `PlanFields` · `useContractDraft`)이고,
+ *  저장도 모달과 같은 라우트에 같은 몸통입니다. 지급 일정(회차 수 · 첫 지급일)을 건드린
+ *  저장은 되돌릴 수 없어 확인 창을 한 번 지납니다 — 저장 버튼이 탭바에 있어 칸 옆의 빨간
+ *  안내와 멀기 때문입니다. `key={contract.id}` 로 마운트되므로 계약이 바뀌면 새로 섭니다. */
+function ContractEditor({ contract, options, onBusy, onDone }: {
+  contract: Contract; options: Options | undefined;
+  onBusy: (busy: boolean) => void; onDone: () => void;
+}) {
+  const f = useContractDraft(contract);
+  const [note, setNote] = useState<string | null>(null);
+  const [confirming, setConfirming] = useState(false);
+  const [save, saving] = useAction(async () => {
+    setNote(null);
+    try {
+      await postForm(`/won-customers/contracts/${contract.id}`, f.body()!);
+      onDone();
+    } catch (error) {
+      setConfirming(false);
+      setNote(error instanceof Error ? error.message : String(error));
+    }
+  });
+  // 저장이 끝나면 부모가 이 폼을 내리므로 `saving → false` 를 볼 기회가 없습니다. 내려갈 때 끕니다.
+  useEffect(() => { onBusy(saving); return () => onBusy(false); }, [saving, onBusy]);
+  const submit = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!f.draft) return;
+    const problem = validate(f.draft);
+    if (problem) { setNote(problem); return; }
+    if (f.creditChanged) setConfirming(true); else save();
+  };
+  if (!options) return null;
+  return (
+    <form id={CONTRACT_FORM_ID} onSubmit={submit}>
+      <section className="sec">
+        <div className="sec-head">
+          <span className="sec-title">계약 및 결제 정보</span>
+          {note && (
+            <div className="sec-actions" role="status" style={{ color: "var(--danger)" }}>{note}</div>
+          )}
+        </div>
+        <div className="panel"><ContractFields f={f} options={options} /></div>
+      </section>
+      <section className="sec">
+        <div className="sec-head">
+          <span className="sec-title">Perso 계정 및 플랜</span>
+        </div>
+        <div className="panel"><PlanFields f={f} options={options} heading={false} /></div>
+      </section>
+      {confirming && (
+        <Confirm
+          title="지급 예정 목록을 다시 깝니다"
+          rows={[["지급 일정", scheduleLabel(f)]]}
+          note="손으로 추가·수정한 회차와 지급 완료 표시가 모두 사라집니다. 되돌릴 수 없습니다."
+          okLabel="저장"
+          onOk={() => save()}
+          onClose={() => setConfirming(false)}
+        />
+      )}
+    </form>
   );
 }
 

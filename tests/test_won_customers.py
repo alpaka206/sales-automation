@@ -1324,12 +1324,12 @@ def test_the_two_credit_fields_are_editable_and_a_grant_can_be_removed():
     import pathlib
 
     form = pathlib.Path(
-        "frontend/src/screens/won/WonContractForm.tsx"
+        "frontend/src/screens/won/ContractFields.tsx"
     ).read_text(encoding="utf-8")
     assert "disabled={editing}" not in form
     assert "creditChanged" in form and "모두 사라집니다" in form
     # 경고를 띄우는 조건이 곧 다시 까는 조건이어야 합니다 — 서버는 이 표만 봅니다.
-    assert 'if (creditChanged) body.credit_reseed = "1";' in form
+    assert 'if (creditChanged) out.credit_reseed = "1";' in form
 
     detail = pathlib.Path(
         "frontend/src/screens/won/WonCustomerDetail.tsx"
@@ -1421,6 +1421,8 @@ def test_the_console_does_not_manage_renewal_notes_at_all():
     for name in (
         "frontend/src/screens/won/WonCustomerDetail.tsx",
         "frontend/src/screens/won/WonContractForm.tsx",
+        "frontend/src/screens/won/ContractFields.tsx",
+        "frontend/src/screens/won/contractDraft.ts",
         "frontend/src/screens/won/shared.ts",
         "src/api/routes/won_customers.py",
         "src/api/routes/ui_api.py",
@@ -1474,7 +1476,7 @@ def test_the_form_asks_for_the_amount_the_vat_answer_uses():
     """
     import pathlib
 
-    form = pathlib.Path("frontend/src/screens/won/WonContractForm.tsx").read_text(encoding="utf-8")
+    form = pathlib.Path("frontend/src/screens/won/ContractFields.tsx").read_text(encoding="utf-8")
 
     assert '<Field label="VAT 해당 여부">' in form
     assert '<Field label="총 계약금액 (VAT 포함)" required>' in form
@@ -1483,10 +1485,14 @@ def test_the_form_asks_for_the_amount_the_vat_answer_uses():
     assert 'setAmount("incl"' in form and 'setAmount("excl"' in form
     # 미해당은 한 칸이고, 「VAT 포함」이라는 말을 쓰지 않습니다.
     assert '<label className="form-label">계약금액 <span className="req">*</span></label>' in form
-    # 저장을 막는 조건은 금액과 크레딧, 둘뿐입니다.
-    guard = form[form.index("const [save, saving]") : form.index("const body: Record")]
+    # 저장을 막는 조건은 금액과 크레딧, 둘뿐입니다 — 규칙은 `contractDraft.validate` 한 곳이고
+    # 모달과 제자리 편집이 같이 부릅니다.
+    rules = pathlib.Path("frontend/src/screens/won/contractDraft.ts").read_text(encoding="utf-8")
+    guard = rules[rules.index("export function validate(") : rules.index("export function toBody(")]
     assert "billing" in guard and "draft.credits" in guard
     assert "unit_price" not in guard
+    for path in ("frontend/src/screens/won/WonContractForm.tsx", "frontend/src/screens/won/WonCustomerDetail.tsx"):
+        assert "validate(" in pathlib.Path(path).read_text(encoding="utf-8"), path
 
 
 def test_the_unit_price_is_shown_not_typed():
@@ -1496,7 +1502,7 @@ def test_the_unit_price_is_shown_not_typed():
 
     from src.db.models import ClientContract
 
-    form = pathlib.Path("frontend/src/screens/won/WonContractForm.tsx").read_text(encoding="utf-8")
+    form = pathlib.Path("frontend/src/screens/won/ContractFields.tsx").read_text(encoding="utf-8")
     assert 'set("unit_price"' not in form          # 입력하지 않습니다
     assert 'set("credits"' in form                 # 크레딧은 입력합니다
     # 단가 통화·적용 환율 칸은 사라졌습니다.
@@ -1579,6 +1585,7 @@ def test_plan_status_is_not_stored_anywhere():
     for path in (
         "frontend/src/screens/won/WonCustomerDetail.tsx",
         "frontend/src/screens/won/WonContractForm.tsx",
+        "frontend/src/screens/won/ContractFields.tsx",
     ):
         source = pathlib.Path(path).read_text(encoding="utf-8")
         assert 'set("plan_status"' not in source, path
@@ -2060,7 +2067,7 @@ def test_the_form_lets_the_operator_pick_the_supply_basis():
     """
     import pathlib
 
-    form = pathlib.Path("frontend/src/screens/won/WonContractForm.tsx").read_text(encoding="utf-8")
+    form = pathlib.Path("frontend/src/screens/won/ContractFields.tsx").read_text(encoding="utf-8")
     # 라벨에서 「공급가」를 뺐습니다 (2026-08-31): 바로 위 칸이 「공급가 (VAT 미포함)」
     # 이라 두 칸이 같은 말로 시작했고, 이 칸은 공급가를 **입력받는** 칸이 아니라 어느
     # 금액을 기준으로 삼을지 **고르는** 칸입니다.
@@ -2068,7 +2075,8 @@ def test_the_form_lets_the_operator_pick_the_supply_basis():
     assert "VAT 미포함 금액으로" in form
     assert "VAT 포함 금액으로" in form
     # 고를 것이 있는지는 **부가세 해당 여부**가 정합니다 — 통화가 아니라.
-    assert "const inclusive = vatApplicable && draft?.vat_included ===" in form
+    rules = pathlib.Path("frontend/src/screens/won/contractDraft.ts").read_text(encoding="utf-8")
+    assert 'const inclusive = vatApplicable && draft.vat_included === "1"' in rules
 
 
 def test_the_form_asks_in_the_order_the_answers_depend_on():
@@ -2082,7 +2090,7 @@ def test_the_form_asks_in_the_order_the_answers_depend_on():
     """
     import pathlib
 
-    form = pathlib.Path("frontend/src/screens/won/WonContractForm.tsx").read_text(encoding="utf-8")
+    form = pathlib.Path("frontend/src/screens/won/ContractFields.tsx").read_text(encoding="utf-8")
     money = form[form.index('<div className="form-sec">금액</div>'):]
     order = [
         money.index('label="VAT 해당 여부"'),
@@ -2519,7 +2527,7 @@ def test_the_ticket_link_can_be_typed_per_contract():
 
     from src.api.routes.won_customers import _fill_contract
 
-    form = pathlib.Path("frontend/src/screens/won/WonContractForm.tsx").read_text(encoding="utf-8")
+    form = pathlib.Path("frontend/src/screens/won/ContractFields.tsx").read_text(encoding="utf-8")
     ticket = form[form.index('<Field label="Ticket ID">') :][:400]
     assert "readOnly" not in ticket, "계약별 티켓은 운영자가 적습니다"
     assert 'set("ticket_id", e.target.value)' in ticket
@@ -2880,7 +2888,7 @@ def test_the_contact_moved_out_of_the_basic_panel_into_the_contract_form():
         "frontend/src/screens/won/WonCustomerDetail.tsx"
     ).read_text(encoding="utf-8")
     form = pathlib.Path(
-        "frontend/src/screens/won/WonContractForm.tsx"
+        "frontend/src/screens/won/ContractFields.tsx"
     ).read_text(encoding="utf-8")
 
     assert 'v={client.contact_name}' not in detail

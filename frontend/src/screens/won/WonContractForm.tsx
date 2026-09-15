@@ -4,46 +4,19 @@ import { useLocation, useNavigate, useParams, useSearchParams } from "react-rout
 import { getJSON, postForm } from "../../lib/api";
 import { SubmitButton, useAction } from "../../ui/ActionButton";
 import { Modal } from "../../ui/Modal";
-import { Field } from "./WonNew";
-import { type Contract, type ListData, type Row, addMonths, n } from "./shared";
+import { ContractFields, PlanFields, useContractDraft } from "./ContractFields";
+import { carryOver, emptyCarry, emptyDraft, validate } from "./contractDraft";
+import { type ListData, type Row, addMonths } from "./shared";
 
-/** 계약 정보 입력 — 추가와 수정이 같은 폼입니다.
+/** 계약 정보 입력 — 새 계약은 이 모달, 있는 계약은 상세의 제자리 편집(`ContractCards`).
  *
- * **목업(`수주관리목업_0806.html` 의 `renderContractModal`)과 절 순서·칸·문구를 맞춥니다.**
- * 머리·본문·바닥의 모양도 목업의 `.modal-head/.modal-body/.modal-foot` 을 따릅니다 — 다만
- * 그 대화상자를 다시 만들지는 않고, 콘솔의 `Modal` 에 그 옷만 입힙니다(`won.css` 끝).
- *
- * 목업과 **다른 곳은 두 군데뿐**이고, 둘 다 운영자가 그렇게 하라고 한 것입니다:
- *
- * - **계약 크레딧을 입력받지 않습니다.** 목업은 손으로 적는 칸인데, 공급가 ÷ 분당 단가 × 60
- *   으로 계산해 같은 자리에 보여 줍니다. 시트에서 손으로 들어가다 보니 계약마다 계산 기준이
- *   달랐습니다. 그래서 **공급가 (VAT 제외)** 칸이 하나 늘었습니다 — 목업에는 없습니다.
- * - **통화와 무관하게 환율을 받습니다.** 원화 계약에 USD 단가를 매기는 경우가 흔하고,
- *   예상 MRR 카드가 원화 계약을 USD 로도 보여 주기 때문입니다. 환율이 없으면 그 환산이
- *   매일 오늘 고시가로 다시 일어나 지난달 숫자가 이번 달에 달라 보입니다.
+ * **칸과 규칙은 `ContractFields` · `contractDraft` 한 벌**이고 여기는 그 옷(콘솔의 `Modal`,
+ * `won.css` 끝의 `.modal-*`)과 「누구의 몇 차 계약인가」만 듭니다. 머리·본문·바닥의 모양은
+ * 목업(`수주관리목업_0806.html` 의 `renderContractModal`)을 따릅니다.
  *
  * 재계약이면 직전 계약에서 플랜·단가·결제 방식을 복사해 채웁니다 — 금액·크레딧·기간만
- * 새로 씁니다.
+ * 새로 씁니다. 수정 주소(`/contracts/{id}`)는 남아 있습니다 — 옛 링크가 열리게.
  */
-const empty = {
-  deal_type: "MRR", starts_on: "", ends_on: "", plan_starts_on: "", plan_ends_on: "", ticket_id: "",
-  // 부가세가 붙는 계약인가(국내 법인이면 해당). **통화가 아니라 고객이 정합니다** — 이 값이
-  // 금액 칸을 한 개 그릴지 두 개 그릴지 정합니다. 폼은 문자열만 나르므로 "1" / "" 입니다.
-  vat_applicable: "1",
-  // 분당 단가의 기준이 VAT 포함 금액인가 — 아래 「공급가」가 고르는 값입니다.
-  currency: "KRW", vat_included: "", amount_incl_vat: "", amount_excl_vat: "", credits: "",
-  // 비워 두면 저장할 때 계약일 고시가로 채웁니다(`_fill_contract_fx`).
-  fx_rate: "", terminated_on: "", credits_used: "",
-  payment_method: "계좌이체", payment_type: "일시불", installments: "1",
-  first_payment_on: "", billing_email: "", note: "",
-  // 고객사 측 담당자·연락처. 계약마다 다를 수 있어 고객이 아니라 계약이 듭니다(0103).
-  contact_name: "", contact_info: "",
-  plan: "Business Tier 1", plan_name: "", perso_email: "",
-  invite_limit: "", queue_limit: "", concurrent_jobs: "", space_count: "", space_seq: "",
-  revenue_from: "",
-};
-type Draft = typeof empty;
-
 // 제출 버튼이 모달 푸터에 있어서 폼을 id 로 가리킵니다.
 const FORM_ID = "won-contract-form";
 
@@ -81,20 +54,14 @@ export function WonContractForm() {
   const contracts = (creating ? [] : data?.contracts) ?? [];
   const ready = Boolean(list) && (creating || Boolean(data));
 
-  const [draft, setDraft] = useState<Draft | null>(null);
+  const f = useContractDraft();
+  const { draft, setDraft, setDocTypes } = f;
   // **초안과 같이 한 번만 굳힙니다.** 매 렌더 `list.pending` 에서 다시 찾으면, 폼을 채우는
   // 동안 그 대기 행이 사라졌을 때(누가 같은 티켓을 다른 계약에 적었다 — `_claim_ticket`)
   // 다 채운 폼이 「고객 정보가 없습니다」 한 줄로 바뀝니다. 아무 쓰기나 SSE 로 목록을
   // 다시 받아 오므로 남의 저장 하나에 이 화면이 통째로 날아갑니다.
   const [customer, setCustomer] = useState<Record<string, string> | null>(null);
-  const [docTypes, setDocTypes] = useState<string[]>([]);
   const [copyPrev, setCopyPrev] = useState(true);
-  const [creditRounds, setCreditRounds] = useState("12");
-  const [firstCreditOn, setFirstCreditOn] = useState("");
-  // 열었을 때의 지급 일정. 이 둘이 바뀌면 저장이 지급 예정 목록을 다시 깝니다 — 그래서
-  // 화면이 미리 안내해야 하고, 안내하려면 「무엇이 바뀌었나」를 알아야 합니다. 매 렌더
-  // 계약에서 다시 읽지 않는 이유는 초안과 같습니다: 남의 저장 하나에 SSE 로 값이 갈립니다.
-  const [creditBase, setCreditBase] = useState(["", ""]);
   const [note, setNote] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
 
@@ -147,20 +114,11 @@ export function WonContractForm() {
     const prev = contracts.length ? contracts[contracts.length - 1] : undefined;
     const pendingTicket = pendingItem?.ticket_id ?? "";
     if (target) {
-      setDraft(fromContract(target));
-      setDocTypes(target.doc_types || []);
-      // **지금 깔려 있는 그대로**를 보여 줍니다(없으면 1). 12 로 채우면 이 두 칸을
-      // 건드리지 않은 저장이 서버 눈에는 「1회차 → 12회차」로 보여, 비고 한 줄 고치는
-      // 저장이 지급 일정을 통째로 다시 깝니다.
-      const rounds = String(target.credit_grants?.length || 1);
-      const first = target.credit_grants?.[0]?.grant_on || target.starts_on || "";
-      setCreditRounds(rounds);
-      setFirstCreditOn(first);
-      setCreditBase([rounds, first]);
+      f.loadContract(target);
     } else {
       const start = prev?.ends_on || new Date().toISOString().slice(0, 10);
       setDraft({
-        ...empty,
+        ...emptyDraft,
         ...(prev && copyPrev ? carryOver(prev) : {}),
         starts_on: start,
         ends_on: addMonths(start, 12),
@@ -169,103 +127,17 @@ export function WonContractForm() {
         plan_name: prev?.plan_name || shownCompany,
       });
       setDocTypes(prev && copyPrev ? prev.doc_types || [] : []);
-      setFirstCreditOn(start);
+      f.setFirstCreditOn(start);
     }
   }
-
-  const set = (key: keyof Draft, value: string) =>
-    setDraft((current) => (current ? { ...current, [key]: value } : current));
-
-  /** 지급 일정을 건드렸는가. 건드렸으면 저장이 회차 목록을 통째로 다시 깔므로, 누르기
-   *  전에 그렇게 적어 줍니다 — 되돌릴 방법이 없습니다. */
-  const creditChanged =
-    editing && (creditRounds !== creditBase[0] || firstCreditOn !== creditBase[1]);
-
-  // 저장하면 플랜 상태가 무엇이 될지. 서버의 won.plan_status 와 같은 규칙을 이 계약 하나에
-  // 적용한 것입니다 — 고르는 칸이 없어진 자리에, 날짜가 무슨 뜻인지 대신 적어 줍니다.
-  //
-  // **보는 것은 플랜 기간입니다** (2026-08-31). 비워 두면 계약 기간과 같다는 뜻이라 서버의
-  // 기본값과 같은 자리로 떨어집니다 — 그래야 미리보기와 저장 결과가 어긋나지 않습니다.
-  // 중도 해지일이 만료일보다 빠르면 그날 끝납니다(`won.plan_period` 와 같은 규칙).
-  const planPreview = (() => {
-    if (!draft) return "세팅중";
-    const today = new Date().toISOString().slice(0, 10);
-    const start = draft.plan_starts_on || draft.starts_on;
-    let end = draft.plan_ends_on || draft.ends_on;
-    if (draft.terminated_on && (!end || draft.terminated_on < end)) end = draft.terminated_on;
-    if (!start || !end) return "세팅중";
-    if (end < today) return "사용 중단";
-    if (start > today) return "세팅중";
-    return "사용중";
-  })();
-
-  // 화면에서 미리 보여 주는 계산값. 저장할 때 서버가 같은 식으로 다시 계산합니다
-  // (won.total_amount / won.unit_price) — 두 곳에 식이 있는 게 아니라, 화면은 사람이
-  // 숫자를 넣는 동안 결과를 보여 줄 뿐입니다.
-  const krw = (draft?.currency ?? "KRW") === "KRW";
-  // 부가세가 붙는 계약인가. **통화가 아니라 고객이 정합니다**(이관 0075).
-  const vatApplicable = draft?.vat_applicable === "1";
-  /** 원화 계약이 **총액으로 적혔는가.** 그 외 통화는 부가세가 없어 늘 총액입니다. */
-  const inclusive = vatApplicable && draft?.vat_included === "1";
-
-  /** 한쪽을 적으면 다른 쪽이 10% 로 따라옵니다. 반올림은 소수 둘째 자리까지 — 원화는
-   *  정수로 떨어지고, 안 떨어지는 통화는 서버가 기준에서 다시 계산하므로 여기 값은
-   *  운영자가 눈으로 확인하는 용도입니다. */
-  function setAmount(which: "incl" | "excl", value: string) {
-    const round2 = (n: number) => String(Math.round(n * 100) / 100);
-    const typed = Number(value);
-    const partner = value.trim() === "" || !Number.isFinite(typed)
-      ? ""
-      : which === "incl" ? round2(typed / 1.1) : round2(typed * 1.1);
-    setDraft((d) => (d ? { ...d, [which === "incl" ? "amount_incl_vat" : "amount_excl_vat"]: value,
-                           [which === "incl" ? "amount_excl_vat" : "amount_incl_vat"]: partner } : d));
-  }
-
-  /** 분당 단가가 기준으로 삼는 금액 — 계약서에 적힌 그 금액입니다. VAT 제외로 적힌 원화
-   *  계약만 공급가 칸을 쓰고, 나머지는 총액 칸입니다. 서버의 `won.billing_amount` 와 같은
-   *  갈래이고, 저장할 때 서버가 다시 계산합니다. */
-  const billing = draft ? n(vatApplicable && !inclusive ? draft.amount_excl_vat : draft.amount_incl_vat) : 0;
-
-  /** 분당 단가 = 기준 금액 ÷ (계약 크레딧 ÷ 60). 소수점은 남깁니다 — 반올림한 단가는
-   *  되짚어 곱했을 때 금액이 안 맞습니다. */
-  const unitPrice = (() => {
-    const credits = draft ? n(draft.credits) : 0;
-    if (!billing || !credits) return null;
-    // 소수 둘째 자리. 상세 화면의 「분당 단가」와 같은 자릿수여야 합니다 — 만드는 화면과
-    // 보는 화면이 같은 계약을 다른 숫자로 보여 주면, 어느 쪽이 저장된 값인지 알 수 없습니다.
-    return (billing / (credits / 60)).toFixed(2);
-  })();
 
   const [save, saving] = useAction(async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!draft) return;
     setNote(null);
-    if (!draft.starts_on || !draft.ends_on || draft.ends_on <= draft.starts_on) {
-      setNote("계약 시작일과 종료일을 확인해 주세요."); return;
-    }
-    // 통화가 정한 금액 칸과 계약 크레딧, 둘만 필수입니다. 분당 단가는 그 둘에서
-    // 나오는 계산값이라 받지 않습니다.
-    if (!billing) {
-      setNote(
-        krw && !inclusive
-          ? "공급가 (VAT 제외) 를 입력해 주세요."
-          : `총 계약금액을 입력해 주세요 (${draft.currency}).`,
-      );
-      return;
-    }
-    if (!n(draft.credits)) {
-      setNote("계약 크레딧을 입력해 주세요 — 분당 단가가 여기서 나옵니다."); return;
-    }
-    const body: Record<string, string> = {
-      ...draft,
-      doc_types: docTypes.join("|"),
-      credit_rounds: creditRounds,
-      first_credit_on: firstCreditOn,
-    };
-    // **경고를 띄우는 조건이 곧 다시 까는 조건입니다.** 서버는 이 표가 있을 때만 회차를
-    // 다시 깝니다 — 폼 값과 행을 비교해 스스로 알아내게 두면, 폼이 빈 첫 지급일 자리에
-    // 계약 시작일을 넣어 보내는 것을 「바뀌었다」로 읽고 경고 없이 일정을 갈아엎습니다.
-    if (creditChanged) body.credit_reseed = "1";
+    const problem = validate(draft);
+    if (problem) { setNote(problem); return; }
+    const body = f.body()!;
     if (!editing && pendingId) body.pending_id = pendingId;
     try {
       if (editing) {
@@ -380,343 +252,10 @@ export function WonContractForm() {
             </>
           )}
 
-          <div className="form-sec">계약</div>
-          <div className="form-grid3">
-            <Field label="수주 유형" required>
-              <Sel value={draft.deal_type} onChange={(v) => set("deal_type", v)} options={options.deal_types} />
-            </Field>
-            <Field label="계약 시작일" required>
-              <input className="inp" type="date" value={draft.starts_on}
-                     onChange={(e) => { set("starts_on", e.target.value); set("ends_on", addMonths(e.target.value, 12)); }} />
-            </Field>
-            <Field label="계약 종료일" required>
-              <input className="inp" type="date" value={draft.ends_on} onChange={(e) => set("ends_on", e.target.value)} />
-            </Field>
-            {/* **중도 해지일.** 플랜은 만료일과 이 날짜 중 빠른 쪽에서 끝납니다. 비어 있는
-                것이 보통이고, 적히는 순간 그 계약의 매출 인식이 거기서 멈춥니다. */}
-            <Field label="중도 해지일">
-              <input className="inp" type="date" value={draft.terminated_on}
-                     onChange={(e) => set("terminated_on", e.target.value)} />
-            </Field>
-            {/* 수주 전환 대기에서 온 건은 티켓이 따라오고, **그 밖에는 손으로 적습니다**
-                (2026-08-19, 운영자 지시 — 고객은 Client ID 로 묶이지만 계약별로 티켓을
-                붙이고 싶은 건이 있습니다). 목업대로 읽기 전용이던 칸입니다. 서버는 예전부터
-                받고 있었고(`_CONTRACT_FIELDS`), 막고 있던 것은 이 칸 하나였습니다.
-                비우면 연동이 풀립니다 — 잘못 적은 값을 되돌릴 길이 있어야 합니다. */}
-            <Field label="Ticket ID">
-              <input className="inp" value={draft.ticket_id}
-                     onChange={(e) => set("ticket_id", e.target.value)}
-                     placeholder="인바운드 건은 자동 연동 · 그 외 직접 입력" />
-            </Field>
-            {/* **고객마다가 아니라 계약마다입니다**(2026-08-31 운영자 지시). 고객 기본
-                정보에 한 벌만 있던 시절에는 두 번째 계약을 맺는 순간 첫 계약의 담당자가
-                덮여 사라졌고, 그것이 화면에서는 「담당자가 바뀌었다」와 같아 보였습니다.
-                재계약이면 직전 계약에서 물려받습니다 — 대개 같은 사람입니다. */}
-            <Field label="고객 담당자">
-              <input className="inp" value={draft.contact_name}
-                     onChange={(e) => set("contact_name", e.target.value)}
-                     placeholder="예: 박지훈 팀장" />
-            </Field>
-            <Field label="고객 연락처">
-              <input className="inp" value={draft.contact_info}
-                     onChange={(e) => set("contact_info", e.target.value)}
-                     placeholder="이메일 또는 전화번호" />
-            </Field>
-            {/* 목업대로 손으로 적는 칸입니다. 계약서에 적히는 것이 금액과 크레딧이고,
-                분당 단가가 그 둘에서 나옵니다 — 한동안 반대로 두었는데, 그러면 반올림한
-                단가로 계산한 크레딧이 계약서의 크레딧과 어긋났습니다. */}
-            <Field label="계약 크레딧" required>
-              <input className="inp" type="number" value={draft.credits}
-                     onChange={(e) => set("credits", e.target.value)} placeholder="예: 64800" />
-            </Field>
-            {/* **수동 입력입니다.** 제품 쪽에서 사용량을 가져오는 경로가 아직 없습니다. 비어
-                있으면 예상 환불 금액을 계산하지 않습니다 — 없는 값을 0 으로 두면 「하나도 안
-                썼으니 전액 환불」이 되어 해지월 매출이 통째로 음수가 됩니다. */}
-            <Field label="크레딧 사용량">
-              <input className="inp" type="number" value={draft.credits_used}
-                     onChange={(e) => set("credits_used", e.target.value)}
-                     placeholder="중도 해지 시 환불 계산에 씁니다" />
-            </Field>
-            <div style={{ gridColumn: "span 3" }}>
-              <label className="form-label">계약서 유형 <span style={{ color: "var(--faint)" }}>(복수 선택)</span></label>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 14, padding: "7px 0 2px" }}>
-                {options.doc_types.map((item) => (
-                  <label key={item} style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 13, cursor: "pointer" }}>
-                    <input type="checkbox" checked={docTypes.includes(item)}
-                           onChange={(e) => setDocTypes(
-                             e.target.checked ? [...docTypes, item] : docTypes.filter((x) => x !== item))} />
-                    {item}
-                  </label>
-                ))}
-              </div>
-            </div>
-          </div>
-
-          <div className="form-sec">금액</div>
-          {/* 순서가 뜻을 갖습니다(운영자 지시): **부가세 해당 여부 → 통화 → 환율 → 금액 →
-              공급가.** 앞의 것이 뒤의 것을 정하기 때문입니다 — 해당 여부가 금액 칸을 한 개로
-              할지 두 개로 할지 정하고, 통화가 환율을 물어볼지 말지 정합니다. */}
-          <div className="form-grid3">
-            <Field label="VAT 해당 여부">
-              <select className="inp" value={draft.vat_applicable}
-                      onChange={(e) => set("vat_applicable", e.target.value)}>
-                <option value="1">VAT 해당 (국내 법인 고객)</option>
-                <option value="">VAT 미해당 (그 외 고객)</option>
-              </select>
-            </Field>
-            <Field label="통화">
-              <Sel value={draft.currency} onChange={(v) => set("currency", v)} options={options.currencies} />
-            </Field>
-            {/* **통화와 무관하게 묻습니다** (2026-08-31 운영자 지시). 예전에는 원화 계약에
-                안 물었는데, 그건 한쪽 방향만 본 이야기였습니다: 예상 MRR 카드는 원화 계약을
-                USD 로도 보여 주고, 계약에 환율이 없으면 그 환산이 매일 오늘 고시가로 다시
-                일어납니다 — 지난달 숫자가 오늘 환율에 따라 움직입니다.
-
-                비워 두면 저장할 때 계약일 고시가(없으면 오늘 고시가)를 조회해 계약 행에
-                박아 둡니다. 이 칸은 비어 있으면 안 되는 칸입니다. */}
-            <Field label="환율 (USD → KRW)">
-              <input className="inp" type="number" value={draft.fx_rate}
-                     onChange={(e) => set("fx_rate", e.target.value)}
-                     placeholder="비우면 계약일 고시가로 자동" />
-            </Field>
-            {/* **어느 칸을 받는지는 통화와 「금액 기준」이 함께 정합니다.** 국내 계약서는
-                공급가로 적히고 부가세가 따로 붙는 것이 흔하지만, 총액으로 적히는 계약도
-                있습니다 — 그것을 공급가 칸에 넣으면 분당 단가가 10% 낮게 나오고 화면
-                어디에도 그게 보이지 않습니다. 해외 계약에는 부가세가 없어 총액이 곧
-                대금이라 고를 것이 없습니다. 어느 쪽이든 채우는 칸은 하나입니다: 둘 다
-                받으면 분당 단가가 어느 쪽 기준인지 계약마다 달라집니다. */}
-            {/* **해당이면 칸이 둘입니다.** 한쪽을 적으면 다른 쪽이 10% 로 따라옵니다 —
-                계약서가 어느 쪽으로 적혀 있든 그 숫자를 그대로 넣을 수 있어야 합니다. 둘 다
-                고칠 수 있게 두되, 저장할 때 서버가 **공급가로 고른 쪽에서 다시 계산**하므로
-                두 값이 어긋난 채 저장되지는 않습니다. */}
-            {vatApplicable ? (
-              <>
-                <Field label="총 계약금액 (VAT 포함)" required>
-                  <input className="inp" type="number" value={draft.amount_incl_vat}
-                         onChange={(e) => setAmount("incl", e.target.value)}
-                         placeholder="예: 11000000" />
-                </Field>
-                <Field label="공급가 (VAT 미포함)" required>
-                  <input className="inp" type="number" value={draft.amount_excl_vat}
-                         onChange={(e) => setAmount("excl", e.target.value)}
-                         placeholder="예: 10000000" />
-                </Field>
-                {/* 분당 단가가 어느 금액에서 나오는지. 계약서가 총액으로 적힌 건과 공급가로
-                    적힌 건이 둘 다 있어서, 고르지 않으면 계약마다 단가가 10% 씩 달라집니다.
-
-                    라벨에서 「공급가」를 뺐습니다 (2026-08-31 운영자 지시): 바로 위 칸이
-                    **공급가 (VAT 미포함)** 이라 두 칸이 같은 말로 시작했고, 이 칸은 공급가를
-                    입력받는 칸이 아니라 **어느 금액을 기준으로 삼을지 고르는** 칸입니다. */}
-                <Field label="분당단가 기준">
-                  <select className="inp" value={draft.vat_included}
-                          onChange={(e) => set("vat_included", e.target.value)}>
-                    <option value="">VAT 미포함 금액으로</option>
-                    <option value="1">VAT 포함 금액으로</option>
-                  </select>
-                </Field>
-              </>
-            ) : (
-              <div style={{ gridColumn: "span 2" }}>
-                <label className="form-label">계약금액 <span className="req">*</span></label>
-                <input className="inp" type="number" value={draft.amount_incl_vat}
-                       onChange={(e) => set("amount_incl_vat", e.target.value)} placeholder="예: 20000" />
-                <div style={{ fontSize: 11.5, color: "var(--faint)", marginTop: 4 }}>
-                  VAT 미해당 — 금액은 하나이고, 그 금액이 분당단가 기준입니다.
-                </div>
-              </div>
-            )}
-            {/* 계산값입니다. 계약서에 적히는 것은 금액과 크레딧이고 단가는 그 둘에서
-                나옵니다 — 소수점은 남깁니다. 반올림한 단가는 되짚어 곱했을 때 금액이
-                안 맞습니다. */}
-            <Field label="분당 단가">
-              <div className="inp" aria-readonly="true"
-                   style={{ background: "var(--bg-soft)", fontVariantNumeric: "tabular-nums",
-                            color: unitPrice === null ? "var(--faint)" : "var(--ink)" }}>
-                {unitPrice === null ? "금액 · 크레딧 입력 시 계산" : `${unitPrice} ${draft.currency}`}
-              </div>
-            </Field>
-          </div>
-
-          <div className="form-sec">결제</div>
-          <div className="form-grid3">
-            <Field label="결제 수단">
-              <Sel value={draft.payment_method} onChange={(v) => set("payment_method", v)} options={options.payment_methods} />
-            </Field>
-            <Field label="결제 방식">
-              <Sel value={draft.payment_type} onChange={(v) => set("payment_type", v)} options={options.payment_types} />
-            </Field>
-            <Field label="총 분납 횟수">
-              <input className="inp" type="number" min={1} value={draft.installments}
-                     disabled={draft.payment_type !== "할부"}
-                     onChange={(e) => set("installments", e.target.value)} />
-            </Field>
-            <Field label="최초 결제일">
-              <input className="inp" type="date" value={draft.first_payment_on}
-                     onChange={(e) => set("first_payment_on", e.target.value)} />
-            </Field>
-            <div style={{ gridColumn: "span 2" }}>
-              <label className="form-label">Billing Email</label>
-              <input className="inp" value={draft.billing_email} placeholder="예: ap@company.com"
-                     onChange={(e) => set("billing_email", e.target.value)} />
-            </div>
-          </div>
-
-          <div className="form-sec">크레딧 지급</div>
-          <div className="form-grid3">
-            <Field label="총 지급 회차">
-              <input className="inp" type="number" min={1} value={creditRounds}
-                     onChange={(e) => setCreditRounds(e.target.value)} />
-            </Field>
-            <Field label="첫 지급 예정일">
-              <input className="inp" type="date" value={firstCreditOn}
-                     onChange={(e) => setFirstCreditOn(e.target.value)} />
-            </Field>
-            <div style={{ display: "flex", alignItems: "flex-end", fontSize: 12,
-                          color: creditChanged ? "var(--red-fg)" : "var(--faint)" }}>
-              {creditChanged
-                ? "저장하면 지급 예정 목록을 다시 깝니다 — 손으로 추가·수정한 회차와 지급 완료 표시가 모두 사라집니다."
-                : "회차별 크레딧은 균등 분배로 자동 생성됩니다."}
-            </div>
-          </div>
-
-          <div className="form-sec">매출 인식</div>
-          <div className="form-grid3">
-            <Field label="매출 인식 시작 월">
-              <input className="inp" type="month" value={draft.revenue_from}
-                     onChange={(e) => set("revenue_from", e.target.value)} />
-              <div style={{ fontSize: 11.5, color: "var(--faint)", marginTop: 4 }}>
-                비우면 계약 시작월부터 인식합니다. (MRR만 적용)
-              </div>
-            </Field>
-          </div>
-
-          <div className="form-sec">Perso 계정 및 플랜</div>
-          <div className="note-box">
-            플랜 기간은 계약 기간과 다릅니다 — MRR 은 이 기간으로 나누고 이 기간에 인식하며,
-            「사용중」도 이 기간이 정합니다. <b>비우면 계약 기간과 같습니다.</b>
-          </div>
-          <div className="form-grid3">
-            {/* **플랜 기간은 계약 기간과 다른 것입니다** (2026-08-31 운영자 지시). 계약은
-                먼저 맺고 실제 사용은 늦게 시작하는 일이 흔한데, 한동안 이 폼이 묻지 않고
-                계약 날짜를 그대로 복사했습니다 — 그래서 MRR 도 「사용중」도 계약 기간으로
-                계산됐습니다.
-
-                MRR 은 이 기간으로 나누고 이 기간에 인식합니다(`won.plan_period`), 그리고
-                「사용중」도 이 기간이 정합니다. 비워 두면 계약 기간과 같습니다 — 대부분의
-                계약이 그렇고, 그때는 아무것도 안 적으면 됩니다. */}
-            <Field label="플랜 시작일">
-              <input className="inp" type="date" value={draft.plan_starts_on}
-                     onChange={(e) => set("plan_starts_on", e.target.value)} />
-            </Field>
-            <Field label="플랜 만료일">
-              <input className="inp" type="date" value={draft.plan_ends_on}
-                     onChange={(e) => set("plan_ends_on", e.target.value)} />
-            </Field>
-            <Field label="플랜">
-              <Sel value={draft.plan} onChange={(v) => set("plan", v)} options={options.plans} />
-            </Field>
-            <Field label="플랜명">
-              <input className="inp" value={draft.plan_name} onChange={(e) => set("plan_name", e.target.value)} />
-            </Field>
-            <Field label="Perso Email">
-              <input className="inp" value={draft.perso_email} onChange={(e) => set("perso_email", e.target.value)} />
-            </Field>
-            <Field label="Account Invitation Limit">
-              <input className="inp" type="number" value={draft.invite_limit} onChange={(e) => set("invite_limit", e.target.value)} />
-            </Field>
-            <Field label="Queue limit">
-              <input className="inp" type="number" value={draft.queue_limit} onChange={(e) => set("queue_limit", e.target.value)} />
-            </Field>
-            <Field label="Concurrent Jobs">
-              <input className="inp" type="number" value={draft.concurrent_jobs} onChange={(e) => set("concurrent_jobs", e.target.value)} />
-            </Field>
-            <Field label="Space 개수">
-              <input className="inp" type="number" value={draft.space_count} onChange={(e) => set("space_count", e.target.value)} />
-            </Field>
-            <div style={{ gridColumn: "span 2" }}>
-              <label className="form-label">space_seq</label>
-              <input className="inp" value={draft.space_seq} onChange={(e) => set("space_seq", e.target.value)}
-                     placeholder="여러 개면 쉼표로" />
-            </div>
-          </div>
-
-          <div className="form-sec">기타</div>
-          <div>
-            <label className="form-label">계약 비고</label>
-            <textarea className="inp" rows={2} value={draft.note}
-                      onChange={(e) => set("note", e.target.value)}
-                      placeholder="갱신 조건, 협의 내용 등" />
-          </div>
-          {/* 「저장 후 플랜 상태」 고르개가 여기 있었습니다. 플랜 상태는 이제 계약 기간이
-              정합니다 — 이 폼에 적는 시작일·종료일이 곧 그 값입니다. 고르개를 남겨 두면
-              사람이 고른 값과 날짜가 말하는 값이 갈라지고, 그때 어느 쪽이 맞는지 아무도
-              모릅니다. 아래 줄이 지금 무엇이 될지 미리 말해 줍니다. */}
-          <div className="note-box" style={{ marginTop: 14 }}>
-            플랜 상태는 계약 기간에서 정해집니다 — 이 계약은 저장하면{" "}
-            <b>{planPreview}</b> 입니다.
-          </div>
-
+          <ContractFields f={f} options={options} />
+          <PlanFields f={f} options={options} />
         </form>
       </div>
     </Modal>
   );
-}
-
-function Sel({ value, onChange, options }: {
-  value: string; onChange: (value: string) => void; options: string[];
-}) {
-  return (
-    <select className="inp" value={value} onChange={(event) => onChange(event.target.value)}>
-      {options.map((option) => <option key={option} value={option}>{option || "—"}</option>)}
-    </select>
-  );
-}
-
-const str = (value: unknown) => (value === null || value === undefined ? "" : String(value));
-
-/** 재계약이 물려받는 것 — 플랜·단가·결제 방식·계정 한도. 금액·기간은 새로 씁니다.
- *
- * **환율은 물려받지 않습니다.** 그건 직전 계약을 맺던 날의 값이라, 새 계약에 그대로
- * 박히면 이번 계약의 크레딧이 남의 시점 환율로 계산됩니다. 쓴 사람이 직접 적습니다. */
-function carryOver(prev: Contract) {
-  return {
-    deal_type: prev.deal_type, currency: prev.currency,
-    // 통화를 물려받으면 「VAT 포함/제외」도 물려받아야 합니다 — 같은 고객의 다음 차수
-    // 계약서는 같은 방식으로 적힙니다. 통화만 따라오고 기준은 초기화되면, 총액으로 적힌
-    // 계약이 공급가 칸으로 들어가 단가가 10% 낮아집니다.
-    vat_applicable: prev.vat_applicable ? "1" : "",
-    vat_included: prev.vat_included ? "1" : "",
-    payment_method: str(prev.payment_method), payment_type: str(prev.payment_type),
-    installments: str(prev.installments ?? 1), billing_email: str(prev.billing_email),
-    contact_name: str(prev.contact_name), contact_info: str(prev.contact_info),
-    plan: str(prev.plan), plan_name: str(prev.plan_name), perso_email: str(prev.perso_email),
-    invite_limit: str(prev.invite_limit), queue_limit: str(prev.queue_limit),
-    concurrent_jobs: str(prev.concurrent_jobs), space_count: str(prev.space_count),
-    space_seq: str(prev.space_seq),
-  };
-}
-const emptyCarry = () => carryOverKeys.reduce((acc, key) => ({ ...acc, [key]: "" }), {});
-const carryOverKeys = Object.keys(carryOver({} as Contract)) as (keyof Draft)[];
-
-function fromContract(contract: Contract): Draft {
-  return {
-    deal_type: contract.deal_type, starts_on: str(contract.starts_on), ends_on: str(contract.ends_on),
-    plan_starts_on: contract.plan_starts_on || "", plan_ends_on: contract.plan_ends_on || "",
-    ticket_id: str(contract.ticket_id), currency: contract.currency,
-    vat_applicable: contract.vat_applicable ? "1" : "",
-    vat_included: contract.vat_included ? "1" : "",
-    fx_rate: str(contract.fx_rate), terminated_on: str(contract.terminated_on),
-    credits_used: str(contract.credits_used),
-    amount_incl_vat: str(contract.amount_incl_vat), amount_excl_vat: str(contract.amount_excl_vat),
-    credits: str(contract.credits),
-    payment_method: str(contract.payment_method), payment_type: str(contract.payment_type),
-    installments: str(contract.installments ?? 1), first_payment_on: str(contract.first_payment_on),
-    billing_email: str(contract.billing_email), note: str(contract.note),
-    contact_name: str(contract.contact_name), contact_info: str(contract.contact_info),
-    plan: str(contract.plan), plan_name: str(contract.plan_name), perso_email: str(contract.perso_email),
-    invite_limit: str(contract.invite_limit), queue_limit: str(contract.queue_limit),
-    concurrent_jobs: str(contract.concurrent_jobs), space_count: str(contract.space_count),
-    space_seq: str(contract.space_seq),
-    revenue_from: contract.revenue_from_set ? str(contract.revenue_from) : "",
-  };
 }
