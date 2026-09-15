@@ -307,7 +307,9 @@ def _poller_steps() -> list[tuple[str, object]]:
         # 멎고, 그때는 허브스팟 왕복이 0 입니다. 급한 값이 아니라 10분이면 넉넉합니다.
         ("contact_websites", _fill_company_websites),
         # 연결된 개인 사서함에서 **우리가 아는 연락처의 메일만** 주워 옵니다 (0115).
-        # 허브스팟이 못 보는 자리이고, 티켓에 붙일지는 화면에서 사람이 누릅니다.
+        # 허브스팟이 못 보는 자리이고, 붙을 자리(그 고객의 최신 대화)가 있으면 바로 붙습니다 —
+        # 앞의 `ticket_history` 뒤에 도는 이유: 허브스팟 줄이 먼저 서 있어야 같은 메일의 사본을
+        # `same_mail` 로 알아보고 건너뜁니다(2026-09-15).
         # 연결된 사서함이 없으면 아무 일도 안 합니다 — 조회조차 안 나갑니다.
         ("personal_mailboxes", sync_mailboxes_once),
         ("hubspot_backfill", process_requested_hubspot_backfill),

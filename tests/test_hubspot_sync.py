@@ -303,6 +303,31 @@ def test_get_latest_note_found(client: HubSpotClient) -> None:
 
 
 @respx.mock
+def test_our_own_note_does_not_come_back(client: HubSpotClient) -> None:
+    """개인함 수집과 소통 기록 폼이 허브스팟에 남긴 노트를 다시 읽어 오면 같은 메일이 「노트」로 한 번
+    더 섭니다(2026-09-15 운영자: 「세 번 기록」). 우리 노트는 첫머리로 알아보고 돌려주지 않습니다 —
+    세 곳이 쓰는 첫머리가 전부 `OUR_NOTE_PREFIXES` 에 있어야 하고, 이 테스트가 그 셋을 맞춥니다."""
+    from src.api.routes.customer_ops import _CHANNEL_LABELS
+    from src.integrations.hubspot import is_our_note
+
+    assert is_our_note("[개인 메일함 untae@estsoft.com] Re: 견적\n\n본문")          # mailbox_sync._note_on_ticket
+    assert is_our_note("[개인 메일함 untae@estsoft.com 에서 발송] Re: 견적\n\n본문")  # senders._send_from_mailbox
+    for label in _CHANNEL_LABELS.values():                                       # customer_ops._log_interaction_to_hubspot
+        assert is_our_note(f"[{label}] 제목 · 담당 김담당\n\n요약"), label
+    assert not is_our_note("고객이 전화로 단가 재문의")                            # 사람이 허브스팟에 직접 쓴 노트
+
+    respx.get(f"{BASE_URL}/crm/v3/objects/contacts/703/associations/notes").mock(
+        return_value=httpx.Response(200, json={"results": [{"id": "n3"}]})
+    )
+    respx.get(f"{BASE_URL}/crm/v3/objects/notes/n3").mock(
+        return_value=httpx.Response(
+            200, json={"properties": {"hs_note_body": "<p>[개인 메일함 untae@estsoft.com] Re: 견적</p><p>본문</p>"}},
+        )
+    )
+    assert client.get_latest_note("703") is None
+
+
+@respx.mock
 def test_get_latest_note_no_results(client: HubSpotClient) -> None:
     respx.get(
         f"{BASE_URL}/crm/v3/objects/contacts/701/associations/notes"

@@ -49,7 +49,7 @@ from ..integrations.gmail import (
 logger = logging.getLogger(__name__)
 
 _API = "https://gmail.googleapis.com/gmail/v1/users/me"
-# 한 회차에 사서함당 볼 메일 수. 개인함은 하루 수십 통이고 3시간마다 도므로 넉넉합니다.
+# 한 회차에 사서함당 볼 메일 수. 개인함은 하루 수십 통이고 10분 폴러마다 도므로 넉넉합니다.
 MESSAGES_PER_SWEEP = 50
 # 창을 조금 겹칩니다 — 경계에 걸친 메일을 놓치지 않게. 다시 읽는 것은 무해합니다.
 _SWEEP_OVERLAP = timedelta(minutes=5)
@@ -163,29 +163,36 @@ def _we_already_sent_it(session, contact_id: int, when: datetime) -> bool:
     ) is not None
 
 
-def _hubspot_already_has_it(session, contact_id: int, when: datetime, direction: str) -> bool:
-    """허브스팟이 이미 잡은 메일인가 — **겹치면 허브스팟 것만** (운영자 지시).
+def _hubspot_already_has_it(
+    session, contact_id: int, when: datetime, direction: str, subject: str | None = None,
+) -> bool:
+    """이미 잡힌 메일인가 — **겹치면 먼저 있던 것만** (운영자 지시).
 
-    자를 새로 만들지 않고 `ticket_history._merge_crm_twins` 가 같은 메일의 두 사본을
-    알아볼 때 쓰는 규칙을 그대로 씁니다: **같은 연락처 · 같은 초 · 같은 방향.** 한
-    연락처에서 같은 초에 다른 메일이 둘 오갈 일은 없습니다.
+    자는 `ticket_history.same_mail` 하나입니다: 같은 연락처에서 **같은 방향 · 같은 제목 · 10분
+    안**이면 같은 메일의 사본으로 봅니다. 한동안 「같은 초」만 봤는데, 지메일 `Date`(보낸 쪽
+    시계)와 허브스팟 `createdAt`(받아들인 시각)은 같은 초인 적이 없어 **한 번도 안 잡혔습니다** —
+    운영자가 지메일에서 직접 답장한 한 통이 세 줄로 선 사고(2026-09-15)의 한 자리입니다.
+
+    다른 사서함의 `gmail:` 줄도 봅니다(예전에는 일부러 뺐습니다). 두 사서함이 같은 메일을
+    각자 가져오면 두 줄이 서는데, 그 둘은 `Date` 가 글자까지 같아 **같은 초**로 잡힙니다.
 
     Message-ID 로 맞추면 더 정확하겠지만, 허브스팟 쪽 줄에 그 값이 **없습니다** — 그걸
     담으려면 이미 들어온 수천 줄을 다시 받아야 합니다.
     """
-    from .ticket_history import _same_direction
+    from .ticket_history import SAME_MAIL_WINDOW, same_mail
 
-    stamp = when.replace(microsecond=0, tzinfo=None)
+    stamp = when.replace(tzinfo=None)
     rows = session.scalars(
         select(CustomerInteraction).where(
             CustomerInteraction.contact_id == contact_id,
             CustomerInteraction.happened_at.is_not(None),
+            CustomerInteraction.happened_at >= stamp - SAME_MAIL_WINDOW,
+            CustomerInteraction.happened_at <= stamp + SAME_MAIL_WINDOW,
         )
     ).all()
     return any(
-        row.happened_at.replace(microsecond=0) == stamp
-        and _same_direction(row.direction) == direction
-        and not (row.external_id or "").startswith("gmail:")
+        same_mail(row.happened_at, row.direction, row.subject, row.external_id,
+                  stamp, direction, subject)
         for row in rows
     )
 
@@ -241,7 +248,7 @@ def _sync_one(email: str) -> tuple[int, list[tuple[str, str, str, datetime]]]:
             )
             # **운영자가 지운 메일은 다시 안 가져옵니다** (2026-09-09). 행을 지우면 그
             # `external_id` 가 위 목록에서 사라지므로, 묘비가 없으면 **다음 회차에 그대로
-            # 되살아납니다** — 지우기가 10분짜리가 되는 셈입니다.
+            # 되살아납니다** — 지우기가 10분짜리가 되는 셈입니다. 스레드 줄에 접힌 줄도 같은 묘비다.
             known |= set(
                 session.scalars(
                     select(MailboxLinkDecision.external_id).where(
@@ -249,6 +256,16 @@ def _sync_one(email: str) -> tuple[int, list[tuple[str, str, str, datetime]]]:
                     )
                 ).all()
             )
+            # **콘솔에서 이 사서함으로 보낸 우리 회신**은 지메일 id 그대로 `messages` 에 있다
+            # (`senders._send_from_mailbox` 가 `smtp_message_id` 에 넣는다). 그 사본은 열쇠로 거른다 —
+            # `_we_already_sent_it` 은 허브스팟으로 나간 것(`hubspot_message_id`)만 보므로 여기서 새는 길이었다.
+            from ..db.models import Message
+
+            known |= {
+                f"gmail:{sent}" for sent in session.scalars(
+                    select(Message.smtp_message_id).where(Message.smtp_message_id.in_(ids))
+                ).all()
+            }
 
         added = 0
         for message_id in ids:
@@ -306,7 +323,8 @@ def _sync_one(email: str) -> tuple[int, list[tuple[str, str, str, datetime]]]:
                 )
                 if contact is None:
                     continue
-                if _hubspot_already_has_it(session, contact.id, when, direction):
+                if _hubspot_already_has_it(session, contact.id, when, direction,
+                                           head.get("subject", "")):
                     continue
                 # 사이트에서 써서 나간 우리 답장이 이 사서함에 사본으로 남습니다 —
                 # 그 주소가 곧 허브스팟 이메일 채널 계정이기 때문입니다.

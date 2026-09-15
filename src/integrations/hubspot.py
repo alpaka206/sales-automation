@@ -289,6 +289,22 @@ def _contact_properties() -> str:
     return ",".join(names)
 
 
+# 이 앱이 허브스팟에 남기는 노트의 첫머리. 세 곳이 쓴다 — `mailbox_sync._note_on_ticket`(「[개인 메일함
+# <주소>] …」), `senders._send_from_mailbox`(「[개인 메일함 <주소> 에서 발송] …」), `customer_ops.
+# _log_interaction_to_hubspot`(「[<채널 이름>] …」, 채널 이름은 그쪽 `_CHANNEL_LABELS`). 여기 목록과 그
+# 세 곳이 어긋나면 `tests/test_mailboxes.py` 가 잡는다.
+OUR_NOTE_PREFIXES = (
+    "[개인 메일함 ",
+    "[이메일]", "[WhatsApp]", "[전화]", "[문자]", "[카카오톡]", "[미팅 진행]", "[HubSpot]",
+    "[Invoice 발송]", "[계약]", "[메모]",
+)
+
+
+def is_our_note(text: str | None) -> bool:
+    """허브스팟에서 읽은 노트가 이 앱이 남긴 것인가 — 도로 가져오면 안 되는 것."""
+    return (text or "").lstrip().startswith(OUR_NOTE_PREFIXES)
+
+
 class HubSpotClient:
     """Thin async wrapper around HubSpot CRM v3."""
 
@@ -1612,7 +1628,12 @@ class HubSpotClient:
         return None
 
     def get_latest_note(self, contact_id: str) -> str | None:
-        """Fetch body of the most recent note associated with a contact."""
+        """Fetch body of the most recent note associated with a contact.
+
+        **우리가 남긴 노트는 돌려주지 않는다** (2026-09-15). 개인함 수집과 소통 기록 폼이 허브스팟에
+        노트를 남기는데(`create_interaction_note`), 그것을 다시 읽어 오면 같은 메일이 「노트」로 한 번
+        더 선다 — 운영자가 본 「세 번 기록」의 한 자리. 우리 노트는 전부 `OUR_NOTE_PREFIXES` 로 시작한다.
+        """
         headers = {"Authorization": f"Bearer {self.token}"}
         with httpx.Client(headers=headers, timeout=30.0) as client:
             r = client.get(
@@ -1633,7 +1654,10 @@ class HubSpotClient:
             )
             if nr.status_code != 200:
                 return None
-            return _html_to_text(nr.json().get("properties", {}).get("hs_note_body") or None)
+            text = _html_to_text(nr.json().get("properties", {}).get("hs_note_body") or None)
+            if text and is_our_note(text):
+                return None
+            return text
 
     def get_associated_deals_sync(self, contact_id: str) -> list[DealDTO]:
         """Fetch deals associated with a contact (sync)."""

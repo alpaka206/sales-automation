@@ -380,6 +380,67 @@ def test_the_old_crm_row_is_folded_into_the_thread_row():
         assert rows[0].context == "견적 안내와 미팅 링크를 보냈습니다.", "요약은 옮겨 탑니다"
 
 
+def test_a_mailbox_copy_is_folded_into_the_thread_row_and_stays_gone():
+    """웹훅이 늦거나 유실돼 **개인함 수집이 먼저** 돌면 `gmail:` 줄이 먼저 서고, 허브스팟 줄은 그
+    뒤에 옵니다 — 그때 이 자리가 유일한 만남입니다(2026-09-15, 「지메일에서 직접 답장하니 세 번
+    기록」). 열쇠는 `same_mail`: 같은 방향 · 같은 제목(Re: 뗀 것) · 10분 안. 지운 줄은 묘비를
+    남깁니다 — 안 남기면 다음 회차의 개인함 수집이 같은 메일을 그대로 되살립니다."""
+    from datetime import datetime, timedelta
+    from unittest.mock import patch
+
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from sqlalchemy.pool import StaticPool
+
+    from src.agents import ticket_history
+    from src.db.base import Base
+    from src.db.models import Contact, Conversation, CustomerInteraction, MailboxLinkDecision
+
+    engine = create_engine(
+        "sqlite:///:memory:", connect_args={"check_same_thread": False}, poolclass=StaticPool
+    )
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine, expire_on_commit=False)
+    sent = datetime(2026, 9, 15, 4, 10, 0)          # 지메일 Date
+    ingested = sent + timedelta(seconds=41)          # 허브스팟 createdAt
+    with factory() as session:
+        contact = Contact(normalized_email="buyer@acme.com", email="buyer@acme.com", full_name="Acme")
+        session.add(contact)
+        session.flush()
+        conv = Conversation(contact_id=contact.id, stage="negotiation")
+        session.add(conv)
+        session.flush()
+        session.add_all([
+            CustomerInteraction(
+                contact_id=contact.id, conversation_id=conv.id, external_id="gmail:m1",
+                channel="이메일", direction="outgoing", subject="Re: 견적 문의",
+                summary="지메일에서 직접 보낸 답장", context="untae@estsoft.com 개인 메일함",
+                happened_at=sent,
+            ),
+            # 같은 고객에게 같은 시각에 온 **다른** 메일 — 제목이 달라 접히면 안 됩니다.
+            CustomerInteraction(
+                contact_id=contact.id, conversation_id=conv.id, external_id="gmail:m2",
+                channel="이메일", direction="outgoing", subject="계약서 초안",
+                summary="다른 이야기", context="untae@estsoft.com 개인 메일함", happened_at=sent,
+            ),
+        ])
+        session.commit()
+        ids = (conv.id, contact.id)
+
+    thread_row = {"external_id": "hubspot:conv:t1", "channel": "이메일", "direction": "outgoing",
+                  "subject": "RE: 견적 문의", "summary": "지메일에서 직접 보낸 답장",
+                  "handler": "untae@estsoft.com", "happened_at": ingested}
+    with patch.object(ticket_history, "SessionLocal", factory):
+        ticket_history._store(ids[0], ids[1], [thread_row])
+
+    with factory() as session:
+        rows = {r.external_id: r for r in session.query(CustomerInteraction).all()}
+        assert set(rows) == {"hubspot:conv:t1", "gmail:m2"}, "같은 메일만 접히고 다른 메일은 남습니다"
+        assert rows["hubspot:conv:t1"].context == "untae@estsoft.com 개인 메일함", "어느 사서함인지는 옮겨 탑니다"
+        stone = session.get(MailboxLinkDecision, "gmail:m1")
+        assert stone is not None and stone.decided_by == "merged", "묘비가 없으면 다음 회차에 되살아납니다"
+
+
 # --------------------------------------------------------------------------- #
 # 고객이 답장하면 협의 중으로 (2026-09-07 운영자 지시)
 # --------------------------------------------------------------------------- #

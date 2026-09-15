@@ -1604,8 +1604,9 @@ def _fit(value: str | None, limit: int = 300) -> str | None:
 def _sync_hubspot(contact_id: int, per_type: int = 20) -> int:
     """허브스팟에 있는 그 사람의 기록을 우리 히스토리로 가져옵니다.
 
-    **손으로 누르는 버튼은 없어졌습니다** (2026-08-26). 부르는 곳은 둘입니다 — 2분 연락처
-    스윕(`agents/contact_sync`)과 과거 이관 라우트(`/internal/customers/hubspot-history`).
+    **손으로 누르는 버튼은 없어졌습니다** (2026-08-26). 부르는 곳은 과거 이관 라우트
+    (`/internal/customers/hubspot-history`)와 `scripts/sync_hubspot_history.py` 뿐입니다 — 2분
+    연락처 스윕은 2026-09-09 에 지웠습니다(「저쪽을 다시 읽지 않는다」).
     버튼이 있던 시절의 정당성은 「스윕이 안 보는 사람이 있다」였는데, 그 시점에 이미
     `never_synced` 가 0 이었습니다(실측). 스윕이 2분마다 도는 지금 그 버튼이 하는 일은
     「곧 일어날 일을 앞당기기」뿐이고, 그러면 「이걸 눌러야 하나」만 남습니다.

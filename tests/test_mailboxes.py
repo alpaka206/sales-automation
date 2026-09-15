@@ -406,9 +406,14 @@ def test_a_conversation_without_a_hubspot_number_still_counts(sync_db):
 
 
 def test_a_mail_hubspot_already_has_is_skipped(sync_db):
-    """**겹치면 허브스팟 것만** (운영자 지시). 자를 새로 만들지 않고 `_merge_crm_twins` 의
-    규칙을 그대로 씁니다 — 같은 연락처 · 같은 초 · 같은 방향."""
-    from datetime import datetime, timezone
+    """**겹치면 먼저 있던 것만** (운영자 지시). 자는 `ticket_history.same_mail` 하나입니다 —
+    같은 연락처 · 같은 방향 · 같은 제목 · 10분 안.
+
+    **같은 초만 보던 시절에는 한 번도 안 잡혔습니다** (2026-09-15): 지메일 `Date` 는 보낸 쪽
+    시계이고 허브스팟 `createdAt` 은 받아들인 시각이라 몇 초씩 어긋납니다 — 운영자가 지메일에서
+    직접 답장한 한 통이 세 줄로 선 사고의 한 자리입니다.
+    """
+    from datetime import datetime, timedelta, timezone
 
     from src.agents.mailbox_sync import _hubspot_already_has_it
     from src.db.models import CustomerInteraction
@@ -418,13 +423,47 @@ def test_a_mail_hubspot_already_has_is_skipped(sync_db):
     with sync_db() as session:
         session.add(CustomerInteraction(
             contact_id=contact_id, channel="이메일", direction="inbound",
-            summary="허브스팟이 들여온 같은 메일", external_id="hubspot:conv:x",
-            happened_at=when.replace(tzinfo=None),
+            subject="RE: Perso 견적 문의", summary="허브스팟이 들여온 같은 메일",
+            external_id="hubspot:conv:x", happened_at=when.replace(tzinfo=None),
         ))
         session.commit()
-        assert _hubspot_already_has_it(session, contact_id, when, "inbound") is True
+        # 같은 초 — 예전 규칙 그대로 잡힙니다.
+        assert _hubspot_already_has_it(session, contact_id, when, "inbound", "Re: Perso 견적 문의") is True
+        # 7초 뒤, 같은 제목 — 지메일과 허브스팟의 시계 차이. 이것이 안 잡히던 구멍입니다.
+        assert _hubspot_already_has_it(
+            session, contact_id, when + timedelta(seconds=7), "inbound", "RE: Perso 견적 문의") is True
         # 방향이 다르면 다른 메일입니다.
-        assert _hubspot_already_has_it(session, contact_id, when, "outgoing") is False
+        assert _hubspot_already_has_it(session, contact_id, when, "outgoing", "RE: Perso 견적 문의") is False
+        # 제목이 다르면 다른 메일입니다 — 같은 고객이 10분 안에 다른 이야기를 보낼 수 있습니다.
+        assert _hubspot_already_has_it(
+            session, contact_id, when + timedelta(seconds=7), "inbound", "첨부 파일 다시 보냅니다") is False
+        # 11분 뒤는 다른 메일입니다.
+        assert _hubspot_already_has_it(
+            session, contact_id, when + timedelta(minutes=11), "inbound", "RE: Perso 견적 문의") is False
+
+
+def test_two_mailboxes_keep_one_copy_of_the_same_mail(sync_db):
+    """운영자의 답장이 두 사서함(보낸 사람 · 받는 사람에 둘 다 우리 주소)에 남으면 예전에는 두 줄이
+    섰습니다 — `gmail:` 줄끼리는 일부러 안 맞대던 자리입니다. 같은 메일은 두 사서함에서 `Date` 가
+    글자까지 같으므로 **같은 초**로 잡습니다(제목이 없어도)."""
+    from datetime import datetime, timedelta, timezone
+
+    from src.agents.mailbox_sync import _hubspot_already_has_it
+    from src.db.models import CustomerInteraction
+
+    contact_id = _seed(sync_db, with_ticket=True)
+    when = datetime(2026, 9, 7, 1, 2, 3, tzinfo=timezone.utc)
+    with sync_db() as session:
+        session.add(CustomerInteraction(
+            contact_id=contact_id, channel="이메일", direction="outgoing", subject=None,
+            summary="첫 사서함이 가져온 우리 답장", external_id="gmail:aaa",
+            context="untae@estsoft.com 개인 메일함", happened_at=when.replace(tzinfo=None),
+        ))
+        session.commit()
+        assert _hubspot_already_has_it(session, contact_id, when, "outgoing", None) is True
+        # 다른 사서함의 줄에는 넓은 창을 안 씁니다 — 다른 초면 다른 메일입니다.
+        assert _hubspot_already_has_it(
+            session, contact_id, when + timedelta(seconds=3), "outgoing", None) is False
 
 
 def test_the_window_is_since_we_last_looked_not_since_consent(sync_db, monkeypatch):
@@ -647,6 +686,43 @@ def test_our_own_reply_does_not_come_back_as_a_second_copy(sync_db, monkeypatch)
             select(CustomerInteraction).where(CustomerInteraction.external_id == "gmail:m9")
         ) is None, "우리가 보낸 답장이 개인함 사본으로 다시 들어오면 안 됩니다"
     assert contact_id  # 연락처는 있었습니다 — 걸러진 이유가 「모르는 사람」이 아닙니다
+
+
+def test_a_reply_sent_through_the_mailbox_itself_is_not_reimported(sync_db, monkeypatch):
+    """콘솔에서 **개인함으로** 보낸 회신(`senders._send_from_mailbox`)은 지메일 id 가 그대로
+    `messages.smtp_message_id` 에 남습니다. 그 사본이 「보낸편지함」에서 돌아오면 열쇠로 거릅니다 —
+    `_we_already_sent_it` 은 허브스팟으로 나간 것(`hubspot_message_id`)만 봐서 여기가 새는 길이었습니다
+    (2026-09-15)."""
+    from datetime import datetime
+
+    from src.agents import mailbox_sync
+    from src.db.models import CustomerInteraction, Message
+
+    _seed(sync_db, with_ticket=True)
+    _mailbox(sync_db, "untae@estsoft.com")
+    with sync_db() as session:
+        conversation = session.scalar(
+            select(Conversation).where(Conversation.hubspot_ticket_id == "T-2")
+        )
+        session.add(Message(
+            conversation_id=conversation.id, direction="outgoing", status="sent",
+            channel="email", subject="RE: 견적", body="안녕하세요,",
+            smtp_message_id="m9", sent_at=datetime(2026, 9, 9, 1, 0, 0)))
+        session.commit()
+
+    _one_mail(monkeypatch, [
+        {"name": "From", "value": "untae@estsoft.com"},
+        {"name": "To", "value": "buyer@acme.com"},
+        {"name": "Subject", "value": "RE: 견적"},
+        # 시각을 한참 뒤로 — 시각 창이 아니라 **열쇠**로 걸러진다는 것을 보입니다.
+        {"name": "Date", "value": "Wed, 9 Sep 2026 15:00:07 +0900"},
+    ])
+
+    assert mailbox_sync.sync_mailboxes_once() == {"added": 0}
+    with sync_db() as session:
+        assert session.scalar(
+            select(CustomerInteraction).where(CustomerInteraction.external_id == "gmail:m9")
+        ) is None
 
 
 def test_a_mail_we_were_only_copied_on_is_skipped(sync_db, monkeypatch):

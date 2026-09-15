@@ -44,11 +44,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import func, select
 
-from ..db.models import Conversation, CustomerInteraction
+from ..common.subjects import strip_reply_prefixes
+from ..db.models import MailboxLinkDecision, Conversation, CustomerInteraction
 from ..integrations.hubspot import _BULK_PACE_SECONDS
 from ..db.session import SessionLocal
 
@@ -265,6 +266,36 @@ def _same_direction(value: str | None) -> str:
     return {"incoming": "inbound", "outbound": "outgoing"}.get(value or "", value or "")
 
 
+# 같은 메일의 두 사본이 서로 다른 시각을 들고 있을 수 있는 폭. 지메일 `Date` 는 보낸 쪽 시계이고
+# 허브스팟 `createdAt` 은 받아들인 시각이라 몇 초에서 몇 분 어긋난다. `_we_already_sent_it` 이
+# 같은 이유로 ±10분을 쓴다 — 한 사람에게 같은 제목의 메일을 10분 안에 두 번 보내는 일은 없다.
+SAME_MAIL_WINDOW = timedelta(minutes=10)
+
+
+def same_mail(
+    a_when: datetime | None, a_direction: str | None, a_subject: str | None, a_external_id: str | None,
+    b_when: datetime | None, b_direction: str | None, b_subject: str | None,
+) -> bool:
+    """두 줄이 **같은 메일의 사본**인가 — 지메일 수집(`gmail:`)과 허브스팟 스레드 수집(`hubspot:conv:`)이
+    같은 규칙을 씁니다(2026-09-15, 운영자가 지메일에서 직접 답장한 한 통이 세 줄로 선 사고).
+
+    열쇠는 **같은 방향 · 같은 제목(Re:/Fwd: 뗀 것) · 10분 안**입니다. 예외 하나: 상대 줄이 다른
+    사서함의 `gmail:` 줄이면 **같은 초**를 요구합니다 — 같은 메일은 두 사서함에서 `Date` 가 글자까지
+    같고, 다른 메일이 같은 초에 오갈 일은 없어서 이쪽은 더 좁게 잡아도 잃는 것이 없습니다.
+    제목이 어느 한쪽이라도 비어 있으면 시각만으로는 안 접습니다 — 같은 초일 때만.
+    """
+    if not a_when or not b_when or _same_direction(a_direction) != _same_direction(b_direction):
+        return False
+    a_at, b_at = a_when.replace(tzinfo=None), b_when.replace(tzinfo=None)
+    same_second = a_at.replace(microsecond=0) == b_at.replace(microsecond=0)
+    if (a_external_id or "").startswith("gmail:"):
+        return same_second
+    a_sub, b_sub = strip_reply_prefixes(a_subject), strip_reply_prefixes(b_subject)
+    if not a_sub or not b_sub:
+        return same_second
+    return a_sub == b_sub and abs(a_at - b_at) <= SAME_MAIL_WINDOW
+
+
 def _merge_crm_twins(session, conversation_id: int) -> int:
     """같은 메일의 **CRM 쪽 줄**을 스레드 줄에 합칩니다. 합친 수를 돌려줍니다.
 
@@ -291,19 +322,31 @@ def _merge_crm_twins(session, conversation_id: int) -> int:
             CustomerInteraction.conversation_id == conversation_id
         )
     ).all()
+    thread_rows = [r for r in rows if r.happened_at and (r.external_id or "").startswith("hubspot:conv:")]
     twins: dict[tuple, CustomerInteraction] = {}
-    for row in rows:
-        if row.happened_at and (row.external_id or "").startswith("hubspot:conv:"):
-            twins.setdefault(
-                (row.happened_at.replace(microsecond=0), _same_direction(row.direction)), row
-            )
+    for row in thread_rows:
+        twins.setdefault((row.happened_at.replace(microsecond=0), _same_direction(row.direction)), row)
     merged = 0
     for row in rows:
-        if not row.happened_at or not (row.external_id or "").startswith("hubspot:email:"):
+        if not row.happened_at:
             continue
-        twin = twins.get(
-            (row.happened_at.replace(microsecond=0), _same_direction(row.direction))
-        )
+        ext = row.external_id or ""
+        twin = None
+        if ext.startswith("hubspot:email:"):
+            twin = twins.get((row.happened_at.replace(microsecond=0), _same_direction(row.direction)))
+        elif ext.startswith("gmail:"):
+            # **개인함 줄도 스레드 줄에 접습니다** (2026-09-15). 웹훅이 늦거나 유실돼 개인함 수집이
+            # 먼저 돌면 `gmail:` 줄이 먼저 서고, 허브스팟 줄은 그 뒤에 온다 — 그때 이 자리가 유일한
+            # 만남입니다. 열쇠는 `same_mail`(제목 · 방향 · 10분). 지운 줄은 묘비를 남깁니다 —
+            # 안 남기면 다음 회차의 개인함 수집이 같은 메일을 그대로 되살립니다.
+            twin = next((t for t in thread_rows if same_mail(
+                t.happened_at, t.direction, t.subject, t.external_id,
+                row.happened_at, row.direction, row.subject)), None)
+            if twin is not None:
+                session.merge(MailboxLinkDecision(
+                    external_id=ext, conversation_id=conversation_id, decided_by="merged",
+                    decided_at=datetime.now(timezone.utc).replace(tzinfo=None),
+                ))
         if twin is None:
             continue
         if not twin.context and row.context:
