@@ -1123,8 +1123,11 @@ function PaySection({ contract, today, onDone, evidence }: {
   const total = n(contract.amount_incl_vat);
   // 수금율은 **항상 계약 통화 기준**입니다. 환율 환산은 대시보드의 예상 MRR 에서만 씁니다.
   const percent = total ? Math.round((n(contract.collected) / total) * 100) : 0;
-  // 미납 = 입금 전인데 날짜가 지난 회차.
-  const overdue = payments.filter((p) => !p.done && dueClass(p.paid_on, today) === "over").length;
+  // 상태 넷은 목업의 PAY_ST 그대로 — 성공 · 실패 · 미납 · 예정. **고르는 것은 성공과 예정뿐**이고
+  // 미납(입금 전인데 청구일이 지남)과 실패(스냅샷의 국내 카드 결제 실패 기록)는 그 사실에서
+  // 따라오는 표시입니다. 실패는 카드 결제에만 있고, 계좌이체·세금계산서는 기록이 없어 미납으로 섭니다.
+  const failed = payments.filter((p) => !p.done && evidence?.get(p.id)?.kind === "failed").length;
+  const overdue = payments.filter((p) => !p.done && dueClass(p.paid_on, today) === "over").length - failed;
 
   const [ask, setAsk] = useState<Payment | null>(null);
 
@@ -1137,7 +1140,11 @@ function PaySection({ contract, today, onDone, evidence }: {
     <Section id="sec-pay" title="결제 내역" plain
              right={<>
                <span>{[contract.payment_method, contract.payment_type].filter(Boolean).join(" · ") || "결제 방식 미정"} · 총 {payments.length}회</span>
-               {overdue > 0 && <span style={{ color: "var(--red-fg)", fontWeight: 700 }}>· 미납 {overdue}건</span>}
+               {(overdue > 0 || failed > 0) && (
+                 <span style={{ color: "var(--red-fg)", fontWeight: 700 }}>
+                   {failed > 0 && ` · 실패 ${failed}건`}{overdue > 0 && ` · 미납 ${overdue}건`}
+                 </span>
+               )}
              </>}>
       <div className="panel">
         <div className="tile-h">
@@ -1149,13 +1156,13 @@ function PaySection({ contract, today, onDone, evidence }: {
           <div className="credit-pct">수금 <b className="tnum">{percent}%</b></div>
         </div>
         <div className="pbar" style={{ margin: "10px 0 14px" }}>
-          <div className={`fill${overdue ? " amber" : ""}`} style={{ width: `${Math.min(percent, 100)}%` }} />
+          <div className={`fill${overdue || failed ? " amber" : ""}`} style={{ width: `${Math.min(percent, 100)}%` }} />
         </div>
         <div className="field-grid">
-          <KV k="입금 완료" v={`${paid.length}회`} />
-          <KV k="미납" v={<span style={overdue ? { color: "var(--red-fg)" } : undefined}>{overdue}회</span>} />
-          <KV k="잔여 금액 (VAT 포함)" v={<span className="mono">{money(total - n(contract.collected), contract.currency)}</span>} />
-          <KV k="다음 결제일" v={contract.next_pay_on ? fmt(contract.next_pay_on) : "완료"} />
+          <KV k="성공" v={`${paid.length}회`} />
+          <KV k="실패" v={<span style={failed ? { color: "var(--red-fg)" } : undefined}>{failed}회</span>} />
+          <KV k="미납" v={<span style={overdue ? { color: "var(--amber-fg)" } : undefined}>{overdue}회</span>} />
+          <KV k="다음 청구일" v={contract.next_pay_on ? fmt(contract.next_pay_on) : "완료"} />
         </div>
       </div>
 
@@ -1214,8 +1221,9 @@ function payHint(e: PaymentEvidence | undefined, done: boolean): string {
 }
 
 /** 결제 회차 한 줄 — 지급 표(`GrantRow`)와 같은 방식. 날짜·금액·환율·비고는 칸에서 바로 고치고
- *  blur 에 저장, 상태는 알약 고르개(입금 완료 · 예정 · 미납 · 결제 실패)이고 바꾸면 확인 창.
- *  「미납」(날짜가 지난 예정)과 「결제 실패」(스냅샷)는 고를 수 있는 값이 아니라 보이는 값입니다. */
+ *  blur 에 저장, 상태는 알약 고르개(성공 · 실패 · 미납 · 예정 — 목업의 PAY_ST)이고 바꾸면 확인 창.
+ *  「미납」(청구일이 지난 예정)과 「실패」(스냅샷의 카드 결제 실패)는 고를 수 있는 값이 아니라
+ *  보이는 값입니다 — 저장되는 칸은 `done` 하나라서입니다. */
 function PayRow({ payment, currency, today, onAsk, onSave, evidence }: {
   payment: Payment; currency: string; today: string;
   onAsk: () => void; onSave: (fields: Record<string, string>) => Promise<void>;
@@ -1279,8 +1287,8 @@ function PayRow({ payment, currency, today, onAsk, onSave, evidence }: {
                 onChange={(e) => { if ((e.target.value === "done") !== payment.done) onAsk(); }}>
           <option value="todo">예정</option>
           {state === "late" && <option value="late" disabled>미납</option>}
-          {state === "failed" && <option value="failed" disabled>결제 실패</option>}
-          <option value="done">입금 완료</option>
+          {state === "failed" && <option value="failed" disabled>실패</option>}
+          <option value="done">성공</option>
         </select>
         {!payment.done && (
           <div className="st-note"><span className={dueClass(payment.paid_on, today) || undefined}>{dday(payment.paid_on, today)}</span></div>
