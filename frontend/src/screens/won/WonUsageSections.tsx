@@ -10,7 +10,7 @@ import { useState } from "react";
 import { useSpaceMetric, type Pair, type SpaceResult } from "../../lib/agent";
 import type { Contract } from "./shared";
 import { fmt, num } from "./shared";
-import { AlertTags, DiagnosisBasis, LevelTag } from "./UsageBits";
+import { AlertTags, LevelTag } from "./UsageBits";
 import type { RowUsage } from "./useUsage";
 import { LENGTH_BINS, RULE, fillMonths, fillWeeks, isCurrentPeriod, pairName, type Diagnosis } from "./usage";
 
@@ -240,7 +240,6 @@ const TONE_COLOR: Record<string, string> = { ok: "var(--teal-700)", warn: "var(-
 /** 사용 진단 — 사용 수준 / 마지막 작업 / 주의. 목업의 `dg-bar`: 「크레딧」 탭 맨 위, 카드 밖에
  *  서는 줄이라 `.sec` 이 아니라 홀로 선 `.panel` 입니다(테두리·모서리는 같고 머리가 없다). */
 export function UsageInsight({ d }: { d: Diagnosis }) {
-  const [open, setOpen] = useState(false);
   const cell = (k: string, v: React.ReactNode, tone: string, sub: React.ReactNode) => (
     <div style={{ padding: "14px 18px", background: "#fff" }}>
       <div className="field-label">{k}</div>
@@ -262,11 +261,8 @@ export function UsageInsight({ d }: { d: Diagnosis }) {
           d.alerts.length ? "danger" : "ok",
           d.alerts.length ? d.alerts.map((a) => <div key={a.key}>{a.detail}</div>) : "해당하는 주의 항목이 없습니다")}
       </div>
-      <div style={{ padding: "8px 18px", borderTop: "1px solid var(--line-soft)", display: "flex", gap: 8, alignItems: "center" }}>
-        <button type="button" className="btn btn-sm" onClick={() => setOpen(!open)}>{open ? "판정 근거 닫기" : "판정 근거"}</button>
-        <span className="muted" style={{ fontSize: 11.5 }}>기준일은 스냅샷 시각입니다 — 오늘이 아닙니다.</span>
-      </div>
-      {open && <div style={{ padding: "0 18px 14px" }}><DiagnosisBasis d={d} rule={RULE} /></div>}
+      {/* 「판정 근거」 펼침은 뺐습니다(2026-09-15 운영자: 「굳이 따로 안 보여줘도 돼」). 규칙 자체는
+          `usage.ts` 의 RULE 과 그 테스트에 있습니다. */}
     </div>
   );
 }

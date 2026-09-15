@@ -4,7 +4,7 @@ import { Link } from "react-router-dom";
 import type { useAgent } from "../../lib/agent";
 import { fmt } from "./shared";
 import type { RowUsage, UsageIndex } from "./useUsage";
-import { levelTone, type Alert, type Diagnosis, type Level } from "./usage";
+import { levelTone, type Alert, type Level } from "./usage";
 
 const TONE: Record<string, string> = {
   ok: "st-live", warn: "st-setup", danger: "risk", reply: "plan-ent", neutral: "neutral",
@@ -84,41 +84,5 @@ export function UsageCells({ usage }: { usage: RowUsage }) {
         </div>
       </td>
     </>
-  );
-}
-
-/** 판정 근거 — 상세 헤더의 (i) 팝오버 내용. 규칙과 이 고객의 값을 나란히. */
-export function DiagnosisBasis({ d, rule }: { d: Diagnosis; rule: typeof import("./usage").RULE }) {
-  const row = (hit: boolean, key: string, ruleText: string, value: string) => (
-    <div key={key} style={{ display: "flex", alignItems: "baseline", gap: 10, padding: "6px 0",
-                            borderTop: "1px solid var(--line-soft)", opacity: hit ? 1 : 0.75, fontSize: 12.5 }}>
-      <b style={{ color: hit ? "var(--red-fg)" : "var(--faint)", width: 10 }}>{hit ? "●" : "·"}</b>
-      <span style={{ fontWeight: 600, minWidth: 100 }}>{key}</span>
-      <span className="muted" style={{ flex: 1 }}>{ruleText}</span>
-      <span style={{ fontWeight: 700, fontVariantNumeric: "tabular-nums", color: hit ? "var(--red-fg)" : "var(--muted)" }}>{value}</span>
-    </div>
-  );
-  const gap = d.gap === null ? "—" : `${d.gap > 0 ? "+" : ""}${d.gap}%p`;
-  return (
-    <div className="panel" style={{ padding: "12px 16px" }}>
-      <div className="sub-head"><span className="sub-title">사용 수준</span><span className="sub-count">하나만 적용 · 현재 <b>{d.level}</b></span></div>
-      {row(d.level === "미사용", "미사용", "최근 30일 소진 0", d.level === "미사용" ? "0" : "소진 있음")}
-      {row(d.level === "과소사용", "과소사용", `누적 소진율 − 계약 경과율 ≤ −${rule.gapPct}%p`, gap)}
-      {row(d.level === "초과사용", "초과사용", `≥ +${rule.gapPct}%p`, gap)}
-      {row(d.level === "적정", "적정", "위 어디에도 해당 없음", d.usedPct !== null && d.pacePct !== null ? `소진 ${d.usedPct}% / 경과 ${d.pacePct}%` : "—")}
-      {d.partial && <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>{d.levelDetail}</div>}
-      <div className="sub-head" style={{ marginTop: 14 }}><span className="sub-title">주의</span>
-        <span className="sub-count">해당하면 모두 · 현재 <b>{d.alerts.length ? d.alerts.map((a) => a.key).join(", ") : "없음"}</b></span></div>
-      {row(d.daysIdle !== null && d.daysIdle >= rule.idleDays, "N일 무활동", `마지막 작업 후 ${rule.idleDays}일 이상`,
-        d.daysIdle === null ? "기록 없음" : idleWord(d.daysIdle))}
-      {row(d.runwayMonths !== null && d.runwayMonths <= rule.runwayMonths, "크레딧 부족 예상", `잔여 ÷ 월평균 소진 ≤ ${rule.runwayMonths}개월치`,
-        d.runwayMonths === null ? "—" : `${d.runwayMonths.toFixed(1)}개월치`)}
-      {row(!!d.alerts.find((a) => a.key === "크레딧 잔여 예상"), "크레딧 잔여 예상", `계약 종료 시 잔여 > 계약 크레딧의 ${rule.leftoverPct}%`,
-        d.projectedLeft === null ? "—" : Math.max(0, d.projectedLeft).toLocaleString())}
-      {row(!!d.alerts.find((a) => a.key === "품질"), "품질", `실패율 ≥ 전사 평균 ${rule.failMult}배 또는 재작업률 ≥ ${rule.reworkPct}%`,
-        [d.failRate !== null ? `실패 ${d.failRate.toFixed(1)}%` : null, d.reworkRate !== null ? `재작업 ${d.reworkRate.toFixed(0)}%` : null]
-          .filter(Boolean).join(" · ") || "—")}
-      <div className="muted" style={{ fontSize: 11.5, marginTop: 10 }}>임계값은 전부 임시입니다 — 운영하며 조정합니다.</div>
-    </div>
   );
 }

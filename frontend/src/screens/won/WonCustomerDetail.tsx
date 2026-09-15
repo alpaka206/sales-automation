@@ -176,7 +176,7 @@ export function WonCustomerDetail() {
           {current?.plan && <Tag tone={`plan-${planTone(current.plan)}`}>{current.plan}</Tag>}
           <Tag tone="neutral">{current ? current.label : "계약 없음"}</Tag>
           {data.setup_count > 0 && <Tag tone="st-setup">세팅중 계약 {data.setup_count}건</Tag>}
-          {/* 주의 배지 전부 — 하나도 없으면 안 뜹니다(요청 문서). 근거는 5번 섹션의 「판정 근거」. */}
+          {/* 주의 배지 전부 — 하나도 없으면 안 뜹니다(요청 문서). 근거 펼침은 없습니다 — 규칙은 usage.ts 의 RULE. */}
           {usage.kind === "ok" && <AlertTags alerts={alerts} />}
         </div>
         <div className="secnav" role="tablist">
