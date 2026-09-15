@@ -213,6 +213,15 @@ export function WonCustomers() {
                 </button>
               ))}
             </div>
+            {/* 이 PC 의 데이터 에이전트 — 사용 현황 열과 상세의 크레딧·작업·구성 탭이 이것으로
+                채워집니다. 내려받기·켜기는 「데이터 분석」 화면에 있고 여기서는 거기로 보냅니다
+                (2026-09-15 운영자 요청: 목록 머리에도 입구 하나). 켜져 있으면 이 버튼은 안 보이고
+                왼쪽 「사용량」 꼬리표가 상태를 말합니다. */}
+            {!agent.pair && (
+              <button className="btn" type="button" onClick={() => navigate("/data")}>
+                <G name="inbound" size={15} /> 에이전트 내려받기
+              </button>
+            )}
             {/* 브라우저의 다운로드가 기능 전부입니다 — fetch 로 돌리면 Save As 를 다시 짜게 됩니다. */}
             <a className="btn" href="/won-customers/export.csv">CSV 내보내기</a>
             <button className="btn btn-primary" type="button"
