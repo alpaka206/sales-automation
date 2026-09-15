@@ -1105,7 +1105,7 @@ function GrantForm({ contract, onDone, onCancel }: {
 
 /** 결제 내역 — 목업(수주고객-사용현황-목업_26)의 카드 그대로 (2026-09-15 운영자 지시).
  *
- *  위는 「수금률」 타일(수금액 / 총액 · 수금 % · 진행 막대), 아래는 표 하나(회차 · 입금 날짜 ·
+ *  위는 「수금률」 타일(수금액 / 총액 · 수금 % · 진행 막대), 아래는 표 하나(회차 · 청구일 ·
  *  금액 · 적용 환율 · 상태 · 비고). 날짜·금액·환율·비고는 칸에서 바로 고치고 blur 에 저장,
  *  상태는 알약 고르개이고 바꾸면 확인 창을 지납니다 — 수금율과 다음 결제일이 그 자리에서
  *  달라지고, 입금 완료로 넘길 때는 그 날짜의 환율까지 함께 박히기 때문입니다.
@@ -1163,7 +1163,7 @@ function PaySection({ contract, today, onDone, evidence }: {
         <div className="table-wrap">
           <table className="mini grant-table">
             <thead><tr>
-              <th>회차</th><th>입금 날짜</th><th className="num">금액</th><th>적용 환율</th><th>상태</th><th>비고</th>
+              <th>회차</th><th>청구일</th><th className="num">금액</th><th className="num">적용 환율</th><th>상태</th><th>비고</th>
             </tr></thead>
             <tbody>
               {payments.map((payment) => (
@@ -1182,7 +1182,7 @@ function PaySection({ contract, today, onDone, evidence }: {
           title={ask.done ? "입금 전으로 되돌립니다" : "입금 완료로 표시합니다"}
           rows={[
             ["분납 차수", `${ask.no}/${ask.total}`],
-            ["입금 날짜", fmt(ask.paid_on)],
+            ["청구일", fmt(ask.paid_on)],
             ["금액", money(ask.amount, contract.currency)],
             ["수금 완료", `${money(contract.collected, contract.currency)} → ${money(
               n(contract.collected) + (ask.done ? -n(ask.amount) : n(ask.amount)), contract.currency)}`],
@@ -1262,7 +1262,7 @@ function PayRow({ payment, currency, today, onAsk, onSave, evidence }: {
                  if (next !== String(payment.amount ?? "")) void onSave({ amount: next });
                }} />
       </td>
-      <td className="mono nowrap">
+      <td className="num nowrap">
         <input className="cell-inp" inputMode="decimal" style={{ textAlign: "right" }}
                value={rate} placeholder="비우면 그날 고시가"
                onChange={(e) => setRate(e.target.value)}
@@ -1271,7 +1271,7 @@ function PayRow({ payment, currency, today, onAsk, onSave, evidence }: {
                  if (next !== String(payment.fx_rate ?? "")) void onSave({ fx_rate: next || "auto" });
                }} />
         {payment.fx_on && (
-          <div className="st-note">{fmt(payment.fx_on)} 고시</div>
+          <div className="st-note" style={{ textAlign: "right" }}>{fmt(payment.fx_on)} 고시</div>
         )}
       </td>
       <td>
