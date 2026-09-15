@@ -41,12 +41,12 @@ const SECTIONS: [string, string][] = [
   ["sec-basic", "고객 정보"],
   // 계약과 플랜은 한 탭입니다 — 목업의 「계약 · 플랜」(2026-09-15 운영자 지시). 카드는 둘 그대로.
   ["sec-contract", "계약 · 플랜"],
+  // 결제와 MRR 도 한 탭, 셋째 자리 — 목업의 「결제 · MRR」(2026-09-15 운영자 지시).
+  ["sec-pay", "결제 · MRR"],
   // 지급과 사용 현황은 한 탭입니다 — 목업의 「크레딧」(2026-09-15 운영자 지시). 순서도 목업대로:
   // 사용 진단 줄 → 지급 현황 카드 → 사용 현황 카드. 지급과 소진은 한 화면에서 맞대 봐야 합니다.
   // 사용 쪽은 **이 PC 의 데이터 에이전트**가 답합니다(스냅샷 집계). 서버는 이 값을 모릅니다.
   ["sec-credit", "크레딧"],
-  ["sec-pay", "결제 현황"],
-  ["sec-revenue", "MRR 관리"],
   ["sec-jobs", "작업 성능"],
   ["sec-mix", "사용 구성"],
 ];
@@ -94,7 +94,9 @@ export function WonCustomerDetail() {
   const hash = useLocation().hash.slice(1);
   const [picked, setPicked] = useState<string | null>(null);
   // 예전 앵커 이름은 지금 탭으로 옮긴다 — `#sec-plan` 은 계약 탭 안에 있다.
-  const alias: Record<string, string> = { "sec-plan": "sec-contract", "sec-comm": "sec-basic", "sec-usage": "sec-credit" };
+  const alias: Record<string, string> = {
+    "sec-plan": "sec-contract", "sec-comm": "sec-basic", "sec-usage": "sec-credit", "sec-revenue": "sec-pay",
+  };
   const known = (id: string) => SECTIONS.some(([key]) => key === id);
   const wanted = alias[hash] ?? hash;
   const section = picked ?? (known(wanted) ? wanted : SECTIONS[0][0]);
@@ -279,9 +281,11 @@ export function WonCustomerDetail() {
               </>
             )}
             {section === "sec-pay" && (
-              <PaySection contract={current} today={today} onDone={refresh} evidence={payEvidence} />
+              <>
+                <PaySection contract={current} today={today} onDone={refresh} evidence={payEvidence} />
+                <RevenueSection contract={current} today={today} />
+              </>
             )}
-            {section === "sec-revenue" && <RevenueSection contract={current} today={today} />}
             {section === "sec-jobs" && (
               <JobsSection pair={agent.pair} contract={current} usage={usage}
                            failRateAll={usageIndex.index?.failRateAll ?? null} />
@@ -505,18 +509,6 @@ function KV({ k, v, span }: { k: string; v: React.ReactNode; span?: number }) {
     <div style={span ? { gridColumn: `span ${span}` } : undefined}>
       <div className="field-label">{k}</div>
       <div className="field-value">{v || "—"}</div>
-    </div>
-  );
-}
-
-function Stat({ label, value, sub, tone }: {
-  label: string; value: React.ReactNode; sub?: string; tone?: string;
-}) {
-  return (
-    <div>
-      <div className="stat-label">{label}</div>
-      <div className="stat-value" style={tone ? { color: tone } : undefined}>{value}</div>
-      {sub && <div style={{ fontSize: 11.5, color: "var(--faint)", marginTop: 2 }}>{sub}</div>}
     </div>
   );
 }
@@ -1111,15 +1103,28 @@ function GrantForm({ contract, onDone, onCancel }: {
   );
 }
 
+/** 결제 내역 — 목업(수주고객-사용현황-목업_26)의 카드 그대로 (2026-09-15 운영자 지시).
+ *
+ *  위는 「수금률」 타일(수금액 / 총액 · 수금 % · 진행 막대), 아래는 표 하나(회차 · 입금 날짜 ·
+ *  금액 · 적용 환율 · 상태 · 비고). 날짜·금액·환율·비고는 칸에서 바로 고치고 blur 에 저장,
+ *  상태는 알약 고르개이고 바꾸면 확인 창을 지납니다 — 수금율과 다음 결제일이 그 자리에서
+ *  달라지고, 입금 완료로 넘길 때는 그 날짜의 환율까지 함께 박히기 때문입니다.
+ *
+ *  스냅샷이 말하는 것(국내 카드 결제 실패 · 링크만 발급 · 금액 불일치)은 지급 표와 같이 **비고
+ *  자리**에 흐리게 섭니다 — 저장하지는 않습니다. 금액·기간이 맞는 결제 완료는 자동 대조가
+ *  회차를 닫으며 비고에 적습니다(0120). */
 function PaySection({ contract, today, onDone, evidence }: {
   contract: Contract; today: string; onDone: () => void;
-  /** 회차별 국내 결제 근거(스냅샷). 에이전트가 없거나 원화 계약이 아니면 null — 열이 안 뜹니다. */
+  /** 회차별 국내 결제 근거(스냅샷). 에이전트가 없거나 원화 계약이 아니면 null. */
   evidence: Map<number, PaymentEvidence> | null;
 }) {
-  const paid = contract.payments.filter((p) => p.done);
+  const payments = contract.payments;
+  const paid = payments.filter((p) => p.done);
   const total = n(contract.amount_incl_vat);
   // 수금율은 **항상 계약 통화 기준**입니다. 환율 환산은 대시보드의 예상 MRR 에서만 씁니다.
   const percent = total ? Math.round((n(contract.collected) / total) * 100) : 0;
+  // 미납 = 입금 전인데 날짜가 지난 회차.
+  const overdue = payments.filter((p) => !p.done && dueClass(p.paid_on, today) === "over").length;
 
   const [ask, setAsk] = useState<Payment | null>(null);
 
@@ -1129,72 +1134,48 @@ function PaySection({ contract, today, onDone, evidence }: {
   }
 
   return (
-    <Section id="sec-pay" title="결제 현황" plain>
+    <Section id="sec-pay" title="결제 내역" plain
+             right={<>
+               <span>{[contract.payment_method, contract.payment_type].filter(Boolean).join(" · ") || "결제 방식 미정"} · 총 {payments.length}회</span>
+               {overdue > 0 && <span style={{ color: "var(--red-fg)", fontWeight: 700 }}>· 미납 {overdue}건</span>}
+             </>}>
       <div className="panel">
-        <div className="meter">
-          <div className="meter-head">
-            <div>
-              <div className="field-label">수금율</div>
-              <div className="meter-num">{percent}%</div>
-            </div>
-            <div className="meter-note">
-              {money(contract.collected, contract.currency)} / {money(contract.amount_incl_vat, contract.currency)}{" "}
-              <span style={{ color: "var(--faint)" }}>(VAT 포함)</span>
-            </div>
-          </div>
-          <div className="meter-track">
-            <div className={`meter-fill${percent < 100 ? " amber" : ""}`}
-                 style={{ width: `${Math.min(percent, 100)}%` }} />
-          </div>
+        <div className="tile-h">
+          <span className="tile-k">수금률</span>
+          <span className="tile-s">{paid.length}/{payments.length}회 입금</span>
         </div>
-        <div className="stat-row">
-          <Stat label="총 계약 금액 (VAT 포함)" value={money(contract.amount_incl_vat, contract.currency)}
-                sub={contract.currency !== "KRW"
-                  ? "VAT 해당 없음"
-                  : `공급가 ${money(contract.amount_excl_vat, contract.currency)}${
-                      contract.vat_included ? " (역산)" : ""}`} />
-          <Stat label="수금 완료 금액 (VAT 포함)" value={money(contract.collected, contract.currency)} />
-          <Stat label="잔여 금액 (VAT 포함)" value={money(total - n(contract.collected), contract.currency)} />
-          <Stat label="다음 결제일" value={contract.next_pay_on ? fmt(contract.next_pay_on) : "완료"} />
+        <div className="credit-top">
+          <div className="tile-v">{money(contract.collected, contract.currency)}<small>/ {money(contract.amount_incl_vat, contract.currency)} (VAT 포함)</small></div>
+          <div className="credit-pct">수금 <b className="tnum">{percent}%</b></div>
         </div>
-        <div className="stat-row" style={{ borderTop: "none", paddingTop: 0, marginTop: 12 }}>
-          <Stat label="총 분납 횟수" value={`${contract.payments.length}회`} />
-          <Stat label="분납 완료" value={`${paid.length}회`} />
-          <Stat label="잔여 분납" value={`${contract.payments.length - paid.length}회`} />
-          <Stat label="결제 수단" value={
-            <span style={{ fontSize: 14 }}>{contract.payment_method || "—"} · {contract.payment_type || "—"}</span>
-          } />
+        <div className="pbar" style={{ margin: "10px 0 14px" }}>
+          <div className={`fill${overdue ? " amber" : ""}`} style={{ width: `${Math.min(percent, 100)}%` }} />
+        </div>
+        <div className="field-grid">
+          <KV k="입금 완료" v={`${paid.length}회`} />
+          <KV k="미납" v={<span style={overdue ? { color: "var(--red-fg)" } : undefined}>{overdue}회</span>} />
+          <KV k="잔여 금액 (VAT 포함)" v={<span className="mono">{money(total - n(contract.collected), contract.currency)}</span>} />
+          <KV k="다음 결제일" v={contract.next_pay_on ? fmt(contract.next_pay_on) : "완료"} />
         </div>
       </div>
 
-      <div className="panel">
-        <div className="sub-head">
-          <span className="sub-title">결제 히스토리</span>
-          <span className="sub-count">{contract.payments.length}건</span>
-          <span style={{ marginLeft: "auto", fontSize: 12, color: "var(--faint)" }}>
-            입금 확인 후 상태를 바꾸면 수금율에 바로 반영됩니다
-          </span>
-        </div>
+      {payments.length ? (
         <div className="table-wrap">
-          <table className="mini">
+          <table className="mini grant-table">
             <thead><tr>
-              <th>분납 차수</th><th style={{ width: 190 }}>입금 날짜</th>
-              <th className="num">금액</th><th>적용 환율</th>
-              {evidence && evidence.size > 0 && <th title="이 PC 의 스냅샷에서 본 국내 카드 결제(portone) 기록">스냅샷</th>}
-              <th>비고</th>
-              <th style={{ width: 130 }}>상태</th>
+              <th>회차</th><th>입금 날짜</th><th className="num">금액</th><th>적용 환율</th><th>상태</th><th>비고</th>
             </tr></thead>
             <tbody>
-              {contract.payments.map((payment) => (
+              {payments.map((payment) => (
                 <PayRow key={payment.id} payment={payment} currency={contract.currency} today={today}
-                        evidence={evidence && evidence.size > 0 ? (evidence.get(payment.id) ?? { kind: "unseen" }) : undefined}
+                        evidence={evidence?.get(payment.id)}
                         onAsk={() => setAsk(payment)}
                         onSave={(fields) => save(payment.id, fields)} />
               ))}
             </tbody>
           </table>
         </div>
-      </div>
+      ) : <div className="panel"><div className="board-empty">결제 회차가 없습니다 — 계약 편집의 「결제」에서 결제 방식과 분납 횟수를 정해 저장하면 깔립니다.</div></div>}
 
       {ask && (
         <Confirm
@@ -1219,58 +1200,57 @@ function PaySection({ contract, today, onDone, evidence }: {
   );
 }
 
-/** 목업처럼 날짜와 금액을 **그 칸에서 바로** 고칩니다 — 수정 버튼을 거치지 않습니다.
- *
- * 상태만 확인 창을 거칩니다: 수금율과 다음 결제일이 그 자리에서 달라지고, 입금 완료로
- * 넘길 때는 그 날짜의 환율까지 함께 박히기 때문입니다(노션 §6).
- */
-/** 결제 근거 칸. 자동 대조는 `paid`(금액·기간 일치)만 완료 처리하고, 나머지는 여기서 사람이 본다. */
-function PayEvidence({ e }: { e: PaymentEvidence }) {
+/** 스냅샷이 이 회차에 대해 말하는 것 — 비고가 비어 있을 때 그 자리에 흐리게 섭니다. 금액·기간이
+ *  맞는 결제 완료(`paid`)는 자동 대조가 회차를 닫으며 비고에 적으므로 여기서는 안 적습니다. */
+function payHint(e: PaymentEvidence | undefined, done: boolean): string {
+  if (!e) return "";
   switch (e.kind) {
-    case "future": return <span className="muted">—</span>;
-    case "paid": return <span className="tag st-live" title={`₩${num(e.amount)} 카드 결제`}>결제 확인 {fmt(e.paidOn)}</span>;
-    case "paid-mismatch":
-      return <span className="tag st-setup" title="결제는 있는데 금액이 회차와 다릅니다 — 자동 처리하지 않았습니다">결제 있음 · ₩{num(e.amount)} ({fmt(e.paidOn)})</span>;
-    case "ready": return <span className="tag st-setup" title={`결제 링크 발급 ${e.requested ? fmt(e.requested) : ""} · ₩${num(e.amount)} — 아직 결제 전`}>미입금 · 링크 발급</span>;
-    case "failed": return <span className="tag risk" title={e.code ?? ""}>결제 실패 {fmt(e.on)}</span>;
-    default: return <span className="tag neutral" title="예정일 앞뒤로 국내 카드 결제 기록이 없습니다 — 계좌이체·세금계산서 결제는 스냅샷에 안 잡힙니다">기록 없음</span>;
+    case "failed": return `카드 결제 실패 ${fmt(e.on)}${e.code ? ` · ${e.code}` : ""}`;
+    case "ready": return `미입금 · 결제 링크 발급${e.requested ? ` ${fmt(e.requested)}` : ""} · ₩${num(e.amount)}`;
+    case "paid-mismatch": return `카드 결제 있음 ₩${num(e.amount)} (${fmt(e.paidOn)}) — 금액이 회차와 다름`;
+    case "paid": return done ? "" : `카드 결제 확인 ${fmt(e.paidOn)} — 입금 완료로 표시하세요`;
+    default: return "";
   }
 }
 
+/** 결제 회차 한 줄 — 지급 표(`GrantRow`)와 같은 방식. 날짜·금액·환율·비고는 칸에서 바로 고치고
+ *  blur 에 저장, 상태는 알약 고르개(입금 완료 · 예정 · 미납 · 결제 실패)이고 바꾸면 확인 창.
+ *  「미납」(날짜가 지난 예정)과 「결제 실패」(스냅샷)는 고를 수 있는 값이 아니라 보이는 값입니다. */
 function PayRow({ payment, currency, today, onAsk, onSave, evidence }: {
   payment: Payment; currency: string; today: string;
   onAsk: () => void; onSave: (fields: Record<string, string>) => Promise<void>;
   evidence?: PaymentEvidence;
 }) {
+  // 네 칸 다 **서버 값이 바뀌면 따라옵니다** — 자동 대조·다른 사람의 저장이 SSE 로 오면
+  // 내 칸이 옛 값을 들고 있다가 focus·blur 한 번에 그 값을 도로 저장해 남의 편집을 되돌립니다.
   const [when, setWhen] = useState(payment.paid_on ?? "");
+  useEffect(() => setWhen(payment.paid_on ?? ""), [payment.paid_on]);
   // 금액은 **읽을 때는 목업처럼 ₩1,722,600**, 고칠 때는 숫자입니다. type="number" 로 두면
   // 표에 자릿수 구분 없는 날숫자가 남아 다른 금액 칸과 따로 놉니다.
   const [amount, setAmount] = useState(money(payment.amount, currency));
+  useEffect(() => setAmount(money(payment.amount, currency)), [payment.amount, currency]);
   // **환율도 고칠 수 있습니다** (2026-08-31 운영자 지시). 입금 완료로 바꾸면 그 날짜
   // 고시가가 자동으로 들어가지만, 실제로 은행이 적용한 환율은 다를 수 있습니다 — 그때
   // 여기서 적습니다. **비우면 다시 자동**입니다: 저장할 때 그 날짜 고시가로 채워집니다.
   const [rate, setRate] = useState(payment.fx_rate ? String(payment.fx_rate) : "");
-  // 비우고 저장하면 서버가 채워 넣으므로 **화면 값이 내가 친 것과 달라집니다** — 그때
-  // 따라옵니다(날짜·금액 칸에는 없어도 되는 줄입니다: 그 둘은 적은 값이 그대로 남습니다).
   useEffect(() => setRate(payment.fx_rate ? String(payment.fx_rate) : ""), [payment.fx_rate]);
-  // 비고 (0120). 자동 대조가 「스냅샷 결제 확인 <날짜>」를 적는 칸이기도 해서, 저쪽이 채우면
-  // 화면 값이 내가 친 것과 달라집니다 — 그때 따라옵니다(환율 칸과 같은 이유).
+  // 비고 (0120). 자동 대조가 「스냅샷 결제 확인 <날짜>」를 적는 칸이기도 합니다.
   const [note, setNote] = useState(payment.note ?? "");
   useEffect(() => setNote(payment.note ?? ""), [payment.note]);
+
   const overdue = !payment.done && dueClass(payment.paid_on, today) === "over";
+  const failed = !payment.done && evidence?.kind === "failed";
+  const state = payment.done ? "done" : failed ? "failed" : overdue ? "late" : "todo";
+  const tone = { done: "st-ok", failed: "st-danger", late: "st-warn", todo: "st-neutral" }[state];
+  const hint = payHint(evidence, payment.done);
   const raw = (text: string) => text.replace(/[^0-9.-]/g, "");
   return (
     <tr className={payment.done ? undefined : "pending"}>
-      <td className="mono">{payment.no}/{payment.total}차</td>
+      <td className="mono">{payment.no}/{payment.total}회</td>
       <td>
         <input type="date" className="cell-inp" value={when}
                onChange={(e) => setWhen(e.target.value)}
                onBlur={() => when !== payment.paid_on && onSave({ paid_on: when })} />
-        {overdue && (
-          <div className="memo-line" style={{ color: "var(--red-fg)" }}>
-            {fmt(payment.paid_on)} · {dday(payment.paid_on, today)}
-          </div>
-        )}
       </td>
       <td className="num">
         <input className="cell-inp" inputMode="decimal" style={{ textAlign: "right" }} value={amount}
@@ -1291,22 +1271,25 @@ function PayRow({ payment, currency, today, onAsk, onSave, evidence }: {
                  if (next !== String(payment.fx_rate ?? "")) void onSave({ fx_rate: next || "auto" });
                }} />
         {payment.fx_on && (
-          <div className="memo-line">{fmt(payment.fx_on)} 고시</div>
+          <div className="st-note">{fmt(payment.fx_on)} 고시</div>
         )}
       </td>
-      {evidence && <td><PayEvidence e={evidence} /></td>}
       <td>
-        <input className="cell-inp" value={note} placeholder="비고"
-               title={note}
-               onChange={(e) => setNote(e.target.value)}
-               onBlur={() => note !== (payment.note ?? "") && void onSave({ note })} />
+        <select className={`st-sel ${tone}`} value={state}
+                onChange={(e) => { if ((e.target.value === "done") !== payment.done) onAsk(); }}>
+          <option value="todo">예정</option>
+          {state === "late" && <option value="late" disabled>미납</option>}
+          {state === "failed" && <option value="failed" disabled>결제 실패</option>}
+          <option value="done">입금 완료</option>
+        </select>
+        {!payment.done && (
+          <div className="st-note"><span className={dueClass(payment.paid_on, today) || undefined}>{dday(payment.paid_on, today)}</span></div>
+        )}
       </td>
       <td>
-        <select className={`pay-sel${payment.done ? " is-done" : ""}`} value={payment.done ? "1" : "0"}
-                onChange={onAsk}>
-          <option value="1">입금 완료</option>
-          <option value="0">입금 전</option>
-        </select>
+        <input className={`memo-in${hint && !note ? " memo-in--hint" : ""}`} value={note} placeholder={hint || "비고 입력"} title={note || hint}
+               onChange={(e) => setNote(e.target.value)}
+               onBlur={() => note !== (payment.note ?? "") && void onSave({ note })} />
       </td>
     </tr>
   );
@@ -1333,17 +1316,16 @@ function RevenueSection({ contract, today }: { contract: Contract; today: string
   const bars = mrr
     ? Array.from({ length: Math.min(months, 12) }, (_, i) => {
         const month = addMonths(base, i);
-        return { key: month, on: month.slice(0, 7) <= today.slice(0, 7), height: "70%",
-                 label: `${month.slice(5, 7)}월` };
+        return { key: month, on: month.slice(0, 7) <= today.slice(0, 7), label: `${month.slice(5, 7)}월` };
       })
     : contract.payments.map((p) => ({
-        key: `p${p.id}`, on: p.done, height: p.done ? "90%" : "20%",
-        label: p.paid_on ? `${p.paid_on.slice(5, 7)}월` : "—",
+        key: `p${p.id}`, on: p.done, label: p.paid_on ? `${p.paid_on.slice(5, 7)}월` : "—",
       }));
 
   return (
-    <Section id="sec-revenue" title="MRR 관리">
-      <div className="field-grid">
+    <Section id="sec-revenue" title="MRR 관리"
+             right={mrr ? `${base.slice(0, 7).replace("-", ".")}부터 ${months}개월 인식` : "결제월에 일시 인식"}>
+      <div className="field-grid c3">
         <KV k="계약 종류" v={<Tag tone={mrr ? "d-mrr" : "d-poc"}>{contract.deal_type}</Tag>} />
         <KV k="총 계약 금액 (VAT 포함)"
             v={<span className="mono">{money(contract.amount_incl_vat, contract.currency)}</span>} />
@@ -1363,20 +1345,18 @@ function RevenueSection({ contract, today }: { contract: Contract; today: string
                 <span className="muted">{contract.revenue_from_set ? "(직접 지정)" : "(계약 시작월)"}</span></>}
         </span>} />
       </div>
-      <div style={{ marginTop: 14, paddingTop: 14, borderTop: "1px solid var(--line-soft)" }}>
-        <div className="field-label">
-          {mrr
-            ? `${base.slice(0, 7).replace("-", ".")}부터 ${months}개월 인식 · VAT 포함 총액 ÷ ${months} = ${money(contract.monthly_revenue, contract.currency)}`
-            : "결제가 발생한 달에 전액 인식"}
-        </div>
-        <div className="revbar">
+      <div className="mrr-note">
+        {mrr
+          ? `${base.slice(0, 7).replace("-", ".")}부터 ${months}개월 인식 · VAT 포함 총액 ÷ ${months} = ${money(contract.monthly_revenue, contract.currency)}`
+          : "결제가 발생한 달에 전액 인식"}
+      </div>
+      <div className="revbar">
           {bars.map((bar) => (
             <div className="col" key={bar.key}>
-              <div className={`b${bar.on ? " on" : ""}`} style={{ height: bar.height }} />
+              <div className={`b${bar.on ? " on" : ""}`} />
               <div className="l">{bar.label}</div>
             </div>
           ))}
-        </div>
       </div>
     </Section>
   );
