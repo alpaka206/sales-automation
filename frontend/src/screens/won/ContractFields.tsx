@@ -36,6 +36,11 @@ export function useContractDraft(initial?: Contract) {
   // 화면이 미리 안내해야 하고, 안내하려면 「무엇이 바뀌었나」를 알아야 합니다. 매 렌더
   // 계약에서 다시 읽지 않는 이유는 초안과 같습니다: 남의 저장 하나에 SSE 로 값이 갈립니다.
   const [creditBase, setCreditBase] = useState<[string, string]>(() => (initial ? schedule(initial) : ["", ""]));
+  // 계약 크레딧의 기준선 — 이것을 고친 저장도 회차 금액을 다시 나눕니다(아래 `creditChanged`).
+  const [creditsBase, setCreditsBase] = useState(() => (initial ? String(initial.credits ?? "") : ""));
+  // 회차가 하나도 없는 계약은 어느 저장이든 깝니다 — 없는 일정을 채우는 길이 이것뿐입니다
+  // (상세 카드의 「지급 일정 다시 깔기」 폼은 2026-09-15 에 뺐습니다).
+  const [noGrants, setNoGrants] = useState(() => Boolean(initial && !(initial.credit_grants?.length)));
 
   const set = (key: keyof Draft, value: string) =>
     setDraft((current) => (current ? { ...current, [key]: value } : current));
@@ -49,11 +54,18 @@ export function useContractDraft(initial?: Contract) {
     setCreditRounds(rounds);
     setFirstCreditOn(first);
     setCreditBase([rounds, first]);
+    setCreditsBase(String(c.credits ?? ""));
+    setNoGrants(!(c.credit_grants?.length));
   };
 
-  /** 지급 일정을 건드렸는가. 새 계약(기준선 없음)에서는 언제나 아니오 — 다시 깔 것이 없습니다. */
+  /** 지급 일정을 다시 깔아야 하는 저장인가 — 회차 수 · 첫 지급일 · **계약 크레딧** 중 하나를
+   *  고쳤거나, 회차가 하나도 없는 계약이다. 계약 크레딧이 여기 있는 이유: 회차 금액은 그
+   *  값을 회차 수로 나눈 것이라, 크레딧만 고치면 회차 합계가 계약과 어긋난 채 남고 그건
+   *  카드의 「미지급 크레딧」에만 보입니다. 새 계약(기준선 없음)에서는 언제나 아니오. */
   const creditChanged =
-    creditBase[0] !== "" && (creditRounds !== creditBase[0] || firstCreditOn !== creditBase[1]);
+    creditBase[0] !== "" && (
+      creditRounds !== creditBase[0] || firstCreditOn !== creditBase[1]
+      || (draft?.credits ?? "") !== creditsBase || noGrants);
 
   /** 서버로 보낼 몸통. **경고를 띄우는 조건이 곧 다시 까는 조건입니다** — 서버는 `credit_reseed`
    *  표가 있을 때만 회차를 다시 깝니다. 폼 값과 행을 비교해 스스로 알아내게 두면, 폼이 빈

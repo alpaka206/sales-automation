@@ -42,7 +42,6 @@ type UsageData = {
   jobs_from: string | null;
 };
 
-const EARN: Record<string, string> = { enterprise: "엔터프라이즈 지급", charge: "충전", join: "가입", event: "이벤트", none: "구분 없음" };
 const REASON: Record<string, string> = {
   ENGINE_ERROR: "엔진 오류", AUDIO_PIPELINE_FAILED: "오디오 처리 실패", VIDEO_PIPELINE_FAILED: "영상 처리 실패",
   API_ERROR: "API 오류", TIMEOUT: "시간 초과", "(미기록)": "사유 미기록",
@@ -145,8 +144,8 @@ function Unavailable({ usage }: { usage: RowUsage }) {
 }
 
 // ── 5. 크레딧 사용 현황 ─────────────────────────────────────────────────
-export function CreditUsageSection({ contract, usage, credits, snapshotStamp, snapshotAt, creditsFrom }: {
-  contract: Contract; usage: RowUsage; snapshotStamp?: string;
+export function CreditUsageSection({ contract, usage, credits, snapshotAt, creditsFrom }: {
+  contract: Contract; usage: RowUsage;
   /** 부모가 한 번 받아 4번(지급 회차 대조)과 여기가 같이 씁니다 — 같은 질의를 두 번 내지 않으려고. */
   credits: { data: SpaceResult<CreditsData> | null; problem: string | null; busy: boolean };
   /** YYYY-MM-DD — 기간 채우기와 「진행 중」의 기준. */
@@ -157,11 +156,16 @@ export function CreditUsageSection({ contract, usage, credits, snapshotStamp, sn
 
   return (
     <section className="sec" id="sec-usage">
+      {/* 머리 오른쪽은 목업 그대로: 단위 안내, 그 오른쪽에 월별·주별 (2026-09-15 운영자 지시).
+          스냅샷 시각 꼬리표와 「이 PC 에서 계산」은 뺐다 — 같은 지시. */}
       <div className="sec-head">
         <span className="sec-title">크레딧 사용 현황</span>
-        {snapshotStamp && <span className="tag neutral">스냅샷 {snapshotStamp}</span>}
-        <div className="sec-actions">
-          <span className="muted" style={{ fontSize: 12 }}>단위: 크레딧 (1분 = 60크레딧) · 이 PC 에서 계산</span>
+        <div className="sec-actions" style={{ gap: 12 }}>
+          <span className="muted" style={{ fontSize: 12 }}>단위: 크레딧 (1분 = 60크레딧)</span>
+          <div className="seg">
+            <button type="button" className={gran === "m" ? "on" : undefined} onClick={() => setGran("m")}>월별</button>
+            <button type="button" className={gran === "w" ? "on" : undefined} onClick={() => setGran("w")}>주별</button>
+          </div>
         </div>
       </div>
 
@@ -176,11 +180,6 @@ export function CreditUsageSection({ contract, usage, credits, snapshotStamp, sn
           <div className="panel">
             <div className="sub-head">
               <span className="sub-title">크레딧 사용량</span>
-              <span className="sub-count">기준선 = 계약 크레딧 ÷ 플랜 개월수{gran === "w" ? " ÷ 4.34" : ""}</span>
-              <div className="chips" style={{ marginLeft: "auto" }}>
-                <button type="button" className={`chip btn-sm${gran === "m" ? " is-on" : ""}`} onClick={() => setGran("m")}>월별</button>
-                <button type="button" className={`chip btn-sm${gran === "w" ? " is-on" : ""}`} onClick={() => setGran("w")}>주별</button>
-              </div>
             </div>
             {busy && <Empty text="계산 중…" />}
             {problem && <Empty text={`가져오지 못했습니다: ${problem}`} />}
@@ -198,35 +197,9 @@ export function CreditUsageSection({ contract, usage, credits, snapshotStamp, sn
                               isCurrent={(p) => isCurrentPeriod(p, at, gran)} />
                 : <Empty text="소진 기록이 없습니다." />;
             })()}
-            {data && data.data.rolled_back ? (
-              <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>
-                취소(ROLLBACK) {num(data.data.rolled_back)} 크레딧은 뺀 값입니다 · 계산 {data.computed_ms}ms
-              </div>
-            ) : null}
-          </div>
-
-          <div className="panel">
-            <div className="sub-head">
-              <span className="sub-title">소진 기록으로 본 지급 묶음</span>
-              <span className="sub-count">지급액은 스냅샷에 없습니다 — 각 묶음에서 쓴 만큼만 보입니다. 안 쓴 지급은 안 잡힙니다.</span>
-            </div>
-            {data && (data.data.buckets?.length ? (
-              <div className="table-wrap"><table className="mini">
-                <thead><tr><th>묶음</th><th>종류</th><th>첫 사용</th><th>마지막 사용</th><th style={{ textAlign: "right" }}>소진</th><th style={{ textAlign: "right" }}>건수</th></tr></thead>
-                <tbody>
-                  {data.data.buckets.map((b) => (
-                    <tr key={b.no}>
-                      <td>{b.no}</td>
-                      <td>{EARN[b.earn_type] ?? b.earn_type}{b.is_free ? " · 무료" : ""}</td>
-                      <td>{fmt(b.first_use.slice(0, 10))}</td>
-                      <td>{fmt(b.last_use.slice(0, 10))}</td>
-                      <td style={{ textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{num(b.consumed)}</td>
-                      <td style={{ textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{num(b.n)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table></div>
-            ) : <Empty text="스냅샷에 이 스페이스의 지급 묶음 기록이 없습니다." />)}
+            {/* 취소(ROLLBACK) 차감 안내 · 계산 시간 · 「소진 기록으로 본 지급 묶음」 표는 뺐다
+                (2026-09-15 운영자: 「이런 것도 삭제 · 지급 묶음도 필요 없음」). 묶음 데이터는 지급
+                회차 표의 상태 줄(소진 시작 날짜)과 자동 대조가 그대로 쓴다. */}
           </div>
         </>
       )}

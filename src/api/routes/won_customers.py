@@ -47,6 +47,17 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["web"])
 
 
+
+def _sent(form, key: str) -> str | None:
+    """폼에 그 칸이 **있었나** — 있으면 값(빈 문자열 포함), 없으면 None.
+
+    `Form(None)` 으로는 못 가립니다: FastAPI 는 빈 문자열 값을 「안 보냄」으로 읽어 기본값을
+    주므로 「비웠다」와 「안 건드렸다」가 같아집니다. 칸 하나씩 저장하는 화면(결제·지급 회차
+    표)은 그 둘이 달라야 합니다 — 비운 비고는 지워져야 하고, 안 보낸 비고는 남아야 합니다.
+    """
+    value = form.get(key)
+    return None if value is None else str(value)
+
 def _text(value: str | None) -> str | None:
     value = (value or "").strip()
     return value or None
@@ -498,8 +509,9 @@ def _reseed_credit_grants(
 
     지급 예정 목록은 「총 지급 회차 · 첫 지급 예정일 · 계약 크레딧」에서 나오는 계산값이라,
     그 값을 고치면 목록도 같이 다시 계산됩니다(2026-09-02 운영자 지시). 손으로 추가·수정한
-    회차도, 지급 완료 표시도 같이 사라집니다 — 되돌릴 수 없으므로 두 화면(계약 수정 폼,
-    상세 4번 「크레딧 지급」)이 저장 전에 그렇게 안내합니다.
+    회차도, 지급 완료 표시도 같이 사라집니다 — 되돌릴 수 없으므로 계약 편집(새 계약 모달 ·
+    상세의 제자리 편집)이 저장 전에 그렇게 안내합니다. 상세 카드에 있던 「지급 일정 다시
+    깔기」 폼은 2026-09-15 에 뺐습니다.
 
     나눗셈의 나머지는 **마지막 회차**에 붙입니다: 회차마다 반올림하면 합계가 계약 크레딧과
     어긋나고, 그 차이는 화면 어디에도 안 보입니다.
@@ -651,10 +663,14 @@ async def update_credit_grant(
     request: Request,
     grant_on: str = Form(""),
     amount: str = Form(""),
-    memo: str = Form(""),
     done: str = Form(""),
     granted_by: str = Form(""),
 ):
+    # 비고는 **보낸 요청만** 건드립니다 — 화면이 칸 하나씩 저장하므로(날짜 칸의 blur 가 비고를
+    # 지우면 안 됩니다) 결제 회차의 `note` 와 같은 규칙입니다. 다만 `Form(None)` 으로는 못
+    # 가립니다: FastAPI 는 빈 문자열 `memo=` 를 「안 보냄」으로 읽어 기본값을 주므로, 비고를
+    # 지우는 저장이 조용히 무시됩니다(리뷰 실측). 그래서 폼에 키가 있는지를 봅니다.
+    memo = _sent(await request.form(), "memo")
     with SessionLocal() as session:
         grant = session.get(ContractCreditGrant, grant_id)
         if grant is None:
@@ -662,7 +678,8 @@ async def update_credit_grant(
         grant.grant_on = _text(grant_on) or grant.grant_on
         if amount.strip():
             grant.amount = _int(amount)
-        grant.memo = _text(memo)
+        if memo is not None:
+            grant.memo = _text(memo)
         if done:
             was_done = grant.done
             grant.done = done == "true"
@@ -705,17 +722,19 @@ async def add_payment(
 @router.post("/won-customers/payments/{payment_id}")
 async def update_payment(
     payment_id: int,
+    request: Request,
     paid_on: str = Form(""),
     amount: str = Form(""),
     done: str = Form(""),
     fx_rate: str = Form(""),
-    note: str | None = Form(None),
 ):
     """입금 상태·날짜·금액. 완료로 바꾸면 **그 날짜의 환율**을 채웁니다.
 
     조회에 실패해도 저장은 됩니다 — 값이 비면 화면이 입력칸을 열어 둡니다. 환율 API 가
     죽었다고 입금 처리가 막히면, 그 사실은 수금율이 틀린 채로 며칠 지나서야 드러납니다.
     """
+    # 비고(0120)는 폼에 키가 있을 때만 — `Form(None)` 은 빈 값을 못 가립니다(위 지급 회차와 같다).
+    note = _sent(await request.form(), "note")
     with SessionLocal() as session:
         payment = session.get(ContractPayment, payment_id)
         if payment is None:

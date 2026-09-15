@@ -12,7 +12,7 @@ import { CHANNELS, InteractionForm } from "../../ui/InteractionForm";
 import { Modal } from "../../ui/Modal";
 import { Confirm } from "./Confirm";
 import { AlertTags } from "./UsageBits";
-import { useAutoReconcile } from "./reconcile";
+import { AUTO_BY, useAutoReconcile } from "./reconcile";
 import { useEvidence, usageFor, useUsageIndex } from "./useUsage";
 import { matchGrants, matchPayments, mergeEvidence, parseSpaceSeqs, type GrantEvidence, type PaymentEvidence } from "./usage";
 import { WonContractForm } from "./WonContractForm";
@@ -274,7 +274,6 @@ export function WonCustomerDetail() {
                 {usage.kind === "ok" && <UsageInsight d={usage.diagnosis} />}
                 <CreditSection contract={current} today={today} onDone={refresh} evidence={grantEvidence} />
                 <CreditUsageSection contract={current} usage={usage} credits={credits}
-                                    snapshotStamp={usageIndex.index?.snapshotStamp}
                                     snapshotAt={usageIndex.index?.snapshotAt}
                                     creditsFrom={usageIndex.index?.creditsFrom} />
               </>
@@ -858,24 +857,36 @@ function PlanSection({ contract }: { contract: Contract }) {
   );
 }
 
+/** 크레딧 지급 현황 — 목업(수주고객-사용현황-목업_26)의 카드 그대로 (2026-09-15 운영자 지시).
+ *
+ *  위는 「확인된 지급」 타일(진행 막대 + 다음 지급 · 잔여 회차 · 미지급), 아래는 **표 하나**
+ *  (회차 · 지급 예정일 · 크레딧 · 상태 · 비고). 예정과 완료를 두 표로 가르지 않는다 — 회차는
+ *  한 줄로 이어진 일정이고, 상태는 줄마다 알약 고르개가 말한다. 날짜·크레딧·비고는 결제 표처럼
+ *  그 자리에서 고친다(blur 저장). 일정을 다시 까는 폼(회차 수 · 첫 지급일)은 여기 없다 —
+ *  계약 편집의 「크레딧 지급」 절이 그 자리다(운영자: 「이런 거 필요 없어」).
+ *
+ *  스냅샷 근거는 상태 칸의 작은 줄이다: 지급 뒤 소진이 시작됐으면 그 날짜, 예정일이 지났는데
+ *  기록이 없으면 「확인 불가」. 지급 원장은 스냅샷에 없어 「지급됐다」까지는 못 말한다 —
+ *  「확인 불가」는 오류가 아니라 「증거 없음」이다. */
 function CreditSection({ contract, today, onDone, evidence }: {
   contract: Contract; today: string; onDone: () => void;
-  /** 회차별로 스냅샷에 소진 시작 기록이 있나. 에이전트가 없으면 null 이고 열이 안 뜹니다. */
+  /** 회차별로 스냅샷에 소진 시작 기록이 있나. 에이전트가 없으면 null 이고 줄이 안 뜹니다. */
   evidence: Map<number, GrantEvidence> | null;
 }) {
-  const done = contract.credit_grants.filter((g) => g.done);
-  const pending = contract.credit_grants.filter((g) => !g.done);
-  const total = contract.credit_grants.length;
+  const grants = contract.credit_grants;
+  const done = grants.filter((g) => g.done);
+  const pending = grants.filter((g) => !g.done);
+  const total = grants.length;
   // 계약 크레딧 대비 지급 진행률. 100%를 넘을 수 있습니다 — 테스트·보상 지급은 계약분
-  // 밖이라, 넘은 것이 곧 오류는 아닙니다. 그래서 자르지 않고 그대로 보여 줍니다.
-  const percent = contract.credits
-    ? Math.round((contract.granted_credits / contract.credits) * 100)
-    : 0;
+  // 밖이라, 넘은 것이 곧 오류는 아닙니다. 막대만 100 에서 멈춥니다.
+  const percent = contract.credits ? Math.round((contract.granted_credits / contract.credits) * 100) : 0;
   const left = (contract.credits ?? 0) - contract.granted_credits;
+  const unknown = evidence
+    ? grants.filter((g) => !g.done && evidence.get(g.id)?.kind === "unseen").length
+    : 0;
 
   const [ask, setAsk] = useState<Grant | null>(null);
   const [removing, setRemoving] = useState<Grant | null>(null);
-  const [editing, setEditing] = useState<number | null>(null);
   const [adding, setAdding] = useState(false);
 
   async function save(id: number, fields: Record<string, string>) {
@@ -883,92 +894,28 @@ function CreditSection({ contract, today, onDone, evidence }: {
     onDone();
   }
 
-  // 스냅샷 대조 칸. 지급 원장이 스냅샷에 없어 「지급됐다」는 못 말하고, 「그 뒤로 소진이
-  // 시작됐다」까지만 말합니다. 그래서 「확인 불가」는 오류가 아니라 「증거 없음」입니다.
-  const seen = (grant: Grant) => {
-    const e = evidence?.get(grant.id);
-    if (!e || e.kind === "future") return <span className="muted">—</span>;
-    if (e.kind === "seen") {
-      return <span className="tag st-live" title={`묶음 ${e.n}개 · ${num(e.consumed)} 소진`}>소진 시작 {fmt(e.firstUse)}{e.n > 1 ? ` · 묶음 ${e.n}` : ""}</span>;
-    }
-    return <span className="tag st-setup" title="지급 예정일 뒤로 이 스페이스에 엔터프라이즈 지급 묶음의 소진 기록이 없습니다 — 지급이 안 됐거나 아직 안 쓴 것">확인 불가</span>;
-  };
-
-  const row = (grant: Grant, mode: "pending" | "done") =>
-    editing === grant.no ? (
-      <GrantEdit key={grant.id} grant={grant} total={total} extraCols={evidence ? 1 : 0}
-                 onCancel={() => setEditing(null)}
-                 onRevert={grant.done ? () => { setEditing(null); setAsk(grant); } : undefined}
-                 onSave={(fields) => save(grant.id, fields).then(() => setEditing(null))} />
-    ) : mode === "pending" ? (
-      <tr key={grant.id} className="pending">
-        <td className="mono">{grant.no}/{total}</td>
-        <td className="mono">
-          {fmt(grant.grant_on)} <span className={dueClass(grant.grant_on, today) || undefined}
-                                      style={{ color: "var(--faint)" }}>{dday(grant.grant_on, today)}</span>
-          {grant.memo && <div className="memo-line">{grant.memo}</div>}
-        </td>
-        <td className="num">{num(grant.amount)}</td>
-        {evidence && <td>{seen(grant)}</td>}
-        <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
-          <button className="btn btn-sm btn-ghost" type="button" onClick={() => setEditing(grant.no)}>수정</button>{" "}
-          <button className="btn btn-sm btn-ghost" type="button" onClick={() => setRemoving(grant)}>삭제</button>{" "}
-          <button className="btn btn-sm" type="button" onClick={() => setAsk(grant)}>지급 완료</button>
-        </td>
-      </tr>
-    ) : (
-      <tr key={grant.id}>
-        <td className="mono">{grant.no}/{total}</td>
-        <td className="mono">{fmt(grant.grant_on)}
-          {grant.memo && <div className="memo-line">{grant.memo}</div>}
-        </td>
-        <td className="num">{num(grant.amount)}</td>
-        {evidence && <td>{seen(grant)}</td>}
-        <td style={{ whiteSpace: "nowrap" }}>
-          {grant.granted_by || "—"}{" "}
-          <button className="btn btn-sm btn-ghost" type="button" onClick={() => setEditing(grant.no)}>수정</button>
-        </td>
-      </tr>
-    );
-
   return (
     <Section id="sec-credit" title="크레딧 지급 현황" plain
-             right={<button className="btn btn-sm" type="button"
-                            onClick={() => setAdding(!adding)}>+ 지급 회차 추가</button>}>
+             right={<>
+               {unknown > 0 && <span style={{ color: "var(--amber-fg)", fontWeight: 700 }}>확인 불가 {unknown}건</span>}
+               <button className="btn btn-sm" type="button" onClick={() => setAdding(!adding)}>+ 지급 회차 추가</button>
+             </>}>
       <div className="panel">
-        <div className="meter">
-          <div className="meter-head">
-            <div>
-              <div className="field-label">누적 지급 크레딧</div>
-              <div className="meter-num">
-                {num(contract.granted_credits)}{" "}
-                <span style={{ fontSize: 13, fontWeight: 600, color: "var(--muted)" }}>
-                  / {num(contract.credits)}
-                </span>
-              </div>
-            </div>
-            <div className="meter-note">
-              {percent}% · {done.length}/{total}회차 · {num(Math.round(contract.granted_credits / 60))}분 지급
-            </div>
-          </div>
-          <div className="meter-track">
-            <div className="meter-fill" style={{ width: `${Math.min(percent, 100)}%` }} />
-          </div>
+        <div className="tile-h">
+          <span className="tile-k">확인된 지급</span>
+          <span className="tile-s">{done.length}/{total}회차</span>
         </div>
-        <div className="stat-row">
-          <Stat label="다음 지급일" value={contract.next_credit_on ? fmt(contract.next_credit_on) : "—"} />
-          <Stat label="다음 지급 크레딧" value={contract.next_credit_amount ? num(contract.next_credit_amount) : "—"} />
-          <Stat label="잔여 지급 회차" value={`${pending.length}회`} />
-          <Stat label={left < 0 ? "계약 외 추가 지급" : "잔여 크레딧"} value={num(Math.abs(left))}
-                tone={left < 0 ? "var(--amber-fg)" : undefined} />
+        <div className="tile-v">{num(contract.granted_credits)}<small>/ {num(contract.credits)}</small></div>
+        <div className="pbar" style={{ margin: "10px 0 14px" }}>
+          <div className="fill" style={{ width: `${Math.min(percent, 100)}%` }} />
         </div>
-        {/* `key` 에 일정까지 넣습니다. 계약 id 만으로는 **앞 계약의** 회차 수가 남고(상세는
-            드롭다운으로 계약을 갈아 끼우는 화면이라 리마운트가 없습니다), 그것도 없으면
-            다른 사람이 방금 고친 일정 위에 내 화면의 옛 숫자가 그대로 앉아 있습니다.
-            타이핑 중에는 계약이 안 바뀌므로 글자를 치는 사이에 초기화되지 않습니다. */}
-        <ScheduleForm contract={contract} onDone={onDone}
-                      key={`${contract.id}:${contract.credit_grants.length}:${
-                        contract.credit_grants[0]?.grant_on ?? ""}`} />
+        <div className="field-grid">
+          <KV k="다음 지급 예정일" v={contract.next_credit_on ? fmt(contract.next_credit_on) : (pending.length ? "—" : "완료")} />
+          <KV k="다음 지급 크레딧" v={contract.next_credit_amount ? num(contract.next_credit_amount) : "—"} />
+          <KV k="잔여 지급 회차" v={`${pending.length}회`} />
+          <KV k={left < 0 ? "계약 외 추가 지급" : "미지급 크레딧"}
+              v={<span style={left < 0 ? { color: "var(--amber-fg)" } : undefined}>{num(Math.abs(left))}</span>} />
+        </div>
       </div>
 
       {adding && (
@@ -978,36 +925,26 @@ function CreditSection({ contract, today, onDone, evidence }: {
         </div>
       )}
 
-      <div className="split-2" style={{ marginTop: 10 }}>
-        <div className="panel">
-          <div className="sub-head">
-            <span className="sub-title">지급 예정</span><span className="sub-count">{pending.length}건</span>
-          </div>
-          {pending.length ? (
-            <div className="table-wrap"><table className="mini">
-              <thead><tr>
-                <th>회차</th><th>지급 예정일</th><th className="num">크레딧</th>
-                {evidence && <th title="이 PC 의 스냅샷에서 본 소진 시작 기록">스냅샷</th>}<th style={{ width: 150 }} />
-              </tr></thead>
-              <tbody>{pending.map((g) => row(g, "pending"))}</tbody>
-            </table></div>
-          ) : <div className="board-empty">지급 예정 회차가 없습니다.</div>}
+      {grants.length ? (
+        <div className="table-wrap">
+          <table className="mini grant-table">
+            <thead><tr>
+              <th>회차</th><th>지급 예정일</th><th className="num">크레딧</th><th>상태</th>
+              <th>비고 <span style={{ fontWeight: 500, color: "var(--faint)" }}>— 클릭해 수정</span></th>
+              <th />
+            </tr></thead>
+            <tbody>
+              {grants.map((grant) => (
+                <GrantRow key={grant.id} grant={grant} total={total} today={today}
+                          evidence={evidence?.get(grant.id)}
+                          onAsk={() => setAsk(grant)}
+                          onRemove={grant.done ? undefined : () => setRemoving(grant)}
+                          onSave={(fields) => save(grant.id, fields)} />
+              ))}
+            </tbody>
+          </table>
         </div>
-        <div className="panel">
-          <div className="sub-head">
-            <span className="sub-title">지급 완료</span><span className="sub-count">{done.length}건</span>
-          </div>
-          {done.length ? (
-            <div className="table-wrap"><table className="mini">
-              <thead><tr>
-                <th>회차</th><th>지급 날짜</th><th className="num">크레딧</th>
-                {evidence && <th title="이 PC 의 스냅샷에서 본 소진 시작 기록">스냅샷</th>}<th>지급자</th>
-              </tr></thead>
-              <tbody>{done.slice().reverse().map((g) => row(g, "done"))}</tbody>
-            </table></div>
-          ) : <div className="board-empty">아직 지급 내역이 없습니다.</div>}
-        </div>
-      </div>
+      ) : <div className="panel"><div className="board-empty">지급 회차가 없습니다 — 계약 편집의 「크레딧 지급」에서 회차 수 · 첫 지급일을 정해 저장하면 깔립니다.</div></div>}
 
       {ask && (
         <Confirm
@@ -1037,7 +974,7 @@ function CreditSection({ contract, today, onDone, evidence }: {
             ["지급 예정일", fmt(removing.grant_on)],
             ["크레딧", `${num(removing.amount)} 크레딧`],
           ]}
-          note="남은 회차는 1부터 다시 번호가 매겨집니다. 지운 회차의 크레딧은 다른 회차로 옮겨 가지 않습니다 — 나눠 담으려면 지급 일정을 다시 까세요."
+          note="남은 회차는 1부터 다시 번호가 매겨집니다. 지운 회차의 크레딧은 다른 회차로 옮겨 가지 않습니다 — 나눠 담으려면 계약 편집에서 지급 일정을 다시 까세요."
           okLabel="삭제"
           danger
           onOk={() => postForm(`/won-customers/credits/${removing.id}/delete`, {}).then(onDone)}
@@ -1048,63 +985,87 @@ function CreditSection({ contract, today, onDone, evidence }: {
   );
 }
 
-/** 지급 일정 다시 깔기 — 「총 지급 회차 · 첫 지급 예정일」이 지급 예정 목록을 만드는 값입니다.
+/** 지급 회차 한 줄 — 결제 표(`PayRow`)와 같은 방식: 날짜·크레딧·비고는 칸에서 바로 고치고
+ *  blur 에 저장, 상태는 알약 고르개(목업 `st-sel`)이고 바꾸면 확인 창을 지납니다.
  *
- * 계약 수정 폼의 같은 두 칸과 **같은 라우트**로 갑니다(`POST /won-customers/contracts/{id}`).
- * 목록은 그 둘과 계약 크레딧에서 나오는 계산값이라 여기서 고치면 목록도 다시 계산되고,
- * 손으로 추가·수정한 회차와 지급 완료 표시는 그때 사라집니다 — 확인 창이 그렇게 적습니다.
- *
- * 기준값은 매 렌더 계약에서 다시 읽습니다. 저장하고 나면 그 값이 방금 적은 값이 되어
- * 버튼이 저절로 잠깁니다 — 「바뀐 것이 있을 때만 눌린다」가 상태 하나로 지켜집니다.
- */
-function ScheduleForm({ contract, onDone }: { contract: Contract; onDone: () => void }) {
-  const rounds0 = String(contract.credit_grants.length || 1);
-  const first0 = contract.credit_grants[0]?.grant_on || contract.starts_on || "";
-  const [rounds, setRounds] = useState(rounds0);
-  const [first, setFirst] = useState(first0);
-  const [ask, setAsk] = useState(false);
-  /** 서버가 받는 범위(1~120)와 같은 조건입니다. **「바뀌었을 때만」이 아닙니다** — 계약
-   *  크레딧만 고친 뒤 회차 금액을 다시 나누는 길이 이 버튼뿐이라, 값이 그대로여도 눌려야
-   *  합니다. 무슨 일이 일어나는지는 확인 창이 말합니다. */
-  const valid = Number(rounds) >= 1 && Number(rounds) <= 120;
+ *  상태 칸의 작은 줄이 근거를 말합니다 — 예정이면 D-day, 스냅샷이 소진 시작을 봤으면 그
+ *  날짜, 예정일이 지났는데 기록이 없으면 「확인 불가」. 완료 줄의 꼬리표는 누가 확인했나:
+ *  「자동」(스냅샷 자동 대조) 또는 담당자 이름. */
+function GrantRow({ grant, total, today, evidence, onAsk, onRemove, onSave }: {
+  grant: Grant; total: number; today: string; evidence?: GrantEvidence;
+  onAsk: () => void; onRemove?: () => void;
+  onSave: (fields: Record<string, string>) => Promise<void>;
+}) {
+  // 세 칸 다 **서버 값이 바뀌면 따라옵니다** — 다른 사람의 저장이 SSE 로 오면 내 칸이
+  // 옛 값을 들고 있다가 focus·blur 한 번에 그 값을 도로 저장해 남의 편집을 되돌립니다.
+  const [when, setWhen] = useState(grant.grant_on ?? "");
+  useEffect(() => setWhen(grant.grant_on ?? ""), [grant.grant_on]);
+  // 읽을 때는 60,000, 고칠 때는 날숫자 — 결제 표의 금액 칸과 같은 방식입니다. NULL(워크북에서
+  // 빈 칸으로 들어온 회차)은 빈 칸입니다 — 0 으로 보이면 focus·blur 만으로 0 이 저장됩니다.
+  const shown = (value: number | null) => (value === null ? "" : num(value));
+  const [amount, setAmount] = useState(shown(grant.amount));
+  useEffect(() => setAmount(shown(grant.amount)), [grant.amount]);
+  const raw = (text: string) => text.replace(/[^0-9]/g, "");
+  // 자동 대조가 「소진 시작 <날짜> (스냅샷 <날짜>)」를 적는 칸이기도 해서, 저쪽이 채우면
+  // 화면 값이 내가 친 것과 달라집니다 — 그때 따라옵니다(결제 표의 비고 칸과 같은 이유).
+  const [memo, setMemo] = useState(grant.memo ?? "");
+  useEffect(() => setMemo(grant.memo ?? ""), [grant.memo]);
+
+  // 스냅샷이 아직 안 본 예정 회차(예정일이 지났는데 소진 기록 없음)만 「확인 불가」입니다.
+  const unknown = !grant.done && evidence?.kind === "unseen";
+  const tone = grant.done ? "st-ok" : unknown ? "st-warn" : "st-neutral";
+  const note = grant.done
+    ? evidence?.kind === "seen"
+      ? <>소진 시작 {fmt(evidence.firstUse)}{evidence.n > 1 ? ` · 묶음 ${evidence.n}` : ""}</>
+      : evidence?.kind === "unseen" ? <span className="warnc">지급 뒤 소진 기록 없음</span> : null
+    : unknown
+      ? <span className="warnc">사용 기록이 없어 지급 확인 불가</span>
+      : evidence?.kind === "seen"
+        ? <>소진 시작 {fmt(evidence.firstUse)} — 완료로 표시하세요</>
+        : <span className={dueClass(grant.grant_on, today) || undefined}>{dday(grant.grant_on, today)}</span>;
+  const auto = grant.granted_by === AUTO_BY;
+
   return (
-    <>
-      <div className="form-row"
-           style={{ gridTemplateColumns: "1fr 1fr auto", alignItems: "end", marginTop: 12 }}>
-        <div>
-          <label className="form-label">총 지급 회차</label>
-          <input className="inp" type="number" min={1} value={rounds}
-                 onChange={(e) => setRounds(e.target.value)} />
-        </div>
-        <div>
-          <label className="form-label">첫 지급 예정일</label>
-          <input className="inp" type="date" value={first}
-                 onChange={(e) => setFirst(e.target.value)} />
-        </div>
-        <button className="btn btn-sm btn-primary" type="button" disabled={!valid}
-                onClick={() => setAsk(true)}>지급 일정 다시 깔기</button>
-      </div>
-      {ask && (
-        <Confirm
-          title="지급 일정을 다시 깝니다"
-          rows={[
-            ["총 지급 회차", `${rounds0}회 → ${rounds.trim()}회`],
-            ["첫 지급 예정일", `${fmt(first0)} → ${fmt(first)}`],
-            ["계약 크레딧", `${num(contract.credits)} · 회차에 균등 분배`],
-          ]}
-          note="지금 있는 회차를 모두 지우고 다시 만듭니다 — 손으로 추가·수정한 회차와 지급 완료 표시가 함께 사라집니다."
-          okLabel="다시 깔기"
-          danger
-          onOk={() => postForm(`/won-customers/contracts/${contract.id}`, {
-            // 누른 사람이 「다시 깔기」라고 적힌 버튼을 눌렀습니다 — 서버가 값을 비교해
-            // 「안 바뀌었으니 넘어간다」고 판단하면, 확인 창을 지나고도 아무 일이 안
-            // 일어납니다. 계약 크레딧만 고친 뒤 다시 나누는 길도 이것뿐입니다.
-            credit_reseed: "1", credit_rounds: rounds.trim(), first_credit_on: first,
-          }).then(onDone)}
-          onClose={() => setAsk(false)}
-        />
-      )}
-    </>
+    <tr className={grant.done ? undefined : "pending"}>
+      <td className="mono">{grant.no}/{total}회차</td>
+      <td>
+        <input type="date" className="cell-inp" value={when}
+               onChange={(e) => setWhen(e.target.value)}
+               onBlur={() => when && when !== grant.grant_on && void onSave({ grant_on: when })} />
+      </td>
+      <td className="num">
+        <input className="cell-inp" inputMode="numeric" style={{ textAlign: "right" }} value={amount}
+               onFocus={() => setAmount(raw(amount))}
+               onChange={(e) => setAmount(e.target.value)}
+               onBlur={() => {
+                 const next = raw(amount);
+                 setAmount(next ? num(Number(next)) : shown(grant.amount));
+                 if (next && next !== String(grant.amount ?? "")) void onSave({ amount: next });
+               }} />
+      </td>
+      <td>
+        <span className="nowrap">
+          <select className={`st-sel ${tone}`} value={grant.done ? "done" : unknown ? "unknown" : "todo"}
+                  onChange={(e) => { if ((e.target.value === "done") !== grant.done) onAsk(); }}>
+            <option value="todo">예정</option>
+            {unknown && <option value="unknown" disabled>확인 불가</option>}
+            <option value="done">지급 확인</option>
+          </select>
+          {grant.done && (auto
+            ? <span className="autotag">자동</span>
+            : grant.granted_by ? <span className="edited">{grant.granted_by}</span> : null)}
+        </span>
+        {note && <div className="st-note">{note}</div>}
+      </td>
+      <td>
+        <input className="memo-in" value={memo} placeholder="비고 입력" title={memo}
+               onChange={(e) => setMemo(e.target.value)}
+               onBlur={() => memo !== (grant.memo ?? "") && void onSave({ memo })} />
+      </td>
+      <td style={{ textAlign: "right" }}>
+        {onRemove && <button className="btn btn-sm btn-ghost" type="button" onClick={onRemove}>삭제</button>}
+      </td>
+    </tr>
   );
 }
 
@@ -1145,57 +1106,6 @@ function GrantForm({ contract, onDone, onCancel }: {
                 onClick={() => add()}>{adding ? "추가 중" : "추가"}</button>
       </div>
     </>
-  );
-}
-
-/** 목업의 `editRow` — 행 자리에서 그대로 펴지는 편집 폼. */
-function GrantEdit({ grant, total, onSave, onCancel, onRevert, extraCols = 0 }: {
-  grant: Grant; total: number;
-  onSave: (fields: Record<string, string>) => void;
-  onCancel: () => void;
-  onRevert?: () => void;
-  /** 표에 「스냅샷」 열이 있으면 1 — 편집 줄이 열 수를 따라가야 합니다. */
-  extraCols?: number;
-}) {
-  const [when, setWhen] = useState(grant.grant_on ?? "");
-  const [amount, setAmount] = useState(String(grant.amount ?? ""));
-  const [by, setBy] = useState(grant.granted_by ?? "");
-  const [memo, setMemo] = useState(grant.memo ?? "");
-  return (
-    <tr className="pending">
-      <td className="mono">{grant.no}/{total}</td>
-      <td colSpan={3 + extraCols}>
-        <div className="form-row" style={{ gridTemplateColumns: grant.done ? "1fr 1fr 1fr" : "1fr 1fr" }}>
-          <div>
-            <label className="form-label">지급 날짜</label>
-            <input className="inp" type="date" value={when} onChange={(e) => setWhen(e.target.value)} />
-          </div>
-          <div>
-            <label className="form-label">지급 크레딧</label>
-            <input className="inp" type="number" value={amount} onChange={(e) => setAmount(e.target.value)} />
-          </div>
-          {grant.done && (
-            <div>
-              <label className="form-label">지급자</label>
-              <input className="inp" value={by} onChange={(e) => setBy(e.target.value)} />
-            </div>
-          )}
-        </div>
-        <div style={{ marginTop: 8 }}>
-          <label className="form-label">메모</label>
-          <input className="inp" value={memo} onChange={(e) => setMemo(e.target.value)} />
-        </div>
-        <div style={{ display: "flex", gap: 7, justifyContent: "flex-end", marginTop: 9 }}>
-          {onRevert && (
-            <button className="btn btn-sm" type="button" style={{ marginRight: "auto", color: "var(--red-fg)" }}
-                    onClick={onRevert}>지급 취소</button>
-          )}
-          <button className="btn btn-sm" type="button" onClick={onCancel}>취소</button>
-          <button className="btn btn-sm btn-primary" type="button"
-                  onClick={() => onSave({ grant_on: when, amount, granted_by: by, memo })}>저장</button>
-        </div>
-      </td>
-    </tr>
   );
 }
 

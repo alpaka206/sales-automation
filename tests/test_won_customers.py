@@ -1315,6 +1315,45 @@ def test_deleting_a_grant_renumbers_the_rest(factory):
         assert sum(g.amount for g in grants) == 800
 
 
+def test_a_cleared_memo_is_cleared_and_an_unsent_memo_is_kept(factory):
+    """칸 하나씩 저장하는 표의 규칙 — 지급 회차 `memo` 와 결제 회차 `note` 둘 다.
+
+    `Form(None)` 으로는 못 지킵니다: FastAPI 는 빈 문자열 `memo=` 를 「안 보냄」으로 읽어
+    기본값을 주므로, 비고를 지우는 저장이 조용히 무시되고 화면은 빈 칸을 보여 주다가
+    새로고침하면 옛 비고가 돌아옵니다(리뷰 실측). 그래서 라우트는 폼에 키가 있는지를 봅니다.
+    """
+    from src.db.models import ContractCreditGrant, ContractPayment
+
+    contract_id = _contract_with_schedule(factory, 2108)
+    with factory() as session:
+        grant = sorted(session.get(ClientContract, contract_id).credit_grants, key=lambda g: g.no)[0]
+        grant.memo = "예전 비고"
+        payment = ContractPayment(contract_id=contract_id, no=1, total=1, paid_on="2026-02-01",
+                                  amount=100, note="입금 비고")
+        session.add(payment)
+        session.commit()
+        grant_id, payment_id = grant.id, payment.id
+
+    patched, client = _console(factory)
+    with patched, client:
+        # 날짜만 보낸 저장은 비고를 안 건드린다.
+        assert client.post(f"/won-customers/credits/{grant_id}", data={"grant_on": "2026-03-03"}).status_code == 200
+        with factory() as session:
+            assert session.get(ContractCreditGrant, grant_id).memo == "예전 비고"
+        # 빈 비고를 보낸 저장은 지운다.
+        assert client.post(f"/won-customers/credits/{grant_id}", data={"memo": ""}).status_code == 200
+        with factory() as session:
+            assert session.get(ContractCreditGrant, grant_id).memo is None
+
+        # 결제 회차의 `note` 도 같은 규칙.
+        assert client.post(f"/won-customers/payments/{payment_id}", data={"amount": "120"}).status_code == 200
+        with factory() as session:
+            assert session.get(ContractPayment, payment_id).note == "입금 비고"
+        assert client.post(f"/won-customers/payments/{payment_id}", data={"note": ""}).status_code == 200
+        with factory() as session:
+            assert session.get(ContractPayment, payment_id).note is None
+
+
 def test_the_two_credit_fields_are_editable_and_a_grant_can_be_removed():
     """라우트만 있고 버튼이 없으면 없는 기능입니다.
 
@@ -1335,7 +1374,9 @@ def test_the_two_credit_fields_are_editable_and_a_grant_can_be_removed():
         "frontend/src/screens/won/WonCustomerDetail.tsx"
     ).read_text(encoding="utf-8")
     assert "/delete`" in detail and ">삭제</button>" in detail
-    assert "지급 일정 다시 깔기" in detail
+    # 「지급 일정 다시 깔기」 버튼은 카드에서 나갔습니다(2026-09-15 운영자: 「이런 거 필요 없어」).
+    # 그 길은 계약 편집(모달·제자리)의 「총 지급 회차 · 첫 지급 예정일」 두 칸 하나입니다.
+    assert "지급 일정 다시 깔기" not in detail
 
 
 def test_the_mockup_css_does_not_claim_the_console_button_variants():

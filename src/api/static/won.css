@@ -339,6 +339,37 @@
 .won .mini .num {text-align:right;font-variant-numeric:tabular-nums;}
 .won .mini tr.pending td {background:var(--bg-soft);}
 .won .memo-line {font-size:11.5px;color:var(--muted);margin-top:4px;white-space:normal;line-height:1.45;}
+/* 크레딧 지급 현황 — 목업(수주고객-사용현황-목업_26)의 타일·막대·상태 알약·비고 칸. */
+.won .tile-h {display:flex;align-items:baseline;justify-content:space-between;gap:12px;}
+.won .tile-k {font-size:11.5px;font-weight:600;letter-spacing:.03em;color:var(--faint);}
+.won .tile-s {font-size:12px;color:var(--faint);font-weight:600;font-variant-numeric:tabular-nums;}
+.won .tile-v {font-size:22px;font-weight:700;letter-spacing:-.02em;margin-top:6px;font-variant-numeric:tabular-nums;}
+.won .tile-v small {font-size:13px;color:var(--faint);font-weight:600;margin-left:5px;}
+.won .pbar {position:relative;height:8px;background:var(--line);border-radius:99px;overflow:hidden;}
+.won .pbar .fill {position:absolute;top:0;bottom:0;left:0;border-radius:99px;background:var(--teal-600);}
+.won .grant-table th, .won .grant-table td {padding-left:20px;}
+.won .grant-table th {background:var(--bg-soft);border-bottom:1px solid var(--line);}
+.won .grant-table tbody tr {cursor:default;}
+.won .grant-table tbody tr:hover {background:transparent;}
+.won .grant-table tr.pending td {background:transparent;}
+.won .st-sel {appearance:none;border:1px solid transparent;border-radius:99px;padding:3px 22px 3px 10px;
+    font:inherit;font-size:11px;font-weight:700;cursor:pointer;
+    background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 10 10'><path d='M2 4l3 3 3-3' fill='none' stroke='%2352615e' stroke-width='1.4' stroke-linecap='round'/></svg>");
+    background-repeat:no-repeat;background-position:right 7px center;}
+.won .st-sel:hover {border-color:var(--line);}
+.won .st-sel:focus {outline:none;box-shadow:0 0 0 3px rgba(42,157,143,.15);}
+.won .st-sel.st-ok {background-color:var(--teal-50);color:var(--teal-700);}
+.won .st-sel.st-warn {background-color:var(--amber-bg);color:var(--amber-fg);}
+.won .st-sel.st-neutral {background-color:var(--gray-bg);color:var(--gray-fg);}
+.won .autotag {font-size:10px;font-weight:700;color:var(--teal-700);background:var(--teal-50);border-radius:99px;padding:2px 7px;margin-left:6px;}
+.won .edited {font-size:10px;font-weight:700;color:var(--muted);background:var(--gray-bg);border-radius:99px;padding:2px 7px;margin-left:6px;}
+.won .st-note {font-size:11px;color:var(--faint);margin-top:4px;white-space:nowrap;}
+.won .st-note .warnc {color:var(--amber-fg);font-weight:600;}
+.won .memo-in {width:100%;min-width:180px;border:1px solid transparent;border-radius:6px;padding:5px 8px;
+    font:inherit;font-size:12px;background:transparent;color:var(--ink);}
+.won .memo-in::placeholder {color:var(--faint);}
+.won .memo-in:hover {border-color:var(--line);background:#fff;}
+.won .memo-in:focus {outline:none;border-color:var(--teal-500);background:#fff;box-shadow:0 0 0 2px rgba(42,157,143,.15);}
 .won .memo-line::before {content:"↳ ";color:var(--faint);}
 .won .sub-head {display:flex;align-items:center;gap:8px;margin-bottom:9px;}
 .won .sub-title {font-size:12.5px;font-weight:700;color:var(--ink-2);}
@@ -388,7 +419,9 @@
 .won .step.on {background:var(--teal-600);}
 .won .modal-body {padding:20px 22px;overflow-y:auto;}
 .won .modal-foot {padding:14px 22px;border-top:1px solid var(--line);display:flex;gap:8px;justify-content:flex-end;background:var(--bg-soft);border-radius:0 0 14px 14px;}
-.won .seg {display:flex;gap:4px;background:var(--bg-soft);border:1px solid var(--line);border-radius:9px;padding:4px;margin-bottom:18px;}
+/* 「수주 고객 추가」의 큰 세그먼트(`.seg.customer-paths` + `.seg-btn`). 위 69행의 `.won .seg`
+   (KPI 카드 · 사용 현황 머리의 작은 월별·주별)와 이름이 같아 한동안 이 규칙이 그쪽까지 입혔다. */
+.won .seg.customer-paths {display:flex;gap:4px;background:var(--bg-soft);border:1px solid var(--line);border-radius:9px;padding:4px;margin-bottom:18px;}
 .won .seg-btn {flex:1;border:none;background:none;padding:8px 10px;border-radius:6px;font-size:13.5px;color:var(--muted);font-weight:500;}
 .won .seg-btn:hover {color:var(--ink);}
 .won .seg-btn.is-on {background:#fff;color:var(--teal-700);font-weight:700;box-shadow:0 1px 2px rgba(16,24,40,.06);}
