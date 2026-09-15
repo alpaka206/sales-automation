@@ -39,6 +39,19 @@ perso-agent.exe --unregister         # persodata:// 등록 해제 (Windows)
 Windows 에서는 처음 실행에 `persodata://` 를 HKCU 에 등록한다(관리자 권한 불필요). 맥은 맨
 바이너리로는 URL 스킴 등록이 안 되므로(.app 번들·서명 필요) 파일을 직접 실행한다.
 
+## 버전과 업데이트
+
+`perso-agent --version` 이 찍는 값은 빌드가 박은 것이다(`-X main.version=…`). 릴리스 워크플로가
+태그 `agent-vX.Y.Z` 에서 떼어 넣고, 손으로 빌드하면 `dev` 다. 콘솔은 `/v1/status` 의 `version` 을
+`frontend/src/lib/agent.ts` 의 `AGENT_MIN_VERSION` 과 비교한다 — **에이전트 SQL 이 내는 키가 바뀌면
+그 상수를 같이 올린다.** 낡은 에이전트를 만난 화면은 「업데이트 필요」와 내려받기를 띄우고, 내려받은
+파일을 옛 파일 자리에 덮어쓰면 끝이다(설정 파일도 설치도 없다). `dev` 는 언제나 최신으로 본다.
+
+내는 법:
+```
+git tag agent-v1.1.0 && git push origin agent-v1.1.0     # Actions 가 세 파일을 빌드해 Release 에 올린다
+```
+
 ## 방어 (전부 실측으로 확인)
 
 `127.0.0.1` 만 바인딩 · Host 검증(DNS rebinding) · Origin 허용목록(`*` 없음) · 프로세스마다

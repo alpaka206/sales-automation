@@ -41,6 +41,13 @@ export function UsageStamp({ agent, index, problem, busy }: {
       </Link>
     );
   }
+  if (agent.outdated) {
+    return (
+      <Link to="/data" className="tag st-setup" title={`에이전트 ${agent.status?.version ?? "1.0"} — 이 콘솔은 더 새 버전이 필요합니다. 일부 값이 빕니다.`}>
+        사용량 · 에이전트 업데이트 필요
+      </Link>
+    );
+  }
   if (busy || agent.busy || !index) return <span className="tag neutral">사용량 불러오는 중…</span>;
   const stale = agent.status?.as_of.stale;
   return (

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Icon } from "../ui/Icon";
 import { ActionButton } from "../ui/ActionButton";
 import { DataTable, type Column } from "../ui/DataTable";
-import { AGENT_DOWNLOADS, AGENT_RELEASES, agentFetch, useAgent, type AsOf } from "../lib/agent";
+import { AGENT_DOWNLOADS, AGENT_MIN_VERSION, AGENT_RELEASES, agentFetch, useAgent, type AsOf } from "../lib/agent";
 
 /** 스냅샷 데이터를 **로컬 에이전트**에서 가져와 그리는 화면.
  *
@@ -106,6 +106,7 @@ export function DataAgent() {
               데이터 기준 <strong>{status.snapshot_at?.slice(0, 16).replace("T", " ") ?? status.as_of.committed_at?.slice(0, 16).replace("T", " ") ?? "(알 수 없음)"}</strong>
               {" · "}커밋 <code>{status.as_of.commit}</code>
               {" · "}pull: {status.as_of.pull}
+              {" · "}에이전트 <code>{status.version ?? "1.0 이전"}</code>
               {status.as_of.stale && <strong> · ⚠️ 낡은 데이터입니다</strong>}
             </div>
             <div className="t-sm td-subtle tnum">{status.folder_mb.toLocaleString()}MB</div>
@@ -114,6 +115,17 @@ export function DataAgent() {
             원본 CSV 와 계산은 이 PC 에서만 돕니다 — 집계만 이 화면으로 옵니다. 수주 고객 화면의
             「마지막 작업」·「사용 상태」와 사용 현황 세 섹션도 같은 에이전트가 답합니다.
           </div>
+        </div>
+      )}
+
+      {agent.outdated && (
+        <div className="card card--warn mb-gap">
+          <strong>에이전트 업데이트가 필요합니다.</strong>
+          <div className="t-sm td-subtle" style={{ marginTop: 6 }}>
+            지금 <code>{agent.status?.version ?? "1.0 이전"}</code>, 이 콘솔은 <code>{AGENT_MIN_VERSION}</code> 이상이 필요합니다 —
+            새 버전이 주는 값을 이 에이전트는 몰라 일부 화면이 빕니다. 내려받아 옛 파일 자리에 덮어쓰고 다시 열면 됩니다(설정은 없습니다).
+          </div>
+          <Downloads isMac={isMac} />
         </div>
       )}
 
@@ -145,7 +157,7 @@ export function DataAgent() {
         </div>
       )}
 
-      {agent.pair && status && <Downloads isMac={isMac} compact />}
+      {agent.pair && status && !agent.outdated && <Downloads isMac={isMac} compact />}
 
       {metrics.map((m) => <Table key={m.metric} metric={m} />)}
     </>

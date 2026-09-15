@@ -36,13 +36,16 @@ jobs:
           curl -fsSL -o bin/duckdb-darwin-universal.zip "https://github.com/duckdb/duckdb/releases/download/v$V/duckdb_cli-osx-universal.zip"
           ls -la bin/
       - run: go vet ./... && go test ./...
-      - name: Build (CGO 없음 — 한 대에서 세 타깃)
+      - name: Build (CGO 없음 — 한 대에서 세 타깃, 버전은 태그에서)
         run: |
           set -e
+          V="${GITHUB_REF_NAME#agent-v}"
+          echo "version=$V"
+          LD="-s -w -X main.version=$V"
           mkdir -p dist
-          GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" -o dist/perso-agent.exe .
-          GOOS=darwin  GOARCH=arm64 CGO_ENABLED=0 go build -ldflags="-s -w" -o dist/perso-agent-mac-arm64 .
-          GOOS=darwin  GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" -o dist/perso-agent-mac-intel .
+          GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="$LD" -o dist/perso-agent.exe .
+          GOOS=darwin  GOARCH=arm64 CGO_ENABLED=0 go build -ldflags="$LD" -o dist/perso-agent-mac-arm64 .
+          GOOS=darwin  GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="$LD" -o dist/perso-agent-mac-intel .
           (cd dist && sha256sum * > SHA256SUMS.txt && cat SHA256SUMS.txt)
       - uses: softprops/action-gh-release@v2
         with:
@@ -52,6 +55,7 @@ jobs:
             agent/dist/perso-agent-mac-intel
             agent/dist/SHA256SUMS.txt
           body: |
-            로컬 데이터 에이전트. 스냅샷 clone 폴더(`perso-data-snapshot`) 옆에 두고 실행합니다.
+            로컬 데이터 에이전트 ${{ github.ref_name }}. 스냅샷 clone 폴더(`perso-data-snapshot`) 옆에 두고 실행합니다.
+            콘솔이 요구하는 버전보다 낡으면 수주 고객 화면이 「업데이트 필요」를 띄웁니다 — 그때 이 파일로 바꿉니다.
             원본도 집계도 콘솔 서버로 가지 않습니다 — 계산은 이 PC 에서 끝납니다.
             사용법: `agent/README.md`

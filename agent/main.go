@@ -26,7 +26,11 @@ import (
 	"time"
 )
 
-const version = "perso-agent/1.0"
+// 빌드가 박는다: `go build -ldflags "-X main.version=1.2.3"`. 릴리스 워크플로가 태그
+// `agent-v1.2.3` 에서 떼어 넣고, 손으로 빌드하면 "dev" 다. 콘솔이 `/v1/status` 로 읽어 자기가
+// 요구하는 최소 버전(frontend/src/lib/agent.ts 의 AGENT_MIN_VERSION)과 비교한다 — SQL 이 내는
+// 키가 바뀌면 콘솔은 그 상수를 올리고, 낡은 에이전트를 만난 화면은 「업데이트 필요」를 띄운다.
+var version = "dev"
 
 // 포트를 하나로 박지 않는다. 다른 프로그램이 쓰고 있으면 그쪽으로 요청이 간다.
 var portCandidates = []int{43110, 43111, 43112, 43113, 43114, 43115, 43116, 43117, 43118, 43119}
@@ -137,7 +141,7 @@ func (a *agent) routes() *http.ServeMux {
 		if !ok {
 			return
 		}
-		send(w, http.StatusOK, map[string]any{"ok": true, "agent": version, "port": a.port}, origin)
+		send(w, http.StatusOK, map[string]any{"ok": true, "agent": "perso-agent/" + version, "version": version, "port": a.port}, origin)
 	})
 
 	mux.HandleFunc("/v1/status", a.guarded(func(w http.ResponseWriter, _ *http.Request, origin string) {
@@ -146,6 +150,7 @@ func (a *agent) routes() *http.ServeMux {
 			"snapshot_at": a.snap.snapshotAt().UTC().Format(time.RFC3339),
 			"folder_mb":   a.snap.FolderMB(), "metrics": metricNames(),
 			"space_metrics": []string{"summary", "credits", "jobs", "usage", "evidence"},
+			"version":       version,
 		}, origin)
 	}))
 
@@ -354,9 +359,14 @@ func main() {
 	flag.Var(&extra, "console", "허용할 콘솔 출처 (여러 번 줄 수 있음, 준 것이 먼저)")
 	noBrowser := flag.Bool("no-browser", false, "브라우저를 열지 않는다")
 	unregister := flag.Bool("unregister", false, "persodata:// 등록만 지우고 끝낸다")
+	showVersion := flag.Bool("version", false, "버전만 찍고 끝낸다")
 	// **`persodata://open` 으로 열리면 그 URL 이 argv[1] 로 온다.** Go 의 flag 는 첫
 	// 비플래그에서 멈추므로 그대로 무해하게 무시된다 — 그 값으로 하는 일이 없다.
 	flag.Parse()
+	if *showVersion {
+		fmt.Println("perso-agent " + version)
+		return
+	}
 
 	if *unregister {
 		unregisterScheme()
@@ -369,6 +379,7 @@ func main() {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
+	fmt.Printf("perso-agent %s\n", version)
 	fmt.Printf("스냅샷: %s\n", snap.Repo)
 	fmt.Println("pull 확인 중…")
 	snap.Pull()

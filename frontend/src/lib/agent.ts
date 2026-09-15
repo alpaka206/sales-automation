@@ -23,7 +23,25 @@ export type AsOf = {
 export type AgentStatus = {
   as_of: AsOf; snapshot_at: string; repo: string; folder_mb: number;
   metrics: string[]; space_metrics?: string[];
+  /** 빌드가 박은 버전("1.1.0"). 손으로 빌드한 것은 "dev". 이 칸이 없으면 1.0 이전 빌드다. */
+  version?: string;
 };
+
+/** **이 콘솔이 요구하는 에이전트 최소 버전.** 에이전트 SQL 이 내는 키가 바뀌면 여기를 올린다 —
+ *  낡은 에이전트는 그 키를 안 주고, 화면은 빈 값을 조용히 그린다. 그래서 화면이 먼저 말한다.
+ *  1.1.0: 작업 성능·사용 구성이 목업대로 되며 fail_kinds · processing.avg · limits · 30일 members 가 생겼다. */
+export const AGENT_MIN_VERSION = "1.1.0";
+
+/** 버전 비교 — "1.2.3" 식 세 자리. "dev"(손 빌드)는 언제나 최신으로 본다. 없으면(1.0 이전) 가장 낡다. */
+export function versionOutdated(version: string | undefined, min = AGENT_MIN_VERSION): boolean {
+  if (version === "dev") return false;
+  const parse = (v: string | undefined) => (v ?? "0").split(".").map((x) => parseInt(x, 10) || 0);
+  const [a, b] = [parse(version), parse(min)];
+  for (let i = 0; i < 3; i++) {
+    if ((a[i] ?? 0) !== (b[i] ?? 0)) return (a[i] ?? 0) < (b[i] ?? 0);
+  }
+  return false;
+}
 
 /** 에이전트가 브라우저를 열 때 `#agent=<포트>&token=<토큰>` 으로 넘겨 줍니다.
  *  **프래그먼트라 우리 서버로 안 갑니다** — 쿼리스트링이면 접근 로그에 남습니다. */
@@ -107,7 +125,9 @@ export function useAgent() {
   /** 에이전트가 **지금 답하는가.** 연결 정보가 있어도 꺼져 있으면 false — 「내려받기·켜기」 안내는
    *  이 값을 봐야 한다. 저장값만 보면 꺼진 에이전트가 「있음」으로 보인다. */
   const live = !busy && status !== null;
-  return { pair, status, problem, busy, live, reconnect: connect };
+  /** 답은 하는데 이 콘솔이 요구하는 것보다 낡았다 — 새 키를 안 주므로 화면 일부가 빈다. */
+  const outdated = live && versionOutdated(status?.version);
+  return { pair, status, problem, busy, live, outdated, reconnect: connect };
 }
 
 /** 스페이스 단위 지표 하나. `spaces` 가 비면 부르지 않습니다. */

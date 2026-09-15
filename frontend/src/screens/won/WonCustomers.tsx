@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useLocation, useNavigate } from "react-router-dom";
 import { getJSON } from "../../lib/api";
-import { AGENT_DOWNLOADS, useAgent } from "../../lib/agent";
+import { AGENT_DOWNLOADS, AGENT_MIN_VERSION, useAgent } from "../../lib/agent";
 import { MonthlyArea } from "./MonthlyArea";
 import { pendingContractPath } from "./pending";
 import { UsageCells, UsageStamp } from "./UsageBits";
@@ -220,10 +220,12 @@ export function WonCustomers() {
                 착지하는 곳이지 메뉴가 아닙니다. 에이전트가 **지금 답하면** 안 보이고(저장된 연결
                 정보가 있어도 꺼져 있으면 보인다) 왼쪽 「사용량」 꼬리표가 상태를 말합니다. 상태를
                 확인하는 동안(첫 요청)은 안 그린다 — 깜빡임이 그것이었다. */}
-            {!agent.busy && !agent.live && (
-              <a className="btn" href={isMac ? AGENT_DOWNLOADS.macArm : AGENT_DOWNLOADS.windows}
-                 title="내려받은 파일을 스냅샷 폴더(perso-data-snapshot) 옆에서 실행하면 이 화면과 연결됩니다.">
-                <G name="inbound" size={15} /> 에이전트 내려받기 ({isMac ? "Mac" : "Windows"})
+            {!agent.busy && (!agent.live || agent.outdated) && (
+              <a className={`btn${agent.outdated ? " btn-primary" : ""}`} href={isMac ? AGENT_DOWNLOADS.macArm : AGENT_DOWNLOADS.windows}
+                 title={agent.outdated
+                   ? `에이전트 ${agent.status?.version ?? "1.0"} — 이 화면은 ${AGENT_MIN_VERSION} 이상이 필요합니다. 내려받아 옛 파일 자리에 덮어쓰고 다시 여세요.`
+                   : "내려받은 파일을 스냅샷 폴더(perso-data-snapshot) 옆에서 실행하면 이 화면과 연결됩니다."}>
+                <G name="inbound" size={15} /> {agent.outdated ? "에이전트 업데이트" : "에이전트 내려받기"} ({isMac ? "Mac" : "Windows"})
               </a>
             )}
             {/* 브라우저의 다운로드가 기능 전부입니다 — fetch 로 돌리면 Save As 를 다시 짜게 됩니다. */}
