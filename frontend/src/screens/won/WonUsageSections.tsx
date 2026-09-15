@@ -12,7 +12,7 @@ import type { Contract } from "./shared";
 import { fmt, num } from "./shared";
 import { AlertTags, LevelTag } from "./UsageBits";
 import type { RowUsage } from "./useUsage";
-import { LENGTH_BINS, RULE, fillMonths, fillWeeks, isCurrentPeriod, pairName, type Diagnosis } from "./usage";
+import { LENGTH_BINS, fillMonths, fillWeeks, isCurrentPeriod, pairName, type Diagnosis } from "./usage";
 
 // ── 에이전트 응답 모양 (spaces.go 의 SQL 과 1:1) ─────────────────────────
 type Period = { period: string; used: number };
@@ -26,10 +26,14 @@ type JobsData = {
   monthly: { period: string; ok: number; failed: number }[] | null;
   reasons: { reason: string; n: number }[] | null;
   errors: { code: string; n: number }[] | null;
-  processing: { n: number; p50: number | null; p90: number | null; max: number | null; per_video_minute: number | null; avg_video_minutes: number | null };
+  /** 실패 종류 상위 5 — 엔진 오류 코드가 있으면 그것, 없으면 실패 사유. 나머지는 `fail_other`. */
+  fail_kinds: { kind: string; n: number }[] | null; fail_other: number;
+  processing: { n: number; avg: number | null; p50: number | null; p90: number | null; max: number | null; per_video_minute: number | null; avg_video_minutes: number | null };
   wait: { n: number; avg: number | null; max: number | null };
   speed: { green: number; red: number };
   concurrency_peak: number | null; concurrency_peak_at: string | null;
+  /** 플랜 한도(스냅샷의 plan_option). 스페이스가 스냅샷에 없으면 둘 다 null. */
+  limits: { concurrent: number | null; queue: number | null };
   jobs_from: string | null; last_job: string | null;
 };
 type UsageData = {
@@ -51,38 +55,6 @@ const ERRCODE: Record<string, string> = {
   SRT_LENGTH_EXCEED_VIDEO_ERROR: "자막이 영상보다 김", SRT_PARSE_ERROR: "자막 파싱 오류",
   SRT_REVERSE_TIMESTAMP_ERROR: "자막 시각 역순", "(미기록)": "코드 없음",
 };
-const SOURCE: Record<string, string> = { FILE_UPLOAD: "파일 업로드", YOUTUBE: "YouTube", TIKTOK: "TikTok", GOOGLE_DRIVE: "Google Drive", "(미기록)": "미기록" };
-
-// ── 작은 그림들 ─────────────────────────────────────────────────────────
-function BarList({ rows, color, unit = "건" }: { rows: { label: string; n: number; sub?: string }[]; color?: string; unit?: string }) {
-  const max = Math.max(1, ...rows.map((r) => r.n));
-  if (!rows.length) return <div className="board-empty">해당 없음</div>;
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 9 }}>
-      {rows.map((r) => (
-        <div key={r.label} style={{ display: "grid", gridTemplateColumns: "minmax(90px,140px) 1fr 64px", alignItems: "center", gap: 10, fontSize: 12.5 }}>
-          <span className="muted" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={r.sub ?? r.label}>{r.label}</span>
-          <span style={{ height: 8, borderRadius: 5, background: "var(--line)", overflow: "hidden" }}>
-            <span style={{ display: "block", height: "100%", width: `${(r.n / max) * 100}%`, background: color ?? "var(--teal-600)", borderRadius: 5 }} />
-          </span>
-          <span style={{ textAlign: "right", fontVariantNumeric: "tabular-nums", fontWeight: 600 }}>{num(r.n)}{unit}</span>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function Donut({ pct, color, label }: { pct: number; color: string; label: string }) {
-  const r = 38, c = 2 * Math.PI * r, on = (c * Math.min(pct, 100)) / 100;
-  return (
-    <svg viewBox="0 0 96 96" width={110} height={110} role="img" aria-label={label}>
-      <circle cx="48" cy="48" r={r} fill="none" stroke="var(--line)" strokeWidth="12" />
-      <circle cx="48" cy="48" r={r} fill="none" stroke={color} strokeWidth="12" strokeLinecap="round"
-              strokeDasharray={`${on.toFixed(1)} ${c.toFixed(1)}`} transform="rotate(-90 48 48)" />
-      <text x="48" y="53" textAnchor="middle" fontSize="17" fontWeight="700" fill="var(--ink)">{label}</text>
-    </svg>
-  );
-}
 
 /** 기간별 막대 + 기준선. 목업의 drawChart 를 React 로. */
 function PeriodBars({ rows, target, targetLabel, unit = "크레딧", isCurrent }: {
@@ -273,6 +245,92 @@ function UsedMeter({ d, contract }: { d: Diagnosis; contract: Contract }) {
 }
 
 // ── 8. 작업 성능 ─────────────────────────────────────────────────────────
+/** 목업의 실패 종류 라벨 — 엔진 오류 코드(자세한 원인)와 실패 사유(큰 갈래)를 한 표에서 씁니다. */
+const KIND: Record<string, string> = { ...REASON, ...ERRCODE };
+
+/** 목업의 `donut()` 그대로 — 148px, 반지름 38, 굵기 13, 트랙 #edf3f1, 글자 #14201e. */
+function MockDonut({ pct, color, label }: { pct: number; color: string; label: string }) {
+  const r = 38, c = 2 * Math.PI * r, on = (c * Math.min(pct, 100)) / 100;
+  return (
+    <svg className="donut" viewBox="0 0 96 96" role="img" aria-label={label}>
+      <circle cx="48" cy="48" r={r} fill="none" stroke="#edf3f1" strokeWidth="13" />
+      <circle cx="48" cy="48" r={r} fill="none" stroke={color} strokeWidth="13" strokeLinecap="round"
+              strokeDasharray={`${on.toFixed(1)} ${c.toFixed(1)}`} transform="rotate(-90 48 48)" />
+      <text x="48" y="53" textAnchor="middle" fontSize={label.length > 3 ? 17 : 19} fontWeight="700" fill="#14201e">{label}</text>
+    </svg>
+  );
+}
+
+/** 목업의 `bars()` — `.blist > .brow (.lb · .bt > .bf · .vv)`. */
+function Bars({ rows, cls, empty }: { rows: { k: string; v: number; s: string; hint?: string }[]; cls?: string; empty: string }) {
+  if (!rows.length) return <div className="board-empty" style={{ padding: "6px 0" }}>{empty}</div>;
+  const max = Math.max(1, ...rows.map((r) => r.v));
+  return (
+    <div className="blist">
+      {rows.map((r) => (
+        <div className="brow" key={r.k}>
+          <div className="lb" title={r.hint ?? r.k}>{r.k}</div>
+          <div className="bt"><div className={`bf${cls ? ` ${cls}` : ""}`} style={{ width: `${((r.v / max) * 100).toFixed(1)}%` }} /></div>
+          <div className="vv">{r.s}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** 목업의 `pieChart()` — 176px 파이 + 오른쪽 범례(색 · 이름 · N편 · %). 가운데는 합계와 「총 영상」. */
+const PIE = ["#0F766E", "#2A9D8F", "#7CC0B4", "#B9DAD3", "#DCE8E6", "#EEF2F1"];
+function Pie({ rows, unit = "편", midLabel = "총 영상" }: { rows: { k: string; v: number; hint?: string }[]; unit?: string; midLabel?: string }) {
+  const total = rows.reduce((a, r) => a + r.v, 0) || 1;
+  const R = 52, C = 2 * Math.PI * R;
+  let off = 0;
+  const segs = rows.map((r, i) => {
+    const len = C * (r.v / total);
+    const seg = <circle key={r.k} cx="66" cy="66" r={R} fill="none" stroke={PIE[i % PIE.length]} strokeWidth="21"
+                        strokeDasharray={`${len.toFixed(2)} ${(C - len).toFixed(2)}`} strokeDashoffset={(-off).toFixed(2)}
+                        transform="rotate(-90 66 66)" />;
+    off += len;
+    return seg;
+  });
+  return (
+    <div className="piewrap">
+      <div className="pie">
+        <svg viewBox="0 0 132 132">{segs}</svg>
+        <div className="pie-mid"><div><div className="pie-n">{num(rows.reduce((a, r) => a + r.v, 0))}</div><div className="pie-u">{midLabel}</div></div></div>
+      </div>
+      <div className="lgd">
+        {rows.map((r, i) => (
+          <div className="lgd-row" key={r.k}>
+            <span className="lgd-c" style={{ background: PIE[i % PIE.length] }} />
+            <span className="lgd-k" title={r.hint ?? r.k}>{r.k}</span>
+            <span className="lgd-v">{num(r.v)}{unit}</span>
+            <span className="lgd-p">{Math.round((r.v / total) * 100)}%</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/** 카드 머리 — 목업 `.card-head`(제목 + 오른쪽 힌트). */
+function Card({ id, title, hint, children }: { id?: string; title: string; hint?: React.ReactNode; children: React.ReactNode }) {
+  return (
+    <section className="sec" id={id}>
+      <div className="sec-head">
+        <span className="sec-title">{title}</span>
+        {hint && <div className="sec-actions">{hint}</div>}
+      </div>
+      <div className="panel">{children}</div>
+    </section>
+  );
+}
+
+// ── 작업 성능 — 목업의 perf pane 그대로 (2026-09-15 운영자 지시 「100% 일치」) ────────────
+// 카드 셋: 작업 성공률(도넛 · 성공/실패 · 이 고객 vs 전체 평균 · 실패 사유 분포) / 작업 처리 시간
+// (대기 + 처리 타임라인) / 동시 처리(피크 vs 한도). 값은 전부 이 PC 의 에이전트가 스냅샷에서 센다.
+// 목업이 지어낸 곳은 실제 값으로 바꿨다: 전체 평균은 94.1 고정이 아니라 전사 실패율에서, 실패
+// 사유는 지어낸 다섯 줄이 아니라 스냅샷의 엔진 오류 코드·실패 사유 상위 5, 「최장」은 ×4.5 가
+// 아니라 실제 최장 처리 시간, 동시 처리 한도는 스냅샷의 플랜(plan_option.concurrentJobs).
 export function JobsSection({ pair, contract, usage, failRateAll }: {
   pair: Pair | null; contract: Contract; usage: RowUsage; failRateAll: number | null;
 }) {
@@ -282,196 +340,144 @@ export function JobsSection({ pair, contract, usage, failRateAll }: {
   const ok = d?.status?.find((s) => s.status === "COMPLETED")?.n ?? 0;
   const failed = d?.status?.find((s) => s.status === "FAILED")?.n ?? 0;
   const rate = ok + failed ? (ok / (ok + failed)) * 100 : null;
-  const limit = contract.concurrent_jobs;
+  const avgAll = failRateAll === null ? null : 100 - failRateAll;
+
+  const gate = usage.kind !== "ok" ? <Unavailable usage={usage} />
+    : busy ? <Empty text="계산 중…" />
+    : problem ? <Empty text={`가져오지 못했습니다: ${problem}`} />
+    : !d ? <Empty text="기록이 없습니다." /> : null;
+  if (gate || !d) return <Card id="sec-jobs" title="작업 성공률" hint="최근 6개월 누적">{gate}</Card>;
+
+  // 처리 시간 — 목업의 dia: 평균(대기 + 처리) · 타임라인(대기 · 처리) · 축(0분 … 최장).
+  const proc = d.processing.avg ?? 0;
+  const wait = d.wait.n && d.wait.avg ? d.wait.avg : 0;
+  const total = +(wait + proc).toFixed(1);
+  const mx = Math.max(d.processing.max ?? 0, total, 1);
+  const pc = (v: number) => Math.max(0, Math.min(100, (v / mx) * 100));
+
+  // 동시 처리 — 한도는 스냅샷의 플랜이 먼저, 없으면 계약 폼의 Concurrent Jobs.
+  const peak = d.concurrency_peak ?? 0;
+  const lim = d.limits?.concurrent ?? contract.concurrent_jobs;
+  const over = lim !== null && peak > lim;
+  const cScale = Math.max(peak, lim ?? 0, 1) * 1.1;
+  const cp = (v: number) => Math.max(0, Math.min(100, (v / cScale) * 100));
+
+  const fails = [
+    ...(d.fail_kinds ?? []).map((k) => ({ k: KIND[k.kind] ?? k.kind, v: k.n, s: `${num(k.n)}건`, hint: k.kind })),
+    ...(d.fail_other > 0 ? [{ k: "기타", v: d.fail_other, s: `${num(d.fail_other)}건` }] : []),
+  ];
 
   return (
-    <section className="sec" id="sec-jobs">
-      <div className="sec-head">
-        <span className="sec-title">작업 성능</span>
-        <span className="tag neutral">최근 6개월 · 스냅샷은 그 앞을 안 담습니다</span>
-      </div>
-      {usage.kind !== "ok" ? <div className="panel"><Unavailable usage={usage} /></div>
-        : busy ? <div className="panel"><Empty text="계산 중…" /></div>
-        : problem ? <div className="panel"><Empty text={`가져오지 못했습니다: ${problem}`} /></div>
-        : !d ? null : (
-        <>
-          <div className="panel">
-            <div className="sub-head"><span className="sub-title">작업 성공률</span>
-              <span className="sub-count">{d.jobs_from ? `${fmt(d.jobs_from.slice(0, 10))} 이후` : ""} · 내보내기 {num(ok + failed)}건</span></div>
-            <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) minmax(0,1.1fr)", gap: 28, alignItems: "start" }}>
-              <div style={{ display: "flex", gap: 16, alignItems: "center" }}>
-                {rate === null ? <Empty text="완료·실패 기록이 없습니다." /> : (
-                  <>
-                    <Donut pct={rate} color={rate >= 94 ? "var(--teal-600)" : "#E4A11B"} label={`${rate.toFixed(1)}%`} />
-                    <div style={{ flex: 1, fontSize: 12.5 }}>
-                      <div>성공 <b>{num(ok)}</b>건 · 실패 <b>{num(failed)}</b>건</div>
-                      {failRateAll !== null && (
-                        <div className="muted" style={{ marginTop: 6 }}>
-                          전사 평균 성공률 {(100 - failRateAll).toFixed(1)}%
-                          {rate < 100 - failRateAll * RULE.failMult ? <b style={{ color: "var(--red-fg)", marginLeft: 6 }}>평균의 {RULE.failMult}배 넘게 실패</b> : null}
-                        </div>
-                      )}
-                      <div className="muted" style={{ marginTop: 6 }}>
-                        지연 트랙(RED) {d.speed.green + d.speed.red ? Math.round((d.speed.red / (d.speed.green + d.speed.red)) * 100) : 0}%
-                      </div>
-                    </div>
-                  </>
-                )}
-              </div>
-              <div>
-                <div className="sub-title" style={{ marginBottom: 10 }}>실패 사유 분포</div>
-                <BarList color="#b45309" rows={(d.reasons ?? []).map((r) => ({ label: REASON[r.reason] ?? r.reason, n: r.n, sub: r.reason }))} />
-                {d.errors?.length ? (
-                  <div style={{ marginTop: 12 }}>
-                    <div className="muted" style={{ fontSize: 11.5, marginBottom: 6 }}>엔진 오류 코드</div>
-                    <BarList color="#b45309" rows={d.errors.map((e) => ({ label: ERRCODE[e.code] ?? e.code, n: e.n, sub: e.code }))} />
+    <>
+      <Card id="sec-jobs" title="작업 성공률" hint="최근 6개월 누적">
+        <div className="succ">
+          <div className="seat">
+            {rate === null ? <Empty text="완료·실패 기록이 없습니다." /> : (
+              <>
+                <MockDonut pct={rate} color={rate >= 94 ? "#15713a" : "#946005"} label={`${rate.toFixed(1)}%`} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div className="seat-txt">성공 <b>{num(ok)}</b>건 &nbsp; 실패 <b>{num(failed)}</b>건</div>
+                  <div className="cmp">
+                    <div className="cmp-r"><span className="cmp-k">이 고객</span>
+                      <span className="cmp-t"><span className="cmp-f" style={{ width: `${rate}%`, background: rate >= 94 ? "#15713a" : "#946005" }} /></span>
+                      <span className="cmp-v">{rate.toFixed(1)}%</span></div>
+                    {avgAll !== null && (
+                      <div className="cmp-r"><span className="cmp-k">전체 평균</span>
+                        <span className="cmp-t"><span className="cmp-f" style={{ width: `${avgAll}%`, background: "#cbd9d5" }} /></span>
+                        <span className="cmp-v" style={{ color: "var(--faint)" }}>{avgAll.toFixed(1)}%</span></div>
+                    )}
                   </div>
-                ) : null}
-              </div>
-            </div>
-            {d.monthly?.length ? (
-              <div style={{ marginTop: 16 }}>
-                <div className="muted" style={{ fontSize: 11.5, marginBottom: 6 }}>월별 내보내기</div>
-                <div style={{ display: "flex", gap: 6 }}>
-                  {d.monthly.map((m) => {
-                    const t = m.ok + m.failed, mx = Math.max(1, ...d.monthly!.map((x) => x.ok + x.failed));
-                    return (
-                      <div key={m.period} style={{ flex: 1, minWidth: 0, textAlign: "center" }} title={`${m.period} · 성공 ${m.ok} · 실패 ${m.failed}`}>
-                        <div style={{ height: 40, display: "flex", alignItems: "flex-end" }}>
-                          <div style={{ width: "100%", height: `${(t / mx) * 100}%`, background: m.failed ? "linear-gradient(to top, #b45309 " + Math.round((m.failed / Math.max(1, t)) * 100) + "%, var(--teal-600) 0)" : "var(--teal-600)", borderRadius: "4px 4px 0 0" }} />
-                        </div>
-                        <div className="muted" style={{ fontSize: 10.5, marginTop: 4 }}>{m.period.slice(2)}</div>
-                      </div>
-                    );
-                  })}
                 </div>
+              </>
+            )}
+          </div>
+          <div className="succ-r">
+            <h3 className="succ-h">실패 사유 분포</h3>
+            <Bars rows={fails} cls="b3" empty="실패가 없습니다." />
+          </div>
+        </div>
+      </Card>
+
+      <div className="g2">
+        <Card title="작업 처리 시간" hint="최근 6개월">
+          {d.processing.n ? (
+            <div className="dia">
+              <div className="dia-h"><span className="dia-t">평균<b>{total}분</b></span>
+                <span className="dia-r">{wait > 0 ? `평균 대기 ${wait}분 · ` : ""}영상 1분당 {d.processing.per_video_minute ?? "—"}분</span></div>
+              <div className="tl">
+                {wait > 0 && <div className="tl-seg wait" style={{ left: 0, width: `${pc(wait)}%` }}>대기 {wait}분</div>}
+                <div className={`tl-seg proc${wait > 0 ? "" : " only"}`} style={{ left: `${pc(wait)}%`, width: `${pc(proc)}%` }}>처리 {proc}분</div>
+                <div className="tl-tick" style={{ left: "100%" }} />
               </div>
-            ) : null}
-          </div>
-
-          <div className="panel" style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0,1fr))", gap: 28 }}>
-            <div>
-              <div className="sub-head"><span className="sub-title">작업 처리 시간</span>
-                <span className="sub-count">시작 → 마지막 갱신 · 완료 {num(d.processing.n)}건</span></div>
-              {d.processing.n ? (
-                <>
-                  <div className="stat-row" style={{ marginTop: 6, paddingTop: 0, borderTop: 0 }}>
-                    <Stat label="중앙값" value={`${d.processing.p50}분`} />
-                    <Stat label="상위 10%" value={`${d.processing.p90}분`} />
-                    <Stat label="최장" value={`${d.processing.max}분`} />
-                    <Stat label="영상 1분당" value={d.processing.per_video_minute !== null ? `${d.processing.per_video_minute}분` : "—"} sub={d.processing.avg_video_minutes !== null ? `평균 영상 ${d.processing.avg_video_minutes}분` : undefined} />
-                  </div>
-                  <div className="muted" style={{ fontSize: 12, marginTop: 12 }}>
-                    {d.wait.n ? `대기(큐) 기록 ${num(d.wait.n)}건 · 평균 ${d.wait.avg}분 · 최장 ${d.wait.max}분` : "대기(큐) 기록 없음 — 곧바로 처리됐습니다"}
-                  </div>
-                  <div className="muted" style={{ fontSize: 11.5, marginTop: 4 }}>완료 시각 컬럼이 없어 마지막 갱신 시각으로 잰 값입니다.</div>
-                </>
-              ) : <Empty text="완료 기록이 없습니다." />}
+              <div className="tl-axis"><span>0분</span><span>최장 {mx}분</span></div>
             </div>
-            <div>
-              <div className="sub-head"><span className="sub-title">동시 처리</span><span className="sub-count">최근 6개월 피크</span></div>
-              {d.concurrency_peak === null ? <Empty text="기록이 없습니다." /> : (() => {
-                const peak = d.concurrency_peak, over = limit !== null && peak > limit;
-                const scale = Math.max(peak, limit ?? 0, 1) * 1.1;
-                return (
-                  <>
-                    <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between" }}>
-                      <span className="meter-num" style={{ color: over ? "var(--red-fg)" : undefined }}>{peak}건</span>
-                      <span className="meter-note">
-                        {limit === null ? "한도 미입력 (계약 폼의 Concurrent Jobs)"
-                          : over ? <b style={{ color: "var(--red-fg)" }}>한도 {limit}건 · {peak - limit}건 초과</b>
-                          : `한도 ${limit}건 · ${Math.round((peak / limit) * 100)}% 사용`}
-                      </span>
-                    </div>
-                    <div className="meter-track" style={{ position: "relative", overflow: "visible", height: 22 }}>
-                      <div style={{ position: "absolute", inset: "0 auto 0 0", width: `${(Math.min(peak, limit ?? peak) / scale) * 100}%`, background: "var(--teal-600)", borderRadius: 5 }} />
-                      {over && <div style={{ position: "absolute", top: 0, bottom: 0, left: `${(limit! / scale) * 100}%`, width: `${((peak - limit!) / scale) * 100}%`, background: "var(--red-fg)", borderRadius: "0 5px 5px 0" }} />}
-                      {limit !== null && <div style={{ position: "absolute", top: -6, bottom: -6, left: `${(limit / scale) * 100}%`, width: 2, background: "var(--ink)" }} title={`한도 ${limit}`} />}
-                    </div>
-                    <div className="muted" style={{ fontSize: 11.5, marginTop: 8 }}>
-                      피크 시각 {d.concurrency_peak_at ? d.concurrency_peak_at.slice(0, 16) : "—"} · 시작~갱신 구간이 겹친 수로 셌습니다
-                    </div>
-                  </>
-                );
-              })()}
+          ) : <Empty text="완료 기록이 없습니다." />}
+        </Card>
+        <Card title="동시 처리" hint="최근 6개월 피크">
+          {d.concurrency_peak === null ? <Empty text="기록이 없습니다." /> : (
+            <div className="dia">
+              <div className="dia-h"><span className="dia-t">피크<b style={over ? { color: "#b91c1c" } : undefined}>{peak}건</b></span>
+                <span className="dia-r">
+                  {lim === null ? "한도 미확인 — 스냅샷에 플랜이 없고 계약 폼의 Concurrent Jobs 도 비어 있음"
+                    : over ? <b style={{ color: "#b91c1c" }}>한도 {lim}건 · {peak - lim}건 초과</b>
+                    : `한도 ${lim}건 · ${Math.round((peak / lim) * 100)}% 사용`}
+                </span></div>
+              <div className="tl">
+                <div className="tl-seg proc" style={{ left: 0, width: `${cp(Math.min(peak, lim ?? peak))}%` }}>{Math.min(peak, lim ?? peak)}</div>
+                {over && <div className="tl-seg" style={{ left: `${cp(lim!)}%`, width: `${cp(peak - lim!)}%`, background: "#b91c1c" }}>+{peak - lim!}</div>}
+                {lim !== null && <div className="tl-tick" style={{ left: `${cp(lim)}%` }} />}
+              </div>
+              <div className="tl-axis"><span>0건</span><span>{lim === null ? "" : `한도 ${lim}건`}</span></div>
             </div>
-          </div>
-        </>
-      )}
-    </section>
+          )}
+        </Card>
+      </div>
+    </>
   );
 }
 
-function Stat({ label, value, sub }: { label: string; value: React.ReactNode; sub?: string }) {
-  return (
-    <div>
-      <div className="stat-label">{label}</div>
-      <div className="stat-value">{value}</div>
-      {sub && <div style={{ fontSize: 11.5, color: "var(--faint)", marginTop: 2 }}>{sub}</div>}
-    </div>
-  );
-}
-
-// ── 9. 사용 구성 ─────────────────────────────────────────────────────────
-export function MixSection({ pair, usage }: { pair: Pair | null; usage: RowUsage }) {
+// ── 사용 구성 — 목업의 usage pane 그대로 ─────────────────────────────────────
+// 언어쌍 Top 5 · 영상 길이 분포(파이 둘) / 좌석 활용률(계약 좌석 · 등록 멤버 · 사용, 멤버별 막대).
+// 멤버별 막대는 목업이 난수로 갈랐지만 여기는 스냅샷의 실제 내보내기 수 — 이름·이메일은 스냅샷에
+// 없어 「멤버 1·2·…」 순위로만 선다. 창은 카드의 「최근 30일」과 같다.
+export function MixSection({ pair, contract, usage }: { pair: Pair | null; contract: Contract; usage: RowUsage }) {
   const spaces = usage.kind === "ok" ? usage.spaces : [];
   const { data, problem, busy } = useSpaceMetric<UsageData>(pair, "usage", spaces);
   const d = data?.data;
-  return (
-    <section className="sec" id="sec-mix">
-      <div className="sec-head">
-        <span className="sec-title">사용 구성</span>
-        <span className="tag neutral">최근 6개월 내보내기 기준</span>
-      </div>
-      {usage.kind !== "ok" ? <div className="panel"><Unavailable usage={usage} /></div>
-        : busy ? <div className="panel"><Empty text="계산 중…" /></div>
-        : problem ? <div className="panel"><Empty text={`가져오지 못했습니다: ${problem}`} /></div>
-        : !d ? null : (
-        <>
-          <div className="panel" style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0,1fr))", gap: 28 }}>
-            <div>
-              <div className="sub-head"><span className="sub-title">언어쌍 Top 5</span>
-                <span className="sub-count">{num((d.languages ?? []).reduce((a, x) => a + x.n, 0) + d.languages_other)}편</span></div>
-              <BarList unit="편" rows={[
-                ...(d.languages ?? []).map((l) => ({ label: pairName(l.pair), n: l.n, sub: l.pair })),
-                ...(d.languages_other > 0 ? [{ label: "기타", n: d.languages_other }] : []),
-              ]} />
-            </div>
-            <div>
-              <div className="sub-head"><span className="sub-title">영상 길이 분포</span></div>
-              <BarList unit="편" rows={LENGTH_BINS.map((bin) => ({ label: bin, n: d.lengths?.find((l) => l.bin === bin)?.n ?? 0 }))} />
-              <div className="sub-head" style={{ marginTop: 16 }}><span className="sub-title">업로드 경로</span></div>
-              <BarList unit="편" rows={(d.sources ?? []).map((s) => ({ label: SOURCE[s.source] ?? s.source, n: s.n }))} />
-              {d.extras.total ? (
-                <div className="muted" style={{ fontSize: 12, marginTop: 10 }}>
-                  립싱크 {Math.round((d.extras.lip_sync / d.extras.total) * 100)}%
-                  {d.extras.avg_speakers !== null ? ` · 평균 화자 ${d.extras.avg_speakers}명` : ""}
-                </div>
-              ) : null}
-            </div>
-          </div>
+  const gate = usage.kind !== "ok" ? <Unavailable usage={usage} />
+    : busy ? <Empty text="계산 중…" />
+    : problem ? <Empty text={`가져오지 못했습니다: ${problem}`} />
+    : !d ? <Empty text="기록이 없습니다." /> : null;
+  if (gate || !d) return <Card id="sec-mix" title="언어쌍 Top 5" hint="최근 6개월 생성 영상">{gate}</Card>;
 
-          <div className="panel">
-            <div className="sub-head"><span className="sub-title">좌석 활용률</span>
-              <span className="sub-count">
-                {d.seats.spaces_found < spaces.length ? `스페이스 ${spaces.length}개 중 ${d.seats.spaces_found}개만 스냅샷에 있음` : `스페이스 ${d.seats.spaces_found}개`}
-              </span></div>
-            <div className="stat-row" style={{ marginTop: 6, paddingTop: 0, borderTop: 0 }}>
-              <Stat label="스페이스 좌석" value={num(d.seats.seats)} sub="space.seat — 멤버 제한 수" />
-              <Stat label="등록 멤버" value={num(d.seats.members)} sub={`소유자 ${d.seats.owners}${d.seats.left ? ` · 나감·차단 ${d.seats.left}` : ""}`} />
-              <Stat label="최근 30일 사용" value={num(d.seats.active_30d)} sub="내보내기를 한 사람" />
-              <Stat label="6개월 사용" value={num(d.seats.active_6m)} />
-            </div>
-            {d.members?.length ? (
-              <div style={{ marginTop: 16 }}>
-                <div className="muted" style={{ fontSize: 11.5, marginBottom: 8 }}>멤버별 내보내기 — 이름·이메일은 스냅샷에 없어 순위로만 보입니다</div>
-                <BarList rows={d.members.map((m) => ({ label: `멤버 ${m.rank}`, n: m.jobs }))} />
-              </div>
-            ) : null}
-          </div>
-        </>
-      )}
-    </section>
+  const langs = [
+    ...(d.languages ?? []).map((l) => ({ k: pairName(l.pair), v: l.n, hint: l.pair })),
+    ...(d.languages_other > 0 ? [{ k: "기타", v: d.languages_other }] : []),
+  ];
+  const lens = LENGTH_BINS.map((bin) => ({ k: bin, v: d.lengths?.find((l) => l.bin === bin)?.n ?? 0 }));
+  // 계약 좌석 — 스냅샷의 space.seat 합이 먼저, 없으면 계약 폼의 Account Invitation Limit.
+  const seatLimit = d.seats.seats || contract.invite_limit || 0;
+
+  return (
+    <>
+      <div className="g2">
+        <Card id="sec-mix" title="언어쌍 Top 5" hint="최근 6개월 생성 영상">
+          {langs.length ? <Pie rows={langs} /> : <Empty text="내보내기 기록이 없습니다." />}
+        </Card>
+        <Card title="영상 길이 분포" hint="최근 6개월 생성 영상">
+          {lens.some((l) => l.v > 0) ? <Pie rows={lens} /> : <Empty text="내보내기 기록이 없습니다." />}
+        </Card>
+      </div>
+      <Card title="좌석 활용률" hint="최근 30일">
+        <div className="seat-sum">
+          <span><i>계약 좌석</i><b>{num(seatLimit)}</b></span>
+          <span><i>등록 멤버</i><b>{num(d.seats.members)}</b></span>
+          <span><i>사용</i><b>{num(d.seats.active_30d)}</b></span>
+        </div>
+        <Bars rows={(d.members ?? []).map((m) => ({ k: `멤버 ${m.rank}`, v: m.jobs, s: `${num(m.jobs)}건` }))}
+              empty="최근 30일에 내보내기를 한 멤버가 없습니다." />
+      </Card>
+    </>
   );
 }
 

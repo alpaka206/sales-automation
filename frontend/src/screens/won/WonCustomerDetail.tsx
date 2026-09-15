@@ -290,7 +290,7 @@ export function WonCustomerDetail() {
               <JobsSection pair={agent.pair} contract={current} usage={usage}
                            failRateAll={usageIndex.index?.failRateAll ?? null} />
             )}
-            {section === "sec-mix" && <MixSection pair={agent.pair} usage={usage} />}
+            {section === "sec-mix" && <MixSection pair={agent.pair} contract={current} usage={usage} />}
           </>
         ) : null}
 

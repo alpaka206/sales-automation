@@ -198,9 +198,24 @@ SELECT
 // ── 3. 작업 성능 ─────────────────────────────────────────────────────────
 const jobsSQL = spacesCTE + `,
 lar AS (
-  SELECT l.failure_reason, l.engine_error_code
+  -- 실패 종류: 엔진 오류 코드가 있으면 그것(NO_VOICE_DETECTED_VAD 처럼 사람이 읽는 원인),
+  -- 없으면 실패 사유(AUDIO_PIPELINE_FAILED …). ENGINE_ERROR 한 줄로 뭉치면 원인이 안 보인다.
+  SELECT l.failure_reason, l.engine_error_code,
+         coalesce(nullif(l.engine_error_code, ''), l.failure_reason, '(미기록)') AS kind
   FROM read_csv_auto('{{d}}/perso_video_translator.live_api_response.csv', union_by_name=true) l
   JOIN pel ON pel.seq = l.export_log_seq
+),
+kinds AS (SELECT kind, count(*) AS n FROM lar GROUP BY 1),
+top_kinds AS (SELECT kind, n FROM kinds ORDER BY n DESC, kind LIMIT 5),
+-- 플랜 한도 — 스페이스의 구독(subscriber.plan_seq) → plan_option(video_translator) 의 JSON.
+-- 동시 처리 한도는 계약 폼에도 있지만(concurrent_jobs) 스냅샷이 아는 값이 실제 값이다.
+-- 스페이스가 여럿이고 플랜이 다르면 큰 쪽을 든다. 990/990 엔터프라이즈 스페이스가 풀린다(2026-09-14 실측).
+po AS (
+  SELECT TRY_CAST(json_extract_string(detail, '$.concurrentJobs') AS INTEGER) AS conc,
+         TRY_CAST(TRY_CAST(json_extract_string(detail, '$.queueLimit') AS DOUBLE) AS INTEGER) AS q
+  FROM read_csv_auto('{{d}}/perso_payment.plan_option.csv', union_by_name=true) o
+  JOIN read_csv_auto('{{d}}/perso_payment.subscriber.part*.csv', union_by_name=true) s ON s.plan_seq = o.plan_seq
+  WHERE o.type = 'video_translator' AND s.space_seq IN (SELECT space_seq FROM sp)
 ),
 done AS (
   SELECT date_diff('minute', create_date, update_date) AS proc_min,
@@ -225,8 +240,11 @@ SELECT
       SELECT coalesce(failure_reason, '(미기록)') AS reason, count(*) AS n FROM lar GROUP BY 1))) AS reasons,
   to_json((SELECT list(struct_pack(code := code, n := n) ORDER BY n DESC) FROM (
       SELECT coalesce(engine_error_code, '(미기록)') AS code, count(*) AS n FROM lar GROUP BY 1))) AS errors,
+  to_json((SELECT list(struct_pack(kind := kind, n := n) ORDER BY n DESC, kind) FROM top_kinds)) AS fail_kinds,
+  (SELECT coalesce(sum(n), 0) FROM kinds) - (SELECT coalesce(sum(n), 0) FROM top_kinds) AS fail_other,
   to_json((SELECT struct_pack(
       n := count(*),
+      avg := round(avg(proc_min), 1),
       p50 := round(quantile_cont(proc_min, 0.5), 1),
       p90 := round(quantile_cont(proc_min, 0.9), 1),
       max := max(proc_min),
@@ -239,6 +257,7 @@ SELECT
                               red := count(*) FILTER (WHERE speed_type = 'RED')) FROM pel)) AS speed,
   (SELECT max(running) FROM run) AS concurrency_peak,
   (SELECT arg_max(t, running) FROM run) AS concurrency_peak_at,
+  to_json((SELECT struct_pack(concurrent := max(conc), queue := max(q)) FROM po)) AS limits,
   (SELECT min(create_date) FROM pel) AS jobs_from,
   (SELECT max(create_date) FROM pel) AS last_job
 `
@@ -252,7 +271,10 @@ pairs AS (
   FROM pel GROUP BY 1
 ),
 top5 AS (SELECT pair, n FROM pairs ORDER BY n DESC, pair LIMIT 5),
-byuser AS (SELECT user_seq, count(*) AS jobs FROM pel WHERE user_seq IS NOT NULL GROUP BY 1),
+-- 멤버별 내보내기는 **최근 30일** — 좌석 활용률 카드가 「최근 30일」이고 「사용」 수와 같은 창이어야
+-- 막대 수와 그 수가 맞는다. 6개월치는 seats.active_6m 이 셀 뿐이다.
+byuser AS (SELECT user_seq, count(*) AS jobs FROM pel
+           WHERE user_seq IS NOT NULL AND create_date >= (SELECT t FROM nowat) - INTERVAL 30 DAY GROUP BY 1),
 sm AS (
   SELECT status, member_role
   FROM read_csv_auto('{{d}}/perso.space_member.part*.csv', union_by_name=true)
