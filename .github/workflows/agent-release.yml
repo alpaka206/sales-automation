@@ -1,0 +1,57 @@
+# 로컬 데이터 에이전트(agent/)를 세 타깃으로 빌드해 GitHub Release 에 올립니다.
+#
+# 바이너리를 git 에 넣지 않는 이유: 셋을 합치면 100MB 이고 커밋마다 따라옵니다. Render 빌드에
+# 넣지 않는 이유: 그 인스턴스는 Python 런타임이라 Go 가 없고, 512Mi 무료 인스턴스가 100MB 를
+# 서빙할 이유가 없습니다. 저장소가 공개라 Release 자산은 인증 없이 받아지고, 콘솔의 내려받기
+# 버튼이 `releases/latest/download/<파일>` 을 가리킵니다.
+#
+# 내는 법:  git tag agent-v1.0.0 && git push origin agent-v1.0.0
+name: Agent release
+
+on:
+  push:
+    tags: ["agent-v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: agent
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: agent/go.mod
+      - name: DuckDB CLI zips (embed 됩니다 — 버전은 snapshot.go 의 duckdbVersion)
+        run: |
+          set -e
+          V=$(grep -oE 'duckdbVersion = "[0-9.]+"' snapshot.go | grep -oE '[0-9.]+')
+          echo "DuckDB $V"
+          curl -fsSL -o bin/duckdb-windows-amd64.zip   "https://github.com/duckdb/duckdb/releases/download/v$V/duckdb_cli-windows-amd64.zip"
+          curl -fsSL -o bin/duckdb-darwin-universal.zip "https://github.com/duckdb/duckdb/releases/download/v$V/duckdb_cli-osx-universal.zip"
+          ls -la bin/
+      - run: go vet ./... && go test ./...
+      - name: Build (CGO 없음 — 한 대에서 세 타깃)
+        run: |
+          set -e
+          mkdir -p dist
+          GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" -o dist/perso-agent.exe .
+          GOOS=darwin  GOARCH=arm64 CGO_ENABLED=0 go build -ldflags="-s -w" -o dist/perso-agent-mac-arm64 .
+          GOOS=darwin  GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" -o dist/perso-agent-mac-intel .
+          (cd dist && sha256sum * > SHA256SUMS.txt && cat SHA256SUMS.txt)
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            agent/dist/perso-agent.exe
+            agent/dist/perso-agent-mac-arm64
+            agent/dist/perso-agent-mac-intel
+            agent/dist/SHA256SUMS.txt
+          body: |
+            로컬 데이터 에이전트. 스냅샷 clone 폴더(`perso-data-snapshot`) 옆에 두고 실행합니다.
+            원본도 집계도 콘솔 서버로 가지 않습니다 — 계산은 이 PC 에서 끝납니다.
+            사용법: `agent/README.md`
