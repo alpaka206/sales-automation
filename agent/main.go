@@ -383,7 +383,15 @@ func main() {
 	fmt.Printf("스냅샷: %s\n", snap.Repo)
 	fmt.Println("pull 확인 중…")
 	snap.Pull()
-	fmt.Printf("  → %s\n", snap.pullNote)
+	note, _ := snap.pullState()
+	fmt.Printf("  → %s\n", note)
+	// 켜 둔 채로 며칠이 가도 최신이게 — 스냅샷은 매일 새로 만들어지므로 한 시간마다 다시 pull 한다
+	// (새 것이 없으면 git 이 곧바로 끝난다). 계산 중에 바뀌면 RunMetric 이 잡아 다시 계산하게 한다.
+	go func() {
+		for range time.Tick(time.Hour) {
+			snap.Pull()
+		}
+	}()
 
 	ln, port, err := listen()
 	if err != nil {

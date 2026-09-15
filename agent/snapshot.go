@@ -3,6 +3,7 @@ package main
 import (
 	"archive/zip"
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,6 +15,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -36,9 +38,11 @@ func utcNow() string { return time.Now().UTC().Format(time.RFC3339) }
 // 숫자**가 나온다. 오류 없이 틀린 값을 보여 주는 것이 갱신 실패보다 나쁘다. 그래서 계산
 // 전후로 커밋 sha 를 비교하고, 달라졌으면 그 결과를 버린다.
 type Snapshot struct {
-	Repo     string
-	Data     string
-	duckdb   string
+	Repo   string
+	Data   string
+	duckdb string
+	// pull 이 한 시간마다 뒤에서도 도니(main.go) 이 둘은 잠그고 읽고 쓴다.
+	mu       sync.Mutex
 	pullNote string
 	pulledAt string
 }
@@ -61,17 +65,24 @@ func NewSnapshot(repo string) (*Snapshot, error) {
 
 // -- git ------------------------------------------------------------
 func (s *Snapshot) git(args ...string) (int, string) {
-	cmd := exec.Command("git", append([]string{"-C", s.Repo}, args...)...)
+	// 2분 상한. pull 이 사내망·VPN 문제로 영영 안 끝나면 화면도 안 열린다 — 그러면 「이전
+	// 데이터로 열고 사유를 적는다」는 약속이 안 지켜진다. 로그인 창(첫 실행)은 그 안에 충분하다.
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", s.Repo}, args...)...)
 	out, err := cmd.CombinedOutput()
 	text := strings.TrimSpace(string(out))
 	if err == nil {
 		return 0, text
 	}
+	if ctx.Err() != nil {
+		return 124, "2분 안에 끝나지 않았습니다 — 네트워크·VPN·GitHub 로그인을 확인하세요"
+	}
 	var ee *exec.ExitError
 	if errors.As(err, &ee) {
 		return ee.ExitCode(), text
 	}
-	return 127, "git 을 실행할 수 없습니다"
+	return 127, "git 을 실행할 수 없습니다 — git 이 설치돼 있나요?"
 }
 
 func (s *Snapshot) Commit() string {
@@ -91,24 +102,38 @@ func (s *Snapshot) CommittedAt() string {
 // Pull 은 **실패해도 계속한다** — 이전 데이터로 서비스하고 사유를 남긴다.
 func (s *Snapshot) Pull() {
 	if _, err := os.Stat(filepath.Join(s.Repo, ".git")); err != nil {
-		s.pullNote = "git 저장소가 아닙니다 (시험용 폴더)"
+		s.setPull("git 저장소가 아닙니다 (시험용 폴더)", false)
 		return
 	}
 	code, out := s.git("pull", "--ff-only")
-	s.pulledAt = utcNow()
 	first := strings.TrimSpace(strings.SplitN(out, "\n", 2)[0])
 	if code == 0 {
 		// **성공에는 사유를 안 붙인다.** git 의 첫 줄은 `From <원격 주소>` 라 화면 한
 		// 줄을 통째로 먹는데, 「어느 데이터를 보고 있나」는 옆의 커밋 sha 와 기준 시각이
 		// 이미 정확하게 말한다. 실패는 반대다 — 그 문장이 곧 할 일이라 그대로 싣는다.
-		s.pullNote = "성공"
+		s.setPull("성공", true)
 		return
 	}
 	// 사유를 그대로 보여 준다. 「실패했습니다」만 적으면 할 수 있는 일이 없다.
 	if first == "" {
 		first = "사유 없음"
 	}
-	s.pullNote = fmt.Sprintf("실패(코드 %d) — %s", code, first)
+	s.setPull(fmt.Sprintf("실패(코드 %d) — %s", code, first), true)
+}
+
+func (s *Snapshot) setPull(note string, stamp bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.pullNote = note
+	if stamp {
+		s.pulledAt = utcNow()
+	}
+}
+
+func (s *Snapshot) pullState() (string, string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.pullNote, s.pulledAt
 }
 
 type asOf struct {
@@ -124,8 +149,9 @@ func (s *Snapshot) AsOf() asOf {
 	// 낡았는지는 **데이터의 시각**(manifest 의 generated_at)으로 잰다. 커밋 시각은 그 근사치이고
 	// git 저장소가 아닌 폴더에는 아예 없다 — 그때 「낡음」으로 떨어지면 시험 폴더가 늘 빨갛다.
 	stale := time.Since(s.snapshotAt()) > 36*time.Hour
-	return asOf{Commit: s.Commit(), CommittedAt: committed, PulledAt: s.pulledAt,
-		Pull: s.pullNote, Stale: stale}
+	note, pulled := s.pullState()
+	return asOf{Commit: s.Commit(), CommittedAt: committed, PulledAt: pulled,
+		Pull: note, Stale: stale}
 }
 
 func (s *Snapshot) FolderMB() int64 {

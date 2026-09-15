@@ -31,7 +31,7 @@ GOOS=darwin  GOARCH=amd64 go build -ldflags="-s -w" -o dist/perso-agent-mac-inte
 스냅샷 clone 폴더 **옆**에 두고 실행한다. 폴더 이름이 다르면 `--repo`.
 
 ```
-perso-agent.exe                      # 실행 → pull → 43110 에 뜸 → 브라우저에 콘솔이 열림
+perso-agent.exe                      # 실행 → pull → 43110 에 뜸 → 브라우저에 콘솔이 열림 (켜 둔 동안 한 시간마다 다시 pull)
 perso-agent.exe --console http://127.0.0.1:8010   # 로컬 콘솔로 시험할 때 (허용 출처 앞에 붙는다)
 perso-agent.exe --unregister         # persodata:// 등록 해제 (Windows)
 ```
