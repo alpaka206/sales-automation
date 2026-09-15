@@ -18,7 +18,7 @@ import { matchGrants, matchPayments, mergeEvidence, parseSpaceSeqs, type GrantEv
 import { WonContractForm } from "./WonContractForm";
 import { ContractFields, PlanFields, scheduleLabel, useContractDraft } from "./ContractFields";
 import { validate } from "./contractDraft";
-import { CreditUsageSection, JobsSection, MixSection, type CreditsData } from "./WonUsageSections";
+import { CreditUsageSection, JobsSection, MixSection, UsageInsight, type CreditsData } from "./WonUsageSections";
 import {
   RETIRED,
   type Comm, type Contract, type Grant, type History, type ListData, type Options, type Payment, type Row,
@@ -41,10 +41,10 @@ const SECTIONS: [string, string][] = [
   ["sec-basic", "고객 정보"],
   // 계약과 플랜은 한 탭입니다 — 목업의 「계약 · 플랜」(2026-09-15 운영자 지시). 카드는 둘 그대로.
   ["sec-contract", "계약 · 플랜"],
-  ["sec-credit", "크레딧 지급"],
-  // 5·8·9 는 **이 PC 의 데이터 에이전트**가 답합니다(스냅샷 집계). 서버는 이 값을 모릅니다.
-  // 크레딧 사용 현황은 지급 바로 아래에 둡니다 — 지급과 소진은 한 화면에서 맞대 봐야 합니다.
-  ["sec-usage", "크레딧 사용 현황"],
+  // 지급과 사용 현황은 한 탭입니다 — 목업의 「크레딧」(2026-09-15 운영자 지시). 순서도 목업대로:
+  // 사용 진단 줄 → 지급 현황 카드 → 사용 현황 카드. 지급과 소진은 한 화면에서 맞대 봐야 합니다.
+  // 사용 쪽은 **이 PC 의 데이터 에이전트**가 답합니다(스냅샷 집계). 서버는 이 값을 모릅니다.
+  ["sec-credit", "크레딧"],
   ["sec-pay", "결제 현황"],
   ["sec-revenue", "MRR 관리"],
   ["sec-jobs", "작업 성능"],
@@ -94,7 +94,7 @@ export function WonCustomerDetail() {
   const hash = useLocation().hash.slice(1);
   const [picked, setPicked] = useState<string | null>(null);
   // 예전 앵커 이름은 지금 탭으로 옮긴다 — `#sec-plan` 은 계약 탭 안에 있다.
-  const alias: Record<string, string> = { "sec-plan": "sec-contract", "sec-comm": "sec-basic" };
+  const alias: Record<string, string> = { "sec-plan": "sec-contract", "sec-comm": "sec-basic", "sec-usage": "sec-credit" };
   const known = (id: string) => SECTIONS.some(([key]) => key === id);
   const wanted = alias[hash] ?? hash;
   const section = picked ?? (known(wanted) ? wanted : SECTIONS[0][0]);
@@ -269,13 +269,15 @@ export function WonCustomerDetail() {
               )
             )}
             {section === "sec-credit" && (
-              <CreditSection contract={current} today={today} onDone={refresh} evidence={grantEvidence} />
-            )}
-            {section === "sec-usage" && (
-              <CreditUsageSection contract={current} usage={usage} credits={credits}
-                                  snapshotStamp={usageIndex.index?.snapshotStamp}
-                                  snapshotAt={usageIndex.index?.snapshotAt}
-                                  creditsFrom={usageIndex.index?.creditsFrom} />
+              <>
+                {/* 목업의 `dg-bar` — 사용 수준 · 마지막 작업 · 주의. 카드 밖, 탭 맨 위. */}
+                {usage.kind === "ok" && <UsageInsight d={usage.diagnosis} />}
+                <CreditSection contract={current} today={today} onDone={refresh} evidence={grantEvidence} />
+                <CreditUsageSection contract={current} usage={usage} credits={credits}
+                                    snapshotStamp={usageIndex.index?.snapshotStamp}
+                                    snapshotAt={usageIndex.index?.snapshotAt}
+                                    creditsFrom={usageIndex.index?.creditsFrom} />
+              </>
             )}
             {section === "sec-pay" && (
               <PaySection contract={current} today={today} onDone={refresh} evidence={payEvidence} />

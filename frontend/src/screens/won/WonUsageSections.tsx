@@ -167,8 +167,6 @@ export function CreditUsageSection({ contract, usage, credits, snapshotStamp, sn
 
       {usage.kind !== "ok" ? <div className="panel"><Unavailable usage={usage} /></div> : (
         <>
-          <Diagnostics d={usage.diagnosis} />
-
           <div className="panel">
             <div className="sub-head"><span className="sub-title">크레딧 소진율</span>
               {usage.diagnosis.partial && <span className="mini-chip">2025-12 이전 소진 없음</span>}</div>
@@ -239,8 +237,9 @@ export function CreditUsageSection({ contract, usage, credits, snapshotStamp, sn
 const idleWord = (d: number) => (d === 0 ? "오늘" : d === 1 ? "어제" : `${d}일 전`);
 const TONE_COLOR: Record<string, string> = { ok: "var(--teal-700)", warn: "var(--amber-fg)", danger: "var(--red-fg)", reply: "var(--indigo-fg)", neutral: "var(--muted)" };
 
-/** 사용 진단 — 사용 수준 / 마지막 작업 / 주의. */
-function Diagnostics({ d }: { d: Diagnosis }) {
+/** 사용 진단 — 사용 수준 / 마지막 작업 / 주의. 목업의 `dg-bar`: 「크레딧」 탭 맨 위, 카드 밖에
+ *  서는 줄이라 `.sec` 이 아니라 홀로 선 `.panel` 입니다(테두리·모서리는 같고 머리가 없다). */
+export function UsageInsight({ d }: { d: Diagnosis }) {
   const [open, setOpen] = useState(false);
   const cell = (k: string, v: React.ReactNode, tone: string, sub: React.ReactNode) => (
     <div style={{ padding: "14px 18px", background: "#fff" }}>
@@ -254,7 +253,7 @@ function Diagnostics({ d }: { d: Diagnosis }) {
   );
   const levelTone = d.level === "미사용" ? "danger" : d.level === "과소사용" ? "warn" : d.level === "초과사용" ? "reply" : d.level === "적정" ? "ok" : "neutral";
   return (
-    <div className="panel" style={{ padding: 0, overflow: "hidden" }}>
+    <div className="panel" style={{ padding: 0, overflow: "hidden", marginBottom: 18 }}>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0,1fr))", gap: 1, background: "var(--line)" }}>
         {cell("사용 수준", d.level, levelTone, d.levelDetail)}
         {cell("마지막 작업", d.daysIdle === null ? "기록 없음" : idleWord(d.daysIdle), d.idleTone,
