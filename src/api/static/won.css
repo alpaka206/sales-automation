@@ -361,13 +361,12 @@
 .won .st-sel.st-ok {background-color:var(--teal-50);color:var(--teal-700);}
 .won .st-sel.st-warn {background-color:var(--amber-bg);color:var(--amber-fg);}
 .won .st-sel.st-neutral {background-color:var(--gray-bg);color:var(--gray-fg);}
-.won .autotag {font-size:10px;font-weight:700;color:var(--teal-700);background:var(--teal-50);border-radius:99px;padding:2px 7px;margin-left:6px;}
-.won .edited {font-size:10px;font-weight:700;color:var(--muted);background:var(--gray-bg);border-radius:99px;padding:2px 7px;margin-left:6px;}
 .won .st-note {font-size:11px;color:var(--faint);margin-top:4px;white-space:nowrap;}
-.won .st-note .warnc {color:var(--amber-fg);font-weight:600;}
 .won .memo-in {width:100%;min-width:180px;border:1px solid transparent;border-radius:6px;padding:5px 8px;
     font:inherit;font-size:12px;background:transparent;color:var(--ink);}
 .won .memo-in::placeholder {color:var(--faint);}
+/* 스냅샷이 말하는 것(예정일이 지났는데 소진 기록 없음)이 비고 자리에 흐리게 설 때. */
+.won .memo-in--hint::placeholder {color:var(--amber-fg);font-weight:600;}
 .won .memo-in:hover {border-color:var(--line);background:#fff;}
 .won .memo-in:focus {outline:none;border-color:var(--teal-500);background:#fff;box-shadow:0 0 0 2px rgba(42,157,143,.15);}
 .won .memo-line::before {content:"↳ ";color:var(--faint);}

@@ -1345,6 +1345,17 @@ def test_a_cleared_memo_is_cleared_and_an_unsent_memo_is_kept(factory):
         with factory() as session:
             assert session.get(ContractCreditGrant, grant_id).memo is None
 
+        # 완료된 회차의 지급자는 고쳐진다 — 옛 줄 편집 폼도 이 값을 보냈지만 라우트가 완료로
+        # 바꾸는 순간에만 읽어서 조용히 버려졌다(2026-09-15 확인). 예정 회차에서는 무시된다.
+        assert client.post(f"/won-customers/credits/{grant_id}", data={"granted_by": "김담당"}).status_code == 200
+        with factory() as session:
+            assert session.get(ContractCreditGrant, grant_id).granted_by == "김담당"
+        with factory() as session:
+            pending_id = sorted(session.get(ClientContract, contract_id).credit_grants, key=lambda g: g.no)[1].id
+        assert client.post(f"/won-customers/credits/{pending_id}", data={"granted_by": "김담당"}).status_code == 200
+        with factory() as session:
+            assert session.get(ContractCreditGrant, pending_id).granted_by is None
+
         # 결제 회차의 `note` 도 같은 규칙.
         assert client.post(f"/won-customers/payments/{payment_id}", data={"amount": "120"}).status_code == 200
         with factory() as session:

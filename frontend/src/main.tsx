@@ -24,6 +24,18 @@ import { SignIn } from "./screens/SignIn";
 
 const root = createRoot(document.getElementById("root")!);
 
+// **날짜 칸은 연도 네 자리를 치면 달로 넘어간다** (2026-09-15 운영자 지시). 크롬의
+// `<input type="date">` 는 `max` 가 없으면 연도를 여섯 자리(275760년)까지 받아서, 2026 을
+// 치고도 커서가 연도에 머문다 — 달·일로 가려면 화살표나 Tab 을 눌러야 했다. 상한이 네 자리
+// 연도이면 네 글자에서 넘어간다. 칸이 열일곱 곳이라 한 자리(포커스가 들어올 때)에서 다 건다 —
+// 칸마다 속성을 적으면 다음에 만드는 칸이 빠진다. 이미 `max` 가 있는 칸은 그대로 둔다.
+document.addEventListener("focusin", (event) => {
+  const el = event.target;
+  if (!(el instanceof HTMLInputElement) || el.max) return;
+  if (el.type === "date") el.max = "9999-12-31";
+  else if (el.type === "month") el.max = "9999-12";
+});
+
 // Sign-in renders before there is a session, so it is not a route: it has no sidebar, no
 // data to fetch, and no event stream to open. /auth/* is also the one prefix the auth
 // middleware lets through, which is why the URL stays exactly what it was.

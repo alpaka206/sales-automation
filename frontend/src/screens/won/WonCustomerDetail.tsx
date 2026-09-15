@@ -12,7 +12,7 @@ import { CHANNELS, InteractionForm } from "../../ui/InteractionForm";
 import { Modal } from "../../ui/Modal";
 import { Confirm } from "./Confirm";
 import { AlertTags } from "./UsageBits";
-import { AUTO_BY, useAutoReconcile } from "./reconcile";
+import { useAutoReconcile } from "./reconcile";
 import { useEvidence, usageFor, useUsageIndex } from "./useUsage";
 import { matchGrants, matchPayments, mergeEvidence, parseSpaceSeqs, type GrantEvidence, type PaymentEvidence } from "./usage";
 import { WonContractForm } from "./WonContractForm";
@@ -929,8 +929,7 @@ function CreditSection({ contract, today, onDone, evidence }: {
         <div className="table-wrap">
           <table className="mini grant-table">
             <thead><tr>
-              <th>회차</th><th>지급 예정일</th><th className="num">크레딧</th><th>상태</th>
-              <th>비고 <span style={{ fontWeight: 500, color: "var(--faint)" }}>— 클릭해 수정</span></th>
+              <th>회차</th><th>지급 예정일</th><th className="num">크레딧</th><th>상태</th><th>지급자</th><th>비고</th>
               <th />
             </tr></thead>
             <tbody>
@@ -985,12 +984,13 @@ function CreditSection({ contract, today, onDone, evidence }: {
   );
 }
 
-/** 지급 회차 한 줄 — 결제 표(`PayRow`)와 같은 방식: 날짜·크레딧·비고는 칸에서 바로 고치고
- *  blur 에 저장, 상태는 알약 고르개(목업 `st-sel`)이고 바꾸면 확인 창을 지납니다.
+/** 지급 회차 한 줄 — 결제 표(`PayRow`)와 같은 방식: 날짜·크레딧·지급자·비고는 칸에서 바로
+ *  고치고 blur 에 저장, 상태는 알약 고르개(목업 `st-sel`)이고 바꾸면 확인 창을 지납니다.
  *
- *  상태 칸의 작은 줄이 근거를 말합니다 — 예정이면 D-day, 스냅샷이 소진 시작을 봤으면 그
- *  날짜, 예정일이 지났는데 기록이 없으면 「확인 불가」. 완료 줄의 꼬리표는 누가 확인했나:
- *  「자동」(스냅샷 자동 대조) 또는 담당자 이름. */
+ *  상태 칸 아래 줄은 예정 회차의 D-day 뿐입니다. 스냅샷이 말하는 것(예정일이 지났는데 소진
+ *  기록이 없다)은 **비고 칸**에 섭니다 — 운영자가 적은 비고가 없을 때 그 자리에 흐리게
+ *  (2026-09-15 운영자: 「이런 건 비고에 넣어 두는 게 맞는 것 같아」). 「소진 시작 날짜」는
+ *  따로 안 적습니다 — 자동 대조가 완료 처리하며 비고에 이미 적습니다. */
 function GrantRow({ grant, total, today, evidence, onAsk, onRemove, onSave }: {
   grant: Grant; total: number; today: string; evidence?: GrantEvidence;
   onAsk: () => void; onRemove?: () => void;
@@ -1011,19 +1011,17 @@ function GrantRow({ grant, total, today, evidence, onAsk, onRemove, onSave }: {
   const [memo, setMemo] = useState(grant.memo ?? "");
   useEffect(() => setMemo(grant.memo ?? ""), [grant.memo]);
 
+  // 지급자 — 완료 회차에만 있습니다. 「스냅샷 자동」도 여기 적히고 고칠 수 있습니다.
+  const [by, setBy] = useState(grant.granted_by ?? "");
+  useEffect(() => setBy(grant.granted_by ?? ""), [grant.granted_by]);
+
   // 스냅샷이 아직 안 본 예정 회차(예정일이 지났는데 소진 기록 없음)만 「확인 불가」입니다.
   const unknown = !grant.done && evidence?.kind === "unseen";
   const tone = grant.done ? "st-ok" : unknown ? "st-warn" : "st-neutral";
-  const note = grant.done
-    ? evidence?.kind === "seen"
-      ? <>소진 시작 {fmt(evidence.firstUse)}{evidence.n > 1 ? ` · 묶음 ${evidence.n}` : ""}</>
-      : evidence?.kind === "unseen" ? <span className="warnc">지급 뒤 소진 기록 없음</span> : null
-    : unknown
-      ? <span className="warnc">사용 기록이 없어 지급 확인 불가</span>
-      : evidence?.kind === "seen"
-        ? <>소진 시작 {fmt(evidence.firstUse)} — 완료로 표시하세요</>
-        : <span className={dueClass(grant.grant_on, today) || undefined}>{dday(grant.grant_on, today)}</span>;
-  const auto = grant.granted_by === AUTO_BY;
+  // 스냅샷이 말하는 것 — 비고가 비어 있을 때 그 자리에 흐리게 섭니다.
+  const hint = unknown
+    ? "사용 기록이 없어 지급 확인 불가"
+    : grant.done && evidence?.kind === "unseen" ? "지급 뒤 소진 기록 없음" : "";
 
   return (
     <tr className={grant.done ? undefined : "pending"}>
@@ -1044,21 +1042,25 @@ function GrantRow({ grant, total, today, evidence, onAsk, onRemove, onSave }: {
                }} />
       </td>
       <td>
-        <span className="nowrap">
-          <select className={`st-sel ${tone}`} value={grant.done ? "done" : unknown ? "unknown" : "todo"}
-                  onChange={(e) => { if ((e.target.value === "done") !== grant.done) onAsk(); }}>
-            <option value="todo">예정</option>
-            {unknown && <option value="unknown" disabled>확인 불가</option>}
-            <option value="done">지급 확인</option>
-          </select>
-          {grant.done && (auto
-            ? <span className="autotag">자동</span>
-            : grant.granted_by ? <span className="edited">{grant.granted_by}</span> : null)}
-        </span>
-        {note && <div className="st-note">{note}</div>}
+        <select className={`st-sel ${tone}`} value={grant.done ? "done" : unknown ? "unknown" : "todo"}
+                onChange={(e) => { if ((e.target.value === "done") !== grant.done) onAsk(); }}>
+          <option value="todo">예정</option>
+          {unknown && <option value="unknown" disabled>확인 불가</option>}
+          <option value="done">지급 확인</option>
+        </select>
+        {!grant.done && !unknown && (
+          <div className="st-note"><span className={dueClass(grant.grant_on, today) || undefined}>{dday(grant.grant_on, today)}</span></div>
+        )}
       </td>
       <td>
-        <input className="memo-in" value={memo} placeholder="비고 입력" title={memo}
+        {grant.done ? (
+          <input className="cell-inp" value={by} placeholder="담당자" title={by}
+                 onChange={(e) => setBy(e.target.value)}
+                 onBlur={() => by.trim() !== (grant.granted_by ?? "") && void onSave({ granted_by: by.trim() })} />
+        ) : <span className="muted">—</span>}
+      </td>
+      <td>
+        <input className={`memo-in${hint && !memo ? " memo-in--hint" : ""}`} value={memo} placeholder={hint || "비고 입력"} title={memo || hint}
                onChange={(e) => setMemo(e.target.value)}
                onBlur={() => memo !== (grant.memo ?? "") && void onSave({ memo })} />
       </td>

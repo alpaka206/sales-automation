@@ -670,7 +670,8 @@ async def update_credit_grant(
     # 지우면 안 됩니다) 결제 회차의 `note` 와 같은 규칙입니다. 다만 `Form(None)` 으로는 못
     # 가립니다: FastAPI 는 빈 문자열 `memo=` 를 「안 보냄」으로 읽어 기본값을 주므로, 비고를
     # 지우는 저장이 조용히 무시됩니다(리뷰 실측). 그래서 폼에 키가 있는지를 봅니다.
-    memo = _sent(await request.form(), "memo")
+    form = await request.form()
+    memo = _sent(form, "memo")
     with SessionLocal() as session:
         grant = session.get(ContractCreditGrant, grant_id)
         if grant is None:
@@ -688,6 +689,11 @@ async def update_credit_grant(
                 grant.granted_by = _text(granted_by) or actor_name(request, fallback="") or None
             elif not grant.done:
                 grant.granted_by = None
+        elif grant.done and _sent(form, "granted_by") is not None:
+            # 이미 완료된 회차의 지급자를 고친다 — 표의 「지급자」 칸. 옛 줄 편집 폼도 이 값을
+            # 보냈지만 위 가지에서만 읽혀 조용히 버려졌다(2026-09-15 운영자 요청으로 살렸다).
+            # 비우면 「누가 확인했는지 모름」이라 NULL 이다.
+            grant.granted_by = _text(granted_by)
         session.commit()
     return {"ok": True}
 
