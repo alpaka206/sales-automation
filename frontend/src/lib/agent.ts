@@ -149,6 +149,26 @@ export function useSpaceMetric<T>(pair: Pair | null, metric: string, spaces: num
   return { data, problem, busy };
 }
 
+/** 영업 인사이트 — 스페이스 목록 없이 `/v1/sales` 한 번. 값은 이 PC 를 안 떠납니다. */
+export function useSalesInsight<T>(pair: Pair | null) {
+  const [data, setData] = useState<SalesResult<T> | null>(null);
+  const [problem, setProblem] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    if (!pair) { setData(null); return; }
+    let live = true;
+    setBusy(true); setProblem(null);
+    agentFetch<SalesResult<T>>(pair, "/v1/sales")
+      .then((r) => { if (live) setData(r); })
+      .catch((error) => { if (live) { setData(null); setProblem(error instanceof Error ? error.message : String(error)); } })
+      .finally(() => { if (live) setBusy(false); });
+    return () => { live = false; };
+  }, [pair]);
+  return { data, problem, busy };
+}
+
+export type SalesResult<T> = { as_of: AsOf; snapshot_at: string; data: T; computed_ms: number };
+
 export type SpaceResult<T> = {
   metric: string; spaces: number[]; as_of: AsOf; snapshot_at: string;
   data: T; computed_ms: number;

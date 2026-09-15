@@ -263,53 +263,6 @@ def ui_customers(stage: str = "", q: str = ""):
     }
 
 
-def _lead(row: dict) -> dict:
-    """A 리드 히스토리 row flattened for the insight lists."""
-    contact = row["contact"]
-    return {
-        "contact_id": contact.id,
-        "company": contact.company,
-        "name": contact.full_name,
-        "email": contact.email,
-        "stage": row["stage"],
-        "state": row["state"],
-        "next_action": row["next_action"],
-        "last_activity": row["last_activity"],
-    }
-
-
-@router.get("/api/ui/operations")
-def ui_operations():
-    """고객 인사이트. The follow-up ladder and the renewal window, from the same builder the
-    page renders — these numbers must not have a second definition.
-
-    「리드 추이」의 기간별 집계는 화면과 함께 지웠습니다. ``period`` 인자도 같이 사라졌으니
-    옛 주소(`?period=year`)로 와도 그냥 무시됩니다.
-    """
-    from .customer_ops import _operations_context
-
-    context = _operations_context()
-    return {
-        "follow_up_days": context["follow_up_days"],
-        "lists": {
-            key: [_lead(row) for row in context[key]]
-            for key in ("stale", "missing_reply", "due_reminder_1", "due_reminder_2",
-                        "due_unqualified", "lost", "upsell")
-        },
-        "renewals": [
-            {
-                "contact_id": contact.id,
-                "company": contact.company or contact.full_name,
-                "plan": contract.plan,
-                "amount": contract.amount,
-                "currency": contract.currency,
-                "expires_at": contract.expires_at,
-            }
-            for contract, contact in context["renewals"]
-        ],
-    }
-
-
 @router.get("/api/ui/companies/{domain}")
 def ui_company(domain: str):
     """회사 상세. Personal domains are never grouped — the route already refuses, and

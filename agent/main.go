@@ -187,6 +187,8 @@ func (a *agent) routes() *http.ServeMux {
 	for name := range spaceMetrics {
 		mux.HandleFunc("/v1/spaces/"+name, a.guarded(a.spacesHandler(name)))
 	}
+	// 영업 인사이트 — 스페이스 목록 없이 전체를 본다 (sales.go). 눈에 띄는 스페이스와 제품 전체 흐름.
+	mux.HandleFunc("/v1/sales", a.guarded(a.salesHandler))
 
 	// 상태를 바꾸는 것은 무인증 GET 으로 열지 않는다.
 	mux.HandleFunc("/v1/refresh", a.guarded(func(w http.ResponseWriter, r *http.Request, origin string) {

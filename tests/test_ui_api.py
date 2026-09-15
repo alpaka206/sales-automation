@@ -60,7 +60,6 @@ def test_every_screen_the_sidebar_offers_has_working_json():
             "/api/ui/companies/acme.com",
             "/api/ui/email-templates",
             "/api/ui/policy-docs",
-            "/api/ui/operations",
             "/api/ui/logs",
             "/api/ui/recovery",
         ):

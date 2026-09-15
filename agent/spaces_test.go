@@ -64,3 +64,14 @@ func TestSpaceSQLNamesNoIdentifierExceptSpaceSeq(t *testing.T) {
 		}
 	}
 }
+
+func TestSalesSQLNamesNoIdentifierExceptSpaceSeq(t *testing.T) {
+	for _, token := range []string{":= p.user_seq", "user_seq :=", "project_seq :=", "title", "credit_seq :=", "history_seq :=", "plan_seq :=", "owner_seq :="} {
+		if strings.Contains(salesSQL, token) {
+			t.Errorf("영업 인사이트 SQL 이 식별자를 내보냅니다: %s", token)
+		}
+	}
+	if !strings.Contains(salesSQL, "{{asof}}") {
+		t.Errorf("영업 인사이트 SQL 이 기준 시각을 안 씁니다")
+	}
+}

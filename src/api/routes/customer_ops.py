@@ -6,7 +6,7 @@ import asyncio
 import hashlib
 import hmac
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from urllib.parse import quote
 
@@ -233,9 +233,6 @@ BOARD_CARDS_PER_STAGE = 15
 # this app; these thresholds only drive the read-only /operations board so an operator
 # can see which threads HubSpot is about to act on (and catch ones it missed, e.g. a
 # deal that moved to another channel and was never pulled into Negotiating).
-FOLLOW_UP_REMINDER_1_DAYS = 3
-FOLLOW_UP_REMINDER_2_DAYS = FOLLOW_UP_REMINDER_1_DAYS + 7   # 10
-FOLLOW_UP_UNQUALIFIED_DAYS = FOLLOW_UP_REMINDER_2_DAYS + 3  # 13
 
 
 def _announce(topic: str) -> None:
@@ -2260,95 +2257,3 @@ async def google_sheets_sync(request: Request):
     )
 
 
-def _operations_context() -> dict:
-    """고객 인사이트 — 손이 가야 하는 고객 목록들.
-
-    Extracted from the route so the React screen reads the same numbers — a second copy
-    of this arithmetic is a second set of answers to 몇 건이냐.
-
-    「리드 추이」(기간별 문의 수 막대 · 국가별 비중 · 평균 점수)가 여기서 같이 나왔습니다.
-    보는 사람이 없어 화면과 함께 지웠습니다 — 화면에서만 빼면 매 요청마다 아무도 안 읽는
-    집계가 계속 돕니다(대화 전체를 훑는 계산이었습니다).
-    """
-    rows = _customer_rows()
-    now = datetime.now(timezone.utc).replace(tzinfo=None)
-    stale_before = now - timedelta(days=14)
-    reminder_1_before = now - timedelta(days=FOLLOW_UP_REMINDER_1_DAYS)
-    reminder_2_before = now - timedelta(days=FOLLOW_UP_REMINDER_2_DAYS)
-    unqualified_before = now - timedelta(days=FOLLOW_UP_UNQUALIFIED_DAYS)
-    renew_before = now + timedelta(days=60)
-    with SessionLocal() as session:
-        conversations = session.execute(select(Conversation)).scalars().all()
-        renewals = (
-            session.execute(
-                select(ContractRecord, Contact)
-                .join(Contact, ContractRecord.contact_id == Contact.id)
-                .where(
-                    ContractRecord.status == "active",
-                    ContractRecord.expires_at.isnot(None),
-                    ContractRecord.expires_at <= renew_before,
-                )
-                .order_by(ContractRecord.expires_at)
-            )
-            .all()
-        )
-    row_by_contact = {row["contact"].id: row for row in rows}
-    stale = [
-        row
-        for row in rows
-        if row["state"] == "negotiation"
-        and row["last_activity"]
-        and row["last_activity"].replace(tzinfo=None) < stale_before
-    ]
-    missing_reply = []
-    due_reminder_1 = []
-    due_reminder_2 = []
-    due_unqualified = []
-    for conv in conversations:
-        incoming = _naive(conv.last_incoming_at)
-        outgoing = _naive(conv.last_outgoing_at)
-        if incoming and (not outgoing or incoming > outgoing):
-            row = row_by_contact.get(conv.contact_id)
-            if row and row not in missing_reply:
-                missing_reply.append(row)
-            continue
-        # Waiting on the customer: we mailed last and they have not answered since.
-        # Buckets are exclusive so the counts add up - each thread shows on the one
-        # rung of the ladder it currently sits at.
-        if not outgoing or (incoming and incoming >= outgoing):
-            continue
-        row = row_by_contact.get(conv.contact_id)
-        if not row:
-            continue
-        if outgoing < unqualified_before:
-            bucket = due_unqualified
-        elif outgoing < reminder_2_before:
-            bucket = due_reminder_2
-        elif outgoing < reminder_1_before:
-            bucket = due_reminder_1
-        else:
-            continue
-        if row not in bucket:
-            bucket.append(row)
-    lost = [row for row in rows if row["stage"] == "closed_lost" or row["state"] == "lost"]
-    upsell = [
-        row
-        for row in rows
-        if row["state"] == "service"
-        and (not row["profile"] or (row["profile"].current_plan or "").lower() not in {"business", "enterprise"})
-    ]
-    return {
-            "stale": stale,
-            "missing_reply": missing_reply,
-            "due_reminder_1": due_reminder_1,
-            "due_reminder_2": due_reminder_2,
-            "due_unqualified": due_unqualified,
-            "follow_up_days": {
-                "reminder_1": FOLLOW_UP_REMINDER_1_DAYS,
-                "reminder_2": FOLLOW_UP_REMINDER_2_DAYS,
-                "unqualified": FOLLOW_UP_UNQUALIFIED_DAYS,
-            },
-            "renewals": renewals,
-            "lost": lost,
-            "upsell": upsell,
-    }

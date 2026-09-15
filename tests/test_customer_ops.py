@@ -286,54 +286,6 @@ def test_contract_rejects_another_contacts_inquiry(customer_db, customer_id) -> 
     assert response.status_code == 400
 
 
-def test_operations_surfaces_stale_and_renewal(customer_db, customer_id) -> None:
-    with customer_db() as session:
-        session.add(CustomerProfile(contact_id=customer_id, customer_state="negotiation"))
-        session.add(
-            ContractRecord(
-                contact_id=customer_id,
-                status="active",
-                plan="Business",
-                expires_at=datetime.now() + timedelta(days=30),
-            )
-        )
-        session.commit()
-    with TestClient(app) as client:
-        payload = client.get("/api/ui/operations").json()
-    assert "Example Co" in [row["company"] for row in payload["lists"]["stale"]]
-    assert payload["renewals"], "an active contract expiring inside 60 days must show"
-
-
-@pytest.mark.parametrize(
-    ("silent_days", "expected_bucket"),
-    [
-        (1, None),                 # inside the grace window — not due yet
-        (5, "due_reminder_1"),     # past 3d
-        (11, "due_reminder_2"),    # past 3+7d
-        (30, "due_unqualified"),   # past 3+7+3d
-    ],
-)
-def test_operations_follow_up_ladder_buckets(
-    customer_db, customer_id, silent_days, expected_bucket
-) -> None:
-    """Each thread lands on exactly one rung of the 3/7/3 ladder, keyed off our last mail."""
-    with customer_db() as session:
-        conv = session.query(Conversation).filter_by(contact_id=customer_id).one()
-        # We mailed last; the customer has been silent since.
-        conv.last_outgoing_at = datetime.now() - timedelta(days=silent_days)
-        conv.last_incoming_at = datetime.now() - timedelta(days=silent_days + 1)
-        session.commit()
-
-    with TestClient(app) as client:
-        lists = client.get("/api/ui/operations").json()["lists"]
-
-    buckets = ("due_reminder_1", "due_reminder_2", "due_unqualified")
-    populated = [bucket for bucket in buckets if lists[bucket]]
-    assert populated == ([expected_bucket] if expected_bucket else [])
-    # Never double-counted: a thread appears on at most one rung.
-    assert len(populated) <= 1
-
-
 def test_customer_detail_offers_only_stages_the_board_still_has(customer_id) -> None:
     """The profile stage picker used to carry its own hardcoded copy of the stage list.
 
@@ -544,34 +496,6 @@ def test_pipeline_keeps_each_inquiry_stage_and_only_latest_updates_profile(
         profile = session.get(CustomerProfile, customer_id)
         assert profile.pipeline_stage == "negotiation"
         assert profile.customer_state == "negotiation"
-
-
-def test_insights_are_the_lists_not_the_charts(customer_db, customer_id) -> None:
-    """「리드 추이」(기간별 문의 수 · 국가별 비중 · 평균 점수)는 화면과 함께 지웠습니다.
-
-    보는 사람이 없었고, 화면에서만 빼면 매 요청마다 아무도 안 읽는 집계가 계속 돕니다 —
-    대화 전체를 훑는 계산이었습니다. 남은 것은 손이 가야 하는 고객 목록들입니다.
-    """
-    with customer_db() as session:
-        conversation = session.query(Conversation).filter_by(contact_id=customer_id).one()
-        session.add(
-            Message(
-                conversation_id=conversation.id,
-                direction="inbound",
-                body="pricing inquiry",
-                status="received",
-            )
-        )
-        session.commit()
-    with TestClient(app) as client:
-        # 옛 주소로 와도 그냥 무시됩니다 — period 인자가 사라졌습니다.
-        payload = client.get("/api/ui/operations?period=day").json()
-    assert set(payload) == {"follow_up_days", "lists", "renewals"}
-    assert "missing_reply" in payload["lists"]
-
-    from src.api.routes import customer_ops
-
-    assert not hasattr(customer_ops, "_inbound_analytics")
 
 
 def test_contract_can_be_corrected_without_duplicate(customer_db, customer_id) -> None:
