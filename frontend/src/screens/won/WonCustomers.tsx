@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useLocation, useNavigate } from "react-router-dom";
 import { getJSON } from "../../lib/api";
-import { useAgent } from "../../lib/agent";
+import { AGENT_DOWNLOADS, useAgent } from "../../lib/agent";
 import { MonthlyArea } from "./MonthlyArea";
 import { pendingContractPath } from "./pending";
 import { UsageCells, UsageStamp } from "./UsageBits";
@@ -95,6 +95,7 @@ export function WonCustomers() {
   // 한 번(≤50씩)에 묻고, 행마다 그 답을 맞춰 붙입니다. 에이전트가 없으면 그 두 열만 비고
   // 나머지는 예전 그대로입니다 — 서버는 이 값을 모릅니다.
   const agent = useAgent();
+  const isMac = /Mac/i.test(navigator.platform);
   const allSpaces = useMemo(() => spacesOfRows(data?.rows), [data?.rows]);
   const usage = useUsageIndex(agent.pair, allSpaces);
   const usages = useRowUsages(data?.rows, usage.index);
@@ -214,13 +215,15 @@ export function WonCustomers() {
               ))}
             </div>
             {/* 이 PC 의 데이터 에이전트 — 사용 현황 열과 상세의 크레딧·작업·구성 탭이 이것으로
-                채워집니다. 내려받기·켜기는 「데이터 분석」 화면에 있고 여기서는 거기로 보냅니다
-                (2026-09-15 운영자 요청: 목록 머리에도 입구 하나). 켜져 있으면 이 버튼은 안 보이고
-                왼쪽 「사용량」 꼬리표가 상태를 말합니다. */}
+                채워집니다. **여기서 바로 내려받습니다**(2026-09-15 운영자: 「app/data 는 노출도 안
+                되는데 굳이 거기로?」) — 이 PC 의 OS 에 맞는 파일 하나. 그 화면은 에이전트가 켜질 때
+                착지하는 곳이지 메뉴가 아닙니다. 켜져 있으면 이 버튼은 안 보이고 왼쪽 「사용량」
+                꼬리표가 상태를 말합니다. */}
             {!agent.pair && (
-              <button className="btn" type="button" onClick={() => navigate("/data")}>
-                <G name="inbound" size={15} /> 에이전트 내려받기
-              </button>
+              <a className="btn" href={isMac ? AGENT_DOWNLOADS.macArm : AGENT_DOWNLOADS.windows}
+                 title="내려받은 파일을 스냅샷 폴더(perso-data-snapshot) 옆에서 실행하면 이 화면과 연결됩니다.">
+                <G name="inbound" size={15} /> 에이전트 내려받기 ({isMac ? "Mac" : "Windows"})
+              </a>
             )}
             {/* 브라우저의 다운로드가 기능 전부입니다 — fetch 로 돌리면 Save As 를 다시 짜게 됩니다. */}
             <a className="btn" href="/won-customers/export.csv">CSV 내보내기</a>
