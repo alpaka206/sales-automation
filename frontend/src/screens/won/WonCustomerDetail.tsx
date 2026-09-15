@@ -37,8 +37,8 @@ import {
  */
 const SECTIONS: [string, string][] = [
   ["sec-basic", "고객 정보"],
-  ["sec-contract", "계약 · 결제 정보"],
-  ["sec-plan", "Perso 계정 · 플랜"],
+  // 계약과 플랜은 한 탭입니다 — 목업의 「계약 · 플랜」(2026-09-15 운영자 지시). 카드는 둘 그대로.
+  ["sec-contract", "계약 · 플랜"],
   ["sec-credit", "크레딧 지급"],
   // 5·8·9 는 **이 PC 의 데이터 에이전트**가 답합니다(스냅샷 집계). 서버는 이 값을 모릅니다.
   // 크레딧 사용 현황은 지급 바로 아래에 둡니다 — 지급과 소진은 한 화면에서 맞대 봐야 합니다.
@@ -55,8 +55,6 @@ const AVATAR_COLORS = ["#0F766E", "#B45309", "#3730A3", "#B42318", "#026AA2", "#
 const Tag = ({ tone, children }: { tone: string; children: React.ReactNode }) =>
   <span className={`tag ${tone}`}>{children}</span>;
 
-const stateTone = (state: string) =>
-  state === "진행 중" ? "st-live" : state === "세팅중" ? "st-setup" : "st-stop";
 
 export function WonCustomerDetail() {
   const { clientId } = useParams();
@@ -76,7 +74,6 @@ export function WonCustomerDetail() {
     queryFn: () => getJSON<ListData>("/api/ui/won-customers"),
   });
   const [pickedSeq, setPickedSeq] = useState<number | null>(null);
-  const [showAll, setShowAll] = useState(false);
   const [removing, setRemoving] = useState(false);
   const [retiring, setRetiring] = useState(false);
 
@@ -89,15 +86,18 @@ export function WonCustomerDetail() {
   // 엽니다 — 해시가 곧 탭 이름이라 주소를 나눠 줘도 같은 탭이 열립니다.
   const hash = useLocation().hash.slice(1);
   const [picked, setPicked] = useState<string | null>(null);
+  // 예전 앵커 이름은 지금 탭으로 옮긴다 — `#sec-plan` 은 계약 탭 안에 있다.
+  const alias: Record<string, string> = { "sec-plan": "sec-contract", "sec-comm": "sec-basic" };
   const known = (id: string) => SECTIONS.some(([key]) => key === id);
-  const section = picked ?? (known(hash) ? hash : SECTIONS[0][0]);
+  const wanted = alias[hash] ?? hash;
+  const section = picked ?? (known(wanted) ? wanted : SECTIONS[0][0]);
   const select = (id: string) => {
     setPicked(id);
     // 긴 탭을 내려 보다 다른 탭을 누르면 그 탭의 중간에 서게 됩니다 — 위로 올립니다.
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
   // 이 화면에 있는 채로 해시만 바뀌면(보드에서 또 누름) 그 탭으로.
-  useEffect(() => { if (known(hash)) setPicked(hash); }, [hash]);
+  useEffect(() => { if (known(wanted)) setPicked(wanted); }, [wanted]);
 
   const refresh = () => queryClient.invalidateQueries();
 
@@ -178,6 +178,21 @@ export function WonCustomerDetail() {
               {label}
             </button>
           ))}
+          {/* **계약 고르개는 탭바 오른쪽입니다** (목업의 `ct-sel`, 2026-09-15 운영자 지시). 계약을
+              고르면 계약·플랜부터 사용 구성까지 탭 전부가 그 계약의 값으로 바뀌므로, 어느 한 탭
+              안이 아니라 탭들 옆에 서야 합니다. */}
+          {current && (
+            <div className="ct-sel">
+              <select className="sel-pill" value={current.seq}
+                      onChange={(event) => setPickedSeq(Number(event.target.value))}>
+                {contracts.slice().reverse().map((c) => (
+                  <option key={c.seq} value={c.seq}>
+                    {c.label} · {fmt(c.starts_on)} ~ {fmt(c.ends_on)} · {c.state}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
         </div>
       </div>
 
@@ -218,13 +233,11 @@ export function WonCustomerDetail() {
         ) : current ? (
           <>
             {section === "sec-contract" && (
-              <ContractSection
-                client={data} contracts={contracts} current={current} today={today}
-                showAll={showAll} onToggleAll={() => setShowAll(!showAll)}
-                onPick={(seq) => { setPickedSeq(seq); setShowAll(false); }}
-              />
+              <>
+                <ContractSection client={data} current={current} today={today} />
+                <PlanSection contract={current} />
+              </>
             )}
-            {section === "sec-plan" && <PlanSection contract={current} />}
             {section === "sec-credit" && (
               <CreditSection contract={current} today={today} onDone={refresh} evidence={grantEvidence} />
             )}
@@ -647,12 +660,11 @@ function BasicSection({ client, contracts, options, onDone }: {
 
 /** 2 계약 및 결제 정보 — 이 화면의 축.
  *
- * 오른쪽 액션이 넷입니다(목업 그대로): 계약 고르개 · 전체 계약 내역 접기/펴기 · 계약 추가 ·
- * 편집. 고르개를 바꾸면 이 아래 3·4·5·7번이 그 계약의 값으로 함께 바뀝니다.
+ * 오른쪽 액션이 둘입니다: 계약 추가 · 편집. 계약 고르개는 탭바 오른쪽에 있습니다(2026-09-15) —
+ * 고르면 계약 단위 탭 전부가 그 계약의 값으로 바뀝니다.
  */
-function ContractSection({ client, contracts, current, today, showAll, onToggleAll, onPick }: {
-  client: Row; contracts: Contract[]; current: Contract; today: string;
-  showAll: boolean; onToggleAll: () => void; onPick: (seq: number) => void;
+function ContractSection({ client, current, today }: {
+  client: Row; current: Contract; today: string;
 }) {
   const navigate = useNavigate();
   const docs = current.doc_types || [];
@@ -661,17 +673,8 @@ function ContractSection({ client, contracts, current, today, showAll, onToggleA
       <div className="sec-head">
         <span className="sec-title">계약 및 결제 정보</span>
         <div className="sec-actions">
-          <select className="sel-pill" value={current.seq}
-                  onChange={(event) => onPick(Number(event.target.value))}>
-            {contracts.slice().reverse().map((c) => (
-              <option key={c.seq} value={c.seq}>
-                {c.label} · {fmt(c.starts_on)}–{fmt(c.ends_on)} · {c.state}
-              </option>
-            ))}
-          </select>
-          <button className={`btn btn-sm${showAll ? " btn-ghost" : ""}`} type="button" onClick={onToggleAll}>
-            전체 계약 내역 {contracts.length}건 {showAll ? "▲" : "▼"}
-          </button>
+          {/* 계약 고르개는 탭바 오른쪽으로 갔고 「전체 계약 내역」 표는 뺐습니다(2026-09-15 운영자:
+              「필요 없는 것 같아」) — 고르개가 곧 목록입니다. 여기는 이 계약에 대한 동작만. */}
           <button className="btn btn-sm" type="button"
                   onClick={() => navigate(`/won-customers/${client.client_id}/contracts/new`)}>+ 계약 추가</button>
           <button className="btn btn-sm" type="button"
@@ -679,44 +682,6 @@ function ContractSection({ client, contracts, current, today, showAll, onToggleA
         </div>
       </div>
 
-      {showAll && (
-        <div className="panel" style={{ marginBottom: 10, background: "var(--bg-soft)" }}>
-          <div className="sub-head">
-            <span className="sub-title">전체 계약 내역</span>
-            <span className="sub-count">{contracts.length}건</span>
-            <button className="btn btn-sm btn-ghost" type="button" style={{ marginLeft: "auto" }}
-                    onClick={() => navigate(`/won-customers/${client.client_id}/contracts/new`)}>+ 계약 추가</button>
-          </div>
-          <div className="table-wrap">
-            <table className="mini">
-              <thead><tr>
-                <th>계약</th><th>상태</th><th>수주 유형</th><th>계약기간</th><th>플랜</th>
-                <th className="num">총 계약금액</th><th className="num">계약 크레딧</th><th />
-              </tr></thead>
-              <tbody>
-                {contracts.slice().reverse().map((c) => (
-                  <tr key={c.seq}>
-                    <td>{c.label}</td>
-                    <td><Tag tone={stateTone(c.state)}>{c.state}</Tag></td>
-                    <td><Tag tone={c.deal_type === "MRR" ? "d-mrr" : "d-poc"}>{c.deal_type}</Tag></td>
-                    <td className="mono nowrap">{fmt(c.starts_on)} – {fmt(c.ends_on)}</td>
-                    <td>{c.plan ? <Tag tone={`plan-${planTone(c.plan)}`}>{c.plan}</Tag> : "—"}</td>
-                    <td className="num nowrap">{money(c.amount_incl_vat, c.currency)}</td>
-                    <td className="num">{num(c.credits)}</td>
-                    <td style={{ textAlign: "right" }}>
-                      <button className="btn btn-sm btn-ghost" type="button"
-                              disabled={c.seq === current.seq}
-                              onClick={() => onPick(c.seq)}>
-                        {c.seq === current.seq ? "보는 중" : "열기"}
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
 
       <div className="panel">
         <div className="field-grid">
@@ -727,7 +692,10 @@ function ContractSection({ client, contracts, current, today, showAll, onToggleA
           <KV k="계약기간" v={<span className="mono">
             {current.starts_on} – {current.ends_on} <span className="muted">({current.months}개월)</span>
           </span>} />
-          <KV k="계약서 유형" span={2} v={docs.length
+          <KV k="총 계약금액 (VAT 포함)" v={<span className="mono">
+            {money(current.amount_incl_vat, current.currency)} <span className="muted">{current.currency}</span>
+          </span>} />
+          <KV k="계약서 유형" v={docs.length
             ? docs.map((t) => <span key={t} style={{ marginRight: 4 }}><Tag tone="neutral">{t}</Tag></span>)
             : "—"} />
           <KV k="계약 크레딧" v={<span className="mono">
@@ -736,9 +704,6 @@ function ContractSection({ client, contracts, current, today, showAll, onToggleA
               = {num(Math.round((current.credits ?? 0) / 60))}분 ·{" "}
               {current.vat_included ? "VAT 포함 금액 기준" : "공급가 기준"}
             </span>
-          </span>} />
-          <KV k="총 계약금액 (VAT 포함)" v={<span className="mono">
-            {money(current.amount_incl_vat, current.currency)} <span className="muted">{current.currency}</span>
           </span>} />
           {/* 총액으로 적힌 계약도 숫자를 보여 주되(총액 ÷ 1.1) **역산이라고 적습니다** —
               계약서에 적힌 금액과 계산한 금액이 같은 얼굴이면 안 됩니다. 워크북의 공급가
