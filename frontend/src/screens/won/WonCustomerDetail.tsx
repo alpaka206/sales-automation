@@ -1,23 +1,33 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useLocation, useNavigate, useParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { getJSON, postForm } from "../../lib/api";
+import { useAgent, useSpaceMetric } from "../../lib/agent";
 import { useAction } from "../../ui/ActionButton";
 // **타입 목록은 한 곳에서 옵니다** (2026-09-03 운영자 지시). 이 화면은 모달이 아니고
 // 「관련 계약」 칸이 따로 있어 폼 자체는 합치지 않지만, 고르개 목록까지 따로 들고 있으면
 // 같은 값을 두 화면이 다르게 부릅니다 — 여기는 「메일」·「왓츠앱」·「기타」였고 저쪽은
 // 「이메일」·「WhatsApp」·「메모」였습니다.
-import { CHANNELS } from "../../ui/InteractionForm";
+import { CHANNELS, InteractionForm } from "../../ui/InteractionForm";
+import { Modal } from "../../ui/Modal";
 import { Confirm } from "./Confirm";
+import { AlertTags } from "./UsageBits";
+import { useAutoReconcile } from "./reconcile";
+import { useEvidence, usageFor, useUsageIndex } from "./useUsage";
+import { matchGrants, matchPayments, mergeEvidence, parseSpaceSeqs, type GrantEvidence, type PaymentEvidence } from "./usage";
 import { WonContractForm } from "./WonContractForm";
+import { CreditUsageSection, JobsSection, MixSection, type CreditsData } from "./WonUsageSections";
 import {
   RETIRED,
-  type Contract, type Grant, type ListData, type Options, type Payment, type Row,
+  type Comm, type Contract, type Grant, type History, type ListData, type Options, type Payment, type Row,
   addMonths, dday, dueClass, fmt, initials, money, n, num, planTone, statusTone,
 } from "./shared";
 
 /** 수주 고객 상세 — 목업(`수주관리목업_0806.html` 의 `detailHTML`)의 섹션 그대로. 목업의
- * 8개 중 「갱신 · 비고」가 빠져 일곱 개입니다(이관 0073).
+ * 8개 중 「갱신 · 비고」가 빠져 일곱 개였고(이관 0073), 2026-09-15 에 사용 현황 셋이 붙어
+ * 열 개입니다(`수주고객-사용현황-목업_26.html`). 그 셋은 **이 PC 의 데이터 에이전트**가
+ * 답합니다 — 스냅샷 원본도 집계도 서버를 안 지납니다. 같은 날 상단 nav 가 앵커에서
+ * **탭**이 됐습니다 — 고른 섹션 하나만 그립니다.
  *
  * **계약 선택 드롭다운이 이 화면의 축입니다.** 고객은 하나이고 계약이 여럿이라, 2~6번
  * 섹션은 전부 "지금 고른 계약" 의 내용이고 고르는 순간 함께 바뀝니다.
@@ -26,13 +36,17 @@ import {
  * 먼저 쌓이고 그대로 이어집니다(0065).
  */
 const SECTIONS: [string, string][] = [
-  ["sec-basic", "고객 기본 정보"],
+  ["sec-basic", "고객 정보"],
   ["sec-contract", "계약 · 결제 정보"],
   ["sec-plan", "Perso 계정 · 플랜"],
   ["sec-credit", "크레딧 지급"],
+  // 5·8·9 는 **이 PC 의 데이터 에이전트**가 답합니다(스냅샷 집계). 서버는 이 값을 모릅니다.
+  // 크레딧 사용 현황은 지급 바로 아래에 둡니다 — 지급과 소진은 한 화면에서 맞대 봐야 합니다.
+  ["sec-usage", "크레딧 사용 현황"],
   ["sec-pay", "결제 현황"],
   ["sec-revenue", "MRR 관리"],
-  ["sec-comm", "소통 히스토리"],
+  ["sec-jobs", "작업 성능"],
+  ["sec-mix", "사용 구성"],
 ];
 
 const AVATAR_COLORS = ["#0F766E", "#B45309", "#3730A3", "#B42318", "#026AA2", "#4B5563"];
@@ -63,58 +77,45 @@ export function WonCustomerDetail() {
   });
   const [pickedSeq, setPickedSeq] = useState<number | null>(null);
   const [showAll, setShowAll] = useState(false);
-  const [commFilter, setCommFilter] = useState<"all" | "nego" | number>("all");
-  const [addingComm, setAddingComm] = useState(false);
   const [removing, setRemoving] = useState(false);
   const [retiring, setRetiring] = useState(false);
 
-  // 액션 보드가 `/won-customers/2102#sec-credit` 로 보냅니다. 브라우저의 기본 앵커 이동은
-  // 소용이 없습니다 — 그 시점에 섹션이 아직 그려지지 않았습니다. 데이터가 온 **뒤에**
-  // 한 번 내려갑니다. 훅은 아래 early return 보다 위에 있어야 합니다(#310).
-  useEffect(() => {
-    if (!data) return;
-    const id = window.location.hash.slice(1);
-    if (!id) return;
-    // 렌더 직후에는 아직 레이아웃이 잡히기 전이라, 다음 프레임에 찾습니다.
-    const timer = setTimeout(
-      () => document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" }),
-      60,
-    );
-    return () => clearTimeout(timer);
-  }, [data]);
+  // 사용 현황은 이 PC 의 에이전트에서 옵니다. 지금 고른 계약의 Space ID 만 묻습니다.
+  const agent = useAgent();
 
-  // 지금 보고 있는 섹션. 8개가 한 화면에 이어져 있어서 스크롤하다 보면 어디쯤인지 놓칩니다.
-  //
-  // IntersectionObserver 를 쓰는 이유: scroll 이벤트로 위치를 계산하면 스크롤할 때마다 8개
-  // 섹션의 좌표를 다시 재게 됩니다. 관찰자는 화면에 들어오고 나갈 때만 부릅니다.
-  //
-  // `rootMargin` 위쪽이 큰 이유는 머리글이 sticky 라서입니다 — 그 아래로 들어온 섹션은
-  // 가려져 있는데도 "보인다" 고 나옵니다. 화면 위쪽 1/4 을 감지선으로 씁니다.
-  const [section, setSection] = useState<string>(SECTIONS[0][0]);
-  useEffect(() => {
-    if (!data) return;
-    const seen = new Map<string, number>();
-    const observer = new IntersectionObserver(
-      (entries) => {
-        for (const entry of entries) seen.set(entry.target.id, entry.intersectionRatio);
-        // 가장 많이 보이는 섹션. 동률이면 위쪽 섹션이 이깁니다(SECTIONS 순서).
-        let best = "", ratio = 0;
-        for (const [id] of SECTIONS) {
-          const value = seen.get(id) ?? 0;
-          if (value > ratio) { best = id; ratio = value; }
-        }
-        if (best) setSection(best);
-      },
-      { rootMargin: "-150px 0px -55% 0px", threshold: [0, 0.25, 0.5, 1] },
-    );
-    for (const [id] of SECTIONS) {
-      const element = document.getElementById(id);
-      if (element) observer.observe(element);
-    }
-    return () => observer.disconnect();
-  }, [data]);
+  // **상단 nav 는 탭입니다** (2026-09-15 운영자 지시 — 「이동이 아니라 그 요소만 보이도록」).
+  // 한동안 열 섹션이 한 화면에 이어져 있었고 nav 는 거기로 내려가는 앵커였습니다. 이제 고른
+  // 섹션 하나만 그립니다. 액션 보드가 보내는 `/won-customers/2102#sec-credit` 은 그 탭을
+  // 엽니다 — 해시가 곧 탭 이름이라 주소를 나눠 줘도 같은 탭이 열립니다.
+  const hash = useLocation().hash.slice(1);
+  const [picked, setPicked] = useState<string | null>(null);
+  const known = (id: string) => SECTIONS.some(([key]) => key === id);
+  const section = picked ?? (known(hash) ? hash : SECTIONS[0][0]);
+  const select = (id: string) => {
+    setPicked(id);
+    // 긴 탭을 내려 보다 다른 탭을 누르면 그 탭의 중간에 서게 됩니다 — 위로 올립니다.
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+  // 이 화면에 있는 채로 해시만 바뀌면(보드에서 또 누름) 그 탭으로.
+  useEffect(() => { if (known(hash)) setPicked(hash); }, [hash]);
 
   const refresh = () => queryClient.invalidateQueries();
+
+  // 훅은 early return 위에 있어야 합니다. 고른 계약이 아직 없으면 빈 목록이라 안 부릅니다.
+  const currentForUsage = (data?.contracts ?? []).find((c) => c.seq === pickedSeq)
+    ?? data?.active ?? (data?.contracts ?? [])[(data?.contracts ?? []).length - 1] ?? null;
+  const usageIndex = useUsageIndex(agent.pair, parseSpaceSeqs(currentForUsage?.space_seq));
+  // 크레딧 소진은 한 번만 받아 4번(지급 회차마다 소진이 시작됐나)과 5번이 같이 씁니다.
+  const creditSpaces = usageIndex.index
+    ? parseSpaceSeqs(currentForUsage?.space_seq).filter((s) => usageIndex.index!.bySpace.get(s)?.known)
+    : [];
+  const credits = useSpaceMetric<CreditsData>(agent.pair, "credits", creditSpaces);
+  // 이 고객의 **모든** 계약을 맞대어 자동 적용합니다(목록은 활성 계약만 봅니다).
+  const allContractSpaces = useMemo(
+    () => [...new Set((data?.contracts ?? []).flatMap((c) => parseSpaceSeqs(c.space_seq)))],
+    [data?.contracts]);
+  const evidence = useEvidence(agent.pair, allContractSpaces);
+  useAutoReconcile(data?.contracts ?? [], evidence.index);
 
   if (!data) return <div className="won"><div className="page">불러오는 중…</div></div>;
 
@@ -123,6 +124,18 @@ export function WonCustomerDetail() {
   const current =
     contracts.find((c) => c.seq === pickedSeq) ?? data.active ?? contracts[contracts.length - 1] ?? null;
   const comms = data.comms ?? [];
+  const usage = usageFor(current, usageIndex.index);
+  const alerts = usage.kind === "ok" ? usage.diagnosis.alerts : [];
+  // 지급 회차 ↔ 스냅샷 소진 묶음. **표시만** — 우리 기록에는 쓰지 않습니다.
+  const grantEvidence = current && credits.data && usageIndex.index
+    ? matchGrants(current.credit_grants, credits.data.data.buckets ?? [], usageIndex.index.snapshotAt)
+    : null;
+  const payEvidence = (() => {
+    if (!current || !evidence.index) return null;
+    const rows = parseSpaceSeqs(current.space_seq).map((s) => evidence.index!.bySpace.get(s)).filter((x) => !!x);
+    if (!rows.length) return null;
+    return matchPayments(current.payments, current.currency, mergeEvidence(rows).payments, evidence.index.snapshotAt);
+  })();
 
   return (
     <div className="won">
@@ -154,12 +167,14 @@ export function WonCustomerDetail() {
           {current?.plan && <Tag tone={`plan-${planTone(current.plan)}`}>{current.plan}</Tag>}
           <Tag tone="neutral">{current ? current.label : "계약 없음"}</Tag>
           {data.setup_count > 0 && <Tag tone="st-setup">세팅중 계약 {data.setup_count}건</Tag>}
+          {/* 주의 배지 전부 — 하나도 없으면 안 뜹니다(요청 문서). 근거는 5번 섹션의 「판정 근거」. */}
+          {usage.kind === "ok" && <AlertTags alerts={alerts} />}
         </div>
-        <div className="secnav">
+        <div className="secnav" role="tablist">
           {SECTIONS.map(([id, label]) => (
-            <button key={id} type="button" className={section === id ? "is-on" : undefined}
-                    aria-current={section === id ? "true" : undefined}
-                    onClick={() => document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" })}>
+            <button key={id} type="button" role="tab" className={section === id ? "is-on" : undefined}
+                    aria-selected={section === id}
+                    onClick={() => select(id)}>
               {label}
             </button>
           ))}
@@ -167,12 +182,18 @@ export function WonCustomerDetail() {
       </div>
 
       <div className="detail-body">
-        <BasicSection client={data} contracts={contracts} options={list?.options} onDone={refresh} />
+        {section === "sec-basic" && (
+          <>
+            <BasicSection client={data} contracts={contracts} options={list?.options} onDone={refresh} />
+            <HistoryCard client={data} contracts={contracts} comms={comms} history={data.history} onDone={refresh} />
+          </>
+        )}
 
-        {!current ? (
+        {/* 계약이 있어야 그려지는 탭들. 계약이 없으면 어느 탭을 눌러도 같은 안내입니다. */}
+        {!current && section !== "sec-basic" ? (
           <section className="sec" id="sec-contract">
             <div className="sec-head">
-              <span className="sec-num">2</span><span className="sec-title">계약 및 결제 정보</span>
+              <span className="sec-title">계약 및 결제 정보</span>
             </div>
             <div className="empty">
               <strong>등록된 계약이 없습니다</strong>
@@ -194,83 +215,37 @@ export function WonCustomerDetail() {
               </div>
             </div>
           </section>
-        ) : (
+        ) : current ? (
           <>
-            <ContractSection
-              client={data} contracts={contracts} current={current} today={today}
-              showAll={showAll} onToggleAll={() => setShowAll(!showAll)}
-              onPick={(seq) => { setPickedSeq(seq); setShowAll(false); }}
-            />
-            <PlanSection contract={current} />
-            <CreditSection contract={current} today={today} onDone={refresh} />
-            <PaySection contract={current} today={today} onDone={refresh} />
-            <RevenueSection contract={current} today={today} />
-          </>
-        )}
-
-        {/* 7 소통 히스토리 — 고객 단위. 계약을 골라도 바뀌지 않습니다. */}
-        <section className="sec" id="sec-comm">
-          <div className="sec-head">
-            <span className="sec-num">7</span><span className="sec-title">소통 히스토리</span>
-            <Tag tone="neutral">고객 단위 · 전체 계약 통합</Tag>
-            <div className="sec-actions">
-              <div className="chips">
-                <Chip on={commFilter === "all"} onClick={() => setCommFilter("all")}
-                      count={comms.length}>전체</Chip>
-                <Chip on={commFilter === "nego"} onClick={() => setCommFilter("nego")}
-                      count={comms.filter((x) => !x.contract_seq).length}>협상 단계</Chip>
-                {contracts.slice().reverse().map((c) => (
-                  <Chip key={c.seq} on={commFilter === c.seq} onClick={() => setCommFilter(c.seq)}
-                        count={comms.filter((x) => x.contract_seq === c.seq).length}>{c.seq}차</Chip>
-                ))}
-              </div>
-              {data.contact_id && (
-                <button className="btn btn-sm btn-primary" type="button"
-                        onClick={() => setAddingComm(!addingComm)}>+ 소통 등록</button>
-              )}
-            </div>
-          </div>
-          <div className="panel">
-            {addingComm && data.contact_id && (
-              <CommForm contactId={data.contact_id} contracts={contracts}
-                        onCancel={() => setAddingComm(false)}
-                        onDone={() => { setAddingComm(false); refresh(); }} />
+            {section === "sec-contract" && (
+              <ContractSection
+                client={data} contracts={contracts} current={current} today={today}
+                showAll={showAll} onToggleAll={() => setShowAll(!showAll)}
+                onPick={(seq) => { setPickedSeq(seq); setShowAll(false); }}
+              />
             )}
-            {(() => {
-              const rows = comms.filter((item) =>
-                commFilter === "all" ? true
-                : commFilter === "nego" ? !item.contract_seq
-                : item.contract_seq === commFilter);
-              if (!rows.length) {
-                return <div className="board-empty">
-                  {commFilter === "all"
-                    ? "등록된 소통 내역이 없습니다. + 소통 등록으로 기록하세요."
-                    : "이 구분에 해당하는 소통 내역이 없습니다."}
-                </div>;
-              }
-              return (
-                <div className="timeline">
-                  {rows.map((item, index) => (
-                    <div key={item.id} className={`tl-item${index === 0 ? " mark" : ""}`}>
-                      <div className="tl-meta">
-                        <Tag tone="blue">{item.channel}</Tag>
-                        {fmt(item.happened_at?.slice(0, 10))}
-                        <span>·</span>
-                        {item.handler || "—"}
-                        <span style={{ marginLeft: 4 }}>
-                          <Tag tone={item.contract_seq ? "neutral" : "st-setup"}>
-                            {item.contract_seq ? `${item.contract_seq}차 계약` : "협상 단계"}
-                          </Tag>
-                        </span>
-                      </div>
-                      <div className="tl-text">{item.subject ? `${item.subject} — ` : ""}{item.summary}</div>
-                    </div>
-                  ))}
-                </div>
-              );
-            })()}
-          </div>
-        </section>
+            {section === "sec-plan" && <PlanSection contract={current} />}
+            {section === "sec-credit" && (
+              <CreditSection contract={current} today={today} onDone={refresh} evidence={grantEvidence} />
+            )}
+            {section === "sec-usage" && (
+              <CreditUsageSection contract={current} usage={usage} credits={credits}
+                                  snapshotStamp={usageIndex.index?.snapshotStamp}
+                                  snapshotAt={usageIndex.index?.snapshotAt}
+                                  creditsFrom={usageIndex.index?.creditsFrom} />
+            )}
+            {section === "sec-pay" && (
+              <PaySection contract={current} today={today} onDone={refresh} evidence={payEvidence} />
+            )}
+            {section === "sec-revenue" && <RevenueSection contract={current} today={today} />}
+            {section === "sec-jobs" && (
+              <JobsSection pair={agent.pair} contract={current} usage={usage}
+                           failRateAll={usageIndex.index?.failRateAll ?? null} />
+            )}
+            {section === "sec-mix" && <MixSection pair={agent.pair} usage={usage} />}
+          </>
+        ) : null}
+
       </div>
 
       {contractRoute && <WonContractForm />}
@@ -318,19 +293,154 @@ export function WonCustomerDetail() {
   );
 }
 
-function Chip({ on, count, onClick, children }: {
-  on: boolean; count: number; onClick: () => void; children: React.ReactNode;
+/** 이전 히스토리 — **티켓 화면의 「이전 히스토리」와 같은 모양** (2026-09-15 운영자 지시).
+ *
+ *  계약 전의 이야기는 티켓마다 한 상자(제목 · 단계 · 요약 한 문단)이고 누르면 그 티켓으로
+ *  갑니다. 지워진 티켓은 제목으로 묶여 같은 모양으로 서고, 티켓이 없던 기록은 「티켓 외
+ *  n건」으로 셉니다 — 전부 `MessageDetail` 의 카드와 같은 값·같은 규칙입니다. 머리 오른쪽
+ *  「전체보기」는 이 고객의 리드 히스토리로 갑니다.
+ *
+ *  **계약 단위 묶음** (1차·2차 …)이 위입니다 — 지금 진행 중인 이야기가 먼저. 계약이 생긴 뒤의
+ *  소통은 여기 적고, 묶음마다
+ *  「+ 소통 등록」이 그 계약을 고른 채로 폼을 엽니다. 빈 묶음도 그립니다 — 2차 계약에 아직
+ *  기록이 없다는 것도 정보이고, 적을 자리가 있어야 합니다. */
+function HistoryCard({ client, contracts, comms, history, onDone }: {
+  client: Row; contracts: Contract[]; comms: Comm[]; history: History | undefined; onDone: () => void;
 }) {
+  const [adding, setAdding] = useState<number | null>(null);
+  // 「+ 추가하기」 — 리드 히스토리 화면의 **그 모달 그대로** (2026-09-15 운영자 지시:
+  // 「이전에 만든 모달 그대로 가져다가」). 폼이 한 벌이라 칸이 늘어도 두 화면이 같이 는다.
+  const [logging, setLogging] = useState(false);
+  const tickets = history?.tickets ?? [];
+  const past = history?.past_tickets ?? [];
+  const loose = history?.loose ?? [];
+  const nothing = !tickets.length && !past.length && !loose.length;
   return (
-    <button type="button" className={`chip btn-sm${on ? " is-on" : ""}`} onClick={onClick}>
-      {children}<span className="count">{count}</span>
-    </button>
+    <section className="sec" id="sec-comm">
+      <div className="sec-head">
+        <span className="sec-title">이전 히스토리</span>
+        <div className="sec-actions">
+          {/* **전체보기는 언제나 뜹니다** (운영자 지시: 「있든 없든」). 연락처가 없는 고객은
+              리드 히스토리 **목록**으로 — 갈 상세가 없어서입니다. */}
+          <button className="btn btn-sm btn-primary" type="button" disabled={!client.contact_id}
+                  title={client.contact_id ? undefined : "연락처가 없는 고객은 기록을 적을 수 없습니다"}
+                  onClick={() => setLogging(true)}>+ 추가하기</button>
+          <Link className="btn btn-sm" to={client.contact_id ? `/customers/${client.contact_id}` : "/customers"}>전체보기</Link>
+        </div>
+      </div>
+      {logging && client.contact_id && (
+        <Modal title="히스토리 추가" hideCancel wide onClose={() => setLogging(false)}>
+          <div style={{ marginTop: 16 }}>
+            <InteractionForm contactId={client.contact_id}
+                             onCancel={() => setLogging(false)}
+                             onSaved={() => { setLogging(false); onDone(); }} />
+          </div>
+        </Modal>
+      )}
+      {contracts.slice().reverse().map((c) => {
+        const rows = comms.filter((x) => x.contract_seq === c.seq);
+        return (
+          <div className="panel" key={c.seq}>
+            <div className="sub-head">
+              <span className="sub-title">{c.seq}차 계약</span>
+              <span className="sub-count">{fmt(c.starts_on)} – {fmt(c.ends_on)} · {rows.length}건</span>
+              {client.contact_id && (
+                <button className="btn btn-sm" type="button" style={{ marginLeft: "auto" }}
+                        onClick={() => setAdding(adding === c.seq ? null : c.seq)}>
+                  {adding === c.seq ? "닫기" : "+ 소통 등록"}
+                </button>
+              )}
+            </div>
+            {adding === c.seq && client.contact_id && (
+              <CommForm contactId={client.contact_id} contracts={contracts} defaultSeq={c.seq}
+                        onCancel={() => setAdding(null)}
+                        onDone={() => { setAdding(null); onDone(); }} />
+            )}
+            {rows.length ? (
+              <div className="timeline">
+                {rows.map((item, index) => (
+                  <div key={item.id} className={`tl-item${index === 0 ? " mark" : ""}`}>
+                    <div className="tl-meta">
+                      <Tag tone="blue">{item.channel}</Tag>
+                      {fmt(item.happened_at?.slice(0, 10))}
+                      <span>·</span>
+                      {item.handler || "—"}
+                    </div>
+                    <div className="tl-text">{item.subject ? `${item.subject} — ` : ""}{item.summary}</div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="board-empty">아직 기록이 없습니다.</div>
+            )}
+          </div>
+        );
+      })}
+      <div className="panel">
+        {nothing ? (
+          /* 티켓 화면과 같은 빈 상태 — **눈에 띄어야 합니다** (2026-09-04 · 09-15 운영자 지시).
+             「없다」는 판단에 쓰는 사실이라 흐린 작은 글씨로 적으면 「아직 안 불러왔다」로 읽힙니다. */
+          <div className="empty" style={{ padding: "40px 20px" }}>
+            <div className="empty__text empty__text--lead">이전 히스토리가 존재하지 않습니다.</div>
+          </div>
+        ) : (
+          <div className="stack" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            {tickets.map((t) => (
+              <Link key={t.conversation_id} className="link--plain history-box" to={`/tickets/${t.conversation_id}`}>
+                <div className="row-between" style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+                  <strong className="t-sm">{t.subject || "제목 없는 문의"}</strong>
+                  <span style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                    <span className="tag neutral">{history?.stage_labels[t.stage] ?? t.stage}</span>
+                    <span className="muted">›</span>
+                  </span>
+                </div>
+                <div className="muted" style={{ fontSize: 12 }}>
+                  {fmt(t.created_at?.slice(0, 10))}{t.ticket_id ? ` · #${t.ticket_id}` : ""}
+                </div>
+                {t.summary && <div style={{ marginTop: 4, fontSize: 13, whiteSpace: "pre-line" }}>{t.summary}</div>}
+              </Link>
+            ))}
+            {past.map((t) => (
+              <Link key={t.subject} className="link--plain history-box" to={`/customers/${client.contact_id}`}>
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+                  <strong className="t-sm">{t.subject}</strong><span className="muted">›</span>
+                </div>
+                <div className="muted" style={{ fontSize: 12 }}>
+                  {t.last_at ? fmt(t.last_at.slice(0, 10)) : ""} · {t.count}건 · 지난 티켓
+                </div>
+                {t.summary && <div style={{ marginTop: 4, fontSize: 13, whiteSpace: "pre-line" }}>{t.summary}</div>}
+              </Link>
+            ))}
+            {loose.length > 0 && (
+              <div>
+                <div className="sub-head" style={{ marginTop: 6 }}>
+                  <span className="sub-title">티켓 외 기록</span><span className="sub-count">{loose.length}건</span>
+                </div>
+                <div className="timeline">
+                  {loose.map((item, index) => (
+                    <div key={item.id} className={`tl-item${index === 0 ? " mark" : ""}`}>
+                      <div className="tl-meta">
+                        <Tag tone="blue">{item.channel}</Tag>
+                        {fmt(item.happened_at?.slice(0, 10))}
+                        <span>·</span>
+                        {item.handler || "—"}
+                      </div>
+                      <div className="tl-text">{item.subject ? `${item.subject} — ` : ""}{item.summary}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+    </section>
   );
 }
 
-/** 섹션 하나. 목업의 번호 뱃지 · 제목 · 오른쪽 액션 · 흰 카드. */
-function Section({ num: number, id, title, right, children, plain }: {
-  num: number; id: string; title: string;
+function Section({ id, title, right, children, plain }: {
+  id: string; title: string;
   right?: React.ReactNode; children: React.ReactNode;
   /** 내용이 스스로 패널을 여러 개 그리는 섹션(크레딧·결제). */
   plain?: boolean;
@@ -338,7 +448,6 @@ function Section({ num: number, id, title, right, children, plain }: {
   return (
     <section className="sec" id={id}>
       <div className="sec-head">
-        <span className="sec-num">{number}</span>
         <span className="sec-title">{title}</span>
         {right && <div className="sec-actions">{right}</div>}
       </div>
@@ -421,7 +530,7 @@ function BasicSection({ client, contracts, options, onDone }: {
 
   if (!editing) {
     return (
-      <Section num={1} id="sec-basic" title="고객 기본 정보"
+      <Section id="sec-basic" title="고객 기본 정보"
                right={<button className="btn btn-sm" type="button"
                               onClick={() => setEditing(true)}>편집</button>}>
         <div className="field-grid">
@@ -449,7 +558,7 @@ function BasicSection({ client, contracts, options, onDone }: {
   }
 
   return (
-    <Section num={1} id="sec-basic" title="고객 기본 정보">
+    <Section id="sec-basic" title="고객 기본 정보">
       <div className="form-grid3">
         <div>
           <label className="form-label">고객사</label>
@@ -550,7 +659,7 @@ function ContractSection({ client, contracts, current, today, showAll, onToggleA
   return (
     <section className="sec" id="sec-contract">
       <div className="sec-head">
-        <span className="sec-num">2</span><span className="sec-title">계약 및 결제 정보</span>
+        <span className="sec-title">계약 및 결제 정보</span>
         <div className="sec-actions">
           <select className="sel-pill" value={current.seq}
                   onChange={(event) => onPick(Number(event.target.value))}>
@@ -675,7 +784,7 @@ function ContractSection({ client, contracts, current, today, showAll, onToggleA
 
 function PlanSection({ contract }: { contract: Contract }) {
   return (
-    <Section num={3} id="sec-plan" title="Perso 계정 및 플랜">
+    <Section id="sec-plan" title="Perso 계정 및 플랜">
       <div className="field-grid">
         <KV k="플랜" v={contract.plan ? <Tag tone={`plan-${planTone(contract.plan)}`}>{contract.plan}</Tag> : "—"} />
         <KV k="플랜명" v={contract.plan_name} />
@@ -696,8 +805,10 @@ function PlanSection({ contract }: { contract: Contract }) {
   );
 }
 
-function CreditSection({ contract, today, onDone }: {
+function CreditSection({ contract, today, onDone, evidence }: {
   contract: Contract; today: string; onDone: () => void;
+  /** 회차별로 스냅샷에 소진 시작 기록이 있나. 에이전트가 없으면 null 이고 열이 안 뜹니다. */
+  evidence: Map<number, GrantEvidence> | null;
 }) {
   const done = contract.credit_grants.filter((g) => g.done);
   const pending = contract.credit_grants.filter((g) => !g.done);
@@ -719,9 +830,20 @@ function CreditSection({ contract, today, onDone }: {
     onDone();
   }
 
+  // 스냅샷 대조 칸. 지급 원장이 스냅샷에 없어 「지급됐다」는 못 말하고, 「그 뒤로 소진이
+  // 시작됐다」까지만 말합니다. 그래서 「확인 불가」는 오류가 아니라 「증거 없음」입니다.
+  const seen = (grant: Grant) => {
+    const e = evidence?.get(grant.id);
+    if (!e || e.kind === "future") return <span className="muted">—</span>;
+    if (e.kind === "seen") {
+      return <span className="tag st-live" title={`묶음 ${e.n}개 · ${num(e.consumed)} 소진`}>소진 시작 {fmt(e.firstUse)}{e.n > 1 ? ` · 묶음 ${e.n}` : ""}</span>;
+    }
+    return <span className="tag st-setup" title="지급 예정일 뒤로 이 스페이스에 엔터프라이즈 지급 묶음의 소진 기록이 없습니다 — 지급이 안 됐거나 아직 안 쓴 것">확인 불가</span>;
+  };
+
   const row = (grant: Grant, mode: "pending" | "done") =>
     editing === grant.no ? (
-      <GrantEdit key={grant.id} grant={grant} total={total}
+      <GrantEdit key={grant.id} grant={grant} total={total} extraCols={evidence ? 1 : 0}
                  onCancel={() => setEditing(null)}
                  onRevert={grant.done ? () => { setEditing(null); setAsk(grant); } : undefined}
                  onSave={(fields) => save(grant.id, fields).then(() => setEditing(null))} />
@@ -734,6 +856,7 @@ function CreditSection({ contract, today, onDone }: {
           {grant.memo && <div className="memo-line">{grant.memo}</div>}
         </td>
         <td className="num">{num(grant.amount)}</td>
+        {evidence && <td>{seen(grant)}</td>}
         <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
           <button className="btn btn-sm btn-ghost" type="button" onClick={() => setEditing(grant.no)}>수정</button>{" "}
           <button className="btn btn-sm btn-ghost" type="button" onClick={() => setRemoving(grant)}>삭제</button>{" "}
@@ -747,6 +870,7 @@ function CreditSection({ contract, today, onDone }: {
           {grant.memo && <div className="memo-line">{grant.memo}</div>}
         </td>
         <td className="num">{num(grant.amount)}</td>
+        {evidence && <td>{seen(grant)}</td>}
         <td style={{ whiteSpace: "nowrap" }}>
           {grant.granted_by || "—"}{" "}
           <button className="btn btn-sm btn-ghost" type="button" onClick={() => setEditing(grant.no)}>수정</button>
@@ -755,7 +879,7 @@ function CreditSection({ contract, today, onDone }: {
     );
 
   return (
-    <Section num={4} id="sec-credit" title="크레딧 지급 현황" plain
+    <Section id="sec-credit" title="크레딧 지급 현황" plain
              right={<button className="btn btn-sm" type="button"
                             onClick={() => setAdding(!adding)}>+ 지급 회차 추가</button>}>
       <div className="panel">
@@ -809,7 +933,8 @@ function CreditSection({ contract, today, onDone }: {
           {pending.length ? (
             <div className="table-wrap"><table className="mini">
               <thead><tr>
-                <th>회차</th><th>지급 예정일</th><th className="num">크레딧</th><th style={{ width: 150 }} />
+                <th>회차</th><th>지급 예정일</th><th className="num">크레딧</th>
+                {evidence && <th title="이 PC 의 스냅샷에서 본 소진 시작 기록">스냅샷</th>}<th style={{ width: 150 }} />
               </tr></thead>
               <tbody>{pending.map((g) => row(g, "pending"))}</tbody>
             </table></div>
@@ -822,7 +947,8 @@ function CreditSection({ contract, today, onDone }: {
           {done.length ? (
             <div className="table-wrap"><table className="mini">
               <thead><tr>
-                <th>회차</th><th>지급 날짜</th><th className="num">크레딧</th><th>지급자</th>
+                <th>회차</th><th>지급 날짜</th><th className="num">크레딧</th>
+                {evidence && <th title="이 PC 의 스냅샷에서 본 소진 시작 기록">스냅샷</th>}<th>지급자</th>
               </tr></thead>
               <tbody>{done.slice().reverse().map((g) => row(g, "done"))}</tbody>
             </table></div>
@@ -970,11 +1096,13 @@ function GrantForm({ contract, onDone, onCancel }: {
 }
 
 /** 목업의 `editRow` — 행 자리에서 그대로 펴지는 편집 폼. */
-function GrantEdit({ grant, total, onSave, onCancel, onRevert }: {
+function GrantEdit({ grant, total, onSave, onCancel, onRevert, extraCols = 0 }: {
   grant: Grant; total: number;
   onSave: (fields: Record<string, string>) => void;
   onCancel: () => void;
   onRevert?: () => void;
+  /** 표에 「스냅샷」 열이 있으면 1 — 편집 줄이 열 수를 따라가야 합니다. */
+  extraCols?: number;
 }) {
   const [when, setWhen] = useState(grant.grant_on ?? "");
   const [amount, setAmount] = useState(String(grant.amount ?? ""));
@@ -983,7 +1111,7 @@ function GrantEdit({ grant, total, onSave, onCancel, onRevert }: {
   return (
     <tr className="pending">
       <td className="mono">{grant.no}/{total}</td>
-      <td colSpan={3}>
+      <td colSpan={3 + extraCols}>
         <div className="form-row" style={{ gridTemplateColumns: grant.done ? "1fr 1fr 1fr" : "1fr 1fr" }}>
           <div>
             <label className="form-label">지급 날짜</label>
@@ -1018,8 +1146,10 @@ function GrantEdit({ grant, total, onSave, onCancel, onRevert }: {
   );
 }
 
-function PaySection({ contract, today, onDone }: {
+function PaySection({ contract, today, onDone, evidence }: {
   contract: Contract; today: string; onDone: () => void;
+  /** 회차별 국내 결제 근거(스냅샷). 에이전트가 없거나 원화 계약이 아니면 null — 열이 안 뜹니다. */
+  evidence: Map<number, PaymentEvidence> | null;
 }) {
   const paid = contract.payments.filter((p) => p.done);
   const total = n(contract.amount_incl_vat);
@@ -1034,7 +1164,7 @@ function PaySection({ contract, today, onDone }: {
   }
 
   return (
-    <Section num={5} id="sec-pay" title="결제 현황" plain>
+    <Section id="sec-pay" title="결제 현황" plain>
       <div className="panel">
         <div className="meter">
           <div className="meter-head">
@@ -1084,11 +1214,15 @@ function PaySection({ contract, today, onDone }: {
           <table className="mini">
             <thead><tr>
               <th>분납 차수</th><th style={{ width: 190 }}>입금 날짜</th>
-              <th className="num">금액</th><th>적용 환율</th><th style={{ width: 130 }}>상태</th>
+              <th className="num">금액</th><th>적용 환율</th>
+              {evidence && evidence.size > 0 && <th title="이 PC 의 스냅샷에서 본 국내 카드 결제(portone) 기록">스냅샷</th>}
+              <th>비고</th>
+              <th style={{ width: 130 }}>상태</th>
             </tr></thead>
             <tbody>
               {contract.payments.map((payment) => (
                 <PayRow key={payment.id} payment={payment} currency={contract.currency} today={today}
+                        evidence={evidence && evidence.size > 0 ? (evidence.get(payment.id) ?? { kind: "unseen" }) : undefined}
                         onAsk={() => setAsk(payment)}
                         onSave={(fields) => save(payment.id, fields)} />
               ))}
@@ -1125,9 +1259,23 @@ function PaySection({ contract, today, onDone }: {
  * 상태만 확인 창을 거칩니다: 수금율과 다음 결제일이 그 자리에서 달라지고, 입금 완료로
  * 넘길 때는 그 날짜의 환율까지 함께 박히기 때문입니다(노션 §6).
  */
-function PayRow({ payment, currency, today, onAsk, onSave }: {
+/** 결제 근거 칸. 자동 대조는 `paid`(금액·기간 일치)만 완료 처리하고, 나머지는 여기서 사람이 본다. */
+function PayEvidence({ e }: { e: PaymentEvidence }) {
+  switch (e.kind) {
+    case "future": return <span className="muted">—</span>;
+    case "paid": return <span className="tag st-live" title={`₩${num(e.amount)} 카드 결제`}>결제 확인 {fmt(e.paidOn)}</span>;
+    case "paid-mismatch":
+      return <span className="tag st-setup" title="결제는 있는데 금액이 회차와 다릅니다 — 자동 처리하지 않았습니다">결제 있음 · ₩{num(e.amount)} ({fmt(e.paidOn)})</span>;
+    case "ready": return <span className="tag st-setup" title={`결제 링크 발급 ${e.requested ? fmt(e.requested) : ""} · ₩${num(e.amount)} — 아직 결제 전`}>미입금 · 링크 발급</span>;
+    case "failed": return <span className="tag risk" title={e.code ?? ""}>결제 실패 {fmt(e.on)}</span>;
+    default: return <span className="tag neutral" title="예정일 앞뒤로 국내 카드 결제 기록이 없습니다 — 계좌이체·세금계산서 결제는 스냅샷에 안 잡힙니다">기록 없음</span>;
+  }
+}
+
+function PayRow({ payment, currency, today, onAsk, onSave, evidence }: {
   payment: Payment; currency: string; today: string;
   onAsk: () => void; onSave: (fields: Record<string, string>) => Promise<void>;
+  evidence?: PaymentEvidence;
 }) {
   const [when, setWhen] = useState(payment.paid_on ?? "");
   // 금액은 **읽을 때는 목업처럼 ₩1,722,600**, 고칠 때는 숫자입니다. type="number" 로 두면
@@ -1140,6 +1288,10 @@ function PayRow({ payment, currency, today, onAsk, onSave }: {
   // 비우고 저장하면 서버가 채워 넣으므로 **화면 값이 내가 친 것과 달라집니다** — 그때
   // 따라옵니다(날짜·금액 칸에는 없어도 되는 줄입니다: 그 둘은 적은 값이 그대로 남습니다).
   useEffect(() => setRate(payment.fx_rate ? String(payment.fx_rate) : ""), [payment.fx_rate]);
+  // 비고 (0120). 자동 대조가 「스냅샷 결제 확인 <날짜>」를 적는 칸이기도 해서, 저쪽이 채우면
+  // 화면 값이 내가 친 것과 달라집니다 — 그때 따라옵니다(환율 칸과 같은 이유).
+  const [note, setNote] = useState(payment.note ?? "");
+  useEffect(() => setNote(payment.note ?? ""), [payment.note]);
   const overdue = !payment.done && dueClass(payment.paid_on, today) === "over";
   const raw = (text: string) => text.replace(/[^0-9.-]/g, "");
   return (
@@ -1176,6 +1328,13 @@ function PayRow({ payment, currency, today, onAsk, onSave }: {
         {payment.fx_on && (
           <div className="memo-line">{fmt(payment.fx_on)} 고시</div>
         )}
+      </td>
+      {evidence && <td><PayEvidence e={evidence} /></td>}
+      <td>
+        <input className="cell-inp" value={note} placeholder="비고"
+               title={note}
+               onChange={(e) => setNote(e.target.value)}
+               onBlur={() => note !== (payment.note ?? "") && void onSave({ note })} />
       </td>
       <td>
         <select className={`pay-sel${payment.done ? " is-done" : ""}`} value={payment.done ? "1" : "0"}
@@ -1218,7 +1377,7 @@ function RevenueSection({ contract, today }: { contract: Contract; today: string
       }));
 
   return (
-    <Section num={6} id="sec-revenue" title="MRR 관리">
+    <Section id="sec-revenue" title="MRR 관리">
       <div className="field-grid">
         <KV k="계약 종류" v={<Tag tone={mrr ? "d-mrr" : "d-poc"}>{contract.deal_type}</Tag>} />
         <KV k="총 계약 금액 (VAT 포함)"
@@ -1260,21 +1419,23 @@ function RevenueSection({ contract, today }: { contract: Contract; today: string
 
 /** 소통 히스토리 등록 — **고객 단위**입니다. 계약 차수를 비우면 협상 단계(계약 전) 기록이고,
  *  그래서 계약이 하나도 없는 고객에게도 쓸 수 있습니다. */
-export function CommForm({ contactId, contracts, onDone, onCancel }: {
+export function CommForm({ contactId, contracts, onDone, onCancel, defaultSeq }: {
   contactId: number; contracts: Contract[]; onDone: () => void; onCancel?: () => void;
+  /** 어느 묶음의 「+ 소통 등록」에서 열렸나 — 그 계약이 고른 채로 뜹니다. */
+  defaultSeq?: number | null;
 }) {
   const today = new Date().toISOString().slice(0, 10);
   const [channel, setChannel] = useState("email");
   const [handler, setHandler] = useState("");
   const [when, setWhen] = useState(today);
-  const [seq, setSeq] = useState("");
+  const [seq, setSeq] = useState(defaultSeq ? String(defaultSeq) : "");
   const [summary, setSummary] = useState("");
   const [add, adding] = useAction(async () => {
     if (!summary.trim()) return;
     await postForm(`/customers/${contactId}/interactions`, {
       channel, handler, happened_at: when, contract_seq: seq, summary,
     });
-    setSummary(""); setHandler(""); setSeq("");
+    setSummary(""); setHandler("");
     onDone();
   });
   return (

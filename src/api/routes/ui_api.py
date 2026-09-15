@@ -1177,7 +1177,7 @@ def _won_contract(contract, today) -> dict:
             {
                 "id": p.id, "no": p.no, "total": p.total, "paid_on": p.paid_on,
                 "amount": p.amount, "done": p.done,
-                "fx_rate": p.fx_rate, "fx_on": p.fx_on,
+                "fx_rate": p.fx_rate, "fx_on": p.fx_on, "note": p.note,
             }
             for p in payments
         ],
@@ -1633,4 +1633,76 @@ def ui_won_customer(client_id: int):
             }
             for item in comms
         ]
+        # **티켓 화면의 「이전 히스토리」와 같은 값, 같은 모양** (2026-09-15 운영자 지시:
+        # 「티켓에서의 이전 히스토리처럼 묶어서」). 계약 전 이야기는 접점 기록 한 줄씩이
+        # 아니라 **티켓마다 요약 한 문단**이다 — 그 화면이 이미 그렇게 그리고, 같은 사람의
+        # 같은 이야기를 두 화면이 다르게 그리면 어느 쪽이 맞는지 화면만 봐서는 모른다.
+        # 지워진 티켓(제목으로 묶음)과 「티켓 외 n건」도 그 함수가 같이 준다.
+        payload["history"] = _won_history(session, client.contact_id)
     return payload
+
+
+def _won_history(session, contact_id: int | None) -> dict:
+    from sqlalchemy import select
+
+    from .customer_ops import PIPELINE_STAGES
+    from .messages import _customer_history
+
+    if not contact_id:
+        return {"tickets": [], "past_tickets": [], "loose_count": 0, "stage_labels": {}}
+    tickets = (
+        session.execute(
+            select(Conversation)
+            .where(Conversation.contact_id == contact_id)
+            .order_by(Conversation.created_at.desc())
+        )
+        .scalars()
+        .all()
+    )
+    extra = _customer_history(session, contact_id)
+    # **티켓도 계약도 아닌 기록은 줄로 준다.** 티켓 화면은 「티켓 외 n건」으로 세기만 하는데
+    # (그 화면에서 필요한 건 요약이라), 여기는 「+ 추가하기」로 그런 기록을 **적는 자리**라
+    # 방금 적은 것이 숫자 하나로 사라지면 안 된다. 계약에 묶인 것은 아래 계약 묶음이 그린다.
+    from ...agents.hubspot_reconcile import PAST_TICKET_HANDLER
+    from ...db.models import CustomerInteraction
+
+    loose_rows = (
+        session.execute(
+            select(CustomerInteraction)
+            .where(
+                CustomerInteraction.contact_id == contact_id,
+                CustomerInteraction.conversation_id.is_(None),
+                CustomerInteraction.contract_seq.is_(None),
+                CustomerInteraction.handler.is_distinct_from(PAST_TICKET_HANDLER),
+            )
+            .order_by(CustomerInteraction.happened_at.desc(), CustomerInteraction.id.desc())
+            .limit(100)
+        )
+        .scalars()
+        .all()
+    )
+    return {
+        "tickets": [
+            {
+                "conversation_id": conv.id,
+                "ticket_id": conv.hubspot_ticket_id,
+                "subject": conv.inquiry_subject,
+                "stage": conv.stage,
+                "created_at": conv.created_at,
+                # 티켓 화면과 같은 순서 — 사건마다 쌓인 요약이 먼저, 접수 때 뽑은 요청은 폴백.
+                "summary": conv.summary or conv.customer_requests,
+            }
+            for conv in tickets
+        ],
+        "past_tickets": extra["past_tickets"],
+        "loose_count": extra["loose_count"],
+        "loose": [
+            {
+                "id": row.id, "channel": row.channel, "direction": row.direction,
+                "handler": row.handler, "subject": row.subject, "summary": row.summary,
+                "happened_at": row.happened_at,
+            }
+            for row in loose_rows
+        ],
+        "stage_labels": {key: label for key, label, _ in PIPELINE_STAGES},
+    }

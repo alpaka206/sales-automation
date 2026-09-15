@@ -1095,3 +1095,6 @@ body.modal-open .content { overflow: hidden; }
    때 운영자 화면(세로 695px)에서 편집기가 화면 밖으로 나갔습니다. 빼는 값은 이 화면의
    나머지(칩 줄·카드 패딩·제목 줄·라벨·액션 바)를 실측한 것입니다. */
 .doc-body { height: calc(100dvh - 320px); min-height: 220px; }
+
+/* 낡은 데이터·연결 실패처럼 「그냥 지나가면 안 되는」 카드. */
+.card--warn { border-color: var(--warn); background: color-mix(in srgb, var(--warn) 7%, var(--surface)); }

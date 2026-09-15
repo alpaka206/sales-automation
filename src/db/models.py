@@ -918,6 +918,9 @@ class ContractPayment(Base):
     # 매출이 이번 달에 바뀝니다. 주말·공휴일 입금은 직전 영업일(보통 금요일) 고시가입니다.
     fx_rate: Mapped[Decimal | None] = mapped_column(Numeric(12, 4), nullable=True)
     fx_on: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    # 비고 (0120). 자동 대조가 「스냅샷 결제 확인 <날짜>」를 적는 자리이기도 하다 — 자동으로
+    # 닫힌 회차와 사람이 닫은 회차가 화면에서 같아 보이면 안 된다.
+    note: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     contract: Mapped["ClientContract"] = relationship(back_populates="payments")
 

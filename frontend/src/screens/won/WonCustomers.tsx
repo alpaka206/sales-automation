@@ -2,8 +2,12 @@ import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useLocation, useNavigate } from "react-router-dom";
 import { getJSON } from "../../lib/api";
+import { useAgent } from "../../lib/agent";
 import { MonthlyArea } from "./MonthlyArea";
 import { pendingContractPath } from "./pending";
+import { UsageCells, UsageStamp } from "./UsageBits";
+import { contractsOfRows, useAutoReconcile } from "./reconcile";
+import { spacesOfRows, useEvidence, useRowUsages, useUsageIndex, type RowUsage } from "./useUsage";
 import { WonContractForm } from "./WonContractForm";
 import {
   type ListData, type Row,
@@ -87,6 +91,19 @@ export function WonCustomers() {
 
   const today = data?.today ?? new Date().toISOString().slice(0, 10);
 
+  // **사용량은 이 PC 의 에이전트에서 옵니다.** 목록의 모든 활성 계약이 가리키는 스페이스를
+  // 한 번(≤50씩)에 묻고, 행마다 그 답을 맞춰 붙입니다. 에이전트가 없으면 그 두 열만 비고
+  // 나머지는 예전 그대로입니다 — 서버는 이 값을 모릅니다.
+  const agent = useAgent();
+  const allSpaces = useMemo(() => spacesOfRows(data?.rows), [data?.rows]);
+  const usage = useUsageIndex(agent.pair, allSpaces);
+  const usages = useRowUsages(data?.rows, usage.index);
+  // **자동 대조** — 스냅샷에 지급·결제 근거가 있으면 그 회차를 완료 처리합니다(운영자 결정,
+  // `reconcile.ts`). 목록을 여는 것이 곧 그 방아쇠입니다.
+  const evidence = useEvidence(agent.pair, allSpaces);
+  const activeContracts = useMemo(() => contractsOfRows(data?.rows), [data?.rows]);
+  useAutoReconcile(activeContracts, evidence.index);
+
   const rows = useMemo(() => {
     const all = data?.rows ?? [];
     const query = search.trim().toLowerCase();
@@ -169,7 +186,13 @@ export function WonCustomers() {
     <div className="won">
       <div className="page">
         <div className="page-head">
-          <div><h1 className="page-title">수주 고객</h1></div>
+          <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+            <h1 className="page-title">수주 고객</h1>
+            {/* 사용량 도장 — 목록의 「마지막 작업」·「사용 상태」가 **어느 시각의 스냅샷**인지.
+                이 두 열은 우리 서버가 아니라 이 PC 의 에이전트가 답한 값이라, 값 옆에 그
+                시각이 없으면 낡은 숫자가 맞는 숫자처럼 보입니다. */}
+            <UsageStamp agent={agent} index={usage.index} problem={usage.problem} busy={usage.busy} />
+          </div>
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
             {/* **이 화면의 축입니다.** 아래 필터들과 달리 목록만 거르는 것이 아니라 위 카드
                 둘의 모집단까지 정하므로, 그것들 사이가 아니라 제목 옆에 있습니다.
@@ -388,16 +411,20 @@ export function WonCustomers() {
           <table>
             <thead>
               <tr>
-                <th style={{ width: "17%" }}>고객사</th>
-                <th style={{ width: "8%" }}>산업 분야</th>
-                <th style={{ width: "7%" }}>국가</th>
-                <th style={{ width: "8%" }}>플랜 상태</th>
-                <th style={{ width: "9%" }}>플랜</th>
-                <th style={{ width: "7%" }}>수주 유형</th>
+                {/* 산업 분야·국가 열은 뺐습니다 (2026-09-15 운영자 지시). 둘 다 상세 1번에
+                    그대로 있습니다 — 목록은 손이 가야 하는 값(사용 상태·다음 지급·다음 결제)이
+                    먼저입니다. */}
+                <th style={{ width: "20%" }}>고객사</th>
+                <th style={{ width: "9%" }}>플랜 상태</th>
+                <th style={{ width: "10%" }}>플랜</th>
+                <th style={{ width: "8%" }}>수주 유형</th>
                 {/* MRR 은 계약 금액 ÷ 개월수, PoC 는 첫 결제가 이번 달일 때만 전액.
                     부서와 무관하게 모든 행에 나옵니다 — 위 카드만 GTM 으로 거릅니다. */}
                 <th style={{ width: "10%" }} className="moneycell">이번달 MRR</th>
                 <th style={{ width: "12%" }}>계약 기간</th>
+                {/* 두 열은 스냅샷(이 PC 의 에이전트)이 답합니다 — 위 도장의 시각 기준입니다. */}
+                <th style={{ width: "8%" }}>마지막 작업</th>
+                <th style={{ width: "11%" }}>사용 상태</th>
                 <th style={{ width: "11%" }}>다음 크레딧 지급</th>
                 <th style={{ width: "11%" }}>다음 결제</th>
               </tr>
@@ -405,7 +432,8 @@ export function WonCustomers() {
             <tbody>
               {rows.map((row, index) => (
                 <RowView key={row.client_id} row={row} rows={rows} index={index}
-                         today={today} onOpen={() => open(row.client_id)} />
+                         today={today} usage={usages.get(row.client_id) ?? { kind: "no-agent" }}
+                         onOpen={() => open(row.client_id)} />
               ))}
             </tbody>
           </table>
@@ -464,8 +492,8 @@ function Select({ value, onChange, all, options }: {
   );
 }
 
-function RowView({ row, rows, index, today, onOpen }: {
-  row: Row; rows: Row[]; index: number; today: string; onOpen: () => void;
+function RowView({ row, rows, index, today, usage, onOpen }: {
+  row: Row; rows: Row[]; index: number; today: string; usage: RowUsage; onOpen: () => void;
 }) {
   const contract = row.active;
   const endLeft = daysUntil(contract?.ends_on, today);
@@ -495,8 +523,6 @@ function RowView({ row, rows, index, today, onOpen }: {
             </div>
           </div>
         </td>
-        <td className="nowrap">{row.industry || "—"}</td>
-        <td className="nowrap">{row.country || "—"}</td>
         <td><StatusTag status={row.plan_status} /></td>
         <td><PlanTag plan={contract?.plan ?? null} /></td>
         <td><DealTag deal={contract?.deal_type ?? null} /></td>
@@ -519,6 +545,7 @@ function RowView({ row, rows, index, today, onOpen }: {
             </span>
           )}
         </td>
+        <UsageCells usage={usage} />
         <td className="datecell">
           {contract?.next_credit_on ? fmt(contract.next_credit_on) : <span className="muted">완료</span>}
           {contract?.next_credit_on && (

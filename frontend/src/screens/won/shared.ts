@@ -13,6 +13,7 @@ export type Grant = {
 export type Payment = {
   id: number; no: number; total: number; paid_on: string | null;
   amount: Money; done: boolean; fx_rate: Money; fx_on: string | null;
+  note: string | null;
 };
 export type Contract = {
   id: number; seq: number; label: string; state: string;
@@ -70,6 +71,17 @@ export type Row = {
   month_revenue: Record<string, number>;
   active: Contract | null; contract_count?: number; contracts?: Contract[];
   comms?: Comm[];
+  history?: History;
+};
+export type History = {
+  tickets: { conversation_id: number; ticket_id: string | null; subject: string | null;
+             stage: string; created_at: string; summary: string | null }[];
+  past_tickets: { subject: string; summary: string | null; count: number; last_at: string | null }[];
+  loose_count: number;
+  /** 티켓도 계약도 아닌 기록 — 「+ 추가하기」로 적은 고객 단위 메모 등. 여기서는 줄로 그린다. */
+  loose: { id: number; channel: string; direction: string; handler: string | null; subject: string | null;
+           summary: string; happened_at: string }[];
+  stage_labels: Record<string, string>;
 };
 export type Comm = {
   id: number; channel: string; handler: string | null; subject: string | null;

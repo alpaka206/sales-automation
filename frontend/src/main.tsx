@@ -12,6 +12,7 @@ import { CustomerDetail } from "./screens/CustomerDetail";
 import { EmailTemplates } from "./screens/EmailTemplates";
 import { PolicyDocs } from "./screens/PolicyDocs";
 import { Operations } from "./screens/Operations";
+import { DataAgent } from "./screens/DataAgent";
 import { CompanyDetail } from "./screens/CompanyDetail";
 import { SettingsUsers } from "./screens/SettingsUsers";
 import { SettingsMailboxes } from "./screens/SettingsMailboxes";
@@ -60,6 +61,9 @@ function mountConsole() {
             <Route path="email-templates" element={<EmailTemplates />} />
             <Route path="policy-docs" element={<PolicyDocs />} />
             <Route path="operations" element={<Operations />} />
+            {/* 스냅샷 데이터를 로컬 에이전트에서 가져와 그린다 — 데이터는 우리 서버를
+                안 지난다. 화면만 여기서 오고 숫자는 브라우저가 127.0.0.1 에서 받는다. */}
+            <Route path="data" element={<DataAgent />} />
             <Route path="companies/:domain" element={<CompanyDetail />} />
             <Route path="settings/users" element={<SettingsUsers />} />
             <Route path="settings/mailboxes" element={<SettingsMailboxes />} />

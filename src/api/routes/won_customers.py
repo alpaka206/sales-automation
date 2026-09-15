@@ -709,6 +709,7 @@ async def update_payment(
     amount: str = Form(""),
     done: str = Form(""),
     fx_rate: str = Form(""),
+    note: str | None = Form(None),
 ):
     """입금 상태·날짜·금액. 완료로 바꾸면 **그 날짜의 환율**을 채웁니다.
 
@@ -723,6 +724,10 @@ async def update_payment(
             payment.paid_on = paid_on.strip()
         if amount.strip():
             payment.amount = _number(amount)
+        # 비고는 **보냈을 때만** 건드립니다 — 날짜·금액 칸의 저장이 자기 칸만 보내므로,
+        # 안 보낸 비고를 빈 값으로 읽으면 그 저장마다 비고가 지워집니다.
+        if note is not None:
+            payment.note = _text(note)
         # **빈 값은 「안 보냈다」와 구별되지 않습니다.** 같은 라우트를 날짜·금액 칸도 쓰고
         # 그 저장들은 자기 칸만 보내는데, `fx_rate=` 로 빈 문자열이 와도 FastAPI 는 기본값을
         # 줍니다(실측) — 그래서 「비웠다」는 뜻은 글자로 보냅니다. `auto` 가 그것이고,
