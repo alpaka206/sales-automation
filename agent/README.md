@@ -31,9 +31,15 @@ GOOS=darwin  GOARCH=amd64 go build -ldflags="-s -w" -o dist/perso-agent-mac-inte
 스냅샷 폴더 **옆**에 두고 실행한다 — `perso-data-snapshot`(git clone) · `perso-data-snapshot-main`(GitHub zip,
 두 겹이어도 된다) 중 `data/manifest.json` 이 있는 첫 폴더를 찾는다. 다른 곳이면 `--repo`.
 
-**Mac 은 `.zip` 을 받는다.** 맨 바이너리를 브라우저로 받으면 실행 권한이 빠져서 더블클릭이 텍스트 편집기로
-가고 「유니코드(UTF-8) 텍스트 인코딩이 적용되지 않습니다」가 뜬다. zip 은 `ditto` 로 싸서 권한을 담고 있어,
-풀고 더블클릭하면 터미널이 열리며 실행된다. 서명·공증은 릴리스 워크플로가 한다(Developer ID).
+**Mac 은 `perso-agent-mac.zip` 안의 `Perso Agent.app` 이다** (2026-09-17). 맨 실행 파일은 두 번 막혔다 —
+브라우저로 받으면 실행 권한이 빠져 텍스트 편집기로 열리고(「유니코드(UTF-8) 텍스트 인코딩이 적용되지
+않습니다」), 권한을 붙여도 공증과 무관하게 Finder 더블클릭이 거절된다(`spctl -t exec`: `the code is valid
+but does not seem to be an app`). 그래서 universal 실행 파일을 번들로 싸서 서명·공증·티켓 부착을 하고,
+릴리스 워크플로가 **받은 것처럼 격리 속성을 단 zip 에서 `spctl -t exec` 이 통과해야** 릴리스한다.
+
+앱으로 뜨면 창이 없다. 스냅샷은 앱 옆 → 홈·다운로드·데스크톱·문서 폴더 순으로 찾고(맥이 받은 앱을 임시
+경로로 옮겨 실행해도 찾게), 못 찾으면 대화 상자로 알리고, 이미 떠 있으면 콘솔만 연다(`agent/app.go`).
+끄려면 활성 상태 보기에서 `perso-agent` 를 종료한다.
 
 ```
 perso-agent.exe                      # 실행 → pull → 43110 에 뜸 → 브라우저에 콘솔이 열림 (켜 둔 동안 한 시간마다 다시 pull)

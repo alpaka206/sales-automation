@@ -5,8 +5,9 @@
 # 서빙할 이유가 없습니다. 저장소가 공개라 Release 자산은 인증 없이 받아지고, 콘솔의 내려받기
 # 버튼이 `releases/latest/download/<파일>` 을 가리킵니다.
 #
-# 러너가 macOS 인 이유: Mac 바이너리를 Developer ID 로 서명하고 Apple 에 공증(notarize)해야
-# Gatekeeper 의 「악성 코드가 없음을 확인할 수 없습니다」가 안 뜹니다. codesign · notarytool 은
+# 러너가 macOS 인 이유: Mac 은 `Perso Agent.app` 으로 싸서 Developer ID 로 서명하고 Apple 에
+# 공증(notarize)한 뒤 티켓을 붙여야(staple) Gatekeeper 의 「악성 코드가 없음을 확인할 수 없습니다」가
+# 안 뜹니다. codesign · notarytool 은
 # macOS 에만 있고, Go 는 CGO 없이 어디서든 세 타깃을 냅니다. 공증은 사람 심사가 아니라 자동
 # 스캔이지만 큐가 밀리면 30분도 걸립니다. 서명 Secrets 가 없으면 그 단계만 건너뛰고 서명 없이
 # 올립니다.
@@ -58,6 +59,45 @@ jobs:
           GOOS=darwin  GOARCH=arm64 CGO_ENABLED=0 go build -ldflags="$LD" -o dist/perso-agent-mac-arm64 .
           GOOS=darwin  GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="$LD" -o dist/perso-agent-mac-intel .
 
+      # **Mac 은 앱으로 준다** (2026-09-17). 맨 실행 파일은 공증을 받아도 Finder 더블클릭에서 막힌다 —
+      # 운영자 맥과 macOS 14·15 러너에서 똑같이 잰 결과: `spctl -t install` 은 `accepted · Notarized
+      # Developer ID` 인데 더블클릭이 쓰는 `spctl -t exec` 은 `rejected (the code is valid but does
+      # not seem to be an app)`. 그리고 브라우저로 받은 맨 파일은 실행 권한도 없어 텍스트 편집기로 열렸다.
+      # 번들은 두 문제를 같이 없앤다. 실행 파일은 arm64·intel 을 합친 universal 하나라 맥 종류를 안 고른다.
+      # `persodata://` 도 Info.plist 로 등록돼, 콘솔의 「에이전트 열기」가 맥에서도 앱을 띄운다.
+      - name: Mac 앱 번들 (universal)
+        run: |
+          set -e
+          V="${GITHUB_REF_NAME#agent-v}"
+          APP="dist/Perso Agent.app"
+          mkdir -p "$APP/Contents/MacOS"
+          lipo -create -output "$APP/Contents/MacOS/perso-agent" dist/perso-agent-mac-arm64 dist/perso-agent-mac-intel
+          chmod 755 "$APP/Contents/MacOS/perso-agent"
+          cat > "$APP/Contents/Info.plist" <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>CFBundleExecutable</key><string>perso-agent</string>
+            <key>CFBundleIdentifier</key><string>ai.perso.agent</string>
+            <key>CFBundleName</key><string>Perso Agent</string>
+            <key>CFBundleDisplayName</key><string>Perso Agent</string>
+            <key>CFBundlePackageType</key><string>APPL</string>
+            <key>CFBundleShortVersionString</key><string>$V</string>
+            <key>CFBundleVersion</key><string>$V</string>
+            <key>LSMinimumSystemVersion</key><string>11.0</string>
+            <key>LSUIElement</key><true/>
+            <key>CFBundleURLTypes</key>
+            <array><dict>
+              <key>CFBundleURLName</key><string>ai.perso.agent</string>
+              <key>CFBundleURLSchemes</key><array><string>persodata</string></array>
+            </dict></array>
+          </dict>
+          </plist>
+          PLIST
+          plutil -lint "$APP/Contents/Info.plist"
+          lipo -info "$APP/Contents/MacOS/perso-agent"
+
       - name: Mac 서명 (Developer ID · hardened runtime · 타임스탬프 — 공증의 세 조건)
         if: env.HAS_CERT == 'true'
         env:
@@ -78,7 +118,7 @@ jobs:
           IDENT=$(security find-identity -v -p codesigning build.keychain | grep -o '"Developer ID Application: [^"]*"' | head -1 | tr -d '"')
           echo "identity: $IDENT"
           test -n "$IDENT"
-          for f in perso-agent-mac-arm64 perso-agent-mac-intel; do
+          for f in perso-agent-mac-arm64 perso-agent-mac-intel "Perso Agent.app"; do
             codesign --force --options runtime --timestamp --sign "$IDENT" "dist/$f"
             codesign --verify --strict --verbose=2 "dist/$f"
           done
@@ -95,16 +135,13 @@ jobs:
           printf '%s' "$NOTARY_KEY_P8" > /tmp/notary.p8
           trap 'rm -f /tmp/notary.p8' EXIT
 
-          # 맨 바이너리는 zip 에 싸서 제출합니다. 티켓은 바이너리의 서명 해시에 묶이므로 Release 에는
-          # zip 이 아니라 바이너리 그대로 올려도 Gatekeeper 가 첫 실행 때 온라인으로 확인해 통과시킵니다
-          # (stapler 는 .app/.pkg/.dmg 에만 붙습니다).
-          #
-          # 둘을 동시에 제출합니다. 순차로 기다리면 큐가 밀리는 날 대기가 두 배로 쌓입니다.
-          BINS="perso-agent-mac-arm64 perso-agent-mac-intel"
-          for f in $BINS; do
+          # 앱과 맨 바이너리 둘(터미널에서 `curl -LO` 로 받는 사람)을 동시에 제출합니다. 순차로 기다리면
+          # 큐가 밀리는 날 대기가 쌓입니다. 제출은 zip 으로 합니다(notarytool 이 받는 모양).
+          ITEMS=("perso-agent-mac-arm64" "perso-agent-mac-intel" "Perso Agent.app")
+          for f in "${ITEMS[@]}"; do
             ditto -c -k --keepParent "dist/$f" "/tmp/$f.zip"
           done
-          for f in $BINS; do
+          for f in "${ITEMS[@]}"; do
             xcrun notarytool submit "/tmp/$f.zip" \
               --key /tmp/notary.p8 --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER_ID" \
               --wait --timeout 60m --output-format json \
@@ -115,7 +152,7 @@ jobs:
 
           # notarytool 은 결과가 Invalid 여도 0 을 내는 경우가 보고돼 있습니다. 상태를 직접 봅니다.
           rc=0
-          for f in $BINS; do
+          for f in "${ITEMS[@]}"; do
             echo "--- $f ---"
             cat "/tmp/$f.err" || true
             cat "/tmp/$f.json" || true
@@ -133,40 +170,79 @@ jobs:
           done
           exit $rc
 
-      # **Mac 은 zip 으로 받는다** (2026-09-17). 브라우저로 받은 맨 바이너리에는 실행 권한이 없어서
-      # 더블클릭하면 macOS 가 텍스트 문서로 열고 「유니코드(UTF-8) 텍스트 인코딩이 적용되지 않습니다」가
-      # 뜬다 — 사람이 터미널에서 `chmod +x` 를 해야 했다. `ditto` 로 싼 zip 은 권한을 담고 있어서
-      # 풀기만 하면 실행 파일로 나오고, 더블클릭하면 터미널이 열리며 돈다. 안의 바이너리는 위에서
-      # 서명·공증한 그 파일이라(공증 티켓은 서명 해시에 묶인다) 공증도 그대로다. 서명 Secrets 가 없어도
-      # 만든다 — 권한 문제는 서명과 무관하다. 맨 바이너리도 계속 올린다(`curl -LO` 로 받는 사람).
-      - name: Mac zip (실행 권한째)
+      # 티켓을 앱에 붙인다 — 그러면 맥이 Apple 서버에 못 닿아도(사내망·오프라인) 첫 실행이 통과한다.
+      # 맨 바이너리에는 붙일 수 없다(stapler 는 .app/.pkg/.dmg 만 받는다).
+      - name: Mac 티켓 부착 (staple)
+        if: env.HAS_CERT == 'true'
         run: |
           set -e
-          # **`dist/` 안에서 싼다.** `--keepParent dist/$f` 로 싸면 zip 안에 `dist/` 폴더가 딸려 들어가,
-          # 풀었을 때 파일이 `dist` 폴더 안에 생긴다 — 스냅샷 폴더 옆으로 또 옮겨야 한다(v1.3.1 이 그랬다).
+          xcrun stapler staple "dist/Perso Agent.app"
+          xcrun stapler validate "dist/Perso Agent.app"
+
+      # 풀면 `Perso Agent.app` 하나가 나온다. `ditto` 는 실행 권한과 서명(확장 속성)을 그대로 담는다.
+      - name: Mac zip
+        run: |
+          set -e
           cd dist
-          for f in perso-agent-mac-arm64 perso-agent-mac-intel; do
-            chmod 755 "$f"
-            ditto -c -k "$f" "$f.zip"
-            unzip -Z1 "$f.zip"
+          ditto -c -k --keepParent "Perso Agent.app" perso-agent-mac.zip
+          unzip -Z1 perso-agent-mac.zip | head -5
+
+      # **더블클릭과 같은 판정을 여기서 통과해야 릴리스한다.** 브라우저로 받은 것처럼 격리 속성을 달고,
+      # Finder 가 쓰는 `spctl -t exec` 이 `accepted · Notarized Developer ID` 인지 본다. 1.3.0~1.3.3 은
+      # 서명·공증이 다 됐는데 이 판정 하나에서 떨어졌고, 그건 맥을 들고 있는 사람만 알았다.
+      - name: Mac 검증 — 받은 zip 을 더블클릭했을 때의 판정
+        if: env.HAS_CERT == 'true'
+        run: |
+          set -e
+          rm -rf /tmp/gk && mkdir -p /tmp/gk
+          cp dist/perso-agent-mac.zip /tmp/gk/
+          Q="0081;$(printf %x "$(date +%s)");Chrome;$(uuidgen)"
+          xattr -w com.apple.quarantine "$Q" /tmp/gk/perso-agent-mac.zip
+          ditto -x -k /tmp/gk/perso-agent-mac.zip /tmp/gk/out
+          APP="/tmp/gk/out/Perso Agent.app"
+          xattr -w com.apple.quarantine "$Q" "$APP"
+          OUT=$(spctl -a -vvv -t exec "$APP" 2>&1 || true)
+          echo "$OUT"
+          echo "$OUT" | grep -q ": accepted" && echo "$OUT" | grep -q "source=Notarized Developer ID"
+          xcrun stapler validate "$APP"
+          "$APP/Contents/MacOS/perso-agent" --version
+
+      # **앱으로 떠서 응답하는지** — Finder 더블클릭과 같은 길(`open`, Launch Services)로 띄워 /v1/health 를
+      # 본다. 창 없이 뜨는 앱이라 인자 처리나 실행 방식이 틀려도 화면에 아무것도 안 남는다. 격리 속성은
+      # 뗀다: 떼지 않으면 첫 실행의 「인터넷에서 받은 앱을 열까요?」 확인 창이 사람 없는 러너를 붙잡는다
+      # (그 판정 자체는 바로 위 단계가 봤다).
+      - name: Mac 검증 — 앱으로 띄워서 응답하는지
+        if: env.HAS_CERT == 'true'
+        run: |
+          set -e
+          rm -rf /tmp/launch && mkdir -p /tmp/launch/snap/data
+          echo '{}' > /tmp/launch/snap/data/manifest.json
+          ditto -x -k dist/perso-agent-mac.zip /tmp/launch
+          xattr -dr com.apple.quarantine "/tmp/launch/Perso Agent.app" || true
+          open "/tmp/launch/Perso Agent.app" --args --repo /tmp/launch/snap --no-browser
+          for i in $(seq 1 30); do
+            if curl -fsS -m 2 http://127.0.0.1:43110/v1/health; then echo; OK=1; break; fi
+            sleep 1
           done
-          ls -la
+          pkill -f "Perso Agent.app/Contents/MacOS/perso-agent" || true
+          test "${OK:-}" = 1
 
       - name: 체크섬
         run: |
-          cd dist && shasum -a 256 * > SHA256SUMS.txt && cat SHA256SUMS.txt
+          cd dist
+          shasum -a 256 perso-agent.exe perso-agent-mac-arm64 perso-agent-mac-intel perso-agent-mac.zip > SHA256SUMS.txt
+          cat SHA256SUMS.txt
       - uses: softprops/action-gh-release@v2
         with:
           files: |
             agent/dist/perso-agent.exe
+            agent/dist/perso-agent-mac.zip
             agent/dist/perso-agent-mac-arm64
             agent/dist/perso-agent-mac-intel
-            agent/dist/perso-agent-mac-arm64.zip
-            agent/dist/perso-agent-mac-intel.zip
             agent/dist/SHA256SUMS.txt
           body: |
-            로컬 데이터 에이전트 ${{ github.ref_name }}. 스냅샷 폴더(`perso-data-snapshot` 또는 `perso-data-snapshot-main`) 옆에 두고 실행합니다.
-            Mac 은 `.zip` 을 받아 더블클릭으로 풀고, 나온 파일을 더블클릭하세요(Apple 공증 완료).
-            콘솔이 요구하는 버전보다 낡으면 수주 고객 화면이 「업데이트 필요」를 띄웁니다 — 그때 이 파일로 바꿉니다.
-            원본도 집계도 콘솔 서버로 가지 않습니다 — 계산은 이 PC 에서 끝납니다.
-            사용법: `agent/README.md`
+            로컬 데이터 에이전트 ${{ github.ref_name }}.
+            **Mac**: `perso-agent-mac.zip` 을 받아 풀고, 나온 `Perso Agent` 앱을 더블클릭하세요(Apple 공증·티켓 부착). 창 없이 뒤에서 돌고 브라우저가 열립니다.
+            **Windows**: `perso-agent.exe` 를 실행하세요.
+            스냅샷 폴더(`perso-data-snapshot` 또는 `perso-data-snapshot-main`)는 에이전트 옆이나 홈·다운로드·데스크톱·문서 폴더에 두면 찾습니다.
+            원본도 집계도 콘솔 서버로 가지 않습니다 — 계산은 이 PC 에서 끝납니다. 사용법: `agent/README.md`

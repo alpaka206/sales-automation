@@ -171,15 +171,15 @@ function Downloads({ isMac, compact }: { isMac: boolean; compact?: boolean }) {
     <>
       <div className="row" style={{ gap: 8, flexWrap: "wrap", marginTop: compact ? 0 : 10 }}>
         <a className={`btn btn--sm${!isMac ? " btn--primary" : ""}`} href={AGENT_DOWNLOADS.windows}>Windows (.exe)</a>
-        <a className={`btn btn--sm${isMac ? " btn--primary" : ""}`} href={AGENT_DOWNLOADS.macArm}>Mac (Apple Silicon)</a>
-        <a className="btn btn--sm" href={AGENT_DOWNLOADS.macIntel}>Mac (Intel)</a>
+        <a className={`btn btn--sm${isMac ? " btn--primary" : ""}`} href={AGENT_DOWNLOADS.mac}>Mac</a>
         <a className="t-sm td-subtle" href={AGENT_RELEASES} target="_blank" rel="noreferrer">모든 버전</a>
       </div>
       <div className="t-xs t-subtle" style={{ marginTop: 8 }}>
         스냅샷 저장소를 먼저 clone 해 두세요 (<code>git clone … perso-data-snapshot</code>) — 비공개 저장소라
         각자의 GitHub 권한으로 받습니다. 에이전트에는 토큰이 없습니다.
-        {isMac && <> Mac 은 받은 zip 을 더블클릭해 풀고, 나온 파일을 스냅샷 폴더(<code>perso-data-snapshot</code> 또는
-          <code>perso-data-snapshot-main</code>) 옆에 두고 더블클릭하세요 — 터미널이 열리며 실행됩니다.</>}
+        {isMac && <> Mac 은 받은 zip 을 풀고 <strong>Perso Agent</strong> 앱을 더블클릭하세요 — 창 없이 뒤에서 돌고
+          브라우저가 열립니다. 스냅샷 폴더(<code>perso-data-snapshot</code> 또는 <code>perso-data-snapshot-main</code>)는
+          앱 옆이나 홈·다운로드·데스크톱·문서 폴더에 두면 찾습니다.</>}
       </div>
     </>
   );

@@ -226,7 +226,7 @@ export function SalesInsights() {
           <strong>이 PC 에 데이터 에이전트가 없거나 꺼져 있습니다.</strong>
           <div className="t-sm td-subtle" style={{ marginTop: 6 }}>
             이 화면의 값은 전부 이 PC 의 스냅샷에서 계산됩니다 — 서버는 그 데이터를 모릅니다.{" "}
-            <a href={isMac ? AGENT_DOWNLOADS.macArm : AGENT_DOWNLOADS.windows}>에이전트 내려받기 ({isMac ? "Mac" : "Windows"})</a>
+            <a href={isMac ? AGENT_DOWNLOADS.mac : AGENT_DOWNLOADS.windows}>에이전트 내려받기 ({isMac ? "Mac" : "Windows"})</a>
             {agent.problem && <> · 사유: {agent.problem}</>}
           </div>
         </div>

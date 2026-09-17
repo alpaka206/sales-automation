@@ -19,7 +19,6 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -307,57 +306,11 @@ func launchFlags() []string {
 	return out
 }
 
-// defaultRepo — 실행 파일 옆에서 스냅샷 폴더를 찾는다. `git clone` 이면 `perso-data-snapshot`
-// 이고, GitHub 의 zip 을 풀면 `perso-data-snapshot-main/perso-data-snapshot-main` 처럼 두 겹이
-// 된다. 어느 쪽이든 `data/manifest.json` 이 있는 첫 폴더를 고른다 — 못 찾으면 관례 이름을
-// 돌려주고 NewSnapshot 이 어디를 봤는지 적어 준다.
-func defaultRepo() string {
-	exe, err := os.Executable()
-	if err != nil {
-		return "perso-data-snapshot"
-	}
-	here := filepath.Dir(exe)
-	isRepo := func(dir string) bool {
-		_, err := os.Stat(filepath.Join(dir, "data", "manifest.json"))
-		return err == nil
-	}
-	for _, name := range []string{"perso-data-snapshot", "perso-data-snapshot-main"} {
-		dir := filepath.Join(here, name)
-		if isRepo(dir) {
-			return dir
-		}
-		if isRepo(filepath.Join(dir, name)) {
-			return filepath.Join(dir, name)
-		}
-	}
-	if isRepo(here) {
-		return here
-	}
-	if entries, err := os.ReadDir(here); err == nil {
-		for _, e := range entries {
-			if !e.IsDir() || !strings.HasPrefix(e.Name(), "perso-data-snapshot") {
-				continue
-			}
-			dir := filepath.Join(here, e.Name())
-			if isRepo(dir) {
-				return dir
-			}
-			if inner, err := os.ReadDir(dir); err == nil {
-				for _, in := range inner {
-					if in.IsDir() && isRepo(filepath.Join(dir, in.Name())) {
-						return filepath.Join(dir, in.Name())
-					}
-				}
-			}
-		}
-	}
-	return filepath.Join(here, "perso-data-snapshot")
-}
-
 func main() {
 	log.SetFlags(log.Ltime)
 	var extra originList
-	repo := flag.String("repo", defaultRepo(), "스냅샷 clone 폴더 (기본: 실행 파일 옆)")
+	os.Args = withoutPSN(os.Args)
+	repo := flag.String("repo", defaultRepo(), "스냅샷 폴더 (기본: 실행 파일·앱 옆 → 홈·다운로드·데스크톱·문서)")
 	flag.Var(&extra, "console", "허용할 콘솔 출처 (여러 번 줄 수 있음, 준 것이 먼저)")
 	noBrowser := flag.Bool("no-browser", false, "브라우저를 열지 않는다")
 	unregister := flag.Bool("unregister", false, "persodata:// 등록만 지우고 끝낸다")
@@ -376,10 +329,25 @@ func main() {
 	}
 	registerScheme(launchFlags())
 
+	// 앱으로 떴는데 이미 떠 있으면 콘솔만 연다 — 창이 없어 떠 있는지 볼 길이 없으니 누구나 다시 누른다.
+	// 맨 실행 파일(터미널·Windows)은 예전대로다: 개발할 때 --console 을 달리해 둘을 띄운다.
+	if currentBundle() != "" {
+		if port := runningAgentPort(); port != 0 {
+			if !*noBrowser {
+				openBrowser(append([]string(extra), defaultOrigins...)[0] + "/app/data")
+			}
+			return
+		}
+	}
+
 	snap, err := NewSnapshot(*repo)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+		if currentBundle() != "" {
+			err = fmt.Errorf("스냅샷 폴더를 못 찾았습니다.\n\n"+
+				"perso-data-snapshot(또는 perso-data-snapshot-main) 폴더를 이 앱 옆이나 홈·다운로드·데스크톱·문서 "+
+				"폴더에 두고 다시 여세요.\n\n%v", err)
+		}
+		fail(err)
 	}
 	fmt.Printf("perso-agent %s\n", version)
 	fmt.Printf("스냅샷: %s\n", snap.Repo)
@@ -397,8 +365,7 @@ func main() {
 
 	ln, port, err := listen()
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+		fail(err)
 	}
 	a := &agent{snap: snap, token: newToken(), port: port,
 		origins: append([]string(extra), defaultOrigins...)}

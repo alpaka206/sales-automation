@@ -221,7 +221,7 @@ export function WonCustomers() {
                 정보가 있어도 꺼져 있으면 보인다) 왼쪽 「사용량」 꼬리표가 상태를 말합니다. 상태를
                 확인하는 동안(첫 요청)은 안 그린다 — 깜빡임이 그것이었다. */}
             {!agent.busy && (!agent.live || agent.outdated) && (
-              <a className={`btn${agent.outdated ? " btn-primary" : ""}`} href={isMac ? AGENT_DOWNLOADS.macArm : AGENT_DOWNLOADS.windows}
+              <a className={`btn${agent.outdated ? " btn-primary" : ""}`} href={isMac ? AGENT_DOWNLOADS.mac : AGENT_DOWNLOADS.windows}
                  title={agent.outdated
                    ? `에이전트 ${agent.status?.version ?? "1.0"} — 이 화면은 ${AGENT_MIN_VERSION} 이상이 필요합니다. 내려받아 옛 파일 자리에 덮어쓰고 다시 여세요.`
                    : "내려받은 파일을 스냅샷 폴더(perso-data-snapshot) 옆에서 실행하면 이 화면과 연결됩니다."}>

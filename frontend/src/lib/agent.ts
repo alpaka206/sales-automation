@@ -180,8 +180,7 @@ export type SpaceResult<T> = {
 export const AGENT_RELEASES = "https://github.com/alpaka206/sales-automation/releases/latest";
 export const AGENT_DOWNLOADS = {
   windows: `${AGENT_RELEASES}/download/perso-agent.exe`,
-  // Mac 은 zip 이다 — 맨 바이너리는 브라우저로 받으면 실행 권한이 빠져 더블클릭이 텍스트 편집기로 간다
-  // (2026-09-17). zip 은 권한을 담고 있어 풀면 바로 실행된다(`agent-release.yml`).
-  macArm: `${AGENT_RELEASES}/download/perso-agent-mac-arm64.zip`,
-  macIntel: `${AGENT_RELEASES}/download/perso-agent-mac-intel.zip`,
+  // Mac 은 **앱 zip 하나**다(arm64·intel 합친 universal). 맨 실행 파일은 공증을 받아도 Finder 더블클릭에서
+  // 「악성 코드를 확인할 수 없습니다」로 막힌다 — Gatekeeper 가 앱이 아니면 거절한다(2026-09-17 실측).
+  mac: `${AGENT_RELEASES}/download/perso-agent-mac.zip`,
 };
