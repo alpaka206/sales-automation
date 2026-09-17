@@ -142,9 +142,13 @@ jobs:
       - name: Mac zip (실행 권한째)
         run: |
           set -e
+          # **`dist/` 안에서 싼다.** `--keepParent dist/$f` 로 싸면 zip 안에 `dist/` 폴더가 딸려 들어가,
+          # 풀었을 때 파일이 `dist` 폴더 안에 생긴다 — 스냅샷 폴더 옆으로 또 옮겨야 한다(v1.3.1 이 그랬다).
+          cd dist
           for f in perso-agent-mac-arm64 perso-agent-mac-intel; do
-            chmod 755 "dist/$f"
-            ditto -c -k --keepParent "dist/$f" "dist/$f.zip"
+            chmod 755 "$f"
+            ditto -c -k "$f" "$f.zip"
+            unzip -Z1 "$f.zip"
           done
           ls -la dist/
 
