@@ -8,23 +8,23 @@ package main
 // `rejected (the code is valid but does not seem to be an app)` 이다. 앱이 아니면 공증과 무관하게
 // 막힌다 — 그래서 번들로 싸고 티켓을 붙인다(`agent-release.yml`).
 //
-// 앱으로 뜨면 터미널 창이 없다. 그래서 셋이 달라진다:
+// 앱으로 뜨면 터미널 창이 없다. 그래서 둘이 달라진다:
 //   - 스냅샷 폴더를 **앱 옆**에서 찾는다(실행 파일은 `.app/Contents/MacOS` 안에 있다). 맥이 받은 앱을
 //     임시 경로로 옮겨 실행하면(App Translocation) 앱 옆이 어딘지 알 수 없어서, 홈·다운로드·데스크톱·
 //     문서 폴더도 본다.
 //   - 실패를 **대화 상자로** 알린다. 표준 출력은 아무도 안 본다 — 조용히 꺼지면 「안 된다」만 남는다.
-//   - 이미 떠 있으면 하나 더 띄우지 않고 콘솔만 연다. 창이 없어 떠 있는지 알 길이 없으니 누구나 다시 누른다.
+//
+// 「이미 떠 있으면 콘솔만 연다」는 **일부러 없다.** 확인하려면 에이전트가 HTTP 를 보내야 하는데, 이
+// 에이전트에는 요청을 보내는 코드가 없다는 것이 고정된 약속이다(`tests/test_agent_stays_local.py`).
+// 다시 누르면 다음 포트에 하나 더 뜨고 콘솔이 그쪽에 붙는다 — 불편할 뿐 틀리지 않는다.
 
 import (
-	"encoding/json"
 	"fmt"
-	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
-	"time"
 )
 
 // appBundleOf — 실행 파일이 `X.app/Contents/MacOS/…` 에 있으면 `X.app` 의 경로, 아니면 "".
@@ -131,26 +131,6 @@ func withoutPSN(args []string) []string {
 		}
 	}
 	return out
-}
-
-// runningAgentPort — 이 PC 에 이미 떠 있는 에이전트의 포트. 없으면 0.
-func runningAgentPort() int {
-	client := http.Client{Timeout: 400 * time.Millisecond}
-	for _, p := range portCandidates {
-		resp, err := client.Get(fmt.Sprintf("http://127.0.0.1:%d/v1/health", p))
-		if err != nil {
-			continue
-		}
-		var body struct {
-			Agent string `json:"agent"`
-		}
-		_ = json.NewDecoder(resp.Body).Decode(&body)
-		resp.Body.Close()
-		if strings.HasPrefix(body.Agent, "perso-agent/") {
-			return p
-		}
-	}
-	return 0
 }
 
 // fail — 실패를 알리고 끝낸다. 앱으로 떴으면 대화 상자로, 아니면 터미널에.

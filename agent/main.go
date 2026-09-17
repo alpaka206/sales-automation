@@ -329,17 +329,6 @@ func main() {
 	}
 	registerScheme(launchFlags())
 
-	// 앱으로 떴는데 이미 떠 있으면 콘솔만 연다 — 창이 없어 떠 있는지 볼 길이 없으니 누구나 다시 누른다.
-	// 맨 실행 파일(터미널·Windows)은 예전대로다: 개발할 때 --console 을 달리해 둘을 띄운다.
-	if currentBundle() != "" {
-		if port := runningAgentPort(); port != 0 {
-			if !*noBrowser {
-				openBrowser(append([]string(extra), defaultOrigins...)[0] + "/app/data")
-			}
-			return
-		}
-	}
-
 	snap, err := NewSnapshot(*repo)
 	if err != nil {
 		if currentBundle() != "" {
