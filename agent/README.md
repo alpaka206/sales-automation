@@ -28,7 +28,12 @@ GOOS=darwin  GOARCH=amd64 go build -ldflags="-s -w" -o dist/perso-agent-mac-inte
 
 ## 실행
 
-스냅샷 clone 폴더 **옆**에 두고 실행한다. 폴더 이름이 다르면 `--repo`.
+스냅샷 폴더 **옆**에 두고 실행한다 — `perso-data-snapshot`(git clone) · `perso-data-snapshot-main`(GitHub zip,
+두 겹이어도 된다) 중 `data/manifest.json` 이 있는 첫 폴더를 찾는다. 다른 곳이면 `--repo`.
+
+**Mac 은 `.zip` 을 받는다.** 맨 바이너리를 브라우저로 받으면 실행 권한이 빠져서 더블클릭이 텍스트 편집기로
+가고 「유니코드(UTF-8) 텍스트 인코딩이 적용되지 않습니다」가 뜬다. zip 은 `ditto` 로 싸서 권한을 담고 있어,
+풀고 더블클릭하면 터미널이 열리며 실행된다. 서명·공증은 릴리스 워크플로가 한다(Developer ID).
 
 ```
 perso-agent.exe                      # 실행 → pull → 43110 에 뜸 → 브라우저에 콘솔이 열림 (켜 둔 동안 한 시간마다 다시 pull)

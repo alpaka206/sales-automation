@@ -180,6 +180,8 @@ export type SpaceResult<T> = {
 export const AGENT_RELEASES = "https://github.com/alpaka206/sales-automation/releases/latest";
 export const AGENT_DOWNLOADS = {
   windows: `${AGENT_RELEASES}/download/perso-agent.exe`,
-  macArm: `${AGENT_RELEASES}/download/perso-agent-mac-arm64`,
-  macIntel: `${AGENT_RELEASES}/download/perso-agent-mac-intel`,
+  // Mac 은 zip 이다 — 맨 바이너리는 브라우저로 받으면 실행 권한이 빠져 더블클릭이 텍스트 편집기로 간다
+  // (2026-09-17). zip 은 권한을 담고 있어 풀면 바로 실행된다(`agent-release.yml`).
+  macArm: `${AGENT_RELEASES}/download/perso-agent-mac-arm64.zip`,
+  macIntel: `${AGENT_RELEASES}/download/perso-agent-mac-intel.zip`,
 };

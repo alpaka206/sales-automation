@@ -178,8 +178,8 @@ function Downloads({ isMac, compact }: { isMac: boolean; compact?: boolean }) {
       <div className="t-xs t-subtle" style={{ marginTop: 8 }}>
         스냅샷 저장소를 먼저 clone 해 두세요 (<code>git clone … perso-data-snapshot</code>) — 비공개 저장소라
         각자의 GitHub 권한으로 받습니다. 에이전트에는 토큰이 없습니다.
-        {isMac && <> Mac 은 내려받은 파일에 격리 속성이 붙어 처음 한 번 「시스템 설정 → 개인정보 보호 및 보안 → 그래도 열기」가 필요합니다.
-          터미널에서 <code>curl -LO</code> 로 받으면 그 단계가 없습니다.</>}
+        {isMac && <> Mac 은 받은 zip 을 더블클릭해 풀고, 나온 파일을 스냅샷 폴더(<code>perso-data-snapshot</code> 또는
+          <code>perso-data-snapshot-main</code>) 옆에 두고 더블클릭하세요 — 터미널이 열리며 실행됩니다.</>}
       </div>
     </>
   );
