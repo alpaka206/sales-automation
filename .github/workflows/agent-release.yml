@@ -8,7 +8,8 @@
 # 러너가 macOS 인 이유: Mac 바이너리를 Developer ID 로 서명하고 Apple 에 공증(notarize)해야
 # Gatekeeper 의 「악성 코드가 없음을 확인할 수 없습니다」가 안 뜹니다. codesign · notarytool 은
 # macOS 에만 있고, Go 는 CGO 없이 어디서든 세 타깃을 냅니다. 공증은 사람 심사가 아니라 자동
-# 스캔이라 보통 몇 분입니다. 서명 Secrets 가 없으면 그 단계만 건너뛰고 서명 없이 올립니다.
+# 스캔이지만 큐가 밀리면 30분도 걸립니다. 서명 Secrets 가 없으면 그 단계만 건너뛰고 서명 없이
+# 올립니다.
 #
 # 내는 법:  git tag agent-v1.0.0 && git push origin agent-v1.0.0
 name: Agent release
@@ -23,7 +24,9 @@ permissions:
 jobs:
   build:
     runs-on: macos-latest
-    timeout-minutes: 30
+    # 공증 대기가 대부분입니다. 30분이었을 때 arm64 하나가 28분 걸려 intel 은 제출도 못 하고
+    # 잘렸습니다(2026-09-17). 아래에서 둘을 동시에 제출하지만, 큐가 밀리는 날의 여유를 둡니다.
+    timeout-minutes: 75
     defaults:
       run:
         working-directory: agent
@@ -81,7 +84,7 @@ jobs:
           done
           rm -f /tmp/cert.p12
 
-      - name: Mac 공증 (Apple 자동 스캔 — 사람 심사 아님, 보통 몇 분)
+      - name: Mac 공증 (Apple 자동 스캔 — 사람 심사 아님, 큐에 따라 몇 분~30분)
         if: env.HAS_CERT == 'true'
         env:
           NOTARY_KEY_P8: ${{ secrets.APPLE_NOTARY_KEY_P8 }}
@@ -90,14 +93,45 @@ jobs:
         run: |
           set -e
           printf '%s' "$NOTARY_KEY_P8" > /tmp/notary.p8
+          trap 'rm -f /tmp/notary.p8' EXIT
+
           # 맨 바이너리는 zip 에 싸서 제출합니다. 티켓은 바이너리의 서명 해시에 묶이므로 Release 에는
           # zip 이 아니라 바이너리 그대로 올려도 Gatekeeper 가 첫 실행 때 온라인으로 확인해 통과시킵니다
           # (stapler 는 .app/.pkg/.dmg 에만 붙습니다).
-          for f in perso-agent-mac-arm64 perso-agent-mac-intel; do
+          #
+          # 둘을 동시에 제출합니다. 순차로 기다리면 큐가 밀리는 날 대기가 두 배로 쌓입니다.
+          BINS="perso-agent-mac-arm64 perso-agent-mac-intel"
+          for f in $BINS; do
             ditto -c -k --keepParent "dist/$f" "/tmp/$f.zip"
-            xcrun notarytool submit "/tmp/$f.zip" --key /tmp/notary.p8 --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER_ID" --wait
           done
-          rm -f /tmp/notary.p8
+          for f in $BINS; do
+            xcrun notarytool submit "/tmp/$f.zip" \
+              --key /tmp/notary.p8 --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER_ID" \
+              --wait --timeout 60m --output-format json \
+              > "/tmp/$f.json" 2> "/tmp/$f.err" &
+          done
+          # 한쪽이 실패해도 나머지 결과를 봐야 하므로 여기서 죽이지 않습니다.
+          wait || true
+
+          # notarytool 은 결과가 Invalid 여도 0 을 내는 경우가 보고돼 있습니다. 상태를 직접 봅니다.
+          rc=0
+          for f in $BINS; do
+            echo "--- $f ---"
+            cat "/tmp/$f.err" || true
+            cat "/tmp/$f.json" || true
+            echo
+            S=$(jq -r '.status // empty' "/tmp/$f.json" 2>/dev/null || true)
+            ID=$(jq -r '.id // empty' "/tmp/$f.json" 2>/dev/null || true)
+            echo "$f: status=${S:-<없음>}"
+            if [ "$S" != "Accepted" ]; then
+              rc=1
+              if [ -n "$ID" ]; then
+                xcrun notarytool log "$ID" \
+                  --key /tmp/notary.p8 --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER_ID" || true
+              fi
+            fi
+          done
+          exit $rc
 
       - name: 체크섬
         run: |
