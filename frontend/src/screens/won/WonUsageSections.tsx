@@ -17,9 +17,18 @@ import { LENGTH_BINS, fillMonths, fillWeeks, forecastTone, isCurrentPeriod, leve
 // ── 에이전트 응답 모양 (spaces.go 의 SQL 과 1:1) ─────────────────────────
 type Period = { period: string; used: number };
 type Bucket = { no: number; earn_type: string; is_free: number; first_use: string; last_use: string; consumed: number; n: number };
+/** 1.3.0 — 작업 실행 한 건. 프로젝트는 번호가 아니라 차례(`project_no`, 첫 소진 순)다 — 식별자는 에이전트가 안 내보낸다.
+ *  작업 상세(status·pair·minutes…)는 스냅샷의 작업 창(2026-03-14~) 안에서만 있고 그 앞은 null 이다. */
+export type CreditRecord = {
+  at: string; space_seq: number; project_no: number; action: "EXECUTE" | "ROLLBACK"; credits: number; steps: number;
+  tier: string | null; status: string | null; pair: string | null; minutes: number | null; lip_sync: boolean | null;
+  speed: string | null; speakers: number | null;
+};
 export type CreditsData = {
   monthly: Period[] | null; weekly: Period[] | null; daily: Period[] | null; buckets: Bucket[] | null;
   used_total: number | null; rolled_back: number | null; first_use: string | null; last_use: string | null;
+  /** 최신 500건. `records_total` 이 그보다 크면 그만큼만 보인다. */
+  records?: CreditRecord[] | null; records_total?: number | null;
 };
 type JobsData = {
   status: { status: string; n: number }[] | null;
@@ -179,9 +188,75 @@ export function CreditUsageSection({ contract, usage, credits, snapshotAt, credi
                 (2026-09-15 운영자: 「이런 것도 삭제 · 지급 묶음도 필요 없음」). 묶음 데이터는 지급
                 회차 표의 상태 줄(소진 시작 날짜)과 자동 대조가 그대로 쓴다. */}
           </div>
+
+          {data && <CreditRecords rows={data.data.records ?? []} total={data.data.records_total ?? 0} spaces={usage.spaces} />}
         </>
       )}
     </section>
+  );
+}
+
+const STATUS: Record<string, string> = { COMPLETED: "완료", FAILED: "실패", PROCESSING: "처리 중", PENDING: "대기", CANCELED: "취소" };
+const PAGE = 20;
+
+/** 작업별 소진 기록 (2026-09-17 운영자: 「크레딧을 사용한 기록들을 작업별로 … 어떤 space 인지 보기 편하게」).
+ *  한 줄 = 한 작업 실행. 스페이스가 여럿이면 고르개로 좁힌다. 20건씩 펼친다 — 에이전트가 최신 500건까지 준다. */
+function CreditRecords({ rows, total, spaces }: { rows: CreditRecord[]; total: number; spaces: number[] }) {
+  const [space, setSpace] = useState<number | null>(null);
+  const [shown, setShown] = useState(PAGE);
+  const filtered = space === null ? rows : rows.filter((r) => r.space_seq === space);
+  const visible = filtered.slice(0, shown);
+  const stamp = (at: string) => `${fmt(at.slice(0, 10))} ${at.slice(11, 16)}`;
+  return (
+    <div className="panel">
+      <div className="sub-head">
+        <span className="sub-title">크레딧 사용 기록</span>
+        <span className="muted" style={{ fontSize: 12 }}>
+          {total > rows.length ? `최신 ${num(rows.length)}건 / 전체 ${num(total)}건` : `${num(total)}건`}
+          {spaces.length > 1 && (
+            <select className="st-sel st-neutral" style={{ marginLeft: 10 }} value={space ?? ""}
+                    onChange={(e) => { setSpace(e.target.value ? Number(e.target.value) : null); setShown(PAGE); }}>
+              <option value="">모든 space</option>
+              {spaces.map((s) => <option key={s} value={s}>space {s}</option>)}
+            </select>
+          )}
+        </span>
+      </div>
+      {!filtered.length ? <Empty text="소진 기록이 없습니다." /> : (
+        <div className="table-wrap">
+          <table className="mini">
+            <thead><tr>
+              <th>일시</th><th>space</th><th>프로젝트</th><th>작업</th><th>상태</th><th className="num">크레딧</th>
+            </tr></thead>
+            <tbody>
+              {visible.map((r, i) => (
+                <tr key={`${r.at}-${r.space_seq}-${r.project_no}-${i}`}>
+                  <td className="datecell">{stamp(r.at)}</td>
+                  <td className="mono">{r.space_seq}</td>
+                  <td>#{r.project_no}{r.steps > 1 && <span className="muted" style={{ fontSize: 11.5 }}> · {r.steps}단계</span>}</td>
+                  <td>
+                    {r.pair ? pairName(r.pair)
+                      : <span className="muted" title="스냅샷의 작업 기록은 최근 6개월뿐이라 그 앞의 소진은 무슨 작업이었는지 모릅니다">작업 기록 없음</span>}
+                    {r.minutes !== null && <span className="muted" style={{ fontSize: 11.5 }}> · {r.minutes}분</span>}
+                    {r.lip_sync && <span className="mini-chip calm" style={{ marginLeft: 6 }}>립싱크</span>}
+                    {r.speakers ? <span className="muted" style={{ fontSize: 11.5 }}> · 화자 {r.speakers}</span> : null}
+                  </td>
+                  <td>{r.action === "ROLLBACK" ? <span className="mini-chip">취소 환급</span> : r.status ? (STATUS[r.status] ?? r.status) : "—"}</td>
+                  <td className="num" style={r.credits < 0 ? { color: "var(--teal-700)" } : undefined}>{r.credits < 0 ? `+${num(-r.credits)}` : num(r.credits)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {filtered.length > shown && (
+            <div style={{ padding: "8px 11px" }}>
+              <button type="button" className="btn btn--sm" onClick={() => setShown(shown + PAGE)}>
+                더 보기 ({num(filtered.length - shown)}건 남음)
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -236,7 +311,7 @@ function UsedMeter({ d, contract }: { d: Diagnosis; contract: Contract }) {
         <span>계약 <b>{num(credits)}</b></span>
       </div>
       <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>
-        최근 30일 소진 {num(Math.round(d.avgMonthly))}
+        월평균 소진 {num(Math.round(d.avgMonthly))}{d.monthsUsed !== null ? ` (${d.monthsUsed.toFixed(1)}개월 기준)` : ""}
         {d.runwayMonths !== null && isFinite(d.runwayMonths) ? ` · 이 속도면 약 ${d.runwayMonths.toFixed(1)}개월치` : ""}
         {contract.credits_used !== null ? ` · 손으로 적은 사용량 ${num(contract.credits_used)}` : ""}
       </div>

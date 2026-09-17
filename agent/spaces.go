@@ -97,7 +97,7 @@ const spacesCTE = `
 WITH sp AS (SELECT unnest([{{spaces}}]::BIGINT[]) AS space_seq),
 nowat AS (SELECT CAST('{{asof}}' AS TIMESTAMP) AS t),
 cuh AS (
-  SELECT space_seq, create_date, action_type, credit_history_seq,
+  SELECT space_seq, create_date, action_type, credit_history_seq, project_seq, plan_tier,
          CASE WHEN action_type = 'EXECUTE' THEN actual_used_quota ELSE -actual_used_quota END AS signed
   FROM read_csv_auto('{{d}}/perso_video_translator.credit_usage_history.csv', union_by_name=true)
   WHERE space_seq IN (SELECT space_seq FROM sp)
@@ -175,6 +175,27 @@ bucket AS (
   SELECT credit_seq, earn_type, is_free, min(create_date) AS first_use, max(create_date) AS last_use,
          round(sum(initial_credit)) AS consumed, count(*) AS n
   FROM scuh GROUP BY 1, 2, 3
+),
+grp AS (
+  SELECT project_seq, space_seq, action_type, plan_tier, date_trunc('second', create_date) AS t,
+         round(sum(signed)) AS credits, count(*) AS steps
+  FROM cuh GROUP BY 1, 2, 3, 4, 5
+),
+near AS (
+  SELECT g.*, e.job_status, e.speed_type, e.speaker_count,
+         CASE WHEN e.source_language_code IS NULL THEN NULL
+              ELSE e.source_language_code || ' → ' || e.target_language_code END AS pair,
+         round(e.original_video_duration_ms / 60000.0, 1) AS minutes,
+         (e.lib_sync = 1) AS lip_sync,
+         row_number() OVER (PARTITION BY g.project_seq, g.t, g.action_type, g.plan_tier
+                            ORDER BY abs(date_diff('second', g.t, e.create_date))) AS rn
+  FROM grp g
+  LEFT JOIN pel e ON e.project_seq = g.project_seq AND abs(date_diff('second', g.t, e.create_date)) <= 300
+),
+pf AS (SELECT project_seq, min(create_date) AS f FROM cuh GROUP BY 1),
+rec AS (
+  SELECT n.*, dense_rank() OVER (ORDER BY pf.f, pf.project_seq) AS project_no
+  FROM near n JOIN pf USING (project_seq) WHERE n.rn = 1
 )
 SELECT
   to_json((SELECT list(struct_pack(period := period, used := used) ORDER BY period) FROM (
@@ -192,7 +213,17 @@ SELECT
   (SELECT round(sum(signed)) FROM cuh) AS used_total,
   (SELECT round(sum(CASE WHEN action_type = 'ROLLBACK' THEN -signed ELSE 0 END)) FROM cuh) AS rolled_back,
   (SELECT min(create_date) FROM cuh) AS first_use,
-  (SELECT max(create_date) FILTER (WHERE action_type = 'EXECUTE') FROM cuh) AS last_use
+  (SELECT max(create_date) FILTER (WHERE action_type = 'EXECUTE') FROM cuh) AS last_use,
+  -- 1.3.0 — 작업별 소진 기록 (2026-09-17 운영자: 「크레딧을 사용한 기록들을 작업별로 … 어떤 space 인지」).
+  -- 한 줄 = 한 작업 실행: 같은 프로젝트·같은 초의 차감 행(파이프라인 단계마다 한 행)을 합친다.
+  -- 프로젝트는 번호가 아니라 **차례**(project_no, 첫 소진 순)로 부른다 — 식별자는 계약 검사가 거절한다.
+  -- 작업 상세는 같은 프로젝트의 export 기록 중 5분 안에서 가장 가까운 것; 없으면(작업 창 밖) 빈칸.
+  to_json((SELECT list(struct_pack(at := t, space_seq := space_seq, project_no := project_no, action := action_type,
+                                   credits := credits, steps := steps, tier := plan_tier, status := job_status,
+                                   pair := pair, minutes := minutes, lip_sync := lip_sync, speed := speed_type,
+                                   speakers := speaker_count) ORDER BY t DESC, project_no DESC)
+           FROM (SELECT * FROM rec ORDER BY t DESC LIMIT 500))) AS records,
+  (SELECT count(*) FROM rec) AS records_total
 `
 
 // ── 3. 작업 성능 ─────────────────────────────────────────────────────────

@@ -56,23 +56,42 @@ describe("사용 수준 — 누적 소진율을 계약 경과율과 견준다 (�
   });
 });
 
-describe("크레딧 사용 전망 — 누적 + 최근 30일 × 남은 달", () => {
-  // 2026-09-14 기준 168일 남음 = 5.5개월. 누적 60,000 + 9,000 × 5.5 = 109,737 → 91%.
+describe("크레딧 사용 전망 — 누적 + 월평균 × 남은 달 (2026-09-17 운영자: 최근 30일 대신 지금까지의 월평균)", () => {
+  // 2026-09-14 기준: 첫 소진 03-02 부터 196일 = 6.45개월 사용 → 월평균 60,000 ÷ 6.45 = 9,306.
+  // 168일 남음 = 5.5개월. 60,000 + 9,306 × 5.5 = 111,429 → 93%.
   it("계약 끝에 85~115% 안이면 정상", () => {
     const d = diagnose(contract(), space(), AS_OF, 3.7, CREDITS_FROM);
-    expect(d.projected).toBe(109_737);
+    expect(d.monthsUsed).toBeCloseTo(6.447, 2);
+    expect(Math.round(d.avgMonthly)).toBe(9_306);
+    expect(d.projected).toBe(111_429);
     expect(d.forecast).toBe("정상");
-    expect(d.forecastDetail).toBe("예상 소진 109,737 / 계약 120,000 (91%) · 5.5개월 남음");
+    expect(d.forecastDetail).toBe("예상 소진 111,429 / 계약 120,000 (93%) · 월평균 9,306 × 5.5개월 남음");
+  });
+  it("최근 30일은 전망에 안 들어간다 — 한 달 몰아 썼어도 평균으로 편다", () => {
+    const d = diagnose(contract(), space({ used_30d: 30_000 }), AS_OF, 3.7, CREDITS_FROM);
+    expect(d.projected).toBe(111_429);
+    expect(diagnose(contract(), space({ used_30d: 0 }), AS_OF, 3.7, CREDITS_FROM).projected).toBe(111_429);
   });
   it("115% 이상이면 부족 예상, 85% 이하면 잔여 예상", () => {
-    // 60,000 + 15,000 × 5.5 = 142,895 → 119%
-    expect(diagnose(contract(), space({ used_30d: 15_000 }), AS_OF, 3.7, CREDITS_FROM).forecast).toBe("부족 예상");
-    // 20,000 + 3,000 × 5.5 = 36,579 → 30%
-    expect(diagnose(contract(), space({ used_total: 20_000, used_30d: 3_000 }), AS_OF, 3.7, CREDITS_FROM).forecast).toBe("잔여 예상");
+    // 90,000 ÷ 6.45 = 13,959 × 5.5 + 90,000 = 167,143 → 139%
+    expect(diagnose(contract(), space({ used_total: 90_000 }), AS_OF, 3.7, CREDITS_FROM).forecast).toBe("부족 예상");
+    // 20,000 ÷ 6.45 = 3,102 × 5.5 + 20,000 = 37,143 → 31%
+    expect(diagnose(contract(), space({ used_total: 20_000 }), AS_OF, 3.7, CREDITS_FROM).forecast).toBe("잔여 예상");
   });
   it("보름 남았으면 반 달만 더한다 — 달력 달로 세지 않는다", () => {
     const d = diagnose(contract({ plan_ends_on: "2026-09-29", ends_on: "2026-09-29" }), space(), AS_OF, 3.7, CREDITS_FROM);
-    expect(d.projected).toBe(Math.round(60_000 + 9_000 * (15 / 30.4)));
+    expect(d.projected).toBe(64_592);
+  });
+  it("쓴 지 한 달이 안 됐으면 한 달로 센다 — 나흘 쓴 값을 일곱 배로 부풀리지 않는다", () => {
+    const d = diagnose(contract(), space({ used_total: 3_000, first_use: "2026-09-10 00:00:00" }), AS_OF, 3.7, CREDITS_FROM);
+    expect(d.monthsUsed).toBe(1);
+    expect(d.avgMonthly).toBe(3_000);
+    expect(d.projected).toBe(19_579);
+  });
+  it("첫 소진이 없으면 플랜 시작부터 센다 — 소진이 0 이면 월평균도 0", () => {
+    const d = diagnose(contract(), space({ first_use: null, used_total: 6_000 }), AS_OF, 3.7, CREDITS_FROM);
+    expect(d.monthsUsed).toBeCloseTo(197 / 30.4, 3);
+    expect(diagnose(contract(), space({ first_use: null, used_total: 0, used_30d: 0 }), AS_OF, 3.7, CREDITS_FROM).avgMonthly).toBe(0);
   });
   it("계약이 스냅샷 기록보다 먼저 시작했으면 누적이 덜 잡혀 둘 다 판정 불가", () => {
     const d = diagnose(contract({ plan_starts_on: "2025-10-01", starts_on: "2025-10-01" }), space(),

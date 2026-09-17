@@ -5,6 +5,11 @@
 # 서빙할 이유가 없습니다. 저장소가 공개라 Release 자산은 인증 없이 받아지고, 콘솔의 내려받기
 # 버튼이 `releases/latest/download/<파일>` 을 가리킵니다.
 #
+# 러너가 macOS 인 이유: Mac 바이너리를 Developer ID 로 서명하고 Apple 에 공증(notarize)해야
+# Gatekeeper 의 「악성 코드가 없음을 확인할 수 없습니다」가 안 뜹니다. codesign · notarytool 은
+# macOS 에만 있고, Go 는 CGO 없이 어디서든 세 타깃을 냅니다. 공증은 사람 심사가 아니라 자동
+# 스캔이라 보통 몇 분입니다. 서명 Secrets 가 없으면 그 단계만 건너뛰고 서명 없이 올립니다.
+#
 # 내는 법:  git tag agent-v1.0.0 && git push origin agent-v1.0.0
 name: Agent release
 
@@ -17,11 +22,14 @@ permissions:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
+    runs-on: macos-latest
+    timeout-minutes: 30
     defaults:
       run:
         working-directory: agent
+    env:
+      # step 의 if 는 secrets 를 못 읽어서 env 로 한 번 옮깁니다.
+      HAS_CERT: ${{ secrets.APPLE_CERT_P12_B64 != '' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -46,7 +54,54 @@ jobs:
           GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="$LD" -o dist/perso-agent.exe .
           GOOS=darwin  GOARCH=arm64 CGO_ENABLED=0 go build -ldflags="$LD" -o dist/perso-agent-mac-arm64 .
           GOOS=darwin  GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="$LD" -o dist/perso-agent-mac-intel .
-          (cd dist && sha256sum * > SHA256SUMS.txt && cat SHA256SUMS.txt)
+
+      - name: Mac 서명 (Developer ID · hardened runtime · 타임스탬프 — 공증의 세 조건)
+        if: env.HAS_CERT == 'true'
+        env:
+          P12_B64: ${{ secrets.APPLE_CERT_P12_B64 }}
+          P12_PASSWORD: ${{ secrets.APPLE_CERT_PASSWORD }}
+        run: |
+          set -e
+          echo "$P12_B64" | base64 --decode > /tmp/cert.p12
+          # 러너마다 새 키체인 — 러너는 일회용이라 남지 않습니다.
+          security create-keychain -p "" build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p "" build.keychain
+          security import /tmp/cert.p12 -k build.keychain -P "$P12_PASSWORD" -T /usr/bin/codesign -T /usr/bin/security
+          # Apple 중간 인증서 — 없으면 체인이 안 이어져 서명은 되는데 공증이 거절됩니다.
+          curl -fsSL -o /tmp/DeveloperIDG2CA.cer https://www.apple.com/certificateauthority/DeveloperIDG2CA.cer
+          security import /tmp/DeveloperIDG2CA.cer -k build.keychain -T /usr/bin/codesign || true
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "" build.keychain
+          IDENT=$(security find-identity -v -p codesigning build.keychain | grep -o '"Developer ID Application: [^"]*"' | head -1 | tr -d '"')
+          echo "identity: $IDENT"
+          test -n "$IDENT"
+          for f in perso-agent-mac-arm64 perso-agent-mac-intel; do
+            codesign --force --options runtime --timestamp --sign "$IDENT" "dist/$f"
+            codesign --verify --strict --verbose=2 "dist/$f"
+          done
+          rm -f /tmp/cert.p12
+
+      - name: Mac 공증 (Apple 자동 스캔 — 사람 심사 아님, 보통 몇 분)
+        if: env.HAS_CERT == 'true'
+        env:
+          NOTARY_KEY_P8: ${{ secrets.APPLE_NOTARY_KEY_P8 }}
+          NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
+          NOTARY_ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
+        run: |
+          set -e
+          printf '%s' "$NOTARY_KEY_P8" > /tmp/notary.p8
+          # 맨 바이너리는 zip 에 싸서 제출합니다. 티켓은 바이너리의 서명 해시에 묶이므로 Release 에는
+          # zip 이 아니라 바이너리 그대로 올려도 Gatekeeper 가 첫 실행 때 온라인으로 확인해 통과시킵니다
+          # (stapler 는 .app/.pkg/.dmg 에만 붙습니다).
+          for f in perso-agent-mac-arm64 perso-agent-mac-intel; do
+            ditto -c -k --keepParent "dist/$f" "/tmp/$f.zip"
+            xcrun notarytool submit "/tmp/$f.zip" --key /tmp/notary.p8 --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER_ID" --wait
+          done
+          rm -f /tmp/notary.p8
+
+      - name: 체크섬
+        run: |
+          cd dist && shasum -a 256 * > SHA256SUMS.txt && cat SHA256SUMS.txt
       - uses: softprops/action-gh-release@v2
         with:
           files: |

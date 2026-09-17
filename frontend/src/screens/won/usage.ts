@@ -75,11 +75,12 @@ export type Forecast = "부족 예상" | "잔여 예상" | "정상" | "판정 �
 export type Alert = { key: string; detail: string };
 export type Diagnosis = {
   level: Level; levelDetail: string;
-  /** 계약 끝까지 이 속도면 — 누적 + 최근 30일 소진 × 남은 달(일수 ÷ 30.4, 보름 남았으면 반 달). */
+  /** 계약 끝까지 이 속도면 — 누적 + 월평균 소진 × 남은 달(일수 ÷ 30.4, 보름 남았으면 반 달). */
   forecast: Forecast; forecastDetail: string; projected: number | null;
   usedPct: number | null; pacePct: number | null;
   lastActivity: string | null; daysIdle: number | null; idleTone: "ok" | "warn" | "danger";
-  remaining: number | null; avgMonthly: number; runwayMonths: number | null;
+  /** 월평균 소진 = 누적 ÷ 사용 개월 수(첫 소진부터 스냅샷 시각까지, 최소 1개월). */
+  remaining: number | null; avgMonthly: number; monthsUsed: number | null; runwayMonths: number | null;
   failRate: number | null;
   /** 품질뿐이다 — 무활동은 「마지막 작업」의 색이, 부족·잔여는 「크레딧 사용 전망」이 말한다 (2026-09-16). */
   alerts: Alert[];
@@ -116,7 +117,13 @@ export function diagnose(contract: Contract, s: SpaceSummary, asOf: string, glob
   const idleTone = daysIdle === null || daysIdle >= RULE.idleDays ? "danger" : daysIdle > RULE.warnDays ? "warn" : "ok";
 
   const remaining = credits !== null ? credits - s.used_total : null;
-  const avgMonthly = s.used_30d;
+  // 월평균 소진 = 누적 ÷ 사용 개월 수. 사용 개월 수는 **첫 소진**(없으면 플랜 시작)부터 스냅샷 시각까지이고,
+  // 한 달이 안 됐으면 한 달로 센다 — 열흘 쓴 값을 세 배로 부풀려 전망하지 않는다. 최근 30일이 아니다:
+  // 한 달 쉬면 전망이 0 이 되고 한 달 몰아 쓰면 「부족」이 되던 것을 평균으로 편다 (2026-09-17 운영자).
+  // 스냅샷 기록 시작(2025-12-01)보다 앞은 어차피 누적에 없어 그 날부터 센다.
+  const usedFrom = [s.first_use?.slice(0, 10) ?? start, creditsFrom?.slice(0, 10)].filter((v): v is string => !!v).sort().pop() ?? null;
+  const monthsUsed = usedFrom && usedFrom <= asOf ? Math.max(1, daysBetween(usedFrom, asOf) / 30.4) : null;
+  const avgMonthly = monthsUsed ? s.used_total / monthsUsed : 0;
   const runwayMonths = remaining !== null && avgMonthly > 0 ? remaining / avgMonthly : null;
 
   const jobs = s.jobs_ok + s.jobs_failed;
@@ -138,15 +145,15 @@ export function diagnose(contract: Contract, s: SpaceSummary, asOf: string, glob
     levelDetail = `소진 ${usedPct}% / 경과 ${pacePct}% (${gap > 0 ? "+" : ""}${gap}%p)`;
   }
 
-  // 크레딧 사용 전망 — 누적 + 최근 30일 × 남은 달 이 계약 크레딧의 115% 를 넘으면 부족, 85% 에 못 미치면 잔여.
+  // 크레딧 사용 전망 — 누적 + 월평균 × 남은 달 이 계약 크레딧의 115% 를 넘으면 부족, 85% 에 못 미치면 잔여.
   let forecast: Forecast; let forecastDetail: string; let projected: number | null = null;
   if (cannot) {
     forecast = "판정 불가"; forecastDetail = cannot;
   } else {
-    projected = Math.round(s.used_total + s.used_30d * monthsLeft!);
+    projected = Math.round(s.used_total + avgMonthly * monthsLeft!);
     const pct = Math.round((projected / credits!) * 100);
     forecast = pct >= 100 + RULE.forecastPct ? "부족 예상" : pct <= 100 - RULE.forecastPct ? "잔여 예상" : "정상";
-    forecastDetail = `예상 소진 ${num(projected)} / 계약 ${num(credits!)} (${pct}%) · ${monthsLeft!.toFixed(1)}개월 남음`;
+    forecastDetail = `예상 소진 ${num(projected)} / 계약 ${num(credits!)} (${pct}%) · 월평균 ${num(Math.round(avgMonthly))} × ${monthsLeft!.toFixed(1)}개월 남음`;
   }
 
   // 품질 — 실패율이 전사 평균의 두 배. 재작업률 조건은 뺐다 (2026-09-16 운영자: 「아예 삭제」).
@@ -156,7 +163,7 @@ export function diagnose(contract: Contract, s: SpaceSummary, asOf: string, glob
   }
 
   return { level, levelDetail, forecast, forecastDetail, projected, usedPct, pacePct, lastActivity, daysIdle, idleTone,
-    remaining, avgMonthly, runwayMonths, failRate, alerts, partial };
+    remaining, avgMonthly, monthsUsed, runwayMonths, failRate, alerts, partial };
 }
 
 const num = (v: number) => v.toLocaleString("ko-KR");
