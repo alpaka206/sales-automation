@@ -167,7 +167,8 @@ def _retire_superseded_drafts(session, conversation_id: int, local_stage: str) -
     if local_stage not in _PAST_NEW:
         return 0
     return _delete_pending_drafts(
-        session, conversation_id, why=f"단계 {local_stage} 이동"
+        session, conversation_id, why=f"단계 {local_stage} 이동",
+        keep_reminders=local_stage == "meeting_link_sent",
     )
 
 
@@ -234,13 +235,22 @@ def _retire_empty_client(session, row, conversation_id: int) -> None:
     )
 
 
-def _delete_pending_drafts(session, conversation_id: int, *, why: str) -> int:
-    """나가지 않은 초안과 그 승인 기록을 지웁니다. 지운 수를 돌려줍니다."""
+def _delete_pending_drafts(
+    session, conversation_id: int, *, why: str, keep_reminders: bool = False
+) -> int:
+    """나가지 않은 초안과 그 승인 기록을 지웁니다. 지운 수를 돌려줍니다.
+
+    ``keep_reminders`` — **티켓이 아직 Contacted 면 후속 리마인더 행은 남깁니다** (2026-09-17).
+    그 단계에서 단계 동기화는 10분마다 닿는데(리컨사일 · 웹훅 · 최신화), 실패한 리마인더를
+    그때 지우면 시퀀스가 「아직 안 보냈다」로 읽고 다시 만들어 보냅니다 — 실패가 회차마다
+    되풀이됩니다. Contacted 를 벗어나면 다른 초안과 똑같이 지웁니다: 고객이 못 본 글입니다.
+    """
     from sqlalchemy import delete as sql_delete
 
     from ..db.models import Approval, Message
+    from .followup_sequence import REMINDER_VARIANTS
 
-    drafts = (
+    query = (
         session.query(Message)
         .filter(
             Message.conversation_id == conversation_id,
@@ -256,8 +266,12 @@ def _delete_pending_drafts(session, conversation_id: int, *, why: str) -> int:
             # 않으면 단계 한 번 옮기는 것이 아직 안 나간 고객 접수확인을 취소합니다.
             # 목록·집계·검토 화면이 전부 두는 것과 같은 조건입니다.
         )
-        .all()
     )
+    if keep_reminders:
+        query = query.filter(
+            (Message.prompt_variant.is_(None)) | (Message.prompt_variant.not_in(REMINDER_VARIANTS))
+        )
+    drafts = query.all()
     if drafts:
         ids = [draft.id for draft in drafts]
         # 승인 기록이 먼저입니다. FK 는 ON DELETE CASCADE 지만 SQLite 는 `foreign_keys=ON`

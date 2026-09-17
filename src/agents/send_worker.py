@@ -122,7 +122,13 @@ async def _post_send_bookkeeping(session, msg, conv, message_id: int) -> None:
     # 그 값을 우리 쪽으로 다시 가져옵니다.
     #
     # 위에서 이미 올렸으므로 지금 `meeting_link_sent` 라는 것이 곧 「올렸다」입니다.
-    advanced = bool(conv and conv.stage == "meeting_link_sent")
+    # **후속 리마인더는 빼야 합니다** (2026-09-17). 이미 Contacted 인 티켓에서 나가서 「지금
+    # Contacted」가 「이번에 올렸다」가 아닌 유일한 발송입니다 — 그대로 두면 리마인더마다 허브스팟
+    # 티켓을 Contacted 로 다시 PUT 해서, 영업이 방금 옮긴 Negotiating 을 되돌립니다.
+    from .followup_sequence import REMINDER_VARIANTS
+
+    reminder = msg.prompt_variant in REMINDER_VARIANTS
+    advanced = bool(conv and conv.stage == "meeting_link_sent" and not reminder)
     ticket_id = conv.hubspot_ticket_id if conv else None
     if advanced and ticket_id and not await asyncio.to_thread(
         move_ticket_stage_after_send, ticket_id
@@ -182,6 +188,10 @@ async def _post_send_bookkeeping(session, msg, conv, message_id: int) -> None:
         msg.post_send_synced_at = None if errors else now
         session.commit()
         if msg.post_send_sync_attempts > 1:
+            return
+        if reminder:
+            # 사람이 쓴 답이 아니라 요약에 한 줄을 보태지 않습니다 — 「답을 세 번 했다」로 읽힙니다.
+            add_progress(conv.id, "reply", "후속 리마인더 발송 (자동)")
             return
         add_progress(conv.id, "reply", f"답변 발송 완료: {msg.subject or '(제목 없음)'}"[:200])
         # 티켓 요약에 우리 답 한 줄을 덧붙입니다. **여기서** 하는 이유: 요약은 예전에

@@ -13,6 +13,8 @@ from starlette.concurrency import run_in_threadpool
 from sqlalchemy.orm import joinedload
 
 from ...agents.approval import ApprovalError, approve, reject
+from ...agents.followup_sequence import REMINDER_VARIANTS
+from ...agents.followup_sequence import view as followup_view
 from ...common.config import settings
 from ...common.subjects import reply_subject, strip_reply_prefixes
 from ...common.textwash import text_wash
@@ -317,6 +319,8 @@ def _message_detail_context(
                 # 온 이유 자체라 펼쳐 두지만, 후속 초안은 다시 들어왔을 때 펼쳐져 있으면
                 # 「이 티켓의 기록」을 보러 온 사람의 화면을 가로막습니다(운영자 지적).
                 "is_manual": tm.prompt_variant == MANUAL_REPLY_VARIANT,
+                # 후속 리마인더(자동). 사람이 쓴 회신과 같은 말풍선이면 「세 번 답했다」로 읽힙니다.
+                "is_reminder": tm.prompt_variant in REMINDER_VARIANTS,
                 # 한 줄 요약. New 를 지난 화면은 본문 대신 이것을 보여 주고,
                 # 「전체보기」를 눌렀을 때 본문이 나옵니다.
                 "summary_line": tm.summary_line,
@@ -395,6 +399,9 @@ def _message_detail_context(
                 ),
                 "inquiry_subject": conv.inquiry_subject if conv else None,
                 "inquiry_language": conv.inquiry_language if conv else None,
+                # 후속 리마인더 한 줄 — 다음 리마인더가 언제인지, 멈췄는지, 닫았다가 되살아났는지
+                # (`followup_sequence.view`, 파생값). 되살아난 티켓은 화면이 빨갛게 그립니다.
+                "followup": followup_view(conv, thread_rows) if conv else None,
                 # 티켓이 만들어진 날. **허브스팟을 다시 부르지 않습니다** — 백필이 허브스팟의
                 # `createdate` 를 그대로 복사해 두었고(`hubspot_backfill`: `created_at=
                 # ticket.created_at`), 실시간으로 들어온 티켓만 우리가 받은 시각이라 몇 초
@@ -1123,6 +1130,10 @@ async def start_manual_reply(
                 Message.conversation_id == conv.id,
                 Message.direction == "outgoing",
                 Message.status.in_(_OPEN_DRAFT_STATUSES),
+                # 실패한 후속 리마인더는 「쓰다 만 초안」이 아닙니다. 그 행에 운영자가 자기 글을
+                # 쓰면 리마인더로 분류된 채 나갑니다.
+                (Message.prompt_variant.is_(None))
+                | (Message.prompt_variant.not_in(REMINDER_VARIANTS)),
             )
             .order_by(Message.id.desc())
             .first()

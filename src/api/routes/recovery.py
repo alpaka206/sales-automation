@@ -215,7 +215,12 @@ async def resolve_unknown_delivery(
             conversation = session.get(Conversation, message.conversation_id)
             if conversation and message.prompt_variant != "auto_ack":
                 conversation.last_outgoing_at = message.sent_at
-                conversation.stage = "meeting_link_sent"
+                # **앞으로만 갑니다** — 발송 워커·승인과 같은 규칙. 확인 대기 사이에 고객이 답해
+                # 협의 중이 된 티켓(후속 리마인더가 그 창을 넓힌다)을 Contacted 로 되돌리면 안 됩니다.
+                from ...agents.send_worker import _ADVANCES_FROM
+
+                if conversation.stage in _ADVANCES_FROM:
+                    conversation.stage = "meeting_link_sent"
         _audit(session, request, action, "message", message_id)
         session.commit()
     return RedirectResponse("/logs?tab=recovery&updated=delivery", status_code=303)

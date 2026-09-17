@@ -25,6 +25,8 @@ export type Card = {
   stage: string;
   /** Won Type 또는 Lost Reason. 그 단계의 목록에 있는 값일 때만 서버가 실어 보냅니다. */
   deal_detail: string | null;
+  /** 후속 리마인더가 닫았는데 고객이 돌아와 Negotiating 으로 되살아났다 — 빨갛게 섭니다. */
+  revived?: boolean;
 };
 export type Stage = { key: string; label: string; total: number; cards: Card[] };
 
@@ -217,6 +219,7 @@ export function Board({ stages, manualLogStages, dealDetails = {} }: {
                   <article
                     key={card.conversation_id}
                     className={`pipeline-card${canLog ? " pipeline-card--logged" : ""}${
+                      card.revived ? " pipeline-card--revived" : ""}${
                       details ? " pipeline-card--deal" : ""
                     }${
                       dragging?.conversation_id === card.conversation_id ? " is-dragging" : ""

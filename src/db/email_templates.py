@@ -35,6 +35,9 @@ _CODE_RESOLVED_KEYS = frozenset(
         "whatsapp_link_en",
         "sender_name",
         "sender_name_en",
+        # 후속 리마인더 본문 (`agents.followup_sequence.TEMPLATE_KEYS`, 2026-09-17).
+        "followup_reminder",
+        "followup_closing",
     }
 )
 

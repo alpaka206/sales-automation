@@ -64,9 +64,10 @@ PIPELINE_STAGES: tuple[tuple[str, str, str], ...] = (
     # 필요하고, 다음에 이름이 또 바뀌면 그걸 또 합니다.
     ("meeting_link_sent", "Contacted", "답변 발송"),
     ("negotiation", "Negotiating", "협의 중"),
-    # `reminder_sent` 가 여기 있었습니다 (이관 0109, 운영자 지시로 삭제). 리마인더는 이
-    # 앱이 보내지 않습니다 — 허브스팟 워크플로가 보냅니다. 우리 화면에 그 단계 칸만 있고
-    # 그 일은 저쪽에서 일어나서, 보드에는 아무도 안 옮기는 열이 하나 서 있었습니다.
+    # `reminder_sent` 가 여기 있었습니다 (이관 0109, 운영자 지시로 삭제). 그때 리마인더는
+    # 허브스팟 워크플로가 보냈고 보드에는 아무도 안 옮기는 열이 서 있었습니다. 2026-09-17 부터
+    # 이 앱이 보내지만(`agents/followup_sequence`) **단계는 Contacted 그대로입니다** — 고객 답장 →
+    # Negotiating 규칙이 Contacted 에서만 돌기 때문입니다. 열을 되살리지 않습니다.
     ("won", "Closed Won", "계약 성사"),
     ("closed_lost", "Closed Lost", "실패"),
     # No Response 가 없어지면서 이 단계가 「끝난 문의」 전부를 받습니다(이관 0076) —
@@ -648,6 +649,21 @@ def _set_conversation_stage(
         conversation.stage = stage
         if retire_drafts:
             _retire_superseded_drafts(session, conversation.id, stage)
+        elif stage != "meeting_link_sent":
+            # 고객이 답해서 옮기는 자리. 사람이 쓰던 초안은 두지만, **아직 안 나간 후속
+            # 리마인더는 치웁니다** — 워커가 집기 전이면 방금 답한 고객에게 「답이 없으셔서」가
+            # 나갑니다(2026-09-17).
+            from ...agents.stage_sync import _SUPERSEDABLE
+            from ...agents.followup_sequence import REMINDER_VARIANTS
+
+            for unsent in session.scalars(
+                select(Message).where(
+                    Message.conversation_id == conversation.id,
+                    Message.prompt_variant.in_(REMINDER_VARIANTS),
+                    Message.status.in_(_SUPERSEDABLE),
+                )
+            ).all():
+                session.delete(unsent)
         latest_id = session.scalar(
             select(Conversation.id)
             .where(Conversation.contact_id == contact.id)

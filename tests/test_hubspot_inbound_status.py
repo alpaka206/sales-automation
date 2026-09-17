@@ -238,3 +238,42 @@ async def test_a_reply_on_a_negotiating_ticket_does_not_drag_the_stage_back(
     mock_move.assert_not_called()
     client.update_inbound_status.assert_not_awaited()
     assert profile.pipeline_stage == "negotiation"
+
+
+@pytest.mark.asyncio
+@patch.object(settings, "HUBSPOT_UPDATE_CONTACT_INBOUND_STATUS", True)
+@patch("src.agents.send_worker.append_summary_line")
+@patch("src.agents.send_worker.add_progress")
+@patch("src.integrations.hubspot.move_ticket_stage_after_send")
+@patch("src.integrations.hubspot.HubSpotClient")
+async def test_a_follow_up_reminder_does_not_push_contacted_again(
+    mock_hs_cls, mock_move, mock_progress, mock_summary
+) -> None:
+    """**후속 리마인더는 「단계를 올린 발송」이 아닙니다** (2026-09-17).
+
+    이미 Contacted 인 티켓에서 나가서 `conv.stage == meeting_link_sent` 가 참인데, 그대로 두면
+    리마인더마다 허브스팟 티켓을 Contacted 로 다시 PUT 합니다 — 영업이 방금 Negotiating 으로
+    옮겼고 웹훅이 아직 안 왔으면 사람의 이동을 기계가 되돌립니다. 요약에 한 줄을 보태지도
+    않습니다(「답을 세 번 했다」로 읽힙니다).
+    """
+    from src.agents.followup_sequence import REMINDER_1
+    from src.agents.send_worker import _post_send_bookkeeping
+
+    session = MagicMock()
+    contact = MagicMock(spec=Contact)
+    contact.hubspot_contact_id = "hs-503"
+    profile = MagicMock(spec=CustomerProfile)
+    profile.pipeline_stage = "meeting_link_sent"
+    session.get.side_effect = lambda model, _id: contact if model is Contact else profile
+    conv = MagicMock(id=5, contact_id=503, hubspot_ticket_id="T-10", stage="meeting_link_sent")
+    client = mock_hs_cls.return_value
+    client.update_inbound_status = AsyncMock()
+    client.close = AsyncMock()
+
+    msg = MagicMock(subject="RE: quote", prompt_variant=REMINDER_1, post_send_sync_attempts=0)
+    await _post_send_bookkeeping(session, msg, conv, 13)
+
+    mock_move.assert_not_called()
+    client.update_inbound_status.assert_not_awaited()
+    mock_summary.assert_not_called()
+    assert "리마인더" in mock_progress.call_args.args[2]

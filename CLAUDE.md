@@ -528,16 +528,21 @@ PERSO Inbound is a FastAPI workflow for inbound inquiry handling and customer op
     **적기만 해도 옮겨진다는 것이 더 나빴다**: 기록은 지난 일을 적는 자리라 어제 한
     미팅을 오늘 적으면 그 순간 단계가 움직이고, 그게 허브스팟과 워크북까지 나갔다.
     단계를 옮기는 길은 그대로다 — 보드에서 끌기 · 고객 상세 폼 · 허브스팟 동기화.
-  - **아는 자리가 `ticket_history.sync_one_ticket` 뿐이다.** 접수(폴러·웹훅)는 **New
+  - **아는 자리는 둘이다** — 허브스팟 스레드 수집(`ticket_history.sync_one_ticket`)과 후속
+    리마인더 스윕(`followup_sequence`, 아래). 스윕은 개인 사서함 답장과 콘솔의 「수신」 기록까지
+    보지만 `FOLLOWUP_SEQUENCE_SINCE` 뒤에 회신이 나간 티켓만 본다.
+  - **(옛 문단)** 한동안 아는 자리가 `ticket_history.sync_one_ticket` 뿐이었다. 접수(폴러·웹훅)는 **New
     티켓만** 보므로 Contacted 로 넘어간 티켓에 온 답장은 그 문을 아예 안 지나고,
     `inbound.py` 도 그 티켓의 `messages` 행을 만들지 않는다(New 이후의 대화는
     `customer_interactions` 에 산다).
-  - **「새 답장」의 기준은 `history_synced_at`** — 「우리가 마지막으로 본 때」. **NULL 이면
-    안 옮긴다**: 수집기는 티켓을 끝없이 한 바퀴씩 도는데 첫 바퀴에는 그 티켓의 과거가
-    통째로 들어와서, 기준이 없으면 몇 달 전 답장 하나로 Contacted 에 서 있던 티켓 수백
-    건이 한 회차에 옮겨지고 그게 허브스팟과 영업팀 워크북까지 나간다. 잃는 것은 없다 —
-    다음 바퀴부터 정상으로 판정된다. 판단은 `reply_advances_stage` 한 곳이고 순수 함수라
-    DB 없이 검사한다.
+  - **「새 답장」의 기준은 `_seen_upto`** — 이미 넣어 둔 그 티켓 스레드 줄의 마지막 시각과 우리
+    마지막 회신(`last_outgoing_at`) 중 늦은 쪽. **둘 다 없으면 안 옮긴다**: 처음 수집하는 티켓에는
+    과거가 통째로 들어와서, 기준이 없으면 몇 달 전 답장 하나로 Contacted 티켓 수백 건이 한 회차에
+    옮겨지고 허브스팟과 워크북까지 나간다. 판단은 `reply_advances_stage` 한 곳(순수 함수).
+    - ⚠️ **2026-09-08 ~ 09-17 동안 이 규칙은 한 번도 안 돌았다.** 기준이 `history_synced_at` 이었는데
+      대기열을 그 칸 `IS NULL` 하나로 합치면서 수집기가 도장 없는 티켓만 집게 됐고, 그러면 기준은
+      언제나 None 이다. 테스트가 순수 함수만 봐서 초록이었다 — 지금은
+      `test_the_reply_rule_fires_for_a_ticket_queued_again_by_the_webhook` 가 수집 경로째 고정한다.
   - **올라가는 자리는 Contacted 하나뿐이다.** New 에 온 답장은 우리가 아직 답을 안 한
     것이라 여전히 New 이고(검토할 초안이 대기 중이다), 협의 중·수주·종료는 이미 지나간
     자리라 되돌리면 안 된다 — 발송 워커가 「앞으로만 간다」로 같은 사고를 이미 막았다.
@@ -740,7 +745,32 @@ PERSO Inbound is a FastAPI workflow for inbound inquiry handling and customer op
       제목은 `common.subjects.reply_subject` 하나가 정한다 — 「RE: <고객이 쓴 제목>」이라
       **언제나 고객의 언어**이고, 그래서 제목을 번역하던 `_subject_in_inquiry_language` 도
       같이 나갔다. 되살리려면 「어느 문서가 제목을 정하는가」를 코드가 알 방법부터 정해라.
-- Every outbound reply requires human approval. `_finalize_draft` always writes `pending_approval`, and migration 0087 retires any legacy queued acknowledgement.
+- Every outbound reply requires human approval. `_finalize_draft` always writes `pending_approval`, and migration 0087 retires any legacy queued acknowledgement. **The one exception is the Contacted follow-up reminder** (below) — the operator's approval is writing the template in the console, and `FOLLOWUP_SEQUENCE_SINCE` turns it on.
+- **Contacted 후속 리마인더 — 답이 없으면 3일 · 5일 · 7일** (2026-09-17 운영자 지시, `agents/followup_sequence`,
+  설계 `docs/후속-회신-시퀀스-설계.md`). 허브스팟 워크플로 `4623059693` 이 하던 일이다 — **그 워크플로를
+  끄고 켠다**(안 끄면 같은 고객이 리마인더를 두 통 받는다).
+  우리 회신 +3일 → 템플릿 `followup_reminder`, +5일 → `followup_closing`, +7일 → Closed Lost. 그 사이
+  고객이 연락하면 Negotiating. **닫은 뒤에 연락이 와도** Negotiating 으로 되살리고 보드·티켓에 빨갛게
+  선다(`conversations.followup_closed_at`, 이관 0121 — 사람이 닫은 건과 가르는 유일한 표시).
+  - **새 표도 새 발송 경로도 없다.** 리마인더는 `messages` 행(`prompt_variant` =
+    `followup_reminder_1/2`)이고 `approved` 로 세우면 발송 워커가 보낸다 — 관문·스레드·발신 주소·CC·서명·
+    실패 사유가 사람이 누른 발송과 같다. 몇 번째를 보냈는지는 그 행들에서 읽는다(`sequence_state`).
+  - **시계의 기준은 이 콘솔에서 나간 마지막 회신**(리마인더 제외). 사람이 후속 회신을 또 보내면 3·5·7
+    이 처음부터. 리마인더는 **기준 회신 뒤에 만든 것만** 센다 — 안 그러면 사람 메일 사흘 뒤 「닫겠습니다」.
+  - **본문은 영문 템플릿 두 행**이고 고객 언어가 영어가 아니면 보낼 때 번역한다. 번역이 비거나 언어가
+    안 맞으면 **행을 안 만든다**(발송 관문에서 걸리면 `send_failed` 로 시퀀스가 멈춘다). 서명·CC·
+    발신 계정(개인 사서함이면 그 사서함)·제목·받는 사람은 기준 회신을 베낀다.
+  - **답장은 연락처 단위로 본다** — 개인함 메일은 최신 대화에, 새 폼은 새 티켓에 붙는다. 이 티켓에
+    붙었으면 Negotiating, 같은 사람의 다른 자리면 옮기지 않고 재촉만 멈춘다. 콘솔의 「수신」 기록도 센다.
+  - **안 보내는 조건이 보내는 조건보다 많다**: `FOLLOWUP_SEQUENCE_SINCE` 비었음 · 그 날짜 전 회신 ·
+    메일 비상 스위치(`email_delivery_enabled`) · 평일 09~18시(KST) 밖 · 사람이 쓰는 초안 있음 · 기준
+    회신의 개인 사서함 끊김 · 보내기 직전 허브스팟 재확인 실패(fail closed) · 보내다 만 리마인더
+    (`approved` 는 워커 대기, 실패·거절은 **사람이 잡을 때까지 시계 정지** — 실패를 되풀이하지 않는다).
+  - **리마인더라서 달라지는 자리 넷**: 발송 뒤 정리가 단계 미러링을 건너뛴다(안 그러면 리마인더마다
+    허브스팟 티켓을 Contacted 로 다시 PUT 해 영업이 옮긴 Negotiating 을 되돌린다) · Contacted 인
+    동안 `_delete_pending_drafts` 가 리마인더 행을 안 지운다(지우면 다시 만든다) · 복구 화면
+    「재시도」(=다시 쓰기)와 「메일 발송」의 열린 초안 찾기가 리마인더를 안 건드린다 · 후속 초안의
+    「지난 회신」 앵커가 리마인더를 건너뛴다.
 - **The inquiry category is stored and shown; which document answers it is NOT.** `Conversation.inquiry_category` (0049) is what the 회신 및 검토 list shows where 채널 used to be — channel was `email` on every row. `support` / `spam` / `recruiting` render as **UnQualified**, which means "not a sales lead", not "do not reply": those still get an answer, from the CS guide or the intro document. It also replaced the 검토 필요 flag (0047, dropped in 0049) — "CS 문의" says which one to open first far better than "확인이 필요합니다" did. `Conversation.inquiry_subject` (renamed from `topic` in 0041) still holds the customer's own subject line.
   - **The category→document mapping is deliberately not in code.** The model reads the document index (title · summary · tags) and picks; the category and the inquiry language are hints in the prompt, not a lookup table. Policy changes and Notion titles change — a mapping frozen in Python breaks on both, with nothing on screen to show it broke. `spam` no longer short-circuits to "no documents" for the same reason.
 - HubSpot Conversations performs real delivery on an existing ticket thread. A ticket with no usable thread fails closed for manual handling.

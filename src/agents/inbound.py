@@ -45,6 +45,7 @@ from .inbound_scoring import (  # noqa: F401 — re-exported for callers/tests
 )
 from .summaries import append_summary_line
 from .stage_sync import _retire_superseded_drafts
+from .followup_sequence import REMINDER_VARIANTS
 
 logger = logging.getLogger(__name__)
 
@@ -117,6 +118,7 @@ class _Turn(NamedTuple):
     direction: str  # "inbound" | "outgoing" | "note"
     subject: str | None
     body: str
+    reminder: bool = False  # 후속 리마인더 — 우리 차례이지만 「이미 적은 말」의 근거는 아닙니다
 
 
 _TURN_LABELS = {"inbound": "고객", "outgoing": "우리", "note": "기록"}
@@ -178,6 +180,7 @@ def thread_events(conv_id: int | None) -> list[_Turn]:
                 direction="inbound" if row.direction == "inbound" else "outgoing",
                 subject=row.subject,
                 body=row.body or "",
+                reminder=row.prompt_variant in REMINDER_VARIANTS,
             ))
         for item in interactions:
             if item.external_id in drawn_by_messages:
@@ -232,7 +235,8 @@ def latest_customer_message(conv_id: int | None) -> _Turn | None:
 def last_sent_reply(conv_id: int | None) -> _Turn | None:
     """마지막으로 나간 우리 회신. 「이미 적은 말을 되풀이하지 마라」의 근거입니다."""
     for turn in reversed(thread_events(conv_id)):
-        if turn.direction == "outgoing":
+        # 리마인더 세 줄을 「지난 회신」으로 실으면 실제 회신이 앵커에서 빠집니다.
+        if turn.direction == "outgoing" and not turn.reminder:
             return turn
     return None
 

@@ -194,6 +194,11 @@ class Settings(BaseSettings):
     # Webhook and poller only enqueue; this worker performs HubSpot/AI work with retries.
     INBOUND_WORKER_ENABLED: bool = True
 
+    # ----- Contacted 후속 리마인더 (docs/후속-회신-시퀀스-설계.md) -----
+    # YYYY-MM-DD. 이 날짜 **뒤에 나간** 회신만 3·5·7일 시계를 돕니다 — 기존 티켓은 안 건드린다는
+    # 운영자 지시(2026-09-17)가 이 한 칸입니다. **비어 있으면 리마인더는 꺼져 있습니다.**
+    FOLLOWUP_SEQUENCE_SINCE: str = ""
+
     # ----- Send worker -----
     SEND_WORKER_ENABLED: bool = False
     SEND_RATE_PER_MINUTE: int = 5

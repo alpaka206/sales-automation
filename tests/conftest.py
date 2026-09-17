@@ -87,6 +87,10 @@ os.environ["GOOGLE_SHEETS_SPREADSHEET_ID"] = ""
 # alone, so the old name stays valid) — blanking one spelling while the developer's .env
 # carries another lets a real stage id through. test_safe_mode's
 # test_pytest_can_never_move_a_real_hubspot_ticket is what catches a missed one.
+# 후속 리마인더를 켜는 칸. 개발자 `.env` 에 날짜가 적혀 있으면 폴러를 부르는 테스트가
+# 실제 허브스팟에 발송·단계 이동을 시도합니다 — 켜는 테스트는 직접 넣습니다.
+os.environ["FOLLOWUP_SEQUENCE_SINCE"] = ""
+
 for _stage_var in (
     "HUBSPOT_TICKET_STAGE_NEW",
     "HUBSPOT_TICKET_STAGE_QUALIFIED",

@@ -117,6 +117,11 @@ def request_redraft(message_id: int) -> int:
             raise RedraftError("메시지를 찾을 수 없습니다")
         if msg.status not in {"send_failed", "draft_failed"}:
             raise RedraftError(f"발송·작성 실패 상태만 다시 쓸 수 있습니다 (현재: {msg.status})")
+        from .followup_sequence import REMINDER_VARIANTS
+
+        if msg.prompt_variant in REMINDER_VARIANTS:
+            # 본문은 운영자가 콘솔에 쓴 템플릿입니다. 다시 쓰면 모델의 글이 리마인더로 나갑니다.
+            raise RedraftError("후속 리마인더는 다시 쓰지 않습니다 — 티켓 화면에서 다시 발송하세요")
         conv = session.get(Conversation, msg.conversation_id)
         ticket_id = (conv.hubspot_ticket_id or "") if conv else ""
         if not ticket_id:

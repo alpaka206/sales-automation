@@ -92,6 +92,10 @@ class Conversation(Base):
     # 회차가 그 자리에서 계속하고, 한 바퀴를 다 돌면 가장 오래된 것부터 다시 돌아 새로
     # 쌓인 대화가 저절로 들어옵니다(`agents/ticket_history`).
     history_synced_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # **후속 리마인더가 이 티켓을 Closed Lost 로 닫은 때** (이관 0121). 사람이 닫은 건과 가르는
+    # 유일한 표시입니다 — 닫힌 뒤 고객이 답하면 이 칸이 있는 티켓만 Negotiating 으로 되살리고,
+    # 되살아난 티켓(이 칸 + Negotiating)은 보드와 티켓 화면에 빨갛게 섭니다(2026-09-17 운영자).
+    followup_closed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     hubspot_ticket_id: Mapped[str | None] = mapped_column(
         String(64), nullable=True, unique=True, index=True
     )

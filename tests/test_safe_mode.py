@@ -75,6 +75,49 @@ def test_no_setting_can_make_a_detailed_reply_send_itself():
     assert not hasattr(Settings(_env_file=None), "AUTO_SEND_THRESHOLD")
 
 
+def test_follow_up_reminders_create_nothing_in_safe_mode(safe, monkeypatch):
+    """후속 리마인더는 **사람 승인 없이 나가는 유일한 회신**이다 — 그래서 safe mode 에서는 발송
+    대기 행 자체가 안 생기고 단계도 안 닫는다. 발송은 워커의 `send()` 관문을, 단계 이동은
+    `_sync_stage` 의 관문을 그대로 지나지만, 그 앞에서 시계부터 멈춘다: 메일이 막혔는데 시계가
+    돌면 한 통도 못 받은 고객이 Lost 가 된다.
+    """
+    from datetime import datetime, timedelta, timezone
+
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from sqlalchemy.pool import StaticPool
+
+    from src.agents import followup_sequence as fs
+    from src.db.base import Base
+    from src.db.models import Contact, Conversation, Message
+
+    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False},
+                           poolclass=StaticPool)
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine, expire_on_commit=False)
+    monkeypatch.setattr(fs, "SessionLocal", factory)
+    monkeypatch.setattr(settings, "FOLLOWUP_SEQUENCE_SINCE", "2026-01-01")
+    monkeypatch.setattr(fs, "in_send_window", lambda now: True)
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    with factory() as session:
+        contact = Contact(normalized_email="b@example.com", email="b@example.com", full_name="B")
+        session.add(contact)
+        session.flush()
+        conv = Conversation(contact_id=contact.id, stage="meeting_link_sent", hubspot_ticket_id="T-1")
+        session.add(conv)
+        session.flush()
+        session.add(Message(conversation_id=conv.id, direction="outgoing", status="sent", body="a",
+                            to_address="b@example.com", sent_at=now - timedelta(days=30)))
+        session.commit()
+        conv_id = conv.id
+
+    fs.run_followup_sequence_once()
+
+    with factory() as session:
+        assert session.query(Message).filter_by(conversation_id=conv_id).count() == 1
+        assert session.get(Conversation, conv_id).stage == "meeting_link_sent"
+
+
 # ---- Per-destination switches are SUBORDINATE to the master ------------------
 
 def test_per_channel_switches_cannot_override_safe_mode(safe, monkeypatch):

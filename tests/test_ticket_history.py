@@ -484,6 +484,84 @@ def test_a_new_customer_reply_moves_contacted_to_negotiating():
         assert not reply_advances_stage(stage, seen, [_reply_row("inbound", later)])
 
 
+def test_the_reply_rule_fires_for_a_ticket_queued_again_by_the_webhook(monkeypatch):
+    """**이 규칙은 2026-09-08 부터 한 번도 안 돌았다** (2026-09-17 에 찾았다).
+
+    기준이 `history_synced_at` 이었는데 수집기는 그 칸이 NULL 인 티켓만 집는다 — 그러면 기준은
+    언제나 None 이고 위 순수 함수는 첫 줄에서 False 다. 순수 함수만 검사해서 몰랐다. 지금 기준은
+    「이미 넣어 둔 스레드 줄의 마지막 시각 · 우리 마지막 회신」 중 늦은 쪽이다.
+    """
+    import asyncio
+    from datetime import datetime, timedelta
+
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from sqlalchemy.pool import StaticPool
+
+    from src.agents import ticket_history
+    from src.db.base import Base
+    from src.db.models import Contact, Conversation, CustomerInteraction
+
+    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False},
+                           poolclass=StaticPool)
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine, expire_on_commit=False)
+    monkeypatch.setattr(ticket_history, "SessionLocal", factory)
+    reply_at = datetime(2026, 9, 16, 9, 0)
+    with factory() as session:
+        contact = Contact(normalized_email="c@example.com", email="c@example.com", full_name="C")
+        session.add(contact)
+        session.flush()
+        conv = Conversation(contact_id=contact.id, stage="meeting_link_sent", hubspot_ticket_id="T-5",
+                            last_outgoing_at=reply_at - timedelta(days=2), history_synced_at=None)
+        session.add(conv)
+        session.flush()
+        session.add(CustomerInteraction(contact_id=contact.id, conversation_id=conv.id, channel="이메일",
+                                        direction="inbound", summary="첫 문의",
+                                        external_id="hubspot:conv:first",
+                                        happened_at=reply_at - timedelta(days=3)))
+        session.commit()
+        conv_id, contact_id = conv.id, contact.id
+
+    fetched = [
+        {"external_id": "hubspot:conv:first", "channel": "이메일", "direction": "inbound",
+         "subject": None, "summary": "첫 문의", "handler": None,
+         "happened_at": reply_at - timedelta(days=3)},
+        {"external_id": "hubspot:conv:reply", "channel": "이메일", "direction": "inbound",
+         "subject": None, "summary": "좋습니다", "handler": None, "happened_at": reply_at},
+    ]
+
+    class _Client:
+        async def close(self):
+            return None
+
+    advanced = []
+
+    async def _collect(client, ticket):
+        return [dict(row) for row in fetched]
+
+    async def _advance(conversation_id, contact):
+        advanced.append(conversation_id)
+
+    monkeypatch.setattr("src.integrations.hubspot.HubSpotClient", _Client)
+    monkeypatch.setattr(ticket_history, "collect_ticket_history", _collect)
+    monkeypatch.setattr(ticket_history, "_advance_on_customer_reply", _advance)
+    asyncio.run(ticket_history.sync_one_ticket(conv_id))
+    assert advanced == [conv_id]
+
+    # 처음 보는 티켓(넣어 둔 줄도 우리 회신도 없다)에서는 여전히 안 옮긴다.
+    with factory() as session:
+        fresh = Conversation(contact_id=contact_id, stage="meeting_link_sent", hubspot_ticket_id="T-6")
+        session.add(fresh)
+        session.commit()
+        fresh_id = fresh.id
+    advanced.clear()
+    fetched[0]["external_id"] = "hubspot:conv:first-2"
+    fetched[1]["external_id"] = "hubspot:conv:reply-2"
+    asyncio.run(ticket_history.sync_one_ticket(fresh_id))
+    assert advanced == []
+
+
 def test_the_reply_advance_never_deletes_a_draft():
     """운영자가 「메일 발송」으로 열어 둔 후속 초안이 고객 답장 한 통에 사라지면 안 됩니다.
 

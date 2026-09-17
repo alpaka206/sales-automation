@@ -107,6 +107,9 @@ def _card(row: dict) -> dict:
         "stage": row["stage"],
         # Won Type / Lost Reason. 티켓 세부 내역과 같은 판단을 같은 곳에서 합니다.
         "deal_detail": visible_deal_detail(row["stage"], conversation.deal_detail),
+        # 후속 리마인더가 닫았는데 고객이 돌아와 협의 중으로 되살아난 티켓 — 빨갛게 섭니다
+        # (2026-09-17 운영자). 사람이 다음 단계로 옮기면 저절로 꺼집니다.
+        "revived": conversation.followup_closed_at is not None and row["stage"] == "negotiation",
     }
 
 

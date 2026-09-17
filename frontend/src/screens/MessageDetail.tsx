@@ -24,6 +24,8 @@ type Bubble = {
   subject_ko: string | null;
   needs_ko: boolean;
   is_auto_ack: boolean;
+  /** 후속 리마인더(자동). 사람이 쓴 회신과 같은 말풍선이면 「세 번 답했다」로 읽힙니다. */
+  is_reminder?: boolean;
   summary_line: string | null;
   language: string | null;
   created_at: string;
@@ -62,6 +64,8 @@ type Detail = {
     inquiry_subject: string | null; inquiry_language: string | null; client_id: number | null;
     /** 티켓이 만들어진 날. 백필분은 허브스팟의 생성일 그대로입니다. */
     created_at: string | null;
+    /** 후속 리마인더 한 줄(`followup_sequence.view`). 시퀀스 밖의 티켓은 `null`. */
+    followup: Followup | null;
   };
   ticket_interactions: Interaction[];
   /** 메일이 하나도 없는 티켓은 `null` 입니다 — HubSpot 에서 들여온 티켓이 그렇습니다. */
@@ -707,6 +711,8 @@ export function MessageDetail() {
         </div>
       </div>
 
+      {ticket.followup && <FollowupBanner followup={ticket.followup} />}
+
       {msg?.status === "drafting" && (
         <div className="banner banner--info mb-gap" role="status">
           <span className="banner__icon"><Icon name="sparkles" size={18} /></span>
@@ -792,7 +798,9 @@ export function MessageDetail() {
                 ? "고객 문의"
                 : bubble.is_auto_ack
                   ? "자동 접수확인 (승인 없이 발송)"
-                  : "회신";
+                  : bubble.is_reminder
+                    ? "후속 리마인더 (자동)"
+                    : "회신";
               return (
                 <div key={bubble.id} className={`bubble bubble--${inbound ? "in" : "out"}${bubble.is_current ? " bubble--current" : ""}`}>
                   <div className="bubble__head">
@@ -1188,6 +1196,7 @@ function MessageRow({ bubble, isFirstReply = false }: {
                 {dir.label}
               </span>
               {bubble.is_auto_ack && <span className="tag">자동 접수확인</span>}
+              {bubble.is_reminder && <span className="tag">후속 리마인더 (자동)</span>}
               <time className="t-xs t-subtle tnum">
                 {kst(bubble.sent_at || bubble.created_at)}
               </time>
@@ -1220,3 +1229,32 @@ const SENT = new Set(["outgoing", "outbound"]);
  *  실제로 들어온 언어이고, 목록을 늘려 봐야 안 오는 말이 대부분입니다 — 모르는 코드는
  *  대문자로 적으면 그 자체로 읽힙니다(`PT`·`ES`). */
 
+type Followup = {
+  state: "send_1" | "send_2" | "close" | "sending" | "stalled" | "closed" | "revived";
+  due?: string | null; at?: string | null;
+  reminder_1_at?: string | null; reminder_2_at?: string | null;
+};
+
+/** 후속 리마인더 한 줄 (2026-09-17). 무엇을 언제 할지는 서버가 정하고(`followup_sequence.view`),
+ *  화면은 말만 고릅니다. **닫았다가 고객이 돌아온 티켓은 빨갛게** — 운영자 지시입니다. */
+function FollowupBanner({ followup: f }: { followup: Followup }) {
+  const at = (value?: string | null) => kst(value, "md-hm");
+  const text =
+    f.state === "revived" ? `답이 없어 ${at(f.at)} 에 자동으로 닫았는데 고객이 다시 연락해 협의 중으로 되살렸습니다.`
+    : f.state === "closed" ? `답이 없어 ${at(f.at)} 에 자동으로 Closed Lost 로 닫았습니다. 고객이 연락하면 협의 중으로 되살립니다.`
+    : f.state === "send_1" ? `답이 없으면 ${at(f.due)} 이후 리마인더를 보냅니다.`
+    : f.state === "send_2" ? `리마인더 발송 ${at(f.reminder_1_at)} · 답이 없으면 ${at(f.due)} 이후 마감 메일을 보냅니다.`
+    : f.state === "close" ? `마감 메일 발송 ${at(f.reminder_2_at)} · 답이 없으면 ${at(f.due)} 이후 Closed Lost 로 닫습니다.`
+    : f.state === "sending" ? "후속 리마인더를 보내는 중입니다."
+    : "후속 리마인더 발송이 멈췄습니다 — 아래 기록에서 다시 보내거나 단계를 옮기세요.";
+  const tone = f.state === "revived" ? " banner--danger" : f.state === "stalled" ? " banner--warn" : "";
+  return (
+    <div className={`banner${tone} mb-gap`} role={f.state === "revived" ? "alert" : "status"}>
+      <span className="banner__icon"><Icon name={f.state === "revived" ? "warn" : "send"} size={18} /></span>
+      <div>
+        <div className="banner__title">{f.state === "revived" ? "자동 종료 뒤 고객이 돌아왔습니다" : "후속 리마인더"}</div>
+        <div className="t-sm">{text}</div>
+      </div>
+    </div>
+  );
+}
