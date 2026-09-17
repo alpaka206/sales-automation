@@ -280,7 +280,23 @@ sm AS (
   FROM read_csv_auto('{{d}}/perso.space_member.part*.csv', union_by_name=true)
   WHERE space_seq IN (SELECT space_seq FROM sp)
 ),
-spc AS (SELECT seat FROM read_csv_auto('{{d}}/perso.space.part*.csv', union_by_name=true) WHERE seq IN (SELECT space_seq FROM sp))
+spc AS (SELECT seat FROM read_csv_auto('{{d}}/perso.space.part*.csv', union_by_name=true) WHERE seq IN (SELECT space_seq FROM sp)),
+-- 콘텐츠 카테고리 — project_sensitive.project_category (2026-09-16 운영자). 프로젝트당 한 줄이어야 하는데
+-- 드물게 둘이라(실측 92,393 대 92,389) 최신 것 하나만 — 안 그러면 내보내기 수가 부풀어 「총 영상」이 틀린다.
+-- 세는 단위는 다른 카드와 같은 **내보내기**(pel)라 파이 가운데 수가 언어쌍·길이와 맞는다.
+cats AS (
+  SELECT coalesce(c.category, '(미기록)') AS category, count(*) AS n
+  FROM pel LEFT JOIN (
+    SELECT project_seq, arg_max(project_category, seq) AS category
+    FROM read_csv_auto('{{d}}/perso_video_translator.project_sensitive.csv', union_by_name=true)
+    WHERE project_seq IN (SELECT project_seq FROM ps) GROUP BY 1
+  ) c ON c.project_seq = pel.project_seq
+  GROUP BY 1
+),
+topcat AS (SELECT category, n FROM cats WHERE category <> '(미기록)' ORDER BY n DESC, category LIMIT 5),
+-- 보이스 클론 — space_voice 의 살아 있는 줄. 등록한 사람 수는 좌석 대비를 내는 데 쓴다(사람은 안 나간다).
+sv AS (SELECT user_seq FROM read_csv_auto('{{d}}/perso_video_translator.space_voice.csv', union_by_name=true)
+       WHERE space_seq IN (SELECT space_seq FROM sp) AND is_active = 1)
 SELECT
   to_json((SELECT list(struct_pack(pair := pair, n := n) ORDER BY n DESC, pair) FROM top5)) AS languages,
   (SELECT coalesce(sum(n), 0) FROM pairs) - (SELECT coalesce(sum(n), 0) FROM top5) AS languages_other,
@@ -291,6 +307,9 @@ SELECT
       GROUP BY 1, 2))) AS lengths,
   to_json((SELECT list(struct_pack(source := source, n := n) ORDER BY n DESC) FROM (
       SELECT coalesce(upload_source_type, '(미기록)') AS source, count(*) AS n FROM pel GROUP BY 1))) AS sources,
+  to_json((SELECT list(struct_pack(category := category, n := n) ORDER BY n DESC, category) FROM topcat)) AS categories,
+  (SELECT coalesce(sum(n), 0) FROM cats) - (SELECT coalesce(sum(n), 0) FROM topcat) AS categories_other,
+  to_json((SELECT struct_pack(voices := count(*), members := count(DISTINCT user_seq)) FROM sv)) AS voices,
   to_json((SELECT struct_pack(
       seats := (SELECT coalesce(sum(seat), 0) FROM spc),
       spaces_found := (SELECT count(*) FROM spc),

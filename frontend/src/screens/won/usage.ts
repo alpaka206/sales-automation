@@ -7,13 +7,11 @@
 import type { Contract } from "./shared";
 
 export const RULE = {
-  idleDays: 30,     // N일 무활동 · 미사용
-  gapPct: 20,       // 과소·초과: 누적 소진율 − 계약 경과율 (%p)
-  runwayMonths: 1.5, // 크레딧 부족 예상: 잔여 ÷ 월평균 소진
-  leftoverPct: 20,  // 크레딧 잔여 예상: 계약 종료 시 잔여 > 계약 크레딧의 N%
+  gapPct: 15,       // 사용 수준: 누적 소진율 − 계약 경과율(소진율 미터의 세로선) ±N%p (2026-09-16 운영자)
+  forecastPct: 15,  // 크레딧 사용 전망: 예상 소진(누적 + 최근 30일 × 남은 달) vs 계약 크레딧 ±N%
+  warnDays: 7,      // 마지막 작업: N일 초과면 주황
+  idleDays: 30,     // 마지막 작업: N일 이상이면 빨강 · 미사용
   failMult: 2,      // 품질: 실패율 ≥ 전사 평균 N배
-  reworkPct: 20,    // 품질: 재작업률 N%
-  warnDays: 14,     // 마지막 작업 노랑
   minJobs: 10,      // 실패율을 따질 최소 작업 수 — 다섯 건 중 하나가 실패해도 「품질」이 되면 안 된다
   leadDays: 2,      // 자동 대조: 예정일 N일 전부터 본다(지난 것은 전부). 그보다 먼 회차는 안 본다 (2026-09-15 운영자)
 };
@@ -72,14 +70,18 @@ export const shiftDay = (iso: string, days: number) => {
   return d.toISOString().slice(0, 10);
 };
 
-export type Level = "미사용" | "과소사용" | "초과사용" | "적정" | "판정 불가";
+export type Level = "미사용" | "과소사용" | "초과사용" | "정상" | "판정 불가";
+export type Forecast = "부족 예상" | "잔여 예상" | "정상" | "판정 불가";
 export type Alert = { key: string; detail: string };
 export type Diagnosis = {
-  level: Level; levelDetail: string; gap: number | null;
+  level: Level; levelDetail: string;
+  /** 계약 끝까지 이 속도면 — 누적 + 최근 30일 소진 × 남은 달(일수 ÷ 30.4, 보름 남았으면 반 달). */
+  forecast: Forecast; forecastDetail: string; projected: number | null;
   usedPct: number | null; pacePct: number | null;
   lastActivity: string | null; daysIdle: number | null; idleTone: "ok" | "warn" | "danger";
-  remaining: number | null; avgMonthly: number; runwayMonths: number | null; projectedLeft: number | null;
-  failRate: number | null; reworkRate: number | null;
+  remaining: number | null; avgMonthly: number; runwayMonths: number | null;
+  failRate: number | null;
+  /** 품질뿐이다 — 무활동은 「마지막 작업」의 색이, 부족·잔여는 「크레딧 사용 전망」이 말한다 (2026-09-16). */
   alerts: Alert[];
   /** 계약이 스냅샷의 크레딧 기록(2025-12-01~)보다 먼저 시작해 누적이 덜 잡힌다. */
   partial: boolean;
@@ -97,11 +99,12 @@ export function diagnose(contract: Contract, s: SpaceSummary, asOf: string, glob
 
   // 경과율 — 플랜 기간 기준(계약 기간이 아닙니다: MRR 이 그렇게 나뉘는 것과 같은 이유).
   let pacePct: number | null = null;
-  let monthsLeft = 0;
+  let monthsLeft: number | null = null;
   if (start && end && end > start) {
     const total = daysBetween(start, end);
     const gone = Math.min(total, Math.max(0, daysBetween(start, asOf)));
     pacePct = Math.round((gone / total) * 100);
+    // 남은 달은 일수로 잰다 — 보름 남았으면 반 달. 달력 달로 세면 이번 달이 통째로 한 달이 된다.
     monthsLeft = Math.max(0, (total - gone) / 30.4);
   }
   const usedPct = credits && credits > 0 ? Math.round((s.used_total / credits) * 100) : null;
@@ -109,61 +112,60 @@ export function diagnose(contract: Contract, s: SpaceSummary, asOf: string, glob
 
   const lastActivity = [s.last_use, s.last_job].filter(Boolean).sort().pop()?.slice(0, 10) ?? null;
   const daysIdle = lastActivity ? Math.max(0, daysBetween(lastActivity, asOf)) : null;
-  const idleTone = daysIdle === null || daysIdle >= RULE.idleDays ? "danger" : daysIdle >= RULE.warnDays ? "warn" : "ok";
+  // 7일 이내 초록 · 7일 넘어 30일 미만 주황 · 30일 이상 빨강 (2026-09-16 운영자). 목록과 상세가 같은 색.
+  const idleTone = daysIdle === null || daysIdle >= RULE.idleDays ? "danger" : daysIdle > RULE.warnDays ? "warn" : "ok";
 
   const remaining = credits !== null ? credits - s.used_total : null;
-  const avgMonthly = s.used_90d / 3;
+  const avgMonthly = s.used_30d;
   const runwayMonths = remaining !== null && avgMonthly > 0 ? remaining / avgMonthly : null;
-  const projectedLeft = remaining !== null ? Math.round(remaining - avgMonthly * monthsLeft) : null;
 
   const jobs = s.jobs_ok + s.jobs_failed;
   const failRate = jobs > 0 ? (s.jobs_failed / jobs) * 100 : null;
-  const reworkRate = s.projects > 0 ? (s.reworked / s.projects) * 100 : null;
 
-  // 사용 수준 — 하나만.
-  const gap = usedPct !== null && pacePct !== null ? usedPct - pacePct : null;
+  const cannot = !credits ? "계약 크레딧이 없습니다" : pacePct === null ? "플랜 기간이 없습니다"
+    : partial ? `스냅샷의 소진 기록이 ${creditsFrom?.slice(0, 10)} 부터라 그 앞 소진이 빠져 있습니다` : null;
+
+  // 사용 수준 — 누적 소진율을 계약 경과율(소진율 미터의 세로선)과 견준다. 「지금까지 쓴 만큼이 지난
+  // 기간에 맞나」이고, 최근 30일은 안 본다 — 그건 아래 「전망」의 재료다 (2026-09-17 운영자).
   let level: Level; let levelDetail: string;
   if (s.used_30d <= 0) {
     level = "미사용"; levelDetail = "최근 30일 소진 0";
-  } else if (gap === null) {
-    level = "판정 불가"; levelDetail = credits ? "플랜 기간이 없습니다" : "계약 크레딧이 없습니다";
-  } else if (partial) {
-    level = "판정 불가";
-    levelDetail = `스냅샷의 소진 기록이 ${creditsFrom?.slice(0, 10)} 부터라 그 앞 소진이 빠져 있습니다`;
+  } else if (cannot) {
+    level = "판정 불가"; levelDetail = cannot;
   } else {
-    level = gap <= -RULE.gapPct ? "과소사용" : gap >= RULE.gapPct ? "초과사용" : "적정";
+    const gap = usedPct! - pacePct!;
+    level = gap <= -RULE.gapPct ? "과소사용" : gap >= RULE.gapPct ? "초과사용" : "정상";
     levelDetail = `소진 ${usedPct}% / 경과 ${pacePct}% (${gap > 0 ? "+" : ""}${gap}%p)`;
   }
 
-  // 주의 — 해당하면 모두.
-  const alerts: Alert[] = [];
-  if (daysIdle !== null && daysIdle >= RULE.idleDays) {
-    alerts.push({ key: `${daysIdle}일 무활동`, detail: `마지막 작업 이후 ${RULE.idleDays}일 이상 경과` });
-  } else if (daysIdle === null && s.known) {
-    alerts.push({ key: "작업 기록 없음", detail: "스냅샷에 이 스페이스의 소진·작업 기록이 없습니다" });
+  // 크레딧 사용 전망 — 누적 + 최근 30일 × 남은 달 이 계약 크레딧의 115% 를 넘으면 부족, 85% 에 못 미치면 잔여.
+  let forecast: Forecast; let forecastDetail: string; let projected: number | null = null;
+  if (cannot) {
+    forecast = "판정 불가"; forecastDetail = cannot;
+  } else {
+    projected = Math.round(s.used_total + s.used_30d * monthsLeft!);
+    const pct = Math.round((projected / credits!) * 100);
+    forecast = pct >= 100 + RULE.forecastPct ? "부족 예상" : pct <= 100 - RULE.forecastPct ? "잔여 예상" : "정상";
+    forecastDetail = `예상 소진 ${num(projected)} / 계약 ${num(credits!)} (${pct}%) · ${monthsLeft!.toFixed(1)}개월 남음`;
   }
-  if (runwayMonths !== null && runwayMonths <= RULE.runwayMonths) {
-    alerts.push({ key: "크레딧 부족 예상", detail: `이 속도면 약 ${runwayMonths.toFixed(1)}개월 뒤 소진` });
-  }
-  if (projectedLeft !== null && credits && !partial && projectedLeft > credits * (RULE.leftoverPct / 100)) {
-    alerts.push({ key: "크레딧 잔여 예상", detail: `계약 종료 시 약 ${projectedLeft.toLocaleString()} 남을 전망` });
-  }
-  const qualityWhy: string[] = [];
-  if (failRate !== null && globalFailRate && jobs >= RULE.minJobs && failRate >= globalFailRate * RULE.failMult) {
-    qualityWhy.push(`실패율 ${failRate.toFixed(1)}% (전사 ${globalFailRate.toFixed(1)}%의 ${(failRate / globalFailRate).toFixed(1)}배)`);
-  }
-  if (reworkRate !== null && reworkRate >= RULE.reworkPct) {
-    qualityWhy.push(`재작업률 ${reworkRate.toFixed(0)}% (프로젝트 ${s.projects}개 중 ${s.reworked}개를 두 번 이상 내보냄)`);
-  }
-  if (qualityWhy.length) alerts.push({ key: "품질", detail: qualityWhy.join(" · ") });
 
-  return { level, levelDetail, gap, usedPct, pacePct, lastActivity, daysIdle, idleTone,
-    remaining, avgMonthly, runwayMonths, projectedLeft, failRate, reworkRate, alerts, partial };
+  // 품질 — 실패율이 전사 평균의 두 배. 재작업률 조건은 뺐다 (2026-09-16 운영자: 「아예 삭제」).
+  const alerts: Alert[] = [];
+  if (failRate !== null && globalFailRate && jobs >= RULE.minJobs && failRate >= globalFailRate * RULE.failMult) {
+    alerts.push({ key: "품질", detail: `실패율 ${failRate.toFixed(1)}% (전사 ${globalFailRate.toFixed(1)}%의 ${(failRate / globalFailRate).toFixed(1)}배)` });
+  }
+
+  return { level, levelDetail, forecast, forecastDetail, projected, usedPct, pacePct, lastActivity, daysIdle, idleTone,
+    remaining, avgMonthly, runwayMonths, failRate, alerts, partial };
 }
+
+const num = (v: number) => v.toLocaleString("ko-KR");
 
 export const levelTone = (level: Level) =>
   level === "미사용" ? "danger" : level === "과소사용" ? "warn" : level === "초과사용" ? "reply"
-  : level === "적정" ? "ok" : "neutral";
+  : level === "정상" ? "ok" : "neutral";
+export const forecastTone = (f: Forecast) =>
+  f === "부족 예상" ? "danger" : f === "잔여 예상" ? "warn" : f === "정상" ? "ok" : "neutral";
 
 /** 언어 코드 → 한국어. 스냅샷에는 사람 이름이 없습니다(`language.description` 은 `en-US` 같은 태그). */
 const LANG: Record<string, string> = {

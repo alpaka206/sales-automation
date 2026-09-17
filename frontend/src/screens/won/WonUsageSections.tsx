@@ -1,4 +1,4 @@
-// 수주 고객 상세의 사용 현황 세 섹션 — 크레딧 사용 현황 · 작업 성능 · 사용 구성.
+// 수주 고객 상세의 사용 현황 세 섹션 — 크레딧 사용 현황 · 작업 성능 · 사용 패턴.
 //
 // 값은 전부 이 PC 의 에이전트(`/v1/spaces/*`)에서 오고 **서버로 가지 않습니다.** 계약 쪽
 // 숫자(계약 크레딧·플랜 기간·동시 처리 한도)는 화면이 이미 들고 있는 계약 행에서 읽어
@@ -10,9 +10,9 @@ import { useState } from "react";
 import { useSpaceMetric, type Pair, type SpaceResult } from "../../lib/agent";
 import type { Contract } from "./shared";
 import { fmt, num } from "./shared";
-import { AlertTags, LevelTag } from "./UsageBits";
+import { TONE_COLOR, idleWord } from "./UsageBits";
 import type { RowUsage } from "./useUsage";
-import { LENGTH_BINS, fillMonths, fillWeeks, isCurrentPeriod, pairName, type Diagnosis } from "./usage";
+import { LENGTH_BINS, fillMonths, fillWeeks, forecastTone, isCurrentPeriod, levelTone, pairName, type Diagnosis } from "./usage";
 
 // ── 에이전트 응답 모양 (spaces.go 의 SQL 과 1:1) ─────────────────────────
 type Period = { period: string; used: number };
@@ -40,10 +40,16 @@ type UsageData = {
   languages: { pair: string; n: number }[] | null; languages_other: number;
   lengths: { bin: string; n: number }[] | null;
   sources: { source: string; n: number }[] | null;
+  /** 1.2.0 — 콘텐츠 카테고리 상위 5(project_sensitive.project_category) · 보이스 클론(space_voice 의 살아 있는 줄). */
+  categories?: { category: string; n: number }[] | null; categories_other?: number;
+  voices?: { voices: number; members: number } | null;
   seats: { seats: number; spaces_found: number; members: number; owners: number; left: number; active_30d: number; active_6m: number };
   members: { rank: number; jobs: number }[] | null;
   extras: { lip_sync: number; total: number; avg_speakers: number | null };
   jobs_from: string | null;
+};
+const SOURCE: Record<string, string> = {
+  FILE_UPLOAD: "파일 업로드", YOUTUBE: "YouTube", TIKTOK: "TikTok", GOOGLE_DRIVE: "Google Drive", "(미기록)": "미기록",
 };
 
 const REASON: Record<string, string> = {
@@ -179,11 +185,8 @@ export function CreditUsageSection({ contract, usage, credits, snapshotAt, credi
   );
 }
 
-const idleWord = (d: number) => (d === 0 ? "오늘" : d === 1 ? "어제" : `${d}일 전`);
-const TONE_COLOR: Record<string, string> = { ok: "var(--teal-700)", warn: "var(--amber-fg)", danger: "var(--red-fg)", reply: "var(--indigo-fg)", neutral: "var(--muted)" };
-
-/** 사용 진단 — 사용 수준 / 마지막 작업 / 주의. 목업의 `dg-bar`: 「크레딧」 탭 맨 위, 카드 밖에
- *  서는 줄이라 `.sec` 이 아니라 홀로 선 `.panel` 입니다(테두리·모서리는 같고 머리가 없다). */
+/** 사용 진단 — 사용 수준 / 크레딧 사용 전망 / 마지막 작업 (2026-09-16 운영자: 「주의」는 아예 삭제).
+ *  목업의 `dg-bar`: 「크레딧」 탭 맨 위, 카드 밖에 서는 줄이라 `.sec` 이 아니라 홀로 선 `.panel` 입니다. */
 export function UsageInsight({ d }: { d: Diagnosis }) {
   const cell = (k: string, v: React.ReactNode, tone: string, sub: React.ReactNode) => (
     <div style={{ padding: "14px 18px", background: "#fff" }}>
@@ -195,16 +198,13 @@ export function UsageInsight({ d }: { d: Diagnosis }) {
       <div className="muted" style={{ fontSize: 11.5, lineHeight: 1.5 }}>{sub}</div>
     </div>
   );
-  const levelTone = d.level === "미사용" ? "danger" : d.level === "과소사용" ? "warn" : d.level === "초과사용" ? "reply" : d.level === "적정" ? "ok" : "neutral";
   return (
     <div className="panel" style={{ padding: 0, overflow: "hidden", marginBottom: 18 }}>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0,1fr))", gap: 1, background: "var(--line)" }}>
-        {cell("사용 수준", d.level, levelTone, d.levelDetail)}
+        {cell("사용 수준", d.level, levelTone(d.level), d.levelDetail)}
+        {cell("크레딧 사용 전망", d.forecast, forecastTone(d.forecast), d.forecastDetail)}
         {cell("마지막 작업", d.daysIdle === null ? "기록 없음" : idleWord(d.daysIdle), d.idleTone,
           d.lastActivity ? fmt(d.lastActivity) : "스냅샷에 소진·작업 기록이 없습니다")}
-        {cell("주의", d.alerts.length ? d.alerts.map((a) => <div key={a.key}>{a.key}</div>) : "없음",
-          d.alerts.length ? "danger" : "ok",
-          d.alerts.length ? d.alerts.map((a) => <div key={a.key}>{a.detail}</div>) : "해당하는 주의 항목이 없습니다")}
       </div>
       {/* 「판정 근거」 펼침은 뺐습니다(2026-09-15 운영자: 「굳이 따로 안 보여줘도 돼」). 규칙 자체는
           `usage.ts` 의 RULE 과 그 테스트에 있습니다. */}
@@ -236,7 +236,7 @@ function UsedMeter({ d, contract }: { d: Diagnosis; contract: Contract }) {
         <span>계약 <b>{num(credits)}</b></span>
       </div>
       <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>
-        최근 3개월 평균 월 소진 {num(Math.round(d.avgMonthly))}
+        최근 30일 소진 {num(Math.round(d.avgMonthly))}
         {d.runwayMonths !== null && isFinite(d.runwayMonths) ? ` · 이 속도면 약 ${d.runwayMonths.toFixed(1)}개월치` : ""}
         {contract.credits_used !== null ? ` · 손으로 적은 사용량 ${num(contract.credits_used)}` : ""}
       </div>
@@ -266,11 +266,11 @@ function Bars({ rows, cls, empty }: { rows: { k: string; v: number; s: string; h
   if (!rows.length) return <div className="board-empty" style={{ padding: "6px 0" }}>{empty}</div>;
   const max = Math.max(1, ...rows.map((r) => r.v));
   return (
-    <div className="blist">
+    <div className={`blist${cls === "pct" ? " pct" : ""}`}>
       {rows.map((r) => (
         <div className="brow" key={r.k}>
           <div className="lb" title={r.hint ?? r.k}>{r.k}</div>
-          <div className="bt"><div className={`bf${cls ? ` ${cls}` : ""}`} style={{ width: `${((r.v / max) * 100).toFixed(1)}%` }} /></div>
+          <div className="bt"><div className={`bf${cls && cls !== "pct" ? ` ${cls}` : ""}`} style={{ width: `${((r.v / max) * 100).toFixed(1)}%` }} /></div>
           <div className="vv">{r.s}</div>
         </div>
       ))}
@@ -309,6 +309,33 @@ function Pie({ rows, unit = "편", midLabel = "총 영상" }: { rows: { k: strin
         ))}
       </div>
     </div>
+  );
+}
+
+/** 목업의 쌓인 막대 + 범례 — 한 줄에 구간 전부, 아래에 색 · 이름 · N편 · %. 0 인 구간은 막대에서만 빠진다(색은 자리를 지킨다). */
+function Stacked({ rows, unit = "편" }: { rows: { k: string; v: number }[]; unit?: string }) {
+  const total = rows.reduce((a, r) => a + r.v, 0) || 1;
+  const pct = (v: number) => Math.round((v / total) * 100);
+  return (
+    <>
+      <div className="stk">
+        {rows.map((r, i) => r.v > 0 && (
+          <span key={r.k} className={i >= 2 ? "lt" : undefined} style={{ flex: r.v, background: PIE[i % PIE.length] }} title={`${r.k} · ${num(r.v)}${unit}`}>
+            {pct(r.v) >= 6 ? `${pct(r.v)}%` : ""}
+          </span>
+        ))}
+      </div>
+      <div className="lgd">
+        {rows.map((r, i) => (
+          <div className="lgd-row" key={r.k}>
+            <span className="lgd-c" style={{ background: PIE[i % PIE.length] }} />
+            <span className="lgd-k">{r.k}</span>
+            <span className="lgd-v">{num(r.v)}{unit}</span>
+            <span className="lgd-p">{pct(r.v)}%</span>
+          </div>
+        ))}
+      </div>
+    </>
   );
 }
 
@@ -436,10 +463,14 @@ export function JobsSection({ pair, contract, usage, failRateAll }: {
   );
 }
 
-// ── 사용 구성 — 목업의 usage pane 그대로 ─────────────────────────────────────
-// 언어쌍 Top 5 · 영상 길이 분포(파이 둘) / 좌석 활용률(계약 좌석 · 등록 멤버 · 사용, 멤버별 막대).
-// 멤버별 막대는 목업이 난수로 갈랐지만 여기는 스냅샷의 실제 내보내기 수 — 이름·이메일은 스냅샷에
+// ── 사용 패턴 — 운영자가 준 그림 그대로 (2026-09-16 「디자인은 완벽히 동일하게」) ────────────
+// 언어쌍 Top 5(막대 · N편 · %) · 영상 길이 분포(쌓인 막대 + 범례) / 콘텐츠 카테고리 · 업로드 경로
+// (파이 + 범례) / 좌석 활용률(계약 좌석 · 등록 멤버 · 사용, 멤버별 막대) · 보이스 클론(등록 보이스 ·
+// 등록한 멤버 · 계약 좌석 대비). 멤버별 막대는 스냅샷의 실제 내보내기 수 — 이름·이메일은 스냅샷에
 // 없어 「멤버 1·2·…」 순위로만 선다. 창은 카드의 「최근 30일」과 같다.
+// 카테고리는 project_sensitive.project_category, 경로는 project_export_log.upload_source_type, 보이스는
+// space_voice — project.generation_type 은 아니다(그건 더빙/립싱크 같은 **프로젝트 종류**이고 보이스
+// 클론 343 개의 원본 프로젝트는 338 개가 DUBBING 이라 가를 것이 없다).
 export function MixSection({ pair, contract, usage }: { pair: Pair | null; contract: Contract; usage: RowUsage }) {
   const spaces = usage.kind === "ok" ? usage.spaces : [];
   const { data, problem, busy } = useSpaceMetric<UsageData>(pair, "usage", spaces);
@@ -450,35 +481,60 @@ export function MixSection({ pair, contract, usage }: { pair: Pair | null; contr
     : !d ? <Empty text="기록이 없습니다." /> : null;
   if (gate || !d) return <Card id="sec-mix" title="언어쌍 Top 5" hint="최근 6개월 생성 영상">{gate}</Card>;
 
+  const total = (d.languages ?? []).reduce((a, l) => a + l.n, 0) + d.languages_other;
+  const share = (v: number) => `${num(v)}편 · ${Math.round((v / (total || 1)) * 100)}%`;
   const langs = [
-    ...(d.languages ?? []).map((l) => ({ k: pairName(l.pair), v: l.n, hint: l.pair })),
-    ...(d.languages_other > 0 ? [{ k: "기타", v: d.languages_other }] : []),
+    ...(d.languages ?? []).map((l) => ({ k: pairName(l.pair), v: l.n, s: share(l.n), hint: l.pair })),
+    ...(d.languages_other > 0 ? [{ k: "기타", v: d.languages_other, s: share(d.languages_other) }] : []),
   ];
   const lens = LENGTH_BINS.map((bin) => ({ k: bin, v: d.lengths?.find((l) => l.bin === bin)?.n ?? 0 }));
+  const lensTotal = lens.reduce((a, l) => a + l.v, 0);
+  const cats = [
+    ...(d.categories ?? []).map((c) => ({ k: c.category, v: c.n })),
+    ...((d.categories_other ?? 0) > 0 ? [{ k: "기타", v: d.categories_other! }] : []),
+  ];
+  const sources = (d.sources ?? []).map((s) => ({ k: SOURCE[s.source] ?? s.source, v: s.n, hint: s.source }));
   // 계약 좌석 — 스냅샷의 space.seat 합이 먼저, 없으면 계약 폼의 Account Invitation Limit.
   const seatLimit = d.seats.seats || contract.invite_limit || 0;
+  const voices = d.voices ?? { voices: 0, members: 0 };
 
   return (
     <>
       <div className="g2">
-        <Card id="sec-mix" title="언어쌍 Top 5" hint="최근 6개월 생성 영상">
-          {langs.length ? <Pie rows={langs} /> : <Empty text="내보내기 기록이 없습니다." />}
+        <Card id="sec-mix" title="언어쌍 Top 5" hint={`최근 6개월 ${num(total)}편`}>
+          <Bars rows={langs} cls="pct" empty="내보내기 기록이 없습니다." />
         </Card>
-        <Card title="영상 길이 분포" hint="최근 6개월 생성 영상">
-          {lens.some((l) => l.v > 0) ? <Pie rows={lens} /> : <Empty text="내보내기 기록이 없습니다." />}
+        <Card title="영상 길이 분포" hint={`최근 6개월 ${num(lensTotal)}편`}>
+          {lensTotal ? <Stacked rows={lens} /> : <Empty text="내보내기 기록이 없습니다." />}
         </Card>
       </div>
-      <Card title="좌석 활용률" hint="최근 30일">
-        <div className="seat-sum">
-          <span><i>계약 좌석</i><b>{num(seatLimit)}</b></span>
-          <span><i>등록 멤버</i><b>{num(d.seats.members)}</b></span>
-          <span><i>사용</i><b>{num(d.seats.active_30d)}</b></span>
-        </div>
-        <Bars rows={(d.members ?? []).map((m) => ({ k: `멤버 ${m.rank}`, v: m.jobs, s: `${num(m.jobs)}건` }))}
-              empty="최근 30일에 내보내기를 한 멤버가 없습니다." />
-      </Card>
+      <div className="g2">
+        <Card title="콘텐츠 카테고리" hint="최근 6개월 생성 영상">
+          {cats.length ? <Pie rows={cats} /> : <Empty text="내보내기 기록이 없습니다." />}
+        </Card>
+        <Card title="업로드 경로" hint="최근 6개월 생성 영상">
+          {sources.length ? <Pie rows={sources} /> : <Empty text="내보내기 기록이 없습니다." />}
+        </Card>
+      </div>
+      <div className="g2">
+        <Card title="좌석 활용률" hint="최근 30일">
+          <div className="seat-sum">
+            <span><i>계약 좌석</i><b>{num(seatLimit)}</b></span>
+            <span><i>등록 멤버</i><b>{num(d.seats.members)}</b></span>
+            <span><i>사용</i><b>{num(d.seats.active_30d)}</b></span>
+          </div>
+          <Bars rows={(d.members ?? []).map((m) => ({ k: `멤버 ${m.rank}`, v: m.jobs, s: `${num(m.jobs)}건` }))}
+                empty="최근 30일에 내보내기를 한 멤버가 없습니다." />
+        </Card>
+        <Card title="보이스 클론" hint="현재 등록 기준">
+          <div className="seat-sum bare">
+            <span><i>등록 보이스</i><b>{num(voices.voices)}</b></span>
+            <span><i>등록한 멤버</i><b>{num(voices.members)}명</b></span>
+            <span><i>계약 좌석 대비</i><b>{seatLimit ? `${Math.round((voices.members / seatLimit) * 100)}%` : "—"}</b></span>
+          </div>
+        </Card>
+      </div>
     </>
   );
 }
 
-export { AlertTags, LevelTag };

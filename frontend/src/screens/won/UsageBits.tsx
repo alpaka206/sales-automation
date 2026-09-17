@@ -4,23 +4,30 @@ import { Link } from "react-router-dom";
 import type { useAgent } from "../../lib/agent";
 import { fmt } from "./shared";
 import type { RowUsage, UsageIndex } from "./useUsage";
-import { levelTone, type Alert, type Level } from "./usage";
+import { forecastTone, levelTone, type Diagnosis } from "./usage";
 
 const TONE: Record<string, string> = {
   ok: "st-live", warn: "st-setup", danger: "risk", reply: "plan-ent", neutral: "neutral",
+};
+/** 글자색 — 「마지막 작업」이 목록과 상세에서 같은 색을 쓴다. */
+export const TONE_COLOR: Record<string, string> = {
+  ok: "var(--teal-700)", warn: "var(--amber-fg)", danger: "var(--red-fg)", reply: "var(--indigo-fg)", neutral: "var(--muted)",
 };
 
 export const Tone = ({ tone, children, title }: { tone: string; children: React.ReactNode; title?: string }) =>
   <span className={`tag ${TONE[tone] ?? "neutral"}`} title={title}>{children}</span>;
 
-export function LevelTag({ level }: { level: Level }) {
-  return <Tone tone={levelTone(level)}>{level}</Tone>;
-}
-
-/** 주의 배지 전부. 하나도 없으면 `정상` (상세 헤더) 또는 아무것도 안 그림 (목록). */
-export function AlertTags({ alerts, emptyLabel }: { alerts: Alert[]; emptyLabel?: string }) {
-  if (!alerts.length) return emptyLabel ? <Tone tone="ok">{emptyLabel}</Tone> : null;
-  return <>{alerts.map((a) => <Tone key={a.key} tone="danger" title={a.detail}>{a.key}</Tone>)}</>;
+/** 사용 상태 — 목록의 열과 상세 헤더가 같은 것을 그린다: 사용 수준(정상이면 생략) · 크레딧 사용 전망
+ *  (부족·잔여만) · 품질. 셋 다 조용하면 `emptyLabel`(목록은 「정상」, 헤더는 없음). */
+export function StatusTags({ d, emptyLabel }: { d: Diagnosis; emptyLabel?: string }) {
+  const tags: React.ReactNode[] = [];
+  if (d.level !== "정상") tags.push(<Tone key="level" tone={levelTone(d.level)} title={d.levelDetail}>{d.level}</Tone>);
+  if (d.forecast === "부족 예상" || d.forecast === "잔여 예상") {
+    tags.push(<Tone key="forecast" tone={forecastTone(d.forecast)} title={d.forecastDetail}>{d.forecast}</Tone>);
+  }
+  d.alerts.forEach((a) => tags.push(<Tone key={a.key} tone="danger" title={a.detail}>{a.key}</Tone>));
+  if (!tags.length) return emptyLabel ? <Tone tone="ok">{emptyLabel}</Tone> : null;
+  return <>{tags}</>;
 }
 
 /** 「사용량 기준 2026-09-14 05:00」 — 연결이 없으면 그 사실을. */
@@ -58,7 +65,7 @@ export function UsageStamp({ agent, index, problem, busy }: {
   );
 }
 
-const idleWord = (d: number) => (d === 0 ? "오늘" : d === 1 ? "어제" : `${d}일 전`);
+export const idleWord = (d: number) => (d === 0 ? "오늘" : d === 1 ? "어제" : `${d}일 전`);
 
 /** 목록의 두 열: 마지막 작업 · 사용 상태. */
 export function UsageCells({ usage }: { usage: RowUsage }) {
@@ -74,20 +81,16 @@ export function UsageCells({ usage }: { usage: RowUsage }) {
       <td><Tone tone="warn" title={`Space ${usage.spaces.join(", ")} 이(가) 스냅샷에 없습니다 — 번호를 확인하세요`}>스냅샷에 없음</Tone></td></>;
   }
   const d = usage.diagnosis;
+  // 7일 이내 초록 · 30일 미만 주황 · 30일 이상 빨강 — 날짜와 「N일 전」이 같은 색 (2026-09-16 운영자).
   return (
     <>
-      <td className="datecell">
-        {d.lastActivity ? fmt(d.lastActivity) : <span className="muted">기록 없음</span>}
-        {d.daysIdle !== null && (
-          <span className={`sub ${d.idleTone === "danger" ? "over" : d.idleTone === "warn" ? "due" : ""}`}>
-            {idleWord(d.daysIdle)}
-          </span>
-        )}
+      <td className="datecell" style={{ color: TONE_COLOR[d.idleTone], fontWeight: 600 }}>
+        {d.lastActivity ? fmt(d.lastActivity) : "기록 없음"}
+        {d.daysIdle !== null && <span className="sub" style={{ color: "inherit" }}>{idleWord(d.daysIdle)}</span>}
       </td>
       <td>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
-          {d.level !== "적정" && <LevelTag level={d.level} />}
-          <AlertTags alerts={d.alerts} emptyLabel={d.level === "적정" ? "정상" : undefined} />
+          <StatusTags d={d} emptyLabel="정상" />
         </div>
       </td>
     </>

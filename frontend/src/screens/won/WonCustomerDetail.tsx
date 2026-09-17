@@ -11,7 +11,7 @@ import { SubmitButton, useAction } from "../../ui/ActionButton";
 import { CHANNELS, InteractionForm } from "../../ui/InteractionForm";
 import { Modal } from "../../ui/Modal";
 import { Confirm } from "./Confirm";
-import { AlertTags } from "./UsageBits";
+import { StatusTags } from "./UsageBits";
 import { useAutoReconcile } from "./reconcile";
 import { useEvidence, usageFor, useUsageIndex } from "./useUsage";
 import { matchGrants, matchPayments, mergeEvidence, parseSpaceSeqs, type GrantEvidence, type PaymentEvidence } from "./usage";
@@ -48,7 +48,7 @@ const SECTIONS: [string, string][] = [
   // 사용 쪽은 **이 PC 의 데이터 에이전트**가 답합니다(스냅샷 집계). 서버는 이 값을 모릅니다.
   ["sec-credit", "크레딧"],
   ["sec-jobs", "작업 성능"],
-  ["sec-mix", "사용 구성"],
+  ["sec-mix", "사용 패턴"],
 ];
 
 const AVATAR_COLORS = ["#0F766E", "#B45309", "#3730A3", "#B42318", "#026AA2", "#4B5563"];
@@ -136,7 +136,6 @@ export function WonCustomerDetail() {
     contracts.find((c) => c.seq === pickedSeq) ?? data.active ?? contracts[contracts.length - 1] ?? null;
   const comms = data.comms ?? [];
   const usage = usageFor(current, usageIndex.index);
-  const alerts = usage.kind === "ok" ? usage.diagnosis.alerts : [];
   // 지급 회차 ↔ 스냅샷 소진 묶음. **표시만** — 우리 기록에는 쓰지 않습니다.
   const grantEvidence = current && credits.data && usageIndex.index
     ? matchGrants(current.credit_grants, credits.data.data.buckets ?? [], usageIndex.index.snapshotAt)
@@ -178,8 +177,8 @@ export function WonCustomerDetail() {
           {current?.plan && <Tag tone={`plan-${planTone(current.plan)}`}>{current.plan}</Tag>}
           <Tag tone="neutral">{current ? current.label : "계약 없음"}</Tag>
           {data.setup_count > 0 && <Tag tone="st-setup">세팅중 계약 {data.setup_count}건</Tag>}
-          {/* 주의 배지 전부 — 하나도 없으면 안 뜹니다(요청 문서). 근거 펼침은 없습니다 — 규칙은 usage.ts 의 RULE. */}
-          {usage.kind === "ok" && <AlertTags alerts={alerts} />}
+          {/* 사용 상태 — 목록의 열과 같은 배지(사용 수준 · 전망 · 품질). 조용하면 안 뜹니다. 규칙은 usage.ts 의 RULE. */}
+          {usage.kind === "ok" && <StatusTags d={usage.diagnosis} />}
         </div>
         <div className="secnav" role="tablist">
           {SECTIONS.map(([id, label]) => (
@@ -272,7 +271,7 @@ export function WonCustomerDetail() {
             )}
             {section === "sec-credit" && (
               <>
-                {/* 목업의 `dg-bar` — 사용 수준 · 마지막 작업 · 주의. 카드 밖, 탭 맨 위. */}
+                {/* 목업의 `dg-bar` — 사용 수준 · 크레딧 사용 전망 · 마지막 작업. 카드 밖, 탭 맨 위. */}
                 {usage.kind === "ok" && <UsageInsight d={usage.diagnosis} />}
                 <CreditSection contract={current} today={today} onDone={refresh} evidence={grantEvidence} />
                 <CreditUsageSection contract={current} usage={usage} credits={credits}

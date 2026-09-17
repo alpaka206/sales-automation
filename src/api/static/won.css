@@ -425,6 +425,11 @@
 .won .bf.b2 {background:var(--teal-500);}
 .won .bf.b3 {background:#b45309;}
 .won .brow .vv {text-align:right;font-variant-numeric:tabular-nums;}
+.won .blist.pct .brow {grid-template-columns:minmax(84px,132px) minmax(0,1fr) 84px;}
+.won .stk {display:flex;gap:4px;height:28px;margin:4px 0 20px;}
+.won .stk span {display:grid;place-items:center;min-width:0;border-radius:5px;font-size:12.5px;font-weight:700;color:#fff;white-space:nowrap;overflow:hidden;}
+.won .stk span.lt {color:#14201e;}
+.won .seat-sum.bare {border-bottom:0;padding-bottom:4px;margin-bottom:0;}
 .won .dia {margin-top:4px;}
 .won .dia-h {display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin-bottom:2px;}
 .won .dia-t {font-size:12px;color:#65736f;font-weight:600;}

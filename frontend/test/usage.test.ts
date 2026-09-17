@@ -6,7 +6,7 @@ import type { Contract } from "../src/screens/won/shared";
 // 판정은 화면에 배지로 서는 값이라, 규칙 하나가 틀리면 멀쩡한 고객이 「미사용」이 된다.
 
 const contract = (over: Partial<Contract> = {}): Contract => ({
-  credits: 120_000, plan_starts_on: "2026-03-01", plan_ends_on: "2027-03-01",
+  credits: 120_000, plan_starts_on: "2026-03-01", plan_ends_on: "2027-03-01", plan_months: 12,
   starts_on: "2026-03-01", ends_on: "2027-03-01", ...over,
 } as Contract);
 
@@ -30,34 +30,25 @@ describe("space_seq 파싱", () => {
   });
 });
 
-describe("사용 수준 — 하나만", () => {
-  it("6.5개월 지나 절반 썼으면 적정", () => {
+describe("사용 수준 — 누적 소진율을 계약 경과율과 견준다 (±15%p)", () => {
+  it("6.5개월 지나 절반 썼으면 정상 — 최근 30일은 안 본다", () => {
     const d = diagnose(contract(), space(), AS_OF, 3.7, CREDITS_FROM);
     expect(d.pacePct).toBe(54);   // 197일 / 365일
     expect(d.usedPct).toBe(50);
-    expect(d.level).toBe("적정");
+    expect(d.level).toBe("정상");
+    expect(d.levelDetail).toBe("소진 50% / 경과 54% (-4%p)");
+    expect(diagnose(contract(), space({ used_30d: 1 }), AS_OF, 3.7, CREDITS_FROM).level).toBe("정상");
     expect(d.alerts).toEqual([]);
   });
-  it("경과율보다 20%p 넘게 덜 썼으면 과소사용", () => {
-    const d = diagnose(contract(), space({ used_total: 30_000 }), AS_OF, 3.7, CREDITS_FROM);
-    expect(d.level).toBe("과소사용");
-    expect(d.gap).toBe(25 - 54);
-  });
-  it("20%p 넘게 더 썼으면 초과사용", () => {
-    const d = diagnose(contract(), space({ used_total: 100_000 }), AS_OF, 3.7, CREDITS_FROM);
-    expect(d.level).toBe("초과사용");
+  it("경과율보다 15%p 이상 덜 썼으면 과소사용, 더 썼으면 초과사용 — 14%p 는 정상", () => {
+    expect(diagnose(contract(), space({ used_total: 46_800 }), AS_OF, 3.7, CREDITS_FROM).level).toBe("과소사용"); // 39%
+    expect(diagnose(contract(), space({ used_total: 48_000 }), AS_OF, 3.7, CREDITS_FROM).level).toBe("정상");     // 40%
+    expect(diagnose(contract(), space({ used_total: 81_600 }), AS_OF, 3.7, CREDITS_FROM).level).toBe("정상");     // 68%
+    expect(diagnose(contract(), space({ used_total: 82_800 }), AS_OF, 3.7, CREDITS_FROM).level).toBe("초과사용"); // 69%
   });
   it("최근 30일 소진이 0이면 다른 것과 무관하게 미사용", () => {
     const d = diagnose(contract(), space({ used_30d: 0, used_total: 100_000 }), AS_OF, 3.7, CREDITS_FROM);
     expect(d.level).toBe("미사용");
-  });
-  it("계약이 스냅샷 기록보다 먼저 시작했으면 누적이 덜 잡혀 판정 불가", () => {
-    const d = diagnose(contract({ plan_starts_on: "2025-10-01", starts_on: "2025-10-01" }), space(),
-      AS_OF, 3.7, CREDITS_FROM);
-    expect(d.partial).toBe(true);
-    expect(d.level).toBe("판정 불가");
-    // 잔여 예상도 그 누적에 기대므로 안 띄운다.
-    expect(d.alerts.map((a) => a.key)).not.toContain("크레딧 잔여 예상");
   });
   it("계약 크레딧이 없으면 판정 불가이되 미사용은 잡는다", () => {
     expect(diagnose(contract({ credits: null }), space(), AS_OF, 3.7, CREDITS_FROM).level).toBe("판정 불가");
@@ -65,15 +56,45 @@ describe("사용 수준 — 하나만", () => {
   });
 });
 
-describe("주의 — 해당하면 모두", () => {
-  it("마지막 작업이 30일 넘었으면 N일 무활동, 14일부터 노랑", () => {
+describe("크레딧 사용 전망 — 누적 + 최근 30일 × 남은 달", () => {
+  // 2026-09-14 기준 168일 남음 = 5.5개월. 누적 60,000 + 9,000 × 5.5 = 109,737 → 91%.
+  it("계약 끝에 85~115% 안이면 정상", () => {
+    const d = diagnose(contract(), space(), AS_OF, 3.7, CREDITS_FROM);
+    expect(d.projected).toBe(109_737);
+    expect(d.forecast).toBe("정상");
+    expect(d.forecastDetail).toBe("예상 소진 109,737 / 계약 120,000 (91%) · 5.5개월 남음");
+  });
+  it("115% 이상이면 부족 예상, 85% 이하면 잔여 예상", () => {
+    // 60,000 + 15,000 × 5.5 = 142,895 → 119%
+    expect(diagnose(contract(), space({ used_30d: 15_000 }), AS_OF, 3.7, CREDITS_FROM).forecast).toBe("부족 예상");
+    // 20,000 + 3,000 × 5.5 = 36,579 → 30%
+    expect(diagnose(contract(), space({ used_total: 20_000, used_30d: 3_000 }), AS_OF, 3.7, CREDITS_FROM).forecast).toBe("잔여 예상");
+  });
+  it("보름 남았으면 반 달만 더한다 — 달력 달로 세지 않는다", () => {
+    const d = diagnose(contract({ plan_ends_on: "2026-09-29", ends_on: "2026-09-29" }), space(), AS_OF, 3.7, CREDITS_FROM);
+    expect(d.projected).toBe(Math.round(60_000 + 9_000 * (15 / 30.4)));
+  });
+  it("계약이 스냅샷 기록보다 먼저 시작했으면 누적이 덜 잡혀 둘 다 판정 불가", () => {
+    const d = diagnose(contract({ plan_starts_on: "2025-10-01", starts_on: "2025-10-01" }), space(),
+      AS_OF, 3.7, CREDITS_FROM);
+    expect(d.partial).toBe(true);
+    expect(d.level).toBe("판정 불가");
+    expect(d.forecast).toBe("판정 불가");
+    expect(d.projected).toBeNull();
+  });
+});
+
+describe("마지막 작업 · 품질", () => {
+  it("7일 이내 초록, 그 뒤 주황, 30일부터 빨강 — 주의 배지는 없다", () => {
     const idle = diagnose(contract(), space({ last_use: "2026-08-01 00:00:00", last_job: "2026-07-20 00:00:00" }),
       AS_OF, 3.7, CREDITS_FROM);
     expect(idle.daysIdle).toBe(44);
     expect(idle.idleTone).toBe("danger");
-    expect(idle.alerts.map((a) => a.key)).toContain("44일 무활동");
-    const warn = diagnose(contract(), space({ last_use: "2026-08-30 00:00:00", last_job: null }), AS_OF, 3.7, CREDITS_FROM);
-    expect(warn.idleTone).toBe("warn");
+    expect(idle.alerts).toEqual([]);
+    expect(diagnose(contract(), space({ last_use: "2026-08-15 00:00:00", last_job: null }), AS_OF, 3.7, CREDITS_FROM).idleTone).toBe("danger");
+    expect(diagnose(contract(), space({ last_use: "2026-08-16 00:00:00", last_job: null }), AS_OF, 3.7, CREDITS_FROM).idleTone).toBe("warn");
+    expect(diagnose(contract(), space({ last_use: "2026-09-06 00:00:00", last_job: null }), AS_OF, 3.7, CREDITS_FROM).idleTone).toBe("warn");
+    expect(diagnose(contract(), space({ last_use: "2026-09-07 00:00:00", last_job: null }), AS_OF, 3.7, CREDITS_FROM).idleTone).toBe("ok");
   });
   it("마지막 작업은 소진 기록과 작업 기록 중 최신", () => {
     const d = diagnose(contract(), space({ last_use: "2026-09-01 00:00:00", last_job: "2026-09-13 00:00:00" }),
@@ -81,31 +102,21 @@ describe("주의 — 해당하면 모두", () => {
     expect(d.lastActivity).toBe("2026-09-13");
     expect(d.daysIdle).toBe(1);
   });
-  it("이 속도면 1.5개월 안에 바닥나면 크레딧 부족 예상", () => {
-    // 잔여 10,000 · 최근 90일 27,000 → 월 9,000 → 1.1개월
-    const d = diagnose(contract(), space({ used_total: 110_000 }), AS_OF, 3.7, CREDITS_FROM);
-    expect(d.runwayMonths).toBeCloseTo(1.11, 1);
-    expect(d.alerts.map((a) => a.key)).toContain("크레딧 부족 예상");
-  });
-  it("계약 끝에 20% 넘게 남을 전망이면 크레딧 잔여 예상", () => {
-    // 잔여 100,000 · 월 3,000 · 5.5개월 남음 → 약 83,000 남음 > 24,000
-    const d = diagnose(contract(), space({ used_total: 20_000, used_90d: 9_000, used_30d: 3_000 }), AS_OF, 3.7, CREDITS_FROM);
-    expect(d.alerts.map((a) => a.key)).toContain("크레딧 잔여 예상");
-  });
   it("실패율이 전사 평균 2배면 품질 — 단, 작업이 열 건은 돼야", () => {
     const bad = diagnose(contract(), space({ jobs_ok: 80, jobs_failed: 20 }), AS_OF, 3.7, CREDITS_FROM);
     expect(bad.alerts.find((a) => a.key === "품질")?.detail).toMatch(/실패율 20.0%/);
     const few = diagnose(contract(), space({ jobs_ok: 4, jobs_failed: 1, projects: 5, reworked: 0 }), AS_OF, 3.7, CREDITS_FROM);
     expect(few.alerts.map((a) => a.key)).not.toContain("품질");
   });
-  it("재작업률 20% 이상이면 품질", () => {
-    const d = diagnose(contract(), space({ projects: 50, reworked: 12 }), AS_OF, 3.7, CREDITS_FROM);
-    expect(d.alerts.find((a) => a.key === "품질")?.detail).toMatch(/재작업률 24%/);
+  it("재작업률은 더 이상 품질이 아니다 (2026-09-16 운영자)", () => {
+    const d = diagnose(contract(), space({ projects: 50, reworked: 40 }), AS_OF, 3.7, CREDITS_FROM);
+    expect(d.alerts).toEqual([]);
   });
   it("임계값은 한 곳에서 온다", () => {
+    expect(RULE.gapPct).toBe(15);
+    expect(RULE.forecastPct).toBe(15);
+    expect(RULE.warnDays).toBe(7);
     expect(RULE.idleDays).toBe(30);
-    expect(RULE.gapPct).toBe(20);
-    expect(RULE.runwayMonths).toBe(1.5);
   });
 });
 

@@ -49,7 +49,7 @@ Windows 에서는 처음 실행에 `persodata://` 를 HKCU 에 등록한다(관�
 
 내는 법:
 ```
-git tag agent-v1.1.0 && git push origin agent-v1.1.0     # Actions 가 세 파일을 빌드해 Release 에 올린다
+git tag agent-v1.2.0 && git push origin agent-v1.2.0     # Actions 가 세 파일을 빌드해 Release 에 올린다
 ```
 
 ## 방어 (전부 실측으로 확인)
