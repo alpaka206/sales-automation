@@ -1232,6 +1232,8 @@ const SENT = new Set(["outgoing", "outbound"]);
 type Followup = {
   state: "send_1" | "send_2" | "close" | "sending" | "stalled" | "closed" | "revived";
   due?: string | null; at?: string | null;
+  /** 보내야 할 리마인더의 템플릿 키가 콘솔에 없다 — 스윕은 안 보내고 기다린다. */
+  template_missing?: string | null;
   reminder_1_at?: string | null; reminder_2_at?: string | null;
 };
 
@@ -1242,12 +1244,14 @@ function FollowupBanner({ followup: f }: { followup: Followup }) {
   const text =
     f.state === "revived" ? `답이 없어 ${at(f.at)} 에 자동으로 닫았는데 고객이 다시 연락해 협의 중으로 되살렸습니다.`
     : f.state === "closed" ? `답이 없어 ${at(f.at)} 에 자동으로 Closed Lost 로 닫았습니다. 고객이 연락하면 협의 중으로 되살립니다.`
+    : f.template_missing ? `이메일 템플릿에 키 「${f.template_missing}」 가 없어 리마인더를 보내지 못합니다 — 이메일 템플릿 → 새로 만들기에서 그 키로 만드세요.`
     : f.state === "send_1" ? `답이 없으면 ${at(f.due)} 이후 리마인더를 보냅니다.`
     : f.state === "send_2" ? `리마인더 발송 ${at(f.reminder_1_at)} · 답이 없으면 ${at(f.due)} 이후 마감 메일을 보냅니다.`
     : f.state === "close" ? `마감 메일 발송 ${at(f.reminder_2_at)} · 답이 없으면 ${at(f.due)} 이후 Closed Lost 로 닫습니다.`
     : f.state === "sending" ? "후속 리마인더를 보내는 중입니다."
     : "후속 리마인더 발송이 멈췄습니다 — 아래 기록에서 다시 보내거나 단계를 옮기세요.";
-  const tone = f.state === "revived" ? " banner--danger" : f.state === "stalled" ? " banner--warn" : "";
+  const tone = f.state === "revived" ? " banner--danger"
+    : f.state === "stalled" || f.template_missing ? " banner--warn" : "";
   return (
     <div className={`banner${tone} mb-gap`} role={f.state === "revived" ? "alert" : "status"}>
       <span className="banner__icon"><Icon name={f.state === "revived" ? "warn" : "send"} size={18} /></span>

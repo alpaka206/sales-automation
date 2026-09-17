@@ -73,11 +73,13 @@ def _utcnow() -> datetime:
 
 
 def since() -> datetime | None:
+    """그 날짜 **한국 시각 0시**(UTC 로 전날 15시). 열이 UTC 라 그대로 두면 그날 오전 9시 전에
+    나간 회신이 「기존 티켓」으로 빠진다."""
     raw = (settings.FOLLOWUP_SEQUENCE_SINCE or "").strip()
     if not raw:
         return None
     try:
-        return datetime.strptime(raw, "%Y-%m-%d")
+        return datetime.strptime(raw, "%Y-%m-%d") - timedelta(hours=9)
     except ValueError:
         logger.warning("FOLLOWUP_SEQUENCE_SINCE 가 YYYY-MM-DD 가 아닙니다 — 리마인더를 끕니다.")
         return None
@@ -150,9 +152,17 @@ def view(conv: Conversation, messages) -> dict | None:
     if base is None or _naive(base.sent_at) < start:
         return None
     step, due = next_step(base, reminders)
+    missing = None
+    if step in ("send_1", "send_2"):
+        # 키를 틀리게 적었거나 아직 안 만들었으면 스윕은 로그만 남기고 안 보낸다 — 화면이 그걸 말한다.
+        from ..db.email_templates import get_email_template
+
+        key = TEMPLATE_KEYS[REMINDER_1 if step == "send_1" else REMINDER_2]
+        missing = None if (get_email_template(key) or "").strip() else key
     return {
         "state": step,
         "due": due,
+        "template_missing": missing,
         "reminder_1_at": getattr(reminders.get(REMINDER_1), "sent_at", None),
         "reminder_2_at": getattr(reminders.get(REMINDER_2), "sent_at", None),
     }

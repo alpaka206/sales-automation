@@ -368,3 +368,38 @@ def test_a_reminder_is_never_redrafted_by_the_model(db, monkeypatch):
         message_id = row.id
     with pytest.raises(inbound_worker.RedraftError):
         inbound_worker.request_redraft(message_id)
+
+
+def test_the_start_date_is_midnight_in_korea(monkeypatch):
+    """열이 UTC 라 그대로 두면 그날 오전 9시 전에 나간 회신이 「기존 티켓」으로 빠진다."""
+    monkeypatch.setattr(settings, "FOLLOWUP_SEQUENCE_SINCE", "2026-09-18")
+    assert fs.since() == datetime(2026, 9, 17, 15, 0)
+
+
+def test_an_old_ticket_starts_only_from_a_mail_sent_after_the_start_date(db):
+    """「리마인더는 새 메일부터」(2026-09-17 운영자). 기존 티켓은 새 메일이 없으면 영영 조용하고,
+    그 날짜 뒤에 콘솔에서 새로 보낸 메일이 있으면 **그 메일부터** 3일을 센다."""
+    quiet = _ticket(db, sent_days_ago=400)
+    fs.run_followup_sequence_once()
+    assert len(_outgoing(db, quiet)) == 1
+
+    with db() as session:
+        session.add(Message(conversation_id=quiet, direction="outgoing", status="sent", body="new follow-up",
+                            to_address="buyer@example.com", subject="RE: Custom quote", language="en",
+                            target_language="en", prompt_variant="manual", sent_at=_now() - timedelta(days=1)))
+        session.commit()
+    fs.run_followup_sequence_once()
+    assert len(_outgoing(db, quiet)) == 2  # 새 메일 뒤 1일 — 아직
+
+    _mark_sent(db, _outgoing(db, quiet)[1].id, days_ago=3.1)
+    fs.run_followup_sequence_once()
+    assert _outgoing(db, quiet)[-1].prompt_variant == fs.REMINDER_1
+
+
+def test_a_misspelled_template_key_shows_on_the_ticket(db, monkeypatch):
+    """키를 틀리게 적으면 스윕은 로그만 남기고 안 보낸다 — 티켓 화면이 그걸 말해야 누가 안다."""
+    monkeypatch.setattr("src.db.email_templates.get_email_template", lambda key, language=None: None)
+    conv = _ticket(db, sent_days_ago=4)
+    with db() as session:
+        view = fs.view(session.get(Conversation, conv), _outgoing(db, conv))
+    assert view["state"] == "send_1" and view["template_missing"] == "followup_reminder"
