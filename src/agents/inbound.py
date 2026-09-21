@@ -45,7 +45,7 @@ from .inbound_scoring import (  # noqa: F401 — re-exported for callers/tests
 )
 from .summaries import append_summary_line
 from .stage_sync import _retire_superseded_drafts
-from .followup_sequence import REMINDER_VARIANTS
+from .followup_sequence import REMINDER_NOTE_PREFIX, REMINDER_VARIANTS
 
 logger = logging.getLogger(__name__)
 
@@ -172,6 +172,18 @@ def thread_events(conv_id: int | None) -> list[_Turn]:
         drawn_by_messages = {
             f"hubspot:conv:{m.hubspot_message_id}" for m in messages if m.hubspot_message_id
         }
+        # **후속 리마인더의 소통 히스토리 줄은 대화가 아닙니다** (2026-09-21). 발송 뒤 정리가
+        # 「1차 리마인더 완료」 한 줄을 `customer_interactions` 에 남기는데(운영자 지시로 그
+        # 표에 남겨야 화면에 뜹니다), 그 줄은 같은 리마인더를 **두 번째로** 그리는 것이고
+        # 위 `hubspot:conv:` 규칙으로는 안 걸립니다 — 열쇠가 다릅니다.
+        #
+        # 그대로 두면 셋이 깨집니다: `last_sent_reply` 가 「지난 회신」으로 그 일곱 글자를
+        # 집어 실제 회신을 앵커에서 밀어내고(리마인더를 건너뛰는 규칙이 이 줄에는 안 걸립니다
+        # — `reminder` 표는 `messages` 쪽에만 있습니다), 초안 프롬프트에 우리가 그렇게 답한
+        # 것처럼 실리며, `latest_customer_message` 의 「마지막 회신 뒤」 기준선이 앞당겨져
+        # 직전에 온 고객 답장이 안 보이게 됩니다.
+        #
+        # 메일 자체는 `messages` 행으로 이미 이 목록에 있습니다(`reminder=True` 로).
         turns: list[_Turn] = []
         for row in messages:
             at = row.sent_at or row.created_at
@@ -184,6 +196,8 @@ def thread_events(conv_id: int | None) -> list[_Turn]:
             ))
         for item in interactions:
             if item.external_id in drawn_by_messages:
+                continue
+            if (item.external_id or "").startswith(REMINDER_NOTE_PREFIX):
                 continue
             body = (item.summary or "").strip() or (item.subject or "").strip()
             if not body:

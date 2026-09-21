@@ -403,3 +403,57 @@ def test_a_misspelled_template_key_shows_on_the_ticket(db, monkeypatch):
     with db() as session:
         view = fs.view(session.get(Conversation, conv), _outgoing(db, conv))
     assert view["state"] == "send_1" and view["template_missing"] == "followup_reminder"
+
+
+# ---- 몇 차까지 나갔나 (2026-09-21 운영자 지시: 「1차 리마인더 완료 이런식으로」) ----------
+
+def test_the_ticket_says_which_reminders_are_done(db):
+    conv = _ticket(db, sent_days_ago=30)
+    fs.run_followup_sequence_once()
+    first = _outgoing(db, conv)[1]
+    with db() as session:
+        assert fs.view(session.get(Conversation, conv), _outgoing(db, conv))["done"] == []
+
+    _mark_sent(db, first.id, days_ago=5.1)
+    with db() as session:
+        assert fs.view(session.get(Conversation, conv), _outgoing(db, conv))["done"] \
+            == ["1차 리마인더 완료"]
+
+    fs.run_followup_sequence_once()
+    _mark_sent(db, _outgoing(db, conv)[2].id, days_ago=1)
+    with db() as session:
+        assert fs.view(session.get(Conversation, conv), _outgoing(db, conv))["done"] \
+            == ["1차 리마인더 완료", "2차 리마인더 완료"]
+
+
+@pytest.mark.parametrize("status", ["approved", "send_failed", "test_sent"])
+def test_a_reminder_that_never_reached_the_customer_is_not_done(db, status):
+    """`next_step` 이 「이미 보냈다」로 쓰는 그 조건이어야 한다.
+
+    `test_sent` 는 SAFE 모드로 「나간」 것이라 고객이 받은 것이 없다. `sent_at` 만 보면 시퀀스는
+    `stalled` 인데 화면만 완료라고 적는다.
+    """
+    conv = _ticket(db, sent_days_ago=30)
+    fs.run_followup_sequence_once()
+    with db() as session:
+        row = _outgoing(db, conv)[1]
+        held = session.get(Message, row.id)
+        held.status, held.sent_at = status, _now() - timedelta(days=1)
+        session.commit()
+    with db() as session:
+        assert fs.view(session.get(Conversation, conv), _outgoing(db, conv))["done"] == []
+
+
+def test_a_closed_ticket_still_says_it_was_chased_twice(db):
+    """닫힌 티켓이야말로 「두 번 재촉하고 닫았다」가 적혀 있어야 하는 자리다."""
+    conv = _ticket(db, sent_days_ago=30)
+    fs.run_followup_sequence_once()
+    _mark_sent(db, _outgoing(db, conv)[1].id, days_ago=5.1)
+    fs.run_followup_sequence_once()
+    _mark_sent(db, _outgoing(db, conv)[2].id, days_ago=7.1)
+    fs.run_followup_sequence_once()
+    assert _stage(db, conv) == "closed_lost"
+    with db() as session:
+        view = fs.view(session.get(Conversation, conv), _outgoing(db, conv))
+    assert view["state"] == "closed"
+    assert view["done"] == ["1차 리마인더 완료", "2차 리마인더 완료"]

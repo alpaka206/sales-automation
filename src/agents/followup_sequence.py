@@ -44,10 +44,16 @@ logger = logging.getLogger(__name__)
 REMINDER_1 = "followup_reminder_1"
 REMINDER_2 = "followup_reminder_2"
 REMINDER_VARIANTS = (REMINDER_1, REMINDER_2)
+REMINDER_ORDINAL = {REMINDER_1: "1차", REMINDER_2: "2차"}
 # 발송 경로가 이 이름으로 찾는다(`db.email_templates._CODE_RESOLVED_KEYS`). 본문은 운영자가 콘솔에
 # 쓴 영문 그대로이고, 고객 언어가 영어가 아니면 보낼 때 번역한다.
 TEMPLATE_KEYS = {REMINDER_1: "followup_reminder", REMINDER_2: "followup_closing"}
 APPROVER = "followup_sequence"
+# 리마인더가 나간 뒤 소통 히스토리에 남기는 줄의 `external_id` 앞머리(`send_worker`).
+# **두 곳이 이 글자를 안다** — 남기는 쪽과, 대화를 읽을 때 그 줄을 건너뛰는 쪽
+# (`inbound.thread_events`). 철자를 두 파일에 따로 적으면 한쪽만 고쳐질 때 그 줄이 조용히
+# 「우리가 보낸 회신」으로 다시 세어집니다.
+REMINDER_NOTE_PREFIX = "followup:reminder:"
 
 CONTACTED = "meeting_link_sent"
 NEGOTIATION = "negotiation"
@@ -59,6 +65,15 @@ AFTER_REMINDER_2 = timedelta(days=7)
 # 한 회차에 보내거나 닫는 수. 읽기는 대상 수와 무관하게 쿼리 넷이다.
 PER_SWEEP = 20
 _KST = timezone(timedelta(hours=9))
+
+
+def done_label(variant: str) -> str:
+    """「1차 리마인더 완료」 — 티켓 배너 · 소통 히스토리 · 진행 기록이 **같은 한 문장**을 적는다.
+
+    변형 이름을 이 모듈이 들고 있으니 그 말도 여기가 들고 있다(2026-09-21 운영자 지시:
+    「1차 리마인더 완료 이런식으로」). 두 곳에 적으면 세 화면이 같은 사건을 다르게 부른다.
+    """
+    return f"{REMINDER_ORDINAL[variant]} 리마인더 완료"
 
 
 def _naive(value: datetime | None) -> datetime | None:
@@ -140,15 +155,30 @@ def next_step(base: Message, reminders: dict[str, Message]) -> tuple[str, dateti
 
 
 def view(conv: Conversation, messages) -> dict | None:
-    """티켓 화면의 한 줄. 파생값이라 저장하지 않는다."""
+    """티켓 화면의 한 줄. 파생값이라 저장하지 않는다.
+
+    `done` 은 「몇 차까지 나갔나」를 **그릴 글자 그대로** 담는다(2026-09-21 운영자 지시).
+    세 갈래 전부에 싣는다 — 닫힌·되살아난 티켓이야말로 「두 번 재촉하고 닫았다」가 적혀
+    있어야 하는 자리다. 그래서 `sequence_state` 를 early return 위로 올렸다(쿼리는 안 늘어난다:
+    `messages` 는 이미 손에 있다).
+    """
+    base, reminders = sequence_state(messages)
+    # 판정은 `next_step` 이 「이미 보냈다」로 쓰는 그 조건이다. `sent_at` 만 보면 `test_sent`
+    # (SAFE 모드로 나간 것 — 고객이 받은 것이 없다)가 완료로 읽히고, 시퀀스는 `stalled` 인데
+    # 화면만 완료라고 적는다.
+    done = [
+        done_label(variant)
+        for variant in REMINDER_VARIANTS
+        if (row := reminders.get(variant)) is not None
+        and row.status == "sent" and row.sent_at is not None
+    ]
     if conv.followup_closed_at is not None and conv.stage == NEGOTIATION:
-        return {"state": "revived", "at": conv.followup_closed_at}
+        return {"state": "revived", "at": conv.followup_closed_at, "done": done}
     if conv.followup_closed_at is not None and conv.stage == CLOSED_LOST:
-        return {"state": "closed", "at": conv.followup_closed_at}
+        return {"state": "closed", "at": conv.followup_closed_at, "done": done}
     start = since()
     if start is None or conv.stage != CONTACTED:
         return None
-    base, reminders = sequence_state(messages)
     if base is None or _naive(base.sent_at) < start:
         return None
     step, due = next_step(base, reminders)
@@ -165,6 +195,7 @@ def view(conv: Conversation, messages) -> dict | None:
         "template_missing": missing,
         "reminder_1_at": getattr(reminders.get(REMINDER_1), "sent_at", None),
         "reminder_2_at": getattr(reminders.get(REMINDER_2), "sent_at", None),
+        "done": done,
     }
 
 

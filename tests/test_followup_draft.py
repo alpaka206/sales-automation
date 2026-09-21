@@ -15,6 +15,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from src.agents import inbound as inbound_module
+from src.agents.followup_sequence import REMINDER_NOTE_PREFIX
 from src.db.base import Base
 from src.db.models import Contact, Conversation, CustomerInteraction, Message
 
@@ -89,6 +90,35 @@ def test_our_own_reply_is_not_counted_twice(thread):
                  happened_at=BASE + timedelta(hours=1))
 
     assert len(inbound_module.thread_events(conv_id)) == 2
+
+
+def test_the_reminders_history_line_is_not_a_second_reply(thread):
+    """발송 뒤 정리가 소통 히스토리에 남기는 「1차 리마인더 완료」는 **대화가 아닙니다.**
+
+    2026-09-21 운영자 지시로 리마인더가 나가면 `customer_interactions` 에 한 줄이 남습니다 —
+    그 표가 티켓 화면과 고객 상세가 그리는 목록이라 거기 있어야 눈에 보입니다. 그런데 그 줄은
+    같은 리마인더를 **두 번째로** 그리는 것이고, 우리 회신을 거르는 `hubspot:conv:` 규칙에는
+    열쇠가 달라 안 걸립니다.
+
+    그대로 두면 셋이 깨집니다. ① `last_sent_reply` 가 그 일곱 글자를 「지난 회신」으로 집어
+    실제 회신을 앵커에서 밀어냅니다(리마인더를 건너뛰는 규칙은 `messages` 쪽 표시에만
+    걸립니다). ② 초안 프롬프트에 우리가 그렇게 답한 것처럼 실립니다. ③
+    `latest_customer_message` 의 「마지막 회신 뒤」 기준선이 앞당겨져 직전에 온 고객 답장이
+    안 보이게 됩니다.
+    """
+    factory, conv_id, contact_id = thread
+    _interaction(factory, conv_id, contact_id,
+                 external_id=f"{REMINDER_NOTE_PREFIX}77",
+                 direction="outgoing", summary="1차 리마인더 완료",
+                 happened_at=BASE + timedelta(hours=3))
+
+    bodies = [turn.body for turn in inbound_module.thread_events(conv_id)]
+    assert "1차 리마인더 완료" not in bodies
+    assert bodies == ["크레딧 가격이 궁금합니다", "미팅으로 안내드리겠습니다"]
+
+    # 그리고 「지난 회신」 앵커는 실제 회신 그대로입니다.
+    last = inbound_module.last_sent_reply(conv_id)
+    assert last is not None and last.body == "미팅으로 안내드리겠습니다"
 
 
 def test_a_reply_sent_from_hubspot_means_it_is_not_the_first_reply(thread, monkeypatch):

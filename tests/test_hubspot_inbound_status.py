@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 from src.agents.inbound import InboundAgent
 from src.api.main import app
 from src.common.config import settings
-from src.db.models import Contact, CustomerProfile
+from src.db.models import Contact, CustomerInteraction, CustomerProfile
 
 
 @pytest.fixture()
@@ -270,10 +270,22 @@ async def test_a_follow_up_reminder_does_not_push_contacted_again(
     client.update_inbound_status = AsyncMock()
     client.close = AsyncMock()
 
-    msg = MagicMock(subject="RE: quote", prompt_variant=REMINDER_1, post_send_sync_attempts=0)
+    msg = MagicMock(id=77, subject="RE: quote", prompt_variant=REMINDER_1,
+                    post_send_sync_attempts=0)
     await _post_send_bookkeeping(session, msg, conv, 13)
 
     mock_move.assert_not_called()
     client.update_inbound_status.assert_not_awaited()
     mock_summary.assert_not_called()
-    assert "리마인더" in mock_progress.call_args.args[2]
+    assert mock_progress.call_args.args[2] == "1차 리마인더 완료"
+
+    # **소통 히스토리에 한 줄** (2026-09-21 운영자 지시). 위의 진행 기록 `reply` 는 읽을 때
+    # 걸러지므로(`ROUTINE_PROGRESS_KINDS`) 그것만으로는 운영자 눈에 아무것도 안 남습니다.
+    row = next(c.args[0] for c in session.add.call_args_list
+               if isinstance(c.args[0], CustomerInteraction))
+    assert row.summary == "1차 리마인더 완료"
+    assert row.external_id == "followup:reminder:77"
+    # `inbound` 이면 `followup_sequence._replies` 가 우리 리마인더를 고객 답장으로 읽어
+    # 티켓을 Negotiating 으로 옮기고 시퀀스를 멈춥니다.
+    assert row.direction == "outgoing"
+    assert row.conversation_id == 5 and row.contact_id == 503

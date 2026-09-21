@@ -10,11 +10,12 @@ from collections import deque
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import func, select, update
+from sqlalchemy.exc import IntegrityError
 
 from ..common.config import settings
 from ..db.conversation_history import add_progress
 from .summaries import append_summary_line
-from ..db.models import Contact, Conversation, CustomerProfile, Message
+from ..db.models import Contact, Conversation, CustomerInteraction, CustomerProfile, Message
 from ..db.session import SessionLocal
 
 logger = logging.getLogger(__name__)
@@ -125,7 +126,7 @@ async def _post_send_bookkeeping(session, msg, conv, message_id: int) -> None:
     # **후속 리마인더는 빼야 합니다** (2026-09-17). 이미 Contacted 인 티켓에서 나가서 「지금
     # Contacted」가 「이번에 올렸다」가 아닌 유일한 발송입니다 — 그대로 두면 리마인더마다 허브스팟
     # 티켓을 Contacted 로 다시 PUT 해서, 영업이 방금 옮긴 Negotiating 을 되돌립니다.
-    from .followup_sequence import REMINDER_VARIANTS
+    from .followup_sequence import REMINDER_NOTE_PREFIX, REMINDER_VARIANTS, done_label
 
     reminder = msg.prompt_variant in REMINDER_VARIANTS
     advanced = bool(conv and conv.stage == "meeting_link_sent" and not reminder)
@@ -191,7 +192,42 @@ async def _post_send_bookkeeping(session, msg, conv, message_id: int) -> None:
             return
         if reminder:
             # 사람이 쓴 답이 아니라 요약에 한 줄을 보태지 않습니다 — 「답을 세 번 했다」로 읽힙니다.
-            add_progress(conv.id, "reply", "후속 리마인더 발송 (자동)")
+            #
+            # **글자의 출처는 `followup_sequence.done_label` 한 곳입니다** (2026-09-21 운영자
+            # 지시). 티켓 배너 · 소통 히스토리 · 진행 기록이 같은 문장을 적어야 합니다.
+            label = done_label(msg.prompt_variant)
+            add_progress(conv.id, "reply", label)
+            # **소통 히스토리에도 한 줄 남깁니다.** 그 표가 티켓 화면과 고객 상세가 그리는
+            # 목록이고, 위의 진행 기록 `reply` 는 읽을 때 걸러집니다
+            # (`ROUTINE_PROGRESS_KINDS`) — 그것만으로는 운영자 눈에 아무것도 안 남습니다.
+            #
+            # `customer_ops.interaction_add` 는 안 씁니다: 그 헬퍼는 티켓 요약에 한 줄을
+            # 보태고 허브스팟 노트까지 남기는데, 메일 자체는 이미 Conversations 스레드에
+            # 있습니다(바로 위 「요약에 안 보탠다」와 같은 이유).
+            #
+            # **`direction` 은 `outgoing` 이어야 합니다.** `followup_sequence._replies` 가 이
+            # 연락처의 `inbound` 줄을 「고객이 답장했다」로 읽어 티켓을 Negotiating 으로 옮기고
+            # 시퀀스를 멈춥니다 — 우리 리마인더가 고객 답장으로 보이면 안 됩니다.
+            session.add(CustomerInteraction(
+                contact_id=conv.contact_id,
+                conversation_id=conv.id,
+                channel="이메일",
+                direction="outgoing",
+                # 열이 300자입니다. 제목은 「RE: <고객이 쓴 제목>」이라 길이를 우리가 정하지
+                # 않습니다 — 안 자르면 긴 제목 하나가 배달된 메일의 기록을 통째로 날립니다.
+                subject=(msg.subject or "")[:300] or None,
+                summary=label,
+                # 이 함수는 재시도되는 자리라(`_retry_post_send_syncs`) 같은 줄이 두 번 들어올
+                # 수 있습니다. 그 칸이 유니크(0106)라, id 를 여기서 정해 두면 재시도가 줄을
+                # 늘리는 대신 조용히 걸립니다.
+                external_id=f"{REMINDER_NOTE_PREFIX}{msg.id}",
+                happened_at=msg.sent_at or now,
+            ))
+            try:
+                session.commit()
+            except IntegrityError:
+                # 이미 있는 줄입니다 — 배달된 메일이 500 이 되면 안 됩니다.
+                session.rollback()
             return
         add_progress(conv.id, "reply", f"답변 발송 완료: {msg.subject or '(제목 없음)'}"[:200])
         # 티켓 요약에 우리 답 한 줄을 덧붙입니다. **여기서** 하는 이유: 요약은 예전에
