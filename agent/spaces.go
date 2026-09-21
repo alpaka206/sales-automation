@@ -233,8 +233,13 @@ lar AS (
   -- 없으면 실패 사유(AUDIO_PIPELINE_FAILED …). ENGINE_ERROR 한 줄로 뭉치면 원인이 안 보인다.
   SELECT l.failure_reason, l.engine_error_code,
          coalesce(nullif(l.engine_error_code, ''), l.failure_reason, '(미기록)') AS kind
+  -- **실패한 작업만** 센다. 이 표는 실패 전용이 아니다: 4,357 줄을 export 기록과 맞대면
+  -- FAILED 4,246 · COMPLETED 105 · 빈칸 5 · PROCESSING 1 이고, 그 111 줄은 **전부**
+  -- '(미기록)' 으로 떨어진다(2026-09-14 스냅샷 실측). 그래서 실패가 0건인 엔터프라이즈
+  -- 스페이스 하나가 94 줄을 싣고 있었고, 카드에 「100.0% · 실패 0건」과 「사유 미기록 94건」이
+  -- 나란히 섰다 — 운영자가 「작업 성공률 100퍼 맞는지 확인해봐」라고 한 자리다.
   FROM read_csv_auto('{{d}}/perso_video_translator.live_api_response.csv', union_by_name=true) l
-  JOIN pel ON pel.seq = l.export_log_seq
+  JOIN pel ON pel.seq = l.export_log_seq AND pel.job_status = 'FAILED'
 ),
 kinds AS (SELECT kind, count(*) AS n FROM lar GROUP BY 1),
 top_kinds AS (SELECT kind, n FROM kinds ORDER BY n DESC, kind LIMIT 5),

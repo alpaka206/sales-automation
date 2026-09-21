@@ -1,4 +1,4 @@
-// 수주 고객 상세의 사용 현황 세 섹션 — 크레딧 사용 현황 · 작업 성능 · 사용 패턴.
+// 수주 고객 상세의 사용 현황 세 섹션 — 크레딧 사용 현황 · 작업 성능 · 영상 분석.
 //
 // 값은 전부 이 PC 의 에이전트(`/v1/spaces/*`)에서 오고 **서버로 가지 않습니다.** 계약 쪽
 // 숫자(계약 크레딧·플랜 기간·동시 처리 한도)는 화면이 이미 들고 있는 계약 행에서 읽어
@@ -12,7 +12,7 @@ import type { Contract } from "./shared";
 import { fmt, num } from "./shared";
 import { TONE_COLOR, idleWord } from "./UsageBits";
 import type { RowUsage } from "./useUsage";
-import { LENGTH_BINS, fillMonths, fillWeeks, forecastTone, isCurrentPeriod, levelTone, pairName, type Diagnosis } from "./usage";
+import { LENGTH_BINS, fillMonths, fillWeeks, forecastTone, grantedPct, isCurrentPeriod, levelTone, pairName, type Diagnosis } from "./usage";
 
 // ── 에이전트 응답 모양 (spaces.go 의 SQL 과 1:1) ─────────────────────────
 type Period = { period: string; used: number };
@@ -287,11 +287,13 @@ export function UsageInsight({ d }: { d: Diagnosis }) {
   );
 }
 
-/** 소진율 미터 — 채움은 소진, 세로선은 계약 경과. */
+/** 소진율 미터 — 채움은 소진, 세로선은 계약 경과, 사선은 아직 지급되지 않은 구간. */
 function UsedMeter({ d, contract }: { d: Diagnosis; contract: Contract }) {
   const credits = contract.credits ?? 0;
   const used = credits - (d.remaining ?? credits);
   const fill = d.level === "미사용" ? "var(--red-fg)" : d.level === "과소사용" ? "#E4A11B" : d.level === "초과사용" ? "var(--indigo-fg)" : "var(--teal-600)";
+  const granted = grantedPct(contract);
+  const ungranted = credits - contract.granted_credits;
   if (!credits) return <Empty text="계약 크레딧이 없어 소진율을 낼 수 없습니다 — 계약 폼의 「계약 크레딧」." />;
   return (
     <div className="meter">
@@ -301,13 +303,25 @@ function UsedMeter({ d, contract }: { d: Diagnosis; contract: Contract }) {
       </div>
       <div className="meter-track" style={{ position: "relative", overflow: "visible", height: 12 }}>
         <div className="meter-fill" style={{ width: `${Math.min(100, d.usedPct ?? 0)}%`, background: fill }} />
+        {/* 사선은 **채움 뒤에** 놓는다 — 소진이 지급을 넘는 계약이 있고, 그 겹침이 바로
+            「지급 안 된 몫까지 썼다」는 정보다. 앞에 두면 그 구간이 채움에 덮여 사라진다.
+            둥글기를 직접 적는 이유: 바로 위에서 won.css 의 `overflow:hidden` 을 `visible`
+            로 덮었다(계약 경과 세로선이 ±6px 삐져나와야 한다). 안 적으면 트랙의 둥근 끝
+            밖으로 각진 모서리가 서서 렌더링 오류처럼 보인다. */}
+        {granted !== null && (
+          <div className="meter-ungranted" title={`미지급 ${num(ungranted)} 크레딧`}
+               style={{ left: `${granted}%`, right: 0, top: 0, bottom: 0, borderRadius: "0 5px 5px 0" }} />
+        )}
         {d.pacePct !== null && (
           <div title={`계약 경과 ${d.pacePct}%`} style={{ position: "absolute", top: -6, bottom: -6, left: `${d.pacePct}%`, width: 3, background: "var(--ink)", borderRadius: 2, boxShadow: "0 0 0 2px #fff" }} />
         )}
       </div>
       <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11.5, color: "var(--muted)", marginTop: 8 }}>
         <span>소진 <b>{num(used)}</b></span>
-        <span>세로선 = 계약 경과 {d.pacePct ?? "—"}%</span>
+        {/* 무늬만으로 말하지 않는다 — 글자도 같이 말한다(`MonthlyArea.tsx` 의 음수와 같은
+            규칙). 「미지급」이라 적는 것은 바로 위 카드가 같은 숫자를 그 말로 적기 때문이다:
+            한 화면에서 같은 숫자를 두 말로 부르는 것이 덜 좋은 말 하나보다 나쁘다. */}
+        <span>세로선 = 계약 경과 {d.pacePct ?? "—"}%{granted !== null ? ` · 사선 = 미지급 ${num(ungranted)}` : ""}</span>
         <span>계약 <b>{num(credits)}</b></span>
       </div>
       <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>
@@ -443,6 +457,11 @@ export function JobsSection({ pair, contract, usage, failRateAll }: {
   const failed = d?.status?.find((s) => s.status === "FAILED")?.n ?? 0;
   const rate = ok + failed ? (ok / (ok + failed)) * 100 : null;
   const avgAll = failRateAll === null ? null : 100 - failRateAll;
+  // 색의 기준은 **전체 평균**이다. 94 는 목업이 지어낸 평균 94.1 이 남은 값이라(위 주석의
+  // 「목업이 지어낸 곳은 실제 값으로 바꿨다」에서 이 한 줄만 안 바뀌었다), 실제 기준인
+  // 전사 성공률 96.28%(2026-09-14 실측) 아래인 96% 고객이 초록으로 칠해지고 있었다.
+  // 전사 실패율을 못 가져온 때만 예전 값으로 떨어진다.
+  const rateColor = rate !== null && rate >= (avgAll ?? 94) ? "#15713a" : "#946005";
 
   const gate = usage.kind !== "ok" ? <Unavailable usage={usage} />
     : busy ? <Empty text="계산 중…" />
@@ -476,12 +495,12 @@ export function JobsSection({ pair, contract, usage, failRateAll }: {
           <div className="seat">
             {rate === null ? <Empty text="완료·실패 기록이 없습니다." /> : (
               <>
-                <MockDonut pct={rate} color={rate >= 94 ? "#15713a" : "#946005"} label={`${rate.toFixed(1)}%`} />
+                <MockDonut pct={rate} color={rateColor} label={`${rate.toFixed(1)}%`} />
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div className="seat-txt">성공 <b>{num(ok)}</b>건 &nbsp; 실패 <b>{num(failed)}</b>건</div>
                   <div className="cmp">
                     <div className="cmp-r"><span className="cmp-k">이 고객</span>
-                      <span className="cmp-t"><span className="cmp-f" style={{ width: `${rate}%`, background: rate >= 94 ? "#15713a" : "#946005" }} /></span>
+                      <span className="cmp-t"><span className="cmp-f" style={{ width: `${rate}%`, background: rateColor }} /></span>
                       <span className="cmp-v">{rate.toFixed(1)}%</span></div>
                     {avgAll !== null && (
                       <div className="cmp-r"><span className="cmp-k">전체 평균</span>
@@ -538,7 +557,7 @@ export function JobsSection({ pair, contract, usage, failRateAll }: {
   );
 }
 
-// ── 사용 패턴 — 운영자가 준 그림 그대로 (2026-09-16 「디자인은 완벽히 동일하게」) ────────────
+// ── 영상 분석 — 운영자가 준 그림 그대로 (2026-09-16 「디자인은 완벽히 동일하게」) ────────────
 // 언어쌍 Top 5(막대 · N편 · %) · 영상 길이 분포(쌓인 막대 + 범례) / 콘텐츠 카테고리 · 업로드 경로
 // (파이 + 범례) / 좌석 활용률(계약 좌석 · 등록 멤버 · 사용, 멤버별 막대) · 보이스 클론(등록 보이스 ·
 // 등록한 멤버 · 계약 좌석 대비). 멤버별 막대는 스냅샷의 실제 내보내기 수 — 이름·이메일은 스냅샷에

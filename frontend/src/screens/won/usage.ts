@@ -168,6 +168,27 @@ export function diagnose(contract: Contract, s: SpaceSummary, asOf: string, glob
 
 const num = (v: number) => v.toLocaleString("ko-KR");
 
+/**
+ * 분할 지급 계약에서 **아직 지급되지 않은 구간**이 소진율 바의 어디서 시작하는지 —
+ * 지급된 크레딧의 비율(%)입니다. 회차가 하나면 null: 바 전체가 지급된 몫이라 그을 선이
+ * 없습니다 (2026-09-21 운영자: 「분할 지급할때가 있잖아 … 미지급된거라는거 표시」).
+ *
+ * 합은 **서버가 센 값**(`granted_credits`)을 그대로 읽습니다. 바로 위 「미지급 크레딧」
+ * 칸이 같은 값을 그리므로 여기서 `credit_grants` 를 다시 더하면 한 화면의 두 숫자가 서로
+ * 다른 정의를 갖게 됩니다 — 이 저장소가 이미 세 번 겪은 자리입니다.
+ *
+ * `granted_credits > 0` 이 꼭 필요합니다: `_reseed_credit_grants` 가 계약마다 회차를
+ * `done=False` 로 깔아 두므로 아무도 완료 표시를 안 한 계약은 0 이고, 그때 바가 통째로
+ * 미지급으로 칠해집니다 — 「지급이 안 됐다」가 아니라 「아직 안 적었다」인데.
+ */
+export function grantedPct(contract: Contract): number | null {
+  const credits = contract.credits;
+  const granted = contract.granted_credits;
+  if (contract.credit_grants.length <= 1 || !credits) return null;
+  if (granted <= 0 || granted >= credits) return null;
+  return Math.round((granted / credits) * 100);
+}
+
 export const levelTone = (level: Level) =>
   level === "미사용" ? "danger" : level === "과소사용" ? "warn" : level === "초과사용" ? "reply"
   : level === "정상" ? "ok" : "neutral";

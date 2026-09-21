@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { RULE, daysBetween, diagnose, mergeSummaries, pairName, parseSpaceSeqs, type SpaceSummary }
+import { RULE, daysBetween, diagnose, grantedPct, mergeSummaries, pairName, parseSpaceSeqs, type SpaceSummary }
   from "../src/screens/won/usage";
 import type { Contract } from "../src/screens/won/shared";
 
@@ -136,6 +136,29 @@ describe("마지막 작업 · 품질", () => {
     expect(RULE.forecastPct).toBe(15);
     expect(RULE.warnDays).toBe(7);
     expect(RULE.idleDays).toBe(30);
+  });
+});
+
+describe("미지급 크레딧 구간 — 사선이 어디서 시작하나", () => {
+  // 지급 합은 **서버가 센 값**을 읽는다(`granted_credits`). 브라우저가 회차를 다시 더하면
+  // 바로 위 「미지급 크레딧」 칸과 같은 숫자를 서로 다르게 정의한다.
+  const withGrants = (n: number, granted: number) => contract({
+    credits: 120_000, granted_credits: granted,
+    credit_grants: Array.from({ length: n }, (_, i) => ({ id: i + 1 })),
+  } as Partial<Contract>);
+
+  it("분할 지급이고 일부만 지급됐으면 지급된 비율", () => {
+    expect(grantedPct(withGrants(2, 60_000))).toBe(50);
+  });
+  it("회차가 하나면 null — 바 전체가 지급된 몫이라 그을 선이 없다", () => {
+    expect(grantedPct(withGrants(1, 60_000))).toBeNull();
+  });
+  it("아무 회차도 완료가 아니면 null — 「지급이 안 됐다」가 아니라 「아직 안 적었다」다", () => {
+    expect(grantedPct(withGrants(4, 0))).toBeNull();
+  });
+  it("전액 지급됐거나 계약 크레딧이 없으면 null", () => {
+    expect(grantedPct(withGrants(2, 120_000))).toBeNull();
+    expect(grantedPct(contract({ credits: null, granted_credits: 10, credit_grants: [{}, {}] } as Partial<Contract>))).toBeNull();
   });
 });
 
