@@ -731,17 +731,23 @@ class TestVatInclusiveAmount:
         assert rows[3001]["note"] == "그대로"
         assert rows[4001]["note"] is None
 
-    def test_an_empty_total_is_filled_from_the_supply_number(self, mem_engine):
-        """운영자 문장 ③ 의 안전망 — 「미포함만 써있던건 그걸 vat 포함에 작성해두면 돼」.
+    def test_an_empty_total_is_filled_from_the_supply_number_plus_vat(self, mem_engine):
+        """운영자 문장 ③ — 「미포함만 써있던건 그걸 vat 포함에 작성해두면 돼」.
 
-        그렇게 쓰는 경로가 없어 운영에는 없을 것이지만, 있으면 금액이 없는 계약이 됩니다.
+        **더하는 것은 `× 1.1` 입니다.** 「그렇게 쓰는 경로가 없어 아마 0건」이라고 적어 두고
+        그대로 베끼게 만들었는데, 운영에 **7건** 있었고 그 7건의 총액이 10% 내려앉은 채로 한
+        번 배포됐습니다(이관 0126 이 되돌립니다).
+
+        그대로 베끼면 안 되는 이유: 이 행들은 포함 값이 **계산값**이었습니다 — 옛
+        `won.total_amount` 가 `공급가 × 1.1` 을 돌려주고, 화면의 「총 계약금액」과 워크북 계약
+        탭 L열이 그 값을 보여 주고 있었습니다. 두 칸이 다 채워진 행과 다른 점이 그것입니다.
         """
         self._legacy(mem_engine, [dict(
             client_id=5001, seq=1, currency="KRW", credits=60_000,
             incl=None, excl=9_000_000, included=0, applicable=1, note=None,
         )])
         self._run(mem_engine)
-        assert float(self._rows(mem_engine)[5001]["amount_incl_vat"]) == 9_000_000
+        assert float(self._rows(mem_engine)[5001]["amount_incl_vat"]) == 9_900_000
 
     def test_the_two_columns_are_gone_and_a_second_run_is_quiet(self, mem_engine):
         """열을 지우고 나면 두 번째 실행은 아무것도 안 합니다 — 반쯤 돌던 DB 에서도 다시
@@ -758,6 +764,77 @@ class TestVatInclusiveAmount:
         self._run(mem_engine)   # 두 번째 — 조용히 넘어갑니다
         note = self._rows(mem_engine)[2102]["note"]
         assert note.count("실제 분당단가") == 1, "재실행이 같은 줄을 또 붙이면 안 됩니다"
+
+
+class TestPromotedSupplyPriceGetsItsVat:
+    """이관 0126 — 0123 이 그대로 베낀 계약금액에 VAT 를 더해 되돌린다.
+
+    0123 의 규칙 ③ 대상(포함이 비고 미포함만 있는 행)이 없을 거라고 적어 두었는데 운영에
+    **7건** 있었고, 그대로 베낀 채로 배포됐습니다. 옛 `total_amount` 가 그 행에서
+    `공급가 × 1.1` 을 돌려주고 있었으므로 화면과 워크북이 보여 주던 총액이 10% 내려앉았습니다.
+
+    **대상은 산수가 증명합니다.** `amount_excl_vat` 는 이미 지워졌으므로, 0123 이 같은
+    트랜잭션에서 적은 계약비고의 **VAT 미포함 기준 단가**와 지금 단가를 비교합니다 — 같으면
+    그대로 베껴진 행이고, 1.1배면 포함 값이 원래 있던 행입니다.
+    """
+
+    def _db(self, engine, rows):
+        with engine.begin() as conn:
+            conn.execute(text("""
+                CREATE TABLE client_contracts (
+                    client_id INTEGER, seq INTEGER, credits INTEGER,
+                    amount_incl_vat NUMERIC, note TEXT)
+            """))
+            for row in rows:
+                conn.execute(text(
+                    "INSERT INTO client_contracts VALUES "
+                    "(:client_id,:seq,:credits,:amount,:note)"), row)
+
+    def _run(self, engine):
+        importlib.import_module(
+            "src.db.migrations.0126_the_promoted_supply_price_was_missing_its_vat"
+        ).up(engine)
+
+    def _amounts(self, engine):
+        with engine.begin() as conn:
+            return {
+                r[0]: float(r[1])
+                for r in conn.execute(text(
+                    "SELECT client_id, amount_incl_vat FROM client_contracts"))
+            }
+
+    # 1,566,000 ÷ (64,800 ÷ 60) = 1,450 — 그대로 베껴진 행.
+    COPIED = dict(client_id=2102, seq=1, credits=64_800, amount=1_566_000,
+                  note="실제 분당단가 1,450 KRW/분 (VAT 미포함 기준)")
+    # 11,000,000 ÷ 1,000 = 11,000 = 비고의 10,000 × 1.1 — 포함 값이 원래 있던 행.
+    INTACT = dict(client_id=3001, seq=1, credits=60_000, amount=11_000_000,
+                  note="실제 분당단가 10,000 KRW/분 (VAT 미포함 기준)")
+
+    def test_a_copied_amount_gets_its_vat_back(self, mem_engine):
+        """1,566,000 × 1.1 = 1,722,600 — 시트 L열이 0123 전에 보여 주던 그 값입니다."""
+        self._db(mem_engine, [dict(self.COPIED)])
+        self._run(mem_engine)
+        assert self._amounts(mem_engine)[2102] == 1_722_600
+
+    def test_a_row_that_already_had_its_total_is_left_alone(self, mem_engine):
+        """**이 테스트가 0126 의 안전장치입니다.** 비고가 있는 행을 전부 올려 버리면 이미
+        맞는 총액이 10% 부풀고, 그건 화면 어디에도 「틀렸다」로 안 보입니다."""
+        self._db(mem_engine, [dict(self.INTACT)])
+        self._run(mem_engine)
+        assert self._amounts(mem_engine)[3001] == 11_000_000
+
+    def test_running_twice_does_not_stack_the_vat(self, mem_engine):
+        """되돌린 뒤에는 등식이 깨지므로 두 번째 실행이 아무 일도 안 합니다."""
+        self._db(mem_engine, [dict(self.COPIED)])
+        self._run(mem_engine)
+        self._run(mem_engine)
+        assert self._amounts(mem_engine)[2102] == 1_722_600
+
+    def test_a_row_without_the_note_is_never_touched(self, mem_engine):
+        """비고가 없으면 0123 이 단가를 안 옮긴 행 — 부가세 미해당이거나 포함 기준입니다."""
+        self._db(mem_engine, [dict(self.COPIED, client_id=9999, note=None)])
+        self._run(mem_engine)
+        assert self._amounts(mem_engine)[9999] == 1_566_000
 
 
 def test_no_migration_compares_a_boolean_to_an_integer():

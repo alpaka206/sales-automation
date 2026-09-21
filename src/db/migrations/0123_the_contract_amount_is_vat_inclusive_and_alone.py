@@ -24,7 +24,13 @@ DB 를 보면 왜 그렇게 읽어야 하는지가 분명합니다 — 옛 저�
 
 즉 ①·③ 이 값 규칙(**포함을 쓰고**, 포함이 없으면 미포함을 올려 쓴다)이고 ② 는 칸 규칙
 (칸을 하나만 남겨라)입니다. 그래서 이 이관은 **금액을 거의 안 움직입니다** — `amount_incl_vat`
-가 비어 있고 `amount_excl_vat` 만 있는 행만 올려 씁니다(③ 의 안전망, 운영에는 없을 것입니다).
+가 비어 있고 `amount_excl_vat` 만 있는 행만 채웁니다(③).
+
+**그 행이 운영에 7건 있었습니다.** 「그렇게 쓰는 경로가 없어 아마 0건」이라고 적어 두었는데
+틀렸고, 그래서 처음에는 공급가를 **그대로** 베꼈습니다 — 옛 `total_amount` 가 그 행에서
+`공급가 × 1.1` 을 돌려주어 화면과 워크북이 그 값을 총액으로 보여 주고 있었으므로, 그대로
+베끼면 그 7건의 총액이 10% 내려앉습니다. 지금은 `× 1.1` 로 채웁니다. 이미 그대로 베껴진
+운영 행은 **이관 0126** 이 되돌립니다.
 
 `amount_excl_vat` 와 `vat_included` 를 지우고 `amount_incl_vat` 하나를 남깁니다. 공급가는
 저장하지 않고 총액 ÷ 1.1 로 되짚습니다(`won.supply_amount`).
@@ -137,6 +143,12 @@ def up(engine: Engine) -> None:
             # 남아 수금율이 100% 를 넘습니다.
             if incl is not None or excl is None:
                 continue
+            # **올려 쓸 값은 공급가 × 1.1 입니다.** 그대로 베끼면 그 행의 총액이 10%
+            # 내려앉습니다 — 옛 `total_amount` 가 이 행에서 `공급가 × 1.1` 을 돌려주고 있었고,
+            # 화면과 워크북이 그 값을 총액으로 보여 주고 있었기 때문입니다. 「미포함만 써있던
+            # 건」이 운영에 **7건** 있었고(제가 「아마 0건」이라고 가정했습니다) 그대로 베낀
+            # 채로 한 번 배포됐습니다 — 이관 0126 이 그 7건을 되돌립니다.
+            promoted = (excl * (1 + VAT_RATE)).quantize(Decimal("0.01"))
             conn.execute(
                 # **글자로 묶고 CAST 로 못박습니다.** sqlite3 는 `Decimal` 을 바인딩하지
                 # 못하고(「type 'decimal.Decimal' is not supported」) 운영은 Postgres 라
@@ -144,12 +156,12 @@ def up(engine: Engine) -> None:
                 # 넣는 암묵적 캐스트도 두 DB 가 같다고 믿을 자리가 아니라 직접 적습니다.
                 text("UPDATE client_contracts SET amount_incl_vat = CAST(:amount AS NUMERIC) "
                      "WHERE client_id = :cid AND seq = :seq"),
-                {"amount": str(excl), "cid": row["client_id"], "seq": row["seq"]},
+                {"amount": str(promoted), "cid": row["client_id"], "seq": row["seq"]},
             )
             moved += 1
             # 운영 DB 는 개발망에서 조회할 수 없으므로, 몇 행이 그랬는지를 아는 길은 이 줄뿐입니다.
-            logger.info("0123: %s-%s 계약금액이 비어 있어 공급가 %s 를 올려 썼습니다.",
-                        row["client_id"], row["seq"], excl)
+            logger.info("0123: %s-%s 계약금액이 비어 있어 공급가에 VAT 를 더해 채웠습니다.",
+                        row["client_id"], row["seq"])
 
         for column in ("vat_included", "amount_excl_vat"):
             conn.execute(text(f"ALTER TABLE client_contracts DROP COLUMN {column}"))
