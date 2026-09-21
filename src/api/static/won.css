@@ -721,3 +721,62 @@
   border: 1px solid var(--line);
   color: var(--ink-2);
 }
+
+/* ── 한 번에 한 가지를 정하는 폼은 가운데 좁은 단으로 (2026-09-21 운영자 지시:
+ * 「너무 양옆에 붙어있고 눈에 확 들어오지 않아」) ─────────────────────────────────
+ *
+ * 「수주 고객 추가」는 모달이 아니라 화면입니다(`WonNew.tsx` 의 이유: 세로 640px 노트북에서
+ * 모달 안 스크롤은 버튼을 화면 밖으로 밀어냅니다). 그래서 위 `.won .page {max-width:none}`
+ * 가 그 폼까지 1720px 로 펼쳐, 세 칸짜리 그리드의 입력 하나가 500px 가 됐습니다.
+ *
+ * 위 블록의 결정("use the full width, no centered max-width")은 **목록과 상세**에 대한
+ * 것입니다 — 표는 넓을수록 좋습니다. 이 규칙은 그 예외이고, 대상은 **결정을 하나 내리는
+ * 폼** 하나뿐입니다. 지우기 전에 위 주석과 같이 읽으십시오.
+ *
+ * 920px 인 이유: `.form-grid3`(3열)과 `.type-grid`(2열)이 한 줄에 그대로 들어가므로 화면이
+ * 더 길어지지 않습니다 — 세로 640px 짜리 화면에서 길어지는 것이 제일 나쁩니다. 다음 단계인
+ * 계약 폼 모달이 760px 라, 두 단계가 같은 흐름으로 읽힙니다.
+ *
+ * 선택자가 `.won .page.page--form`(0,3,0) 인 이유: `.won .page--form`(0,2,0)은 위
+ * `max-width:none`(0,2,0)과 무게가 같아 **순서로만** 이깁니다. 블록이 옮겨지는 날 조용히
+ * 아무 일도 안 하게 됩니다(이 파일이 `.btn-primary.btn` 에서 이미 한 번 겪은 자리입니다). */
+.won .page.page--form { max-width: 920px; margin-inline: auto; }
+/* 카드가 페이지에서 떠 보이게. 값은 위 토큰의 `--shadow` 를 그대로 씁니다 — 같은 그림자를
+ * 두 곳에 적지 않습니다. */
+.won .page--form .sec { box-shadow: var(--shadow); }
+/* `.modal-foot` 의 바닥 둥글기는 14px 인데 `.sec` 는 12px 라 1px 이 삐져나옵니다.
+ * `.page--form` 안으로만 좁힙니다 — 고객 기본 정보 편집 푸터는 패널 안에 있어 다릅니다. */
+.won .page--form .modal-foot { border-radius: 0 0 12px 12px; }
+
+/* ── 아직 지급되지 않은 크레딧 구간 (2026-09-21 운영자 지시:
+ * 「분할 지급할때가 있잖아 … 미지급된거라는거 표시」) ──────────────────────────────
+ *
+ * 색이 아니라 **무늬**입니다. 소진율 바에는 이미 네 가지 상태색(미사용·과소사용·초과사용·
+ * 정상)이 있어서 다섯째 색을 더하면 다섯째 상태로 읽힙니다. 그리고 색만으로 말하지 않는
+ * 규칙이 이 저장소에 이미 있습니다(`MonthlyArea.tsx` 의 음수) — 무늬 + 툴팁 + 범례 글자가
+ * 같이 말합니다. */
+.won .meter-ungranted {
+  position: absolute;
+  background: repeating-linear-gradient(45deg, transparent 0 3px, rgba(17,24,39,.22) 3px 6px);
+}
+
+/* ── 라벨 옆의 작은 (i) (2026-09-21 운영자 지시: 「i 작은 표시 있고 눌렀을때 …」) ──────
+ *
+ * `<details>/<summary>` 입니다 — 운영자가 「눌렀을때」라고 했고, 그건 hover 인 `title=` 이
+ * 아닙니다. 이 저장소에 툴팁 컴포넌트가 없고, 두 줄짜리 설명을 위해 만들 이유도 없습니다
+ * (`<details>` 는 클릭과 키보드가 공짜입니다). */
+.won .hint { display: inline-block; position: relative; }
+.won .hint > summary {
+  list-style: none; cursor: pointer; display: inline-grid; place-items: center;
+  width: 14px; height: 14px; border-radius: 50%; margin-left: 4px; vertical-align: middle;
+  border: 1px solid var(--line); background: var(--bg-soft);
+  color: var(--muted); font-size: 10px; font-weight: 700; font-style: italic; line-height: 1;
+}
+.won .hint > summary::-webkit-details-marker { display: none; }
+.won .hint > summary:hover { color: var(--ink); border-color: var(--faint); }
+.won .hint > div {
+  position: absolute; z-index: 20; top: calc(100% + 6px); left: 0; min-width: 216px;
+  padding: 9px 11px; border: 1px solid var(--line); border-radius: 8px;
+  background: #fff; box-shadow: var(--shadow);
+  font-size: 12.5px; font-weight: 400; color: var(--ink-2); line-height: 1.7; white-space: nowrap;
+}

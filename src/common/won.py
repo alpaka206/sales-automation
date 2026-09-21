@@ -57,24 +57,35 @@ RETIRED_PLAN_STATUS = "내림"
 # 목록 정렬: 손이 가야 하는 것이 위로. 세팅중 → 사용중 → 사용 중단 → 내림.
 PLAN_STATUS_ORDER = {"세팅중": 0, "사용중": 1, "사용 중단": 2, RETIRED_PLAN_STATUS: 3}
 
+# 화면 이름은 **매출 인식**입니다(2026-09-21 운영자 지시, 그 전에는 「수주 유형」).
+# 저장하는 값은 그대로 `MRR`·`PoC` 입니다 — 단계 키와 표시 이름이 따로 움직이는 것과 같은
+# 이유이고(CLAUDE.md), 이 두 글자는 워크북 계약 탭 E열의 값이자 `sheet_to_db` 가 다시 읽는
+# 값이라 바꾸면 시트를 오가는 계약이 전부 끊깁니다.
 DEAL_TYPES = ("MRR", "PoC")
 PLANS = ("Business Tier 1", "Business Tier 2", "Business Tier 3", "Enterprise")
-DOC_TYPES = (
-    "해당 없음",
-    "직접 계약 / DocuSign",
-    "결제 시 약관 및 협의 내용 동의",
-    "세금계산서 발행",
-)
-# RENEWAL_PLANS 가 여기 있었습니다. 갱신 계획은 콘솔에서 뺐고(이관 0073), 남은 것은
+# DOC_TYPES(계약서 유형) 가 여기 있었습니다. 2026-09-21 에 운영자 지시로 아예 뺐습니다
+# (이관 0125 가 `client_contracts.doc_types` 를 지웁니다). 워크북 계약 탭 I열은 **남습니다** —
+# 그 파일들이 전부 열 문자로 접근해서, 열 하나를 지우면 J~AM 이 한 칸씩 밀려 들어가고
+# 예외는 안 납니다. 콘솔이 그 칸을 안 쓰게만 했습니다.
+#
+# RENEWAL_PLANS 도 여기 있었습니다. 갱신 계획은 콘솔에서 뺐고(이관 0073), 남은 것은
 # 워크북의 드롭다운뿐이라 목록은 `scripts/build_won_sheets.py` 의 CHOICES 한 곳에 있습니다.
-PAYMENT_METHODS = ("Stripe", "포트원", "계좌이체")
+#
+# **「계좌이체」는 「직접거래」가 됐습니다** (2026-09-21 운영자 지시). 이 값은 라벨이 아니라
+# `client_contracts.payment_method` 에 **그대로 저장되는 글자**라, 목록만 고치면 옛 글자를
+# 든 행이 고르개(`Sel`)에서 첫 항목(Stripe)으로 그려지면서 초안은 여전히 옛 값을 듭니다 —
+# 화면에 적힌 것과 저장되는 것이 갈립니다. 그래서 이관 0122 가 행을 같이 옮깁니다.
+PAYMENT_METHODS = ("Stripe", "포트원", "직접거래")
 PAYMENT_TYPES = ("일시불", "할부")
 CURRENCIES = ("KRW", "USD")
-INDUSTRIES = (
-    "크리에이터(개인)", "교육", "MCN", "의료", "종교", "기업", "대행사", "확인 안 됨",
-    "제작사/엔터사", "스포츠", "뷰티", "공공기관", "출판", "제조", "보안",
-)
-# HubSpot 파이프라인의 Won type → 수주 유형. **자동으로 채우지 않고 기본값만 제안**합니다:
+# INDUSTRIES(산업 분야) 가 여기 있었습니다. 2026-09-21 에 운영자 지시로 화면에서 뺐고
+# (「입력도 이전 데이터도 사라져도 되니깐 노출될 필요 x」) 이관 0124 가 `clients.industry` 를
+# 지웠습니다. 워크북 「고객 기본 정보」 E열은 남아 운영자가 직접 적는 칸이 됐고, 그 드롭다운
+# 목록은 `scripts/build_won_sheets.py` 의 CHOICES 한 곳에 있습니다(갱신 계획과 같은 모양).
+#
+# `customer_profiles.industry`(리드 히스토리의 「산업군」, 허브스팟에서 동기화)는 **다른
+# 칸이고 그대로 있습니다.**
+# HubSpot 파이프라인의 Won type → 매출 인식. **자동으로 채우지 않고 기본값만 제안**합니다:
 # Contract 와 Renewal 이 둘 다 MRR 이라, 되묻지 않으면 PoC 였던 건이 조용히 MRR 로 굳습니다.
 WON_TYPE_HINT = {"Contract": "MRR", "Renewal": "MRR", "PoC": "PoC"}
 
@@ -124,14 +135,14 @@ def months_between(start: str | None, end: str | None) -> int:
 
 
 def contract_state(contract, today: date | None = None) -> str:
-    """진행 중 / 세팅중 / 종료 — 오늘과 **플랜 기간**을 비교합니다.
+    """진행 중 / 세팅중 / 종료 — 오늘과 **계약 기간**을 비교합니다.
 
-    계약 기간이 아닌 이유는 `plan_status` 와 같습니다(2026-08-31 운영자 지시): 계약은 먼저
-    맺고 실제 사용은 늦게 시작하는 일이 흔한데, 계약서에 도장을 찍은 날부터 「진행 중」이라고
-    적으면 아직 아무것도 안 쓰는 계약이 진행 중으로 보입니다. 고객 단위(`plan_status`)와
-    계약 한 건이 같은 기간을 보게 해서, 한 화면 안에서 두 줄이 서로 다른 말을 하지 않습니다.
+    2026-09-21 운영자 지시로 MRR 이 계약 기간으로 돌아오면서 이 판정도 같이 왔습니다. 고객
+    단위(`plan_status`)와 계약 한 건이 **같은 기간**을 봐야, 한 화면 안에서 고객은 「세팅중」
+    인데 그 밑의 계약 줄은 「진행 중」이라고 적히는 일이 없습니다 — 그 짝은 기간이 무엇이든
+    지켜야 하는 규칙입니다.
 
-    **중도 해지도 여기서 따라옵니다** — `plan_period` 의 끝이 만료일과 해지일 중 빠른
+    **중도 해지도 여기서 따라옵니다** — `plan_period` 의 끝이 종료일과 해지일 중 빠른
     쪽이라, 해지한 계약은 그날부터 「종료」입니다. 전에는 만료일이 올 때까지 「진행 중」이었고,
     그건 매출 인식이 이미 멈춘 계약이었습니다.
 
@@ -150,18 +161,19 @@ def contract_state(contract, today: date | None = None) -> str:
 
 
 def plan_status(client, today: date | None = None) -> str:
-    """플랜 상태 — **플랜 기간이 정합니다.** 저장하지 않습니다.
+    """플랜 상태 — **계약 기간이 정합니다.** 저장하지 않습니다.
 
-    계약 기간이 아닌 이유는 MRR 을 플랜 기간으로 나누는 이유와 같습니다(`plan_period`):
-    계약은 먼저 맺고 실제 사용은 늦게 시작하는 일이 흔합니다. 계약서에 도장을 찍은 날부터
-    「사용중」이라고 적으면, 아직 아무것도 안 쓰는 고객이 활성 고객 수와 예상 MRR 에
-    들어갑니다 — 그 두 숫자를 보려고 만든 화면인데요 (2026-08-31 운영자 지시).
+    **이름만 「플랜」입니다.** 그 말은 워크북 「플랜 상태」 드롭다운 열의 이름이라 바꾸지
+    않았고(`PLAN_STATUSES` — 거기 없는 말을 시트에 쓰면 그 행이 영업팀의 어느 필터에도 안
+    걸립니다), 기간은 `plan_period` 가 정합니다. 2026-09-21 운영자 지시로 그것이 계약
+    기간으로 돌아왔습니다 — MRR 과 **같은 자**를 쓰게 하려는 것이고, 그래야 한 화면에서
+    「세팅중」인 고객에게 이번 달 MRR 이 잡히는 모순이 없습니다.
 
-    오늘이 어느 플랜 기간 안에 들면 사용중, 아직 시작하지 않았거나 날짜가 덜 적힌 계약이
+    오늘이 어느 계약 기간 안에 들면 사용중, 아직 시작하지 않았거나 날짜가 덜 적힌 계약이
     있으면 세팅중, 있는 계약이 전부 지났으면 사용 중단입니다. 계약이 아직 하나도 없는
     고객(수주 전환만 된 상태)도 세팅중입니다 — 앞으로 채울 것이 있다는 뜻이므로.
 
-    중도 해지도 여기서 따라옵니다: `plan_period` 의 끝이 만료일과 해지일 중 빠른 쪽이라,
+    중도 해지도 여기서 따라옵니다: `plan_period` 의 끝이 종료일과 해지일 중 빠른 쪽이라,
     해지한 고객은 그날부터 「사용 중단」입니다.
 
     저장하지 않는 이유는 고객 종류를 저장하지 않는 이유와 같습니다: 날짜에서 나오는 값을
@@ -183,7 +195,7 @@ def plan_status(client, today: date | None = None) -> str:
         return "세팅중"
     pending = False
     for contract in contracts:
-        # **플랜 기간**입니다 — 비어 있으면 계약 기간으로 떨어집니다(`plan_period`).
+        # **계약 기간**입니다 — 끝은 종료일과 중도 해지일 중 빠른 쪽(`plan_period`).
         plan_start, plan_end = plan_period(contract)
         start, end = parse_date(plan_start), parse_date(plan_end)
         if end and end < today:
@@ -195,7 +207,7 @@ def plan_status(client, today: date | None = None) -> str:
 
 
 def active_contract(client, today: date | None = None):
-    """화면이 기본으로 여는 계약 — 오늘이 **플랜 기간**에 든 것, 없으면 가장 최근 차수.
+    """화면이 기본으로 여는 계약 — 오늘이 **계약 기간**에 든 것, 없으면 가장 최근 차수.
 
     `contract_state` 와 같은 기간을 봅니다. 다른 기간으로 고르면 화면이 「진행 중」이라고
     적힌 계약 대신 다른 차수를 열어 놓게 됩니다.
@@ -212,7 +224,7 @@ def active_contract(client, today: date | None = None):
 def upcoming_contracts(client, today: date | None = None) -> list:
     """아직 시작 전인 계약 = 세팅중 계약. 1차가 도는 중에 2차를 미리 등록한 경우입니다.
 
-    **플랜 기간 기준**입니다 — 화면의 「세팅중 계약 n건」과 그 아래 계약 줄의 「세팅중」이
+    **계약 기간 기준**입니다 — 화면의 「세팅중 계약 n건」과 그 아래 계약 줄의 「세팅중」이
     같은 것을 세야 합니다. 계약 시작일로 세면 계약은 시작했는데 플랜이 아직인 건이 줄에는
     「세팅중」으로 뜨고 개수에는 안 들어갑니다.
     """
@@ -268,88 +280,57 @@ def vat_applicable(contract) -> bool:
     return is_krw(contract) if chosen is None else bool(chosen)
 
 
-def vat_included(contract) -> bool:
-    """**분당 단가의 기준이 VAT 포함 금액인가.** 화면의 「공급가 선택」이 고르는 값입니다.
+def total_amount(contract) -> Decimal | None:
+    """계약 금액 — **행에 적힌 그 값이고, 그것이 VAT 포함 총액입니다.**
 
-    부가세가 없는 계약에는 고를 것이 없습니다 — 금액이 하나뿐이라 늘 거짓입니다. 이 값을
-    `vat_applicable` 과 함께 보지 않으면, 미해당 계약이 「VAT 제외」로 읽혀 총액이 10%
-    부풀 수 있습니다.
+    2026-09-21 운영자 지시로 금액 칸이 하나가 됐습니다: 「계약금액은 모두 VAT 포함만으로
+    바꿀거야」. 그전에는 한 계약에 금액이 둘(`amount_incl_vat`·`amount_excl_vat`)이고
+    `vat_included` 가 「계약서에 적힌 쪽이 어느 것인가」를 들고 있었습니다 — 국내 계약서가
+    공급가로 적히기도 하고 총액으로 적히기도 해서, 어느 쪽인지 모르면 분당 단가가 계약마다
+    10% 씩 달라졌기 때문입니다.
+    그 사실은 이제 **계약비고**가 듭니다: 이관 0123 이 VAT 미포함 기준이던 계약마다
+    「실제 분당단가 … (VAT 미포함 기준)」 한 줄을 적어 두었고, 앞으로는 운영자가 적습니다.
+
+    예상 MRR 이 더하는 값도, 월간 매출을 나누는 분자도 언제나 이 값입니다.
     """
-    return vat_applicable(contract) and bool(getattr(contract, "vat_included", False))
+    return _decimal(contract.amount_incl_vat)
 
 
-def billing_amount(contract) -> Decimal | None:
-    """분당 단가가 기준으로 삼는 금액. **계약서에 적힌 그 금액입니다.**
+def supply_amount(contract) -> Decimal | None:
+    """VAT 제외 금액. **VAT 해당 계약에만 있습니다** — 미해당 계약은 부가세가 없습니다.
 
-    - **VAT 미해당** 계약: **그 금액**. 부가세가 없어 적힌 금액이 곧 대금입니다.
-    - VAT 해당 · 공급가로 **VAT 포함 금액**을 고른 계약: **그 총액 그대로.** 10% 를 빼지 않습니다 — 계약서가
-      총액으로 적혀 있으면 단가도 그 금액에서 나옵니다.
-    - VAT 해당 · 공급가로 **VAT 미포함 금액**을 고른 계약: **공급가.** 총액은 여기에 10% 를 더해 계산합니다.
+    **언제나 총액 ÷ 1.1 로 되짚습니다.** 금액 칸이 하나가 된 뒤로는 계약서에 그 숫자가
+    적혀 있든 없든 여기서 계산하는 값입니다. 국내 거래의 공급가는 총액에서 정확히 나오고,
+    워크북의 공급가 열은 회계가 합계를 내는 칸이라 비면 그 행만 조용히 빠집니다. 화면도
+    같은 값을 보여 주되 「총액에서 역산」이라고 적습니다 — 계약서에 적힌 금액과 계산한
+    금액을 같은 얼굴로 두지 않기 위해서.
 
-    한동안 원화는 공급가 하나만 받았습니다. 그런데 계약서가 늘 공급가로 적히지는 않아서,
-    총액으로 적힌 계약을 그 칸에 넣으면 분당 단가가 10% 낮게 나왔고 화면 어디에도 그게
-    보이지 않았습니다. 받는 칸이 통화·기준마다 하나뿐인 것은 그대로입니다 — 둘 다 받으면
-    어느 쪽이 기준인지가 계약마다 달라집니다.
-
-    **총액만 있는 옛 원화 계약은 거기서 공급가를 되짚습니다.** 공급가를 받기로 하기 전의
-    행들은 총액만 채워져 있어서, 그대로 두면 화면의 공급가 칸이 비고 — 필수 칸이라 —
-    그 계약은 플랜 하나 고치는 것조차 저장이 막혔습니다. 총액 = 공급가 + 10% 의 정확한
-    역이라 값을 지어내는 것이 아니고, 다음 저장 때 공급가로 자리를 옮겨 앉습니다.
+    `vat_applicable` 이 남아 있는 이유가 이 함수입니다: 「공급가라는 것이 있는 계약인가」를
+    아는 곳이 여기뿐이라, 같이 지우면 해외 계약의 공급가 칸이 0 으로 채워져 시트와 CSV 로
+    나갑니다.
     """
-    if not vat_applicable(contract) or vat_included(contract):
-        return _decimal(contract.amount_incl_vat)
-    supply = _decimal(contract.amount_excl_vat)
-    if supply is not None:
-        return supply
+    if not vat_applicable(contract):
+        return None
     total = _decimal(contract.amount_incl_vat)
     return total / (1 + VAT_RATE) if total else None
 
 
-def total_amount(contract) -> Decimal | None:
-    """VAT 포함 총액 — 예상 MRR 이 더하는 값은 **언제나 이것**입니다.
-
-    VAT 제외로 적힌 원화 계약만 공급가에 10% 를 더해 **계산합니다**(입력 칸이 없습니다).
-    총액으로 적힌 계약은 받은 값이 그대로 총액이라 더할 것이 없습니다.
-
-    총액만 있는 옛 계약도 같은 답이 나옵니다: `billing_amount` 가 총액에서 공급가를
-    되짚고, 여기서 다시 10% 를 더하면 원래 총액입니다.
-    """
-    if not vat_applicable(contract) or vat_included(contract):
-        return _decimal(contract.amount_incl_vat)
-    supply = billing_amount(contract)
-    return supply * (1 + VAT_RATE) if supply else None
-
-
-def supply_amount(contract) -> Decimal | None:
-    """VAT 제외 금액. **VAT 해당 계약에만 있습니다** — 미해당 계약은 금액이 하나뿐입니다.
-
-    총액으로 적힌 계약은 **총액 ÷ 1.1 로 되짚습니다.** 계약서에 그 숫자가 없더라도 국내
-    거래의 공급가는 총액에서 정확히 나오는 값이고, 워크북의 공급가 열은 회계가 채우는
-    칸이라 비면 그 행만 합계에서 빠집니다. 화면도 같은 값을 보여 주되 「총액에서 역산」
-    이라고 적습니다 — 계약서에 적힌 금액과 계산한 금액을 같은 얼굴로 두지 않기 위해서.
-    """
-    if not vat_applicable(contract):
-        return None
-    if vat_included(contract):
-        total = _decimal(contract.amount_incl_vat)
-        return total / (1 + VAT_RATE) if total else None
-    return billing_amount(contract)
-
-
 def unit_price(contract) -> Decimal | None:
-    """분당 단가 = 기준 금액 ÷ (계약 크레딧 ÷ 60). **계산값입니다 — 저장하지 않습니다.**
+    """분당 단가 = 계약 금액 ÷ (계약 크레딧 ÷ 60). **계산값입니다 — 저장하지 않습니다.**
 
     방향이 뒤집혔습니다. 예전에는 단가를 받아 크레딧을 계산했는데(크레딧 = 공급가 ÷ 단가
     × 60), 계약서에 적히는 것은 금액과 크레딧이고 단가는 그 둘에서 나오는 값입니다. 단가를
     받으면 반올림한 단가로 계산한 크레딧이 계약서의 크레딧과 어긋납니다.
 
-    운영자 시트의 실제 계약으로 검산하면 같은 숫자가 나옵니다:
-    1,566,000원 ÷ (64,800 ÷ 60) = 1,450원/분.
+    **기준은 `total_amount` 하나입니다.** 예전에는 `billing_amount`(계약서에 적힌 금액)가
+    따로 있어서, 공급가로 적힌 계약은 공급가에서 단가가 나왔습니다. 금액 칸이 하나가 되면서
+    그 갈래가 없어졌고, VAT 미포함 기준이던 계약의 「계약서에 적힌 단가」는 계약비고에
+    남습니다(이관 0123).
 
     소수점은 남깁니다 — 20,000,000 ÷ (456,120 ÷ 60) 처럼 딱 떨어지지 않는 계약이 흔하고,
     반올림한 단가는 되짚어 곱했을 때 금액이 안 맞습니다.
     """
-    amount = billing_amount(contract)
+    amount = total_amount(contract)
     credits = contract.credits
     if not amount or not credits or credits <= 0:
         return None
@@ -366,20 +347,25 @@ def _month_no(month: str | None) -> int | None:
 
 
 def plan_period(contract) -> tuple[str | None, str | None]:
-    """매출을 인식하는 기간 — **플랜 기준**입니다. `(시작, 끝)`.
+    """매출을 인식하고 플랜 상태를 정하는 기간 — **계약 기준**입니다. `(시작, 끝)`.
 
-    계약 기간이 아니라 플랜 기간인 이유: 계약은 먼저 맺고 실제 사용은 늦게 시작하는 일이
-    흔합니다(운영자 확인). 계약 기간으로 나누면 아직 쓰지도 않는 달에 매출이 잡히고, 정작
-    쓰는 달에는 덜 잡힙니다.
+    **2026-09-21 운영자 지시로 계약 기간으로 돌아왔습니다**(「MRR (계약기간 분할인식) 기준:
+    계약기간으로 다시 바꿔줘」). 2026-08-18 ~ 09-21 동안은 플랜 기간이었고, 그때의 이유는
+    「계약은 먼저 맺고 실제 사용은 늦게 시작하는 일이 흔하다」였습니다 — 되살리기 전에
+    CLAUDE.md 의 그 문단을 읽으십시오. 지시가 이깁니다.
 
-    끝은 **플랜 만료일과 중도 해지일 중 빠른 쪽**입니다. 해지한 계약이 남은 달의 MRR 을
-    계속 얹고 있던 것이 이 칸이 생긴 이유입니다.
+    끝은 **계약 종료일과 중도 해지일 중 빠른 쪽**입니다. 해지한 계약이 남은 달의 MRR 을
+    계속 얹고 있던 것이 `terminated_on` 이 생긴 이유이고, 그 규칙은 그대로입니다.
 
-    플랜 날짜가 비면 계약 날짜로 떨어집니다 — 저장 경로가 둘을 같이 채우지만(`_fill_contract`),
-    그 전에 들어온 행과 워크북에서 온 행은 비어 있을 수 있습니다.
+    **이름은 그대로 뒀습니다.** 「플랜 상태」는 워크북 드롭다운 열의 이름이고(`PLAN_STATUSES`),
+    `plan_months` 는 payload 키라 화면 두 곳과 고정된 테스트 픽스처가 읽습니다 — 다섯 함수와
+    키 하나를 같이 바꾸는 것은 동작이 하나도 안 바뀌는 개명입니다. 대신 이 줄로 못박습니다:
+    **이 함수는 `plan_starts_on`·`plan_ends_on` 을 읽지 않습니다.**
+
+    그 두 칸은 남아 있고(운영자: 「플랜 시작일·만료일 칸은 남김」) 이제 **크레딧 소진 속도**
+    (`frontend/.../usage.ts` 의 경과율·사용 전망)와 워크북 AE·AF 열만 읽습니다.
     """
-    start = contract.plan_starts_on or contract.starts_on
-    end = contract.plan_ends_on or contract.ends_on
+    start, end = contract.starts_on, contract.ends_on
     terminated = getattr(contract, "terminated_on", None)
     if terminated and (not end or terminated < end):
         end = terminated
@@ -387,15 +373,18 @@ def plan_period(contract) -> tuple[str | None, str | None]:
 
 
 def plan_months(contract) -> int:
-    """MRR 을 나누는 **분모**. 플랜 시작 ~ 플랜 만료(해지일 아님).
+    """MRR 을 나누는 **분모**. 계약 시작 ~ 계약 종료(해지일 아님).
+
+    **분모와 인식 창이 둘 다 계약 기간**이라 월별 합계가 총 계약금액과 정확히 맞습니다
+    (`revenue_start_month` 도 같이 움직였습니다). 한쪽만 바꾸면 마지막 달이 잘리거나 월별
+    합계가 총액을 넘는데, **잘렸다는 표시는 화면 어디에도 없습니다** — 두 곳이 같이 바뀌어야
+    하는 이유입니다.
 
     해지일로 자르지 않는 이유: 해지는 「월 요금이 얼마인가」를 바꾸는 사건이 아니라 「언제까지
     받는가」를 바꾸는 사건입니다. 월 요금은 그대로 두고, 남은 몫은 해지월에 한 번에 정산합니다
     (`termination_adjustment`). 분모까지 줄이면 해지한 계약의 월 요금이 갑자기 올라갑니다.
     """
-    start = contract.plan_starts_on or contract.starts_on
-    end = contract.plan_ends_on or contract.ends_on
-    return months_between(start, end)
+    return months_between(contract.starts_on, contract.ends_on)
 
 
 def termination_month(contract) -> str | None:
@@ -448,14 +437,14 @@ def termination_adjustment(contract) -> Decimal | None:
 def revenue_in_month(contract, month: str) -> Decimal:
     """그 달에 잡히는 금액 — 「이번달 예상 MRR」 카드가 더하는 값.
 
-    **플랜 기간이 정합니다. 결제 방식은 안 봅니다.** 계약 금액 ÷ 플랜 개월수를 인식 기간의
+    **계약 기간이 정합니다. 결제 방식은 안 봅니다.** 계약 금액 ÷ 계약 개월수를 인식 기간의
     매달에 똑같이 넣습니다 — 일시불이든 분납이든, 회차를 몇 개로 쪼갰든 같은 값입니다.
     한동안 결제일이 정하게 뒀는데(그 달에 잡힌 회차 금액의 합), 그러면 12개월 계약을 1월에
     일시불로 받은 고객이 2월부터 카드에서 사라집니다. 매달 서비스를 쓰고 있는데도요.
     상세 화면의 「월간 매출」(`monthly_revenue`)과 같은 값이 되고, 그게 맞습니다 —
     한 계약의 한 달치 매출이 화면마다 다르면 안 됩니다.
 
-    - **MRR**: 인식 시작월부터 **플랜 개월수**만큼, 매달 총액 ÷ 플랜 개월수.
+    - **MRR**: 인식 시작월부터 **계약 개월수**만큼, 매달 총액 ÷ 계약 개월수.
     - **중도 해지**: 해지월에 `총액 − 예상 환불 − 이미 인식한 MRR` 을 한 번에 잡고 그 뒤로는
       0 입니다. 음수일 수 있습니다 — 이미 인식한 것이 실제로 번 돈보다 많으면 그렇습니다.
       크레딧 사용량이 비어 환불액을 모르면 정산 없이 인식만 멈춥니다.
@@ -463,7 +452,7 @@ def revenue_in_month(contract, month: str) -> Decimal:
       일시 인식」이라고 적어 두는 그것이고, 정기 매출이 아니라 균등 배분할 기간이 없습니다.
     - 기간이나 금액이 덜 적힌 계약은 0 입니다.
 
-    플랜 **상태**는 보지 않습니다. 세팅중이든 사용 중단이든 이번 달이 플랜 기간 안이면
+    플랜 **상태**는 보지 않습니다. 세팅중이든 사용 중단이든 이번 달이 계약 기간 안이면
     이번 달 돈입니다 — 상태는 사람이 고치는 값이고 기간은 날짜라, 둘이 어긋날 때 날짜를
     믿습니다.
     """
@@ -497,10 +486,10 @@ def revenue_in_month(contract, month: str) -> Decimal:
 
 
 def monthly_revenue(contract) -> Decimal:
-    """월간 매출 — MRR 은 VAT 포함 총액 ÷ **플랜** 개월수, PoC 는 0 (결제월에 전액 인식).
+    """월간 매출 — MRR 은 VAT 포함 총액 ÷ **계약** 개월수, PoC 는 0 (결제월에 전액 인식).
 
-    계약 개월수가 아닌 이유는 `plan_period` 에 적혀 있습니다: 계약은 먼저 맺고 실제 사용은
-    늦게 시작하는 일이 흔합니다.
+    2026-09-21 운영자 지시로 계약 개월수로 돌아왔습니다(`plan_period`). 이 값이 목록 행과
+    CSV 「월간 매출」과 상세의 「월간 MRR」이 읽는 그 숫자입니다.
     """
     if contract is None or contract.deal_type != "MRR":
         return Decimal(0)
@@ -511,13 +500,13 @@ def monthly_revenue(contract) -> Decimal:
 
 
 def monthly_supply_revenue(contract) -> Decimal:
-    """월간 매출을 **공급가로** 본 값 — 공급가 ÷ **플랜** 개월수 (2026-09-09).
+    """월간 매출을 **공급가로** 본 값 — 공급가 ÷ **계약** 개월수 (2026-09-09).
 
     **화면이 스스로 나누던 값입니다.** 상세의 「월간 MRR (공급가 기준)」이
-    `공급가 ÷ contract.months` 로 계산했는데, 그 `months` 는 **계약 개월수**였습니다.
-    바로 옆의 「월간 MRR (VAT 포함)」은 서버가 **플랜 개월수**로 나눈 값이라, 두 숫자가
-    같은 계약을 서로 다른 기간으로 말했습니다 — 계약 날짜를 고치면 한쪽만 움직였고,
-    운영자가 그걸로 잡았습니다.
+    `공급가 ÷ contract.months` 로 계산했는데, 바로 옆의 「월간 MRR」은 서버가 나눈 값이라
+    두 숫자가 같은 계약을 서로 다른 기간으로 말했습니다 — 계약 날짜를 고치면 한쪽만
+    움직였고, 운영자가 그걸로 잡았습니다. **분모를 한 곳에 두는 것**이 그 답이고, 그
+    분모가 무엇인지(플랜→계약, 2026-09-21)와는 상관없이 남는 규칙입니다.
 
     같은 자를 쓰게 하는 방법은 자를 한 곳에 두는 것뿐입니다. 환율을 서버가 한 번만
     환산하는 것과 같은 이유입니다 — 화면이 다시 계산하면 같은 숫자가 화면마다 달라집니다.
@@ -533,12 +522,11 @@ def monthly_supply_revenue(contract) -> Decimal:
 
 
 def revenue_start_month(contract) -> str | None:
-    """매출을 인식하기 시작하는 달. 지정이 없으면 **플랜 시작월**.
+    """매출을 인식하기 시작하는 달. 지정이 없으면 **계약 시작월**.
 
-    계약 시작월이 아닌 이유는 `plan_period` 와 같습니다: 계약은 먼저 맺고 실제 사용은 늦게
-    시작하는 일이 흔합니다. 계약 시작월부터 인식하면 아직 쓰지도 않는 달에 매출이 잡히고,
-    분모는 플랜 개월수라 **월별 합계가 총액을 넘습니다** — 그때는 마지막 달이 잘려 나가서,
-    화면 어디에도 잘렸다는 표시가 없습니다.
+    **분모(`plan_months`)와 짝입니다.** 둘 다 계약 기간이라 월별 합계가 총 계약금액과
+    정확히 맞습니다. 한쪽만 옮기면 마지막 달이 잘리거나 합계가 총액을 넘는데, 잘렸다는
+    표시는 화면 어디에도 없습니다 — 2026-09-21 에 두 함수를 같이 되돌린 이유입니다.
 
     ``revenue_from`` 은 그 위의 명시 지정이라 그대로 이깁니다.
     """
@@ -567,7 +555,7 @@ def first_revenue_month(client) -> str | None:
     신규 고객이 어느 달의 New 에도 안 잡히고 — 화면에는 큰 막대 옆에 「New ₩0」 이 서는데,
     그게 틀렸다는 표시는 어디에도 없습니다.
 
-    그래서 `revenue_in_month` 와 **같은 갈래**를 탑니다: PoC 는 플랜 기간이 아니라 첫 회차의
+    그래서 `revenue_in_month` 와 **같은 갈래**를 탑니다: PoC 는 계약 기간이 아니라 첫 회차의
     달에 전액을 인식하므로(균등 배분할 기간이 없습니다) 그 달로 재고, MRR 은 인식 시작월로
     잽니다. 한 자로 재던 동안에는 신규 PoC 고객이 New 에서 통째로 빠져 있었습니다.
 
@@ -586,11 +574,12 @@ def first_revenue_month(client) -> str | None:
 def first_cash_month(client) -> str | None:
     """그 고객의 입금이 **처음 잡히는 달**. New 매출이 어느 달에 서는지 정합니다.
 
-    MRR 쪽과 자가 다른 이유: 월 매출은 **결제 회차의 날짜**로 칸을 만드는데, 그 날짜는
-    계약일에서 나오고(`first_payment_on or starts_on`) 플랜 시작일과 다릅니다 — 계약은 먼저
-    맺고 사용은 늦게 시작하는 일이 흔해서 `plan_starts_on` 이 생긴 것입니다. 두 계열을 한
-    자로 재던 동안에는, 8월에 입금받고 9월에 플랜이 시작한 신규 고객이 8월 New 매출에도
-    9월 New 매출에도 안 잡혔습니다.
+    MRR 쪽과 자가 다른 이유: 월 매출은 **결제 회차의 날짜**로 칸을 만들고(`first_payment_on
+    or starts_on`), MRR 은 **인식 시작월**로 칸을 만듭니다. 계약 시작 전에 선입금을 받거나
+    `revenue_from` 을 따로 적은 계약에서 둘이 갈립니다 — 두 계열을 한 자로 재던 동안에는
+    8월에 입금받고 9월부터 인식하는 신규 고객이 8월 New 매출에도 9월 New 매출에도 안
+    잡혔습니다. (그 갈림이 플랜 날짜에서 나오던 시절도 있었습니다 — 2026-09-21 에 MRR 이
+    계약 기간으로 돌아오면서 그 이유만 바뀌었고, 두 자를 따로 두는 규칙은 그대로입니다.)
     """
     months = [
         _first_payment_month(contract)

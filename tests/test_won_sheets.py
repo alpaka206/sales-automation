@@ -23,13 +23,11 @@ def _client(client_id: int, company: str = "서울대학교"):
     return SimpleNamespace(
         client_id=client_id,
         company=company,
-        industry="교육",
         country="한국",
         department="GTM",
         first_won_on="2026-05-19",
-        # 플랜 상태는 저장된 값이 아니라 **플랜 기간**에서 나옵니다(won.plan_status).
-        # 플랜 날짜를 비우면 계약 기간이 그 자리에 서므로(서버 기본값과 같은 규칙), 기간
-        # 안인 계약 하나를 주면 시트 J열이 「사용중」이 됩니다.
+        # 플랜 상태는 저장된 값이 아니라 **계약 기간**에서 나옵니다(won.plan_status,
+        # 2026-09-21). 기간 안인 계약 하나를 주면 시트 J열이 「사용중」이 됩니다.
         contracts=[
             SimpleNamespace(
                 starts_on=(date.today() - timedelta(days=30)).isoformat(),
@@ -55,10 +53,11 @@ def test_an_empty_sheet_fills_from_the_top():
         "'고객 기본 정보'!I2:I2",
     ]
     # 붙어 있는 열은 한 범위로 묶입니다 — 칸마다 한 범위면 요청이 열 배가 됩니다.
-    # 사이가 끊기는 것은 B·G(수식)와 D(Website URL)·H(최초 연락일, 시트 것) 때문입니다.
+    # 사이가 끊기는 것은 B·G(수식)와 D(Website URL)·E(산업 분야, 이관 0124 뒤로 시트 것)·
+    # H(최초 연락일, 시트 것) 때문입니다. E 가 빠지면서 예전의 `E2:F2` 가 `F2:F2` 입니다.
     assert [entry["range"] for entry in plan.raw] == [
         "'고객 기본 정보'!C2:C2",
-        "'고객 기본 정보'!E2:F2",
+        "'고객 기본 정보'!F2:F2",
         "'고객 기본 정보'!J2:J2",
     ]
     assert plan.clears == []
@@ -103,11 +102,12 @@ def test_a_row_the_console_no_longer_has_is_cleared_but_formulas_survive():
     grid = _sheet({"A": "2102", "C": "집나간 햄지"})
     plan = plan_tab(CLIENTS, grid, [], {"2102"})
 
-    # B·G(수식)와 D(Website URL)·H(최초 연락일)는 콘솔이 안 쓰므로 그대로 둡니다.
+    # B·G(수식)와 D(Website URL)·E(산업 분야)·H(최초 연락일)는 콘솔이 안 쓰므로 그대로
+    # 둡니다 — E 는 이관 0124 부터 그 목록에 들어왔습니다.
     assert plan.clears == [
         "'고객 기본 정보'!A2:A2",
         "'고객 기본 정보'!C2:C2",
-        "'고객 기본 정보'!E2:F2",
+        "'고객 기본 정보'!F2:F2",
         "'고객 기본 정보'!I2:J2",
     ]
     assert plan.entered == [] and plan.raw == []
@@ -138,3 +138,26 @@ def test_the_sheet_formula_calls_the_1000_band_gtm_inbound():
 
     # 드롭다운도 같은 목록입니다 — 규칙 안에 값을 들고 있어서 따로 고쳐야 합니다.
     assert set(choices("고객 종류")) == {label for _floor, label in CLIENT_ID_BANDS}
+
+
+def test_the_payment_method_dropdown_says_what_the_console_saves():
+    """콘솔의 고르개와 워크북의 드롭다운은 **같은 말**을 해야 합니다.
+
+    `client_contracts.payment_method` 에 들어가는 것은 라벨이 아니라 **그 글자 그대로**
+    이고, 동기화가 그 글자를 시트 계약 탭 Q열에 씁니다. 목록이 갈라지면 콘솔이 쓴 값이
+    시트의 데이터 확인 목록에 없는 말이 되고, **그러면 그 행이 영업팀의 어느 필터에도
+    안 걸립니다** — 단계 표기에서 이미 한 번 데었고(`google_sheets._STAGE_VALUES`),
+    「내림」을 `PLAN_STATUSES` 에 안 넣는 이유도 같습니다.
+
+    2026-09-21 에 「계좌이체」가 「직접거래」가 되면서(운영자 지시, 이관 0122 가 행을 같이
+    옮겼습니다) 실제로 두 곳을 따로 고쳐야 했습니다. 그때까지 **어긋나도 빨개지는 곳이
+    없었습니다.**
+    """
+    import sys
+
+    sys.argv = ["x"]
+    from scripts.build_won_sheets import choices
+
+    from src.common import won
+
+    assert set(choices("결제 수단")) == set(won.PAYMENT_METHODS)

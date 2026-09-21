@@ -71,7 +71,11 @@ class _Row:
 
 # B(고객 종류)·G(담당부서)는 번호대에서 나오는 수식, D(Website URL)와 H(최초 연락일)는
 # 시트가 원본이라 콘솔이 안 씁니다. 사람 이름·연락처는 이 탭에 아예 없습니다.
-CLIENTS = _Tab("고객 기본 정보", ("A",), tuple("ACEFIJ"))
+#
+# **E(산업 분야)도 2026-09-21 부터 시트가 원본입니다** — 콘솔에서 그 칸을 뺐습니다(이관
+# 0124). owned 에서 같이 빼야 합니다: `_client_row` 가 안 싣는데 owned 에는 남아 있으면,
+# `plan_tab` 이 지워진 행의 E 만 비우고 살아 있는 행은 영영 안 고쳐 옛 값이 굳습니다.
+CLIENTS = _Tab("고객 기본 정보", ("A",), tuple("ACFIJ"))
 # Perso 계정·플랜은 계약과 1:1 이라 같은 행(AB~AL)입니다. 탭을 나누면 Client ID·고객사·
 # 계약 차수 세 열을 다시 적을 뿐입니다 — db/models.py 가 같은 말을 합니다.
 CONTRACTS = _Tab(
@@ -129,7 +133,6 @@ def _client_row(client: Client) -> _Row:
         entered={"A": client.client_id, "I": _date(client.first_won_on)},
         raw={
             "C": _text(client.company),
-            "E": _text(client.industry),
             "F": _text(client.country),
             # 화면과 같은 값이 시트에도 갑니다 — 계약 기간에서 나옵니다. 저장된 값을
             # 싣던 시절에는 계약이 끝나도 시트가 「사용중」인 채였습니다.
@@ -153,11 +156,16 @@ def _contract_row(contract: ClientContract) -> _Row:
             "F": _date(contract.starts_on),
             "G": _date(contract.ends_on),
             "J": _num(contract.credits),
-            # 화면과 같은 값이 나갑니다. 총액은 원화면 공급가+10%, 분당 단가는 금액을
-            # 크레딧에서 나눈 계산값입니다 — 저장된 열이 아닙니다.
+            # 화면과 같은 값이 나갑니다. L 은 계약 금액(= VAT 포함 총액, 이관 0123),
+            # 분당 단가는 그 금액을 크레딧에서 나눈 계산값입니다 — 저장된 열이 아닙니다.
             "L": _num(won.total_amount(contract)),
-            # 공급가는 총액으로 적힌 계약에서도 채웁니다(총액 ÷ 1.1) — 회계가 합계를
-            # 내는 열이라 비면 그 행만 조용히 빠집니다. 화면과 같은 값입니다.
+            # 공급가는 언제나 총액 ÷ 1.1 입니다 — 회계가 합계를 내는 열이라 비면 그 행만
+            # 조용히 빠집니다. 화면과 같은 값입니다.
+            #
+            # **「검증」 탭의 산정 크레딧 수식이 이 열을 보고 있었습니다**(M ÷ O × 60).
+            # 공급가가 언제나 총액 ÷ 1.1 이 되면서 그 값이 계약 크레딧 ÷ 1.1 로 나와 모든
+            # 행이 「불일치」로 찍혔고, 그래서 `build_won_sheets` 에서 L ÷ O × 60 으로
+            # 고쳤습니다 — 살아 있는 워크북에는 `--refresh-derived` 를 돌려야 반영됩니다.
             "M": _num(won.supply_amount(contract)),
             "O": _num(won.unit_price(contract)),
             # P(적용 환율)·N(분당 단가 통화)은 없어진 칸입니다. 옛 값이 남아 있으면 지금
@@ -175,7 +183,11 @@ def _contract_row(contract: ClientContract) -> _Row:
         raw={
             "D": _text(contract.ticket_id),
             "E": _text(contract.deal_type),
-            "I": " + ".join(contract.doc_types or []),
+            # I(계약서 유형)는 없어진 칸입니다(이관 0125). **열은 남기고 비웁니다**: 열을
+            # 지우면 J~AM 이 한 칸씩 밀려 들어가고 예외는 안 나며, owned 에서 I 를 빼면
+            # 지워진 계약의 옛 글자가 `plan_tab` 의 재사용 행에 그대로 얹힙니다(N·P 와
+            # 같은 이유).
+            "I": "",
             "K": _text(contract.currency),
             "N": "",
             "Q": _text(contract.payment_method),

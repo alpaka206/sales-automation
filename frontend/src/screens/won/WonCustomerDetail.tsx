@@ -3,20 +3,21 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { getJSON, postForm } from "../../lib/api";
 import { useAgent, useSpaceMetric } from "../../lib/agent";
-import { SubmitButton, useAction } from "../../ui/ActionButton";
+import { ActionButton, SubmitButton, useAction } from "../../ui/ActionButton";
 // **타입 목록은 한 곳에서 옵니다** (2026-09-03 운영자 지시). 이 화면은 모달이 아니고
 // 「관련 계약」 칸이 따로 있어 폼 자체는 합치지 않지만, 고르개 목록까지 따로 들고 있으면
 // 같은 값을 두 화면이 다르게 부릅니다 — 여기는 「메일」·「왓츠앱」·「기타」였고 저쪽은
 // 「이메일」·「WhatsApp」·「메모」였습니다.
 import { CHANNELS, InteractionForm } from "../../ui/InteractionForm";
 import { Modal } from "../../ui/Modal";
+import { DeleteDialog } from "../../ui/DeleteDialog";
 import { Confirm } from "./Confirm";
 import { StatusTags } from "./UsageBits";
 import { useAutoReconcile } from "./reconcile";
 import { useEvidence, usageFor, useUsageIndex } from "./useUsage";
 import { matchGrants, matchPayments, mergeEvidence, parseSpaceSeqs, type GrantEvidence, type PaymentEvidence } from "./usage";
 import { WonContractForm } from "./WonContractForm";
-import { ContractFields, PlanFields, scheduleLabel, useContractDraft } from "./ContractFields";
+import { ContractFields, DealTypeHint, PlanFields, scheduleLabel, useContractDraft } from "./ContractFields";
 import { validate } from "./contractDraft";
 import { CreditUsageSection, JobsSection, MixSection, UsageInsight, type CreditsData } from "./WonUsageSections";
 import {
@@ -48,7 +49,7 @@ const SECTIONS: [string, string][] = [
   // 사용 쪽은 **이 PC 의 데이터 에이전트**가 답합니다(스냅샷 집계). 서버는 이 값을 모릅니다.
   ["sec-credit", "크레딧"],
   ["sec-jobs", "작업 성능"],
-  ["sec-mix", "사용 패턴"],
+  ["sec-mix", "영상 분석"],
 ];
 
 const AVATAR_COLORS = ["#0F766E", "#B45309", "#3730A3", "#B42318", "#026AA2", "#4B5563"];
@@ -161,7 +162,7 @@ export function WonCustomerDetail() {
                 바로 아래 기본 정보 섹션에 있고, 여기서는 고객을 분류하는 값이 먼저입니다. */}
             <div className="dh-sub">
               {["Client ID " + data.client_id, data.customer_type,
-                data.industry, data.country, data.department]
+                data.country, data.department]
                 .map((part) => part || "—").join(" · ")}
             </div>
           </div>
@@ -204,7 +205,7 @@ export function WonCustomerDetail() {
               </select>
               {/* **편집 하나가 두 카드를 같이 입력칸으로 바꿉니다** (2026-09-15 운영자 확인).
                   「계약 및 결제 정보」와 「Perso 계정 및 플랜」은 한 계약 행이고 칸들이 서로
-                  얽혀 있어서(VAT → 통화 → 금액 → 공급가, 크레딧 ↔ 단가, 플랜 기간 → MRR),
+                  얽혀 있어서(VAT → 통화 → 금액, 크레딧 ↔ 단가, 계약 기간 → MRR),
                   카드마다 따로 저장하면 반쪽짜리 계약이 남습니다. 저장·취소도 한 번입니다. */}
               {section === "sec-contract" && (editingContract ? (
                 <>
@@ -264,7 +265,7 @@ export function WonCustomerDetail() {
                                 onDone={() => { setEditingContract(false); refresh(); }} />
               ) : (
                 <>
-                  <ContractSection current={current} today={today} />
+                  <ContractSection current={current} today={today} onDone={refresh} />
                   <PlanSection contract={current} />
                 </>
               )
@@ -283,6 +284,7 @@ export function WonCustomerDetail() {
               <>
                 <PaySection contract={current} today={today} onDone={refresh} evidence={payEvidence} />
                 <RevenueSection contract={current} today={today} />
+                <TerminationSection contract={current} onDone={refresh} />
               </>
             )}
             {section === "sec-jobs" && (
@@ -319,21 +321,21 @@ export function WonCustomerDetail() {
         />
       )}
 
+      {/* **지우는 창은 콘솔에 한 벌입니다** (2026-09-21 운영자 지시) — 문구를 옮겨 적어야
+          지워집니다. 값을 바꾸는 확인(`Confirm`)과 지우는 확인은 다른 창입니다. */}
       {removing && (
-        <Confirm
-          title="이 고객을 지웁니다"
+        <DeleteDialog
+          name={`${data.company} (Client ID ${data.client_id})`}
           rows={[["고객사", data.company], ["Client ID", String(data.client_id)], ["계약", "0건"]]}
           note={
-            "이 번호를 들고 있던 문의·연락처·수주 전환 대기의 Client ID 도 함께 비웁니다 — " +
-            "없는 번호가 남아 있으면 다음 Won 때 그 번호가 도로 찾아져 고객이 살아 돌아옵니다. " +
-            "워크북 「고객 기본 정보」의 그 행은 시트가 원본이라 손으로 지웁니다."
+            "이 번호를 들고 있던 문의·연락처·수주 전환 대기의 Client ID 도 함께 비웁니다 — "
+            + "없는 번호가 남아 있으면 다음 Won 때 그 번호가 도로 찾아져 고객이 살아 돌아옵니다. "
+            + "워크북 「고객 기본 정보」의 그 행은 시트가 원본이라 손으로 지웁니다."
           }
-          okLabel="삭제"
-          danger
-          onOk={() => postForm(`/won-customers/${data.client_id}/delete`, {})
+          onConfirm={() => postForm(`/won-customers/${data.client_id}/delete`, {})
             .then(() => queryClient.invalidateQueries())
             .then(() => navigate("/won-customers", { replace: true }))}
-          onClose={() => setRemoving(false)}
+          onCancel={() => setRemoving(false)}
         />
       )}
     </div>
@@ -503,7 +505,8 @@ function Section({ id, title, right, children, plain }: {
   );
 }
 
-function KV({ k, v, span }: { k: string; v: React.ReactNode; span?: number }) {
+// `k` 가 ReactNode 인 이유: 「매출 인식」 옆에 (i) 가 붙습니다(`DealTypeHint`).
+function KV({ k, v, span }: { k: React.ReactNode; v: React.ReactNode; span?: number }) {
   return (
     <div style={span ? { gridColumn: `span ${span}` } : undefined}>
       <div className="field-label">{k}</div>
@@ -528,7 +531,6 @@ function BasicSection({ client, contracts, options, onDone }: {
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState({
     company: client.company,
-    industry: client.industry ?? "",
     country: client.country ?? "",
     department: client.department ?? "",
     first_won_on: client.first_won_on ?? "",
@@ -550,7 +552,7 @@ function BasicSection({ client, contracts, options, onDone }: {
   // 요약 카드와 예상 MRR 이 GTM 만 더할 때 쓰는 값입니다 — 한 글자 잘못 고치면 이 화면
   // 밖의 숫자가 조용히 달라집니다. 바뀐 것이 없으면 물을 것도 없어 바로 닫습니다.
   const LABELS: Record<keyof typeof form, string> = {
-    company: "고객사", industry: "산업 분야", country: "국가", department: "담당부서",
+    company: "고객사", country: "국가", department: "담당부서",
     first_won_on: "최초 수주일", owner: "담당",
   };
   const changed = (Object.keys(form) as (keyof typeof form)[])
@@ -570,7 +572,6 @@ function BasicSection({ client, contracts, options, onDone }: {
                               onClick={() => setEditing(true)}>편집</button>}>
         <div className="field-grid">
           <KV k="고객사" v={client.company} />
-          <KV k="산업 분야" v={client.industry} />
           <KV k="국가" v={client.country} />
           <KV k="담당부서" v={client.department} />
           <KV k="Client ID" v={<span className="mono">{client.client_id}</span>} />
@@ -599,15 +600,8 @@ function BasicSection({ client, contracts, options, onDone }: {
           <label className="form-label">고객사</label>
           <input className="inp" value={form.company} onChange={(e) => set("company", e.target.value)} />
         </div>
-        <div>
-          <label className="form-label">산업 분야</label>
-          {/* 목록에 없으면 직접 입력합니다 — 운영자가 시트에서 쓰던 방식 그대로. */}
-          <input className="inp" list="won-industries" value={form.industry}
-                 onChange={(e) => set("industry", e.target.value)} />
-          <datalist id="won-industries">
-            {(options?.industries ?? []).map((item) => <option key={item} value={item} />)}
-          </datalist>
-        </div>
+        {/* 「산업 분야」 칸이 여기 있었습니다 — 2026-09-21 운영자 지시로 없앴습니다
+            (이관 0124). 워크북 「고객 기본 정보」 E열은 남아 시트에서 적습니다. */}
         <div>
           <label className="form-label">국가</label>
           <input className="inp" value={form.country} onChange={(e) => set("country", e.target.value)} />
@@ -686,48 +680,74 @@ function BasicSection({ client, contracts, options, onDone }: {
  * 페이지 머리에만 있고, 「편집」은 탭바 오른쪽에서 이 카드와 「Perso 계정 및 플랜」을 같이
  * 입력칸으로 바꿉니다(`ContractEditor`). 계약 고르개도 탭바 오른쪽입니다.
  */
-function ContractSection({ current, today }: { current: Contract; today: string }) {
-  const docs = current.doc_types || [];
+function ContractSection({ current, today, onDone }: {
+  current: Contract; today: string; onDone: () => void;
+}) {
+  const [removing, setRemoving] = useState(false);
   return (
     <section className="sec" id="sec-contract">
       <div className="sec-head">
         <span className="sec-title">계약 및 결제 정보</span>
+        {/* **계약 삭제는 오래 없던 동작입니다** (2026-09-21 운영자 지시로 생겼습니다).
+            없던 이유는 그대로 남아 있습니다 — 이 차수에 딸린 결제 회차와 크레딧 지급
+            회차가 **같이** 사라지고 되돌릴 방법이 없습니다. 그래서 값을 고치는 자리
+            (「편집」, 탭바 오른쪽)와 멀리 떼어 두고, 문구를 옮겨 적는 창을 지납니다. */}
+        <div className="sec-actions">
+          <button className="btn btn-sm btn--danger" type="button"
+                  onClick={() => setRemoving(true)}>이 계약 삭제</button>
+        </div>
       </div>
+      {removing && (
+        <DeleteDialog
+          name={`${current.seq}차 계약`}
+          rows={[
+            ["계약기간", `${fmt(current.starts_on)} – ${fmt(current.ends_on)}`],
+            ["계약금액", `${money(current.amount_incl_vat, current.currency)} ${current.currency}`],
+            ["결제 회차", `${current.payments.length}건`],
+            ["크레딧 지급 회차", `${current.credit_grants.length}건`],
+          ]}
+          warning="이 계약에 딸린 결제 회차와 크레딧 지급 회차가 같이 사라집니다. 되돌릴 수 없습니다."
+          note={
+            "마지막 차수였다면 그 고객은 장부에서 내려갑니다 — 번호와 행은 남으므로 "
+            + "워크북의 다른 탭이 조회해 가는 회사명은 그대로이고, 계약을 다시 넣으면 "
+            + "저절로 올라옵니다."
+          }
+          // 옮겨 갈 곳이 없습니다 — 고른 차수가 사라지면 위 `current` 가 다음 계약으로
+          // 저절로 떨어집니다(`find(...) ?? data.active ?? 마지막`).
+          onConfirm={() => postForm(`/won-customers/contracts/${current.id}/delete`, {}).then(onDone)}
+          onCancel={() => setRemoving(false)}
+        />
+      )}
 
       <div className="panel">
         <div className="field-grid">
-          <KV k="수주 유형" v={<Tag tone={current.deal_type === "MRR" ? "d-mrr" : "d-poc"}>{current.deal_type}</Tag>} />
+          <KV k={<>매출 인식<DealTypeHint /></>}
+              v={<Tag tone={current.deal_type === "MRR" ? "d-mrr" : "d-poc"}>{current.deal_type}</Tag>} />
           <KV k="Ticket ID" v={current.ticket_id
             ? <><Tag tone="blue">{current.ticket_id}</Tag> <span className="muted" style={{ fontSize: 12 }}>인바운드 연동</span></>
             : <span className="muted">연동 없음</span>} />
           <KV k="계약기간" v={<span className="mono">
             {current.starts_on} – {current.ends_on} <span className="muted">({current.months}개월)</span>
           </span>} />
-          <KV k="총 계약금액 (VAT 포함)" v={<span className="mono">
+          <KV k="총 계약금액" v={<span className="mono">
             {money(current.amount_incl_vat, current.currency)} <span className="muted">{current.currency}</span>
           </span>} />
-          <KV k="계약서 유형" v={docs.length
-            ? docs.map((t) => <span key={t} style={{ marginRight: 4 }}><Tag tone="neutral">{t}</Tag></span>)
-            : "—"} />
+          {/* 「계약서 유형」이 여기 있었습니다 — 2026-09-21 에 없어졌습니다(이관 0125). */}
           <KV k="계약 크레딧" v={<span className="mono">
             {num(current.credits)}{" "}
-            <span className="muted">
-              = {num(Math.round((current.credits ?? 0) / 60))}분 ·{" "}
-              {current.vat_included ? "VAT 포함 금액 기준" : "공급가 기준"}
-            </span>
+            <span className="muted">= {num(Math.round((current.credits ?? 0) / 60))}분</span>
           </span>} />
-          {/* 총액으로 적힌 계약도 숫자를 보여 주되(총액 ÷ 1.1) **역산이라고 적습니다** —
-              계약서에 적힌 금액과 계산한 금액이 같은 얼굴이면 안 됩니다. 워크북의 공급가
-              열과 같은 값입니다: 비워 두면 회계가 합계를 내는 칸에서 그 행만 빠집니다. */}
+          {/* 공급가는 **언제나 계산값**입니다(총액 ÷ 1.1) — 그래서 「역산」이라고 적습니다.
+              워크북의 공급가 열과 같은 값이고, 비워 두면 회계가 합계를 내는 칸에서 그 행만
+              빠집니다. **통화가 아니라 부가세 해당 여부로 가릅니다**: 원화인데 VAT 미해당인
+              계약은 서버가 null 을 보내므로 통화로 가르면 「₩0」이 그려졌습니다. */}
           <KV k="공급가 (VAT 제외)" v={<span className="mono">
-            {current.currency !== "KRW" ? (
+            {!current.vat_applicable ? (
               <span className="muted">VAT 해당 없음</span>
             ) : (
               <>
                 {money(current.amount_excl_vat, current.currency)}{" "}
-                <span className="muted">
-                  {current.vat_included ? "총액에서 역산" : "VAT 10% 제외"}
-                </span>
+                <span className="muted">총액에서 역산</span>
               </>
             )}
           </span>} />
@@ -957,18 +977,16 @@ function CreditSection({ contract, today, onDone, evidence }: {
       )}
 
       {removing && (
-        <Confirm
-          title="이 지급 회차를 지웁니다"
+        <DeleteDialog
+          name={`${removing.no}/${removing.total} 지급 회차`}
           rows={[
             ["회차", `${removing.no}/${removing.total}`],
             ["지급 예정일", fmt(removing.grant_on)],
             ["크레딧", `${num(removing.amount)} 크레딧`],
           ]}
           note="남은 회차는 1부터 다시 번호가 매겨집니다. 지운 회차의 크레딧은 다른 회차로 옮겨 가지 않습니다 — 나눠 담으려면 계약 편집에서 지급 일정을 다시 까세요."
-          okLabel="삭제"
-          danger
-          onOk={() => postForm(`/won-customers/credits/${removing.id}/delete`, {}).then(onDone)}
-          onClose={() => setRemoving(null)}
+          onConfirm={() => postForm(`/won-customers/credits/${removing.id}/delete`, {}).then(onDone)}
+          onCancel={() => setRemoving(null)}
         />
       )}
     </Section>
@@ -1102,6 +1120,71 @@ function GrantForm({ contract, onDone, onCancel }: {
   );
 }
 
+/** 중도 해지 정산 — **크레딧 사용량을 적는 유일한 자리** (2026-09-21 운영자 지시:
+ *  「중도 해지시 환불 계산에 쓰는 크레딧 사용량 결제/mrr 탭 페이지에서 아래에 새로운 박스로
+ *  추가해서 입력하도록」). 계약 폼의 「계약」 절에 있던 칸이 여기로 왔습니다 — **묻는 자리가
+ *  곧 그 값이 무엇에 쓰이는지를 말합니다.**
+ *
+ *  **0 과 빈칸은 다릅니다.** 비어 있으면 환불액을 계산하지 않고 인식만 멈추는데, 0 을 넣으면
+ *  「하나도 안 썼으니 전액 환불」이 되어 해지월 매출이 통째로 음수가 됩니다. 그래서 NULL 을
+ *  `""` 로 그리고(`0` 이 아니라), 손대지 않은 칸은 저장하지 않습니다.
+ *
+ *  **보내는 칸은 `credits_used` 하나뿐입니다.** 계약 라우트는 폼에 온 칸만 건드리므로
+ *  (`_fill_contract`) 부분 폼이 안전하고, 반대로 금액까지 실어 보내면 그 사이 계약 편집에서
+ *  바뀐 값을 열었을 때의 값으로 되돌립니다.
+ *
+ *  서버 값이 바뀌면 따라갑니다(`useEffect`) — SSE 로 남의 저장이 들어왔을 때 묵은 칸 하나가
+ *  blur 한 번에 그 저장을 되돌리는 것이 이 화면이 이미 두 번 겪은 자리입니다. */
+function TerminationSection({ contract, onDone }: { contract: Contract; onDone: () => void }) {
+  const shown = (value: number | null) => (value === null || value === undefined ? "" : String(value));
+  const [used, setUsed] = useState(shown(contract.credits_used));
+  useEffect(() => setUsed(shown(contract.credits_used)), [contract.credits_used]);
+
+  const dirty = used.trim() !== shown(contract.credits_used);
+  const save = async () => {
+    await postForm(`/won-customers/contracts/${contract.id}`, { credits_used: used.trim() });
+    onDone();
+  };
+
+  return (
+    <Section id="sec-termination" title="중도 해지 정산">
+      <div className="form-row" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+        <div>
+          <label className="form-label">크레딧 사용량</label>
+          <input className="inp" type="number" value={used} placeholder="비우면 정산하지 않습니다"
+                 onChange={(e) => setUsed(e.target.value)} />
+          <div style={{ fontSize: 11.5, color: "var(--faint)", marginTop: 4 }}>
+            수동 입력입니다 — 제품 쪽에서 가져오는 경로가 아직 없습니다. 계약 크레딧{" "}
+            {num(contract.credits)} 중 실제로 쓴 양을 적습니다.
+          </div>
+        </div>
+        <div>
+          <label className="form-label">중도 해지일</label>
+          {/* 읽기 전용입니다 — 고치는 자리는 「계약 · 플랜」 탭입니다. 여기 같이 두는 이유는
+              둘이 **다 있어야** 환불이 계산되기 때문입니다: 해지일이 없으면 위 숫자를 적어도
+              아무 일도 안 일어나고, 왜 그런지가 화면 어디에도 안 보입니다. */}
+          <div className="inp" aria-readonly="true"
+               style={{ background: "var(--bg-soft)", color: contract.terminated_on ? "var(--ink)" : "var(--faint)" }}>
+            {contract.terminated_on ? fmt(contract.terminated_on) : "해지 없음"}
+          </div>
+          <div style={{ fontSize: 11.5, color: "var(--faint)", marginTop: 4 }}>
+            {contract.terminated_on
+              ? "예상 환불 = 총액 × (남은 크레딧 ÷ 계약 크레딧). 해지월에 한 번에 정산합니다."
+              : "해지일이 없으면 이 값은 계산에 쓰이지 않습니다 — 「계약 · 플랜」 탭에서 적습니다."}
+          </div>
+        </div>
+      </div>
+      {/* 버튼을 둔 이유(옆의 결제·지급 표는 blur 에 저장합니다): 이 칸 하나가 해지월 매출
+          전체를 뒤집을 수 있어서, 스쳐 지나간 focus 가 저장이 되면 안 됩니다. 바꾼 것이
+          없으면 눌리지도 않습니다. */}
+      <div style={{ display: "flex", gap: 7, justifyContent: "flex-end", marginTop: 9 }}>
+        <ActionButton className="btn btn-sm btn-primary" pending="저장 중"
+                      disabled={!dirty} onClick={save}>저장</ActionButton>
+      </div>
+    </Section>
+  );
+}
+
 /** 결제 내역 — 목업(수주고객-사용현황-목업_26)의 카드 그대로 (2026-09-15 운영자 지시).
  *
  *  위는 「수금률」 타일(수금액 / 총액 · 수금 % · 진행 막대), 아래는 표 하나(회차 · 청구일 ·
@@ -1124,7 +1207,7 @@ function PaySection({ contract, today, onDone, evidence }: {
   const percent = total ? Math.round((n(contract.collected) / total) * 100) : 0;
   // 상태 넷은 목업의 PAY_ST 그대로 — 성공 · 실패 · 미납 · 예정. **고르는 것은 성공과 예정뿐**이고
   // 미납(입금 전인데 청구일이 지남)과 실패(스냅샷의 국내 카드 결제 실패 기록)는 그 사실에서
-  // 따라오는 표시입니다. 실패는 카드 결제에만 있고, 계좌이체·세금계산서는 기록이 없어 미납으로 섭니다.
+  // 따라오는 표시입니다. 실패는 카드 결제에만 있고, 직접거래·세금계산서는 기록이 없어 미납으로 섭니다.
   const failed = payments.filter((p) => !p.done && evidence?.get(p.id)?.kind === "failed").length;
   const overdue = payments.filter((p) => !p.done && dueClass(p.paid_on, today) === "over").length - failed;
 
@@ -1151,7 +1234,7 @@ function PaySection({ contract, today, onDone, evidence }: {
           <span className="tile-s">{paid.length}/{payments.length}회 입금</span>
         </div>
         <div className="credit-top">
-          <div className="tile-v">{money(contract.collected, contract.currency)}<small>/ {money(contract.amount_incl_vat, contract.currency)} (VAT 포함)</small></div>
+          <div className="tile-v">{money(contract.collected, contract.currency)}<small>/ {money(contract.amount_incl_vat, contract.currency)}</small></div>
           <div className="credit-pct">수금 <b className="tnum">{percent}%</b></div>
         </div>
         <div className="pbar" style={{ margin: "10px 0 14px" }}>
@@ -1271,7 +1354,11 @@ function PayRow({ payment, currency, today, onAsk, onSave, evidence }: {
       </td>
       <td className="num nowrap">
         <input className="cell-inp" inputMode="decimal" style={{ textAlign: "right" }}
-               value={rate} placeholder="비우면 그날 고시가"
+               // 「그날 고시가」라고 적어 두었는데, 비워서 보내면(`"auto"`) 서버는 그 회차가
+               // **입금 완료이고 입금일이 있을 때만** 고시가를 채웁니다 — 입금 전 회차는
+               // 비운 채로 남습니다. 단정하지 않는 말이 실제 동작에 맞습니다
+               // (2026-09-21 운영자 지시).
+               value={rate} placeholder="비우면 자동 적용"
                onChange={(e) => setRate(e.target.value)}
                onBlur={() => {
                  const next = rate.trim();
@@ -1314,8 +1401,8 @@ function RevenueSection({ contract, today }: { contract: Contract; today: string
   const mrr = contract.deal_type === "MRR";
   /** **MRR 을 나누는 개월수는 계약 개월수가 아니라 플랜 개월수입니다** (2026-09-09).
    *
-   *  여기가 `contract.months`(계약 개월수)였습니다. 바로 아래 「월간 MRR (VAT 포함)」은
-   *  서버가 플랜 개월수로 나눈 값을 그대로 그리는데, 그 옆의 「공급가 기준」만 이 값으로
+   *  여기가 `contract.months`(계약 개월수)였습니다. 바로 아래 「월간 MRR」은
+   *  서버가 나눈 값을 그대로 그리는데, 그 옆의 「공급가 기준」만 이 값으로
    *  화면이 직접 나눴습니다 — 그래서 계약 날짜를 고치면 **한쪽만 움직였습니다.**
    *  운영자가 그걸로 잡았습니다. 인식 개월수를 적는 아래 문장도 같은 값을 씁니다. */
   const months = contract.plan_months || contract.months || 1;
@@ -1333,10 +1420,11 @@ function RevenueSection({ contract, today }: { contract: Contract; today: string
     <Section id="sec-revenue" title="MRR 관리"
              right={mrr ? `${base.slice(0, 7).replace("-", ".")}부터 ${months}개월 인식` : "결제월에 일시 인식"}>
       <div className="field-grid c3">
-        <KV k="계약 종류" v={<Tag tone={mrr ? "d-mrr" : "d-poc"}>{contract.deal_type}</Tag>} />
-        <KV k="총 계약 금액 (VAT 포함)"
+        <KV k={<>매출 인식<DealTypeHint /></>}
+            v={<Tag tone={mrr ? "d-mrr" : "d-poc"}>{contract.deal_type}</Tag>} />
+        <KV k="총 계약 금액"
             v={<span className="mono">{money(contract.amount_incl_vat, contract.currency)}</span>} />
-        <KV k="월간 MRR (VAT 포함)" v={<span className="mono">
+        <KV k="월간 MRR" v={<span className="mono">
           {mrr ? <>{money(contract.monthly_revenue, contract.currency)} <span className="muted">/ 월</span></>
                : <span className="muted">결제월에 일시 인식</span>}
         </span>} />
@@ -1354,7 +1442,7 @@ function RevenueSection({ contract, today }: { contract: Contract; today: string
       </div>
       <div className="mrr-note">
         {mrr
-          ? `${base.slice(0, 7).replace("-", ".")}부터 ${months}개월 인식 · VAT 포함 총액 ÷ ${months} = ${money(contract.monthly_revenue, contract.currency)}`
+          ? `${base.slice(0, 7).replace("-", ".")}부터 ${months}개월 인식 · 총액 ÷ ${months} = ${money(contract.monthly_revenue, contract.currency)}`
           : "결제가 발생한 달에 전액 인식"}
       </div>
       <div className="revbar">

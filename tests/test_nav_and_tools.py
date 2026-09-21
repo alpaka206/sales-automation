@@ -389,3 +389,45 @@ def test_the_sidebar_stays_lit_on_a_detail_page():
     # 형제 경로가 서로를 켜면 안 됩니다.
     assert not on_path("/customers", "/won-customers")
     assert not on_path("/won-customers", "/customers")
+
+
+def test_every_delete_on_screen_goes_through_the_one_dialog():
+    """지우는 창은 **한 벌**입니다 (2026-09-21 운영자 지시: 「모든 삭제 확인 모달 통일해서
+    재사용하도록 확실하게」).
+
+    소스를 훑어서 셉니다. 이 규칙이 사는 곳은 서버가 아니라 화면이고, 화면에는 창을 검사할
+    테스트가 하나도 없었습니다 — 그래서 옛 확인 창을 그대로 둔 자리가 있어도 아무것도
+    빨개지지 않았습니다. 실제로 그런 자리가 셋이었습니다: 기록 한 줄 삭제는 제목도 버튼
+    글자도 없는 `ConfirmModal` 이라 **「수정」이라고 적힌 초록 버튼**으로 지웠고, 접근 권한
+    삭제는 손으로 만든 모달이었으며, 복구 화면의 「정리」는 문의와 메일을 되돌릴 수 없게
+    지우면서 클릭 한 번이었습니다.
+
+    **지우는 것만 셉니다.** 저장·재발송·상태 변경에까지 문장을 옮겨 적게 하면 확인 창이
+    흔해지고, 흔해지면 아무도 안 읽습니다(`won/Confirm.tsx` 의 규칙).
+    """
+    root = pathlib.Path("frontend/src")
+    # 지우는 라우트로 가는 화면: `.../delete` 로 POST 하거나, DELETE 로 부르거나,
+    # 접근 권한을 거두는 `revoke`.
+    calls = re.compile(r"/delete[\"`]|method: \"DELETE\"|\"revoke\"")
+    found = {
+        path.relative_to(root).as_posix()
+        for path in root.rglob("*.tsx")
+        if calls.search(path.read_text(encoding="utf-8"))
+    }
+
+    # 훑개가 헛돌면 이 테스트는 언제나 초록입니다 — 아는 자리를 먼저 세웁니다.
+    expected = {
+        "screens/CustomerDetail.tsx",   # 기록 한 줄 · 이 고객 삭제
+        "screens/MessageDetail.tsx",    # 기록 한 줄
+        "screens/PolicyDocs.tsx",       # 정책 문서
+        "screens/EmailTemplates.tsx",   # 이메일 템플릿
+        "screens/SettingsUsers.tsx",    # 접근 권한
+        "screens/won/WonCustomerDetail.tsx",  # 수주 고객 · 계약 · 지급 회차
+    }
+    assert expected <= found, f"지우는 화면을 못 찾았습니다: {expected - found}"
+
+    for name in sorted(found):
+        source = (root / name).read_text(encoding="utf-8")
+        assert "DeleteDialog" in source, (
+            f"{name} 이 지우면서 다른 확인 창을 씁니다 — 삭제는 `DeleteDialog` 한 벌입니다"
+        )

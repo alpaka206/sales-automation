@@ -120,7 +120,8 @@ def import_from_sheet(write: bool = True) -> dict:
             client_id = int(cell(r, "A"))
             client = session.get(Client, client_id) or Client(client_id=client_id)
             client.company = cell(r, "C") or client.company or "이름 미확인"
-            client.industry = text(cell(r, "E"))
+            # E(산업 분야)는 읽지 않습니다 — 없어진 칸입니다(이관 0124). 시트 열은 남아
+            # 있으므로 **F 부터의 글자를 당기면 안 됩니다.**
             client.country = text(cell(r, "F"))
             client.department = text(cell(r, "G"))
             client.first_won_on = text(cell(r, "I"))
@@ -148,12 +149,13 @@ def import_from_sheet(write: bool = True) -> dict:
             contract.deal_type = cell(r, "E") or "MRR"
             contract.starts_on = text(cell(r, "F"))
             contract.ends_on = text(cell(r, "G"))
-            contract.doc_types = [p.strip() for p in cell(r, "I").split("+") if p.strip()] or None
+            # I(계약서 유형)는 읽지 않습니다 — 없어진 칸입니다(이관 0125).
             contract.credits = whole(cell(r, "J"))
             contract.currency = cell(r, "K") or "KRW"
+            # 계약 금액 한 칸입니다(이관 0123). M(공급가)은 **읽지 않습니다** — 총액 ÷ 1.1
+            # 로 되짚는 계산값이고, 시트의 그 칸도 콘솔이 써서 내보낸 값입니다.
             contract.amount_incl_vat = num(cell(r, "L"))
-            contract.amount_excl_vat = num(cell(r, "M"))
-            # N(단가 통화)·O(분당 단가)·P(환율)은 읽지 않습니다 — 단가는 금액과 크레딧
+            # N(단가 통화)·O(분당 단가)·P(환율)도 읽지 않습니다 — 단가는 금액과 크레딧
             # 에서 나오는 계산값이고, 나머지 둘은 없어진 칸입니다.
             contract.payment_method = text(cell(r, "Q"))
             contract.payment_type = text(cell(r, "R"))

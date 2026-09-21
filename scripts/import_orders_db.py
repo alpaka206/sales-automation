@@ -55,15 +55,9 @@ DERIVED = {tab["title"]: set(tab.get("array") or {}) for tab in TABS}
 ORDERS_TAB = "수주 DB"
 CLAIMS_TAB = "클레임 · 히스토리"
 
-# 수주 DB 의 계약서 열 → 선택지 시트의 계약서 유형. PoC·계약 안함은 계약서 종류가 아니라
-# 거래 성격이라 "해당 없음" 으로 접는다 (수주 유형 쪽에서 PoC 로 잡힌다).
-_DOC_TYPES = {
-    "직접 계약 (docusign)": "직접 계약 / DocuSign",
-    "금액 지불 시 협의 내용에 합의 및 기존 약관에 동의": "결제 시 약관 및 협의 내용 동의",
-    "세금계산서 발행": "세금계산서 발행",
-    "poc": "해당 없음",
-    "계약 안함": "해당 없음",
-}
+# `_DOC_TYPES` 와 `doc_types()` 가 여기 있었다. 계약서 유형은 2026-09-21 에 아예 없어졌고
+# (이관 0125) 콘솔이 계약 탭 I열을 빈칸으로 내보내므로, 여기서 채워 봐야 다음 동기화에
+# 지워진다. PoC 판정은 E열(매출 인식) 쪽에 그대로 있다.
 _PLAN_STATUS = {"사용 중": "사용중", "종료": "사용 중단"}
 
 
@@ -96,16 +90,6 @@ def unit_price(note: str) -> tuple[str, float] | None:
         return ("KRW" if found.group(1) == "₩" else "USD", float(found.group(2).replace(",", "")))
     except ValueError:
         return None
-
-
-def doc_types(text: str) -> str:
-    parts = [p.strip() for p in str(text).split(",") if p.strip()]
-    mapped = []
-    for part in parts:
-        name = _DOC_TYPES.get(part.lower(), part)
-        if name not in mapped:
-            mapped.append(name)
-    return " + ".join(mapped)
 
 
 def main() -> None:
@@ -159,7 +143,6 @@ def main() -> None:
                     "E": "PoC" if "poc" in (note + str(line[5])).lower() else "MRR",
                     "F": str(line[3]).strip(),
                     "G": add_months(line[3], months),
-                    "I": doc_types(line[5]),
                     "J": money(line[23]) or "",
                     "K": str(line[12]).strip(),
                     "L": amount or "",

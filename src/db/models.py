@@ -742,7 +742,11 @@ class Client(Base):
     # 종류는 **저장하지 않고** 이 값에서 파생합니다 — 두 군데 두면 서로 달라집니다.
     client_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=False)
     company: Mapped[str] = mapped_column(String(255), nullable=False)
-    industry: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # `industry`(산업 분야) 가 여기 있었습니다 — 2026-09-21 운영자 지시로 화면에서 빼고
+    # 이관 0124 가 열을 지웠습니다(「입력도 이전 데이터도 사라져도 되니깐 노출될 필요 x」).
+    # 워크북 「고객 기본 정보」 E열은 남아 운영자가 직접 적는 칸이 됐습니다 — 그 열을 지우면
+    # F~J 가 한 칸씩 밀려 들어가고 예외는 안 납니다.
+    # `customer_profiles.industry`(「산업군」, 허브스팟 동기화)는 다른 칸이고 그대로입니다.
     country: Mapped[str | None] = mapped_column(String(64), nullable=True)
     department: Mapped[str | None] = mapped_column(String(32), nullable=True)
     # 고객사 **측** 담당자는 여기 없습니다 — ``client_contracts`` 에 있습니다(이관 0103).
@@ -793,36 +797,36 @@ class ClientContract(Base):
     deal_type: Mapped[str] = mapped_column(String(8), nullable=False, default="MRR")
     starts_on: Mapped[str | None] = mapped_column(String(10), nullable=True)
     ends_on: Mapped[str | None] = mapped_column(String(10), nullable=True)
-    # 복수 선택입니다. 화면에서 " + " 로 이어 보여주고 저장은 배열로 — 문자열로 저장하면
-    # "직접 계약 / DocuSign + 세금계산서 발행" 을 다시 쪼개야 필터가 됩니다.
-    doc_types: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    # `doc_types`(계약서 유형) 가 여기 있었습니다 — 2026-09-21 운영자 지시로 아예 뺐고
+    # 이관 0125 가 열을 지웠습니다. 워크북 계약 탭 I열은 남지만 콘솔이 안 씁니다(빈칸으로
+    # 내보냅니다) — 열을 지우면 J~AM 이 한 칸씩 밀립니다.
     # 계약 크레딧은 **입력**입니다. 계약서에 적히는 것이 금액과 크레딧이고, 분당 단가가
     # 그 둘에서 나옵니다(`won.unit_price`). 방향이 반대였던 시절에는 반올림한 단가로
     # 계산한 크레딧이 계약서의 크레딧과 어긋났습니다(이관 0068).
     credits: Mapped[int | None] = mapped_column(Integer, nullable=True)
     currency: Mapped[str] = mapped_column(String(8), nullable=False, default="KRW")
-    # **통화마다 채워지는 칸은 하나뿐입니다.** 원화 계약은 공급가만 받고 총액은 +10% 로
-    # 계산하고(`won.total_amount`), 그 외 통화는 부가세가 없어 총액만 받습니다. 둘 다
-    # 채우면 어느 쪽이 기준인지가 계약마다 달라집니다 — 저장 경로가 안 쓰는 쪽을 비웁니다.
+    # **계약 금액은 이 한 칸입니다. 그 값이 VAT 포함 총액입니다** (2026-09-21 운영자 지시:
+    # 「계약금액은 모두 VAT 포함만 으로 바꿀거야」). 공급가는 저장하지 않고 총액 ÷ 1.1 로
+    # 되짚습니다(`won.supply_amount`).
+    #
+    # 그전에는 금액이 둘(`amount_excl_vat`)이고 `vat_included` 가 「계약서에 적힌 쪽이 어느
+    # 것인가」를 들고 있었습니다 — 국내 계약서가 공급가로도 총액으로도 적혀서, 모르면 분당
+    # 단가가 계약마다 10% 씩 달라졌기 때문입니다. 이관 0123 이 그 둘을 지우면서, VAT 미포함
+    # 기준이던 계약마다 **계약비고**에 「실제 분당단가 … (VAT 미포함 기준)」을 적어 두었습니다.
+    # 그 사실이 남는 곳은 이제 그 한 줄뿐입니다.
     amount_incl_vat: Mapped[Decimal | None] = mapped_column(Numeric(18, 2), nullable=True)
-    amount_excl_vat: Mapped[Decimal | None] = mapped_column(Numeric(18, 2), nullable=True)
-    # **원화 계약에서만 뜻이 있습니다:** 계약서에 적힌 금액이 VAT 포함인가. 계약서마다
-    # 다르게 적히는데(공급가 + 부가세 별기 / 총액 일괄), 어느 쪽인지 모르면 분당 단가가
-    # 계약마다 10% 씩 달라집니다. 켜면 받은 금액이 곧 총액이자 단가의 기준이고, 끄면
-    # 예전과 같이 공급가를 받아 총액을 +10% 로 계산합니다. 다른 통화는 부가세가 없어
-    # 이 값을 보지 않습니다 — 총액만 받습니다.
-    vat_included: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     # **부가세가 붙는 계약인가.** 기준은 통화가 아니라 고객입니다 — 국내 법인이면 해당,
     # 그 외에는 미해당. 한동안 `won.is_krw` 가 이 판단을 대신했는데(원화면 부가세가 있다),
-    # 통화와 늘 같이 가지는 않습니다. 해당이면 포함·미포함 두 금액이 다 저장되고, 미해당이면
-    # 금액은 하나뿐이라 `vat_included` 는 볼 것이 없습니다.
+    # 통화와 늘 같이 가지는 않습니다. **금액 칸이 하나가 된 뒤에도 남아야 합니다**:
+    # 「공급가라는 것이 있는 계약인가」를 아는 곳이 여기뿐이라, 같이 지우면 해외 계약의
+    # 공급가 칸이 0 으로 채워져 시트와 CSV 로 나갑니다.
     #
     # **NULL 은 「아직 안 고름」입니다** — 그때는 예전 규칙대로 통화로 추정합니다
     # (`won.vat_applicable`). 이 칸이 생기기 전의 행 수백 개를 이관이 손대지 않아도 금액이
     # 안 움직이는 이유이고, 새 폼은 언제나 값을 보냅니다. NOT NULL DEFAULT false 로 두면
     # 그 옛 원화 계약이 전부 「미해당」이 되어 총액이 10% 씩 내려앉습니다.
     vat_applicable: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
-    # 중도 해지일. 플랜은 만료일과 이 날짜 중 **빠른 쪽**에서 끝납니다.
+    # 중도 해지일. 인식 기간은 계약 종료일과 이 날짜 중 **빠른 쪽**에서 끝납니다.
     terminated_on: Mapped[str | None] = mapped_column(String(10), nullable=True)
     # **그 계약에 적용할 환율과 기준 날짜.** 결제 회차에도 같은 이름의 칸이 있는데 뜻이
     # 다릅니다: 저쪽은 **입금액을 환산한** 환율(그날 실제로 받은 돈), 이쪽은 **계약 금액을

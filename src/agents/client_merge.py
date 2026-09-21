@@ -103,7 +103,6 @@ def validate_client_merge(snapshot: dict, expected_company: str) -> None:
 
 _CLIENT_FIELDS = (
     "company",
-    "industry",
     "country",
     "department",
     "first_won_on",

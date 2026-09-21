@@ -55,7 +55,7 @@ export function WonContractForm() {
   const ready = Boolean(list) && (creating || Boolean(data));
 
   const f = useContractDraft();
-  const { draft, setDraft, setDocTypes } = f;
+  const { draft, setDraft } = f;
   // **초안과 같이 한 번만 굳힙니다.** 매 렌더 `list.pending` 에서 다시 찾으면, 폼을 채우는
   // 동안 그 대기 행이 사라졌을 때(누가 같은 티켓을 다른 계약에 적었다 — `_claim_ticket`)
   // 다 채운 폼이 「고객 정보가 없습니다」 한 줄로 바뀝니다. 아무 쓰기나 SSE 로 목록을
@@ -81,8 +81,8 @@ export function WonContractForm() {
     () => {
       // 「수주 고객 추가」에서 왔으면 **적어 온 칸을 돌려주며** 되돌립니다. 1단계는 이제
       // 아무것도 저장하지 않으므로, 그냥 뒤로 보내면 여덟 칸을 처음부터 다시 칩니다.
-      // `location.state` 를 통째로 넘기는 이유는 그 안에 산업 분야의 「직접 입력」 여부처럼
-      // 1단계만 아는 값이 같이 들어 있어서입니다 — 여기서 그 모양을 알 필요가 없습니다.
+      // `location.state` 를 통째로 넘깁니다 — 1단계가 무엇을 담아 두었는지 여기서 알 필요가
+      // 없습니다(산업 분야의 「직접 입력」 여부가 그런 값이었습니다, 이관 0124 에서 없어짐).
       if (creating && handed) {
         navigate("/won-customers/new", { state: location.state, replace: true });
         return;
@@ -126,7 +126,6 @@ export function WonContractForm() {
         ticket_id: pendingTicket,
         plan_name: prev?.plan_name || shownCompany,
       });
-      setDocTypes(prev && copyPrev ? prev.doc_types || [] : []);
       f.setFirstCreditOn(start);
     }
   }
@@ -242,7 +241,6 @@ export function WonContractForm() {
                        onChange={(e) => {
                          setCopyPrev(e.target.checked);
                          setDraft((c) => c ? { ...c, ...(e.target.checked ? carryOver(prev) : emptyCarry()) } : c);
-                         setDocTypes(e.target.checked ? prev.doc_types || [] : []);
                        }} />
                 이전 계약({prev.label})의 플랜 · 결제 · 계정 설정 불러오기
               </label>

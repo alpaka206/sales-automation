@@ -6,7 +6,8 @@
 - **금액과 크레딧을 받고, 분당 단가는 계산합니다**(`won.unit_price`). 계약서에 적히는 것이
   그 둘이라서요. 방향이 반대였던 시절에는 반올림한 단가로 계산한 크레딧이 계약서의 크레딧과
   어긋났습니다.
-- 통화가 쓰는 금액 칸은 하나뿐입니다: 원화는 공급가(총액은 +10% 로 계산), 그 외는 총액.
+- **계약 금액은 한 칸이고 VAT 포함입니다**(2026-09-21 운영자 지시). 공급가는 저장하지 않고
+  총액 ÷ 1.1 로 되짚습니다(`won.supply_amount`).
 - 결제 회차를 입금 완료로 바꿀 때 **그 날짜의 환율**을 채웁니다. 조회에 실패하면 비워 둡니다;
   운영자가 직접 넣을 수 있고, 조회 실패가 저장을 막으면 안 됩니다.
 - 계약 차수는 받지 않고 그 고객의 마지막 차수 + 1 입니다.
@@ -16,8 +17,11 @@ PUT 이면 405 가 나고, 화면에는 "저장이 안 된다" 로만 보입니�
 그렇게 막혀 있었습니다. 동사를 둘 두면 어느 쪽인지 매번 확인해야 하고, 그 확인을 한 번
 빠뜨리면 같은 일이 반복됩니다.
 
-계약 삭제는 없습니다. 지워야 할 계약은 실수로 만든 것뿐인데, 그건 값을 고치면 되고 — 지우면
-거기 딸린 결제·크레딧 기록이 같이 사라집니다.
+**계약 삭제가 생겼습니다** (2026-09-21 운영자 지시). 오래 없었고, 없던 이유는 「지워야 할
+계약은 실수로 만든 것뿐인데 그건 값을 고치면 되고, 지우면 거기 딸린 결제·크레딧 기록이 같이
+사라진다」였습니다. 그 대가는 그대로입니다 — 그래서 `delete_contract` 가 무엇이 같이 사라지는지
+세어 돌려주고, 화면은 문구를 옮겨 적게 한 뒤에야 부릅니다. 마지막 차수를 지우면 계약 0건짜리
+고객이 남는데 그건 2026-08-25 의 유령 행 사고라, 그 자리에서 **장부에서 내립니다**.
 """
 
 from __future__ import annotations
@@ -86,48 +90,12 @@ def _get_contract(session, contract_id: int) -> ClientContract:
     return contract
 
 
-def _settle_amounts(contract: ClientContract) -> None:
-    """계약이 쓰지 않는 금액 칸을 비웁니다 — **쓰는 쪽에 값이 있을 때만.**
-
-    어느 칸을 쓰는지는 통화와 「VAT 포함/제외」가 함께 정합니다: VAT 제외로 적힌 원화
-    계약만 공급가를 받고 총액을 +10% 로 계산하며(`won.total_amount`), 나머지(총액으로
-    적힌 원화 계약, 그리고 부가세가 없는 그 외 통화)는 총액만 받습니다. 안 쓰는 쪽에 옛
-    값이 남아 있으면, 통화나 기준을 바꾼 계약에서 화면이 계산한 값과 행에 든 값이
-    갈라집니다.
-
-    **조건이 붙어 있는 이유는 데이터가 사라졌기 때문입니다.** 이 라우트는 폼에 온 칸만
-    건드리므로(`_fill_contract` 의 `if name in form`) 몇 칸만 보내는 폼도 받습니다.
-    실제로 「갱신 계획·사용 중단 이유·비고」 패널이 세 칸만 보냈고, 그때 금액은 폼에 없어
-    행의 값이 그대로 남는데 조건 없이 반대쪽을 비우니 **총액만 있던 옛 원화 계약은 비고
-    한 줄 저장에 금액이 통째로 사라졌습니다.** 되돌릴 방법이 없습니다. 그 패널은 이제
-    없지만(이관 0073) 조건은 남깁니다 — 부분 폼은 한 줄이면 다시 생깁니다.
-
-    쓰는 쪽에 값이 있을 때만 반대쪽을 지우면, 옛 계약은 다음번에 금액을 실제로 채워
-    저장할 때 제자리를 찾습니다.
-    """
-    if not won.vat_applicable(contract):
-        # 부가세가 없으면 금액은 하나입니다. 그 하나는 `amount_incl_vat` 에 삽니다 —
-        # `won.total_amount` 가 미해당 계약에서 읽는 칸이고, 「포함」이라는 이름은 부가세가
-        # 없는 계약에서는 그냥 「그 금액」이라는 뜻입니다.
-        if contract.amount_incl_vat is None and contract.amount_excl_vat is not None:
-            contract.amount_incl_vat = contract.amount_excl_vat
-        if contract.amount_incl_vat is not None:
-            contract.amount_excl_vat = None
-        return
-
-    # 해당이면 **둘 다 저장합니다.** 다만 받은 값을 그대로 두 칸에 두지 않고, 고른 기준에서
-    # 나머지를 **다시 계산합니다.** 화면이 자동완성해 주더라도 폼은 두 숫자를 따로 보내므로,
-    # 손으로 한쪽만 고친 요청이 들어오면 두 값이 어긋난 채 저장됩니다 — 그리고 분당 단가와
-    # 총액이 서로 다른 금액에서 나옵니다. 기준 한 칸에서 파생시키면 그 상태가 아예 없습니다.
-    basis = won.billing_amount(contract)
-    if basis is None:
-        return
-    if won.vat_included(contract):
-        contract.amount_incl_vat = basis
-        contract.amount_excl_vat = basis / (1 + won.VAT_RATE)
-    else:
-        contract.amount_excl_vat = basis
-        contract.amount_incl_vat = basis * (1 + won.VAT_RATE)
+# `_settle_amounts` 가 여기 있었습니다. 통화와 「VAT 포함/제외」를 보고 두 금액 칸 중 어느
+# 쪽을 기준으로 삼아 나머지를 다시 계산할지 정하던 함수인데, 2026-09-21 에 계약 금액이
+# `amount_incl_vat` 한 칸이 되면서(이관 0123) 할 일이 없어졌습니다.
+#
+# **그 함수의 경고는 `_fill_contract` 로 옮겼습니다** — 「금액을 안 보내는 폼이 금액을 지우면
+# 안 된다」입니다. 되살릴 일이 있으면 거기부터 읽으십시오.
 
 
 # --------------------------------------------------------------------------- #
@@ -169,7 +137,6 @@ async def create_client(request: Request):
         client = Client(
             client_id=given,
             company=company,
-            industry=_text(form.get("industry")),
             country=_text(form.get("country")),
             # 담당부서는 **번호대**에서 나옵니다. 화면이 보낸 고객 종류를 그대로 믿으면,
             # 대기 건이 물고 온 3000·4000번대 번호에 GTM 이 박히고 — `won.department` 는
@@ -189,7 +156,6 @@ async def create_client(request: Request):
 async def update_client(
     client_id: int,
     company: str = Form(""),
-    industry: str = Form(""),
     country: str = Form(""),
     department: str = Form(""),
     first_won_on: str = Form(""),
@@ -201,7 +167,6 @@ async def update_client(
             raise HTTPException(status_code=404, detail="고객을 찾을 수 없습니다")
         if company.strip():
             client.company = company.strip()
-        client.industry = _text(industry)
         client.country = _text(country)
         client.department = _text(department)
         client.first_won_on = _text(first_won_on)
@@ -296,7 +261,7 @@ _CONTRACT_FIELDS = (
     "contact_name", "contact_info",
     "revenue_from", "plan", "plan_name", "perso_email",
     "plan_starts_on", "plan_ends_on", "space_seq",
-    # 중도 해지일. 플랜은 만료일과 이 날짜 중 빠른 쪽에서 끝납니다.
+    # 중도 해지일. 인식 기간은 계약 종료일과 이 날짜 중 빠른 쪽에서 끝납니다.
     "terminated_on", "fx_on",
 )
 # credits 가 여기 있는 이유: 계약 크레딧은 이제 **입력**입니다. 계약서에 적히는 것이
@@ -306,10 +271,22 @@ _CONTRACT_INTS = (
     # 예상 환불 금액의 분자. 수동 입력입니다 — 제품 쪽에서 가져오는 경로가 아직 없습니다.
     "credits_used",
 )
-_CONTRACT_DECIMALS = ("amount_incl_vat", "amount_excl_vat", "fx_rate")
+_CONTRACT_DECIMALS = ("amount_incl_vat", "fx_rate")
 
 
 def _fill_contract(contract: ClientContract, form: dict) -> None:
+    """폼에 **온 칸만** 건드립니다 — 안 온 칸은 행의 값이 그대로 남습니다.
+
+    `if name in form` 이 그 규칙이고, 지우면 안 되는 이유가 하나 있습니다: 이 라우트는 몇
+    칸만 보내는 폼도 받습니다. 예전에 「갱신 계획·사용 중단 이유·비고」 패널이 세 칸만 보냈고,
+    그때 금액은 폼에 없으니 행의 값이 남아야 하는데 저장 경로가 「안 쓰는 금액 칸을 비운다」를
+    조건 없이 돌렸습니다 — **총액만 있던 옛 원화 계약은 비고 한 줄 저장에 금액이 통째로
+    사라졌습니다.** 되돌릴 방법이 없었습니다.
+
+    그 패널은 없어졌지만(이관 0073) 부분 폼은 한 줄이면 다시 생깁니다. 실제로 2026-09-21 의
+    「중도 해지 정산」 박스가 그 모양입니다 — `credits_used` 하나만 보냅니다. 그래서 **어떤
+    칸도 「안 보냈으니 지운다」로 읽지 않습니다.**
+    """
     for name in _CONTRACT_FIELDS:
         if name in form:
             setattr(contract, name, _text(form.get(name)))
@@ -319,34 +296,26 @@ def _fill_contract(contract: ClientContract, form: dict) -> None:
     for name in _CONTRACT_DECIMALS:
         if name in form:
             setattr(contract, name, _number(form.get(name)))
-    # 금액 칸과 **같이** 와야 합니다. 안 그러면 「비고 한 줄」만 보내는 폼이 기준을
-    # 뒤집습니다(그 폼은 금액을 안 보냅니다 — `_one_amount_per_currency` 의 주석 참고).
-    if "vat_included" in form:
-        contract.vat_included = _flag(form.get("vat_included"))
-    # **금액 칸보다 먼저 정해져야 하는 값입니다.** 부가세가 붙는 계약인지에 따라 아래
-    # `_settle_amounts` 가 한 칸을 남길지 두 칸을 채울지가 갈립니다.
+    # **금액을 정하지는 않지만 공급가가 있는 계약인지를 정합니다**(`won.supply_amount`).
+    # `vat_included` 와 `doc_types` 가 여기 있었습니다 — 2026-09-21 에 둘 다 없어졌습니다
+    # (이관 0123 · 0125). 옛 화면이 그 이름을 계속 보내도 조용히 무시됩니다.
     if "vat_applicable" in form:
         contract.vat_applicable = _flag(form.get("vat_applicable"))
-    if "doc_types" in form:
-        # 복수 선택. 화면은 " + " 로 이어 보여주지만 저장은 배열입니다 — 문자열로 두면
-        # "직접 계약 / DocuSign + 세금계산서 발행" 을 다시 쪼개야 필터가 됩니다.
-        raw = (form.get("doc_types") or "").strip()
-        contract.doc_types = [part.strip() for part in raw.split("|") if part.strip()] or None
     contract.deal_type = contract.deal_type or "MRR"
     contract.currency = contract.currency or "KRW"
     # **플랜 날짜를 계약 날짜로 채우지 않습니다** (2026-09-09 운영자 보고로 되돌림).
     #
     # 여기 두 줄이 `plan_starts_on = plan_starts_on or starts_on` 이었습니다. 「비우면
     # 계약 기간과 같다」를 저장 시점에 **값으로 굳힌** 것인데, 그러면 그 뒤로 계약 날짜를
-    # 고쳐도 플랜 날짜는 옛 값 그대로입니다. MRR 은 플랜 기간으로 나누므로 **계약 날짜를
-    # 바꿔도 MRR 이 안 움직입니다** — 운영자가 정확히 그것을 보고 알려 줬습니다.
+    # 고쳐도 플랜 날짜는 옛 값 그대로입니다. 그때는 MRR 이 플랜 기간으로 나뉘어서 **계약
+    # 날짜를 바꿔도 MRR 이 안 움직였고**, 운영자가 정확히 그것을 보고 알려 줬습니다.
     #
-    # 파생값을 저장하면 원본이 바뀔 때 조용히 어긋난다 — 이 저장소가 이미 두 번 겪은
-    # 자리입니다(`customer_profiles.qualification` 0104, 고객 종류 0065). 기본값은
-    # 읽을 때 정합니다: `won.plan_period` 와 `won.plan_months` 가 비어 있으면 계약
-    # 날짜로 떨어집니다. 이미 굳어 있는 행은 이관 0117 이 되돌립니다.
+    # MRR 은 2026-09-21 에 계약 기간으로 돌아왔으니 그 증상은 이제 불가능합니다. **그래도
+    # 다시 채우지 마십시오**: 굳은 플랜 날짜는 이제 크레딧 소진 속도(경과율·사용 전망)를
+    # 틀리게 만들고, 그건 화면에 「틀렸다」로 안 보입니다. 파생값을 저장하면 원본이 바뀔 때
+    # 조용히 어긋난다 — 이 저장소가 세 번 겪은 자리입니다
+    # (`customer_profiles.qualification` 0104, 고객 종류 0065, 이 칸 0117).
     _fill_contract_fx(contract)
-    _settle_amounts(contract)
 
 
 def _complete_pending_won(session, pending_id: int | None, client: Client) -> None:
@@ -559,9 +528,9 @@ def _resync_credit_grants(session, contract: ClientContract, form: dict) -> None
     자기가 불러온 값과 지금 칸의 값을 비교하므로 그런 어긋남이 없고, **운영자에게 경고를
     띄우는 조건과 실제로 일어나는 일이 같은 조건**이 됩니다.
 
-    이 라우트는 폼에 온 칸만 건드립니다(`_fill_contract`). 회차만 예외로 두면
-    `_settle_amounts` 가 겪은 일 — 몇 칸만 보내는 폼 한 번에 옛 값이 사라지는 일 — 이
-    그대로 반복됩니다.
+    이 라우트는 폼에 온 칸만 건드립니다(`_fill_contract`). 회차만 예외로 두면 그 규칙이
+    한 칸에서만 깨지고, 그건 예전에 금액에서 일어난 일 — 몇 칸만 보내는 폼 한 번에 옛 원화
+    계약의 금액이 통째로 사라진 일 — 이 그대로 반복되는 것입니다.
     """
     if not _flag(form.get("credit_reseed")):
         return
@@ -601,6 +570,46 @@ async def update_contract(contract_id: int, request: Request):
             _claim_ticket(session, contract, client)
         session.commit()
     return {"ok": True}
+
+
+@router.post("/won-customers/contracts/{contract_id}/delete")
+async def delete_contract(contract_id: int):
+    """계약 한 차수를 지웁니다 — **딸린 결제 회차와 크레딧 지급 회차가 같이 사라집니다.**
+
+    오래 없던 라우트이고, 없던 이유가 그 한 줄이었습니다(모듈 첫머리). 2026-09-21 운영자
+    지시로 생겼고, 그 대가는 바뀌지 않았으므로 문구를 옮겨 적는 확인 창 뒤에만 있습니다.
+
+    **마지막 차수를 지우면 그 고객을 장부에서 내립니다.** 계약 0건짜리 고객은 `won.plan_status`
+    가 「세팅중」으로 읽어 활성 고객 수와 워크북 「고객 기본 정보」에 그대로 남습니다 —
+    2026-08-25 에 운영자가 「왜 계속 추가되냐」고 물었던 유령 행이 정확히 그것입니다. 고객을
+    **지우지는 않습니다**: 그 번호를 문의·연락처가 들고 있고 워크북의 다른 탭이 조회해
+    회사명을 가져오므로, 계약 한 건 지웠다고 그 연결을 끊을 이유가 없습니다. 계약이 다시
+    들어오면 `_add_contract` 가 `retired_on` 을 비워 저절로 되돌아옵니다.
+
+    워크북 행은 `publish_changes_middleware` 가 이 POST 뒤에 동기화를 걸어 정리합니다 —
+    계약 탭에서 그 차수의 행이 비워지는 것이 그때입니다.
+    """
+    with SessionLocal() as session:
+        contract = _get_contract(session, contract_id)
+        client = session.get(Client, contract.client_id)
+        grants = len(contract.credit_grants or ())
+        payments = len(contract.payments or ())
+        # **commit 뒤에는 지워진 행의 칸을 못 읽습니다** — 로그에 쓸 값은 지금 떠 둡니다.
+        client_id, seq = contract.client_id, contract.seq
+        session.delete(contract)
+        session.flush()
+        # `client.contracts` 는 flush 뒤에도 캐시가 남을 수 있어 직접 셉니다.
+        left = (
+            session.query(ClientContract)
+            .filter(ClientContract.client_id == client_id)
+            .count()
+        )
+        if client is not None and left == 0 and client.retired_on is None:
+            client.retired_on = date.today().isoformat()
+        session.commit()
+    logger.info("계약 %s-%s 를 지웠습니다 (결제 %s건 · 지급 %s건 동반 삭제, 남은 계약 %s건).",
+                client_id, seq, payments, grants, left)
+    return {"ok": True, "grants": grants, "payments": payments, "contracts_left": left}
 
 
 # --------------------------------------------------------------------------- #
@@ -824,15 +833,15 @@ def export_csv():
     buffer = io.StringIO()
     writer = csv.writer(buffer)
     writer.writerow([
-        "Client ID", "고객사", "고객 종류", "산업 분야", "국가", "담당부서",
+        "Client ID", "고객사", "고객 종류", "국가", "담당부서",
         "최초 수주일", "플랜 상태", "담당",
-        "계약 차수", "계약 상태", "Ticket ID", "수주 유형", "고객 담당자", "고객 연락처",
-        "계약 시작일", "계약 종료일", "계약 개월수", "계약서 유형",
+        "계약 차수", "계약 상태", "Ticket ID", "매출 인식", "고객 담당자", "고객 연락처",
+        "계약 시작일", "계약 종료일", "계약 개월수",
         "계약 크레딧", "누적 지급 크레딧", "통화",
-        "총 계약금액 (VAT 포함)", "공급가 (VAT 제외)", "수금 완료 금액", "수금율",
+        "총 계약금액", "공급가 (VAT 제외)", "수금 완료 금액", "수금율",
         "분당 단가",
         "결제 수단", "결제 방식", "총 분납 횟수", "최초 결제일", "Billing Email",
-        "월간 매출 (VAT 포함)", "매출 인식 시작 월",
+        "월간 매출", "매출 인식 시작 월",
         "플랜", "플랜명", "Perso Email", "Space 개수", "space_seq",
         "다음 크레딧 지급일", "다음 결제일",
     ])
@@ -849,13 +858,13 @@ def export_csv():
         for client in clients:
             base = [
                 client.client_id, client.company, won.client_type(client.client_id),
-                client.industry, client.country, client.department,
+                client.country, client.department,
                 client.first_won_on,
                 won.plan_status(client, today), client.owner,
             ]
             if not client.contracts:
                 # 계약이 아직 없는 고객도 한 줄 나갑니다 — 빠지면 명단이 아닙니다.
-                writer.writerow(base + [""] * 32)   # 머리글 41 − 고객 9
+                writer.writerow(base + [""] * 31)   # 머리글 39 − 고객 8
                 continue
             for contract in client.contracts:
                 total = float(won.total_amount(contract) or 0)
@@ -867,13 +876,11 @@ def export_csv():
                     contract.deal_type, contract.contact_name, contract.contact_info,
                     contract.starts_on, contract.ends_on,
                     won.months_between(contract.starts_on, contract.ends_on),
-                    " + ".join(contract.doc_types or []),
                     contract.credits, won.granted_credits(contract), contract.currency,
-                    # 공급가는 `supply_amount` 입니다 — `billing_amount` 는 **계약서에
-                    # 적힌 금액**이라, VAT 포함으로 적힌 원화 계약에서는 총액을 돌려줍니다.
-                    # 그 값을 「공급가 (VAT 제외)」 칸에 넣으면 과세표준이 10% 부풀고, 옆
-                    # 칸의 총액이 그럴듯해서 아무도 눈치채지 못합니다. 화면·워크북과 같은
-                    # 값이어야 합니다.
+                    # 공급가 열은 **회계가 합계를 내는 칸**이라 계약 금액을 그대로 적으면
+                    # 안 됩니다. 계약 금액은 VAT 포함이고(이관 0123) 공급가는 그것 ÷ 1.1
+                    # 입니다 — 화면·워크북과 같은 `won.supply_amount` 를 씁니다. 비면 그
+                    # 행만 조용히 합계에서 빠집니다.
                     won.total_amount(contract), won.supply_amount(contract), paid,
                     f"{(paid / total * 100):.1f}%" if total else "",
                     won.unit_price(contract),

@@ -1056,23 +1056,21 @@ def _won_contract(contract, today) -> dict:
         "ends_on": contract.ends_on,
         # **계약 개월수입니다** — 화면의 「계약 기간 (N개월)」이 읽습니다.
         "months": won.months_between(contract.starts_on, contract.ends_on),
-        # **MRR 을 나누는 개월수는 이쪽입니다** (2026-09-09). 둘이 다를 수 있어서
-        # 화면이 `months` 로 나누면 옆 칸의 서버 계산과 어긋납니다.
+        # **MRR 을 나누는 개월수**. 2026-09-21 에 계약 기간으로 돌아오면서 위 `months` 와
+        # 같은 값이 됐습니다(`won.plan_months`). 키를 남긴 것은 화면 두 곳과 고정된 테스트
+        # 픽스처가 이 이름을 읽기 때문이고, **둘이 다시 갈라질 일은 없습니다** — 분모가
+        # 어디 있는지는 여기 한 줄로만 알 수 있어야 합니다.
         "plan_months": won.plan_months(contract),
-        "doc_types": contract.doc_types or [],
         "credits": contract.credits,
         "currency": contract.currency,
-        # 금액은 통화가 정한 한 칸만 저장되고 나머지는 계산입니다: 원화는 공급가를 받아
-        # 총액을 +10% 로, 그 외는 총액을 받고 공급가 칸이 없습니다. 분당 단가도 계산값
-        # 입니다 — 금액 ÷ (크레딧 ÷ 60).
+        # **계약 금액은 한 칸이고 그 값이 VAT 포함 총액입니다**(이관 0123). 공급가는 저장
+        # 하지 않고 총액 ÷ 1.1 로 되짚습니다 — 워크북의 공급가 열이 회계가 합계를 내는
+        # 칸이라 비면 그 행만 빠지고, 화면과 시트가 같은 값이어야 합니다. 분당 단가도
+        # 계산값입니다 — 금액 ÷ (크레딧 ÷ 60).
         "amount_incl_vat": won.total_amount(contract),
-        # 총액으로 적힌 계약도 채웁니다(총액 ÷ 1.1). 워크북의 공급가 열이 회계가 합계를
-        # 내는 칸이라 비면 그 행만 빠지고, 화면과 시트가 같은 값이어야 합니다.
         "amount_excl_vat": won.supply_amount(contract),
-        # 분당 단가의 기준이 VAT 포함 금액인가 — 화면의 「공급가 선택」이 고른 값입니다.
-        "vat_included": won.vat_included(contract),
-        # 부가세가 붙는 계약인가. **통화가 아니라 고객이 정합니다**(이관 0075). 폼이 금액
-        # 칸을 한 개 그릴지 두 개 그릴지가 여기서 갈립니다.
+        # 부가세가 붙는 계약인가. **통화가 아니라 고객이 정합니다**(이관 0075). 금액 칸이
+        # 하나가 된 뒤에도 남습니다 — 공급가라는 것이 있는 계약인지를 이 값이 정합니다.
         "vat_applicable": won.vat_applicable(contract),
         # 그 계약에 적용할 환율과 기준 날짜. 비어 있으면 저장할 때 계약일 고시가로 채웁니다.
         "fx_rate": contract.fx_rate,
@@ -1162,7 +1160,6 @@ def _won_client(client, today, *, full: bool, contact=None) -> dict:
         "client_id": client.client_id,
         "company": client.company,
         "customer_type": won.client_type(client.client_id),
-        "industry": client.industry,
         "country": client.country,
         # **적어 둔 값이 없으면 번호대에서 되짚습니다**(won.department) — 요약 카드와
         # 예상 MRR 이 GTM 만 더할 때 쓰는 것과 같은 함수입니다. 여기서 원본 열을 그대로
@@ -1502,7 +1499,7 @@ def ui_won_customers():
         # 마감한 달의 숫자가 오늘 환율에 따라 움직였습니다. 계약에 환율이 없는 옛 행만
         # 오늘 고시가로 떨어집니다.
         #
-        # **두 지표는 다른 것을 셉니다.** `mrr` 은 플랜 기간에 균등 배분한 인식 매출이고,
+        # **두 지표는 다른 것을 셉니다.** `mrr` 은 계약 기간에 균등 배분한 인식 매출이고,
         # `cash` 는 결제 회차가 잡힌 달에 통째로 얹는 현금흐름입니다. 한 화면에 같이 두는
         # 이유는 둘이 갈릴 때가 그 계약을 봐야 할 때이기 때문입니다.
         #
@@ -1523,13 +1520,12 @@ def ui_won_customers():
         "cash_stripe_months": _series_floats(cash_stripe_months),
         "mrr_stripe_months": _series_floats(mrr_stripe_months),
         "options": {
-            "industries": list(won.INDUSTRIES),
             "plans": list(won.PLANS),
             # 「내림」이 뒤에 붙습니다 — 내린 고객은 목록에서 숨기므로, 이 고르개가
             # 그들을 다시 보는 유일한 길입니다.
             "plan_statuses": [*won.PLAN_STATUSES, won.RETIRED_PLAN_STATUS],
+            # 화면 이름은 「매출 인식」이고 값은 MRR·PoC 그대로입니다(won.DEAL_TYPES).
             "deal_types": list(won.DEAL_TYPES),
-            "doc_types": list(won.DOC_TYPES),
             "payment_methods": list(won.PAYMENT_METHODS),
             "payment_types": list(won.PAYMENT_TYPES),
             "currencies": list(won.CURRENCIES),

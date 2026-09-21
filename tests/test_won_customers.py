@@ -24,6 +24,19 @@ from src.db.base import Base
 from src.db.models import Client, ClientContract, Contact, ContractCreditGrant, ContractPayment
 
 
+def _code(source: str) -> str:
+    """주석을 걷어낸 화면 소스.
+
+    「이 낱말이 화면에 없어야 한다」를 물을 때 필요합니다. **없앤 이유를 적어 둔 주석이
+    바로 그 낱말을 들고 있기** 때문입니다 — `분당단가 기준` 고르개를 지운 자리에 「그
+    고르개가 하던 일」을 한 문단 적어 두었고, 낱말만 찾으면 그 주석이 스스로 걸립니다.
+    그때 빨개지는 테스트는 「되살아났다」가 아니라 「설명을 적었다」를 말합니다.
+    """
+    import re
+
+    return re.sub(r"//.*", "", re.sub(r"/\*.*?\*/", "", source, flags=re.S))
+
+
 @pytest.fixture()
 def factory():
     engine = create_engine(
@@ -43,21 +56,26 @@ def test_unit_price_matches_the_operators_own_sheet():
     예전에는 단가를 받아 크레딧을 계산했는데, 반올림한 단가로 계산한 크레딧이 계약서의
     크레딧과 어긋났습니다.
 
-    집나간 햄지: 공급가 1,566,000원 · 64,800 크레딧 → 1,450원/분. 시트와 같습니다.
-    서울대학교: 20,000,000원 · 456,120 크레딧 → 2,631.xx 원/분 — 딱 떨어지지 않으므로
+    **기준은 `total_amount` 하나입니다** (2026-09-21). 예전에는 `billing_amount`(계약서에
+    적힌 금액)가 따로 있어서 같은 크레딧에 단가가 두 가지로 나왔습니다 — 금액 칸이 하나가
+    되면서 고를 것이 없어졌습니다. 이관 0123 이 공급가로 적혀 있던 계약의 숫자를
+    `amount_incl_vat` 로 **그대로 옮겼으므로**, 운영자 시트의 단가는 그대로 나옵니다.
+
+    집나간 햄지: 1,566,000원 · 64,800 크레딧 → 1,450원/분. 시트와 같습니다.
+    서울대학교: 20,000,000원 · 456,120 크레딧 → 2,630.89 원/분 — 딱 떨어지지 않으므로
     소수점을 남깁니다. 반올림하면 되짚어 곱했을 때 금액이 안 맞습니다.
     """
     krw = ClientContract(
-        client_id=1, seq=1, currency="KRW", amount_excl_vat=1_566_000, credits=64_800
+        client_id=1, seq=1, currency="KRW", amount_incl_vat=1_566_000, credits=64_800
     )
     assert won.unit_price(krw) == Decimal("1450")
 
     seoul = ClientContract(
-        client_id=2, seq=1, currency="KRW", amount_excl_vat=20_000_000, credits=456_120
+        client_id=2, seq=1, currency="KRW", amount_incl_vat=20_000_000, credits=456_120
     )
     assert round(float(won.unit_price(seoul)), 2) == 2630.89
 
-    # USD 계약은 총액이 기준입니다 — 부가세가 없어 총액이 곧 대금입니다.
+    # 통화는 단가를 가르지 않습니다 — 어느 계약이든 적힌 금액 하나에서 나옵니다.
     usd = ClientContract(
         client_id=3, seq=1, currency="USD", amount_incl_vat=20_000, credits=60_000
     )
@@ -65,21 +83,31 @@ def test_unit_price_matches_the_operators_own_sheet():
 
     # 크레딧이 없으면 계산하지 않습니다. 0 을 넣으면 나눗셈이 터집니다.
     assert won.unit_price(ClientContract(client_id=4, seq=1, currency="KRW",
-                                         amount_excl_vat=1_000_000, credits=None)) is None
+                                         amount_incl_vat=1_000_000, credits=None)) is None
     assert won.unit_price(ClientContract(client_id=5, seq=1, currency="KRW",
-                                         amount_excl_vat=None, credits=100)) is None
+                                         amount_incl_vat=None, credits=100)) is None
 
 
-def test_the_total_is_the_supply_plus_vat_for_krw_only():
-    """원화 계약은 공급가만 받고 총액은 +10% 로 계산합니다 — 입력 칸이 없습니다.
-    그 외 통화는 부가세가 없어 총액만 받고 공급가 칸이 없습니다."""
-    krw = ClientContract(client_id=1, seq=1, currency="KRW", amount_excl_vat=10_000_000)
-    assert won.total_amount(krw) == Decimal("11000000.0")
-    assert won.billing_amount(krw) == Decimal("10000000")
+def test_the_contract_amount_is_the_vat_inclusive_total():
+    """**행에 적힌 금액이 곧 VAT 포함 총액입니다** (2026-09-21 운영자 지시).
+
+    예전에는 원화 계약이 공급가만 받고 총액을 +10% 로 계산했습니다(칸이 둘, 그중 어느
+    쪽이 계약서에 적힌 값인지를 `vat_included` 가 들었습니다). 이제 칸이 하나라 **계산이
+    끼지 않습니다** — 통화가 무엇이든, 부가세가 붙든 안 붙든 총액은 그 값 그대로입니다.
+
+    여기서 고정하는 것이 그 「계산이 끼지 않는다」입니다: 같은 11,000,000 을 원화로 적든
+    USD 로 적든 총액이 같아야 합니다. 어딘가에서 10% 를 다시 더하기 시작하면 예상 MRR·
+    월간 매출·CSV 가 한꺼번에 10% 씩 어긋나고, 그 차이는 화면 어디에도 안 보입니다.
+    """
+    krw = ClientContract(client_id=1, seq=1, currency="KRW", amount_incl_vat=11_000_000)
+    assert won.total_amount(krw) == Decimal("11000000")
 
     usd = ClientContract(client_id=2, seq=1, currency="USD", amount_incl_vat=20_000)
     assert won.total_amount(usd) == Decimal("20000")
-    assert won.billing_amount(usd) == Decimal("20000")
+
+    # 금액이 비어 있으면 없는 것입니다 — 0 으로 읽으면 카드에 「₩0」 이 서고, 그건
+    # 「아직 안 적었다」와 「0원 계약」을 같은 얼굴로 만듭니다.
+    assert won.total_amount(ClientContract(client_id=3, seq=1, currency="KRW")) is None
 
 
 def test_customer_type_comes_from_the_id_band():
@@ -96,8 +124,8 @@ def test_monthly_revenue_matches_the_sheet():
     contract = ClientContract(
         client_id=1, seq=1, deal_type="MRR",
         starts_on="2026-06-25", ends_on="2027-06-25",
-        # 원화 계약이라 공급가만 저장됩니다 — 총액 22,000,000 은 여기에 10% 를 더한 값.
-        currency="KRW", amount_excl_vat=20_000_000,
+        # 금액은 한 칸이고 그것이 VAT 포함 총액입니다(2026-09-21) — 22,000,000 ÷ 12.
+        currency="KRW", amount_incl_vat=22_000_000,
     )
     assert won.months_between(contract.starts_on, contract.ends_on) == 12
     assert round(float(won.monthly_revenue(contract))) == 1_833_333
@@ -116,29 +144,40 @@ def test_contract_state_is_read_from_today_not_stored():
     assert won.contract_state(ended, today) == "종료"
 
 
-def test_contract_state_follows_the_plan_period_not_the_contract_period():
-    """계약 한 건의 상태도 **플랜 기간**이 정합니다 (2026-08-31 운영자 지시).
+def test_contract_state_follows_the_contract_period_not_the_plan_period():
+    """계약 한 건의 상태는 **계약 기간**이 정합니다 (2026-09-21 운영자 지시로 되돌림).
 
-    고객 단위(`plan_status`)와 같은 기간을 봐야, 한 화면에서 고객은 「세팅중」인데 그 밑의
-    계약 줄은 「진행 중」이라고 적히는 일이 없습니다.
+    2026-08-31 ~ 09-21 동안은 플랜 기간이었습니다. 바뀐 것은 **어느 기간이냐**뿐이고,
+    이 테스트가 지키는 것은 그게 아니라 **짝**입니다: 고객 단위(`plan_status`)와 계약 한
+    건(`contract_state`)이 같은 자를 봐야, 한 화면에서 고객은 「세팅중」인데 그 밑의 계약
+    줄은 「진행 중」이라고 적히는 일이 없습니다. 그 짝이 기간이 무엇이든 남는 규칙입니다.
+
+    그래서 픽스처를 **뒤집었습니다** — 플랜 날짜만으로 판정하면 정답이 반대로 나오게
+    두고, 두 함수가 나란히 계약 기간을 말하는지 봅니다.
     """
     today = date(2026, 8, 6)
-    # 계약은 도는 중인데 플랜은 아직 시작 전.
-    signed_early = ClientContract(client_id=1, seq=1, starts_on="2026-01-01",
-                                  ends_on="2026-12-31", plan_starts_on="2026-10-01",
-                                  plan_ends_on="2027-09-30")
-    assert won.contract_state(signed_early, today) == "세팅중"
-    # 계약은 아직 남았는데 플랜은 끝남.
-    plan_over = ClientContract(client_id=1, seq=2, starts_on="2026-01-01", ends_on="2026-12-31",
-                               plan_starts_on="2026-01-01", plan_ends_on="2026-06-30")
-    assert won.contract_state(plan_over, today) == "종료"
+    from types import SimpleNamespace
+
+    # 플랜은 도는 중인데 계약은 아직 시작 전.
+    starts_later = ClientContract(client_id=1, seq=1, starts_on="2026-10-01",
+                                  ends_on="2027-09-30", plan_starts_on="2026-01-01",
+                                  plan_ends_on="2026-12-31")
+    assert won.contract_state(starts_later, today) == "세팅중"
+    assert won.plan_status(SimpleNamespace(contracts=[starts_later], retired_on=None),
+                           today) == "세팅중"
+    # 계약은 끝났는데 플랜은 아직 남음.
+    contract_over = ClientContract(client_id=1, seq=2, starts_on="2026-01-01",
+                                   ends_on="2026-06-30", plan_starts_on="2026-01-01",
+                                   plan_ends_on="2026-12-31")
+    assert won.contract_state(contract_over, today) == "종료"
+    assert won.plan_status(SimpleNamespace(contracts=[contract_over], retired_on=None),
+                           today) == "사용 중단"
 
 
 def test_a_terminated_contract_reads_as_over_from_that_day():
     """중도 해지는 「언제까지인가」를 바꿉니다. 전에는 만료일이 올 때까지 「진행 중」이었는데,
     그건 매출 인식이 이미 멈춘 계약이었습니다."""
     contract = ClientContract(client_id=1, seq=1, starts_on="2026-01-01", ends_on="2026-12-31",
-                              plan_starts_on="2026-01-01", plan_ends_on="2026-12-31",
                               terminated_on="2026-05-31")
     assert won.contract_state(contract, date(2026, 5, 1)) == "진행 중"
     assert won.contract_state(contract, date(2026, 6, 1)) == "종료"
@@ -146,19 +185,23 @@ def test_a_terminated_contract_reads_as_over_from_that_day():
 
 def test_the_setup_count_and_the_contract_rows_count_the_same_thing():
     """화면의 「세팅중 계약 n건」과 그 아래 계약 줄의 「세팅중」이 어긋나면, 둘 중 어느
-    쪽이 맞는지 화면만 봐서는 모릅니다. 같은 기간을 봐야 합니다."""
+    쪽이 맞는지 화면만 봐서는 모릅니다. 같은 기간을 봐야 합니다.
+
+    그 기간은 2026-09-21 부터 **계약 기간**입니다. 픽스처는 플랜 날짜를 일부러 다르게
+    두었습니다 — 셋 중 하나라도 플랜 날짜를 보면 그 하나만 답이 달라집니다.
+    """
     today = date(2026, 8, 6)
-    signed_early = ClientContract(client_id=1, seq=1, starts_on="2026-01-01",
-                                  ends_on="2026-12-31", plan_starts_on="2026-10-01",
-                                  plan_ends_on="2027-09-30")
+    starts_later = ClientContract(client_id=1, seq=1, starts_on="2026-10-01",
+                                  ends_on="2027-09-30", plan_starts_on="2026-01-01",
+                                  plan_ends_on="2026-12-31")
     from types import SimpleNamespace
 
-    client = SimpleNamespace(contracts=[signed_early], retired_on=None)
+    client = SimpleNamespace(contracts=[starts_later], retired_on=None)
 
-    assert won.contract_state(signed_early, today) == "세팅중"
-    assert won.upcoming_contracts(client, today) == [signed_early]
+    assert won.contract_state(starts_later, today) == "세팅중"
+    assert won.upcoming_contracts(client, today) == [starts_later]
     # 기본으로 열리는 계약도 같은 기간으로 고릅니다 — 도는 계약이 없으니 최근 차수.
-    assert won.active_contract(client, today) is signed_early
+    assert won.active_contract(client, today) is starts_later
 
 
 def test_a_contract_with_no_dates_still_reads_as_running():
@@ -650,8 +693,9 @@ def test_the_sheet_keeps_a_retired_customers_row_but_empties_the_status(factory)
     from src.agents.won_sheets import _client_row
 
     with factory() as session:
-        client = Client(client_id=1301, company="내린 고객", industry="교육",
-                        retired_on="2026-08-25")
+        # 「산업 분야」는 2026-09-21 에 없어졌습니다(이관 0124) — 콘솔에 입력 칸이 없고,
+        # 워크북 E열은 운영자가 직접 적는 칸이 되어 동기화가 안 건드립니다.
+        client = Client(client_id=1301, company="내린 고객", retired_on="2026-08-25")
         session.add(client)
         session.commit()
 
@@ -739,7 +783,7 @@ def test_a_customer_and_its_first_contract_are_one_request(factory):
             # 화면은 대기 건을 「GTM Inbound」로 보냅니다. 번호는 3000번대인데도요.
             "customer_type": "GTM Inbound", "company": "인터랙티브 고객",
             "client_id": "3105", "starts_on": "2026-09-01", "ends_on": "2027-09-01",
-            "currency": "KRW", "vat_applicable": "1", "amount_excl_vat": "10000000",
+            "currency": "KRW", "vat_applicable": "1", "amount_incl_vat": "11000000",
             "credits": "60000",
         })
     assert created.status_code == 200, created.text
@@ -753,6 +797,10 @@ def test_a_customer_and_its_first_contract_are_one_request(factory):
         assert saved.department == "Interactive"
         assert won.plan_status(saved, date(2026, 9, 2)) == "사용중"
         assert session.query(CC).count() == 1
+        # 금액도 같이 실려 들어갑니다. **폼 이름이 틀리면 조용히 버려집니다** —
+        # `_fill_contract` 는 모르는 칸을 무시하므로, 옛 이름(`amount_excl_vat`)으로
+        # 보내면 200 이 돌아오고 계약만 금액 없이 섭니다.
+        assert won.total_amount(saved.contracts[0]) == Decimal("11000000")
 
 
 def test_a_customer_cannot_be_created_without_its_first_contract(factory):
@@ -813,6 +861,73 @@ def test_an_empty_customer_can_be_removed_but_a_contracted_one_cannot(factory):
     ).read_text(encoding="utf-8")
     assert "/delete`, {})" in detail
     assert "이 고객 삭제" in detail
+
+
+def test_deleting_the_last_contract_retires_the_customer_instead_of_orphaning_it(factory):
+    """계약 한 차수를 지웁니다 (2026-09-21 운영자 지시로 생긴 라우트).
+
+    오래 없던 동작이고, **없던 이유는 그대로입니다** — 딸린 결제 회차와 크레딧 지급
+    회차가 같이 사라지고 되돌릴 방법이 없습니다. 그래서 화면은 문구를 옮겨 적는 창
+    뒤에 두었고, 여기서는 그 창을 지난 뒤 실제로 무엇이 남는지를 봅니다.
+
+    **마지막 차수를 지우면 고객을 장부에서 내립니다 — 지우지 않습니다.** 계약 0건짜리
+    고객은 `won.plan_status` 가 「세팅중」으로 읽어 활성 고객 수와 워크북 「고객 기본
+    정보」에 그대로 남습니다(2026-08-25 에 운영자가 「왜 계속 추가되냐」고 물었던 유령
+    행이 그것입니다). 그렇다고 행을 지우면 **번호가 사라집니다**: 문의·연락처가 그
+    번호를 들고 있고 워크북의 계약·회차 탭과 Inbound DB 가 그것으로 회사명을 조회하므로,
+    계약 한 건 지웠다고 끊을 연결이 아닙니다. 계약이 다시 들어오면 `_add_contract` 가
+    `retired_on` 을 비워 저절로 올라옵니다.
+    """
+    with factory() as session:
+        session.add_all([
+            Client(client_id=1170, company="두 차수 고객"),
+            Client(client_id=1171, company="한 차수 고객"),
+        ])
+        session.flush()
+        둘 = [ClientContract(client_id=1170, seq=n, starts_on="2026-01-01", ends_on="2026-12-31")
+             for n in (1, 2)]
+        하나 = ClientContract(client_id=1171, seq=1, starts_on="2026-01-01", ends_on="2026-12-31")
+        session.add_all([*둘, 하나])
+        session.flush()
+        session.add_all([
+            ContractPayment(contract_id=둘[0].id, no=1, total=1, paid_on="2026-01-10", amount=100),
+            ContractCreditGrant(contract_id=둘[0].id, no=1, total=1,
+                                grant_on="2026-01-10", amount=100),
+        ])
+        session.commit()
+        첫차수, 마지막차수 = 둘[0].id, 하나.id
+
+    patched, client = _console(factory)
+    with patched, client:
+        답 = client.post(f"/won-customers/contracts/{첫차수}/delete")
+        assert 답.status_code == 200, 답.text
+        assert 답.json()["contracts_left"] == 1
+        assert client.post(f"/won-customers/contracts/{마지막차수}/delete").status_code == 200
+
+    with factory() as session:
+        # 한 차수만 지운 고객은 그대로 장부에 있습니다 — 아직 계약이 있으니까요.
+        남은고객 = session.get(Client, 1170)
+        assert [c.seq for c in 남은고객.contracts] == [2]
+        assert 남은고객.retired_on is None
+        # 딸린 회차는 같이 사라집니다. 이 라우트가 확인 창 뒤에만 있는 이유입니다.
+        assert session.query(ContractPayment).count() == 0
+        assert session.query(ContractCreditGrant).count() == 0
+
+        # 마지막 차수를 잃은 고객은 **행과 번호를 남긴 채** 내려갑니다.
+        내린고객 = session.get(Client, 1171)
+        assert 내린고객 is not None, "번호가 사라지면 워크북과 문의의 조회가 끊깁니다"
+        assert 내린고객.retired_on
+        assert won.plan_status(내린고객) == won.RETIRED_PLAN_STATUS
+
+    # 라우트만 있고 버튼이 없으면 없는 기능입니다 — 그 버튼은 값을 고치는 자리(「편집」)와
+    # 멀리 떨어진 계약 카드 머리에 있고, 지우는 창은 콘솔에 한 벌뿐인 그것입니다.
+    import pathlib
+
+    detail = pathlib.Path(
+        "frontend/src/screens/won/WonCustomerDetail.tsx"
+    ).read_text(encoding="utf-8")
+    assert "이 계약 삭제" in detail
+    assert "/won-customers/contracts/${current.id}/delete`" in detail
 
 
 def test_the_console_creates_no_customer_before_the_contract_is_saved():
@@ -1021,7 +1136,9 @@ def test_active_customer_donuts_resize_and_show_only_real_deal_types():
     screen = pathlib.Path(
         "frontend/src/screens/won/WonCustomers.tsx"
     ).read_text(encoding="utf-8")
-    deal_donut = screen[screen.index('<Donut cap="수주 유형"') :]
+    # 화면 이름은 **매출 인식**입니다(2026-09-21 운영자 지시, 그 전에는 「수주 유형」).
+    # 저장하는 값 `MRR`·`PoC` 는 그대로라 조각 라벨은 안 바뀝니다.
+    deal_donut = screen[screen.index('<Donut cap="매출 인식"') :]
     deal_donut = deal_donut[: deal_donut.index("/>")]
     assert 'label: "MRR"' in deal_donut
     assert 'label: "PoC"' in deal_donut
@@ -1040,6 +1157,51 @@ def test_active_customer_donuts_resize_and_show_only_real_deal_types():
     stacked = css[css.index("@container (max-width:420px)") :]
     stacked = stacked[: stacked.index("}")]
     assert ".won .kpi-donut__body {flex-direction:column" in stacked
+
+
+def test_the_add_customer_form_is_a_centered_column_not_the_full_width():
+    """「수주 고객 추가」는 **한 가지를 정하는 폼**이라 가운데 좁은 단입니다
+    (2026-09-21 운영자: 「너무 양옆에 붙어있고 눈에 확 들어오지 않아」).
+
+    고쳐야 했던 것이 둘입니다. ① `.won .sec` 에는 여백이 없고 — 여백은 `.sec > .panel` 이
+    줍니다 — 이 화면만 그 패널이 없어서 칸이 카드 테두리에 그대로 붙어 있었습니다.
+    ② won.css 가 목록·상세를 위해 `.won .page` 를 `max-width:none` 로 두는데, 그러면 세 칸짜리
+    그리드가 1720px 에 펼쳐져 입력 하나가 500px 가 됩니다.
+
+    **모달로 바꾸지 않았습니다.** `WonNew` 의 주석이 왜인지 적어 두었습니다 — 세로 640px 짜리
+    노트북에서 모달 안 스크롤은 버튼을 화면 밖으로 밀어냅니다.
+
+    선택자가 `.won .page.page--form`(0,3,0)인 것까지 봅니다. `.won .page--form`(0,2,0)은 위
+    `max-width:none` 과 무게가 같아 **순서로만** 이기고, 블록이 옮겨지는 날 조용히 아무 일도
+    안 하게 됩니다.
+    """
+    import pathlib
+
+    picker = pathlib.Path("frontend/src/screens/won/WonNew.tsx").read_text(encoding="utf-8")
+    assert 'className="page page--form"' in picker
+    assert 'className="panel"' in picker, "본문이 패널 안에 있어야 여백이 생깁니다"
+
+    css = pathlib.Path("src/api/static/won.css").read_text(encoding="utf-8")
+    assert ".won .page.page--form {" in css
+    assert ".won .page--form .sec {" in css
+    # `:root` 에 걸면 콘솔 전체가 바뀝니다 — 이 파일의 규칙은 전부 `.won` 아래입니다.
+    assert ":root" not in css.split(".won .page.page--form")[1]
+
+
+def test_the_usage_pattern_tab_is_now_called_video_analysis():
+    """탭 이름만 바꾸고 **해시 키는 그대로**입니다 (2026-09-21 운영자 지시).
+
+    `sec-mix` 는 공유된 주소의 앵커입니다(`/won-customers/2102#sec-mix`) — 키를 따라 바꾸면
+    남이 받은 링크가 첫 탭(고객 정보)으로 조용히 떨어집니다. 라벨은 이 한 줄이 유일한
+    출처라, 이름이 드리프트해도 아무것도 빨개지지 않던 자리입니다.
+    """
+    import pathlib
+
+    detail = pathlib.Path(
+        "frontend/src/screens/won/WonCustomerDetail.tsx"
+    ).read_text(encoding="utf-8")
+    assert '["sec-mix", "영상 분석"]' in detail
+    assert "사용 패턴" not in _code(detail)
 
 
 def test_waiting_card_bypasses_the_three_way_customer_picker():
@@ -1087,7 +1249,7 @@ def test_credit_rounds_add_up_to_the_contract(factory):
         session.add(Client(client_id=2103, company="테스트"))
         contract = ClientContract(
             client_id=2103, seq=1, starts_on="2026-08-01", ends_on="2027-08-01",
-            currency="KRW", amount_excl_vat=10_000_000,   # 총액 11,000,000 은 계산값
+            currency="KRW", amount_incl_vat=11_000_000,   # 금액은 한 칸, 그게 총액입니다
             installments=4, first_payment_on="2026-08-01",
             credits=240_817,
         )
@@ -1520,26 +1682,43 @@ def test_the_list_screen_keeps_the_mockups_thresholds_and_wording():
     assert 'id="fxInput"' not in screen
 
 
-def test_the_form_asks_for_the_amount_the_vat_answer_uses():
-    """**부가세 해당 여부**가 어느 칸을 받는지 정합니다 — 통화가 아니라(이관 0075).
+def test_the_form_asks_for_one_amount_and_never_for_the_supply_price():
+    """**금액 칸은 하나이고 VAT 포함입니다** (2026-09-21 운영자 지시).
 
-    해당이면 포함·미포함 두 칸을 다 받고 한쪽을 적으면 다른 쪽이 따라옵니다: 계약서가 어느
-    쪽으로 적혀 있든 그 숫자를 그대로 넣을 수 있어야 합니다. 미해당이면 금액은 하나입니다.
+    그전에는 부가세 해당 계약에 칸이 둘이었고(포함·미포함) 「분당단가 기준」 고르개가 어느
+    쪽에서 단가를 뽑을지 정했습니다 — 국내 계약서가 공급가로도 총액으로도 적혀서, 모르면
+    분당 단가가 계약마다 10% 씩 달라졌기 때문입니다. 그 사실은 이제 **계약 비고**가 듭니다.
+
+    **없어진 것을 같이 고정합니다.** 한쪽을 적으면 다른 쪽이 따라오던 `setAmount` 도,
+    기준 고르개도, `vat_included` 도 화면에 남아 있으면 안 됩니다 — 남은 칸 하나가 저장
+    경로에 없는 열로 가고(`_fill_contract` 는 조용히 무시합니다), 화면에 적은 것과 저장되는
+    것이 갈립니다. 그 어긋남은 **다음에 그 계약을 열 때까지** 안 보입니다.
+
+    **`VAT 해당 여부` 는 남습니다** — 금액 칸 수가 아니라 「공급가라는 것이 있는 계약인가」를
+    정하고(`won.supply_amount`), 그 답이 워크북 공급가 열과 CSV 로 나갑니다.
     """
     import pathlib
 
-    form = pathlib.Path("frontend/src/screens/won/ContractFields.tsx").read_text(encoding="utf-8")
+    form = _code(pathlib.Path("frontend/src/screens/won/ContractFields.tsx")
+                 .read_text(encoding="utf-8"))
+    rules = _code(pathlib.Path("frontend/src/screens/won/contractDraft.ts")
+                  .read_text(encoding="utf-8"))
 
     assert '<Field label="VAT 해당 여부">' in form
-    assert '<Field label="총 계약금액 (VAT 포함)" required>' in form
-    assert '<Field label="공급가 (VAT 미포함)" required>' in form
-    # 한쪽을 적으면 다른 쪽이 10% 로 따라옵니다.
-    assert 'setAmount("incl"' in form and 'setAmount("excl"' in form
-    # 미해당은 한 칸이고, 「VAT 포함」이라는 말을 쓰지 않습니다.
+    # 칸은 하나이고, 라벨에 「(VAT 포함)」을 안 답니다 — 이제 모든 계약금액이 그렇습니다.
     assert '<label className="form-label">계약금액 <span className="req">*</span></label>' in form
+    assert "총 계약금액 (VAT 포함)" not in form
+    assert "공급가 (VAT 미포함)" not in form
+    assert "setAmount(" not in form
+    assert "분당단가 기준" not in form
+    # 초안이 그 두 이름을 아예 안 나릅니다 — 보내면 `_fill_contract` 가 조용히 버립니다.
+    assert "vat_included" not in rules, "지워진 열을 폼이 계속 보내면 조용히 버려집니다"
+    assert "amount_excl_vat" not in rules
+    # 단가의 기준은 그 한 칸입니다 — 고를 것이 없습니다.
+    assert "const billing = n(draft.amount_incl_vat);" in rules
+
     # 저장을 막는 조건은 금액과 크레딧, 둘뿐입니다 — 규칙은 `contractDraft.validate` 한 곳이고
     # 모달과 제자리 편집이 같이 부릅니다.
-    rules = pathlib.Path("frontend/src/screens/won/contractDraft.ts").read_text(encoding="utf-8")
     guard = rules[rules.index("export function validate(") : rules.index("export function toBody(")]
     assert "billing" in guard and "draft.credits" in guard
     assert "unit_price" not in guard
@@ -1659,28 +1838,6 @@ def test_the_sheet_gets_the_same_status_the_screen_shows():
     assert "client.plan_status" not in importer
 
 
-def test_an_old_krw_contract_with_only_a_total_still_opens_and_saves():
-    """공급가를 받기로 하기 전의 원화 계약은 **총액만** 채워져 있습니다.
-
-    그대로 두면 화면의 공급가 칸이 비고, 필수 칸이라 그 계약은 플랜 하나 고치는 것조차
-    저장이 막힙니다 — 요청이 아예 안 나가고, 누른 사람에게는 "플랜이 적용이 안 된다" 로만
-    보입니다. 총액 = 공급가 + 10% 의 정확한 역이라 되짚어도 값을 지어내지 않습니다.
-    """
-    old = ClientContract(
-        client_id=1, seq=1, currency="KRW", amount_incl_vat=1_722_600, credits=64_800
-    )
-    assert won.billing_amount(old) == Decimal("1566000")
-    assert won.total_amount(old) == Decimal("1722600")     # 되짚어도 원래 총액
-    assert won.unit_price(old) == Decimal("1450")          # 시트와 같은 단가
-
-    # 공급가가 있으면 그쪽이 원본입니다 — 되짚기는 없을 때만.
-    both = ClientContract(
-        client_id=2, seq=1, currency="KRW",
-        amount_excl_vat=1_000_000, amount_incl_vat=9_999_999, credits=60_000,
-    )
-    assert won.billing_amount(both) == Decimal("1000000")
-
-
 def test_saving_only_the_notes_never_erases_the_money(factory):
     """이 라우트에는 계약 전체 폼만 오는 게 아닙니다.
 
@@ -1688,6 +1845,10 @@ def test_saving_only_the_notes_never_erases_the_money(factory):
     받습니다. 실제로 「갱신 계획·사용 중단 이유·비고」 패널이 세 칸만 보냈고(0073 에서
     없어졌습니다), 그때 통화가 안 쓰는 금액 칸을 조건 없이 비우니 **총액만 있던 옛 원화
     계약은 비고 한 줄 저장에 금액이 통째로 사라졌습니다** — 되돌릴 방법이 없습니다.
+
+    **그 패널이 없어졌다고 이 규칙이 한가해진 것이 아닙니다.** 2026-09-21 의 「중도 해지
+    정산」 박스가 정확히 같은 모양입니다 — `credits_used` **하나만** 보냅니다. 그래서 두
+    가지 부분 폼을 다 두드립니다.
     """
     from src.api.routes.won_customers import _fill_contract
 
@@ -1696,21 +1857,21 @@ def test_saving_only_the_notes_never_erases_the_money(factory):
     _fill_contract(옛계약, {"note": "통화만 해 봄"})
     assert 옛계약.amount_incl_vat == 1_722_600, "비고 저장에 금액이 사라졌습니다"
     assert won.total_amount(옛계약) == Decimal("1722600")
-    assert won.unit_price(옛계약) == Decimal("1450")
 
-    # **두 칸이 갈라진 채로 저장되지 않습니다.** 예전에는 반대쪽을 비웠고, 지금은 고른
-    # 기준에서 다시 계산합니다(이관 0075: VAT 해당 계약은 포함·미포함을 둘 다 보여 줍니다).
-    # 어느 쪽이든 결론은 같습니다 — 분당 단가와 총액이 서로 다른 금액에서 나오는 상태가
-    # 아예 없습니다. 여기서 9,999,999 는 손으로 한쪽만 고친 요청을 흉내 낸 값입니다.
-    정상 = ClientContract(client_id=2, seq=1, currency="KRW",
-                         amount_excl_vat=1_566_000, amount_incl_vat=9_999_999)
-    _fill_contract(정상, {"note": "x"})
-    assert 정상.amount_excl_vat == 1_566_000
-    assert 정상.amount_incl_vat == Decimal("1722600.0"), "기준(공급가)에서 다시 계산합니다"
+    # 「중도 해지 정산」 박스 — 크레딧 사용량 한 칸. 금액도 크레딧도 그대로여야 합니다.
+    _fill_contract(옛계약, {"credits_used": "12000"})
+    assert 옛계약.credits_used == 12_000
+    assert 옛계약.amount_incl_vat == 1_722_600, "해지 정산 저장에 금액이 사라졌습니다"
+    assert 옛계약.credits == 64_800
 
 
-def test_a_contract_with_no_vat_keeps_one_amount(factory):
-    """부가세가 없는 계약은 금액이 하나입니다 — 그 하나는 `amount_incl_vat` 에 삽니다.
+def test_a_contract_with_no_vat_has_no_supply_price(factory):
+    """부가세 미해당 계약에는 **공급가라는 것이 없습니다** — `None` 이지 0 이 아닙니다.
+
+    금액 칸은 이제 모든 계약이 하나입니다(2026-09-21). 그래서 `vat_applicable` 이 가르는
+    것은 칸 수가 아니라 이것 하나입니다: 이 계약에 공급가가 있는가. 0 으로 채우면 워크북
+    공급가 열과 CSV 에 「0」이 실려 나가고, 회계가 합계를 내는 칸이라 그 행이 총액과 안
+    맞는 채로 섞입니다 — 빈칸이면 빠지기라도 하는데 0 은 더해집니다.
 
     「포함」이라는 이름이 남아 있는 것은 열 이름을 바꾸는 이관이 살아 있는 금액 열을
     건드리는 일이기 때문입니다. 부가세가 없는 계약에서 그 이름은 그냥 「그 금액」입니다.
@@ -1721,7 +1882,6 @@ def test_a_contract_with_no_vat_keeps_one_amount(factory):
     _fill_contract(해외, {"vat_applicable": "", "amount_incl_vat": "20000"})
 
     assert 해외.amount_incl_vat == Decimal("20000")
-    assert 해외.amount_excl_vat is None, "부가세가 없으면 공급가 칸은 비어 있습니다"
     assert won.total_amount(해외) == Decimal("20000")
     assert won.supply_amount(해외) is None
 
@@ -1731,30 +1891,39 @@ def test_vat_applicability_is_the_customers_not_the_currencys(factory):
 
     한동안 통화가 이 판단을 대신했습니다(`won.is_krw`). 대부분 맞지만 늘 맞지는 않아서
     계약마다 고르는 칸이 되었습니다(이관 0075).
+
+    **정하는 것이 바뀌었습니다.** 예전에는 「10% 를 더할까」였고(금액 칸이 둘), 지금은
+    「공급가가 있는 계약인가」입니다 — 금액은 적힌 그대로이고 공급가만 총액 ÷ 1.1 로
+    나옵니다. 그래서 같은 10% 가 반대 방향으로 걸립니다.
     """
     from src.api.routes.won_customers import _fill_contract
 
     국내달러 = ClientContract(client_id=4, seq=1, currency="USD", credits=60_000)
-    _fill_contract(국내달러, {"vat_applicable": "1", "vat_included": "", "amount_excl_vat": "10000"})
+    _fill_contract(국내달러, {"vat_applicable": "1", "amount_incl_vat": "11000"})
     assert won.vat_applicable(국내달러) is True
-    assert 국내달러.amount_incl_vat == Decimal("11000"), "USD 여도 10% 가 붙습니다"
+    assert won.total_amount(국내달러) == Decimal("11000"), "적힌 금액에 10% 를 더하지 않습니다"
+    assert won.supply_amount(국내달러) == Decimal("10000"), "USD 여도 공급가가 나옵니다"
 
     해외원화 = ClientContract(client_id=5, seq=1, currency="KRW", credits=60_000)
     _fill_contract(해외원화, {"vat_applicable": "", "amount_incl_vat": "1000000"})
     assert won.vat_applicable(해외원화) is False
-    assert won.total_amount(해외원화) == Decimal("1000000"), "원화여도 10% 를 안 더합니다"
+    assert won.total_amount(해외원화) == Decimal("1000000")
+    assert won.supply_amount(해외원화) is None, "원화여도 공급가를 지어내지 않습니다"
 
 
 def test_a_contract_written_before_the_column_existed_keeps_its_old_meaning(factory):
     """`vat_applicable` 이 비어 있으면 옛 규칙으로 떨어집니다 — 원화면 해당.
 
-    이 칸이 생기기 전의 계약 수백 건에는 고른 값이 없습니다. 없는 것을 「미해당」으로 읽으면
-    그 원화 계약들의 총액이 한꺼번에 10% 내려앉습니다.
+    이 칸이 생기기 전의 계약 수백 건에는 고른 값이 없습니다. 없는 것을 「미해당」으로
+    읽으면 그 원화 계약들의 **공급가 열이 한꺼번에 빕니다** — 워크북의 그 열은 회계가
+    합계를 내는 칸이라, 비면 그 행만 조용히 빠집니다. (금액 칸이 둘이던 시절에는 같은
+    실수가 총액을 10% 떨어뜨렸습니다. 증상만 바뀌었고 되짚기는 그대로 필요합니다.)
     """
-    옛계약 = ClientContract(client_id=6, seq=1, currency="KRW", amount_excl_vat=1_000_000)
+    옛계약 = ClientContract(client_id=6, seq=1, currency="KRW", amount_incl_vat=1_100_000)
     assert 옛계약.vat_applicable is None
     assert won.vat_applicable(옛계약) is True
     assert won.total_amount(옛계약) == Decimal("1100000")
+    assert won.supply_amount(옛계약) == Decimal("1000000")
 
 
 def test_the_registry_append_never_writes_into_a_formula_column():
@@ -1838,27 +2007,27 @@ def test_this_months_revenue_is_decided_by_the_contract_period():
     이번달 = "2026-08"
     한달치 = Decimal("1100000")            # 13,200,000 ÷ 12
 
-    일시불 = _계약(회차=[("2026-01-15", 13_200_000)], amount_excl_vat=12_000_000)
+    일시불 = _계약(회차=[("2026-01-15", 13_200_000)], amount_incl_vat=13_200_000)
     assert won.revenue_in_month(일시불, 이번달) == 한달치
     assert won.revenue_in_month(일시불, "2026-01") == 한달치
 
     분할 = _계약(회차=[("2026-02-15", 6_600_000), ("2026-08-20", 6_600_000)],
-               amount_excl_vat=12_000_000)
+               amount_incl_vat=13_200_000)
     assert won.revenue_in_month(분할, 이번달) == 한달치      # 회차를 어떻게 나눴든 같습니다
 
-    회차없음 = _계약(회차=[], amount_excl_vat=12_000_000)
+    회차없음 = _계약(회차=[], amount_incl_vat=13_200_000)
     assert won.revenue_in_month(회차없음, 이번달) == 한달치
 
 
 def test_only_the_months_inside_the_contract_period_count():
     """기간 밖은 0 입니다 — 안 그러면 끝난 계약이 영원히 이번 달 매출에 남습니다."""
-    계약 = _계약(회차=[], amount_excl_vat=12_000_000)       # 2026-01 ~ 2026-12
+    계약 = _계약(회차=[], amount_incl_vat=13_200_000)       # 2026-01 ~ 2026-12
     assert won.revenue_in_month(계약, "2025-12") == 0
     assert won.revenue_in_month(계약, "2026-12") == Decimal("1100000")
     assert won.revenue_in_month(계약, "2027-01") == 0
 
     # 인식 시작월을 직접 지정하면 거기서부터 셉니다.
-    늦게 = _계약(회차=[], amount_excl_vat=12_000_000, revenue_from="2026-03")
+    늦게 = _계약(회차=[], amount_incl_vat=13_200_000, revenue_from="2026-03")
     assert won.revenue_in_month(늦게, "2026-01") == 0
     assert won.revenue_in_month(늦게, "2027-02") == Decimal("1100000")
 
@@ -1868,12 +2037,12 @@ def test_a_poc_lands_whole_in_the_month_of_its_first_payment():
     이번달 = "2026-08"
 
     첫회차가_이번달 = _계약(deal="PoC", 회차=[("2026-08-10", 2_750_000), ("2026-09-10", 2_750_000)],
-                      amount_excl_vat=5_000_000)
-    assert won.revenue_in_month(첫회차가_이번달, 이번달) == Decimal("5500000.0")
+                      amount_incl_vat=5_500_000)
+    assert won.revenue_in_month(첫회차가_이번달, 이번달) == Decimal("5500000")
     assert won.revenue_in_month(첫회차가_이번달, "2026-09") == 0    # 이미 8월에 잡혔습니다
 
     첫회차가_지난달 = _계약(deal="PoC", 회차=[("2026-07-10", 2_750_000), ("2026-08-10", 2_750_000)],
-                      amount_excl_vat=5_000_000)
+                      amount_incl_vat=5_500_000)
     assert won.revenue_in_month(첫회차가_지난달, 이번달) == 0
 
 
@@ -1882,12 +2051,12 @@ def test_a_contract_with_no_amount_or_no_period_is_counted_as_nothing():
     금액없음 = _계약(회차=[])
     assert won.revenue_in_month(금액없음, "2026-08") == 0
 
-    기간없음 = _계약(회차=[], amount_excl_vat=12_000_000)
+    기간없음 = _계약(회차=[], amount_incl_vat=13_200_000)
     기간없음.starts_on = 기간없음.ends_on = None
     assert won.revenue_in_month(기간없음, "2026-08") == 0
 
     # PoC 는 그대로 회차가 정합니다 — 균등 배분할 정기 매출이 아닙니다.
-    assert won.revenue_in_month(_계약(deal="PoC", 회차=[], amount_excl_vat=5_000_000), "2026-08") == 0
+    assert won.revenue_in_month(_계약(deal="PoC", 회차=[], amount_incl_vat=5_500_000), "2026-08") == 0
 
 
 def test_the_card_does_not_filter_by_plan_status():
@@ -2023,11 +2192,11 @@ def test_the_row_shows_what_this_customer_added_this_month():
         # 12개월 · 총액 13,200,000 → 매달 1,100,000
         ClientContract(client_id=1001, seq=1, deal_type="MRR", currency="KRW",
                        starts_on="2026-01-01", ends_on="2026-12-31",
-                       amount_excl_vat=12_000_000),
+                       amount_incl_vat=13_200_000),
         # 첫 결제가 이번 달인 PoC → 전액. 쪼개지 않습니다.
         ClientContract(client_id=1001, seq=2, deal_type="PoC", currency="KRW",
                        starts_on="2026-08-01", ends_on="2026-09-30",
-                       amount_excl_vat=1_000_000,
+                       amount_incl_vat=1_100_000,
                        payments=[ContractPayment(no=1, total=1, paid_on="2026-08-10",
                                                  amount=1_100_000)]),
     ]
@@ -2052,90 +2221,45 @@ def test_the_row_shows_what_this_customer_added_this_month():
 
 
 # --------------------------------------------------------------------------- #
-# VAT — 계약서가 총액으로 적히는 원화 계약
+# VAT — 금액은 한 칸이고 공급가는 거기서 나온다 (2026-09-21)
+#
+# 「계약서가 총액으로 적혔나 공급가로 적혔나」를 고르던 테스트 셋이 여기 있었습니다
+# (`..._written_as_a_total_keeps_that_total` · `..._never_reads_the_vat_flag` ·
+# `..._lets_the_operator_pick_the_supply_basis`). `vat_included` 와 `billing_amount` 가
+# 없어지면서 고를 것 자체가 없어졌고, 그 셋이 재던 숫자(적힌 금액이 곧 총액 · USD 총액 ·
+# 단가)는 맨 위 `test_the_contract_amount_is_the_vat_inclusive_total` 과
+# `test_unit_price_matches_the_operators_own_sheet` 이 그대로 잽니다. 고르개가 화면에
+# 되살아나지 않는 것은 `test_the_form_asks_for_one_amount_and_never_for_the_supply_price`
+# 가 봅니다.
 # --------------------------------------------------------------------------- #
-def test_a_krw_contract_written_as_a_total_keeps_that_total():
-    """**계약서에 적힌 금액이 기준입니다.** 원화 계약이 늘 공급가로 적히지는 않습니다.
-
-    총액으로 적힌 계약을 공급가 칸에 넣으면 총액이 10% 부풀고 분당 단가가 10% 낮게
-    나오는데, 화면 어디에도 그게 보이지 않습니다 — 그래서 어느 쪽인지를 행에 박아 둡니다.
-
-    같은 금액을 두 기준으로 넣어 비교합니다: 11,000,000 을 총액으로 적으면 총액도 단가
-    기준도 그대로 11,000,000 이고, 공급가로 적으면 총액이 12,100,000 이 됩니다.
-    """
-    total = ClientContract(
-        client_id=1, seq=1, currency="KRW", vat_included=True,
-        amount_incl_vat=11_000_000, credits=60_000,
-    )
-    assert won.billing_amount(total) == Decimal("11000000")
-    assert won.total_amount(total) == Decimal("11000000")
-    assert won.unit_price(total) == Decimal("11000")
-
-    supply = ClientContract(
-        client_id=2, seq=1, currency="KRW", vat_included=False,
-        amount_excl_vat=11_000_000, credits=60_000,
-    )
-    assert won.total_amount(supply) == Decimal("12100000.0")
-    assert won.unit_price(supply) == Decimal("11000")
-
-
-def test_a_foreign_contract_never_reads_the_vat_flag():
-    """해외 계약에는 부가세가 없어 총액이 곧 대금입니다 — 고를 것이 없습니다.
-
-    통화와 함께 보지 않으면, 원화였다가 USD 로 바꾼 계약에 남은 플래그가 조용히 따라
-    붙습니다. `vat_included()` 가 통화까지 보는 이유입니다.
-    """
-    usd = ClientContract(
-        client_id=1, seq=1, currency="USD", vat_included=True,
-        amount_incl_vat=20_000, credits=60_000,
-    )
-    assert won.vat_included(usd) is False
-    assert won.total_amount(usd) == Decimal("20000")
-    assert won.unit_price(usd) == Decimal("20")
-
-
 def test_the_mrr_is_always_the_vat_inclusive_total():
-    """기준이 무엇이든 예상 MRR 이 더하는 값은 **VAT 포함 총액** 하나입니다.
+    """예상 MRR 이 더하는 값은 **VAT 포함 총액**이지 공급가가 아닙니다.
 
-    같은 총액 22,000,000 짜리 12개월 계약을 두 기준으로 적어도 월간 매출은 같아야 합니다 —
-    다르면 그 카드의 숫자가 계약을 어떻게 입력했느냐에 따라 달라집니다.
+    금액 칸이 하나가 되어도 이 선택은 그대로 남습니다 — 공급가는 계산으로 늘 옆에 있고
+    (총액 ÷ 1.1), 어느 쪽을 더하느냐로 카드 숫자가 10% 달라지기 때문입니다. 실수하기
+    쉬운 자리이고, 틀려도 화면에는 그럴듯한 숫자가 서 있을 뿐입니다.
+
+    22,000,000 짜리 12개월 계약: 월간 매출 1,833,333.33… 이고 공급가 기준은 그것 ÷ 1.1
+    입니다. 두 값이 **다르다**는 것까지 봐야 「총액을 쓴다」가 실제로 검사됩니다.
     """
-    written_as_total = ClientContract(
-        client_id=1, seq=1, deal_type="MRR", currency="KRW", vat_included=True,
+    contract = ClientContract(
+        client_id=1, seq=1, deal_type="MRR", currency="KRW", vat_applicable=True,
         starts_on="2026-01-01", ends_on="2027-01-01", amount_incl_vat=22_000_000,
     )
-    written_as_supply = ClientContract(
-        client_id=2, seq=1, deal_type="MRR", currency="KRW", vat_included=False,
-        starts_on="2026-01-01", ends_on="2027-01-01", amount_excl_vat=20_000_000,
-    )
-    assert won.monthly_revenue(written_as_total) == won.monthly_revenue(written_as_supply)
-
-
-def test_the_form_lets_the_operator_pick_the_supply_basis():
-    """분당 단가가 어느 금액에서 나오는지는 사람이 고릅니다.
-
-    계약서가 총액으로 적힌 건과 공급가로 적힌 건이 둘 다 있어서, 고르지 않으면 같은 화면의
-    계약마다 단가가 10% 씩 달라집니다.
-    """
-    import pathlib
-
-    form = pathlib.Path("frontend/src/screens/won/ContractFields.tsx").read_text(encoding="utf-8")
-    # 라벨에서 「공급가」를 뺐습니다 (2026-08-31): 바로 위 칸이 「공급가 (VAT 미포함)」
-    # 이라 두 칸이 같은 말로 시작했고, 이 칸은 공급가를 **입력받는** 칸이 아니라 어느
-    # 금액을 기준으로 삼을지 **고르는** 칸입니다.
-    assert '<Field label="분당단가 기준">' in form
-    assert "VAT 미포함 금액으로" in form
-    assert "VAT 포함 금액으로" in form
-    # 고를 것이 있는지는 **부가세 해당 여부**가 정합니다 — 통화가 아니라.
-    rules = pathlib.Path("frontend/src/screens/won/contractDraft.ts").read_text(encoding="utf-8")
-    assert 'const inclusive = vatApplicable && draft.vat_included === "1"' in rules
+    assert won.months_between(contract.starts_on, contract.ends_on) == 12
+    assert won.monthly_revenue(contract) == Decimal("22000000") / 12
+    # 공급가 기준은 따로 있고, 월간 매출이 그것과 같아지면 카드가 10% 내려앉은 것입니다.
+    assert won.monthly_supply_revenue(contract) == Decimal("20000000") / 12
+    assert won.monthly_revenue(contract) != won.monthly_supply_revenue(contract)
 
 
 def test_the_form_asks_in_the_order_the_answers_depend_on():
-    """부가세 해당 여부 → 통화 → 환율 → 금액 → 공급가.
+    """부가세 해당 여부 → 통화 → 환율 → 계약금액.
 
-    앞의 것이 뒤의 것을 정합니다: 해당 여부가 금액 칸을 한 개로 할지 두 개로 할지 정합니다.
-    순서가 뒤집히면 이미 적은 금액이 뒤늦게 바뀐 해당 여부 때문에 다른 뜻이 됩니다.
+    앞의 것이 뒤의 것을 정합니다. 칸이 하나가 된 뒤로 해당 여부가 정하는 것은 칸 수가
+    아니라 **공급가가 있는 계약인가**이고, 그래도 순서는 그대로여야 합니다: 그 답이 금액
+    칸 아래 안내 문구(「공급가는 이 값 ÷ 1.1」 / 「VAT 미해당 — 공급가라는 것이 없고」)를
+    가르므로, 금액을 먼저 적게 하면 이미 적은 숫자의 뜻이 뒤늦게 바뀝니다.
 
     **환율은 통화와 무관하게 묻습니다** (2026-08-31): 예상 MRR 카드가 원화 계약도 USD 로
     보여 주고, 계약에 환율이 없으면 그 환산이 매일 오늘 고시가로 다시 일어납니다.
@@ -2148,42 +2272,47 @@ def test_the_form_asks_in_the_order_the_answers_depend_on():
         money.index('label="VAT 해당 여부"'),
         money.index('label="통화"'),
         money.index('label="환율 (USD → KRW)"'),
-        money.index('label="총 계약금액 (VAT 포함)"'),
-        money.index('label="분당단가 기준"'),
+        money.index('<label className="form-label">계약금액 '),
     ]
     assert order == sorted(order), "금액 구역의 칸 순서가 스펙과 다릅니다"
     # 통화로 감싸지 않습니다 — 원화 계약도 USD 로 환산되어 보이기 때문입니다.
     assert 'draft.currency !== "KRW" && (' not in money
 
 
-
-def test_the_supply_price_is_filled_even_when_the_contract_is_written_as_a_total():
+def test_the_supply_price_is_always_the_total_divided_not_a_stored_number():
     """워크북의 공급가 열은 회계가 합계를 내는 칸입니다 — 비면 그 행만 조용히 빠집니다.
 
-    계약서에 그 숫자가 없더라도 국내 거래의 공급가는 총액에서 정확히 나옵니다. 화면도 같은
-    값을 보여 주되 「역산」이라고 적습니다 — 시트와 화면이 다른 값이면 안 됩니다.
+    계약서에 그 숫자가 적혀 있든 없든 **언제나 총액 ÷ 1.1** 입니다(금액 칸이 하나가 된
+    뒤로 저장된 공급가라는 것이 없습니다). 화면도 같은 값을 보여 주되 「총액에서 역산」
+    이라고 적습니다 — 시트와 화면이 다른 값이면 안 됩니다.
+
+    **부가세 해당 여부가 가릅니다, 통화가 아니라.** 국내 법인의 USD 계약에는 공급가가
+    있고 해외 고객의 원화 계약에는 없습니다.
     """
-    total = ClientContract(
-        client_id=1, seq=1, currency="KRW", vat_included=True, amount_incl_vat=11_000_000,
+    krw = ClientContract(
+        client_id=1, seq=1, currency="KRW", vat_applicable=True, amount_incl_vat=11_000_000,
     )
-    assert won.supply_amount(total) == Decimal("10000000")
+    assert won.supply_amount(krw) == Decimal("10000000")
 
-    supply = ClientContract(
-        client_id=2, seq=1, currency="KRW", vat_included=False, amount_excl_vat=10_000_000,
+    국내달러 = ClientContract(
+        client_id=2, seq=1, currency="USD", vat_applicable=True, amount_incl_vat=11_000,
     )
-    assert won.supply_amount(supply) == Decimal("10000000")
+    assert won.supply_amount(국내달러) == Decimal("10000")
 
-    # 해외 계약에는 공급가가 없습니다 — 총액이 곧 대금입니다.
+    # 부가세가 안 붙는 계약에는 공급가가 없습니다 — 총액이 곧 대금입니다.
     usd = ClientContract(client_id=3, seq=1, currency="USD", amount_incl_vat=20_000)
     assert won.supply_amount(usd) is None
 
 
-def test_the_csv_supply_column_is_the_supply_price_not_the_written_amount(factory):
-    """CSV 의 「공급가 (VAT 제외)」 칸은 `supply_amount` 여야 합니다.
+def test_the_csv_supply_column_is_the_total_divided_not_the_total_itself(factory):
+    """CSV 의 「공급가 (VAT 제외)」 칸은 `supply_amount`(총액 ÷ 1.1)여야 합니다.
 
-    `billing_amount` 는 **계약서에 적힌 금액**이라, VAT 포함으로 적힌 원화 계약에서는 총액을
-    돌려줍니다. 그 값을 공급가 칸에 넣으면 과세표준이 10% 부풀고, 바로 옆 총액 칸이 그럴듯해서
-    아무도 눈치채지 못합니다. 이 CSV 는 영업 시트에 붙여 넣으라고 있는 것이라 그대로 퍼집니다.
+    총액을 그대로 넣으면 과세표준이 10% 부풀고, 바로 옆 총액 칸이 그럴듯해서 아무도
+    눈치채지 못합니다. 이 CSV 는 영업 시트에 붙여 넣으라고 있는 것이라 그대로 퍼집니다.
+    한 줄이 같은 숫자를 두 번 적고 있는 것이니 **눈으로는 안 걸립니다** — 여기서 봅니다.
+
+    머리글도 같이 고정합니다(2026-09-21): 「수주 유형」 → 「매출 인식」, 총액·월간 매출에서
+    「(VAT 포함)」을 뺐고, 「산업 분야」·「계약서 유형」은 열 자체가 없어졌습니다.
     """
     import csv
     import io
@@ -2196,7 +2325,7 @@ def test_the_csv_supply_column_is_the_supply_price_not_the_written_amount(factor
         session.add(Client(client_id=1109, company="계약이 아직 없는 고객"))
         session.flush()
         session.add(ClientContract(
-            client_id=1108, seq=1, deal_type="MRR", currency="KRW", vat_included=True,
+            client_id=1108, seq=1, deal_type="MRR", currency="KRW", vat_applicable=True,
             starts_on="2026-01-01", ends_on="2027-01-01",
             amount_incl_vat=11_000_000, credits=60_000,
         ))
@@ -2211,49 +2340,63 @@ def test_the_csv_supply_column_is_the_supply_price_not_the_written_amount(factor
 
     rows = list(csv.reader(io.StringIO(body)))
     header, row = rows[0], rows[1]
-    total = row[header.index("총 계약금액 (VAT 포함)")]
+    total = row[header.index("총 계약금액")]
     supply = row[header.index("공급가 (VAT 제외)")]
     assert float(total) == 11_000_000
     assert float(supply) == 10_000_000
-    # 분당 단가는 **적힌 금액** 기준입니다 — 총액으로 적혔으면 총액에서 나옵니다.
+    # 분당 단가는 계약금액 하나에서 나옵니다 — 고를 기준이 없습니다.
     assert float(row[header.index("분당 단가")]) == 11_000
+    # 이름이 바뀐 열과 없어진 열. 시트에 붙여 넣는 표라 머리글이 곧 약속입니다.
+    assert "매출 인식" in header and "수주 유형" not in header
+    assert "월간 매출" in header
+    assert "산업 분야" not in header and "계약서 유형" not in header
+    assert not any("(VAT 포함)" in name for name in header)
     # **모든 줄의 칸 수가 머리글과 같아야 합니다.** 계약이 없는 고객은 빈 칸을 세어서
-    # 채우는데(`[""] * 32`), 그 수를 안 고치면 다음 열부터 통째로 밀립니다 — 그리고
+    # 채우는데(`[""] * 31`), 그 수를 안 고치면 다음 열부터 통째로 밀립니다 — 그리고
     # 스프레드시트에 붙여 넣기 전까지는 아무도 모릅니다.
     assert {len(line) for line in rows if line} == {len(header)}
 
 
-def test_the_mrr_divisor_is_the_plan_period_not_the_contract_period():
-    """계약은 먼저 맺고 실제 사용은 늦게 시작하는 일이 흔합니다(운영자 확인).
+def test_the_mrr_divisor_is_the_contract_period_not_the_plan_period():
+    """**분모도 인식 창도 계약 기간입니다** (2026-09-21 운영자 지시로 되돌림).
 
-    계약 기간으로 나누면 아직 쓰지도 않는 달에 매출이 잡히고 정작 쓰는 달에는 덜 잡힙니다.
-    플랜 기간으로 나누면 **월별 합계가 총 계약금액과 정확히 맞습니다** — 그게 이 규칙을
-    고르는 이유입니다.
+    2026-08-18 ~ 09-21 동안은 플랜 기간이었고, 그 이유는 「계약은 먼저 맺고 사용은 늦게
+    시작한다」였습니다. 지시가 이깁니다.
+
+    **바뀌지 않은 것이 이 테스트의 알맹이입니다**: 분모와 인식 창이 **같은 기간**이라
+    월별 합계가 총 계약금액과 정확히 맞습니다. 한쪽만 옮기면 마지막 달이 잘리거나 합계가
+    총액을 넘는데, 잘렸다는 표시는 화면 어디에도 없습니다 — 두 함수를 같이 되돌린 이유이고,
+    다음에 또 옮긴다면 역시 같이 옮겨야 합니다.
+
+    픽스처의 플랜 날짜는 **일부러 다릅니다**(10개월). 어느 한 함수라도 그것을 읽으면
+    합계가 12,000,000 에서 벗어납니다.
     """
     contract = ClientContract(
         client_id=1, seq=1, deal_type="MRR", currency="KRW", vat_applicable=True,
-        vat_included=True, amount_incl_vat=12_000_000,
-        starts_on="2026-01-01", ends_on="2026-12-31",          # 계약 12개월
-        plan_starts_on="2026-03-01", plan_ends_on="2026-12-31",  # 플랜 10개월
+        amount_incl_vat=12_000_000,
+        starts_on="2026-01-01", ends_on="2026-12-31",            # 계약 12개월
+        plan_starts_on="2026-03-01", plan_ends_on="2026-12-31",  # 플랜 10개월 — 안 봅니다
     )
-    assert won.plan_months(contract) == 10
-    assert won.monthly_revenue(contract) == Decimal("1200000")
+    assert won.plan_months(contract) == 12
+    assert won.monthly_revenue(contract) == Decimal("1000000")
 
     months = [f"2026-{m:02d}" for m in range(1, 13)]
     recognised = {m: won.revenue_in_month(contract, m) for m in months}
     assert sum(recognised.values()) == Decimal("12000000"), "월별 합계가 총액과 맞아야 합니다"
-    # 인식은 플랜 시작월부터입니다 — 계약만 맺힌 1·2월은 0.
-    assert recognised["2026-01"] == 0 and recognised["2026-02"] == 0
-    assert recognised["2026-03"] == Decimal("1200000")
+    # 인식은 **계약** 시작월부터입니다 — 플랜이 3월에 시작해도 1월부터 잡힙니다.
+    assert recognised["2026-01"] == Decimal("1000000")
+    assert recognised["2026-03"] == Decimal("1000000")
+    # 그리고 딱 12개월에서 끝납니다 — 창이 분모보다 길면 합계가 총액을 넘습니다.
+    assert won.revenue_in_month(contract, "2025-12") == 0
+    assert won.revenue_in_month(contract, "2027-01") == 0
 
 
 def test_a_terminated_contract_stops_and_settles_in_that_month():
     """중도 해지: 그 달에 `총액 − 예상 환불 − 이미 인식한 MRR` 을 한 번에 잡고 끝냅니다."""
     contract = ClientContract(
         client_id=2, seq=1, deal_type="MRR", currency="KRW", vat_applicable=True,
-        vat_included=True, amount_incl_vat=12_000_000, credits=120_000, credits_used=30_000,
+        amount_incl_vat=12_000_000, credits=120_000, credits_used=30_000,
         starts_on="2026-01-01", ends_on="2026-12-31",
-        plan_starts_on="2026-01-01", plan_ends_on="2026-12-31",
         terminated_on="2026-04-15",
     )
     # 남은 크레딧 90,000 / 120,000 = 0.75 → 환불 900만
@@ -2277,9 +2420,8 @@ def test_the_settlement_can_be_negative():
     """
     contract = ClientContract(
         client_id=3, seq=1, deal_type="MRR", currency="KRW", vat_applicable=True,
-        vat_included=True, amount_incl_vat=12_000_000, credits=120_000, credits_used=6_000,
+        amount_incl_vat=12_000_000, credits=120_000, credits_used=6_000,
         starts_on="2026-01-01", ends_on="2026-12-31",
-        plan_starts_on="2026-01-01", plan_ends_on="2026-12-31",
         terminated_on="2026-11-20",
     )
     # 거의 안 썼으니 환불이 큽니다: 114,000/120,000 = 0.95 → 1,140만
@@ -2294,9 +2436,8 @@ def test_without_a_usage_number_we_stop_but_do_not_settle():
     적지 않습니다 — 인식만 멈춥니다."""
     contract = ClientContract(
         client_id=4, seq=1, deal_type="MRR", currency="KRW", vat_applicable=True,
-        vat_included=True, amount_incl_vat=12_000_000, credits=120_000,
+        amount_incl_vat=12_000_000, credits=120_000,
         starts_on="2026-01-01", ends_on="2026-12-31",
-        plan_starts_on="2026-01-01", plan_ends_on="2026-12-31",
         terminated_on="2026-04-15",
     )
     assert contract.credits_used is None
@@ -2311,27 +2452,35 @@ def test_using_more_credits_than_the_contract_refunds_nothing():
     """음수 환불은 추가 청구인데, 그건 이 화면이 정할 일이 아닙니다."""
     contract = ClientContract(
         client_id=5, seq=1, deal_type="MRR", currency="KRW", vat_applicable=True,
-        vat_included=True, amount_incl_vat=1_000_000, credits=1_000, credits_used=1_500,
+        amount_incl_vat=1_000_000, credits=1_000, credits_used=1_500,
         starts_on="2026-01-01", ends_on="2026-10-31",
-        plan_starts_on="2026-01-01", plan_ends_on="2026-10-31",
         terminated_on="2026-05-10",
     )
     assert won.expected_refund(contract) == Decimal("0")
 
 
-def test_the_plan_ends_at_whichever_comes_first():
-    """플랜 만료일과 중도 해지일 중 **빠른 쪽**에서 끝납니다."""
-    early = ClientContract(client_id=6, seq=1, plan_starts_on="2026-01-01",
-                           plan_ends_on="2026-12-31", terminated_on="2026-06-30")
+def test_the_period_ends_at_whichever_comes_first_but_the_divisor_does_not():
+    """인식 기간은 계약 종료일과 중도 해지일 중 **빠른 쪽**에서 끝납니다.
+
+    날짜는 **계약 날짜**입니다 (2026-09-21) — 예전에는 플랜 날짜로 썼고, 그대로 두면 두
+    픽스처 다 날짜가 없어져 마지막 `plan_months` 비교가 `1 == 1` 이 되어 아무것도 안
+    재게 됩니다. 그 비교가 재는 규칙은 안 바뀌었으므로 계약 날짜로 다시 세웁니다.
+
+    **분모는 해지일로 줄이지 않습니다.** 해지는 「월 요금이 얼마인가」가 아니라 「언제까지
+    받는가」를 바꾸는 사건이라, 분모까지 줄이면 해지한 계약의 월 요금이 갑자기 오릅니다
+    (남은 몫은 해지월에 한 번에 정산합니다).
+    """
+    early = ClientContract(client_id=6, seq=1, starts_on="2026-01-01",
+                           ends_on="2026-12-31", terminated_on="2026-06-30")
     assert won.plan_period(early) == ("2026-01-01", "2026-06-30")
-    # 해지일이 만료일보다 뒤면 만료일이 이깁니다 — 이미 끝난 계약을 늘리지 않습니다.
-    late = ClientContract(client_id=7, seq=1, plan_starts_on="2026-01-01",
-                          plan_ends_on="2026-06-30", terminated_on="2026-12-31")
+    # 해지일이 종료일보다 뒤면 종료일이 이깁니다 — 이미 끝난 계약을 늘리지 않습니다.
+    late = ClientContract(client_id=7, seq=1, starts_on="2026-01-01",
+                          ends_on="2026-06-30", terminated_on="2026-12-31")
     assert won.plan_period(late) == ("2026-01-01", "2026-06-30")
-    # 해지해도 **분모**는 플랜 만료일까지입니다 — 월 요금이 갑자기 오르면 안 됩니다.
-    assert won.plan_months(early) == won.plan_months(
-        ClientContract(client_id=8, seq=1, plan_starts_on="2026-01-01", plan_ends_on="2026-12-31")
-    )
+    # 해지해도 분모는 계약 종료일까지입니다 — 6 이 아니라 12 여야 합니다.
+    온전한계약 = ClientContract(client_id=8, seq=1, starts_on="2026-01-01", ends_on="2026-12-31")
+    assert won.plan_months(early) == won.plan_months(온전한계약) == 12
+    assert won.plan_months(late) == 6, "끝난 계약의 분모는 그 계약의 길이 그대로입니다"
 
 
 def test_the_series_converts_with_the_contracts_own_rate():
@@ -2385,9 +2534,8 @@ def test_cash_lands_whole_in_the_month_of_each_instalment():
 
     contract = ClientContract(
         client_id=3, seq=1, deal_type="MRR", currency="KRW", vat_applicable=True,
-        vat_included=True, amount_incl_vat=12_000_000,
+        amount_incl_vat=12_000_000,
         starts_on="2026-01-01", ends_on="2026-12-31",
-        plan_starts_on="2026-01-01", plan_ends_on="2026-12-31",
     )
     contract.payments = [
         ContractPayment(no=1, total=2, paid_on="2026-01-10", amount=Decimal("6000000"), done=True),
@@ -2423,26 +2571,25 @@ def test_the_series_is_bucketed_per_department_and_a_total():
 def test_each_new_series_is_measured_with_its_own_ruler(factory):
     """New MRR 과 New 매출은 **자기 계열과 같은 자**로 잽니다.
 
-    한 자(플랜 시작월)로 재던 동안 두 가지가 통째로 빠져 있었습니다. 화면에는 큰 면 옆에
-    「New ₩0」 이 설 뿐, 틀렸다는 표시가 어디에도 없습니다:
+    한 자로 재던 동안 두 가지가 통째로 빠져 있었습니다. 화면에는 큰 면 옆에 「New ₩0」
+    이 설 뿐, 틀렸다는 표시가 어디에도 없습니다:
 
-    1. **선입금 신규 고객의 New 매출.** 월 매출 칸은 **입금한 달**에 서는데, 그 날짜는
-       계약일에서 나오고 플랜 시작일과 다릅니다 — `plan_starts_on` 이 생긴 이유가 「계약은
-       먼저 맺고 사용은 늦게 시작한다」입니다. 그래서 8월에 입금받고 9월에 시작한 고객은
-       8월에도 9월에도 New 매출에 안 잡혔습니다.
+    1. **선입금 신규 고객의 New 매출.** 월 매출 칸은 **입금한 달**에 서는데, 그 날짜가
+       인식 시작월보다 앞설 수 있습니다 — 계약이 10월부터인데 8월에 미리 받는 경우가
+       그것입니다. 그래서 8월에 입금받고 10월에 시작한 고객은 8월에도 10월에도 New
+       매출에 안 잡혔습니다.
     2. **PoC 신규 고객의 New MRR.** PoC 는 균등 배분할 기간이 없어 **첫 회차의 달**에
-       전액을 인식하는데(`revenue_in_month`), 플랜 시작월로 재니 그 달에 값이 없었습니다.
-       PoC 는 두 가지 수주 유형 중 하나입니다.
+       전액을 인식하는데(`revenue_in_month`), 시작월로 재니 그 달에 값이 없었습니다.
+       PoC 는 두 가지 매출 인식 방식 중 하나입니다.
     """
     with factory() as session:
-        # 계약은 8월, 플랜은 10월부터, 입금은 8월 — 자마다 답이 다릅니다.
+        # 계약은 10월부터인데 입금은 8월 — 자마다 답이 다릅니다.
         선입금 = Client(client_id=1801, company="선입금 고객")
         session.add(선입금)
         session.flush()
         계약 = ClientContract(
             client_id=1801, seq=1, deal_type="MRR",
-            starts_on="2026-08-01", ends_on="2027-08-01",
-            plan_starts_on="2026-10-01", plan_ends_on="2027-10-01",
+            starts_on="2026-10-01", ends_on="2027-10-01",
         )
         session.add(계약)
         session.flush()
@@ -2458,14 +2605,13 @@ def test_each_new_series_is_measured_with_its_own_ruler(factory):
         시범 = ClientContract(
             client_id=1802, seq=1, deal_type="PoC",
             starts_on="2026-08-01", ends_on="2026-10-31",
-            plan_starts_on="2026-08-01", plan_ends_on="2026-10-31",
         )
         session.add(시범)
         session.flush()
         session.add(ContractPayment(contract_id=시범.id, no=1, total=1, paid_on="2026-09-10"))
         session.flush()
         session.refresh(poc)
-        # 플랜은 8월에 시작하지만 PoC 의 매출은 **9월**에 통째로 잡힙니다.
+        # 계약은 8월에 시작하지만 PoC 의 매출은 **9월**(첫 회차)에 통째로 잡힙니다.
         assert won.first_revenue_month(poc) == "2026-09"
         assert won.revenue_in_month(시범, "2026-08") == 0
 
@@ -2499,8 +2645,8 @@ def test_the_new_series_reaches_the_screen_through_the_route(factory):
         session.flush()
         contract = ClientContract(
             client_id=1804, seq=1, deal_type="MRR", currency="KRW", vat_applicable=False,
-            starts_on=f"{prev}-01", ends_on=f"{today.year + 1}-{today.month:02d}-01",
-            plan_starts_on=f"{now}-01", plan_ends_on=f"{today.year + 1}-{today.month:02d}-01",
+            # 인식은 **계약 시작월**부터입니다(2026-09-21) — 이번달 시작, 12개월.
+            starts_on=f"{now}-01", ends_on=f"{today.year + 1}-{today.month:02d}-01",
             amount_incl_vat=12_000_000,
             # 채워 두면 라우트가 환율을 조회하지 않습니다.
             fx_rate=1000, fx_on=f"{prev}-01",
@@ -2591,7 +2737,13 @@ def test_the_ticket_link_can_be_typed_per_contract():
     assert contract.ticket_id is None
 
 
-# ---- 플랜 기간은 계약 기간과 다른 것이다 (2026-08-31) -----------------------------
+# ---- 플랜 날짜는 저장되지만 MRR·상태는 계약 기간이 정한다 (2026-09-21) -------------
+#
+# 이 묶음은 2026-08-31 에 「플랜 기간은 계약 기간과 다른 것이다」로 섰습니다. 운영자가
+# 2026-09-21 에 MRR 기준을 계약 기간으로 되돌리면서 분모·인식 창·플랜 상태·계약 상태가
+# **같이** 움직였고, 그래서 픽스처를 뒤집었습니다 — 플랜 날짜만 보는 코드가 하나라도
+# 남으면 여기서 답이 갈립니다. `plan_starts_on`·`plan_ends_on` 열은 그대로 있고, 읽는
+# 곳은 크레딧 소진 속도(`frontend/.../usage.ts`)와 워크북 AE·AF 열뿐입니다.
 
 
 class _Contract:
@@ -2601,9 +2753,9 @@ class _Contract:
         defaults = {
             "starts_on": None, "ends_on": None, "plan_starts_on": None, "plan_ends_on": None,
             "terminated_on": None, "revenue_from": None, "credits": None, "credits_used": None,
-            "currency": "KRW", "vat_applicable": False, "vat_included": True,
+            "currency": "KRW", "vat_applicable": False,
             "deal_type": "MRR", "installments": None, "payment_type": None,
-            "amount_incl_vat": None, "amount_excl_vat": None, "seq": 1,
+            "amount_incl_vat": None, "seq": 1,
         }
         defaults.update(fields)
         for key, value in defaults.items():
@@ -2616,23 +2768,36 @@ class _Client:
         self.retired_on = None
 
 
-def test_a_contract_signed_early_is_not_in_use_until_the_plan_starts():
-    """**계약은 먼저 맺고 실제 사용은 늦게 시작합니다.** 계약서에 도장을 찍은 날부터
-    「사용중」이라고 적으면, 아직 아무것도 안 쓰는 고객이 활성 고객 수와 예상 MRR 에
-    들어갑니다 — 그 두 숫자를 보려고 만든 화면인데요 (2026-08-31 운영자 지시).
-    """
-    signed_early = _Contract(
-        starts_on="2026-01-01", ends_on="2026-12-31",
-        plan_starts_on="2026-03-01", plan_ends_on="2027-02-28",
-    )
-    client = _Client(signed_early)
+def test_plan_status_follows_the_contract_period_not_the_plan_period():
+    """**「사용중」과 MRR 은 같은 자로 잽니다** (2026-09-21 운영자 지시로 계약 기간).
 
-    # 계약은 시작했지만 플랜은 아직입니다.
+    어느 기간이냐는 지시가 정하지만, 이 테스트가 지키는 것은 **짝**입니다: 상태를 재는
+    자와 매출을 인식하는 자가 다르면 「세팅중」인 고객에게 이번 달 MRR 이 잡힙니다 —
+    활성 고객 수와 예상 MRR 을 보려고 만든 화면에서 그 둘이 서로를 부정합니다.
+
+    픽스처의 플랜 날짜는 계약보다 두 달 **앞서** 시작하고 두 달 **먼저** 끝납니다.
+    플랜 날짜를 보는 코드가 하나라도 남으면 네 시점 중 어딘가에서 답이 갈립니다.
+    """
+    starts_later = _Contract(
+        starts_on="2026-03-01", ends_on="2027-02-28",
+        plan_starts_on="2026-01-01", plan_ends_on="2026-12-31",
+        amount_incl_vat=Decimal("12000000"),
+    )
+    client = _Client(starts_later)
+
+    # 플랜은 1월에 시작했지만 계약은 3월부터입니다.
     assert won.plan_status(client, date(2026, 1, 15)) == "세팅중"
     assert won.plan_status(client, date(2026, 3, 2)) == "사용중"
-    # 계약은 끝났지만 플랜은 도는 중입니다 — 여기서도 플랜이 이깁니다.
+    # 플랜은 끝났지만 계약은 도는 중입니다 — 여기서도 계약이 이깁니다.
     assert won.plan_status(client, date(2027, 1, 5)) == "사용중"
     assert won.plan_status(client, date(2027, 3, 1)) == "사용 중단"
+
+    # 그리고 매출이 그 상태를 따라갑니다 — 세팅중인 달에는 0, 사용중인 달에만 잡힙니다.
+    assert won.months_between("2026-03-01", "2027-02-28") == 12
+    assert won.revenue_in_month(starts_later, "2026-01") == 0
+    assert won.revenue_in_month(starts_later, "2026-03") == Decimal("1000000")
+    assert won.revenue_in_month(starts_later, "2027-02") == Decimal("1000000")
+    assert won.revenue_in_month(starts_later, "2027-03") == 0
 
 
 def test_the_plan_period_defaults_to_the_contract_period():
@@ -2651,7 +2816,6 @@ def test_terminating_ends_the_plan_and_the_status_follows():
     활성 고객 수가 틀립니다."""
     stopped = _Contract(
         starts_on="2026-01-01", ends_on="2026-12-31",
-        plan_starts_on="2026-01-01", plan_ends_on="2026-12-31",
         terminated_on="2026-05-31",
     )
     client = _Client(stopped)
@@ -2661,27 +2825,32 @@ def test_terminating_ends_the_plan_and_the_status_follows():
     assert won.plan_status(client, date(2026, 6, 1)) == "사용 중단"
 
 
-def test_mrr_is_divided_by_the_plan_months_not_the_contract_months():
-    """**분모와 인식 창이 둘 다 플랜 기간**이라 월별 합계가 총액과 정확히 맞습니다.
-    한쪽만 플랜으로 두면 마지막 달이 잘리고, 잘렸다는 표시는 화면 어디에도 없습니다."""
+def test_mrr_is_divided_by_the_contract_months_not_the_plan_months():
+    """**분모와 인식 창이 둘 다 계약 기간**이라 월별 합계가 총액과 정확히 맞습니다
+    (2026-09-21 운영자 지시로 되돌림).
+
+    한쪽만 옮기면 마지막 달이 잘리거나 합계가 총액을 넘고, **잘렸다는 표시는 화면 어디에도
+    없습니다** — 그래서 둘을 늘 같이 옮깁니다. 여기서 재는 것이 그 항등식입니다.
+    """
     from decimal import Decimal
 
-    # 계약은 12개월인데 플랜은 6개월 — 월 요금은 플랜으로 나눈 값이어야 합니다.
+    # 계약은 12개월인데 플랜은 6개월 — 월 요금은 **계약**으로 나눈 값이어야 합니다.
     contract = _Contract(
         starts_on="2026-01-01", ends_on="2026-12-31",
         plan_starts_on="2026-07-01", plan_ends_on="2026-12-31",
-        amount_incl_vat=Decimal("6000000"),
+        amount_incl_vat=Decimal("12000000"),
     )
 
-    assert won.plan_months(contract) == 6
+    assert won.plan_months(contract) == 12
     assert won.monthly_revenue(contract) == Decimal("1000000")
-    # 계약은 1월에 시작했지만 매출은 플랜이 시작하는 7월부터 잡힙니다.
-    assert won.revenue_start_month(contract) == "2026-07"
-    assert won.revenue_in_month(contract, "2026-03") == Decimal("0")
+    # 플랜은 7월부터지만 매출은 계약이 시작하는 1월부터 잡힙니다.
+    assert won.revenue_start_month(contract) == "2026-01"
+    assert won.revenue_in_month(contract, "2026-03") == Decimal("1000000")
     assert won.revenue_in_month(contract, "2026-07") == Decimal("1000000")
-    # 그리고 열두 달을 다 더해도 총액을 넘지 않습니다.
+    # 그리고 열두 달을 다 더하면 총액과 **정확히** 같습니다 — 남지도 모자라지도 않습니다.
     year = sum(won.revenue_in_month(contract, f"2026-{m:02d}") for m in range(1, 13))
-    assert year == Decimal("6000000")
+    assert year == Decimal("12000000")
+    assert won.revenue_in_month(contract, "2027-01") == Decimal("0")
 
 
 # ---- 환율은 계약마다 박힌다 (2026-08-31) ------------------------------------------
@@ -2898,7 +3067,9 @@ def test_the_payment_row_lets_the_rate_be_typed():
     ).read_text(encoding="utf-8")
 
     assert 'void onSave({ fx_rate: next || "auto" })' in screen
-    assert 'placeholder="비우면 그날 고시가"' in screen
+    # 문구는 2026-09-21 에 「비우면 자동 적용」이 됐습니다(운영자 지시). 「그날 고시가」는
+    # 어느 날인지를 읽는 사람이 다시 따져야 했습니다 — 입금일입니다.
+    assert 'placeholder="비우면 자동 적용"' in screen
 
 
 def test_the_customer_contact_is_stored_per_contract(factory):
@@ -2946,9 +3117,12 @@ def test_the_contact_moved_out_of_the_basic_panel_into_the_contract_form():
     assert 'v={client.contact_name}' not in detail
     assert 'v={current.contact_name}' in detail
     assert 'set("contact_name", e.target.value)' in form
-    # 워딩 — 이 화면이 보여 주는 것은 인식 매출(MRR)입니다.
+    # 워딩 — 이 화면이 보여 주는 것은 인식 매출(MRR)입니다. 괄호의 「(VAT 포함)」은
+    # 2026-09-21 에 뺐습니다: 계약금액이 이제 전부 VAT 포함이라 구별할 상대가 없고,
+    # 구별이 없는 단서는 읽는 사람에게 「그럼 다른 것도 있나」를 되묻게 합니다.
     assert 'title="MRR 관리"' in detail
-    assert 'k="월간 MRR (VAT 포함)"' in detail
+    assert 'k="월간 MRR"' in detail
+    assert "(VAT 포함)" not in detail
 
 
 def test_saving_does_not_freeze_the_plan_dates(factory):
@@ -2956,13 +3130,19 @@ def test_saving_does_not_freeze_the_plan_dates(factory):
     운영자 보고: 「계약 날짜를 변경하면 공급가 기준 MRR 은 변경이 되는데 나머지 MRR 도
     밖의 리스트도 안 된다」).
 
-    저장 경로에 `plan_starts_on = plan_starts_on or starts_on` 두 줄이 있었습니다. MRR 은
-    플랜 기간으로 나누므로(`won.plan_months`), 한 번 굳고 나면 계약 날짜를 아무리 고쳐도
-    **분모가 안 움직입니다.** 화면의 「공급가 기준」만 계약 개월수로 직접 나누고 있어서
-    그것만 따라 움직였고, 두 숫자가 갈린 덕에 운영자가 알아챘습니다.
+    저장 경로에 `plan_starts_on = plan_starts_on or starts_on` 두 줄이 있었습니다. 그때
+    MRR 은 플랜 기간으로 나뉘어서, 한 번 굳고 나면 계약 날짜를 아무리 고쳐도 **분모가
+    안 움직였습니다.** 화면의 「공급가 기준」만 계약 개월수로 직접 나누고 있어서 그것만
+    따라 움직였고, 두 숫자가 갈린 덕에 운영자가 알아챘습니다.
 
-    파생값을 저장하면 원본이 바뀔 때 조용히 어긋납니다 — 이 저장소가 이미 두 번 겪은
-    자리입니다(`customer_profiles.qualification` 0104, 고객 종류 0065).
+    **그 증상은 2026-09-21 에 불가능해졌습니다** — MRR 이 계약 기간으로 돌아왔으니 플랜
+    날짜가 굳어 있어도 분모는 계약을 따라갑니다. **그래도 이 규칙은 남습니다**: 굳은 플랜
+    날짜는 이제 크레딧 소진 속도(경과율·사용 전망)를 틀리게 만들고, 그건 화면에 「틀렸다」
+    로 안 보입니다. 파생값을 저장하면 원본이 바뀔 때 조용히 어긋난다 — 이 저장소가 세 번
+    겪은 자리입니다(`customer_profiles.qualification` 0104, 고객 종류 0065, 이 칸 0117).
+
+    아래 `plan_months`·`monthly_revenue` 는 그 뒤의 결과를 한 번 더 확인하는 줄입니다:
+    비어 있는 플랜 날짜가 계산을 막지 않아야 합니다.
     """
     from src.common import won
 
@@ -3001,11 +3181,12 @@ def test_changing_the_contract_dates_moves_every_mrr_figure():
 
     증상은 「공급가 기준 MRR 만 바뀌고 나머지도 밖의 목록도 그대로」였습니다. 원인은
     저장 경로가 `plan_starts_on = plan_starts_on or starts_on` 으로 **「비우면 계약
-    기간과 같다」를 값으로 굳힌** 것이었습니다 — MRR 은 플랜 기간으로 나누므로, 한 번
-    굳고 나면 계약 날짜를 아무리 고쳐도 분모가 안 움직입니다.
+    기간과 같다」를 값으로 굳힌** 것이었습니다 — 그때 MRR 은 플랜 기간으로 나뉘었으니,
+    한 번 굳고 나면 계약 날짜를 아무리 고쳐도 분모가 안 움직였습니다.
 
-    파생값을 저장하면 원본이 바뀔 때 조용히 어긋납니다. 이 저장소가 이미 두 번 겪은
-    자리입니다(`customer_profiles.qualification` 0104, 고객 종류 0065).
+    2026-09-21 에 분모가 계약 기간이 되면서 그 한 갈래는 막혔지만, 여기서 재는 것은
+    원인이 아니라 **요구**입니다: 계약 날짜가 MRR 세 값(월간 매출 · 공급가 기준 · 인식
+    시작월)을 전부 움직여야 합니다. 어느 하나가 다른 날짜를 보기 시작하면 여기서 걸립니다.
     """
     from types import SimpleNamespace
 
@@ -3013,8 +3194,8 @@ def test_changing_the_contract_dates_moves_every_mrr_figure():
 
     def contract(start, end):
         return SimpleNamespace(
-            deal_type="MRR", currency="KRW", vat_applicable=True, vat_included=True,
-            amount_incl_vat=Decimal("11000000"), amount_excl_vat=None,
+            deal_type="MRR", currency="KRW", vat_applicable=True,
+            amount_incl_vat=Decimal("11000000"),
             starts_on=start, ends_on=end,
             # **비어 있습니다** — 「계약 기간과 같다」는 뜻이고, 그게 대부분의 계약입니다.
             plan_starts_on=None, plan_ends_on=None,
@@ -3035,32 +3216,35 @@ def test_changing_the_contract_dates_moves_every_mrr_figure():
 def test_the_two_mrr_figures_use_the_same_divisor():
     """**한 계약의 두 MRR 이 서로 다른 기간을 말하면 안 됩니다** (2026-09-09).
 
-    화면의 「월간 MRR (공급가 기준)」이 `공급가 ÷ contract.months`(계약 개월수)로 직접
-    나눴고, 옆의 「월간 MRR (VAT 포함)」은 서버가 플랜 개월수로 나눈 값이었습니다. 플랜이
-    계약보다 늦게 시작하면 둘이 갈리고, 계약 날짜를 고치면 한쪽만 움직입니다.
+    화면의 「월간 MRR (공급가 기준)」이 `공급가 ÷ contract.months` 로 **직접** 나눴고,
+    옆의 「월간 MRR」은 서버가 나눈 값이었습니다. 그때 둘의 분모가 달라(계약 vs 플랜) 같은
+    계약을 두 기간으로 말했고, 계약 날짜를 고치면 한쪽만 움직였습니다.
 
-    자를 한 곳에 두는 것이 유일한 방법입니다 — 환율을 서버가 한 번만 환산하는 것과 같은
-    이유입니다.
+    **분모가 무엇이냐는 2026-09-21 에 계약 기간으로 바뀌었고, 이 규칙은 그대로입니다** —
+    자를 한 곳에 두는 것이 유일한 방법이라는 것. 화면이 다시 나누면 같은 숫자가 화면마다
+    달라집니다(환율을 서버가 한 번만 환산하는 것과 같은 이유). 그래서 아래 비 1.1 은 어느
+    기간을 쓰든 성립해야 하는 값입니다.
     """
     from types import SimpleNamespace
 
     from src.common import won
 
-    # 계약 12개월인데 플랜은 10개월(사용을 두 달 늦게 시작).
+    # 계약 12개월. 플랜 날짜는 **비어 있습니다** — 2026-09-21 부터 이 계산에 안 들어오고,
+    # 픽스처에 남겨 두면 다음 읽는 사람이 그것이 분모라고 믿습니다.
     contract = SimpleNamespace(
-        deal_type="MRR", currency="KRW", vat_applicable=True, vat_included=True,
-        amount_incl_vat=Decimal("11000000"), amount_excl_vat=None,
+        deal_type="MRR", currency="KRW", vat_applicable=True,
+        amount_incl_vat=Decimal("11000000"),
         starts_on="2026-01-01", ends_on="2026-12-31",
-        plan_starts_on="2026-03-01", plan_ends_on="2026-12-31",
+        plan_starts_on=None, plan_ends_on=None,
         terminated_on=None, revenue_from=None, credits_used=None, credits=None,
     )
 
     assert won.months_between(contract.starts_on, contract.ends_on) == 12
-    assert won.plan_months(contract) == 10
+    assert won.plan_months(contract) == 12
 
-    # 총액 ÷ 10, 공급가 ÷ 10 — **같은 10** 입니다.
-    assert won.monthly_revenue(contract) == Decimal("11000000") / 10
-    assert won.monthly_supply_revenue(contract) == won.supply_amount(contract) / 10
+    # 총액 ÷ 12, 공급가 ÷ 12 — **같은 12** 입니다.
+    assert won.monthly_revenue(contract) == Decimal("11000000") / 12
+    assert won.monthly_supply_revenue(contract) == won.supply_amount(contract) / 12
     # 그래서 둘의 비는 언제나 1.1 입니다 — 기간이 갈리면 이 값이 깨집니다.
     ratio = won.monthly_revenue(contract) / won.monthly_supply_revenue(contract)
     assert round(float(ratio), 6) == 1.1
@@ -3092,7 +3276,7 @@ def test_the_month_splits_by_stripe(factory):
         # 같은 Stripe 계약이어도 **아직 안 들어온 회차**는 그 외입니다.
         SimpleNamespace(paid_on="2026-09-20", amount=Decimal(2_000_000), done=False, fx_rate=None),
     ])
-    transfer = contract("계좌이체", [
+    transfer = contract("직접거래", [
         # 입금은 끝났지만 Stripe 가 아닙니다 — 그 외입니다.
         SimpleNamespace(paid_on="2026-09-15", amount=Decimal(4_000_000), done=True, fx_rate=None),
     ])
@@ -3101,7 +3285,7 @@ def test_the_month_splits_by_stripe(factory):
     assert _cash_cells(stripe, months, rate, stripe_only=True)["2026-09"]["KRW"] == Decimal(3_000_000)
 
     assert _cash_cells(transfer, months, rate)["2026-09"]["KRW"] == Decimal(4_000_000)
-    # 계좌이체 계약은 입금이 끝났어도 Stripe 몫이 0 입니다.
+    # 직접거래 계약은 입금이 끝났어도 Stripe 몫이 0 입니다.
     assert _cash_cells(transfer, months, rate, stripe_only=True) == {}
 
 
@@ -3145,8 +3329,8 @@ def test_the_mrr_split_looks_at_the_contract_not_the_payment():
     rate = Decimal(1300)
     # Stripe 계약, 9월 회차는 아직 미입금.
     contract = SimpleNamespace(
-        deal_type="MRR", currency="KRW", vat_applicable=False, vat_included=False,
-        amount_incl_vat=Decimal(12_000_000), amount_excl_vat=None,
+        deal_type="MRR", currency="KRW", vat_applicable=False,
+        amount_incl_vat=Decimal(12_000_000),
         starts_on="2026-01-01", ends_on="2026-12-31",
         plan_starts_on=None, plan_ends_on=None, terminated_on=None,
         revenue_from=None, credits_used=None, credits=None,
@@ -3162,5 +3346,5 @@ def test_the_mrr_split_looks_at_the_contract_not_the_payment():
     assert _cash_cells(contract, months, rate, stripe_only=True) == {}
 
     # Stripe 가 아닌 계약은 MRR 쪽도 0 입니다.
-    other = SimpleNamespace(**{**contract.__dict__, "payment_method": "계좌이체"})
+    other = SimpleNamespace(**{**contract.__dict__, "payment_method": "직접거래"})
     assert _mrr_cells(other, months, rate, stripe_only=True) == {}

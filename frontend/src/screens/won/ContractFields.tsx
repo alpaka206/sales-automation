@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Field } from "./WonNew";
 import { type Contract, type Options, addMonths, n } from "./shared";
 import {
-  type Draft, derive, fromContract, planPreview, toBody, withAmount,
+  type Draft, derive, fromContract, planPreview, toBody,
 } from "./contractDraft";
 
 /** 계약 폼의 **칸 한 벌** — 모달(새 계약)과 상세의 제자리 편집(있는 계약)이 같이 그립니다.
@@ -14,16 +14,15 @@ import {
  * 목업(`수주관리목업_0806.html` 의 `renderContractModal`)과 **다른 곳은 두 군데뿐**이고, 둘 다
  * 운영자가 그렇게 하라고 한 것입니다:
  *
- * - **계약 크레딧을 입력받지 않습니다.** 목업은 손으로 적는 칸인데, 공급가 ÷ 분당 단가 × 60
- *   으로 계산해 같은 자리에 보여 줍니다. 시트에서 손으로 들어가다 보니 계약마다 계산 기준이
- *   달랐습니다. 그래서 **공급가 (VAT 제외)** 칸이 하나 늘었습니다 — 목업에는 없습니다.
+ * - **계약 크레딧을 입력받습니다.** 계약서에 적히는 것이 금액과 크레딧이고 분당 단가가 그
+ *   둘에서 나옵니다 — 목업은 단가를 받아 크레딧을 계산했는데, 그러면 반올림한 단가로 계산한
+ *   크레딧이 계약서의 크레딧과 어긋났습니다.
  * - **통화와 무관하게 환율을 받습니다.** 원화 계약에 USD 단가를 매기는 경우가 흔하고,
  *   예상 MRR 카드가 원화 계약을 USD 로도 보여 주기 때문입니다. 환율이 없으면 그 환산이
  *   매일 오늘 고시가로 다시 일어나 지난달 숫자가 이번 달에 달라 보입니다.
  */
 export function useContractDraft(initial?: Contract) {
   const [draft, setDraft] = useState<Draft | null>(() => (initial ? fromContract(initial) : null));
-  const [docTypes, setDocTypes] = useState<string[]>(() => initial?.doc_types ?? []);
   // 지급 일정 — **지금 깔려 있는 그대로**(없으면 1). 12 로 채우면 이 두 칸을 건드리지 않은
   // 저장이 서버 눈에는 「1회차 → 12회차」로 보여, 비고 한 줄 고치는 저장이 일정을 다시 깝니다.
   const schedule = (c: Contract): [string, string] => [
@@ -44,12 +43,9 @@ export function useContractDraft(initial?: Contract) {
 
   const set = (key: keyof Draft, value: string) =>
     setDraft((current) => (current ? { ...current, [key]: value } : current));
-  const setAmount = (which: "incl" | "excl", value: string) =>
-    setDraft((current) => (current ? withAmount(current, which, value) : current));
   /** 있는 계약으로 채웁니다 — 모달이 비동기로 불러온 뒤 부릅니다. 지급 일정 기준선도 같이. */
   const loadContract = (c: Contract) => {
     setDraft(fromContract(c));
-    setDocTypes(c.doc_types || []);
     const [rounds, first] = schedule(c);
     setCreditRounds(rounds);
     setFirstCreditOn(first);
@@ -72,13 +68,13 @@ export function useContractDraft(initial?: Contract) {
    *  첫 지급일 자리에 계약 시작일을 넣어 보내는 것을 「바뀌었다」로 읽고 경고 없이 갈아엎습니다. */
   const body = (): Record<string, string> | null => {
     if (!draft) return null;
-    const out = toBody(draft, docTypes, creditRounds, firstCreditOn);
+    const out = toBody(draft, creditRounds, firstCreditOn);
     if (creditChanged) out.credit_reseed = "1";
     return out;
   };
 
   return {
-    draft, setDraft, set, setAmount, docTypes, setDocTypes,
+    draft, setDraft, set,
     creditRounds, setCreditRounds, firstCreditOn, setFirstCreditOn,
     creditChanged, loadContract, body,
   };
@@ -95,18 +91,44 @@ export function Sel({ value, onChange, options }: {
   );
 }
 
+/** 「매출 인식」 옆의 작은 (i) — 눌러야 열립니다(운영자 지시: 「i 작은 표시 있고 눌렀을때」).
+ *
+ *  `<details>/<summary>` 인 이유: 이 저장소에 툴팁 컴포넌트가 없고, 두 줄짜리 설명을 위해
+ *  만들 이유도 없습니다. `title=` 은 hover 라 「눌렀을때」가 아닙니다. 옷은 `.won .hint`
+ *  한 곳에 있습니다.
+ *
+ *  **한 벌만 두고 두 자리가 같이 씁니다** — 폼(값을 고르는 곳)과 상세 카드(값을 읽는 곳).
+ *  두 곳에 따로 적으면 같은 두 줄이 언젠가 서로 다른 말을 합니다. */
+export function DealTypeHint() {
+  return (
+    <details className="hint">
+      <summary aria-label="매출 인식이란" title="매출 인식이란" />
+      <div>
+        MRR — 계약기간 분할인식<br />
+        PoC — 일괄인식
+      </div>
+    </details>
+  );
+}
+
 /** 계약 · 금액 · 결제 · 크레딧 지급 · 매출 인식 · 기타. `f.draft` 가 있어야 그립니다. */
 export function ContractFields({ f, options }: { f: ContractDraftState; options: Options }) {
-  const { draft, set, setAmount, docTypes, setDocTypes } = f;
+  const { draft, set } = f;
   if (!draft) return null;
   const { vatApplicable, unitPrice } = derive(draft);
   return (
     <>
       <div className="form-sec">계약</div>
       <div className="form-grid3">
-        <Field label="수주 유형" required>
+        {/* 이름은 **매출 인식**입니다(2026-09-21 운영자 지시, 그 전에는 「수주 유형」).
+            저장하는 값은 MRR·PoC 그대로입니다 — 그 두 글자가 워크북 계약 탭 E열의 값이자
+            `sheet_to_db` 가 다시 읽는 값이라, 키를 따라 바꾸면 시트를 오가는 계약이 끊깁니다. */}
+        <div>
+          <label className="form-label">
+            매출 인식<span className="req"> *</span><DealTypeHint />
+          </label>
           <Sel value={draft.deal_type} onChange={(v) => set("deal_type", v)} options={options.deal_types} />
-        </Field>
+        </div>
         <Field label="계약 시작일" required>
           <input className="inp" type="date" value={draft.starts_on}
                  onChange={(e) => { set("starts_on", e.target.value); set("ends_on", addMonths(e.target.value, 12)); }} />
@@ -114,8 +136,9 @@ export function ContractFields({ f, options }: { f: ContractDraftState; options:
         <Field label="계약 종료일" required>
           <input className="inp" type="date" value={draft.ends_on} onChange={(e) => set("ends_on", e.target.value)} />
         </Field>
-        {/* **중도 해지일.** 플랜은 만료일과 이 날짜 중 빠른 쪽에서 끝납니다. 비어 있는
-            것이 보통이고, 적히는 순간 그 계약의 매출 인식이 거기서 멈춥니다. */}
+        {/* **중도 해지일.** 인식 기간은 계약 종료일과 이 날짜 중 빠른 쪽에서 끝납니다.
+            비어 있는 것이 보통이고, 적히는 순간 그 계약의 매출 인식이 거기서 멈춥니다.
+            환불 계산에 쓰는 크레딧 사용량은 「결제 · MRR」 탭의 「중도 해지 정산」에 있습니다. */}
         <Field label="중도 해지일">
           <input className="inp" type="date" value={draft.terminated_on}
                  onChange={(e) => set("terminated_on", e.target.value)} />
@@ -151,33 +174,16 @@ export function ContractFields({ f, options }: { f: ContractDraftState; options:
           <input className="inp" type="number" value={draft.credits}
                  onChange={(e) => set("credits", e.target.value)} placeholder="예: 64800" />
         </Field>
-        {/* **수동 입력입니다.** 제품 쪽에서 사용량을 가져오는 경로가 아직 없습니다. 비어
-            있으면 예상 환불 금액을 계산하지 않습니다 — 없는 값을 0 으로 두면 「하나도 안
-            썼으니 전액 환불」이 되어 해지월 매출이 통째로 음수가 됩니다. */}
-        <Field label="크레딧 사용량">
-          <input className="inp" type="number" value={draft.credits_used}
-                 onChange={(e) => set("credits_used", e.target.value)}
-                 placeholder="중도 해지 시 환불 계산에 씁니다" />
-        </Field>
-        <div style={{ gridColumn: "span 3" }}>
-          <label className="form-label">계약서 유형 <span style={{ color: "var(--faint)" }}>(복수 선택)</span></label>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 14, padding: "7px 0 2px" }}>
-            {options.doc_types.map((item) => (
-              <label key={item} style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 13, cursor: "pointer" }}>
-                <input type="checkbox" checked={docTypes.includes(item)}
-                       onChange={(e) => setDocTypes(
-                         e.target.checked ? [...docTypes, item] : docTypes.filter((x) => x !== item))} />
-                {item}
-              </label>
-            ))}
-          </div>
-        </div>
+        {/* 「크레딧 사용량」이 여기 있었습니다 — 2026-09-21 에 「결제 · MRR」 탭의 「중도
+            해지 정산」 박스로 옮겼습니다(운영자 지시). 묻는 자리가 곧 그 값이 무엇에
+            쓰이는지를 말합니다. 「계약서 유형」은 같은 날 아예 없어졌습니다(이관 0125). */}
       </div>
 
       <div className="form-sec">금액</div>
-      {/* 순서가 뜻을 갖습니다(운영자 지시): **부가세 해당 여부 → 통화 → 환율 → 금액 →
-          공급가.** 앞의 것이 뒤의 것을 정하기 때문입니다 — 해당 여부가 금액 칸을 한 개로
-          할지 두 개로 할지 정하고, 통화가 환율을 물어볼지 말지 정합니다. */}
+      {/* 순서가 뜻을 갖습니다(운영자 지시): **부가세 해당 여부 → 통화 → 환율 → 금액.**
+          앞의 것이 뒤의 것을 정하기 때문입니다. 해당 여부는 이제 금액 칸 수를 가르지 않고
+          (칸은 하나입니다) **공급가가 있는 계약인지**를 정합니다 — 워크북의 공급가 열과
+          CSV 가 그 값을 읽습니다. */}
       <div className="form-grid3">
         <Field label="VAT 해당 여부">
           <select className="inp" value={draft.vat_applicable}
@@ -201,55 +207,27 @@ export function ContractFields({ f, options }: { f: ContractDraftState; options:
                  onChange={(e) => set("fx_rate", e.target.value)}
                  placeholder="비우면 계약일 고시가로 자동" />
         </Field>
-        {/* **어느 칸을 받는지는 통화와 「금액 기준」이 함께 정합니다.** 국내 계약서는
-            공급가로 적히고 부가세가 따로 붙는 것이 흔하지만, 총액으로 적히는 계약도
-            있습니다 — 그것을 공급가 칸에 넣으면 분당 단가가 10% 낮게 나오고 화면
-            어디에도 그게 보이지 않습니다. 해외 계약에는 부가세가 없어 총액이 곧
-            대금이라 고를 것이 없습니다. 어느 쪽이든 채우는 칸은 하나입니다: 둘 다
-            받으면 분당 단가가 어느 쪽 기준인지 계약마다 달라집니다. */}
-        {/* **해당이면 칸이 둘입니다.** 한쪽을 적으면 다른 쪽이 10% 로 따라옵니다 —
-            계약서가 어느 쪽으로 적혀 있든 그 숫자를 그대로 넣을 수 있어야 합니다. 둘 다
-            고칠 수 있게 두되, 저장할 때 서버가 **공급가로 고른 쪽에서 다시 계산**하므로
-            두 값이 어긋난 채 저장되지는 않습니다. */}
-        {vatApplicable ? (
-          <>
-            <Field label="총 계약금액 (VAT 포함)" required>
-              <input className="inp" type="number" value={draft.amount_incl_vat}
-                     onChange={(e) => setAmount("incl", e.target.value)}
-                     placeholder="예: 11000000" />
-            </Field>
-            <Field label="공급가 (VAT 미포함)" required>
-              <input className="inp" type="number" value={draft.amount_excl_vat}
-                     onChange={(e) => setAmount("excl", e.target.value)}
-                     placeholder="예: 10000000" />
-            </Field>
-            {/* 분당 단가가 어느 금액에서 나오는지. 계약서가 총액으로 적힌 건과 공급가로
-                적힌 건이 둘 다 있어서, 고르지 않으면 계약마다 단가가 10% 씩 달라집니다.
+        {/* **칸은 하나입니다** (2026-09-21 운영자 지시: 「계약금액은 모두 VAT 포함만으로」).
+            그전에는 부가세 해당 계약에 칸이 둘이고 「분당단가 기준」 고르개가 어느 쪽을
+            기준으로 삼을지 정했습니다 — 국내 계약서가 공급가로도 총액으로도 적혀서, 모르면
+            분당 단가가 계약마다 10% 씩 달라졌기 때문입니다. 그 사실은 이제 **계약 비고**가
+            듭니다(이관 0123 이 옛 계약마다 한 줄 적어 두었습니다).
 
-                라벨에서 「공급가」를 뺐습니다 (2026-08-31 운영자 지시): 바로 위 칸이
-                **공급가 (VAT 미포함)** 이라 두 칸이 같은 말로 시작했고, 이 칸은 공급가를
-                입력받는 칸이 아니라 **어느 금액을 기준으로 삼을지 고르는** 칸입니다. */}
-            <Field label="분당단가 기준">
-              <select className="inp" value={draft.vat_included}
-                      onChange={(e) => set("vat_included", e.target.value)}>
-                <option value="">VAT 미포함 금액으로</option>
-                <option value="1">VAT 포함 금액으로</option>
-              </select>
-            </Field>
-          </>
-        ) : (
-          <div style={{ gridColumn: "span 2" }}>
-            <label className="form-label">계약금액 <span className="req">*</span></label>
-            <input className="inp" type="number" value={draft.amount_incl_vat}
-                   onChange={(e) => set("amount_incl_vat", e.target.value)} placeholder="예: 20000" />
-            <div style={{ fontSize: 11.5, color: "var(--faint)", marginTop: 4 }}>
-              VAT 미해당 — 금액은 하나이고, 그 금액이 분당단가 기준입니다.
-            </div>
+            라벨에 「(VAT 포함)」을 안 답니다 — 이제 모든 계약금액이 그렇습니다. */}
+        <div style={{ gridColumn: "span 2" }}>
+          <label className="form-label">계약금액 <span className="req">*</span></label>
+          <input className="inp" type="number" value={draft.amount_incl_vat}
+                 onChange={(e) => set("amount_incl_vat", e.target.value)}
+                 placeholder={vatApplicable ? "예: 11000000" : "예: 20000"} />
+          <div style={{ fontSize: 11.5, color: "var(--faint)", marginTop: 4 }}>
+            {vatApplicable
+              ? "VAT 포함 금액입니다. 공급가는 이 값 ÷ 1.1 로 계산합니다."
+              : "VAT 미해당 — 공급가라는 것이 없고, 이 금액이 그대로 대금입니다."}
           </div>
-        )}
-        {/* 계산값입니다. 계약서에 적히는 것은 금액과 크레딧이고 단가는 그 둘에서
-            나옵니다 — 소수점은 남깁니다. 반올림한 단가는 되짚어 곱했을 때 금액이
-            안 맞습니다. */}
+        </div>
+        {/* 계산값입니다 — 계약금액 ÷ (크레딧 ÷ 60). 소수점은 남깁니다: 반올림한 단가는
+            되짚어 곱했을 때 금액이 안 맞습니다. **VAT 포함 기준**이라, 계약서가 VAT 미포함
+            단가로 적힌 건이면 그 숫자를 계약 비고에 적어 두십시오. */}
         <Field label="분당 단가">
           <div className="inp" aria-readonly="true"
                style={{ background: "var(--bg-soft)", fontVariantNumeric: "tabular-nums",
@@ -301,7 +279,9 @@ export function ContractFields({ f, options }: { f: ContractDraftState; options:
         </div>
       </div>
 
-      <div className="form-sec">매출 인식</div>
+      {/* 절 이름이 「매출 인식」이었습니다. 위 계약 절의 칸이 그 이름을 갖게 되면서
+          (2026-09-21) 한 폼에 같은 말이 둘이 됐고, 그중 하나만 줄였습니다. */}
+      <div className="form-sec">매출 인식 시작</div>
       <div className="form-grid3">
         <Field label="매출 인식 시작 월">
           <input className="inp" type="month" value={draft.revenue_from}
@@ -334,18 +314,18 @@ export function PlanFields({ f, options, heading = true }: {
     <>
       {heading && <div className="form-sec">Perso 계정 및 플랜</div>}
       <div className="note-box">
-        플랜 기간은 계약 기간과 다릅니다 — MRR 은 이 기간으로 나누고 이 기간에 인식하며,
-        「사용중」도 이 기간이 정합니다. <b>비우면 계약 기간과 같습니다.</b>
+        플랜 기간은 계약 기간과 다를 수 있습니다 — 계약을 먼저 맺고 사용을 늦게 시작하는
+        경우입니다. <b>MRR 과 「사용중」은 계약 기간이 정합니다</b>(2026-09-21). 이 두 날짜는
+        크레딧 소진 속도(경과율·사용 전망)와 워크북에만 쓰이고, 비우면 계약 기간과 같습니다.
       </div>
       <div className="form-grid3">
         {/* **플랜 기간은 계약 기간과 다른 것입니다** (2026-08-31 운영자 지시). 계약은
-            먼저 맺고 실제 사용은 늦게 시작하는 일이 흔한데, 한동안 이 폼이 묻지 않고
-            계약 날짜를 그대로 복사했습니다 — 그래서 MRR 도 「사용중」도 계약 기간으로
-            계산됐습니다.
+            먼저 맺고 실제 사용은 늦게 시작하는 일이 흔합니다.
 
-            MRR 은 이 기간으로 나누고 이 기간에 인식합니다(`won.plan_period`), 그리고
-            「사용중」도 이 기간이 정합니다. 비워 두면 계약 기간과 같습니다 — 대부분의
-            계약이 그렇고, 그때는 아무것도 안 적으면 됩니다. */}
+            **2026-09-21 부터 MRR 과 플랜 상태는 이 날짜를 안 봅니다** — 운영자 지시로
+            계약 기간으로 돌아왔습니다(`won.plan_period`). 남은 독자는 크레딧 소진 속도
+            (`usage.ts` 의 경과율·사용 전망)와 워크북 AE·AF 열입니다. 비워 두면 계약
+            기간과 같습니다 — 대부분의 계약이 그렇고, 그때는 아무것도 안 적으면 됩니다. */}
         <Field label="플랜 시작일">
           <input className="inp" type="date" value={draft.plan_starts_on}
                  onChange={(e) => set("plan_starts_on", e.target.value)} />
@@ -381,10 +361,10 @@ export function PlanFields({ f, options, heading = true }: {
                  placeholder="여러 개면 쉼표로" />
         </div>
       </div>
-      {/* 「저장 후 플랜 상태」 고르개가 여기 있었습니다. 플랜 상태는 이제 계약 기간이
-          정합니다 — 이 폼에 적는 시작일·종료일이 곧 그 값입니다. 고르개를 남겨 두면
-          사람이 고른 값과 날짜가 말하는 값이 갈라지고, 그때 어느 쪽이 맞는지 아무도
-          모릅니다. 아래 줄이 지금 무엇이 될지 미리 말해 줍니다. */}
+      {/* 「저장 후 플랜 상태」 고르개가 여기 있었습니다. 플랜 상태는 계약 기간이 정합니다 —
+          **계약 절의 시작일·종료일**이 곧 그 값입니다(이 절의 플랜 날짜가 아닙니다).
+          고르개를 남겨 두면 사람이 고른 값과 날짜가 말하는 값이 갈라지고, 그때 어느 쪽이
+          맞는지 아무도 모릅니다. 아래 줄이 지금 무엇이 될지 미리 말해 줍니다. */}
       <div className="note-box" style={{ marginTop: 14 }}>
         플랜 상태는 계약 기간에서 정해집니다 — 이 계약은 저장하면{" "}
         <b>{planPreview(draft)}</b> 입니다.

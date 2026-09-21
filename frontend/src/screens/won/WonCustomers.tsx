@@ -244,14 +244,14 @@ export function WonCustomers() {
               <G name="person" /> 활성 고객 <span style={{ color: "var(--faint)" }}>({deptLabel})</span>
             </div>
             <div className="kpi-value"><span>{live + setup}</span><span className="unit">곳</span></div>
-            {/* 두 지표는 구성비를 읽는 값이라 원그래프로 보여 줍니다. 수주 유형은 계약을
+            {/* 두 지표는 구성비를 읽는 값이라 원그래프로 보여 줍니다. 매출 인식은 계약을
                 저장할 때 MRR 또는 PoC로 정해지므로 화면도 그 두 종류만 나눕니다. */}
             <div className="kpi-splits">
               <Donut cap="플랜 상태" slices={[
                 { label: "사용중", n: live, color: "var(--teal-600)" },
                 { label: "세팅중", n: setup, color: "#E4A11B" },
               ]} />
-              <Donut cap="수주 유형" slices={[
+              <Donut cap="매출 인식" slices={[
                 { label: "MRR", n: mrrCount, color: "var(--teal-600)" },
                 { label: "PoC", n: pocCount, color: "#E4A11B" },
               ]} />
@@ -432,7 +432,7 @@ export function WonCustomers() {
                 <th style={{ width: "20%" }}>고객사</th>
                 <th style={{ width: "9%" }}>플랜 상태</th>
                 <th style={{ width: "10%" }}>플랜</th>
-                <th style={{ width: "8%" }}>수주 유형</th>
+                <th style={{ width: "8%" }}>매출 인식</th>
                 {/* MRR 은 계약 금액 ÷ 개월수, PoC 는 첫 결제가 이번 달일 때만 전액.
                     부서와 무관하게 모든 행에 나옵니다 — 위 카드만 GTM 으로 거릅니다. */}
                 <th style={{ width: "10%" }} className="moneycell">이번달 MRR</th>

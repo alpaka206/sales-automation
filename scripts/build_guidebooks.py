@@ -1622,7 +1622,7 @@ def build_operator_guide() -> Path:
         [
             ("기본", "플랜, 상태, 금액, 통화, 계약일, 만료일"),
             ("연결 문의", "실제로 계약으로 성사된 문의 선택, 해당 Client ID 스냅샷"),
-            ("결제", "포트원/Stripe/계좌이체, 일시불/할부, 예정일, 실제 입금일"),
+            ("결제", "포트원/Stripe/직접거래, 일시불/할부, 예정일, 실제 입금일"),
             ("상품", "언어쌍, 단가, 크레딧, 초대/Queue/동시작업/Space 한도"),
             ("문서", "견적서, Invoice, 결제 링크, 계약서 방식"),
             ("수주 DB", "Billing Email, owner, space_seq, plan start, Enterprise Name 등"),

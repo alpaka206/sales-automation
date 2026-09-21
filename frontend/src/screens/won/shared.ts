@@ -21,16 +21,17 @@ export type Contract = {
   starts_on: string | null; ends_on: string | null;
   /** 계약 개월수 — 「계약 기간 (N개월)」이 읽습니다. */
   months: number;
-  /** **MRR 을 나누는 개월수.** 계약 개월수와 다를 수 있습니다(플랜은 늦게 시작하는 일이
-   *  흔합니다). 이 둘을 섞으면 같은 계약의 두 MRR 이 서로 다른 기간을 말합니다. */
+  /** **MRR 을 나누는 개월수.** 2026-09-21 부터 계약 개월수와 **같은 값**입니다 — MRR 이
+   *  계약 기간으로 돌아왔습니다(`won.plan_months`). 이름을 남긴 것은 이 키를 읽는 화면과
+   *  테스트가 있어서이고, 분모가 무엇인지는 서버 한 곳에서만 정합니다. */
   plan_months: number;
-  doc_types: string[]; credits: number | null; currency: string;
+  credits: number | null; currency: string;
+  /** **계약금액은 한 칸이고 그 값이 VAT 포함 총액입니다**(이관 0123). `amount_excl_vat` 는
+   *  저장된 값이 아니라 총액 ÷ 1.1 로 서버가 되짚은 공급가입니다 — 워크북의 공급가 열과
+   *  같은 값이어야 해서 화면이 다시 나누지 않습니다. 부가세 미해당 계약은 null 입니다. */
   amount_incl_vat: Money; amount_excl_vat: Money;
-  /** **분당 단가의 기준이 VAT 포함 금액인가.** 화면의 「공급가 선택」이 고른 값입니다.
-   *  부가세가 없는 계약에는 고를 것이 없어 늘 false 입니다. */
-  vat_included: boolean;
   /** 부가세가 붙는 계약인가. **통화가 아니라 고객이 정합니다**(국내 법인이면 해당).
-   *  이 값이 폼의 금액 칸을 한 개로 할지 두 개로 할지 정합니다. */
+   *  금액 칸을 가르지는 않고, **공급가가 있는 계약인지**를 정합니다. */
   vat_applicable: boolean;
   /** 그 계약에 적용할 환율과 기준 날짜. 비어 있으면 저장할 때 계약일 고시가로 채웁니다. */
   fx_rate: Money; fx_on: string | null;
@@ -60,7 +61,7 @@ export type Contract = {
 };
 export type Row = {
   client_id: number; company: string; customer_type: string;
-  industry: string | null; country: string | null;
+  country: string | null;
   /** 적어 둔 값이 없으면 Client ID 번호대에서 되짚은 값 — 서버가 정합니다(won.department). */
   department: string | null;
   /** 연결된 인바운드 연락처의 것. 목록 검색이 씁니다. 아웃바운드 고객은 비어 있습니다. */
@@ -88,8 +89,9 @@ export type Comm = {
   summary: string; happened_at: string; contract_seq: number | null;
 };
 export type Options = {
-  industries: string[]; plans: string[]; plan_statuses: string[]; deal_types: string[];
-  doc_types: string[];
+  plans: string[]; plan_statuses: string[];
+  /** 화면 이름은 「매출 인식」, 값은 MRR·PoC 그대로입니다. */
+  deal_types: string[];
   payment_methods: string[]; payment_types: string[]; currencies: string[];
   customer_types: string[]; departments: string[];
   /** 「전체」의 이름 — 부서가 아니라 셋을 합친 묶음이고, 서버가 보낸 키와 같아야 합니다. */
@@ -122,7 +124,7 @@ export type ListData = {
   months: string[];
   /** 담당부서 → 달 → 통화 → 금액.
    *
-   *  `mrr_months` 는 **플랜 기간에 균등 배분한 인식 매출**이고, `cash_months` 는 결제 회차가
+   *  `mrr_months` 는 **계약 기간에 균등 배분한 인식 매출**이고, `cash_months` 는 결제 회차가
    *  잡힌 달에 통째로 얹는 **현금흐름**입니다. 둘이 갈릴 때가 그 계약을 봐야 할 때라 한
    *  화면에 같이 둡니다.
    *

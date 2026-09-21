@@ -640,7 +640,7 @@ def _order_record(contact: Contact, contract: ContractRecord) -> dict:
     instrument = fields.get("payment_instrument") or {
         "stripe": "Stripe",
         "portone": "포트원",
-        "bank_transfer": "계좌이체",
+        "bank_transfer": "직접거래",
     }.get(contract.payment_method or "", contract.payment_method or "")
     return {
         "client_id": contract.sheet_client_id,
@@ -768,7 +768,7 @@ def sync_pending_inbound_rows(limit: int = 50) -> int:
             if not contact or not inbound:
                 continue
             when = inbound.created_at
-            # 고객사 이름·산업·국가는 「고객 기본 정보」가 원본입니다. 그 Client ID 가 이미
+            # 고객사 이름·국가는 「고객 기본 정보」가 원본입니다. 그 Client ID 가 이미
             # 수주 고객이면 거기 적힌 철자를 씁니다 — 같은 회사가 세 번 문의해도 서울대학교 /
             # 서울대 / SNU 로 갈라지지 않도록. 시트 수식으로는 이걸 못 합니다: Inbound DB 가
             # 고객 기본 정보를 조회하면 그 반대 방향과 순환 참조가 되고, 조회가 빈 리드
@@ -802,9 +802,10 @@ def sync_pending_inbound_rows(limit: int = 50) -> int:
                 "email": contact.email or "",
                 "country": (master.country if master else None)
                 or country_in_korean(contact.country),
-                "company_type": (master.industry if master else None)
-                or (profile.industry if profile else None)
-                or "확인 안 됨",
+                # 기업 종류는 연락처 프로필(허브스팟 `industry`)에서 옵니다. 예전에는
+                # `Client.industry`(고객 기본 정보 E열)가 먼저였는데, 그 칸이 없어졌습니다
+                # (이관 0124) — 그 열은 이제 이 append 경로와 운영자가 채웁니다.
+                "company_type": (profile.industry if profile else None) or "확인 안 됨",
                 "channel": "허브스팟" if contact.hubspot_contact_id else inbound.channel,
                 "plan": normalise_plan(profile.current_plan if profile else None),
                 "user_seq": profile.user_seq if profile else "",
