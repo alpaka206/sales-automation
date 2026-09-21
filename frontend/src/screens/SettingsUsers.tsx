@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Modal } from "../ui/Modal";
+import { DeleteDialog } from "../ui/DeleteDialog";
 import { getJSON, postForm, HttpError } from "../lib/api";
 import { Icon } from "../ui/Icon";
 import { kst } from "../lib/format";
@@ -162,20 +162,19 @@ export function SettingsUsers() {
         />
       </div>
 
-      {/* Removal is not a role change: the row leaves the list entirely. */}
+      {/* Removal is not a role change: the row leaves the list entirely.
+          그래서 **콘솔의 모든 삭제와 같은 창**입니다 (2026-09-21 운영자 지시: 「모든 삭제
+          확인 모달 통일해서 재사용하도록 확실하게」). 여기 손으로 만든 모달이 따로 서
+          있었고, 확인이 클릭 한 번이라 이 화면만 「예」를 누르면 끝이었습니다 — 그 한 번이
+          지우는 것은 그 사람이 콘솔에 들어오는 길입니다.
+          모달은 끝난 뒤에 닫습니다: 먼저 닫으면 「삭제 중」을 볼 자리가 사라지고, 실패해도
+          목록만 그대로인 채 아무 말이 없습니다. */}
       {removing && (
-        <Modal
-          title="접근 권한을 삭제합니다"
-          description={`${removing} 의 접근 권한을 삭제하시겠습니까? 목록에서 완전히 제거됩니다.`}
-          onClose={() => setRemoving(null)}
-          actions={
-            // 모달은 끝난 뒤에 닫습니다. 먼저 닫으면 "삭제 중" 을 볼 자리가 사라지고,
-            // 실패해도 목록만 그대로인 채 아무 말이 없습니다.
-            <ActionButton className="btn btn--danger" pending="삭제 중"
-                          onClick={() => act(removing, "revoke").then(() => setRemoving(null))}>
-              삭제
-            </ActionButton>
-          }
+        <DeleteDialog
+          name={removing}
+          note="이 사람은 콘솔에 로그인할 수 없게 되고 목록에서 완전히 사라집니다. 다시 쓰려면 위 「사용자 추가」로 다시 넣으면 됩니다 — 구글 계정 쪽은 건드리지 않습니다."
+          onCancel={() => setRemoving(null)}
+          onConfirm={() => act(removing, "revoke").then(() => setRemoving(null))}
         />
       )}
     </>

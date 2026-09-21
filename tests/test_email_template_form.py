@@ -472,9 +472,13 @@ def test_deleting_needs_the_sentence_typed_out_not_a_click():
 
     화면 소스로 확인합니다. 이 규칙이 사는 곳은 서버가 아니라 이 창 하나이고(서버는 되돌릴
     수 있게 만드는 쪽을 맡습니다), 그래서 창이 사라지면 규칙도 같이 사라집니다.
+
+    **문구에서 「문서」가 빠졌습니다** (2026-09-21). 이 창이 콘솔의 모든 삭제를 맡게 되면서
+    지우는 것이 문서만이 아니게 됐습니다 — 지메일 계정, 연락처, 계약. 지메일 계정 앞에서
+    「이 문서를 삭제하겠습니다」를 옮겨 적게 하는 것은 그 자체로 무엇을 지우는지 흐립니다.
     """
     dialog = pathlib.Path("frontend/src/ui/DeleteDialog.tsx").read_text(encoding="utf-8")
-    assert 'DELETE_PHRASE = "이 문서를 삭제하겠습니다."' in dialog
+    assert 'DELETE_PHRASE = "삭제하겠습니다"' in dialog
     assert "typed.trim() === DELETE_PHRASE" in dialog
     assert "disabled={!ok}" in dialog, "문장이 맞기 전에는 삭제 버튼이 눌리면 안 됩니다"
 

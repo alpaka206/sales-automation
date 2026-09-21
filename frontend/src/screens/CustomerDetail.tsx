@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { getJSON, postForm } from "../lib/api";
 import { Icon } from "../ui/Icon";
 import { SubmitButton, useAction } from "../ui/ActionButton";
@@ -8,7 +8,7 @@ import { kst } from "../lib/format";
 import { InteractionForm, InteractionItem, groupByTicket, type Interaction } from "../ui/InteractionForm";
 import { LoadingBlock } from "../ui/Loading";
 import { Modal } from "../ui/Modal";
-import { ConfirmModal } from "../ui/ConfirmModal";
+import { DeleteDialog } from "../ui/DeleteDialog";
 import { PlanCard } from "../ui/PlanCard";
 import { NewTicketForm } from "../ui/NewTicketForm";
 
@@ -66,7 +66,7 @@ const CONTRACT_STATUSES: [string, string][] = [
   ["active", "서비스 이용"], ["expired", "종료"], ["cancelled", "취소"],
 ];
 const PAYMENT_METHODS: [string, string][] = [
-  ["portone", "포트원"], ["stripe", "Stripe"], ["bank_transfer", "세금계산서·계좌이체"],
+  ["portone", "포트원"], ["stripe", "Stripe"], ["bank_transfer", "세금계산서·직접거래"],
 ];
 
 /** datetime-local / date inputs need the stored value trimmed to their own shape. */
@@ -76,6 +76,7 @@ const forInput = (value: string | null | undefined, length: number) =>
 
 export function CustomerDetail() {
   const { id } = useParams();
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { data, isPending } = useQuery({
     queryKey: ["customer", id],
@@ -86,8 +87,13 @@ export function CustomerDetail() {
   // 고치는 중인 기록. **같은 모달, 같은 폼**입니다 — 적을 때와 고칠 때가 묻는 칸이 같아서,
   // 갈라 두면 칸을 하나 더할 때 한쪽만 늘어납니다.
   const [editing, setEditing] = useState<Interaction | null>(null);
-  const [confirm, setConfirm] = useState<
-    { description: ReactNode; run: () => Promise<void> } | null
+  /** 지우기 전에 묻는 창 — **콘솔의 모든 삭제가 같은 한 벌입니다**(`DeleteDialog`,
+   *  2026-09-21 운영자 지시: 「모든 삭제 확인 모달 통일해서 재사용하도록 확실하게」).
+   *
+   *  예전에는 이 화면이 `ConfirmModal` 을 제목도 버튼 글자도 없이 썼습니다 — 기록 한 줄을
+   *  지우는 확인이 「수정」이라고 적힌 초록 버튼이었습니다. */
+  const [deleting, setDeleting] = useState<
+    { name: string; note: ReactNode; rows?: [string, string][]; run: () => Promise<void> } | null
   >(null);
 
   /** 기록 한 줄 지우기 — **확인 창을 반드시 지납니다** (2026-09-09 운영자 지시).
@@ -96,17 +102,11 @@ export function CustomerDetail() {
   function askDeleteInteraction(item: Interaction) {
     if (!item.id) return;
     const fromMailbox = (item.context || "").includes("개인 메일함");
-    setConfirm({
-      description: (
-        <>
-          이 기록을 지웁니다: <strong>{item.subject || item.summary || "(내용 없음)"}</strong>
-          <div className="t-sm t-subtle" style={{ marginTop: 6 }}>
-            {fromMailbox
-              ? "개인 메일함에서 들어온 줄입니다 — 지우면 다시 가져오지 않습니다."
-              : "리드 히스토리에서 사라집니다. 허브스팟 원본은 그대로입니다."}
-          </div>
-        </>
-      ),
+    setDeleting({
+      name: item.subject || item.summary || "(내용 없음)",
+      note: fromMailbox
+        ? "개인 메일함에서 들어온 줄입니다 — 지우면 다시 가져오지 않습니다."
+        : "리드 히스토리에서 사라집니다. 허브스팟 원본은 그대로입니다.",
       run: async () => {
         await postForm(`/customers/${id}/interactions/${item.id}/delete`,
                        { redirect_to: `/customers/${id}` });
@@ -235,6 +235,40 @@ export function CustomerDetail() {
             </div>
           )}
         </div>
+        {/* **이 사람의 기록을 지우는 자리는 여기 하나입니다** (2026-09-21 운영자 지시).
+            리드 히스토리에서 들어오는 화면이고, 지우는 대상이 화면 전체(티켓 · 메일 ·
+            기록 · 계약 카드)라 카드 안이 아니라 머리글 오른쪽입니다. 휴지통 아이콘만 두지
+            않는 이유: 이 버튼이 지우는 것은 한 줄이 아니라 이 화면 전체라, 무엇이 사라지는지
+            글자로 말해야 합니다(정책 문서·템플릿의 아이콘 하나는 그 한 행 이야기입니다). */}
+        <button type="button" className="btn btn--danger-ghost btn--sm"
+                aria-haspopup="dialog"
+                onClick={() => setDeleting({
+                  name: contact.company || contact.full_name,
+                  // 무엇이 몇 건 사라지는지. 「정말요?」만 있으면 지우고 나서야 압니다.
+                  rows: [
+                    ["이메일", contact.email || "-"],
+                    ["티켓", `${data.tickets.length}건`],
+                    ["소통 히스토리", `${data.interactions.length}건`],
+                    ["계약 카드", `${data.contracts.length}건`],
+                  ],
+                  note: (
+                    <>
+                      티켓·메일·소통 히스토리·이 화면의 계약 카드가 함께 사라지고 되돌릴 수
+                      없습니다. <strong>허브스팟 티켓이 저쪽에 남아 있으면 10분 스윕이 그
+                      티켓을 다시 주워 와 이 사람의 행이 다시 섭니다</strong> — 지우려면
+                      허브스팟에서 티켓을 먼저 지우세요. 수주 고객(Client ID)과 그 계약·결제는
+                      지워지지 않고 연결만 끊어집니다. 워크북 행도 그대로입니다 — 시트가
+                      원본이라 손으로 지웁니다.
+                    </>
+                  ),
+                  run: async () => {
+                    await postForm(`/customers/${contact.id}/delete`, {});
+                    await queryClient.invalidateQueries();
+                    navigate("/customers", { replace: true });
+                  },
+                })}>
+          <Icon name="trash" size={14} /> 이 고객 삭제
+        </button>
         {/* 「HubSpot 동기화」 버튼은 지웠습니다 (2026-08-26 운영자 지시). 2분마다 도는
             연락처 스윕이 같은 일을 합니다 — 플랜 칸, 메일·통화·미팅·노트·Deal 전부. 그
             버튼이 남아 있으면 하는 일이 「곧 일어날 일을 앞당기기」뿐인데, 그건 누르는
@@ -517,11 +551,15 @@ export function CustomerDetail() {
         </Modal>
       )}
 
-      {confirm && (
-        <ConfirmModal
-          description={confirm.description}
-          onConfirm={confirm.run}
-          onClose={() => setConfirm(null)}
+      {deleting && (
+        <DeleteDialog
+          name={deleting.name}
+          note={deleting.note}
+          rows={deleting.rows}
+          onCancel={() => setDeleting(null)}
+          // 창은 **끝난 뒤에** 닫습니다 — 먼저 닫으면 「삭제 중」을 볼 자리가 없어지고,
+          // 실패하면 아무 말 없이 목록만 그대로입니다.
+          onConfirm={async () => { await deleting.run(); setDeleting(null); }}
         />
       )}
     </>

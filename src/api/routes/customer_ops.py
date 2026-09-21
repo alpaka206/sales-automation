@@ -12,7 +12,7 @@ from urllib.parse import quote
 
 from fastapi import APIRouter, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
-from sqlalchemy import func, select, update
+from sqlalchemy import delete, func, select, update
 
 from ...agents.summaries import append_line, rebuild_summary
 # 「우리가 보낸 것인가」는 스레드 수집기와 **같은 규칙**을 씁니다 — 두 벌이면 같은 메일을
@@ -1363,6 +1363,83 @@ async def interaction_delete(
             ))
         session.commit()
     return RedirectResponse(back, status_code=303)
+
+
+@router.post("/customers/{contact_id}/delete")
+async def contact_delete(contact_id: int):
+    """이 사람의 기록을 통째로 지웁니다 (2026-09-21 운영자 지시 — 리드 히스토리에 지우는
+    길이 없었습니다).
+
+    지우는 순서는 ``hubspot_reconcile.delete_conversation`` 을 그대로 따릅니다. 자식을
+    FK 에 맡기지 않고 손으로 지우는 이유가 그 함수에 적혀 있고, 그중 하나는 실제 사고입니다:
+    **승인 기록을 먼저 지웁니다** — 모델에는 ``ondelete="CASCADE"`` 라고 적혀 있지만 운영
+    DB 의 ``approvals`` 제약에는 그것이 없어서, 승인을 한 번이라도 받은 초안이 있는 대화를
+    지우려 하면 그 자리에서 500 이었습니다(2026-09-03).
+
+    **저쪽과 다른 점 하나: 남은 것이 있어도 거부하지 않습니다.** 그 함수는 「티켓이
+    허브스팟에서 사라졌다」에 반응하는 자동 정리라 지울지 말지를 스스로 정해야 하지만,
+    여기는 운영자가 이 사람의 기록을 없애라고 누른 자리입니다.
+
+    **수주 고객은 건드리지 않습니다.** ``clients.contact_id`` 만 비웁니다 — 그 아래
+    계약·결제·크레딧 회차는 이 버튼의 것이 아니고, 번호를 문의·연락처·워크북이 들고
+    있습니다(``won_customers.delete_client`` 와 같은 이유). 반대로 이 화면의 「계약 · 결제」
+    카드(``contract_records``)는 같이 갑니다: 그 표의 ``contact_id`` 가 NOT NULL 이라
+    떼어 둘 자리가 없고, 그 카드는 지금 이 화면에서 보고 있던 것입니다.
+
+    **워크북 행은 손대지 않습니다.** 저쪽 정리는 시트 쓰기이고(``delete_inbound_row``),
+    그러면 이 라우트가 ``guard_external_write`` 를 지나야 하는 외부 쓰기가 됩니다. 시트는
+    영업팀의 것이라 콘솔에서 지우기 시작하면 운영자가 먼저 채워 둔 행이 사라집니다 —
+    ``delete_client`` 가 같은 이유로 안 지웁니다. 그 한 줄은 손으로 지웁니다.
+
+    **허브스팟 티켓이 남아 있으면 다시 들어옵니다.** 10분 스윕이 우리가 모르는 티켓을
+    주워 오므로(``hubspot_backfill.adopt_ticket``), 티켓을 저쪽에서 먼저 지우지 않으면 이
+    사람의 행이 다시 섭니다(연락처가 안 붙은 티켓이면 자리 표시 연락처로). 확인 창이 그
+    문장을 적습니다 — 조용히 되살아나는 것이 한 문장보다 나쁩니다.
+    """
+    from ...db.models import Approval, PendingWon
+
+    with SessionLocal() as session:
+        contact = session.get(Contact, contact_id)
+        if contact is None:
+            raise HTTPException(status_code=404, detail="연락처를 찾을 수 없습니다")
+        conv_ids = list(
+            session.scalars(select(Conversation.id).where(Conversation.contact_id == contact_id))
+        )
+        if conv_ids:
+            session.execute(
+                delete(Approval).where(
+                    Approval.message_id.in_(
+                        select(Message.id).where(Message.conversation_id.in_(conv_ids))
+                    )
+                )
+            )
+            session.execute(delete(Message).where(Message.conversation_id.in_(conv_ids)))
+            session.execute(
+                delete(ConversationProgress).where(
+                    ConversationProgress.conversation_id.in_(conv_ids)
+                )
+            )
+            # 수주 전환 대기는 이 사람의 것이 아니라 **티켓**의 것입니다. 대화만 떼어 둡니다 —
+            # 행까지 지우면 계약 정보를 아직 못 받은 Won 티켓이 대기 목록에서 사라집니다.
+            session.execute(
+                update(PendingWon)
+                .where(PendingWon.conversation_id.in_(conv_ids))
+                .values(conversation_id=None)
+            )
+        session.execute(
+            delete(CustomerInteraction).where(CustomerInteraction.contact_id == contact_id)
+        )
+        session.execute(delete(ContractRecord).where(ContractRecord.contact_id == contact_id))
+        session.execute(delete(CustomerProfile).where(CustomerProfile.contact_id == contact_id))
+        session.execute(
+            update(Client).where(Client.contact_id == contact_id).values(contact_id=None)
+        )
+        if conv_ids:
+            session.execute(delete(Conversation).where(Conversation.id.in_(conv_ids)))
+        session.execute(delete(Contact).where(Contact.id == contact_id))
+        session.commit()
+    logger.info("연락처 %s 와 그 문의 %d건을 지웠습니다", contact_id, len(conv_ids))
+    return {"ok": True}
 
 
 @router.post("/customers/{contact_id}/contracts")

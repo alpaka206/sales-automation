@@ -4,6 +4,7 @@ import { useState } from "react";
 import { getJSON, postForm } from "../lib/api";
 import { kst } from "../lib/format";
 import { Modal } from "../ui/Modal";
+import { DeleteDialog } from "../ui/DeleteDialog";
 import { DataTable } from "../ui/DataTable";
 import { ActionButton } from "../ui/ActionButton";
 import { Loading } from "../ui/Loading";
@@ -40,6 +41,11 @@ export function Recovery() {
   type Action = {
     label: string; path: string;
     body?: Record<string, string>; danger?: boolean; confirm?: string;
+    /** 값이 있으면 **지우는 것**이라 문장을 옮겨 적어야 합니다(`DeleteDialog`, 2026-09-21
+     *  운영자 지시로 콘솔의 모든 삭제가 한 벌입니다). 나머지는 평범한 확인 창입니다 —
+     *  발송 실패 정리는 상태를 「거절」로 바꿀 뿐 행이 남고, 「미발송 확인 후 재시도」는
+     *  지우는 것이 아니라 다시 보내는 것입니다. 확인 창이 흔해지면 아무도 안 읽습니다. */
+    typedName?: string;
   };
 
   async function act(action: Action) {
@@ -156,6 +162,11 @@ export function Recovery() {
                       path: "/operations/recovery/hubspot-sync",
                       body: { apply: "true" },
                       danger: true,
+                      // 티켓과 메일을 **영구히** 지우는 회차에만 문장을 옮겨 적게 합니다.
+                      // 초안 종료만 남은 회차는 상태 변경이라 행이 그대로 남습니다.
+                      typedName: r.deleted > 0
+                        ? `HubSpot에 없는 티켓 ${r.deleted}건`
+                        : undefined,
                       confirm: [
                         r.deleted > 0 &&
                           `HubSpot에 없는 티켓 ${r.deleted}건 — 해당 문의와 메일 기록을 완전히 삭제합니다. 되돌릴 수 없습니다.`,
@@ -172,6 +183,9 @@ export function Recovery() {
             ? <><span className="spinner" role="status" /> 확인 중</>
             : "HubSpot 최신화"}
         </button>
+        {/* **이건 삭제가 아닙니다 — 상태 변경입니다.** 각 건이 「거절」이 되어 목록에서만
+            빠지고 행과 대화 기록은 그대로라, 문장을 옮겨 적게 하는 창(`DeleteDialog`)이
+            아니라 평범한 확인 창입니다(`typedName` 없음). */}
         <button type="button" className="btn btn--subtle btn--sm" disabled={busy !== null}
                 onClick={() => setPending({
                   label: "발송 실패 내역 정리",
@@ -244,9 +258,31 @@ export function Recovery() {
         />
       </section>
 
+      {/* 지우는 회차는 **콘솔의 모든 삭제와 같은 창**입니다 — 문의와 메일 기록이 영구히
+          사라지는데(「되돌릴 수 없습니다」) 여기가 클릭 한 번이었습니다. 지우는 창에는 평범한
+          확인 창의 실패 문장 자리가 없어서, 그 문장은 `note` 에 같이 싣습니다. */}
+      {pending?.typedName && (
+        <DeleteDialog
+          name={pending.typedName}
+          confirmLabel={pending.label}
+          note={
+            <>
+              <div style={{ whiteSpace: "pre-line" }}>{pending.confirm}</div>
+              {note?.startsWith("실패") && (
+                <div className="t-xs" style={{ marginTop: 8, color: "var(--danger)" }} role="status">
+                  {note}
+                </div>
+              )}
+            </>
+          }
+          onCancel={() => setPending(null)}
+          onConfirm={() => run(pending)}
+        />
+      )}
+
       {/* Confirming "not sent" queues a real send. It gets a dialog, not a browser
           confirm() — the old page used confirm(), which blocks the whole tab. */}
-      {pending && (
+      {pending && !pending.typedName && (
         <Modal title={pending.label}
                description={
                  <>

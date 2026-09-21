@@ -7,6 +7,7 @@ import { Icon } from "../ui/Icon";
 import { directionMark, interactionMark } from "../ui/InteractionForm";
 import { Modal } from "../ui/Modal";
 import { ConfirmModal } from "../ui/ConfirmModal";
+import { DeleteDialog } from "../ui/DeleteDialog";
 import { ActionButton } from "../ui/ActionButton";
 import { InteractionForm, InteractionItem, type Interaction } from "../ui/InteractionForm";
 import { DraftEditor } from "../ui/DraftEditor";
@@ -178,6 +179,11 @@ export function MessageDetail() {
   // 끝나지 않고 허브스팟까지 갑니다.
   const [confirm, setConfirm] = useState<
     { description: React.ReactNode; run: () => Promise<void> } | null
+  >(null);
+  // 지우는 것만 여기로 옵니다 — 위 `confirm` 은 저장용이고, 하나로 합치면 플랜 칸 저장에도
+  // 「삭제하겠습니다」를 옮겨 적게 됩니다. 창은 `DeleteDialog` 한 벌입니다.
+  const [deleting, setDeleting] = useState<
+    { name: string; note: React.ReactNode; run: () => Promise<void> } | null
   >(null);
   /** **고치는 중인 초안 한 벌.** 다섯 값이 따로 있던 것을 묶었습니다 (2026-09-08).
    *
@@ -473,25 +479,25 @@ export function MessageDetail() {
 
   /** 기록 한 줄 지우기 — **확인 창을 반드시 지납니다** (2026-09-09 운영자 지시).
    *
-   *  이 화면이 이미 쓰는 `confirm` 상태를 그대로 씁니다: 창을 새로 만들면 같은 뜻의
-   *  확인이 두 모양이 되고, 하나만 고쳐지는 날이 옵니다. 문장을 옮겨 적게 하는
-   *  `DeleteDialog` 는 안 씁니다 — 그건 지우면 되돌릴 수 없는 정책 문서용이고, 여기는
-   *  기록 한 줄입니다. 다만 개인 메일함에서 온 줄은 **다시 안 들어온다**는 것을 문장에
-   *  적습니다: 지우면 수집기가 그 메일을 영영 건너뜁니다(묘비). */
+   *  **지우는 창은 `DeleteDialog` 하나입니다** (2026-09-21 운영자 지시: 「모든 삭제 확인
+   *  모달 통일해서 재사용하도록 확실하게」). 여기 「그건 정책 문서용이고 여기는 기록 한
+   *  줄이다」라고 적혀 있었는데, 그 이유는 옮겨 적는 문장이 「이 **문서**를 삭제하겠습니다」
+   *  였기 때문입니다 — 문구에서 「문서」가 빠진 지금은 남아 있지 않습니다.
+   *
+   *  **위의 `confirm` 은 그대로 둡니다.** 그 상태는 플랜 칸·Deal Detail 저장이 같이 쓰고
+   *  (`TicketInfoCard` 가 `confirm` 으로 밀어 넣습니다), 저쪽으로 합치면 칸 하나 고치는
+   *  저장마다 문장을 옮겨 적게 됩니다. 삭제만 이 상태를 씁니다.
+   *
+   *  개인 메일함에서 온 줄은 **다시 안 들어온다**는 것을 문장에 적습니다: 지우면 수집기가
+   *  그 메일을 영영 건너뜁니다(묘비). */
   function askDeleteInteraction(item: Interaction) {
     if (!item.id || !contact) return;
     const fromMailbox = (item.context || "").includes("개인 메일함");
-    setConfirm({
-      description: (
-        <>
-          이 기록을 지웁니다: <strong>{item.subject || item.summary || "(내용 없음)"}</strong>
-          <div className="t-sm t-subtle" style={{ marginTop: 6 }}>
-            {fromMailbox
-              ? "개인 메일함에서 들어온 줄입니다 — 지우면 다시 가져오지 않습니다."
-              : "이 티켓의 기록에서 사라집니다. 허브스팟 원본은 그대로입니다."}
-          </div>
-        </>
-      ),
+    setDeleting({
+      name: item.subject || item.summary || "(내용 없음)",
+      note: fromMailbox
+        ? "개인 메일함에서 들어온 줄입니다 — 지우면 다시 가져오지 않습니다."
+        : "이 티켓의 기록에서 사라집니다. 허브스팟 원본은 그대로입니다.",
       run: async () => {
         await postForm(
           `/customers/${contact.id}/interactions/${item.id}/delete`,
@@ -1024,6 +1030,16 @@ export function MessageDetail() {
         />
       )}
 
+      {deleting && (
+        <DeleteDialog
+          name={deleting.name}
+          note={deleting.note}
+          onCancel={() => setDeleting(null)}
+          // 창은 끝난 뒤에 닫습니다 — 먼저 닫으면 「삭제 중」을 볼 자리가 없어집니다.
+          onConfirm={async () => { await deleting.run(); setDeleting(null); }}
+        />
+      )}
+
       {confirmSend && msg && (
         <Modal
           title="발송하시겠습니까?"
@@ -1235,6 +1251,13 @@ type Followup = {
   /** 보내야 할 리마인더의 템플릿 키가 콘솔에 없다 — 스윕은 안 보내고 기다린다. */
   template_missing?: string | null;
   reminder_1_at?: string | null; reminder_2_at?: string | null;
+  /** 이미 끝난 단계의 **완성된 한국어 라벨**(`["1차 리마인더 완료", …]`).
+   *
+   *  **화면이 이 글자를 짓지 않습니다** (2026-09-21 운영자 지시: 「리마인더 메일 발송 후
+   *  소통 히스토리에도 기록 / 1차 리마인더 완료 이런식으로」). 같은 사실을 티켓 배너 ·
+   *  소통 히스토리 줄 · 진행 기록 세 곳이 적는데, 말을 각자 지으면 세 화면이 같은 일을
+   *  다르게 부릅니다 — 말의 출처는 서버 한 곳입니다. */
+  done?: string[];
 };
 
 /** 후속 리마인더 한 줄 (2026-09-17). 무엇을 언제 할지는 서버가 정하고(`followup_sequence.view`),
@@ -1246,7 +1269,8 @@ function FollowupBanner({ followup: f }: { followup: Followup }) {
     : f.state === "closed" ? `답이 없어 ${at(f.at)} 에 자동으로 Closed Lost 로 닫았습니다. 고객이 연락하면 협의 중으로 되살립니다.`
     : f.template_missing ? `이메일 템플릿에 키 「${f.template_missing}」 가 없어 리마인더를 보내지 못합니다 — 이메일 템플릿 → 새로 만들기에서 그 키로 만드세요.`
     : f.state === "send_1" ? `답이 없으면 ${at(f.due)} 이후 리마인더를 보냅니다.`
-    : f.state === "send_2" ? `리마인더 발송 ${at(f.reminder_1_at)} · 답이 없으면 ${at(f.due)} 이후 마감 메일을 보냅니다.`
+    // 「완료」는 아래 칩이 말합니다 — 시각만 남깁니다(같은 사실을 한 줄에 두 번 적지 않습니다).
+    : f.state === "send_2" ? `${at(f.reminder_1_at)} 발송 · 답이 없으면 ${at(f.due)} 이후 마감 메일을 보냅니다.`
     : f.state === "close" ? `마감 메일 발송 ${at(f.reminder_2_at)} · 답이 없으면 ${at(f.due)} 이후 Closed Lost 로 닫습니다.`
     : f.state === "sending" ? "후속 리마인더를 보내는 중입니다."
     : "후속 리마인더 발송이 멈췄습니다 — 아래 기록에서 다시 보내거나 단계를 옮기세요.";
@@ -1257,6 +1281,14 @@ function FollowupBanner({ followup: f }: { followup: Followup }) {
       <span className="banner__icon"><Icon name={f.state === "revived" ? "warn" : "send"} size={18} /></span>
       <div>
         <div className="banner__title">{f.state === "revived" ? "자동 종료 뒤 고객이 돌아왔습니다" : "후속 리마인더"}</div>
+        {/* **몇 차까지 나갔는지는 칩이 말합니다** (2026-09-21 운영자 지시: 「리마인더 1차
+            완료, 2차 완료 후 티켓에 표기」). 글자는 서버가 정한 그대로 찍습니다 — 그래야
+            소통 히스토리 줄과 진행 기록이 같은 말을 합니다. */}
+        {f.done?.length ? (
+          <div className="row wrap" style={{ gap: 6, margin: "2px 0 6px" }}>
+            {f.done.map((label) => <span key={label} className="tag">{label}</span>)}
+          </div>
+        ) : null}
         <div className="t-sm">{text}</div>
       </div>
     </div>

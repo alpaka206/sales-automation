@@ -1053,3 +1053,60 @@ def test_deleting_a_hand_written_record_leaves_no_tombstone(customer_db, custome
     with customer_db() as session:
         assert session.get(CustomerInteraction, row_id) is None
         assert session.scalar(select(func.count()).select_from(MailboxLinkDecision)) == 0
+
+
+def test_deleting_a_contact_takes_its_records_and_spares_the_won_ledger(
+    customer_db, customer_id
+) -> None:
+    """「이 고객 삭제」 — 이 사람의 기록만 가고, 수주 장부는 남습니다 (2026-09-21 운영자 지시).
+
+    한 번에 셋을 고정합니다.
+
+    ① **승인 기록이 먼저 갑니다.** 모델에는 ``ondelete="CASCADE"`` 라고 적혀 있지만 운영
+       DB 의 ``approvals`` 제약에는 그것이 없어서, 승인을 받은 초안이 있는 대화를 지우면
+       그 자리에서 500 이었습니다(2026-09-03, 「허브스팟 최신화」). 제약의 상태에 기대지
+       않고 손으로 지웁니다.
+    ② **수주 고객은 연결만 끊깁니다.** 그 아래 계약·결제·크레딧 회차는 이 버튼의 것이
+       아니고, 번호를 워크북과 Inbound DB 가 조회합니다.
+    ③ **수주 전환 대기 행은 남습니다.** 그 행은 사람이 아니라 **티켓**의 것이라, 지우면
+       계약 정보를 아직 못 받은 Won 티켓이 대기 목록에서 조용히 사라집니다.
+    """
+    from src.db.models import Approval, Client, PendingWon
+
+    with customer_db() as session:
+        conversation_id = session.scalar(
+            select(Conversation.id).where(Conversation.contact_id == customer_id)
+        )
+        message = Message(conversation_id=conversation_id, direction="outgoing",
+                          status="sent", body="나간 답변")
+        session.add(message)
+        session.flush()
+        session.add_all([
+            Approval(message_id=message.id, approver="ops@example.com", action="approve"),
+            CustomerInteraction(contact_id=customer_id, channel="manual", direction="note",
+                                summary="미팅", happened_at=datetime(2026, 9, 1)),
+            ContractRecord(contact_id=customer_id, status="draft", plan="Starter"),
+            CustomerProfile(contact_id=customer_id, pipeline_stage="negotiation"),
+            Client(client_id=1234, company="Example Co", contact_id=customer_id),
+            PendingWon(ticket_id="9001", conversation_id=conversation_id, status="pending"),
+        ])
+        session.commit()
+
+    with TestClient(app) as client:
+        assert client.post(f"/customers/{customer_id}/delete").status_code == 200
+        assert client.post("/customers/999999/delete").status_code == 404
+
+    with customer_db() as session:
+        assert session.get(Contact, customer_id) is None
+        assert session.get(Conversation, conversation_id) is None
+        assert session.scalar(select(func.count()).select_from(Message)) == 0
+        assert session.scalar(select(func.count()).select_from(Approval)) == 0
+        assert session.scalar(select(func.count()).select_from(CustomerInteraction)) == 0
+        assert session.scalar(select(func.count()).select_from(ContractRecord)) == 0
+        assert session.get(CustomerProfile, customer_id) is None
+        # 수주 고객 행은 살아남고 연결만 끊깁니다.
+        won = session.get(Client, 1234)
+        assert won is not None and won.contact_id is None
+        # 대기 행도 살아남고 대화만 떨어집니다.
+        pending = session.scalar(select(PendingWon).where(PendingWon.ticket_id == "9001"))
+        assert pending is not None and pending.conversation_id is None
