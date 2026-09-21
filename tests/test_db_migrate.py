@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib
+import pathlib
 import pkgutil
 import types
 from datetime import datetime, timezone
@@ -757,3 +758,40 @@ class TestVatInclusiveAmount:
         self._run(mem_engine)   # 두 번째 — 조용히 넘어갑니다
         note = self._rows(mem_engine)[2102]["note"]
         assert note.count("실제 분당단가") == 1, "재실행이 같은 줄을 또 붙이면 안 됩니다"
+
+
+def test_no_migration_compares_a_boolean_to_an_integer():
+    """`boolean = 1` 은 **Postgres 에서만** 터집니다 — 그래서 테스트가 있습니다.
+
+    2026-09-21, 이관 0123 이 `WHERE vat_included = 0 AND (vat_applicable = 1 OR ...)` 으로
+    배포에서 죽었습니다: `operator does not exist: boolean = integer`. SQLite 는 boolean 을
+    정수로 들고 있어 **로컬 테스트 전부가 초록이었습니다.** 빌드가 실패하면서 앞선 0122 만
+    적용된 채로 남았고, 그 11행이 옛 릴리스의 드롭다운에 없는 값을 든 상태가 됐습니다 —
+    반쯤 적용된 이관이 이 종류 버그의 실제 대가입니다.
+
+    쓰는 법은 `IS TRUE` · `IS FALSE` 입니다. 양쪽 다 되고 NULL 도 뜻대로 갈립니다
+    (`x IS TRUE` 는 NULL 을 안 잡고, `x IS NULL` 을 따로 씁니다).
+
+    DDL 의 기본값은 다른 이야기입니다 — `DEFAULT 0` / `DEFAULT false` 는 방언마다 철자가
+    달라서 이 저장소는 `false_literal` 로 갈라 씁니다(0003 · 0071). 그건 값 비교가 아니라
+    선언이라 여기서 안 봅니다.
+    """
+    import re
+
+    # `is_default = 1` 하나만 예외입니다 — SQLite 부분 인덱스 가지 안이고(`else:` 쪽),
+    # Postgres 가지는 같은 파일에서 따로 씁니다.
+    allowed = {("0046_default_signature.py", "is_default = 1")}
+    # boolean 으로 쓰이는 칸 이름 + `= 0/1`. 칸 이름을 열거하지 않고 모양으로 찾습니다.
+    pattern = re.compile(
+        r"\b(vat_included|vat_applicable|done|is_\w+|\w+_enabled|\w+_applicable)\s*=\s*[01]\b"
+    )
+    offenders = []
+    for path in sorted(pathlib.Path("src/db/migrations").glob("[0-9]*.py")):
+        for hit in pattern.finditer(path.read_text(encoding="utf-8")):
+            if (path.name, hit.group(0)) in allowed:
+                continue
+            offenders.append(f"{path.name}: {hit.group(0)}")
+    assert not offenders, (
+        "boolean 을 정수와 비교합니다 — Postgres 가 거절합니다. `IS TRUE` / `IS FALSE` 로: "
+        + ", ".join(offenders)
+    )

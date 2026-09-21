@@ -64,9 +64,15 @@ CREDITS_PER_MINUTE = 60
 _MARK = "실제 분당단가"
 
 # 「부가세가 붙는 계약인가」 — `won.vat_applicable` 과 **같은 규칙**입니다. NULL 은 「아직 안
-# 고름」이라 통화로 추정합니다(그 칸이 생기기 전의 행 수백 개가 그렇습니다). 이 조건을
-# `vat_applicable = 1` 로만 쓰면 옛 원화 계약이 전부 빠져나가 금액이 안 옮겨집니다.
-_APPLICABLE = "(vat_applicable = 1 OR (vat_applicable IS NULL AND currency = 'KRW'))"
+# 고름」이라 통화로 추정합니다(그 칸이 생기기 전의 행 수백 개가 그렇습니다). NULL 가지를
+# 빼면 옛 원화 계약이 전부 빠져나가 계약비고를 못 받습니다.
+#
+# **`= 1` / `= 0` 으로 쓰면 Postgres 가 거절합니다** — `operator does not exist: boolean =
+# integer`. SQLite 는 boolean 을 정수로 들고 있어 통과하므로 **로컬 테스트로는 절대 안
+# 잡힙니다**: 2026-09-21 에 이 이관이 그렇게 배포에서 죽었습니다(빌드 실패, 앞선 0122 만
+# 적용된 채로 남아 그 11행이 옛 드롭다운에 없는 값을 든 상태가 됐습니다). `IS TRUE` ·
+# `IS FALSE` 는 양쪽 다 되고 뜻이 하나입니다.
+_APPLICABLE = "(vat_applicable IS TRUE OR (vat_applicable IS NULL AND currency = 'KRW'))"
 
 
 def _num(value) -> Decimal | None:
@@ -102,7 +108,7 @@ def up(engine: Engine) -> None:
         rows = conn.execute(text(
             "SELECT client_id, seq, currency, credits, amount_incl_vat, amount_excl_vat, note "
             "FROM client_contracts "
-            f"WHERE vat_included = 0 AND {_APPLICABLE}"
+            f"WHERE vat_included IS FALSE AND {_APPLICABLE}"
         )).mappings().all()
 
         moved = noted = 0
@@ -132,11 +138,11 @@ def up(engine: Engine) -> None:
             if incl is not None or excl is None:
                 continue
             conn.execute(
-                # **글자로 묶습니다.** sqlite3 는 `Decimal` 을 바인딩하지 못합니다
-                # (「type 'decimal.Decimal' is not supported」) — 운영은 Postgres 라 안
-                # 걸리지만 개발자 DB 와 테스트가 그 자리에서 터집니다. 두 DB 모두 NUMERIC
-                # 칸에 들어오는 숫자 글자를 그대로 받습니다.
-                text("UPDATE client_contracts SET amount_incl_vat = :amount "
+                # **글자로 묶고 CAST 로 못박습니다.** sqlite3 는 `Decimal` 을 바인딩하지
+                # 못하고(「type 'decimal.Decimal' is not supported」) 운영은 Postgres 라
+                # 안 걸립니다 — 즉 어느 한쪽에서만 터지는 종류입니다. 글자를 NUMERIC 칸에
+                # 넣는 암묵적 캐스트도 두 DB 가 같다고 믿을 자리가 아니라 직접 적습니다.
+                text("UPDATE client_contracts SET amount_incl_vat = CAST(:amount AS NUMERIC) "
                      "WHERE client_id = :cid AND seq = :seq"),
                 {"amount": str(excl), "cid": row["client_id"], "seq": row["seq"]},
             )
