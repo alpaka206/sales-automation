@@ -639,3 +639,121 @@ def test_it_refuses_to_lock_us_out_of_our_own_database():
         'ALTER TABLE public."_migrations" DISABLE ROW LEVEL SECURITY',
     ]
     assert not any("messages" in sql for sql in alters)
+
+
+class TestVatInclusiveAmount:
+    """이관 0123 — 계약 금액을 VAT 포함 한 칸으로.
+
+    **한 번 반대로 읽었던 자리라 테스트가 있습니다.** 운영자 문장 셋 중 둘은 값 규칙이고
+    하나는 칸 규칙인데, 「포함·미포함 둘 다 써있던건 미포함만 남겨두면 되고」를 값 규칙으로
+    읽어 미포함 숫자를 계약금액으로 옮겼습니다. 옛 저장 경로가 국내 계약이면 **언제나 두 칸을
+    다 채웠으므로** 그 규칙은 사실상 모든 계약에 걸리고, 총액이 한꺼번에 10% 내려앉으면서
+    분납 회차만 옛 총액으로 남아 수금율이 100% 를 넘습니다. 운영자가 「그러면 vat 포함으로
+    하지않았어 우리?」로 잡아 줬습니다.
+    """
+
+    def _legacy(self, engine, rows):
+        with engine.begin() as conn:
+            conn.execute(text("""
+                CREATE TABLE client_contracts (
+                    client_id INTEGER, seq INTEGER, currency TEXT, credits INTEGER,
+                    amount_incl_vat NUMERIC, amount_excl_vat NUMERIC,
+                    vat_included BOOLEAN NOT NULL DEFAULT 0, vat_applicable BOOLEAN,
+                    note TEXT)
+            """))
+            for row in rows:
+                conn.execute(
+                    text("INSERT INTO client_contracts VALUES "
+                         "(:client_id,:seq,:currency,:credits,:incl,:excl,:included,:applicable,:note)"),
+                    row,
+                )
+
+    def _run(self, engine):
+        importlib.import_module(
+            "src.db.migrations.0123_the_contract_amount_is_vat_inclusive_and_alone"
+        ).up(engine)
+
+    def _rows(self, engine):
+        with engine.begin() as conn:
+            return {
+                r["client_id"]: dict(r)
+                for r in conn.execute(text(
+                    "SELECT client_id, amount_incl_vat, note FROM client_contracts"
+                )).mappings()
+            }
+
+    def test_the_total_survives_and_the_supply_number_is_not_promoted(self, mem_engine):
+        """콘솔로 저장한 국내 계약은 **두 칸이 다 채워져 있고**, 남는 것은 포함 쪽입니다.
+
+        이 한 줄이 「계약금액은 모두 VAT 포함만으로」의 뜻입니다 — 미포함을 올려 쓰면 그
+        계약의 총액·월 MRR·예상 MRR 이 10% 내려앉고, 이미 마감한 달의 숫자까지 움직입니다.
+        """
+        self._legacy(mem_engine, [dict(
+            client_id=2102, seq=1, currency="KRW", credits=64_800,
+            incl=1_722_600, excl=1_566_000, included=0, applicable=1, note="갱신 협의 중",
+        )])
+        self._run(mem_engine)
+        row = self._rows(mem_engine)[2102]
+        assert float(row["amount_incl_vat"]) == 1_722_600
+
+    def test_the_contract_note_keeps_the_vat_excluded_rate(self, mem_engine):
+        """분당 단가의 기준이 총액으로 바뀌므로 화면 단가가 10% 올라갑니다.
+
+        계약서에 적힌 그 단가를 아는 칸은 `vat_included` 뿐이었고 그것이 사라집니다 —
+        **열을 지우기 전에** 계약비고에 남기는 것이 운영자의 마지막 줄입니다. 덧붙이기만
+        하므로 운영자가 쓴 글이 살아 있어야 합니다.
+        """
+        self._legacy(mem_engine, [dict(
+            client_id=2102, seq=1, currency="KRW", credits=64_800,
+            incl=1_722_600, excl=1_566_000, included=0, applicable=1, note="갱신 협의 중",
+        )])
+        self._run(mem_engine)
+        note = self._rows(mem_engine)[2102]["note"]
+        # 1,566,000 ÷ (64,800 ÷ 60) = 1,450 — 운영자 시트의 그 숫자입니다.
+        assert "실제 분당단가 1,450 KRW/분 (VAT 미포함 기준)" in note
+        assert note.startswith("갱신 협의 중"), "운영자가 쓴 글을 덮으면 안 됩니다"
+
+    def test_a_contract_already_priced_on_the_total_gets_no_note(self, mem_engine):
+        """`vat_included` 가 켜져 있던 계약은 단가가 안 움직이므로 적을 것이 없습니다.
+
+        부가세 미해당(해외) 계약도 같습니다 — 공급가라는 것이 없습니다. 조건 없이 적으면
+        계약비고에 아무 의미 없는 줄이 전 계약에 붙습니다.
+        """
+        self._legacy(mem_engine, [
+            dict(client_id=3001, seq=1, currency="KRW", credits=60_000,
+                 incl=11_000_000, excl=10_000_000, included=1, applicable=1, note="그대로"),
+            dict(client_id=4001, seq=1, currency="USD", credits=60_000,
+                 incl=20_000, excl=None, included=0, applicable=0, note=None),
+        ])
+        self._run(mem_engine)
+        rows = self._rows(mem_engine)
+        assert rows[3001]["note"] == "그대로"
+        assert rows[4001]["note"] is None
+
+    def test_an_empty_total_is_filled_from_the_supply_number(self, mem_engine):
+        """운영자 문장 ③ 의 안전망 — 「미포함만 써있던건 그걸 vat 포함에 작성해두면 돼」.
+
+        그렇게 쓰는 경로가 없어 운영에는 없을 것이지만, 있으면 금액이 없는 계약이 됩니다.
+        """
+        self._legacy(mem_engine, [dict(
+            client_id=5001, seq=1, currency="KRW", credits=60_000,
+            incl=None, excl=9_000_000, included=0, applicable=1, note=None,
+        )])
+        self._run(mem_engine)
+        assert float(self._rows(mem_engine)[5001]["amount_incl_vat"]) == 9_000_000
+
+    def test_the_two_columns_are_gone_and_a_second_run_is_quiet(self, mem_engine):
+        """열을 지우고 나면 두 번째 실행은 아무것도 안 합니다 — 반쯤 돌던 DB 에서도 다시
+        돌릴 수 있어야 합니다."""
+        self._legacy(mem_engine, [dict(
+            client_id=2102, seq=1, currency="KRW", credits=64_800,
+            incl=1_722_600, excl=1_566_000, included=0, applicable=1, note=None,
+        )])
+        self._run(mem_engine)
+        columns = {c["name"] for c in inspect(mem_engine).get_columns("client_contracts")}
+        assert "amount_excl_vat" not in columns and "vat_included" not in columns
+        assert "vat_applicable" in columns, "공급가가 있는 계약인지를 아는 곳이 이 칸뿐입니다"
+
+        self._run(mem_engine)   # 두 번째 — 조용히 넘어갑니다
+        note = self._rows(mem_engine)[2102]["note"]
+        assert note.count("실제 분당단가") == 1, "재실행이 같은 줄을 또 붙이면 안 됩니다"
