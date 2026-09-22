@@ -1,0 +1,20 @@
+{
+    "recorded_date":  "2026-09-21",
+    "ruff":  {
+                 "output":  "All checks passed!",
+                 "command":  ".\\.venv\\Scripts\\ruff.exe check --no-cache src tests scripts/check_policy_response.py scripts/evaluate_policy_response.py scripts/summarize_policy_evaluation.py",
+                 "evidence_type":  "Recorded from tool console output, latest invocation after final script changes",
+                 "exit_code":  0
+             },
+    "diff_check":  {
+                       "output":  "",
+                       "command":  "git -c core.safecrlf=false diff --check",
+                       "evidence_type":  "Recorded from tool console output",
+                       "exit_code":  0
+                   },
+    "staged_files":  [
+
+                     ],
+    "commit":  "95ec3d5c36d5eab58d7e03cfc469ea72f9332036",
+    "initial_assessment_sha256":  "a86cc3302429b74d809729fce9155c3ac6df96d3017428d9c68e17223c72fe64"
+}

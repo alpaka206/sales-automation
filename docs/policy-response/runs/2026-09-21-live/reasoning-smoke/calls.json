@@ -1,0 +1,189 @@
+[
+  {
+    "run": "S02-router-1",
+    "model": "gemini-2.5-flash",
+    "max_tokens": 2000,
+    "thinking_budget": 0,
+    "grounded": false,
+    "status": "PASS",
+    "input_tokens": 559,
+    "candidate_output_tokens": 26,
+    "seconds": 3.172
+  },
+  {
+    "run": "S02-router-1",
+    "model": "gemini-2.5-flash",
+    "max_tokens": 2000,
+    "thinking_budget": 0,
+    "grounded": false,
+    "status": "PASS",
+    "input_tokens": 674,
+    "candidate_output_tokens": 62,
+    "seconds": 0.938
+  },
+  {
+    "run": "S02-router-1",
+    "model": "gemini-2.5-pro",
+    "max_tokens": 4000,
+    "thinking_budget": 1024,
+    "grounded": false,
+    "status": "PASS",
+    "input_tokens": 1519,
+    "candidate_output_tokens": 199,
+    "seconds": 12.125
+  },
+  {
+    "run": "S02-all-1",
+    "model": "gemini-2.5-flash",
+    "max_tokens": 2000,
+    "thinking_budget": 0,
+    "grounded": false,
+    "status": "PASS",
+    "input_tokens": 559,
+    "candidate_output_tokens": 43,
+    "seconds": 1.062
+  },
+  {
+    "run": "S02-all-1",
+    "model": "gemini-2.5-pro",
+    "max_tokens": 4000,
+    "thinking_budget": 1024,
+    "grounded": false,
+    "status": "PASS",
+    "input_tokens": 1843,
+    "candidate_output_tokens": 239,
+    "seconds": 10.203
+  },
+  {
+    "run": "S06-router-1",
+    "model": "gemini-2.5-flash",
+    "max_tokens": 2000,
+    "thinking_budget": 0,
+    "grounded": false,
+    "status": "PASS",
+    "input_tokens": 582,
+    "candidate_output_tokens": 46,
+    "seconds": 0.812
+  },
+  {
+    "run": "S06-router-1",
+    "model": "gemini-2.5-flash",
+    "max_tokens": 2000,
+    "thinking_budget": 0,
+    "grounded": false,
+    "status": "PASS",
+    "input_tokens": 613,
+    "candidate_output_tokens": 49,
+    "seconds": 1.063
+  },
+  {
+    "run": "S06-router-1",
+    "model": "gemini-2.5-pro",
+    "max_tokens": 4000,
+    "thinking_budget": 1024,
+    "grounded": false,
+    "status": "PASS",
+    "input_tokens": 1549,
+    "candidate_output_tokens": 250,
+    "seconds": 10.844
+  },
+  {
+    "run": "S06-all-1",
+    "model": "gemini-2.5-flash",
+    "max_tokens": 2000,
+    "thinking_budget": 0,
+    "grounded": false,
+    "status": "PASS",
+    "input_tokens": 582,
+    "candidate_output_tokens": 52,
+    "seconds": 0.828
+  },
+  {
+    "run": "S06-all-1",
+    "model": "gemini-2.5-pro",
+    "max_tokens": 4000,
+    "thinking_budget": 1024,
+    "grounded": false,
+    "status": "PASS",
+    "input_tokens": 1711,
+    "candidate_output_tokens": 214,
+    "seconds": 8.297
+  },
+  {
+    "run": "S06-all-1",
+    "model": "gemini-2.5-pro",
+    "max_tokens": 4000,
+    "thinking_budget": 1024,
+    "grounded": false,
+    "status": "PASS",
+    "input_tokens": 1836,
+    "candidate_output_tokens": 324,
+    "seconds": 7.765
+  },
+  {
+    "run": "S14-router-1",
+    "model": "gemini-2.5-flash",
+    "max_tokens": 2000,
+    "thinking_budget": 0,
+    "grounded": false,
+    "status": "PASS",
+    "input_tokens": 572,
+    "candidate_output_tokens": 33,
+    "seconds": 0.812
+  },
+  {
+    "run": "S14-router-1",
+    "model": "gemini-2.5-flash",
+    "max_tokens": 2000,
+    "thinking_budget": 0,
+    "grounded": false,
+    "status": "PASS",
+    "input_tokens": 603,
+    "candidate_output_tokens": 48,
+    "seconds": 0.781
+  },
+  {
+    "run": "S14-router-1",
+    "model": "gemini-2.5-pro",
+    "max_tokens": 4000,
+    "thinking_budget": 1024,
+    "grounded": false,
+    "status": "PASS",
+    "input_tokens": 1377,
+    "candidate_output_tokens": 284,
+    "seconds": 12.891
+  },
+  {
+    "run": "S14-router-1",
+    "model": "gemini-2.5-pro",
+    "max_tokens": 4000,
+    "thinking_budget": 1024,
+    "grounded": false,
+    "status": "PASS",
+    "input_tokens": 1502,
+    "candidate_output_tokens": 311,
+    "seconds": 8.719
+  },
+  {
+    "run": "S14-all-1",
+    "model": "gemini-2.5-flash",
+    "max_tokens": 2000,
+    "thinking_budget": 0,
+    "grounded": false,
+    "status": "PASS",
+    "input_tokens": 572,
+    "candidate_output_tokens": 33,
+    "seconds": 0.953
+  },
+  {
+    "run": "S14-all-1",
+    "model": "gemini-2.5-pro",
+    "max_tokens": 4000,
+    "thinking_budget": 1024,
+    "grounded": false,
+    "status": "PASS",
+    "input_tokens": 1701,
+    "candidate_output_tokens": 331,
+    "seconds": 8.5
+  }
+]

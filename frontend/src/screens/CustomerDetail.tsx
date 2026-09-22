@@ -1,3 +1,4 @@
+import { TicketHistoryBox, type HistoryRecord } from "../ui/TicketHistoryBox";
 import { useState, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "react-router-dom";
@@ -47,10 +48,7 @@ type Ticket = {
   conversation_id: number; ticket_id: string | null; client_id: number | null;
   subject: string | null; category: string | null; language: string | null;
   stage: string; created_at: string;
-  last_incoming_at: string | null; last_outgoing_at: string | null; summary: string | null;
-  messages: { id: number; direction: string; status: string; subject: string | null;
-              body: string | null; happened_at: string | null }[];
-  progress: { kind: string; detail: string; created_at: string }[];
+  last_incoming_at: string | null; last_outgoing_at: string | null; records: HistoryRecord[];
 };
 type Won = {
   client_id: number; company: string; department: string | null; customer_type: string | null;
@@ -278,10 +276,7 @@ export function CustomerDetail() {
 
       <div className="customer-layout">
         <div className="stack">
-          {/* **티켓 하나가 카드 하나.** 그 안에 그 티켓의 메일과 진행 기록이 들어갑니다.
-              예전에는 모든 티켓의 메일이 한 줄로 섞여 있어서, 문의가 둘 이상인 고객에서는
-              어느 메일이 어느 건인지 알 수 없었습니다. 최신 티켓만 펼쳐 둡니다 — 대개
-              그것이 지금 보는 건이고, 다 펼치면 스크롤이 화면 몇 개가 됩니다. */}
+          {/* 티켓별 실제 기록을 같은 테두리 상자로 구분합니다. */}
           <section className="card" id="tickets">
             <div className="section-header">
               <div className="section-header__title">티켓 {data.tickets.length}건</div>
@@ -290,9 +285,12 @@ export function CustomerDetail() {
               <p className="t-sm t-subtle">이 고객으로 접수된 티켓이 없습니다.</p>
             ) : (
               <div className="stack" style={{ gap: 10 }}>
-                {data.tickets.map((ticket, index) => (
-                  <TicketBlock key={ticket.conversation_id} ticket={ticket}
-                               open={index === 0} stages={data.stage_options} />
+                {data.tickets.map((ticket) => (
+                  <TicketHistoryBox key={ticket.conversation_id} subject={ticket.subject}
+                    at={ticket.created_at} ticketId={ticket.ticket_id}
+                    stage={labelFor(data.stage_options, ticket.stage)}
+                    href={`/tickets/${ticket.conversation_id}`} records={ticket.records}
+                    onEdit={setEditing} onDelete={askDeleteInteraction} />
                 ))}
               </div>
             )}
@@ -360,7 +358,7 @@ export function CustomerDetail() {
               {data.interactions.length === 0 ? (
                 <div className="empty"><div className="empty__text">아직 기록이 없습니다.</div></div>
               ) : (
-                groupByTicket(data.interactions, data.tickets).map((group) => (
+                groupByTicket(data.interactions.filter((item) => !item.conversation_id), []).map((group) => (
                   <div key={group.key}>
                     <div className="t-xs t-subtle" style={{ marginBottom: 6 }}>
                       {group.label}
@@ -595,76 +593,3 @@ function KV({ k, v }: { k: string; v: React.ReactNode }) {
 
 const labelFor = (options: { key: string; label: string }[], value: string | null | undefined) =>
   options.find((option) => option.key === value)?.label ?? value ?? "-";
-
-/** 티켓 한 건 — 머리글은 늘 보이고, 안의 메일과 진행 기록은 접힙니다.
- *
- *  `details/summary` 를 쓰는 이유: 접힘 상태를 브라우저가 들고 있어서 상태 하나를 더
- *  만들지 않아도 되고, 키보드와 스크린리더가 원래부터 압니다.
- */
-function TicketBlock({ ticket, open, stages }: {
-  ticket: Ticket;
-  open: boolean;
-  stages: { key: string; label: string }[];
-}) {
-  return (
-    <details className="card" open={open} style={{ padding: "12px 14px" }}>
-      <summary style={{ cursor: "pointer", listStyle: "none" }}>
-        <div className="row-between wrap" style={{ gap: 8 }}>
-          <strong className="t-sm">{ticket.subject || "제목 없는 문의"}</strong>
-          <span className="row wrap" style={{ gap: 6 }}>
-            <span className="tag">{labelFor(stages, ticket.stage)}</span>
-            {ticket.ticket_id && <span className="tag mono">#{ticket.ticket_id}</span>}
-            {ticket.client_id != null && (
-              <span className="tag tnum">Client ID {ticket.client_id}</span>
-            )}
-          </span>
-        </div>
-        <div className="t-xs t-subtle" style={{ marginTop: 4 }}>
-          접수 {kst(ticket.created_at)}
-          {ticket.last_outgoing_at && ` · 마지막 발송 ${kst(ticket.last_outgoing_at)}`}
-          {` · 메일 ${ticket.messages.length}통`}
-        </div>
-      </summary>
-
-      {ticket.summary && (
-        <p className="t-sm" style={{ margin: "10px 0 0", color: "var(--text-muted)" }}>
-          {ticket.summary}
-        </p>
-      )}
-
-      <div className="history-list" style={{ marginTop: 12 }}>
-        {ticket.messages.length === 0 ? (
-          <p className="t-sm t-subtle">이 티켓에는 남아 있는 메일이 없습니다.</p>
-        ) : (
-          ticket.messages.map((message) => (
-            <InteractionItem
-              key={message.id}
-              item={{
-                channel: "email",
-                direction: message.direction,
-                // 상태를 작성자 자리에 적습니다 — 나간 메일과 아직 안 나간 초안은
-                // 히스토리에서 반드시 구별돼야 합니다.
-                handler: message.status,
-                subject: message.subject,
-                summary: message.body,
-                context: null,
-                happened_at: message.happened_at,
-                source: "message",
-              } as Interaction}
-            />
-          ))
-        )}
-      </div>
-
-      {ticket.progress.length > 0 && (
-        <div style={{ marginTop: 10, borderTop: "1px solid var(--border)", paddingTop: 8 }}>
-          {ticket.progress.map((row, index) => (
-            <div key={index} className="t-xs t-subtle">
-              {kst(row.created_at)} · {row.kind} · {row.detail}
-            </div>
-          ))}
-        </div>
-      )}
-    </details>
-  );
-}

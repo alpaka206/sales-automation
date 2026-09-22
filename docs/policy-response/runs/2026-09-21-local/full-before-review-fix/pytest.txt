@@ -1,0 +1,63 @@
+........................................................................ [  4%]
+........................................................................ [  8%]
+........................................................................ [ 12%]
+........................................................................ [ 17%]
+........................................................................ [ 21%]
+........................................................................ [ 25%]
+........................................................................ [ 29%]
+....................................................................sss. [ 34%]
+...............................s........................................ [ 38%]
+...............s..........ss......................s.s................... [ 42%]
+...s................ss.................................................. [ 46%]
+.......................ss......s.....................................s.. [ 51%]
+..ss........sss....s..........s..sss.s..........sss...s...........ss.... [ 55%]
+.sss......ss............s......s...............sss...................... [ 59%]
+........................................................................ [ 63%]
+........................................................................ [ 68%]
+........................................................................ [ 72%]
+........................................................................ [ 76%]
+........................................................................ [ 80%]
+........................................................................ [ 85%]
+...............................F........................................ [ 89%]
+........................................................................ [ 93%]
+........................................................................ [ 98%]
+.................................                                        [100%]
+================================== FAILURES ===================================
+__________ test_the_ticket_screen_does_not_say_the_same_thing_twice ___________
+
+    def test_the_ticket_screen_does_not_say_the_same_thing_twice():
+        """티켓 화면에서 **요약 카드와 제목 줄을 뺐습니다** (2026-08-25 운영자 지시).
+    
+        요약의 불릿과 「이 티켓의 기록」 각 줄의 둘째 줄은 **같은 문자열**입니다 — 한 줄을
+        만들어 `messages.summary_line` 과 `conversations.summary` 에 같이 쓰기 때문입니다
+        (`append_summary_line`). 그래서 한 화면이 같은 말을 두 번 했고, 카드 쪽에는 시각도
+        방향도 없었습니다. 제목 줄도 같은 이유입니다: 그 목록은 스레드 하나라 줄마다 같은
+        제목이 반복되고, 우리 메일 줄은 그것을 번역해서 쓰기 때문에 원문·국문이 나란히 놓여
+        다른 두 건처럼 보였습니다.
+    
+        **값은 그대로 쌓입니다.** 초안 프롬프트가 「기존 대화 요약」으로 읽으므로, 지운 것은
+        화면과 그 화면에 보내던 값뿐입니다.
+        """
+        screen = pathlib.Path("frontend/src/screens/MessageDetail.tsx").read_text(
+            encoding="utf-8"
+        )
+        assert "data.summary" not in screen
+        assert "history-item__title" not in screen  # 티켓 기록의 메일 줄
+        assert "hideSubject" in screen  # 소통 기록 줄
+        route = pathlib.Path("src/api/routes/messages.py").read_text(encoding="utf-8")
+        assert '"summary": conv.summary' not in route
+        inbound = pathlib.Path("src/agents/inbound.py").read_text(encoding="utf-8")
+>       assert "기존 대화 요약" in inbound
+E       assert '기존 대화 요약' in '"""Inbound agent - classifies, drafts a reply, and queues it for approval."""\n\nfrom __future__ import annotations\n...warning("문의 번역 실패 (msg=%s)", row.id, exc_info=True)\n        if done:\n            session.commit()\n    return done\n'
+
+tests\test_ticket_summary.py:140: AssertionError
+============================== warnings summary ===============================
+.venv\Lib\site-packages\fastapi\testclient.py:1
+  C:\Users\EST-INFRA\Desktop\sales-automation\.venv\Lib\site-packages\fastapi\testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+SKIPPED [43] tests\test_lazy_imports.py:53: 서드파티는 requirements 가 책임집니다
+FAILED tests/test_ticket_summary.py::test_the_ticket_screen_does_not_say_the_same_thing_twice
+1 failed, 1645 passed, 43 skipped, 1 warning in 43.73s

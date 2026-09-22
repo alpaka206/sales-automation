@@ -303,8 +303,12 @@ def _finish_job(job_id: int, owner: str) -> None:
 
 
 def _retry_job(job_id: int, owner: str, attempts: int, exc: Exception) -> None:
+    from .draft_evidence import DraftEvidenceError
+
     now = _utcnow()
-    terminal = attempts >= MAX_ATTEMPTS
+    # The drafter already tried one repair. Re-running the whole job eight times
+    # would sample until a wording slips past the guard instead of requesting review.
+    terminal = attempts >= MAX_ATTEMPTS or isinstance(exc, DraftEvidenceError)
     delay = min(30 * (2 ** max(0, attempts - 1)), 30 * 60)
     error = f"{type(exc).__name__}: {str(exc)[:500]}"
     with SessionLocal() as session:
@@ -380,7 +384,7 @@ def process_one_inbound_job() -> bool:
     except Exception as exc:
         _retry_job(job_id, owner, attempts, exc)
         logger.exception(
-            "Inbound job failed; retry scheduled (ticket=%s attempt=%d)",
+            "Inbound job failed (ticket=%s attempt=%d)",
             ticket_id,
             attempts,
         )

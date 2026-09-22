@@ -1,0 +1,26 @@
+{
+  "command": [
+    "C:\\Users\\EST-INFRA\\Desktop\\sales-automation\\.venv\\Scripts\\python.exe",
+    "scripts/check_policy_response.py",
+    "--result-dir",
+    "docs/policy-response/runs/2026-09-21-live/final-python-verified",
+    "tests",
+    "-q",
+    "-ra"
+  ],
+  "cwd": "C:\\Users\\EST-INFRA\\Desktop\\sales-automation",
+  "status": "PASS",
+  "exit_code": 0,
+  "duration_seconds": 46.078,
+  "network": "EXTERNAL_DENIED; numeric loopback only for Windows asyncio",
+  "database": "disposable SQLite; production URL overridden",
+  "live_model_evaluation": "NOT_RUN",
+  "pytest_args": [
+    "tests",
+    "-q",
+    "-ra",
+    "-p",
+    "no:cacheprovider",
+    "--junitxml=C:\\Users\\EST-INFRA\\Desktop\\sales-automation\\docs\\policy-response\\runs\\2026-09-21-live\\final-python-verified\\junit.xml"
+  ]
+}

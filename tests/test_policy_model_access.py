@@ -77,6 +77,16 @@ def test_a_people_only_document_never_reaches_the_company_rules(policy_db):
     assert "원가" not in rules and "42%" not in rules
 
 
+def test_rules_lookup_failure_is_not_an_empty_policy(monkeypatch):
+    from src.llm.prompts import get_company_rules
+
+    def unavailable():
+        raise RuntimeError("db unavailable")
+    monkeypatch.setattr("src.db.session.SessionLocal", unavailable)
+    with pytest.raises(RuntimeError):
+        get_company_rules("first")
+
+
 def test_a_people_only_document_never_reaches_the_router_index(policy_db):
     """라우터 후보에도 안 뜬다 — 인덱스는 제목과 요약뿐이지만 그것도 그 문서의 내용이다."""
     from src.llm.knowledge import FIRST, router_docs

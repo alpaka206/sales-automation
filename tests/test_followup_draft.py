@@ -204,3 +204,48 @@ def test_the_two_branches_reach_the_prompt(thread, monkeypatch):
     agent._draft_reply(contact_info, classification, conv_id, "en")
     assert "고객이 새로 보낸" in seen["followup_rule"]
     assert seen["last_message"] == "인도 루피로는 얼마인가요?"
+
+
+def test_reminder_does_not_answer_a_customer_correction(thread):
+    factory, conv_id, contact_id = thread
+    _interaction(factory, conv_id, contact_id, direction="incoming",
+                 summary="정정합니다. 개인 구매가 아니라 기업 계약입니다.",
+                 happened_at=BASE + timedelta(hours=2))
+    with factory() as session:
+        session.add(Message(conversation_id=conv_id, direction="outgoing", body="리마인더",
+                            status="sent", prompt_variant="followup_reminder_1",
+                            sent_at=BASE + timedelta(hours=3)))
+        session.commit()
+    latest = inbound_module.latest_customer_message(conv_id)
+    assert latest is not None and "기업 계약" in latest.body
+
+
+def test_test_sent_is_not_a_customer_visible_reply(thread):
+    factory, conv_id, _ = thread
+    with factory() as session:
+        session.query(Message).filter(Message.direction == "outgoing").update({"status": "test_sent"})
+        session.commit()
+    agent = inbound_module.InboundAgent.__new__(inbound_module.InboundAgent)
+    assert agent._is_first_reply(conv_id)
+    assert inbound_module.last_sent_reply(conv_id) is None
+
+
+def test_recent_correction_survives_a_long_derived_summary(thread):
+    factory, conv_id, contact_id = thread
+    with factory() as session:
+        session.get(Conversation, conv_id).summary = "예전 정보입니다. " * 1000
+        session.commit()
+    _interaction(factory, conv_id, contact_id, direction="incoming",
+                 summary="정정합니다. 구매는 20일 전입니다.", happened_at=BASE + timedelta(hours=2))
+    agent = inbound_module.InboundAgent.__new__(inbound_module.InboundAgent)
+    context = agent._build_conversation_context(conv_id, "추가 문의", max_chars=6000)
+    assert "구매는 20일 전" in context
+    assert len(context) <= 6000
+
+
+def test_history_read_failure_is_not_an_empty_first_reply(monkeypatch):
+    def unavailable():
+        raise RuntimeError("db unavailable")
+    monkeypatch.setattr(inbound_module, "SessionLocal", unavailable)
+    with pytest.raises(RuntimeError):
+        inbound_module.thread_events(123)

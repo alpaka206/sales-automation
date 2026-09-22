@@ -1,3 +1,4 @@
+import type { HistoryRecord } from "../../ui/TicketHistoryBox";
 /** 수주 고객 화면이 함께 쓰는 타입과 표시 규칙.
  *
  * 계산은 서버가 합니다(`src/common/won.py`). 여기 있는 것은 **표시**뿐입니다 — 숫자를
@@ -76,8 +77,8 @@ export type Row = {
 };
 export type History = {
   tickets: { conversation_id: number; ticket_id: string | null; subject: string | null;
-             stage: string; created_at: string; summary: string | null }[];
-  past_tickets: { subject: string; summary: string | null; count: number; last_at: string | null }[];
+             stage: string; created_at: string; records: HistoryRecord[] }[];
+  past_tickets: { subject: string; records: HistoryRecord[]; count: number; last_at: string | null }[];
   loose_count: number;
   /** 티켓도 계약도 아닌 기록 — 「+ 추가하기」로 적은 고객 단위 메모 등. 여기서는 줄로 그린다. */
   loose: { id: number; channel: string; direction: string; handler: string | null; subject: string | null;

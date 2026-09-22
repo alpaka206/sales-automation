@@ -1,0 +1,31 @@
+
+> build
+> tsc -b && vite build
+
+vite v8.2.0 building client environment for production...
+[2K
+npm.cmd : 
+위치 줄:2 문자:109
++ ... STEXITCODE; npm.cmd run build *> ../docs/policy-response/runs/2026-09 ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+/static/tokens.css doesn't exist at build time, it will remain unchanged to be resolved at runtime
+
+/static/console.css doesn't exist at build time, it will remain unchanged to be resolved at runtime
+
+/static/won.css doesn't exist at build time, it will remain unchanged to be resolved at runtime
+transforming...✓ 121 modules transformed.
+rendering chunks...
+computing gzip size...
+../src/api/static/app/index.html                  1.05 kB │ gzip:   0.58 kB
+../src/api/static/app/assets/index-DYawDGLA.js  559.68 kB │ gzip: 161.87 kB
+
+✓ built in 330ms
+[plugin builtin:vite-reporter] 
+(!) Some chunks are larger than 500 kB after minification. Consider:
+- Using dynamic import() to code-split the application
+- Use build.rolldownOptions.output.codeSplitting to improve chunking: https://rolldown.rs/reference/OutputOptions.codeS
+plitting
+- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.

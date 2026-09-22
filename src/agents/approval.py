@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from sqlalchemy import update
 
 from ..common.config import settings
-from ..db.models import Approval, Conversation, Message
+from ..db.models import Approval, Conversation, Event, Message
 from ..db.session import SessionLocal
 
 logger = logging.getLogger(__name__)
@@ -96,6 +96,14 @@ def approve(
     ``cc_addresses`` 도 같은 규칙입니다(이관 0112) — None 은 「참조 없음」이고, 그때
     발송 payload 는 이 칸이 생기기 전과 한 글자도 다르지 않습니다.
     """
+    from .reply_safety import approval_binding, validate_draft_context
+
+    try:
+        validate_draft_context(message_id)
+    except RuntimeError as exc:
+        raise ApprovalError(str(exc)) from exc
+    except Exception:
+        raise ApprovalError("초안의 근거를 확인하지 못했습니다. 다시 시도해 주세요.") from None
     session = SessionLocal()
     try:
         pending = session.get(Message, message_id)
@@ -155,6 +163,10 @@ def approve(
             raise ApprovalError(f"Message {message_id} is {msg.status}, not pending_approval.")
 
         action = "edit" if edited_body is not None else "approve"
+
+        session.add(Event(kind="reply_approval", payload={
+            "message_id": message_id, "binding": approval_binding(pending, values),
+        }))
 
         session.add(
             Approval(

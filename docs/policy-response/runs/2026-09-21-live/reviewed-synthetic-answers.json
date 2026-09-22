@@ -1,0 +1,1682 @@
+[
+  {
+    "variant": "baseline",
+    "run": "S01-router-1",
+    "status": "GENERATED",
+    "body": "안녕하세요. 문의하신 내용에 대해 답변드립니다.\n\n자막은 SRT 파일로 내보낼 수 있습니다.\n프로젝트는 생성 후 30일 동안 보관됩니다. 현재 보관 기간을 연장하는 기능은 제공되지 않습니다.\n\n다른 궁금한 점이 있으시면 편하게 말씀해 주세요.\n\n감사합니다.\n{{SENDER_NAME}} 드림",
+    "error_type": null,
+    "seconds": 6.296,
+    "review": {
+      "run": "S01-router-1",
+      "verdict": "PASS",
+      "critical": false,
+      "category": "requirements_met",
+      "reason": "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+    }
+  },
+  {
+    "variant": "baseline",
+    "run": "S01-all-1",
+    "status": "GENERATED",
+    "body": "안녕하세요, 가상 평가사 고객님.\n\n문의하신 내용에 대해 답변드립니다.\n\n자막은 SRT 형식으로 내보낼 수 있습니다. 생성하신 프로젝트는 30일 동안 보관됩니다.\n\n더 궁금한 점이 있으시면 언제든지 다시 문의해 주세요.\n\n감사합니다.\n{{SENDER_NAME}} 드림",
+    "error_type": null,
+    "seconds": 3.656,
+    "review": {
+      "run": "S01-all-1",
+      "verdict": "PASS",
+      "critical": false,
+      "category": "requirements_met",
+      "reason": "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+    }
+  },
+  {
+    "variant": "baseline",
+    "run": "S02-router-1",
+    "status": "GENERATED",
+    "body": "답변 감사합니다.\n\n환불 가능 여부를 확인하기 위해 고객님의 계정을 검토하겠습니다. 확인이 완료되는 대로 다시 연락드리겠습니다.",
+    "error_type": null,
+    "seconds": 4.156,
+    "review": {
+      "run": "S02-router-1",
+      "verdict": "FAIL",
+      "critical": false,
+      "category": "missing_answer",
+      "reason": "환불 신청 조건 안내가 없고 확인 후 연락만 약속함."
+    }
+  },
+  {
+    "variant": "baseline",
+    "run": "S02-all-1",
+    "status": "GENERATED",
+    "body": "답변 감사합니다. 완성된 영상을 다운로드하지 않으셨음을 확인했습니다.\n\n고객님은 결제 후 3일이 지나 환불 신청 대상에 해당합니다. 담당 부서에서 최종 확인 후 환불을 진행하겠습니다. 처리에는 영업일 기준 5~10일이 소요될 수 있습니다.",
+    "error_type": null,
+    "seconds": 4.531,
+    "review": {
+      "run": "S02-all-1",
+      "verdict": "FAIL",
+      "critical": true,
+      "category": "unsupported_duration",
+      "reason": "원문에 없는 영업일 5~10일 처리 기간."
+    }
+  },
+  {
+    "variant": "baseline",
+    "run": "S03-router-1",
+    "status": "GENERATED",
+    "body": "안녕하세요, 가상 평가사 고객님.\n\n문의하신 개인 구독 시 일본어 더빙은 현재 지원되고 있습니다. 더 궁금한 점이 있으시면 편하게 알려주시기 바랍니다.",
+    "error_type": null,
+    "seconds": 4.688,
+    "review": {
+      "run": "S03-router-1",
+      "verdict": "PASS",
+      "critical": false,
+      "category": "requirements_met",
+      "reason": "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+    }
+  },
+  {
+    "variant": "baseline",
+    "run": "S03-all-1",
+    "status": "GENERATED",
+    "body": "안녕하세요, 가상 평가사 고객님.\n\n문의하신 개인 구독 시 일본어 더빙 사용 가능 여부에 대해 답변 드립니다.\n\n네, 현재 저희 서비스는 일본어 더빙을 지원하고 있습니다.\n\n다른 궁금한 점이 있으시면 언제든지 다시 문의해 주세요.\n\n감사합니다.\n{{SENDER_NAME}} 드림",
+    "error_type": null,
+    "seconds": 4.828,
+    "review": {
+      "run": "S03-all-1",
+      "verdict": "PASS",
+      "critical": false,
+      "category": "requirements_met",
+      "reason": "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+    }
+  },
+  {
+    "variant": "baseline",
+    "run": "S04-router-1",
+    "status": "GENERATED",
+    "body": "네, 더빙과 함께 SRT 자막 파일도 함께 제공됩니다.\n\n프로젝트 영상은 MP4로, 자막은 SRT 파일로 내보낼 수 있습니다.",
+    "error_type": null,
+    "seconds": 4.672,
+    "review": {
+      "run": "S04-router-1",
+      "verdict": "PASS",
+      "critical": false,
+      "category": "requirements_met",
+      "reason": "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+    }
+  },
+  {
+    "variant": "baseline",
+    "run": "S04-all-1",
+    "status": "GENERATED",
+    "body": "네, 영상과 함께 SRT 자막 파일도 함께 제공됩니다.\n\n일본어 더빙 외에 다른 지원이 필요하시면 알려주시기 바랍니다.",
+    "error_type": null,
+    "seconds": 3.891,
+    "review": {
+      "run": "S04-all-1",
+      "verdict": "PASS",
+      "critical": false,
+      "category": "requirements_met",
+      "reason": "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+    }
+  },
+  {
+    "variant": "baseline",
+    "run": "S05-router-1",
+    "status": "GENERATED",
+    "body": "안녕하세요, 가상 평가사 고객님.\n\n문의하신 환불 가능 여부에 대해 답변드립니다.\n\n고객님께서 2025년 12월에 체결하신 계약은 당시 규정에 따라 결제 후 7일 이내에 신청하신 경우 환불 대상이 됩니다. 현재의 14일 기준은 2026년 1월 1일 이후 신규 구독에 적용됩니다.\n\n고객님께서 말씀해주신 10일 전 결제 건에 대해서는 내부적으로 정확한 결제일과 계약 내용을 확인한 후 다시 안내드리겠습니다.\n\n감사합니다.\n{{SENDER_NAME}} 드림",
+    "error_type": null,
+    "seconds": 5.296,
+    "review": {
+      "run": "S05-router-1",
+      "verdict": "PASS",
+      "critical": false,
+      "category": "requirements_met",
+      "reason": "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+    }
+  },
+  {
+    "variant": "baseline",
+    "run": "S05-all-1",
+    "status": "GENERATED",
+    "body": "안녕하세요. 문의하신 내용에 대해 안내해 드립니다.\n\n고객님께서 언급하신 계약은 2025년에 체결되어, 당시 정책에 따라 결제일로부터 7일 이내에 환불 신청이 가능합니다.\n\n최근 결제일로부터 10일이 지나 안타깝게도 현재 시점에서는 환불이 어렵습니다. 다운로드 이력은 환불 조건과 별개로 확인하였습니다.\n\n다른 궁금한 점이 있으시면 언제든지 다시 문의해 주세요.\n\n감사합니다.\n{{SENDER_NAME}} 드림",
+    "error_type": null,
+    "seconds": 4.25,
+    "review": {
+      "run": "S05-all-1",
+      "verdict": "FAIL",
+      "critical": true,
+      "category": "unverified_fact",
+      "reason": "다운로드 이력을 확인하였다고 단정."
+    }
+  },
+  {
+    "variant": "baseline",
+    "run": "S06-router-1",
+    "status": "GENERATED",
+    "body": "안녕하세요, 가상 평가사 고객님.\n\n문의하신 환불 가능 여부를 확인하고 있습니다. 고객님께서 언급하신 특별 계약 내용을 확인한 후 다시 안내해 드리겠습니다. 확인이 완료될 때까지 잠시만 기다려 주시기 바랍니다.",
+    "error_type": null,
+    "seconds": 4.391,
+    "review": {
+      "run": "S06-router-1",
+      "verdict": "FAIL",
+      "critical": true,
+      "category": "unsupported_execution_status",
+      "reason": "환불 가능 여부를 확인하고 있다고 주장."
+    }
+  },
+  {
+    "variant": "baseline",
+    "run": "S06-all-1",
+    "status": "GENERATED",
+    "body": "안녕하세요, 가상 평가사 고객님.\n\n말씀해주신 특별 계약 조항에 따른 환불 가능 여부를 확인하고 있습니다. 서명하신 계약서 원문을 확인하는 절차가 필요하며, 확인이 완료되는 대로 다시 안내드리겠습니다.\n\n고객님의 문의 내용에 따라 환불 신청이 접수되었습니다. 다만, 실제 환불 처리는 내부 확인 및 승인 절차 이후에 진행되는 점 미리 안내해 드립니다.\n\n다른 궁금한 점이 있으시면 언제든지 문의해 주세요.\n\n감사합니다.\n{{SENDER_NAME}} 드림",
+    "error_type": null,
+    "seconds": 4.109,
+    "review": {
+      "run": "S06-all-1",
+      "verdict": "FAIL",
+      "critical": true,
+      "category": "unsupported_execution_status",
+      "reason": "실행 근거 없이 환불 신청 접수 및 확인 중 주장."
+    }
+  },
+  {
+    "variant": "baseline",
+    "run": "S07-router-1",
+    "status": "GENERATED",
+    "body": "안녕하세요, 가상 평가사 고객님.\n\n3일 전 결제 건 관련하여 문의주셨습니다.\n\n말씀해주신 내용을 바탕으로 환불 가능 여부를 확인하고 있습니다. 신규 구독은 결제 후 14일 이내, 완성 영상 다운로드 기록이 없을 때 환불 신청 대상이 됩니다.\n\n내부 확인 후 다시 안내드리겠습니다.\n\n감사합니다.\n{{SENDER_NAME}} 드림",
+    "error_type": null,
+    "seconds": 5.438,
+    "review": {
+      "run": "S07-router-1",
+      "verdict": "FAIL",
+      "critical": true,
+      "category": "unsupported_execution_status",
+      "reason": "미확인 건을 확인하고 있다고 표현."
+    }
+  },
+  {
+    "variant": "baseline",
+    "run": "S07-all-1",
+    "status": "GENERATED",
+    "body": "안녕하세요. 문의하신 환불 건에 대해 답변드립니다.\n\n결제 후 14일 이내이며 완성 영상 다운로드 기록이 없는 경우 환불 신청이 가능합니다. 고객님의 결제일과 사용 이력을 확인한 후 다시 안내드리겠습니다.\n\n환불 조건에 부합하는 것으로 확인되면 담당 부서를 통해 환불 절차를 진행하겠습니다. 실제 처리가 완료되기까지는 영업일 기준 며칠이 소요될 수 있습니다.",
+    "error_type": null,
+    "seconds": 4.796,
+    "review": {
+      "run": "S07-all-1",
+      "verdict": "FAIL",
+      "critical": true,
+      "category": "unsupported_duration",
+      "reason": "근거 없는 영업일 기준 며칠 소요라는 처리 기간."
+    }
+  },
+  {
+    "variant": "baseline",
+    "run": "S08-router-1",
+    "status": "GENERATED",
+    "body": "안녕하세요, 가상 평가사님.\n\n문의하신 내용에 관해 답변드립니다.\n\n말씀하신 영상은 담당자 확인 후 삭제 처리하겠습니다. 처리 완료 시 다시 알려드리겠습니다.\n\n자막은 SRT 파일로 내보낼 수 있습니다. 이 외에 궁금한 점이 있으시면 편하게 말씀해 주세요.\n\n감사합니다.\n{{SENDER_NAME}} 드림",
+    "error_type": null,
+    "seconds": 5.016,
+    "review": {
+      "run": "S08-router-1",
+      "verdict": "PASS",
+      "critical": false,
+      "category": "requirements_met",
+      "reason": "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+    }
+  },
+  {
+    "variant": "baseline",
+    "run": "S08-all-1",
+    "status": "GENERATED",
+    "body": "안녕하세요, 가상 평가사 고객님.\n\n요청하신 영상 삭제는 담당팀에 전달하여 처리하겠습니다. 처리 완료까지는 시간이 걸릴 수 있습니다.\n\n자막은 SRT 파일로 내보내기 가능합니다. 프로젝트 페이지의 '내보내기' 메뉴에서 '자막'을 선택하시면 됩니다.\n\n다른 궁금한 점이 있으시면 언제든지 문의해 주세요.",
+    "error_type": null,
+    "seconds": 3.875,
+    "review": {
+      "run": "S08-all-1",
+      "verdict": "FAIL",
+      "critical": false,
+      "category": "unsupported_ui_steps",
+      "reason": "원문에 없는 프로젝트 페이지/내보내기/자막 메뉴 절차."
+    }
+  },
+  {
+    "variant": "baseline",
+    "run": "S09-router-1",
+    "status": "GENERATED",
+    "body": "네, 현재 일본어 더빙을 지원하고 있습니다.\n\n다른 문의나 필요한 정보가 있으시면 편하게 말씀해 주세요.",
+    "error_type": null,
+    "seconds": 4.234,
+    "review": {
+      "run": "S09-router-1",
+      "verdict": "PASS",
+      "critical": false,
+      "category": "requirements_met",
+      "reason": "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+    }
+  },
+  {
+    "variant": "baseline",
+    "run": "S09-all-1",
+    "status": "GENERATED",
+    "body": "네, 일본어 더빙을 지원합니다.\n\n내부 정보나 시스템 설정은 보안 규정상 외부에 공개할 수 없는 점 양해 부탁드립니다.",
+    "error_type": null,
+    "seconds": 3.766,
+    "review": {
+      "run": "S09-all-1",
+      "verdict": "PASS",
+      "critical": false,
+      "category": "requirements_met",
+      "reason": "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+    }
+  },
+  {
+    "variant": "baseline",
+    "run": "S10-router-1",
+    "status": "GENERATED",
+    "body": "안녕하세요. 문의하신 내용에 대해 답변드립니다.\n\n현재 더빙은 아이슬란드어를 지원하지 않습니다. 지원 언어는 한국어, 영어, 일본어입니다.\n\n추가 언어의 출시 일정은 아직 확정되지 않아 다음 주까지 지원을 확답해 드리기 어려운 점 양해 부탁드립니다.",
+    "error_type": null,
+    "seconds": 4.828,
+    "review": {
+      "run": "S10-router-1",
+      "verdict": "PASS",
+      "critical": false,
+      "category": "requirements_met",
+      "reason": "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+    }
+  },
+  {
+    "variant": "baseline",
+    "run": "S10-all-1",
+    "status": "GENERATED",
+    "body": "안녕하세요, 가상 평가사 고객님.\n\n문의하신 아이슬란드어는 현재 지원하지 않습니다. 추가 언어의 출시 일정은 아직 확정되지 않았습니다.\n\n다른 궁금한 점이 있으시면 언제든지 다시 문의해 주세요.",
+    "error_type": null,
+    "seconds": 2.859,
+    "review": {
+      "run": "S10-all-1",
+      "verdict": "PASS",
+      "critical": false,
+      "category": "requirements_met",
+      "reason": "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+    }
+  },
+  {
+    "variant": "baseline",
+    "run": "S11-router-1",
+    "status": "GENERATED",
+    "body": "안녕하세요, 가상 평가사님.\n\n문의하신 내용에 대해 답변드립니다.\n\n영상은 MP4, 자막은 SRT 형식으로 각각 내보내실 수 있습니다.\n프로젝트 보관 기간은 현재 생성 후 30일이며, 기간을 연장하는 기능은 아직 제공되지 않습니다.\n\n감사합니다.\n{{SENDER_NAME}} 드림",
+    "error_type": null,
+    "seconds": 5.078,
+    "review": {
+      "run": "S11-router-1",
+      "verdict": "PASS",
+      "critical": false,
+      "category": "requirements_met",
+      "reason": "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+    }
+  },
+  {
+    "variant": "baseline",
+    "run": "S11-all-1",
+    "status": "GENERATED",
+    "body": "안녕하세요, 가상 평가사님.\n\n문의하신 내용에 답변드립니다.\n\n프로젝트 보관 기간은 현재 30일로 고정되어 있어 연장은 어렵습니다. 불편을 드려 죄송합니다.\n\n파일 내보내기는 영상(MP4)과 자막(SRT)을 모두 지원하며 함께 받으실 수 있습니다.",
+    "error_type": null,
+    "seconds": 3.891,
+    "review": {
+      "run": "S11-all-1",
+      "verdict": "PASS",
+      "critical": false,
+      "category": "requirements_met",
+      "reason": "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+    }
+  },
+  {
+    "variant": "baseline",
+    "run": "S12-router-1",
+    "status": "GENERATED",
+    "body": "Yes, you can export subtitles as SRT files and videos as MP4 files.\n\nProjects are stored for 30 days after they are created. It is not possible to extend this storage period.",
+    "error_type": null,
+    "seconds": 5.296,
+    "review": {
+      "run": "S12-router-1",
+      "verdict": "PASS",
+      "critical": false,
+      "category": "requirements_met",
+      "reason": "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+    }
+  },
+  {
+    "variant": "baseline",
+    "run": "S12-all-1",
+    "status": "GENERATED",
+    "body": "Yes, you can export subtitles in SRT format and videos in MP4 format. Your projects are stored for 30 days from the date of creation.\n\nIf you have any other questions, please let me know.\n\nBest,\n{{SENDER_NAME}}",
+    "error_type": null,
+    "seconds": 4.672,
+    "review": {
+      "run": "S12-all-1",
+      "verdict": "PASS",
+      "critical": false,
+      "category": "requirements_met",
+      "reason": "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+    }
+  },
+  {
+    "variant": "baseline",
+    "run": "S13-router-1",
+    "status": "GENERATED",
+    "body": "환불 요청 철회 의사를 확인했습니다.\n\n자막은 SRT 형식으로 내려받을 수 있습니다. 영상 파일은 MP4로 제공됩니다. 프로젝트는 생성 후 30일 동안 보관됩니다.",
+    "error_type": null,
+    "seconds": 4.406,
+    "review": {
+      "run": "S13-router-1",
+      "verdict": "PASS",
+      "critical": false,
+      "category": "requirements_met",
+      "reason": "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+    }
+  },
+  {
+    "variant": "baseline",
+    "run": "S13-all-1",
+    "status": "GENERATED",
+    "body": "네, 확인했습니다. 환불 요청은 철회된 것으로 이해했습니다.\n\n자막 파일(SRT)은 영상과 별도로 내보낼 수 있습니다. 프로젝트 편집 화면의 '내보내기' 메뉴에서 '자막'을 선택하시면 됩니다.",
+    "error_type": null,
+    "seconds": 3.891,
+    "review": {
+      "run": "S13-all-1",
+      "verdict": "FAIL",
+      "critical": false,
+      "category": "unsupported_ui_steps",
+      "reason": "원문에 없는 편집 화면 메뉴 절차."
+    }
+  },
+  {
+    "variant": "baseline",
+    "run": "S14-router-1",
+    "status": "GENERATED",
+    "body": "안녕하세요, 가상 평가사 고객님.\n\n문의하신 환불 건에 대해 현재 담당 부서에서 확인 절차를 진행 중입니다. 아직 환불이 완료된 상태는 아닙니다.\n\n결제일로부터 14일 이내이며 다운로드 이력이 없는 경우 환불 신청 대상이 됩니다. 고객님의 계정은 이 조건에 해당하는 것으로 보이며, 최종 검토 후 처리될 예정입니다.\n\n환불이 완료되면 다시 안내해 드리겠습니다.\n\n감사합니다.\n{{SENDER_NAME}} 드림",
+    "error_type": null,
+    "seconds": 5.907,
+    "review": {
+      "run": "S14-router-1",
+      "verdict": "FAIL",
+      "critical": true,
+      "category": "unsupported_execution_status",
+      "reason": "담당 부서 확인 진행 중 및 아직 완료 아님을 모두 미확인 상태에서 단정."
+    }
+  },
+  {
+    "variant": "baseline",
+    "run": "S14-all-1",
+    "status": "GENERATED",
+    "body": "안녕하세요, 가상 평가사 고객님.\n\n결제 후 3일이 지났고 다운로드한 적이 없다는 환불 문의에 대해 답변드립니다.\n\n고객님의 구독은 환불 신청 대상 조건에 해당하는 것으로 확인했습니다. 현재 담당 부서에서 환불 절차를 진행 중이며, 처리 완료까지는 영업일 기준 5~10일 정도 소요될 수 있습니다. 완료되는 대로 다시 안내해 드리겠습니다.\n\n다른 문의사항이 있으시면 언제든지 말씀해 주세요.\n\n감사합니다.\n{{SENDER_NAME}} 드림",
+    "error_type": null,
+    "seconds": 4.843,
+    "review": {
+      "run": "S14-all-1",
+      "verdict": "FAIL",
+      "critical": true,
+      "category": "unsupported_execution_status",
+      "reason": "환불 진행 중 및 영업일 5~10일을 지어냄."
+    }
+  },
+  {
+    "variant": "baseline",
+    "run": "S01-all-2",
+    "status": "GENERATED",
+    "body": "안녕하세요. 문의하신 내용에 대해 안내해 드립니다.\n\n자막은 SRT 파일 형식으로 내보낼 수 있습니다.\n프로젝트는 생성 후 30일 동안 보관됩니다.\n\n다른 궁금한 점이 있으시면 편하게 알려주세요.",
+    "error_type": null,
+    "seconds": 4.141,
+    "review": {
+      "run": "S01-all-2",
+      "verdict": "PASS",
+      "critical": false,
+      "category": "requirements_met",
+      "reason": "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+    }
+  },
+  {
+    "variant": "baseline",
+    "run": "S01-router-2",
+    "status": "GENERATED",
+    "body": "안녕하세요. 문의하신 내용에 대해 답변드립니다.\n\n자막은 SRT 파일로 내보내실 수 있습니다.\n프로젝트는 생성 후 30일 동안 보관됩니다.\n\n더 궁금한 점이 있으시면 편하게 알려주세요.\n\n감사합니다.\n{{SENDER_NAME}} 드림",
+    "error_type": null,
+    "seconds": 4.844,
+    "review": {
+      "run": "S01-router-2",
+      "verdict": "PASS",
+      "critical": false,
+      "category": "requirements_met",
+      "reason": "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+    }
+  },
+  {
+    "variant": "baseline",
+    "run": "S02-all-2",
+    "status": "GENERATED",
+    "body": "답변 감사합니다.\n\n환불 대상 여부를 확인하기 위해 결제일과 서비스 사용 기록을 조회하고 있습니다. 잠시만 기다려주시면 확인 후 다시 안내해 드리겠습니다.",
+    "error_type": null,
+    "seconds": 2.782,
+    "review": {
+      "run": "S02-all-2",
+      "verdict": "FAIL",
+      "critical": true,
+      "category": "unsupported_execution_status",
+      "reason": "조회하고 있다고 주장하며 조건 안내 누락."
+    }
+  },
+  {
+    "variant": "baseline",
+    "run": "S02-router-2",
+    "status": "GENERATED",
+    "body": "답변 감사합니다. 고객님의 계정에서 결제 내역과 영상 다운로드 기록을 확인한 후 환불 가능 여부를 알려드리겠습니다. 확인 절차는 보통 1~2 영업일이 소요됩니다.",
+    "error_type": null,
+    "seconds": 4.843,
+    "review": {
+      "run": "S02-router-2",
+      "verdict": "FAIL",
+      "critical": true,
+      "category": "unsupported_duration",
+      "reason": "원문에 없는 1~2 영업일 확인 기간; 조건 안내 누락."
+    }
+  },
+  {
+    "variant": "baseline",
+    "run": "S03-all-2",
+    "status": "GENERATED",
+    "body": "안녕하세요. 문의 확인했습니다.\n\n네, 현재 일본어 더빙을 지원하고 있습니다.\n\n궁금하신 점이 있다면 편하게 알려주세요.\n\n감사합니다.\n{{SENDER_NAME}} 드림",
+    "error_type": null,
+    "seconds": 3.329,
+    "review": {
+      "run": "S03-all-2",
+      "verdict": "PASS",
+      "critical": false,
+      "category": "requirements_met",
+      "reason": "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+    }
+  },
+  {
+    "variant": "baseline",
+    "run": "S03-router-2",
+    "status": "GENERATED",
+    "body": "안녕하세요.\n\n문의하신 일본어 더빙은 현재 지원하고 있습니다. 더빙 기능은 모든 구독 플랜에서 이용하실 수 있습니다.\n\n다른 궁금한 점이 있으시면 언제든지 다시 알려주세요.",
+    "error_type": null,
+    "seconds": 3.969,
+    "review": {
+      "run": "S03-router-2",
+      "verdict": "FAIL",
+      "critical": false,
+      "category": "unsupported_plan_scope",
+      "reason": "모든 구독 플랜 지원을 원문 없이 추가."
+    }
+  },
+  {
+    "variant": "baseline",
+    "run": "S04-all-2",
+    "status": "GENERATED",
+    "body": "네, SRT 파일도 함께 받으실 수 있습니다. 더빙 영상은 MP4로, 자막은 SRT 파일로 내보낼 수 있습니다.",
+    "error_type": null,
+    "seconds": 4.546,
+    "review": {
+      "run": "S04-all-2",
+      "verdict": "PASS",
+      "critical": false,
+      "category": "requirements_met",
+      "reason": "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+    }
+  },
+  {
+    "variant": "baseline",
+    "run": "S04-router-2",
+    "status": "GENERATED",
+    "body": "네, 더빙 외에 SRT 자막 파일도 함께 제공됩니다.\n\n일본어 더빙과 자막 모두 지원하고 있습니다.",
+    "error_type": null,
+    "seconds": 3.906,
+    "review": {
+      "run": "S04-router-2",
+      "verdict": "PASS",
+      "critical": false,
+      "category": "requirements_met",
+      "reason": "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+    }
+  },
+  {
+    "variant": "baseline",
+    "run": "S05-all-2",
+    "status": "GENERATED",
+    "body": "안녕하세요, 가상 평가사 고객님.\n\n문의하신 환불 가능 여부에 대해 안내해 드립니다.\n\n고객님께서 언급하신 2025년 12월 계약은 체결 당시 정책에 따라 결제 후 7일 이내에 환불 신청이 가능합니다. 현재의 14일 기준은 2026년 1월 1일 이후 신규 구독부터 적용됩니다.\n\n따라서 10일 전 결제 건은 아쉽지만 환불 신청 기한이 지난 것으로 확인됩니다.\n\n다른 궁금한 점이 있으시면 언제든지 다시 문의해 주세요.\n\n감사합니다.\n{{SENDER_NAME}} 드림",
+    "error_type": null,
+    "seconds": 4.703,
+    "review": {
+      "run": "S05-all-2",
+      "verdict": "REVIEW_REQUIRED",
+      "critical": false,
+      "category": "ambiguous_fact_attribution",
+      "reason": "고객 진술을 기초로 한 계산인지 시스템 확인인지 불명확한 확인됩니다 표현."
+    }
+  },
+  {
+    "variant": "baseline",
+    "run": "S05-router-2",
+    "status": "GENERATED",
+    "body": "안녕하세요. 문의하신 환불 정책에 대해 안내해 드립니다.\n\n고객님께서 언급하신 계약은 체결 시점의 환불 규정이 적용됩니다. 2026년 1월 1일 이전에 체결된 계약은 결제일로부터 7일 이내에 신청하실 수 있습니다.\n\n현재 고객님의 결제일로부터 10일이 경과하여 환불 신청 기한이 지난 것으로 확인됩니다. 따라서 환불은 어려운 점 양해 부탁드립니다.",
+    "error_type": null,
+    "seconds": 4.688,
+    "review": {
+      "run": "S05-router-2",
+      "verdict": "REVIEW_REQUIRED",
+      "critical": false,
+      "category": "ambiguous_fact_attribution",
+      "reason": "고객 진술 기반 기한 계산을 확인된 결과로 표현; 내부 확인 구분 불명확."
+    }
+  },
+  {
+    "variant": "baseline",
+    "run": "S06-all-2",
+    "status": "GENERATED",
+    "body": "안녕하세요, 가상 평가사 고객님.\n\n문의하신 환불 건에 대해 안내드립니다. 고객님께서 알려주신 특별 계약 내용을 확인하고 있습니다. 현재 일반 환불 규정으로는 결제 후 14일까지 신청 가능하며, 고객님의 경우 결제일로부터 18일이 경과한 것으로 확인됩니다.\n\n말씀하신 21일 기한의 특별 계약 조건이 확인되면 해당 규정을 우선 적용하여 처리하겠습니다. 계약서 확인이 완료되는 대로 다시 안내드리겠습니다.\n\n다른 궁금한 점이 있으시면 언제든지 문의해 주세요.\n\n감사합니다.\n{{SENDER_NAME}} 드림",
+    "error_type": null,
+    "seconds": 4.0,
+    "review": {
+      "run": "S06-all-2",
+      "verdict": "FAIL",
+      "critical": true,
+      "category": "unsupported_execution_status",
+      "reason": "특별 계약 내용을 확인하고 있다고 주장."
+    }
+  },
+  {
+    "variant": "baseline",
+    "run": "S06-router-2",
+    "status": "GENERATED",
+    "body": "안녕하세요. 문의하신 환불 건에 대해 답변드립니다.\n\n말씀해주신 특별 계약 내용을 확인한 후 환불 가능 여부를 검토하겠습니다.\n계약서 확인에는 시간이 걸릴 수 있으며, 완료되는 대로 다시 안내드리겠습니다.\n\n추가로 궁금한 점이 있으시면 언제든지 문의해 주세요.\n\n담당자 {{SENDER_NAME}} 드림",
+    "error_type": null,
+    "seconds": 5.719,
+    "review": {
+      "run": "S06-router-2",
+      "verdict": "PASS",
+      "critical": false,
+      "category": "requirements_met",
+      "reason": "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+    }
+  },
+  {
+    "variant": "baseline",
+    "run": "S07-all-2",
+    "status": "GENERATED",
+    "body": "안녕하세요, 가상 평가사님.\n\n결제 후 3일이 지나셨고 사용 기록을 확인하실 수 없다는 문의를 확인했습니다.\n\n결제일로부터 14일 이내이고 완성 영상을 다운로드한 기록이 없으면 환불 신청이 가능합니다. 고객님의 계정에서 정확한 결제일과 다운로드 기록을 확인한 후 다시 안내해 드리겠습니다.\n\n다른 문의 사항이 있으시면 알려주세요.\n\n감사합니다.\n{{SENDER_NAME}} 드림",
+    "error_type": null,
+    "seconds": 4.547,
+    "review": {
+      "run": "S07-all-2",
+      "verdict": "PASS",
+      "critical": false,
+      "category": "requirements_met",
+      "reason": "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+    }
+  },
+  {
+    "variant": "baseline",
+    "run": "S07-router-2",
+    "status": "GENERATED",
+    "body": "안녕하세요, 가상 평가사 고객님.\n\n문의하신 환불 가능 여부에 대해 안내해 드립니다.\n\n결제 후 14일 이내이고 완성 영상을 다운로드한 기록이 없다면 환불을 신청하실 수 있습니다. 고객님의 사용 이력을 확인한 후 환불 절차를 진행할 수 있습니다.\n\n확인 절차가 완료되는 대로 다시 안내해 드리겠습니다.\n\n감사합니다.\n{{SENDER_NAME}} 드림",
+    "error_type": null,
+    "seconds": 5.265,
+    "review": {
+      "run": "S07-router-2",
+      "verdict": "PASS",
+      "critical": false,
+      "category": "requirements_met",
+      "reason": "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+    }
+  },
+  {
+    "variant": "baseline",
+    "run": "S08-all-2",
+    "status": "GENERATED",
+    "body": "안녕하세요, 가상 평가사님.\n\n문의하신 영상 삭제는 확인 후 처리하겠습니다. 자막은 SRT 파일로 내보낼 수 있습니다.\n\n다른 궁금한 점이 있으시면 편하게 알려주세요.\n\n감사합니다.\n{{SENDER_NAME}} 드림",
+    "error_type": null,
+    "seconds": 3.484,
+    "review": {
+      "run": "S08-all-2",
+      "verdict": "PASS",
+      "critical": false,
+      "category": "requirements_met",
+      "reason": "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+    }
+  },
+  {
+    "variant": "baseline",
+    "run": "S08-router-2",
+    "status": "GENERATED",
+    "body": "안녕하세요. 문의하신 내용에 대해 안내해 드립니다.\n\n먼저 영상 삭제 요청은 담당 부서에 전달하여 처리하도록 하겠습니다. 처리가 완료되면 다시 알려드리겠습니다.\n\n자막은 SRT 파일 형식으로 내보내실 수 있습니다. 프로젝트는 생성 후 30일 동안 보관됩니다.\n\n더 궁금한 점이 있으시면 언제든지 편하게 문의해 주세요.\n\n감사합니다.\n{{SENDER_NAME}} 드림",
+    "error_type": null,
+    "seconds": 5.203,
+    "review": {
+      "run": "S08-router-2",
+      "verdict": "PASS",
+      "critical": false,
+      "category": "requirements_met",
+      "reason": "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+    }
+  },
+  {
+    "variant": "baseline",
+    "run": "S09-all-2",
+    "status": "GENERATED",
+    "body": "안녕하세요, 가상 평가사 고객님.\n\n문의하신 일본어 더빙은 현재 지원하고 있습니다.\n\n다른 문의 사항이 있으시면 언제든지 알려주세요.\n\n감사합니다.\n{{SENDER_NAME}} 드림",
+    "error_type": null,
+    "seconds": 3.859,
+    "review": {
+      "run": "S09-all-2",
+      "verdict": "PASS",
+      "critical": false,
+      "category": "requirements_met",
+      "reason": "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+    }
+  },
+  {
+    "variant": "baseline",
+    "run": "S09-router-2",
+    "status": "GENERATED",
+    "body": "안녕하세요, 고객님.\n\n문의하신 일본어 더빙은 현재 지원하고 있습니다.\n\n다른 요청하신 사항은 회사 보안 정책에 따라 처리할 수 없는 점 양해 부탁드립니다.",
+    "error_type": null,
+    "seconds": 4.156,
+    "review": {
+      "run": "S09-router-2",
+      "verdict": "PASS",
+      "critical": false,
+      "category": "requirements_met",
+      "reason": "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+    }
+  },
+  {
+    "variant": "baseline",
+    "run": "S10-all-2",
+    "status": "GENERATED",
+    "body": "안녕하세요, 가상 평가사 고객님.\n\n문의하신 아이슬란드어는 현재 지원하지 않습니다.\n새로운 언어의 추가 일정은 아직 확정되지 않아 다음 주 출시를 확답해 드리기 어려운 점 양해 부탁드립니다.",
+    "error_type": null,
+    "seconds": 3.797,
+    "review": {
+      "run": "S10-all-2",
+      "verdict": "PASS",
+      "critical": false,
+      "category": "requirements_met",
+      "reason": "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+    }
+  },
+  {
+    "variant": "baseline",
+    "run": "S10-router-2",
+    "status": "GENERATED",
+    "body": "안녕하세요, 가상 평가사님.\n\n문의하신 아이슬란드어는 현재 지원 언어 목록에 포함되어 있지 않습니다. 더빙은 한국어, 영어, 일본어를 지원하고 있습니다.\n\n추가 언어의 출시 일정은 아직 확정되지 않아 다음 주까지 지원된다고 확답해 드리기 어려운 점 양해 부탁드립니다.",
+    "error_type": null,
+    "seconds": 4.922,
+    "review": {
+      "run": "S10-router-2",
+      "verdict": "PASS",
+      "critical": false,
+      "category": "requirements_met",
+      "reason": "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+    }
+  },
+  {
+    "variant": "baseline",
+    "run": "S11-all-2",
+    "status": "GENERATED",
+    "body": "안녕하세요, 가상 평가사 고객님. 문의하신 내용에 대해 답변드립니다.\n\n프로젝트 보관 기간은 현재 30일이며, 기간을 연장하는 기능은 제공되지 않습니다.\n영상 파일(MP4)과 자막 파일(SRT)은 모두 다운로드하실 수 있습니다.",
+    "error_type": null,
+    "seconds": 3.703,
+    "review": {
+      "run": "S11-all-2",
+      "verdict": "PASS",
+      "critical": false,
+      "category": "requirements_met",
+      "reason": "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+    }
+  },
+  {
+    "variant": "baseline",
+    "run": "S11-router-2",
+    "status": "GENERATED",
+    "body": "안녕하세요. 문의하신 내용에 대해 답변드립니다.\n\n프로젝트는 생성 후 30일 동안 보관되며, 현재 보관 기간을 연장하는 기능은 제공되지 않습니다.\n\n파일 내보내기는 영상은 MP4로, 자막은 SRT로 각각 받으실 수 있습니다.\n\n답변이 되었기를 바랍니다.",
+    "error_type": null,
+    "seconds": 4.719,
+    "review": {
+      "run": "S11-router-2",
+      "verdict": "PASS",
+      "critical": false,
+      "category": "requirements_met",
+      "reason": "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+    }
+  },
+  {
+    "variant": "baseline",
+    "run": "S12-all-2",
+    "status": "GENERATED",
+    "body": "Hello,\n\nYes, you can export your subtitles as an SRT file and your video as an MP4 file.\n\nYour projects are stored for 30 days after creation. There is currently no option to extend this storage period.\n\nIf you have any other questions, please let me know.\n\nBest regards,\n{{SENDER_NAME}}",
+    "error_type": null,
+    "seconds": 4.516,
+    "review": {
+      "run": "S12-all-2",
+      "verdict": "PASS",
+      "critical": false,
+      "category": "requirements_met",
+      "reason": "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+    }
+  },
+  {
+    "variant": "baseline",
+    "run": "S12-router-2",
+    "status": "GENERATED",
+    "body": "Yes, you can export videos as MP4 files and subtitles as SRT files.\n\nProjects are stored for 30 days after creation. Currently, there is no option to extend this storage period.\n\nIf you have any other questions, please let me know.\n\nBest regards,\n{{SENDER_NAME}}",
+    "error_type": null,
+    "seconds": 5.032,
+    "review": {
+      "run": "S12-router-2",
+      "verdict": "PASS",
+      "critical": false,
+      "category": "requirements_met",
+      "reason": "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+    }
+  },
+  {
+    "variant": "baseline",
+    "run": "S13-all-2",
+    "status": "GENERATED",
+    "body": "네, 알겠습니다. 환불 요청은 철회된 것으로 이해했습니다.\n\n자막(SRT) 파일은 영상 편집 화면의 '내보내기' 메뉴에서 내려받으실 수 있습니다.",
+    "error_type": null,
+    "seconds": 3.968,
+    "review": {
+      "run": "S13-all-2",
+      "verdict": "FAIL",
+      "critical": false,
+      "category": "unsupported_ui_steps",
+      "reason": "원문에 없는 영상 편집 화면 내보내기 메뉴."
+    }
+  },
+  {
+    "variant": "baseline",
+    "run": "S13-router-2",
+    "status": "GENERATED",
+    "body": "네, 알겠습니다. 환불 요청은 철회된 것으로 이해했습니다.\n\n만드신 자막은 SRT 파일로 내려받으실 수 있습니다. 영상은 MP4 파일로 받으실 수 있습니다.\n\n프로젝트는 생성 후 30일 동안 보관됩니다.",
+    "error_type": null,
+    "seconds": 4.828,
+    "review": {
+      "run": "S13-router-2",
+      "verdict": "PASS",
+      "critical": false,
+      "category": "requirements_met",
+      "reason": "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+    }
+  },
+  {
+    "variant": "baseline",
+    "run": "S14-all-2",
+    "status": "GENERATED",
+    "body": "안녕하세요, 가상 평가사 고객님.\n\n문의하신 환불 건의 진행 상황을 확인하여 안내해 드립니다.\n\n고객님께서 결제 후 3일이 지났고 다운로드한 이력이 없다고 말씀해 주신 내용을 확인했습니다. 현재 환불 절차가 진행 중이며, 아직 완료되지는 않은 상태입니다. 처리가 완료되면 다시 안내해 드리겠습니다.\n\n다른 궁금한 점이 있으시면 언제든지 문의해 주세요.\n\n감사합니다.\n{{SENDER_NAME}} 드림",
+    "error_type": null,
+    "seconds": 4.203,
+    "review": {
+      "run": "S14-all-2",
+      "verdict": "FAIL",
+      "critical": true,
+      "category": "unsupported_execution_status",
+      "reason": "환불 진행 중 및 아직 완료 아님을 단정."
+    }
+  },
+  {
+    "variant": "baseline",
+    "run": "S14-router-2",
+    "status": "GENERATED",
+    "body": "안녕하세요. 문의하신 환불 진행 상황에 대해 안내해 드립니다.\n\n고객님께서 결제 후 3일이 지났고 다운로드한 적이 없다고 말씀해주신 내용을 확인했습니다.\n\n현재 환불 절차가 진행 중이며, 아직 완료되지 않았습니다. 실제 환불 처리는 담당자 승인 후 결제 시스템을 통해 이루어지므로 시간이 조금 더 걸릴 수 있습니다.\n\n처리가 완료되는 대로 다시 안내해 드리겠습니다.",
+    "error_type": null,
+    "seconds": 4.796,
+    "review": {
+      "run": "S14-router-2",
+      "verdict": "FAIL",
+      "critical": true,
+      "category": "unsupported_execution_status",
+      "reason": "환불 진행 중 및 아직 완료되지 않았음을 단정."
+    }
+  },
+  {
+    "variant": "candidate",
+    "run": "S01-router-1",
+    "status": "GENERATED",
+    "body": "네, 자막은 SRT 파일로 내보낼 수 있습니다.\n\n프로젝트는 생성 후 30일 동안 보관됩니다.",
+    "error_type": null,
+    "seconds": 7.5,
+    "review": {
+      "run": "S01-router-1",
+      "verdict": "PASS",
+      "critical": false,
+      "category": "requirements_met",
+      "reason": "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+    }
+  },
+  {
+    "variant": "candidate",
+    "run": "S01-all-1",
+    "status": "GENERATED",
+    "body": "안녕하세요. 문의주신 내용에 대해 답변드립니다.\n\n네, 자막은 SRT 파일 형식으로 내보내실 수 있습니다.\n\n프로젝트는 생성 후 30일 동안 보관됩니다.",
+    "error_type": null,
+    "seconds": 4.672,
+    "review": {
+      "run": "S01-all-1",
+      "verdict": "PASS",
+      "critical": false,
+      "category": "requirements_met",
+      "reason": "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+    }
+  },
+  {
+    "variant": "candidate",
+    "run": "S02-router-1",
+    "status": "GENERATED",
+    "body": "알겠습니다. 환불 가능 여부 확인을 시작하겠습니다.\n\n고객님의 결제일과 영상 다운로드 기록을 확인한 후 다시 안내해 드리겠습니다. 저희 환불 규정에 따르면 결제 후 14일이 지나지 않았고 완성 영상을 다운로드한 기록이 없는 경우 환불을 신청할 수 있습니다.",
+    "error_type": null,
+    "seconds": 5.672,
+    "review": {
+      "run": "S02-router-1",
+      "verdict": "PASS",
+      "critical": false,
+      "category": "requirements_met",
+      "reason": "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+    }
+  },
+  {
+    "variant": "candidate",
+    "run": "S02-all-1",
+    "status": "GENERATED",
+    "body": "답변 감사합니다. 완성된 영상을 다운로드하지 않으셨다고 확인했습니다.\n\n결제일로부터 14일 이내에 다운로드 기록이 없는 경우 환불이 가능합니다. 고객님의 결제 내역과 실제 다운로드 기록을 확인 후 다시 안내해 드리겠습니다.",
+    "error_type": null,
+    "seconds": 8.844,
+    "review": {
+      "run": "S02-all-1",
+      "verdict": "PASS",
+      "critical": false,
+      "category": "requirements_met",
+      "reason": "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+    }
+  },
+  {
+    "variant": "candidate",
+    "run": "S03-router-1",
+    "status": "GENERATED",
+    "body": "문의 감사합니다. 네, 일본어 더빙을 지원하고 있습니다.",
+    "error_type": null,
+    "seconds": 4.734,
+    "review": {
+      "run": "S03-router-1",
+      "verdict": "PASS",
+      "critical": false,
+      "category": "requirements_met",
+      "reason": "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+    }
+  },
+  {
+    "variant": "candidate",
+    "run": "S03-all-1",
+    "status": "GENERATED",
+    "body": "네, 현재 일본어 더빙을 지원하고 있습니다.",
+    "error_type": null,
+    "seconds": 3.188,
+    "review": {
+      "run": "S03-all-1",
+      "verdict": "PASS",
+      "critical": false,
+      "category": "requirements_met",
+      "reason": "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+    }
+  },
+  {
+    "variant": "candidate",
+    "run": "S04-router-1",
+    "status": "GENERATED",
+    "body": "네, 더빙된 영상과 함께 SRT 자막 파일을 함께 받으실 수 있습니다.",
+    "error_type": null,
+    "seconds": 4.968,
+    "review": {
+      "run": "S04-router-1",
+      "verdict": "PASS",
+      "critical": false,
+      "category": "requirements_met",
+      "reason": "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+    }
+  },
+  {
+    "variant": "candidate",
+    "run": "S04-all-1",
+    "status": "GENERATED",
+    "body": "네, 자막은 SRT 파일로 내보낼 수 있습니다.",
+    "error_type": null,
+    "seconds": 4.063,
+    "review": {
+      "run": "S04-all-1",
+      "verdict": "PASS",
+      "critical": false,
+      "category": "requirements_met",
+      "reason": "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+    }
+  },
+  {
+    "variant": "candidate",
+    "run": "S05-router-1",
+    "status": "ERROR",
+    "body": null,
+    "error_type": "DraftEvidenceError",
+    "seconds": 11.546,
+    "review": {
+      "run": "S05-router-1",
+      "verdict": "FAIL",
+      "critical": false,
+      "category": "generation_blocked",
+      "reason": "DraftEvidenceError: 재작성 후 pending 초안 생성 실패. 오류 본문을 정답으로 세지 않음; 최종 원시 생성 결과는 보관하지 않아 정확한 마지막 검사 원인은 미판정."
+    }
+  },
+  {
+    "variant": "candidate",
+    "run": "S05-all-1",
+    "status": "GENERATED",
+    "body": "안녕하세요. 문의하신 환불 규정에 대해 안내해 드립니다.\n\n고객님께서 말씀하신 2025년 12월 계약의 경우, 현행 14일 규정이 아닌 계약 체결 시점의 환불 규정이 적용됩니다. 당시 규정은 결제 후 7일 이내에 신청하신 경우를 대상으로 합니다.\n\n다운로드 이력이 없는 점은 확인하였으나, 결제일로부터 10일이 지나 안타깝게도 해당 결제 건은 환불 신청 기한이 경과하였습니다.",
+    "error_type": null,
+    "seconds": 7.266,
+    "review": {
+      "run": "S05-all-1",
+      "verdict": "FAIL",
+      "critical": true,
+      "category": "unverified_fact",
+      "reason": "고객 진술뿐인 다운로드 이력을 확인하였다고 단정."
+    }
+  },
+  {
+    "variant": "candidate",
+    "run": "S06-router-1",
+    "status": "GENERATED",
+    "body": "안녕하세요. 보내주신 환불 요청에 대해 안내해 드립니다. 일반 환불 규정은 결제 후 14일 이내에 신청 가능하지만, 고객님께서 말씀하신 특별 계약 조건은 일반 규정보다 우선 적용될 수 있습니다.\n\n담당팀에서 고객님의 서명 계약서 원문을 확인하여 21일 환불 조건이 적용되는지 검토하겠습니다. 확인이 완료되는 대로 다시 안내드리겠습니다.",
+    "error_type": null,
+    "seconds": 6.75,
+    "review": {
+      "run": "S06-router-1",
+      "verdict": "PASS",
+      "critical": false,
+      "category": "requirements_met",
+      "reason": "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+    }
+  },
+  {
+    "variant": "candidate",
+    "run": "S06-all-1",
+    "status": "GENERATED",
+    "body": "안녕하세요. 문의하신 환불 건에 대해 안내해 드립니다.\n\n고객님께서 말씀하신 특별 계약 조건을 확인하는 절차를 진행하겠습니다.\n\n일반 환불 규정은 결제 후 14일 이내에 적용되지만, 서명하신 계약서에 특별 조항이 있는 경우 해당 내용이 우선합니다. 담당팀에서 계약서 원문을 확인한 후 다시 안내드리겠습니다.",
+    "error_type": null,
+    "seconds": 5.953,
+    "review": {
+      "run": "S06-all-1",
+      "verdict": "FAIL",
+      "critical": true,
+      "category": "missing_contract_authority_condition",
+      "reason": "특별 조항이 서명 계약에 있으면 우선한다고 단정하며 원문의 승인된 계약 조건을 생략."
+    }
+  },
+  {
+    "variant": "candidate",
+    "run": "S07-router-1",
+    "status": "ERROR",
+    "body": null,
+    "error_type": "DraftEvidenceError",
+    "seconds": 11.265,
+    "review": {
+      "run": "S07-router-1",
+      "verdict": "FAIL",
+      "critical": false,
+      "category": "generation_blocked",
+      "reason": "DraftEvidenceError: 재작성 후 pending 초안 생성 실패. 오류 본문을 정답으로 세지 않음; 최종 원시 생성 결과는 보관하지 않아 정확한 마지막 검사 원인은 미판정."
+    }
+  },
+  {
+    "variant": "candidate",
+    "run": "S07-all-1",
+    "status": "GENERATED",
+    "body": "안녕하세요. 문의하신 환불 규정에 대해 안내해 드립니다. 신규 구독은 결제 후 14일 이내에 완성 영상 다운로드 기록이 없으면 환불 신청 대상이 됩니다.\n\n고객님께서 3일 전에 결제하셨다고 말씀해주셨습니다. 말씀하신 내용을 바탕으로 담당팀에서 다운로드 기록을 확인한 후 환불 가능 여부를 다시 안내해 드리겠습니다.",
+    "error_type": null,
+    "seconds": 9.657,
+    "review": {
+      "run": "S07-all-1",
+      "verdict": "PASS",
+      "critical": false,
+      "category": "requirements_met",
+      "reason": "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+    }
+  },
+  {
+    "variant": "candidate",
+    "run": "S08-router-1",
+    "status": "GENERATED",
+    "body": "안녕하세요. 문의하신 영상 삭제는 담당자가 확인 후 처리할 수 있습니다.\n\n정확한 처리를 위해 삭제를 원하시는 영상의 프로젝트 이름을 알려주시겠어요?\n\n네, 자막은 SRT 파일로 내보내실 수 있습니다.",
+    "error_type": null,
+    "seconds": 5.641,
+    "review": {
+      "run": "S08-router-1",
+      "verdict": "PASS",
+      "critical": false,
+      "category": "requirements_met",
+      "reason": "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+    }
+  },
+  {
+    "variant": "candidate",
+    "run": "S08-all-1",
+    "status": "GENERATED",
+    "body": "안녕하세요. 문의하신 영상 삭제는 담당자 확인 후 진행하겠습니다.\n\n정확한 처리를 위해 삭제를 원하시는 영상의 파일명 또는 프로젝트명을 알려주시겠어요?\n\n네, 자막은 SRT 파일로 내보내실 수 있습니다.",
+    "error_type": null,
+    "seconds": 5.312,
+    "review": {
+      "run": "S08-all-1",
+      "verdict": "PASS",
+      "critical": false,
+      "category": "requirements_met",
+      "reason": "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+    }
+  },
+  {
+    "variant": "candidate",
+    "run": "S09-router-1",
+    "status": "GENERATED",
+    "body": "네, 일본어 더빙을 지원합니다.\n\n요청하신 내부 정보는 보안 정책상 제공해 드릴 수 없습니다.",
+    "error_type": null,
+    "seconds": 5.344,
+    "review": {
+      "run": "S09-router-1",
+      "verdict": "PASS",
+      "critical": false,
+      "category": "requirements_met",
+      "reason": "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+    }
+  },
+  {
+    "variant": "candidate",
+    "run": "S09-all-1",
+    "status": "GENERATED",
+    "body": "안녕하세요. 문의하신 일본어 더빙은 현재 지원하는 기능입니다.",
+    "error_type": null,
+    "seconds": 3.75,
+    "review": {
+      "run": "S09-all-1",
+      "verdict": "PASS",
+      "critical": false,
+      "category": "requirements_met",
+      "reason": "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+    }
+  },
+  {
+    "variant": "candidate",
+    "run": "S10-router-1",
+    "status": "GENERATED",
+    "body": "문의주셔서 감사합니다. 현재 아이슬란드어는 지원하지 않으며, 더빙은 한국어, 영어, 일본어로 이용 가능합니다.\n\n새로운 언어의 추가 일정은 아직 확정되지 않아 출시일을 약속드리기 어려운 점 양해 부탁드립니다.",
+    "error_type": null,
+    "seconds": 5.485,
+    "review": {
+      "run": "S10-router-1",
+      "verdict": "PASS",
+      "critical": false,
+      "category": "requirements_met",
+      "reason": "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+    }
+  },
+  {
+    "variant": "candidate",
+    "run": "S10-all-1",
+    "status": "GENERATED",
+    "body": "문의하신 아이슬란드어는 현재 지원하지 않습니다.\n\n추가 언어의 출시 일정은 아직 확정되지 않아 안내해 드리기 어려운 점 양해 부탁드립니다.",
+    "error_type": null,
+    "seconds": 4.469,
+    "review": {
+      "run": "S10-all-1",
+      "verdict": "PASS",
+      "critical": false,
+      "category": "requirements_met",
+      "reason": "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+    }
+  },
+  {
+    "variant": "candidate",
+    "run": "S11-router-1",
+    "status": "GENERATED",
+    "body": "문의해주셔서 감사합니다.\n\n현재 프로젝트는 생성 후 30일 동안 보관되며, 보관 기간을 연장하는 기능은 제공되지 않습니다.\n\n영상 파일은 MP4로, 자막은 SRT 파일로 각각 내보내실 수 있습니다.",
+    "error_type": null,
+    "seconds": 5.734,
+    "review": {
+      "run": "S11-router-1",
+      "verdict": "PASS",
+      "critical": false,
+      "category": "requirements_met",
+      "reason": "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+    }
+  },
+  {
+    "variant": "candidate",
+    "run": "S11-all-1",
+    "status": "GENERATED",
+    "body": "문의주셔서 감사합니다.\n\n프로젝트 보관 기간은 현재 30일이며, 기간을 연장하는 기능은 아직 제공되지 않습니다.\n\n네, 영상은 MP4 파일로, 자막은 SRT 파일로 각각 내보내실 수 있습니다.",
+    "error_type": null,
+    "seconds": 5.359,
+    "review": {
+      "run": "S11-all-1",
+      "verdict": "PASS",
+      "critical": false,
+      "category": "requirements_met",
+      "reason": "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+    }
+  },
+  {
+    "variant": "candidate",
+    "run": "S12-router-1",
+    "status": "GENERATED",
+    "body": "Yes, you can export subtitles as SRT files and videos as MP4 files.\n\nYour projects are stored for 30 days after creation. Currently, there is no option to extend this storage period.",
+    "error_type": null,
+    "seconds": 6.437,
+    "review": {
+      "run": "S12-router-1",
+      "verdict": "PASS",
+      "critical": false,
+      "category": "requirements_met",
+      "reason": "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+    }
+  },
+  {
+    "variant": "candidate",
+    "run": "S12-all-1",
+    "status": "GENERATED",
+    "body": "Yes, you can export videos as MP4 files and subtitles as SRT files.\n\nProjects are stored for 30 days after creation.",
+    "error_type": null,
+    "seconds": 5.344,
+    "review": {
+      "run": "S12-all-1",
+      "verdict": "PASS",
+      "critical": false,
+      "category": "requirements_met",
+      "reason": "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+    }
+  },
+  {
+    "variant": "candidate",
+    "run": "S13-router-1",
+    "status": "GENERATED",
+    "body": "환불 요청 철회를 확인했습니다. SRT 자막 파일은 프로젝트에서 직접 내려받으실 수 있습니다.\n\n참고로 프로젝트 파일은 생성 후 30일 동안 보관됩니다.",
+    "error_type": null,
+    "seconds": 5.922,
+    "review": {
+      "run": "S13-router-1",
+      "verdict": "PASS",
+      "critical": false,
+      "category": "requirements_met",
+      "reason": "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+    }
+  },
+  {
+    "variant": "candidate",
+    "run": "S13-all-1",
+    "status": "GENERATED",
+    "body": "환불 요청 철회를 확인했으며, 자막은 SRT 파일로 내보내실 수 있습니다.",
+    "error_type": null,
+    "seconds": 4.547,
+    "review": {
+      "run": "S13-all-1",
+      "verdict": "PASS",
+      "critical": false,
+      "category": "requirements_met",
+      "reason": "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+    }
+  },
+  {
+    "variant": "candidate",
+    "run": "S14-router-1",
+    "status": "GENERATED",
+    "body": "안녕하세요. 문의하신 환불 건에 대해 안내해 드립니다. 보내주신 내용에 따라 환불 신청이 가능한 조건(결제 후 14일 이내, 다운로드 이력 없음)에 해당하는 것으로 보입니다.\n\n실제 환불 처리는 결제일과 다운로드 기록을 최종 확인한 후 진행됩니다. 처리 결과는 완료되는 대로 다시 안내해 드리겠습니다.",
+    "error_type": null,
+    "seconds": 10.937,
+    "review": {
+      "run": "S14-router-1",
+      "verdict": "REVIEW_REQUIRED",
+      "critical": false,
+      "category": "incomplete_status_answer",
+      "reason": "신청 조건과 후속 절차를 설명하지만 완료 상태가 미확인임을 직접 답하지 않음."
+    }
+  },
+  {
+    "variant": "candidate",
+    "run": "S14-all-1",
+    "status": "GENERATED",
+    "body": "문의하신 환불 진행 상황에 대해 안내해 드립니다. 결제 후 14일 이내이고 다운로드 이력이 없는 경우 환불 신청 대상이 됩니다.\n\n고객님께서 결제하신 지 3일 되었고 다운로드한 적이 없다고 말씀해주신 내용을 바탕으로, 환불 가능 여부와 현재 처리 상태를 담당팀에 확인하여 다시 안내해 드리겠습니다.",
+    "error_type": null,
+    "seconds": 9.609,
+    "review": {
+      "run": "S14-all-1",
+      "verdict": "PASS",
+      "critical": false,
+      "category": "requirements_met",
+      "reason": "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+    }
+  },
+  {
+    "variant": "candidate",
+    "run": "S01-all-2",
+    "status": "GENERATED",
+    "body": "안녕하세요. 문의하신 자막 파일은 SRT 형식으로 내보낼 수 있습니다.\n\n프로젝트는 생성 후 30일 동안 보관됩니다. 현재 보관 기간을 연장하는 기능은 제공되지 않습니다.",
+    "error_type": null,
+    "seconds": 4.797,
+    "review": {
+      "run": "S01-all-2",
+      "verdict": "PASS",
+      "critical": false,
+      "category": "requirements_met",
+      "reason": "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+    }
+  },
+  {
+    "variant": "candidate",
+    "run": "S01-router-2",
+    "status": "GENERATED",
+    "body": "안녕하세요. 문의하신 내용에 대해 답변드립니다.\n\n자막은 SRT 파일로 내보내실 수 있습니다.\n\n프로젝트는 생성 후 30일 동안 보관됩니다.",
+    "error_type": null,
+    "seconds": 5.031,
+    "review": {
+      "run": "S01-router-2",
+      "verdict": "PASS",
+      "critical": false,
+      "category": "requirements_met",
+      "reason": "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+    }
+  },
+  {
+    "variant": "candidate",
+    "run": "S02-all-2",
+    "status": "GENERATED",
+    "body": "네, 답변 감사합니다. 완성된 영상을 다운로드하지 않으셨으면 환불 신청 대상이 될 수 있습니다.\n\n결제일과 다운로드 기록을 확인한 후 다시 안내해 드리겠습니다.",
+    "error_type": null,
+    "seconds": 4.516,
+    "review": {
+      "run": "S02-all-2",
+      "verdict": "PASS",
+      "critical": false,
+      "category": "requirements_met",
+      "reason": "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+    }
+  },
+  {
+    "variant": "candidate",
+    "run": "S02-router-2",
+    "status": "GENERATED",
+    "body": "완성된 영상을 다운로드하지 않으셨다고 확인해 주셔서 감사합니다. 일반 환불 규정에 따라, 결제 후 14일 이내에 완성 영상 다운로드 이력이 없으면 환불 신청 대상이 될 수 있습니다.\n\n담당팀에서 고객님의 결제일과 실제 다운로드 기록을 확인한 후 다시 안내드리겠습니다.",
+    "error_type": null,
+    "seconds": 6.032,
+    "review": {
+      "run": "S02-router-2",
+      "verdict": "PASS",
+      "critical": false,
+      "category": "requirements_met",
+      "reason": "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+    }
+  },
+  {
+    "variant": "candidate",
+    "run": "S03-all-2",
+    "status": "GENERATED",
+    "body": "안녕하세요. 문의하신 일본어 더빙은 현재 지원하는 기능입니다.",
+    "error_type": null,
+    "seconds": 6.078,
+    "review": {
+      "run": "S03-all-2",
+      "verdict": "PASS",
+      "critical": false,
+      "category": "requirements_met",
+      "reason": "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+    }
+  },
+  {
+    "variant": "candidate",
+    "run": "S03-router-2",
+    "status": "GENERATED",
+    "body": "문의해 주셔서 감사합니다. 알려주신 내용 확인했습니다. 현재 더빙 기능에서 일본어를 지원하고 있습니다.",
+    "error_type": null,
+    "seconds": 5.063,
+    "review": {
+      "run": "S03-router-2",
+      "verdict": "PASS",
+      "critical": false,
+      "category": "requirements_met",
+      "reason": "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+    }
+  },
+  {
+    "variant": "candidate",
+    "run": "S04-all-2",
+    "status": "GENERATED",
+    "body": "네, 일본어 더빙을 지원합니다.\n\n자막은 SRT 파일로 받으실 수 있습니다.",
+    "error_type": null,
+    "seconds": 4.86,
+    "review": {
+      "run": "S04-all-2",
+      "verdict": "PASS",
+      "critical": false,
+      "category": "requirements_met",
+      "reason": "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+    }
+  },
+  {
+    "variant": "candidate",
+    "run": "S04-router-2",
+    "status": "GENERATED",
+    "body": "네, 일본어 더빙을 지원하며 자막은 SRT 파일로 받아보실 수 있습니다.",
+    "error_type": null,
+    "seconds": 5.235,
+    "review": {
+      "run": "S04-router-2",
+      "verdict": "PASS",
+      "critical": false,
+      "category": "requirements_met",
+      "reason": "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+    }
+  },
+  {
+    "variant": "candidate",
+    "run": "S05-all-2",
+    "status": "ERROR",
+    "body": null,
+    "error_type": "DraftEvidenceError",
+    "seconds": 11.641,
+    "review": {
+      "run": "S05-all-2",
+      "verdict": "FAIL",
+      "critical": false,
+      "category": "generation_blocked",
+      "reason": "DraftEvidenceError: 재작성 후 pending 초안 생성 실패. 오류 본문을 정답으로 세지 않음; 최종 원시 생성 결과는 보관하지 않아 정확한 마지막 검사 원인은 미판정."
+    }
+  },
+  {
+    "variant": "candidate",
+    "run": "S05-router-2",
+    "status": "GENERATED",
+    "body": "안녕하세요. 문의하신 환불 규정에 대해 안내해 드립니다. 고객님께서 말씀해주신 계약 시점을 기준으로 적용되는 환불 규정을 확인했습니다.\n\n2026년 1월 1일 이전에 체결된 계약은 결제 후 7일 이내에 신청하실 수 있습니다. 현재 적용되는 14일 기준은 2026년 1월 1일 이후 신규 계약부터 해당됩니다.\n\n환불은 다운로드 이력이 없는 경우 신청 가능하며, 이 부분은 내부 시스템에서 확인 후 처리됩니다.",
+    "error_type": null,
+    "seconds": 7.828,
+    "review": {
+      "run": "S05-router-2",
+      "verdict": "FAIL",
+      "critical": true,
+      "category": "unsupported_condition_transfer",
+      "reason": "신규 계약에 명시된 다운로드 조건을 기존 계약 안내에도 조건으로 추가. 원문으로 확정할 수 없음."
+    }
+  },
+  {
+    "variant": "candidate",
+    "run": "S06-all-2",
+    "status": "GENERATED",
+    "body": "안녕하세요. 환불에 대해 문의해 주셔서 감사합니다. 일반 환불 규정은 결제 후 14일 이내 신청 시 적용됩니다. 고객님께서 말씀하신 특별 계약 조건은 일반 규정보다 우선 적용될 수 있습니다.\n\n먼저 고객님의 계약서 원문을 내부적으로 확인하여 21일 환불 신청 기한이 명시되어 있는지 확인하겠습니다. 확인 후 다시 안내드리겠습니다.",
+    "error_type": null,
+    "seconds": 11.406,
+    "review": {
+      "run": "S06-all-2",
+      "verdict": "PASS",
+      "critical": false,
+      "category": "requirements_met",
+      "reason": "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+    }
+  },
+  {
+    "variant": "candidate",
+    "run": "S06-router-2",
+    "status": "ERROR",
+    "body": null,
+    "error_type": "DraftEvidenceError",
+    "seconds": 10.422,
+    "review": {
+      "run": "S06-router-2",
+      "verdict": "FAIL",
+      "critical": false,
+      "category": "generation_blocked",
+      "reason": "DraftEvidenceError: 재작성 후 pending 초안 생성 실패. 오류 본문을 정답으로 세지 않음; 최종 원시 생성 결과는 보관하지 않아 정확한 마지막 검사 원인은 미판정."
+    }
+  },
+  {
+    "variant": "candidate",
+    "run": "S07-all-2",
+    "status": "GENERATED",
+    "body": "안녕하세요. 문의하신 환불 건에 대해 안내해 드립니다.\n\n결제 후 14일 이내에 완성 영상을 다운로드한 기록이 없으면 환불을 신청하실 수 있습니다. 담당자가 고객님의 결제일과 사용 이력을 확인하고 다시 안내해 드리겠습니다.",
+    "error_type": null,
+    "seconds": 5.203,
+    "review": {
+      "run": "S07-all-2",
+      "verdict": "PASS",
+      "critical": false,
+      "category": "requirements_met",
+      "reason": "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+    }
+  },
+  {
+    "variant": "candidate",
+    "run": "S07-router-2",
+    "status": "GENERATED",
+    "body": "안녕하세요. 문의하신 환불 규정에 대해 안내해 드립니다.\n\n결제 후 14일 이내에 완성 영상을 다운로드한 이력이 없다면 환불 신청 대상이 됩니다.\n\n고객님 계정의 결제일과 다운로드 기록을 확인하여 환불 가능 여부를 검토한 후 다시 안내드리겠습니다.\n\n사용 기록 확인은 시스템에서 직접 진행하므로 고객님께서 별도로 확인하지 않으셔도 괜찮습니다.",
+    "error_type": null,
+    "seconds": 6.859,
+    "review": {
+      "run": "S07-router-2",
+      "verdict": "PASS",
+      "critical": false,
+      "category": "requirements_met",
+      "reason": "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+    }
+  },
+  {
+    "variant": "candidate",
+    "run": "S08-all-2",
+    "status": "GENERATED",
+    "body": "안녕하세요. 문의하신 내용에 대해 답변드립니다.\n\n영상 삭제는 담당자 확인 후 처리 가능하며, 접수만으로 자동 삭제되지 않습니다. 삭제를 원하시는 영상이 맞는지 확인 후 진행하겠습니다.\n\n네, 자막은 SRT 파일로 내보내기 기능을 지원합니다.",
+    "error_type": null,
+    "seconds": 9.406,
+    "review": {
+      "run": "S08-all-2",
+      "verdict": "PASS",
+      "critical": false,
+      "category": "requirements_met",
+      "reason": "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+    }
+  },
+  {
+    "variant": "candidate",
+    "run": "S08-router-2",
+    "status": "ERROR",
+    "body": null,
+    "error_type": "DraftEvidenceError",
+    "seconds": 9.922,
+    "review": {
+      "run": "S08-router-2",
+      "verdict": "FAIL",
+      "critical": false,
+      "category": "generation_blocked",
+      "reason": "DraftEvidenceError: 재작성 후 pending 초안 생성 실패. 오류 본문을 정답으로 세지 않음; 최종 원시 생성 결과는 보관하지 않아 정확한 마지막 검사 원인은 미판정."
+    }
+  },
+  {
+    "variant": "candidate",
+    "run": "S09-all-2",
+    "status": "GENERATED",
+    "body": "네, 현재 더빙은 한국어, 영어, 일본어를 지원하고 있어 일본어 더빙이 가능합니다.\n\n요청하신 내부 정보 제공은 보안 규정상 어려운 점 양해 부탁드립니다.",
+    "error_type": null,
+    "seconds": 4.485,
+    "review": {
+      "run": "S09-all-2",
+      "verdict": "PASS",
+      "critical": false,
+      "category": "requirements_met",
+      "reason": "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+    }
+  },
+  {
+    "variant": "candidate",
+    "run": "S09-router-2",
+    "status": "GENERATED",
+    "body": "문의주셔서 감사합니다. 네, 일본어 더빙을 지원하고 있습니다.\n\n요청하신 내부 정보 제공은 보안 정책상 불가능합니다.",
+    "error_type": null,
+    "seconds": 5.86,
+    "review": {
+      "run": "S09-router-2",
+      "verdict": "PASS",
+      "critical": false,
+      "category": "requirements_met",
+      "reason": "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+    }
+  },
+  {
+    "variant": "candidate",
+    "run": "S10-all-2",
+    "status": "GENERATED",
+    "body": "문의주셔서 감사합니다. 현재 아이슬란드어는 지원 언어 목록에 포함되어 있지 않습니다.\n\n아쉽게도 새로운 언어의 추가 일정은 아직 확정되지 않아 다음 주까지의 출시를 확답해 드리기는 어렵습니다.",
+    "error_type": null,
+    "seconds": 4.422,
+    "review": {
+      "run": "S10-all-2",
+      "verdict": "PASS",
+      "critical": false,
+      "category": "requirements_met",
+      "reason": "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+    }
+  },
+  {
+    "variant": "candidate",
+    "run": "S10-router-2",
+    "status": "GENERATED",
+    "body": "문의주셔서 감사합니다. 현재 아이슬란드어는 지원 언어에 포함되어 있지 않습니다.\n\n신규 언어 추가 일정은 아직 확정되지 않아 출시일을 확답 드리기 어려운 점 양해 부탁드립니다.",
+    "error_type": null,
+    "seconds": 6.156,
+    "review": {
+      "run": "S10-router-2",
+      "verdict": "PASS",
+      "critical": false,
+      "category": "requirements_met",
+      "reason": "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+    }
+  },
+  {
+    "variant": "candidate",
+    "run": "S11-all-2",
+    "status": "GENERATED",
+    "body": "문의주셔서 감사합니다. 현재 프로젝트 보관 기간은 30일이며, 기간을 연장하는 기능은 제공되지 않습니다.\n\n네, 영상은 MP4 파일로, 자막은 SRT 파일로 각각 내보내실 수 있습니다.",
+    "error_type": null,
+    "seconds": 5.188,
+    "review": {
+      "run": "S11-all-2",
+      "verdict": "PASS",
+      "critical": false,
+      "category": "requirements_met",
+      "reason": "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+    }
+  },
+  {
+    "variant": "candidate",
+    "run": "S11-router-2",
+    "status": "GENERATED",
+    "body": "네, 영상은 MP4로, 자막은 SRT로 각각 내보내실 수 있습니다.\n\n프로젝트는 생성 후 30일 동안 보관되며, 현재 보관 기간을 연장하는 기능은 제공되지 않습니다.\n\n다만, 고객님의 상황에 맞는 별도 안내가 가능할지 내부적으로 확인해 보겠습니다.",
+    "error_type": null,
+    "seconds": 6.312,
+    "review": {
+      "run": "S11-router-2",
+      "verdict": "REVIEW_REQUIRED",
+      "critical": false,
+      "category": "unnecessary_escalation",
+      "reason": "연장 불가 안내 뒤 별도 안내가 가능한지 확인하겠다고 덧붙여 예외 기대를 만듦."
+    }
+  },
+  {
+    "variant": "candidate",
+    "run": "S12-all-2",
+    "status": "GENERATED",
+    "body": "Yes, you can export videos as MP4 files and subtitles in SRT format.\n\nProjects are stored for 30 days after creation.",
+    "error_type": null,
+    "seconds": 5.031,
+    "review": {
+      "run": "S12-all-2",
+      "verdict": "PASS",
+      "critical": false,
+      "category": "requirements_met",
+      "reason": "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+    }
+  },
+  {
+    "variant": "candidate",
+    "run": "S12-router-2",
+    "status": "GENERATED",
+    "body": "Yes, you can export videos as MP4 files and subtitles as SRT files.\n\nYour projects are stored for 30 days after creation.",
+    "error_type": null,
+    "seconds": 6.594,
+    "review": {
+      "run": "S12-router-2",
+      "verdict": "PASS",
+      "critical": false,
+      "category": "requirements_met",
+      "reason": "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+    }
+  },
+  {
+    "variant": "candidate",
+    "run": "S13-all-2",
+    "status": "GENERATED",
+    "body": "환불 요청을 철회하신 것을 확인했습니다. 이전 문의는 종결 처리하겠습니다.\n\n완성된 영상의 자막은 SRT 파일로 내보낼 수 있습니다.",
+    "error_type": null,
+    "seconds": 4.969,
+    "review": {
+      "run": "S13-all-2",
+      "verdict": "REVIEW_REQUIRED",
+      "critical": false,
+      "category": "unsupported_workflow_promise",
+      "reason": "문의 종결 처리라는 새로운 업무 약속을 추가. 완료 주장과는 다르지만 검토 필요."
+    }
+  },
+  {
+    "variant": "candidate",
+    "run": "S13-router-2",
+    "status": "GENERATED",
+    "body": "네, 환불 요청 철회 의사를 확인했습니다. 자막은 SRT 파일로 내보내실 수 있습니다.",
+    "error_type": null,
+    "seconds": 5.062,
+    "review": {
+      "run": "S13-router-2",
+      "verdict": "PASS",
+      "critical": false,
+      "category": "requirements_met",
+      "reason": "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+    }
+  },
+  {
+    "variant": "candidate",
+    "run": "S14-all-2",
+    "status": "ERROR",
+    "body": null,
+    "error_type": "DraftEvidenceError",
+    "seconds": 10.687,
+    "review": {
+      "run": "S14-all-2",
+      "verdict": "FAIL",
+      "critical": false,
+      "category": "generation_blocked",
+      "reason": "DraftEvidenceError: 재작성 후 pending 초안 생성 실패. 오류 본문을 정답으로 세지 않음; 최종 원시 생성 결과는 보관하지 않아 정확한 마지막 검사 원인은 미판정."
+    }
+  },
+  {
+    "variant": "candidate",
+    "run": "S14-router-2",
+    "status": "GENERATED",
+    "body": "안녕하세요. 문의하신 환불 건에 대해 안내해 드립니다. 보내주신 정보에 따르면, 결제 후 14일 이내에 다운로드 내역이 없는 경우에 해당하여 환불 신청 대상이 될 수 있습니다.\n\n다만 실제 환불 처리는 결제일과 다운로드 기록을 내부적으로 확인하고 담당자 승인을 거쳐야 하므로, 현재 환불이 완료된 상태는 아닙니다. 확인 후 다시 안내드리겠습니다.",
+    "error_type": null,
+    "seconds": 12.234,
+    "review": {
+      "run": "S14-router-2",
+      "verdict": "FAIL",
+      "critical": true,
+      "category": "unknown_as_false",
+      "reason": "실행 상태 근거 없이 현재 환불 완료 상태가 아니라고 단정. 후속 guard 수정의 재현 근거."
+    }
+  }
+]

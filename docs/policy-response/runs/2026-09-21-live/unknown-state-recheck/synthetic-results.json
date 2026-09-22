@@ -1,0 +1,40 @@
+[
+    {
+        "run":  "S14-router-1",
+        "status":  "ERROR",
+        "body":  null,
+        "error_type":  "DraftEvidenceError",
+        "answer_points":  null,
+        "seconds":  13.875
+    },
+    {
+        "run":  "S14-all-1",
+        "status":  "ERROR",
+        "body":  null,
+        "error_type":  "DraftEvidenceError",
+        "answer_points":  null,
+        "seconds":  11.906
+    },
+    {
+        "run":  "S14-all-2",
+        "status":  "GENERATED",
+        "body":  "안녕하세요. 문의하신 환불 건에 대해 안내해 드립니다.\n\n결제일로부터 14일 이내이고 다운로드 이력이 없는 경우 환불 신청이 가능합니다. 고객님의 결제 및 다운로드 기록을 확인한 후 다시 안내드리겠습니다.",
+        "error_type":  null,
+        "answer_points":  [
+                              {
+                                  "question":  "환불이 실제로 완료되었는지 궁금합니다.",
+                                  "supported_answer":  "안녕하세요. 문의하신 환불 건에 대해 안내해 드립니다.",
+                                  "verification_needed":  "결제일로부터 14일 이내이고 다운로드 이력이 없는 경우 환불 신청이 가능합니다. 고객님의 결제 및 다운로드 기록을 확인한 후 다시 안내드리겠습니다."
+                              }
+                          ],
+        "seconds":  11.094
+    },
+    {
+        "run":  "S14-router-2",
+        "status":  "ERROR",
+        "body":  null,
+        "error_type":  "DraftEvidenceError",
+        "answer_points":  null,
+        "seconds":  12.89
+    }
+]

@@ -30,10 +30,12 @@ def _clear_dedup():
 
 
 @pytest.fixture(autouse=True)
-def _isolated_knowledge_db(db_session, monkeypatch):
+def _isolated_knowledge_db(db_session, db_session_factory, monkeypatch):
     """Point knowledge loader at the test DB session so it starts empty."""
     factory = lambda: db_session  # noqa: E731
     monkeypatch.setattr(knowledge, "SessionLocal", factory)
+    # Rules and routing candidates now share one policy read through db.session.
+    monkeypatch.setattr("src.db.session.SessionLocal", db_session_factory)
     knowledge.reset_cache()
     yield db_session
     knowledge.reset_cache()

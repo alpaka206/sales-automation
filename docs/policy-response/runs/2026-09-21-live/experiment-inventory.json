@@ -1,0 +1,123 @@
+[
+    {
+        "name":  "baseline",
+        "calls":  144,
+        "runs":  56,
+        "generation_errors":  0,
+        "input_tokens":  124729,
+        "candidate_output_tokens":  10914,
+        "status":  "COMPLETED",
+        "exit_code":  0,
+        "raw_path":  "tmp/policy-eval-2026-09-21/baseline"
+    },
+    {
+        "name":  "candidate",
+        "calls":  157,
+        "runs":  56,
+        "generation_errors":  6,
+        "input_tokens":  168673,
+        "candidate_output_tokens":  22787,
+        "status":  "COMPLETED",
+        "exit_code":  1,
+        "raw_path":  "tmp/policy-eval-2026-09-21/candidate"
+    },
+    {
+        "name":  "candidate-smoke",
+        "calls":  17,
+        "runs":  6,
+        "generation_errors":  0,
+        "input_tokens":  18628,
+        "candidate_output_tokens":  2365,
+        "status":  "COMPLETED",
+        "exit_code":  0,
+        "raw_path":  "tmp/policy-eval-2026-09-21/candidate-smoke"
+    },
+    {
+        "name":  "composed-smoke",
+        "calls":  20,
+        "runs":  6,
+        "generation_errors":  1,
+        "input_tokens":  24829,
+        "candidate_output_tokens":  3622,
+        "status":  "COMPLETED",
+        "exit_code":  1,
+        "raw_path":  "tmp/policy-eval-2026-09-21/composed-smoke"
+    },
+    {
+        "name":  "final-negative-recheck",
+        "calls":  7,
+        "runs":  2,
+        "generation_errors":  0,
+        "input_tokens":  8637,
+        "candidate_output_tokens":  1516,
+        "status":  "COMPLETED",
+        "exit_code":  0,
+        "raw_path":  "tmp/policy-eval-2026-09-21/final-negative-recheck"
+    },
+    {
+        "name":  "final-state-recheck",
+        "calls":  7,
+        "runs":  2,
+        "generation_errors":  1,
+        "input_tokens":  8643,
+        "candidate_output_tokens":  1267,
+        "status":  "COMPLETED",
+        "exit_code":  1,
+        "raw_path":  "tmp/policy-eval-2026-09-21/final-state-recheck"
+    },
+    {
+        "name":  "followup-smoke",
+        "calls":  6,
+        "runs":  2,
+        "generation_errors":  0,
+        "input_tokens":  7701,
+        "candidate_output_tokens":  919,
+        "status":  "COMPLETED",
+        "exit_code":  0,
+        "raw_path":  "tmp/policy-eval-2026-09-21/followup-smoke"
+    },
+    {
+        "name":  "plan-smoke",
+        "calls":  19,
+        "runs":  6,
+        "generation_errors":  3,
+        "input_tokens":  22798,
+        "candidate_output_tokens":  4792,
+        "status":  "COMPLETED",
+        "exit_code":  1,
+        "raw_path":  "tmp/policy-eval-2026-09-21/plan-smoke"
+    },
+    {
+        "name":  "reasoning-smoke",
+        "calls":  17,
+        "runs":  6,
+        "generation_errors":  1,
+        "input_tokens":  18354,
+        "candidate_output_tokens":  2544,
+        "status":  "COMPLETED",
+        "exit_code":  1,
+        "raw_path":  "tmp/policy-eval-2026-09-21/reasoning-smoke"
+    },
+    {
+        "name":  "smoke",
+        "calls":  6,
+        "runs":  2,
+        "generation_errors":  0,
+        "input_tokens":  4784,
+        "candidate_output_tokens":  351,
+        "status":  "COMPLETED",
+        "exit_code":  0,
+        "raw_path":  "tmp/policy-eval-2026-09-21/smoke"
+    },
+    {
+        "name":  "unknown-state-recheck",
+        "calls":  14,
+        "runs":  4,
+        "generation_errors":  3,
+        "input_tokens":  17274,
+        "candidate_output_tokens":  2895,
+        "status":  "COMPLETED",
+        "exit_code":  1,
+        "raw_path":  "tmp/policy-eval-2026-09-21/unknown-state-recheck"
+    }
+]

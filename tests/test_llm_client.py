@@ -55,6 +55,14 @@ def test_schema_retry_on_bad_json(mock_gemini, mock_log, client: LLMClient) -> N
 
 @patch("src.llm.client.LLMClient._log_event")
 @patch("src.llm.client.call_gemini")
+def test_explicit_draft_thinking_budget_survives_schema_retry(mock_gemini, mock_log, client):
+    mock_gemini.side_effect = [_result("not json"), _result('{"greeting": "fixed"}')]
+    client.complete("test/hello", schema=_TestSchema, tier="pro", thinking_budget=1024)
+    assert [call.kwargs["thinking_budget"] for call in mock_gemini.call_args_list] == [1024, 1024]
+
+
+@patch("src.llm.client.LLMClient._log_event")
+@patch("src.llm.client.call_gemini")
 def test_schema_fails_twice_raises(mock_gemini, mock_log, client: LLMClient) -> None:
     mock_gemini.return_value = _result("not json at all")
     with pytest.raises(LLMError, match="invalid JSON twice"):

@@ -1,0 +1,68 @@
+[
+    {
+        "run":  "S02-router-1",
+        "status":  "GENERATED",
+        "body":  "답변 감사합니다.\n\n말씀해주신 내용을 바탕으로 환불 가능 여부를 확인하겠습니다. 결제일과 실제 영상 다운로드 기록을 확인한 후 다시 안내해 드리겠습니다.",
+        "error_type":  null,
+        "answer_points":  [
+                              {
+                                  "question":  "3일 전 결제 건 환불 요청",
+                                  "supported_answer":  "완성 영상 다운로드 기록이 없다고 답변해 주셔서 감사합니다. 일반 환불 규정에 따르면, 결제 후 14일 이내이고 완성 영상을 다운로드한 기록이 없을 경우 환불 신청 대상이 될 수 있습니다.",
+                                  "verification_needed":  "실제 결제일과 다운로드 이력을 내부 시스템에서 확인해야 합니다."
+                              }
+                          ],
+        "seconds":  8.984
+    },
+    {
+        "run":  "S02-all-1",
+        "status":  "GENERATED",
+        "body":  "알겠습니다.\n\n말씀해주신 내용을 바탕으로 환불 가능 여부를 확인하여 다시 안내해 드리겠습니다.",
+        "error_type":  null,
+        "answer_points":  [
+                              {
+                                  "question":  "환불을 요청합니다. (완성된 영상 다운로드 이력 없음)",
+                                  "supported_answer":  "완성 영상을 다운로드한 적이 없으시군요. 알겠습니다. 결제 후 14일 이내이고 다운로드 이력이 없으면 환불 신청 대상이 됩니다. 고객님의 계정 정보를 바탕으로 환불 가능 여부를 확인하고 있습니다.",
+                                  "verification_needed":  "결제일 및 다운로드 이력"
+                              }
+                          ],
+        "seconds":  4.39
+    },
+    {
+        "run":  "S06-router-1",
+        "status":  "GENERATED",
+        "body":  "안녕하세요. 가상 평가사님.\n\n문의하신 환불에 관해 안내해 드립니다.\n\n말씀해주신 특별 계약 내용을 확인하여 환불 가능 여부를 검토하겠습니다. 개별 계약 조건은 일반 규정보다 우선 적용될 수 있습니다.\n\n확인 절차가 완료되는 대로 다시 안내드리겠습니다.\n\n감사합니다.\n\n{{SENDER_NAME}} 드림",
+        "error_type":  null,
+        "answer_points":  [
+                              {
+                                  "question":  "결제 후 18일이 지났고, 특별 계약에 따라 21일 이내 환불을 받고 싶습니다.",
+                                  "supported_answer":  "말씀하신 특별 계약의 예외 조항은 일반 규정보다 우선하여 적용될 수 있습니다. 현재 일반 환불 규정은 결제 후 14일 이내 신청을 기준으로 합니다. 고객님의 계약 조건을 우선 확인하여 환불 가능 여부를 검토하겠습니다.",
+                                  "verification_needed":  "고객의 서명된 특별 계약서 원문과 21일 환불 조항의 존재 및 유효성 확인"
+                              }
+                          ],
+        "seconds":  13.313
+    },
+    {
+        "run":  "S06-all-1",
+        "status":  "ERROR",
+        "body":  null,
+        "error_type":  "DraftEvidenceError",
+        "answer_points":  null,
+        "seconds":  12.14
+    },
+    {
+        "run":  "S14-router-1",
+        "status":  "ERROR",
+        "body":  null,
+        "error_type":  "DraftEvidenceError",
+        "answer_points":  null,
+        "seconds":  12.813
+    },
+    {
+        "run":  "S14-all-1",
+        "status":  "ERROR",
+        "body":  null,
+        "error_type":  "DraftEvidenceError",
+        "answer_points":  null,
+        "seconds":  13.562
+    }
+]

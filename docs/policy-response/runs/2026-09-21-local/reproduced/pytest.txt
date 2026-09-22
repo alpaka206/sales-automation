@@ -1,0 +1,111 @@
+.......FFFF.F.........                                                   [100%]
+================================== FAILURES ===================================
+_____________ test_reminder_does_not_answer_a_customer_correction _____________
+
+thread = (sessionmaker(class_='Session', bind=Engine(sqlite:///:memory:), autoflush=True, expire_on_commit=False), 1, 1)
+
+    def test_reminder_does_not_answer_a_customer_correction(thread):
+        factory, conv_id, contact_id = thread
+        _interaction(factory, conv_id, contact_id, direction="incoming",
+                     summary="정정합니다. 개인 구매가 아니라 기업 계약입니다.",
+                     happened_at=BASE + timedelta(hours=2))
+        with factory() as session:
+            session.add(Message(conversation_id=conv_id, direction="outgoing", body="리마인더",
+                                status="sent", prompt_variant="followup_reminder_1",
+                                sent_at=BASE + timedelta(hours=3)))
+            session.commit()
+        latest = inbound_module.latest_customer_message(conv_id)
+>       assert latest is not None and "기업 계약" in latest.body
+E       assert (None is not None)
+
+tests\test_followup_draft.py:220: AssertionError
+_______________ test_test_sent_is_not_a_customer_visible_reply ________________
+
+thread = (sessionmaker(class_='Session', bind=Engine(sqlite:///:memory:), autoflush=True, expire_on_commit=False), 1, 1)
+
+    def test_test_sent_is_not_a_customer_visible_reply(thread):
+        factory, conv_id, _ = thread
+        with factory() as session:
+            session.query(Message).filter(Message.direction == "outgoing").update({"status": "test_sent"})
+            session.commit()
+        agent = inbound_module.InboundAgent.__new__(inbound_module.InboundAgent)
+>       assert agent._is_first_reply(conv_id)
+E       assert False
+E        +  where False = _is_first_reply(1)
+E        +    where _is_first_reply = <src.agents.inbound.InboundAgent object at 0x00000222D99E4190>._is_first_reply
+
+tests\test_followup_draft.py:229: AssertionError
+___________ test_recent_correction_survives_a_long_derived_summary ____________
+
+thread = (sessionmaker(class_='Session', bind=Engine(sqlite:///:memory:), autoflush=True, expire_on_commit=False), 1, 1)
+
+    def test_recent_correction_survives_a_long_derived_summary(thread):
+        factory, conv_id, contact_id = thread
+        with factory() as session:
+            session.get(Conversation, conv_id).summary = "예전 정보입니다. " * 1000
+            session.commit()
+        _interaction(factory, conv_id, contact_id, direction="incoming",
+                     summary="정정합니다. 구매는 20일 전입니다.", happened_at=BASE + timedelta(hours=2))
+        agent = inbound_module.InboundAgent.__new__(inbound_module.InboundAgent)
+        context = agent._build_conversation_context(conv_id, "추가 문의", max_chars=6000)
+>       assert "구매는 20일 전" in context
+E       AssertionError: assert '구매는 20일 전' in '기존 대화 요약:\n예전 정보입니다. 예전 정보입니다. 예전 정보입니다. 예전 정보입니다. 예전 정보입니다. 예전 정보입니다. 예전 정보입니다. 예전 정보입니다. 예전 정보입니다. 예전 정보입니다. 예전 정보입... 정보입니다. 예전 정보입니다. 예전 정보입니다. 예전 정보입니다. 예전 정보입니다. 예전 정보입니다. 예전 정보입니다. 예전 정보입니다. 예전 정보입니다. 예전 정보입니다. 예전 정보입니다. 예전 정보입니다. '
+
+tests\test_followup_draft.py:242: AssertionError
+____________ test_history_read_failure_is_not_an_empty_first_reply ____________
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x00000222D9A4B7D0>
+
+    def test_history_read_failure_is_not_an_empty_first_reply(monkeypatch):
+        def unavailable():
+            raise RuntimeError("db unavailable")
+        monkeypatch.setattr(inbound_module, "SessionLocal", unavailable)
+>       with pytest.raises(RuntimeError):
+E       Failed: DID NOT RAISE RuntimeError
+
+tests\test_followup_draft.py:250: Failed
+------------------------------ Captured log call ------------------------------
+WARNING  src.agents.inbound:inbound.py:217 대화 이력을 못 읽었습니다 (conv=123).
+Traceback (most recent call last):
+  File "C:\Users\EST-INFRA\Desktop\sales-automation\src\agents\inbound.py", line 148, in thread_events
+    with SessionLocal() as session:
+         ^^^^^^^^^^^^^^
+  File "C:\Users\EST-INFRA\Desktop\sales-automation\tests\test_followup_draft.py", line 248, in unavailable
+    raise RuntimeError("db unavailable")
+RuntimeError: db unavailable
+______________ test_rules_lookup_failure_is_not_an_empty_policy _______________
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x00000222DAC66C10>
+
+    def test_rules_lookup_failure_is_not_an_empty_policy(monkeypatch):
+        from src.llm.prompts import get_company_rules
+    
+        def unavailable():
+            raise RuntimeError("db unavailable")
+        monkeypatch.setattr("src.db.session.SessionLocal", unavailable)
+>       with pytest.raises(RuntimeError):
+E       Failed: DID NOT RAISE RuntimeError
+
+tests\test_policy_model_access.py:86: Failed
+------------------------------ Captured log call ------------------------------
+WARNING  src.llm.prompts:prompts.py:91 Company rules could not be read from the database.
+Traceback (most recent call last):
+  File "C:\Users\EST-INFRA\Desktop\sales-automation\src\llm\prompts.py", line 70, in _rules_from_db
+    with SessionLocal() as session:
+         ^^^^^^^^^^^^^^
+  File "C:\Users\EST-INFRA\Desktop\sales-automation\tests\test_policy_model_access.py", line 84, in unavailable
+    raise RuntimeError("db unavailable")
+RuntimeError: db unavailable
+============================== warnings summary ===============================
+.venv\Lib\site-packages\fastapi\testclient.py:1
+  C:\Users\EST-INFRA\Desktop\sales-automation\.venv\Lib\site-packages\fastapi\testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/test_followup_draft.py::test_reminder_does_not_answer_a_customer_correction
+FAILED tests/test_followup_draft.py::test_test_sent_is_not_a_customer_visible_reply
+FAILED tests/test_followup_draft.py::test_recent_correction_survives_a_long_derived_summary
+FAILED tests/test_followup_draft.py::test_history_read_failure_is_not_an_empty_first_reply
+FAILED tests/test_policy_model_access.py::test_rules_lookup_failure_is_not_an_empty_policy
+5 failed, 17 passed, 1 warning in 2.58s

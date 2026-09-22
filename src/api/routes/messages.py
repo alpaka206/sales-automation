@@ -273,6 +273,10 @@ def _message_detail_context(
         # surfaced inline so the operator sees who this customer is without leaving
         # the reply screen. Full editable view stays at /customers/{id}.
         customer = _customer_history(session, contact.id) if contact else None
+        from ...db.history_view import ticket_records
+        other_records = ticket_records(
+            session, contact.id, [other.id for other in other_conversations],
+        ) if contact else {}
         # 한 번만 셉니다 — 아래에서 Lead Type 과 Lifecycle Stage 두 줄이 같이 씁니다.
         qualification = _qualification_of(customer, conv.plan_snapshot if conv else None)
 
@@ -362,14 +366,7 @@ def _message_detail_context(
                     "subject": other.inquiry_subject,
                     "stage": other.stage,
                     "created_at": other.created_at,
-                    # **오간 것마다 쌓인 요약이 먼저입니다** (2026-09-04 운영자 지시).
-                    # 순서가 뒤집혀 있었습니다 — `customer_requests` 는 접수할 때 고객이
-                    # 무엇을 물었는지만 뽑은 값이라(프롬프트가 「우리가 무엇을 할지는 쓰지
-                    # 않는다」고 못 박습니다) 그 뒤에 무슨 일이 있었는지를 말하지 못하고,
-                    # 접수 때 한 번 쓰고 끝이라 **기록이 늘어도 안 바뀝니다.**
-                    # `summary` 는 사건마다 한 줄씩 붙습니다 — 이 카드가 보여 줄 값입니다.
-                    # 접수만 되고 아무 일도 없었던 티켓에서만 뒤엣것으로 떨어집니다.
-                    "summary": other.summary or other.customer_requests,
+                    "records": other_records.get(other.id, []),
                 }
                 for other in other_conversations
             ],
@@ -538,28 +535,7 @@ def _qualification_of(customer: dict | None, snapshot: dict | None = None) -> st
 
 
 def _customer_history(session, contact_id: int) -> dict:
-    """Read-only customer-level facts for the ticket screen — **줄이 아니라 숫자입니다.**
-
-    프로필 스냅샷(단계·상태·온도·다음 액션)과, 어느 티켓에도 안 달린 접점 기록의 **개수**
-    하나. 그게 전부입니다.
-
-    **기록 줄 50개를 보내던 것을 지웠습니다** (2026-09-04 운영자 지시). 이 화면의
-    「리드 히스토리」는 이제 접점 기록을 한 줄씩 그리지 않고 **티켓마다 요약 한 문단**을
-    그립니다(`other_tickets[].summary`) — 답을 쓰는 자리에서 필요한 것은 「이 사람과 전에
-    무슨 이야기가 있었나」이지 그때 오간 메일의 본문이 아닙니다. 본문은 「전체보기」가
-    가는 고객 상세에 있습니다. 그래서 이 콘솔에서 가장 자주 열리는 화면이 매번 읽고
-    버리던 50행이 없어졌습니다.
-
-    티켓에 안 달린 접점은 **두 종류로 갈라 보냅니다** (2026-09-04 운영자 지시).
-
-    `past_tickets` — 티켓에서 나왔는데 그 티켓이 지워진 것. 제목으로 다시 묶어 살아 있는
-    티켓과 **같은 모양**(제목 + 요약 한 문단)으로 세웁니다. 한 덩어리로 쓸어 담으면 한
-    문의였던 메일 세 통이 출처 없는 세 건이 됩니다.
-
-    `loose_count` — **진짜 티켓이 없던 것만**. 허브스팟 딜·노트, 손으로 적은 고객 단위
-    메모, 수주 화면에서 적은 소통 기록. 줄로 설 자리는 없지만 없는 척하면 고객 상세와
-    건수가 안 맞아서 「티켓 외 n건」으로 셉니다.
-    """
+    """Customer metadata, actual archived ticket records and loose record count."""
     from ...agents.hubspot_reconcile import PAST_TICKET_HANDLER
 
     profile = session.get(CustomerProfile, contact_id)
@@ -590,20 +566,17 @@ def _customer_history(session, contact_id: int) -> dict:
     for row in past_rows:
         label = strip_reply_prefixes(row.subject) or "제목 없는 문의"
         group = past.setdefault(
-            label, {"subject": label, "lines": [], "count": 0, "last_at": None}
+            label, {"subject": label, "records": [], "count": 0, "last_at": None}
         )
         group["count"] += 1
-        # 살아 있는 티켓과 **같은 모양**입니다 — 한 줄씩 붙인 불릿 목록
-        # (`conversations.summary`). 그래야 「지워졌다」가 표시일 뿐 다른 종류로 안 읽힙니다.
-        # 아직 요약이 없는 줄은 건너뜁니다(10분 폴러가 채우는 중입니다).
-        if row.context:
-            group["lines"].append(f"- {row.context}")
+        from ...db.history_view import interaction_record
+        group["records"].append(interaction_record(row))
         if row.happened_at and (group["last_at"] is None or row.happened_at > group["last_at"]):
             group["last_at"] = row.happened_at
     past_tickets = [
         {
             "subject": g["subject"],
-            "summary": "\n".join(g["lines"]) or None,
+            "records": list(reversed(g["records"])),
             "count": g["count"],
             "last_at": g["last_at"],
         }

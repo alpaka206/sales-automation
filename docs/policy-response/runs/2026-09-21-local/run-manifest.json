@@ -1,0 +1,264 @@
+{
+    "schema_version":  "1.0",
+    "work_id":  "policy-response-redesign",
+    "baseline_commit":  "95ec3d5c36d5eab58d7e03cfc469ea72f9332036",
+    "date":  "2026-09-21",
+    "initial_tracked_changes":  [
+
+                                ],
+    "preserved_user_files":  [
+                                 "docs/데이터-스냅샷-로컬-분석-설계.md",
+                                 "docs/데이터-에이전트-설계.md",
+                                 "docs/로컬-웹-연결-조사요청.md",
+                                 "docs/수주고객-사용현황-데이터검증-2026-09-15.md"
+                             ],
+    "preservation_note":  "No writes to these four pre-existing user documents. Initial content hashes were not captured.",
+    "input_packets_ignored":  [
+                                  "policy-response-final/",
+                                  "ai-policy-redesign/",
+                                  "policy_response_final_cli_package/"
+                              ],
+    "changed_files":  [
+                          ".gitignore",
+                          "CLAUDE.md",
+                          "docs/adr/2026-09-21-policy-response-boundaries.md",
+                          "docs/architecture/policy-response-system.md",
+                          "docs/evaluation/policy-response-evaluation.md",
+                          "docs/operations/policy-response-runbook.md",
+                          "docs/policy-response/runs/2026-09-21-local/artifact-verification.txt",
+                          "docs/policy-response/runs/2026-09-21-local/baseline/pytest.txt",
+                          "docs/policy-response/runs/2026-09-21-local/baseline-corrected/command.json",
+                          "docs/policy-response/runs/2026-09-21-local/baseline-corrected/junit.xml",
+                          "docs/policy-response/runs/2026-09-21-local/baseline-corrected/pytest.txt",
+                          "docs/policy-response/runs/2026-09-21-local/decision-ledger.jsonl",
+                          "docs/policy-response/runs/2026-09-21-local/diff-check.txt",
+                          "docs/policy-response/runs/2026-09-21-local/final-python/command.json",
+                          "docs/policy-response/runs/2026-09-21-local/final-python/junit.xml",
+                          "docs/policy-response/runs/2026-09-21-local/final-python/pytest.txt",
+                          "docs/policy-response/runs/2026-09-21-local/findings.md",
+                          "docs/policy-response/runs/2026-09-21-local/frontend/build.txt",
+                          "docs/policy-response/runs/2026-09-21-local/frontend/commands.json",
+                          "docs/policy-response/runs/2026-09-21-local/frontend/test.txt",
+                          "docs/policy-response/runs/2026-09-21-local/full-before-review-fix/command.json",
+                          "docs/policy-response/runs/2026-09-21-local/full-before-review-fix/junit.xml",
+                          "docs/policy-response/runs/2026-09-21-local/full-before-review-fix/pytest.txt",
+                          "docs/policy-response/runs/2026-09-21-local/initial-assessment.md",
+                          "docs/policy-response/runs/2026-09-21-local/lint.txt",
+                          "docs/policy-response/runs/2026-09-21-local/reproduced/command.json",
+                          "docs/policy-response/runs/2026-09-21-local/reproduced/junit.xml",
+                          "docs/policy-response/runs/2026-09-21-local/reproduced/pytest.txt",
+                          "docs/policy-response/runs/2026-09-21-local/results.md",
+                          "docs/policy-response/runs/2026-09-21-local/run-manifest.json",
+                          "docs/research/policy-response-evidence.md",
+                          "docs/verification/policy-response-result.json",
+                          "frontend/src/screens/CustomerDetail.tsx",
+                          "frontend/src/screens/MessageDetail.tsx",
+                          "frontend/src/screens/won/shared.ts",
+                          "frontend/src/screens/won/WonCustomerDetail.tsx",
+                          "frontend/src/ui/TicketHistoryBox.tsx",
+                          "frontend/test/ticket-history.test.tsx",
+                          "README.md",
+                          "scripts/check_policy_response.py",
+                          "src/agents/approval.py",
+                          "src/agents/inbound.py",
+                          "src/agents/reply_safety.py",
+                          "src/api/routes/customer_ops.py",
+                          "src/api/routes/messages.py",
+                          "src/api/routes/ui_api.py",
+                          "src/api/static/console.css",
+                          "src/db/history_view.py",
+                          "src/integrations/senders/__init__.py",
+                          "src/llm/client.py",
+                          "src/llm/knowledge.py",
+                          "src/llm/policy_context.py",
+                          "src/llm/prompts.py",
+                          "src/llm/prompts/inbound/draft_reply.md",
+                          "src/llm/prompts/inbound/extract_requests.md",
+                          "src/llm/prompts/inbound/select_docs.md",
+                          "tests/test_followup_draft.py",
+                          "tests/test_history_view.py",
+                          "tests/test_inbound_flow.py",
+                          "tests/test_interaction_log.py",
+                          "tests/test_policy_context.py",
+                          "tests/test_policy_model_access.py",
+                          "tests/test_rule_guards.py",
+                          "tests/test_ticket_summary.py"
+                      ],
+    "source_file_hashes":  [
+                               {
+                                   "path":  ".gitignore",
+                                   "sha256":  "eea265ae3fe3ce84b6b9f488c665a8c0994abbd5bf978e0c6fd345b4dc873693"
+                               },
+                               {
+                                   "path":  "CLAUDE.md",
+                                   "sha256":  "5a14e047739d095c7d60caca8b131ccf4a7c84559016e13b0216886bf2607b82"
+                               },
+                               {
+                                   "path":  "docs/adr/2026-09-21-policy-response-boundaries.md",
+                                   "sha256":  "a0b1926c6ab9f286b0230291f6e6d8b9fd0dd69e3c6c97a509bb4638e26e70f6"
+                               },
+                               {
+                                   "path":  "docs/architecture/policy-response-system.md",
+                                   "sha256":  "1c224f6eb47af6980fe432d56e804ca7f362b9f05c02e0bb9fe50187f3c8435b"
+                               },
+                               {
+                                   "path":  "docs/evaluation/policy-response-evaluation.md",
+                                   "sha256":  "6017efecc3632cd4071dcdf796bd3475a478f414247585f4c60cd407786fcb7f"
+                               },
+                               {
+                                   "path":  "docs/operations/policy-response-runbook.md",
+                                   "sha256":  "fa4e3dbbb9556d664ac391da94599722d693357dd21554ba529a5aa9d7ea297f"
+                               },
+                               {
+                                   "path":  "docs/research/policy-response-evidence.md",
+                                   "sha256":  "3b233fa59ec9bca52065d538ebd3b35b458247e110654e16041cb4dbb0b52373"
+                               },
+                               {
+                                   "path":  "frontend/src/screens/CustomerDetail.tsx",
+                                   "sha256":  "20979820fe6aa65955733448fbf3dac9d0e1827ee01c4751bdeed30b78b1840e"
+                               },
+                               {
+                                   "path":  "frontend/src/screens/MessageDetail.tsx",
+                                   "sha256":  "aa3fab93a44540e9ec5332245932ea1969b585025154b98e57a42e222f9f41fd"
+                               },
+                               {
+                                   "path":  "frontend/src/screens/won/shared.ts",
+                                   "sha256":  "e70c7e99c576aa7c657be1b3964d0b438ddafd0e3020d48dd394f5de324e3b3b"
+                               },
+                               {
+                                   "path":  "frontend/src/screens/won/WonCustomerDetail.tsx",
+                                   "sha256":  "ebb1f26790c90195a5f191d61a43938e4e6e30010ecf65d787bee08dc7c9b86d"
+                               },
+                               {
+                                   "path":  "frontend/src/ui/TicketHistoryBox.tsx",
+                                   "sha256":  "339cee59b748599b70c05a8d0ac3ba3e9e34812aeff00f74312c96c3ff79f96a"
+                               },
+                               {
+                                   "path":  "frontend/test/ticket-history.test.tsx",
+                                   "sha256":  "f03071acb9e688b18897645575bd83492a5a91264a957a9802114aee24bf2285"
+                               },
+                               {
+                                   "path":  "README.md",
+                                   "sha256":  "6655082c0385683f3ce47a2d3ffbb829a73f34ba721488f9d4a099758e947e3a"
+                               },
+                               {
+                                   "path":  "scripts/check_policy_response.py",
+                                   "sha256":  "5b7e99087b0a2a75244a51603823d5857420ad4974523f7b3599bb0382d40a34"
+                               },
+                               {
+                                   "path":  "src/agents/approval.py",
+                                   "sha256":  "8567599285cc7510b4f6caa0e835d155ccd57c17a734595e515392e20270e392"
+                               },
+                               {
+                                   "path":  "src/agents/inbound.py",
+                                   "sha256":  "d9831a5106b621f5e1ec45074903803005c858bf38910aa69e1e14b784fa94b7"
+                               },
+                               {
+                                   "path":  "src/agents/reply_safety.py",
+                                   "sha256":  "5cca8f23897c9e412325da62bbd510b6ef4b6932300e5b586d4e19ca51b403c0"
+                               },
+                               {
+                                   "path":  "src/api/routes/customer_ops.py",
+                                   "sha256":  "91ae5b05c4e316b72405ee2765f32e889c07ee5a5d0fc690b365a0c238a039ee"
+                               },
+                               {
+                                   "path":  "src/api/routes/messages.py",
+                                   "sha256":  "8f3b8e5e28679f66a0f525782e352b7f4e20bfeb75fd059d79896b00683d685b"
+                               },
+                               {
+                                   "path":  "src/api/routes/ui_api.py",
+                                   "sha256":  "0490668fe3eb1490bc3f1f29612d8e8c558b4734f763a7bd7d71c714f0f642ad"
+                               },
+                               {
+                                   "path":  "src/api/static/console.css",
+                                   "sha256":  "a1bdb74c629954c9c87b270b056b0607dcfcde38c28bd15547b141c72ca599a0"
+                               },
+                               {
+                                   "path":  "src/db/history_view.py",
+                                   "sha256":  "b57ec5f6a262725d8dda8114eca100999a574f3b22cb6e388815354d4ad1e617"
+                               },
+                               {
+                                   "path":  "src/integrations/senders/__init__.py",
+                                   "sha256":  "936c483e34f2d4d356b290263bd34053e305ec5812485855f5f6889ebf9dcf7f"
+                               },
+                               {
+                                   "path":  "src/llm/client.py",
+                                   "sha256":  "83b33a8a3c5b948e4ad0546ca22b6aa4608a4c573a106dc68c47bd5e475a70d8"
+                               },
+                               {
+                                   "path":  "src/llm/knowledge.py",
+                                   "sha256":  "cc26566bbd05a422a21952d479128e2bb9300a17bbc767e25ceba372daad15b7"
+                               },
+                               {
+                                   "path":  "src/llm/policy_context.py",
+                                   "sha256":  "cff3a24b4a4885b015d1efa831ed5fd2f521b9f19e537f9551bb73398c6320be"
+                               },
+                               {
+                                   "path":  "src/llm/prompts.py",
+                                   "sha256":  "1f10306cbd4ed64ee1c037b000e413b735fe075ea4992baf03ac7c0ef8eb2f0d"
+                               },
+                               {
+                                   "path":  "src/llm/prompts/inbound/draft_reply.md",
+                                   "sha256":  "4e92468c95c8d41410b405f9ba62bdb45eb7b10eaf4035bb8deb73e551195be6"
+                               },
+                               {
+                                   "path":  "src/llm/prompts/inbound/extract_requests.md",
+                                   "sha256":  "2c90c8d5e4959306889df1af8e61c7079832dc9f1436524b71844510ab81a7bc"
+                               },
+                               {
+                                   "path":  "src/llm/prompts/inbound/select_docs.md",
+                                   "sha256":  "fff239b9754aef71a35f821c067930990f8147476d05a8044e4531f942f5441b"
+                               },
+                               {
+                                   "path":  "tests/test_followup_draft.py",
+                                   "sha256":  "f42901bea7e3344a022174af3b6cb8f497edfb578ee41bdab9303faee357472b"
+                               },
+                               {
+                                   "path":  "tests/test_history_view.py",
+                                   "sha256":  "70e057146f033efe173568ee3c929bf75ba3d66434cdb1af038e22ce58de3211"
+                               },
+                               {
+                                   "path":  "tests/test_inbound_flow.py",
+                                   "sha256":  "f8c137056b313e664882007891c0cf31531cf97083d4be944aebd34ddeb4e099"
+                               },
+                               {
+                                   "path":  "tests/test_interaction_log.py",
+                                   "sha256":  "098b62dac512d52489dd105e246b31ac2f83480c1f2b530c5ba5503643b1fbad"
+                               },
+                               {
+                                   "path":  "tests/test_policy_context.py",
+                                   "sha256":  "76866545b2ee933f3b7a2851f1992fe27908db4104934a9ac5130a4a4e2a5932"
+                               },
+                               {
+                                   "path":  "tests/test_policy_model_access.py",
+                                   "sha256":  "90f845886b09c21ed74e4531c7dfe547551bb2e596e8685c2256c3a188ccdea3"
+                               },
+                               {
+                                   "path":  "tests/test_rule_guards.py",
+                                   "sha256":  "e6e14c47b2aea6505591b1dc605a8a82f3b08bbba1388d50ffaaffb8c964c1ad"
+                               },
+                               {
+                                   "path":  "tests/test_ticket_summary.py",
+                                   "sha256":  "526069db46ad2f664f1c63647b5d7783cdd6fc3cc3707369e13180359b53240a"
+                               }
+                           ],
+    "hash_algorithm":  "SHA256 over file bytes at final local verification",
+    "candidate_fixture_hash":  "6d4027efdcda183fe22bbd65701bf7942e39b678feef3dd978f7638db86b6440",
+    "fixture_hash_recipe":  "SHA256 UTF-8 of sorted path:sha256 lines joined with LF, no trailing newline; tests/test_followup_draft.py,test_history_view.py,test_policy_context.py,test_policy_model_access.py,test_rule_guards.py",
+    "initial_assessment_sha256":  "a86cc3302429b74d809729fce9155c3ac6df96d3017428d9c68e17223c72fe64",
+    "execution_evidence":  [
+                               "docs/policy-response/runs/2026-09-21-local/final-python/command.json",
+                               "docs/policy-response/runs/2026-09-21-local/final-python/junit.xml",
+                               "docs/policy-response/runs/2026-09-21-local/frontend/commands.json",
+                               "docs/policy-response/runs/2026-09-21-local/lint.txt",
+                               "docs/policy-response/runs/2026-09-21-local/diff-check.txt"
+                           ],
+    "committed":  false,
+    "staged_files":  [
+
+                     ],
+    "live_model":  "NOT_RUN",
+    "migration_added":  false,
+    "production_actions":  "NOT_RUN",
+    "browser_visual_qa":  "NOT_RUN"
+}

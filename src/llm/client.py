@@ -119,6 +119,8 @@ class LLMClient:
         max_tokens: int = 2000,
         tier: str = "flash",
         stage: str | None = None,
+        policy_snapshot=None,
+        thinking_budget: int | None = None,
     ) -> str | T:
         """Render a prompt and call Gemini.
 
@@ -134,8 +136,15 @@ class LLMClient:
         「필요한 곳에만 준다」가 기본값이라, 새 호출자가 아무것도 안 해도 안 실립니다.
         """
         model = settings.gemini_model_for.get(tier, settings.GEMINI_MODEL)
-        thinking_budget = _THINKING_BUDGET_BY_TIER.get(tier, 0)
-        system = get_company_rules(stage) if stage is not None else ""
+        if thinking_budget is None:
+            thinking_budget = _THINKING_BUDGET_BY_TIER.get(tier, 0)
+        if policy_snapshot is not None:
+            if stage != policy_snapshot.stage:
+                raise ValueError("Policy snapshot and reply stage differ")
+            policy_snapshot.assert_current()
+            system = policy_snapshot.rules
+        else:
+            system = get_company_rules(stage) if stage is not None else ""
         prompt = load_prompt(prompt_name, variables, include_rules=False)
 
         if schema is not None:
@@ -155,7 +164,10 @@ class LLMClient:
         try:
             return schema.model_validate_json(_strip_code_fences(text))
         except ValidationError as first_err:
-            logger.warning("LLM JSON parse failed once, retrying. err=%s", first_err)
+            # ValidationError contains raw model output (possibly customer/policy data).
+            logger.warning("LLM JSON parse failed once; retrying (%d errors).", first_err.error_count())
+            if policy_snapshot is not None:
+                policy_snapshot.assert_current()
             retry_prompt = (
                 prompt
                 + "\n\nYour previous response was not valid JSON matching the schema."
@@ -170,8 +182,8 @@ class LLMClient:
             )
             try:
                 return schema.model_validate_json(_strip_code_fences(text))
-            except ValidationError as second_err:
-                raise LLMError(f"LLM returned invalid JSON twice: {second_err}") from second_err
+            except ValidationError:
+                raise LLMError("LLM returned invalid JSON twice") from None
 
     def search(
         self,

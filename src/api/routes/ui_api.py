@@ -752,7 +752,7 @@ def ui_customer_detail(contact_id: int):
                 "created_at": item["conversation"].created_at,
                 "last_incoming_at": item["conversation"].last_incoming_at,
                 "last_outgoing_at": item["conversation"].last_outgoing_at,
-                "summary": item["conversation"].summary,
+                "records": item["records"],
                 "messages": [
                     {
                         "id": message.id,
@@ -1585,11 +1585,7 @@ def ui_won_customer(client_id: int):
             }
             for item in comms
         ]
-        # **티켓 화면의 「이전 히스토리」와 같은 값, 같은 모양** (2026-09-15 운영자 지시:
-        # 「티켓에서의 이전 히스토리처럼 묶어서」). 계약 전 이야기는 접점 기록 한 줄씩이
-        # 아니라 **티켓마다 요약 한 문단**이다 — 그 화면이 이미 그렇게 그리고, 같은 사람의
-        # 같은 이야기를 두 화면이 다르게 그리면 어느 쪽이 맞는지 화면만 봐서는 모른다.
-        # 지워진 티켓(제목으로 묶음)과 「티켓 외 n건」도 그 함수가 같이 준다.
+        # Actual ticket records share the same reader and UI as lead history.
         payload["history"] = _won_history(session, client.contact_id)
     return payload
 
@@ -1599,6 +1595,7 @@ def _won_history(session, contact_id: int | None) -> dict:
 
     from .customer_ops import PIPELINE_STAGES
     from .messages import _customer_history
+    from ...db.history_view import ticket_records
 
     if not contact_id:
         return {"tickets": [], "past_tickets": [], "loose_count": 0, "stage_labels": {}}
@@ -1612,8 +1609,9 @@ def _won_history(session, contact_id: int | None) -> dict:
         .all()
     )
     extra = _customer_history(session, contact_id)
+    records = ticket_records(session, contact_id, [conv.id for conv in tickets])
     # **티켓도 계약도 아닌 기록은 줄로 준다.** 티켓 화면은 「티켓 외 n건」으로 세기만 하는데
-    # (그 화면에서 필요한 건 요약이라), 여기는 「+ 추가하기」로 그런 기록을 **적는 자리**라
+    # 여기는 「+ 추가하기」로 그런 기록을 **적는 자리**라
     # 방금 적은 것이 숫자 하나로 사라지면 안 된다. 계약에 묶인 것은 아래 계약 묶음이 그린다.
     from ...agents.hubspot_reconcile import PAST_TICKET_HANDLER
     from ...db.models import CustomerInteraction
@@ -1641,8 +1639,7 @@ def _won_history(session, contact_id: int | None) -> dict:
                 "subject": conv.inquiry_subject,
                 "stage": conv.stage,
                 "created_at": conv.created_at,
-                # 티켓 화면과 같은 순서 — 사건마다 쌓인 요약이 먼저, 접수 때 뽑은 요청은 폴백.
-                "summary": conv.summary or conv.customer_requests,
+                "records": records.get(conv.id, []),
             }
             for conv in tickets
         ],

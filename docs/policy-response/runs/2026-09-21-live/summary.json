@@ -1,0 +1,155 @@
+{
+  "review_method": "Single implementing agent; non-blind manual review of all 112 outputs against predeclared synthetic requirements and policy text. Development data, not holdout. PASS requires no observed material unsupported claim and required answers; ambiguity is REVIEW_REQUIRED; blocked generation is FAIL. Critical means fabricated operational/time/fact/condition/authority decision. No population accuracy or independent adjudication claimed.",
+  "runs": {
+    "baseline": {
+      "manifest": {
+        "data_origin": "SYNTHETIC_DEVELOPMENT_CASES_NOT_COMPANY_POLICY",
+        "dataset_sha256": "9d31b9af6d8d768467fb5bc2d03d2b0da949d195870f42b1559fff5347949bfe",
+        "policy_sha256": "9a86a63749679d2367106c538cb6d5a2c5d67a1e2b3e4d30a0e5105de855a3b7",
+        "models": {
+          "flash": "gemini-2.5-flash",
+          "pro": "gemini-2.5-pro"
+        },
+        "api_surface": "vertex-ai",
+        "repeats": 2,
+        "arms": [
+          "router",
+          "all"
+        ],
+        "max_calls": 180,
+        "production_writes": false,
+        "customer_send": false,
+        "source": "synthetic local fixture",
+        "authorization": "User explicitly authorized live evaluation in follow-up request",
+        "actual_calls": 144,
+        "completed_runs": 56,
+        "generation_errors": 0
+      },
+      "metrics": {
+        "router": {
+          "attempted": 28,
+          "generated": 28,
+          "valid_answers": 20,
+          "failed_answers": 7,
+          "review_required": 1,
+          "critical_error_outputs": 5,
+          "generation_repaired": 0,
+          "actual_provider_calls": 86,
+          "input_tokens": 66871,
+          "candidate_output_tokens": 6040,
+          "thinking_tokens": null,
+          "billed_cost": null,
+          "p50_seconds": 4.835,
+          "p95_seconds_nearest_rank": 5.907
+        },
+        "all": {
+          "attempted": 28,
+          "generated": 28,
+          "valid_answers": 16,
+          "failed_answers": 11,
+          "review_required": 1,
+          "critical_error_outputs": 8,
+          "generation_repaired": 0,
+          "actual_provider_calls": 58,
+          "input_tokens": 57858,
+          "candidate_output_tokens": 4874,
+          "thinking_tokens": null,
+          "billed_cost": null,
+          "p50_seconds": 3.984,
+          "p95_seconds_nearest_rank": 4.828
+        }
+      },
+      "results_sha256": "72941cce7ae4ff1d07649b38ed344ee8c74df61a0bf5470b2ffa5c528ba43ada"
+    },
+    "candidate": {
+      "manifest": {
+        "data_origin": "SYNTHETIC_DEVELOPMENT_CASES_NOT_COMPANY_POLICY",
+        "dataset_sha256": "9d31b9af6d8d768467fb5bc2d03d2b0da949d195870f42b1559fff5347949bfe",
+        "policy_sha256": "9a86a63749679d2367106c538cb6d5a2c5d67a1e2b3e4d30a0e5105de855a3b7",
+        "models": {
+          "flash": "gemini-2.5-flash",
+          "pro": "gemini-2.5-pro"
+        },
+        "api_surface": "vertex-ai",
+        "repeats": 2,
+        "arms": [
+          "router",
+          "all"
+        ],
+        "max_calls": 220,
+        "production_writes": false,
+        "customer_send": false,
+        "source": "synthetic local fixture",
+        "authorization": "User explicitly authorized live evaluation in follow-up request",
+        "runtime_sha256": {
+          "src/agents/inbound.py": "84e4ab0b651223bd16b1ba29b19b52271cd26b220ecb549dd6edf1dbe300ea43",
+          "src/agents/draft_evidence.py": "fbac3a6a9c8078d30c2e5fe175c561f6fca446e4776e09ff602dd50339433e45",
+          "src/llm/policy_context.py": "d4fe77a401b31b58207efc9ef594996f3d1e8637a866297fe93c1f25db5ff1f0",
+          "src/llm/knowledge.py": "fd3e4a0291d96a4bbccc78451dd445a9ae463148e587c4134f155260edcd5700",
+          "src/llm/client.py": "063f8f2e81792242abdecb3dfbfa8510427760ad8e708801ccd254a25f3ab14d",
+          "src/llm/providers/gemini_vertex.py": "8e210e9bf72a0dc5849f1e4b866c5dfc77a1259baa194be924f8ec7236363e7a",
+          "src/llm/prompts/inbound/draft_reply.md": "7206405695f4b34da588c4216a42620873cec931a11dfe13fb78abb61a226e0f",
+          "scripts/evaluate_policy_response.py": "86427cd204ebbe15767fdc90061f8a406cb461fb28470e9cc74f2a0132bc3444"
+        },
+        "command": [
+          "C:\\Users\\EST-INFRA\\Desktop\\sales-automation\\.venv\\Scripts\\python.exe",
+          "scripts/evaluate_policy_response.py",
+          "--live",
+          "--dataset",
+          "tests/fixtures/policy_response_live.json",
+          "--arms",
+          "router",
+          "all",
+          "--repeats",
+          "2",
+          "--max-calls",
+          "220",
+          "--output",
+          "tmp/policy-eval-2026-09-21/candidate"
+        ],
+        "draft_thinking_budget_override": null,
+        "region": "global",
+        "actual_calls": 157,
+        "completed_runs": 56,
+        "generation_errors": 6
+      },
+      "metrics": {
+        "router": {
+          "attempted": 28,
+          "generated": 24,
+          "valid_answers": 20,
+          "failed_answers": 6,
+          "review_required": 2,
+          "critical_error_outputs": 2,
+          "generation_repaired": 2,
+          "actual_provider_calls": 92,
+          "input_tokens": 86443,
+          "candidate_output_tokens": 11896,
+          "thinking_tokens": null,
+          "billed_cost": null,
+          "p50_seconds": 6.094,
+          "p95_seconds_nearest_rank": 11.546
+        },
+        "all": {
+          "attempted": 28,
+          "generated": 26,
+          "valid_answers": 23,
+          "failed_answers": 4,
+          "review_required": 1,
+          "critical_error_outputs": 2,
+          "generation_repaired": 4,
+          "actual_provider_calls": 65,
+          "input_tokens": 82230,
+          "candidate_output_tokens": 10891,
+          "thinking_tokens": null,
+          "billed_cost": null,
+          "p50_seconds": 5.196,
+          "p95_seconds_nearest_rank": 11.406
+        }
+      },
+      "results_sha256": "f4256b3e25b913f6387cc96d2c71f3bc815adf1a85855dedf12d898f02d433d4"
+    }
+  },
+  "development_only": true,
+  "review_sha256": "dfcb11eb448798d9ed3f4e27c049fa7027f76715c278fb2ae38d7e9e1a01083e"
+}

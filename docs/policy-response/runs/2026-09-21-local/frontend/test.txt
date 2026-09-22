@@ -1,0 +1,13 @@
+
+> test
+> vitest run
+
+
+ RUN  v4.1.10 C:/Users/EST-INFRA/Desktop/sales-automation/frontend
+
+
+ Test Files  9 passed (9)
+      Tests  66 passed (66)
+   Start at  17:04:23
+   Duration  1.27s (transform 665ms, setup 0ms, import 1.43s, tests 278ms, environment 2ms)
+

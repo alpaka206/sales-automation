@@ -834,9 +834,12 @@ def _customer_context(contact_id: int) -> dict | None:
         for row in progress_rows:
             progress_by_conversation.setdefault(row.conversation_id, []).append(row)
 
+        from ...db.history_view import ticket_records
+        records = ticket_records(session, contact_id, conv_ids)
         tickets = [
             {
                 "conversation": conversation,
+                "records": records.get(conversation.id, []),
                 # 오래된 것부터. 티켓 안에서는 대화 순서가 곧 읽는 순서입니다 — 목록 전체는
                 # 최신 티켓이 위지만, 한 티켓 안에서 답장이 문의보다 위에 있으면 안 됩니다.
                 "messages": sorted(

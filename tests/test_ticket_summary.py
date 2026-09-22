@@ -137,7 +137,7 @@ def test_the_ticket_screen_does_not_say_the_same_thing_twice():
     route = pathlib.Path("src/api/routes/messages.py").read_text(encoding="utf-8")
     assert '"summary": conv.summary' not in route
     inbound = pathlib.Path("src/agents/inbound.py").read_text(encoding="utf-8")
-    assert "기존 대화 요약" in inbound
+    assert "파생 대화 요약·원문 우선" in inbound
 
 
 def test_a_record_row_prints_korean_time():
@@ -325,13 +325,8 @@ def test_a_contact_level_record_leaves_every_summary_alone(log_db_for_summary):
         assert not (session.get(Conv, ids["conv"]).summary or "")
 
 
-def test_the_lead_history_card_draws_summaries_not_rows():
-    """티켓 화면의 「리드 히스토리」는 **요약 문단**이지 기록 줄 목록이 아닙니다.
-
-    운영자 지시(2026-09-04): 「티켓별로 요약본만 보여지면 좋겠다 … 세부 이메일 내용 아예 x」.
-    되돌아가면 화면에 `InteractionItem` 목록이 다시 서고, 그건 답을 쓰는 자리에 메일함을
-    하나 더 세우는 일입니다.
-    """
+def test_previous_history_uses_shared_record_boxes():
+    """2026-09-21 사용자 변경: 이전 요약 제거, 실제 기록을 테두리로 구분."""
     import pathlib
 
     screen = pathlib.Path("frontend/src/screens/MessageDetail.tsx").read_text(
@@ -339,8 +334,8 @@ def test_the_lead_history_card_draws_summaries_not_rows():
     )
     card = screen[screen.index('<div className="section-header__title">이전 히스토리</div>'):]
     card = card[: card.index("  return (")]
-    assert "other.summary" in card, "티켓마다 요약 문단을 그려야 합니다"
-    assert "InteractionItem" not in card, "이전 히스토리에 기록 줄이 서면 안 됩니다"
+    assert "other.summary" not in card
+    assert "records={other.records}" in card
     # 「티켓 외 n건」 · 「전체보기」 · 눈에 띄는 빈 상태.
     assert "loose_count" in card and "전체보기" in card
     assert "이전 히스토리가 존재하지 않습니다." in card
@@ -348,11 +343,11 @@ def test_the_lead_history_card_draws_summaries_not_rows():
     # 지금 보고 있는 티켓은 안 들어갑니다 — 그 요약은 왼쪽 「이 티켓의 기록」과 같은 글자입니다.
     assert "data.other_tickets.map" in card
     # **한 문의가 한 상자**이고, 누르면 그 티켓으로 갑니다 (2026-09-04 운영자 지시).
-    assert card.count("history-box") == 2, "살아 있는 티켓과 지난 티켓 둘 다 상자입니다"
-    assert "to={`/tickets/${other.conversation_id}`}" in card
+    assert card.count("<TicketHistoryBox") == 2
+    assert "href={`/tickets/${other.conversation_id}`}" in card
     # 지난 티켓은 눌러 갈 티켓이 없어 고객 상세로 갑니다. 칩 대신 `›` 가 섭니다.
     assert "지난 티켓" in card and 'className="tag">지난 티켓' not in card
-    assert card.count('name="chevron" size={15}') == 2
+    assert "records={past.records}" in card
 
 
 def test_the_bold_empty_state_has_a_rule_of_its_own():

@@ -82,6 +82,24 @@ def test_worker_retries_when_contact_is_not_associated_yet(mock_hubspot_cls) -> 
 
 @patch("src.agents.inbound.InboundAgent")
 @patch("src.integrations.hubspot.HubSpotClient")
+def test_exhausted_evidence_repair_is_not_sampled_again_by_the_queue(mock_hubspot_cls, mock_agent_cls):
+    from src.agents.draft_evidence import DraftEvidenceError
+
+    enqueue_inbound_ticket("evidence-failed", source="webhook")
+    mock_hubspot_cls.return_value.get_ticket_primary_contact_sync.return_value = "fixture-contact"
+    mock_agent_cls.return_value.handle.side_effect = DraftEvidenceError("unsupported_duration")
+    assert process_one_inbound_job()
+    with SessionLocal() as session:
+        job = session.query(InboundJob).one()
+        assert job.status == "dead"
+        assert job.attempts == 1
+        assert job.locked_by is None
+        assert "DraftEvidenceError" in job.last_error
+    assert not process_one_inbound_job()
+
+
+@patch("src.agents.inbound.InboundAgent")
+@patch("src.integrations.hubspot.HubSpotClient")
 def test_worker_retries_until_ticket_body_is_available(mock_hubspot_cls, mock_agent_cls) -> None:
     enqueue_inbound_ticket("T-3-body", source="webhook")
     mock_hubspot_cls.return_value.get_ticket_primary_contact_sync.return_value = "C-3"

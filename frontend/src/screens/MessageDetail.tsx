@@ -1,3 +1,4 @@
+import { TicketHistoryBox, type HistoryRecord } from "../ui/TicketHistoryBox";
 import { useLayoutEffect, useState, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "react-router-dom";
@@ -47,9 +48,7 @@ type Detail = {
   other_tickets: {
     conversation_id: number; ticket_id: string | null; subject: string | null;
     stage: string; created_at: string;
-    /** 그 티켓에 오간 것마다 쌓인 요약(`conversations.summary`). 접수만 되고 아무 일도
-     *  없었던 티켓에서는 접수 때 뽑은 `customer_requests` 로 떨어집니다. */
-    summary: string | null;
+    records: HistoryRecord[];
   }[];
   won: {
     client_id: number; company: string; plan_status: string; department: string | null;
@@ -100,7 +99,7 @@ type Detail = {
     profile: Record<string, unknown> | null;
     /** 티켓에서 나왔는데 그 티켓이 지워진 기록 — 제목으로 다시 묶은 것. 살아 있는
      *  티켓과 같은 모양(제목 + 요약)으로 섭니다. */
-    past_tickets: { subject: string; summary: string | null; count: number; last_at: string | null }[];
+    past_tickets: { subject: string; records: HistoryRecord[]; count: number; last_at: string | null }[];
     /** **진짜 티켓이 없던** 접점의 개수 — 허브스팟 딜·노트, 고객 단위 메모, 수주 기록. */
     loose_count: number;
   } | null;
@@ -385,12 +384,7 @@ export function MessageDetail() {
   const visibleBubbles = afterNew
     ? data.thread.filter((b) => b.is_current && showEditor)
     : data.thread;
-  // **이 티켓의 접점 기록은 여기 섭니다** (2026-09-04 운영자 지시: 「둘을 기존처럼 따로」).
-  //
-  // 하루 동안 반대로 돌려 봤습니다 — 이 목록에서 빼고 「리드 히스토리」가 티켓별로 묶어
-  // 전부 보여 주게. 그건 답을 쓰는 화면에 메일함을 하나 더 세우는 일이었습니다. 지금은
-  // 둘이 **세는 것 자체가 다릅니다**: 여기는 이 티켓에서 실제로 오간 것(메일 · 접점 기록 ·
-  // 진행 기록), 「리드 히스토리」는 **다른 티켓들의 요약 한 문단씩**.
+  // 현재 티켓의 기록과 이전 티켓의 기록은 별도 목록입니다.
   const ticketLog = [
     ...data.ticket_interactions.map((item, index) => ({
       key: `i${item.id ?? index}`,
@@ -570,19 +564,7 @@ export function MessageDetail() {
   // New 에서는 오른쪽 — 그때 본론은 초안이고 이건 그것을 쓰기 위한 참고입니다. New 를
   // 지나면 본론이 「이 사람과 무슨 이야기가 오갔나」로 바뀌므로 「이 티켓의 기록」 **아래**,
   // 본문 칼럼에 섭니다. 같은 것을 두 벌 적으면 한쪽만 고치는 날이 옵니다.
-  // **리드 히스토리 — 이전 티켓의 요약만** (2026-09-04 운영자 지시).
-  //        「세부 이메일 내용 아예 x」. 답을 쓰는 자리에서 필요한 것은 「이 사람과 전에
-  //        무슨 이야기가 있었나」 한 문단이지 그때 오간 메일의 본문이 아닙니다. 본문은
-  //        「전체보기」가 가는 고객 상세에 있고, 그 화면은 **같은 값을 같은 모양으로**
-  //        그립니다(`CustomerDetail` 의 `ticket.summary`).
-  //
-  //        **지금 보고 있는 티켓은 안 넣습니다.** 그 요약 불릿은 바로 왼쪽 「이 티켓의
-  //        기록」 각 줄의 둘째 줄과 **같은 문자열**이라(한 줄을 만들어 `messages.
-  //        summary_line` 과 `conversations.summary` 에 같이 씁니다), 넣으면 2026-08-25 에
-  //        지운 요약 카드가 그대로 부활합니다. 「**이전** 히스토리」라는 말도 그 뜻입니다.
-  //
-  //        머리글 오른쪽의 「전체보기」가 예전의 떠 있던 칩을 대신합니다 — 같은 곳으로
-  //        가는데, 카드 안에 있으면 「무엇의 전체인가」가 붙습니다.
+  // 이전 티켓은 실제 기록을 티켓별 테두리 안에 보여 줍니다.
   const leadHistoryCard = contact && (
       <div className="card">
         <div className="section-header" style={{ marginBottom: 12 }}>
@@ -608,63 +590,15 @@ export function MessageDetail() {
           </div>
         ) : (
           <div className="stack" style={{ gap: 12 }}>
-            {/* **한 문의가 한 상자입니다** (2026-09-04 운영자 지시: 「티켓 있으면 테두리
-                한번 치도록」). 요약을 자르지 않기로 하면서 줄이 여러 줄이 됐고, 테두리가
-                없으면 어디까지가 한 티켓 이야기인지 안 보입니다.
-
-                **눌러서 그 티켓으로 갑니다.** 오른쪽 `›` 가 그것을 미리 말합니다 — 상자가
-                통째로 링크라 어디를 눌러도 됩니다. */}
             {data.other_tickets.map((other) => (
-              <Link key={other.conversation_id} className="link--plain history-box"
-                    to={`/tickets/${other.conversation_id}`}>
-                <div className="row-between" style={{ gap: 8 }}>
-                  <strong className="t-sm">{other.subject || "제목 없는 문의"}</strong>
-                  <span className="row" style={{ gap: 6 }}>
-                    <span className="tag">{data.stage_labels[other.stage] ?? other.stage}</span>
-                    <Icon name="chevron" size={15} />
-                  </span>
-                </div>
-                <div className="t-xs t-subtle">
-                  {kst(other.created_at)}{other.ticket_id ? ` · #${other.ticket_id}` : ""}
-                </div>
-                {/* **자르지 않습니다** (2026-09-04 운영자 지시: 「전부 보여줌」).
-                    오간 것마다 한 줄씩 쌓인 값이라 오래된 티켓은 길어질 수 있는데,
-                    그게 그 티켓의 이야기 전부입니다. */}
-                {other.summary && (
-                  <div className="t-sm" style={{ marginTop: 4, whiteSpace: "pre-line" }}>
-                    {other.summary}
-                  </div>
-                )}
-              </Link>
+              <TicketHistoryBox key={other.conversation_id} subject={other.subject}
+                at={other.created_at} ticketId={other.ticket_id}
+                stage={data.stage_labels[other.stage] ?? other.stage}
+                href={`/tickets/${other.conversation_id}`} records={other.records} />
             ))}
-            {/* **지워진 티켓도 그 티켓끼리 섭니다** (2026-09-04 운영자 지시).
-                허브스팟에서 티켓을 지우면 그 메일이 연락처 기록으로 옮겨지는데, 한
-                덩어리로 쓸어 담으면 한 문의였던 메일 세 통이 출처 없는 세 건이 됩니다.
-                티켓 행이 없어 묶는 열쇠는 제목이고, 그래서 눌러 갈 곳도 없습니다 —
-                내용은 「전체보기」에 있습니다. 모양은 살아 있는 티켓과 같습니다. */}
             {data.customer?.past_tickets?.map((past) => (
-              /* **눌러 갈 티켓이 없습니다** — 그 대화 행은 지워졌습니다. 그래서 여기서는
-                 「자세히 보기」가 고객 상세로 갑니다. 그 메일들이 실제로 사는 자리이고,
-                 머리글의 「전체보기」와 같은 곳입니다.
-
-                 「지난 티켓」 칩은 뗐습니다(2026-09-04 운영자 지시) — 그 사실은 아래
-                 메타 줄이 적습니다. 오른쪽 자리는 **어디로 갈 수 있는지**를 말하는 데
-                 씁니다. */
-              <Link key={past.subject} className="link--plain history-box"
-                    to={`/customers/${contact.id}`}>
-                <div className="row-between" style={{ gap: 8 }}>
-                  <strong className="t-sm">{past.subject}</strong>
-                  <Icon name="chevron" size={15} />
-                </div>
-                <div className="t-xs t-subtle">
-                  {past.last_at ? kst(past.last_at) : ""} · {past.count}건 · 지난 티켓
-                </div>
-                {past.summary && (
-                  <div className="t-sm" style={{ marginTop: 4, whiteSpace: "pre-line" }}>
-                    {past.summary}
-                  </div>
-                )}
-              </Link>
+              <TicketHistoryBox key={past.subject} subject={past.subject} at={past.last_at}
+                stage="지난 티켓" records={past.records} />
             ))}
             {/* **진짜 티켓이 없던 것만** 여기 셉니다 — 허브스팟 딜·노트, 손으로 적은
                 고객 단위 메모, 수주 화면에서 적은 소통 기록. 줄로 설 자리는 없지만

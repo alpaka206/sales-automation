@@ -1,0 +1,50 @@
+{
+  "data_origin": "SYNTHETIC_DEVELOPMENT_CASES_NOT_COMPANY_POLICY",
+  "dataset_sha256": "9d31b9af6d8d768467fb5bc2d03d2b0da949d195870f42b1559fff5347949bfe",
+  "policy_sha256": "9a86a63749679d2367106c538cb6d5a2c5d67a1e2b3e4d30a0e5105de855a3b7",
+  "models": {
+    "flash": "gemini-2.5-flash",
+    "pro": "gemini-2.5-pro"
+  },
+  "api_surface": "vertex-ai",
+  "repeats": 1,
+  "arms": [
+    "router",
+    "all"
+  ],
+  "max_calls": 20,
+  "production_writes": false,
+  "customer_send": false,
+  "source": "synthetic local fixture",
+  "authorization": "User explicitly authorized live evaluation in follow-up request",
+  "runtime_sha256": {
+    "src/agents/inbound.py": "84e4ab0b651223bd16b1ba29b19b52271cd26b220ecb549dd6edf1dbe300ea43",
+    "src/agents/draft_evidence.py": "fbac3a6a9c8078d30c2e5fe175c561f6fca446e4776e09ff602dd50339433e45",
+    "src/llm/policy_context.py": "d4fe77a401b31b58207efc9ef594996f3d1e8637a866297fe93c1f25db5ff1f0",
+    "src/llm/knowledge.py": "fd3e4a0291d96a4bbccc78451dd445a9ae463148e587c4134f155260edcd5700",
+    "src/llm/prompts/inbound/draft_reply.md": "7206405695f4b34da588c4216a42620873cec931a11dfe13fb78abb61a226e0f",
+    "scripts/evaluate_policy_response.py": "7926cf64cb343215fb14616d511ea8740cc61aeb2dc4587107a245646a7b2b11"
+  },
+  "command": [
+    "C:\\Users\\EST-INFRA\\Desktop\\sales-automation\\.venv\\Scripts\\python.exe",
+    "scripts/evaluate_policy_response.py",
+    "--live",
+    "--dataset",
+    "tests/fixtures/policy_response_live.json",
+    "--case",
+    "S02",
+    "--arms",
+    "router",
+    "all",
+    "--repeats",
+    "1",
+    "--max-calls",
+    "20",
+    "--output",
+    "tmp/policy-eval-2026-09-21/followup-smoke"
+  ],
+  "draft_thinking_budget_override": null,
+  "actual_calls": 6,
+  "completed_runs": 2,
+  "generation_errors": 0
+}

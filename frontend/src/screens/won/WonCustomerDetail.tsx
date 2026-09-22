@@ -1,3 +1,4 @@
+import { TicketHistoryBox } from "../../ui/TicketHistoryBox";
 import { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
@@ -342,17 +343,7 @@ export function WonCustomerDetail() {
   );
 }
 
-/** 이전 히스토리 — **티켓 화면의 「이전 히스토리」와 같은 모양** (2026-09-15 운영자 지시).
- *
- *  계약 전의 이야기는 티켓마다 한 상자(제목 · 단계 · 요약 한 문단)이고 누르면 그 티켓으로
- *  갑니다. 지워진 티켓은 제목으로 묶여 같은 모양으로 서고, 티켓이 없던 기록은 「티켓 외
- *  n건」으로 셉니다 — 전부 `MessageDetail` 의 카드와 같은 값·같은 규칙입니다. 머리 오른쪽
- *  「전체보기」는 이 고객의 리드 히스토리로 갑니다.
- *
- *  **계약 단위 묶음** (1차·2차 …)이 위입니다 — 지금 진행 중인 이야기가 먼저. 계약이 생긴 뒤의
- *  소통은 여기 적고, 묶음마다
- *  「+ 소통 등록」이 그 계약을 고른 채로 폼을 엽니다. 빈 묶음도 그립니다 — 2차 계약에 아직
- *  기록이 없다는 것도 정보이고, 적을 자리가 있어야 합니다. */
+/** 실제 티켓 기록은 공통 컴포넌트로, 계약 소통은 계약별로 구분합니다. */
 function HistoryCard({ client, contracts, comms, history, onDone }: {
   client: Row; contracts: Contract[]; comms: Comm[]; history: History | undefined; onDone: () => void;
 }) {
@@ -435,30 +426,13 @@ function HistoryCard({ client, contracts, comms, history, onDone }: {
         ) : (
           <div className="stack" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
             {tickets.map((t) => (
-              <Link key={t.conversation_id} className="link--plain history-box" to={`/tickets/${t.conversation_id}`}>
-                <div className="row-between" style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
-                  <strong className="t-sm">{t.subject || "제목 없는 문의"}</strong>
-                  <span style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                    <span className="tag neutral">{history?.stage_labels[t.stage] ?? t.stage}</span>
-                    <span className="muted">›</span>
-                  </span>
-                </div>
-                <div className="muted" style={{ fontSize: 12 }}>
-                  {fmt(t.created_at?.slice(0, 10))}{t.ticket_id ? ` · #${t.ticket_id}` : ""}
-                </div>
-                {t.summary && <div style={{ marginTop: 4, fontSize: 13, whiteSpace: "pre-line" }}>{t.summary}</div>}
-              </Link>
+              <TicketHistoryBox key={t.conversation_id} subject={t.subject} at={t.created_at}
+                ticketId={t.ticket_id} stage={history?.stage_labels[t.stage] ?? t.stage}
+                href={`/tickets/${t.conversation_id}`} records={t.records} />
             ))}
             {past.map((t) => (
-              <Link key={t.subject} className="link--plain history-box" to={`/customers/${client.contact_id}`}>
-                <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
-                  <strong className="t-sm">{t.subject}</strong><span className="muted">›</span>
-                </div>
-                <div className="muted" style={{ fontSize: 12 }}>
-                  {t.last_at ? fmt(t.last_at.slice(0, 10)) : ""} · {t.count}건 · 지난 티켓
-                </div>
-                {t.summary && <div style={{ marginTop: 4, fontSize: 13, whiteSpace: "pre-line" }}>{t.summary}</div>}
-              </Link>
+              <TicketHistoryBox key={t.subject} subject={t.subject} at={t.last_at}
+                stage="지난 티켓" records={t.records} />
             ))}
             {loose.length > 0 && (
               <div>

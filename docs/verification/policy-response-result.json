@@ -1,0 +1,1808 @@
+{
+    "schema_version":  "1.0",
+    "work_id":  "policy-response-redesign",
+    "recorded_date":  "2026-09-21",
+    "baseline":  {
+                     "commit":  "95ec3d5c36d5eab58d7e03cfc469ea72f9332036",
+                     "initial_changes_present":  true,
+                     "policy_snapshot":  null,
+                     "dataset_snapshot":  null,
+                     "notes":  "No tracked changes initially; four user documents plus input packets untracked. Production policies not read. Initial assessment saved before specs."
+                 },
+    "implementation_status":  "PARTIAL",
+    "production_send_enabled_by_this_task":  false,
+    "commit_created":  false,
+    "production_migration_executed":  false,
+    "live_model_evaluation":  {
+                                  "status":  "PARTIAL",
+                                  "model_id":  [
+                                                   "gemini-2.5-flash",
+                                                   "gemini-2.5-pro"
+                                               ],
+                                  "api_surface":  "Vertex AI",
+                                  "region":  "global",
+                                  "authorized_budget":  "Explicit user follow-up authorized live evaluation without a requested monetary cap; per-run API call caps used.",
+                                  "reason":  "414 real provider calls / 148 synthetic development attempts. Current company policies unavailable: read-only DB timeout and authenticated GET 401. No customer data sent. Production correctness NOT_RUN.",
+                                  "current_company_policy_evaluation":  "NOT_RUN",
+                                  "provider_calls":  414,
+                                  "attempts":  148,
+                                  "input_tokens":  425050,
+                                  "candidate_output_tokens":  53972,
+                                  "thinking_tokens":  null,
+                                  "billed_cost":  null,
+                                  "latest_full_live_comparison":  "NOT_RUN after final negative-status guard and queue-terminal changes; final S14 smoke only",
+                                  "evidence_path":  "docs/policy-response/runs/2026-09-21-live/results.md"
+                              },
+    "requirements":  [
+                         {
+                             "id":  "I01",
+                             "code_refs":  [
+                                               "src/llm/policy_context.py",
+                                               "src/llm/knowledge.py",
+                                               "src/db/history_view.py"
+                                           ],
+                             "test_ids":  [
+                                              "tests/test_policy_context.py::test_snapshot_filters_before_input_and_keeps_original",
+                                              "tests/test_history_view.py::test_history_is_scoped_deduplicated_and_includes_real_records",
+                                              "tests/test_policy_context.py::test_router_logs_do_not_echo_model_reasoning_or_keys"
+                                          ],
+                             "remaining_risk":  "Single-install boundaries; not a full tenant/security/PII audit. Prompt injection semantics and all legacy logs remain unverified.",
+                             "applicability":  "APPLICABLE",
+                             "reason":  "Applies to policy-based HubSpot draft generation and review; implemented subset only.",
+                             "status":  "PARTIAL",
+                             "evidence_paths":  [
+                                                    "docs/policy-response/runs/2026-09-21-local/final-python/junit.xml",
+                                                    "docs/policy-response/runs/2026-09-21-live/final-python-complete/junit.xml"
+                                                ]
+                         },
+                         {
+                             "id":  "I02",
+                             "code_refs":  [
+                                               "src/llm/policy_context.py",
+                                               "src/agents/inbound.py",
+                                               "src/llm/client.py"
+                                           ],
+                             "test_ids":  [
+                                              "tests/test_policy_context.py::test_policy_mutation_invalidates_snapshot_even_without_version_bump",
+                                              "tests/test_policy_context.py::test_real_draft_path_uses_one_snapshot_and_persists_private_provenance"
+                                          ],
+                             "remaining_risk":  "No approved immutable policy release or owner-defined precedence. Hashes cannot reconstruct deleted sources or exact hosted outputs. Input/config trace is not a full rendered-prompt archive.",
+                             "applicability":  "APPLICABLE",
+                             "reason":  "Applies to policy-based HubSpot draft generation and review; implemented subset only.",
+                             "status":  "PARTIAL",
+                             "evidence_paths":  [
+                                                    "docs/policy-response/runs/2026-09-21-local/final-python/junit.xml",
+                                                    "docs/policy-response/runs/2026-09-21-live/final-python-complete/junit.xml"
+                                                ]
+                         },
+                         {
+                             "id":  "I03",
+                             "code_refs":  [
+                                               "src/llm/policy_context.py",
+                                               "src/llm/prompts/inbound/draft_reply.md"
+                                           ],
+                             "test_ids":  [
+                                              "tests/test_policy_context.py::test_snapshot_filters_before_input_and_keeps_original"
+                                          ],
+                             "remaining_risk":  "Synthetic historical-contract cases executed; candidate S05 still transfers a new-contract condition to an old contract. No deterministic effective-date or grandfathering decision. Real policy evaluation NOT_RUN.",
+                             "applicability":  "APPLICABLE",
+                             "reason":  "Applies to policy-based HubSpot draft generation and review; implemented subset only.",
+                             "status":  "PARTIAL",
+                             "evidence_paths":  [
+                                                    "docs/policy-response/runs/2026-09-21-local/final-python/junit.xml",
+                                                    "docs/policy-response/runs/2026-09-21-live/final-python-complete/junit.xml",
+                                                    "docs/policy-response/runs/2026-09-21-live/reviewed-synthetic-answers.json"
+                                                ]
+                         },
+                         {
+                             "id":  "I04",
+                             "code_refs":  [
+                                               "src/agents/inbound.py",
+                                               "src/llm/prompts/inbound/extract_requests.md"
+                                           ],
+                             "test_ids":  [
+                                              "tests/test_followup_draft.py::test_recent_correction_survives_a_long_derived_summary",
+                                              "tests/test_policy_context.py::test_first_reply_routes_the_latest_customer_correction",
+                                              "tests/test_policy_context.py::test_request_extraction_includes_synced_corrections_and_can_clear_withdrawn_requests"
+                                          ],
+                             "remaining_risk":  "No typed fact conflict resolver or verification timestamp per enriched CRM attribute. Bounded context truncation and derived extraction remain fallible.",
+                             "applicability":  "APPLICABLE",
+                             "reason":  "Applies to policy-based HubSpot draft generation and review; implemented subset only.",
+                             "status":  "PARTIAL",
+                             "evidence_paths":  [
+                                                    "docs/policy-response/runs/2026-09-21-local/final-python/junit.xml",
+                                                    "docs/policy-response/runs/2026-09-21-live/final-python-complete/junit.xml",
+                                                    "docs/policy-response/runs/2026-09-21-live/reviewed-synthetic-answers.json"
+                                                ]
+                         },
+                         {
+                             "id":  "I05",
+                             "code_refs":  [
+                                               "src/agents/inbound.py",
+                                               "src/agents/approval.py",
+                                               "src/llm/prompts/inbound/draft_reply.md",
+                                               "src/agents/draft_evidence.py"
+                                           ],
+                             "test_ids":  [
+                                              "tests/test_policy_context.py::test_real_draft_path_uses_one_snapshot_and_persists_private_provenance",
+                                              "tests/test_safe_mode.py::test_no_setting_can_make_a_detailed_reply_send_itself",
+                                              "tests/test_draft_evidence.py::test_claiming_an_unexecuted_action_is_detected"
+                                          ],
+                             "remaining_risk":  "Some unsupported positive and negative action statuses blocked; missing receipts mean UNKNOWN. Limited lexical checks are not semantic validation; unverified fact assertions remain.",
+                             "applicability":  "APPLICABLE",
+                             "reason":  "Applies to policy-based HubSpot draft generation and review; implemented subset only.",
+                             "status":  "PARTIAL",
+                             "evidence_paths":  [
+                                                    "docs/policy-response/runs/2026-09-21-local/final-python/junit.xml",
+                                                    "docs/policy-response/runs/2026-09-21-live/final-python-complete/junit.xml",
+                                                    "docs/policy-response/runs/2026-09-21-live/reviewed-synthetic-answers.json"
+                                                ]
+                         },
+                         {
+                             "id":  "I06",
+                             "code_refs":  [
+                                               "src/agents/inbound.py",
+                                               "src/llm/knowledge.py",
+                                               "src/llm/prompts/inbound/draft_reply.md",
+                                               "src/agents/draft_evidence.py"
+                                           ],
+                             "test_ids":  [
+                                              "tests/test_followup_draft.py::test_the_two_branches_reach_the_prompt",
+                                              "tests/test_policy_context.py::test_first_reply_routes_the_latest_customer_correction",
+                                              "tests/test_draft_evidence.py::test_composition_cannot_drop_known_answer_when_internal_verification_is_needed"
+                                          ],
+                             "remaining_risk":  "Question-level AnswerPoint composition implemented but model-created questions/answers are fallible. 112 synthetic outputs manually reviewed; no independent holdout, full completeness validator, or measured human editing time.",
+                             "applicability":  "APPLICABLE",
+                             "reason":  "Applies to policy-based HubSpot draft generation and review; implemented subset only.",
+                             "status":  "PARTIAL",
+                             "evidence_paths":  [
+                                                    "docs/policy-response/runs/2026-09-21-local/final-python/junit.xml",
+                                                    "docs/policy-response/runs/2026-09-21-live/final-python-complete/junit.xml",
+                                                    "docs/policy-response/runs/2026-09-21-live/reviewed-synthetic-answers.json"
+                                                ]
+                         },
+                         {
+                             "id":  "I07",
+                             "code_refs":  [
+                                               "src/llm/client.py",
+                                               "src/agents/inbound.py",
+                                               "src/agents/draft_evidence.py"
+                                           ],
+                             "test_ids":  [
+                                              "tests/test_policy_context.py::test_schema_failure_does_not_copy_customer_text_to_error_logs",
+                                              "tests/test_policy_context.py::test_real_draft_path_uses_one_snapshot_and_persists_private_provenance",
+                                              "tests/test_draft_evidence.py::test_existing_id_or_valid_json_does_not_make_a_quote_valid",
+                                              "tests/test_policy_context.py::test_unsupported_duration_gets_one_repair_then_is_kept_out_of_pending"
+                                          ],
+                             "remaining_risk":  "Quote membership, novel numeric duration and limited execution status checks with one repair implemented. Exact quotes do not prove entailment/coverage/authority; semantic_validation remains NOT_RUN. Candidate comparison blocked 6/56; false-positive rate unadjudicated.",
+                             "applicability":  "APPLICABLE",
+                             "reason":  "Applies to policy-based HubSpot draft generation and review; implemented subset only.",
+                             "status":  "PARTIAL",
+                             "evidence_paths":  [
+                                                    "docs/policy-response/runs/2026-09-21-local/final-python/junit.xml",
+                                                    "docs/policy-response/runs/2026-09-21-live/final-python-complete/junit.xml",
+                                                    "docs/policy-response/runs/2026-09-21-live/reviewed-synthetic-answers.json"
+                                                ]
+                         },
+                         {
+                             "id":  "I08",
+                             "code_refs":  [
+                                               "src/agents/reply_safety.py",
+                                               "src/agents/approval.py",
+                                               "src/integrations/senders/__init__.py",
+                                               "src/agents/send_worker.py"
+                                           ],
+                             "test_ids":  [
+                                              "tests/test_policy_context.py::test_approved_content_recipient_and_status_changes_block_send",
+                                              "tests/test_policy_context.py::test_approved_draft_invalidated_by_new_evidence",
+                                              "tests/test_policy_context.py::test_correction_during_remote_lookup_blocks_the_actual_transport",
+                                              "tests/test_send_worker.py::test_unknown_delivery_outcome_is_quarantined_without_retry",
+                                              "tests/test_rule_guards.py::test_send_price_guard_uses_the_same_real_reply_history"
+                                          ],
+                             "remaining_risk":  "Legacy trace-free drafts, dynamic rendered signature/link/default sender settings and last-check-to-POST races remain. Local synchronized state only; no exactly-once or delivered/read guarantee.",
+                             "applicability":  "APPLICABLE",
+                             "reason":  "Applies to policy-based HubSpot draft generation and review; implemented subset only.",
+                             "status":  "PARTIAL",
+                             "evidence_paths":  [
+                                                    "docs/policy-response/runs/2026-09-21-local/final-python/junit.xml",
+                                                    "docs/policy-response/runs/2026-09-21-live/final-python-complete/junit.xml"
+                                                ]
+                         },
+                         {
+                             "id":  "I09",
+                             "code_refs":  [
+                                               "scripts/check_policy_response.py",
+                                               "src/llm/prompts.py",
+                                               "src/agents/inbound.py",
+                                               "src/integrations/senders/__init__.py",
+                                               "src/agents/inbound_worker.py"
+                                           ],
+                             "test_ids":  [
+                                              "tests/test_policy_model_access.py::test_rules_lookup_failure_is_not_an_empty_policy",
+                                              "tests/test_followup_draft.py::test_history_read_failure_is_not_an_empty_first_reply",
+                                              "tests/test_rule_guards.py::test_send_price_guard_read_failure_blocks_delivery",
+                                              "tests/test_safe_mode.py::test_direct_send_is_blocked_in_safe_mode",
+                                              "tests/test_inbound_worker.py::test_exhausted_evidence_repair_is_not_sampled_again_by_the_queue"
+                                          ],
+                             "remaining_risk":  "Exhausted evidence repair now terminates its durable job instead of repeated automatic resampling. Remaining semantic errors and draft blocks require review. Upstream canonical state, incomplete pagination, production behavior remain unverified.",
+                             "applicability":  "APPLICABLE",
+                             "reason":  "Applies to policy-based HubSpot draft generation and review; implemented subset only.",
+                             "status":  "PARTIAL",
+                             "evidence_paths":  [
+                                                    "docs/policy-response/runs/2026-09-21-local/final-python/junit.xml",
+                                                    "docs/policy-response/runs/2026-09-21-live/final-python-complete/junit.xml",
+                                                    "docs/policy-response/runs/2026-09-21-live/reviewed-synthetic-answers.json"
+                                                ]
+                         }
+                     ],
+    "changes":  [
+                    {
+                        "id":  "CH01",
+                        "classification":  "MUST_FIX",
+                        "files":  [
+                                      "src/agents/inbound.py",
+                                      "src/llm/prompts/inbound/extract_requests.md",
+                                      "src/integrations/senders/__init__.py"
+                                  ],
+                        "failure_mode":  "F01,F02,F03,F04,F08; latest corrections lost, test/reminder treated as answers, failed reads as empty context",
+                        "reason":  "Use one actual dialogue source, recent originals first; fail on failed mandatory reads, not customer denial.",
+                        "evidence_ids":  [
+                                             "E01",
+                                             "E02"
+                                         ],
+                        "rollback":  "Revert only these local edits; old failure modes return. No DB migration."
+                    },
+                    {
+                        "id":  "CH02",
+                        "classification":  "MUST_FIX",
+                        "files":  [
+                                      "src/llm/policy_context.py",
+                                      "src/llm/knowledge.py",
+                                      "src/llm/prompts.py",
+                                      "src/llm/client.py",
+                                      "src/agents/inbound.py"
+                                  ],
+                        "failure_mode":  "F04,F05,F09; mixed policy versions, false-empty rules, raw response logs",
+                        "reason":  "One authorized snapshot, server-owned provenance, count-only diagnostics.",
+                        "evidence_ids":  [
+                                             "E01",
+                                             "E02"
+                                         ],
+                        "rollback":  "Old code ignores new Event kinds; reverting removes freshness checks."
+                    },
+                    {
+                        "id":  "CH03",
+                        "classification":  "MUST_FIX",
+                        "files":  [
+                                      "src/agents/reply_safety.py",
+                                      "src/agents/approval.py",
+                                      "src/integrations/senders/__init__.py"
+                                  ],
+                        "failure_mode":  "F06; approved content or evidence changes before delivery",
+                        "reason":  "Bind reviewed fields and recheck local policy/dialogue immediately before dispatch.",
+                        "evidence_ids":  [
+                                             "E01",
+                                             "E02"
+                                         ],
+                        "rollback":  "No schema rollback. Pending reviewed drafts require owner review before any operational revert."
+                    },
+                    {
+                        "id":  "CH04",
+                        "classification":  "MUST_FIX",
+                        "files":  [
+                                      "src/db/history_view.py",
+                                      "src/api/routes/messages.py",
+                                      "src/api/routes/ui_api.py",
+                                      "src/api/routes/customer_ops.py",
+                                      "frontend/src/ui/TicketHistoryBox.tsx",
+                                      "frontend/src/screens/CustomerDetail.tsx",
+                                      "frontend/src/screens/MessageDetail.tsx",
+                                      "frontend/src/screens/won/WonCustomerDetail.tsx",
+                                      "frontend/src/screens/won/shared.ts",
+                                      "src/api/static/console.css"
+                                  ],
+                        "failure_mode":  "F07; prior tickets showed aggregate summaries and duplicate lead records",
+                        "reason":  "User requested actual records in bordered ticket groups; reuse one projection/component, remove duplicate summary-only blocks.",
+                        "evidence_ids":  [
+                                             "E01",
+                                             "E02"
+                                         ],
+                        "rollback":  "Revert API/UI together; DB summaries retained for other consumers."
+                    },
+                    {
+                        "id":  "CH05",
+                        "classification":  "KEEP",
+                        "files":  [
+                                      "src/agents/followup_sequence.py",
+                                      "src/agents/send_worker.py",
+                                      "src/common/safe_mode.py",
+                                      "src/llm/providers/gemini_vertex.py"
+                                  ],
+                        "failure_mode":  "Unneeded redesign risks existing reminder/queue/ambiguous-send behavior",
+                        "reason":  "Existing regression evidence supports keeping separate reminder templates, durable jobs, human review and current adapters.",
+                        "evidence_ids":  [
+                                             "E01",
+                                             "E02",
+                                             "E05"
+                                         ],
+                        "rollback":  "Not changed."
+                    },
+                    {
+                        "id":  "CH06",
+                        "classification":  "MEASURE_FIRST",
+                        "files":  [
+                                      "src/llm/knowledge.py",
+                                      "src/llm/providers/gemini_vertex.py"
+                                  ],
+                        "failure_mode":  "Potential missed exceptions and schema failures; prevalence unknown",
+                        "reason":  "Compare router vs whole authorized corpus, provider schema, successor model under approved data/budget before adoption.",
+                        "evidence_ids":  [
+                                             "E03",
+                                             "E06"
+                                         ],
+                        "rollback":  "No experimental production branch added."
+                    },
+                    {
+                        "id":  "CH07",
+                        "classification":  "DEFER",
+                        "files":  [
+
+                                  ],
+                        "failure_mode":  "Inferred policy semantics or excessive architecture without observed benefit",
+                        "reason":  "No vector DB, graph, rules compiler, new broker, or extra verifier LLM; authority/time inputs unconfirmed.",
+                        "evidence_ids":  [
+                                             "E01",
+                                             "E02"
+                                         ],
+                        "rollback":  "Nothing introduced."
+                    },
+                    {
+                        "id":  "LIVE_GROUNDED_COMPOSITION",
+                        "classification":  "MUST_FIX",
+                        "files":  [
+                                      "src/agents/draft_evidence.py",
+                                      "src/agents/inbound.py",
+                                      "src/agents/inbound_worker.py",
+                                      "src/llm/policy_context.py",
+                                      "src/llm/knowledge.py",
+                                      "src/llm/prompts/inbound/draft_reply.md",
+                                      "tests/test_draft_evidence.py",
+                                      "tests/test_policy_context.py",
+                                      "tests/test_inbound_worker.py"
+                                  ],
+                        "failure_mode":  "Invented deadlines/operation statuses; answer plan facts omitted from separately generated body; unknown completion inverted to false; queue repeats exhausted repair.",
+                        "reason":  "Observed real Vertex failures motivated deterministic composition and limited checks; preserve review and existing routing.",
+                        "evidence_ids":  [
+                                             "E07",
+                                             "E08",
+                                             "docs/policy-response/runs/2026-09-21-live/results.md"
+                                         ],
+                        "rollback":  "Revert grounded schema/composition/checks and queue terminal classification together; no DB migration. Existing trace fields ignorable."
+                    },
+                    {
+                        "id":  "LIVE_EVALUATION_ADAPTER",
+                        "classification":  "MEASURE_FIRST",
+                        "files":  [
+                                      "scripts/evaluate_policy_response.py",
+                                      "scripts/summarize_policy_evaluation.py",
+                                      "tests/fixtures/policy_response_live.json",
+                                      "src/llm/client.py",
+                                      "tests/test_llm_client.py"
+                                  ],
+                        "failure_mode":  "No reproducible paid-provider comparison or per-call reasoning experiment.",
+                        "reason":  "Read-only source export, isolated SQLite real generation, explicit call caps, same-model router/all comparison; truthful manual adjudications and output publication restricted to public fixture hashes.",
+                        "evidence_ids":  [
+                                             "E07",
+                                             "E08",
+                                             "E09"
+                                         ],
+                        "rollback":  "Remove evaluation-only tools and optional thinking-budget override; leave production defaults unchanged."
+                    }
+                ],
+    "commands":  [
+                     {
+                         "command":  ".\\.venv\\Scripts\\python.exe scripts/check_policy_response.py --result-dir docs/policy-response/runs/2026-09-21-local/baseline tests -q",
+                         "cwd":  "C:\\Users\\EST-INFRA\\Desktop\\sales-automation",
+                         "status":  "FAIL",
+                         "exit_code":  null,
+                         "result_path":  "docs/policy-response/runs/2026-09-21-local/baseline/pytest.txt",
+                         "notes":  "Interrupted harness; numeric loopback was erroneously blocked. Not a product regression."
+                     },
+                     {
+                         "command":  ".\\.venv\\Scripts\\python.exe scripts/check_policy_response.py --result-dir docs/policy-response/runs/2026-09-21-local/baseline-corrected tests -q",
+                         "cwd":  "C:\\Users\\EST-INFRA\\Desktop\\sales-automation",
+                         "status":  "PASS",
+                         "exit_code":  0,
+                         "result_path":  "docs/policy-response/runs/2026-09-21-local/baseline-corrected/command.json",
+                         "notes":  "1610 passed,43 skipped; command argv was mutated by an existing test. Actual command recorded here and in initial-assessment; pytest_args retained."
+                     },
+                     {
+                         "command":  ".\\.venv\\Scripts\\python.exe scripts/check_policy_response.py --result-dir docs/policy-response/runs/2026-09-21-local/reproduced tests/test_followup_draft.py tests/test_policy_model_access.py -q",
+                         "cwd":  "C:\\Users\\EST-INFRA\\Desktop\\sales-automation",
+                         "status":  "FAIL",
+                         "exit_code":  1,
+                         "result_path":  "docs/policy-response/runs/2026-09-21-local/reproduced/command.json",
+                         "notes":  "5 deliberately added regressions failed before implementation;17 passed."
+                     },
+                     {
+                         "command":  ".\\.venv\\Scripts\\python.exe scripts/check_policy_response.py --result-dir docs/policy-response/runs/2026-09-21-local/final-python tests -q -ra",
+                         "cwd":  "C:\\Users\\EST-INFRA\\Desktop\\sales-automation",
+                         "status":  "FAIL",
+                         "exit_code":  1,
+                         "result_path":  "docs/policy-response/runs/2026-09-21-local/full-before-review-fix/command.json",
+                         "notes":  "Intermediate run:1 stale label assertion failed;1645 passed,43 skipped. Results directory renamed after run."
+                     },
+                     {
+                         "command":  ".\\.venv\\Scripts\\python.exe scripts/check_policy_response.py --result-dir docs/policy-response/runs/2026-09-21-local/final-python tests -q -ra",
+                         "cwd":  "C:\\Users\\EST-INFRA\\Desktop\\sales-automation",
+                         "status":  "PASS",
+                         "exit_code":  0,
+                         "result_path":  "docs/policy-response/runs/2026-09-21-local/final-python/command.json",
+                         "notes":  "1655 passed,43 skipped,1 pre-existing warning; final source."
+                     },
+                     {
+                         "command":  ".\\.venv\\Scripts\\ruff.exe check --no-cache src tests scripts/check_policy_response.py",
+                         "cwd":  "C:\\Users\\EST-INFRA\\Desktop\\sales-automation",
+                         "status":  "PASS",
+                         "exit_code":  0,
+                         "result_path":  "docs/policy-response/runs/2026-09-21-local/lint.txt",
+                         "notes":  ""
+                     },
+                     {
+                         "command":  "npm.cmd test",
+                         "cwd":  "C:\\Users\\EST-INFRA\\Desktop\\sales-automation\\frontend",
+                         "status":  "PASS",
+                         "exit_code":  0,
+                         "result_path":  "docs/policy-response/runs/2026-09-21-local/frontend/test.txt",
+                         "notes":  "66 passed/9 files"
+                     },
+                     {
+                         "command":  "npm.cmd run build",
+                         "cwd":  "C:\\Users\\EST-INFRA\\Desktop\\sales-automation\\frontend",
+                         "status":  "PASS",
+                         "exit_code":  0,
+                         "result_path":  "docs/policy-response/runs/2026-09-21-local/frontend/build.txt",
+                         "notes":  "Includes tsc -b. Static CSS and \u003e500kB chunk warnings remain; PowerShell stderr formatting is not a nonzero exit."
+                     },
+                     {
+                         "command":  "Gemini paired evaluation",
+                         "cwd":  "C:\\Users\\EST-INFRA\\Desktop\\sales-automation",
+                         "status":  "NOT_RUN",
+                         "exit_code":  null,
+                         "result_path":  null,
+                         "notes":  "Historical initial local phase before follow-up user authorization; superseded by actual commands below."
+                     },
+                     {
+                         "command":  "Live HubSpot delivery / CRM writes / deployment / production migration",
+                         "cwd":  "C:\\Users\\EST-INFRA\\Desktop\\sales-automation",
+                         "status":  "NOT_RUN",
+                         "exit_code":  null,
+                         "result_path":  null,
+                         "notes":  "Outside local authorization."
+                     },
+                     {
+                         "command":  "Browser visual QA",
+                         "cwd":  "C:\\Users\\EST-INFRA\\Desktop\\sales-automation",
+                         "status":  "NOT_RUN",
+                         "exit_code":  null,
+                         "result_path":  null,
+                         "notes":  "SSR component rendering and build only."
+                     },
+                     {
+                         "command":  "git -c core.safecrlf=false diff --check",
+                         "cwd":  "C:\\Users\\EST-INFRA\\Desktop\\sales-automation",
+                         "status":  "PASS",
+                         "exit_code":  0,
+                         "result_path":  "docs/policy-response/runs/2026-09-21-local/diff-check.txt",
+                         "notes":  "No whitespace errors; line ending warnings only."
+                     },
+                     {
+                         "command":  "C:\\Users\\EST-INFRA\\Desktop\\sales-automation\\.venv\\Scripts\\python.exe scripts/check_policy_response.py --result-dir docs/policy-response/runs/2026-09-21-live/final-python tests -q -ra",
+                         "cwd":  "C:\\Users\\EST-INFRA\\Desktop\\sales-automation",
+                         "status":  "PASS",
+                         "exit_code":  0,
+                         "result_path":  "docs/policy-response/runs/2026-09-21-live/final-python/pytest.txt",
+                         "notes":  "1672 passed /43 skipped before adversarial follow-up"
+                     },
+                     {
+                         "command":  "C:\\Users\\EST-INFRA\\Desktop\\sales-automation\\.venv\\Scripts\\python.exe scripts/check_policy_response.py --result-dir docs/policy-response/runs/2026-09-21-live/final-python-after-review tests -q -ra",
+                         "cwd":  "C:\\Users\\EST-INFRA\\Desktop\\sales-automation",
+                         "status":  "FAIL",
+                         "exit_code":  1,
+                         "result_path":  "docs/policy-response/runs/2026-09-21-live/final-python-after-review/pytest.txt",
+                         "notes":  "1 failed /1674 passed: negative-status conjugation defect; corrected later"
+                     },
+                     {
+                         "command":  "C:\\Users\\EST-INFRA\\Desktop\\sales-automation\\.venv\\Scripts\\python.exe scripts/check_policy_response.py --result-dir docs/policy-response/runs/2026-09-21-live/final-python-verified tests -q -ra",
+                         "cwd":  "C:\\Users\\EST-INFRA\\Desktop\\sales-automation",
+                         "status":  "PASS",
+                         "exit_code":  0,
+                         "result_path":  "docs/policy-response/runs/2026-09-21-live/final-python-verified/pytest.txt",
+                         "notes":  "1675 passed /43 skipped before final phrase and queue regression"
+                     },
+                     {
+                         "command":  "C:\\Users\\EST-INFRA\\Desktop\\sales-automation\\.venv\\Scripts\\python.exe scripts/check_policy_response.py --result-dir docs/policy-response/runs/2026-09-21-live/final-python-complete tests -q -ra",
+                         "cwd":  "C:\\Users\\EST-INFRA\\Desktop\\sales-automation",
+                         "status":  "PASS",
+                         "exit_code":  0,
+                         "result_path":  "docs/policy-response/runs/2026-09-21-live/final-python-complete/pytest.txt",
+                         "notes":  "1678 passed /43 skipped /1 warning; latest product code"
+                     },
+                     {
+                         "command":  "scripts/evaluate_policy_response.py --live; exact early invocation described in results.md",
+                         "cwd":  "C:\\Users\\EST-INFRA\\Desktop\\sales-automation",
+                         "status":  "PASS",
+                         "exit_code":  0,
+                         "result_path":  "docs/policy-response/runs/2026-09-21-live/baseline/manifest.json",
+                         "notes":  "Completed 56 attempts; 0 failed generations; 144 real provider calls. Exit status is not semantic correctness."
+                     },
+                     {
+                         "command":  "C:\\Users\\EST-INFRA\\Desktop\\sales-automation\\.venv\\Scripts\\python.exe scripts/evaluate_policy_response.py --live --dataset tests/fixtures/policy_response_live.json --arms router all --repeats 2 --max-calls 220 --output tmp/policy-eval-2026-09-21/candidate",
+                         "cwd":  "C:\\Users\\EST-INFRA\\Desktop\\sales-automation",
+                         "status":  "FAIL",
+                         "exit_code":  1,
+                         "result_path":  "docs/policy-response/runs/2026-09-21-live/candidate/manifest.json",
+                         "notes":  "Completed 56 attempts; 6 failed generations; 157 real provider calls. Exit status is not semantic correctness."
+                     },
+                     {
+                         "command":  "C:\\Users\\EST-INFRA\\Desktop\\sales-automation\\.venv\\Scripts\\python.exe scripts/evaluate_policy_response.py --live --dataset tests/fixtures/policy_response_live.json --case S02 --case S06 --case S14 --arms router all --repeats 1 --max-calls 40 --output tmp/policy-eval-2026-09-21/candidate-smoke",
+                         "cwd":  "C:\\Users\\EST-INFRA\\Desktop\\sales-automation",
+                         "status":  "PASS",
+                         "exit_code":  0,
+                         "result_path":  "docs/policy-response/runs/2026-09-21-live/candidate-smoke/manifest.json",
+                         "notes":  "Completed 6 attempts; 0 failed generations; 17 real provider calls. Exit status is not semantic correctness."
+                     },
+                     {
+                         "command":  "C:\\Users\\EST-INFRA\\Desktop\\sales-automation\\.venv\\Scripts\\python.exe scripts/evaluate_policy_response.py --live --dataset tests/fixtures/policy_response_live.json --case S02 --case S06 --case S14 --arms router all --repeats 1 --max-calls 40 --output tmp/policy-eval-2026-09-21/composed-smoke",
+                         "cwd":  "C:\\Users\\EST-INFRA\\Desktop\\sales-automation",
+                         "status":  "FAIL",
+                         "exit_code":  1,
+                         "result_path":  "docs/policy-response/runs/2026-09-21-live/composed-smoke/manifest.json",
+                         "notes":  "Completed 6 attempts; 1 failed generations; 20 real provider calls. Exit status is not semantic correctness."
+                     },
+                     {
+                         "command":  "C:\\Users\\EST-INFRA\\Desktop\\sales-automation\\.venv\\Scripts\\python.exe scripts/evaluate_policy_response.py --live --dataset tests/fixtures/policy_response_live.json --case S14 --arms router all --repeats 1 --max-calls 12 --output tmp/policy-eval-2026-09-21/final-negative-recheck",
+                         "cwd":  "C:\\Users\\EST-INFRA\\Desktop\\sales-automation",
+                         "status":  "PASS",
+                         "exit_code":  0,
+                         "result_path":  "docs/policy-response/runs/2026-09-21-live/final-negative-recheck/manifest.json",
+                         "notes":  "Completed 2 attempts; 0 failed generations; 7 real provider calls. Exit status is not semantic correctness."
+                     },
+                     {
+                         "command":  "C:\\Users\\EST-INFRA\\Desktop\\sales-automation\\.venv\\Scripts\\python.exe scripts/evaluate_policy_response.py --live --dataset tests/fixtures/policy_response_live.json --case S14 --arms router all --repeats 1 --max-calls 12 --output tmp/policy-eval-2026-09-21/final-state-recheck",
+                         "cwd":  "C:\\Users\\EST-INFRA\\Desktop\\sales-automation",
+                         "status":  "FAIL",
+                         "exit_code":  1,
+                         "result_path":  "docs/policy-response/runs/2026-09-21-live/final-state-recheck/manifest.json",
+                         "notes":  "Completed 2 attempts; 1 failed generations; 7 real provider calls. Exit status is not semantic correctness."
+                     },
+                     {
+                         "command":  "C:\\Users\\EST-INFRA\\Desktop\\sales-automation\\.venv\\Scripts\\python.exe scripts/evaluate_policy_response.py --live --dataset tests/fixtures/policy_response_live.json --case S02 --arms router all --repeats 1 --max-calls 20 --output tmp/policy-eval-2026-09-21/followup-smoke",
+                         "cwd":  "C:\\Users\\EST-INFRA\\Desktop\\sales-automation",
+                         "status":  "PASS",
+                         "exit_code":  0,
+                         "result_path":  "docs/policy-response/runs/2026-09-21-live/followup-smoke/manifest.json",
+                         "notes":  "Completed 2 attempts; 0 failed generations; 6 real provider calls. Exit status is not semantic correctness."
+                     },
+                     {
+                         "command":  "C:\\Users\\EST-INFRA\\Desktop\\sales-automation\\.venv\\Scripts\\python.exe scripts/evaluate_policy_response.py --live --dataset tests/fixtures/policy_response_live.json --case S02 --case S06 --case S14 --arms router all --repeats 1 --max-calls 40 --output tmp/policy-eval-2026-09-21/plan-smoke",
+                         "cwd":  "C:\\Users\\EST-INFRA\\Desktop\\sales-automation",
+                         "status":  "FAIL",
+                         "exit_code":  1,
+                         "result_path":  "docs/policy-response/runs/2026-09-21-live/plan-smoke/manifest.json",
+                         "notes":  "Completed 6 attempts; 3 failed generations; 19 real provider calls. Exit status is not semantic correctness."
+                     },
+                     {
+                         "command":  "C:\\Users\\EST-INFRA\\Desktop\\sales-automation\\.venv\\Scripts\\python.exe scripts/evaluate_policy_response.py --live --dataset tests/fixtures/policy_response_live.json --case S02 --case S06 --case S14 --arms router all --repeats 1 --draft-thinking-budget 1024 --max-calls 40 --output tmp/policy-eval-2026-09-21/reasoning-smoke",
+                         "cwd":  "C:\\Users\\EST-INFRA\\Desktop\\sales-automation",
+                         "status":  "FAIL",
+                         "exit_code":  1,
+                         "result_path":  "docs/policy-response/runs/2026-09-21-live/reasoning-smoke/manifest.json",
+                         "notes":  "Completed 6 attempts; 1 failed generations; 17 real provider calls. Exit status is not semantic correctness."
+                     },
+                     {
+                         "command":  "scripts/evaluate_policy_response.py --live; exact early invocation described in results.md",
+                         "cwd":  "C:\\Users\\EST-INFRA\\Desktop\\sales-automation",
+                         "status":  "PASS",
+                         "exit_code":  0,
+                         "result_path":  "docs/policy-response/runs/2026-09-21-live/smoke/manifest.json",
+                         "notes":  "Completed 2 attempts; 0 failed generations; 6 real provider calls. Exit status is not semantic correctness."
+                     },
+                     {
+                         "command":  "C:\\Users\\EST-INFRA\\Desktop\\sales-automation\\.venv\\Scripts\\python.exe scripts/evaluate_policy_response.py --live --dataset tests/fixtures/policy_response_live.json --case S14 --arms router all --repeats 2 --max-calls 24 --output tmp/policy-eval-2026-09-21/unknown-state-recheck",
+                         "cwd":  "C:\\Users\\EST-INFRA\\Desktop\\sales-automation",
+                         "status":  "FAIL",
+                         "exit_code":  1,
+                         "result_path":  "docs/policy-response/runs/2026-09-21-live/unknown-state-recheck/manifest.json",
+                         "notes":  "Completed 4 attempts; 3 failed generations; 14 real provider calls. Exit status is not semantic correctness."
+                     },
+                     {
+                         "command":  "scripts/evaluate_policy_response.py --export-sources tmp/policy-eval-2026-09-21/sources.json; --export-http attempted separately",
+                         "cwd":  "C:\\Users\\EST-INFRA\\Desktop\\sales-automation",
+                         "status":  "FAIL",
+                         "exit_code":  1,
+                         "result_path":  "docs/policy-response/runs/2026-09-21-live/results.md",
+                         "notes":  "Read-only DB timeout twice; configured authenticated GET returned HTTP 401. No production data mutation or successful policy export."
+                     },
+                     {
+                         "command":  ".\\.venv\\Scripts\\python.exe scripts/summarize_policy_evaluation.py --raw-root tmp/policy-eval-2026-09-21 --reviews docs/policy-response/runs/2026-09-21-live/adjudications.json --output docs/policy-response/runs/2026-09-21-live/summary.json",
+                         "cwd":  "C:\\Users\\EST-INFRA\\Desktop\\sales-automation",
+                         "status":  "PASS",
+                         "exit_code":  0,
+                         "result_path":  "docs/policy-response/runs/2026-09-21-live/summary.json",
+                         "notes":  "No model call; all 112 runs require explicit review labels. Initial sandbox trampoline denied; rerun with approved narrow prefix succeeded."
+                     },
+                     {
+                         "command":  ".\\.venv\\Scripts\\ruff.exe check --no-cache src tests scripts/check_policy_response.py scripts/evaluate_policy_response.py scripts/summarize_policy_evaluation.py",
+                         "cwd":  "C:\\Users\\EST-INFRA\\Desktop\\sales-automation",
+                         "status":  "PASS",
+                         "exit_code":  0,
+                         "result_path":  "docs/policy-response/runs/2026-09-21-live/checks.json",
+                         "notes":  "Latest source, tests and all three evaluation/check scripts."
+                     },
+                     {
+                         "command":  "git -c core.safecrlf=false diff --check",
+                         "cwd":  "C:\\Users\\EST-INFRA\\Desktop\\sales-automation",
+                         "status":  "PASS",
+                         "exit_code":  0,
+                         "result_path":  "docs/policy-response/runs/2026-09-21-live/checks.json",
+                         "notes":  "Latest code/docs whitespace; staging empty, baseline commit unchanged."
+                     }
+                 ],
+    "experiments":  [
+                        {
+                            "id":  "LOCAL_REPRO",
+                            "status":  "COMPLETED",
+                            "data_origin":  "SYNTHETIC_LOCAL_TESTS",
+                            "dataset_hash":  "6d4027efdcda183fe22bbd65701bf7942e39b678feef3dd978f7638db86b6440",
+                            "policy_snapshot":  null,
+                            "baseline":  "5 failed /17 passed before fixes; same five regressions pass in final suite",
+                            "candidate":  "Current local working tree",
+                            "settings":  {
+                                             "network":  "EXTERNAL_DENIED",
+                                             "database":  "disposable SQLite",
+                                             "providers":  "mock",
+                                             "model_calls":  0
+                                         },
+                            "metrics":  [
+                                            {
+                                                "name":  "reproduced_regressions_fixed",
+                                                "value":  5,
+                                                "unit":  "tests",
+                                                "numerator":  5,
+                                                "denominator":  5,
+                                                "population":  "Five reproduced development failures",
+                                                "uncertainty":  "Deterministic development fixtures; no estimate of customer-answer accuracy.",
+                                                "measurement_type":  "LOCAL_REGRESSION"
+                                            }
+                                        ],
+                            "limitations":  "Not a blind study or estimate of answer quality; final fixture hash is a candidate inventory, not an initial dataset hash."
+                        },
+                        {
+                            "id":  "LOCAL_SUITE",
+                            "status":  "COMPLETED",
+                            "data_origin":  "REPOSITORY_TESTS_AND_SYNTHETIC_FIXTURES",
+                            "dataset_hash":  "6d4027efdcda183fe22bbd65701bf7942e39b678feef3dd978f7638db86b6440",
+                            "policy_snapshot":  null,
+                            "baseline":  "1610 passed/43 skipped",
+                            "candidate":  "1655 passed/43 skipped",
+                            "settings":  {
+                                             "repetitions_final":  1,
+                                             "network":  "EXTERNAL_DENIED",
+                                             "database":  "SQLite",
+                                             "model_calls":  0
+                                         },
+                            "metrics":  [
+                                            {
+                                                "name":  "python_test_pass_count",
+                                                "value":  1655,
+                                                "unit":  "tests",
+                                                "numerator":  1655,
+                                                "denominator":  1698,
+                                                "population":  "Full final Python suite incl skipped cases",
+                                                "uncertainty":  "Deterministic development fixtures; no estimate of customer-answer accuracy.",
+                                                "measurement_type":  "LOCAL_TEST"
+                                            },
+                                            {
+                                                "name":  "frontend_test_pass_count",
+                                                "value":  66,
+                                                "unit":  "tests",
+                                                "numerator":  66,
+                                                "denominator":  66,
+                                                "population":  "Nine frontend test files",
+                                                "uncertainty":  "Deterministic development fixtures; no estimate of customer-answer accuracy.",
+                                                "measurement_type":  "LOCAL_TEST"
+                                            }
+                                        ],
+                            "limitations":  "43 predefined third-party import skips, one deprecation warning. No PostgreSQL/live provider/browser/latency test. Test count is not quality."
+                        },
+                        {
+                            "id":  "ROUTER_VS_ALL_DOCUMENTS",
+                            "status":  "COMPLETED",
+                            "data_origin":  "SYNTHETIC_DEVELOPMENT_CASES_NOT_COMPANY_POLICY",
+                            "dataset_hash":  "9d31b9af6d8d768467fb5bc2d03d2b0da949d195870f42b1559fff5347949bfe",
+                            "policy_snapshot":  "9a86a63749679d2367106c538cb6d5a2c5d67a1e2b3e4d30a0e5105de855a3b7",
+                            "baseline":  "First-turn local safety fixes, before live-discovered composition/evidence changes; not original Git HEAD.",
+                            "candidate":  "Frozen composition candidate before later negative-status and queue-terminal fixes; full final-code live rerun NOT_RUN.",
+                            "settings":  {
+                                             "models":  [
+                                                            "gemini-2.5-flash",
+                                                            "gemini-2.5-pro"
+                                                        ],
+                                             "api":  "Vertex AI",
+                                             "region":  "global",
+                                             "cases":  14,
+                                             "repeats":  2,
+                                             "arms":  [
+                                                          "router",
+                                                          "all"
+                                                      ],
+                                             "draft_max_output_tokens":  4000,
+                                             "draft_thinking_budget":  128,
+                                             "review":  "single implementing agent, non-blind",
+                                             "independent_holdout":  "NOT_RUN"
+                                         },
+                            "metrics":  [
+                                            {
+                                                "name":  "baseline.router.valid_answers",
+                                                "value":  20,
+                                                "unit":  "outputs",
+                                                "numerator":  20,
+                                                "denominator":  28,
+                                                "population":  "14 synthetic development cases x2 dependent repeats; all attempts including blocked drafts",
+                                                "uncertainty":  "Single implementer non-blind labels; no confidence interval or population generalization",
+                                                "measurement_type":  "LIVE_MANUAL_DEVELOPMENT_REVIEW"
+                                            },
+                                            {
+                                                "name":  "baseline.router.critical_error_outputs",
+                                                "value":  5,
+                                                "unit":  "outputs",
+                                                "numerator":  5,
+                                                "denominator":  28,
+                                                "population":  "14 synthetic development cases x2 dependent repeats; all attempts including blocked drafts",
+                                                "uncertainty":  "Single implementer non-blind labels; no confidence interval or population generalization",
+                                                "measurement_type":  "LIVE_MANUAL_DEVELOPMENT_REVIEW"
+                                            },
+                                            {
+                                                "name":  "baseline.router.generated",
+                                                "value":  28,
+                                                "unit":  "outputs",
+                                                "numerator":  28,
+                                                "denominator":  28,
+                                                "population":  "14 synthetic development cases x2 dependent repeats; all attempts including blocked drafts",
+                                                "uncertainty":  "Single implementer non-blind labels; no confidence interval or population generalization",
+                                                "measurement_type":  "LIVE_PIPELINE"
+                                            },
+                                            {
+                                                "name":  "baseline.router.actual_provider_calls",
+                                                "value":  86,
+                                                "unit":  "calls",
+                                                "numerator":  null,
+                                                "denominator":  null,
+                                                "population":  "28 attempted drafts; includes failed attempts and retries",
+                                                "uncertainty":  "Not independent samples; thinking tokens and billed cost uncollected",
+                                                "measurement_type":  "LIVE_PROVIDER_OBSERVATION"
+                                            },
+                                            {
+                                                "name":  "baseline.router.input_tokens",
+                                                "value":  66871,
+                                                "unit":  "tokens",
+                                                "numerator":  null,
+                                                "denominator":  null,
+                                                "population":  "28 attempted drafts; includes failed attempts and retries",
+                                                "uncertainty":  "Not independent samples; thinking tokens and billed cost uncollected",
+                                                "measurement_type":  "LIVE_PROVIDER_OBSERVATION"
+                                            },
+                                            {
+                                                "name":  "baseline.router.candidate_output_tokens",
+                                                "value":  6040,
+                                                "unit":  "tokens",
+                                                "numerator":  null,
+                                                "denominator":  null,
+                                                "population":  "28 attempted drafts; includes failed attempts and retries",
+                                                "uncertainty":  "Not independent samples; thinking tokens and billed cost uncollected",
+                                                "measurement_type":  "LIVE_PROVIDER_OBSERVATION"
+                                            },
+                                            {
+                                                "name":  "baseline.router.p50_seconds",
+                                                "value":  4.835,
+                                                "unit":  "seconds",
+                                                "numerator":  null,
+                                                "denominator":  null,
+                                                "population":  "28 attempted drafts; includes failed attempts and retries",
+                                                "uncertainty":  "Not independent samples; thinking tokens and billed cost uncollected",
+                                                "measurement_type":  "LIVE_PROVIDER_OBSERVATION"
+                                            },
+                                            {
+                                                "name":  "baseline.router.p95_seconds_nearest_rank",
+                                                "value":  5.907,
+                                                "unit":  "seconds",
+                                                "numerator":  null,
+                                                "denominator":  null,
+                                                "population":  "28 attempted drafts; includes failed attempts and retries",
+                                                "uncertainty":  "Not independent samples; thinking tokens and billed cost uncollected",
+                                                "measurement_type":  "LIVE_PROVIDER_OBSERVATION"
+                                            },
+                                            {
+                                                "name":  "baseline.all.valid_answers",
+                                                "value":  16,
+                                                "unit":  "outputs",
+                                                "numerator":  16,
+                                                "denominator":  28,
+                                                "population":  "14 synthetic development cases x2 dependent repeats; all attempts including blocked drafts",
+                                                "uncertainty":  "Single implementer non-blind labels; no confidence interval or population generalization",
+                                                "measurement_type":  "LIVE_MANUAL_DEVELOPMENT_REVIEW"
+                                            },
+                                            {
+                                                "name":  "baseline.all.critical_error_outputs",
+                                                "value":  8,
+                                                "unit":  "outputs",
+                                                "numerator":  8,
+                                                "denominator":  28,
+                                                "population":  "14 synthetic development cases x2 dependent repeats; all attempts including blocked drafts",
+                                                "uncertainty":  "Single implementer non-blind labels; no confidence interval or population generalization",
+                                                "measurement_type":  "LIVE_MANUAL_DEVELOPMENT_REVIEW"
+                                            },
+                                            {
+                                                "name":  "baseline.all.generated",
+                                                "value":  28,
+                                                "unit":  "outputs",
+                                                "numerator":  28,
+                                                "denominator":  28,
+                                                "population":  "14 synthetic development cases x2 dependent repeats; all attempts including blocked drafts",
+                                                "uncertainty":  "Single implementer non-blind labels; no confidence interval or population generalization",
+                                                "measurement_type":  "LIVE_PIPELINE"
+                                            },
+                                            {
+                                                "name":  "baseline.all.actual_provider_calls",
+                                                "value":  58,
+                                                "unit":  "calls",
+                                                "numerator":  null,
+                                                "denominator":  null,
+                                                "population":  "28 attempted drafts; includes failed attempts and retries",
+                                                "uncertainty":  "Not independent samples; thinking tokens and billed cost uncollected",
+                                                "measurement_type":  "LIVE_PROVIDER_OBSERVATION"
+                                            },
+                                            {
+                                                "name":  "baseline.all.input_tokens",
+                                                "value":  57858,
+                                                "unit":  "tokens",
+                                                "numerator":  null,
+                                                "denominator":  null,
+                                                "population":  "28 attempted drafts; includes failed attempts and retries",
+                                                "uncertainty":  "Not independent samples; thinking tokens and billed cost uncollected",
+                                                "measurement_type":  "LIVE_PROVIDER_OBSERVATION"
+                                            },
+                                            {
+                                                "name":  "baseline.all.candidate_output_tokens",
+                                                "value":  4874,
+                                                "unit":  "tokens",
+                                                "numerator":  null,
+                                                "denominator":  null,
+                                                "population":  "28 attempted drafts; includes failed attempts and retries",
+                                                "uncertainty":  "Not independent samples; thinking tokens and billed cost uncollected",
+                                                "measurement_type":  "LIVE_PROVIDER_OBSERVATION"
+                                            },
+                                            {
+                                                "name":  "baseline.all.p50_seconds",
+                                                "value":  3.984,
+                                                "unit":  "seconds",
+                                                "numerator":  null,
+                                                "denominator":  null,
+                                                "population":  "28 attempted drafts; includes failed attempts and retries",
+                                                "uncertainty":  "Not independent samples; thinking tokens and billed cost uncollected",
+                                                "measurement_type":  "LIVE_PROVIDER_OBSERVATION"
+                                            },
+                                            {
+                                                "name":  "baseline.all.p95_seconds_nearest_rank",
+                                                "value":  4.828,
+                                                "unit":  "seconds",
+                                                "numerator":  null,
+                                                "denominator":  null,
+                                                "population":  "28 attempted drafts; includes failed attempts and retries",
+                                                "uncertainty":  "Not independent samples; thinking tokens and billed cost uncollected",
+                                                "measurement_type":  "LIVE_PROVIDER_OBSERVATION"
+                                            },
+                                            {
+                                                "name":  "candidate.router.valid_answers",
+                                                "value":  20,
+                                                "unit":  "outputs",
+                                                "numerator":  20,
+                                                "denominator":  28,
+                                                "population":  "14 synthetic development cases x2 dependent repeats; all attempts including blocked drafts",
+                                                "uncertainty":  "Single implementer non-blind labels; no confidence interval or population generalization",
+                                                "measurement_type":  "LIVE_MANUAL_DEVELOPMENT_REVIEW"
+                                            },
+                                            {
+                                                "name":  "candidate.router.critical_error_outputs",
+                                                "value":  2,
+                                                "unit":  "outputs",
+                                                "numerator":  2,
+                                                "denominator":  28,
+                                                "population":  "14 synthetic development cases x2 dependent repeats; all attempts including blocked drafts",
+                                                "uncertainty":  "Single implementer non-blind labels; no confidence interval or population generalization",
+                                                "measurement_type":  "LIVE_MANUAL_DEVELOPMENT_REVIEW"
+                                            },
+                                            {
+                                                "name":  "candidate.router.generated",
+                                                "value":  24,
+                                                "unit":  "outputs",
+                                                "numerator":  24,
+                                                "denominator":  28,
+                                                "population":  "14 synthetic development cases x2 dependent repeats; all attempts including blocked drafts",
+                                                "uncertainty":  "Single implementer non-blind labels; no confidence interval or population generalization",
+                                                "measurement_type":  "LIVE_PIPELINE"
+                                            },
+                                            {
+                                                "name":  "candidate.router.actual_provider_calls",
+                                                "value":  92,
+                                                "unit":  "calls",
+                                                "numerator":  null,
+                                                "denominator":  null,
+                                                "population":  "28 attempted drafts; includes failed attempts and retries",
+                                                "uncertainty":  "Not independent samples; thinking tokens and billed cost uncollected",
+                                                "measurement_type":  "LIVE_PROVIDER_OBSERVATION"
+                                            },
+                                            {
+                                                "name":  "candidate.router.input_tokens",
+                                                "value":  86443,
+                                                "unit":  "tokens",
+                                                "numerator":  null,
+                                                "denominator":  null,
+                                                "population":  "28 attempted drafts; includes failed attempts and retries",
+                                                "uncertainty":  "Not independent samples; thinking tokens and billed cost uncollected",
+                                                "measurement_type":  "LIVE_PROVIDER_OBSERVATION"
+                                            },
+                                            {
+                                                "name":  "candidate.router.candidate_output_tokens",
+                                                "value":  11896,
+                                                "unit":  "tokens",
+                                                "numerator":  null,
+                                                "denominator":  null,
+                                                "population":  "28 attempted drafts; includes failed attempts and retries",
+                                                "uncertainty":  "Not independent samples; thinking tokens and billed cost uncollected",
+                                                "measurement_type":  "LIVE_PROVIDER_OBSERVATION"
+                                            },
+                                            {
+                                                "name":  "candidate.router.p50_seconds",
+                                                "value":  6.094,
+                                                "unit":  "seconds",
+                                                "numerator":  null,
+                                                "denominator":  null,
+                                                "population":  "28 attempted drafts; includes failed attempts and retries",
+                                                "uncertainty":  "Not independent samples; thinking tokens and billed cost uncollected",
+                                                "measurement_type":  "LIVE_PROVIDER_OBSERVATION"
+                                            },
+                                            {
+                                                "name":  "candidate.router.p95_seconds_nearest_rank",
+                                                "value":  11.546,
+                                                "unit":  "seconds",
+                                                "numerator":  null,
+                                                "denominator":  null,
+                                                "population":  "28 attempted drafts; includes failed attempts and retries",
+                                                "uncertainty":  "Not independent samples; thinking tokens and billed cost uncollected",
+                                                "measurement_type":  "LIVE_PROVIDER_OBSERVATION"
+                                            },
+                                            {
+                                                "name":  "candidate.all.valid_answers",
+                                                "value":  23,
+                                                "unit":  "outputs",
+                                                "numerator":  23,
+                                                "denominator":  28,
+                                                "population":  "14 synthetic development cases x2 dependent repeats; all attempts including blocked drafts",
+                                                "uncertainty":  "Single implementer non-blind labels; no confidence interval or population generalization",
+                                                "measurement_type":  "LIVE_MANUAL_DEVELOPMENT_REVIEW"
+                                            },
+                                            {
+                                                "name":  "candidate.all.critical_error_outputs",
+                                                "value":  2,
+                                                "unit":  "outputs",
+                                                "numerator":  2,
+                                                "denominator":  28,
+                                                "population":  "14 synthetic development cases x2 dependent repeats; all attempts including blocked drafts",
+                                                "uncertainty":  "Single implementer non-blind labels; no confidence interval or population generalization",
+                                                "measurement_type":  "LIVE_MANUAL_DEVELOPMENT_REVIEW"
+                                            },
+                                            {
+                                                "name":  "candidate.all.generated",
+                                                "value":  26,
+                                                "unit":  "outputs",
+                                                "numerator":  26,
+                                                "denominator":  28,
+                                                "population":  "14 synthetic development cases x2 dependent repeats; all attempts including blocked drafts",
+                                                "uncertainty":  "Single implementer non-blind labels; no confidence interval or population generalization",
+                                                "measurement_type":  "LIVE_PIPELINE"
+                                            },
+                                            {
+                                                "name":  "candidate.all.actual_provider_calls",
+                                                "value":  65,
+                                                "unit":  "calls",
+                                                "numerator":  null,
+                                                "denominator":  null,
+                                                "population":  "28 attempted drafts; includes failed attempts and retries",
+                                                "uncertainty":  "Not independent samples; thinking tokens and billed cost uncollected",
+                                                "measurement_type":  "LIVE_PROVIDER_OBSERVATION"
+                                            },
+                                            {
+                                                "name":  "candidate.all.input_tokens",
+                                                "value":  82230,
+                                                "unit":  "tokens",
+                                                "numerator":  null,
+                                                "denominator":  null,
+                                                "population":  "28 attempted drafts; includes failed attempts and retries",
+                                                "uncertainty":  "Not independent samples; thinking tokens and billed cost uncollected",
+                                                "measurement_type":  "LIVE_PROVIDER_OBSERVATION"
+                                            },
+                                            {
+                                                "name":  "candidate.all.candidate_output_tokens",
+                                                "value":  10891,
+                                                "unit":  "tokens",
+                                                "numerator":  null,
+                                                "denominator":  null,
+                                                "population":  "28 attempted drafts; includes failed attempts and retries",
+                                                "uncertainty":  "Not independent samples; thinking tokens and billed cost uncollected",
+                                                "measurement_type":  "LIVE_PROVIDER_OBSERVATION"
+                                            },
+                                            {
+                                                "name":  "candidate.all.p50_seconds",
+                                                "value":  5.196,
+                                                "unit":  "seconds",
+                                                "numerator":  null,
+                                                "denominator":  null,
+                                                "population":  "28 attempted drafts; includes failed attempts and retries",
+                                                "uncertainty":  "Not independent samples; thinking tokens and billed cost uncollected",
+                                                "measurement_type":  "LIVE_PROVIDER_OBSERVATION"
+                                            },
+                                            {
+                                                "name":  "candidate.all.p95_seconds_nearest_rank",
+                                                "value":  11.406,
+                                                "unit":  "seconds",
+                                                "numerator":  null,
+                                                "denominator":  null,
+                                                "population":  "28 attempted drafts; includes failed attempts and retries",
+                                                "uncertainty":  "Not independent samples; thinking tokens and billed cost uncollected",
+                                                "measurement_type":  "LIVE_PROVIDER_OBSERVATION"
+                                            }
+                                        ],
+                            "limitations":  "Synthetic adaptive development set; no independent labels or holdout; actual company policies unavailable. Candidate 6/56 blocked with final raw failure output not retained, so false-positive rate not known. Router valid count unchanged 20/28; critical outputs 5→2, latency increased. Full current-code 56-run evaluation NOT_RUN; final S14 smoke separately recorded. Exact baseline runtime snapshot unavailable."
+                        },
+                        {
+                            "id":  "FINAL_NEGATIVE_STATUS_RECHECK",
+                            "status":  "PARTIAL",
+                            "data_origin":  "SYNTHETIC_DEVELOPMENT_CASES_NOT_COMPANY_POLICY",
+                            "dataset_hash":  "9d31b9af6d8d768467fb5bc2d03d2b0da949d195870f42b1559fff5347949bfe",
+                            "policy_snapshot":  "9a86a63749679d2367106c538cb6d5a2c5d67a1e2b3e4d30a0e5105de855a3b7",
+                            "baseline":  "Candidate S14-router-2 unknown-as-false; later paraphrase bypass reproduced",
+                            "candidate":  "Final negative-state matcher; 2/2 generated, no affirmative/negative completion status observed; one answer still needs directness review",
+                            "settings":  {
+                                             "arms":  [
+                                                          "router",
+                                                          "all"
+                                                      ],
+                                             "max_calls":  12,
+                                             "cases":  [
+                                                           "S14"
+                                                       ],
+                                             "repeats":  1
+                                         },
+                            "metrics":  [
+                                            {
+                                                "name":  "generated_drafts",
+                                                "value":  2,
+                                                "unit":  "drafts",
+                                                "numerator":  2,
+                                                "denominator":  2,
+                                                "population":  "S14 only, final smoke",
+                                                "uncertainty":  "Tiny adaptive sample, not full answer accuracy",
+                                                "measurement_type":  "LIVE_PIPELINE"
+                                            }
+                                        ],
+                            "limitations":  "Full latest-code live comparison NOT_RUN; final worker change tested locally, not via operational queue."
+                        }
+                    ],
+    "documents":  [
+                      "docs/architecture/policy-response-system.md",
+                      "docs/adr/2026-09-21-policy-response-boundaries.md",
+                      "docs/research/policy-response-evidence.md",
+                      "docs/operations/policy-response-runbook.md",
+                      "docs/evaluation/policy-response-evaluation.md",
+                      "docs/policy-response/runs/2026-09-21-local/results.md",
+                      "docs/policy-response/runs/2026-09-21-local/findings.md",
+                      "README.md",
+                      "CLAUDE.md",
+                      "docs/policy-response/runs/2026-09-21-local/initial-assessment.md",
+                      "docs/policy-response/runs/2026-09-21-local/decision-ledger.jsonl",
+                      "docs/policy-response/runs/2026-09-21-local/run-manifest.json",
+                      "docs/adr/2026-09-21-grounded-draft-composition.md",
+                      "docs/policy-response/runs/2026-09-21-live/results.md",
+                      "docs/policy-response/runs/2026-09-21-live/summary.json",
+                      "docs/policy-response/runs/2026-09-21-live/adjudications.json",
+                      "docs/policy-response/runs/2026-09-21-live/run-manifest.json"
+                  ],
+    "unresolved_risks":  [
+                             {
+                                 "severity":  "HIGH",
+                                 "risk":  "Owner-approved authority, effective dates and contract precedence not structured; no deterministic semantic policy decision/validation."
+                             },
+                             {
+                                 "severity":  "HIGH",
+                                 "risk":  "Legacy trace-free drafts, dynamic signature/link/default-sender configuration and final-check-to-remote-send race not fully bound."
+                             },
+                             {
+                                 "severity":  "HIGH",
+                                 "risk":  "Upstream state may be stale or incomplete; local revalidation is not live canonical HubSpot verification."
+                             },
+                             {
+                                 "severity":  "MEDIUM",
+                                 "risk":  "Synthetic live comparison still has unverified facts, transferred contract conditions, missing authority conditions, ambiguous/unnecessary promises and blocked drafts. No independent current-policy evaluation; router valid count unchanged."
+                             },
+                             {
+                                 "severity":  "MEDIUM",
+                                 "risk":  "Event retention/deletion propagation and growth, DB JSON scan/history volume p95 unmeasured; hashes are linkable metadata."
+                             },
+                             {
+                                 "severity":  "MEDIUM",
+                                 "risk":  "Prompt/input/config hashes do not archive every rendered input or translation setting; deleted original documents cannot be reconstructed from digests."
+                             },
+                             {
+                                 "severity":  "LOW",
+                                 "risk":  "Existing Starlette/httpx and Vite static CSS/chunk warnings; browser visual QA NOT_RUN."
+                             }
+                         ],
+    "owner_decisions_required":  [
+                                     "Policy owner: approved original sources, effective/purchase/contract dates, priority and exception authority.",
+                                     "Operations/policy owner: accessible current-policy read path, independently held-out expected answers and quality/stop thresholds. Current live evaluation was explicitly authorized and executed; no renewed budget approval is being requested.",
+                                     "Release owner: legacy drafts regeneration, dynamic dispatch-content binding, deployment/rollback approval.",
+                                     "Data owner: raw records and Event retention/deletion rules.",
+                                     "Model owner: verify deployed overrides and evaluate supported successor before documented model retirement."
+                                 ],
+    "rejected_complexity":  [
+                                {
+                                    "proposal":  "RAG/vector database or graph by default",
+                                    "status":  "REJECTED",
+                                    "reason":  "No measured advantage over current small corpus/router; adds authorization,index/deletion synchronization."
+                                },
+                                {
+                                    "proposal":  "Generic policy compiler/rules engine now",
+                                    "status":  "REJECTED",
+                                    "reason":  "Business authority/time/exception definitions unavailable; AI-derived rules must not gain automatic authority."
+                                },
+                                {
+                                    "proposal":  "Additional verifier model/new queue broker",
+                                    "status":  "REJECTED",
+                                    "reason":  "No measured marginal benefit; shared model errors and operational cost."
+                                }
+                            ],
+    "next_discriminating_experiments":  [
+                                            "Acquire current policy through authorized read access, freeze owner-defined contract/effective-date truth and independent held-out inquiries; compare current router versus all at actual policy size.",
+                                            "Independently adjudicate S05/S06 authority/fact failures and S14 unknown status; measure guard false positives, valid answer rate, human editing time and latency together.",
+                                            "Compare supported replacement model before current model lifecycle end using same snapshots and independent labels."
+                                        ],
+    "acceptance_coverage":  [
+                                {
+                                    "id":  "C01",
+                                    "status":  "NOT_RUN",
+                                    "exact_supplied_scenario":  "NOT_RUN",
+                                    "related_test_ids":  [
+
+                                                         ],
+                                    "evidence_paths":  [
+
+                                                       ],
+                                    "notes":  "Public synthetic design scenario; related boundary tests do not establish full semantic acceptance."
+                                },
+                                {
+                                    "id":  "C02",
+                                    "status":  "NOT_RUN",
+                                    "exact_supplied_scenario":  "NOT_RUN",
+                                    "related_test_ids":  [
+
+                                                         ],
+                                    "evidence_paths":  [
+
+                                                       ],
+                                    "notes":  "Public synthetic design scenario; related boundary tests do not establish full semantic acceptance."
+                                },
+                                {
+                                    "id":  "C03",
+                                    "status":  "NOT_RUN",
+                                    "exact_supplied_scenario":  "NOT_RUN",
+                                    "related_test_ids":  [
+
+                                                         ],
+                                    "evidence_paths":  [
+
+                                                       ],
+                                    "notes":  "Public synthetic design scenario; related boundary tests do not establish full semantic acceptance."
+                                },
+                                {
+                                    "id":  "C04",
+                                    "status":  "NOT_RUN",
+                                    "exact_supplied_scenario":  "NOT_RUN",
+                                    "related_test_ids":  [
+
+                                                         ],
+                                    "evidence_paths":  [
+
+                                                       ],
+                                    "notes":  "Public synthetic design scenario; related boundary tests do not establish full semantic acceptance."
+                                },
+                                {
+                                    "id":  "C05",
+                                    "status":  "NOT_RUN",
+                                    "exact_supplied_scenario":  "NOT_RUN",
+                                    "related_test_ids":  [
+
+                                                         ],
+                                    "evidence_paths":  [
+
+                                                       ],
+                                    "notes":  "Public synthetic design scenario; related boundary tests do not establish full semantic acceptance."
+                                },
+                                {
+                                    "id":  "C06",
+                                    "status":  "NOT_RUN",
+                                    "exact_supplied_scenario":  "NOT_RUN",
+                                    "related_test_ids":  [
+
+                                                         ],
+                                    "evidence_paths":  [
+
+                                                       ],
+                                    "notes":  "Public synthetic design scenario; related boundary tests do not establish full semantic acceptance."
+                                },
+                                {
+                                    "id":  "C07",
+                                    "status":  "NOT_RUN",
+                                    "exact_supplied_scenario":  "NOT_RUN",
+                                    "related_test_ids":  [
+
+                                                         ],
+                                    "evidence_paths":  [
+
+                                                       ],
+                                    "notes":  "Public synthetic design scenario; related boundary tests do not establish full semantic acceptance."
+                                },
+                                {
+                                    "id":  "C08",
+                                    "status":  "NOT_RUN",
+                                    "exact_supplied_scenario":  "NOT_RUN",
+                                    "related_test_ids":  [
+
+                                                         ],
+                                    "evidence_paths":  [
+
+                                                       ],
+                                    "notes":  "Public synthetic design scenario; related boundary tests do not establish full semantic acceptance."
+                                },
+                                {
+                                    "id":  "C09",
+                                    "status":  "NOT_RUN",
+                                    "exact_supplied_scenario":  "NOT_RUN",
+                                    "related_test_ids":  [
+
+                                                         ],
+                                    "evidence_paths":  [
+
+                                                       ],
+                                    "notes":  "Public synthetic design scenario; related boundary tests do not establish full semantic acceptance."
+                                },
+                                {
+                                    "id":  "C10",
+                                    "status":  "NOT_RUN",
+                                    "exact_supplied_scenario":  "NOT_RUN",
+                                    "related_test_ids":  [
+
+                                                         ],
+                                    "evidence_paths":  [
+
+                                                       ],
+                                    "notes":  "Public synthetic design scenario; related boundary tests do not establish full semantic acceptance."
+                                },
+                                {
+                                    "id":  "C11",
+                                    "status":  "RELATED_LOCAL_CHECKS_ONLY",
+                                    "exact_supplied_scenario":  "NOT_RUN",
+                                    "related_test_ids":  [
+                                                             "tests/test_policy_context.py::test_first_reply_routes_the_latest_customer_correction"
+                                                         ],
+                                    "evidence_paths":  [
+                                                           "docs/policy-response/runs/2026-09-21-local/final-python/junit.xml"
+                                                       ],
+                                    "notes":  "Public synthetic design scenario; related boundary tests do not establish full semantic acceptance."
+                                },
+                                {
+                                    "id":  "C12",
+                                    "status":  "NOT_RUN",
+                                    "exact_supplied_scenario":  "NOT_RUN",
+                                    "related_test_ids":  [
+
+                                                         ],
+                                    "evidence_paths":  [
+
+                                                       ],
+                                    "notes":  "Public synthetic design scenario; related boundary tests do not establish full semantic acceptance."
+                                },
+                                {
+                                    "id":  "C13",
+                                    "status":  "RELATED_LOCAL_CHECKS_ONLY",
+                                    "exact_supplied_scenario":  "NOT_RUN",
+                                    "related_test_ids":  [
+                                                             "tests/test_followup_draft.py::test_recent_correction_survives_a_long_derived_summary",
+                                                             "tests/test_policy_context.py::test_first_reply_routes_the_latest_customer_correction"
+                                                         ],
+                                    "evidence_paths":  [
+                                                           "docs/policy-response/runs/2026-09-21-local/final-python/junit.xml"
+                                                       ],
+                                    "notes":  "Public synthetic design scenario; related boundary tests do not establish full semantic acceptance."
+                                },
+                                {
+                                    "id":  "C14",
+                                    "status":  "NOT_RUN",
+                                    "exact_supplied_scenario":  "NOT_RUN",
+                                    "related_test_ids":  [
+
+                                                         ],
+                                    "evidence_paths":  [
+
+                                                       ],
+                                    "notes":  "Public synthetic design scenario; related boundary tests do not establish full semantic acceptance."
+                                },
+                                {
+                                    "id":  "C15",
+                                    "status":  "NOT_RUN",
+                                    "exact_supplied_scenario":  "NOT_RUN",
+                                    "related_test_ids":  [
+
+                                                         ],
+                                    "evidence_paths":  [
+
+                                                       ],
+                                    "notes":  "Public synthetic design scenario; related boundary tests do not establish full semantic acceptance."
+                                },
+                                {
+                                    "id":  "C16",
+                                    "status":  "NOT_RUN",
+                                    "exact_supplied_scenario":  "NOT_RUN",
+                                    "related_test_ids":  [
+
+                                                         ],
+                                    "evidence_paths":  [
+
+                                                       ],
+                                    "notes":  "Public synthetic design scenario; related boundary tests do not establish full semantic acceptance."
+                                },
+                                {
+                                    "id":  "C17",
+                                    "status":  "NOT_RUN",
+                                    "exact_supplied_scenario":  "NOT_RUN",
+                                    "related_test_ids":  [
+
+                                                         ],
+                                    "evidence_paths":  [
+
+                                                       ],
+                                    "notes":  "Public synthetic design scenario; related boundary tests do not establish full semantic acceptance."
+                                },
+                                {
+                                    "id":  "C18",
+                                    "status":  "NOT_RUN",
+                                    "exact_supplied_scenario":  "NOT_RUN",
+                                    "related_test_ids":  [
+
+                                                         ],
+                                    "evidence_paths":  [
+
+                                                       ],
+                                    "notes":  "Public synthetic design scenario; related boundary tests do not establish full semantic acceptance."
+                                },
+                                {
+                                    "id":  "C19",
+                                    "status":  "NOT_RUN",
+                                    "exact_supplied_scenario":  "NOT_RUN",
+                                    "related_test_ids":  [
+
+                                                         ],
+                                    "evidence_paths":  [
+
+                                                       ],
+                                    "notes":  "Public synthetic design scenario; related boundary tests do not establish full semantic acceptance."
+                                },
+                                {
+                                    "id":  "C20",
+                                    "status":  "NOT_RUN",
+                                    "exact_supplied_scenario":  "NOT_RUN",
+                                    "related_test_ids":  [
+
+                                                         ],
+                                    "evidence_paths":  [
+
+                                                       ],
+                                    "notes":  "Public synthetic design scenario; related boundary tests do not establish full semantic acceptance."
+                                },
+                                {
+                                    "id":  "C21",
+                                    "status":  "RELATED_LOCAL_CHECKS_ONLY",
+                                    "exact_supplied_scenario":  "NOT_RUN",
+                                    "related_test_ids":  [
+                                                             "tests/test_policy_context.py::test_snapshot_filters_before_input_and_keeps_original",
+                                                             "tests/test_history_view.py::test_history_is_scoped_deduplicated_and_includes_real_records"
+                                                         ],
+                                    "evidence_paths":  [
+                                                           "docs/policy-response/runs/2026-09-21-local/final-python/junit.xml"
+                                                       ],
+                                    "notes":  "Public synthetic design scenario; related boundary tests do not establish full semantic acceptance."
+                                },
+                                {
+                                    "id":  "C22",
+                                    "status":  "NOT_RUN",
+                                    "exact_supplied_scenario":  "NOT_RUN",
+                                    "related_test_ids":  [
+
+                                                         ],
+                                    "evidence_paths":  [
+
+                                                       ],
+                                    "notes":  "Public synthetic design scenario; related boundary tests do not establish full semantic acceptance."
+                                },
+                                {
+                                    "id":  "C23",
+                                    "status":  "RELATED_LOCAL_CHECKS_ONLY",
+                                    "exact_supplied_scenario":  "NOT_RUN",
+                                    "related_test_ids":  [
+                                                             "tests/test_followup_draft.py::test_reminder_does_not_answer_a_customer_correction"
+                                                         ],
+                                    "evidence_paths":  [
+                                                           "docs/policy-response/runs/2026-09-21-local/final-python/junit.xml"
+                                                       ],
+                                    "notes":  "Public synthetic design scenario; related boundary tests do not establish full semantic acceptance."
+                                },
+                                {
+                                    "id":  "C24",
+                                    "status":  "RELATED_LOCAL_CHECKS_ONLY",
+                                    "exact_supplied_scenario":  "NOT_RUN",
+                                    "related_test_ids":  [
+                                                             "tests/test_followup_draft.py::test_test_sent_is_not_a_customer_visible_reply"
+                                                         ],
+                                    "evidence_paths":  [
+                                                           "docs/policy-response/runs/2026-09-21-local/final-python/junit.xml"
+                                                       ],
+                                    "notes":  "Public synthetic design scenario; related boundary tests do not establish full semantic acceptance."
+                                },
+                                {
+                                    "id":  "C25",
+                                    "status":  "RELATED_LOCAL_CHECKS_ONLY",
+                                    "exact_supplied_scenario":  "NOT_RUN",
+                                    "related_test_ids":  [
+                                                             "tests/test_followup_draft.py::test_the_two_branches_reach_the_prompt"
+                                                         ],
+                                    "evidence_paths":  [
+                                                           "docs/policy-response/runs/2026-09-21-local/final-python/junit.xml"
+                                                       ],
+                                    "notes":  "Public synthetic design scenario; related boundary tests do not establish full semantic acceptance."
+                                },
+                                {
+                                    "id":  "C26",
+                                    "status":  "NOT_RUN",
+                                    "exact_supplied_scenario":  "NOT_RUN",
+                                    "related_test_ids":  [
+
+                                                         ],
+                                    "evidence_paths":  [
+
+                                                       ],
+                                    "notes":  "Public synthetic design scenario; related boundary tests do not establish full semantic acceptance."
+                                },
+                                {
+                                    "id":  "C27",
+                                    "status":  "NOT_RUN",
+                                    "exact_supplied_scenario":  "NOT_RUN",
+                                    "related_test_ids":  [
+
+                                                         ],
+                                    "evidence_paths":  [
+
+                                                       ],
+                                    "notes":  "Public synthetic design scenario; related boundary tests do not establish full semantic acceptance."
+                                },
+                                {
+                                    "id":  "C28",
+                                    "status":  "NOT_RUN",
+                                    "exact_supplied_scenario":  "NOT_RUN",
+                                    "related_test_ids":  [
+
+                                                         ],
+                                    "evidence_paths":  [
+
+                                                       ],
+                                    "notes":  "Public synthetic design scenario; related boundary tests do not establish full semantic acceptance."
+                                },
+                                {
+                                    "id":  "C29",
+                                    "status":  "RELATED_LOCAL_CHECKS_ONLY",
+                                    "exact_supplied_scenario":  "NOT_RUN",
+                                    "related_test_ids":  [
+                                                             "tests/test_policy_context.py::test_real_draft_path_uses_one_snapshot_and_persists_private_provenance"
+                                                         ],
+                                    "evidence_paths":  [
+                                                           "docs/policy-response/runs/2026-09-21-local/final-python/junit.xml"
+                                                       ],
+                                    "notes":  "Public synthetic design scenario; related boundary tests do not establish full semantic acceptance."
+                                },
+                                {
+                                    "id":  "C30",
+                                    "status":  "NOT_RUN",
+                                    "exact_supplied_scenario":  "NOT_RUN",
+                                    "related_test_ids":  [
+
+                                                         ],
+                                    "evidence_paths":  [
+
+                                                       ],
+                                    "notes":  "Public synthetic design scenario; related boundary tests do not establish full semantic acceptance."
+                                },
+                                {
+                                    "id":  "C31",
+                                    "status":  "NOT_RUN",
+                                    "exact_supplied_scenario":  "NOT_RUN",
+                                    "related_test_ids":  [
+
+                                                         ],
+                                    "evidence_paths":  [
+
+                                                       ],
+                                    "notes":  "Public synthetic design scenario; related boundary tests do not establish full semantic acceptance."
+                                },
+                                {
+                                    "id":  "C32",
+                                    "status":  "NOT_RUN",
+                                    "exact_supplied_scenario":  "NOT_RUN",
+                                    "related_test_ids":  [
+
+                                                         ],
+                                    "evidence_paths":  [
+
+                                                       ],
+                                    "notes":  "Public synthetic design scenario; related boundary tests do not establish full semantic acceptance."
+                                },
+                                {
+                                    "id":  "C33",
+                                    "status":  "NOT_RUN",
+                                    "exact_supplied_scenario":  "NOT_RUN",
+                                    "related_test_ids":  [
+
+                                                         ],
+                                    "evidence_paths":  [
+
+                                                       ],
+                                    "notes":  "Public synthetic design scenario; related boundary tests do not establish full semantic acceptance."
+                                },
+                                {
+                                    "id":  "C34",
+                                    "status":  "RELATED_LOCAL_CHECKS_ONLY",
+                                    "exact_supplied_scenario":  "NOT_RUN",
+                                    "related_test_ids":  [
+                                                             "tests/test_send_worker.py::test_claim_is_atomic_under_concurrent_workers"
+                                                         ],
+                                    "evidence_paths":  [
+                                                           "docs/policy-response/runs/2026-09-21-local/final-python/junit.xml"
+                                                       ],
+                                    "notes":  "Public synthetic design scenario; related boundary tests do not establish full semantic acceptance."
+                                },
+                                {
+                                    "id":  "C35",
+                                    "status":  "NOT_RUN",
+                                    "exact_supplied_scenario":  "NOT_RUN",
+                                    "related_test_ids":  [
+
+                                                         ],
+                                    "evidence_paths":  [
+
+                                                       ],
+                                    "notes":  "Public synthetic design scenario; related boundary tests do not establish full semantic acceptance."
+                                },
+                                {
+                                    "id":  "C36",
+                                    "status":  "NOT_RUN",
+                                    "exact_supplied_scenario":  "NOT_RUN",
+                                    "related_test_ids":  [
+
+                                                         ],
+                                    "evidence_paths":  [
+
+                                                       ],
+                                    "notes":  "Public synthetic design scenario; related boundary tests do not establish full semantic acceptance."
+                                },
+                                {
+                                    "id":  "C37",
+                                    "status":  "NOT_RUN",
+                                    "exact_supplied_scenario":  "NOT_RUN",
+                                    "related_test_ids":  [
+
+                                                         ],
+                                    "evidence_paths":  [
+
+                                                       ],
+                                    "notes":  "Public synthetic design scenario; related boundary tests do not establish full semantic acceptance."
+                                },
+                                {
+                                    "id":  "C38",
+                                    "status":  "RELATED_LOCAL_CHECKS_ONLY",
+                                    "exact_supplied_scenario":  "NOT_RUN",
+                                    "related_test_ids":  [
+                                                             "tests/test_policy_context.py::test_approved_content_recipient_and_status_changes_block_send"
+                                                         ],
+                                    "evidence_paths":  [
+                                                           "docs/policy-response/runs/2026-09-21-local/final-python/junit.xml"
+                                                       ],
+                                    "notes":  "Public synthetic design scenario; related boundary tests do not establish full semantic acceptance."
+                                },
+                                {
+                                    "id":  "C39",
+                                    "status":  "RELATED_LOCAL_CHECKS_ONLY",
+                                    "exact_supplied_scenario":  "NOT_RUN",
+                                    "related_test_ids":  [
+                                                             "tests/test_policy_context.py::test_approved_content_recipient_and_status_changes_block_send"
+                                                         ],
+                                    "evidence_paths":  [
+                                                           "docs/policy-response/runs/2026-09-21-local/final-python/junit.xml"
+                                                       ],
+                                    "notes":  "Public synthetic design scenario; related boundary tests do not establish full semantic acceptance."
+                                },
+                                {
+                                    "id":  "C40",
+                                    "status":  "RELATED_LOCAL_CHECKS_ONLY",
+                                    "exact_supplied_scenario":  "NOT_RUN",
+                                    "related_test_ids":  [
+                                                             "tests/test_policy_context.py::test_approved_draft_invalidated_by_new_evidence",
+                                                             "tests/test_policy_context.py::test_correction_during_remote_lookup_blocks_the_actual_transport"
+                                                         ],
+                                    "evidence_paths":  [
+                                                           "docs/policy-response/runs/2026-09-21-local/final-python/junit.xml"
+                                                       ],
+                                    "notes":  "Public synthetic design scenario; related boundary tests do not establish full semantic acceptance."
+                                },
+                                {
+                                    "id":  "C41",
+                                    "status":  "RELATED_LOCAL_CHECKS_ONLY",
+                                    "exact_supplied_scenario":  "NOT_RUN",
+                                    "related_test_ids":  [
+                                                             "tests/test_send_worker.py::test_unknown_delivery_outcome_is_quarantined_without_retry"
+                                                         ],
+                                    "evidence_paths":  [
+                                                           "docs/policy-response/runs/2026-09-21-local/final-python/junit.xml"
+                                                       ],
+                                    "notes":  "Public synthetic design scenario; related boundary tests do not establish full semantic acceptance."
+                                },
+                                {
+                                    "id":  "C42",
+                                    "status":  "RELATED_LOCAL_CHECKS_ONLY",
+                                    "exact_supplied_scenario":  "NOT_RUN",
+                                    "related_test_ids":  [
+                                                             "tests/test_send_worker.py::test_reclaim_stuck_sending"
+                                                         ],
+                                    "evidence_paths":  [
+                                                           "docs/policy-response/runs/2026-09-21-local/final-python/junit.xml"
+                                                       ],
+                                    "notes":  "Public synthetic design scenario; related boundary tests do not establish full semantic acceptance."
+                                },
+                                {
+                                    "id":  "C43",
+                                    "status":  "NOT_RUN",
+                                    "exact_supplied_scenario":  "NOT_RUN",
+                                    "related_test_ids":  [
+
+                                                         ],
+                                    "evidence_paths":  [
+
+                                                       ],
+                                    "notes":  "Public synthetic design scenario; related boundary tests do not establish full semantic acceptance."
+                                },
+                                {
+                                    "id":  "C44",
+                                    "status":  "NOT_RUN",
+                                    "exact_supplied_scenario":  "NOT_RUN",
+                                    "related_test_ids":  [
+
+                                                         ],
+                                    "evidence_paths":  [
+
+                                                       ],
+                                    "notes":  "Public synthetic design scenario; related boundary tests do not establish full semantic acceptance."
+                                },
+                                {
+                                    "id":  "C45",
+                                    "status":  "RELATED_LOCAL_CHECKS_ONLY",
+                                    "exact_supplied_scenario":  "NOT_RUN",
+                                    "related_test_ids":  [
+                                                             "tests/test_policy_model_access.py::test_rules_lookup_failure_is_not_an_empty_policy",
+                                                             "tests/test_rule_guards.py::test_send_price_guard_read_failure_blocks_delivery"
+                                                         ],
+                                    "evidence_paths":  [
+                                                           "docs/policy-response/runs/2026-09-21-local/final-python/junit.xml"
+                                                       ],
+                                    "notes":  "Public synthetic design scenario; related boundary tests do not establish full semantic acceptance."
+                                },
+                                {
+                                    "id":  "C46",
+                                    "status":  "NOT_RUN",
+                                    "exact_supplied_scenario":  "NOT_RUN",
+                                    "related_test_ids":  [
+
+                                                         ],
+                                    "evidence_paths":  [
+
+                                                       ],
+                                    "notes":  "Public synthetic design scenario; related boundary tests do not establish full semantic acceptance."
+                                },
+                                {
+                                    "id":  "C47",
+                                    "status":  "NOT_RUN",
+                                    "exact_supplied_scenario":  "NOT_RUN",
+                                    "related_test_ids":  [
+
+                                                         ],
+                                    "evidence_paths":  [
+
+                                                       ],
+                                    "notes":  "Public synthetic design scenario; related boundary tests do not establish full semantic acceptance."
+                                },
+                                {
+                                    "id":  "C48",
+                                    "status":  "NOT_RUN",
+                                    "exact_supplied_scenario":  "NOT_RUN",
+                                    "related_test_ids":  [
+
+                                                         ],
+                                    "evidence_paths":  [
+
+                                                       ],
+                                    "notes":  "Public synthetic design scenario; related boundary tests do not establish full semantic acceptance."
+                                },
+                                {
+                                    "id":  "C49",
+                                    "status":  "NOT_RUN",
+                                    "exact_supplied_scenario":  "NOT_RUN",
+                                    "related_test_ids":  [
+
+                                                         ],
+                                    "evidence_paths":  [
+
+                                                       ],
+                                    "notes":  "Public synthetic design scenario; related boundary tests do not establish full semantic acceptance."
+                                },
+                                {
+                                    "id":  "C50",
+                                    "status":  "NOT_RUN",
+                                    "exact_supplied_scenario":  "NOT_RUN",
+                                    "related_test_ids":  [
+
+                                                         ],
+                                    "evidence_paths":  [
+
+                                                       ],
+                                    "notes":  "Public synthetic design scenario; related boundary tests do not establish full semantic acceptance."
+                                }
+                            ],
+    "acceptance_source":  {
+                              "sha256":  "3807f4629b79745bc8e84b97460f93a9cd50ac479aa9268a06e8849d1a8444eb",
+                              "data_origin":  "SYNTHETIC_DESIGN_SPEC",
+                              "production_policy":  false
+                          },
+    "artifact_checks":  {
+                            "diff_check":  "PASS",
+                            "staged_files":  [
+
+                                             ],
+                            "input_packets_ignored":  true,
+                            "commit_unchanged":  true,
+                            "latest_manifest":  "docs/policy-response/runs/2026-09-21-live/run-manifest.json",
+                            "verification_path":  "docs/policy-response/runs/2026-09-21-live/artifact-verification.json"
+                        },
+    "audit":  {
+                  "initial_assessment_sha256":  "a86cc3302429b74d809729fce9155c3ac6df96d3017428d9c68e17223c72fe64",
+                  "independent_blind_agents":  0,
+                  "working_tree_shared_with_competing_run":  false,
+                  "live_review_method":  "One implementing agent reviewed 112 paired outputs; no independent reviewers or model judge."
+              }
+}

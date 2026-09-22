@@ -8,7 +8,7 @@ import re
 from datetime import datetime, timezone
 from typing import Any, NamedTuple
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, PrivateAttr
 from sqlalchemy import select
 
 from ..common.config import settings
@@ -22,6 +22,7 @@ from ..db.models import (
     Conversation,
     CustomerInteraction,
     CustomerProfile,
+    Event,
     InboundJob,
     Message,
 )
@@ -36,7 +37,8 @@ from ..common.sheet_values import (
 )
 from ..llm.client import LLMClient
 from ..llm.knowledge import FIRST, FOLLOWUP, select_relevant_docs
-from ..llm.prompts import apply_editable_tokens, canonicalize_contact_links, get_reply_format
+from ..llm.policy_context import PolicySnapshot, fingerprint
+from ..llm.prompts import apply_editable_tokens, canonicalize_contact_links, get_reply_format, load_prompt
 from ._notify import notify_approval_once
 from .inbound_scoring import (  # noqa: F401 — re-exported for callers/tests
     _build_enrichment_context,
@@ -46,6 +48,7 @@ from .inbound_scoring import (  # noqa: F401 — re-exported for callers/tests
 from .summaries import append_summary_line
 from .stage_sync import _retire_superseded_drafts
 from .followup_sequence import REMINDER_NOTE_PREFIX, REMINDER_VARIANTS
+from .draft_evidence import AnswerPoint, PolicyQuote, DraftEvidenceError, check_draft, compose_answer, repair_instruction
 
 logger = logging.getLogger(__name__)
 
@@ -72,8 +75,9 @@ _DEFAULT_HUBSPOT = object()
 # 회신의 형식·톤 규칙은 한 벌이어야 하고, 파일이 둘이면 그 규칙이 두 곳에서 갈립니다.
 _FOLLOWUP_RULE_ANSWER = (
     "이 대화에는 이미 우리가 보낸 회신이 있습니다. 이번 글은 그 뒤에 **고객이 새로 보낸 "
-    "메시지에 대한 답**입니다. 위의 '가장 최근 문의'가 그 메시지이고, 그것에 답하세요 — "
-    "처음부터 다시 소개하거나 이미 안내한 것을 되풀이하지 마세요."
+    "메시지에 대한 답**입니다. 위의 '가장 최근 문의'를 직전 질문에 연결하고, "
+    "그 응답으로 답할 수 있게 된 원래 문의까지 이어서 답하세요. "
+    "이미 안내한 설명만 생략하며, 아직 안내하지 않은 조건은 답변에 포함하세요."
 )
 _FOLLOWUP_RULE_ELABORATE = (
     "이 대화에는 이미 우리가 보낸 회신이 있고, **고객의 답장은 아직 없습니다.** 이번 글은 "
@@ -119,14 +123,15 @@ class _Turn(NamedTuple):
     subject: str | None
     body: str
     reminder: bool = False  # 후속 리마인더 — 우리 차례이지만 「이미 적은 말」의 근거는 아닙니다
+    source_ref: str = ""
 
 
 _TURN_LABELS = {"inbound": "고객", "outgoing": "우리", "note": "기록"}
 # 실제로 나간 회신. 초안·승인 대기는 아직 고객이 못 본 글이라 「우리가 한 말」이 아닙니다.
-_SENT_STATUSES = ("sent", "test_sent")
+_SENT_STATUSES = ("sent",)
 
 
-def thread_events(conv_id: int | None) -> list[_Turn]:
+def thread_events(conv_id: int | None, *, factory=None) -> list[_Turn]:
     """이 티켓에서 오간 것 전부, 오래된 순. **두 표를 합칩니다.**
 
     ``messages`` 에는 이 콘솔이 만든 것만 있습니다 — 최초 문의 하나와 우리가 여기서 보낸
@@ -140,12 +145,15 @@ def thread_events(conv_id: int | None) -> list[_Turn]:
     응답이 돌려준 스레드 메시지 id 가 ``messages.hubspot_message_id`` 이고, 수집기는
     그것으로 ``external_id`` 를 만듭니다(티켓 화면이 중복을 거를 때와 같은 규칙).
 
-    읽기 전용이고, 실패하면 빈 목록입니다 — 맥락이 없다고 초안을 못 쓰는 것보다는 낫습니다.
+    조회 실패는 빈 대화가 아닙니다. 해당 초안을 실패 처리해 다시 시도하게 합니다.
     """
     if not conv_id:
         return []
     try:
-        with SessionLocal() as session:
+        with (factory or SessionLocal)() as session:
+            conv = session.get(Conversation, conv_id)
+            if conv is None:
+                raise RuntimeError("대화를 찾을 수 없습니다.")
             messages = (
                 session.query(Message)
                 .filter(
@@ -166,6 +174,7 @@ def thread_events(conv_id: int | None) -> list[_Turn]:
             interactions = (
                 session.query(CustomerInteraction)
                 .filter(CustomerInteraction.conversation_id == conv_id)
+                .filter(CustomerInteraction.contact_id == conv.contact_id)
                 .all()
             )
 
@@ -193,6 +202,7 @@ def thread_events(conv_id: int | None) -> list[_Turn]:
                 subject=row.subject,
                 body=row.body or "",
                 reminder=row.prompt_variant in REMINDER_VARIANTS,
+                source_ref=f"message:{row.id}",
             ))
         for item in interactions:
             if item.external_id in drawn_by_messages:
@@ -210,12 +220,13 @@ def thread_events(conv_id: int | None) -> list[_Turn]:
                 ),
                 subject=item.subject,
                 body=body,
+                source_ref=f"interaction:{item.id}",
             ))
-        turns.sort(key=lambda turn: turn.at)
+        turns.sort(key=lambda turn: (turn.at, turn.source_ref))
         return turns
     except Exception:
         logger.warning("대화 이력을 못 읽었습니다 (conv=%s).", conv_id, exc_info=True)
-        return []
+        raise
 
 
 def _naive(value: datetime | None) -> datetime:
@@ -226,19 +237,19 @@ def _naive(value: datetime | None) -> datetime:
     """
     if value is None:
         return datetime.min
-    return value.replace(tzinfo=None) if value.tzinfo else value
+    return value.astimezone(timezone.utc).replace(tzinfo=None) if value.tzinfo else value
 
 
-def latest_customer_message(conv_id: int | None) -> _Turn | None:
+def latest_customer_message(conv_id: int | None, *, events=None) -> _Turn | None:
     """마지막으로 나간 우리 회신 **뒤에** 온 고객 메시지. 없으면 None.
 
     이것이 후속 초안의 갈림길입니다 (운영자 지시): 있으면 **그 메시지에 답하고**, 없으면
     같은 문의를 더 자세히 씁니다.
     """
-    events = thread_events(conv_id)
+    events = thread_events(conv_id) if events is None else events
     after = 0
     for index, turn in enumerate(events):
-        if turn.direction == "outgoing":
+        if turn.direction == "outgoing" and not turn.reminder:
             after = index + 1
     for turn in reversed(events[after:]):
         if turn.direction == "inbound":
@@ -246,13 +257,39 @@ def latest_customer_message(conv_id: int | None) -> _Turn | None:
     return None
 
 
-def last_sent_reply(conv_id: int | None) -> _Turn | None:
+def last_sent_reply(conv_id: int | None, *, events=None) -> _Turn | None:
     """마지막으로 나간 우리 회신. 「이미 적은 말을 되풀이하지 마라」의 근거입니다."""
-    for turn in reversed(thread_events(conv_id)):
+    for turn in reversed(thread_events(conv_id) if events is None else events):
         # 리마인더 세 줄을 「지난 회신」으로 실으면 실제 회신이 앵커에서 빠집니다.
         if turn.direction == "outgoing" and not turn.reminder:
             return turn
     return None
+
+
+def customer_turns_since(events: list[_Turn], since: datetime, *, seen=()) -> list[_Turn]:
+    """``since`` 뒤에 **고객이** 보낸 것 — 「초안이 못 본 말」의 기준입니다.
+
+    초안이 근거로 삼은 대화가 그 뒤에 바뀌었는지는 이것으로 잽니다. 대화 전체의 해시로
+    재면 안 됩니다: 10분 폴러의 스레드 수집(``ticket_history``)이 **최초 문의의 사본**을
+    ``hubspot:conv:`` 줄로 넣는데, 문의 ``messages`` 행에는 스레드 id 가 없어 그 사본은
+    안 걸러집니다 — 그러면 초안이 서고 수집이 지나간 **모든 New 티켓**이 「대화가
+    변경되었습니다」로 승인이 막히고, 빠져나갈 길은 다시 쓰기(운영자 편집이 사라진다)
+    뿐입니다. 운영자가 그 티켓에 「수신」 기록을 적어도, 개인함 수집이 옛 메일을 붙여도
+    같은 일이 났습니다. 그 줄들은 초안이 답해야 할 새 말이 아닙니다.
+
+    그래서 재는 것은 **초안이 못 본(``seen`` 에 없는) 고객 메시지 중 시각이 초안 뒤인 것**
+    뿐입니다. 사본은 원래 시각을 들고 오므로 안 걸리고, 초안 뒤에 온 답장·정정은 걸립니다.
+    우리 회신·기록 줄은 세지 않습니다. ``since`` 는 시간대 없는 UTC(``_naive`` 가 turn.at 에
+    쓰는 것과 같은 자)이고, ``seen`` 은 초안이 읽었던 turn 의 ``source_ref`` 들입니다.
+    """
+    seen = set(seen)
+    return [turn for turn in events
+            if turn.direction == "inbound" and turn.source_ref not in seen and turn.at > since]
+
+
+def utcnow_naive() -> datetime:
+    """``customer_turns_since`` 의 자 — ``_naive`` 와 같은 시간대(UTC, tz 없음)입니다."""
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 class ClassifyResult(BaseModel):
@@ -267,6 +304,11 @@ class CompanyTypeResult(BaseModel):
 
 
 class DraftResult(BaseModel):
+    # Server-owned provenance; JSON returned by the model cannot populate it.
+    _context_manifest: dict = PrivateAttr(default_factory=dict)
+    _policy_snapshot: PolicySnapshot | None = PrivateAttr(default=None)
+    policy_quotes: list[PolicyQuote] = []
+    answer_points: list[AnswerPoint] = []
     # **모델이 주는 제목은 쓰지 않습니다** — `_draft_reply` 가 `reply_subject` 로 다시
     # 만듭니다(CODE GUARD 3). 그래서 프롬프트도 이 칸을 안 묻고, 기본값이 있습니다:
     # 옛 응답이나 테스트 더미가 제목을 실어 보내도 파싱은 통과해야 합니다.
@@ -278,6 +320,13 @@ class DraftResult(BaseModel):
     # 때만 쓰이고(프롬프트가 JSON 모양을 따로 적습니다), 이 칸은 링크·금액 가드가 전부
     # 끝난 뒤 `_draft_reply` 가 채웁니다. 본문이 이미 한국어면 빈 문자열입니다.
     body_ko: str = ""
+
+
+class GroundedDraftResult(DraftResult):
+    """One generated representation; the server composes its customer-facing body."""
+
+    body: str = ""
+    answer_points: list[AnswerPoint] = Field(min_length=1)
 
 
 class _RequestsResult(BaseModel):
@@ -903,7 +952,7 @@ class InboundAgent:
         """
         if not conv_id:
             return True
-        return not any(turn.direction == "outgoing" for turn in thread_events(conv_id))
+        return last_sent_reply(conv_id) is None
 
     def _build_conversation_context(
         self,
@@ -912,6 +961,7 @@ class InboundAgent:
         *,
         limit: int = 8,
         max_chars: int = 6000,
+        events=None,
     ) -> str:
         """Return the rolling summary and latest completed turns for drafting.
 
@@ -931,7 +981,7 @@ class InboundAgent:
             skipped_latest = False
             prior: list[_Turn] = []
             # 최신부터 거꾸로 담습니다 — 긴 스레드에서 잘려 나가야 할 쪽은 오래된 쪽입니다.
-            for turn in reversed(thread_events(conv_id)):
+            for turn in reversed(thread_events(conv_id) if events is None else events):
                 if (
                     not skipped_latest
                     and latest
@@ -944,22 +994,40 @@ class InboundAgent:
                 if len(prior) >= limit:
                     break
 
+            # Reserve the budget for recent original turns BEFORE derived summaries.
+            # Label provenance; a customer's assertion is never system verification.
             parts: list[str] = []
-            if summary:
-                parts.append(f"기존 대화 요약:\n{summary}")
-            if requests:
-                parts.append(f"기존 고객 요청사항:\n{requests}")
-            if prior:
-                turns: list[str] = []
-                for turn in reversed(prior):
-                    subject = f" [{turn.subject}]" if turn.subject else ""
-                    turns.append(f"{_TURN_LABELS[turn.direction]}{subject}: "
-                                 f"{text_wash(turn.body)[:1200]}")
-                parts.append("최근 대화:\n" + "\n\n".join(turns))
+            used = 0
+            for turn in prior:  # newest first
+                state = "고객 주장·미검증" if turn.direction == "inbound" else "대화 기록"
+                head = (f"{_TURN_LABELS.get(turn.direction, '기록')} "
+                        f"[{turn.at.isoformat()} UTC; {turn.source_ref}; {state}]: ")
+                raw = text_wash(turn.body)
+                remaining = max_chars - used - len(head) - 30
+                if remaining <= 0:
+                    break
+                body = raw[:min(1200, remaining)]
+                if len(body) < len(raw):
+                    body += " [원문 일부 생략]"
+                part = head + body
+                parts.append(part)
+                used += len(part) + 2
+            parts.reverse()
+            for label, value in (("파생 대화 요약·원문 우선", summary),
+                                 ("파생 고객 요청사항·원문 우선", requests)):
+                if value:
+                    remaining = max_chars - used - len(label) - 25
+                    if remaining <= 0:
+                        break
+                    part = f"{label}:\n{value[:remaining]}"
+                    if len(value) > remaining:
+                        part += " [요약 일부 생략]"
+                    parts.append(part)
+                    used += len(part) + 2
             return "\n\n".join(parts)[:max_chars]
         except Exception:
             logger.warning("Conversation context lookup failed for conv %s.", conv_id, exc_info=True)
-            return ""
+            raise
 
     def _draft_reply(
         self,
@@ -984,7 +1052,12 @@ class InboundAgent:
         from ..llm.reply import ensure_language, korean_reading
         from ..llm.translate import is_mostly_korean
 
-        first_reply = self._is_first_reply(conv_id)
+        generated_at = utcnow_naive()
+        events = thread_events(conv_id)
+        previous = last_sent_reply(conv_id, events=events)
+        first_reply = previous is None
+        stage = FIRST if first_reply else FOLLOWUP
+        policy = PolicySnapshot.capture(stage)
         # **후속 회신은 두 갈래입니다** (2026-09-07 운영자 지시).
         #
         #   마지막 회신 뒤에 고객 메시지가 있다 → 그 메시지에 답한다
@@ -993,16 +1066,18 @@ class InboundAgent:
         # `last_message` 를 여기서 갈아 끼우는 것이 요점입니다. 그 값은 허브스팟이 준
         # **티켓 본문** = 최초 문의라, 그대로 두면 후속 초안이 처음 문의에 다시 답합니다.
         last_message = contact_info["last_message"]
+        newer = latest_customer_message(conv_id, events=events)
+        if newer is not None:
+            last_message = newer.body or last_message
         followup_rule = ""
         if not first_reply:
-            newer = latest_customer_message(conv_id)
-            previous = last_sent_reply(conv_id)
             if newer is not None:
                 followup_rule = _FOLLOWUP_RULE_ANSWER
-                last_message = newer.body or last_message
             elif previous is not None:
                 followup_rule = _FOLLOWUP_RULE_ELABORATE + text_wash(previous.body)[:2000]
 
+        context = self._build_conversation_context(conv_id, last_message, events=events)
+        selection_trace: dict = {}
         knowledge_docs = select_relevant_docs(
             inquiry=last_message,
             category=classification.category,
@@ -1010,22 +1085,21 @@ class InboundAgent:
             # 한국어 문의에는 KR 문서, 그 외에는 ENG 문서. 기본 메일 템플릿이 두 벌이라
             # 언어를 안 가리면 두 벌이 같이 붙습니다.
             language=inquiry_lang,
-            # 그 문서가 메일 제목을 들고 있으면 같이 받습니다 — 아래 CODE GUARD 3 에서 씁니다.
             # 「후속 회신에만」 문서는 첫 회신의 인덱스에 아예 안 실립니다 (0108). 모델에게
             # 「고르지 마라」라고 부탁하는 대신 보여 주지 않습니다.
-            stage=FIRST if first_reply else FOLLOWUP,
+            stage=stage,
+            candidates=policy.candidates,
+            conversation_context=context,
+            selection_trace=selection_trace,
         )
-        draft = self.llm.complete(
-            "inbound/draft_reply",
-            {
+        policy.assert_current()
+        draft_fields = {
                 "contact_name": contact_info["full_name"],
                 "company": contact_info["company"],
                 "country": contact_info["country"],
                 "category": classification.category,
                 "last_message": last_message,
-                "conversation_context": self._build_conversation_context(
-                    conv_id, last_message
-                ),
+                "conversation_context": context,
                 # 이 회신이 무엇인가 — 첫 회신에서는 빈 문자열입니다.
                 "followup_rule": followup_rule,
                 "enrichment_context": _build_enrichment_context(contact_info),
@@ -1038,15 +1112,29 @@ class InboundAgent:
                 # 그 문장을 그대로 살려 쓸 수 있어야 합니다 — 한 번 한국어를 거치면
                 # 그 문장은 되돌아오지 못합니다.
                 "reply_language": language_name(inquiry_lang),
-            },
-            schema=DraftResult,
-            tier="pro",
-            max_tokens=4000,
+                "evidence_feedback": "",
+        }
+        allowed_docs = [doc for doc in policy.documents if doc.mode == "rules"
+                        or doc.id in selection_trace.get("selected_ids", [])]
+        customer_text = "\n".join(turn.body for turn in events if turn.direction == "inbound")
+        customer_text += "\n" + last_message
+        for attempt in range(2):
+            draft = self.llm.complete(
+                "inbound/draft_reply", draft_fields, schema=GroundedDraftResult, tier="pro", max_tokens=4000,
             # **회사 규칙이 실리는 유일한 호출입니다** (2026-09-10). 「첫 회신에만」·
             # 「그 이후 회신에」 문서가 여기서 갈립니다. 나머지 호출(분류·라우팅·요약·
             # 번역)은 `stage` 를 안 주므로 규칙을 아예 안 받습니다.
-            stage=FIRST if first_reply else FOLLOWUP,
-        )
+                stage=stage, policy_snapshot=policy,
+            )
+            if draft.answer_points:
+                draft.body = compose_answer(draft.answer_points)
+            issues = check_draft(draft.body, draft.policy_quotes, documents=allowed_docs,
+                                 customer_text=customer_text)
+            if not issues:
+                break
+            if attempt == 1:
+                raise DraftEvidenceError("초안 근거 검증 실패: " + ", ".join(issues))
+            draft_fields["evidence_feedback"] = repair_instruction(issues)
 
         # CODE GUARD 1 — the draft is in the language it will be sent in.
         #
@@ -1067,10 +1155,9 @@ class InboundAgent:
             if removed:
                 draft.body = cleaned
                 logger.warning(
-                    "First-reply pricing guard removed %d line(s) (contact=%s): %s",
+                    "First-reply pricing guard removed %d line(s) (conversation=%s)",
                     len(removed),
-                    contact_info.get("email") or "?",
-                    " | ".join(removed)[:300],
+                    conv_id,
                 )
                 if conv_id:
                     add_progress(
@@ -1099,6 +1186,31 @@ class InboundAgent:
         # 금액 가드가 끝난 뒤라야 두 벌이 같은 문장, 같은 링크를 들고 대조가 됩니다.
         # 한 번만 돌고 행에 저장되므로 화면을 열 때마다 모델을 부르지 않습니다.
         draft.body_ko = korean_reading(draft.body, llm=self.llm)
+        final_issues = check_draft(draft.body, draft.policy_quotes, documents=allowed_docs,
+                                   customer_text=customer_text)
+        if final_issues:
+            raise DraftEvidenceError("초안 변환 후 근거 검증 실패: " + ", ".join(final_issues))
+        policy.assert_current()
+        draft._policy_snapshot = policy
+        draft._context_manifest = {
+            "version": 1, "conversation_id": conv_id,
+            "policy": policy.manifest(), "selection": selection_trace,
+            # 「대화가 바뀌었나」의 기준 시각. 해시(`thread_sha256`)는 기록용이지 판정 기준이
+            # 아닙니다 — `customer_turns_since` 의 docstring 이 그 이유입니다.
+            "generated_at": generated_at.isoformat(),
+            "thread_sha256": fingerprint(events),
+            "turn_refs": [turn.source_ref for turn in events],
+            "input_sha256": fingerprint({"latest": last_message, "context": context,
+                                         "contact": contact_info}),
+            "body_sha256": fingerprint(draft.body),
+            "model": settings.GEMINI_MODEL_PRO, "api_surface": "vertex-ai",
+            "prompt_sha256": fingerprint(load_prompt("inbound/draft_reply")),
+            "schema_sha256": fingerprint(GroundedDraftResult.model_json_schema()),
+            "limited_evidence_checks": {"status": "PASS", "generation_attempts": attempt + 1,
+                                        "quoted_source_ids": sorted({q.source_id for q in draft.policy_quotes}),
+                                        "answer_points_count": len(draft.answer_points)},
+            "semantic_validation": "NOT_RUN", "delivery_permission": "DRAFT_ONLY",
+        }
         return draft
 
     def _persist_placeholder(
@@ -1404,6 +1516,12 @@ class InboundAgent:
         spot instead of being put in 발송 대기. That is the one window the stage gates
         cannot cover: ``handle()`` checked the stage minutes ago, at ingest.
         """
+        if draft._policy_snapshot is not None:
+            draft._policy_snapshot.assert_current()
+            since = datetime.fromisoformat(draft._context_manifest["generated_at"])
+            if customer_turns_since(thread_events(conv_id), since,
+                                    seen=draft._context_manifest["turn_refs"]):
+                raise RuntimeError("초안 생성 중 대화가 변경되었습니다. 다시 생성해 주세요.")
         session = SessionLocal()
         try:
             msg = session.get(Message, message_id)
@@ -1421,6 +1539,10 @@ class InboundAgent:
             # and the immediate receipt acknowledgement have both been removed, so no
             # configuration value can make an inbound message send by itself.
             msg.status = "pending_approval"
+            if draft._context_manifest:
+                session.add(Event(kind="reply_context", payload={
+                    **draft._context_manifest, "message_id": message_id,
+                }))
             conv = session.get(Conversation, msg.conversation_id)
             if conv:
                 # 목록이 보여줄 값. 유형은 스레드의 성질이라 대화에 답니다 — 그리고 이것이
@@ -1454,35 +1576,25 @@ class InboundAgent:
         if not conv_id:
             return
         try:
-            with SessionLocal() as session:
-                rows = (
-                    session.query(Message)
-                    .filter(
-                        Message.conversation_id == conv_id,
-                        Message.direction == "inbound",
-                    )
-                    .order_by(Message.created_at.asc(), Message.id.asc())
-                    .all()
-                )
-                # 긴 대화에서는 **최근** 문의부터 담습니다. 앞에서 자르면 지금 답하려는
-                # 바로 그 메시지가 빠집니다.
-                newest_first: list[str] = []
-                used = 0
-                for m in reversed(rows):
-                    if not (m.body or "").strip():
-                        continue
-                    subj = f"[{m.subject}] " if m.subject else ""
-                    part = f"고객: {subj}{m.body.strip()}"
-                    remaining = 8000 - used
-                    if remaining <= 0:
+            started = utcnow_naive()
+            events = thread_events(conv_id)
+            # Use the same customer turns as drafting, including synced corrections.
+            newest_first: list[str] = []
+            used = 0
+            for turn in reversed(events):
+                if turn.direction != "inbound":
+                    continue
+                part = f"고객 주장·미검증 [{turn.at.isoformat()} UTC; {turn.source_ref}]: {turn.body}"
+                remaining = 8000 - used
+                if remaining <= 0:
+                    break
+                if len(part) > remaining:
+                    if newest_first:
                         break
-                    if len(part) > remaining:
-                        if newest_first:
-                            break
-                        part = part[-remaining:]
-                    newest_first.append(part)
-                    used += len(part) + 2
-                thread_text = "\n\n".join(reversed(newest_first))
+                    part = part[:max(0, remaining - 15)] + " [원문 일부 생략]"
+                newest_first.append(part)
+                used += len(part) + 2
+            thread_text = "\n\n".join(reversed(newest_first))
             if not thread_text:
                 return
 
@@ -1497,12 +1609,13 @@ class InboundAgent:
                 tier="flash",
                 max_tokens=1200,
             )
+            if customer_turns_since(thread_events(conv_id), started,
+                                    seen=[turn.source_ref for turn in events]):
+                return  # A stale derived summary must not overwrite a correction.
             with SessionLocal() as session:
                 conv = session.get(Conversation, conv_id)
                 if conv:
-                    conv.customer_requests = (
-                        result.customer_requests or ""
-                    ).strip() or conv.customer_requests
+                    conv.customer_requests = (result.customer_requests or "").strip() or None
                     session.commit()
         except Exception:
             logger.warning(

@@ -1,0 +1,2 @@
+PASS: JSON parsed; 9 requirement records, 50 acceptance inventory entries; all requirement code/test/evidence and document references exist; all requirement test IDs found in final JUnit. 1698 JUnit cases, 43 skipped. Existing user documents present. No staged files or new commit.
+Source hashes: 39 matched. Markdown links: PASS. Repository-config diff check: exit 0. A diagnostic autocrlf=false override reports existing CRLF as whitespace; no repository git config was changed.

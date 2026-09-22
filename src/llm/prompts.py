@@ -58,39 +58,13 @@ def _rules_from_db(stage: str | None = None) -> str:
 
     Nothing here reaches the network — the rows ARE the policy, not a cache of it.
     """
-    # 단계 표는 `knowledge` 한 곳입니다. 늦게 import 하는 이유는 순환을 피하려는 것이고,
-    # 이 파일의 다른 DB 접근과 같은 방식입니다.
-    from .knowledge import scopes_for_stage
+    from .policy_context import read_sources
 
-    allowed = scopes_for_stage(stage)
-    try:
-        from ..db.models import PolicySource
-        from ..db.session import SessionLocal
-
-        with SessionLocal() as session:
-            rows = (
-                session.query(PolicySource)
-                # **「사람만 본다」는 여기서 빠집니다** (0119). 프롬프트에 안 넣는 것을
-                # 코드 흐름이 아니라 **쿼리**로 지킵니다 — 흐름으로 두면 다음 호출자가
-                # 그 앞을 안 지납니다. 운영 단가 문서가 이 자리로 매 호출 프롬프트에
-                # 원가·이익률·승인 하한을 싣고 있었습니다.
-                .filter(PolicySource.model_access == "customer_context")
-                .filter(PolicySource.mode == "rules")
-                .filter(PolicySource.scope.in_(allowed))
-                # 순서는 만든 순서입니다. `order_index` 라는 칸이 있었지만 정할 방법이
-                # 없어서 늘 같은 값이었고, 결국 이 정렬이었습니다 (0101).
-                .order_by(PolicySource.id)
-                .all()
-            )
-            parts = [
-                f"# {row.label}\n{(row.body or '').strip()}" for row in rows if (row.body or "").strip()
-            ]
-    except Exception:
-        # Logged loudly: with the rules in the database this is the one failure that can
-        # silently strip tone and CS policy out of every prompt.
-        logger.warning("Company rules could not be read from the database.", exc_info=True)
-        return ""
-    return "\n\n".join(parts)
+    # A failed lookup is not an empty policy set. Let the draft worker record failure.
+    return "\n\n".join(
+        f"# {row.label}\n{(row.body or '').strip()}"
+        for row in read_sources(stage, mode="rules") if (row.body or "").strip()
+    )
 
 
 def get_company_rules(stage: str | None = None) -> str:

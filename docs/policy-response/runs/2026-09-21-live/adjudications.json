@@ -1,0 +1,791 @@
+{
+    "method":  "Single implementing agent; non-blind manual review of all 112 outputs against predeclared synthetic requirements and policy text. Development data, not holdout. PASS requires no observed material unsupported claim and required answers; ambiguity is REVIEW_REQUIRED; blocked generation is FAIL. Critical means fabricated operational/time/fact/condition/authority decision. No population accuracy or independent adjudication claimed.",
+    "baseline":  [
+                     {
+                         "run":  "S01-router-1",
+                         "verdict":  "PASS",
+                         "critical":  false,
+                         "category":  "requirements_met",
+                         "reason":  "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+                     },
+                     {
+                         "run":  "S01-all-1",
+                         "verdict":  "PASS",
+                         "critical":  false,
+                         "category":  "requirements_met",
+                         "reason":  "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+                     },
+                     {
+                         "run":  "S02-router-1",
+                         "verdict":  "FAIL",
+                         "critical":  false,
+                         "category":  "missing_answer",
+                         "reason":  "환불 신청 조건 안내가 없고 확인 후 연락만 약속함."
+                     },
+                     {
+                         "run":  "S02-all-1",
+                         "verdict":  "FAIL",
+                         "critical":  true,
+                         "category":  "unsupported_duration",
+                         "reason":  "원문에 없는 영업일 5~10일 처리 기간."
+                     },
+                     {
+                         "run":  "S03-router-1",
+                         "verdict":  "PASS",
+                         "critical":  false,
+                         "category":  "requirements_met",
+                         "reason":  "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+                     },
+                     {
+                         "run":  "S03-all-1",
+                         "verdict":  "PASS",
+                         "critical":  false,
+                         "category":  "requirements_met",
+                         "reason":  "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+                     },
+                     {
+                         "run":  "S04-router-1",
+                         "verdict":  "PASS",
+                         "critical":  false,
+                         "category":  "requirements_met",
+                         "reason":  "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+                     },
+                     {
+                         "run":  "S04-all-1",
+                         "verdict":  "PASS",
+                         "critical":  false,
+                         "category":  "requirements_met",
+                         "reason":  "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+                     },
+                     {
+                         "run":  "S05-router-1",
+                         "verdict":  "PASS",
+                         "critical":  false,
+                         "category":  "requirements_met",
+                         "reason":  "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+                     },
+                     {
+                         "run":  "S05-all-1",
+                         "verdict":  "FAIL",
+                         "critical":  true,
+                         "category":  "unverified_fact",
+                         "reason":  "다운로드 이력을 확인하였다고 단정."
+                     },
+                     {
+                         "run":  "S06-router-1",
+                         "verdict":  "FAIL",
+                         "critical":  true,
+                         "category":  "unsupported_execution_status",
+                         "reason":  "환불 가능 여부를 확인하고 있다고 주장."
+                     },
+                     {
+                         "run":  "S06-all-1",
+                         "verdict":  "FAIL",
+                         "critical":  true,
+                         "category":  "unsupported_execution_status",
+                         "reason":  "실행 근거 없이 환불 신청 접수 및 확인 중 주장."
+                     },
+                     {
+                         "run":  "S07-router-1",
+                         "verdict":  "FAIL",
+                         "critical":  true,
+                         "category":  "unsupported_execution_status",
+                         "reason":  "미확인 건을 확인하고 있다고 표현."
+                     },
+                     {
+                         "run":  "S07-all-1",
+                         "verdict":  "FAIL",
+                         "critical":  true,
+                         "category":  "unsupported_duration",
+                         "reason":  "근거 없는 영업일 기준 며칠 소요라는 처리 기간."
+                     },
+                     {
+                         "run":  "S08-router-1",
+                         "verdict":  "PASS",
+                         "critical":  false,
+                         "category":  "requirements_met",
+                         "reason":  "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+                     },
+                     {
+                         "run":  "S08-all-1",
+                         "verdict":  "FAIL",
+                         "critical":  false,
+                         "category":  "unsupported_ui_steps",
+                         "reason":  "원문에 없는 프로젝트 페이지/내보내기/자막 메뉴 절차."
+                     },
+                     {
+                         "run":  "S09-router-1",
+                         "verdict":  "PASS",
+                         "critical":  false,
+                         "category":  "requirements_met",
+                         "reason":  "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+                     },
+                     {
+                         "run":  "S09-all-1",
+                         "verdict":  "PASS",
+                         "critical":  false,
+                         "category":  "requirements_met",
+                         "reason":  "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+                     },
+                     {
+                         "run":  "S10-router-1",
+                         "verdict":  "PASS",
+                         "critical":  false,
+                         "category":  "requirements_met",
+                         "reason":  "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+                     },
+                     {
+                         "run":  "S10-all-1",
+                         "verdict":  "PASS",
+                         "critical":  false,
+                         "category":  "requirements_met",
+                         "reason":  "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+                     },
+                     {
+                         "run":  "S11-router-1",
+                         "verdict":  "PASS",
+                         "critical":  false,
+                         "category":  "requirements_met",
+                         "reason":  "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+                     },
+                     {
+                         "run":  "S11-all-1",
+                         "verdict":  "PASS",
+                         "critical":  false,
+                         "category":  "requirements_met",
+                         "reason":  "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+                     },
+                     {
+                         "run":  "S12-router-1",
+                         "verdict":  "PASS",
+                         "critical":  false,
+                         "category":  "requirements_met",
+                         "reason":  "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+                     },
+                     {
+                         "run":  "S12-all-1",
+                         "verdict":  "PASS",
+                         "critical":  false,
+                         "category":  "requirements_met",
+                         "reason":  "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+                     },
+                     {
+                         "run":  "S13-router-1",
+                         "verdict":  "PASS",
+                         "critical":  false,
+                         "category":  "requirements_met",
+                         "reason":  "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+                     },
+                     {
+                         "run":  "S13-all-1",
+                         "verdict":  "FAIL",
+                         "critical":  false,
+                         "category":  "unsupported_ui_steps",
+                         "reason":  "원문에 없는 편집 화면 메뉴 절차."
+                     },
+                     {
+                         "run":  "S14-router-1",
+                         "verdict":  "FAIL",
+                         "critical":  true,
+                         "category":  "unsupported_execution_status",
+                         "reason":  "담당 부서 확인 진행 중 및 아직 완료 아님을 모두 미확인 상태에서 단정."
+                     },
+                     {
+                         "run":  "S14-all-1",
+                         "verdict":  "FAIL",
+                         "critical":  true,
+                         "category":  "unsupported_execution_status",
+                         "reason":  "환불 진행 중 및 영업일 5~10일을 지어냄."
+                     },
+                     {
+                         "run":  "S01-all-2",
+                         "verdict":  "PASS",
+                         "critical":  false,
+                         "category":  "requirements_met",
+                         "reason":  "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+                     },
+                     {
+                         "run":  "S01-router-2",
+                         "verdict":  "PASS",
+                         "critical":  false,
+                         "category":  "requirements_met",
+                         "reason":  "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+                     },
+                     {
+                         "run":  "S02-all-2",
+                         "verdict":  "FAIL",
+                         "critical":  true,
+                         "category":  "unsupported_execution_status",
+                         "reason":  "조회하고 있다고 주장하며 조건 안내 누락."
+                     },
+                     {
+                         "run":  "S02-router-2",
+                         "verdict":  "FAIL",
+                         "critical":  true,
+                         "category":  "unsupported_duration",
+                         "reason":  "원문에 없는 1~2 영업일 확인 기간; 조건 안내 누락."
+                     },
+                     {
+                         "run":  "S03-all-2",
+                         "verdict":  "PASS",
+                         "critical":  false,
+                         "category":  "requirements_met",
+                         "reason":  "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+                     },
+                     {
+                         "run":  "S03-router-2",
+                         "verdict":  "FAIL",
+                         "critical":  false,
+                         "category":  "unsupported_plan_scope",
+                         "reason":  "모든 구독 플랜 지원을 원문 없이 추가."
+                     },
+                     {
+                         "run":  "S04-all-2",
+                         "verdict":  "PASS",
+                         "critical":  false,
+                         "category":  "requirements_met",
+                         "reason":  "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+                     },
+                     {
+                         "run":  "S04-router-2",
+                         "verdict":  "PASS",
+                         "critical":  false,
+                         "category":  "requirements_met",
+                         "reason":  "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+                     },
+                     {
+                         "run":  "S05-all-2",
+                         "verdict":  "REVIEW_REQUIRED",
+                         "critical":  false,
+                         "category":  "ambiguous_fact_attribution",
+                         "reason":  "고객 진술을 기초로 한 계산인지 시스템 확인인지 불명확한 확인됩니다 표현."
+                     },
+                     {
+                         "run":  "S05-router-2",
+                         "verdict":  "REVIEW_REQUIRED",
+                         "critical":  false,
+                         "category":  "ambiguous_fact_attribution",
+                         "reason":  "고객 진술 기반 기한 계산을 확인된 결과로 표현; 내부 확인 구분 불명확."
+                     },
+                     {
+                         "run":  "S06-all-2",
+                         "verdict":  "FAIL",
+                         "critical":  true,
+                         "category":  "unsupported_execution_status",
+                         "reason":  "특별 계약 내용을 확인하고 있다고 주장."
+                     },
+                     {
+                         "run":  "S06-router-2",
+                         "verdict":  "PASS",
+                         "critical":  false,
+                         "category":  "requirements_met",
+                         "reason":  "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+                     },
+                     {
+                         "run":  "S07-all-2",
+                         "verdict":  "PASS",
+                         "critical":  false,
+                         "category":  "requirements_met",
+                         "reason":  "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+                     },
+                     {
+                         "run":  "S07-router-2",
+                         "verdict":  "PASS",
+                         "critical":  false,
+                         "category":  "requirements_met",
+                         "reason":  "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+                     },
+                     {
+                         "run":  "S08-all-2",
+                         "verdict":  "PASS",
+                         "critical":  false,
+                         "category":  "requirements_met",
+                         "reason":  "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+                     },
+                     {
+                         "run":  "S08-router-2",
+                         "verdict":  "PASS",
+                         "critical":  false,
+                         "category":  "requirements_met",
+                         "reason":  "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+                     },
+                     {
+                         "run":  "S09-all-2",
+                         "verdict":  "PASS",
+                         "critical":  false,
+                         "category":  "requirements_met",
+                         "reason":  "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+                     },
+                     {
+                         "run":  "S09-router-2",
+                         "verdict":  "PASS",
+                         "critical":  false,
+                         "category":  "requirements_met",
+                         "reason":  "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+                     },
+                     {
+                         "run":  "S10-all-2",
+                         "verdict":  "PASS",
+                         "critical":  false,
+                         "category":  "requirements_met",
+                         "reason":  "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+                     },
+                     {
+                         "run":  "S10-router-2",
+                         "verdict":  "PASS",
+                         "critical":  false,
+                         "category":  "requirements_met",
+                         "reason":  "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+                     },
+                     {
+                         "run":  "S11-all-2",
+                         "verdict":  "PASS",
+                         "critical":  false,
+                         "category":  "requirements_met",
+                         "reason":  "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+                     },
+                     {
+                         "run":  "S11-router-2",
+                         "verdict":  "PASS",
+                         "critical":  false,
+                         "category":  "requirements_met",
+                         "reason":  "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+                     },
+                     {
+                         "run":  "S12-all-2",
+                         "verdict":  "PASS",
+                         "critical":  false,
+                         "category":  "requirements_met",
+                         "reason":  "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+                     },
+                     {
+                         "run":  "S12-router-2",
+                         "verdict":  "PASS",
+                         "critical":  false,
+                         "category":  "requirements_met",
+                         "reason":  "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+                     },
+                     {
+                         "run":  "S13-all-2",
+                         "verdict":  "FAIL",
+                         "critical":  false,
+                         "category":  "unsupported_ui_steps",
+                         "reason":  "원문에 없는 영상 편집 화면 내보내기 메뉴."
+                     },
+                     {
+                         "run":  "S13-router-2",
+                         "verdict":  "PASS",
+                         "critical":  false,
+                         "category":  "requirements_met",
+                         "reason":  "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+                     },
+                     {
+                         "run":  "S14-all-2",
+                         "verdict":  "FAIL",
+                         "critical":  true,
+                         "category":  "unsupported_execution_status",
+                         "reason":  "환불 진행 중 및 아직 완료 아님을 단정."
+                     },
+                     {
+                         "run":  "S14-router-2",
+                         "verdict":  "FAIL",
+                         "critical":  true,
+                         "category":  "unsupported_execution_status",
+                         "reason":  "환불 진행 중 및 아직 완료되지 않았음을 단정."
+                     }
+                 ],
+    "candidate":  [
+                      {
+                          "run":  "S01-router-1",
+                          "verdict":  "PASS",
+                          "critical":  false,
+                          "category":  "requirements_met",
+                          "reason":  "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+                      },
+                      {
+                          "run":  "S01-all-1",
+                          "verdict":  "PASS",
+                          "critical":  false,
+                          "category":  "requirements_met",
+                          "reason":  "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+                      },
+                      {
+                          "run":  "S02-router-1",
+                          "verdict":  "PASS",
+                          "critical":  false,
+                          "category":  "requirements_met",
+                          "reason":  "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+                      },
+                      {
+                          "run":  "S02-all-1",
+                          "verdict":  "PASS",
+                          "critical":  false,
+                          "category":  "requirements_met",
+                          "reason":  "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+                      },
+                      {
+                          "run":  "S03-router-1",
+                          "verdict":  "PASS",
+                          "critical":  false,
+                          "category":  "requirements_met",
+                          "reason":  "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+                      },
+                      {
+                          "run":  "S03-all-1",
+                          "verdict":  "PASS",
+                          "critical":  false,
+                          "category":  "requirements_met",
+                          "reason":  "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+                      },
+                      {
+                          "run":  "S04-router-1",
+                          "verdict":  "PASS",
+                          "critical":  false,
+                          "category":  "requirements_met",
+                          "reason":  "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+                      },
+                      {
+                          "run":  "S04-all-1",
+                          "verdict":  "PASS",
+                          "critical":  false,
+                          "category":  "requirements_met",
+                          "reason":  "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+                      },
+                      {
+                          "run":  "S05-router-1",
+                          "verdict":  "FAIL",
+                          "critical":  false,
+                          "category":  "generation_blocked",
+                          "reason":  "DraftEvidenceError: 재작성 후 pending 초안 생성 실패. 오류 본문을 정답으로 세지 않음; 최종 원시 생성 결과는 보관하지 않아 정확한 마지막 검사 원인은 미판정."
+                      },
+                      {
+                          "run":  "S05-all-1",
+                          "verdict":  "FAIL",
+                          "critical":  true,
+                          "category":  "unverified_fact",
+                          "reason":  "고객 진술뿐인 다운로드 이력을 확인하였다고 단정."
+                      },
+                      {
+                          "run":  "S06-router-1",
+                          "verdict":  "PASS",
+                          "critical":  false,
+                          "category":  "requirements_met",
+                          "reason":  "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+                      },
+                      {
+                          "run":  "S06-all-1",
+                          "verdict":  "FAIL",
+                          "critical":  true,
+                          "category":  "missing_contract_authority_condition",
+                          "reason":  "특별 조항이 서명 계약에 있으면 우선한다고 단정하며 원문의 승인된 계약 조건을 생략."
+                      },
+                      {
+                          "run":  "S07-router-1",
+                          "verdict":  "FAIL",
+                          "critical":  false,
+                          "category":  "generation_blocked",
+                          "reason":  "DraftEvidenceError: 재작성 후 pending 초안 생성 실패. 오류 본문을 정답으로 세지 않음; 최종 원시 생성 결과는 보관하지 않아 정확한 마지막 검사 원인은 미판정."
+                      },
+                      {
+                          "run":  "S07-all-1",
+                          "verdict":  "PASS",
+                          "critical":  false,
+                          "category":  "requirements_met",
+                          "reason":  "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+                      },
+                      {
+                          "run":  "S08-router-1",
+                          "verdict":  "PASS",
+                          "critical":  false,
+                          "category":  "requirements_met",
+                          "reason":  "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+                      },
+                      {
+                          "run":  "S08-all-1",
+                          "verdict":  "PASS",
+                          "critical":  false,
+                          "category":  "requirements_met",
+                          "reason":  "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+                      },
+                      {
+                          "run":  "S09-router-1",
+                          "verdict":  "PASS",
+                          "critical":  false,
+                          "category":  "requirements_met",
+                          "reason":  "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+                      },
+                      {
+                          "run":  "S09-all-1",
+                          "verdict":  "PASS",
+                          "critical":  false,
+                          "category":  "requirements_met",
+                          "reason":  "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+                      },
+                      {
+                          "run":  "S10-router-1",
+                          "verdict":  "PASS",
+                          "critical":  false,
+                          "category":  "requirements_met",
+                          "reason":  "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+                      },
+                      {
+                          "run":  "S10-all-1",
+                          "verdict":  "PASS",
+                          "critical":  false,
+                          "category":  "requirements_met",
+                          "reason":  "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+                      },
+                      {
+                          "run":  "S11-router-1",
+                          "verdict":  "PASS",
+                          "critical":  false,
+                          "category":  "requirements_met",
+                          "reason":  "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+                      },
+                      {
+                          "run":  "S11-all-1",
+                          "verdict":  "PASS",
+                          "critical":  false,
+                          "category":  "requirements_met",
+                          "reason":  "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+                      },
+                      {
+                          "run":  "S12-router-1",
+                          "verdict":  "PASS",
+                          "critical":  false,
+                          "category":  "requirements_met",
+                          "reason":  "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+                      },
+                      {
+                          "run":  "S12-all-1",
+                          "verdict":  "PASS",
+                          "critical":  false,
+                          "category":  "requirements_met",
+                          "reason":  "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+                      },
+                      {
+                          "run":  "S13-router-1",
+                          "verdict":  "PASS",
+                          "critical":  false,
+                          "category":  "requirements_met",
+                          "reason":  "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+                      },
+                      {
+                          "run":  "S13-all-1",
+                          "verdict":  "PASS",
+                          "critical":  false,
+                          "category":  "requirements_met",
+                          "reason":  "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+                      },
+                      {
+                          "run":  "S14-router-1",
+                          "verdict":  "REVIEW_REQUIRED",
+                          "critical":  false,
+                          "category":  "incomplete_status_answer",
+                          "reason":  "신청 조건과 후속 절차를 설명하지만 완료 상태가 미확인임을 직접 답하지 않음."
+                      },
+                      {
+                          "run":  "S14-all-1",
+                          "verdict":  "PASS",
+                          "critical":  false,
+                          "category":  "requirements_met",
+                          "reason":  "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+                      },
+                      {
+                          "run":  "S01-all-2",
+                          "verdict":  "PASS",
+                          "critical":  false,
+                          "category":  "requirements_met",
+                          "reason":  "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+                      },
+                      {
+                          "run":  "S01-router-2",
+                          "verdict":  "PASS",
+                          "critical":  false,
+                          "category":  "requirements_met",
+                          "reason":  "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+                      },
+                      {
+                          "run":  "S02-all-2",
+                          "verdict":  "PASS",
+                          "critical":  false,
+                          "category":  "requirements_met",
+                          "reason":  "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+                      },
+                      {
+                          "run":  "S02-router-2",
+                          "verdict":  "PASS",
+                          "critical":  false,
+                          "category":  "requirements_met",
+                          "reason":  "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+                      },
+                      {
+                          "run":  "S03-all-2",
+                          "verdict":  "PASS",
+                          "critical":  false,
+                          "category":  "requirements_met",
+                          "reason":  "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+                      },
+                      {
+                          "run":  "S03-router-2",
+                          "verdict":  "PASS",
+                          "critical":  false,
+                          "category":  "requirements_met",
+                          "reason":  "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+                      },
+                      {
+                          "run":  "S04-all-2",
+                          "verdict":  "PASS",
+                          "critical":  false,
+                          "category":  "requirements_met",
+                          "reason":  "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+                      },
+                      {
+                          "run":  "S04-router-2",
+                          "verdict":  "PASS",
+                          "critical":  false,
+                          "category":  "requirements_met",
+                          "reason":  "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+                      },
+                      {
+                          "run":  "S05-all-2",
+                          "verdict":  "FAIL",
+                          "critical":  false,
+                          "category":  "generation_blocked",
+                          "reason":  "DraftEvidenceError: 재작성 후 pending 초안 생성 실패. 오류 본문을 정답으로 세지 않음; 최종 원시 생성 결과는 보관하지 않아 정확한 마지막 검사 원인은 미판정."
+                      },
+                      {
+                          "run":  "S05-router-2",
+                          "verdict":  "FAIL",
+                          "critical":  true,
+                          "category":  "unsupported_condition_transfer",
+                          "reason":  "신규 계약에 명시된 다운로드 조건을 기존 계약 안내에도 조건으로 추가. 원문으로 확정할 수 없음."
+                      },
+                      {
+                          "run":  "S06-all-2",
+                          "verdict":  "PASS",
+                          "critical":  false,
+                          "category":  "requirements_met",
+                          "reason":  "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+                      },
+                      {
+                          "run":  "S06-router-2",
+                          "verdict":  "FAIL",
+                          "critical":  false,
+                          "category":  "generation_blocked",
+                          "reason":  "DraftEvidenceError: 재작성 후 pending 초안 생성 실패. 오류 본문을 정답으로 세지 않음; 최종 원시 생성 결과는 보관하지 않아 정확한 마지막 검사 원인은 미판정."
+                      },
+                      {
+                          "run":  "S07-all-2",
+                          "verdict":  "PASS",
+                          "critical":  false,
+                          "category":  "requirements_met",
+                          "reason":  "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+                      },
+                      {
+                          "run":  "S07-router-2",
+                          "verdict":  "PASS",
+                          "critical":  false,
+                          "category":  "requirements_met",
+                          "reason":  "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+                      },
+                      {
+                          "run":  "S08-all-2",
+                          "verdict":  "PASS",
+                          "critical":  false,
+                          "category":  "requirements_met",
+                          "reason":  "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+                      },
+                      {
+                          "run":  "S08-router-2",
+                          "verdict":  "FAIL",
+                          "critical":  false,
+                          "category":  "generation_blocked",
+                          "reason":  "DraftEvidenceError: 재작성 후 pending 초안 생성 실패. 오류 본문을 정답으로 세지 않음; 최종 원시 생성 결과는 보관하지 않아 정확한 마지막 검사 원인은 미판정."
+                      },
+                      {
+                          "run":  "S09-all-2",
+                          "verdict":  "PASS",
+                          "critical":  false,
+                          "category":  "requirements_met",
+                          "reason":  "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+                      },
+                      {
+                          "run":  "S09-router-2",
+                          "verdict":  "PASS",
+                          "critical":  false,
+                          "category":  "requirements_met",
+                          "reason":  "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+                      },
+                      {
+                          "run":  "S10-all-2",
+                          "verdict":  "PASS",
+                          "critical":  false,
+                          "category":  "requirements_met",
+                          "reason":  "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+                      },
+                      {
+                          "run":  "S10-router-2",
+                          "verdict":  "PASS",
+                          "critical":  false,
+                          "category":  "requirements_met",
+                          "reason":  "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+                      },
+                      {
+                          "run":  "S11-all-2",
+                          "verdict":  "PASS",
+                          "critical":  false,
+                          "category":  "requirements_met",
+                          "reason":  "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+                      },
+                      {
+                          "run":  "S11-router-2",
+                          "verdict":  "REVIEW_REQUIRED",
+                          "critical":  false,
+                          "category":  "unnecessary_escalation",
+                          "reason":  "연장 불가 안내 뒤 별도 안내가 가능한지 확인하겠다고 덧붙여 예외 기대를 만듦."
+                      },
+                      {
+                          "run":  "S12-all-2",
+                          "verdict":  "PASS",
+                          "critical":  false,
+                          "category":  "requirements_met",
+                          "reason":  "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+                      },
+                      {
+                          "run":  "S12-router-2",
+                          "verdict":  "PASS",
+                          "critical":  false,
+                          "category":  "requirements_met",
+                          "reason":  "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+                      },
+                      {
+                          "run":  "S13-all-2",
+                          "verdict":  "REVIEW_REQUIRED",
+                          "critical":  false,
+                          "category":  "unsupported_workflow_promise",
+                          "reason":  "문의 종결 처리라는 새로운 업무 약속을 추가. 완료 주장과는 다르지만 검토 필요."
+                      },
+                      {
+                          "run":  "S13-router-2",
+                          "verdict":  "PASS",
+                          "critical":  false,
+                          "category":  "requirements_met",
+                          "reason":  "가상 정책과 필수 답변을 대조했으며 중대한 모순을 관측하지 않음. 독립 평가 아님."
+                      },
+                      {
+                          "run":  "S14-all-2",
+                          "verdict":  "FAIL",
+                          "critical":  false,
+                          "category":  "generation_blocked",
+                          "reason":  "DraftEvidenceError: 재작성 후 pending 초안 생성 실패. 오류 본문을 정답으로 세지 않음; 최종 원시 생성 결과는 보관하지 않아 정확한 마지막 검사 원인은 미판정."
+                      },
+                      {
+                          "run":  "S14-router-2",
+                          "verdict":  "FAIL",
+                          "critical":  true,
+                          "category":  "unknown_as_false",
+                          "reason":  "실행 상태 근거 없이 현재 환불 완료 상태가 아니라고 단정. 후속 guard 수정의 재현 근거."
+                      }
+                  ]
+}

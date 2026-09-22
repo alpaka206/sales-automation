@@ -79,25 +79,15 @@ def enforce_first_reply_no_price(message: Message) -> None:
     if not isinstance(conv_id, int):
         return
 
-    from ...db.models import Message as _Message
+    from ...agents.inbound import last_sent_reply, thread_events
     from ...db.session import SessionLocal
 
     try:
-        with SessionLocal() as session:
-            prior_sent = (
-                session.query(_Message)
-                .filter(
-                    _Message.conversation_id == conv_id,
-                    _Message.direction == "outgoing",
-                    _Message.status == "sent",
-                    _Message.id != message.id,
-                    (_Message.prompt_variant.is_(None)) | (_Message.prompt_variant != "auto_ack"),
-                )
-                .count()
-            )
+        events = [turn for turn in thread_events(conv_id, factory=SessionLocal)
+                  if turn.source_ref != f"message:{message.id}"]
+        prior_sent = last_sent_reply(conv_id, events=events)
     except Exception:
-        logger.warning("First-reply price guard: conv lookup failed; skipping.", exc_info=True)
-        return
+        raise DeliveryPermanentError("첫 회신 여부를 확인하지 못했습니다. 다시 검토해 주세요.") from None
     if prior_sent:
         return  # not the first reply — later replies may quote KB prices
 
@@ -107,10 +97,9 @@ def enforce_first_reply_no_price(message: Message) -> None:
     if removed:
         message.body = cleaned
         logger.warning(
-            "Send guard: stripped %d price line(s) from the FIRST reply (msg %s): %s",
+            "Send guard: stripped %d price line(s) from the FIRST reply (msg %s)",
             len(removed),
             message.id,
-            " | ".join(removed)[:200],
         )
 
 
@@ -161,6 +150,17 @@ def parse_cc_addresses(value: str | None, *, exclude: str = "") -> list[str]:
     return out
 
 
+def _validate_review(message: Message, *, transformed: bool = False) -> None:
+    from ...agents.reply_safety import validate_approved_message
+
+    try:
+        validate_approved_message(message, transformed=transformed)
+    except RuntimeError as exc:
+        raise DeliveryPermanentError(str(exc)) from exc
+    except Exception:
+        raise DeliveryPermanentError("승인 근거를 확인하지 못했습니다. 다시 검토해 주세요.") from None
+
+
 async def send(message: Message) -> None:
     """Reply on the ticket's existing HubSpot Conversations email thread."""
     from ...common.safe_mode import email_delivery_enabled
@@ -170,6 +170,8 @@ async def send(message: Message) -> None:
             "Email delivery is disabled: enable LIVE_EXTERNAL_WRITES and the "
             "code-level EMAIL_SENDING_ENABLED switch."
         )
+
+    _validate_review(message)
 
     # Code-enforced language + text wash, then the first-reply no-price rule.
     if message.direction == "outgoing":
@@ -224,7 +226,7 @@ async def send(message: Message) -> None:
             # 있어서 화면과 실제 발송이 갈렸습니다(2026-09-03).
             context = await client.find_default_reply_context(ticket_id, recipients[0])
 
-        send = partial(
+        dispatch = partial(
             client.send_conversation_message,
             recipient_email=recipients[0],
             # **받는 사람은 그대로입니다** — 참조는 얹기만 합니다(이관 0112). 비어 있으면
@@ -236,6 +238,13 @@ async def send(message: Message) -> None:
             text=message.body or "",
             rich_text=rich_text,
         )
+
+        async def send(context):
+            # Context lookup may have awaited remote I/O. Recheck local changes
+            # immediately before each POST, including the known-rejection fallback.
+            _validate_review(message, transformed=True)
+            return await dispatch(context)
+
         attempt = None if chosen else cross_inbox_attempt(context)
         if attempt is None:
             hubspot_message_id = await send(context)
@@ -332,6 +341,7 @@ async def _send_from_mailbox(
                            exc_info=True)
 
     cc = parse_cc_addresses(getattr(message, "cc_addresses", None), exclude=recipient)
+    _validate_review(message, transformed=True)
     sent_id = await asyncio.to_thread(
         partial(
             send_mail,

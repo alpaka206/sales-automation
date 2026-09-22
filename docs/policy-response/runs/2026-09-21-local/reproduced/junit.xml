@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="5" skipped="0" tests="22" time="2.578" timestamp="2026-09-21T16:32:42.239992+09:00" hostname="E0000000000-35"><testcase classname="tests.test_followup_draft" name="test_the_conversation_includes_what_hubspot_brought_back" time="0.110" /><testcase classname="tests.test_followup_draft" name="test_our_own_reply_is_not_counted_twice" time="0.024" /><testcase classname="tests.test_followup_draft" name="test_the_reminders_history_line_is_not_a_second_reply" time="0.022" /><testcase classname="tests.test_followup_draft" name="test_a_reply_sent_from_hubspot_means_it_is_not_the_first_reply" time="0.024" /><testcase classname="tests.test_followup_draft" name="test_a_new_customer_message_is_what_the_follow_up_answers" time="0.024" /><testcase classname="tests.test_followup_draft" name="test_an_older_customer_message_does_not_count_as_a_new_one" time="0.024" /><testcase classname="tests.test_followup_draft" name="test_the_two_branches_reach_the_prompt" time="0.039" /><testcase classname="tests.test_followup_draft" name="test_reminder_does_not_answer_a_customer_correction" time="0.034"><failure message="assert (None is not None)">thread = (sessionmaker(class_='Session', bind=Engine(sqlite:///:memory:), autoflush=True, expire_on_commit=False), 1, 1)
+
+    def test_reminder_does_not_answer_a_customer_correction(thread):
+        factory, conv_id, contact_id = thread
+        _interaction(factory, conv_id, contact_id, direction="incoming",
+                     summary="정정합니다. 개인 구매가 아니라 기업 계약입니다.",
+                     happened_at=BASE + timedelta(hours=2))
+        with factory() as session:
+            session.add(Message(conversation_id=conv_id, direction="outgoing", body="리마인더",
+                                status="sent", prompt_variant="followup_reminder_1",
+                                sent_at=BASE + timedelta(hours=3)))
+            session.commit()
+        latest = inbound_module.latest_customer_message(conv_id)
+&gt;       assert latest is not None and "기업 계약" in latest.body
+E       assert (None is not None)
+
+tests\test_followup_draft.py:220: AssertionError</failure></testcase><testcase classname="tests.test_followup_draft" name="test_test_sent_is_not_a_customer_visible_reply" time="0.026"><failure message="assert False&#10; +  where False = _is_first_reply(1)&#10; +    where _is_first_reply = &lt;src.agents.inbound.InboundAgent object at 0x00000222D99E4190&gt;._is_first_reply">thread = (sessionmaker(class_='Session', bind=Engine(sqlite:///:memory:), autoflush=True, expire_on_commit=False), 1, 1)
+
+    def test_test_sent_is_not_a_customer_visible_reply(thread):
+        factory, conv_id, _ = thread
+        with factory() as session:
+            session.query(Message).filter(Message.direction == "outgoing").update({"status": "test_sent"})
+            session.commit()
+        agent = inbound_module.InboundAgent.__new__(inbound_module.InboundAgent)
+&gt;       assert agent._is_first_reply(conv_id)
+E       assert False
+E        +  where False = _is_first_reply(1)
+E        +    where _is_first_reply = &lt;src.agents.inbound.InboundAgent object at 0x00000222D99E4190&gt;._is_first_reply
+
+tests\test_followup_draft.py:229: AssertionError</failure></testcase><testcase classname="tests.test_followup_draft" name="test_recent_correction_survives_a_long_derived_summary" time="0.025"><failure message="AssertionError: assert '구매는 20일 전' in '기존 대화 요약:\n예전 정보입니다. 예전 정보입니다. 예전 정보입니다. 예전 정보입니다. 예전 정보입니다. 예전 정보입니다. 예전 정보입니다. 예전 정보입니다. 예전 정보입니다. 예전 정보입니다. 예전 정보입... 정보입니다. 예전 정보입니다. 예전 정보입니다. 예전 정보입니다. 예전 정보입니다. 예전 정보입니다. 예전 정보입니다. 예전 정보입니다. 예전 정보입니다. 예전 정보입니다. 예전 정보입니다. 예전 정보입니다. '">thread = (sessionmaker(class_='Session', bind=Engine(sqlite:///:memory:), autoflush=True, expire_on_commit=False), 1, 1)
+
+    def test_recent_correction_survives_a_long_derived_summary(thread):
+        factory, conv_id, contact_id = thread
+        with factory() as session:
+            session.get(Conversation, conv_id).summary = "예전 정보입니다. " * 1000
+            session.commit()
+        _interaction(factory, conv_id, contact_id, direction="incoming",
+                     summary="정정합니다. 구매는 20일 전입니다.", happened_at=BASE + timedelta(hours=2))
+        agent = inbound_module.InboundAgent.__new__(inbound_module.InboundAgent)
+        context = agent._build_conversation_context(conv_id, "추가 문의", max_chars=6000)
+&gt;       assert "구매는 20일 전" in context
+E       AssertionError: assert '구매는 20일 전' in '기존 대화 요약:\n예전 정보입니다. 예전 정보입니다. 예전 정보입니다. 예전 정보입니다. 예전 정보입니다. 예전 정보입니다. 예전 정보입니다. 예전 정보입니다. 예전 정보입니다. 예전 정보입니다. 예전 정보입... 정보입니다. 예전 정보입니다. 예전 정보입니다. 예전 정보입니다. 예전 정보입니다. 예전 정보입니다. 예전 정보입니다. 예전 정보입니다. 예전 정보입니다. 예전 정보입니다. 예전 정보입니다. 예전 정보입니다. '
+
+tests\test_followup_draft.py:242: AssertionError</failure></testcase><testcase classname="tests.test_followup_draft" name="test_history_read_failure_is_not_an_empty_first_reply" time="0.003"><failure message="Failed: DID NOT RAISE RuntimeError">monkeypatch = &lt;_pytest.monkeypatch.MonkeyPatch object at 0x00000222D9A4B7D0&gt;
+
+    def test_history_read_failure_is_not_an_empty_first_reply(monkeypatch):
+        def unavailable():
+            raise RuntimeError("db unavailable")
+        monkeypatch.setattr(inbound_module, "SessionLocal", unavailable)
+&gt;       with pytest.raises(RuntimeError):
+E       Failed: DID NOT RAISE RuntimeError
+
+tests\test_followup_draft.py:250: Failed</failure></testcase><testcase classname="tests.test_policy_model_access" name="test_a_people_only_document_never_reaches_the_company_rules" time="0.018" /><testcase classname="tests.test_policy_model_access" name="test_rules_lookup_failure_is_not_an_empty_policy" time="0.003"><failure message="Failed: DID NOT RAISE RuntimeError">monkeypatch = &lt;_pytest.monkeypatch.MonkeyPatch object at 0x00000222DAC66C10&gt;
+
+    def test_rules_lookup_failure_is_not_an_empty_policy(monkeypatch):
+        from src.llm.prompts import get_company_rules
+    
+        def unavailable():
+            raise RuntimeError("db unavailable")
+        monkeypatch.setattr("src.db.session.SessionLocal", unavailable)
+&gt;       with pytest.raises(RuntimeError):
+E       Failed: DID NOT RAISE RuntimeError
+
+tests\test_policy_model_access.py:86: Failed</failure></testcase><testcase classname="tests.test_policy_model_access" name="test_a_people_only_document_never_reaches_the_router_index" time="0.018" /><testcase classname="tests.test_policy_model_access" name="test_saving_a_people_only_document_does_not_send_the_body_to_a_model" time="0.123" /><testcase classname="tests.test_policy_model_access" name="test_the_usage_note_is_only_made_for_documents_the_router_reads" time="0.041" /><testcase classname="tests.test_policy_model_access" name="test_the_scope_actually_decides_which_reply_gets_the_rules" time="0.020" /><testcase classname="tests.test_policy_model_access" name="test_an_unknown_stage_is_refused_rather_than_widened" time="0.017" /><testcase classname="tests.test_policy_model_access" name="test_editing_only_the_title_keeps_a_follow_up_only_document_out_of_the_first_reply" time="0.035" /><testcase classname="tests.test_policy_model_access" name="test_a_placement_round_trip_never_moves_a_document" time="0.001" /><testcase classname="tests.test_policy_model_access" name="test_an_unknown_placement_is_refused" time="0.025" /><testcase classname="tests.test_policy_model_access" name="test_the_real_log_event_records_the_system_size" time="0.024" /></testsuite></testsuites>

@@ -227,3 +227,39 @@ def test_later_reply_keeps_price_at_send(db_session, monkeypatch):
     # A later reply may quote prices — must be untouched.
     assert "$29" in msg.body
 
+
+
+def test_send_price_guard_read_failure_blocks_delivery(db_session, monkeypatch):
+    from src.integrations import senders
+    from src.integrations.delivery import DeliveryPermanentError
+
+    msg = _seed_reply(db_session, "검토한 본문")
+    def unavailable():
+        raise RuntimeError("unavailable")
+    monkeypatch.setattr("src.db.session.SessionLocal", unavailable)
+    with pytest.raises(DeliveryPermanentError, match="확인하지 못"):
+        senders.enforce_first_reply_no_price(msg)
+
+
+@pytest.mark.parametrize("prior_kind", ["reminder", "test_sent", "hubspot_reply"])
+def test_send_price_guard_uses_the_same_real_reply_history(db_session, monkeypatch, prior_kind):
+    from datetime import datetime
+    from src.agents.followup_sequence import REMINDER_VARIANTS
+    from src.db.models import Conversation, CustomerInteraction, Message
+    from src.integrations import senders
+
+    msg = _seed_reply(db_session, "플랜 안내드립니다.\n- Creator $29/월\n미팅에서 안내드릴게요.")
+    conv = db_session.get(Conversation, msg.conversation_id)
+    if prior_kind == "hubspot_reply":
+        db_session.add(CustomerInteraction(contact_id=conv.contact_id, conversation_id=conv.id,
+                                          channel="email", direction="outgoing",
+                                          summary="실제 이전 회신", happened_at=datetime(2020, 1, 1)))
+    else:
+        db_session.add(Message(conversation_id=conv.id, direction="outgoing", body="이전 기록",
+                               status="sent" if prior_kind == "reminder" else "test_sent",
+                               prompt_variant=next(iter(REMINDER_VARIANTS)) if prior_kind == "reminder" else None,
+                               sent_at=datetime(2020, 1, 1)))
+    db_session.commit()
+    monkeypatch.setattr("src.db.session.SessionLocal", lambda: db_session)
+    senders.enforce_first_reply_no_price(msg)
+    assert ("$29" in msg.body) == (prior_kind == "hubspot_reply")

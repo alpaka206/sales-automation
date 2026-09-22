@@ -672,8 +672,10 @@ def test_a_deleted_tickets_mail_stays_grouped_as_that_ticket(log_db):
     assert [g["subject"] for g in history["past_tickets"]] == ["자막 번역 견적 문의"]
     group = history["past_tickets"][0]
     assert group["count"] == 2
-    # 살아 있는 티켓과 같은 모양 — 불릿 목록.
-    assert group["summary"] == "- 견적을 물어 왔다\n- 단가를 안내했다"
+    # 2026-09-21: 요약 문단 대신 실제 기록을 최신순으로, 한 티켓 안에 보여 준다.
+    assert [r["context"] for r in group["records"]] == ["단가를 안내했다", "견적을 물어 왔다"]
+    assert all(r["summary"] == "본문" for r in group["records"])
+    assert "summary" not in group
     # 「티켓 외」에는 진짜 티켓이 없던 것만 남습니다.
     assert history["loose_count"] == 1
 

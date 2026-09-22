@@ -1,0 +1,23 @@
+{
+  "data_origin": "SYNTHETIC_DEVELOPMENT_CASES_NOT_COMPANY_POLICY",
+  "dataset_sha256": "9d31b9af6d8d768467fb5bc2d03d2b0da949d195870f42b1559fff5347949bfe",
+  "policy_sha256": "9a86a63749679d2367106c538cb6d5a2c5d67a1e2b3e4d30a0e5105de855a3b7",
+  "models": {
+    "flash": "gemini-2.5-flash",
+    "pro": "gemini-2.5-pro"
+  },
+  "api_surface": "vertex-ai",
+  "repeats": 2,
+  "arms": [
+    "router",
+    "all"
+  ],
+  "max_calls": 180,
+  "production_writes": false,
+  "customer_send": false,
+  "source": "synthetic local fixture",
+  "authorization": "User explicitly authorized live evaluation in follow-up request",
+  "actual_calls": 144,
+  "completed_runs": 56,
+  "generation_errors": 0
+}
