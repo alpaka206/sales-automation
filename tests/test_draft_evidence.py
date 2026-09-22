@@ -71,6 +71,14 @@ def test_composition_cannot_drop_known_answer_when_internal_verification_is_need
         "SRT로 내보낼 수 있습니다.")
 
 
+def test_an_all_blank_composition_is_the_one_grounding_failure_that_still_raises():
+    """검사는 표시만 남기지만(2026-09-22) 보여 줄 본문이 없는 초안은 여전히 여기서 죽는다."""
+    from src.agents.draft_evidence import DraftEvidenceError
+
+    with pytest.raises(DraftEvidenceError):
+        compose_answer([AnswerPoint(question="?", supported_answer=" ", verification_needed="  ")])
+
+
 def test_grounded_schema_does_not_accept_a_body_without_answer_points():
     from pydantic import ValidationError
     from src.agents.inbound import GroundedDraftResult

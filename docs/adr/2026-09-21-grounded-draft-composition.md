@@ -14,6 +14,7 @@
 - 후속 답변 입력 지시는 최신 짧은 응답을 직전 질문과 원래 미해결 문의에 연결한다. “이미 설명한 것 생략”이 미설명 조건까지 없애지 않도록 범위를 명시했다. 리마인더 생성 경로는 그대로다.
 - `PolicyQuote`는 생성에 실제 제공한 source_id와 원문 내 연속 구절인지 검사한다. 규칙과 지식 문서에 ID/version 표시를 추가한다. 인용 유효성과 답변의 논리적 타당성은 다르다.
 - `check_draft`는 입력 원문/고객 발화에 없는 숫자 기간과 일부 명백한 실행 상태 표현을 감지한다. 실패하면 같은 snapshot으로 **의미 검사 재작성 1회**만 허용한다. 재실패는 초안 오류이며 고객에 대한 자동 거절이 아니다. 기존 JSON 형식 재시도/통신 재시도까지 전체 API 호출이 2회라는 뜻은 아니다.
+- **2026-09-22 변경 — 검사는 표시하고 막지 않는다** (운영자 지시: 「미완성이라도 사람한테 뜨면 좋겠는데」). 재작성 1회 뒤에도 남는 문제와 변환 뒤 검사의 문제는 `DraftEvidenceError` 가 아니라 매니페스트의 `limited_evidence_checks.status = FAIL` + `issues` 로 남고, 초안은 그대로 `pending_approval` 로 검토 화면에 선다(편집기 위 경고 배너). 위·아래 문단의 「재실패는 초안 오류」·「pending 차단」은 그 날 이전의 동작이다. `DraftEvidenceError` 와 큐의 terminal 처리는 답변 요소가 전부 비어 보여 줄 본문이 없는 조합(`compose_answer`)에만 남는다. 고정 테스트: `test_policy_context.py::test_unsupported_duration_gets_one_repair_then_reaches_the_operator_flagged`, `test_draft_evidence.py::test_an_all_blank_composition_is_the_one_grounding_failure_that_still_raises`.
 - 실제 실행 근거가 없으므로 “아직 완료되지 않았다”도 확인된 상태로 취급하지 않는다. 주 비교 뒤 관측된 이 문장 계열을 추가 검사했다. durable inbound job은 `DraftEvidenceError`를 terminal로 처리해 이미 소진한 의미 재작성을 큐에서 8회 반복하지 않는다.
 - 언어·링크·기존 가격 처리 뒤에도 본문을 검사한다. Event에는 검사 상태/생성 횟수/인용 ID/답변 요소 개수만 추가한다. `semantic_validation=NOT_RUN`, `delivery_permission=DRAFT_ONLY`를 유지한다.
 - 기본 모델·추론 한도 128·리마인더·운영 설정은 유지한다. 명시적 호출별 thinking budget은 평가 adapter의 비교용으로만 사용했다. 새 DB 테이블, migration, 인덱스, 그래프, 별도 검증 모델은 없다.
@@ -33,7 +34,7 @@
 
 실제 출력·판정·토큰·지연·탐색 실패는 [live 결과](../policy-response/runs/2026-09-21-live/results.md), 원본 가상 정책은 `tests/fixtures/policy_response_live.json`에 있다. fixture의 기대사항은 첫 호출 전에 작성했으나 구현자는 전체 개발셋을 보았으므로 holdout이 아니다. 단일 구현 에이전트의 비맹검 판정이며 독립 전문가 확인은 NOT_RUN이다.
 
-`tests/test_draft_evidence.py`는 관측한 기간/상태 오류, 원문 인용 위조, 번역 기간 단위, 부정 문장, 답변 요소 유지와 schema를 검증한다. `test_policy_context.py::test_unsupported_duration_gets_one_repair_then_is_kept_out_of_pending`는 실제 경로의 1회 재작성과 재실패 시 pending 차단을 검증한다. `test_llm_client.py::test_explicit_draft_thinking_budget_survives_schema_retry`는 비교 설정 전달을 확인한다.
+`tests/test_draft_evidence.py`는 관측한 기간/상태 오류, 원문 인용 위조, 번역 기간 단위, 부정 문장, 답변 요소 유지와 schema를 검증한다. `test_policy_context.py::test_unsupported_duration_gets_one_repair_then_reaches_the_operator_flagged`는 실제 경로의 1회 재작성과, 재실패 시 FAIL 표시를 단 채 pending 에 서고 티켓 payload 의 `evidence` 로 나가는 것을 검증한다(2026-09-22 전에는 pending 차단이었다). `test_llm_client.py::test_explicit_draft_thinking_budget_survives_schema_retry`는 비교 설정 전달을 확인한다.
 
 `test_inbound_worker.py::test_exhausted_evidence_repair_is_not_sampled_again_by_the_queue`는 durable queue가 재실패 초안을 자동 반복 생성하지 않는지 확인한다. 주 비교 56개 이후 추가한 부정 상태 검사/큐 변경은 최신 전체 로컬 시험으로 검증했고, 실제 모델은 S14 2개만 최종 재확인했다. 전체 56개를 최종 코드에서 재평가했다고 주장하지 않는다.
 

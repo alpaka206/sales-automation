@@ -66,6 +66,9 @@ type Detail = {
     created_at: string | null;
     /** 후속 리마인더 한 줄(`followup_sequence.view`). 시퀀스 밖의 티켓은 `null`. */
     followup: Followup | null;
+    /** 초안의 근거 검사 판정. 검사는 막지 않고 표시만 남깁니다(2026-09-22) — `FAIL` 이면
+     *  편집기 위에 경고 배너. 기록이 없는 수동 초안·문의 글은 `null`. */
+    evidence?: { status: string; issues: string[] } | null;
   };
   ticket_interactions: Interaction[];
   /** 메일이 하나도 없는 티켓은 `null` 입니다 — HubSpot 에서 들여온 티켓이 그렇습니다. */
@@ -660,6 +663,22 @@ export function MessageDetail() {
         </div>
       )}
 
+      {/* 근거 검사에 걸린 초안 (2026-09-22 운영자 지시: 「미완성이라도 사람한테 뜨면
+          좋겠는데」). 예전에는 이 초안이 draft_failed 로 죽어 빈 카드만 남았습니다. 이제
+          초안은 그대로 오고 무엇에 걸렸는지를 여기 적습니다 — 문자열 검사라 틀릴 수 있고,
+          그 판단은 본문을 읽는 사람이 합니다. */}
+      {ticket.evidence?.status === "FAIL" && (
+        <div className="banner banner--warn mb-gap" role="alert">
+          <span className="banner__icon"><Icon name="warn" size={18} /></span>
+          <div>
+            <div className="banner__title">근거 검사에 걸린 초안입니다 — 보내기 전에 확인하세요</div>
+            <ul className="t-sm" style={{ margin: "4px 0 0", paddingLeft: 18 }}>
+              {ticket.evidence.issues.map((code) => <li key={code}>{EVIDENCE_ISSUE_LABELS[code] ?? code}</li>)}
+            </ul>
+          </div>
+        </div>
+      )}
+
       {/* 발송을 누른 자리가 여기이므로 실패한 이유도 여기에 섭니다. 배지만 「발송 실패」로
           바뀌던 시절에는 왜인지 알 방법이 화면에 없었습니다(2026-08-26). */}
       {(msg?.status === "send_failed" || msg?.status === "delivery_unknown") && msg.send_error && (
@@ -1178,6 +1197,14 @@ const SENT = new Set(["outgoing", "outbound"]);
  *  소문자 두 글자가 뜹니다. 표를 크게 만들지 않는 이유: 여기 뜰 수 있는 언어는 문의가
  *  실제로 들어온 언어이고, 목록을 늘려 봐야 안 오는 말이 대부분입니다 — 모르는 코드는
  *  대문자로 적으면 그 자체로 읽힙니다(`PT`·`ES`). */
+
+/** 근거 검사 코드 → 운영자가 읽는 말. 코드의 출처는 `draft_evidence.check_draft` 이고, 모르는
+ *  코드는 그대로 찍습니다 — 검사가 하나 늘었을 때 조용히 빈 줄이 되면 안 됩니다. */
+const EVIDENCE_ISSUE_LABELS: Record<string, string> = {
+  unsupported_duration: "원문·고객 메일에 없는 기간이 있습니다",
+  unsupported_execution_status: "하지 않은 처리(접수·진행·완료)를 한 것처럼 적었습니다",
+  invalid_policy_quote: "정책 인용이 원문과 다릅니다",
+};
 
 type Followup = {
   state: "send_1" | "send_2" | "close" | "sending" | "stalled" | "closed" | "revived";

@@ -11,7 +11,8 @@ PERSO Inbound is a FastAPI workflow for inbound inquiry handling and customer op
 - 리마인더 시퀀스와 설정을 유지한다. 리마인더·test_sent는 첫/후속 실질 답변의 기준이 아니다. 생성과 발송 가격 가드는 같은 실제 대화 판정을 사용한다.
 - 로컬 안전 검증: `python scripts/check_policy_response.py --result-dir tmp/policy-check tests -q -ra`. 임시 DB·mock·외부 네트워크 차단이며 live Gemini 평가가 아니다.
 - 설계와 변경 근거: [구조](docs/architecture/policy-response-system.md), [ADR](docs/adr/2026-09-21-policy-response-boundaries.md), [실행 결과](docs/verification/policy-response-result.json). 정책 의미 검증/운영 배포 완료로 과장하지 않는다.
-- 초안은 질문별 AnswerPoint를 코드에서 본문으로 조합한다. 원문 인용·숫자 기간·일부 허위 상태 검사 실패는 의미 재작성 1회 뒤 draft_failed로 남기며 durable job도 자동 재시도하지 않는다(변환 — 언어 보정·링크·금액 가드 — 뒤의 검사는 재작성 없이 바로 실패한다). 기간 검사는 처리·환불·이내 같은 절차 문장에만 걸고 날짜와 미팅 길이는 안 본다 — 「미팅은 30분」으로 초안이 죽으면 안 된다. 검사 PASS는 의미 정확성 인증이 아니다. [실제 Gemini 개발셋 결과](docs/policy-response/runs/2026-09-21-live/results.md)와 [후속 ADR](docs/adr/2026-09-21-grounded-draft-composition.md)을 참조한다.
+- 초안은 질문별 AnswerPoint를 코드에서 본문으로 조합한다. **근거 검사(원문 인용·숫자 기간·일부 허위 상태)는 표시만 하고 막지 않는다** (2026-09-22 운영자: 「미완성이라도 사람한테 뜨면 좋겠는데. 그래야 내용보고 후에 고도화를 하든 하지」): 재작성 1회 뒤에도 걸리면 초안은 `pending_approval` 로 서고 `reply_context` Event 의 `limited_evidence_checks` 가 `FAIL` + 걸린 항목을 들며, 티켓 화면이 「근거 검사에 걸린 초안입니다」 배너로 그것을 적는다(`ticket.evidence`). 그 전날(09-21)에는 `draft_failed` 로 죽였다 — 빈 카드는 아무것도 말해 주지 않았다. 기간 검사는 처리·환불·이내 같은 절차 문장에만 걸고 날짜와 미팅 길이는 안 본다. 검사 PASS는 의미 정확성 인증이 아니다.
+  - **`draft_failed` 가 되는 것**은 이제 이것뿐이다: 분류·라우팅·초안 모델 호출 실패(스키마를 두 번 못 맞춤 포함) · 정책/대화 조회 실패 · 생성 중 정책이 바뀜 · 생성 중 고객 메시지가 새로 옴(`customer_turns_since`) · `answer_points` 가 전부 비어 본문을 만들 수 없음(`DraftEvidenceError`, 이것만 durable job 도 재시도 없이 dead). 나머지는 백오프로 8회 재시도하고 그 사이 카드는 `draft_failed` 로 보인다. 그 상태에서 운영자가 할 수 있는 것은 「초안 다시 쓰기」와 「메일 발송」(새 수동 초안)이다. [실제 Gemini 개발셋 결과](docs/policy-response/runs/2026-09-21-live/results.md)와 [후속 ADR](docs/adr/2026-09-21-grounded-draft-composition.md)을 참조한다.
 
 ## Invariants
 
@@ -971,6 +972,7 @@ PERSO Inbound is a FastAPI workflow for inbound inquiry handling and customer op
     남겨야 해」는 그대로다 — 누르는 자리가 없어졌을 뿐이라, 붙이는 그 자리에서 남긴다.
     회차 **끝에 모아서** 보낸다: 수집 중에 보내면 저쪽이 느린 날 사서함 한 바퀴가 그만큼
     길어지고 그 사이 세션이 열려 있다.
+  - **허브스팟에 노트를 적기 전에 허브스팟부터 읽는다** (2026-09-22 운영자: 「허브스팟에도 기록되었는지 확인하고 기록할지」 · 「gmail 에서 직접, hubspot 에서 직접, 우리 사이트에서 … 깔끔하게 모든 곳에서 정리되도록」). 실측: 7월 이후 노트 46건 중 26건이 이 앱 것이고 같은 글이 2~3번 선 묶음이 넷 — **지메일 초안**이었다(저장할 때마다 새 메시지 id, `-in:drafts` 와 `labelIds` 로 거른다). 울타리 넷: ① 초안·스팸·휴지통은 메일이 아니다 ② 채널 계정 사서함으로 **온** 메일은 노트 없음(스레드가 들고 있다) ③ 채널 계정에서 **나간** 메일은 스레드를 읽어 같은 메일이 있으면 노트 없음(허브스팟 화면에서 답한 메일의 보낸편지함 사본) ④ 어느 노트든 그 티켓의 노트를 읽어 같은 머리·같은 본문 앞 200자가 있으면 안 적는다. 읽기가 실패하면 안 적는다. 네 길 × 세 자리 표는 `docs/HubSpot-쓰기-감사-2026-09-22.md` §3-6.
   - **우리가 보낸 사본은 안 가져온다**(`_we_already_sent_it`). `perso.ai@estsoft.com` 이
     곧 허브스팟 이메일 채널 계정이라 콘솔에서 나간 회신이 그 사서함에 남는다 — 안 거르면
     우리 답장이 티켓 기록에 **두 번** 서고, 나중에 읽는 사람은 「답을 두 번 보냈다」로

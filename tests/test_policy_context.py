@@ -19,6 +19,7 @@ def policy_db(db_session_factory, monkeypatch):
     monkeypatch.setattr("src.db.session.SessionLocal", db_session_factory)
     monkeypatch.setattr(inbound, "SessionLocal", db_session_factory)
     monkeypatch.setattr("src.agents.approval.SessionLocal", db_session_factory)
+    monkeypatch.setattr("src.api.routes.messages.SessionLocal", db_session_factory)
     with db_session_factory() as session:
         session.add_all([
             PolicySource(label="규칙", doc_key="rules", mode="rules", body="조건 충족 시 검토 가능"),
@@ -123,9 +124,9 @@ def test_real_draft_path_uses_one_snapshot_and_persists_private_provenance(polic
 
 
 @pytest.mark.parametrize("repair_succeeds", [True, False])
-def test_unsupported_duration_gets_one_repair_then_is_kept_out_of_pending(policy_db, repair_succeeds):
-    from src.agents.draft_evidence import DraftEvidenceError
-
+def test_unsupported_duration_gets_one_repair_then_reaches_the_operator_flagged(policy_db, repair_succeeds):
+    """검사에 걸린 초안도 사람에게 간다 (2026-09-22). 재작성 한 번 뒤 남는 문제는 죽이지 않고
+    매니페스트에 FAIL 로 적어 검토 화면이 보여 준다 — 예전에는 빈 카드와 dead 잡이 남았다."""
     conv_id, msg_id = _draft_setup(policy_db)
     agent, _ = _agent()
     feedback = []
@@ -139,19 +140,33 @@ def test_unsupported_duration_gets_one_repair_then_is_kept_out_of_pending(policy
         return inbound.DraftResult(body=body, language="ko")
 
     agent.llm.complete.side_effect = complete
+    draft = agent._draft_reply(INFO, CLASSIFICATION, conv_id, "ko")
+    checks = draft._context_manifest["limited_evidence_checks"]
+    assert checks["generation_attempts"] == 2
+    assert agent._finalize_draft(msg_id, INFO, CLASSIFICATION, draft, conv_id, "ko")
+    with policy_db() as session:
+        assert session.get(Message, msg_id).status == "pending_approval"
+        trace = session.query(Event).filter_by(kind="reply_context").one().payload
     if repair_succeeds:
-        draft = agent._draft_reply(INFO, CLASSIFICATION, conv_id, "ko")
-        assert draft._context_manifest["limited_evidence_checks"]["generation_attempts"] == 2
-        assert agent._finalize_draft(msg_id, INFO, CLASSIFICATION, draft, conv_id, "ko")
+        assert trace["limited_evidence_checks"]["status"] == "PASS"
+        assert trace["limited_evidence_checks"]["issues"] == []
     else:
-        with pytest.raises(DraftEvidenceError, match="unsupported_duration"):
-            agent._draft_reply(INFO, CLASSIFICATION, conv_id, "ko")
-        with policy_db() as session:
-            assert session.get(Message, msg_id).status == "drafting"
-            assert not session.query(Event).filter_by(kind="reply_context").count()
+        assert trace["limited_evidence_checks"]["status"] == "FAIL"
+        assert "unsupported_duration" in trace["limited_evidence_checks"]["issues"]
+        # 검토 화면이 읽는 자리 — 판정이 여기 안 실리면 아무 데도 안 보인다.
+        from src.api.routes.messages import _message_detail_context
+        evidence = _message_detail_context(msg_id)["ticket"]["evidence"]
+        assert evidence["status"] == "FAIL"
+        assert "unsupported_duration" in evidence["issues"]
     assert len(feedback) == 2
     assert feedback[0] == ""
     assert "unsupported_duration" in feedback[1]
+
+
+def test_a_manual_draft_without_a_trace_has_no_evidence_verdict(policy_db):
+    _, msg_id = _draft_setup(policy_db)
+    from src.api.routes.messages import _message_detail_context
+    assert _message_detail_context(msg_id)["ticket"]["evidence"] is None
 
 
 def test_new_customer_correction_prevents_finalizing_old_draft(policy_db):

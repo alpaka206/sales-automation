@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 import time
-from datetime import timezone
+from datetime import datetime, timezone
 
 import httpx
 import pytest
@@ -329,14 +329,14 @@ def sync_db(db, monkeypatch):
     return db
 
 
-def _seed(factory, *, with_ticket: bool):
+def _seed(factory, *, with_ticket: bool, hubspot_contact_id: str | None = None):
     from datetime import datetime
 
     from src.db.models import Contact, Conversation
 
     with factory() as session:
         contact = Contact(normalized_email="buyer@acme.com", email="buyer@acme.com",
-                          full_name="Acme Buyer")
+                          full_name="Acme Buyer", hubspot_contact_id=hubspot_contact_id)
         session.add(contact)
         session.flush()
         if with_ticket:
@@ -523,7 +523,7 @@ def test_the_window_is_since_we_last_looked_not_since_consent(sync_db, monkeypat
 
     # 아직 한 번도 안 돌았으면 동의 시각이 바닥입니다.
     mailbox_sync._sync_one("untae@estsoft.com")
-    assert asked[-1] == f"after:{int(consent.replace(tzinfo=timezone.utc).timestamp())}"
+    assert asked[-1].split()[0] == f"after:{int(consent.replace(tzinfo=timezone.utc).timestamp())}"
 
     with sync_db() as session:
         session.get(MailboxAccount, "untae@estsoft.com").last_polled_at = polled
@@ -531,7 +531,8 @@ def test_the_window_is_since_we_last_looked_not_since_consent(sync_db, monkeypat
 
     mailbox_sync._sync_one("untae@estsoft.com")
     expected = (polled - timedelta(minutes=5)).replace(tzinfo=timezone.utc)
-    assert asked[-1] == f"after:{int(expected.timestamp())}", "겹침을 두고 그때부터"
+    assert asked[-1].split()[0] == f"after:{int(expected.timestamp())}", "겹침을 두고 그때부터"
+    assert "-in:drafts" in asked[-1], "임시보관함은 묻지 않습니다 — 초안은 저장할 때마다 id 가 바뀝니다"
 
 
 def test_a_collected_mail_lands_on_the_newest_record(sync_db, monkeypatch):
@@ -606,7 +607,8 @@ def test_a_collected_mail_lands_on_the_newest_record(sync_db, monkeypatch):
         assert landed.hubspot_ticket_id == "T-2", "가장 최근 기록에 붙습니다"
 
 
-def _one_mail(monkeypatch, headers: list[dict], *, snippet: str = "본문"):
+def _one_mail(monkeypatch, headers: list[dict], *, snippet: str = "본문",
+              labels: list[str] | None = None):
     """지메일 한 통을 돌려주는 가짜 클라이언트를 걸어 둡니다."""
     from src.agents import mailbox_sync
 
@@ -624,7 +626,7 @@ def _one_mail(monkeypatch, headers: list[dict], *, snippet: str = "본문"):
             return None
 
     mail = {"id": "m9", "internalDate": "1789000000000", "snippet": snippet,
-            "payload": {"headers": headers}}
+            "labelIds": labels or ["INBOX"], "payload": {"headers": headers}}
 
     class _Client:
         def __enter__(self): return self
@@ -798,3 +800,204 @@ def test_a_deleted_mail_does_not_come_back(sync_db, monkeypatch):
         session.commit()
 
     assert mailbox_sync.sync_mailboxes_once() == {"added": 0}, "지운 메일이 되살아났습니다"
+
+
+def _noted(monkeypatch) -> list[tuple]:
+    """허브스팟 노트 대신 호출을 적어 둡니다 — 나갔는지, 무엇이 나갔는지."""
+    from src.agents import mailbox_sync
+
+    calls: list[tuple] = []
+
+    async def _record(hubspot_contact_id, ticket_id, body, when):
+        calls.append((hubspot_contact_id, ticket_id, body))
+
+    monkeypatch.setattr(mailbox_sync, "_note_on_ticket", _record)
+    return calls
+
+
+def test_a_gmail_draft_is_not_a_mail(sync_db, monkeypatch):
+    """**지메일은 초안을 저장할 때마다 새 메시지 id 를 줍니다** (2026-09-22 실측).
+
+    한 통을 세 번 고쳐 쓰면 `gmail:` 줄 셋과 허브스팟 노트 셋이 서고 보낸 뒤 넷째가
+    섭니다 — 운영 포털에 같은 글이 2~3번 노트로 서 있었고 그중 하나는 제목이
+    「[DUPLICATE, discard]」인 초안이었습니다. `external_id` 는 id 가 달라 못 막고,
+    `same_mail` 은 빈 초안에 본문 지문이 없어 못 막습니다. 조회에서 빼고(`-in:drafts`),
+    받은 메시지의 라벨로 한 번 더 봅니다 — 조회 문법은 저쪽 사정이고 라벨은 사실입니다.
+    """
+    from src.agents import mailbox_sync
+    from src.db.models import CustomerInteraction
+
+    _seed(sync_db, with_ticket=True, hubspot_contact_id="C-1")
+    _mailbox(sync_db, "untae@estsoft.com")
+    calls = _noted(monkeypatch)
+    _one_mail(monkeypatch, [
+        {"name": "From", "value": "untae@estsoft.com"},
+        {"name": "To", "value": "buyer@acme.com"},
+        {"name": "Subject", "value": "Perso Dubbing API: a few questions"},
+        {"name": "Date", "value": "Fri, 18 Sep 2026 11:18:00 +0900"},
+    ], labels=["DRAFT"])
+
+    assert mailbox_sync.sync_mailboxes_once() == {"added": 0}
+    with sync_db() as session:
+        assert session.scalar(
+            select(CustomerInteraction).where(CustomerInteraction.external_id == "gmail:m9")
+        ) is None, "초안은 오간 메일이 아닙니다"
+    assert calls == [], "허브스팟에도 안 적습니다"
+
+
+@respx.mock
+def test_a_mail_that_arrived_on_a_channel_account_is_not_noted_again(sync_db, monkeypatch):
+    """**채널 계정 사서함으로 온 메일은 허브스팟이 이미 들고 있습니다** (2026-09-22).
+
+    `perso.ai@estsoft.com` 은 허브스팟 이메일 채널 계정이라 그 주소로 온 메일은 허브스팟이
+    받아 티켓 스레드에 세웁니다. 노트로 또 적으면 같은 메일이 두 번 섭니다 — 7월 이후
+    우리 노트 26건 중 8건이 그 사서함이었습니다. 우리 줄은 그대로 넣습니다: 그 메일이 어느
+    티켓 것인지는 여전히 우리가 판단한 것입니다.
+    """
+    from src.agents import mailbox_sync
+    from src.db.models import CustomerInteraction
+    from src.integrations.hubspot import BASE_URL
+
+    _seed(sync_db, with_ticket=True, hubspot_contact_id="C-1")
+    _mailbox(sync_db)  # perso.ai@estsoft.com
+    calls = _noted(monkeypatch)
+    respx.get(f"{BASE_URL}/conversations/v3/conversations/channel-accounts").mock(
+        return_value=httpx.Response(200, json={"results": [
+            {"id": "team", "channelId": "1002", "active": True, "authorized": True,
+             "archived": False, "deliveryIdentifier": {"value": "Perso.ai@estsoft.com"}},
+        ]})
+    )
+    _one_mail(monkeypatch, [
+        {"name": "From", "value": "buyer@acme.com"},
+        {"name": "To", "value": "perso.ai@estsoft.com"},
+        {"name": "Subject", "value": "재문의"},
+        {"name": "Date", "value": "Tue, 22 Sep 2026 10:00:00 +0900"},
+    ])
+
+    assert mailbox_sync.sync_mailboxes_once() == {"added": 1}
+    with sync_db() as session:
+        assert session.scalar(
+            select(CustomerInteraction).where(CustomerInteraction.external_id == "gmail:m9")
+        ) is not None, "우리 줄은 섭니다"
+    assert calls == [], "스레드가 이미 든 메일을 노트로 또 적지 않습니다"
+
+
+@respx.mock
+@pytest.mark.parametrize("in_thread", [True, False])
+def test_a_reply_sent_from_the_hubspot_screen_is_not_noted_from_its_gmail_copy(sync_db, monkeypatch, in_thread):
+    """**허브스팟 화면에서 답한 메일은 그 계정의 보낸편지함에도 사본이 선다** (2026-09-22 운영자:
+    「gmail 에서 직접, hubspot 에서 직접, 우리 사이트에서 … 깔끔하게 모든 곳에서 정리되도록」).
+
+    채널 계정 사서함의 **나간** 메일은 스레드를 읽어 같은 메일이 있으면 노트를 안 적고, 없으면
+    (지메일에서 직접 보낸 것) 적는다 — 그 노트가 허브스팟에 남는 유일한 자리다.
+    """
+    from src.agents import mailbox_sync
+    from src.integrations.hubspot import BASE_URL
+
+    _seed(sync_db, with_ticket=True, hubspot_contact_id="C-1")
+    _mailbox(sync_db)  # perso.ai@estsoft.com
+    calls = _noted(monkeypatch)
+    respx.get(f"{BASE_URL}/conversations/v3/conversations/channel-accounts").mock(
+        return_value=httpx.Response(200, json={"results": [
+            {"id": "team", "channelId": "1002", "active": True, "authorized": True,
+             "archived": False, "deliveryIdentifier": {"value": "perso.ai@estsoft.com"}},
+        ]})
+    )
+    when = datetime(2026, 9, 22, 1, 0)
+    thread_rows = [{"external_id": "hubspot:conv:9", "channel": "이메일", "direction": "outgoing",
+                    "subject": "Re: 재문의", "summary": "본문", "handler": None,
+                    "happened_at": when}] if in_thread else []
+
+    async def _collect(client, ticket_id):
+        return thread_rows
+
+    monkeypatch.setattr("src.agents.ticket_history.collect_ticket_history", _collect)
+    _one_mail(monkeypatch, [
+        {"name": "From", "value": "perso.ai@estsoft.com"},
+        {"name": "To", "value": "buyer@acme.com"},
+        {"name": "Subject", "value": "Re: 재문의"},
+        {"name": "Date", "value": "Tue, 22 Sep 2026 10:00:03 +0900"},
+    ])
+
+    assert mailbox_sync.sync_mailboxes_once() == {"added": 1}
+    assert (calls == []) is in_thread, "스레드에 있으면 노트를 안 적고, 없으면 적습니다"
+
+
+def _ticket_notes(existing: list[str]):
+    """티켓 T-2 의 노트 읽기·쓰기 엔드포인트를 깔아 두고 **노트 만들기** 라우트를 돌려줍니다."""
+    from src.integrations.hubspot import BASE_URL
+
+    respx.get(f"{BASE_URL}/conversations/v3/conversations/channel-accounts").mock(
+        return_value=httpx.Response(200, json={"results": []})
+    )
+    respx.get(f"{BASE_URL}/crm/v3/objects/tickets/T-2/associations/notes").mock(
+        return_value=httpx.Response(200, json={
+            "results": [{"id": f"n{i}"} for i, _ in enumerate(existing)]
+        })
+    )
+    respx.post(f"{BASE_URL}/crm/v3/objects/notes/batch/read").mock(
+        return_value=httpx.Response(200, json={
+            "results": [{"id": f"n{i}", "properties": {"hs_note_body": body}}
+                        for i, body in enumerate(existing)]
+        })
+    )
+    created = respx.post(f"{BASE_URL}/crm/v3/objects/notes").mock(
+        return_value=httpx.Response(201, json={"id": "n-new"})
+    )
+    respx.put(url__regex=rf"{BASE_URL}/crm/v4/objects/notes/n-new/associations/default/.*").mock(
+        return_value=httpx.Response(200, json={})
+    )
+    return created
+
+
+@respx.mock
+def test_a_note_hubspot_already_has_is_not_written_again(sync_db, monkeypatch):
+    """**적기 전에 그 티켓의 노트를 읽습니다** (2026-09-22 운영자 지시: 「허브스팟에도
+    기록되었는지 확인하고 기록할지」).
+
+    같은 머리(`[개인 메일함 …] 제목`)와 같은 본문 앞 200자가 이미 있으면 안 적습니다.
+    허브스팟은 노트를 `<p>` 로 감싸 돌려주므로 글자를 그대로 재면 같은 노트가 다른 노트로
+    보입니다 — 그래서 글자로 푼 뒤 공백을 접어 잽니다.
+    """
+    from src.agents import mailbox_sync
+
+    _seed(sync_db, with_ticket=True, hubspot_contact_id="C-1")
+    _mailbox(sync_db, "untae@estsoft.com")
+    created = _ticket_notes([
+        "<p>[개인 메일함 untae@estsoft.com] 재문의</p><p>견적 문의드립니다</p>",
+    ])
+    _one_mail(monkeypatch, [
+        {"name": "From", "value": "buyer@acme.com"},
+        {"name": "To", "value": "untae@estsoft.com"},
+        {"name": "Subject", "value": "재문의"},
+        {"name": "Date", "value": "Tue, 22 Sep 2026 10:00:00 +0900"},
+    ], snippet="견적 문의드립니다")
+
+    assert mailbox_sync.sync_mailboxes_once() == {"added": 1}
+    assert created.call_count == 0, "이미 있는 노트를 또 만들었습니다"
+
+
+@respx.mock
+def test_a_personal_mailbox_mail_is_noted_on_the_ticket(sync_db, monkeypatch):
+    """「개인 gmail 로 온 거여도 hubspot 에 기록은 남겨야 해」 — 확인 뒤 **없으면** 적습니다.
+    다른 메일의 노트가 있다고 해서 이 메일의 노트가 막히면 안 됩니다."""
+    import json
+
+    from src.agents import mailbox_sync
+
+    _seed(sync_db, with_ticket=True, hubspot_contact_id="C-1")
+    _mailbox(sync_db, "untae@estsoft.com")
+    created = _ticket_notes([
+        "<p>[개인 메일함 untae@estsoft.com] 재문의</p><p>다른 이야기입니다</p>",
+    ])
+    _one_mail(monkeypatch, [
+        {"name": "From", "value": "buyer@acme.com"},
+        {"name": "To", "value": "untae@estsoft.com"},
+        {"name": "Subject", "value": "재문의"},
+        {"name": "Date", "value": "Tue, 22 Sep 2026 10:00:00 +0900"},
+    ], snippet="견적 문의드립니다")
+
+    assert mailbox_sync.sync_mailboxes_once() == {"added": 1}
+    assert created.call_count == 1
+    body = json.loads(created.calls[0].request.content)["properties"]["hs_note_body"]
+    assert body.startswith("[개인 메일함 untae@estsoft.com] 재문의\n\n견적 문의드립니다")

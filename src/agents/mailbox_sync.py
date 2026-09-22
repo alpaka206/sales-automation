@@ -19,6 +19,15 @@
 5. **우리가 보낸 사본은 안 가져옵니다.** `perso.ai@estsoft.com` 은 허브스팟 이메일 채널
    계정이라 콘솔에서 나간 회신이 그 사서함에 그대로 남습니다 — 안 거르면 우리 답장이
    티켓 기록에 두 번 섭니다(`_we_already_sent_it`).
+6. **임시보관함·스팸·휴지통은 메일이 아닙니다** (2026-09-22). 지메일은 **초안을 저장할
+   때마다 새 메시지 id 를 줍니다** — 한 통을 세 번 고쳐 쓰면 `gmail:` 줄 셋과 허브스팟
+   노트 셋이 서고, 보낸 뒤에는 넷째가 섭니다(실측: 같은 글이 2~3번 노트로, 그중 하나는
+   제목이 「[DUPLICATE, discard]」인 초안). `external_id` 도 `same_mail` 도 못 막습니다 —
+   id 가 다르고 빈 초안은 본문 지문이 없습니다.
+7. **허브스팟에 이미 있는 것은 노트로 안 적습니다** (2026-09-22 운영자 지시: 「허브스팟에도
+   기록되었는지 확인하고 기록할지」). 채널 계정 사서함으로 **온** 메일은 스레드가 이미
+   들고 있고, 그 밖의 것은 티켓의 노트를 먼저 읽어 같은 머리·같은 본문이 있으면 건너뜁니다
+   (`_note_on_ticket`).
 
 **잘못 들어온 줄은 티켓 화면에서 지웁니다**(`customer_ops.interaction_delete`). 지울 때
 `mailbox_link_decisions` 에 묘비를 남기므로 다음 회차에 되살아나지 않습니다 — 그 표는
@@ -196,11 +205,19 @@ def _hubspot_already_has_it(
     )
 
 
-def _sync_one(email: str) -> tuple[int, list[tuple[str, str, str, datetime]], set[int]]:
+# 허브스팟에 남길 노트 하나: (연락처 id, 티켓 id, 본문, 시각, 사서함, 방향).
+# 뒤의 둘은 회차 끝에서 「채널 계정으로 온 메일」을 가려내는 데 쓴다.
+_Note = tuple[str, str, str, datetime, str, str]
+# 지메일이 이 라벨을 단 것은 오간 메일이 아니다. 조회 조건(`-in:`)으로도 거르지만 라벨로 한 번
+# 더 본다 — 조회 문법은 지메일 쪽 사정이고, 라벨은 우리가 받은 그 메시지의 사실이다.
+_NOT_A_MAIL = {"DRAFT", "SPAM", "TRASH"}
+
+
+def _sync_one(email: str) -> tuple[int, list[_Note], set[int]]:
     """사서함 하나. (새로 넣은 줄 수, 허브스팟에 남길 노트들, 고객 메일이 붙은 문의 id 들)."""
     from .ticket_history import is_our_address
 
-    notes: list[tuple[str, str, str, datetime]] = []
+    notes: list[_Note] = []
     replied: set[int] = set()
     with SessionLocal() as session:
         from ..db.models import MailboxAccount as _Account
@@ -227,7 +244,12 @@ def _sync_one(email: str) -> tuple[int, list[tuple[str, str, str, datetime]], se
     token = access_token(email)
     headers = {"Authorization": f"Bearer {token}"}
     # `after:` 는 초 단위 epoch 를 받습니다 — 날짜로만 주면 그날 것이 통째로 들어옵니다.
-    query = f"after:{int(since.replace(tzinfo=timezone.utc).timestamp())}"
+    # 임시보관함은 **묻지 않습니다** — 조회가 초안을 돌려주면 저장할 때마다 다른 id 로 온다
+    # (모듈 설명 6). 스팸·휴지통도 같은 이유로 뺀다.
+    query = (
+        f"after:{int(since.replace(tzinfo=timezone.utc).timestamp())}"
+        " -in:drafts -in:spam -in:trash"
+    )
     with httpx.Client(headers=headers, timeout=_TIMEOUT) as client:
         listing = client.get(
             f"{_API}/messages", params={"q": query, "maxResults": MESSAGES_PER_SWEEP}
@@ -277,6 +299,8 @@ def _sync_one(email: str) -> tuple[int, list[tuple[str, str, str, datetime]], se
                 logger.warning("메일 %s 를 못 읽었습니다 (%s)", message_id, email)
                 continue
             body = detail.json()
+            if _NOT_A_MAIL & set(body.get("labelIds") or ()):
+                continue
             payload = body.get("payload") or {}
             head = _headers(payload)
             people = [
@@ -368,8 +392,27 @@ def _sync_one(email: str) -> tuple[int, list[tuple[str, str, str, datetime]], se
                         f"[개인 메일함 {email}] {head.get('subject', '')}\n\n"
                         f"{_plain_text(payload).strip() or body.get('snippet') or ''}",
                         when,
+                        email,
+                        direction,
                     ))
     return added, notes, replied
+
+
+def _channel_mailboxes() -> frozenset[str]:
+    """허브스팟 이메일 채널로 연결된 주소들. 못 읽으면 빈 집합 — 그때는 예전처럼 노트를 적는다.
+
+    막히는 쪽으로 떨어뜨리지 않는 이유: 그 메일의 사본은 대개 여기까지 오기 전에
+    `_hubspot_already_has_it` 이 걸렀고(폴러가 `ticket_history` 를 먼저 돌린다), 남은 것도
+    `_note_on_ticket` 이 티켓의 노트를 읽고 한 번 더 거른다. 목록 하나 못 읽었다고 개인함
+    노트를 회차째 잃는 것이 더 비싸다.
+    """
+    from ..integrations.hubspot import channel_addresses
+
+    try:
+        return channel_addresses()
+    except Exception:
+        logger.warning("허브스팟 채널 계정 목록을 못 읽었습니다", exc_info=True)
+        return frozenset()
 
 
 def sync_mailboxes_once() -> dict:
@@ -379,7 +422,7 @@ def sync_mailboxes_once() -> dict:
     일이라(비밀번호 변경), 하나 때문에 회차가 통째로 죽으면 안 됩니다.
     """
     added = 0
-    notes: list[tuple[str, str, str, datetime]] = []
+    notes: list[_Note] = []
     replied: set[int] = set()
     for email in enabled_accounts():
         try:
@@ -398,9 +441,36 @@ def sync_mailboxes_once() -> dict:
     # **노트는 마지막에, 한 번에.** 수집 중에 보내면 저쪽이 느린 날 사서함 한 바퀴가
     # 그만큼 길어지고, 그 사이 세션이 열려 있습니다. 실패해도 우리 줄은 그대로입니다 —
     # 「이 메일은 이 티켓 것이다」는 저쪽에 못 써도 유효한 판단입니다.
-    for hubspot_contact_id, ticket_id, body, when in notes:
+    # **채널 계정 사서함으로 온 메일은 허브스팟이 이미 들고 있다** (2026-09-22). 그 주소로
+    # 온 메일은 허브스팟이 받아 티켓 스레드에 세운다 — 노트로 또 적으면 같은 메일이 두 번
+    # 선다(실측: 우리 노트 26건 중 `perso.ai@estsoft.com` 8건). **나간** 메일은 다르다:
+    # 지메일에서 직접 보낸 것은 스레드에 안 서므로 노트가 그 메일이 남는 유일한 자리다.
+    # 목록은 필요할 때 한 번만 묻는다(한 시간 캐시).
+    #
+    # **나간 메일도 채널 계정이면 스레드부터 본다** (2026-09-22 운영자: 「gmail 에서 직접, hubspot 에서
+    # 직접, 우리 사이트에서 … 깔끔하게 모든 곳에서 정리되도록」). 허브스팟 화면에서 답한 메일은
+    # 허브스팟이 그 계정의 지메일로 보내므로 **보낸편지함에도 사본이 선다** — 그 사본을 노트로
+    # 적으면 스레드 메시지와 노트가 같은 메일을 두 번 말한다. DB 쪽은 `_hubspot_already_has_it` 이
+    # 거르지만 그건 스레드 수집이 **먼저** 돌았을 때만이고(폴러 순서상 대개 그렇지만 웹훅이
+    # 빠지면 아니다), 노트는 나간 뒤에 못 되돌린다. 그래서 그 계정의 나간 메일은 스레드를 읽어
+    # 같은 메일이 있으면 안 적는다. 지메일에서 직접 보낸 메일은 스레드에 없으므로 그대로 적힌다 —
+    # 그 노트가 그 메일이 허브스팟에 남는 유일한 자리다.
+    channel: frozenset[str] | None = None
+    for hubspot_contact_id, ticket_id, body, when, mailbox, direction in notes:
         if not hubspot_contact_id:
             continue
+        if channel is None:
+            channel = _channel_mailboxes()
+        if mailbox.strip().lower() in channel:
+            if direction == "inbound":
+                continue
+            try:
+                if asyncio.run(_thread_has_it(ticket_id, when, direction, body)):
+                    continue
+            except Exception:
+                # 확인이 안 되면 안 적는다 — 확인 없이 적는 것이 이번 지시가 막으려는 일이다.
+                logger.warning("티켓 %s 스레드를 못 읽어 노트를 건너뜁니다", ticket_id, exc_info=True)
+                continue
         try:
             asyncio.run(_note_on_ticket(hubspot_contact_id, ticket_id, body[:60_000], when))
         except Exception:
@@ -433,6 +503,28 @@ def sync_mailboxes_once() -> dict:
 # 않은 이유는 모양이 똑같기 때문입니다: `external_id` 하나가 기본키.
 
 
+async def _thread_has_it(ticket_id: str, when: datetime | None, direction: str, note_body: str) -> bool:
+    """그 티켓의 허브스팟 스레드에 **같은 메일**이 이미 서 있는가 — 자는 `ticket_history.same_mail`.
+
+    노트 본문은 「[개인 메일함 …] 제목\n\n본문」이라 첫 빈 줄 뒤가 메일 본문이다. 스레드 줄과
+    같은 방향·같은 본문 앞부분·하루 안이면 같은 메일이다(DB 쪽 `_hubspot_already_has_it` 과 같은 자).
+    """
+    from ..integrations.hubspot import HubSpotClient
+    from .ticket_history import collect_ticket_history, same_mail
+
+    text = note_body.split("\n\n", 1)[1] if "\n\n" in note_body else ""
+    stamp = when.replace(tzinfo=None) if when is not None else None
+    client = HubSpotClient()
+    try:
+        rows = await collect_ticket_history(client, ticket_id)
+    finally:
+        await client.close()
+    return any(
+        same_mail(row.get("happened_at"), row.get("direction"), row.get("summary"), stamp, direction, text)
+        for row in rows
+    )
+
+
 async def _note_on_ticket(hubspot_contact_id: str, ticket_id: str, body: str,
                           when: datetime | None) -> None:
     """허브스팟 티켓에 노트 한 줄 — 「개인 gmail 로 온 거여도 hubspot 에 기록은 남겨야 해」.
@@ -444,11 +536,23 @@ async def _note_on_ticket(hubspot_contact_id: str, ticket_id: str, body: str,
     **실패해도 우리 연결은 되돌리지 않습니다.** 운영자가 누른 것은 「이 메일은 이 티켓
     것이다」이고 그 판단은 저쪽에 못 써도 유효합니다 — 되돌리면 같은 메일을 다시
     물어보게 됩니다.
+
+    **적기 전에 그 티켓의 노트를 읽습니다** (2026-09-22 운영자 지시: 「허브스팟에도
+    기록되었는지 확인하고 기록할지」). 같은 머리(`[개인 메일함 …] 제목`)와 같은 본문 앞
+    200자가 이미 있으면 안 적습니다. 그런 노트가 생기는 길이 셋 있었습니다 — 저장할 때마다
+    id 가 바뀌는 지메일 초안(이제 조회에서 뺐지만 옛 줄은 남아 있다), 우리 줄이 사라진 뒤 다시
+    들어온 메일(DB 복원 · 묘비 표 정리), 그리고 개인함 발송(`senders._send_from_mailbox`)의
+    재시도. 읽기가 실패하면 **안 적습니다** — 저쪽 읽기가 안 되는데 쓰기는 될 리 없고, 확인
+    없이 적는 것이 이번 지시가 막으려는 바로 그 일입니다.
     """
     from ..integrations.hubspot import HubSpotClient
 
     client = HubSpotClient()
     try:
+        key = _note_key(body)
+        if any(_note_key(old) == key for old in await client.ticket_notes(ticket_id)):
+            logger.info("티켓 %s 에 같은 노트가 이미 있어 안 적습니다", ticket_id)
+            return
         await client.create_interaction_note(
             hubspot_contact_id, body[:60_000], happened_at=when, ticket_id=ticket_id
         )
@@ -456,3 +560,13 @@ async def _note_on_ticket(hubspot_contact_id: str, ticket_id: str, body: str,
         logger.warning("티켓 %s 에 노트를 못 남겼습니다", ticket_id, exc_info=True)
     finally:
         await client.close()
+
+
+def _note_key(text: str | None) -> tuple[str, str]:
+    """노트의 열쇠 — 첫 줄(머리)과 그 아래 본문 앞 200자, 공백을 접어서.
+
+    허브스팟이 돌려주는 본문은 `_html_to_text` 를 지나 줄바꿈이 우리가 쓴 것과 다를 수
+    있으므로(`\\n\\n` 이 `\\n` 으로) 글자를 그대로 재지 않는다.
+    """
+    head, _, rest = (text or "").strip().partition("\n")
+    return " ".join(head.split()), " ".join(rest.split())[:200]

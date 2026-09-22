@@ -15,6 +15,7 @@ from sqlalchemy.orm import joinedload
 from ...agents.approval import ApprovalError, approve, reject
 from ...agents.followup_sequence import REMINDER_VARIANTS
 from ...agents.followup_sequence import view as followup_view
+from ...agents.reply_safety import latest_trace
 from ...common.config import settings
 from ...common.subjects import reply_subject, strip_reply_prefixes
 from ...common.textwash import text_wash
@@ -109,6 +110,16 @@ def _clean_signature_key(value: str | None) -> str | None:
     """
     v = (value or "").strip()
     return v if v in {s["key"] for s in list_signature_templates()} else None
+
+
+def _evidence_verdict(session, msg) -> dict | None:
+    """``{"status", "issues"}`` from the draft's latest ``reply_context`` trace, else None."""
+    if msg is None:
+        return None
+    checks = (latest_trace(session, "reply_context", msg.id) or {}).get("limited_evidence_checks")
+    if not checks:
+        return None
+    return {"status": checks.get("status"), "issues": list(checks.get("issues") or [])}
 
 
 def _message_detail_context(
@@ -399,6 +410,10 @@ def _message_detail_context(
                 # 후속 리마인더 한 줄 — 다음 리마인더가 언제인지, 멈췄는지, 닫았다가 되살아났는지
                 # (`followup_sequence.view`, 파생값). 되살아난 티켓은 화면이 빨갛게 그립니다.
                 "followup": followup_view(conv, thread_rows) if conv else None,
+                # 근거 검사 판정 (2026-09-22). 검사는 초안을 막지 않고 매니페스트에 표시만
+                # 남기므로(`inbound._draft_reply`), 여기서 안 실으면 그 판정은 아무 데도
+                # 안 보인다. 기록(`reply_context` Event)이 없는 수동 초안·문의 글은 `None`.
+                "evidence": _evidence_verdict(session, msg),
                 # 티켓이 만들어진 날. **허브스팟을 다시 부르지 않습니다** — 백필이 허브스팟의
                 # `createdate` 를 그대로 복사해 두었고(`hubspot_backfill`: `created_at=
                 # ticket.created_at`), 실시간으로 들어온 티켓만 우리가 받은 시각이라 몇 초

@@ -48,7 +48,7 @@ from .inbound_scoring import (  # noqa: F401 — re-exported for callers/tests
 from .summaries import append_summary_line
 from .stage_sync import _retire_superseded_drafts
 from .followup_sequence import REMINDER_NOTE_PREFIX, REMINDER_VARIANTS
-from .draft_evidence import AnswerPoint, PolicyQuote, DraftEvidenceError, check_draft, compose_answer, repair_instruction
+from .draft_evidence import AnswerPoint, PolicyQuote, check_draft, compose_answer, repair_instruction
 
 logger = logging.getLogger(__name__)
 
@@ -323,7 +323,13 @@ class DraftResult(BaseModel):
 
 
 class GroundedDraftResult(DraftResult):
-    """One generated representation; the server composes its customer-facing body."""
+    """One generated representation; the server composes its customer-facing body.
+
+    ``answer_points`` must hold at least one item, and ``compose_answer`` raises
+    ``DraftEvidenceError`` when every item is blank — that is the one grounding failure
+    that still kills the job (no body to review). Every other check result rides along
+    in the manifest and is shown to the operator (2026-09-22).
+    """
 
     body: str = ""
     answer_points: list[AnswerPoint] = Field(min_length=1)
@@ -1049,6 +1055,12 @@ class InboundAgent:
           (``reply_subject``) — a policy document cannot name the mail any more
           (0118), so the subject is always the customer's own words and therefore
           already in the customer's language.
+
+        The grounding checks (``check_draft``) FLAG, they do not block (2026-09-22):
+        one repair pass, then whatever remains is written into the manifest as
+        ``limited_evidence_checks.status == "FAIL"`` with the issue codes, and the
+        review screen shows it. The only ``DraftEvidenceError`` left is an empty
+        composition — there is no body to show, so the job stays terminal.
         """
         from ..llm.language import language_name
         from ..llm.reply import ensure_language, korean_reading
@@ -1120,6 +1132,15 @@ class InboundAgent:
                         or doc.id in selection_trace.get("selected_ids", [])]
         customer_text = "\n".join(turn.body for turn in events if turn.direction == "inbound")
         customer_text += "\n" + last_message
+        # **검사에 걸린 초안도 사람에게 간다** (2026-09-22 운영자 지시: 「미완성이라도
+        # 사람한테 뜨면 좋겠는데. 그래야 내용보고 후에 고도화를 하든 하지」). 재작성
+        # 한 번 뒤에도 남는 문제는 `issues` 에 들고 가서 매니페스트에 적고, 검토 화면이
+        # 그 판정을 배너로 보여 준다. 그전에는 여기서 `DraftEvidenceError` 로 죽었고 그
+        # 결과가 빈 카드 하나와 dead 잡이라 운영자는 무엇이 틀렸는지 볼 수도, 고칠 수도
+        # 없었다. 이 검사는 의미 인증이 아니라 문자열 검사라 과잉 차단이 있고, 그 판단은
+        # 사람이 본문을 보고 해야 한다. `DraftEvidenceError` 가 남는 자리는 `compose_answer`
+        # 하나 — 답변 요소가 전부 비어 **보여 줄 본문이 없을 때**뿐이다.
+        issues: list[str] = []
         for attempt in range(2):
             draft = self.llm.complete(
                 "inbound/draft_reply", draft_fields, schema=GroundedDraftResult, tier="pro", max_tokens=4000,
@@ -1132,10 +1153,8 @@ class InboundAgent:
                 draft.body = compose_answer(draft.answer_points)
             issues = check_draft(draft.body, draft.policy_quotes, documents=allowed_docs,
                                  customer_text=customer_text)
-            if not issues:
+            if not issues or attempt:
                 break
-            if attempt == 1:
-                raise DraftEvidenceError("초안 근거 검증 실패: " + ", ".join(issues))
             draft_fields["evidence_feedback"] = repair_instruction(issues)
 
         # CODE GUARD 1 — the draft is in the language it will be sent in.
@@ -1188,13 +1207,16 @@ class InboundAgent:
         # 금액 가드가 끝난 뒤라야 두 벌이 같은 문장, 같은 링크를 들고 대조가 됩니다.
         # 한 번만 돌고 행에 저장되므로 화면을 열 때마다 모델을 부르지 않습니다.
         draft.body_ko = korean_reading(draft.body, llm=self.llm)
-        # 변환(언어 보정·링크 치환·금액 가드) 뒤의 검사는 **재작성 없이 바로 실패합니다**.
-        # 위 루프의 재작성은 모델 호출을 한 번 더 하는 것인데, 그 변환은 모델 호출이
-        # 아니라 다시 쓸 것이 없습니다 — 남는 것은 draft_failed 뿐입니다.
+        # 변환(언어 보정·링크 치환·금액 가드) 뒤의 검사는 **표시만 남기고 막지 않습니다**
+        # (2026-09-22). 위 루프의 재작성은 모델 호출을 한 번 더 하는 것인데, 그 변환은
+        # 모델 호출이 아니라 다시 쓸 것이 없고, 그렇다고 죽이면 운영자가 볼 것이 없습니다.
+        # 두 검사의 문제를 합쳐 매니페스트에 적습니다 — 코드만 적고 고객 글은 안 적습니다.
         final_issues = check_draft(draft.body, draft.policy_quotes, documents=allowed_docs,
                                    customer_text=customer_text)
-        if final_issues:
-            raise DraftEvidenceError("초안 변환 후 근거 검증 실패: " + ", ".join(final_issues))
+        issues = sorted(set(issues) | set(final_issues))
+        if issues:
+            logger.warning("초안 근거 검사에 걸렸습니다 (conv=%s, issues=%s) — 검토 화면에 표시하고 대기열에 둡니다.",
+                           conv_id, ",".join(issues))
         policy.assert_current()
         draft._policy_snapshot = policy
         draft._context_manifest = {
@@ -1211,7 +1233,8 @@ class InboundAgent:
             "model": settings.GEMINI_MODEL_PRO, "api_surface": "vertex-ai",
             "prompt_sha256": fingerprint(load_prompt("inbound/draft_reply")),
             "schema_sha256": fingerprint(GroundedDraftResult.model_json_schema()),
-            "limited_evidence_checks": {"status": "PASS", "generation_attempts": attempt + 1,
+            "limited_evidence_checks": {"status": "FAIL" if issues else "PASS", "issues": issues,
+                                        "generation_attempts": attempt + 1,
                                         "quoted_source_ids": sorted({q.source_id for q in draft.policy_quotes}),
                                         "answer_points_count": len(draft.answer_points)},
             "semantic_validation": "NOT_RUN", "delivery_permission": "DRAFT_ONLY",
