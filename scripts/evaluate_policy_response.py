@@ -218,7 +218,7 @@ def run_live(args, settings) -> int:
                     "api_surface": "vertex-ai", "repeats": args.repeats, "arms": args.arms,
                     "max_calls": args.max_calls, "production_writes": False, "customer_send": False,
                     "source": source.get("source", "external authorized snapshot" if args.sources else "synthetic local fixture"),
-                    "authorization": "User explicitly authorized live evaluation in follow-up request"}
+                    "authorization": args.authorized_by}
         manifest["runtime_sha256"] = {name: hashlib.sha256((ROOT / name).read_bytes()).hexdigest()
                                       for name in ("src/agents/inbound.py", "src/agents/draft_evidence.py",
                                                    "src/llm/policy_context.py", "src/llm/knowledge.py",
@@ -310,6 +310,7 @@ def main() -> int:
     parser.add_argument("--arms", nargs="+", choices=("router", "all"), default=["router", "all"])
     parser.add_argument("--max-calls", type=int, default=120)
     parser.add_argument("--draft-thinking-budget", type=int)
+    parser.add_argument("--authorized-by", help="누가 이 유료 실평가를 승인했는지 — manifest 에 그대로 적힌다")
     args = parser.parse_args()
     isolate_writes()
     from src.common.config import settings
@@ -337,6 +338,8 @@ def main() -> int:
     if args.live:
         if not args.dataset or args.repeats < 1 or args.max_calls < 1:
             parser.error("--live requires --dataset and positive repeats/max-calls")
+        if not args.authorized_by:
+            parser.error("--live requires --authorized-by")
         return run_live(args, settings)
     parser.error("Choose --preflight or --export-sources")
 

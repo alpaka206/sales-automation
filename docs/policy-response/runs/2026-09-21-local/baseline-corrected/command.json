@@ -1,9 +1,9 @@
 {
   "command": [
-    "C:\\Users\\EST-INFRA\\Desktop\\sales-automation\\.venv\\Scripts\\python.exe",
+    "<repo>/.venv\\Scripts\\python.exe",
     "x"
   ],
-  "cwd": "C:\\Users\\EST-INFRA\\Desktop\\sales-automation",
+  "cwd": "<repo>",
   "status": "PASS",
   "exit_code": 0,
   "duration_seconds": 45.531,
@@ -15,6 +15,6 @@
     "-q",
     "-p",
     "no:cacheprovider",
-    "--junitxml=C:\\Users\\EST-INFRA\\Desktop\\sales-automation\\docs\\policy-response\\runs\\2026-09-21-local\\baseline-corrected\\junit.xml"
+    "--junitxml=<repo>/docs\\policy-response\\runs\\2026-09-21-local\\baseline-corrected\\junit.xml"
   ]
 }

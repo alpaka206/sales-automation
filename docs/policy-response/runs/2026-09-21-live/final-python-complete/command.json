@@ -1,6 +1,6 @@
 {
   "command": [
-    "C:\\Users\\EST-INFRA\\Desktop\\sales-automation\\.venv\\Scripts\\python.exe",
+    "<repo>/.venv\\Scripts\\python.exe",
     "scripts/check_policy_response.py",
     "--result-dir",
     "docs/policy-response/runs/2026-09-21-live/final-python-complete",
@@ -8,7 +8,7 @@
     "-q",
     "-ra"
   ],
-  "cwd": "C:\\Users\\EST-INFRA\\Desktop\\sales-automation",
+  "cwd": "<repo>",
   "status": "PASS",
   "exit_code": 0,
   "duration_seconds": 38.922,
@@ -21,6 +21,6 @@
     "-ra",
     "-p",
     "no:cacheprovider",
-    "--junitxml=C:\\Users\\EST-INFRA\\Desktop\\sales-automation\\docs\\policy-response\\runs\\2026-09-21-live\\final-python-complete\\junit.xml"
+    "--junitxml=<repo>/docs\\policy-response\\runs\\2026-09-21-live\\final-python-complete\\junit.xml"
   ]
 }

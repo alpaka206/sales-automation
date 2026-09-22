@@ -51,8 +51,8 @@
                              "reason":  "Applies to policy-based HubSpot draft generation and review; implemented subset only.",
                              "status":  "PARTIAL",
                              "evidence_paths":  [
-                                                    "docs/policy-response/runs/2026-09-21-local/final-python/junit.xml",
-                                                    "docs/policy-response/runs/2026-09-21-live/final-python-complete/junit.xml"
+                                                    "docs/policy-response/runs/2026-09-21-local/final-python/pytest.txt",
+                                                    "docs/policy-response/runs/2026-09-21-live/final-python-complete/pytest.txt"
                                                 ]
                          },
                          {
@@ -71,8 +71,8 @@
                              "reason":  "Applies to policy-based HubSpot draft generation and review; implemented subset only.",
                              "status":  "PARTIAL",
                              "evidence_paths":  [
-                                                    "docs/policy-response/runs/2026-09-21-local/final-python/junit.xml",
-                                                    "docs/policy-response/runs/2026-09-21-live/final-python-complete/junit.xml"
+                                                    "docs/policy-response/runs/2026-09-21-local/final-python/pytest.txt",
+                                                    "docs/policy-response/runs/2026-09-21-live/final-python-complete/pytest.txt"
                                                 ]
                          },
                          {
@@ -89,8 +89,8 @@
                              "reason":  "Applies to policy-based HubSpot draft generation and review; implemented subset only.",
                              "status":  "PARTIAL",
                              "evidence_paths":  [
-                                                    "docs/policy-response/runs/2026-09-21-local/final-python/junit.xml",
-                                                    "docs/policy-response/runs/2026-09-21-live/final-python-complete/junit.xml",
+                                                    "docs/policy-response/runs/2026-09-21-local/final-python/pytest.txt",
+                                                    "docs/policy-response/runs/2026-09-21-live/final-python-complete/pytest.txt",
                                                     "docs/policy-response/runs/2026-09-21-live/reviewed-synthetic-answers.json"
                                                 ]
                          },
@@ -110,8 +110,8 @@
                              "reason":  "Applies to policy-based HubSpot draft generation and review; implemented subset only.",
                              "status":  "PARTIAL",
                              "evidence_paths":  [
-                                                    "docs/policy-response/runs/2026-09-21-local/final-python/junit.xml",
-                                                    "docs/policy-response/runs/2026-09-21-live/final-python-complete/junit.xml",
+                                                    "docs/policy-response/runs/2026-09-21-local/final-python/pytest.txt",
+                                                    "docs/policy-response/runs/2026-09-21-live/final-python-complete/pytest.txt",
                                                     "docs/policy-response/runs/2026-09-21-live/reviewed-synthetic-answers.json"
                                                 ]
                          },
@@ -133,8 +133,8 @@
                              "reason":  "Applies to policy-based HubSpot draft generation and review; implemented subset only.",
                              "status":  "PARTIAL",
                              "evidence_paths":  [
-                                                    "docs/policy-response/runs/2026-09-21-local/final-python/junit.xml",
-                                                    "docs/policy-response/runs/2026-09-21-live/final-python-complete/junit.xml",
+                                                    "docs/policy-response/runs/2026-09-21-local/final-python/pytest.txt",
+                                                    "docs/policy-response/runs/2026-09-21-live/final-python-complete/pytest.txt",
                                                     "docs/policy-response/runs/2026-09-21-live/reviewed-synthetic-answers.json"
                                                 ]
                          },
@@ -156,8 +156,8 @@
                              "reason":  "Applies to policy-based HubSpot draft generation and review; implemented subset only.",
                              "status":  "PARTIAL",
                              "evidence_paths":  [
-                                                    "docs/policy-response/runs/2026-09-21-local/final-python/junit.xml",
-                                                    "docs/policy-response/runs/2026-09-21-live/final-python-complete/junit.xml",
+                                                    "docs/policy-response/runs/2026-09-21-local/final-python/pytest.txt",
+                                                    "docs/policy-response/runs/2026-09-21-live/final-python-complete/pytest.txt",
                                                     "docs/policy-response/runs/2026-09-21-live/reviewed-synthetic-answers.json"
                                                 ]
                          },
@@ -179,8 +179,8 @@
                              "reason":  "Applies to policy-based HubSpot draft generation and review; implemented subset only.",
                              "status":  "PARTIAL",
                              "evidence_paths":  [
-                                                    "docs/policy-response/runs/2026-09-21-local/final-python/junit.xml",
-                                                    "docs/policy-response/runs/2026-09-21-live/final-python-complete/junit.xml",
+                                                    "docs/policy-response/runs/2026-09-21-local/final-python/pytest.txt",
+                                                    "docs/policy-response/runs/2026-09-21-live/final-python-complete/pytest.txt",
                                                     "docs/policy-response/runs/2026-09-21-live/reviewed-synthetic-answers.json"
                                                 ]
                          },
@@ -204,8 +204,8 @@
                              "reason":  "Applies to policy-based HubSpot draft generation and review; implemented subset only.",
                              "status":  "PARTIAL",
                              "evidence_paths":  [
-                                                    "docs/policy-response/runs/2026-09-21-local/final-python/junit.xml",
-                                                    "docs/policy-response/runs/2026-09-21-live/final-python-complete/junit.xml"
+                                                    "docs/policy-response/runs/2026-09-21-local/final-python/pytest.txt",
+                                                    "docs/policy-response/runs/2026-09-21-live/final-python-complete/pytest.txt"
                                                 ]
                          },
                          {
@@ -229,8 +229,8 @@
                              "reason":  "Applies to policy-based HubSpot draft generation and review; implemented subset only.",
                              "status":  "PARTIAL",
                              "evidence_paths":  [
-                                                    "docs/policy-response/runs/2026-09-21-local/final-python/junit.xml",
-                                                    "docs/policy-response/runs/2026-09-21-live/final-python-complete/junit.xml",
+                                                    "docs/policy-response/runs/2026-09-21-local/final-python/pytest.txt",
+                                                    "docs/policy-response/runs/2026-09-21-live/final-python-complete/pytest.txt",
                                                     "docs/policy-response/runs/2026-09-21-live/reviewed-synthetic-answers.json"
                                                 ]
                          }
@@ -402,7 +402,7 @@
     "commands":  [
                      {
                          "command":  ".\\.venv\\Scripts\\python.exe scripts/check_policy_response.py --result-dir docs/policy-response/runs/2026-09-21-local/baseline tests -q",
-                         "cwd":  "C:\\Users\\EST-INFRA\\Desktop\\sales-automation",
+                         "cwd":  "<repo>",
                          "status":  "FAIL",
                          "exit_code":  null,
                          "result_path":  "docs/policy-response/runs/2026-09-21-local/baseline/pytest.txt",
@@ -410,7 +410,7 @@
                      },
                      {
                          "command":  ".\\.venv\\Scripts\\python.exe scripts/check_policy_response.py --result-dir docs/policy-response/runs/2026-09-21-local/baseline-corrected tests -q",
-                         "cwd":  "C:\\Users\\EST-INFRA\\Desktop\\sales-automation",
+                         "cwd":  "<repo>",
                          "status":  "PASS",
                          "exit_code":  0,
                          "result_path":  "docs/policy-response/runs/2026-09-21-local/baseline-corrected/command.json",
@@ -418,7 +418,7 @@
                      },
                      {
                          "command":  ".\\.venv\\Scripts\\python.exe scripts/check_policy_response.py --result-dir docs/policy-response/runs/2026-09-21-local/reproduced tests/test_followup_draft.py tests/test_policy_model_access.py -q",
-                         "cwd":  "C:\\Users\\EST-INFRA\\Desktop\\sales-automation",
+                         "cwd":  "<repo>",
                          "status":  "FAIL",
                          "exit_code":  1,
                          "result_path":  "docs/policy-response/runs/2026-09-21-local/reproduced/command.json",
@@ -426,7 +426,7 @@
                      },
                      {
                          "command":  ".\\.venv\\Scripts\\python.exe scripts/check_policy_response.py --result-dir docs/policy-response/runs/2026-09-21-local/final-python tests -q -ra",
-                         "cwd":  "C:\\Users\\EST-INFRA\\Desktop\\sales-automation",
+                         "cwd":  "<repo>",
                          "status":  "FAIL",
                          "exit_code":  1,
                          "result_path":  "docs/policy-response/runs/2026-09-21-local/full-before-review-fix/command.json",
@@ -434,7 +434,7 @@
                      },
                      {
                          "command":  ".\\.venv\\Scripts\\python.exe scripts/check_policy_response.py --result-dir docs/policy-response/runs/2026-09-21-local/final-python tests -q -ra",
-                         "cwd":  "C:\\Users\\EST-INFRA\\Desktop\\sales-automation",
+                         "cwd":  "<repo>",
                          "status":  "PASS",
                          "exit_code":  0,
                          "result_path":  "docs/policy-response/runs/2026-09-21-local/final-python/command.json",
@@ -442,7 +442,7 @@
                      },
                      {
                          "command":  ".\\.venv\\Scripts\\ruff.exe check --no-cache src tests scripts/check_policy_response.py",
-                         "cwd":  "C:\\Users\\EST-INFRA\\Desktop\\sales-automation",
+                         "cwd":  "<repo>",
                          "status":  "PASS",
                          "exit_code":  0,
                          "result_path":  "docs/policy-response/runs/2026-09-21-local/lint.txt",
@@ -450,7 +450,7 @@
                      },
                      {
                          "command":  "npm.cmd test",
-                         "cwd":  "C:\\Users\\EST-INFRA\\Desktop\\sales-automation\\frontend",
+                         "cwd":  "<repo>/frontend",
                          "status":  "PASS",
                          "exit_code":  0,
                          "result_path":  "docs/policy-response/runs/2026-09-21-local/frontend/test.txt",
@@ -458,7 +458,7 @@
                      },
                      {
                          "command":  "npm.cmd run build",
-                         "cwd":  "C:\\Users\\EST-INFRA\\Desktop\\sales-automation\\frontend",
+                         "cwd":  "<repo>/frontend",
                          "status":  "PASS",
                          "exit_code":  0,
                          "result_path":  "docs/policy-response/runs/2026-09-21-local/frontend/build.txt",
@@ -466,7 +466,7 @@
                      },
                      {
                          "command":  "Gemini paired evaluation",
-                         "cwd":  "C:\\Users\\EST-INFRA\\Desktop\\sales-automation",
+                         "cwd":  "<repo>",
                          "status":  "NOT_RUN",
                          "exit_code":  null,
                          "result_path":  null,
@@ -474,7 +474,7 @@
                      },
                      {
                          "command":  "Live HubSpot delivery / CRM writes / deployment / production migration",
-                         "cwd":  "C:\\Users\\EST-INFRA\\Desktop\\sales-automation",
+                         "cwd":  "<repo>",
                          "status":  "NOT_RUN",
                          "exit_code":  null,
                          "result_path":  null,
@@ -482,7 +482,7 @@
                      },
                      {
                          "command":  "Browser visual QA",
-                         "cwd":  "C:\\Users\\EST-INFRA\\Desktop\\sales-automation",
+                         "cwd":  "<repo>",
                          "status":  "NOT_RUN",
                          "exit_code":  null,
                          "result_path":  null,
@@ -490,39 +490,39 @@
                      },
                      {
                          "command":  "git -c core.safecrlf=false diff --check",
-                         "cwd":  "C:\\Users\\EST-INFRA\\Desktop\\sales-automation",
+                         "cwd":  "<repo>",
                          "status":  "PASS",
                          "exit_code":  0,
                          "result_path":  "docs/policy-response/runs/2026-09-21-local/diff-check.txt",
                          "notes":  "No whitespace errors; line ending warnings only."
                      },
                      {
-                         "command":  "C:\\Users\\EST-INFRA\\Desktop\\sales-automation\\.venv\\Scripts\\python.exe scripts/check_policy_response.py --result-dir docs/policy-response/runs/2026-09-21-live/final-python tests -q -ra",
-                         "cwd":  "C:\\Users\\EST-INFRA\\Desktop\\sales-automation",
+                         "command":  "<repo>/.venv\\Scripts\\python.exe scripts/check_policy_response.py --result-dir docs/policy-response/runs/2026-09-21-live/final-python tests -q -ra",
+                         "cwd":  "<repo>",
                          "status":  "PASS",
                          "exit_code":  0,
                          "result_path":  "docs/policy-response/runs/2026-09-21-live/final-python/pytest.txt",
                          "notes":  "1672 passed /43 skipped before adversarial follow-up"
                      },
                      {
-                         "command":  "C:\\Users\\EST-INFRA\\Desktop\\sales-automation\\.venv\\Scripts\\python.exe scripts/check_policy_response.py --result-dir docs/policy-response/runs/2026-09-21-live/final-python-after-review tests -q -ra",
-                         "cwd":  "C:\\Users\\EST-INFRA\\Desktop\\sales-automation",
+                         "command":  "<repo>/.venv\\Scripts\\python.exe scripts/check_policy_response.py --result-dir docs/policy-response/runs/2026-09-21-live/final-python-after-review tests -q -ra",
+                         "cwd":  "<repo>",
                          "status":  "FAIL",
                          "exit_code":  1,
                          "result_path":  "docs/policy-response/runs/2026-09-21-live/final-python-after-review/pytest.txt",
                          "notes":  "1 failed /1674 passed: negative-status conjugation defect; corrected later"
                      },
                      {
-                         "command":  "C:\\Users\\EST-INFRA\\Desktop\\sales-automation\\.venv\\Scripts\\python.exe scripts/check_policy_response.py --result-dir docs/policy-response/runs/2026-09-21-live/final-python-verified tests -q -ra",
-                         "cwd":  "C:\\Users\\EST-INFRA\\Desktop\\sales-automation",
+                         "command":  "<repo>/.venv\\Scripts\\python.exe scripts/check_policy_response.py --result-dir docs/policy-response/runs/2026-09-21-live/final-python-verified tests -q -ra",
+                         "cwd":  "<repo>",
                          "status":  "PASS",
                          "exit_code":  0,
                          "result_path":  "docs/policy-response/runs/2026-09-21-live/final-python-verified/pytest.txt",
                          "notes":  "1675 passed /43 skipped before final phrase and queue regression"
                      },
                      {
-                         "command":  "C:\\Users\\EST-INFRA\\Desktop\\sales-automation\\.venv\\Scripts\\python.exe scripts/check_policy_response.py --result-dir docs/policy-response/runs/2026-09-21-live/final-python-complete tests -q -ra",
-                         "cwd":  "C:\\Users\\EST-INFRA\\Desktop\\sales-automation",
+                         "command":  "<repo>/.venv\\Scripts\\python.exe scripts/check_policy_response.py --result-dir docs/policy-response/runs/2026-09-21-live/final-python-complete tests -q -ra",
+                         "cwd":  "<repo>",
                          "status":  "PASS",
                          "exit_code":  0,
                          "result_path":  "docs/policy-response/runs/2026-09-21-live/final-python-complete/pytest.txt",
@@ -530,71 +530,71 @@
                      },
                      {
                          "command":  "scripts/evaluate_policy_response.py --live; exact early invocation described in results.md",
-                         "cwd":  "C:\\Users\\EST-INFRA\\Desktop\\sales-automation",
+                         "cwd":  "<repo>",
                          "status":  "PASS",
                          "exit_code":  0,
                          "result_path":  "docs/policy-response/runs/2026-09-21-live/baseline/manifest.json",
                          "notes":  "Completed 56 attempts; 0 failed generations; 144 real provider calls. Exit status is not semantic correctness."
                      },
                      {
-                         "command":  "C:\\Users\\EST-INFRA\\Desktop\\sales-automation\\.venv\\Scripts\\python.exe scripts/evaluate_policy_response.py --live --dataset tests/fixtures/policy_response_live.json --arms router all --repeats 2 --max-calls 220 --output tmp/policy-eval-2026-09-21/candidate",
-                         "cwd":  "C:\\Users\\EST-INFRA\\Desktop\\sales-automation",
+                         "command":  "<repo>/.venv\\Scripts\\python.exe scripts/evaluate_policy_response.py --live --dataset tests/fixtures/policy_response_live.json --arms router all --repeats 2 --max-calls 220 --output tmp/policy-eval-2026-09-21/candidate",
+                         "cwd":  "<repo>",
                          "status":  "FAIL",
                          "exit_code":  1,
                          "result_path":  "docs/policy-response/runs/2026-09-21-live/candidate/manifest.json",
                          "notes":  "Completed 56 attempts; 6 failed generations; 157 real provider calls. Exit status is not semantic correctness."
                      },
                      {
-                         "command":  "C:\\Users\\EST-INFRA\\Desktop\\sales-automation\\.venv\\Scripts\\python.exe scripts/evaluate_policy_response.py --live --dataset tests/fixtures/policy_response_live.json --case S02 --case S06 --case S14 --arms router all --repeats 1 --max-calls 40 --output tmp/policy-eval-2026-09-21/candidate-smoke",
-                         "cwd":  "C:\\Users\\EST-INFRA\\Desktop\\sales-automation",
+                         "command":  "<repo>/.venv\\Scripts\\python.exe scripts/evaluate_policy_response.py --live --dataset tests/fixtures/policy_response_live.json --case S02 --case S06 --case S14 --arms router all --repeats 1 --max-calls 40 --output tmp/policy-eval-2026-09-21/candidate-smoke",
+                         "cwd":  "<repo>",
                          "status":  "PASS",
                          "exit_code":  0,
                          "result_path":  "docs/policy-response/runs/2026-09-21-live/candidate-smoke/manifest.json",
                          "notes":  "Completed 6 attempts; 0 failed generations; 17 real provider calls. Exit status is not semantic correctness."
                      },
                      {
-                         "command":  "C:\\Users\\EST-INFRA\\Desktop\\sales-automation\\.venv\\Scripts\\python.exe scripts/evaluate_policy_response.py --live --dataset tests/fixtures/policy_response_live.json --case S02 --case S06 --case S14 --arms router all --repeats 1 --max-calls 40 --output tmp/policy-eval-2026-09-21/composed-smoke",
-                         "cwd":  "C:\\Users\\EST-INFRA\\Desktop\\sales-automation",
+                         "command":  "<repo>/.venv\\Scripts\\python.exe scripts/evaluate_policy_response.py --live --dataset tests/fixtures/policy_response_live.json --case S02 --case S06 --case S14 --arms router all --repeats 1 --max-calls 40 --output tmp/policy-eval-2026-09-21/composed-smoke",
+                         "cwd":  "<repo>",
                          "status":  "FAIL",
                          "exit_code":  1,
                          "result_path":  "docs/policy-response/runs/2026-09-21-live/composed-smoke/manifest.json",
                          "notes":  "Completed 6 attempts; 1 failed generations; 20 real provider calls. Exit status is not semantic correctness."
                      },
                      {
-                         "command":  "C:\\Users\\EST-INFRA\\Desktop\\sales-automation\\.venv\\Scripts\\python.exe scripts/evaluate_policy_response.py --live --dataset tests/fixtures/policy_response_live.json --case S14 --arms router all --repeats 1 --max-calls 12 --output tmp/policy-eval-2026-09-21/final-negative-recheck",
-                         "cwd":  "C:\\Users\\EST-INFRA\\Desktop\\sales-automation",
+                         "command":  "<repo>/.venv\\Scripts\\python.exe scripts/evaluate_policy_response.py --live --dataset tests/fixtures/policy_response_live.json --case S14 --arms router all --repeats 1 --max-calls 12 --output tmp/policy-eval-2026-09-21/final-negative-recheck",
+                         "cwd":  "<repo>",
                          "status":  "PASS",
                          "exit_code":  0,
                          "result_path":  "docs/policy-response/runs/2026-09-21-live/final-negative-recheck/manifest.json",
                          "notes":  "Completed 2 attempts; 0 failed generations; 7 real provider calls. Exit status is not semantic correctness."
                      },
                      {
-                         "command":  "C:\\Users\\EST-INFRA\\Desktop\\sales-automation\\.venv\\Scripts\\python.exe scripts/evaluate_policy_response.py --live --dataset tests/fixtures/policy_response_live.json --case S14 --arms router all --repeats 1 --max-calls 12 --output tmp/policy-eval-2026-09-21/final-state-recheck",
-                         "cwd":  "C:\\Users\\EST-INFRA\\Desktop\\sales-automation",
+                         "command":  "<repo>/.venv\\Scripts\\python.exe scripts/evaluate_policy_response.py --live --dataset tests/fixtures/policy_response_live.json --case S14 --arms router all --repeats 1 --max-calls 12 --output tmp/policy-eval-2026-09-21/final-state-recheck",
+                         "cwd":  "<repo>",
                          "status":  "FAIL",
                          "exit_code":  1,
                          "result_path":  "docs/policy-response/runs/2026-09-21-live/final-state-recheck/manifest.json",
                          "notes":  "Completed 2 attempts; 1 failed generations; 7 real provider calls. Exit status is not semantic correctness."
                      },
                      {
-                         "command":  "C:\\Users\\EST-INFRA\\Desktop\\sales-automation\\.venv\\Scripts\\python.exe scripts/evaluate_policy_response.py --live --dataset tests/fixtures/policy_response_live.json --case S02 --arms router all --repeats 1 --max-calls 20 --output tmp/policy-eval-2026-09-21/followup-smoke",
-                         "cwd":  "C:\\Users\\EST-INFRA\\Desktop\\sales-automation",
+                         "command":  "<repo>/.venv\\Scripts\\python.exe scripts/evaluate_policy_response.py --live --dataset tests/fixtures/policy_response_live.json --case S02 --arms router all --repeats 1 --max-calls 20 --output tmp/policy-eval-2026-09-21/followup-smoke",
+                         "cwd":  "<repo>",
                          "status":  "PASS",
                          "exit_code":  0,
                          "result_path":  "docs/policy-response/runs/2026-09-21-live/followup-smoke/manifest.json",
                          "notes":  "Completed 2 attempts; 0 failed generations; 6 real provider calls. Exit status is not semantic correctness."
                      },
                      {
-                         "command":  "C:\\Users\\EST-INFRA\\Desktop\\sales-automation\\.venv\\Scripts\\python.exe scripts/evaluate_policy_response.py --live --dataset tests/fixtures/policy_response_live.json --case S02 --case S06 --case S14 --arms router all --repeats 1 --max-calls 40 --output tmp/policy-eval-2026-09-21/plan-smoke",
-                         "cwd":  "C:\\Users\\EST-INFRA\\Desktop\\sales-automation",
+                         "command":  "<repo>/.venv\\Scripts\\python.exe scripts/evaluate_policy_response.py --live --dataset tests/fixtures/policy_response_live.json --case S02 --case S06 --case S14 --arms router all --repeats 1 --max-calls 40 --output tmp/policy-eval-2026-09-21/plan-smoke",
+                         "cwd":  "<repo>",
                          "status":  "FAIL",
                          "exit_code":  1,
                          "result_path":  "docs/policy-response/runs/2026-09-21-live/plan-smoke/manifest.json",
                          "notes":  "Completed 6 attempts; 3 failed generations; 19 real provider calls. Exit status is not semantic correctness."
                      },
                      {
-                         "command":  "C:\\Users\\EST-INFRA\\Desktop\\sales-automation\\.venv\\Scripts\\python.exe scripts/evaluate_policy_response.py --live --dataset tests/fixtures/policy_response_live.json --case S02 --case S06 --case S14 --arms router all --repeats 1 --draft-thinking-budget 1024 --max-calls 40 --output tmp/policy-eval-2026-09-21/reasoning-smoke",
-                         "cwd":  "C:\\Users\\EST-INFRA\\Desktop\\sales-automation",
+                         "command":  "<repo>/.venv\\Scripts\\python.exe scripts/evaluate_policy_response.py --live --dataset tests/fixtures/policy_response_live.json --case S02 --case S06 --case S14 --arms router all --repeats 1 --draft-thinking-budget 1024 --max-calls 40 --output tmp/policy-eval-2026-09-21/reasoning-smoke",
+                         "cwd":  "<repo>",
                          "status":  "FAIL",
                          "exit_code":  1,
                          "result_path":  "docs/policy-response/runs/2026-09-21-live/reasoning-smoke/manifest.json",
@@ -602,15 +602,15 @@
                      },
                      {
                          "command":  "scripts/evaluate_policy_response.py --live; exact early invocation described in results.md",
-                         "cwd":  "C:\\Users\\EST-INFRA\\Desktop\\sales-automation",
+                         "cwd":  "<repo>",
                          "status":  "PASS",
                          "exit_code":  0,
                          "result_path":  "docs/policy-response/runs/2026-09-21-live/smoke/manifest.json",
                          "notes":  "Completed 2 attempts; 0 failed generations; 6 real provider calls. Exit status is not semantic correctness."
                      },
                      {
-                         "command":  "C:\\Users\\EST-INFRA\\Desktop\\sales-automation\\.venv\\Scripts\\python.exe scripts/evaluate_policy_response.py --live --dataset tests/fixtures/policy_response_live.json --case S14 --arms router all --repeats 2 --max-calls 24 --output tmp/policy-eval-2026-09-21/unknown-state-recheck",
-                         "cwd":  "C:\\Users\\EST-INFRA\\Desktop\\sales-automation",
+                         "command":  "<repo>/.venv\\Scripts\\python.exe scripts/evaluate_policy_response.py --live --dataset tests/fixtures/policy_response_live.json --case S14 --arms router all --repeats 2 --max-calls 24 --output tmp/policy-eval-2026-09-21/unknown-state-recheck",
+                         "cwd":  "<repo>",
                          "status":  "FAIL",
                          "exit_code":  1,
                          "result_path":  "docs/policy-response/runs/2026-09-21-live/unknown-state-recheck/manifest.json",
@@ -618,7 +618,7 @@
                      },
                      {
                          "command":  "scripts/evaluate_policy_response.py --export-sources tmp/policy-eval-2026-09-21/sources.json; --export-http attempted separately",
-                         "cwd":  "C:\\Users\\EST-INFRA\\Desktop\\sales-automation",
+                         "cwd":  "<repo>",
                          "status":  "FAIL",
                          "exit_code":  1,
                          "result_path":  "docs/policy-response/runs/2026-09-21-live/results.md",
@@ -626,7 +626,7 @@
                      },
                      {
                          "command":  ".\\.venv\\Scripts\\python.exe scripts/summarize_policy_evaluation.py --raw-root tmp/policy-eval-2026-09-21 --reviews docs/policy-response/runs/2026-09-21-live/adjudications.json --output docs/policy-response/runs/2026-09-21-live/summary.json",
-                         "cwd":  "C:\\Users\\EST-INFRA\\Desktop\\sales-automation",
+                         "cwd":  "<repo>",
                          "status":  "PASS",
                          "exit_code":  0,
                          "result_path":  "docs/policy-response/runs/2026-09-21-live/summary.json",
@@ -634,7 +634,7 @@
                      },
                      {
                          "command":  ".\\.venv\\Scripts\\ruff.exe check --no-cache src tests scripts/check_policy_response.py scripts/evaluate_policy_response.py scripts/summarize_policy_evaluation.py",
-                         "cwd":  "C:\\Users\\EST-INFRA\\Desktop\\sales-automation",
+                         "cwd":  "<repo>",
                          "status":  "PASS",
                          "exit_code":  0,
                          "result_path":  "docs/policy-response/runs/2026-09-21-live/checks.json",
@@ -642,7 +642,7 @@
                      },
                      {
                          "command":  "git -c core.safecrlf=false diff --check",
-                         "cwd":  "C:\\Users\\EST-INFRA\\Desktop\\sales-automation",
+                         "cwd":  "<repo>",
                          "status":  "PASS",
                          "exit_code":  0,
                          "result_path":  "docs/policy-response/runs/2026-09-21-live/checks.json",
@@ -1307,7 +1307,7 @@
                                                              "tests/test_policy_context.py::test_first_reply_routes_the_latest_customer_correction"
                                                          ],
                                     "evidence_paths":  [
-                                                           "docs/policy-response/runs/2026-09-21-local/final-python/junit.xml"
+                                                           "docs/policy-response/runs/2026-09-21-local/final-python/pytest.txt"
                                                        ],
                                     "notes":  "Public synthetic design scenario; related boundary tests do not establish full semantic acceptance."
                                 },
@@ -1332,7 +1332,7 @@
                                                              "tests/test_policy_context.py::test_first_reply_routes_the_latest_customer_correction"
                                                          ],
                                     "evidence_paths":  [
-                                                           "docs/policy-response/runs/2026-09-21-local/final-python/junit.xml"
+                                                           "docs/policy-response/runs/2026-09-21-local/final-python/pytest.txt"
                                                        ],
                                     "notes":  "Public synthetic design scenario; related boundary tests do not establish full semantic acceptance."
                                 },
@@ -1429,7 +1429,7 @@
                                                              "tests/test_history_view.py::test_history_is_scoped_deduplicated_and_includes_real_records"
                                                          ],
                                     "evidence_paths":  [
-                                                           "docs/policy-response/runs/2026-09-21-local/final-python/junit.xml"
+                                                           "docs/policy-response/runs/2026-09-21-local/final-python/pytest.txt"
                                                        ],
                                     "notes":  "Public synthetic design scenario; related boundary tests do not establish full semantic acceptance."
                                 },
@@ -1453,7 +1453,7 @@
                                                              "tests/test_followup_draft.py::test_reminder_does_not_answer_a_customer_correction"
                                                          ],
                                     "evidence_paths":  [
-                                                           "docs/policy-response/runs/2026-09-21-local/final-python/junit.xml"
+                                                           "docs/policy-response/runs/2026-09-21-local/final-python/pytest.txt"
                                                        ],
                                     "notes":  "Public synthetic design scenario; related boundary tests do not establish full semantic acceptance."
                                 },
@@ -1465,7 +1465,7 @@
                                                              "tests/test_followup_draft.py::test_test_sent_is_not_a_customer_visible_reply"
                                                          ],
                                     "evidence_paths":  [
-                                                           "docs/policy-response/runs/2026-09-21-local/final-python/junit.xml"
+                                                           "docs/policy-response/runs/2026-09-21-local/final-python/pytest.txt"
                                                        ],
                                     "notes":  "Public synthetic design scenario; related boundary tests do not establish full semantic acceptance."
                                 },
@@ -1477,7 +1477,7 @@
                                                              "tests/test_followup_draft.py::test_the_two_branches_reach_the_prompt"
                                                          ],
                                     "evidence_paths":  [
-                                                           "docs/policy-response/runs/2026-09-21-local/final-python/junit.xml"
+                                                           "docs/policy-response/runs/2026-09-21-local/final-python/pytest.txt"
                                                        ],
                                     "notes":  "Public synthetic design scenario; related boundary tests do not establish full semantic acceptance."
                                 },
@@ -1525,7 +1525,7 @@
                                                              "tests/test_policy_context.py::test_real_draft_path_uses_one_snapshot_and_persists_private_provenance"
                                                          ],
                                     "evidence_paths":  [
-                                                           "docs/policy-response/runs/2026-09-21-local/final-python/junit.xml"
+                                                           "docs/policy-response/runs/2026-09-21-local/final-python/pytest.txt"
                                                        ],
                                     "notes":  "Public synthetic design scenario; related boundary tests do not establish full semantic acceptance."
                                 },
@@ -1585,7 +1585,7 @@
                                                              "tests/test_send_worker.py::test_claim_is_atomic_under_concurrent_workers"
                                                          ],
                                     "evidence_paths":  [
-                                                           "docs/policy-response/runs/2026-09-21-local/final-python/junit.xml"
+                                                           "docs/policy-response/runs/2026-09-21-local/final-python/pytest.txt"
                                                        ],
                                     "notes":  "Public synthetic design scenario; related boundary tests do not establish full semantic acceptance."
                                 },
@@ -1633,7 +1633,7 @@
                                                              "tests/test_policy_context.py::test_approved_content_recipient_and_status_changes_block_send"
                                                          ],
                                     "evidence_paths":  [
-                                                           "docs/policy-response/runs/2026-09-21-local/final-python/junit.xml"
+                                                           "docs/policy-response/runs/2026-09-21-local/final-python/pytest.txt"
                                                        ],
                                     "notes":  "Public synthetic design scenario; related boundary tests do not establish full semantic acceptance."
                                 },
@@ -1645,7 +1645,7 @@
                                                              "tests/test_policy_context.py::test_approved_content_recipient_and_status_changes_block_send"
                                                          ],
                                     "evidence_paths":  [
-                                                           "docs/policy-response/runs/2026-09-21-local/final-python/junit.xml"
+                                                           "docs/policy-response/runs/2026-09-21-local/final-python/pytest.txt"
                                                        ],
                                     "notes":  "Public synthetic design scenario; related boundary tests do not establish full semantic acceptance."
                                 },
@@ -1658,7 +1658,7 @@
                                                              "tests/test_policy_context.py::test_correction_during_remote_lookup_blocks_the_actual_transport"
                                                          ],
                                     "evidence_paths":  [
-                                                           "docs/policy-response/runs/2026-09-21-local/final-python/junit.xml"
+                                                           "docs/policy-response/runs/2026-09-21-local/final-python/pytest.txt"
                                                        ],
                                     "notes":  "Public synthetic design scenario; related boundary tests do not establish full semantic acceptance."
                                 },
@@ -1670,7 +1670,7 @@
                                                              "tests/test_send_worker.py::test_unknown_delivery_outcome_is_quarantined_without_retry"
                                                          ],
                                     "evidence_paths":  [
-                                                           "docs/policy-response/runs/2026-09-21-local/final-python/junit.xml"
+                                                           "docs/policy-response/runs/2026-09-21-local/final-python/pytest.txt"
                                                        ],
                                     "notes":  "Public synthetic design scenario; related boundary tests do not establish full semantic acceptance."
                                 },
@@ -1682,7 +1682,7 @@
                                                              "tests/test_send_worker.py::test_reclaim_stuck_sending"
                                                          ],
                                     "evidence_paths":  [
-                                                           "docs/policy-response/runs/2026-09-21-local/final-python/junit.xml"
+                                                           "docs/policy-response/runs/2026-09-21-local/final-python/pytest.txt"
                                                        ],
                                     "notes":  "Public synthetic design scenario; related boundary tests do not establish full semantic acceptance."
                                 },
@@ -1719,7 +1719,7 @@
                                                              "tests/test_rule_guards.py::test_send_price_guard_read_failure_blocks_delivery"
                                                          ],
                                     "evidence_paths":  [
-                                                           "docs/policy-response/runs/2026-09-21-local/final-python/junit.xml"
+                                                           "docs/policy-response/runs/2026-09-21-local/final-python/pytest.txt"
                                                        ],
                                     "notes":  "Public synthetic design scenario; related boundary tests do not establish full semantic acceptance."
                                 },

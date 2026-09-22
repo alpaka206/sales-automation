@@ -940,7 +940,7 @@ class InboundAgent:
         # Email is the only reply channel.
         return "email" if contact_info.get("email") else "none"
 
-    def _is_first_reply(self, conv_id: int | None) -> bool:
+    def _is_first_reply(self, conv_id: int | None, *, events=None) -> bool:
         """True if no real reply has gone out in this thread yet (auto-ack excluded).
 
         Drives the "no pricing in the first email" rule. Pending drafts don't count
@@ -949,10 +949,12 @@ class InboundAgent:
         **허브스팟 화면에서 보낸 회신도 셉니다** (2026-09-07). ``messages`` 만 세던 동안
         저쪽에서 사람이 답한 티켓이 「첫 회신」으로 판정됐고, 그래서 금액 금지 가드가
         엉뚱한 자리에 걸렸습니다 — 이 표에는 이 콘솔이 보낸 것만 있습니다.
+
+        「첫 회신인가」의 정의는 여기 **한 곳**입니다 — `_draft_reply` 도 이것을 씁니다.
         """
         if not conv_id:
             return True
-        return last_sent_reply(conv_id) is None
+        return last_sent_reply(conv_id, events=events) is None
 
     def _build_conversation_context(
         self,
@@ -1055,7 +1057,7 @@ class InboundAgent:
         generated_at = utcnow_naive()
         events = thread_events(conv_id)
         previous = last_sent_reply(conv_id, events=events)
-        first_reply = previous is None
+        first_reply = self._is_first_reply(conv_id, events=events)
         stage = FIRST if first_reply else FOLLOWUP
         policy = PolicySnapshot.capture(stage)
         # **후속 회신은 두 갈래입니다** (2026-09-07 운영자 지시).
@@ -1186,6 +1188,9 @@ class InboundAgent:
         # 금액 가드가 끝난 뒤라야 두 벌이 같은 문장, 같은 링크를 들고 대조가 됩니다.
         # 한 번만 돌고 행에 저장되므로 화면을 열 때마다 모델을 부르지 않습니다.
         draft.body_ko = korean_reading(draft.body, llm=self.llm)
+        # 변환(언어 보정·링크 치환·금액 가드) 뒤의 검사는 **재작성 없이 바로 실패합니다**.
+        # 위 루프의 재작성은 모델 호출을 한 번 더 하는 것인데, 그 변환은 모델 호출이
+        # 아니라 다시 쓸 것이 없습니다 — 남는 것은 draft_failed 뿐입니다.
         final_issues = check_draft(draft.body, draft.policy_quotes, documents=allowed_docs,
                                    customer_text=customer_text)
         if final_issues:

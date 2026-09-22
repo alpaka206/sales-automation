@@ -43,6 +43,25 @@ def test_translated_units_and_conditional_status_are_not_rejected():
     assert not check_draft(body, [], documents=DOCS, customer_text="")
 
 
+@pytest.mark.parametrize("body", [
+    "미팅은 30분 정도 진행됩니다.",
+    "2026년 9월 21일에 안내드린 내용입니다.",
+    "9월 30일까지 신청하실 수 있습니다.",
+    "환불 요청이 접수되었는지 여부는 확인이 필요합니다.",
+])
+def test_meeting_lengths_dates_and_the_requested_hedge_are_not_rejected(body):
+    assert check_draft(body, [], documents=DOCS, customer_text="") == []
+
+
+def test_business_days_in_a_korean_doc_support_the_translated_english_draft():
+    docs = [SimpleNamespace(id=1, body="영업일 3일 이내 처리됩니다")]
+    assert check_draft("Refunds are processed within 3 business days.", [], documents=docs, customer_text="") == []
+
+
+def test_the_context_filter_still_catches_an_invented_processing_period():
+    assert "unsupported_duration" in check_draft("환불 처리는 24시간 이내 완료됩니다.", [], documents=DOCS, customer_text="")
+
+
 def test_composition_cannot_drop_known_answer_when_internal_verification_is_needed():
     points = [AnswerPoint(question="환불?", supported_answer="14일 이내라면 신청 대상입니다.",
                           verification_needed="결제일과 다운로드 이력 확인이 필요합니다."),

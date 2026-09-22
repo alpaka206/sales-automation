@@ -40,6 +40,8 @@ scripts\run.bat
 ## 개발
 
 ```powershell
+.\.venv\Scripts\python.exe -m src.db.migrate
+.\.venv\Scripts\python.exe -m pytest -q
 # 임시 SQLite와 외부 네트워크 차단으로 로컬 회귀 검증
 .\.venv\Scripts\python.exe scripts/check_policy_response.py --result-dir tmp/policy-check tests -q -ra
 .\.venv\Scripts\ruff.exe check --no-cache src tests scripts/check_policy_response.py
@@ -75,7 +77,7 @@ npm.cmd run build
 # 설정 존재 여부만 표시, 외부 호출 없음
 .\.venv\Scripts\python.exe scripts/evaluate_policy_response.py --preflight
 # 실제 유료 Vertex 호출, 합성 fixture + 임시 SQLite, 고객 발송 없음
-.\.venv\Scripts\python.exe scripts/evaluate_policy_response.py --live --dataset tests/fixtures/policy_response_live.json --arms router all --repeats 2 --max-calls 220 --output tmp/policy-eval-new
+.\.venv\Scripts\python.exe scripts/evaluate_policy_response.py --live --dataset tests/fixtures/policy_response_live.json --arms router all --repeats 2 --max-calls 220 --output tmp/policy-eval-new --authorized-by "<이름>"
 ```
 
 원시 평가 입력/응답은 tmp 아래에 두며 Git에서 제외합니다. 가상 정책은 회사 정책이나 운영 seed가 아닙니다. 최종 본문을 질문별 답변 요소로 조합한 이유와 실패 사례는 [후속 ADR](docs/adr/2026-09-21-grounded-draft-composition.md)에 있습니다.

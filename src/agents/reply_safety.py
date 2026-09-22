@@ -31,8 +31,10 @@ def validate_draft_context(message_id: int) -> None:
         trace = latest_trace(session, "reply_context", message_id)
     if trace is None:
         return  # Legacy/manual drafts and template reminders have no generated context.
+    # 초안이 **본** 문서(규칙 전부 + 라우터가 고른 참고 문서)만 봅니다 — 전체 digest 로
+    # 재면 문서 하나 저장에 대기열 전체가 막힙니다(`PolicySnapshot.evidence_changed`).
     current = PolicySnapshot.capture(trace["policy"]["stage"])
-    if current.digest != trace["policy"]["sha256"]:
+    if current.evidence_changed(trace["policy"], trace["selection"].get("selected_ids", [])):
         raise RuntimeError("정책이 변경되었습니다. 초안을 다시 생성하고 검토해 주세요.")
     # 초안 뒤에 온 **고객** 메시지만 봅니다 — 대화 전체 해시가 아닙니다. 스레드 수집이
     # 넣는 최초 문의의 사본, 운영자의 「수신」 기록, 개인함에서 붙는 옛 메일은 초안이 답할

@@ -44,6 +44,14 @@ _DURATION = re.compile(
     r"\s*(?:영업일|business\s+days?|days?|weeks?|months?|hours?|minutes?|일|주|개월|시간|분)",
     re.IGNORECASE,
 )
+# 날짜는 기간이 아니다 — 「2026년 9월 21일」의 「21일」이 없는 기간으로 잡히면 안 된다.
+_CALENDAR_DATE = re.compile(r"\d{4}\s*년|\d{1,2}\s*월\s*\d{1,2}\s*일")
+# 이 검사가 잡으려는 것은 지어낸 처리 기간이다. 미팅 길이·플랜 분수처럼 절차와 무관한 문장의
+# 숫자까지 원문에서 찾으면 멀쩡한 첫 회신이 재작성 한 번 뒤 draft_failed 로 죽는다.
+_DURATION_CONTEXT = re.compile(
+    r"환불|처리|소요|절차|접수|삭제|반영|배송|이내|안에|걸[리립려]|refund|process|take|within|deliver|complet",
+    re.IGNORECASE,
+)
 _ACTION = re.compile(
     r"(?:환불|삭제|신청|요청|승인|확인\s*절차).{0,45}?(?:완료(?:되었|됐|했)|접수(?:되었|됐|했)|진행\s*중|처리\s*중|진행하고\s*있)"
     r"|(?:환불|다운로드|결제|사용\s*기록|계약|계정\s*기록).{0,45}?(?:확인하고\s*있|조회하고\s*있|검토\s*중|확인\s*중)"
@@ -51,7 +59,8 @@ _ACTION = re.compile(
     re.IGNORECASE,
 )
 _NEGATIVE_OR_CONDITIONAL = re.compile(
-    r"않|아니|못|확인할\s*수\s*없|완료되면|완료된\s*후|완료\s*후|(?:\bnot\b|\bcannot\b|\bwhether\b|\bif\b)",
+    r"않|아니|못|확인할\s*수\s*없|완료되면|완료된\s*후|완료\s*후|는지|여부|확인이\s*필요|필요합니다"
+    r"|(?:\bnot\b|\bcannot\b|\bwhether\b|\bif\b|need(?:s)?\s+to\s+(?:be\s+)?(?:confirm|verif))",
     re.IGNORECASE,
 )
 _UNVERIFIED_NEGATIVE = re.compile(
@@ -70,7 +79,10 @@ def _duration_key(value: str) -> tuple:
     if unit in {"주", "week", "weeks"}:
         return tuple(n * 7 for n in numbers), "day"
     if unit in {"영업일", "businessday", "businessdays"}:
-        return numbers, "business_day"
+        # 영업일도 「일」로 접는다. 달력 의미를 인증하는 검사가 아니라 지어낸 기간을 잡는 검사라서다 —
+        # 국문 문서의 「영업일 3일」과 영문 초안의 "3 business days" 는 ensure_language 를 지난 같은 문장인데,
+        # 여기서 갈리면 변환 뒤 검사에서 죽고 그 자리에는 재작성이 없다.
+        return numbers, "day"
     if unit in {"시간", "hour", "hours"}:
         return tuple(n * 60 for n in numbers), "minute"
     if unit in {"분", "minute", "minutes"}:
@@ -89,11 +101,14 @@ def check_draft(body: str, quotes: list[PolicyQuote], *, documents, customer_tex
     for quote in quotes:
         if quote.source_id not in allowed or not quote.quote.strip() or _plain(quote.quote) not in _plain(allowed[quote.source_id]):
             issues.append("invalid_policy_quote")
-    source_text = "\n".join(allowed.values()) + "\n" + customer_text
+    source_text = _CALENDAR_DATE.sub(" ", "\n".join(allowed.values()) + "\n" + customer_text)
     supported = {_duration_key(match.group()) for match in _DURATION.finditer(source_text)}
-    for match in _DURATION.finditer(body):
-        if _duration_key(match.group()) not in supported:
-            issues.append("unsupported_duration")
+    for sentence in re.split(r"[\n.!?]+", _CALENDAR_DATE.sub(" ", body)):
+        if not _DURATION_CONTEXT.search(sentence):
+            continue
+        for match in _DURATION.finditer(sentence):
+            if _duration_key(match.group()) not in supported:
+                issues.append("unsupported_duration")
     # This drafting path has no action execution receipts. Avoid pretending one exists.
     for sentence in re.split(r"[\n.!?]+", body):
         # No receipt means UNKNOWN, not "not completed". Do not invert uncertainty.

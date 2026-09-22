@@ -225,6 +225,35 @@ def test_approved_draft_invalidated_by_new_evidence(policy_db, change):
         validate_approved_message(reviewed)
 
 
+def test_editing_an_unselected_document_does_not_invalidate_the_queue(policy_db):
+    """전체 digest 로 재면 문서 하나 저장에 대기열 전체가 막히고, 출구는 다시 쓰기뿐입니다.
+
+    라우터가 안 고른 참고 문서는 초안이 못 본 것이라 고쳐도 승인·발송이 그대로여야 합니다.
+    """
+    from src.agents.reply_safety import validate_approved_message
+
+    with policy_db() as session:
+        session.add(PolicySource(label="무관", doc_key="other", mode="knowledge", body="무관한 문서"))
+        session.commit()
+    _, reviewed = _reviewed_draft(policy_db)  # `_agent()` 는 "source" 만 고릅니다.
+    with policy_db() as session:
+        session.query(PolicySource).filter_by(doc_key="other").one().body = "고친 무관한 문서"
+        session.commit()
+    validate_approved_message(reviewed)
+
+
+def test_a_new_rules_document_invalidates_the_draft(policy_db):
+    """규칙은 모든 회신에 실리므로, 초안이 못 본 규칙이 생긴 것도 정책 변경입니다."""
+    from src.agents.reply_safety import validate_approved_message
+
+    _, reviewed = _reviewed_draft(policy_db)
+    with policy_db() as session:
+        session.add(PolicySource(label="새 규칙", doc_key="rules2", mode="rules", body="새 조건"))
+        session.commit()
+    with pytest.raises(RuntimeError, match="정책"):
+        validate_approved_message(reviewed)
+
+
 def test_approval_refuses_stale_generated_context(policy_db):
     from src.agents.approval import ApprovalError, approve
 

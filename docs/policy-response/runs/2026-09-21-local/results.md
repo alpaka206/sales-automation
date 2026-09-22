@@ -6,7 +6,7 @@
 
 ## 최종 상태
 
-- 전체 Python: **1655 passed, 43 skipped, 1 warning**, exit 0. [명령 메타데이터](final-python/command.json), [stdout](final-python/pytest.txt), [JUnit](final-python/junit.xml).
+- 전체 Python: **1655 passed, 43 skipped, 1 warning**, exit 0. [명령 메타데이터](final-python/command.json), [stdout](final-python/pytest.txt).
 - 프런트엔드: **66 tests / 9 files passed**, 타입 검사·Vite build exit 0. [실행코드](frontend/commands.json), [test](frontend/test.txt), [build](frontend/build.txt).
 - Ruff: **PASS**, exit 0, [로그](lint.txt).
 - 실제 Gemini 평가, live HubSpot/메일, 운영 DB, 브라우저 시각 검수: **NOT_RUN**.

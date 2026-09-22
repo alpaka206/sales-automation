@@ -53,7 +53,7 @@ reasoning-smoke는 Pro 추론을 1024로 높인 탐색이다. S02 누락/허위 
 
 ## 로컬 검증·명령
 
-- 최신 전체 Python: **1678 passed / 43 skipped / 1 warning**, pytest 36.52초, exit 0. [로그](final-python-complete/pytest.txt), [명령](final-python-complete/command.json), [JUnit](final-python-complete/junit.xml).
+- 최신 전체 Python: **1678 passed / 43 skipped / 1 warning**, pytest 36.52초, exit 0. [로그](final-python-complete/pytest.txt), [명령](final-python-complete/command.json).
 - 중간 시험: 1672 pass 후, 부정문 새 회귀에서 1 fail / 1674 pass. “아니/아닙” 활용형 처리가 빠졌던 검사 결함을 수정했다. 1675 pass 재확인 뒤 추가 문장 변형 및 큐 시험까지 포함한 최신 전체 실행이 위 1678이다. 중간 실패도 보존했다.
 - Ruff 최신 소스/테스트/세 스크립트 통과. git diff --check 통과. 모델 호출 후 프런트 코드는 변경하지 않았으며 앞선 66 tests / tsc·Vite build 통과를 유지한다. 브라우저 시각 검수는 NOT_RUN이다.
 - 실제 고객 발송/CRM 쓰기/운영 migration/배포/커밋은 NOT_RUN이다.

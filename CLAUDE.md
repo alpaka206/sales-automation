@@ -6,12 +6,12 @@ PERSO Inbound is a FastAPI workflow for inbound inquiry handling and customer op
 
 - 최신 사용자 지시로 이전 티켓의 **요약 전용 표시를 제거**했다. 리드 상세·티켓 이전 이력·수주 고객 이력은 `history_view.ticket_records`와 `TicketHistoryBox`의 실제 기록을 테두리로 구분한다(나간 회신의 기준은 `DELIVERED_STATUSES` 한 곳, 리마인더의 「N차 리마인더 완료」 줄은 거르지 않는다). AI 문맥에 쓰는 DB summary는 보존한다.
 - 초안은 `PolicySnapshot`과 최근 실제 대화를 사용하고 기존 Event에 근거 참조/hash를 남긴다. 조회 오류를 빈 정상 문맥으로 바꾸지 않는다. 승인 내용과 정책/대화를 발송 전에 재확인한다. legacy/동적 HTML 등 한계는 문서에 명시한다.
-  - **「대화가 변경됐다」는 해시가 아니라 초안 뒤에 온 고객 메시지다** (`inbound.customer_turns_since`, 2026-09-22). 대화 전체 해시로 재면 스레드 수집이 넣는 최초 문의의 사본·운영자 「수신」 기록·개인함의 옛 메일이 전부 「변경」이 되어 **New 티켓마다 승인이 막히고** 빠져나갈 길은 다시 쓰기(운영자 편집이 사라진다)뿐이었다. 정책 쪽은 여전히 전체 해시라 어느 문서든 고치면 대기 중인 초안 전부가 재생성 대상이다.
+  - **「대화가 변경됐다」는 해시가 아니라 초안 뒤에 온 고객 메시지다** (`inbound.customer_turns_since`, 2026-09-22). 대화 전체 해시로 재면 스레드 수집이 넣는 최초 문의의 사본·운영자 「수신」 기록·개인함의 옛 메일이 전부 「변경」이 되어 **New 티켓마다 승인이 막히고** 빠져나갈 길은 다시 쓰기(운영자 편집이 사라진다)뿐이었다. 정책 쪽도 같은 자다 — 초안이 **본** 문서(규칙 전부 + 라우터가 고른 참고 문서)만 본다(`PolicySnapshot.evidence_changed`): 전체 해시로 재면 CS 가이드 오타 하나에 대기열 전부가 「정책 변경」으로 막힌다. 안 고른 참고 문서는 고쳐도 늘어도 안 센다; 규칙 문서는 추가·삭제도 변경이다.
   - **발송 관문은 워커의 잠금 상태(`sending:<pid>:<random>`)를 승인된 그대로로 본다.** `"sending"` 한 글자와 비교하던 첫 판은 사람이 승인한 회신 전부를 send_failed 로 떨어뜨렸을 것이다 — 안전 모드는 그 검사 앞에서 빠지므로 로컬·CI 로는 안 잡힌다. `tests/test_policy_context.py::test_the_workers_claim_passes_the_send_gate` 가 워커와 같은 길로 잡아 고정한다.
 - 리마인더 시퀀스와 설정을 유지한다. 리마인더·test_sent는 첫/후속 실질 답변의 기준이 아니다. 생성과 발송 가격 가드는 같은 실제 대화 판정을 사용한다.
 - 로컬 안전 검증: `python scripts/check_policy_response.py --result-dir tmp/policy-check tests -q -ra`. 임시 DB·mock·외부 네트워크 차단이며 live Gemini 평가가 아니다.
 - 설계와 변경 근거: [구조](docs/architecture/policy-response-system.md), [ADR](docs/adr/2026-09-21-policy-response-boundaries.md), [실행 결과](docs/verification/policy-response-result.json). 정책 의미 검증/운영 배포 완료로 과장하지 않는다.
-- 초안은 질문별 AnswerPoint를 코드에서 본문으로 조합한다. 원문 인용·숫자 기간·일부 허위 상태 검사 실패는 의미 재작성 1회 뒤 draft_failed로 남기며 durable job도 자동 재시도하지 않는다. 검사 PASS는 의미 정확성 인증이 아니다. [실제 Gemini 개발셋 결과](docs/policy-response/runs/2026-09-21-live/results.md)와 [후속 ADR](docs/adr/2026-09-21-grounded-draft-composition.md)을 참조한다.
+- 초안은 질문별 AnswerPoint를 코드에서 본문으로 조합한다. 원문 인용·숫자 기간·일부 허위 상태 검사 실패는 의미 재작성 1회 뒤 draft_failed로 남기며 durable job도 자동 재시도하지 않는다(변환 — 언어 보정·링크·금액 가드 — 뒤의 검사는 재작성 없이 바로 실패한다). 기간 검사는 처리·환불·이내 같은 절차 문장에만 걸고 날짜와 미팅 길이는 안 본다 — 「미팅은 30분」으로 초안이 죽으면 안 된다. 검사 PASS는 의미 정확성 인증이 아니다. [실제 Gemini 개발셋 결과](docs/policy-response/runs/2026-09-21-live/results.md)와 [후속 ADR](docs/adr/2026-09-21-grounded-draft-composition.md)을 참조한다.
 
 ## Invariants
 

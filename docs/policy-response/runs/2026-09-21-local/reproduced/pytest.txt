@@ -67,10 +67,10 @@ tests\test_followup_draft.py:250: Failed
 ------------------------------ Captured log call ------------------------------
 WARNING  src.agents.inbound:inbound.py:217 대화 이력을 못 읽었습니다 (conv=123).
 Traceback (most recent call last):
-  File "C:\Users\EST-INFRA\Desktop\sales-automation\src\agents\inbound.py", line 148, in thread_events
+  File "<repo>\src\agents\inbound.py", line 148, in thread_events
     with SessionLocal() as session:
          ^^^^^^^^^^^^^^
-  File "C:\Users\EST-INFRA\Desktop\sales-automation\tests\test_followup_draft.py", line 248, in unavailable
+  File "<repo>\tests\test_followup_draft.py", line 248, in unavailable
     raise RuntimeError("db unavailable")
 RuntimeError: db unavailable
 ______________ test_rules_lookup_failure_is_not_an_empty_policy _______________
@@ -90,15 +90,15 @@ tests\test_policy_model_access.py:86: Failed
 ------------------------------ Captured log call ------------------------------
 WARNING  src.llm.prompts:prompts.py:91 Company rules could not be read from the database.
 Traceback (most recent call last):
-  File "C:\Users\EST-INFRA\Desktop\sales-automation\src\llm\prompts.py", line 70, in _rules_from_db
+  File "<repo>\src\llm\prompts.py", line 70, in _rules_from_db
     with SessionLocal() as session:
          ^^^^^^^^^^^^^^
-  File "C:\Users\EST-INFRA\Desktop\sales-automation\tests\test_policy_model_access.py", line 84, in unavailable
+  File "<repo>\tests\test_policy_model_access.py", line 84, in unavailable
     raise RuntimeError("db unavailable")
 RuntimeError: db unavailable
 ============================== warnings summary ===============================
 .venv\Lib\site-packages\fastapi\testclient.py:1
-  C:\Users\EST-INFRA\Desktop\sales-automation\.venv\Lib\site-packages\fastapi\testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+  <repo>\.venv\Lib\site-packages\fastapi\testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
     from starlette.testclient import TestClient as TestClient  # noqa
 
 -- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html

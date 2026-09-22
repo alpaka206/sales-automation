@@ -89,8 +89,33 @@ class PolicySnapshot:
                       key=lambda doc: (doc.title or "", doc.label, doc.id))
 
     def assert_current(self) -> None:
+        # 생성 중(몇 초)의 검사라 전체 digest 로 엄격하게 봅니다. 승인·발송 관문은
+        # `evidence_changed` 로 초안이 본 문서만 봅니다 — 아래 이유.
         if self.capture(self.stage).digest != self.digest:
             raise PolicyContextError("초안 생성 중 정책이 변경되었습니다. 다시 생성해 주세요.")
+
+    def evidence_changed(self, manifest: dict, selected_ids) -> bool:
+        """초안이 **본** 문서가 바뀌었나 — 전체 digest 가 아닙니다.
+
+        전체 digest(`assert_current`)로 승인·발송을 막으면 콘솔에서 정책 문서 **아무거나**
+        저장하는 순간(CS 가이드 오타 하나, 저장이 「언제 쓰는가」를 다시 만드는 것까지)
+        대기 중인 초안과 승인됐지만 아직 안 나간 회신이 **전부** 「정책이 변경되었습니다」로
+        막히고, 빠져나갈 길은 다시 쓰기 — 운영자 편집이 사라지는 길 — 뿐입니다.
+
+        그래서 재는 것은 모델이 실제로 읽은 것뿐입니다: 규칙 문서 전부(추가·삭제 포함 —
+        초안이 못 본 규칙이 생긴 것도 정책 변경입니다)와 라우터가 고른 참고 문서. 안 고른
+        참고 문서는 고쳐도 늘어도 지워도 안 셉니다.
+        """
+        current = {doc.id: doc for doc in self.documents}
+        sources = manifest.get("sources", [])
+        rules_then = {src["id"] for src in sources if src["mode"] == "rules"}
+        if rules_then != {doc.id for doc in self.documents if doc.mode == "rules"}:
+            return True
+        watched = rules_then | set(selected_ids)
+        return any(
+            src["id"] not in current or fingerprint(asdict(current[src["id"]])) != src["sha256"]
+            for src in sources if src["id"] in watched
+        )
 
     def manifest(self) -> dict:
         # IDs/revisions/digests only: no titles, raw policy, or AI routing summaries.

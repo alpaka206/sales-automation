@@ -26,7 +26,7 @@
     "scripts/evaluate_policy_response.py": "90c46310e6dbb4e4033e514c19fd7544b4863ca020812a58b83ec799f7f9b2da"
   },
   "command": [
-    "C:\\Users\\EST-INFRA\\Desktop\\sales-automation\\.venv\\Scripts\\python.exe",
+    "<repo>/.venv\\Scripts\\python.exe",
     "scripts/evaluate_policy_response.py",
     "--live",
     "--dataset",
