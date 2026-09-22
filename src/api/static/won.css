@@ -760,23 +760,29 @@
   background: repeating-linear-gradient(45deg, transparent 0 3px, rgba(17,24,39,.22) 3px 6px);
 }
 
-/* ── 라벨 옆의 작은 (i) (2026-09-21 운영자 지시: 「i 작은 표시 있고 눌렀을때 …」) ──────
+/* ── 라벨 옆의 작은 (i) — hover 로 뜹니다 (2026-09-22 운영자 지시: 「클릭이 아니라 hover일때
+ * 뜨도록」) ─────────────────────────────────────────────────────────────────────────────
  *
- * `<details>/<summary>` 입니다 — 운영자가 「눌렀을때」라고 했고, 그건 hover 인 `title=` 이
- * 아닙니다. 이 저장소에 툴팁 컴포넌트가 없고, 두 줄짜리 설명을 위해 만들 이유도 없습니다
- * (`<details>` 는 클릭과 키보드가 공짜입니다). */
-.won .hint { display: inline-block; position: relative; }
-.won .hint > summary {
-  list-style: none; cursor: pointer; display: inline-grid; place-items: center;
-  width: 14px; height: 14px; border-radius: 50%; margin-left: 4px; vertical-align: middle;
+ * 전날(2026-09-21)은 「눌렀을때」라 `<details>/<summary>` 였고 클래스가 `hint` 였습니다. 그
+ * 이름이 위쪽의 목업 규칙 `.won .hint`(카드 바닥의 점선 안내문: `margin-top:22px` ·
+ * `border-top:1px dashed`)와 **겹쳤습니다** — 그래서 동그라미가 라벨 밑으로 밀리고 위에
+ * 점선이 그어졌습니다(운영자: 「밑으로 밀려져 있어 … 이상한 ------ 표시도 있고」). 목업 규칙은
+ * 그대로 두고 이쪽 이름을 `ihint` 로 비켰습니다. `<summary>` 에 글자가 없어 동그라미가 비어
+ * 있던 것도 같이 — 이제 `i` 가 글자로 들어 있습니다.
+ *
+ * 키보드도 엽니다(`tabIndex=0` + `:focus-visible`) — hover 만 두면 마우스 없는 사람은 못 봅니다. */
+.won .ihint { display: inline-block; position: relative; margin-left: 4px; vertical-align: middle; }
+.won .ihint__i {
+  display: inline-flex; align-items: center; justify-content: center; cursor: help;
+  width: 14px; height: 14px; border-radius: 50%; box-sizing: border-box;
   border: 1px solid var(--line); background: var(--bg-soft);
   color: var(--muted); font-size: 10px; font-weight: 700; font-style: italic; line-height: 1;
 }
-.won .hint > summary::-webkit-details-marker { display: none; }
-.won .hint > summary:hover { color: var(--ink); border-color: var(--faint); }
-.won .hint > div {
-  position: absolute; z-index: 20; top: calc(100% + 6px); left: 0; min-width: 216px;
+.won .ihint:hover .ihint__i, .won .ihint:focus-visible .ihint__i { color: var(--ink); border-color: var(--faint); }
+.won .ihint__pop {
+  display: none; position: absolute; z-index: 20; top: calc(100% + 6px); left: 0; min-width: 216px;
   padding: 9px 11px; border: 1px solid var(--line); border-radius: 8px;
   background: #fff; box-shadow: var(--shadow);
-  font-size: 12.5px; font-weight: 400; color: var(--ink-2); line-height: 1.7; white-space: nowrap;
+  font-size: 12.5px; font-weight: 400; font-style: normal; color: var(--ink-2); line-height: 1.7; white-space: nowrap;
 }
+.won .ihint:hover .ihint__pop, .won .ihint:focus-visible .ihint__pop { display: block; }

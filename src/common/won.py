@@ -258,28 +258,6 @@ def _decimal(value) -> Decimal | None:
         return None
 
 
-# 원화 계약의 부가세. 총액 = 공급가 + 10% 이고, 그래서 원화 계약은 총액을 받지 않습니다.
-VAT_RATE = Decimal("0.1")
-
-
-def is_krw(contract) -> bool:
-    return (getattr(contract, "currency", None) or "KRW").upper() == "KRW"
-
-
-def vat_applicable(contract) -> bool:
-    """부가세가 붙는 계약인가. **기준은 통화가 아니라 고객입니다** — 국내 법인이면 해당.
-
-    한동안 `is_krw` 가 이 판단을 대신했습니다(원화면 부가세가 있다). 대부분 맞지만 늘
-    맞지는 않아서, 2026-08-18 에 계약마다 고르는 칸이 되었습니다(이관 0075).
-
-    **비어 있으면 옛 규칙으로 떨어집니다.** 이 칸이 생기기 전의 계약 수백 건에는 고른 값이
-    없고, 없는 것을 「미해당」으로 읽으면 그 원화 계약들의 총액이 한꺼번에 10% 내려앉습니다.
-    새 폼은 언제나 값을 보내므로, 이 되짚기는 옛 행에만 걸립니다.
-    """
-    chosen = getattr(contract, "vat_applicable", None)
-    return is_krw(contract) if chosen is None else bool(chosen)
-
-
 def total_amount(contract) -> Decimal | None:
     """계약 금액 — **행에 적힌 그 값이고, 그것이 VAT 포함 총액입니다.**
 
@@ -291,28 +269,13 @@ def total_amount(contract) -> Decimal | None:
     그 사실은 이제 **계약비고**가 듭니다: 이관 0123 이 VAT 미포함 기준이던 계약마다
     「실제 분당단가 … (VAT 미포함 기준)」 한 줄을 적어 두었고, 앞으로는 운영자가 적습니다.
 
+    **공급가는 없습니다** (2026-09-22 운영자 지시: 「공급가 아예 제외 해도 될거같아」). 하루
+    동안 `supply_amount` 가 총액 ÷ 1.1 로 되짚어 화면·CSV·워크북 M열에 실었고, 그 「공급가가
+    있는 계약인가」를 `vat_applicable` 이 답했습니다 — 둘 다 나갔습니다(이관 0127).
+
     예상 MRR 이 더하는 값도, 월간 매출을 나누는 분자도 언제나 이 값입니다.
     """
     return _decimal(contract.amount_incl_vat)
-
-
-def supply_amount(contract) -> Decimal | None:
-    """VAT 제외 금액. **VAT 해당 계약에만 있습니다** — 미해당 계약은 부가세가 없습니다.
-
-    **언제나 총액 ÷ 1.1 로 되짚습니다.** 금액 칸이 하나가 된 뒤로는 계약서에 그 숫자가
-    적혀 있든 없든 여기서 계산하는 값입니다. 국내 거래의 공급가는 총액에서 정확히 나오고,
-    워크북의 공급가 열은 회계가 합계를 내는 칸이라 비면 그 행만 조용히 빠집니다. 화면도
-    같은 값을 보여 주되 「총액에서 역산」이라고 적습니다 — 계약서에 적힌 금액과 계산한
-    금액을 같은 얼굴로 두지 않기 위해서.
-
-    `vat_applicable` 이 남아 있는 이유가 이 함수입니다: 「공급가라는 것이 있는 계약인가」를
-    아는 곳이 여기뿐이라, 같이 지우면 해외 계약의 공급가 칸이 0 으로 채워져 시트와 CSV 로
-    나갑니다.
-    """
-    if not vat_applicable(contract):
-        return None
-    total = _decimal(contract.amount_incl_vat)
-    return total / (1 + VAT_RATE) if total else None
 
 
 def unit_price(contract) -> Decimal | None:
@@ -497,28 +460,6 @@ def monthly_revenue(contract) -> Decimal:
     if not amount:
         return Decimal(0)
     return amount / plan_months(contract)
-
-
-def monthly_supply_revenue(contract) -> Decimal:
-    """월간 매출을 **공급가로** 본 값 — 공급가 ÷ **계약** 개월수 (2026-09-09).
-
-    **화면이 스스로 나누던 값입니다.** 상세의 「월간 MRR (공급가 기준)」이
-    `공급가 ÷ contract.months` 로 계산했는데, 바로 옆의 「월간 MRR」은 서버가 나눈 값이라
-    두 숫자가 같은 계약을 서로 다른 기간으로 말했습니다 — 계약 날짜를 고치면 한쪽만
-    움직였고, 운영자가 그걸로 잡았습니다. **분모를 한 곳에 두는 것**이 그 답이고, 그
-    분모가 무엇인지(플랜→계약, 2026-09-21)와는 상관없이 남는 규칙입니다.
-
-    같은 자를 쓰게 하는 방법은 자를 한 곳에 두는 것뿐입니다. 환율을 서버가 한 번만
-    환산하는 것과 같은 이유입니다 — 화면이 다시 계산하면 같은 숫자가 화면마다 달라집니다.
-
-    부가세 미해당 계약은 공급가라는 것이 없으므로 ``None`` 입니다(금액이 하나뿐입니다).
-    """
-    if contract is None or contract.deal_type != "MRR":
-        return Decimal(0)
-    supply = supply_amount(contract)
-    if not supply:
-        return Decimal(0)
-    return supply / plan_months(contract)
 
 
 def revenue_start_month(contract) -> str | None:

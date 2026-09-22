@@ -123,6 +123,55 @@ def test_a_personal_domain_is_never_grouped_as_one_company():
     assert payload["conversations"] == []
 
 
+# ---- 보드 카드의 리마인더 칩 (2026-09-22 운영자 지시: 「리마인더 센트 기본적으로 떠있게」) ----
+
+
+def test_a_contacted_card_carries_the_reminder_chip_and_a_new_card_does_not(monkeypatch):
+    """보드와 티켓 배너는 **같은 함수**(`followup_sequence.view`)를 읽습니다 — 둘이 다른 말을
+    하면 운영자가 어느 쪽을 믿을지 화면만 봐서는 모릅니다. 시퀀스가 도는 Contacted 카드는
+    한 통도 안 나갔어도 「Pending」이고, 시퀀스 밖의 카드(New)는 칩이 없습니다(None).
+    첫 그림(`/api/ui/dashboard`)과 「더 보기」(`/api/ui/pipeline/…/cards`)가 같은 카드를
+    다르게 그리면 안 되므로 둘 다 잽니다."""
+    from datetime import datetime, timedelta, timezone
+
+    from src.common.config import settings
+    from src.db.models import Contact, Conversation, Message
+    from src.db.session import SessionLocal
+
+    monkeypatch.setattr(settings, "FOLLOWUP_SEQUENCE_SINCE", "2026-01-01")
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    with SessionLocal() as session:
+        contact = Contact(normalized_email="chip@example.com", email="chip@example.com", full_name="Chip")
+        session.add(contact)
+        session.flush()
+        contacted = Conversation(contact_id=contact.id, stage="meeting_link_sent",
+                                 hubspot_ticket_id="T-chip-1", inquiry_subject="quote")
+        fresh = Conversation(contact_id=contact.id, stage="new",
+                             hubspot_ticket_id="T-chip-2", inquiry_subject="hello")
+        session.add_all([contacted, fresh])
+        session.flush()
+        session.add(Message(conversation_id=contacted.id, direction="outgoing", status="sent",
+                            body="our answer", sent_at=now - timedelta(days=1)))
+        session.commit()
+        contacted_id, fresh_id, contact_id = contacted.id, fresh.id, contact.id
+
+    try:
+        with TestClient(app) as client:
+            board = client.get("/api/ui/dashboard").json()
+            page = client.get("/api/ui/pipeline/meeting_link_sent/cards").json()
+        cards = {c["conversation_id"]: c for stage in board["stages"] for c in stage["cards"]}
+        assert cards[contacted_id]["reminder"] == "Pending"
+        assert cards[fresh_id]["reminder"] is None
+        assert {c["conversation_id"]: c["reminder"] for c in page["cards"]}[contacted_id] == "Pending"
+    finally:
+        # 공용 임시 DB 다 — 다음 테스트가 이 카드를 보게 두지 않는다.
+        with SessionLocal() as session:
+            session.query(Message).filter(Message.conversation_id.in_([contacted_id, fresh_id])).delete()
+            session.query(Conversation).filter(Conversation.id.in_([contacted_id, fresh_id])).delete()
+            session.query(Contact).filter(Contact.id == contact_id).delete()
+            session.commit()
+
+
 
 # ---- live updates ------------------------------------------------------------------
 

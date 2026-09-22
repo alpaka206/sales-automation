@@ -161,3 +161,28 @@ def test_the_payment_method_dropdown_says_what_the_console_saves():
     from src.common import won
 
     assert set(choices("결제 수단")) == set(won.PAYMENT_METHODS)
+
+
+def test_the_supply_price_column_stays_but_the_console_writes_nothing_there():
+    """계약 탭 M열(공급가) — 값은 없어졌고 열은 남습니다 (2026-09-22, 이관 0127).
+
+    열을 지우면 N~AM 이 한 칸씩 밀려 들어가고 예외는 안 납니다. 그리고 **owned 에는 남아야
+    합니다**: 빼면 `plan_tab` 이 비운 행을 다음 계약에 다시 쓸 때 지워진 계약의 옛 공급가가
+    남의 행에 얹혀 그 행의 총액과 안 맞습니다(I·N·P 와 같은 이유).
+    """
+    from src.agents.won_sheets import CONTRACTS, _contract_row
+
+    contract = SimpleNamespace(
+        client_id=1108, seq=1, ticket_id=None, deal_type="MRR", currency="KRW",
+        starts_on="2026-01-01", ends_on="2026-12-31", credits=60_000,
+        amount_incl_vat=11_000_000, installments=None, first_payment_on=None,
+        plan_starts_on=None, plan_ends_on=None, invite_limit=None, queue_limit=None,
+        concurrent_jobs=None, space_count=None, payment_method=None, payment_type=None,
+        billing_email=None, note=None, revenue_from=None, plan=None, plan_name=None,
+        perso_email=None, space_seq=None, terminated_on=None,
+    )
+    row = _contract_row(contract)
+
+    assert row.entered["L"] == 11_000_000
+    assert row.entered["M"] == ""
+    assert "M" in CONTRACTS.owned

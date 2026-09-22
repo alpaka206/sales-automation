@@ -571,7 +571,7 @@ def test_a_meeting_note_no_longer_advances_anything(log_db):
     """**적는 것으로는 단계가 안 움직입니다** (2026-09-07 운영자 지시).
 
     「미팅 진행」을 적으면 Contacted 가 협의 중으로 올라갔습니다. 협의 중으로 가는 기준은
-    **고객이 답장했는가**이고(`ticket_history.reply_advances_stage`), 우리가 무엇을
+    **고객이 답장했는가**이고(`ticket_history.advance_if_customer_replied`), 우리가 무엇을
     했는가가 아닙니다. 길이 둘이면 같은 티켓을 두 규칙이 다르게 옮기고, **적기만 해도
     옮겨진다는 것이 더 나쁩니다**: 기록은 지난 일을 적는 자리라 어제 한 미팅을 오늘 적으면
     그 순간 단계가 움직이고, 그게 허브스팟과 영업팀 워크북까지 나갑니다.
@@ -593,6 +593,51 @@ def test_a_meeting_note_no_longer_advances_anything(log_db):
         )
     with factory() as session:
         assert session.get(Conversation, ids["negotiating"]).stage == "meeting_link_sent"
+
+
+
+def test_a_received_record_asks_the_stage_rule_and_a_sent_one_does_not(log_db, monkeypatch):
+    """**「수신」을 적으면 고객이 답장한 것이다** (2026-09-22 운영자 보고: 「수신은 왔는데
+    stage 가 안 넘어가졌어」). 이 기록은 허브스팟 스레드를 안 지나므로 그쪽 수집기가 영영
+    못 본다 — 판단은 `ticket_history.advance_if_customer_replied` 한 곳이고, 이 라우트는
+    기록이 저장된 뒤 그것을 **그 티켓으로** 부른다. 「발송」·「주고받음」은 부르지 않는다.
+    """
+    from src.agents import ticket_history
+
+    factory, ids = log_db
+    asked: list[int] = []
+
+    async def _advance(conversation_id):
+        asked.append(conversation_id)
+        return True
+
+    monkeypatch.setattr(ticket_history, "advance_if_customer_replied", _advance)
+    with TestClient(app) as client:
+        for direction in ("outgoing", "note"):
+            _post(client, ids["contact"], direction=direction, summary="우리 쪽 기록",
+                  conversation_id=str(ids["negotiating"]))
+        assert asked == []
+        _post(client, ids["contact"], direction="inbound", summary="고객 답장",
+              conversation_id=str(ids["negotiating"]))
+    assert asked == [ids["negotiating"]]
+
+
+def test_a_failing_stage_rule_never_loses_the_received_record(log_db, monkeypatch):
+    """단계는 장부이지 기록의 조건이 아니다 — 판정이 터져도 기록은 남고 요청은 성공이다."""
+    from src.agents import ticket_history
+
+    factory, ids = log_db
+
+    async def _boom(conversation_id):
+        raise RuntimeError("stage sync down")
+
+    monkeypatch.setattr(ticket_history, "advance_if_customer_replied", _boom)
+    with TestClient(app) as client:
+        response = _post(client, ids["contact"], direction="inbound", summary="고객 답장",
+                         conversation_id=str(ids["negotiating"]))
+    assert response.status_code == 303
+    with factory() as session:
+        assert session.query(CustomerInteraction).count() == 1
 
 
 # ---------- 방향은 보낸 주소가 정한다 ----------

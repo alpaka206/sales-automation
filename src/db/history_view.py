@@ -35,7 +35,7 @@ def ticket_records(session, contact_id: int, conversation_ids: list[int]) -> dic
         (Message.direction == "inbound") | Message.status.in_(DELIVERED_STATUSES),
     )))
     # 같은 메일을 두 번 세지 않습니다 — 열쇠는 짐작이 아니라 허브스팟 메시지 id 입니다
-    # (`inbound.thread_events` 와 같은 규칙). 리마인더의 「N차 리마인더 완료」 줄
+    # (`inbound.thread_events` 와 같은 규칙). 리마인더의 「Reminder Sent N」 줄
     # (`followup:reminder:<id>`)은 **거르지 않습니다**: 그 줄은 운영자 지시로 소통 히스토리에
     # 남기는 것이고(2026-09-21), 티켓 화면이 그리는 것을 고객 상세가 숨기면 두 화면이 같은
     # 행을 두고 다른 말을 합니다.

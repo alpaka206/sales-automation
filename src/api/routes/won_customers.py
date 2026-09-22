@@ -6,8 +6,8 @@
 - **금액과 크레딧을 받고, 분당 단가는 계산합니다**(`won.unit_price`). 계약서에 적히는 것이
   그 둘이라서요. 방향이 반대였던 시절에는 반올림한 단가로 계산한 크레딧이 계약서의 크레딧과
   어긋났습니다.
-- **계약 금액은 한 칸이고 VAT 포함입니다**(2026-09-21 운영자 지시). 공급가는 저장하지 않고
-  총액 ÷ 1.1 로 되짚습니다(`won.supply_amount`).
+- **계약 금액은 한 칸이고 VAT 포함입니다**(2026-09-21 운영자 지시). 공급가는 어디에도
+  없습니다 — 「VAT 해당 여부」와 함께 2026-09-22 에 뺐습니다(이관 0127).
 - 결제 회차를 입금 완료로 바꿀 때 **그 날짜의 환율**을 채웁니다. 조회에 실패하면 비워 둡니다;
   운영자가 직접 넣을 수 있고, 조회 실패가 저장을 막으면 안 됩니다.
 - 계약 차수는 받지 않고 그 고객의 마지막 차수 + 1 입니다.
@@ -296,11 +296,9 @@ def _fill_contract(contract: ClientContract, form: dict) -> None:
     for name in _CONTRACT_DECIMALS:
         if name in form:
             setattr(contract, name, _number(form.get(name)))
-    # **금액을 정하지는 않지만 공급가가 있는 계약인지를 정합니다**(`won.supply_amount`).
-    # `vat_included` 와 `doc_types` 가 여기 있었습니다 — 2026-09-21 에 둘 다 없어졌습니다
-    # (이관 0123 · 0125). 옛 화면이 그 이름을 계속 보내도 조용히 무시됩니다.
-    if "vat_applicable" in form:
-        contract.vat_applicable = _flag(form.get("vat_applicable"))
+    # `vat_included` · `doc_types` · `vat_applicable` 이 여기 있었습니다 — 2026-09-21~22 에
+    # 전부 없어졌습니다(이관 0123 · 0125 · 0127). 옛 화면이 그 이름을 계속 보내도 조용히
+    # 무시됩니다.
     contract.deal_type = contract.deal_type or "MRR"
     contract.currency = contract.currency or "KRW"
     # **플랜 날짜를 계약 날짜로 채우지 않습니다** (2026-09-09 운영자 보고로 되돌림).
@@ -838,7 +836,7 @@ def export_csv():
         "계약 차수", "계약 상태", "Ticket ID", "매출 인식", "고객 담당자", "고객 연락처",
         "계약 시작일", "계약 종료일", "계약 개월수",
         "계약 크레딧", "누적 지급 크레딧", "통화",
-        "총 계약금액", "공급가 (VAT 제외)", "수금 완료 금액", "수금율",
+        "총 계약금액", "수금 완료 금액", "수금율",
         "분당 단가",
         "결제 수단", "결제 방식", "총 분납 횟수", "최초 결제일", "Billing Email",
         "월간 매출", "매출 인식 시작 월",
@@ -864,7 +862,7 @@ def export_csv():
             ]
             if not client.contracts:
                 # 계약이 아직 없는 고객도 한 줄 나갑니다 — 빠지면 명단이 아닙니다.
-                writer.writerow(base + [""] * 31)   # 머리글 39 − 고객 8
+                writer.writerow(base + [""] * 30)   # 머리글 38 − 고객 8
                 continue
             for contract in client.contracts:
                 total = float(won.total_amount(contract) or 0)
@@ -877,11 +875,9 @@ def export_csv():
                     contract.starts_on, contract.ends_on,
                     won.months_between(contract.starts_on, contract.ends_on),
                     contract.credits, won.granted_credits(contract), contract.currency,
-                    # 공급가 열은 **회계가 합계를 내는 칸**이라 계약 금액을 그대로 적으면
-                    # 안 됩니다. 계약 금액은 VAT 포함이고(이관 0123) 공급가는 그것 ÷ 1.1
-                    # 입니다 — 화면·워크북과 같은 `won.supply_amount` 를 씁니다. 비면 그
-                    # 행만 조용히 합계에서 빠집니다.
-                    won.total_amount(contract), won.supply_amount(contract), paid,
+                    # 「공급가 (VAT 제외)」 열이 여기 있었습니다 — 2026-09-22 에 뺐습니다
+                    # (이관 0127). 금액은 VAT 포함 총액 하나입니다.
+                    won.total_amount(contract), paid,
                     f"{(paid / total * 100):.1f}%" if total else "",
                     won.unit_price(contract),
                     contract.payment_method, contract.payment_type, contract.installments,

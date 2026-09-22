@@ -8,9 +8,15 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta
+
 import pytest
 
 from src.agents.ticket_history import classify_direction, collect_ticket_history
+
+_REPLY_AT = datetime(2026, 9, 16, 9, 0)
+_HOUR = timedelta(hours=1)
+_DAY = timedelta(days=1)
 
 
 class _FakeClient:
@@ -446,110 +452,201 @@ def test_a_mailbox_copy_is_folded_into_the_thread_row_and_stays_gone():
 # --------------------------------------------------------------------------- #
 # 고객이 답장하면 협의 중으로 (2026-09-07 운영자 지시)
 # --------------------------------------------------------------------------- #
-def _reply_row(direction: str, when):
-    return {"external_id": f"hubspot:conv:{direction}", "channel": "이메일",
-            "direction": direction, "subject": None, "summary": "…",
-            "handler": None, "happened_at": when}
+def _reply_db(monkeypatch):
+    """Contacted 티켓 하나 — 고객의 첫 문의와 **콘솔에서 나간 우리 회신** 한 통.
 
-
-def test_a_new_customer_reply_moves_contacted_to_negotiating():
-    """운영자 지시: 「보내는 기준이 아니고 그 사람한테 답변이 오면 negotiating 으로 가는 것」.
-
-    이 사실을 아는 자리가 수집기뿐입니다 — 접수(폴러·웹훅)는 **New 티켓만** 보므로
-    Contacted 로 넘어간 티켓에 온 답장은 그 문을 아예 안 지납니다.
+    두 표를 합쳐 읽는 것은 `inbound.thread_events` 라 그쪽 `SessionLocal` 도 같이 바꿔야 합니다 —
+    한쪽만 바꾸면 규칙이 conftest 의 공용 DB 를 읽어 언제나 「대화 없음」입니다.
     """
-    from datetime import datetime, timedelta, timezone
-
-    from src.agents.ticket_history import reply_advances_stage
-
-    seen = datetime(2026, 9, 5)
-    later = (seen + timedelta(hours=1)).replace(tzinfo=timezone.utc)
-    earlier = (seen - timedelta(days=30)).replace(tzinfo=timezone.utc)
-
-    assert reply_advances_stage("meeting_link_sent", seen, [_reply_row("inbound", later)])
-
-    # **첫 수집(도장 NULL)에서는 안 옮깁니다.** 수집기는 티켓을 끝없이 한 바퀴씩 도는데
-    # 첫 바퀴에는 그 티켓의 과거가 통째로 들어옵니다 — 기준이 없으면 몇 달 전 답장 하나로
-    # Contacted 에 서 있던 티켓 수백 건이 한 회차에 옮겨지고, 허브스팟과 영업팀 워크북까지
-    # 나갑니다. 잃는 것은 없습니다: 다음 바퀴부터 정상으로 판정됩니다.
-    assert not reply_advances_stage("meeting_link_sent", None, [_reply_row("inbound", later)])
-    # 마지막으로 본 때보다 오래된 것은 새 답장이 아닙니다 — 매 회차 다시 옮기게 됩니다.
-    assert not reply_advances_stage("meeting_link_sent", seen, [_reply_row("inbound", earlier)])
-    # 우리가 보낸 것은 이미 Contacted 를 만든 사건입니다.
-    assert not reply_advances_stage("meeting_link_sent", seen, [_reply_row("outgoing", later)])
-    # New 는 우리가 아직 답을 안 한 자리입니다 — 그 티켓에는 검토할 초안이 대기 중입니다.
-    assert not reply_advances_stage("new", seen, [_reply_row("inbound", later)])
-    # 이미 지나간 단계는 되돌리지 않습니다(발송 워커가 「앞으로만 간다」로 막은 그 사고).
-    for stage in ("negotiation", "won", "closed_lost", "closed"):
-        assert not reply_advances_stage(stage, seen, [_reply_row("inbound", later)])
-
-
-def test_the_reply_rule_fires_for_a_ticket_queued_again_by_the_webhook(monkeypatch):
-    """**이 규칙은 2026-09-08 부터 한 번도 안 돌았다** (2026-09-17 에 찾았다).
-
-    기준이 `history_synced_at` 이었는데 수집기는 그 칸이 NULL 인 티켓만 집는다 — 그러면 기준은
-    언제나 None 이고 위 순수 함수는 첫 줄에서 False 다. 순수 함수만 검사해서 몰랐다. 지금 기준은
-    「이미 넣어 둔 스레드 줄의 마지막 시각 · 우리 마지막 회신」 중 늦은 쪽이다.
-    """
-    import asyncio
-    from datetime import datetime, timedelta
-
     from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker
     from sqlalchemy.pool import StaticPool
 
-    from src.agents import ticket_history
+    from src.agents import inbound, ticket_history
     from src.db.base import Base
-    from src.db.models import Contact, Conversation, CustomerInteraction
+    from src.db.models import Contact, Conversation, CustomerInteraction, Message
 
     engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False},
                            poolclass=StaticPool)
     Base.metadata.create_all(engine)
     factory = sessionmaker(bind=engine, expire_on_commit=False)
     monkeypatch.setattr(ticket_history, "SessionLocal", factory)
-    reply_at = datetime(2026, 9, 16, 9, 0)
+    monkeypatch.setattr(inbound, "SessionLocal", factory)
     with factory() as session:
         contact = Contact(normalized_email="c@example.com", email="c@example.com", full_name="C")
         session.add(contact)
         session.flush()
-        conv = Conversation(contact_id=contact.id, stage="meeting_link_sent", hubspot_ticket_id="T-5",
-                            last_outgoing_at=reply_at - timedelta(days=2), history_synced_at=None)
+        conv = Conversation(contact_id=contact.id, stage="meeting_link_sent", hubspot_ticket_id="T-5")
         session.add(conv)
         session.flush()
         session.add(CustomerInteraction(contact_id=contact.id, conversation_id=conv.id, channel="이메일",
                                         direction="inbound", summary="첫 문의",
-                                        external_id="hubspot:conv:first",
-                                        happened_at=reply_at - timedelta(days=3)))
+                                        external_id="hubspot:conv:first", happened_at=_REPLY_AT - _DAY * 3))
+        session.add(Message(conversation_id=conv.id, direction="outgoing", status="sent", channel="email",
+                            subject="RE: 문의", body="답변드립니다.", hubspot_message_id="hs-reply",
+                            sent_at=_REPLY_AT))
         session.commit()
-        conv_id, contact_id = conv.id, contact.id
+        return factory, conv.id, contact.id
+
+
+def _customer_wrote(factory, conv_id, contact_id, when, *, external_id=None, direction="inbound"):
+    from src.db.models import CustomerInteraction
+
+    with factory() as session:
+        session.add(CustomerInteraction(contact_id=contact_id, conversation_id=conv_id, channel="이메일",
+                                        direction=direction, summary="좋습니다, 진행하죠.",
+                                        external_id=external_id, happened_at=when))
+        session.commit()
+
+
+def _watch_advance(monkeypatch) -> list[int]:
+    from src.agents import ticket_history
+
+    advanced: list[int] = []
+
+    async def _advance(conversation_id, contact):
+        advanced.append(conversation_id)
+
+    monkeypatch.setattr(ticket_history, "_advance_on_customer_reply", _advance)
+    return advanced
+
+
+def _judge(conv_id) -> bool:
+    import asyncio
+
+    from src.agents.ticket_history import advance_if_customer_replied
+
+    return asyncio.run(advance_if_customer_replied(conv_id))
+
+
+def test_a_customer_reply_after_our_reply_moves_contacted_to_negotiating(monkeypatch):
+    """운영자 지시: 「보내는 기준이 아니고 그 사람한테 답변이 오면 negotiating 으로 가는 것」.
+
+    **기준선은 우리 마지막 회신이다** — 그 뒤에 온 고객 메시지만 답장이고, 그 전 것(첫 문의 ·
+    회신 전에 고객이 보탠 메일)은 이미 답한 말이라 셈하면 매 회차 다시 옮기게 된다.
+    """
+    factory, conv_id, contact_id = _reply_db(monkeypatch)
+    advanced = _watch_advance(monkeypatch)
+
+    _customer_wrote(factory, conv_id, contact_id, _REPLY_AT - _HOUR, external_id="hubspot:conv:before")
+    assert not _judge(conv_id), "회신 전에 온 것은 답장이 아닙니다"
+    assert advanced == []
+
+    _customer_wrote(factory, conv_id, contact_id, _REPLY_AT + _HOUR, external_id="hubspot:conv:after")
+    assert _judge(conv_id)
+    assert advanced == [conv_id]
+
+
+def test_a_contacted_ticket_we_never_wrote_to_does_not_move(monkeypatch):
+    """**기준선이 없으면 안 옮긴다.** 백필로 들어온 옛 티켓·영업이 우리가 안 읽는 사서함에서
+    답한 티켓에는 우리 회신이 어디에도 없다 — 그때 몇 달 전 고객 메시지 하나로 옮기면 Contacted
+    에 서 있던 티켓 수백 건이 한 회차에 협의 중이 되고 허브스팟·워크북까지 나간다."""
+    from src.db.models import Message
+
+    factory, conv_id, contact_id = _reply_db(monkeypatch)
+    advanced = _watch_advance(monkeypatch)
+    with factory() as session:
+        for row in session.query(Message).all():
+            session.delete(row)
+        session.commit()
+
+    _customer_wrote(factory, conv_id, contact_id, _REPLY_AT + _HOUR, external_id="hubspot:conv:after")
+    assert not _judge(conv_id)
+    assert advanced == []
+
+
+@pytest.mark.parametrize("stage", ["new", "negotiation", "won", "closed_lost", "closed"])
+def test_only_contacted_moves(monkeypatch, stage):
+    """New 는 우리가 아직 답을 안 한 자리(검토할 초안이 대기 중), 그 뒤 단계는 이미 지나간 자리라
+    되돌리지 않는다 — 발송 워커가 「앞으로만 간다」로 막은 그 사고."""
+    from src.db.models import Conversation
+
+    factory, conv_id, contact_id = _reply_db(monkeypatch)
+    advanced = _watch_advance(monkeypatch)
+    with factory() as session:
+        session.get(Conversation, conv_id).stage = stage
+        session.commit()
+
+    _customer_wrote(factory, conv_id, contact_id, _REPLY_AT + _HOUR, external_id="hubspot:conv:after")
+    assert not _judge(conv_id)
+    assert advanced == []
+
+
+def test_a_reply_through_a_personal_mailbox_counts(monkeypatch):
+    """개인함 수집(`mailbox_sync`)이 붙인 줄 — `gmail:` 열쇠. 허브스팟 스레드를 안 지나므로
+    그쪽 수집기는 영영 못 보는 답장이고, 2026-09-22 「수신은 왔는데 stage 가 안 넘어가졌어」의
+    한 자리다."""
+    factory, conv_id, contact_id = _reply_db(monkeypatch)
+    advanced = _watch_advance(monkeypatch)
+    _customer_wrote(factory, conv_id, contact_id, _REPLY_AT + _HOUR, external_id="gmail:m1")
+    assert _judge(conv_id)
+    assert advanced == [conv_id]
+
+
+def test_a_reply_the_operator_logged_by_hand_counts(monkeypatch):
+    """운영자가 티켓에 적은 「수신」 기록 — 열쇠 없음, 옛 철자 `incoming`. 같은 답장이다."""
+    factory, conv_id, contact_id = _reply_db(monkeypatch)
+    advanced = _watch_advance(monkeypatch)
+    _customer_wrote(factory, conv_id, contact_id, _REPLY_AT + _HOUR, direction="incoming")
+    assert _judge(conv_id)
+    assert advanced == [conv_id]
+
+
+def test_our_reminders_do_not_move_the_baseline(monkeypatch):
+    """**리마인더는 우리 말이 아니다.** 기준 회신 뒤 · 1차 리마인더 전에 온 답장도 답장이다 —
+    리마인더로 기준선을 밀면 그 사이에 온 답장이 「이미 본 것」이 되어 티켓이 Contacted 에
+    남고, 리마인더는 계속 나간다."""
+    from src.agents.followup_sequence import REMINDER_VARIANTS
+    from src.db.models import Message
+
+    factory, conv_id, contact_id = _reply_db(monkeypatch)
+    advanced = _watch_advance(monkeypatch)
+    with factory() as session:
+        session.add(Message(conversation_id=conv_id, direction="outgoing", status="sent", channel="email",
+                            subject="RE: 문의", body="혹시 확인하셨을까요?", prompt_variant=REMINDER_VARIANTS[0],
+                            hubspot_message_id="hs-rem-1", sent_at=_REPLY_AT + _DAY * 3))
+        session.commit()
+
+    _customer_wrote(factory, conv_id, contact_id, _REPLY_AT + _DAY, external_id="hubspot:conv:between")
+    assert _judge(conv_id), "회신 뒤·리마인더 전의 답장은 답장입니다"
+    assert advanced == [conv_id]
+
+
+def test_the_reply_rule_fires_for_a_ticket_queued_again_by_the_webhook(monkeypatch):
+    """**이 규칙은 2026-09-08 부터 한 번도 안 돌았다** (2026-09-17 에 찾았다).
+
+    기준이 `history_synced_at` 이었는데 수집기는 그 칸이 NULL 인 티켓만 집는다 — 그러면 기준은
+    언제나 None 이었다. 순수 함수만 검사해서 몰랐다. 그래서 이 검사는 수집 경로째 돈다 — 지금
+    기준은 **우리 마지막 회신**이고(`advance_if_customer_replied`), 수집기는 넣은 뒤 그것을 부른다.
+    """
+    import asyncio
+
+    from src.agents import ticket_history
+    from src.db.models import Conversation
+
+    factory, conv_id, contact_id = _reply_db(monkeypatch)
+    advanced = _watch_advance(monkeypatch)
 
     fetched = [
         {"external_id": "hubspot:conv:first", "channel": "이메일", "direction": "inbound",
-         "subject": None, "summary": "첫 문의", "handler": None,
-         "happened_at": reply_at - timedelta(days=3)},
+         "subject": None, "summary": "첫 문의", "handler": None, "happened_at": _REPLY_AT - _DAY * 3},
         {"external_id": "hubspot:conv:reply", "channel": "이메일", "direction": "inbound",
-         "subject": None, "summary": "좋습니다", "handler": None, "happened_at": reply_at},
+         "subject": None, "summary": "좋습니다", "handler": None, "happened_at": _REPLY_AT + _HOUR},
     ]
 
     class _Client:
         async def close(self):
             return None
 
-    advanced = []
-
     async def _collect(client, ticket):
         return [dict(row) for row in fetched]
 
-    async def _advance(conversation_id, contact):
-        advanced.append(conversation_id)
-
     monkeypatch.setattr("src.integrations.hubspot.HubSpotClient", _Client)
     monkeypatch.setattr(ticket_history, "collect_ticket_history", _collect)
-    monkeypatch.setattr(ticket_history, "_advance_on_customer_reply", _advance)
     asyncio.run(ticket_history.sync_one_ticket(conv_id))
     assert advanced == [conv_id]
 
-    # 처음 보는 티켓(넣어 둔 줄도 우리 회신도 없다)에서는 여전히 안 옮긴다.
+    # 우리 회신이 어디에도 없는 Contacted 티켓에서는 여전히 안 옮긴다.
     with factory() as session:
         fresh = Conversation(contact_id=contact_id, stage="meeting_link_sent", hubspot_ticket_id="T-6")
         session.add(fresh)

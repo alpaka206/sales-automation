@@ -806,26 +806,18 @@ class ClientContract(Base):
     credits: Mapped[int | None] = mapped_column(Integer, nullable=True)
     currency: Mapped[str] = mapped_column(String(8), nullable=False, default="KRW")
     # **계약 금액은 이 한 칸입니다. 그 값이 VAT 포함 총액입니다** (2026-09-21 운영자 지시:
-    # 「계약금액은 모두 VAT 포함만 으로 바꿀거야」). 공급가는 저장하지 않고 총액 ÷ 1.1 로
-    # 되짚습니다(`won.supply_amount`).
+    # 「계약금액은 모두 VAT 포함만 으로 바꿀거야」). 공급가는 어디에도 없습니다 — 한동안
+    # 총액 ÷ 1.1 로 되짚어 보여 줬는데 2026-09-22 에 그것도 뺐습니다(이관 0127).
     #
     # 그전에는 금액이 둘(`amount_excl_vat`)이고 `vat_included` 가 「계약서에 적힌 쪽이 어느
     # 것인가」를 들고 있었습니다 — 국내 계약서가 공급가로도 총액으로도 적혀서, 모르면 분당
     # 단가가 계약마다 10% 씩 달라졌기 때문입니다. 이관 0123 이 그 둘을 지우면서, VAT 미포함
     # 기준이던 계약마다 **계약비고**에 「실제 분당단가 … (VAT 미포함 기준)」을 적어 두었습니다.
     # 그 사실이 남는 곳은 이제 그 한 줄뿐입니다.
-    amount_incl_vat: Mapped[Decimal | None] = mapped_column(Numeric(18, 2), nullable=True)
-    # **부가세가 붙는 계약인가.** 기준은 통화가 아니라 고객입니다 — 국내 법인이면 해당,
-    # 그 외에는 미해당. 한동안 `won.is_krw` 가 이 판단을 대신했는데(원화면 부가세가 있다),
-    # 통화와 늘 같이 가지는 않습니다. **금액 칸이 하나가 된 뒤에도 남아야 합니다**:
-    # 「공급가라는 것이 있는 계약인가」를 아는 곳이 여기뿐이라, 같이 지우면 해외 계약의
-    # 공급가 칸이 0 으로 채워져 시트와 CSV 로 나갑니다.
     #
-    # **NULL 은 「아직 안 고름」입니다** — 그때는 예전 규칙대로 통화로 추정합니다
-    # (`won.vat_applicable`). 이 칸이 생기기 전의 행 수백 개를 이관이 손대지 않아도 금액이
-    # 안 움직이는 이유이고, 새 폼은 언제나 값을 보냅니다. NOT NULL DEFAULT false 로 두면
-    # 그 옛 원화 계약이 전부 「미해당」이 되어 총액이 10% 씩 내려앉습니다.
-    vat_applicable: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    # `vat_applicable`(부가세 해당 여부, 0075) 도 여기 있었습니다. 남아 있던 이유가 「공급가라는
+    # 것이 있는 계약인가」 하나였고, 공급가가 없어지면서 같이 나갔습니다(이관 0127).
+    amount_incl_vat: Mapped[Decimal | None] = mapped_column(Numeric(18, 2), nullable=True)
     # 중도 해지일. 인식 기간은 계약 종료일과 이 날짜 중 **빠른 쪽**에서 끝납니다.
     terminated_on: Mapped[str | None] = mapped_column(String(10), nullable=True)
     # **그 계약에 적용할 환율과 기준 날짜.** 결제 회차에도 같은 이름의 칸이 있는데 뜻이

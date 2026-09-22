@@ -225,7 +225,7 @@ BOARD_CARDS_PER_STAGE = 15
 
 # `_MEETING_ADVANCES_FROM` 이 여기 있었습니다 — 「미팅 진행」 기록이 New·Contacted 를 협의
 # 중으로 올리던 규칙입니다. **2026-09-07 에 지웠습니다**: 협의 중으로 가는 기준은 고객이
-# 답장했는가이고(`ticket_history.reply_advances_stage`), 그 길이 생긴 이상 이쪽은 같은
+# 답장했는가이고(`ticket_history.advance_if_customer_replied`), 그 길이 생긴 이상 이쪽은 같은
 # 티켓을 다른 규칙으로 옮기는 두 번째 손입니다.
 
 # Days of customer silence (measured from our last outgoing mail) at which each rung
@@ -1208,6 +1208,7 @@ async def interaction_add(
     # Read inside the session, used after it closes — see _log_interaction_to_hubspot.
     hubspot_contact_id: str | None = None
     hubspot_ticket_id: str | None = None
+    linked_conversation_id: int | None = None
     with SessionLocal() as session:
         contact = session.get(Contact, contact_id)
         if not contact:
@@ -1215,6 +1216,7 @@ async def interaction_add(
         hubspot_contact_id = contact.hubspot_contact_id
         conversation = _linked_conversation(session, conversation_id, contact_id)
         hubspot_ticket_id = conversation.hubspot_ticket_id if conversation else None
+        linked_conversation_id = conversation.id if conversation else None
         session.add(
             CustomerInteraction(
                 contact_id=contact_id,
@@ -1236,7 +1238,8 @@ async def interaction_add(
         # 여기 `if channel == "meeting"` 이 있었습니다 — New·Contacted 를 협의 중으로
         # 올리던 규칙입니다. 협의 중으로 가는 기준은 **고객이 답장했는가**이지 우리가 무엇을
         # 했는가가 아닙니다(운영자: 「보내는 기준이 아니고 그 사람한테 답변이 오면
-        # negotiating 으로 가는 것」). 그 판단은 이제 `ticket_history` 가 합니다.
+        # negotiating 으로 가는 것」). 그 판단은 `ticket_history.advance_if_customer_replied`
+        # 가 하고, 「수신」 기록은 아래 커밋 뒤에 그것을 부릅니다.
         #
         # 길이 둘이면 같은 티켓을 두 규칙이 다르게 옮기고, **적기만 해도 옮겨진다는 것이 더
         # 나쁩니다**: 기록은 지난 일을 적는 자리라 어제 한 미팅을 오늘 적으면 그 순간 단계가
@@ -1265,6 +1268,17 @@ async def interaction_add(
         summary=summary.strip(),
         happened_at=_parse_dt(happened_at) or datetime.now(timezone.utc),
     )
+    # **「수신」이면 고객이 답장한 것이다 — Contacted → 협의 중** (2026-09-22 운영자 보고:
+    # 「수신은 왔는데 stage 가 안 넘어가졌어」). 이 기록은 허브스팟 스레드를 안 지나므로
+    # 그쪽 수집기가 영영 못 본다. 판단은 `ticket_history` 한 곳이고, 여기서는 기록이 저장된
+    # 뒤에 부르기만 한다 — 단계는 장부이지 기록의 조건이 아니라 실패해도 요청은 성공이다.
+    if linked_conversation_id is not None and direction.strip().lower() in ("incoming", "inbound"):
+        from ...agents.ticket_history import advance_if_customer_replied
+
+        try:
+            await advance_if_customer_replied(linked_conversation_id)
+        except Exception:
+            logger.warning("문의 %s: 답장 단계 판정 실패", linked_conversation_id, exc_info=True)
 
     return RedirectResponse(back, status_code=303)
 

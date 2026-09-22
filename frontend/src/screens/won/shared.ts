@@ -27,13 +27,10 @@ export type Contract = {
    *  테스트가 있어서이고, 분모가 무엇인지는 서버 한 곳에서만 정합니다. */
   plan_months: number;
   credits: number | null; currency: string;
-  /** **계약금액은 한 칸이고 그 값이 VAT 포함 총액입니다**(이관 0123). `amount_excl_vat` 는
-   *  저장된 값이 아니라 총액 ÷ 1.1 로 서버가 되짚은 공급가입니다 — 워크북의 공급가 열과
-   *  같은 값이어야 해서 화면이 다시 나누지 않습니다. 부가세 미해당 계약은 null 입니다. */
-  amount_incl_vat: Money; amount_excl_vat: Money;
-  /** 부가세가 붙는 계약인가. **통화가 아니라 고객이 정합니다**(국내 법인이면 해당).
-   *  금액 칸을 가르지는 않고, **공급가가 있는 계약인지**를 정합니다. */
-  vat_applicable: boolean;
+  /** **계약금액은 한 칸이고 그 값이 VAT 포함 총액입니다**(이관 0123). 공급가(총액 ÷ 1.1)와
+   *  「부가세 해당 여부」가 옆에 있었는데 2026-09-22 에 payload 에서 같이 나갔습니다 —
+   *  공급가를 안 씁니다(운영자 지시). */
+  amount_incl_vat: Money;
   /** 그 계약에 적용할 환율과 기준 날짜. 비어 있으면 저장할 때 계약일 고시가로 채웁니다. */
   fx_rate: Money; fx_on: string | null;
   /** 중도 해지일 — 플랜은 만료일과 이 날짜 중 빠른 쪽에서 끝납니다. */
@@ -47,8 +44,6 @@ export type Contract = {
   /** 고객사 **측** 담당자와 연락처. 계약마다 다를 수 있어 고객이 아니라 여기 삽니다. */
   contact_name: string | null; contact_info: string | null;
   revenue_from: string | null; revenue_from_set: boolean; monthly_revenue: Money;
-  /** 공급가로 본 월 매출. **서버가 냅니다** — 화면이 나누면 옆 칸과 자가 갈립니다. */
-  monthly_supply_revenue: Money;
   plan: string | null; plan_name: string | null; perso_email: string | null;
   plan_starts_on: string | null; plan_ends_on: string | null; plan_days_left: number | null;
   invite_limit: number | null; queue_limit: number | null; concurrent_jobs: number | null;

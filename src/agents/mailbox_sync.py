@@ -196,17 +196,18 @@ def _hubspot_already_has_it(
     )
 
 
-def _sync_one(email: str) -> tuple[int, list[tuple[str, str, str, datetime]]]:
-    """사서함 하나. (새로 넣은 줄 수, 허브스팟에 남길 노트들)."""
+def _sync_one(email: str) -> tuple[int, list[tuple[str, str, str, datetime]], set[int]]:
+    """사서함 하나. (새로 넣은 줄 수, 허브스팟에 남길 노트들, 고객 메일이 붙은 문의 id 들)."""
     from .ticket_history import is_our_address
 
     notes: list[tuple[str, str, str, datetime]] = []
+    replied: set[int] = set()
     with SessionLocal() as session:
         from ..db.models import MailboxAccount as _Account
 
         account = session.get(_Account, email)
         if account is None or account.collect_from is None:
-            return 0, notes
+            return 0, notes, replied
         # **묻는 창은 「마지막으로 본 이후」입니다** (2026-09-08).
         #
         # 「동의 이후」로 물으면 창이 날마다 넓어지는데 한 회차에 받는 것은
@@ -234,7 +235,7 @@ def _sync_one(email: str) -> tuple[int, list[tuple[str, str, str, datetime]]]:
         listing.raise_for_status()
         ids = [item["id"] for item in (listing.json().get("messages") or [])]
         if not ids:
-            return 0, notes
+            return 0, notes, replied
 
         candidates = [f"gmail:{i}" for i in ids]
         with SessionLocal() as session:
@@ -352,6 +353,9 @@ def _sync_one(email: str) -> tuple[int, list[tuple[str, str, str, datetime]]]:
                 ))
                 session.commit()
                 added += 1
+                # 고객이 쓴 것이 티켓에 붙었다 — 단계 판정은 회차 끝에 `ticket_history` 가 한다.
+                if direction == "inbound" and conversation is not None:
+                    replied.add(conversation.id)
                 # **허브스팟에도 남깁니다** — 「개인 gmail 로 온 거여도 hubspot 에 기록은
                 # 남겨야 해」(운영자). 예전에는 운영자가 「연결할까요?」를 누를 때 했는데,
                 # 그 확인이 없어졌으니(2026-09-09) 붙이는 이 자리로 왔습니다. 커밋 뒤에
@@ -365,7 +369,7 @@ def _sync_one(email: str) -> tuple[int, list[tuple[str, str, str, datetime]]]:
                         f"{_plain_text(payload).strip() or body.get('snippet') or ''}",
                         when,
                     ))
-    return added, notes
+    return added, notes, replied
 
 
 def sync_mailboxes_once() -> dict:
@@ -376,11 +380,13 @@ def sync_mailboxes_once() -> dict:
     """
     added = 0
     notes: list[tuple[str, str, str, datetime]] = []
+    replied: set[int] = set()
     for email in enabled_accounts():
         try:
-            gained, mine = _sync_one(email)
+            gained, mine, theirs = _sync_one(email)
             added += gained
             notes.extend(mine)
+            replied |= theirs
             mark_polled(email)
         except MailboxTokenError as exc:
             # 이유는 이미 행에 적혔습니다(`gmail._mark_broken`). 화면이 그것을 그립니다.
@@ -399,6 +405,17 @@ def sync_mailboxes_once() -> dict:
             asyncio.run(_note_on_ticket(hubspot_contact_id, ticket_id, body[:60_000], when))
         except Exception:
             logger.warning("티켓 %s 에 노트를 못 남겼습니다", ticket_id, exc_info=True)
+    # **고객이 답장했으면 Contacted → 협의 중** (2026-09-22 운영자 보고: 「수신은 왔는데 stage 가
+    # 안 넘어가졌어」). 이 길로 들어온 답장은 허브스팟 스레드를 안 지나므로 그쪽 수집기가 못
+    # 본다 — 판단은 `ticket_history.advance_if_customer_replied` 한 곳이고 여기서는 부르기만
+    # 한다. 노트와 같은 자리(회차 끝, 세션 밖)이고 실패해도 우리 줄은 그대로다.
+    from .ticket_history import advance_if_customer_replied
+
+    for conversation_id in sorted(replied):
+        try:
+            asyncio.run(advance_if_customer_replied(conversation_id))
+        except Exception:
+            logger.warning("문의 %s: 답장 단계 판정 실패", conversation_id, exc_info=True)
     return {"added": added}
 
 

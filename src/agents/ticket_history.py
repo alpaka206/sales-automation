@@ -449,79 +449,64 @@ def _stamp(conversation_id: int) -> None:
 _REPLY_ADVANCES_FROM = "meeting_link_sent"
 
 
-def _naive(value: datetime | None) -> datetime | None:
-    """tz 를 떼어 같은 자로 비교합니다. 열은 tz 없는 `DateTime` 이라 읽으면 naive 로 오고,
-    수집기가 만드는 시각은 aware 입니다 — 그냥 비교하면 TypeError 입니다."""
-    if value is None:
-        return None
-    return value.replace(tzinfo=None) if value.tzinfo else value
+async def advance_if_customer_replied(conversation_id: int) -> bool:
+    """고객이 **우리 마지막 회신 뒤에** 쓴 것이 있으면 Contacted → 협의 중. 옮겼으면 True.
 
+    **판단은 이 한 곳이고, 고객 메시지가 들어오는 길 셋이 전부 여기를 부릅니다** — 허브스팟
+    스레드 수집(`sync_one_ticket`) · 개인 사서함 수집(`mailbox_sync.sync_mailboxes_once`) ·
+    운영자의 「수신」 기록(`customer_ops.interaction_add`). 2026-09-22 운영자 보고: 「수신은
+    왔는데 stage 가 안 넘어가졌어」. 앞의 하나만 이 규칙을 알았고 뒤의 둘로 들어온 답장은
+    기록만 남고 단계는 Contacted 에 그대로였다 — 운영 로그 열흘치(09-12~22)에 「협의 중으로
+    옮겼습니다」가 **한 줄도 없다.** 감지를 세 군데 두면 하나가 조용히 빠진다(CLAUDE.md) —
+    그래서 셋이 같은 함수를 부르고, 옮기는 것은 여전히 `_advance_on_customer_reply` 다.
 
-def reply_advances_stage(
-    stage: str | None, seen_upto: datetime | None, rows: list[dict]
-) -> bool:
-    """이번에 가져온 것 중에 **새로 온 고객 답장**이 있어서 단계를 올려야 하는가.
+    **기준선은 수집 도장이 아니라 우리 마지막 회신이다.** 「새 답장」이란 우리가 마지막으로
+    한 말 뒤에 온 고객 메시지다. `inbound.thread_events` 가 두 표를 합쳐 주므로(콘솔에서 나간
+    회신 · 허브스팟 스레드 · 개인함 · 수동 기록) 어느 길로 들어왔든 같은 자로 잰다. 예전
+    기준(저장된 스레드 줄의 마지막 시각)은 수집기의 사정이지 대화의 사정이 아니라, 수집이
+    회신 전에 돌았느냐 뒤에 돌았느냐에 따라 같은 답장이 「새것」이기도 「본 것」이기도 했다.
+    **리마인더는 우리 말이 아니다** — 기준 회신 뒤 · 1차 리마인더 전에 온 답장도 답장이다.
 
-    순수 함수인 이유: 이 한 줄이 규칙 전부라, DB 없이 다섯 가지 경우를 그대로 읽고 검사할
-    수 있어야 합니다(`tests/test_ticket_history.py`).
+    **기준선이 없으면 안 옮긴다.** 우리가 보이는 어느 길로도 쓴 적 없는 Contacted 티켓(영업이
+    우리가 안 읽는 사서함에서 답했다 · 백필로 들어온 옛 티켓)은 몇 달 전 고객 메시지 하나로
+    옮겨지면 안 된다 — 옛 `seen_upto is None` 관문이 막던 「한 회차에 수백 건이 허브스팟과
+    영업팀 워크북까지 나간다」를 이 줄이 그대로 막는다.
 
-    - ``seen_upto`` 는 **`_store` 전에** 읽은 「우리가 마지막으로 본 때」입니다
-      (`_seen_upto`: 이미 넣어 둔 스레드 줄의 마지막 시각과 우리 마지막 회신 중 늦은 쪽).
-      **None 이면 안 올립니다**: 처음 수집하는 티켓에는 과거가 통째로 들어와서, 기준이 없으면
-      몇 달 전 답장 하나로 Contacted 에 서 있던 티켓 수백 건이 한 회차에 옮겨지고 그게
-      허브스팟과 영업팀 워크북까지 나갑니다.
-    - ``stage`` 는 Contacted 하나뿐입니다. New 에 온 답장은 우리가 아직 답을 안 한 것이라
-      여전히 New 이고(그 티켓에는 검토할 초안이 대기 중입니다), 협의 중·수주·종료는 이미
-      지나간 자리라 되돌리면 안 됩니다.
-    - 방향은 **고객이 보낸 것**만. 우리가 보내는 것은 이미 Contacted 를 만든 사건입니다.
+    대화를 못 읽으면 False 다(`thread_events` 는 조회 실패를 빈 대화로 바꾸지 않고 던진다).
+    기록은 이미 들어갔고 단계는 다음 답장이나 사람이 맞춘다.
     """
-    if not seen_upto or stage != _REPLY_ADVANCES_FROM:
+    from .inbound import _naive, thread_events
+
+    with SessionLocal() as session:
+        conversation = session.get(Conversation, conversation_id)
+        if conversation is None or conversation.stage != _REPLY_ADVANCES_FROM:
+            return False
+        contact_id = conversation.contact_id
+        last_outgoing_at = conversation.last_outgoing_at
+    try:
+        events = thread_events(conversation_id)
+    except Exception:
+        logger.warning("문의 %s: 대화를 못 읽어 답장 판정을 건너뜁니다", conversation_id,
+                       exc_info=True)
         return False
-    return any(
-        row["direction"] == "inbound"
-        and (_naive(row["happened_at"]) or seen_upto) > seen_upto
-        for row in rows
-    )
-
-
-def _seen_upto(session, conversation: Conversation) -> datetime | None:
-    """「새 답장」의 기준 — 이미 넣어 둔 이 티켓의 스레드 줄 중 마지막 시각과, 우리 마지막
-    회신(`last_outgoing_at`) 중 늦은 쪽. 둘 다 없으면 처음 보는 티켓이라 None.
-
-    **예전에는 `history_synced_at` 이었고, 그래서 이 규칙이 한 번도 안 돌았다** (2026-09-17 에
-    찾았다). 2026-09-08 에 대기열을 `history_synced_at IS NULL` 하나로 합치면서 이 함수는
-    도장이 NULL 인 티켓에서만 불리게 됐고, 그러면 기준은 언제나 None 이다. 테스트는 순수 함수만
-    봐서 초록이었다.
-
-    우리 회신을 같이 보는 이유: 수집이 회신 **전에** 돌았으면 저장된 마지막 줄은 고객의 첫
-    문의라, 회신 전에 고객이 보탠 메일이 「답장」으로 셈해진다.
-    """
-    stored = session.scalar(
-        select(func.max(CustomerInteraction.happened_at)).where(
-            CustomerInteraction.conversation_id == conversation.id,
-            CustomerInteraction.external_id.like("hubspot:conv:%"),
-        )
-    )
-    stamps = [_naive(v) for v in (stored, conversation.last_outgoing_at) if v is not None]
-    return max(stamps) if stamps else None
+    ours = [turn.at for turn in events if turn.direction == "outgoing" and not turn.reminder]
+    if last_outgoing_at is not None:
+        ours.append(_naive(last_outgoing_at))
+    if not ours:
+        return False
+    baseline = max(ours)
+    if not any(turn.direction == "inbound" and turn.at > baseline for turn in events):
+        return False
+    await _advance_on_customer_reply(conversation_id, contact_id)
+    return True
 
 
 async def sync_one_ticket(conversation_id: int) -> int:
     """티켓 하나의 히스토리를 맞춥니다. 넣은 기록 수를 돌려줍니다.
 
-    **고객이 답장했으면 단계를 올립니다** (2026-09-07 운영자 지시: 「그 사람한테 답변이
-    오면 negotiating 으로 가는 것」). 그 사실을 아는 자리가 여기뿐입니다 — 접수
-    (`inbound_poller` · 웹훅)는 **New 티켓만** 보므로 Contacted 로 넘어간 티켓에 온 답장은
-    그 문을 아예 안 지납니다.
-
-    **「새로 온 답장」의 기준은 `_seen_upto` 입니다** — 「우리가 마지막으로 본 때」.
-    그보다 나중에 도착한 고객 메시지만 셉니다.
-
-    그래서 **처음 수집하는 티켓(넣어 둔 줄도 우리 회신도 없다)에서는 안 올립니다.** 수집기는 티켓을 끝없이 한
-    바퀴씩 도는데, 첫 바퀴에는 그 티켓의 **모든 과거 메시지**가 한꺼번에 들어옵니다 —
-    기준이 없으면 몇 달 전 답장 하나 때문에 Contacted 에 서 있던 티켓 수백 건이 한 회차에
-    협의 중으로 옮겨지고, 그게 허브스팟과 영업팀 워크북까지 나갑니다. 잃는 것은 없습니다:
-    그 티켓은 다음 바퀴부터 정상으로 판정됩니다.
+    넣고 나서 **고객이 답장했는지는 `advance_if_customer_replied` 가 봅니다.** 판단이 그리로
+    옮겨진 이유(2026-09-22)는 그 함수에 있습니다 — 고객 메시지가 들어오는 길이 셋인데 이
+    수집기만 그 규칙을 알아서, 개인함·수동 기록으로 온 답장은 단계를 못 움직였습니다.
     """
     from ..integrations.hubspot import HubSpotClient
 
@@ -531,9 +516,6 @@ async def sync_one_ticket(conversation_id: int) -> int:
             return 0
         ticket_id = (conversation.hubspot_ticket_id or "").strip()
         contact_id = conversation.contact_id
-        # **`_store` 전에** 읽습니다 — 이 값이 「새 답장」의 기준입니다.
-        seen_upto = _seen_upto(session, conversation)
-        stage = conversation.stage
     if not ticket_id or not contact_id:
         # 티켓이나 연락처가 없으면 가져올 자리가 없습니다. 다시 고르지 않게 도장은 찍습니다.
         _stamp(conversation_id)
@@ -545,9 +527,7 @@ async def sync_one_ticket(conversation_id: int) -> int:
     finally:
         await client.close()
     added = _store(conversation_id, contact_id, rows)
-
-    if reply_advances_stage(stage, seen_upto, rows):
-        await _advance_on_customer_reply(conversation_id, contact_id)
+    await advance_if_customer_replied(conversation_id)
     return added
 
 
@@ -677,6 +657,7 @@ def mark_ticket_history_stale(conversation_id: int) -> None:
 
 
 __all__ = [
+    "advance_if_customer_replied",
     "attach_personal_emails",
     "classify_direction",
     "run_pending_ticket_history",

@@ -83,7 +83,43 @@ async def ui_events(request: Request) -> StreamingResponse:
     )
 
 
-def _card(row: dict) -> dict:
+def _reminders(rows: list[dict]) -> dict[int, str | None]:
+    """{대화 id: 「Pending」·「Reminder Sent N」} — 후속 리마인더 시퀀스가 도는 카드에만.
+
+    티켓 배너와 **같은 함수**(`followup_sequence.view`)를 지납니다 — 보드가 따로 세면 같은
+    티켓을 두 화면이 다르게 부릅니다. 후보는 Contacted 이거나 시퀀스가 닫은 적 있는 대화뿐이고
+    (그 외는 `view` 가 어차피 None), 그 대화들의 나간 메일은 **쿼리 하나**로 받습니다 —
+    카드마다 물으면 보드 한 번에 왕복이 열다섯입니다. `FOLLOWUP_SEQUENCE_SINCE` 가 비어
+    있으면 `view` 가 Contacted 카드에도 None 을 돌려주므로 칩은 시퀀스와 같이 켜집니다.
+    """
+    from sqlalchemy import select
+
+    from ...agents import followup_sequence as fs
+    from ...db.models import Message
+    from ...db.session import SessionLocal
+
+    convs = {
+        row["conversation"].id: row["conversation"]
+        for row in rows
+        if row["stage"] == fs.CONTACTED or row["conversation"].followup_closed_at is not None
+    }
+    if not convs:
+        return {}
+    by_conv: dict[int, list[Message]] = {}
+    with SessionLocal() as session:
+        for m in session.scalars(
+            select(Message).where(
+                Message.conversation_id.in_(list(convs)), Message.direction == "outgoing"
+            )
+        ).all():
+            by_conv.setdefault(m.conversation_id, []).append(m)
+    return {
+        conv_id: (fs.view(conv, by_conv.get(conv_id, [])) or {}).get("reminder")
+        for conv_id, conv in convs.items()
+    }
+
+
+def _card(row: dict, reminder: str | None = None) -> dict:
     """A board row's ORM objects flattened to what a card actually draws."""
     from .customer_ops import visible_deal_detail
 
@@ -110,6 +146,9 @@ def _card(row: dict) -> dict:
         # 후속 리마인더가 닫았는데 고객이 돌아와 협의 중으로 되살아난 티켓 — 빨갛게 섭니다
         # (2026-09-17 운영자). 사람이 다음 단계로 옮기면 저절로 꺼집니다.
         "revived": conversation.followup_closed_at is not None and row["stage"] == "negotiation",
+        # 「Pending」·「Reminder Sent 1」·「Reminder Sent 2」 — 시퀀스가 도는 카드에만, 글자는
+        # 티켓 배너와 같은 곳(`followup_sequence.view`)에서 옵니다 (2026-09-22 운영자 지시).
+        "reminder": reminder,
     }
 
 
@@ -119,6 +158,7 @@ def ui_dashboard(_request: Request):
     from .dashboard import _dashboard_context
 
     context = _dashboard_context()
+    reminders = _reminders([row for stage in context["stages"] for row in stage["rows"]])
     return {
         # 어느 열에 Deal Detail 고르개가 붙는지, 거기 무엇을 고를 수 있는지. 서버가 주므로
         # 값 목록이 화면과 검증 두 곳에 따로 적히지 않습니다 — 라우트가 거절하는 값이
@@ -139,7 +179,7 @@ def ui_dashboard(_request: Request):
                 "key": stage["key"],
                 "label": stage["label"],
                 "total": stage["total"],
-                "cards": [_card(row) for row in stage["rows"]],
+                "cards": [_card(row, reminders.get(row["conversation"].id)) for row in stage["rows"]],
             }
             for stage in context["stages"]
         ],
@@ -1021,8 +1061,9 @@ def ui_pipeline_page(stage: str, offset: int = 0):
         raise HTTPException(status_code=404, detail="지원하지 않는 파이프라인 단계입니다")
     offset = max(offset, 0)
     rows, totals = _pipeline_rows(stage=stage, limit=BOARD_CARDS_PER_STAGE, offset=offset)
+    reminders = _reminders(rows)
     return {
-        "cards": [_card(row) for row in rows],
+        "cards": [_card(row, reminders.get(row["conversation"].id)) for row in rows],
         "next_offset": offset + len(rows),
         "has_more": offset + len(rows) < totals.get(stage, 0),
     }
@@ -1063,15 +1104,10 @@ def _won_contract(contract, today) -> dict:
         "plan_months": won.plan_months(contract),
         "credits": contract.credits,
         "currency": contract.currency,
-        # **계약 금액은 한 칸이고 그 값이 VAT 포함 총액입니다**(이관 0123). 공급가는 저장
-        # 하지 않고 총액 ÷ 1.1 로 되짚습니다 — 워크북의 공급가 열이 회계가 합계를 내는
-        # 칸이라 비면 그 행만 빠지고, 화면과 시트가 같은 값이어야 합니다. 분당 단가도
-        # 계산값입니다 — 금액 ÷ (크레딧 ÷ 60).
+        # **계약 금액은 한 칸이고 그 값이 VAT 포함 총액입니다**(이관 0123). 공급가와
+        # 부가세 해당 여부는 없어졌습니다(이관 0127, 2026-09-22 운영자 지시) — 금액은 이
+        # 하나이고 분당 단가는 계산값입니다(금액 ÷ (크레딧 ÷ 60)).
         "amount_incl_vat": won.total_amount(contract),
-        "amount_excl_vat": won.supply_amount(contract),
-        # 부가세가 붙는 계약인가. **통화가 아니라 고객이 정합니다**(이관 0075). 금액 칸이
-        # 하나가 된 뒤에도 남습니다 — 공급가라는 것이 있는 계약인지를 이 값이 정합니다.
-        "vat_applicable": won.vat_applicable(contract),
         # 그 계약에 적용할 환율과 기준 날짜. 비어 있으면 저장할 때 계약일 고시가로 채웁니다.
         "fx_rate": contract.fx_rate,
         "fx_on": contract.fx_on,
@@ -1091,8 +1127,6 @@ def _won_contract(contract, today) -> dict:
         "revenue_from": won.revenue_start_month(contract),
         "revenue_from_set": bool(contract.revenue_from),
         "monthly_revenue": won.monthly_revenue(contract),
-        # 화면이 `공급가 ÷ months` 로 직접 나누던 값. 자가 갈리지 않게 서버가 냅니다.
-        "monthly_supply_revenue": won.monthly_supply_revenue(contract),
         "plan": contract.plan,
         "plan_name": contract.plan_name,
         "perso_email": contract.perso_email,

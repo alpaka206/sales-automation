@@ -182,7 +182,7 @@ def thread_events(conv_id: int | None, *, factory=None) -> list[_Turn]:
             f"hubspot:conv:{m.hubspot_message_id}" for m in messages if m.hubspot_message_id
         }
         # **후속 리마인더의 소통 히스토리 줄은 대화가 아닙니다** (2026-09-21). 발송 뒤 정리가
-        # 「1차 리마인더 완료」 한 줄을 `customer_interactions` 에 남기는데(운영자 지시로 그
+        # 「Reminder Sent 1」 한 줄을 `customer_interactions` 에 남기는데(운영자 지시로 그
         # 표에 남겨야 화면에 뜹니다), 그 줄은 같은 리마인더를 **두 번째로** 그리는 것이고
         # 위 `hubspot:conv:` 규칙으로는 안 걸립니다 — 열쇠가 다릅니다.
         #

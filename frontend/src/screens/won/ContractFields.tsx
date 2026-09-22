@@ -91,23 +91,26 @@ export function Sel({ value, onChange, options }: {
   );
 }
 
-/** 「매출 인식」 옆의 작은 (i) — 눌러야 열립니다(운영자 지시: 「i 작은 표시 있고 눌렀을때」).
+/** 「매출 인식」 옆의 작은 (i) — **hover(와 키보드 포커스)로 열립니다**(2026-09-22 운영자
+ *  지시: 「클릭이 아니라 hover일때 뜨도록」). 그 전날은 「눌렀을때」라 `<details>` 였습니다.
  *
- *  `<details>/<summary>` 인 이유: 이 저장소에 툴팁 컴포넌트가 없고, 두 줄짜리 설명을 위해
- *  만들 이유도 없습니다. `title=` 은 hover 라 「눌렀을때」가 아닙니다. 옷은 `.won .hint`
- *  한 곳에 있습니다.
+ *  클래스가 `ihint` 인 이유: 처음 `hint` 로 두었더니 목업에서 옮겨 온 `.won .hint`(카드
+ *  바닥의 점선 안내문 — `margin-top:22px; border-top:1px dashed`)와 **겹쳐서**, 동그라미가
+ *  라벨 밑으로 밀리고 위에 점선이 그어졌습니다(운영자 보고: 「밑으로 밀려져 있어, 위에
+ *  이상한 ------ 표시도 있고」). 그 규칙은 목업의 것이라 안 건드리고 이름을 비켰습니다.
+ *  옷은 `.won .ihint` 한 곳에 있습니다.
  *
  *  **한 벌만 두고 두 자리가 같이 씁니다** — 폼(값을 고르는 곳)과 상세 카드(값을 읽는 곳).
  *  두 곳에 따로 적으면 같은 두 줄이 언젠가 서로 다른 말을 합니다. */
 export function DealTypeHint() {
   return (
-    <details className="hint">
-      <summary aria-label="매출 인식이란" title="매출 인식이란" />
-      <div>
+    <span className="ihint" tabIndex={0} role="note" aria-label="매출 인식이란">
+      <span className="ihint__i" aria-hidden="true">i</span>
+      <span className="ihint__pop">
         MRR — 계약기간 분할인식<br />
         PoC — 일괄인식
-      </div>
-    </details>
+      </span>
+    </span>
   );
 }
 
@@ -115,7 +118,7 @@ export function DealTypeHint() {
 export function ContractFields({ f, options }: { f: ContractDraftState; options: Options }) {
   const { draft, set } = f;
   if (!draft) return null;
-  const { vatApplicable, unitPrice } = derive(draft);
+  const { unitPrice } = derive(draft);
   return (
     <>
       <div className="form-sec">계약</div>
@@ -180,18 +183,9 @@ export function ContractFields({ f, options }: { f: ContractDraftState; options:
       </div>
 
       <div className="form-sec">금액</div>
-      {/* 순서가 뜻을 갖습니다(운영자 지시): **부가세 해당 여부 → 통화 → 환율 → 금액.**
-          앞의 것이 뒤의 것을 정하기 때문입니다. 해당 여부는 이제 금액 칸 수를 가르지 않고
-          (칸은 하나입니다) **공급가가 있는 계약인지**를 정합니다 — 워크북의 공급가 열과
-          CSV 가 그 값을 읽습니다. */}
+      {/* 「VAT 해당 여부」가 이 줄 맨 앞에 있었습니다 — 공급가가 있는 계약인지를 정하던
+          칸인데, 공급가 자체를 안 쓰게 되면서(2026-09-22 운영자 지시) 같이 나갔습니다. */}
       <div className="form-grid3">
-        <Field label="VAT 해당 여부">
-          <select className="inp" value={draft.vat_applicable}
-                  onChange={(e) => set("vat_applicable", e.target.value)}>
-            <option value="1">VAT 해당 (국내 법인 고객)</option>
-            <option value="">VAT 미해당 (그 외 고객)</option>
-          </select>
-        </Field>
         <Field label="통화">
           <Sel value={draft.currency} onChange={(v) => set("currency", v)} options={options.currencies} />
         </Field>
@@ -208,26 +202,20 @@ export function ContractFields({ f, options }: { f: ContractDraftState; options:
                  placeholder="비우면 계약일 고시가로 자동" />
         </Field>
         {/* **칸은 하나입니다** (2026-09-21 운영자 지시: 「계약금액은 모두 VAT 포함만으로」).
-            그전에는 부가세 해당 계약에 칸이 둘이고 「분당단가 기준」 고르개가 어느 쪽을
-            기준으로 삼을지 정했습니다 — 국내 계약서가 공급가로도 총액으로도 적혀서, 모르면
-            분당 단가가 계약마다 10% 씩 달라졌기 때문입니다. 그 사실은 이제 **계약 비고**가
-            듭니다(이관 0123 이 옛 계약마다 한 줄 적어 두었습니다).
+            그전에는 칸이 둘이고 「분당단가 기준」 고르개가 어느 쪽을 기준으로 삼을지
+            정했습니다 — 모르면 분당 단가가 계약마다 10% 씩 달라졌기 때문입니다. 그 사실은
+            이제 **계약 비고**가 듭니다(이관 0123 이 옛 계약마다 한 줄 적어 두었습니다).
 
             라벨에 「(VAT 포함)」을 안 답니다 — 이제 모든 계약금액이 그렇습니다. */}
         <div style={{ gridColumn: "span 2" }}>
           <label className="form-label">계약금액 <span className="req">*</span></label>
           <input className="inp" type="number" value={draft.amount_incl_vat}
                  onChange={(e) => set("amount_incl_vat", e.target.value)}
-                 placeholder={vatApplicable ? "예: 11000000" : "예: 20000"} />
-          <div style={{ fontSize: 11.5, color: "var(--faint)", marginTop: 4 }}>
-            {vatApplicable
-              ? "VAT 포함 금액입니다. 공급가는 이 값 ÷ 1.1 로 계산합니다."
-              : "VAT 미해당 — 공급가라는 것이 없고, 이 금액이 그대로 대금입니다."}
-          </div>
+                 placeholder="예: 11000000" />
         </div>
         {/* 계산값입니다 — 계약금액 ÷ (크레딧 ÷ 60). 소수점은 남깁니다: 반올림한 단가는
-            되짚어 곱했을 때 금액이 안 맞습니다. **VAT 포함 기준**이라, 계약서가 VAT 미포함
-            단가로 적힌 건이면 그 숫자를 계약 비고에 적어 두십시오. */}
+            되짚어 곱했을 때 금액이 안 맞습니다. 계약서가 다른 기준의 단가로 적힌 건이면
+            그 숫자를 계약 비고에 적어 두십시오. */}
         <Field label="분당 단가">
           <div className="inp" aria-readonly="true"
                style={{ background: "var(--bg-soft)", fontVariantNumeric: "tabular-nums",

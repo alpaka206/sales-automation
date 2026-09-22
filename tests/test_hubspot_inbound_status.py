@@ -277,13 +277,14 @@ async def test_a_follow_up_reminder_does_not_push_contacted_again(
     mock_move.assert_not_called()
     client.update_inbound_status.assert_not_awaited()
     mock_summary.assert_not_called()
-    assert mock_progress.call_args.args[2] == "1차 리마인더 완료"
+    # 글자는 운영자의 것(2026-09-22: 「Reminder Sent 1」) — 티켓 배너 · 보드 카드와 같은 말.
+    assert mock_progress.call_args.args[2] == "Reminder Sent 1"
 
     # **소통 히스토리에 한 줄** (2026-09-21 운영자 지시). 위의 진행 기록 `reply` 는 읽을 때
     # 걸러지므로(`ROUTINE_PROGRESS_KINDS`) 그것만으로는 운영자 눈에 아무것도 안 남습니다.
     row = next(c.args[0] for c in session.add.call_args_list
                if isinstance(c.args[0], CustomerInteraction))
-    assert row.summary == "1차 리마인더 완료"
+    assert row.summary == "Reminder Sent 1"
     assert row.external_id == "followup:reminder:77"
     # `inbound` 이면 `followup_sequence._replies` 가 우리 리마인더를 고객 답장으로 읽어
     # 티켓을 Negotiating 으로 옮기고 시퀀스를 멈춥니다.

@@ -8,11 +8,9 @@ import { type Contract, n } from "./shared";
 
 export const emptyDraft = {
   deal_type: "MRR", starts_on: "", ends_on: "", plan_starts_on: "", plan_ends_on: "", ticket_id: "",
-  // 부가세가 붙는 계약인가(국내 법인이면 해당). **통화가 아니라 고객이 정합니다** — 이 값이
-  // 공급가가 있는 계약인지를 정합니다(`won.supply_amount`). 폼은 문자열만 나르므로 "1" / "".
-  vat_applicable: "1",
-  // **계약금액은 한 칸이고 VAT 포함입니다**(2026-09-21). `vat_included`·`amount_excl_vat`
-  // 가 여기 있었습니다 — 이관 0123 이 둘 다 지웠습니다.
+  // **계약금액은 한 칸이고 VAT 포함입니다**(2026-09-21). 「VAT 포함/제외」 고르개와
+  // 공급가 칸이 여기 있었습니다 — 이관 0123 이 둘 다 지웠습니다. 「VAT 해당 여부」(공급가가
+  // 있는 계약인가)도 2026-09-22 에 나갔습니다 — 공급가 자체를 안 씁니다(운영자 지시).
   currency: "KRW", amount_incl_vat: "", credits: "",
   // 비워 두면 저장할 때 계약일 고시가로 채웁니다(`_fill_contract_fx`).
   fx_rate: "", terminated_on: "",
@@ -36,7 +34,6 @@ export function fromContract(contract: Contract): Draft {
     deal_type: contract.deal_type, starts_on: str(contract.starts_on), ends_on: str(contract.ends_on),
     plan_starts_on: contract.plan_starts_on || "", plan_ends_on: contract.plan_ends_on || "",
     ticket_id: str(contract.ticket_id), currency: contract.currency,
-    vat_applicable: contract.vat_applicable ? "1" : "",
     fx_rate: str(contract.fx_rate), terminated_on: str(contract.terminated_on),
     amount_incl_vat: str(contract.amount_incl_vat),
     credits: str(contract.credits),
@@ -59,9 +56,8 @@ export function fromContract(contract: Contract): Draft {
 export function carryOver(prev: Contract) {
   return {
     deal_type: prev.deal_type, currency: prev.currency,
-    // 부가세 해당 여부는 **고객의 성질**이라 다음 차수도 같습니다. 「VAT 포함/제외」도
-    // 여기 있었는데, 금액 칸이 하나가 되면서 물려받을 것이 없어졌습니다(이관 0123).
-    vat_applicable: prev.vat_applicable ? "1" : "",
+    // 「VAT 포함/제외」와 「부가세 해당 여부」가 여기 있었습니다 — 금액 칸이 하나가 되면서
+    // (이관 0123) 앞엣것이, 공급가를 안 쓰게 되면서(2026-09-22) 뒤엣것이 나갔습니다.
     payment_method: str(prev.payment_method), payment_type: str(prev.payment_type),
     installments: str(prev.installments ?? 1), billing_email: str(prev.billing_email),
     contact_name: str(prev.contact_name), contact_info: str(prev.contact_info),
@@ -81,16 +77,13 @@ export const emptyCarry = () => carryOverKeys.reduce((acc, key) => ({ ...acc, [k
  *  (won.total_amount / won.unit_price) — 두 곳에 식이 있는 게 아니라, 화면은 사람이
  *  숫자를 넣는 동안 결과를 보여 줄 뿐입니다. */
 export function derive(draft: Draft) {
-  // 부가세가 붙는 계약인가. **통화가 아니라 고객이 정합니다**(이관 0075). 금액 칸을 가르지는
-  // 않고, 공급가가 있는 계약인지를 정합니다.
-  const vatApplicable = draft.vat_applicable === "1";
   /** 분당 단가의 기준 = **계약금액**. 한 칸이라 고를 것이 없습니다(`won.total_amount`). */
   const billing = n(draft.amount_incl_vat);
   /** 분당 단가 = 계약금액 ÷ (계약 크레딧 ÷ 60). 소수 둘째 자리 — 상세의 「분당 단가」와
    *  같은 자릿수여야 합니다. */
   const credits = n(draft.credits);
   const unitPrice = billing && credits ? (billing / (credits / 60)).toFixed(2) : null;
-  return { vatApplicable, billing, unitPrice };
+  return { billing, unitPrice };
 }
 
 /** 저장하면 플랜 상태가 무엇이 될지. 서버의 won.plan_status 와 같은 규칙을 이 계약 하나에

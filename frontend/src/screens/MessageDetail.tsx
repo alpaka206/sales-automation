@@ -1185,13 +1185,13 @@ type Followup = {
   /** 보내야 할 리마인더의 템플릿 키가 콘솔에 없다 — 스윕은 안 보내고 기다린다. */
   template_missing?: string | null;
   reminder_1_at?: string | null; reminder_2_at?: string | null;
-  /** 이미 끝난 단계의 **완성된 한국어 라벨**(`["1차 리마인더 완료", …]`).
+  /** 칩 한 장의 **완성된 글자** — `Pending` · `Reminder Sent 1` · `Reminder Sent 2`.
    *
-   *  **화면이 이 글자를 짓지 않습니다** (2026-09-21 운영자 지시: 「리마인더 메일 발송 후
-   *  소통 히스토리에도 기록 / 1차 리마인더 완료 이런식으로」). 같은 사실을 티켓 배너 ·
-   *  소통 히스토리 줄 · 진행 기록 세 곳이 적는데, 말을 각자 지으면 세 화면이 같은 일을
-   *  다르게 부릅니다 — 말의 출처는 서버 한 곳입니다. */
-  done?: string[];
+   *  **화면이 이 글자를 짓지 않습니다** (2026-09-22 운영자 지시: 「리마인더 센트 기본적으로
+   *  떠있게(Pendding, Reminder Sent 1, Reminder Sent 2)」). 같은 사실을 티켓 배너 · 보드
+   *  카드 · 소통 히스토리 줄 · 진행 기록이 적는데, 말을 각자 지으면 화면마다 같은 일을
+   *  다르게 부릅니다 — 말의 출처는 서버 한 곳입니다(`followup_sequence.done_label`). */
+  reminder: string;
 };
 
 /** 후속 리마인더 한 줄 (2026-09-17). 무엇을 언제 할지는 서버가 정하고(`followup_sequence.view`),
@@ -1215,14 +1215,11 @@ function FollowupBanner({ followup: f }: { followup: Followup }) {
       <span className="banner__icon"><Icon name={f.state === "revived" ? "warn" : "send"} size={18} /></span>
       <div>
         <div className="banner__title">{f.state === "revived" ? "자동 종료 뒤 고객이 돌아왔습니다" : "후속 리마인더"}</div>
-        {/* **몇 차까지 나갔는지는 칩이 말합니다** (2026-09-21 운영자 지시: 「리마인더 1차
-            완료, 2차 완료 후 티켓에 표기」). 글자는 서버가 정한 그대로 찍습니다 — 그래야
-            소통 히스토리 줄과 진행 기록이 같은 말을 합니다. */}
-        {f.done?.length ? (
-          <div className="row wrap" style={{ gap: 6, margin: "2px 0 6px" }}>
-            {f.done.map((label) => <span key={label} className="tag">{label}</span>)}
-          </div>
-        ) : null}
+        {/* **몇 차까지 나갔는지는 칩이 말합니다 — 배너가 뜨면 언제나** (2026-09-22 운영자
+            지시: 「리마인더 센트 기본적으로 떠있게」). 한 통도 안 나갔으면 `Pending`. 글자는
+            서버가 정한 그대로 찍습니다 — 그래야 보드 카드 · 소통 히스토리 줄 · 진행 기록이
+            같은 말을 합니다. */}
+        <div style={{ margin: "2px 0 6px" }}><span className="tag">{f.reminder}</span></div>
         <div className="t-sm">{text}</div>
       </div>
     </div>

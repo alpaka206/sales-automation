@@ -206,7 +206,7 @@ export function WonCustomerDetail() {
               </select>
               {/* **편집 하나가 두 카드를 같이 입력칸으로 바꿉니다** (2026-09-15 운영자 확인).
                   「계약 및 결제 정보」와 「Perso 계정 및 플랜」은 한 계약 행이고 칸들이 서로
-                  얽혀 있어서(VAT → 통화 → 금액, 크레딧 ↔ 단가, 계약 기간 → MRR),
+                  얽혀 있어서(크레딧 ↔ 단가, 계약 기간 → MRR),
                   카드마다 따로 저장하면 반쪽짜리 계약이 남습니다. 저장·취소도 한 번입니다. */}
               {section === "sec-contract" && (editingContract ? (
                 <>
@@ -266,7 +266,7 @@ export function WonCustomerDetail() {
                                 onDone={() => { setEditingContract(false); refresh(); }} />
               ) : (
                 <>
-                  <ContractSection current={current} today={today} onDone={refresh} />
+                  <ContractSection current={current} today={today} />
                   <PlanSection contract={current} />
                 </>
               )
@@ -652,46 +652,15 @@ function BasicSection({ client, contracts, options, onDone }: {
  *
  * 카드 머리에 버튼이 없습니다(2026-09-15 운영자 확인): 「+ 계약 추가」는 이 고객의 동작이라
  * 페이지 머리에만 있고, 「편집」은 탭바 오른쪽에서 이 카드와 「Perso 계정 및 플랜」을 같이
- * 입력칸으로 바꿉니다(`ContractEditor`). 계약 고르개도 탭바 오른쪽입니다.
+ * 입력칸으로 바꿉니다(`ContractEditor`). 계약 고르개도 탭바 오른쪽입니다. 「이 계약 삭제」도
+ * 편집 모드 안에 있습니다(2026-09-22 운영자 지시) — 하루 동안 여기 있었습니다.
  */
-function ContractSection({ current, today, onDone }: {
-  current: Contract; today: string; onDone: () => void;
-}) {
-  const [removing, setRemoving] = useState(false);
+function ContractSection({ current, today }: { current: Contract; today: string }) {
   return (
     <section className="sec" id="sec-contract">
       <div className="sec-head">
         <span className="sec-title">계약 및 결제 정보</span>
-        {/* **계약 삭제는 오래 없던 동작입니다** (2026-09-21 운영자 지시로 생겼습니다).
-            없던 이유는 그대로 남아 있습니다 — 이 차수에 딸린 결제 회차와 크레딧 지급
-            회차가 **같이** 사라지고 되돌릴 방법이 없습니다. 그래서 값을 고치는 자리
-            (「편집」, 탭바 오른쪽)와 멀리 떼어 두고, 문구를 옮겨 적는 창을 지납니다. */}
-        <div className="sec-actions">
-          <button className="btn btn-sm btn--danger" type="button"
-                  onClick={() => setRemoving(true)}>이 계약 삭제</button>
-        </div>
       </div>
-      {removing && (
-        <DeleteDialog
-          name={`${current.seq}차 계약`}
-          rows={[
-            ["계약기간", `${fmt(current.starts_on)} – ${fmt(current.ends_on)}`],
-            ["계약금액", `${money(current.amount_incl_vat, current.currency)} ${current.currency}`],
-            ["결제 회차", `${current.payments.length}건`],
-            ["크레딧 지급 회차", `${current.credit_grants.length}건`],
-          ]}
-          warning="이 계약에 딸린 결제 회차와 크레딧 지급 회차가 같이 사라집니다. 되돌릴 수 없습니다."
-          note={
-            "마지막 차수였다면 그 고객은 장부에서 내려갑니다 — 번호와 행은 남으므로 "
-            + "워크북의 다른 탭이 조회해 가는 회사명은 그대로이고, 계약을 다시 넣으면 "
-            + "저절로 올라옵니다."
-          }
-          // 옮겨 갈 곳이 없습니다 — 고른 차수가 사라지면 위 `current` 가 다음 계약으로
-          // 저절로 떨어집니다(`find(...) ?? data.active ?? 마지막`).
-          onConfirm={() => postForm(`/won-customers/contracts/${current.id}/delete`, {}).then(onDone)}
-          onCancel={() => setRemoving(false)}
-        />
-      )}
 
       <div className="panel">
         <div className="field-grid">
@@ -711,20 +680,8 @@ function ContractSection({ current, today, onDone }: {
             {num(current.credits)}{" "}
             <span className="muted">= {num(Math.round((current.credits ?? 0) / 60))}분</span>
           </span>} />
-          {/* 공급가는 **언제나 계산값**입니다(총액 ÷ 1.1) — 그래서 「역산」이라고 적습니다.
-              워크북의 공급가 열과 같은 값이고, 비워 두면 회계가 합계를 내는 칸에서 그 행만
-              빠집니다. **통화가 아니라 부가세 해당 여부로 가릅니다**: 원화인데 VAT 미해당인
-              계약은 서버가 null 을 보내므로 통화로 가르면 「₩0」이 그려졌습니다. */}
-          <KV k="공급가 (VAT 제외)" v={<span className="mono">
-            {!current.vat_applicable ? (
-              <span className="muted">VAT 해당 없음</span>
-            ) : (
-              <>
-                {money(current.amount_excl_vat, current.currency)}{" "}
-                <span className="muted">총액에서 역산</span>
-              </>
-            )}
-          </span>} />
+          {/* 「공급가 (VAT 제외)」가 여기 있었습니다 — 총액 ÷ 1.1 로 되짚은 값. 공급가를 아예
+              안 쓰기로 하면서(2026-09-22 운영자 지시) payload 에서도 화면에서도 나갔습니다. */}
           {/* 계산값입니다 — 금액 ÷ (계약 크레딧 ÷ 60). 단가 통화 칸은 없어졌습니다:
               단가는 언제나 계약 통화입니다. */}
           <KV k="분당 단가" v={current.unit_price ? <span className="mono">
@@ -768,6 +725,7 @@ function ContractEditor({ contract, options, onBusy, onDone }: {
   const f = useContractDraft(contract);
   const [note, setNote] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
+  const [removing, setRemoving] = useState(false);
   const [save, saving] = useAction(async () => {
     setNote(null);
     try {
@@ -789,33 +747,65 @@ function ContractEditor({ contract, options, onBusy, onDone }: {
   };
   if (!options) return null;
   return (
-    <form id={CONTRACT_FORM_ID} onSubmit={submit}>
-      <section className="sec">
-        <div className="sec-head">
-          <span className="sec-title">계약 및 결제 정보</span>
-          {note && (
-            <div className="sec-actions" role="status" style={{ color: "var(--danger)" }}>{note}</div>
-          )}
-        </div>
-        <div className="panel"><ContractFields f={f} options={options} /></div>
-      </section>
-      <section className="sec">
-        <div className="sec-head">
-          <span className="sec-title">Perso 계정 및 플랜</span>
-        </div>
-        <div className="panel"><PlanFields f={f} options={options} heading={false} /></div>
-      </section>
-      {confirming && (
-        <Confirm
-          title="지급 예정 목록을 다시 깝니다"
-          rows={[["지급 일정", scheduleLabel(f)]]}
-          note="손으로 추가·수정한 회차와 지급 완료 표시가 모두 사라집니다. 되돌릴 수 없습니다."
-          okLabel="저장"
-          onOk={() => save()}
-          onClose={() => setConfirming(false)}
+    <>
+      <form id={CONTRACT_FORM_ID} onSubmit={submit}>
+        <section className="sec">
+          <div className="sec-head">
+            <span className="sec-title">계약 및 결제 정보</span>
+            {/* **「이 계약 삭제」는 편집 모드에서만 보입니다** (2026-09-22 운영자 지시: 「편집버튼
+                눌러야 해당 위치에서 뜨도록」). 하루 동안 읽기 카드의 같은 자리에 있었는데, 그건
+                값을 고치는 자리(「편집」)와 떼어 두려던 것이었습니다. 이제 지키는 것은 자리가
+                아니라 창입니다 — 이 차수에 딸린 결제 회차와 크레딧 지급 회차가 **같이** 사라지고
+                되돌릴 수 없어서, 문구를 옮겨 적는 `DeleteDialog` 를 지납니다. */}
+            <div className="sec-actions">
+              {note && <span role="status" style={{ color: "var(--danger)" }}>{note}</span>}
+              <button className="btn btn-sm btn--danger" type="button" disabled={saving}
+                      onClick={() => setRemoving(true)}>이 계약 삭제</button>
+            </div>
+          </div>
+          <div className="panel"><ContractFields f={f} options={options} /></div>
+        </section>
+        <section className="sec">
+          <div className="sec-head">
+            <span className="sec-title">Perso 계정 및 플랜</span>
+          </div>
+          <div className="panel"><PlanFields f={f} options={options} heading={false} /></div>
+        </section>
+        {confirming && (
+          <Confirm
+            title="지급 예정 목록을 다시 깝니다"
+            rows={[["지급 일정", scheduleLabel(f)]]}
+            note="손으로 추가·수정한 회차와 지급 완료 표시가 모두 사라집니다. 되돌릴 수 없습니다."
+            okLabel="저장"
+            onOk={() => save()}
+            onClose={() => setConfirming(false)}
+          />
+        )}
+      </form>
+      {/* **폼 밖**입니다. `Modal` 은 제자리에 그려지고 이 창에는 글자 입력칸이 있어서, 폼 안에
+          두면 문구를 치고 누른 Enter 가 위 폼의 제출(=계약 저장)로 갑니다. */}
+      {removing && (
+        <DeleteDialog
+          name={`${contract.seq}차 계약`}
+          rows={[
+            ["계약기간", `${fmt(contract.starts_on)} – ${fmt(contract.ends_on)}`],
+            ["계약금액", `${money(contract.amount_incl_vat, contract.currency)} ${contract.currency}`],
+            ["결제 회차", `${contract.payments.length}건`],
+            ["크레딧 지급 회차", `${contract.credit_grants.length}건`],
+          ]}
+          warning="이 계약에 딸린 결제 회차와 크레딧 지급 회차가 같이 사라집니다. 되돌릴 수 없습니다."
+          note={
+            "마지막 차수였다면 그 고객은 장부에서 내려갑니다 — 번호와 행은 남으므로 "
+            + "워크북의 다른 탭이 조회해 가는 회사명은 그대로이고, 계약을 다시 넣으면 "
+            + "저절로 올라옵니다."
+          }
+          // 옮겨 갈 곳이 없습니다 — `onDone` 이 편집을 내리고 다시 읽으면 부모의 `current` 가
+          // 다음 계약으로 저절로 떨어집니다(`find(...) ?? data.active ?? 마지막`).
+          onConfirm={() => postForm(`/won-customers/contracts/${contract.id}/delete`, {}).then(onDone)}
+          onCancel={() => setRemoving(false)}
         />
       )}
-    </form>
+    </>
   );
 }
 
@@ -1373,12 +1363,12 @@ function PayRow({ payment, currency, today, onAsk, onSave, evidence }: {
 /** 6 MRR 관리. 막대는 인식 시작월부터 최대 12개월 — 지난 달은 채워집니다. */
 function RevenueSection({ contract, today }: { contract: Contract; today: string }) {
   const mrr = contract.deal_type === "MRR";
-  /** **MRR 을 나누는 개월수는 계약 개월수가 아니라 플랜 개월수입니다** (2026-09-09).
+  /** **MRR 을 나누는 개월수는 서버가 정한 것**(`plan_months`)을 그대로 씁니다 (2026-09-09).
    *
-   *  여기가 `contract.months`(계약 개월수)였습니다. 바로 아래 「월간 MRR」은
-   *  서버가 나눈 값을 그대로 그리는데, 그 옆의 「공급가 기준」만 이 값으로
-   *  화면이 직접 나눴습니다 — 그래서 계약 날짜를 고치면 **한쪽만 움직였습니다.**
-   *  운영자가 그걸로 잡았습니다. 인식 개월수를 적는 아래 문장도 같은 값을 씁니다. */
+   *  여기가 `contract.months`(계약 개월수)였습니다. 바로 아래 「월간 MRR」은 서버가 나눈
+   *  값을 그대로 그리는데, 그때 옆에 있던 「공급가 기준」(2026-09-22 에 없어졌습니다)만
+   *  이 값으로 화면이 직접 나눴습니다 — 그래서 계약 날짜를 고치면 **한쪽만 움직였습니다.**
+   *  운영자가 그걸로 잡았습니다. 막대 수와 인식 개월수를 적는 아래 문장이 이 값을 씁니다. */
   const months = contract.plan_months || contract.months || 1;
   const base = contract.revenue_from ? `${contract.revenue_from}-01` : contract.starts_on || today;
   const bars = mrr
@@ -1402,12 +1392,8 @@ function RevenueSection({ contract, today }: { contract: Contract; today: string
           {mrr ? <>{money(contract.monthly_revenue, contract.currency)} <span className="muted">/ 월</span></>
                : <span className="muted">결제월에 일시 인식</span>}
         </span>} />
-        <KV k="월간 MRR (공급가 기준)" v={<span className="mono">
-          {/* **서버가 낸 값입니다.** 화면이 나누면 옆 칸과 자가 갈립니다 — 환율을
-              서버가 한 번만 환산하는 것과 같은 이유입니다. */}
-          {mrr ? <>{money(contract.monthly_supply_revenue, contract.currency)} <span className="muted">/ 월</span></>
-               : <span className="muted">결제월에 일시 인식</span>}
-        </span>} />
+        {/* 「월간 MRR (공급가 기준)」이 옆에 있었습니다 — 공급가를 안 쓰기로 하면서
+            (2026-09-22 운영자 지시) 나갔습니다. 남은 MRR 은 서버가 낸 값 그대로입니다. */}
         <KV k="매출 인식 시작 월" v={<span className="mono">
           {!mrr ? <span className="muted">결제월 기준</span>
             : <>{(contract.revenue_from || "").replace("-", ".")}{" "}

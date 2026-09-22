@@ -759,7 +759,8 @@ class TestVatInclusiveAmount:
         self._run(mem_engine)
         columns = {c["name"] for c in inspect(mem_engine).get_columns("client_contracts")}
         assert "amount_excl_vat" not in columns and "vat_included" not in columns
-        assert "vat_applicable" in columns, "공급가가 있는 계약인지를 아는 곳이 이 칸뿐입니다"
+        # 0123 은 이 칸을 안 건드립니다 — 지우는 것은 0127 입니다(아래 TestSupplyPriceIsGone).
+        assert "vat_applicable" in columns
 
         self._run(mem_engine)   # 두 번째 — 조용히 넘어갑니다
         note = self._rows(mem_engine)[2102]["note"]
@@ -835,6 +836,47 @@ class TestPromotedSupplyPriceGetsItsVat:
         self._db(mem_engine, [dict(self.COPIED, client_id=9999, note=None)])
         self._run(mem_engine)
         assert self._amounts(mem_engine)[9999] == 1_566_000
+
+
+class TestSupplyPriceIsGone:
+    """이관 0127 — 공급가가 없어지면서 `vat_applicable` 도 나간다 (2026-09-22 운영자 지시).
+
+    그 칸이 남아 있던 이유는 「공급가라는 것이 있는 계약인가」 하나였습니다. 공급가를
+    아예 안 보여 주기로 했으니 같이 지웁니다. 금액은 한 자리도 안 움직입니다.
+    """
+
+    def _db(self, engine):
+        with engine.begin() as conn:
+            conn.execute(text("""
+                CREATE TABLE client_contracts (
+                    client_id INTEGER, seq INTEGER, currency TEXT,
+                    amount_incl_vat NUMERIC, vat_applicable BOOLEAN)
+            """))
+            conn.execute(text(
+                "INSERT INTO client_contracts VALUES (1108, 1, 'KRW', 11000000, 1)"))
+
+    def _run(self, engine):
+        importlib.import_module(
+            "src.db.migrations.0127_the_supply_price_and_vat_flag_are_gone"
+        ).up(engine)
+
+    def test_the_column_is_gone_and_the_amount_is_not(self, mem_engine):
+        self._db(mem_engine)
+        self._run(mem_engine)
+        columns = {c["name"] for c in inspect(mem_engine).get_columns("client_contracts")}
+        assert "vat_applicable" not in columns
+        assert "amount_incl_vat" in columns
+        with mem_engine.begin() as conn:
+            amount = conn.execute(text("SELECT amount_incl_vat FROM client_contracts")).scalar()
+        assert float(amount) == 11_000_000
+
+        self._run(mem_engine)   # 두 번째 — 조용히 넘어갑니다
+
+    def test_the_model_no_longer_has_the_column(self):
+        """모델에 칸이 남아 있으면 새 DB 는 `create_all` 로 그 칸을 도로 만듭니다."""
+        from src.db.models import ClientContract
+
+        assert "vat_applicable" not in ClientContract.__table__.columns
 
 
 def test_no_migration_compares_a_boolean_to_an_integer():

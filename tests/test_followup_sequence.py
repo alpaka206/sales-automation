@@ -405,25 +405,42 @@ def test_a_misspelled_template_key_shows_on_the_ticket(db, monkeypatch):
     assert view["state"] == "send_1" and view["template_missing"] == "followup_reminder"
 
 
-# ---- 몇 차까지 나갔나 (2026-09-21 운영자 지시: 「1차 리마인더 완료 이런식으로」) ----------
+# ---- 몇 차까지 나갔나 (2026-09-22 운영자 지시: 「리마인더 센트 기본적으로 떠있게(Pendding,
+# Reminder Sent 1 , Reminder Sent 2)」) ---------------------------------------------------
+
+def test_the_chip_is_the_highest_reminder_that_actually_went_out():
+    """순수 함수. 글자는 운영자가 적은 그대로이고, 한 통도 안 나갔으면 「Pending」."""
+    base = _msg(1, days_ago=30)
+    assert fs.reminder_status([]) == "Pending"
+    assert fs.reminder_status([base]) == "Pending"
+    assert fs.reminder_status([base, _msg(2, variant=fs.REMINDER_1, days_ago=20)]) == "Reminder Sent 1"
+    assert fs.reminder_status([base, _msg(2, variant=fs.REMINDER_1, days_ago=20),
+                               _msg(3, variant=fs.REMINDER_2, days_ago=10)]) == "Reminder Sent 2"
+    # SAFE 모드로 「나간」 것은 고객이 받은 것이 없다 — `next_step` 과 같은 기준.
+    assert fs.reminder_status(
+        [base, _msg(2, variant=fs.REMINDER_1, status="test_sent", days_ago=20)]) == "Pending"
+
 
 def test_the_ticket_says_which_reminders_are_done(db):
     conv = _ticket(db, sent_days_ago=30)
+    with db() as session:
+        # 시퀀스가 도는 순간부터 칩이 선다 — 「기본적으로 떠있게」.
+        assert fs.view(session.get(Conversation, conv), _outgoing(db, conv))["reminder"] == "Pending"
     fs.run_followup_sequence_once()
     first = _outgoing(db, conv)[1]
     with db() as session:
-        assert fs.view(session.get(Conversation, conv), _outgoing(db, conv))["done"] == []
+        assert fs.view(session.get(Conversation, conv), _outgoing(db, conv))["reminder"] == "Pending"
 
     _mark_sent(db, first.id, days_ago=5.1)
     with db() as session:
-        assert fs.view(session.get(Conversation, conv), _outgoing(db, conv))["done"] \
-            == ["1차 리마인더 완료"]
+        assert fs.view(session.get(Conversation, conv), _outgoing(db, conv))["reminder"] \
+            == "Reminder Sent 1"
 
     fs.run_followup_sequence_once()
     _mark_sent(db, _outgoing(db, conv)[2].id, days_ago=1)
     with db() as session:
-        assert fs.view(session.get(Conversation, conv), _outgoing(db, conv))["done"] \
-            == ["1차 리마인더 완료", "2차 리마인더 완료"]
+        assert fs.view(session.get(Conversation, conv), _outgoing(db, conv))["reminder"] \
+            == "Reminder Sent 2"
 
 
 @pytest.mark.parametrize("status", ["approved", "send_failed", "test_sent"])
@@ -441,7 +458,7 @@ def test_a_reminder_that_never_reached_the_customer_is_not_done(db, status):
         held.status, held.sent_at = status, _now() - timedelta(days=1)
         session.commit()
     with db() as session:
-        assert fs.view(session.get(Conversation, conv), _outgoing(db, conv))["done"] == []
+        assert fs.view(session.get(Conversation, conv), _outgoing(db, conv))["reminder"] == "Pending"
 
 
 def test_a_closed_ticket_still_says_it_was_chased_twice(db):
@@ -456,4 +473,4 @@ def test_a_closed_ticket_still_says_it_was_chased_twice(db):
     with db() as session:
         view = fs.view(session.get(Conversation, conv), _outgoing(db, conv))
     assert view["state"] == "closed"
-    assert view["done"] == ["1차 리마인더 완료", "2차 리마인더 완료"]
+    assert view["reminder"] == "Reminder Sent 2"

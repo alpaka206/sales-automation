@@ -27,6 +27,10 @@ export type Card = {
   deal_detail: string | null;
   /** 후속 리마인더가 닫았는데 고객이 돌아와 Negotiating 으로 되살아났다 — 빨갛게 섭니다. */
   revived?: boolean;
+  /** `Pending` · `Reminder Sent 1` · `Reminder Sent 2` — 후속 리마인더 시퀀스가 도는 카드에만.
+   *  글자는 티켓 배너와 같은 곳(서버 `followup_sequence.view`)에서 옵니다 (2026-09-22 운영자
+   *  지시: 「리마인더 센트 기본적으로 떠있게」). */
+  reminder?: string | null;
 };
 export type Stage = { key: string; label: string; total: number; cards: Card[] };
 
@@ -258,6 +262,8 @@ export function Board({ stages, manualLogStages, dealDetails = {} }: {
                       <small>{card.email || "-"}</small>
                       <small>문의 #{card.ticket_id || card.conversation_id} · Client ID {card.client_id ?? "—"}</small>
                       <small>{kst(card.last_activity, "md-hm")}</small>
+                      {/* 몇 차까지 재촉했나 — 티켓을 열지 않고도 보이게 (2026-09-22 운영자 지시). */}
+                      {card.reminder && <small><span className="tag">{card.reminder}</span></small>}
                     </Link>
                     {(details || canLog) && (
                       <div className="pipeline-card__tools">
