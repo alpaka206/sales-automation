@@ -22,7 +22,7 @@ class _TestSchema(BaseModel):
 
 
 def _result(text: str) -> LLMResult:
-    return LLMResult(text=text, input_tokens=10, output_tokens=5, model="gemini-2.5-flash")
+    return LLMResult(text=text, input_tokens=10, output_tokens=5, model="gemini-3.5-flash-lite")
 
 
 @patch("src.llm.client.LLMClient._log_event")
@@ -55,10 +55,24 @@ def test_schema_retry_on_bad_json(mock_gemini, mock_log, client: LLMClient) -> N
 
 @patch("src.llm.client.LLMClient._log_event")
 @patch("src.llm.client.call_gemini")
-def test_explicit_draft_thinking_budget_survives_schema_retry(mock_gemini, mock_log, client):
+def test_explicit_draft_thinking_level_survives_schema_retry(mock_gemini, mock_log, client):
     mock_gemini.side_effect = [_result("not json"), _result('{"greeting": "fixed"}')]
-    client.complete("test/hello", schema=_TestSchema, tier="pro", thinking_budget=1024)
-    assert [call.kwargs["thinking_budget"] for call in mock_gemini.call_args_list] == [1024, 1024]
+    client.complete("test/hello", schema=_TestSchema, tier="pro", thinking_level="LOW")
+    assert [call.kwargs["thinking_level"] for call in mock_gemini.call_args_list] == ["LOW", "LOW"]
+
+
+@patch("src.llm.client.LLMClient._log_event")
+@patch("src.llm.client.call_gemini")
+def test_every_tier_sends_a_gemini_3_thinking_level_and_never_a_budget(mock_gemini, mock_log, client):
+    """2026-09-23 전환: Gemini 3 은 `thinking_level` 을 받는다. 숫자 `thinking_budget` 이 섞여 가면
+    400 이고, 아무것도 안 보내면 모델 기본값(3.5 Flash 는 MEDIUM)이 출력 한도를 먹는다."""
+    mock_gemini.return_value = _result("ok")
+    client.complete("test/hello", tier="flash")
+    client.complete("test/hello", tier="pro")
+    client.search("test/hello", tier="pro")
+    for call in mock_gemini.call_args_list:
+        assert call.kwargs["thinking_level"] == "MINIMAL"
+        assert "thinking_budget" not in call.kwargs
 
 
 @patch("src.llm.client.LLMClient._log_event")

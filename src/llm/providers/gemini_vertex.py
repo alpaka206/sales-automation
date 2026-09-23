@@ -85,7 +85,7 @@ def call_gemini(
     max_tokens: int = 2000,
     system: str | None = None,
     model: str | None = None,
-    thinking_budget: int | None = None,
+    thinking_level: str | None = None,
     grounded: bool = False,
 ) -> LLMResult:
     """Generate content via Gemini on Vertex AI and return an LLMResult.
@@ -94,12 +94,13 @@ def call_gemini(
     (``settings.GEMINI_MODEL``). Callers pass the pro-tier id for
     quality-critical drafting.
 
-    ``thinking_budget`` caps the "thinking" tokens of Gemini 2.5 models. This
-    matters because thinking tokens are drawn from the SAME ``max_output_tokens``
-    budget — left uncapped, a long internal reasoning trace can consume the whole
-    budget and truncate (or empty) the actual answer, which then fails JSON
-    parsing. Pass ``0`` to disable thinking (flash), a small int to bound it
-    (pro has a hard minimum of 128), or ``None`` to leave the model default.
+    ``thinking_level`` (``"MINIMAL"``, ``"LOW"``, ``"MEDIUM"``, ``"HIGH"``) bounds the
+    "thinking" of Gemini 3 models. It matters because thinking tokens are drawn
+    from the SAME ``max_output_tokens`` budget — left at the model default, a long
+    internal reasoning trace can consume the whole budget and truncate (or empty)
+    the actual answer, which then fails JSON parsing. ``None`` leaves the model
+    default. Gemini 2.x models reject ``thinking_level``, which is why startup
+    refuses 2.x model ids.
     """
     from google.genai import types
 
@@ -124,11 +125,11 @@ def call_gemini(
         config.automatic_function_calling = types.AutomaticFunctionCallingConfig(disable=True)
     except Exception:  # pragma: no cover - depends on SDK version
         logger.debug("AutomaticFunctionCallingConfig unsupported by SDK; leaving the default.")
-    if thinking_budget is not None:
+    if thinking_level is not None:
         # Guard against SDK variants that don't expose ThinkingConfig — a missing
         # cap is non-fatal, so degrade gracefully rather than crash the call.
         try:
-            config.thinking_config = types.ThinkingConfig(thinking_budget=thinking_budget)
+            config.thinking_config = types.ThinkingConfig(thinking_level=thinking_level)
         except Exception:  # pragma: no cover - depends on SDK version
             logger.debug("ThinkingConfig unsupported by SDK; proceeding without a thinking cap.")
     if grounded:
@@ -146,10 +147,14 @@ def call_gemini(
 
     text = (resp.text or "").strip()
     usage = getattr(resp, "usage_metadata", None)
+    # 생각 토큰은 `candidates_token_count` 에 안 들어가고 따로 옵니다 — 그런데 청구는 출력 단가로
+    # 됩니다. 안 적으면 「출력이 얼마였나」를 볼 때 청구액의 일부가 통째로 안 보입니다.
+    thoughts = getattr(usage, "thoughts_token_count", None)
     return LLMResult(
         text=text,
         input_tokens=getattr(usage, "prompt_token_count", None) or 0,
         output_tokens=getattr(usage, "candidates_token_count", None) or 0,
         model=model,
         cache_read_input_tokens=getattr(usage, "cached_content_token_count", None) or 0,
+        thinking_tokens=thoughts if isinstance(thoughts, int) else 0,
     )

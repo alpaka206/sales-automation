@@ -519,3 +519,13 @@ def test_the_link_replaces_the_line_it_found_and_does_not_move_to_the_end():
     assert out.index("[미팅 링크]") < out.index("감사합니다.")
     assert out.endswith("감사합니다.")
     assert "\n\n\n" not in out
+
+
+def test_the_first_reply_pitches_a_promotion_only_when_asked_about_price():
+    """2026-09-23 Gemini 3 전환 때 잡혔다: 조건 없는 「프로모션을 언급하고 미팅을 제안하세요」를
+    3.5 Flash 가 글자 그대로 따라 SRT·환불 문의에까지 영업 문장을 붙였다(유료 짝 비교 28건 중 13~15건).
+    가격을 물었을 때만이라는 조건이 이 문장에 남아 있어야 한다."""
+    from src.agents.inbound import _PRICING_RULE_FIRST
+
+    assert "물었을 때만" in _PRICING_RULE_FIRST
+    assert "프로모션이나 미팅 이야기를 꺼내지 말고" in _PRICING_RULE_FIRST

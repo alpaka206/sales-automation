@@ -26,12 +26,15 @@ logger = logging.getLogger(__name__)
 
 T = TypeVar("T", bound=BaseModel)
 
-# Cap Gemini 2.5 "thinking" tokens per tier. Thinking is drawn from the same
-# max_output_tokens budget, so an uncapped reasoning trace can truncate the
-# answer and break JSON parsing. flash → 0 (off; fast/cheap, plenty for
-# classification/scoring/routing/drafting); pro → 128 (its hard minimum; keeps
-# light reasoning for customer-facing copy without starving the output).
-_THINKING_BUDGET_BY_TIER = {"flash": 0, "pro": 128}
+# 「생각(thinking)」 양을 자리마다 정해서 보냅니다. 생각 토큰은 **출력 한도(max_output_tokens)
+# 안에서** 쓰이고 출력 단가로 청구됩니다 — 정하지 않으면 모델 기본값(3.5 Flash 는 MEDIUM)으로
+# 생각하다가 한도를 다 먹고 **빈 답이나 잘린 JSON** 을 냅니다.
+#
+# Gemini 3 세대는 숫자(`thinking_budget`)가 아니라 단계(`thinking_level`: MINIMAL·LOW·MEDIUM·HIGH)를
+# 받습니다. 2.5 시절 값은 flash 0(끔)·pro 128(그 모델의 최소)이었고, 가장 가까운 것이 둘 다 MINIMAL
+# 입니다. 2026-09-23 실측: `gemini-3.5-flash` 를 LOW 로 두면 짧은 JSON 요청에서 생각이 한도 200 중
+# 190 을 먹어 답이 잘렸고, 3.5 Flash-Lite 는 MINIMAL 에서 언어 판별(한도 8)이 생각 0 으로 정상이었습니다.
+_THINKING_LEVEL_BY_TIER = {"flash": "MINIMAL", "pro": "MINIMAL"}
 
 
 class LLMError(RuntimeError):
@@ -120,7 +123,7 @@ class LLMClient:
         tier: str = "flash",
         stage: str | None = None,
         policy_snapshot=None,
-        thinking_budget: int | None = None,
+        thinking_level: str | None = None,
     ) -> str | T:
         """Render a prompt and call Gemini.
 
@@ -136,8 +139,8 @@ class LLMClient:
         「필요한 곳에만 준다」가 기본값이라, 새 호출자가 아무것도 안 해도 안 실립니다.
         """
         model = settings.gemini_model_for.get(tier, settings.GEMINI_MODEL)
-        if thinking_budget is None:
-            thinking_budget = _THINKING_BUDGET_BY_TIER.get(tier, 0)
+        if thinking_level is None:
+            thinking_level = _THINKING_LEVEL_BY_TIER.get(tier, "MINIMAL")
         if policy_snapshot is not None:
             if stage != policy_snapshot.stage:
                 raise ValueError("Policy snapshot and reply stage differ")
@@ -155,7 +158,7 @@ class LLMClient:
             max_tokens=max_tokens,
             system=system,
             model=model,
-            thinking_budget=thinking_budget,
+            thinking_level=thinking_level,
         )
 
         if schema is None:
@@ -178,7 +181,7 @@ class LLMClient:
                 max_tokens=max_tokens,
                 system=system,
                 model=model,
-                thinking_budget=thinking_budget,
+                thinking_level=thinking_level,
             )
             try:
                 return schema.model_validate_json(_strip_code_fences(text))
@@ -199,14 +202,14 @@ class LLMClient:
         structured ``complete`` call when they need a parsed result.
         """
         model = settings.gemini_model_for.get(tier, settings.GEMINI_MODEL)
-        thinking_budget = _THINKING_BUDGET_BY_TIER.get(tier, 0)
+        thinking_level = _THINKING_LEVEL_BY_TIER.get(tier, "MINIMAL")
         prompt = load_prompt(prompt_name, variables, include_rules=False)
         return self._dispatch(
             prompt,
             max_tokens=max_tokens,
             system=None,
             model=model,
-            thinking_budget=thinking_budget,
+            thinking_level=thinking_level,
             grounded=True,
         )
 
@@ -218,7 +221,7 @@ class LLMClient:
         max_tokens: int,
         system: str | None = None,
         model: str | None = None,
-        thinking_budget: int | None = None,
+        thinking_level: str | None = None,
         grounded: bool = False,
     ) -> str:
         try:
@@ -227,7 +230,7 @@ class LLMClient:
                 max_tokens,
                 system=system,
                 model=model,
-                thinking_budget=thinking_budget,
+                thinking_level=thinking_level,
                 grounded=grounded,
             )
         except Exception as first_err:
@@ -240,7 +243,7 @@ class LLMClient:
                 max_tokens,
                 system=system,
                 model=model,
-                thinking_budget=thinking_budget,
+                thinking_level=thinking_level,
                 grounded=grounded,
             )
 
@@ -250,7 +253,7 @@ class LLMClient:
         max_tokens: int,
         system: str | None = None,
         model: str | None = None,
-        thinking_budget: int | None = None,
+        thinking_level: str | None = None,
         grounded: bool = False,
     ) -> str:
         llm_result = call_gemini(
@@ -258,7 +261,7 @@ class LLMClient:
             max_tokens=max_tokens,
             system=system,
             model=model,
-            thinking_budget=thinking_budget,
+            thinking_level=thinking_level,
             grounded=grounded,
         )
 

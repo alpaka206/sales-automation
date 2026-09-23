@@ -23,8 +23,14 @@ class Settings(BaseSettings):
     #   GEMINI_MODEL_PRO  → high-quality "pro" tier for customer-facing drafting
     #                       (inbound reply drafts).
     # Code picks the tier per call via LLMClient.complete(..., tier="flash"|"pro").
-    GEMINI_MODEL: str = "gemini-2.5-flash"
-    GEMINI_MODEL_PRO: str = "gemini-2.5-pro"
+    #
+    # **Gemini 3 세대만 씁니다** (2026-09-23 운영자 지시: 「2.5 아예 안쓰게」). 2.5 두 모델은
+    # 2026-10-20 에 종료되고, 이 둘이 Google 이 지정한 공식 대체입니다(2.5-flash → 3.5-flash-lite,
+    # 2.5-pro → 3.5-flash — 3 세대에는 GA 인 Pro 가 없습니다). 2.x 이름을 넣으면 서버가 안 뜹니다
+    # (`api.main.validate_startup_settings`): 생각 설정을 3 세대 방식(`thinking_level`)으로만 보내서,
+    # 2.x 모델은 호출마다 400 이 되기 때문입니다.
+    GEMINI_MODEL: str = "gemini-3.5-flash-lite"
+    GEMINI_MODEL_PRO: str = "gemini-3.5-flash"
     # Service-account JSON (full contents as a string). No API key is used.
     GOOGLE_CREDENTIALS_JSON: str = ""
     # Project falls back to the JSON's project_id when left empty.

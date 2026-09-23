@@ -14,6 +14,24 @@ PERSO Inbound is a FastAPI workflow for inbound inquiry handling and customer op
 - 초안은 질문별 AnswerPoint를 코드에서 본문으로 조합한다. **근거 검사(원문 인용·숫자 기간·일부 허위 상태)는 표시만 하고 막지 않는다** (2026-09-22 운영자: 「미완성이라도 사람한테 뜨면 좋겠는데. 그래야 내용보고 후에 고도화를 하든 하지」): 재작성 1회 뒤에도 걸리면 초안은 `pending_approval` 로 서고 `reply_context` Event 의 `limited_evidence_checks` 가 `FAIL` + 걸린 항목을 들며, 티켓 화면이 「근거 검사에 걸린 초안입니다」 배너로 그것을 적는다(`ticket.evidence`). 그 전날(09-21)에는 `draft_failed` 로 죽였다 — 빈 카드는 아무것도 말해 주지 않았다. 기간 검사는 처리·환불·이내 같은 절차 문장에만 걸고 날짜와 미팅 길이는 안 본다. 검사 PASS는 의미 정확성 인증이 아니다.
   - **`draft_failed` 가 되는 것**은 이제 이것뿐이다: 분류·라우팅·초안 모델 호출 실패(스키마를 두 번 못 맞춤 포함) · 정책/대화 조회 실패 · 생성 중 정책이 바뀜 · 생성 중 고객 메시지가 새로 옴(`customer_turns_since`) · `answer_points` 가 전부 비어 본문을 만들 수 없음(`DraftEvidenceError`, 이것만 durable job 도 재시도 없이 dead). 나머지는 백오프로 8회 재시도하고 그 사이 카드는 `draft_failed` 로 보인다. 그 상태에서 운영자가 할 수 있는 것은 「초안 다시 쓰기」와 「메일 발송」(새 수동 초안)이다. [실제 Gemini 개발셋 결과](docs/policy-response/runs/2026-09-21-live/results.md)와 [후속 ADR](docs/adr/2026-09-21-grounded-draft-composition.md)을 참조한다.
 
+## 2026-09-23 Gemini 3 전환 (2.5 는 안 쓴다)
+
+- **모델은 `gemini-3.5-flash-lite`(flash 자리) · `gemini-3.5-flash`(pro 자리)** 다 (운영자: 「2.5 아예 안쓰게」).
+  2.5 두 모델은 Google 공식 수명 페이지상 **2026-10-20 종료**이고, 이 둘이 공식 대체다(3 세대에는 GA 인 Pro 가 없다).
+  2.x 이름이 설정에 남아 있으면 **서버가 안 뜬다**(`api.main.validate_startup_settings`) — Render 대시보드의
+  `GEMINI_MODEL`·`GEMINI_MODEL_PRO` 가 render.yaml 보다 이기므로 거기에 옛 값이 남은 채 배포되면 `/healthz` 실패로
+  이전 버전이 계속 돈다. 조용히 모든 초안이 `draft_failed` 로 서는 것보다 낫다.
+- **생각 설정은 `thinking_level` 이다** (`llm/client._THINKING_LEVEL_BY_TIER` = 전부 MINIMAL, 초안만
+  `inbound._DRAFT_THINKING_LEVEL` = LOW). 3 세대는 숫자 `thinking_budget` 을 옛 방식으로 보고, 설정을 안 보내면 모델
+  기본값(3.5 Flash 는 MEDIUM)이 **출력 한도를 먹어** 빈 답·잘린 JSON 이 된다 — 실측: LOW 에서 한도 200 중 190 이 생각.
+  생각 토큰은 `LLMResult.thinking_tokens` 에 따로 적힌다(출력 단가로 청구된다).
+- **전환 때 드러난 지시문 버그**: `_PRICING_RULE_FIRST` 가 모든 첫 회신에 「스페셜 프로모션을 언급하고 미팅을
+  제안하라」를 조건 없이 붙였다. 2.5 Pro 는 알아서 가격 문의에만 적용했고 3.5 Flash 는 글자 그대로 따라 SRT·환불
+  문의에도 영업 문장을 붙였다. **가격을 물었을 때만**으로 좁혔다(`tests/test_reply_style.py` 가 고정).
+- **근거는 유료 블라인드 짝 비교다** (`scripts/evaluate_policy_response.py`, 합성 문의 14건 × 2회, 원자료
+  `tmp/model-switch-2026-09-23/` — git 제외). 지시문 수정 뒤: 2.5 평균 4.07·실패 2 / 3.x MINIMAL 4.39·실패 0 /
+  **3.x 초안 LOW 4.50·실패 0·지어낸 문장 0**. 합성 자료라 회사 정책 원문의 정확도를 증명하지는 않는다.
+
 ## Invariants
 
 - **External-write safety (대전제, top priority).** `LIVE_EXTERNAL_WRITES` defaults to `false` (SAFE). While safe: HubSpot writes, Google Sheets writes, and outbound email delivery are blocked. The application never substitutes an internal test recipient. Reads stay on. Enforced in `src/common/safe_mode.py`; guaranteed behavior is pinned by `tests/test_safe_mode.py`. Any new external-write/send path must use the same gate and add a safety test.
@@ -865,8 +883,9 @@ PERSO Inbound is a FastAPI workflow for inbound inquiry handling and customer op
       「리마인더 센트 기본적으로 떠있게(Pending, Reminder Sent 1, Reminder Sent 2)」 — 그 전날의
       「1차 리마인더 완료」를 대신한다). 칩은 **언제나 하나**이고 시퀀스가 살아 있는 티켓에는 기본으로
       `Pending` 이 선다(`view()["reminder"]`, `reminder_status`). 보드 카드도 같은 `view()` 로 같은
-      글자를 단다(`ui_api._reminders`, 페이지당 메시지 조회 한 번). **운영에는 `FOLLOWUP_SEQUENCE_SINCE`
-      가 비어 있어** 시퀀스도 이 칩도 아직 안 뜬다 — 그 값을 넣는 것이 켜는 것이다. 「보냈다」의 기준은 `next_step` 과 같다(`sent` + `sent_at`): 메일
+      글자를 단다(`ui_api._reminders`, 페이지당 메시지 조회 한 번). **운영에는 2026-09-22 에
+      `FOLLOWUP_SEQUENCE_SINCE=2026-09-22` 를 넣었다**(Render 대시보드에만 있고 `render.yaml` 에는 없다) —
+      그 날짜 뒤에 콘솔에서 나간 회신부터 시퀀스와 이 칩이 선다. 그 값을 비우는 것이 끄는 것이다. 「보냈다」의 기준은 `next_step` 과 같다(`sent` + `sent_at`): 메일
     스위치가 내려가 `test_sent` 로 남은 행을 「완료」로 적으면 고객은 한 통도 못 받았는데
     화면은 갔다고 말한다.
     - **소통 히스토리 줄이 없으면 아무 데도 안 보인다.** 발송 뒤 정리가 남기던 진행 기록은

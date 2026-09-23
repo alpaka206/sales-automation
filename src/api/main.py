@@ -90,6 +90,13 @@ def validate_startup_settings() -> None:
             )
     if public_host and public_url and public_url.scheme != "https":
         errors.append("PUBLIC_BASE_URL must use https in production")
+    # **Gemini 2.x 는 이 코드에서 못 돈다** (2026-09-23 전환). 생각 설정을 3 세대 방식
+    # (`thinking_level`)으로만 보내므로 2.x 이름이 남아 있으면 모든 AI 호출이 400 이 되고, 그건
+    # 초안이 전부 `draft_failed` 로 서는 모양으로만 드러납니다. Render 대시보드에 옛 값이 남은 채
+    # 배포되면 여기서 서버가 안 뜨고 → `/healthz` 실패 → 이전 버전이 계속 돕니다. 그 편이 낫습니다.
+    for name, model in (("GEMINI_MODEL", settings.GEMINI_MODEL), ("GEMINI_MODEL_PRO", settings.GEMINI_MODEL_PRO)):
+        if model.strip().lower().startswith(("gemini-1", "gemini-2")):
+            errors.append(f"{name}={model} is a retired Gemini generation; use a Gemini 3 model id")
     if errors:
         raise RuntimeError("Unsafe startup configuration: " + "; ".join(errors))
 

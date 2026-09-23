@@ -180,12 +180,13 @@ def run_live(args, settings) -> int:
             budget_used += 1
             started = time.monotonic()
             record = {"run": current_run, "model": kw.get("model"),
-                      "max_tokens": kw.get("max_tokens"), "thinking_budget": kw.get("thinking_budget"),
+                      "max_tokens": kw.get("max_tokens"), "thinking_level": kw.get("thinking_level"),
                       "grounded": kw.get("grounded", False)}
             try:
                 result = original_call(*a, **kw)
                 record.update(status="PASS", input_tokens=result.input_tokens,
-                              candidate_output_tokens=result.output_tokens)
+                              candidate_output_tokens=result.output_tokens,
+                              thinking_tokens=getattr(result, "thinking_tokens", 0))
                 return result
             except Exception as exc:
                 record.update(status="FAIL", error_type=type(exc).__name__, code=getattr(exc, "code", None))
@@ -205,8 +206,8 @@ def run_live(args, settings) -> int:
 
             def complete(self, name, variables=None, **kwargs):
                 self.prompts.append({"name": name, "variables": copy.deepcopy(variables)})
-                if name == "inbound/draft_reply" and args.draft_thinking_budget is not None:
-                    kwargs["thinking_budget"] = args.draft_thinking_budget
+                if name == "inbound/draft_reply" and args.draft_thinking_level is not None:
+                    kwargs["thinking_level"] = args.draft_thinking_level
                 if self.arm == "all" and name == "inbound/select_docs":
                     # Existing empty-selection fallback supplies the same authorized candidates.
                     return SelectDocsResult(slugs=[], reasoning="evaluation all-candidates arm")
@@ -225,7 +226,7 @@ def run_live(args, settings) -> int:
                                                    "src/llm/client.py", "src/llm/providers/gemini_vertex.py",
                                                    "src/llm/prompts/inbound/draft_reply.md", __file__.replace(str(ROOT) + os.sep, "").replace(os.sep, "/"))}
         manifest["command"] = [sys.executable, *sys.argv]
-        manifest["draft_thinking_budget_override"] = args.draft_thinking_budget
+        manifest["draft_thinking_level_override"] = args.draft_thinking_level
         manifest["region"] = settings.GOOGLE_CLOUD_LOCATION
         write_json(output / "manifest.json", manifest)
         try:
@@ -309,7 +310,7 @@ def main() -> int:
     parser.add_argument("--repeats", type=int, default=1)
     parser.add_argument("--arms", nargs="+", choices=("router", "all"), default=["router", "all"])
     parser.add_argument("--max-calls", type=int, default=120)
-    parser.add_argument("--draft-thinking-budget", type=int)
+    parser.add_argument("--draft-thinking-level", choices=("MINIMAL", "LOW", "MEDIUM", "HIGH"))
     parser.add_argument("--authorized-by", help="누가 이 유료 실평가를 승인했는지 — manifest 에 그대로 적힌다")
     args = parser.parse_args()
     isolate_writes()

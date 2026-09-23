@@ -80,14 +80,14 @@ def test_call_gemini_basic(fake_google) -> None:
         s.GOOGLE_CREDENTIALS_JSON = _CREDS_JSON
         s.GOOGLE_CLOUD_PROJECT = ""
         s.GOOGLE_CLOUD_LOCATION = "global"
-        s.GEMINI_MODEL = "gemini-2.5-flash"
+        s.GEMINI_MODEL = "gemini-3.5-flash-lite"
         result = call_gemini("Hello world")
 
     assert result.text == "Test response"
     assert result.input_tokens == 10
     assert result.output_tokens == 5
     assert result.cache_read_input_tokens == 3
-    assert result.model == "gemini-2.5-flash"
+    assert result.model == "gemini-3.5-flash-lite"
 
 
 def test_call_gemini_uses_vertex_and_json_project(fake_google) -> None:
@@ -99,7 +99,7 @@ def test_call_gemini_uses_vertex_and_json_project(fake_google) -> None:
         s.GOOGLE_CREDENTIALS_JSON = _CREDS_JSON
         s.GOOGLE_CLOUD_PROJECT = ""        # fall back to project_id in the JSON
         s.GOOGLE_CLOUD_LOCATION = "us-central1"
-        s.GEMINI_MODEL = "gemini-2.5-flash"
+        s.GEMINI_MODEL = "gemini-3.5-flash-lite"
         call_gemini("Hello", system="You are helpful", max_tokens=512)
 
     client_kwargs = fake_google.Client.call_args.kwargs
@@ -126,7 +126,7 @@ def test_call_gemini_none_text(fake_google) -> None:
         s.GOOGLE_CREDENTIALS_JSON = _CREDS_JSON
         s.GOOGLE_CLOUD_PROJECT = ""
         s.GOOGLE_CLOUD_LOCATION = "global"
-        s.GEMINI_MODEL = "gemini-2.5-flash"
+        s.GEMINI_MODEL = "gemini-3.5-flash-lite"
         result = call_gemini("Hi")
 
     assert result.text == ""

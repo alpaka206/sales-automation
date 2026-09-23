@@ -174,6 +174,29 @@ def test_startup_rejects_multiple_in_process_workers(monkeypatch) -> None:
         validate_startup_settings()
 
 
+@pytest.mark.parametrize("name", ["GEMINI_MODEL", "GEMINI_MODEL_PRO"])
+def test_startup_rejects_a_retired_gemini_generation(monkeypatch, name) -> None:
+    """2026-09-23: 생각 설정을 Gemini 3 방식으로만 보낸다 — 2.x 이름이 Render 대시보드에 남은 채
+    배포되면 모든 AI 호출이 400 이 되고 초안이 전부 draft_failed 로 선다. 서버가 안 뜨는 편이 낫다."""
+    monkeypatch.setattr(settings, "WEB_CONCURRENCY", 1)
+    monkeypatch.setattr(settings, "APP_HOST", "127.0.0.1")
+    monkeypatch.setattr(settings, "AUTH_MODE", "basic")
+    monkeypatch.setattr(settings, name, "gemini-2.5-pro")
+    with pytest.raises(RuntimeError, match=f"{name}=gemini-2.5-pro"):
+        validate_startup_settings()
+
+
+def test_startup_accepts_the_default_gemini_3_models(monkeypatch) -> None:
+    monkeypatch.setattr(settings, "WEB_CONCURRENCY", 1)
+    monkeypatch.setattr(settings, "APP_HOST", "127.0.0.1")
+    monkeypatch.setattr(settings, "AUTH_MODE", "basic")
+    monkeypatch.setattr(settings, "GEMINI_MODEL", "gemini-3.5-flash-lite")
+    monkeypatch.setattr(settings, "GEMINI_MODEL_PRO", "gemini-3.5-flash")
+    monkeypatch.setattr(settings, "PUBLIC_BASE_URL", "")
+    monkeypatch.setattr(settings, "GOOGLE_SHEETS_OAUTH_REFRESH_TOKEN", "")
+    validate_startup_settings()
+
+
 def test_startup_rejects_public_basic_without_password(monkeypatch) -> None:
     monkeypatch.setattr(settings, "WEB_CONCURRENCY", 1)
     monkeypatch.setattr(settings, "APP_HOST", "0.0.0.0")

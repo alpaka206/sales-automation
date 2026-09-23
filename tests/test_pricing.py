@@ -16,7 +16,7 @@ def test_estimate_tokens_basic() -> None:
 
 
 def test_estimate_cost_known_model() -> None:
-    cost = estimate_cost("gemini-2.5-flash", input_tokens=1000, output_tokens=500)
+    cost = estimate_cost("gemini-3.5-flash-lite", input_tokens=1000, output_tokens=500)
     expected = (1000 * 0.30 + 500 * 2.50) / 1_000_000
     assert abs(cost - expected) < 1e-9
 

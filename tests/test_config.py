@@ -13,7 +13,7 @@ def test_defaults() -> None:
     with patch.dict(os.environ, {}, clear=True):
         s = Settings(_env_file=None)
     assert s.LLM_PROVIDER == "gemini_vertex"
-    assert s.GEMINI_MODEL == "gemini-2.5-flash"
+    assert s.GEMINI_MODEL == "gemini-3.5-flash-lite"
     assert s.LIVE_EXTERNAL_WRITES is False
     assert s.DAILY_SEND_LIMIT == 400
     assert s.APP_PORT == 8000

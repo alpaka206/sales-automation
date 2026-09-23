@@ -89,12 +89,25 @@ _FOLLOWUP_RULE_ELABORATE = (
 # Pricing guidance handed to the draft prompt. The FIRST reply must not state any
 # amount (a hard rule also enforced by strip_price_sentences); later replies may
 # quote real knowledge-base prices.
+#
+# **프로모션·미팅 제안은 가격을 물었을 때만** (2026-09-23). 이 문장이 조건 없이 「언급하고 …
+# 제안하세요」였을 때 Gemini 2.5 Pro 는 알아서 가격 문의에만 적용했지만, 3.5 Flash 는 글자 그대로
+# 따라 SRT·환불·계정 문의에까지 「스페셜 프로모션을 안내드릴 수 있으니 미팅을…」을 끼워 넣었다
+# (유료 짝 비교 28건 중 13~15건, `tmp/model-switch-2026-09-23`). 운영자 정책 원문에도 첫 회신마다
+# 프로모션을 붙이라는 규칙은 없다 — 규칙은 「첫 회신에 금액을 적지 않는다」 하나다.
 _PRICING_RULE_FIRST = (
     "이번이 이 고객에게 보내는 **첫 회신**입니다. 금액·가격·요금(숫자)을 절대 적지 "
-    "마세요. 대신 '고객 상황에 맞는 스페셜 프로모션을 안내드릴 수 있다'는 정도만 "
-    "언급하고, 구체적인 플랜과 금액은 짧은 미팅이나 통화에서 안내하겠다고 자연스럽게 "
-    "제안하세요."
+    "마세요. **고객이 가격·플랜·요금을 물었을 때만** '고객 상황에 맞는 스페셜 프로모션을 "
+    "안내드릴 수 있다'는 정도로 언급하고, 구체적인 플랜과 금액은 짧은 미팅이나 통화에서 "
+    "안내하겠다고 제안하세요. 가격을 묻지 않은 문의(기능·지원·환불·계정 등)에는 "
+    "프로모션이나 미팅 이야기를 꺼내지 말고 물은 것에만 답하세요."
 )
+# **고객에게 나가는 초안만 LOW 로 생각한다** (2026-09-23 유료 블라인드 짝 비교, `tmp/model-switch-2026-09-23`).
+# 같은 문의 14건 × 2회를 가린 채 채점했을 때 3.5 Flash 는 MINIMAL 이 평균 4.39·실패 0, LOW 가 4.50·실패 0·
+# 지어낸 문장 0 이었다(2.5 Pro 는 4.07·실패 2). 초안 한 건의 생각 토큰은 평균 36개라 한도 4000 을 위협하지
+# 않는다. 다른 호출은 MINIMAL 그대로다 — LOW 는 짧은 한도(200)에서 생각이 190 을 먹은 것을 봤다.
+_DRAFT_THINKING_LEVEL = "LOW"
+
 _PRICING_RULE_NORMAL = (
     "가격·플랜 문의면 고객 사용 사례에 맞는 플랜을 **추천**하되, 단가나 구체적인 금액 "
     "숫자는 본문에 쓰지 마세요. 참고 문서에 금액표가 있어도 그 숫자는 어느 플랜을 권할지 "
@@ -1144,6 +1157,7 @@ class InboundAgent:
         for attempt in range(2):
             draft = self.llm.complete(
                 "inbound/draft_reply", draft_fields, schema=GroundedDraftResult, tier="pro", max_tokens=4000,
+                thinking_level=_DRAFT_THINKING_LEVEL,
             # **회사 규칙이 실리는 유일한 호출입니다** (2026-09-10). 「첫 회신에만」·
             # 「그 이후 회신에」 문서가 여기서 갈립니다. 나머지 호출(분류·라우팅·요약·
             # 번역)은 `stage` 를 안 주므로 규칙을 아예 안 받습니다.
