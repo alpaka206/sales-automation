@@ -34,6 +34,41 @@ export type Card = {
 };
 export type Stage = { key: string; label: string; total: number; cards: Card[] };
 
+/** 카드 모서리의 태그 한 장 — **Deal Detail 과 후속 리마인더가 같은 모양**이다 (2026-09-28 운영자
+ *  지시: 「closed won 이나 lost 의 deal detail 뜨는 것처럼, 클릭은 못 하도록」). 고를 것(`options`)이
+ *  있으면 그 자리에서 바꾸는 `select`, 없으면 같은 모양의 글자다 — 모양은 하나이고 누를 수 있는지만
+ *  다르다. 드래그는 막는다: 열려던 목록이 카드를 끌고 간다. */
+function CardTag({ value, tone, title, placeholder, options, onPick }: {
+  value: string;
+  tone?: "won" | "lost" | "info";
+  title: string;
+  placeholder?: string;
+  options?: string[];
+  onPick?: (next: string) => void;
+}) {
+  const className = `pipeline-card__tag${tone ? ` pipeline-card__tag--${tone}` : ""}`;
+  if (!options || !onPick) {
+    return <span className={className} title={title}>{value}</span>;
+  }
+  return (
+    <select
+      className={className}
+      draggable={false}
+      value={value}
+      title={title}
+      aria-label={title}
+      onMouseDown={(event) => event.stopPropagation()}
+      onDragStart={(event) => { event.preventDefault(); event.stopPropagation(); }}
+      onChange={(event) => onPick(event.target.value)}
+    >
+      <option value="">{placeholder}</option>
+      {options.map((option) => (
+        <option key={option} value={option}>{option}</option>
+      ))}
+    </select>
+  );
+}
+
 type Page = { cards: Card[]; next_offset: number; has_more: boolean };
 
 /** 카드 한 장을 다른 열로 옮긴 결과. 열 머리의 수(total)도 같이 맞춘다 — 카드는 옮겨졌는데
@@ -219,12 +254,17 @@ export function Board({ stages, manualLogStages, dealDetails = {} }: {
                 {cards.length === 0 && (
                   <div className="kanban-empty">여기로 카드를 옮길 수 있습니다.</div>
                 )}
-                {cards.map((card) => (
+                {cards.map((card) => {
+                  // 모서리 태그는 **한 장**이다 — 카드 본문 폭(약 200px)에 두 장과 「+」가 한 줄로 안 들어간다.
+                  // 그 열에서 고를 것(Won Type · Lost Reason)이 있으면 그 태그가 서고, 없으면 후속 리마인더
+                  // 단계가 같은 자리에 선다. 시퀀스가 닫은 Lost 카드의 「Reminder Sent 2」는 티켓 배너에 있다.
+                  const reminder = !details && card.reminder ? card.reminder : null;
+                  return (
                   <article
                     key={card.conversation_id}
                     className={`pipeline-card${canLog ? " pipeline-card--logged" : ""}${
                       card.revived ? " pipeline-card--revived" : ""}${
-                      details ? " pipeline-card--deal" : ""
+                      details || reminder ? " pipeline-card--tagged" : ""
                     }${
                       dragging?.conversation_id === card.conversation_id ? " is-dragging" : ""
                     }`}
@@ -262,48 +302,40 @@ export function Board({ stages, manualLogStages, dealDetails = {} }: {
                       <small>{card.email || "-"}</small>
                       <small>문의 #{card.ticket_id || card.conversation_id} · Client ID {card.client_id ?? "—"}</small>
                       <small>{kst(card.last_activity, "md-hm")}</small>
-                      {/* 몇 차까지 재촉했나 — 티켓을 열지 않고도 보이게 (2026-09-22 운영자 지시). */}
-                      {card.reminder && <small><span className="tag">{card.reminder}</span></small>}
                     </Link>
-                    {(details || canLog) && (
+                    {(details || reminder || canLog) && (
                       <div className="pipeline-card__tools">
                         {/* 목업 그대로: 제목 옆의 태그입니다. 태그가 곧 고르개인 이유는
                             이 화면에서 값을 정하는 사람과 읽는 사람이 같기 때문입니다 —
                             읽으려고 카드를 열고 고치려고 또 여는 것이 아니라, 보이는
-                            자리에서 바꿉니다. `select` 를 쓰므로 키보드로도 됩니다.
-                            드래그는 막습니다: 열려던 목록이 카드를 끌고 갑니다. */}
+                            자리에서 바꿉니다. `select` 를 쓰므로 키보드로도 됩니다. */}
                         {details && (
-                          <select
-                            className={`pipeline-card__deal${
-                              card.deal_detail
-                                ? ` pipeline-card__deal--${stage.key === "won" ? "won" : "lost"}`
-                                : ""
-                            }`}
-                            draggable={false}
+                          <CardTag
                             value={card.deal_detail ?? ""}
-                            title={stage.key === "won" ? "Won Type" : "Lost Reason"}
-                            aria-label={`Deal Detail — ${card.subject || "이 문의"}`}
-                            onMouseDown={(event) => event.stopPropagation()}
-                            onDragStart={(event) => { event.preventDefault(); event.stopPropagation(); }}
-                            onChange={(event) => {
-                              const detail = event.target.value;
-                              setConfirm({
-                                description: (
-                                  <>
-                                    <strong>{card.company || card.name || card.subject}</strong> 의
-                                    Deal Detail 을{" "}
-                                    <strong>{detail || "선택 안 함"}</strong> 로 바꿉니다.
-                                  </>
-                                ),
-                                run: () => setDealDetail(card, detail),
-                              });
-                            }}
-                          >
-                            <option value="">Deal Detail</option>
-                            {details.map((option) => (
-                              <option key={option} value={option}>{option}</option>
-                            ))}
-                          </select>
+                            tone={card.deal_detail ? (stage.key === "won" ? "won" : "lost") : undefined}
+                            title={`${stage.key === "won" ? "Won Type" : "Lost Reason"} — ${card.subject || "이 문의"}`}
+                            placeholder="Deal Detail"
+                            options={details}
+                            onPick={(detail) => setConfirm({
+                              description: (
+                                <>
+                                  <strong>{card.company || card.name || card.subject}</strong> 의
+                                  Deal Detail 을{" "}
+                                  <strong>{detail || "선택 안 함"}</strong> 로 바꿉니다.
+                                </>
+                              ),
+                              run: () => setDealDetail(card, detail),
+                            })}
+                          />
+                        )}
+                        {/* 몇 차까지 재촉했나 — 티켓을 열지 않고도 보이게 (2026-09-22 운영자 지시).
+                            글자는 서버가 정한 그대로(`followup_sequence.done_label`)이고 누를 수 없다. */}
+                        {reminder && (
+                          <CardTag
+                            value={reminder}
+                            tone={reminder === "Pending" ? undefined : "info"}
+                            title="후속 리마인더"
+                          />
                         )}
                         {canLog && (
                           <button
@@ -321,7 +353,8 @@ export function Board({ stages, manualLogStages, dealDetails = {} }: {
                       </div>
                     )}
                   </article>
-                ))}
+                  );
+                })}
                 {cards.length < stage.total && (
                   <ActionButton
                     className="kanban-more btn btn--subtle btn--sm"

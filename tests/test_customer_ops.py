@@ -452,7 +452,9 @@ def test_pipeline_cards_have_no_stage_dropdown(customer_db, customer_id) -> None
     # Dropping is the only way to move a card: no per-card stage <select> anywhere.
     source = pathlib.Path("frontend/src/ui/Board.tsx").read_text(encoding="utf-8")
     assert source.count("<select") == 1
-    assert "pipeline-card__deal" in source
+    # 그 하나는 모서리 태그 컴포넌트(`CardTag`) 안에 있다 — 후속 리마인더 태그도 같은 컴포넌트지만
+    # 고를 것이 없어 `<span>` 으로 그린다(누를 수 없다, 2026-09-28).
+    assert "pipeline-card__tag" in source
     assert "단계 변경" not in source
 
 

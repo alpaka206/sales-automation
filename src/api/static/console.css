@@ -462,26 +462,35 @@ a.kpi:hover { border-color: var(--accent); }
   color: var(--text-subtle); cursor: pointer;
 }
 .pipeline-card__log:hover { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
-/* Won Type / Lost Reason. It is a tag AND the control that sets it — on this screen the
-   person who reads the value is the person who decides it, so opening the card to read it
-   and opening it again to change it would be the same trip twice. `appearance: none`
-   drops the native arrow: at 10.5px the arrow is wider than the word beside it. */
-.pipeline-card__deal {
+/* The card's corner tag — one shape for two things (2026-09-28): Won Type / Lost Reason,
+   which is a tag AND the control that sets it (on this screen the person who reads the value
+   decides it, so opening the card to read it and again to change it would be the same trip
+   twice), and the follow-up reminder step, which only reads (a <span>, not clickable).
+   `appearance: none` drops the native arrow: at 10.5px the arrow is wider than the word. */
+.pipeline-card__tag {
   appearance: none; -webkit-appearance: none;
   max-width: 104px; height: 22px; padding: 0 8px;
   border: 1px solid var(--border); border-radius: var(--r-full);
   background: var(--surface-2); color: var(--text-subtle);
   font-family: inherit; font-size: 10.5px; font-weight: 700; line-height: 1;
-  text-align: center; text-overflow: ellipsis; cursor: pointer;
+  text-align: center; text-overflow: ellipsis;
 }
-.pipeline-card__deal:hover { border-color: var(--accent); }
-.pipeline-card__deal--won { border-color: var(--ok-soft); background: var(--ok-soft); color: var(--ok); }
-.pipeline-card__deal--lost { border-color: var(--danger-soft); background: var(--danger-soft); color: var(--danger); }
+select.pipeline-card__tag { cursor: pointer; }
+select.pipeline-card__tag:hover { border-color: var(--accent); }
+/* 116px: 「Reminder Sent 1」(운영자가 정한 글자)이 104px 에서 잘린다. 그 폭까지가 제목의 비켜 둔
+   자리(아래 110 · 140px)와 딱 맞는다 — 오른쪽 7 + 「+」 24 + 틈 6 + 116 = 카드 안쪽에서 140. */
+span.pipeline-card__tag {
+  display: inline-block; box-sizing: border-box; max-width: 116px; line-height: 20px;
+  overflow: hidden; white-space: nowrap; cursor: default;
+}
+.pipeline-card__tag--won { border-color: var(--ok-soft); background: var(--ok-soft); color: var(--ok); }
+.pipeline-card__tag--lost { border-color: var(--danger-soft); background: var(--danger-soft); color: var(--danger); }
+.pipeline-card__tag--info { border-color: var(--info-soft); background: var(--info-soft); color: var(--info); }
 /* Keeps a long subject from running under the corner controls. Carried by modifiers on the
    card rather than :has(), so it does not depend on the browser's selector support. */
 .pipeline-card--logged > a strong { padding-right: 26px; }
-.pipeline-card--deal > a strong { padding-right: 110px; }
-.pipeline-card--deal.pipeline-card--logged > a strong { padding-right: 140px; }
+.pipeline-card--tagged > a strong { padding-right: 110px; }
+.pipeline-card--tagged.pipeline-card--logged > a strong { padding-right: 140px; }
 /* A link that has to read as text. Whole-table-of-links columns (문의 제목) get no visual
    benefit from an underline — every row has one, so it stops marking anything and just
    draws a rule across the page. */

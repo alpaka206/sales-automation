@@ -903,7 +903,7 @@ PERSO Inbound is a FastAPI workflow for inbound inquiry handling and customer op
       「리마인더 센트 기본적으로 떠있게(Pending, Reminder Sent 1, Reminder Sent 2)」 — 그 전날의
       「1차 리마인더 완료」를 대신한다). 칩은 **언제나 하나**이고 시퀀스가 살아 있는 티켓에는 기본으로
       `Pending` 이 선다(`view()["reminder"]`, `reminder_status`). 보드 카드도 같은 `view()` 로 같은
-      글자를 단다(`ui_api._reminders`, 페이지당 메일 조회 셋 — 콘솔 메일 하나 + `outside_replies` 둘). **운영에는 2026-09-22 에
+      글자를 단다(`ui_api._reminders`, 페이지당 메일 조회 셋 — 콘솔 메일 하나 + `outside_replies` 둘). **보드에서는 Deal Detail 과 같은 모서리 태그**다(2026-09-28 운영자: 「deal detail 뜨는 것처럼, 클릭은 못 하도록」) — 컴포넌트 하나(`Board.CardTag`)가 고를 것이 있으면 `select`, 없으면 같은 모양의 글자를 그린다. 모서리 태그는 카드당 하나라 Won·Lost 열에서는 Deal Detail 이 서고 리마인더 태그는 안 선다. **운영에는 2026-09-22 에
       `FOLLOWUP_SEQUENCE_SINCE=2026-09-22` 를 넣었다**(Render 대시보드에만 있고 `render.yaml` 에는 없다) —
       그 날짜 뒤에 나간 우리 메일부터 시퀀스와 이 칩이 선다. 그 값을 비우는 것이 끄는 것이다. 「보냈다」의 기준은 `next_step` 과 같다(`sent` + `sent_at`): 메일
     스위치가 내려가 `test_sent` 로 남은 행을 「완료」로 적으면 고객은 한 통도 못 받았는데
