@@ -7,7 +7,10 @@ readme = "README.md"
 dependencies = [
     "fastapi>=0.115,<1",
     "uvicorn[standard]>=0.30,<1",
-    "sqlalchemy>=2.0,<3",
+    # 2.1 은 `postgresql://` 의 기본 드라이버를 psycopg2 → psycopg(3) 로 바꿨다 — 우리는 psycopg2 만
+    # 깔아서 2026-09-28 배포가 이관 단계에서 `No module named 'psycopg'` 로 멈췄다. 올리려면 드라이버를
+    # 같이 옮기고 테스트를 2.1 에서 돌린 뒤에.
+    "sqlalchemy>=2.0,<2.1",
     "pydantic>=2.7,<3",
     "pydantic-settings>=2.14.2,<3",
     "httpx>=0.27,<1",
