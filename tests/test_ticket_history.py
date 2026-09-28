@@ -519,6 +519,28 @@ def _judge(conv_id) -> bool:
     return asyncio.run(advance_if_customer_replied(conv_id))
 
 
+def test_the_inquiry_logged_after_our_hubspot_reply_is_not_a_customer_reply(monkeypatch):
+    """운영자가 허브스팟 화면에서 먼저 답했고(`hubspot:conv:` 우리 줄), 서버가 자고 있어 문의 행은 그 뒤에
+    접수됐다 — 그 행의 시각은 고객이 쓴 때가 아니다. 답장으로 세면 고객이 한 마디도 안 했는데
+    Negotiating 으로 가고 허브스팟·워크북까지 옮겨진다(2026-09-28 검토에서 재현)."""
+    from src.db.models import Message
+
+    factory, conv_id, contact_id = _reply_db(monkeypatch)
+    advanced = _watch_advance(monkeypatch)
+    with factory() as session:
+        session.query(Message).filter_by(conversation_id=conv_id).delete()  # 콘솔 회신 없음
+        session.add(Message(conversation_id=conv_id, direction="inbound", body="Work email: …",
+                            created_at=_REPLY_AT + _HOUR / 4))
+        session.commit()
+    _customer_wrote(factory, conv_id, contact_id, _REPLY_AT, external_id="hubspot:conv:ours",
+                    direction="outgoing")
+    assert _judge(conv_id) is False and advanced == []
+
+    # 그 뒤에 고객이 정말로 쓰면 그건 답장이다.
+    _customer_wrote(factory, conv_id, contact_id, _REPLY_AT + _HOUR, external_id="hubspot:conv:theirs")
+    assert _judge(conv_id) is True and advanced == [conv_id]
+
+
 def test_a_customer_reply_after_our_reply_moves_contacted_to_negotiating(monkeypatch):
     """운영자 지시: 「보내는 기준이 아니고 그 사람한테 답변이 오면 negotiating 으로 가는 것」.
 

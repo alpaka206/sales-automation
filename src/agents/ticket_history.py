@@ -495,7 +495,18 @@ async def advance_if_customer_replied(conversation_id: int) -> bool:
     if not ours:
         return False
     baseline = max(ours)
-    if not any(turn.direction == "inbound" and turn.at > baseline for turn in events):
+    # **그 대화의 첫 문의 행은 답장이 아니다** (2026-09-28). `messages` 의 문의 행은 시각이 고객이 쓴
+    # 때가 아니라 우리가 접수한 때(`created_at`)라, 운영자가 허브스팟 화면에서 먼저 답하고 접수가 몇 분
+    # 늦으면(잠든 서버 · 놓친 웹훅을 폴러가 줍는 경우) 문의가 「우리 마지막 말 뒤의 고객 turn」이 되어
+    # 고객이 한 마디도 안 했는데 Negotiating 으로 갔다. 실제 제출 시각은 폼 줄(`hubspot:conv:`)이 들고 있다.
+    # 후속 리마인더의 답장 판정(`followup_sequence._replies`)도 같은 줄을 뺀다.
+    first_inquiry = min(
+        (turn.source_ref for turn in events
+         if turn.direction == "inbound" and turn.source_ref.startswith("message:")),
+        key=lambda ref: int(ref.split(":", 1)[1]), default=None,
+    )
+    if not any(turn.direction == "inbound" and turn.at > baseline and turn.source_ref != first_inquiry
+               for turn in events):
         return False
     await _advance_on_customer_reply(conversation_id, contact_id)
     return True

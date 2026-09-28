@@ -100,6 +100,57 @@ def test_a_second_press_opens_the_draft_that_is_already_open(ticket, db_session_
         assert session.query(Message).count() == 1
 
 
+def test_a_draft_older_than_our_last_mail_is_closed_and_a_fresh_one_opens(ticket, db_session_factory):
+    """「메일 발송」으로 열어 둔 초안을 두고 운영자가 허브스팟 화면에서 고객에게 또 썼다. 그 초안은 낡았고
+    후속 리마인더 스윕도 「쓰는 중」으로 안 본다 — 그대로 열어 주면 운영자가 쓰는 동안 리마인더가 나간다
+    (2026-09-28 검토에서 재현). 밀린 초안으로 닫고(행은 남는다) 새로 연다."""
+    from datetime import datetime, timedelta
+
+    from src.db.models import CustomerInteraction
+
+    now = datetime.utcnow()
+    with db_session_factory() as session:
+        old = Message(conversation_id=ticket, direction="outgoing", status="pending_approval",
+                      body="half written", prompt_variant="manual", created_at=now - timedelta(days=2))
+        session.add(old)
+        session.add(CustomerInteraction(
+            contact_id=session.get(Conversation, ticket).contact_id, conversation_id=ticket,
+            channel="이메일", direction="outgoing", summary="answered from the HubSpot inbox",
+            external_id="hubspot:conv:hs-ui", happened_at=now - timedelta(days=1),
+        ))
+        session.commit()
+        old_id = old.id
+
+    with _client() as client:
+        opened = client.post(f"/tickets/{ticket}/reply").json()
+
+    assert opened["created"] is True and opened["message_id"] != old_id
+    with db_session_factory() as session:
+        assert session.get(Message, old_id).status == "superseded"
+
+
+def test_a_draft_written_after_our_last_mail_is_still_the_one_that_opens(ticket, db_session_factory):
+    from datetime import datetime, timedelta
+
+    from src.db.models import CustomerInteraction
+
+    now = datetime.utcnow()
+    with db_session_factory() as session:
+        session.add(CustomerInteraction(
+            contact_id=session.get(Conversation, ticket).contact_id, conversation_id=ticket,
+            channel="이메일", direction="outgoing", summary="answered from the HubSpot inbox",
+            external_id="hubspot:conv:hs-ui", happened_at=now - timedelta(days=2),
+        ))
+        draft = Message(conversation_id=ticket, direction="outgoing", status="pending_approval",
+                        body="writing", prompt_variant="manual", created_at=now - timedelta(hours=1))
+        session.add(draft)
+        session.commit()
+        draft_id = draft.id
+
+    with _client() as client:
+        assert client.post(f"/tickets/{ticket}/reply").json() == {"message_id": draft_id, "created": False}
+
+
 def test_a_ticketless_inquiry_is_refused_before_the_operator_writes_anything(
     db_session_factory, monkeypatch
 ):

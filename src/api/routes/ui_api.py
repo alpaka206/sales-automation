@@ -88,8 +88,9 @@ def _reminders(rows: list[dict]) -> dict[int, str | None]:
 
     티켓 배너와 **같은 함수**(`followup_sequence.view`)를 지납니다 — 보드가 따로 세면 같은
     티켓을 두 화면이 다르게 부릅니다. 후보는 Contacted 이거나 시퀀스가 닫은 적 있는 대화뿐이고
-    (그 외는 `view` 가 어차피 None), 그 대화들의 나간 메일은 **쿼리 하나**로 받습니다 —
-    카드마다 물으면 보드 한 번에 왕복이 열다섯입니다. `FOLLOWUP_SEQUENCE_SINCE` 가 비어
+    (그 외는 `view` 가 어차피 None), 그 대화들의 나간 메일은 카드 수와 무관하게 **쿼리 셋**으로
+    받습니다(콘솔 메일 하나 + 허브스팟 화면·개인함 메일 둘, `outside_replies`) — 카드마다 물으면
+    보드 한 번에 왕복이 열다섯입니다. `FOLLOWUP_SEQUENCE_SINCE` 가 비어
     있으면 `view` 가 Contacted 카드에도 None 을 돌려주므로 칩은 시퀀스와 같이 켜집니다.
     """
     from sqlalchemy import select
@@ -113,8 +114,10 @@ def _reminders(rows: list[dict]) -> dict[int, str | None]:
             )
         ).all():
             by_conv.setdefault(m.conversation_id, []).append(m)
+        # 허브스팟 화면·개인 사서함에서 나간 회신 — 티켓 배너와 같은 입력이어야 같은 글자가 선다.
+        outside = fs.outside_replies(session, list(convs))
     return {
-        conv_id: (fs.view(conv, by_conv.get(conv_id, [])) or {}).get("reminder")
+        conv_id: (fs.view(conv, by_conv.get(conv_id, []), outside.get(conv_id, ())) or {}).get("reminder")
         for conv_id, conv in convs.items()
     }
 

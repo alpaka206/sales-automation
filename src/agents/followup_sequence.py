@@ -19,9 +19,15 @@ Negotiating 으로 되살리고, 그 티켓은 화면에 빨갛게 선다(`follo
   발신 주소(개인 사서함 포함) · CC · 서명 · 실패 사유가 사람이 누른 발송과 한 글자도 다르지
   않다. **「모든 회신은 사람이 승인한다」의 유일한 예외**이고, 승인에 해당하는 것은 운영자가
   콘솔에 템플릿을 쓴 행위다.
-- 시계의 기준은 **이 콘솔에서 나간 마지막 회신**이다. 단계 이동 시각은 기록하지 않고(2026-08-20
-  지시), Contacted 는 발송 워커가 회신을 보낸 그 자리에서 올리므로 같은 사건이다. 운영자가 후속
-  회신을 또 보내면 기준이 그리로 옮겨 가고 3·5·7 이 처음부터 다시 간다.
+- 시계의 기준은 **우리가 마지막으로 보낸 이메일**이다 — 이 콘솔에서 나간 회신, **허브스팟
+  받은편지함 화면에서 보낸 회신, 연결된 개인 사서함에서 보낸 메일** 전부(`outside_replies`,
+  2026-09-28). 단계 이동 시각은 기록하지 않고(2026-08-20 지시), 회신과 Contacted 이동은 같은
+  사건이다. 운영자가 후속 회신을 또 보내면 기준이 그리로 옮겨 가고 3·5·7 이 처음부터 다시 간다.
+  - 예전에는 콘솔 회신만 셌다. 「회신은 콘솔에서만 나간다」가 전제였는데 사실이 아니었다 —
+    2026-09-23 의 두 티켓(424·425)이 허브스팟 화면에서 답하고 Contacted 로 옮겨졌고, 시퀀스에
+    **아예 안 들어가서** 나흘이 지나도 리마인더가 없었고 화면에는 칩도 안 섰다(운영자 보고).
+    「고객 답장 → Negotiating」은 이미 세 길을 같은 자(`inbound.thread_events`)로 쟀는데 이
+    시계만 한 길을 봤다.
 
 `FOLLOWUP_SEQUENCE_SINCE` 가 비어 있으면 아무것도 안 한다. 그 날짜 뒤에 나간 회신만 시계를
 돈다 — 기존 티켓은 안 건드린다는 지시가 그 한 칸이다.
@@ -33,10 +39,10 @@ import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import select
+from sqlalchemy import func, or_, select
 
 from ..common.config import settings
-from ..db.models import Conversation, CustomerInteraction, MailboxAccount, Message
+from ..db.models import Contact, Conversation, CustomerInteraction, MailboxAccount, Message
 from ..db.session import SessionLocal
 
 logger = logging.getLogger(__name__)
@@ -64,9 +70,15 @@ CLOSED_LOST = "closed_lost"
 AFTER_REPLY = timedelta(days=3)
 AFTER_REMINDER_1 = timedelta(days=5)
 AFTER_REMINDER_2 = timedelta(days=7)
-# 한 회차에 보내거나 닫는 수. 읽기는 대상 수와 무관하게 쿼리 넷이다.
+# 한 회차에 보내거나 닫는 수. 읽기는 대상 수와 무관하게 쿼리 일곱이다(후보 · 메일 · 콘솔 밖 메일 둘 ·
+# 답장 둘 · 끊긴 사서함). 행동하기 직전의 재확인만 대상마다 따로다.
 PER_SWEEP = 20
 _KST = timezone(timedelta(hours=9))
+# 콘솔 밖에서 나간 우리 메일의 두 출처 — 허브스팟 스레드 수집기(`ticket_history`)와 개인 사서함
+# 수집기(`mailbox_sync`)가 `customer_interactions` 에 이 앞머리로 남긴다. 둘 다 채널 말은 「이메일」.
+_OUTSIDE_PREFIXES = ("hubspot:conv:", "gmail:")
+_EMAIL_CHANNEL = "이메일"
+_MAILBOX_SUFFIX = " 개인 메일함"  # `mailbox_sync` 가 `context` 에 적는 「<사서함> 개인 메일함」
 
 
 def done_label(variant: str) -> str:
@@ -79,14 +91,14 @@ def done_label(variant: str) -> str:
     return f"Reminder Sent {REMINDER_ORDINAL[variant]}"
 
 
-def reminder_status(messages) -> str:
+def reminder_status(messages, outside=()) -> str:
     """칩 한 장: 실제로 나간 리마인더 중 가장 높은 것의 `done_label`, 없으면 `PENDING_LABEL`.
 
     「보냈다」의 기준은 `next_step` 이 「이미 보냈다」로 쓰는 그 조건이다(`sent` + `sent_at`).
     `sent_at` 만 보면 `test_sent`(SAFE 모드로 나간 것 — 고객이 받은 것이 없다)가 완료로 읽히고,
     시퀀스는 `stalled` 인데 화면만 「Reminder Sent 1」 이라 적는다.
     """
-    _base, reminders = sequence_state(messages)
+    _base, reminders = sequence_state(messages, outside)
     label = PENDING_LABEL
     for variant in REMINDER_VARIANTS:
         row = reminders.get(variant)
@@ -128,8 +140,135 @@ def in_send_window(now: datetime) -> bool:
     return local.weekday() < 5 and 9 <= local.hour < 18
 
 
-def sequence_state(messages) -> tuple[Message | None, dict[str, Message]]:
+def outside_replies(session, conversation_ids) -> dict[int, list[CustomerInteraction]]:
+    """{대화: 이 콘솔 **밖에서** 나간 우리 이메일} — 허브스팟 화면 회신과 개인 사서함 메일. 쿼리 둘.
+
+    **자는 `inbound.thread_events` 와 같다.** 콘솔에서 나간 메일은 수집기가 허브스팟(또는 사서함)에서
+    도로 가져와 두 표에 다 있으므로 같은 열쇠(`messages.hubspot_message_id` · `smtp_message_id`)로
+    한 번만 센다. 리마인더도 그 열쇠를 가지므로 여기서 빠진다 — 안 빠지면 리마인더의 사본이 새
+    기준이 되어 **3일마다 1차가 다시 나간다.** 열쇠를 못 받았는데 메일이 나갔을 수 있는 리마인더
+    (`delivery_unknown` · 보내는 중)의 사본은 **본문**으로 알아본다 — `ticket_history.same_mail`, 개인함과
+    허브스팟 사본을 가르는 그 자다. 시각 창(만든 뒤 10분)으로 재던 첫 판은 둘 다 틀렸다: 다시 보낸
+    리마인더는 창 밖이라 사본이 새 기준이 됐고, 실패한 리마인더 몇 분 뒤 사람이 보낸 메일은 사본으로 버려졌다.
+
+    **이메일만 센다.** 채팅(봇 답 포함) · 폼 · 콘솔에 손으로 적은 기록은 기준이 아니다 — 그 뒤에
+    「지난 메일에 이어 연락드립니다」를 보내면 거짓이다(설계 §1 의 「전화 뒤 보드로 옮긴 건」과 같은 이유).
+    """
+    ids = list(conversation_ids)
+    if not ids:
+        return {}
+    from .ticket_history import same_mail
+
+    drawn: set[str] = set()
+    unkeyed: list[tuple[int, datetime, str]] = []  # 나갔을 수 있는데 사본을 알아볼 열쇠가 없는 리마인더
+    for conv_id, variant, status, hub_id, smtp_id, made_at, approved_at, body in session.execute(
+        select(Message.conversation_id, Message.prompt_variant, Message.status, Message.hubspot_message_id,
+               Message.smtp_message_id, Message.created_at, Message.approved_at, Message.body)
+        .where(Message.conversation_id.in_(ids), Message.direction == "outgoing")
+    ).all():
+        if hub_id:
+            drawn.add(f"hubspot:conv:{hub_id}")
+        if smtp_id:
+            drawn.add(f"gmail:{smtp_id}")
+        # 실패·거절·대기는 아무것도 안 나갔다 — 사본이 있을 수 없다.
+        may_have_left = status in ("delivery_unknown", "sent") or (status or "").startswith("sending")
+        if variant in REMINDER_VARIANTS and may_have_left and not hub_id and not smtp_id:
+            when = approved_at or made_at
+            if when is not None:
+                unkeyed.append((conv_id, _naive(when), body or ""))
+    out: dict[int, list[CustomerInteraction]] = {}
+    for row in session.scalars(
+        select(CustomerInteraction)
+        .join(Conversation, Conversation.id == CustomerInteraction.conversation_id)
+        .where(
+            CustomerInteraction.conversation_id.in_(ids),
+            # `thread_events` 처럼 그 대화의 사람 것만 — 다른 연락처 줄이 붙어 있을 수 있다.
+            CustomerInteraction.contact_id == Conversation.contact_id,
+            CustomerInteraction.direction == "outgoing",
+            CustomerInteraction.channel == _EMAIL_CHANNEL,
+            CustomerInteraction.happened_at.isnot(None),
+            or_(*(CustomerInteraction.external_id.like(f"{p}%") for p in _OUTSIDE_PREFIXES)),
+        )
+    ).all():
+        if row.external_id in drawn:
+            continue
+        if any(c == row.conversation_id and same_mail(when, "outgoing", body, row.happened_at, "outgoing",
+                                                      row.summary)
+               for c, when, body in unkeyed):
+            continue
+        out.setdefault(row.conversation_id, []).append(row)
+    return out
+
+
+def _base_mailbox(base) -> str | None:
+    """기준 회신이 나간 개인 사서함(`gmail:<주소>`) — 리마인더도 거기서 나가고, 끊겼으면 시계를 세운다.
+
+    콘솔 기준은 그 행의 `channel_account_id` 그대로다. 개인함에서 직접 보낸 메일은 수집기가
+    `context` 에 「<사서함> 개인 메일함」을 적어 둔다(`mailbox_sync`); 없으면 보낸 주소(`handler`).
+    """
+    if isinstance(base, Message):
+        return base.channel_account_id
+    if not (base.external_id or "").startswith("gmail:"):
+        return None
+    context = (base.context or "").strip()
+    mailbox = context[: -len(_MAILBOX_SUFFIX)].strip() if context.endswith(_MAILBOX_SUFFIX) else ""
+    mailbox = (mailbox or base.handler or "").strip().lower()
+    return f"gmail:{mailbox}" if mailbox else None
+
+
+def _at(row) -> datetime:
+    """기준 회신이 나간 시각 — 콘솔 행은 `sent_at`, 콘솔 밖 메일은 `happened_at`."""
+    return _naive(row.sent_at if isinstance(row, Message) else row.happened_at)
+
+
+def _committed_at(base) -> datetime:
+    """기준 회신이 **사람 손을 떠난** 시각 — 리마인더·초안이 그 뒤에 만들어졌는지 잴 자.
+
+    콘솔 행은 승인한 시각이다. 나간 시각(`sent_at`)이 늘 그 순간은 아니다: 결과를 모른 채 끝난 발송
+    (`delivery_unknown`)을 나중에 복구 화면에서 「나간 것 확인」하면 `sent_at` 이 **확인한 때**로 찍히고,
+    그 사이 이미 나간 리마인더 1 이 「기준 전」이 되어 1차가 또 나갔다(2026-09-28 검토에서 재현).
+    승인이 기록되지 않은 옛 행은 나간 시각으로.
+    """
+    if isinstance(base, Message):
+        return _naive(base.approved_at or base.sent_at)
+    return _at(base)
+
+
+def _after_base(row: Message, base) -> bool:
+    """이 행(리마인더 · 사람 초안)을 기준 회신이 **사람 손을 떠난 뒤에** 만들었나 — 만든 시각을
+    `_committed_at`(콘솔 회신은 승인 시각, 콘솔 밖 메일은 보낸 시각)과 댄다.
+
+    예전에는 id 로 쟀다(`row.id > base.id`). 기준이 다른 표(`customer_interactions`)일 수 있게 된
+    뒤로는 id 를 비교할 수 없고, 콘솔 기준에서도 id 는 대리값이었다: 리마인더 1 보다 **먼저 만든**
+    사람 초안을 다시 쓰고 **나중에** 보내면 그 회신이 새 기준인데 리마인더 1 이 여전히 「뒤」로 세어져,
+    사흘 뒤 1차가 아니라 나흘 만에 2차(「닫겠습니다」)가 나갔다. 만든 시각이 없는 행(조립한 객체)만 id 로.
+    """
+    if row.created_at is not None:
+        return _naive(row.created_at) > _committed_at(base)
+    return isinstance(base, Message) and row.id is not None and base.id is not None and row.id > base.id
+
+
+def open_draft(messages, base) -> Message | None:
+    """사람이 쓰는 중인 후속 초안 — **기준 회신 뒤에 만든 것만**. 있으면 리마인더를 보류한다.
+
+    기준 전에 만든 초안은 쓰는 중이 아니라 **버려진** 것이다: 「메일 발송」으로 열어만 두고 허브스팟
+    화면에서 답했거나, 실패한 발송을 저쪽에서 다시 보냈거나, New 의 AI 초안이 안 치워졌거나. 예전에는
+    그런 행 하나가 그 티켓의 리마인더를 **영원히** 막았고 화면에는 아무 표시가 없었다(2026-09-28 감사).
+    """
+    held = [
+        m for m in messages
+        if m.direction == "outgoing" and m.prompt_variant not in REMINDER_VARIANTS
+        and m.status in ("drafting", "pending_approval", "approved", "send_failed")
+        and _after_base(m, base)
+    ]
+    return max(held, key=lambda m: m.id or 0) if held else None
+
+
+def sequence_state(messages, outside=()) -> tuple[Message | CustomerInteraction | None, dict[str, Message]]:
     """(기준 회신, {변형: 그 리마인더 행}). **리마인더는 기준 회신 뒤에 만든 것만** 센다.
+
+    기준은 콘솔에서 나간 회신(`messages`)과 콘솔 밖에서 나간 우리 메일(`outside` — `outside_replies`
+    의 한 대화분) 중 **늦은 것**이다. 밖의 메일이 기준이면 `CustomerInteraction` 행이 돌아온다.
 
     기준만 옮기고 리마인더를 그대로 세면, 사람이 후속 회신을 보낸 사흘 뒤에 「닫겠습니다」가
     나간다 — 기준은 새 회신인데 「리마인더 1 은 이미 보냈다」로 읽히기 때문이다.
@@ -138,20 +277,23 @@ def sequence_state(messages) -> tuple[Message | None, dict[str, Message]]:
     for m in messages:
         if (m.direction == "outgoing" and m.status == "sent" and m.sent_at is not None
                 and m.prompt_variant not in REMINDER_VARIANTS):
-            if base is None or _naive(m.sent_at) > _naive(base.sent_at):
+            if base is None or _at(m) > _at(base):
                 base = m
+    for row in outside:
+        if base is None or _at(row) > _at(base):
+            base = row
     if base is None:
         return None, {}
     reminders: dict[str, Message] = {}
     for m in messages:
-        if m.direction == "outgoing" and m.prompt_variant in REMINDER_VARIANTS and m.id > base.id:
+        if m.direction == "outgoing" and m.prompt_variant in REMINDER_VARIANTS and _after_base(m, base):
             held = reminders.get(m.prompt_variant)
             if held is None or m.id > held.id:
                 reminders[m.prompt_variant] = m
     return base, reminders
 
 
-def next_step(base: Message, reminders: dict[str, Message]) -> tuple[str, datetime | None]:
+def next_step(base, reminders: dict[str, Message]) -> tuple[str, datetime | None]:
     """(할 일, 그 시각). 할 일은 `send_1` · `send_2` · `close` · `sending` · `stalled`.
 
     **보내다 만 리마인더가 있으면 시계가 멈춘다.** `approved`·`sending` 은 워커가 곧 보낼 것이고
@@ -167,14 +309,17 @@ def next_step(base: Message, reminders: dict[str, Message]) -> tuple[str, dateti
         return "stalled", None
     first, second = reminders.get(REMINDER_1), reminders.get(REMINDER_2)
     if first is None:
-        return "send_1", _naive(base.sent_at) + AFTER_REPLY
+        return "send_1", _at(base) + AFTER_REPLY
     if second is None:
         return "send_2", _naive(first.sent_at) + AFTER_REMINDER_1
     return "close", _naive(second.sent_at) + AFTER_REMINDER_2
 
 
-def view(conv: Conversation, messages) -> dict | None:
+def view(conv: Conversation, messages, outside=()) -> dict | None:
     """티켓 화면의 한 줄 — 보드 카드도 같은 답을 읽는다(`ui_api._reminders`). 파생값이라 저장하지 않는다.
+
+    `outside` 는 `outside_replies` 의 그 대화분이다. **안 넘기면 허브스팟 화면에서 답한 티켓에 칩이
+    안 선다** — 스윕은 그 티켓에 리마인더를 보내는데 화면만 조용한 어긋남이 된다(2026-09-28).
 
     `reminder` 는 「몇 차까지 나갔나」를 **그릴 글자 그대로** 담는다(2026-09-22 운영자 지시:
     「리마인더 센트 기본적으로 떠있게」 — 한 통도 안 나갔으면 「Pending」). 세 갈래 전부에
@@ -182,8 +327,8 @@ def view(conv: Conversation, messages) -> dict | None:
     그래서 `sequence_state` 를 early return 위로 올렸다(쿼리는 안 늘어난다: `messages` 는 이미
     손에 있다).
     """
-    base, reminders = sequence_state(messages)
-    reminder = reminder_status(messages)
+    base, reminders = sequence_state(messages, outside)
+    reminder = reminder_status(messages, outside)
     if conv.followup_closed_at is not None and conv.stage == NEGOTIATION:
         return {"state": "revived", "at": conv.followup_closed_at, "reminder": reminder}
     if conv.followup_closed_at is not None and conv.stage == CLOSED_LOST:
@@ -191,7 +336,7 @@ def view(conv: Conversation, messages) -> dict | None:
     start = since()
     if start is None or conv.stage != CONTACTED:
         return None
-    if base is None or _naive(base.sent_at) < start:
+    if base is None or _at(base) < start:
         return None
     step, due = next_step(base, reminders)
     missing = None
@@ -201,18 +346,28 @@ def view(conv: Conversation, messages) -> dict | None:
 
         key = TEMPLATE_KEYS[REMINDER_1 if step == "send_1" else REMINDER_2]
         missing = None if (get_email_template(key) or "").strip() else key
+    draft = open_draft(messages, base) if step in ("send_1", "send_2", "close") else None
     return {
         "state": step,
         "due": due,
         "template_missing": missing,
+        # 스윕이 이 초안 때문에 기다린다 — 안 적으면 지난 날짜가 적힌 배너만 남는다.
+        "held_by_draft": draft.id if draft is not None else None,
         "reminder_1_at": getattr(reminders.get(REMINDER_1), "sent_at", None),
         "reminder_2_at": getattr(reminders.get(REMINDER_2), "sent_at", None),
         "reminder": reminder,
     }
 
 
-def _replies(session, contact_ids: set[int], after: datetime) -> list[tuple[int, int | None, datetime]]:
+def _replies(session, contact_ids: set[int], after: datetime,
+             own=()) -> list[tuple[int, int | None, datetime]]:
     """(연락처, 붙은 대화, 시각) — `after` 뒤에 고객이 연락한 것 전부.
+
+    `own` 은 지금 재촉할지 보는 대화들이다. **그 대화의 첫 문의 행은 답장이 아니다** — 그 행의 시각은
+    고객이 쓴 때가 아니라 우리가 접수한 때(`created_at`)라, 허브스팟 화면에서 먼저 답하고 접수가 몇 분
+    늦으면(잠든 서버 · 놓친 웹훅을 10분 폴러가 줍는 경우) 문의 자체가 「기준 뒤 고객 연락」이 되어
+    Negotiating 으로 옮겨졌다(2026-09-28 검토에서 재현). 콘솔 회신이 기준일 때는 늘 접수 뒤라 안 걸렸다.
+    다른 대화의 첫 문의(같은 사람이 새 폼을 냈다)는 그대로 연락이다.
 
     **연락처 단위로 본다.** 답장이 다른 대화에 붙는 길이 셋이다 — 개인함 메일은 그 고객의
     최신 대화에 붙고, 새 폼·채팅은 새 티켓이고, 옛 스레드에 답하면 옛 대화다. 대화 단위로만
@@ -233,6 +388,11 @@ def _replies(session, contact_ids: set[int], after: datetime) -> list[tuple[int,
                    CustomerInteraction.happened_at > after)
         ).all()
     ]
+    first_inquiries = (
+        select(func.min(Message.id))
+        .where(Message.conversation_id.in_(list(own)), Message.direction == "inbound")
+        .group_by(Message.conversation_id)
+    )
     found += [
         (row.contact_id, row.conversation_id, row.created_at)
         for row in session.execute(
@@ -240,7 +400,8 @@ def _replies(session, contact_ids: set[int], after: datetime) -> list[tuple[int,
             .join(Conversation, Conversation.id == Message.conversation_id)
             .where(Conversation.contact_id.in_(contact_ids),
                    Message.direction == "inbound",
-                   Message.created_at > after)
+                   Message.created_at > after,
+                   Message.id.not_in(first_inquiries))
         ).all()
     ]
     return found
@@ -281,38 +442,188 @@ def _reminder_body(variant: str, target: str) -> str | None:
     return body
 
 
+def _due_now(messages, base, reminders, wanted: str) -> bool:
+    """**행동 직전에 새로 읽은 행으로** 그 단계가 아직 할 일인가 — 리마인더를 만들 때와 닫을 때 둘 다.
+
+    스윕은 회차 앞에서 읽은 것으로 판단하는데, 그 뒤 `_recheck` 가 허브스팟에서 **방금 보낸 사람 회신**을
+    가져올 수 있다(웹훅 유실, 수집 대기열이 밀렸거나, 같은 회차의 수집 단계 뒤에 보낸 메일). 그러면 기준이
+    그 회신이다. 다시 안 재면 고객이 사람 메일 몇 분 뒤 「지난 메일에 이어」를 받거나, 우리가 방금 메일을
+    보낸 티켓이 Closed Lost 로 닫힌다(2026-09-28 검토에서 둘 다 재현).
+    """
+    step, due = next_step(base, reminders)
+    return step == wanted and due is not None and _utcnow() >= due and open_draft(messages, base) is None
+
+
+def _still_due(conversation_id: int, wanted: str) -> bool:
+    with SessionLocal() as session:
+        messages = session.scalars(
+            select(Message).where(Message.conversation_id == conversation_id)
+        ).all()
+        outside = outside_replies(session, [conversation_id]).get(conversation_id, [])
+        base, reminders = sequence_state(messages, outside)
+    return base is not None and _due_now(messages, base, reminders, wanted)
+
+
+async def _hubspot_reply(ticket_id: str, message_id: str) -> dict | None:
+    """허브스팟 화면에서 보낸 그 회신의 받는 사람 · 참조 · 발신 계정 · 제목. 못 찾으면 None. 읽기만 한다.
+
+    수집기는 이 넷을 저장하지 않는다(`ticket_history.collect_ticket_history`) — 그래서 리마인더를 만들기
+    직전에 그 메시지를 한 번 더 읽는다. 스레드 목록과 메시지 읽기는 수집기의 함수를 그대로 쓴다.
+    """
+    from ..integrations.hubspot import HubSpotClient
+    from .ticket_history import _addresses, _live_thread_ids, _thread_messages
+
+    client = HubSpotClient()
+    try:
+        for thread_id in await _live_thread_ids(client, ticket_id):
+            for message in await _thread_messages(client, thread_id):
+                if str(message.get("id") or "") != message_id:
+                    continue
+                recipients = message.get("recipients") or []
+                return {
+                    "to": _addresses([r for r in recipients if (r or {}).get("recipientField") == "TO"]),
+                    "cc": _addresses([r for r in recipients if (r or {}).get("recipientField") == "CC"]),
+                    "account": str(message.get("channelAccountId") or "").strip() or None,
+                    "subject": (str(message.get("subject") or "").strip()[:300] or None),
+                    # 우리 인박스 주소들(한 시간 캐시) — 참조에서 뺀다. 동료가 인박스 주소를 TO 에 넣고
+                    # 전체 회신한 메일이 기준이면, 안 빼면 고객이 받는 리마인더의 참조에 보낸 주소 자신이 선다.
+                    "inboxes": {
+                        str((account.get("deliveryIdentifier") or {}).get("value") or "").strip().lower()
+                        for account in await client._live_email_channel_accounts()
+                    },
+                }
+    finally:
+        await client.close()
+    return None
+
+
+def _outside_copy(conv: Conversation, contact_email: str | None, base: CustomerInteraction) -> dict | None:
+    """콘솔 밖 메일이 기준일 때 리마인더가 베낄 것. **같은 사람이 같은 문으로** 이어 쓰게 한다.
+
+    - 허브스팟 화면 회신이면 그 메시지의 받는 사람 · 참조 · 발신 계정 · 제목(`_hubspot_reply`).
+      못 읽으면 None — 이번 회차는 안 보낸다(`_recheck` 와 같은 fail closed). 참조를 잃은 채
+      나가는 것보다 10분 늦는 편이 낫다.
+    - 개인 사서함 메일이면 **그 사서함에서** 나간다(콘솔 기준의 `gmail:` 과 같은 운영자 결정 ④).
+      받는 사람은 그 고객, 참조는 수집기가 안 적어서 없다.
+    - **언어는 그 회신 본문의 언어다** — 콘솔 기준의 `target_language`(운영자가 쓴 언어)와 같은 뜻.
+      `inquiry_language` 로 두면 틀린다: 폼 문의는 본문 앞에 영어 칸 이름(`Work email:` …)이 붙어
+      포르투갈어 문의가 `en` 으로 잡힐 수 있고(424), 운영자가 포르투갈어로 답한 고객에게 영어가 간다.
+    - **서명 카드는 안 붙인다**(NULL = 「서명 없음」). 허브스팟 화면 회신은 본문에 손으로 쓴 맺음말뿐
+      이었다(424·425 실측) — 그대로 베낀 것이다. 콘솔의 기본 서명(목록의 첫 카드)은 다른 사람이나
+      한국어 카드일 수 있어서, 남의 이름으로 재촉하는 것보다 카드 없이 나가는 쪽이 낫다.
+    - 제목은 그 회신 제목에 「RE:」 하나 — 고객의 메일함에서 같은 대화로 묶이게.
+    - **받는 사람은 언제나 그 고객이다.** 수집기는 티켓 스레드의 모든 메시지를 그 고객 줄로 넣고 방향만
+      보낸 주소로 가르므로, 허브스팟 화면에서 동료·파트너에게 **전달한** 메일도 「우리가 보낸 이메일」로
+      선다. 그 메일의 TO 를 베끼면 「지난 메일에 이어」와 「닫겠습니다」가 그 사람에게 간다. 그래서 고객이
+      TO·CC 어디에도 없는 메일이면 안 보내고, 고객 말고 TO 에 있던 사람은 참조로 옮겨 회신 전체의
+      독자를 지킨다.
+    """
+    from ..common.subjects import reply_subject
+    from ..llm.language import detect_language
+
+    text = (base.summary or "").strip()
+    if text and text != "(본문 없음)":
+        # 판정 실패를 「영어」로 읽지 않는다 — 스페인어로 답한 고객에게 영어가 간다. 번역 실패와 같이
+        # 이번 회차를 건너뛰고 다음 회차가 다시 잰다.
+        detected = detect_language(text, default=None)
+        if not detected:
+            logger.warning("문의 %s: 기준 회신의 언어를 못 가려 이번 회차는 건너뜁니다.", conv.id)
+            return None
+        target = detected
+    else:
+        target = conv.inquiry_language or "en"
+    target = target.strip().lower() or "en"
+
+    def subject(found: str | None = None) -> str:
+        return reply_subject(found or base.subject or conv.inquiry_subject, target_code=target)
+
+    external_id = base.external_id or ""
+    if external_id.startswith("gmail:"):
+        account = _base_mailbox(base)
+        if not account or not contact_email:
+            return None
+        return {"to_address": contact_email, "cc_addresses": None, "channel_account_id": account,
+                "subject": subject(), "signature_key": None, "target": target}
+    ticket_id = (conv.hubspot_ticket_id or "").strip()
+    if not ticket_id:
+        return None
+    try:
+        found = asyncio.run(_hubspot_reply(ticket_id, external_id.removeprefix("hubspot:conv:")))
+    except Exception:
+        logger.warning("문의 %s: 허브스팟에서 보낸 회신을 못 읽어 이번 회차는 건너뜁니다.", conv.id,
+                       exc_info=True)
+        return None
+    if found is None:
+        logger.warning("문의 %s: 기준 회신이 허브스팟 스레드에 없어 이번 회차는 건너뜁니다.", conv.id)
+        return None
+    customer = (contact_email or "").strip().lower()
+    audience = found["to"] + found["cc"]
+    # ponytail: 전달 메일은 여기서만 알아본다 — 수집기가 받는 사람을 안 적어 두므로 `outside_replies` 는 그것을
+    # 기준으로 세고, 그 티켓은 다음에 고객에게 메일이 나갈 때까지 조용히 멈춘다(엉뚱한 사람을 재촉하는 것보다
+    # 낫다). 실제로 자주 나면 수집기가 받는 사람을 저장하게 하고 거기서 거른다.
+    if not customer or customer not in audience:
+        logger.warning("문의 %s: 기준 회신이 고객에게 간 메일이 아니라(전달 등) 리마인더를 보내지 않습니다.",
+                       conv.id)
+        return None
+    cc = list(dict.fromkeys(a for a in audience if a != customer and a not in found["inboxes"]))
+    return {"to_address": contact_email, "cc_addresses": ", ".join(cc) or None,
+            "channel_account_id": found["account"], "subject": subject(found["subject"]),
+            "signature_key": None, "target": target}
+
+
 def _create_reminder(conversation_id: int, variant: str) -> int | None:
     """기준 회신을 베낀 `approved` 행 하나. 발송은 워커가 한다.
 
     서명 · CC · 발신 계정(개인 사서함이면 그 사서함) · 제목 · 받는 사람이 전부 기준 회신의 것이다 —
     같은 사람이 같은 문으로 이어 쓰는 메일이다. 서명의 NULL 은 「서명 없음으로 골랐다」라 그대로 둔다.
+    기준이 콘솔 밖 메일이면 베낄 것을 `_outside_copy` 가 찾는다.
     """
     with SessionLocal() as session:
         conv = session.get(Conversation, conversation_id)
         messages = session.scalars(
             select(Message).where(Message.conversation_id == conversation_id)
         ).all()
-        base, _ = sequence_state(messages)
+        outside = outside_replies(session, [conversation_id]).get(conversation_id, [])
+        base, reminders = sequence_state(messages, outside)
         if conv is None or base is None:
             return None
-        target = ((base.target_language or conv.inquiry_language or "en").strip().lower()) or "en"
-        body = _reminder_body(variant, target)
-        if body is None:
+        if not _due_now(messages, base, reminders, "send_1" if variant == REMINDER_1 else "send_2"):
+            logger.info("문의 %s: 보내기 직전에 기준이 바뀌어 %s 를 이번 회차에 만들지 않습니다.",
+                        conversation_id, variant)
             return None
+        contact = session.get(Contact, conv.contact_id) if conv.contact_id else None
+        session.expunge_all()
+    if isinstance(base, Message):
+        copy = {
+            "to_address": base.to_address, "cc_addresses": base.cc_addresses,
+            "channel_account_id": base.channel_account_id, "subject": base.subject,
+            "signature_key": base.signature_key,
+            "target": ((base.target_language or conv.inquiry_language or "en").strip().lower()) or "en",
+        }
+    else:
+        # 허브스팟을 읽는 동안 세션을 안 붙든다 — 저쪽이 느린 날 연결이 그만큼 묶인다.
+        copy = _outside_copy(conv, contact.email if contact else None, base)
+        if copy is None:
+            return None
+    target = copy["target"]
+    body = _reminder_body(variant, target)
+    if body is None:
+        return None
+    with SessionLocal() as session:
         now = _utcnow()
         row = Message(
             conversation_id=conversation_id,
             direction="outgoing",
             channel="email",
-            to_address=base.to_address,
-            subject=base.subject,
+            to_address=copy["to_address"],
+            subject=copy["subject"],
             body=body,
             language=target,
             target_language=target,
             status="approved",
-            signature_key=base.signature_key,
-            channel_account_id=base.channel_account_id,
-            cc_addresses=base.cc_addresses,
+            signature_key=copy["signature_key"],
+            channel_account_id=copy["channel_account_id"],
+            cc_addresses=copy["cc_addresses"],
             prompt_variant=variant,
             approved_by=APPROVER,
             approved_at=now,
@@ -356,7 +667,7 @@ def _advance(conversation_id: int, contact_id: int) -> None:
 def _dead_mailboxes(session) -> set[str]:
     """토큰이 죽은 개인 사서함. 그리로 온 답장은 며칠이고 안 들어오는데 시계만 돈다."""
     return {
-        f"gmail:{email}"
+        f"gmail:{(email or '').lower()}"
         for email in session.scalars(
             select(MailboxAccount.email).where(
                 MailboxAccount.enabled.is_(True), MailboxAccount.last_error.isnot(None)
@@ -383,7 +694,7 @@ def _recheck(conversation_id: int, contact_id: int, after: datetime) -> bool:
         conv = session.get(Conversation, conversation_id)
         if conv is None or conv.stage != CONTACTED:
             return False  # 수집기가 이미 옮겼다
-        replies = _replies(session, {contact_id}, after)
+        replies = _replies(session, {contact_id}, after, own={conversation_id})
     place = _reply_place(replies, contact_id, conversation_id, after)
     if place == "here":
         _advance(conversation_id, contact_id)
@@ -404,12 +715,21 @@ def run_followup_sequence_once(limit: int = PER_SWEEP) -> dict:
                 Conversation.hubspot_ticket_id.isnot(None),
                 (Conversation.stage == CONTACTED)
                 | ((Conversation.stage == CLOSED_LOST) & Conversation.followup_closed_at.isnot(None)),
-                # SINCE 뒤에 나간 회신이 있는 대화만. `last_outgoing_at` 으로 좁히면 싸지만 그
-                # 칸을 안 채우는 발송 경로가 있다(`approval.mark_sent`).
+                # SINCE 뒤에 우리 메일이 나간 대화만 — 콘솔에서든(`messages`) 허브스팟 화면·개인
+                # 사서함에서든(`customer_interactions`). `last_outgoing_at` 으로 좁히면 싸지만 그
+                # 칸을 안 채우는 발송 경로가 있다(`approval.mark_sent`, 그리고 콘솔 밖 회신 전부).
                 Conversation.id.in_(
                     select(Message.conversation_id).where(
                         Message.direction == "outgoing", Message.status == "sent",
                         Message.sent_at >= start,
+                    )
+                )
+                | Conversation.id.in_(
+                    select(CustomerInteraction.conversation_id).where(
+                        CustomerInteraction.direction == "outgoing",
+                        CustomerInteraction.channel == _EMAIL_CHANNEL,
+                        CustomerInteraction.happened_at >= start,
+                        or_(*(CustomerInteraction.external_id.like(f"{p}%") for p in _OUTSIDE_PREFIXES)),
                     )
                 ),
             )
@@ -422,7 +742,8 @@ def run_followup_sequence_once(limit: int = PER_SWEEP) -> dict:
                                   Message.direction == "outgoing")
         ).all():
             by_conv.setdefault(m.conversation_id, []).append(m)
-        replies = _replies(session, {c.contact_id for c in convs}, start)
+        outside = outside_replies(session, [c.id for c in convs])
+        replies = _replies(session, {c.contact_id for c in convs}, start, own=[c.id for c in convs])
         dead = _dead_mailboxes(session)
         session.expunge_all()
 
@@ -435,10 +756,15 @@ def run_followup_sequence_once(limit: int = PER_SWEEP) -> dict:
             break
         try:
             outgoing = by_conv.get(conv.id, [])
-            base, reminders = sequence_state(outgoing)
-            if base is None or _naive(base.sent_at) < start:
+            base, reminders = sequence_state(outgoing, outside.get(conv.id, ()))
+            if base is None or _at(base) < start:
                 continue
-            after = _naive(base.sent_at)
+            after = _at(base)
+            if conv.stage == CLOSED_LOST and conv.followup_closed_at is not None:
+                # **닫은 뒤의 연락은 전부 되살린다**(설계). 기준만 보면 고객 답장과 운영자의 허브스팟 화면
+                # 회신이 같은 회차에 들어올 때 운영자 회신이 새 기준이 되어 그 앞의 고객 답장이 안 보이고,
+                # 티켓은 Closed Lost 에 남는다 — 되살리는 길은 이 스윕 하나뿐이다(2026-09-28 검토에서 재현).
+                after = min(after, _naive(conv.followup_closed_at))
             place = _reply_place(replies, conv.contact_id, conv.id, after)
             if place == "here":
                 _advance(conv.id, conv.contact_id)
@@ -455,15 +781,17 @@ def run_followup_sequence_once(limit: int = PER_SWEEP) -> dict:
             # 비상 스위치를 내렸는데 시계가 돌면, 한 통도 못 받은 고객이 Lost 가 된다.
             if not delivery_on or not window:
                 continue
-            if base.channel_account_id in dead:
+            if (_base_mailbox(base) or "").lower() in dead:
                 continue
-            if any(m.status in ("drafting", "pending_approval", "approved", "send_failed")
-                   and m.prompt_variant not in REMINDER_VARIANTS for m in outgoing):
+            if open_draft(outgoing, base) is not None:
                 continue  # 사람이 쓰는 중이다 — 몇 분 사이 두 통을 받게 하지 않는다
             acted += 1
             if not _recheck(conv.id, conv.contact_id, after):
                 continue
             if step == "close":
+                if not _still_due(conv.id, "close"):
+                    logger.info("문의 %s: 닫기 직전에 기준이 바뀌어 이번 회차에 닫지 않습니다.", conv.id)
+                    continue
                 _close(conv.id)
                 done["closed"] += 1
             elif _create_reminder(conv.id, REMINDER_1 if step == "send_1" else REMINDER_2):

@@ -13,7 +13,10 @@ from starlette.concurrency import run_in_threadpool
 from sqlalchemy.orm import joinedload
 
 from ...agents.approval import ApprovalError, approve, reject
-from ...agents.followup_sequence import REMINDER_VARIANTS
+from ...agents.followup_sequence import CONTACTED as FOLLOWUP_STAGE
+from ...agents.followup_sequence import REMINDER_VARIANTS, outside_replies
+from ...agents.followup_sequence import open_draft as followup_open_draft
+from ...agents.followup_sequence import sequence_state as followup_state
 from ...agents.followup_sequence import view as followup_view
 from ...agents.reply_safety import latest_trace
 from ...common.config import settings
@@ -409,7 +412,13 @@ def _message_detail_context(
                 "inquiry_language": conv.inquiry_language if conv else None,
                 # 후속 리마인더 한 줄 — 다음 리마인더가 언제인지, 멈췄는지, 닫았다가 되살아났는지
                 # (`followup_sequence.view`, 파생값). 되살아난 티켓은 화면이 빨갛게 그립니다.
-                "followup": followup_view(conv, thread_rows) if conv else None,
+                # 허브스팟 화면·개인 사서함에서 답한 티켓도 같은 자로 — 안 넘기면 스윕은 그 티켓에
+                # 리마인더를 보내는데 이 배너만 비어 있다(2026-09-28). 시퀀스가 볼 티켓에서만 묻는다.
+                "followup": followup_view(
+                    conv, thread_rows,
+                    outside_replies(session, [conv.id]).get(conv.id, ())
+                    if conv.stage == FOLLOWUP_STAGE or conv.followup_closed_at is not None else (),
+                ) if conv else None,
                 # 근거 검사 판정 (2026-09-22). 검사는 초안을 막지 않고 매니페스트에 표시만
                 # 남기므로(`inbound._draft_reply`), 여기서 안 실으면 그 판정은 아무 데도
                 # 안 보인다. 기록(`reply_context` Event)이 없는 수동 초안·문의 글은 `None`.
@@ -1127,7 +1136,17 @@ async def start_manual_reply(
             .first()
         )
         if open_draft is not None:
-            return {"message_id": open_draft.id, "created": False}
+            # **우리 마지막 메일보다 먼저 쓰다 만 초안은 이어 쓰지 않는다** (2026-09-28). 운영자가 그 뒤에
+            # 허브스팟 화면·개인함에서 고객에게 또 썼다는 뜻이라 그 글은 낡았고, 후속 리마인더 스윕도 그것을
+            # 「쓰는 중」으로 안 본다(`followup_sequence.open_draft`) — 여기서 그대로 열어 주면 운영자가
+            # 쓰는 동안 리마인더가 나간다. 밀린 초안으로 닫고(행은 남는다) 새로 연다.
+            outgoing = session.query(Message).filter(
+                Message.conversation_id == conv.id, Message.direction == "outgoing"
+            ).all()
+            base, _ = followup_state(outgoing, outside_replies(session, [conv.id]).get(conv.id, ()))
+            if base is None or followup_open_draft([open_draft], base) is not None:
+                return {"message_id": open_draft.id, "created": False}
+            open_draft.status = "superseded"
 
         # 나갈 언어는 문의가 정합니다 — 자동 초안과 같은 규칙입니다. `language` 를 같은
         # 값으로 두면, 운영자가 그 언어로 쓰는 한 번역 관문이 뜨지 않고 한국어로 쓰면 뜹니다

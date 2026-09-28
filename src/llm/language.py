@@ -71,14 +71,18 @@ def _script_guess(text: str) -> str | None:
     return None
 
 
-def detect_language(text: str | None, *, llm: LLMClient | None = None) -> str:
+def detect_language(
+    text: str | None, *, llm: LLMClient | None = None, default: str | None = _DEFAULT
+) -> str | None:
     """Best-effort ISO 639-1 code for the language ``text`` is written in.
 
     Never raises — defaults to English on any failure so a reply still goes out.
+    ``default=None`` lets a caller tell "could not tell" from a real "en": the follow-up
+    reminder would otherwise send an English mail to a Spanish customer on a flash hiccup.
     """
     text = (text or "").strip()
     if not text:
-        return _DEFAULT
+        return default
 
     guess = _script_guess(text)
     if guess:
@@ -94,9 +98,9 @@ def detect_language(text: str | None, *, llm: LLMClient | None = None) -> str:
         if len(code) == 2 and code.isalpha():
             return code
     except Exception:
-        logger.warning("LLM language detection failed; defaulting to %s.", _DEFAULT, exc_info=True)
+        logger.warning("LLM language detection failed; defaulting to %s.", default, exc_info=True)
 
-    return _DEFAULT
+    return default
 
 
 def language_name(code: str) -> str:
