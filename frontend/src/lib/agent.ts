@@ -31,8 +31,12 @@ export type AgentStatus = {
  *  낡은 에이전트는 그 키를 안 주고, 화면은 빈 값을 조용히 그린다. 그래서 화면이 먼저 말한다.
  *  1.1.0: 작업 성능·사용 구성이 목업대로 되며 fail_kinds · processing.avg · limits · 30일 members 가 생겼다.
  *  1.2.0: 사용 패턴에 콘텐츠 카테고리(categories) · 보이스 클론(voices)이 생겼다.
- *  1.3.0: 크레딧 사용 현황에 작업별 소진 기록(records · records_total)이 생겼다. */
-export const AGENT_MIN_VERSION = "1.3.0";
+ *  1.3.0: 크레딧 사용 현황에 작업별 소진 기록(records · records_total)이 생겼다.
+ *  1.5.0: 스스로 업데이트하고, 스냅샷을 제대로 받고(fetch+reset · zip 폴더 전환), 한 번에 1000 스페이스를
+ *         받는다(엔터프라이즈 넷의 상세가 비었다). **1.4.x 는 스스로 못 올라가므로 한 번은 이 안내로 받는다.**
+ *         이 값을 올리는 커밋은 `agent-v1.5.0` 릴리스가 올라간 **뒤에** 배포한다 — 먼저 나가면 「받기」가
+ *         아직 1.4.2 를 준다. */
+export const AGENT_MIN_VERSION = "1.5.0";
 
 /** 버전 비교 — "1.2.3" 식 세 자리. "dev"(손 빌드)는 언제나 최신으로 본다. 없으면(1.0 이전) 가장 낡다. */
 export function versionOutdated(version: string | undefined, min = AGENT_MIN_VERSION): boolean {
