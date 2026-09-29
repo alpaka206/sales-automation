@@ -6,7 +6,7 @@ import { agentFetch, type Pair, type SpaceResult } from "../../lib/agent";
 import type { Contract, Row } from "./shared";
 import { diagnose, mergeSummaries, parseSpaceSeqs, type Diagnosis, type SpaceEvidence, type SpaceSummary, type SummaryData } from "./usage";
 
-const BATCH = 50; // 에이전트의 한 번 상한과 같다
+const BATCH = 50; // 1.4.x 에이전트의 한 번 상한(1.5.0 은 1000) — 목록은 스페이스별로 합칠 수 있어 나눠 보낸다
 
 export type UsageIndex = {
   bySpace: Map<number, SpaceSummary>;

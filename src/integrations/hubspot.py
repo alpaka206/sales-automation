@@ -70,7 +70,7 @@ def _is_hubspot_relay(address: str) -> bool:
 # 살아 있는 이메일 채널 계정 목록의 캐시. 이 목록이 바뀌는 것은 운영자가 허브스팟 포털에서
 # 인박스를 연결하거나 끊을 때뿐이라, 티켓을 열 때마다 물을 값이 아닙니다.
 # 프로세스 안에만 삽니다 — 워커가 여럿이면 워커마다 한 시간에 한 번입니다.
-# 읽는 곳이 둘입니다 — 발신 고르개(`list_sender_accounts`)와 개인함 수집(`channel_addresses`).
+# 읽는 곳은 발신 고르개(`list_sender_accounts`)와 리마인더(`followup_sequence._hubspot_reply`)입니다.
 # 캐시가 **원본 목록**인 이유: 결과를 따로 재우면 같은 목록을 한 시간에 두 번 받고
 # `tests/conftest.py` 가 비우는 자리도 둘이 됩니다.
 _SENDER_ACCOUNTS_TTL = 3600.0
@@ -990,6 +990,41 @@ class HubSpotClient:
             )
         return out
 
+    async def ticket_emails(self, ticket_id: str) -> list[dict]:
+        """그 티켓에 붙은 CRM 메일 기록들 — {when, from, text}. 노트를 적기 전에 **같은 메일이 이미
+        있는지** 보는 자리다(2026-09-29 운영 실측: 허브스팟의 지메일 연동이 자동으로 기록한 메일을 우리
+        개인함 노트가 한 번 더 적었다 — 티켓 셋에서 여덟 쌍). 읽기만 한다.
+        """
+        listing = await self._retry(
+            "GET", f"/crm/v3/objects/tickets/{ticket_id}/associations/emails",
+            params={"limit": 500},
+        )
+        listing.raise_for_status()
+        ids = [str(item["id"]) for item in listing.json().get("results") or [] if item.get("id")]
+        out: list[dict] = []
+        for start in range(0, len(ids), 100):  # 배치 상한
+            read = await self._retry(
+                "POST", "/crm/v3/objects/emails/batch/read",
+                json={
+                    "properties": ["hs_timestamp", "hs_email_from_email", "hs_email_text", "hs_email_html"],
+                    "inputs": [{"id": email_id} for email_id in ids[start : start + 100]],
+                },
+            )
+            read.raise_for_status()
+            for row in read.json().get("results") or []:
+                props = row.get("properties") or {}
+                when = None
+                try:
+                    when = datetime.fromisoformat(str(props.get("hs_timestamp") or "").replace("Z", "+00:00"))
+                except ValueError:
+                    pass
+                out.append({
+                    "when": when,
+                    "from": str(props.get("hs_email_from_email") or ""),
+                    "text": props.get("hs_email_text") or _html_to_text(props.get("hs_email_html")) or "",
+                })
+        return out
+
     async def send_conversation_message(
         self,
         context: ConversationReplyContext,
@@ -1069,7 +1104,12 @@ class HubSpotClient:
             ) from exc
 
         if 200 <= response.status_code < 300:
-            message_id = str(response.json().get("id") or "")
+            # 받았다는 답이 왔는데 본문을 못 읽으면 **나간 것일 수 있습니다** — 영구 실패로
+            # 떨어뜨리면 재승인이 같은 메일을 한 번 더 보냅니다.
+            try:
+                message_id = str(response.json().get("id") or "")
+            except (ValueError, AttributeError):
+                message_id = ""
             if not message_id:
                 raise DeliveryUnknown("HubSpot accepted the message but returned no message ID")
             return message_id
@@ -1402,7 +1442,12 @@ class HubSpotClient:
         """
         guard_external_write("hubspot:create_interaction_note")
         http = await self._http()
-        ts = int((happened_at or datetime.now(timezone.utc)).timestamp() * 1000)
+        # 시간대 없는 값은 **UTC** 다(이 앱의 DB 자). `.timestamp()` 는 그런 값을 서버의 현지 시각으로
+        # 읽는다 — 운영(UTC)에서는 맞고 KST PC 에서는 9시간 틀린다. 자를 여기서 박는다.
+        at = happened_at or datetime.now(timezone.utc)
+        if at.tzinfo is None:
+            at = at.replace(tzinfo=timezone.utc)
+        ts = int(at.timestamp() * 1000)
         r = await http.post(
             "/crm/v3/objects/notes",
             json={
@@ -2070,28 +2115,3 @@ def move_ticket_stage_after_send(ticket_id: str | None) -> bool:
         succeeded = False
         logger.exception("Ticket stage update failed (ticket=%s). Send succeeded.", ticket_id)
     return succeeded
-
-
-def channel_addresses() -> frozenset[str]:
-    """허브스팟 이메일 채널로 연결된 주소들(소문자, 살아 있는 것만). 동기 호출자용.
-
-    개인함 수집이 「이 사서함으로 **온** 메일은 이미 티켓 스레드에 있다」를 가리는 데 쓴다 —
-    그 주소로 온 메일은 허브스팟이 받아 스레드에 세우므로 노트로 또 적으면 같은 메일이
-    두 번 선다(2026-09-22 실측: 7월 이후 우리 노트 26건 중 `perso.ai@estsoft.com` 이 8건).
-    발신 고르개와 같은 목록·같은 한 시간 캐시를 읽으므로 왕복이 늘지 않는다.
-    """
-    async def _read() -> list[dict]:
-        client = HubSpotClient()
-        try:
-            return await client._live_email_channel_accounts()
-        finally:
-            await client.close()
-
-    return frozenset(
-        address
-        for address in (
-            str((account.get("deliveryIdentifier") or {}).get("value") or "").strip().lower()
-            for account in asyncio.run(_read())
-        )
-        if address
-    )

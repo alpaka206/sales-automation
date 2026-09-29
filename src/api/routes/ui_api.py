@@ -155,6 +155,23 @@ def _card(row: dict, reminder: str | None = None) -> dict:
     }
 
 
+def _broken_mailboxes() -> list[dict]:
+    from sqlalchemy import select
+
+    from ...db.models import MailboxAccount
+    from ...db.session import SessionLocal
+
+    with SessionLocal() as session:
+        return [
+            {"email": row.email, "reason": row.last_error}
+            for row in session.scalars(
+                select(MailboxAccount).where(
+                    MailboxAccount.enabled.is_(True), MailboxAccount.last_error.isnot(None)
+                )
+            )
+        ]
+
+
 @router.get("/api/ui/dashboard")
 def ui_dashboard(_request: Request):
     from .customer_ops import DEAL_DETAILS
@@ -163,6 +180,9 @@ def ui_dashboard(_request: Request):
     context = _dashboard_context()
     reminders = _reminders([row for stage in context["stages"] for row in stage["rows"]])
     return {
+        # **끊긴 개인 메일함** (2026-09-29 운영 실측: 한 사서함의 토큰이 09-22 에 죽었고 그 뒤 일주일 동안
+        # 그 메일이 콘솔에 안 들어왔다). 이유는 설정 화면에만 적혀 있어 아무도 못 봤다 — 매일 여는 화면에 둔다.
+        "broken_mailboxes": _broken_mailboxes(),
         # 어느 열에 Deal Detail 고르개가 붙는지, 거기 무엇을 고를 수 있는지. 서버가 주므로
         # 값 목록이 화면과 검증 두 곳에 따로 적히지 않습니다 — 라우트가 거절하는 값이
         # 고르개에 들어 있는 상태가 생기지 않습니다.
@@ -1604,14 +1624,19 @@ def ui_won_customer(client_id: int):
             full=True,
             contact=session.get(Contact, client.contact_id) if client.contact_id else None,
         )
-        # 협상 단계 대화까지 한 타임라인에 쌓입니다 — 계약이 생기기 전 기록이 여기 있습니다.
+        # 계약 차수별 소통 기록 — 화면(`HistoryCard`)이 `contract_seq` 로 계약 패널에 나눠 그립니다. 그래서
+        # **차수가 적힌 줄만** 보냅니다(2026-09-29 감사). 예전에는 그 연락처의 기록 **최신 200줄**을 보냈는데,
+        # 허브스팟에서 가져온 채팅 · 메일이 많은 고객은 손으로 적은 옛 계약 기록이 그 200줄 밖으로 밀려
+        # 「아직 기록이 없습니다」가 됐습니다. 나머지 대화는 아래 `history` 가 티켓별로 그립니다.
         comms = []
         if client.contact_id:
             comms = (
                 session.query(CustomerInteraction)
-                .filter(CustomerInteraction.contact_id == client.contact_id)
+                .filter(
+                    CustomerInteraction.contact_id == client.contact_id,
+                    CustomerInteraction.contract_seq.isnot(None),
+                )
                 .order_by(CustomerInteraction.happened_at.desc())
-                .limit(200)
                 .all()
             )
         payload["comms"] = [

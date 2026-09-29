@@ -316,7 +316,9 @@ async def auth_middleware(request: Request, call_next):
             content={"detail": "INTERNAL_API_TOKEN is not configured; refusing requests."},
         )
     token = request.headers.get("X-Internal-Token", "")
-    if not hmac.compare_digest(token, settings.INTERNAL_API_TOKEN):
+    # 바이트로 잰다 — 글자로 재면 ASCII 가 아닌 값 하나에 TypeError 가 나서 401 대신 500 이다
+    # (2026-09-23 운영 로그: `/internal/healthcheck` 500 「comparing strings with non-ASCII characters」).
+    if not hmac.compare_digest(token.encode(), settings.INTERNAL_API_TOKEN.encode()):
         return JSONResponse(status_code=401, content={"detail": "invalid or missing token"})
     return await call_next(request)
 

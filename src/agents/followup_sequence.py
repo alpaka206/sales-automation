@@ -609,7 +609,19 @@ def _create_reminder(conversation_id: int, variant: str) -> int | None:
     body = _reminder_body(variant, target)
     if body is None:
         return None
+    wanted = "send_1" if variant == REMINDER_1 else "send_2"
     with SessionLocal() as session:
+        # **넣기 직전에 대화 행을 잠그고 한 번 더 잽니다** (2026-09-29 감사). 배포가 겹쳐 폴러 둘이 같은 분에
+        # 돌면 둘 다 위의 확인을 지나고, 그 사이에는 허브스팟 읽기(`_outside_copy`)까지 있습니다. 잠금은 먼저
+        # 온 쪽의 커밋까지 기다리므로 뒤에 온 쪽은 방금 생긴 리마인더를 보고 물러섭니다. SQLite 에는 행
+        # 잠금이 없지만 거기는 프로세스가 하나입니다.
+        session.get(Conversation, conversation_id, with_for_update=True)
+        fresh = session.scalars(select(Message).where(Message.conversation_id == conversation_id)).all()
+        base_now, reminders_now = sequence_state(
+            fresh, outside_replies(session, [conversation_id]).get(conversation_id, []))
+        if base_now is None or not _due_now(fresh, base_now, reminders_now, wanted):
+            logger.info("문의 %s: 넣기 직전에 다른 회차가 먼저 만들어 %s 를 건너뜁니다.", conversation_id, variant)
+            return None
         now = _utcnow()
         row = Message(
             conversation_id=conversation_id,
@@ -629,8 +641,6 @@ def _create_reminder(conversation_id: int, variant: str) -> int | None:
             approved_at=now,
             scheduled_at=now,
         )
-        # ponytail: 「이미 만들었나」는 이 스윕이 읽은 행으로만 가른다. 배포가 겹쳐 폴러 둘이 같은
-        # 분에 돌면 둘 다 만들 수 있다 — 실제로 한 번이라도 나면 (기준 회신, 변형) 유니크를 건다.
         session.add(row)
         session.commit()
         message_id = row.id

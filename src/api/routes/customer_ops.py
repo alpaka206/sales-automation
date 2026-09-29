@@ -6,7 +6,7 @@ import asyncio
 import hashlib
 import hmac
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from urllib.parse import quote
 
@@ -36,6 +36,7 @@ from ...db.models import (
     CustomerInteraction,
     CustomerProfile,
     Event,
+    MailboxLinkDecision,
     Message,
 )
 from ...db.session import SessionLocal
@@ -420,6 +421,23 @@ def _parse_dt(value: str) -> datetime | None:
         return datetime.fromisoformat(value)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=f"날짜 형식이 올바르지 않습니다: {value}") from exc
+
+
+def _parse_form_time(value: str) -> datetime | None:
+    """화면의 `datetime-local` 칸 → UTC(시간대 없이 — 이 표의 다른 시각과 같은 자).
+
+    그 칸은 **운영자의 시계(KST)로** 적히고 시간대 없이 옵니다(`InteractionForm.toLocalInput` 이 UTC 를
+    브라우저 시각으로 바꿔 채웁니다). 예전에는 그 값을 그대로 저장해 UTC 로 읽혔고, 손으로 시각을 적은
+    기록이 **전부 9시간 늦게** 섰습니다 — 허브스팟 노트도(2026-09-29 운영 실측). 고치기를 누를 때마다 9시간씩
+    더 밀렸고, 고객 답장 판정과 리마인더 시계가 그 늦은 시각으로 쟀습니다.
+    """
+    at = _parse_dt(value)
+    if at is None:
+        return None
+    if at.tzinfo is None:
+        # 고정 오프셋 — 한국에는 서머타임이 없고, 윈도우 파이썬에는 시간대 DB(zoneinfo)가 없다.
+        at = at.replace(tzinfo=timezone(timedelta(hours=9)))
+    return at.astimezone(timezone.utc).replace(tzinfo=None)
 
 
 def _customer_rows() -> list[dict]:
@@ -1227,7 +1245,7 @@ async def interaction_add(
                 subject=subject.strip()[:300] or None,
                 summary=summary.strip(),
                 context=context.strip() or None,
-                happened_at=_parse_dt(happened_at) or datetime.now(timezone.utc),
+                happened_at=_parse_form_time(happened_at) or datetime.now(timezone.utc),
                 # 수주 고객의 몇 차 계약에 대한 기록인지. 비면 협상 단계(계약 전)이고,
                 # 이 타임라인은 고객 단위라 계약보다 먼저 시작합니다.
                 contract_seq=int(contract_seq) if contract_seq.strip().isdigit() else None,
@@ -1266,7 +1284,7 @@ async def interaction_add(
         handler=handler.strip(),
         subject=subject.strip(),
         summary=summary.strip(),
-        happened_at=_parse_dt(happened_at) or datetime.now(timezone.utc),
+        happened_at=_parse_form_time(happened_at) or datetime.now(timezone.utc),
     )
     # **「수신」이면 고객이 답장한 것이다 — Contacted → 협의 중** (2026-09-22 운영자 보고:
     # 「수신은 왔는데 stage 가 안 넘어가졌어」). 이 기록은 허브스팟 스레드를 안 지나므로
@@ -1330,7 +1348,7 @@ async def interaction_edit(
         row.direction = direction[:16]
         row.handler = handler.strip()[:120] or None
         row.summary = summary.strip()
-        row.happened_at = _parse_dt(happened_at) or row.happened_at
+        row.happened_at = _parse_form_time(happened_at) or row.happened_at
         session.commit()
     return RedirectResponse(back, status_code=303)
 
@@ -1353,17 +1371,16 @@ async def interaction_delete(
     다릅니다: 갈라지는 것이 아니라 **우리 화면에서 안 보이게** 하는 것이고, 저쪽 원본은
     그대로입니다. 그리고 지금 지워야 하는 것이 정확히 그 가져온 줄들입니다.
 
-    **개인함 메일은 묘비를 남깁니다.** 안 남기면 수집기가 다음 회차에 그대로 다시
+    **가져온 줄은 묘비를 남깁니다.** 안 남기면 수집기가 다음 회차에 그대로 다시
     가져옵니다 — `external_id` 로 중복을 거르는데 행을 지우면 그 열쇠가 사라지기
-    때문입니다. 지우기가 10분짜리가 되면 지운 것이 아닙니다. 표는
+    때문입니다. 지우기가 10분짜리가 되면 지운 것이 아닙니다. 한동안 개인함(`gmail:`) 줄에만
+    남겼고, 허브스팟 스레드 · CRM 줄은 다음 웹훅이나 「다시 받기」에 되살아났습니다(2026-09-29 감사). 표는
     `mailbox_link_decisions` 를 그대로 씁니다(모양이 같고, 확인 단계가 없어지면서 그 표의
     뜻이 「물어본 적 있다」에서 「운영자가 지웠다」로 바뀌었습니다).
 
     **허브스팟에는 손대지 않습니다.** 저쪽 노트·메일은 저쪽 기록이고, 우리 화면에서
     지운다고 없어질 것이 아닙니다. 지우는 것은 우리 줄 하나입니다.
     """
-    from ...db.models import MailboxLinkDecision
-
     back = _internal_path(redirect_to, f"/customers/{contact_id}#history")
     with SessionLocal() as session:
         row = session.get(CustomerInteraction, interaction_id)
@@ -1371,7 +1388,7 @@ async def interaction_delete(
             raise HTTPException(status_code=404, detail="기록을 찾을 수 없습니다")
         external_id = row.external_id or ""
         session.delete(row)
-        if external_id.startswith("gmail:"):
+        if external_id:
             session.merge(MailboxLinkDecision(
                 external_id=external_id,
                 conversation_id=None,
@@ -1790,6 +1807,9 @@ def _sync_hubspot(contact_id: int, per_type: int = 20) -> int:
             exists = session.scalar(
                 select(CustomerInteraction.id).where(CustomerInteraction.external_id == external_id)
             )
+            # 운영자가 지운 줄은 되살리지 않습니다 — 묘비(`interaction_delete`).
+            if exists is None and session.get(MailboxLinkDecision, external_id) is not None:
+                continue
             if exists and conv_id:
                 # 이미 있는 행에도 붙입니다 — 연결을 읽기 시작한 것이 나중이라, 먼저
                 # 가져온 수백 건은 티켓 없이 들어와 있습니다.

@@ -154,9 +154,9 @@ def thread_events(conv_id: int | None, *, factory=None) -> list[_Turn]:
     초안이 최초 문의에 다시 답하고, 「첫 회신인가」 판정이 틀립니다.
 
     **같은 메시지를 두 번 세지 않습니다.** 우리가 여기서 보낸 회신은 수집기가 허브스팟에서
-    도로 가져오므로 두 표에 다 있습니다. 가르는 것은 짐작이 아니라 같은 id 입니다 — 발송
-    응답이 돌려준 스레드 메시지 id 가 ``messages.hubspot_message_id`` 이고, 수집기는
-    그것으로 ``external_id`` 를 만듭니다(티켓 화면이 중복을 거를 때와 같은 규칙).
+    도로 가져오므로 두 표에 다 있습니다. 가르는 것은 ``history_view.message_copies`` 하나입니다 —
+    열쇠(발송 응답이 돌려준 스레드 메시지 id = ``messages.hubspot_message_id``)가 있으면 열쇠로,
+    없으면(첫 문의 · 「나갔다」로 확인한 발송) 본문으로. 티켓 화면이 중복을 거를 때와 같은 규칙입니다.
 
     조회 실패는 빈 대화가 아닙니다. 해당 초안을 실패 처리해 다시 시도하게 합니다.
     """
@@ -191,9 +191,10 @@ def thread_events(conv_id: int | None, *, factory=None) -> list[_Turn]:
                 .all()
             )
 
-        drawn_by_messages = {
-            f"hubspot:conv:{m.hubspot_message_id}" for m in messages if m.hubspot_message_id
-        }
+        # 열쇠가 없는 행(첫 문의 · 「나갔다」로 확인한 발송)은 본문으로 — 자는 `history_view.message_copies` 하나.
+        from ..db.history_view import message_copies
+
+        drawn_by_messages = message_copies(messages, interactions)
         # **후속 리마인더의 소통 히스토리 줄은 대화가 아닙니다** (2026-09-21). 발송 뒤 정리가
         # 「Reminder Sent 1」 한 줄을 `customer_interactions` 에 남기는데(운영자 지시로 그
         # 표에 남겨야 화면에 뜹니다), 그 줄은 같은 리마인더를 **두 번째로** 그리는 것이고
@@ -206,9 +207,19 @@ def thread_events(conv_id: int | None, *, factory=None) -> list[_Turn]:
         # 직전에 온 고객 답장이 안 보이게 됩니다.
         #
         # 메일 자체는 `messages` 행으로 이미 이 목록에 있습니다(`reminder=True` 로).
+        # 사본이 더 이른 시각을 들고 있으면 그것이 진짜다 — 접수가 만든 문의 행의 시각은 고객이 쓴 때가
+        # 아니라 우리가 받아 적은 때다(잠든 서버 · 놓친 웹훅이면 몇 분~몇 시간 늦다, 2026-09-28).
+        earliest: dict[int, datetime] = {}
+        for item in interactions:
+            source = drawn_by_messages.get(item.id)
+            if source is not None and item.happened_at is not None:
+                at = _naive(item.happened_at)
+                earliest[source.id] = min(at, earliest.get(source.id, at))
         turns: list[_Turn] = []
         for row in messages:
             at = row.sent_at or row.created_at
+            if row.id in earliest:
+                at = min(_naive(at), earliest[row.id])
             turns.append(_Turn(
                 at=_naive(at),
                 direction="inbound" if row.direction == "inbound" else "outgoing",
@@ -218,7 +229,7 @@ def thread_events(conv_id: int | None, *, factory=None) -> list[_Turn]:
                 source_ref=f"message:{row.id}",
             ))
         for item in interactions:
-            if item.external_id in drawn_by_messages:
+            if item.id in drawn_by_messages:
                 continue
             if (item.external_id or "").startswith(REMINDER_NOTE_PREFIX):
                 continue

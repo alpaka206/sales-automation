@@ -58,8 +58,13 @@ from ..integrations.gmail import (
 logger = logging.getLogger(__name__)
 
 _API = "https://gmail.googleapis.com/gmail/v1/users/me"
-# 한 회차에 사서함당 볼 메일 수. 개인함은 하루 수십 통이고 10분 폴러마다 도므로 넉넉합니다.
+# 한 회차에 사서함당 **본문까지 읽을** 메일 수. 개인함은 하루 수십 통이고 10분 폴러마다 도므로 넉넉합니다.
+# 넘치면 오래된 쪽부터 읽고, 창은 읽은 데까지만 민다 — 나머지는 다음 회차(`_sync_one`).
 MESSAGES_PER_SWEEP = 50
+# 목록은 id 만 오므로 한 장에 500 개까지 묻는다. ponytail: 한 창에 1만 통이 넘으면 가장 오래된 쪽을
+# 못 본다 — 그런 창은 서버가 몇 주 꺼져 있었다는 뜻이고, 그때는 수집 시작일을 다시 잡는 편이 맞다.
+_LIST_PAGE = 500
+_LIST_PAGES = 20
 # 창을 조금 겹칩니다 — 경계에 걸친 메일을 놓치지 않게. 다시 읽는 것은 무해합니다.
 _SWEEP_OVERLAP = timedelta(minutes=5)
 _TIMEOUT = 30.0
@@ -213,8 +218,12 @@ _Note = tuple[str, str, str, datetime, str, str]
 _NOT_A_MAIL = {"DRAFT", "SPAM", "TRASH"}
 
 
-def _sync_one(email: str) -> tuple[int, list[_Note], set[int]]:
-    """사서함 하나. (새로 넣은 줄 수, 허브스팟에 남길 노트들, 고객 메일이 붙은 문의 id 들)."""
+def _sync_one(email: str) -> tuple[int, list[_Note], set[int], datetime | None]:
+    """사서함 하나. (새로 넣은 줄 수, 허브스팟에 남길 노트들, 고객 메일이 붙은 문의 id 들, 창을 밀 곳).
+
+    마지막 값이 None 이면 창 안의 메일을 다 봤다 — 창을 「지금」으로 민다. 날짜면 이번 회차에 다 못 읽었다
+    — 창을 거기(읽은 것 중 가장 최근)까지만 민다.
+    """
     from .ticket_history import is_our_address
 
     notes: list[_Note] = []
@@ -224,7 +233,7 @@ def _sync_one(email: str) -> tuple[int, list[_Note], set[int]]:
 
         account = session.get(_Account, email)
         if account is None or account.collect_from is None:
-            return 0, notes, replied
+            return 0, notes, replied, None
         # **묻는 창은 「마지막으로 본 이후」입니다** (2026-09-08).
         #
         # 「동의 이후」로 물으면 창이 날마다 넓어지는데 한 회차에 받는 것은
@@ -251,13 +260,24 @@ def _sync_one(email: str) -> tuple[int, list[_Note], set[int]]:
         " -in:drafts -in:spam -in:trash"
     )
     with httpx.Client(headers=headers, timeout=_TIMEOUT) as client:
-        listing = client.get(
-            f"{_API}/messages", params={"q": query, "maxResults": MESSAGES_PER_SWEEP}
-        )
-        listing.raise_for_status()
-        ids = [item["id"] for item in (listing.json().get("messages") or [])]
+        # **목록은 끝까지 넘깁니다** (2026-09-29 감사). 한 장(50통, 최신순)만 읽고 창을 「지금」으로 밀던
+        # 때는, 서버가 자는 동안 공지·광고까지 50통이 넘게 쌓이면 그 창의 **오래된 고객 메일이 다음 창 밖**
+        # 이었습니다 — 빠졌다는 표시도 없이.
+        ids: list[str] = []
+        page_token = None
+        for _ in range(_LIST_PAGES):
+            params = {"q": query, "maxResults": _LIST_PAGE}
+            if page_token:
+                params["pageToken"] = page_token
+            listing = client.get(f"{_API}/messages", params=params)
+            listing.raise_for_status()
+            page = listing.json()
+            ids.extend(item["id"] for item in (page.get("messages") or []))
+            page_token = page.get("nextPageToken")
+            if not page_token:
+                break
         if not ids:
-            return 0, notes, replied
+            return 0, notes, replied, None
 
         candidates = [f"gmail:{i}" for i in ids]
         with SessionLocal() as session:
@@ -289,16 +309,22 @@ def _sync_one(email: str) -> tuple[int, list[_Note], set[int]]:
                 ).all()
             }
 
+        # 오래된 쪽부터 — 넘쳐서 다음 회차로 미룰 때 창을 「읽은 데까지」 밀 수 있게. 아는 메일은 본문을 안
+        # 읽으므로 몫을 안 먹는다. 광고·공지는 줄을 안 남겨 매번 다시 읽히지만, 창이 그 뒤로 밀리므로 한 번뿐이다.
+        fresh = [i for i in reversed(ids) if f"gmail:{i}" not in known]
+        batch = fresh[:MESSAGES_PER_SWEEP]
+        until: datetime | None = None
         added = 0
-        for message_id in ids:
+        for message_id in batch:
             external_id = f"gmail:{message_id}"
-            if external_id in known:
-                continue
             detail = client.get(f"{_API}/messages/{message_id}", params={"format": "full"})
             if detail.is_error:
                 logger.warning("메일 %s 를 못 읽었습니다 (%s)", message_id, email)
                 continue
             body = detail.json()
+            if len(fresh) > len(batch):
+                seen_at = datetime.fromtimestamp(int(body.get("internalDate", 0)) / 1000, tz=timezone.utc)
+                until = max(until, seen_at) if until else seen_at
             if _NOT_A_MAIL & set(body.get("labelIds") or ()):
                 continue
             payload = body.get("payload") or {}
@@ -395,24 +421,23 @@ def _sync_one(email: str) -> tuple[int, list[_Note], set[int]]:
                         email,
                         direction,
                     ))
-    return added, notes, replied
+    if len(fresh) > len(batch) and until is None:
+        # 넘쳤는데 읽은 날짜가 하나도 없다(본문 조회가 전부 실패) — 창을 안 민다. 다음 회차가 같은 자리에서.
+        with SessionLocal() as session:
+            account = session.get(_Account, email)
+            until = account.last_polled_at if account and account.last_polled_at else account.collect_from
+    return added, notes, replied, until
 
 
-def _channel_mailboxes() -> frozenset[str]:
-    """허브스팟 이메일 채널로 연결된 주소들. 못 읽으면 빈 집합 — 그때는 예전처럼 노트를 적는다.
+def _polled_until(email: str, until: datetime) -> None:
+    """창을 `until` 까지만 민다 — 이번 회차에 다 못 읽은 메일이 다음 창 안에 남게."""
+    from ..db.models import MailboxAccount as _Account
 
-    막히는 쪽으로 떨어뜨리지 않는 이유: 그 메일의 사본은 대개 여기까지 오기 전에
-    `_hubspot_already_has_it` 이 걸렀고(폴러가 `ticket_history` 를 먼저 돌린다), 남은 것도
-    `_note_on_ticket` 이 티켓의 노트를 읽고 한 번 더 거른다. 목록 하나 못 읽었다고 개인함
-    노트를 회차째 잃는 것이 더 비싸다.
-    """
-    from ..integrations.hubspot import channel_addresses
-
-    try:
-        return channel_addresses()
-    except Exception:
-        logger.warning("허브스팟 채널 계정 목록을 못 읽었습니다", exc_info=True)
-        return frozenset()
+    with SessionLocal() as session:
+        row = session.get(_Account, email)
+        if row is not None:
+            row.last_polled_at = until.astimezone(timezone.utc).replace(tzinfo=None) if until.tzinfo else until
+            session.commit()
 
 
 def sync_mailboxes_once() -> dict:
@@ -426,11 +451,14 @@ def sync_mailboxes_once() -> dict:
     replied: set[int] = set()
     for email in enabled_accounts():
         try:
-            gained, mine, theirs = _sync_one(email)
+            gained, mine, theirs, until = _sync_one(email)
             added += gained
             notes.extend(mine)
             replied |= theirs
-            mark_polled(email)
+            if until is None:
+                mark_polled(email)
+            else:
+                _polled_until(email, until)
         except MailboxTokenError as exc:
             # 이유는 이미 행에 적혔습니다(`gmail._mark_broken`). 화면이 그것을 그립니다.
             logger.warning("사서함 %s 를 못 열었습니다: %s", email, exc)
@@ -441,38 +469,15 @@ def sync_mailboxes_once() -> dict:
     # **노트는 마지막에, 한 번에.** 수집 중에 보내면 저쪽이 느린 날 사서함 한 바퀴가
     # 그만큼 길어지고, 그 사이 세션이 열려 있습니다. 실패해도 우리 줄은 그대로입니다 —
     # 「이 메일은 이 티켓 것이다」는 저쪽에 못 써도 유효한 판단입니다.
-    # **채널 계정 사서함으로 온 메일은 허브스팟이 이미 들고 있다** (2026-09-22). 그 주소로
-    # 온 메일은 허브스팟이 받아 티켓 스레드에 세운다 — 노트로 또 적으면 같은 메일이 두 번
-    # 선다(실측: 우리 노트 26건 중 `perso.ai@estsoft.com` 8건). **나간** 메일은 다르다:
-    # 지메일에서 직접 보낸 것은 스레드에 안 서므로 노트가 그 메일이 남는 유일한 자리다.
-    # 목록은 필요할 때 한 번만 묻는다(한 시간 캐시).
-    #
-    # **나간 메일도 채널 계정이면 스레드부터 본다** (2026-09-22 운영자: 「gmail 에서 직접, hubspot 에서
-    # 직접, 우리 사이트에서 … 깔끔하게 모든 곳에서 정리되도록」). 허브스팟 화면에서 답한 메일은
-    # 허브스팟이 그 계정의 지메일로 보내므로 **보낸편지함에도 사본이 선다** — 그 사본을 노트로
-    # 적으면 스레드 메시지와 노트가 같은 메일을 두 번 말한다. DB 쪽은 `_hubspot_already_has_it` 이
-    # 거르지만 그건 스레드 수집이 **먼저** 돌았을 때만이고(폴러 순서상 대개 그렇지만 웹훅이
-    # 빠지면 아니다), 노트는 나간 뒤에 못 되돌린다. 그래서 그 계정의 나간 메일은 스레드를 읽어
-    # 같은 메일이 있으면 안 적는다. 지메일에서 직접 보낸 메일은 스레드에 없으므로 그대로 적힌다 —
-    # 그 노트가 그 메일이 허브스팟에 남는 유일한 자리다.
-    channel: frozenset[str] | None = None
-    for hubspot_contact_id, ticket_id, body, when, mailbox, direction in notes:
+    # **이미 허브스팟에 있는 메일은 노트로 또 적지 않는다** — 판단은 `_note_on_ticket` 이 티켓을 읽어서
+    # 한다(노트 · 스레드 · CRM 메일 기록). 한동안 여기서 「채널 계정 사서함으로 온 메일은 스레드가
+    # 들고 있다」로 건너뛰었는데 그 가정이 틀린 자리가 운영에 있었다(그 함수 docstring).
+    for hubspot_contact_id, ticket_id, body, when, _mailbox, direction in notes:
         if not hubspot_contact_id:
             continue
-        if channel is None:
-            channel = _channel_mailboxes()
-        if mailbox.strip().lower() in channel:
-            if direction == "inbound":
-                continue
-            try:
-                if asyncio.run(_thread_has_it(ticket_id, when, direction, body)):
-                    continue
-            except Exception:
-                # 확인이 안 되면 안 적는다 — 확인 없이 적는 것이 이번 지시가 막으려는 일이다.
-                logger.warning("티켓 %s 스레드를 못 읽어 노트를 건너뜁니다", ticket_id, exc_info=True)
-                continue
+        # 이미 있는지는 `_note_on_ticket` 이 읽어서 판단한다 — 노트 · 스레드 · CRM 메일 기록.
         try:
-            asyncio.run(_note_on_ticket(hubspot_contact_id, ticket_id, body[:60_000], when))
+            asyncio.run(_note_on_ticket(hubspot_contact_id, ticket_id, body[:60_000], when, direction))
         except Exception:
             logger.warning("티켓 %s 에 노트를 못 남겼습니다", ticket_id, exc_info=True)
     # **고객이 답장했으면 Contacted → 협의 중** (2026-09-22 운영자 보고: 「수신은 왔는데 stage 가
@@ -503,47 +508,51 @@ def sync_mailboxes_once() -> dict:
 # 않은 이유는 모양이 똑같기 때문입니다: `external_id` 하나가 기본키.
 
 
-async def _thread_has_it(ticket_id: str, when: datetime | None, direction: str, note_body: str) -> bool:
-    """그 티켓의 허브스팟 스레드에 **같은 메일**이 이미 서 있는가 — 자는 `ticket_history.same_mail`.
+async def _ticket_has_it(client, ticket_id: str, when: datetime | None, direction: str, note_body: str) -> bool:
+    """그 메일이 허브스팟 티켓에 **이미 서 있는가** — 스레드 메시지나 CRM 메일 기록으로. 자는
+    `ticket_history.same_mail`(같은 방향 · 같은 본문 앞부분 · 하루 안), DB 쪽 `_hubspot_already_has_it` 과 같다.
 
-    노트 본문은 「[개인 메일함 …] 제목\n\n본문」이라 첫 빈 줄 뒤가 메일 본문이다. 스레드 줄과
-    같은 방향·같은 본문 앞부분·하루 안이면 같은 메일이다(DB 쪽 `_hubspot_already_has_it` 과 같은 자).
+    노트 본문은 「[개인 메일함 …] 제목\n\n본문」이라 첫 빈 줄 뒤가 메일 본문이다.
     """
-    from ..integrations.hubspot import HubSpotClient
-    from .ticket_history import collect_ticket_history, same_mail
+    from .ticket_history import collect_ticket_history, is_our_address, same_mail
 
     text = note_body.split("\n\n", 1)[1] if "\n\n" in note_body else ""
     stamp = when.replace(tzinfo=None) if when is not None else None
-    client = HubSpotClient()
-    try:
-        rows = await collect_ticket_history(client, ticket_id)
-    finally:
-        await client.close()
+    if any(same_mail(row.get("happened_at"), row.get("direction"), row.get("summary"), stamp, direction, text)
+           for row in await collect_ticket_history(client, ticket_id)):
+        return True
     return any(
-        same_mail(row.get("happened_at"), row.get("direction"), row.get("summary"), stamp, direction, text)
-        for row in rows
+        same_mail(mail["when"], "outgoing" if is_our_address(mail["from"]) else "inbound", mail["text"],
+                  stamp, direction, text)
+        for mail in await client.ticket_emails(ticket_id)
     )
 
 
 async def _note_on_ticket(hubspot_contact_id: str, ticket_id: str, body: str,
-                          when: datetime | None) -> None:
+                          when: datetime | None, direction: str | None = None) -> bool:
     """허브스팟 티켓에 노트 한 줄 — 「개인 gmail 로 온 거여도 hubspot 에 기록은 남겨야 해」.
+    남겼거나 **이미 있으면** True, 확인이나 쓰기가 실패하면 False(부르는 쪽이 다시 시도한다).
 
     **노트인 이유**: 이 토큰은 메일 기록(engagement)을 **만들 수 없습니다** —
     `sales-email-read` 는 읽기 전용입니다(CLAUDE.md). 노트는 이 앱이 이미 쓰는 길이고,
     `create_interaction_note` 가 연락처에 달고 티켓에도 붙입니다.
 
-    **실패해도 우리 연결은 되돌리지 않습니다.** 운영자가 누른 것은 「이 메일은 이 티켓
-    것이다」이고 그 판단은 저쪽에 못 써도 유효합니다 — 되돌리면 같은 메일을 다시
-    물어보게 됩니다.
+    **적기 전에 그 티켓을 읽습니다** (2026-09-22 운영자 지시: 「허브스팟에도 기록되었는지 확인하고
+    기록할지」). 셋 중 하나에 같은 메일이 있으면 안 적습니다:
 
-    **적기 전에 그 티켓의 노트를 읽습니다** (2026-09-22 운영자 지시: 「허브스팟에도
-    기록되었는지 확인하고 기록할지」). 같은 머리(`[개인 메일함 …] 제목`)와 같은 본문 앞
-    200자가 이미 있으면 안 적습니다. 그런 노트가 생기는 길이 셋 있었습니다 — 저장할 때마다
-    id 가 바뀌는 지메일 초안(이제 조회에서 뺐지만 옛 줄은 남아 있다), 우리 줄이 사라진 뒤 다시
-    들어온 메일(DB 복원 · 묘비 표 정리), 그리고 개인함 발송(`senders._send_from_mailbox`)의
-    재시도. 읽기가 실패하면 **안 적습니다** — 저쪽 읽기가 안 되는데 쓰기는 될 리 없고, 확인
-    없이 적는 것이 이번 지시가 막으려는 바로 그 일입니다.
+    - **우리 노트** — 같은 머리(`[개인 메일함 …] 제목`)와 같은 본문 앞 200자. 지메일 초안(저장할 때마다
+      id 가 바뀐다), 우리 줄이 사라진 뒤 다시 들어온 메일, 개인함 발송의 재시도가 그 길이었습니다.
+    - **스레드 메시지** — 채널 계정(perso.ai@)으로 오간 메일, 채널 계정을 참조에 넣은 메일.
+    - **CRM 메일 기록** — 허브스팟의 지메일 연동이 자동으로 남긴 것.
+
+    뒤의 둘은 2026-09-29 운영 실측으로 더했습니다. 한동안 「채널 계정 사서함으로 **온** 메일은 스레드가
+    들고 있다」고 가정하고 확인 없이 건너뛰었는데, 콘솔이 폼 스레드에 perso.ai@ 로 답한 뒤 고객이 답하면
+    그 답장이 **티켓에 안 붙은 새 스레드**에 서기도 했습니다 — 허브스팟 티켓에는 아무 흔적이 없었습니다.
+    반대로 그 가정 밖의 사서함(untae@ 가 perso.ai@ 를 참조에 넣은 메일)은 스레드를 안 봐서, 같은 메일이
+    스레드 · CRM 메일 · 우리 노트로 세 번 섰습니다. 그래서 가정 대신 **언제나 읽습니다.** 읽기가 실패하면
+    **안 적습니다** — 확인 없이 적는 것이 이 지시가 막으려는 바로 그 일입니다.
+
+    `direction` 이 없으면(옛 부르는 곳) 노트만 봅니다.
     """
     from ..integrations.hubspot import HubSpotClient
 
@@ -552,12 +561,17 @@ async def _note_on_ticket(hubspot_contact_id: str, ticket_id: str, body: str,
         key = _note_key(body)
         if any(_note_key(old) == key for old in await client.ticket_notes(ticket_id)):
             logger.info("티켓 %s 에 같은 노트가 이미 있어 안 적습니다", ticket_id)
-            return
+            return True
+        if direction and await _ticket_has_it(client, ticket_id, when, direction, body):
+            logger.info("티켓 %s 에 같은 메일이 이미 있어 노트를 안 적습니다", ticket_id)
+            return True
         await client.create_interaction_note(
             hubspot_contact_id, body[:60_000], happened_at=when, ticket_id=ticket_id
         )
+        return True
     except Exception:
         logger.warning("티켓 %s 에 노트를 못 남겼습니다", ticket_id, exc_info=True)
+        return False
     finally:
         await client.close()
 

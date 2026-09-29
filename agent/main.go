@@ -150,6 +150,7 @@ func (a *agent) routes() *http.ServeMux {
 			"folder_mb":   a.snap.FolderMB(), "metrics": metricNames(),
 			"space_metrics": []string{"summary", "credits", "jobs", "usage", "evidence"},
 			"version":       version,
+			"update":        updateState(),
 		}, origin)
 	}))
 
@@ -195,7 +196,8 @@ func (a *agent) routes() *http.ServeMux {
 			send(w, http.StatusMethodNotAllowed, errBody{Error: "POST 로 부르세요"}, origin)
 			return
 		}
-		a.snap.Pull()
+		// 오래 걸리면 뒤에서 마저 받는다 — 화면의 버튼이 몇 분씩 돌지 않게. 그동안 as_of.pull 이 「진행 중」이다.
+		a.snap.PullWait(20 * time.Second)
 		send(w, http.StatusOK, map[string]any{"as_of": a.snap.AsOf()}, origin)
 	}))
 
@@ -298,7 +300,8 @@ func (o *originList) Set(v string) error {
 func launchFlags() []string {
 	out := []string{}
 	for _, a := range os.Args[1:] {
-		if strings.HasPrefix(strings.ToLower(a), "persodata:") || a == "--no-browser" || a == "-no-browser" {
+		if strings.HasPrefix(strings.ToLower(a), "persodata:") || a == "--no-browser" || a == "-no-browser" ||
+			a == justUpdatedFlag || a == "-just-updated" {
 			continue
 		}
 		out = append(out, a)
@@ -315,6 +318,8 @@ func main() {
 	noBrowser := flag.Bool("no-browser", false, "브라우저를 열지 않는다")
 	unregister := flag.Bool("unregister", false, "persodata:// 등록만 지우고 끝낸다")
 	showVersion := flag.Bool("version", false, "버전만 찍고 끝낸다")
+	noUpdate := flag.Bool("no-update", false, "켤 때 새 버전을 확인하지 않는다")
+	justUpdated := flag.Bool(strings.TrimPrefix(justUpdatedFlag, "--"), false, "(내부용) 업데이트 뒤 다시 띄워졌다")
 	// **`persodata://open` 으로 열리면 그 URL 이 argv[1] 로 온다.** Go 의 flag 는 첫
 	// 비플래그에서 멈추므로 그대로 무해하게 무시된다 — 그 값으로 하는 일이 없다.
 	flag.Parse()
@@ -325,6 +330,10 @@ func main() {
 
 	if *unregister {
 		unregisterScheme()
+		return
+	}
+	// 켤 때 한 번 — 새 버전이 있으면 바꿔 넣고 새것을 띄운 뒤 이 프로세스는 끝난다 (update.go).
+	if !*noUpdate && autoUpdate(*justUpdated) {
 		return
 	}
 	registerScheme(launchFlags())
@@ -341,14 +350,16 @@ func main() {
 	fmt.Printf("perso-agent %s\n", version)
 	fmt.Printf("스냅샷: %s\n", snap.Repo)
 	fmt.Println("pull 확인 중…")
-	snap.Pull()
+	// 평소에는 몇 초면 끝난다. 며칠 밀렸거나 처음 로그인하는 중이면 기다리지 않고 받아 둔 데이터로 먼저
+	// 연다 — 받기는 뒤에서 계속되고, 끝나면 그다음 계산부터 새 데이터다.
+	snap.PullWait(20 * time.Second)
 	note, _ := snap.pullState()
 	fmt.Printf("  → %s\n", note)
-	// 켜 둔 채로 며칠이 가도 최신이게 — 스냅샷은 매일 새로 만들어지므로 한 시간마다 다시 pull 한다
-	// (새 것이 없으면 git 이 곧바로 끝난다). 계산 중에 바뀌면 RunMetric 이 잡아 다시 계산하게 한다.
+	// 켜 둔 채로 며칠이 가도 최신이게 — 스냅샷은 매일 새로 만들어지므로 한 시간마다 다시 받는다
+	// (새 것이 없으면 git 이 곧바로 끝난다). 바꿔 끼우는 순간은 계산과 겹치지 않는다(Snapshot.data).
 	go func() {
 		for range time.Tick(time.Hour) {
-			snap.Pull()
+			snap.PullWait(0)
 		}
 	}()
 

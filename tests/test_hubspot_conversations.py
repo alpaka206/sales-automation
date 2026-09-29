@@ -228,6 +228,32 @@ async def test_send_5xx_is_delivery_unknown_without_retry(
     assert route.call_count == 1
 
 
+@respx.mock
+@pytest.mark.asyncio
+async def test_a_2xx_we_cannot_read_is_delivery_unknown_not_a_failure(
+    client: HubSpotClient, monkeypatch
+) -> None:
+    """허브스팟이 받았다고(2xx) 했는데 본문을 못 읽으면 **나갔을 수 있습니다.** 영구 실패로
+    떨어지면 `send_failed` → 재승인이 같은 메일을 한 번 더 보냅니다(2026-09-29 감사)."""
+    monkeypatch.setattr(settings, "HUBSPOT_SENDER_ACTOR_ID", "A-82843387")
+    respx.get(
+        f"{BASE_URL}/conversations/v3/conversations/actors/A-82843387"
+    ).mock(return_value=httpx.Response(200, json={"id": "A-82843387", "type": "AGENT"}))
+    respx.post(
+        f"{BASE_URL}/conversations/v3/conversations/threads/thread-1/messages"
+    ).mock(return_value=httpx.Response(201, content=b"<html>gateway</html>"))
+
+    with pytest.raises(DeliveryUnknown):
+        await client.send_conversation_message(
+            ConversationReplyContext("thread-1", "1002", "account-1"),
+            recipient_email="buyer@example.com",
+            subject="Re: Inquiry",
+            text="Hello",
+            rich_text="<p>Hello</p>",
+        )
+    await client.close()
+
+
 def test_a_validation_failure_names_the_field_not_just_multiple_errors():
     """HubSpot 400 의 진짜 이유는 ``errors`` 배열에 있습니다.
 

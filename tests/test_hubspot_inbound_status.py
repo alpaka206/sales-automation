@@ -260,6 +260,7 @@ async def test_a_follow_up_reminder_does_not_push_contacted_again(
     from src.agents.send_worker import _post_send_bookkeeping
 
     session = MagicMock()
+    session.scalar.return_value = None  # 리마인더 줄이 아직 없다 — 넣기 전에 묻는다(재시도가 두 줄을 안 만들게)
     contact = MagicMock(spec=Contact)
     contact.hubspot_contact_id = "hs-503"
     profile = MagicMock(spec=CustomerProfile)
@@ -271,7 +272,7 @@ async def test_a_follow_up_reminder_does_not_push_contacted_again(
     client.close = AsyncMock()
 
     msg = MagicMock(id=77, subject="RE: quote", prompt_variant=REMINDER_1,
-                    post_send_sync_attempts=0)
+                    post_send_sync_attempts=0, channel_account_id=None)
     await _post_send_bookkeeping(session, msg, conv, 13)
 
     mock_move.assert_not_called()

@@ -20,6 +20,8 @@ type DashboardData = {
   /** 단계 → 그 단계에서 고를 수 있는 Deal Detail. Won 과 Lost 만 있습니다. */
   deal_details: Record<string, string[]>;
   stages: Stage[];
+  /** 토큰이 죽어 수집이 멈춘 개인 메일함. 설정 화면에만 적혀 있으면 아무도 못 본다. */
+  broken_mailboxes?: { email: string; reason: string }[];
 };
 
 export function Dashboard() {
@@ -51,6 +53,18 @@ export function Dashboard() {
         <span className="chip">답변 대기 <b className="tnum">{c.awaiting_total}</b></span>
         <span className="chip">협상중 <b className="tnum">{negotiating}</b></span>
       </div>
+
+      {!!data.broken_mailboxes?.length && (
+        <div className="banner banner--warn mb-gap" role="alert">
+          <div>
+            <div className="banner__title">개인 메일함 연결이 끊겨 그 메일이 안 들어오고 있습니다</div>
+            <div className="banner__body">
+              {data.broken_mailboxes.map((box) => box.email).join(", ")} — <Link to="/settings/mailboxes">설정 → 개인 메일함</Link>에서 다시 연결하세요.
+              다시 연결하면 끊겼던 동안의 메일도 들어옵니다.
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 최신화는 폴러 다음 회차에 돕니다. 아무 표시가 없으면 버튼이 안 눌린 것으로 읽혀
           운영자가 계속 누르게 됩니다. */}

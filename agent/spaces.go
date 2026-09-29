@@ -33,9 +33,12 @@ import (
 	"time"
 )
 
-const maxSpacesPerCall = 50
+// 한 번에 받는 스페이스 수의 상한. 50 이었는데 **엔터프라이즈 넷이 그보다 컸다**(가장 큰 곳 203개) — 상세
+// 화면은 계약의 스페이스를 한 번에 보내야 하므로(백분위·상위 5개·최대 동시 작업은 나눠 더할 수 없다) 그
+// 고객들의 사용 현황이 「한 번에 50개까지」로 비었다(2026-09-29). 상한은 URL 길이·SQL 크기를 막는 울타리다.
+const maxSpacesPerCall = 1000
 
-// parseSpaces — `?s=1,2,3`. 숫자만, 최대 50개. SQL 에 그대로 들어가므로 **여기서 거른다**.
+// parseSpaces — `?s=1,2,3`. 숫자만, 최대 maxSpacesPerCall 개. SQL 에 그대로 들어가므로 **여기서 거른다**.
 func parseSpaces(raw string) ([]int64, error) {
 	if strings.TrimSpace(raw) == "" {
 		return nil, errors.New("s= 에 space_seq 를 쉼표로 주세요")

@@ -116,12 +116,15 @@ async def clear_send_failures(request: Request):
     for "this draft will not be sent", so the row leaves every queue while the thread
     keeps its history. A failure worth investigating should be investigated before this
     is pressed — that is why it is a button an operator chooses, not a sweep on a timer.
+
+    **「갔는지 모른다」(`delivery_unknown`)는 치우지 않습니다** (2026-09-29 감사). 실패가 아니라 확인이 필요한
+    상태입니다 — 고객이 이미 받았을 수 있습니다. `rejected` 로 덮으면 「안 나간 글」이 되어, 리마인더라면
+    그 허브스팟 사본이 「콘솔 밖에서 보낸 새 메일」로 읽혀 **1차 리마인더가 다시 나갑니다.** 그 행은 아래
+    「발송 확인」으로 닫거나, 수집기가 허브스팟 사본을 찾으면 저절로 닫힙니다(`confirm_delivered`).
     """
     with SessionLocal() as session:
         rows = session.scalars(
-            select(Message).where(
-                Message.status.in_(["send_failed", "draft_failed", "delivery_unknown"])
-            )
+            select(Message).where(Message.status.in_(["send_failed", "draft_failed"]))
         ).all()
         for row in rows:
             row.status = "rejected"
@@ -187,6 +190,42 @@ async def retry_failed_message(request: Request, message_id: int):
     return RedirectResponse("/logs?tab=recovery&updated=message", status_code=303)
 
 
+def confirm_delivered(session, message: Message, *, sent_at=None, hubspot_message_id: str | None = None,
+                      reason: str = "operator_confirmed_sent") -> None:
+    """「갔는지 모른다」던 발송을 **나간 것으로** 닫습니다. 커밋은 부르는 쪽이 합니다.
+
+    부르는 곳이 둘입니다 — 복구 화면의 「발송 확인됨」과, 허브스팟 스레드에서 그 메일의 사본을 찾은
+    수집기(`ticket_history._store`). 둘이 각자 적으면 한쪽만 단계를 옮기거나 발송 뒤 정리를 빼먹습니다.
+    발송 뒤 정리는 처음부터(시도 0) 다시 돕니다 — 이 발송은 그것을 한 번도 안 거쳤습니다.
+    수집기가 부르면 실제로 나간 시각과 허브스팟 메시지 id 를 같이 줍니다. 그 id 가 있어야 화면·초안이
+    같은 메일을 두 번 안 셉니다(`history_view.message_copies`).
+    """
+    now = datetime.now(timezone.utc)
+    message.status = "sent"
+    message.sent_at = message.sent_at or sent_at or now
+    if hubspot_message_id and not message.hubspot_message_id:
+        message.hubspot_message_id = hubspot_message_id
+    message.send_claimed_at = None
+    message.post_send_synced_at = None
+    message.post_send_sync_attempts = 0
+    message.post_send_sync_attempted_at = None
+    message.post_send_sync_error = reason
+    conversation = session.get(Conversation, message.conversation_id)
+    if conversation and message.prompt_variant != "auto_ack":
+        if conversation.last_outgoing_at is None or _naive(conversation.last_outgoing_at) < _naive(message.sent_at):
+            conversation.last_outgoing_at = message.sent_at
+        # **앞으로만 갑니다** — 발송 워커·승인과 같은 규칙. 확인 대기 사이에 고객이 답해
+        # 협의 중이 된 티켓(후속 리마인더가 그 창을 넓힌다)을 Contacted 로 되돌리면 안 됩니다.
+        from ...agents.send_worker import _ADVANCES_FROM
+
+        if conversation.stage in _ADVANCES_FROM:
+            conversation.stage = "meeting_link_sent"
+
+
+def _naive(value):
+    return value.astimezone(timezone.utc).replace(tzinfo=None) if value.tzinfo else value
+
+
 @router.post("/operations/recovery/messages/{message_id}/resolve")
 async def resolve_unknown_delivery(
     request: Request,
@@ -204,23 +243,7 @@ async def resolve_unknown_delivery(
             message.scheduled_at = datetime.now(timezone.utc)
             message.send_claimed_at = None
         else:
-            now = datetime.now(timezone.utc)
-            message.status = "sent"
-            message.sent_at = message.sent_at or now
-            message.send_claimed_at = None
-            message.post_send_synced_at = None
-            message.post_send_sync_attempts = 0
-            message.post_send_sync_attempted_at = None
-            message.post_send_sync_error = "operator_confirmed_sent"
-            conversation = session.get(Conversation, message.conversation_id)
-            if conversation and message.prompt_variant != "auto_ack":
-                conversation.last_outgoing_at = message.sent_at
-                # **앞으로만 갑니다** — 발송 워커·승인과 같은 규칙. 확인 대기 사이에 고객이 답해
-                # 협의 중이 된 티켓(후속 리마인더가 그 창을 넓힌다)을 Contacted 로 되돌리면 안 됩니다.
-                from ...agents.send_worker import _ADVANCES_FROM
-
-                if conversation.stage in _ADVANCES_FROM:
-                    conversation.stage = "meeting_link_sent"
+            confirm_delivered(session, message)
         _audit(session, request, action, "message", message_id)
         session.commit()
     return RedirectResponse("/logs?tab=recovery&updated=delivery", status_code=303)
@@ -232,9 +255,11 @@ async def retry_message_sync(request: Request, message_id: int):
         result = session.execute(
             update(Message)
             .where(Message.id == message_id, Message.status == "sent")
+            # 시도 수를 0 이 아니라 1 로 — 0 이면 다음 정리가 「첫 회차」로 읽어 진행 기록 · 요약 줄 ·
+            # 리마인더 줄을 한 번 더 적습니다(2026-09-29 감사). 그 줄들은 첫 발송 뒤에 이미 섰습니다.
             .values(
                 post_send_synced_at=None,
-                post_send_sync_attempts=0,
+                post_send_sync_attempts=1,
                 post_send_sync_attempted_at=None,
                 post_send_sync_error="operator_retry",
             )

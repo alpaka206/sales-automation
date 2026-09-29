@@ -46,6 +46,12 @@ def test_protected_route_rejects_no_token(client: TestClient) -> None:
     assert r.json()["detail"] == "invalid or missing token"
 
 
+def test_a_non_ascii_token_is_401_not_500(client: TestClient) -> None:
+    """글자로 비교하면 ASCII 가 아닌 토큰 하나에 TypeError 가 나서 500 이었다(2026-09-23 운영 로그)."""
+    r = client.post("/internal/healthcheck", headers={"X-Internal-Token": "é".encode("latin-1")})
+    assert r.status_code == 401
+
+
 def test_protected_route_accepts_valid_token(client: TestClient) -> None:
     with patch("src.agents.report.ReportAgent") as mock_agent:
         mock_agent.return_value.generate.return_value = "report body"

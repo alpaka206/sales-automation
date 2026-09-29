@@ -808,8 +808,9 @@ def _noted(monkeypatch) -> list[tuple]:
 
     calls: list[tuple] = []
 
-    async def _record(hubspot_contact_id, ticket_id, body, when):
+    async def _record(hubspot_contact_id, ticket_id, body, when, direction=None):
         calls.append((hubspot_contact_id, ticket_id, body))
+        return True
 
     monkeypatch.setattr(mailbox_sync, "_note_on_ticket", _record)
     return calls
@@ -846,27 +847,30 @@ def test_a_gmail_draft_is_not_a_mail(sync_db, monkeypatch):
 
 
 @respx.mock
-def test_a_mail_that_arrived_on_a_channel_account_is_not_noted_again(sync_db, monkeypatch):
-    """**채널 계정 사서함으로 온 메일은 허브스팟이 이미 들고 있습니다** (2026-09-22).
+@pytest.mark.parametrize("in_thread", [True, False])
+def test_a_mail_on_the_channel_account_is_noted_only_when_the_ticket_lacks_it(sync_db, monkeypatch, in_thread):
+    """**채널 계정 사서함으로 온 메일도 티켓을 읽고 판단합니다** (2026-09-29 운영 실측).
 
-    `perso.ai@estsoft.com` 은 허브스팟 이메일 채널 계정이라 그 주소로 온 메일은 허브스팟이
-    받아 티켓 스레드에 세웁니다. 노트로 또 적으면 같은 메일이 두 번 섭니다 — 7월 이후
-    우리 노트 26건 중 8건이 그 사서함이었습니다. 우리 줄은 그대로 넣습니다: 그 메일이 어느
-    티켓 것인지는 여전히 우리가 판단한 것입니다.
+    한동안 「perso.ai@ 로 온 메일은 허브스팟이 스레드에 세운다」고 가정하고 확인 없이 건너뛰었습니다.
+    대개 맞지만, 콘솔이 폼 스레드에 perso.ai@ 로 답한 뒤 고객이 답하면 그 답장이 **티켓에 안 붙은 새
+    스레드**에 서기도 했습니다 — 허브스팟 티켓에는 흔적이 없었습니다. 스레드에 있으면 안 적고, 없으면
+    적습니다. 우리 줄은 어느 쪽이든 섭니다.
     """
     from src.agents import mailbox_sync
     from src.db.models import CustomerInteraction
-    from src.integrations.hubspot import BASE_URL
 
     _seed(sync_db, with_ticket=True, hubspot_contact_id="C-1")
     _mailbox(sync_db)  # perso.ai@estsoft.com
-    calls = _noted(monkeypatch)
-    respx.get(f"{BASE_URL}/conversations/v3/conversations/channel-accounts").mock(
-        return_value=httpx.Response(200, json={"results": [
-            {"id": "team", "channelId": "1002", "active": True, "authorized": True,
-             "archived": False, "deliveryIdentifier": {"value": "Perso.ai@estsoft.com"}},
-        ]})
-    )
+    created = _ticket_notes([])
+    when = datetime(2026, 9, 22, 1, 0)
+    thread_rows = [{"external_id": "hubspot:conv:9", "channel": "이메일", "direction": "inbound",
+                    "subject": "재문의", "summary": "본문", "handler": None,
+                    "happened_at": when}] if in_thread else []
+
+    async def _collect(client, ticket_id):
+        return thread_rows
+
+    monkeypatch.setattr("src.agents.ticket_history.collect_ticket_history", _collect)
     _one_mail(monkeypatch, [
         {"name": "From", "value": "buyer@acme.com"},
         {"name": "To", "value": "perso.ai@estsoft.com"},
@@ -879,7 +883,37 @@ def test_a_mail_that_arrived_on_a_channel_account_is_not_noted_again(sync_db, mo
         assert session.scalar(
             select(CustomerInteraction).where(CustomerInteraction.external_id == "gmail:m9")
         ) is not None, "우리 줄은 섭니다"
-    assert calls == [], "스레드가 이미 든 메일을 노트로 또 적지 않습니다"
+    assert (created.call_count == 0) is in_thread, "스레드에 있으면 안 적고, 없으면 적습니다"
+
+
+@respx.mock
+def test_a_mail_hubspot_already_logged_is_not_noted_again(sync_db, monkeypatch):
+    """**허브스팟의 지메일 연동이 이미 기록한 메일은 노트로 또 적지 않습니다** (2026-09-29 운영 실측 —
+    티켓 셋에서 CRM 메일 기록과 우리 노트가 같은 메일을 두 번 말하는 쌍이 여덟)."""
+    from src.agents import mailbox_sync
+    from src.integrations.hubspot import BASE_URL
+
+    _seed(sync_db, with_ticket=True, hubspot_contact_id="C-1")
+    _mailbox(sync_db, "untae@estsoft.com")
+    created = _ticket_notes([])
+    respx.get(f"{BASE_URL}/crm/v3/objects/tickets/T-2/associations/emails").mock(
+        return_value=httpx.Response(200, json={"results": [{"id": "e1"}]})
+    )
+    respx.post(f"{BASE_URL}/crm/v3/objects/emails/batch/read").mock(
+        return_value=httpx.Response(200, json={"results": [{"id": "e1", "properties": {
+            "hs_timestamp": "2026-09-22T01:00:40Z", "hs_email_from_email": "buyer@acme.com",
+            "hs_email_text": "견적 문의드립니다",
+        }}]})
+    )
+    _one_mail(monkeypatch, [
+        {"name": "From", "value": "buyer@acme.com"},
+        {"name": "To", "value": "untae@estsoft.com"},
+        {"name": "Subject", "value": "재문의"},
+        {"name": "Date", "value": "Tue, 22 Sep 2026 10:00:00 +0900"},
+    ], snippet="견적 문의드립니다")
+
+    assert mailbox_sync.sync_mailboxes_once() == {"added": 1}
+    assert created.call_count == 0, "허브스팟이 이미 기록한 메일을 노트로 또 적었습니다"
 
 
 @respx.mock
@@ -892,17 +926,10 @@ def test_a_reply_sent_from_the_hubspot_screen_is_not_noted_from_its_gmail_copy(s
     (지메일에서 직접 보낸 것) 적는다 — 그 노트가 허브스팟에 남는 유일한 자리다.
     """
     from src.agents import mailbox_sync
-    from src.integrations.hubspot import BASE_URL
 
     _seed(sync_db, with_ticket=True, hubspot_contact_id="C-1")
     _mailbox(sync_db)  # perso.ai@estsoft.com
-    calls = _noted(monkeypatch)
-    respx.get(f"{BASE_URL}/conversations/v3/conversations/channel-accounts").mock(
-        return_value=httpx.Response(200, json={"results": [
-            {"id": "team", "channelId": "1002", "active": True, "authorized": True,
-             "archived": False, "deliveryIdentifier": {"value": "perso.ai@estsoft.com"}},
-        ]})
-    )
+    created = _ticket_notes([])
     when = datetime(2026, 9, 22, 1, 0)
     thread_rows = [{"external_id": "hubspot:conv:9", "channel": "이메일", "direction": "outgoing",
                     "subject": "Re: 재문의", "summary": "본문", "handler": None,
@@ -920,14 +947,18 @@ def test_a_reply_sent_from_the_hubspot_screen_is_not_noted_from_its_gmail_copy(s
     ])
 
     assert mailbox_sync.sync_mailboxes_once() == {"added": 1}
-    assert (calls == []) is in_thread, "스레드에 있으면 노트를 안 적고, 없으면 적습니다"
+    assert (created.call_count == 0) is in_thread, "스레드에 있으면 노트를 안 적고, 없으면 적습니다"
 
 
 def _ticket_notes(existing: list[str]):
     """티켓 T-2 의 노트 읽기·쓰기 엔드포인트를 깔아 두고 **노트 만들기** 라우트를 돌려줍니다."""
     from src.integrations.hubspot import BASE_URL
 
-    respx.get(f"{BASE_URL}/conversations/v3/conversations/channel-accounts").mock(
+    # 적기 전에 읽는 나머지 둘 — 스레드와 CRM 메일 기록. 기본은 비어 있다(테스트가 덮어쓴다).
+    respx.get(f"{BASE_URL}/conversations/v3/conversations/threads").mock(
+        return_value=httpx.Response(200, json={"results": []})
+    )
+    respx.get(f"{BASE_URL}/crm/v3/objects/tickets/T-2/associations/emails").mock(
         return_value=httpx.Response(200, json={"results": []})
     )
     respx.get(f"{BASE_URL}/crm/v3/objects/tickets/T-2/associations/notes").mock(

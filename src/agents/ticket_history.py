@@ -47,7 +47,7 @@ import logging
 import re
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 
 from ..db.models import MailboxLinkDecision, Conversation, CustomerInteraction
 from ..integrations.hubspot import _BULK_PACE_SECONDS
@@ -320,7 +320,7 @@ def same_mail(
     return a_at.replace(microsecond=0) == b_at.replace(microsecond=0)
 
 
-def _merge_crm_twins(session, conversation_id: int) -> int:
+def _merge_crm_twins(session, conversation_id: int, contact_id: int | None = None) -> int:
     """같은 메일의 **CRM 쪽 줄**을 스레드 줄에 합칩니다. 합친 수를 돌려줍니다.
 
     한 메일이 허브스팟에 객체 두 개로 삽니다(CRM 이메일 · Conversations 메시지). 이제
@@ -347,6 +347,21 @@ def _merge_crm_twins(session, conversation_id: int) -> int:
         )
     ).all()
     thread_rows = [r for r in rows if r.happened_at and (r.external_id or "").startswith("hubspot:conv:")]
+    if contact_id is not None and thread_rows:
+        # **개인함 줄은 그 사람의 다른 티켓에 붙어 있을 수 있다** (2026-09-29 감사). 개인함 수집은 메일을
+        # 그 고객의 **가장 최근** 대화에 붙이는데(`mailbox_sync._newest_conversation`), 고객이 옛 티켓의
+        # 스레드로 답하면 허브스팟 줄은 옛 티켓에 선다. 이 티켓의 줄만 보면 둘은 영영 못 만나고, 같은 메일이
+        # 두 줄 — 하나는 남의 티켓에 — 선다. 연락처 전체의 `gmail:` 줄을 같이 본다.
+        seen = {r.id for r in rows}
+        rows = list(rows) + [
+            r for r in session.scalars(
+                select(CustomerInteraction).where(
+                    CustomerInteraction.contact_id == contact_id,
+                    CustomerInteraction.external_id.like("gmail:%"),
+                )
+            ).all()
+            if r.id not in seen
+        ]
     twins: dict[tuple, CustomerInteraction] = {}
     for row in thread_rows:
         twins.setdefault((row.happened_at.replace(microsecond=0), _same_direction(row.direction)), row)
@@ -380,8 +395,76 @@ def _merge_crm_twins(session, conversation_id: int) -> int:
     return merged
 
 
-def _store(conversation_id: int, contact_id: int, rows: list[dict]) -> int:
-    """새 기록만 넣습니다. 이미 있는 것은 건드리지 않습니다 — 몇 번을 돌려도 같은 결과."""
+def _settle_keyless_sends(session, conversation_id: int) -> int:
+    """스레드에 사본이 보이는 우리 발송에 **허브스팟 id 를 붙입니다.** 맞춘 수를 돌려줍니다.
+
+    열쇠(`messages.hubspot_message_id`)가 없는 우리 발송은 둘입니다 — 결과를 모른 채 끝난 것
+    (`delivery_unknown`: 5xx · 타임아웃)과, 그것을 복구 화면에서 「나갔다」로 확인한 것. 스레드에 같은 글이
+    **승인 뒤에** 섰으면 그 메일은 나간 것입니다(2026-09-29 감사). 그러면:
+
+    - `delivery_unknown` 은 나간 것으로 닫습니다(`recovery.confirm_delivered` — 복구 화면 버튼과 같은 함수).
+      예전에는 사람이 누를 때까지 단계 이동 · `last_outgoing_at` · 발송 뒤 정리가 멈춰 있었고, 리마인더면
+      시퀀스가 통째로 섰습니다.
+    - id 를 붙입니다. 그 열쇠로 화면 · 초안 · 개인함 수집이 같은 메일을 두 번 안 셉니다.
+    """
+    from ..api.routes.recovery import confirm_delivered
+    from ..db.models import Message
+
+    keyless = session.scalars(
+        select(Message).where(
+            Message.conversation_id == conversation_id,
+            Message.direction == "outgoing",
+            Message.status.in_(("delivery_unknown", "sent")),
+            Message.hubspot_message_id.is_(None),
+            Message.smtp_message_id.is_(None),
+        )
+    ).all()
+    if not keyless:
+        return 0
+    taken = set(session.scalars(
+        select(Message.hubspot_message_id).where(Message.hubspot_message_id.is_not(None))
+        .where(Message.conversation_id == conversation_id)
+    ).all())
+    copies = [
+        row for row in session.scalars(
+            select(CustomerInteraction).where(
+                CustomerInteraction.conversation_id == conversation_id,
+                CustomerInteraction.external_id.like("hubspot:conv:%"),
+                CustomerInteraction.happened_at.is_not(None),
+            )
+        ).all()
+        if _same_direction(row.direction) == "outgoing"
+    ]
+    settled = 0
+    for message in keyless:
+        committed = message.approved_at or message.created_at
+        if committed is None:
+            continue
+        # 시계가 조금 어긋나도 된다 — 승인보다 몇 분 앞선 사본은 없다.
+        floor = committed.replace(tzinfo=None) - timedelta(minutes=5)
+        for copy in copies:
+            hub_id = (copy.external_id or "").removeprefix("hubspot:conv:")
+            if hub_id in taken or copy.happened_at.replace(tzinfo=None) < floor:
+                continue
+            if not same_mail(committed, "outgoing", message.body, copy.happened_at, "outgoing", copy.summary):
+                continue
+            if message.status == "delivery_unknown":
+                confirm_delivered(session, message, sent_at=copy.happened_at, hubspot_message_id=hub_id,
+                                  reason="confirmed_by_hubspot_copy")
+            else:
+                message.hubspot_message_id = hub_id
+            taken.add(hub_id)
+            settled += 1
+            break
+    return settled
+
+
+def _store(conversation_id: int, contact_id: int, rows: list[dict], started: datetime | None = None) -> int:
+    """새 기록만 넣습니다. 이미 있는 것은 건드리지 않습니다 — 몇 번을 돌려도 같은 결과.
+
+    도장은 **읽기 시작한 때**(`started`)입니다 — 읽는 도중 온 「다시 받아라」(`history_requested_at`)가
+    도장보다 뒤에 서서 대기열에 남게(이관 0128).
+    """
     added = 0
     with SessionLocal() as session:
         # **티켓으로 좁히면 안 됩니다.** 유니크 인덱스(0106)는 `external_id` 하나에만
@@ -399,6 +482,12 @@ def _store(conversation_id: int, contact_id: int, rows: list[dict]) -> int:
                 )
             ).all()
         ) if wanted else set()
+        # 운영자가 지운 줄은 되살리지 않습니다 — 묘비(`customer_ops.interaction_delete`). 개인함 줄이
+        # 스레드 줄에 접히며 남긴 묘비도 같은 표지만, 그 열쇠는 `gmail:` 이라 여기 목록과 안 겹칩니다.
+        if wanted:
+            known |= set(session.scalars(
+                select(MailboxLinkDecision.external_id).where(MailboxLinkDecision.external_id.in_(wanted))
+            ).all())
         for row in rows:
             if row["external_id"] in known:
                 continue
@@ -408,14 +497,18 @@ def _store(conversation_id: int, contact_id: int, rows: list[dict]) -> int:
             known.add(row["external_id"])
             added += 1
         # 넣은 뒤에 합칩니다 — 방금 들어온 스레드 줄이 옛 CRM 줄의 짝일 수 있습니다.
-        merged = _merge_crm_twins(session, conversation_id)
+        merged = _merge_crm_twins(session, conversation_id, contact_id)
+        settled = _settle_keyless_sends(session, conversation_id)
         conversation = session.get(Conversation, conversation_id)
         if conversation is not None:
-            conversation.history_synced_at = datetime.now(timezone.utc)
+            conversation.history_synced_at = started or datetime.now(timezone.utc)
         session.commit()
     if merged:
         logger.info("중복된 CRM 메일 %d줄을 스레드 줄에 합쳤습니다 (conversation=%s).",
                     merged, conversation_id)
+    if settled:
+        logger.info("허브스팟 스레드에서 사본을 찾아 우리 발송 %d건을 나간 것으로 맞췄습니다 (conversation=%s).",
+                    settled, conversation_id)
 
     # ------------------------------------------------------------------ #
     # **`last_incoming_at` 은 건드리지 않습니다.** 한 번 채웠다가 지웠습니다.
@@ -432,12 +525,15 @@ def _store(conversation_id: int, contact_id: int, rows: list[dict]) -> int:
     return added
 
 
-def _stamp(conversation_id: int) -> None:
-    """「이번 회차에 봤다」는 도장. 성공·실패 둘 다 찍습니다 — 굶기지 않기 위해서."""
+def _stamp(conversation_id: int, at: datetime | None = None) -> None:
+    """「이번 회차에 봤다」는 도장. 성공·실패 둘 다 찍습니다 — 굶기지 않기 위해서.
+
+    `at` 은 읽기 시작한 때 — 읽는 도중 온 요청이 도장 뒤에 서서 대기열에 남습니다.
+    """
     with SessionLocal() as session:
         conversation = session.get(Conversation, conversation_id)
         if conversation is not None:
-            conversation.history_synced_at = datetime.now(timezone.utc)
+            conversation.history_synced_at = at or datetime.now(timezone.utc)
             session.commit()
 
 
@@ -532,12 +628,13 @@ async def sync_one_ticket(conversation_id: int) -> int:
         _stamp(conversation_id)
         return 0
 
+    started = datetime.now(timezone.utc)
     client = HubSpotClient()
     try:
         rows = await collect_ticket_history(client, ticket_id)
     finally:
         await client.close()
-    added = _store(conversation_id, contact_id, rows)
+    added = _store(conversation_id, contact_id, rows, started)
     await advance_if_customer_replied(conversation_id)
     return added
 
@@ -599,13 +696,19 @@ async def sync_pending_ticket_history(limit: int = TICKETS_PER_SWEEP) -> dict:
             select(Conversation.id)
             .where(
                 Conversation.hubspot_ticket_id.isnot(None),
-                Conversation.history_synced_at.is_(None),
+                or_(
+                    Conversation.history_synced_at.is_(None),
+                    # 같은 순간이면 받는다 — 시계가 거친 OS(윈도우 ~1ms)에서는 읽기 시작과 요청이 같은 값일 수
+                    # 있고, 한 번 더 읽는 값이 메일 하나 놓치는 값보다 싸다.
+                    Conversation.history_requested_at >= Conversation.history_synced_at,
+                ),
             )
             .order_by(Conversation.id.asc())
             .limit(max(1, limit))
         ).all()
     done = added = failed = 0
     for conversation_id in pending:
+        started = datetime.now(timezone.utc)
         try:
             added += await sync_one_ticket(conversation_id)
             done += 1
@@ -628,7 +731,7 @@ async def sync_pending_ticket_history(limit: int = TICKETS_PER_SWEEP) -> dict:
             failed += 1
             logger.warning("티켓 히스토리 동기화 실패 (conversation=%s)", conversation_id,
                            exc_info=True)
-            _stamp(conversation_id)
+            _stamp(conversation_id, started)
     if done or added or failed:
         logger.info("티켓 히스토리: %d건 처리, 기록 %d개 추가, 실패 %d건", done, added, failed)
     return {"tickets": done, "added": added, "failed": failed}
@@ -662,8 +765,10 @@ def mark_ticket_history_stale(conversation_id: int) -> None:
     """
     with SessionLocal() as session:
         conversation = session.get(Conversation, conversation_id)
-        if conversation is not None and conversation.history_synced_at is not None:
-            conversation.history_synced_at = None
+        if conversation is not None:
+            # 도장을 지우지 않고 요청을 적습니다(이관 0128). 지우던 때는 수집기가 **읽는 도중** 온 요청이
+            # 할 일이 없었습니다 — 칸이 이미 비어 있었고, 읽기가 끝나며 「지금」이 찍혀 그 메일이 사라졌습니다.
+            conversation.history_requested_at = datetime.now(timezone.utc)
             session.commit()
 
 

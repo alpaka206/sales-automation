@@ -277,11 +277,11 @@ def _message_detail_context(
         # `messages.hubspot_message_id` 이고, 수집기는 그것으로 `external_id` 를 만듭니다.
         # 접점 기록에서 **지우지는 않습니다**: 고객 상세의 히스토리에는 말풍선이 없어서,
         # 지우면 그 화면에서 우리 회신이 통째로 사라집니다.
-        drawn_by_thread = {
-            f"hubspot:conv:{tm.hubspot_message_id}"
-            for tm in thread_rows
-            if tm.hubspot_message_id
-        }
+        # 열쇠가 없는 말풍선(첫 문의 · 「나갔다」로 확인한 발송)은 본문으로 알아봅니다 — 자는
+        # `history_view.message_copies` 하나이고 고객 상세 · 초안이 읽는 대화도 같은 자를 씁니다.
+        from ...db.history_view import message_copies
+
+        drawn_by_thread = message_copies(thread_rows, interaction_rows)
 
         # Customer-level history (CRM state, contract, cross-channel touchpoints)
         # surfaced inline so the operator sees who this customer is without leaving
@@ -465,7 +465,7 @@ def _message_detail_context(
                     # — 뒤집기만 하면 됩니다. 왕복 하나가 200ms 인 데다 이 화면이 제일 자주
                     # 열립니다.
                     for it in reversed(interaction_rows)
-                    if it.external_id not in drawn_by_thread
+                    if it.id not in drawn_by_thread
                 ]
                 if conv
                 else []

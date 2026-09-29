@@ -144,4 +144,6 @@ def check_web_ui_basic_auth(request: Request) -> bool:
     user, sep, passwd = decoded.partition(":")
     if not sep:
         return False
-    return hmac.compare_digest(user, settings.WEB_UI_USERNAME) and hmac.compare_digest(passwd, pw)
+    # 바이트로 잰다 — ASCII 가 아닌 글자가 들어오면 글자 비교는 TypeError(=500)다.
+    return (hmac.compare_digest(user.encode(), settings.WEB_UI_USERNAME.encode())
+            and hmac.compare_digest(passwd.encode(), pw.encode()))

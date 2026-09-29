@@ -303,24 +303,32 @@ def rebuild_summary(session, conv_id: int) -> int:
     나가지 않은 초안은 애초에 후보가 아닙니다(`DELIVERED_STATUSES`). 커밋은 부르는
     쪽이 합니다 — 여러 건을 한 번에 돌릴 때 왕복을 건마다 하지 않으려고요.
     """
+    from ..db.history_view import message_copies
     from ..db.models import DELIVERED_STATUSES, CustomerInteraction
+    from .followup_sequence import REMINDER_NOTE_PREFIX, REMINDER_VARIANTS
 
-    events: list[tuple[object, str | tuple, int | None]] = []
-    for mid, at, line, direction, subject, body in session.query(
-        Message.id, Message.created_at, Message.summary_line,
-        Message.direction, Message.subject, Message.body,
-    ).filter(
+    messages = session.query(Message).filter(
         Message.conversation_id == conv_id,
         (Message.direction == "inbound") | (Message.status.in_(DELIVERED_STATUSES)),
-    ).all():
-        if (body or "").strip():
-            events.append((at, line or (direction, subject, body), mid))
-    for at, context, direction, subject, summary in session.query(
-        CustomerInteraction.happened_at, CustomerInteraction.context,
-        CustomerInteraction.direction, CustomerInteraction.subject,
-        CustomerInteraction.summary,
-    ).filter(CustomerInteraction.conversation_id == conv_id).all():
-        events.append((at, (context or "").strip() or (direction, subject, summary), None))
+    ).all()
+    interactions = session.query(CustomerInteraction).filter(
+        CustomerInteraction.conversation_id == conv_id
+    ).all()
+    # **한 메일은 한 줄**(2026-09-29 감사). 콘솔 회신은 `messages` 에도, 수집기가 도로 가져온 허브스팟
+    # 사본으로도 있다 — 두 줄은 따로 만든 요약이라 글자가 달라 `append_line` 의 같은 불릿 거르기에도 안
+    # 걸렸다. 자는 화면들과 같은 `message_copies` 다. 리마인더는 메일 · 사본 · 「Reminder Sent N」 줄이
+    # 전부 빠진다 — 발송 뒤 정리가 요약에 안 보태는 것과 같은 이유(「답을 세 번 했다」로 읽힌다).
+    copies = message_copies(messages, interactions)
+    events: list[tuple[object, str | tuple, int | None]] = []
+    for m in messages:
+        if m.prompt_variant in REMINDER_VARIANTS or not (m.body or "").strip():
+            continue
+        events.append((m.created_at, m.summary_line or (m.direction, m.subject, m.body), m.id))
+    for item in interactions:
+        if item.id in copies or (item.external_id or "").startswith(REMINDER_NOTE_PREFIX):
+            continue
+        events.append((item.happened_at, (item.context or "").strip()
+                       or (item.direction, item.subject, item.summary), None))
     if not events:
         return 0
 

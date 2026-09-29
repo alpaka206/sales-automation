@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Icon } from "../ui/Icon";
 import { ActionButton } from "../ui/ActionButton";
 import { DataTable, type Column } from "../ui/DataTable";
-import { AGENT_DOWNLOADS, AGENT_MIN_VERSION, AGENT_RELEASES, agentFetch, useAgent, type AsOf } from "../lib/agent";
+import { AGENT_DOWNLOADS, AGENT_MIN_VERSION, AGENT_RELEASES, agentFetch, useAgent, type AgentStatus, type AsOf } from "../lib/agent";
 
 /** 스냅샷 데이터를 **로컬 에이전트**에서 가져와 그리는 화면.
  *
@@ -58,6 +58,20 @@ export function DataAgent() {
   }, [agent.pair, agent.status]);
 
   useEffect(() => { void loadMetrics(); }, [loadMetrics]);
+
+  // 받기가 뒤에서 도는 동안(며칠 밀린 PC · 처음 GitHub 로그인) 끝났는지 **조용히** 본다 — 끝나면 한 번만
+  // 다시 연결한다. reconnect 로 돌면 화면이 「연결하는 중」으로 깜빡이고 지표를 전부 다시 계산한다.
+  const pulling = agent.status?.as_of.pull.startsWith("진행 중") ?? false;
+  const { pair, reconnect } = agent;
+  useEffect(() => {
+    if (!pulling || !pair) return;
+    const id = window.setInterval(() => {
+      agentFetch<AgentStatus>(pair, "/v1/status")
+        .then((s) => { if (!s.as_of.pull.startsWith("진행 중")) reconnect(); })
+        .catch(() => { /* 다음 회차에 다시 */ });
+    }, 10_000);
+    return () => window.clearInterval(id);
+  }, [pulling, pair, reconnect]);
 
   const isSafari = /^((?!chrome|android|crios|fxios).)*safari/i.test(navigator.userAgent);
   const isMac = /Mac/i.test(navigator.platform);
@@ -123,7 +137,7 @@ export function DataAgent() {
           <strong>에이전트 업데이트가 필요합니다.</strong>
           <div className="t-sm td-subtle" style={{ marginTop: 6 }}>
             지금 <code>{agent.status?.version ?? "1.0 이전"}</code>, 이 콘솔은 <code>{AGENT_MIN_VERSION}</code> 이상이 필요합니다 —
-            새 버전이 주는 값을 이 에이전트는 몰라 일부 화면이 빕니다. 내려받아 옛 파일 자리에 덮어쓰고 다시 열면 됩니다(설정은 없습니다).
+            새 버전이 주는 값을 이 에이전트는 몰라 일부 화면이 빕니다. 내려받아 옛 파일 자리에 덮어쓰고 다시 열면 됩니다(설정은 없습니다). 1.5.0 부터는 켤 때 스스로 새 버전으로 올라가므로 이번 한 번이면 됩니다.
           </div>
           <Downloads isMac={isMac} />
         </div>

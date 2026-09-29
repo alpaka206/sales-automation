@@ -469,12 +469,32 @@ def send_mail(
     if thread_id and in_reply_to:
         payload["threadId"] = thread_id
 
+    # **결과 분류는 허브스팟 발송(`send_conversation_message`)과 같은 규칙입니다** (2026-09-29).
+    # 예전에는 분류가 없어 타임아웃·5xx 가 그대로 올라갔고, 워커가 그것을 「영구 실패」로 읽어
+    # `send_failed` 를 찍었습니다 — 그러면 승인이 재발송을 받아 주는데, 지메일은 이미 보냈을 수
+    # 있습니다(고객이 같은 메일을 두 통). 「갔는지 모른다」는 `DeliveryUnknown` 이라 사람이
+    # 확인하기 전에는 다시 안 나갑니다. 토큰을 못 여는 것(`access_token`)은 보내기 전이라 그대로.
+    from .delivery import DeliveryPermanentError, DeliveryTransientError, DeliveryUnknown
+
     with httpx.Client(
         headers={"Authorization": f"Bearer {access_token(mailbox)}"}, timeout=30.0
     ) as client:
-        response = client.post(SEND_URL, json=payload)
-    if response.is_error:
-        raise MailboxTokenError(
-            f"{mailbox}: 발송 실패 (HTTP {response.status_code}) {response.text[:200]}"
-        )
-    return str(response.json().get("id") or "")
+        try:
+            response = client.post(SEND_URL, json=payload)
+        except (httpx.TimeoutException, httpx.TransportError) as exc:
+            raise DeliveryUnknown(f"{mailbox}: 발송 결과를 모릅니다 — {exc}") from exc
+    if 200 <= response.status_code < 300:
+        try:
+            sent_id = str(response.json().get("id") or "")
+        except (ValueError, AttributeError):
+            sent_id = ""
+        if not sent_id:
+            raise DeliveryUnknown(f"{mailbox}: 지메일이 받았는데 메시지 id 가 없습니다")
+        return sent_id
+    if response.status_code == 429:
+        raise DeliveryTransientError(f"{mailbox}: 발송 한도에 걸렸습니다 (HTTP 429)")
+    if response.status_code >= 500:
+        raise DeliveryUnknown(f"{mailbox}: 발송 결과를 모릅니다 (HTTP {response.status_code})")
+    raise DeliveryPermanentError(
+        f"{mailbox}: 발송 실패 (HTTP {response.status_code}) {response.text[:200]}"
+    )

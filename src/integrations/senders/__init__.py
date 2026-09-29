@@ -299,18 +299,17 @@ async def _send_from_mailbox(
     온 문의에 개인 주소를 골라 보내는 경우에는 그런 원본이 없고, 그때는 붙일 스레드도
     `In-Reply-To` 도 없으니 **새 메일**이 유일하게 정직한 결과입니다(운영자 확인).
 
-    **나간 뒤 허브스팟 티켓에 노트로 남깁니다.** 안 그러면 고객이 받은 메일이 티켓에
-    없고, 그건 이 앱이 지금까지 피해 온 상태입니다 — 대화가 두 갈래가 됩니다.
+    **나간 뒤 허브스팟 티켓에 노트로 남깁니다**(발송 뒤 처리가). 안 그러면 고객이 받은 메일이
+    티켓에 없고, 그건 이 앱이 지금까지 피해 온 상태입니다 — 대화가 두 갈래가 됩니다.
     """
     from sqlalchemy import select
 
-    from ...db.models import Contact, CustomerInteraction
+    from ...db.models import CustomerInteraction
     from ...db.session import SessionLocal
     from ..gmail import send_mail, source_message
 
     conversation = message.conversation
     conversation_id = getattr(conversation, "id", None)
-    ticket_id = getattr(conversation, "hubspot_ticket_id", None)
 
     # **원본의 id 만 들고 나옵니다** — 세션 밖에서 ORM 객체를 만지면 그 속성을 읽는
     # 순간 DetachedInstanceError 이고, 그건 발송 직전에 터집니다.
@@ -363,18 +362,6 @@ async def _send_from_mailbox(
         "개인 사서함 %s 에서 %s 로 보냈습니다 (%s).",
         mailbox, recipient, "답장" if in_reply_to else "새 메일",
     )
-
-    if ticket_id:
-        with SessionLocal() as session:
-            contact = session.get(Contact, conversation.contact_id)
-            hubspot_contact_id = contact.hubspot_contact_id if contact else None
-        if hubspot_contact_id:
-            from ...agents.mailbox_sync import _note_on_ticket
-
-            await _note_on_ticket(
-                hubspot_contact_id,
-                ticket_id,
-                f"[개인 메일함 {mailbox} 에서 발송] {message.subject or ''}"
-                f"\n\n{message.body or ''}",
-                None,
-            )
+    # 허브스팟 티켓 노트는 **여기서 안 남깁니다** — 발송 뒤 처리(`send_worker._note_mailbox_send`)가
+    # 남깁니다. 여기서 한 번 쓰고 실패를 삼키면 허브스팟이 그 순간 느릴 때 노트가 영영 없었고, 그
+    # 왕복 동안 `smtp_message_id` 가 commit 되지 않아 개인함 수집이 우리 회신을 한 번 더 가져갈 틈도 있었다.
