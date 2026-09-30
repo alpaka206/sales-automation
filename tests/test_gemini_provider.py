@@ -90,6 +90,25 @@ def test_call_gemini_basic(fake_google) -> None:
     assert result.model == "gemini-3.5-flash-lite"
 
 
+def test_a_reply_cut_at_the_output_cap_is_logged(fake_google, caplog) -> None:
+    """생각 토큰도 출력 한도 안에서 쓰인다 — 잘린 언어 판별은 영어로, 잘린 요약은 반쪽 문장으로 조용히 저장된다
+    (2026-09-30). 그래서 잘린 답은 경고 한 줄을 남긴다."""
+    resp = _mock_response("en")
+    candidate = MagicMock()
+    candidate.finish_reason = "FinishReason.MAX_TOKENS"
+    resp.candidates = [candidate]
+    client = MagicMock()
+    client.models.generate_content.return_value = resp
+    fake_google.Client.return_value = client
+    with patch("src.llm.providers.gemini_vertex.settings") as s, caplog.at_level("WARNING"):
+        s.GOOGLE_CREDENTIALS_JSON = _CREDS_JSON
+        s.GOOGLE_CLOUD_PROJECT = ""
+        s.GOOGLE_CLOUD_LOCATION = "global"
+        s.GEMINI_MODEL = "gemini-3.8-flash"
+        call_gemini("Hello world", max_tokens=8, thinking_level="LOW")
+    assert "출력 한도에서 잘렸습니다" in caplog.text
+
+
 def test_call_gemini_uses_vertex_and_json_project(fake_google) -> None:
     client = MagicMock()
     client.models.generate_content.return_value = _mock_response("ok")

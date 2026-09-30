@@ -16,13 +16,13 @@ PERSO Inbound is a FastAPI workflow for inbound inquiry handling and customer op
 
 ## 2026-09-23 Gemini 3 전환 (2.5 는 안 쓴다)
 
-- **모델은 `gemini-3.5-flash-lite`(flash 자리) · `gemini-3.5-flash`(pro 자리)** 다 (운영자: 「2.5 아예 안쓰게」).
-  **pro 자리는 2026-09-30 부터 `gemini-3.8-flash`** — 아래 절.
+- **모델은 `gemini-3.5-flash-lite`(flash 자리) · `gemini-3.5-flash`(pro 자리)** 였다 (운영자: 「2.5 아예 안쓰게」).
+  **2026-09-30 부터 두 자리 다 `gemini-3.8-flash`** — 아래 절.
   2.5 두 모델은 Google 공식 수명 페이지상 **2026-10-20 종료**이고, 이 둘이 공식 대체다(3 세대에는 GA 인 Pro 가 없다).
   2.x 이름이 설정에 남아 있으면 **서버가 안 뜬다**(`api.main.validate_startup_settings`) — Render 대시보드의
   `GEMINI_MODEL`·`GEMINI_MODEL_PRO` 가 render.yaml 보다 이기므로 거기에 옛 값이 남은 채 배포되면 `/healthz` 실패로
   이전 버전이 계속 돈다. 조용히 모든 초안이 `draft_failed` 로 서는 것보다 낫다.
-- **생각 설정은 `thinking_level` 이다** (`llm/client._THINKING_LEVEL_BY_TIER` = flash MINIMAL · pro LOW(09-30 부터), 초안은
+- **생각 설정은 `thinking_level` 이다** (`llm/client._THINKING_LEVEL_BY_TIER` — 09-30 부터 두 자리 다 LOW, 초안도
   `inbound._DRAFT_THINKING_LEVEL` = LOW). 3 세대는 숫자 `thinking_budget` 을 옛 방식으로 보고, 설정을 안 보내면 모델
   기본값(3.5 Flash 는 MEDIUM)이 **출력 한도를 먹어** 빈 답·잘린 JSON 이 된다 — 실측: LOW 에서 한도 200 중 190 이 생각.
   생각 토큰은 `LLMResult.thinking_tokens` 에 따로 적힌다(출력 단가로 청구된다).
@@ -33,7 +33,7 @@ PERSO Inbound is a FastAPI workflow for inbound inquiry handling and customer op
   `tmp/model-switch-2026-09-23/` — git 제외). 지시문 수정 뒤: 2.5 평균 4.07·실패 2 / 3.x MINIMAL 4.39·실패 0 /
   **3.x 초안 LOW 4.50·실패 0·지어낸 문장 0**. 합성 자료라 회사 정책 원문의 정확도를 증명하지는 않는다.
 
-## 2026-09-30 pro 자리를 `gemini-3.8-flash` 로 (초안 · 회사 웹검색)
+## 2026-09-30 두 자리 다 `gemini-3.8-flash` 로 (초안 · 웹검색 · 분류 · 번역 · 요약)
 
 - **운영자: 「바꿔봐」.** 근거는 09-23 과 같은 틀의 유료 블라인드 비교다(합성 문의 14건 × 2회, 초안 모델만 바꾸고
   채점자 셋이 라벨을 가린 채 채점, 원자료 `tmp/model-compare-2026-09-30/` — git 제외): 3.5-flash LOW 평균 4.15 ·
@@ -41,15 +41,32 @@ PERSO Inbound is a FastAPI workflow for inbound inquiry handling and customer op
   0 · 0**. 같은 문의끼리 나음 11 · 같음 17 · 나쁨 0 이고, 차이는 전부 환불·계약처럼 조건이 붙는 문의에서 났다.
   3.8 MEDIUM 은 점수가 같고 비용 2.3배·지연 2배라 안 쓴다. **점수는 회차마다 채점자가 달라 09-23 의 숫자(4.50)와
   섞어 비교하지 않는다** — 같은 회차 안에서만 비교한다.
+- **flash 자리도 같은 날 바꿨다** (운영자: 「적절한 방법으로 바꿔놔봐」). 과제별 비교(실제 프롬프트·코드 경로,
+  합성 입력, 번역·요약은 채점자 셋 블라인드, `tmp/model-compare-2026-09-30/flash/`): 고객에게 나가는 번역 10건 중
+  7건 나음·나쁨 0(3.5-flash-lite 는 「21일 특별 약정」을 「the 21st」로 옮기고 「승인된」을 빠뜨렸다), 문의 한국어
+  번역 8건 중 4건 나음·나쁨 0, 한 줄 요약 10건 중 6건 나음·나쁨 0(lite 는 숫자를 틀리고 60자를 세 번 넘겼다).
+  분류 22/22 · 문서 고르기는 같았다. **3.8 MEDIUM 은 이 자리에 못 쓴다** — 한도가 작은 호출에서 생각이 한도를 다
+  먹어 언어 판별 3/20, 요약 10건 전부 잘림. 비용은 지금 약 2배 · 2027 약 4배지만 호출 1,000건에 1달러가 안 된다.
 - **3.8 은 생각 단계 MINIMAL 을 400 으로 거절한다** (`Thinking level is unsupported: THINKING_LEVEL_MINIMAL`, 실측).
-  그래서 pro 자리의 기본 단계가 LOW 다 — 그 기본값을 쓰는 호출이 회사 웹검색(`search_company`)이다. **flash 자리는
-  MINIMAL 이라 3.8 을 flash 자리에 넣으면 분류·번역·요약이 전부 400 이다.** 모델을 바꿀 때 단계 목록부터 본다.
+  그래서 두 자리 다 LOW 이고, 모르는 자리 이름의 대체값도 LOW 다. 모델을 바꿀 때 단계 목록부터 본다.
   고정: `tests/test_llm_client.py::test_every_tier_sends_a_gemini_3_thinking_level_and_never_a_budget`.
+- **LOW 도 생각을 한다 — 짧은 일에도 수십 토큰** (실측 최대, 두 번 잰 것 중 큰 값: 언어 판별 67 · 문서 고르기 163). 생각은 출력 한도
+  **안에서** 쓰여서, 한도 8 이던 언어 판별이 20건 중 2건 잘려 실패했다(실패하면 영어로 떨어져 네덜란드어 고객에게
+  영어 회신이 간다). 그래서 한도가 작은 호출의 한도를 올렸다: 언어 판별 8→256 · 한 줄 요약 120→512(두 곳) ·
+  「언제 쓰는가」 200→512. 청구는 쓴 만큼이라 값은 안 오른다. **새 호출에 작은 한도를 주지 마라** —
+  `tests/test_llm_budgets.py` 가 네 자리를 고정한다.
 - **가격**(Vertex global, 100만 토큰당 입력/출력, 출력에 생각 포함): 3.8 은 **2026-12-31 까지 소개가 $0.75/$3.75,
   2027-01-01 부터 $1.50/$7.50** (3.5-flash 는 $1.50/$9.00). 실측 초안 1,000건당 3.5 $5.94 → 3.8 $2.44(2027 $4.88).
   LOW 에서 초안 28건 · 웹검색 2건 모두 생각 토큰 0. 지연은 초안 한 건에 약 +0.7초(백그라운드라 운영자는 안 기다린다).
-- **Render 대시보드의 `GEMINI_MODEL_PRO` 를 같이 바꿨다**(대시보드 값이 `render.yaml` 을 이긴다). 되돌릴 때는 그 값만
-  `gemini-3.5-flash` 로 — pro 자리 LOW 는 3.5 에서도 동작한다(실측).
+- **바꾸는 순서가 있다 — 코드 먼저, Render 대시보드 값 나중** (대시보드 값이 `render.yaml` 을 이긴다). 옛 코드(`092b661`
+  이하)는 flash 자리에 MINIMAL 을 보내서, 대시보드 `GEMINI_MODEL` 이 3.8 인 채로 옛 코드가 한 번이라도 뜨면 분류·언어
+  판별·번역·요약이 전부 400 이다 — 기동 검사도 `/healthz` 도 못 잡는다(검토가 찾았다). 그래서 ① 새 코드를 배포해 올라간 것을
+  확인하고(새 코드는 3.5 값에서도 돈다) ② 대시보드 값을 바꾼 뒤 ③ 배포를 한 번 직접 띄운다 — 어느 배포가 새 값을 봤는지
+  짐작하지 않는다(`render.yaml` 을 바꾼 푸시는 `blueprint_sync` 배포를 하나 더 띄운다). **되돌리기는 대시보드 값만**, 짝은
+  `GEMINI_MODEL=gemini-3.5-flash-lite` · `GEMINI_MODEL_PRO=gemini-3.5-flash`(LOW 와 큰 한도로 둘 다 실측 정상). **flash 자리에
+  3.5-flash 를 넣지 마라** — 그 모델은 LOW 에서 생각을 349토큰까지 써서 언어 판별 한도(256)를 넘긴다. 코드를 `092b661`
+  이하로 되돌려야 하면 대시보드 값부터 3.5 로 돌린다. 배포 뒤 확인은 `POST /internal/healthcheck` — 두 자리를 실제 생각
+  단계로 두드리므로 모델·단계 짝 오류가 400 으로 보인다. 한도에서 잘린 답은 로그에 「출력 한도에서 잘렸습니다」로 남는다.
 
 ## Invariants
 

@@ -158,7 +158,7 @@ services:
         value: "true"
       # ----- Sensible defaults (override in dashboard if needed) -----
       - key: GEMINI_MODEL
-        value: gemini-3.5-flash-lite
+        value: gemini-3.8-flash
       - key: GEMINI_MODEL_PRO
         value: gemini-3.8-flash
       - key: GOOGLE_CLOUD_LOCATION

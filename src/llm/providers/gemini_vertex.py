@@ -147,6 +147,12 @@ def call_gemini(
 
     text = (resp.text or "").strip()
     usage = getattr(resp, "usage_metadata", None)
+    candidates = getattr(resp, "candidates", None) or []
+    if candidates and "MAX_TOKENS" in str(getattr(candidates[0], "finish_reason", "") or ""):
+        # 답이 출력 한도에서 잘렸다 — 생각 토큰도 그 한도 안에서 쓰인다(`llm/client._THINKING_LEVEL_BY_TIER`).
+        # 잘린 언어 판별은 영어로, 잘린 요약은 반쪽 문장으로 조용히 저장된다. 이 줄이 없으면 알 길이 없다.
+        logger.warning("Gemini 답이 출력 한도에서 잘렸습니다: model=%s max_tokens=%s 생각=%s토큰",
+                       model, max_tokens, getattr(usage, "thoughts_token_count", None))
     # 생각 토큰은 `candidates_token_count` 에 안 들어가고 따로 옵니다 — 그런데 청구는 출력 단가로
     # 됩니다. 안 적으면 「출력이 얼마였나」를 볼 때 청구액의 일부가 통째로 안 보입니다.
     thoughts = getattr(usage, "thoughts_token_count", None)

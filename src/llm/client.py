@@ -35,11 +35,13 @@ T = TypeVar("T", bound=BaseModel)
 # 입니다. 2026-09-23 실측: `gemini-3.5-flash` 를 LOW 로 두면 짧은 JSON 요청에서 생각이 한도 200 중
 # 190 을 먹어 답이 잘렸고, 3.5 Flash-Lite 는 MINIMAL 에서 언어 판별(한도 8)이 생각 0 으로 정상이었습니다.
 #
-# **pro 자리는 LOW 입니다** (2026-09-30, pro 모델을 `gemini-3.8-flash` 로 바꾸면서). 3.8 은 MINIMAL 을
+# **두 자리 다 LOW 입니다** (2026-09-30, 두 자리 모두 `gemini-3.8-flash` 로 바꾸면서). 3.8 은 MINIMAL 을
 # 받지 않습니다 — 실측 `400 INVALID_ARGUMENT: Thinking level is unsupported: THINKING_LEVEL_MINIMAL`.
-# 이 기본값을 쓰는 pro 호출은 회사 웹검색(`search`) 하나이고(초안은 따로 LOW 를 넘깁니다), 3.8 은 LOW 에서
-# 초안 28건 내내 생각 토큰을 한 개도 안 썼습니다.
-_THINKING_LEVEL_BY_TIER = {"flash": "MINIMAL", "pro": "LOW"}
+# **LOW 도 생각을 한다 — 짧은 일에도 수십 토큰.** 실측 최대(두 번 잰 것 중 큰 값): 언어 판별 67, 문서 고르기 163. 그 생각이 출력
+# 한도 안에서 쓰이므로 **한도가 작은 호출은 한도를 넉넉히 둔다**(언어 판별 8 → 256, 한 줄 요약 120 → 512,
+# 「언제 쓰는가」 200 → 512). 청구는 쓴 만큼이라 한도를 올려도 값은 안 오른다. 모르는 자리 이름도 LOW 로
+# 떨어진다 — MINIMAL 로 떨어지면 3.8 에서 그 호출이 400 이다.
+_THINKING_LEVEL_BY_TIER = {"flash": "LOW", "pro": "LOW"}
 
 
 class LLMError(RuntimeError):
@@ -132,9 +134,10 @@ class LLMClient:
     ) -> str | T:
         """Render a prompt and call Gemini.
 
-        ``tier`` selects the model: ``"flash"`` (fast/cheap, the default for
-        classification/scoring/routing) or ``"pro"`` (high quality, used for
-        customer-facing drafting). Unknown tiers fall back to flash.
+        ``tier`` selects the model slot: ``"flash"`` (the default — classification,
+        routing, translation, summaries) or ``"pro"`` (customer-facing drafting, web
+        search). Both are ``gemini-3.8-flash`` since 2026-09-30. Unknown tiers fall back to
+        the flash model with thinking level LOW.
 
         ``stage`` 는 **이 호출이 어느 회신을 쓰는가**입니다 — ``'first'`` 또는
         ``'followup'``. 회신 규칙(회사 규칙)은 그때만 실립니다.
@@ -145,7 +148,7 @@ class LLMClient:
         """
         model = settings.gemini_model_for.get(tier, settings.GEMINI_MODEL)
         if thinking_level is None:
-            thinking_level = _THINKING_LEVEL_BY_TIER.get(tier, "MINIMAL")
+            thinking_level = _THINKING_LEVEL_BY_TIER.get(tier, "LOW")
         if policy_snapshot is not None:
             if stage != policy_snapshot.stage:
                 raise ValueError("Policy snapshot and reply stage differ")
@@ -207,7 +210,7 @@ class LLMClient:
         structured ``complete`` call when they need a parsed result.
         """
         model = settings.gemini_model_for.get(tier, settings.GEMINI_MODEL)
-        thinking_level = _THINKING_LEVEL_BY_TIER.get(tier, "MINIMAL")
+        thinking_level = _THINKING_LEVEL_BY_TIER.get(tier, "LOW")
         prompt = load_prompt(prompt_name, variables, include_rules=False)
         return self._dispatch(
             prompt,

@@ -192,9 +192,15 @@ def _check_gemini() -> CheckResult:
     if not settings.GOOGLE_CREDENTIALS_JSON.strip():
         return CheckResult(name="Gemini (Vertex)", status="FAIL", detail="GOOGLE_CREDENTIALS_JSON is empty", latency_ms=0)
     try:
+        from ..llm.client import _THINKING_LEVEL_BY_TIER
         from ..llm.providers.gemini_vertex import call_gemini
 
-        call_gemini("ping", max_tokens=1)
+        # 실제 호출과 **같은 짝**(그 자리의 모델 + 그 자리의 생각 단계)으로 두드린다. 모델이 그 단계를 거절하면
+        # (3.8 의 MINIMAL 처럼) 여기서 400 으로 드러난다 — 단계 없이 두드리던 동안은 그 짝 오류가 PASS 였다.
+        # 한도는 생각이 들어갈 만큼(`tests/test_llm_budgets.py`).
+        for tier, model in settings.gemini_model_for.items():
+            call_gemini("ping", model=model, max_tokens=256,
+                        thinking_level=_THINKING_LEVEL_BY_TIER.get(tier, "LOW"))
         ms = int((time.monotonic() - start) * 1000)
         return CheckResult(name="Gemini (Vertex)", status="PASS", detail="OK", latency_ms=ms)
     except Exception as e:

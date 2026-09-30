@@ -49,8 +49,26 @@ def test_check_gemini_pass() -> None:
         patch("src.llm.providers.gemini_vertex.call_gemini"),
     ):
         s.GOOGLE_CREDENTIALS_JSON = '{"project_id": "p"}'
+        s.gemini_model_for = {"flash": "m", "pro": "m"}
         result = _check_gemini()
     assert result.status == "PASS"
+
+
+def test_check_gemini_knocks_each_slot_with_its_real_thinking_level() -> None:
+    """단계 없이 두드리던 동안은 「모델이 그 단계를 거절한다」(3.8 의 MINIMAL)가 PASS 였다 (2026-09-30)."""
+    from unittest.mock import MagicMock
+
+    fake = MagicMock()
+    with (
+        patch("src.common.healthcheck.settings") as s,
+        patch("src.llm.providers.gemini_vertex.call_gemini", fake),
+    ):
+        s.GOOGLE_CREDENTIALS_JSON = '{"project_id": "p"}'
+        s.gemini_model_for = {"flash": "model-a", "pro": "model-b"}
+        assert _check_gemini().status == "PASS"
+    sent = sorted((c.kwargs["model"], c.kwargs["thinking_level"], c.kwargs["max_tokens"]) for c in fake.call_args_list)
+    assert [m for m, _, _ in sent] == ["model-a", "model-b"]
+    assert all(level == "LOW" and cap >= 256 for _, level, cap in sent)
 
 
 def test_check_gemini_permission_fail() -> None:
@@ -61,6 +79,7 @@ def test_check_gemini_permission_fail() -> None:
         patch("src.llm.providers.gemini_vertex.call_gemini", side_effect=err),
     ):
         s.GOOGLE_CREDENTIALS_JSON = '{"project_id": "p"}'
+        s.gemini_model_for = {"flash": "m", "pro": "m"}
         result = _check_gemini()
     assert result.status == "FAIL"
 

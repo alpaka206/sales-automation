@@ -17,11 +17,10 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", case_sensitive=False, extra="ignore")
 
     # ----- LLM (Gemini on Vertex AI — the only provider) -----
-    # Hybrid model tiers:
-    #   GEMINI_MODEL      → fast/cheap "flash" tier for light judgment
-    #                       (classification, scoring, doc routing, enrichment).
-    #   GEMINI_MODEL_PRO  → high-quality "pro" tier for customer-facing drafting
-    #                       (inbound reply drafts).
+    # Two model slots — the same model since 2026-09-30 (`gemini-3.8-flash`), kept so they can be split again:
+    #   GEMINI_MODEL      → "flash" slot for light judgment
+    #                       (classification, doc routing, translation, summaries, enrichment).
+    #   GEMINI_MODEL_PRO  → "pro" slot for customer-facing drafting and company web search.
     # Code picks the tier per call via LLMClient.complete(..., tier="flash"|"pro").
     #
     # **Gemini 3 세대만 씁니다** (2026-09-23 운영자 지시: 「2.5 아예 안쓰게」). 2.5 두 모델은
@@ -30,11 +29,14 @@ class Settings(BaseSettings):
     # (`api.main.validate_startup_settings`): 생각 설정을 3 세대 방식(`thinking_level`)으로만 보내서,
     # 2.x 모델은 호출마다 400 이 되기 때문입니다.
     #
-    # **pro 자리는 2026-09-30 부터 `gemini-3.8-flash`** (운영자: 「바꿔봐」). 블라인드 비교에서 3.5-flash 보다
-    # 초안이 나았고(평균 4.15 → 4.61, 틀린 답 1 → 0) 값도 싸다. **3.8 은 생각 단계 MINIMAL 을 400 으로
-    # 거절한다** — 그래서 pro 자리의 기본 단계가 LOW 다(`llm/client._THINKING_LEVEL_BY_TIER`). 같은 이유로
-    # 3.8 을 flash 자리(MINIMAL)에 넣으면 분류·번역이 전부 400 이다.
-    GEMINI_MODEL: str = "gemini-3.5-flash-lite"
+    # **두 자리 다 2026-09-30 부터 `gemini-3.8-flash`** (운영자: 「바꿔봐」 · 「적절한 방법으로 바꿔놔봐」).
+    # 블라인드 비교에서 초안(평균 4.15 → 4.61, 틀린 답 1 → 0)도, flash 자리의 번역·요약도 나았다(3.5-flash-lite
+    # 는 「21일 특별 약정」을 「the 21st」로 옮기고 요약 숫자를 틀렸다). 분류·문서 고르기는 같았다.
+    # **3.8 은 생각 단계 MINIMAL 을 400 으로 거절한다** — 그래서 두 자리 다 LOW 이고, LOW 도 생각을 하므로 한도가
+    # 작은 호출은 한도를 올렸다(`llm/client._THINKING_LEVEL_BY_TIER` 주석). 자리를 둘로 남기는 것은 다시 갈라
+    # 쓸 수 있게다 — 되돌릴 때는 Render 대시보드 값만, 짝은 flash=3.5-flash-lite · pro=3.5-flash(LOW 로 둘 다 실측
+    # 정상 — flash 자리에 3.5-flash 는 안 된다). 바꿀 때는 코드 먼저, 대시보드 값 나중(CLAUDE.md 09-30 절).
+    GEMINI_MODEL: str = "gemini-3.8-flash"
     GEMINI_MODEL_PRO: str = "gemini-3.8-flash"
     # Service-account JSON (full contents as a string). No API key is used.
     GOOGLE_CREDENTIALS_JSON: str = ""

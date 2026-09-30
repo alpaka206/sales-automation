@@ -93,7 +93,7 @@ def usage_note_from_body(title: str, body: str, llm: object | None = None) -> st
             "policy/usage_note",
             {"title": title or "", "body": text[:8000]},
             tier="flash",
-            max_tokens=200,
+            max_tokens=512,  # 한도에 생각 토큰이 들어간다 — `llm/client._THINKING_LEVEL_BY_TIER`
         )
     except Exception:
         logger.warning("「언제 쓰는가」를 만들지 못했습니다: %s", title, exc_info=True)

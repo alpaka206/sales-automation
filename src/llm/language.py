@@ -89,8 +89,10 @@ def detect_language(
         return guess
 
     try:
+        # 한도는 생각 토큰까지 포함한다 — 3.8 은 LOW 에서도 이 일에 최대 67토큰을 생각했고, 한도 8 에서는
+        # 답이 잘려 판별이 20건 중 2건 실패했다(2026-09-30 실측, 256 에서는 20/20). 청구는 쓴 만큼이다.
         out = (llm or LLMClient()).complete(
-            "util/detect_language", {"text": text[:2000]}, tier="flash", max_tokens=8
+            "util/detect_language", {"text": text[:2000]}, tier="flash", max_tokens=256
         )
         code = (out or "").strip().lower() if isinstance(out, str) else ""
         # Keep only a leading 2-letter alpha code (model may add stray chars).

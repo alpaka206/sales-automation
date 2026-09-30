@@ -310,7 +310,8 @@ def main() -> int:
     parser.add_argument("--repeats", type=int, default=1)
     parser.add_argument("--arms", nargs="+", choices=("router", "all"), default=["router", "all"])
     parser.add_argument("--max-calls", type=int, default=120)
-    parser.add_argument("--draft-thinking-level", choices=("MINIMAL", "LOW", "MEDIUM", "HIGH"))
+    parser.add_argument("--draft-thinking-level", choices=("MINIMAL", "LOW", "MEDIUM", "HIGH"),
+                        help="MINIMAL 은 3.5 모델과 비교할 때만 — gemini-3.8-flash 는 MINIMAL 을 400 으로 거절한다")
     parser.add_argument("--authorized-by", help="누가 이 유료 실평가를 승인했는지 — manifest 에 그대로 적힌다")
     args = parser.parse_args()
     isolate_writes()

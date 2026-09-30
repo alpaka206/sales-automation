@@ -55,7 +55,7 @@ def one_line(
                 "body": text[:4000],
             },
             tier="flash",
-            max_tokens=120,
+            max_tokens=512,  # 한도에 생각 토큰이 들어간다 — `llm/client._THINKING_LEVEL_BY_TIER`
         )
         line = str(line or "").strip().splitlines()[0].strip().lstrip("-·• ").strip()
         return line[:200] or None

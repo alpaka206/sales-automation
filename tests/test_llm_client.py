@@ -67,14 +67,16 @@ def test_every_tier_sends_a_gemini_3_thinking_level_and_never_a_budget(mock_gemi
     """2026-09-23 전환: Gemini 3 은 `thinking_level` 을 받는다. 숫자 `thinking_budget` 이 섞여 가면
     400 이고, 아무것도 안 보내면 모델 기본값(3.5 Flash 는 MEDIUM)이 출력 한도를 먹는다.
 
-    **pro 자리는 MINIMAL 을 보내면 안 된다** (2026-09-30): pro 모델 `gemini-3.8-flash` 는 MINIMAL 을
-    `400 Thinking level is unsupported` 로 거절한다 — 그 자리의 웹검색이 전부 실패한다."""
+    **어느 자리도 MINIMAL 을 보내면 안 된다** (2026-09-30): 두 자리의 모델 `gemini-3.8-flash` 는 MINIMAL 을
+    `400 Thinking level is unsupported` 로 거절한다 — 분류·번역·요약·웹검색이 전부 실패한다."""
     mock_gemini.return_value = _result("ok")
     client.complete("test/hello", tier="flash")
     client.complete("test/hello", tier="pro")
     client.search("test/hello", tier="pro")
+    client.complete("test/hello", tier="nonsense")  # 모르는 자리 이름도 MINIMAL 로 떨어지면 안 된다
+    client.search("test/hello", tier="nonsense")
     levels = [call.kwargs["thinking_level"] for call in mock_gemini.call_args_list]
-    assert levels == ["MINIMAL", "LOW", "LOW"]
+    assert levels == ["LOW"] * 5
     for call in mock_gemini.call_args_list:
         assert "thinking_budget" not in call.kwargs
 
