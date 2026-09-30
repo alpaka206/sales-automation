@@ -34,8 +34,9 @@ class Settings(BaseSettings):
     # 는 「21일 특별 약정」을 「the 21st」로 옮기고 요약 숫자를 틀렸다). 분류·문서 고르기는 같았다.
     # **3.8 은 생각 단계 MINIMAL 을 400 으로 거절한다** — 그래서 두 자리 다 LOW 이고, LOW 도 생각을 하므로 한도가
     # 작은 호출은 한도를 올렸다(`llm/client._THINKING_LEVEL_BY_TIER` 주석). 자리를 둘로 남기는 것은 다시 갈라
-    # 쓸 수 있게다 — 되돌릴 때는 Render 대시보드 값만, 짝은 flash=3.5-flash-lite · pro=3.5-flash(LOW 로 둘 다 실측
-    # 정상 — flash 자리에 3.5-flash 는 안 된다). 바꿀 때는 코드 먼저, 대시보드 값 나중(CLAUDE.md 09-30 절).
+    # 쓸 수 있게다 — 되돌릴 때는 render.yaml 을 고쳐 푸시한다(대시보드만 바꾸면 다음 render.yaml 변경 때 Blueprint
+    # 동기화가 도로 덮는다). 짝은 flash=3.5-flash-lite · pro=3.5-flash(LOW 로 둘 다 실측 정상 — flash 자리에 3.5-flash
+    # 는 안 된다). 바꿀 때는 코드 먼저, 모델 값 나중(CLAUDE.md 09-30 절).
     GEMINI_MODEL: str = "gemini-3.8-flash"
     GEMINI_MODEL_PRO: str = "gemini-3.8-flash"
     # Service-account JSON (full contents as a string). No API key is used.
