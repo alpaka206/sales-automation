@@ -29,8 +29,13 @@ class Settings(BaseSettings):
     # 2.5-pro → 3.5-flash — 3 세대에는 GA 인 Pro 가 없습니다). 2.x 이름을 넣으면 서버가 안 뜹니다
     # (`api.main.validate_startup_settings`): 생각 설정을 3 세대 방식(`thinking_level`)으로만 보내서,
     # 2.x 모델은 호출마다 400 이 되기 때문입니다.
+    #
+    # **pro 자리는 2026-09-30 부터 `gemini-3.8-flash`** (운영자: 「바꿔봐」). 블라인드 비교에서 3.5-flash 보다
+    # 초안이 나았고(평균 4.15 → 4.61, 틀린 답 1 → 0) 값도 싸다. **3.8 은 생각 단계 MINIMAL 을 400 으로
+    # 거절한다** — 그래서 pro 자리의 기본 단계가 LOW 다(`llm/client._THINKING_LEVEL_BY_TIER`). 같은 이유로
+    # 3.8 을 flash 자리(MINIMAL)에 넣으면 분류·번역이 전부 400 이다.
     GEMINI_MODEL: str = "gemini-3.5-flash-lite"
-    GEMINI_MODEL_PRO: str = "gemini-3.5-flash"
+    GEMINI_MODEL_PRO: str = "gemini-3.8-flash"
     # Service-account JSON (full contents as a string). No API key is used.
     GOOGLE_CREDENTIALS_JSON: str = ""
     # Project falls back to the JSON's project_id when left empty.

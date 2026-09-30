@@ -34,7 +34,12 @@ T = TypeVar("T", bound=BaseModel)
 # 받습니다. 2.5 시절 값은 flash 0(끔)·pro 128(그 모델의 최소)이었고, 가장 가까운 것이 둘 다 MINIMAL
 # 입니다. 2026-09-23 실측: `gemini-3.5-flash` 를 LOW 로 두면 짧은 JSON 요청에서 생각이 한도 200 중
 # 190 을 먹어 답이 잘렸고, 3.5 Flash-Lite 는 MINIMAL 에서 언어 판별(한도 8)이 생각 0 으로 정상이었습니다.
-_THINKING_LEVEL_BY_TIER = {"flash": "MINIMAL", "pro": "MINIMAL"}
+#
+# **pro 자리는 LOW 입니다** (2026-09-30, pro 모델을 `gemini-3.8-flash` 로 바꾸면서). 3.8 은 MINIMAL 을
+# 받지 않습니다 — 실측 `400 INVALID_ARGUMENT: Thinking level is unsupported: THINKING_LEVEL_MINIMAL`.
+# 이 기본값을 쓰는 pro 호출은 회사 웹검색(`search`) 하나이고(초안은 따로 LOW 를 넘깁니다), 3.8 은 LOW 에서
+# 초안 28건 내내 생각 토큰을 한 개도 안 썼습니다.
+_THINKING_LEVEL_BY_TIER = {"flash": "MINIMAL", "pro": "LOW"}
 
 
 class LLMError(RuntimeError):

@@ -160,7 +160,7 @@ services:
       - key: GEMINI_MODEL
         value: gemini-3.5-flash-lite
       - key: GEMINI_MODEL_PRO
-        value: gemini-3.5-flash
+        value: gemini-3.8-flash
       - key: GOOGLE_CLOUD_LOCATION
         value: global
       - key: APPROVAL_CHANNEL

@@ -197,7 +197,7 @@ def test_startup_accepts_the_default_gemini_3_models(monkeypatch) -> None:
     monkeypatch.setattr(settings, "APP_HOST", "127.0.0.1")
     monkeypatch.setattr(settings, "AUTH_MODE", "basic")
     monkeypatch.setattr(settings, "GEMINI_MODEL", "gemini-3.5-flash-lite")
-    monkeypatch.setattr(settings, "GEMINI_MODEL_PRO", "gemini-3.5-flash")
+    monkeypatch.setattr(settings, "GEMINI_MODEL_PRO", "gemini-3.8-flash")
     monkeypatch.setattr(settings, "PUBLIC_BASE_URL", "")
     monkeypatch.setattr(settings, "GOOGLE_SHEETS_OAUTH_REFRESH_TOKEN", "")
     validate_startup_settings()

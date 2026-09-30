@@ -26,6 +26,8 @@ _DEFAULT_RATES = {"input": 0.30, "output": 2.50}
 # Vertex AI global Standard, ≤200K 입력 기준(2026-09-23 공식 가격표). 출력에는 생각 토큰이 포함됩니다.
 PRICING: dict[str, dict[str, float]] = {
     "gemini-3.5-flash-lite": {"input": 0.30, "output": 2.50},
+    # 2026-12-31 까지 소개가. 2027-01-01 부터 1.50 / 7.50 (2026-09-30 공식 가격표).
+    "gemini-3.8-flash": {"input": 0.75, "output": 3.75},
     "gemini-3.5-flash": {"input": 1.50, "output": 9.00},
     "gemini-3.1-flash-lite": {"input": 0.25, "output": 1.50},
 }

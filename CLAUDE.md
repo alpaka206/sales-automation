@@ -17,11 +17,12 @@ PERSO Inbound is a FastAPI workflow for inbound inquiry handling and customer op
 ## 2026-09-23 Gemini 3 전환 (2.5 는 안 쓴다)
 
 - **모델은 `gemini-3.5-flash-lite`(flash 자리) · `gemini-3.5-flash`(pro 자리)** 다 (운영자: 「2.5 아예 안쓰게」).
+  **pro 자리는 2026-09-30 부터 `gemini-3.8-flash`** — 아래 절.
   2.5 두 모델은 Google 공식 수명 페이지상 **2026-10-20 종료**이고, 이 둘이 공식 대체다(3 세대에는 GA 인 Pro 가 없다).
   2.x 이름이 설정에 남아 있으면 **서버가 안 뜬다**(`api.main.validate_startup_settings`) — Render 대시보드의
   `GEMINI_MODEL`·`GEMINI_MODEL_PRO` 가 render.yaml 보다 이기므로 거기에 옛 값이 남은 채 배포되면 `/healthz` 실패로
   이전 버전이 계속 돈다. 조용히 모든 초안이 `draft_failed` 로 서는 것보다 낫다.
-- **생각 설정은 `thinking_level` 이다** (`llm/client._THINKING_LEVEL_BY_TIER` = 전부 MINIMAL, 초안만
+- **생각 설정은 `thinking_level` 이다** (`llm/client._THINKING_LEVEL_BY_TIER` = flash MINIMAL · pro LOW(09-30 부터), 초안은
   `inbound._DRAFT_THINKING_LEVEL` = LOW). 3 세대는 숫자 `thinking_budget` 을 옛 방식으로 보고, 설정을 안 보내면 모델
   기본값(3.5 Flash 는 MEDIUM)이 **출력 한도를 먹어** 빈 답·잘린 JSON 이 된다 — 실측: LOW 에서 한도 200 중 190 이 생각.
   생각 토큰은 `LLMResult.thinking_tokens` 에 따로 적힌다(출력 단가로 청구된다).
@@ -31,6 +32,24 @@ PERSO Inbound is a FastAPI workflow for inbound inquiry handling and customer op
 - **근거는 유료 블라인드 짝 비교다** (`scripts/evaluate_policy_response.py`, 합성 문의 14건 × 2회, 원자료
   `tmp/model-switch-2026-09-23/` — git 제외). 지시문 수정 뒤: 2.5 평균 4.07·실패 2 / 3.x MINIMAL 4.39·실패 0 /
   **3.x 초안 LOW 4.50·실패 0·지어낸 문장 0**. 합성 자료라 회사 정책 원문의 정확도를 증명하지는 않는다.
+
+## 2026-09-30 pro 자리를 `gemini-3.8-flash` 로 (초안 · 회사 웹검색)
+
+- **운영자: 「바꿔봐」.** 근거는 09-23 과 같은 틀의 유료 블라인드 비교다(합성 문의 14건 × 2회, 초안 모델만 바꾸고
+  채점자 셋이 라벨을 가린 채 채점, 원자료 `tmp/model-compare-2026-09-30/` — git 제외): 3.5-flash LOW 평균 4.15 ·
+  그대로 보낼 답 20/28 · 틀린 답 1(S06, 14일 조건을 뺀 환불 규정 요약) · 지어낸 문장 1 → **3.8-flash LOW 4.61 · 26/28 ·
+  0 · 0**. 같은 문의끼리 나음 11 · 같음 17 · 나쁨 0 이고, 차이는 전부 환불·계약처럼 조건이 붙는 문의에서 났다.
+  3.8 MEDIUM 은 점수가 같고 비용 2.3배·지연 2배라 안 쓴다. **점수는 회차마다 채점자가 달라 09-23 의 숫자(4.50)와
+  섞어 비교하지 않는다** — 같은 회차 안에서만 비교한다.
+- **3.8 은 생각 단계 MINIMAL 을 400 으로 거절한다** (`Thinking level is unsupported: THINKING_LEVEL_MINIMAL`, 실측).
+  그래서 pro 자리의 기본 단계가 LOW 다 — 그 기본값을 쓰는 호출이 회사 웹검색(`search_company`)이다. **flash 자리는
+  MINIMAL 이라 3.8 을 flash 자리에 넣으면 분류·번역·요약이 전부 400 이다.** 모델을 바꿀 때 단계 목록부터 본다.
+  고정: `tests/test_llm_client.py::test_every_tier_sends_a_gemini_3_thinking_level_and_never_a_budget`.
+- **가격**(Vertex global, 100만 토큰당 입력/출력, 출력에 생각 포함): 3.8 은 **2026-12-31 까지 소개가 $0.75/$3.75,
+  2027-01-01 부터 $1.50/$7.50** (3.5-flash 는 $1.50/$9.00). 실측 초안 1,000건당 3.5 $5.94 → 3.8 $2.44(2027 $4.88).
+  LOW 에서 초안 28건 · 웹검색 2건 모두 생각 토큰 0. 지연은 초안 한 건에 약 +0.7초(백그라운드라 운영자는 안 기다린다).
+- **Render 대시보드의 `GEMINI_MODEL_PRO` 를 같이 바꿨다**(대시보드 값이 `render.yaml` 을 이긴다). 되돌릴 때는 그 값만
+  `gemini-3.5-flash` 로 — pro 자리 LOW 는 3.5 에서도 동작한다(실측).
 
 ## Invariants
 
