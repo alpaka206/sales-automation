@@ -15,9 +15,11 @@ from sqlalchemy import (
     Numeric,
     String,
     Text,
+    event,
     text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm.attributes import NO_VALUE
 
 from .base import Base
 
@@ -96,10 +98,19 @@ class Conversation(Base):
     # **도장 뒤에 요청이 왔으면 대기열**이다 — 도장은 수집기가 읽기 시작한 때라, 읽는 도중 온 메일도
     # 다음 회차에 들어온다(`agents/ticket_history.sync_pending_ticket_history`).
     history_requested_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    # **후속 리마인더가 이 티켓을 Closed Lost 로 닫은 때** (이관 0121). 사람이 닫은 건과 가르는
-    # 유일한 표시입니다 — 닫힌 뒤 고객이 답하면 이 칸이 있는 티켓만 Negotiating 으로 되살리고,
-    # 되살아난 티켓(이 칸 + Negotiating)은 보드와 티켓 화면에 빨갛게 섭니다(2026-09-17 운영자).
+    # **후속 리마인더가 이 티켓을 닫은 때** (이관 0121 — 닫는 단계는 2026-09-30 부터 Concluded, 그 전
+    # 설계는 Closed Lost). 사람이 닫은 건과 가르는 유일한 표시입니다 — 닫힌 뒤 고객이 답하면 이 칸이
+    # 있는 티켓만 Negotiating 으로 되살립니다(2026-09-17 운영자). 판정은 `followup_sequence.closed_by_sequence`.
     followup_closed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # **그 닫힌 티켓을 시퀀스가 고객 답장으로 되살린 때** (이관 0129). 빨간 표시(되살아난 티켓)만 이 칸으로
+    # 가른다(`followup_sequence.revived_by_sequence`) — 사람이 손으로 협의 중에 옮긴 것은 되살아난 것이
+    # 아니다. 「다시 되살리지 않는다」는 아래 `followup_released_at` 이 정한다.
+    followup_revived_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # **그 닫힌 티켓의 단계를 누구든 옮긴 때** (이관 0129). 되살리기 · 보드 · 허브스팟 · 워크북 어느 길이든
+    # 아래 `_stage_moved_after_followup_close` 가 적는다. 이 칸이 닫은 때보다 늦으면 시퀀스는 그 티켓에서
+    # 손을 뗐다(`followup_sequence.closed_by_sequence`) — 스윕보다 먼저 사람이 협의 중에 옮겼다가 나중에
+    # 끝낸 티켓을, 스윕이 옛 답장으로 되살리던 구멍(2026-09-30).
+    followup_released_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     hubspot_ticket_id: Mapped[str | None] = mapped_column(
         String(64), nullable=True, unique=True, index=True
     )
@@ -138,6 +149,19 @@ class Conversation(Base):
     progress: Mapped[list[ConversationProgress]] = relationship(
         back_populates="conversation", order_by="ConversationProgress.created_at"
     )
+
+
+@event.listens_for(Conversation.stage, "set", active_history=True)
+def _stage_moved_after_followup_close(target, value, oldvalue, _initiator) -> None:
+    """후속 리마인더가 닫은 티켓의 단계가 움직였다 → `followup_released_at`.
+
+    **단계를 쓰는 곳은 여럿이다**(보드 · 고객 상세 폼 · 허브스팟 동기화 · 워크북 · 백필 · 발송 워커 · 복구 ·
+    시퀀스 자신). 전부 ORM 대입이라 여기 한 곳에서 잡는다 — 쓰는 곳마다 달면 하나가 조용히 빠진다.
+    `active_history` 는 만료된 행에서도 옛 값을 읽게 한다(안 읽으면 커밋 뒤의 대입을 못 알아본다).
+    """
+    if oldvalue is NO_VALUE or value == oldvalue or target.followup_closed_at is None:
+        return
+    target.followup_released_at = datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 class Message(Base):

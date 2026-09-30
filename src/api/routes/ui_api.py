@@ -124,6 +124,7 @@ def _reminders(rows: list[dict]) -> dict[int, str | None]:
 
 def _card(row: dict, reminder: str | None = None) -> dict:
     """A board row's ORM objects flattened to what a card actually draws."""
+    from ...agents import followup_sequence as fs
     from .customer_ops import visible_deal_detail
 
     conversation: Conversation = row["conversation"]
@@ -147,8 +148,9 @@ def _card(row: dict, reminder: str | None = None) -> dict:
         # Won Type / Lost Reason. 티켓 세부 내역과 같은 판단을 같은 곳에서 합니다.
         "deal_detail": visible_deal_detail(row["stage"], conversation.deal_detail),
         # 후속 리마인더가 닫았는데 고객이 돌아와 협의 중으로 되살아난 티켓 — 빨갛게 섭니다
-        # (2026-09-17 운영자). 사람이 다음 단계로 옮기면 저절로 꺼집니다.
-        "revived": conversation.followup_closed_at is not None and row["stage"] == "negotiation",
+        # (2026-09-17 운영자). 사람이 다음 단계로 옮기면 저절로 꺼집니다. 판정은 티켓 배너와 같은 함수 —
+        # 사람이 손으로 협의 중에 옮긴 자동 종결 티켓은 되살아난 것이 아닙니다(이관 0129).
+        "revived": fs.revived_by_sequence(conversation),
         # 「Pending」·「Reminder Sent 1」·「Reminder Sent 2」 — 시퀀스가 도는 카드에만, 글자는
         # 티켓 배너와 같은 곳(`followup_sequence.view`)에서 옵니다 (2026-09-22 운영자 지시).
         "reminder": reminder,

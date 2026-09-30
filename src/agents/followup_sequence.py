@@ -7,10 +7,15 @@
 |---|---|
 | 우리 회신 +3일 | 리마인더 1 (템플릿 `followup_reminder`) |
 | 리마인더 1 +5일 | 리마인더 2 (템플릿 `followup_closing`) |
-| 리마인더 2 +7일 | Closed Lost |
+| 리마인더 2 +7일 | Concluded (종결) |
 
 그 사이 언제든 고객이 연락하면 Negotiating 으로 옮기고 끝. **닫은 뒤에** 연락이 와도
 Negotiating 으로 되살리고, 그 티켓은 화면에 빨갛게 선다(`followup_closed_at`).
+
+**닫는 단계는 Concluded 다 — Closed Lost 가 아니다** (2026-09-30 운영자 지시: 「리마인더 메일 다
+끝나면 concluded로 가야하는데」). 처음 지시(09-17)는 「7일동안 안오면 closed lost」였고 그대로
+만들었다. 답이 없어 끝난 문의는 진 건(Closed Lost)이 아니라 끝난 문의(Concluded — 옛 No Response 를
+이관 0076 이 접어 넣은 그 단계)다.
 
 **새 표도 새 발송 경로도 없다.**
 - 리마인더는 `messages` 행이다. 몇 번째를 보냈는지는 그 행들에서 읽는다(`sequence_state`) —
@@ -65,7 +70,10 @@ REMINDER_NOTE_PREFIX = "followup:reminder:"
 
 CONTACTED = "meeting_link_sent"
 NEGOTIATION = "negotiation"
-CLOSED_LOST = "closed_lost"
+# 답이 없어 시퀀스가 끝나면 옮기는 단계 — 로컬 키 `closed`, 화면 이름 Concluded(허브스팟 1404814097).
+# 2026-09-30 까지는 `closed_lost` 였다(모듈 설명). 되살리기도 이 단계에 있는 티켓만 본다 — 사람이 그 뒤
+# Closed Lost 로 옮긴 것은 사람의 결정이라 안 되살린다.
+CLOSE_STAGE = "closed"
 
 AFTER_REPLY = timedelta(days=3)
 AFTER_REMINDER_1 = timedelta(days=5)
@@ -329,16 +337,26 @@ def view(conv: Conversation, messages, outside=()) -> dict | None:
     """
     base, reminders = sequence_state(messages, outside)
     reminder = reminder_status(messages, outside)
-    if conv.followup_closed_at is not None and conv.stage == NEGOTIATION:
-        return {"state": "revived", "at": conv.followup_closed_at, "reminder": reminder}
-    if conv.followup_closed_at is not None and conv.stage == CLOSED_LOST:
-        return {"state": "closed", "at": conv.followup_closed_at, "reminder": reminder}
+    closes_to = close_label()
+    # 닫힌 · 되살아난 티켓의 칩은 **언제나 두 번 재촉했다**다 — 닫기는 리마인더 둘이 나간 뒤에만 일어난다.
+    # 지금 기준으로 세면(`reminder_status`) 운영자가 닫힌 티켓에 메일을 한 통 보내는 순간 그 메일이 새
+    # 기준이 되어 닫힌 카드에 「Pending」이 섰다(2026-09-30 검증).
+    if revived_by_sequence(conv):
+        return {"state": "revived", "at": conv.followup_closed_at, "reminder": done_label(REMINDER_2),
+                "closes_to": closes_to}
+    if closed_by_sequence(conv):
+        return {"state": "closed", "at": conv.followup_closed_at, "reminder": done_label(REMINDER_2),
+                "closes_to": closes_to}
     start = since()
     if start is None or conv.stage != CONTACTED:
         return None
     if base is None or _at(base) < start:
         return None
     step, due = next_step(base, reminders)
+    if step == "close" and _closed_this_cycle(conv, reminders):
+        # 자동 종결 뒤 사람이 Contacted 로 되돌렸다 — 새 메일이 나가기 전에는 다시 안 닫는다(스윕과 같은 판정).
+        return {"state": "reopened", "at": conv.followup_closed_at, "reminder": reminder,
+                "closes_to": closes_to}
     missing = None
     if step in ("send_1", "send_2"):
         # 키를 틀리게 적었거나 아직 안 만들었으면 스윕은 로그만 남기고 안 보낸다 — 화면이 그걸 말한다.
@@ -356,7 +374,56 @@ def view(conv: Conversation, messages, outside=()) -> dict | None:
         "reminder_1_at": getattr(reminders.get(REMINDER_1), "sent_at", None),
         "reminder_2_at": getattr(reminders.get(REMINDER_2), "sent_at", None),
         "reminder": reminder,
+        "closes_to": closes_to,
     }
+
+
+def closed_by_sequence(conv) -> bool:
+    """시퀀스가 닫았고 **그 뒤로 사람이 안 건드린** 티켓 — 고객이 연락하면 되살릴 자리.
+
+    닫는 단계(`CLOSE_STAGE`)에 있어도, 닫은 뒤로 단계가 한 번이라도 움직였다가 돌아온 것은 아니다
+    (`followup_released_at` 이 닫은 때보다 늦다 — 되살리기도, 사람이 옮긴 것도 거기 적힌다). 그건 사람의
+    결정이다 — 그런 티켓을 스윕이 볼 때마다 옛 답장으로 다시 협의 중으로 돌리던 것이 2026-09-30 검증이 네
+    방향에서 따로 재현한 결함이다(이관 0129).
+    """
+    closed, released = _naive(conv.followup_closed_at), _naive(conv.followup_released_at)
+    return conv.stage == CLOSE_STAGE and closed is not None and (released is None or released < closed)
+
+
+def revived_by_sequence(conv) -> bool:
+    """닫았다가 고객 답장으로 되살린 티켓 — 보드와 티켓 화면에 빨갛게 선다(2026-09-17 운영자).
+
+    사람이 손으로 협의 중에 옮긴 자동 종결 티켓은 되살아난 것이 아니다. 예전에는 「닫은 표시 + 협의 중」으로
+    재서 그것까지 빨갛게 섰다.
+    """
+    closed, revived = _naive(conv.followup_closed_at), _naive(conv.followup_revived_at)
+    return conv.stage == NEGOTIATION and closed is not None and revived is not None and revived >= closed
+
+
+def _closed_this_cycle(conv, reminders: dict[str, Message]) -> bool:
+    """이 회차(지금 기준 회신 뒤의 리마인더 둘)를 시퀀스가 **이미 닫은 적 있나** — 닫기는 한 회차에 한 번이다.
+
+    사람이 자동 종결된 티켓을 Contacted 로 되돌려 놓으면(다시 열었다) 기준도 리마인더도 그대로라 `next_step` 은
+    여전히 「닫을 때가 지났다」고 답한다 — 그대로 두면 다음 스윕이 10분 안에 다시 닫고 허브스팟·워크북까지
+    되돌렸다(2026-09-30 검증). 새 메일을 보내면 기준이 바뀌고 리마인더가 처음부터 다시 서므로 그 회차의
+    닫기는 다시 열린다.
+    """
+    second = reminders.get(REMINDER_2)
+    closed = _naive(conv.followup_closed_at)
+    return (closed is not None and second is not None and second.sent_at is not None
+            and closed >= _naive(second.sent_at))
+
+
+def close_label() -> str:
+    """닫는 단계의 **화면 이름** — 배너가 「… 이후 <이름> 로 닫습니다」에 쓴다.
+
+    이름의 출처는 `customer_ops.PIPELINE_STAGES` 한 곳이다(CLAUDE.md). 배너가 「Closed Lost」를 글자로
+    들고 있었고, 그래서 닫는 단계를 바꾸는 일이 화면 두 줄을 따로 고치는 일이었다 — 허브스팟이 이름을
+    바꾸면(그 단계는 이미 네 번 바뀌었다) 또 그렇다.
+    """
+    from ..api.routes.customer_ops import PIPELINE_STAGES
+
+    return next((label for key, label, _ in PIPELINE_STAGES if key == CLOSE_STAGE), CLOSE_STAGE)
 
 
 def _replies(session, contact_ids: set[int], after: datetime,
@@ -448,7 +515,7 @@ def _due_now(messages, base, reminders, wanted: str) -> bool:
     스윕은 회차 앞에서 읽은 것으로 판단하는데, 그 뒤 `_recheck` 가 허브스팟에서 **방금 보낸 사람 회신**을
     가져올 수 있다(웹훅 유실, 수집 대기열이 밀렸거나, 같은 회차의 수집 단계 뒤에 보낸 메일). 그러면 기준이
     그 회신이다. 다시 안 재면 고객이 사람 메일 몇 분 뒤 「지난 메일에 이어」를 받거나, 우리가 방금 메일을
-    보낸 티켓이 Closed Lost 로 닫힌다(2026-09-28 검토에서 둘 다 재현).
+    보낸 티켓이 종결로 닫힌다(2026-09-28 검토에서 둘 다 재현).
     """
     step, due = next_step(base, reminders)
     return step == wanted and due is not None and _utcnow() >= due and open_draft(messages, base) is None
@@ -654,17 +721,19 @@ def _create_reminder(conversation_id: int, variant: str) -> int | None:
 
 
 def _close(conversation_id: int) -> None:
-    """Closed Lost — 콘솔 보드가 카드를 옮길 때와 같은 두 함수. 허브스팟·워크북까지 간다."""
+    """종결(`CLOSE_STAGE`) — 콘솔 보드가 카드를 옮길 때와 같은 두 함수. 허브스팟·워크북까지 간다."""
     from ..api.routes.customer_ops import _set_conversation_stage, _sync_stage
 
-    ticket_id, contact_id, sheet_client_id = _set_conversation_stage(conversation_id, CLOSED_LOST)
+    ticket_id, contact_id, sheet_client_id = _set_conversation_stage(conversation_id, CLOSE_STAGE)
     with SessionLocal() as session:
         conv = session.get(Conversation, conversation_id)
         if conv is not None:
             conv.followup_closed_at = _utcnow()
+            # 두 번째 회차의 닫기는 위 단계 이동이 옛 닫기에 대한 「움직였다」를 방금 적었다 — 새 닫기는 새로 센다.
+            conv.followup_released_at = None
             session.commit()
-    asyncio.run(_sync_stage(ticket_id, CLOSED_LOST, contact_id, sheet_client_id))
-    logger.info("문의 %s: 답이 없어 후속 리마인더가 Closed Lost 로 닫았습니다.", conversation_id)
+    asyncio.run(_sync_stage(ticket_id, CLOSE_STAGE, contact_id, sheet_client_id))
+    logger.info("문의 %s: 답이 없어 후속 리마인더가 %s 로 닫았습니다.", conversation_id, close_label())
 
 
 def _advance(conversation_id: int, contact_id: int) -> None:
@@ -672,6 +741,16 @@ def _advance(conversation_id: int, contact_id: int) -> None:
     from .ticket_history import _advance_on_customer_reply
 
     asyncio.run(_advance_on_customer_reply(conversation_id, contact_id))
+
+
+def _mark_revived(conversation_id: int) -> None:
+    """되살렸다는 빨간 표시(이관 0129). **옮겨졌을 때만** 적는다 — `_advance` 는 실패를 삼키므로(단계 이동이
+    허브스팟에서 실패해도 수집은 성공이다) 여기서 한 번 더 본다."""
+    with SessionLocal() as session:
+        conv = session.get(Conversation, conversation_id)
+        if conv is not None and conv.stage == NEGOTIATION:
+            conv.followup_revived_at = _utcnow()
+            session.commit()
 
 
 def _dead_mailboxes(session) -> set[str]:
@@ -724,7 +803,10 @@ def run_followup_sequence_once(limit: int = PER_SWEEP) -> dict:
             select(Conversation).where(
                 Conversation.hubspot_ticket_id.isnot(None),
                 (Conversation.stage == CONTACTED)
-                | ((Conversation.stage == CLOSED_LOST) & Conversation.followup_closed_at.isnot(None)),
+                # 시퀀스가 닫았고 그 뒤로 단계가 안 움직인 것만(`closed_by_sequence` 와 같은 판정 — 이관 0129).
+                | ((Conversation.stage == CLOSE_STAGE) & Conversation.followup_closed_at.isnot(None)
+                   & (Conversation.followup_released_at.is_(None)
+                      | (Conversation.followup_released_at < Conversation.followup_closed_at))),
                 # SINCE 뒤에 우리 메일이 나간 대화만 — 콘솔에서든(`messages`) 허브스팟 화면·개인
                 # 사서함에서든(`customer_interactions`). `last_outgoing_at` 으로 좁히면 싸지만 그
                 # 칸을 안 채우는 발송 경로가 있다(`approval.mark_sent`, 그리고 콘솔 밖 회신 전부).
@@ -770,14 +852,17 @@ def run_followup_sequence_once(limit: int = PER_SWEEP) -> dict:
             if base is None or _at(base) < start:
                 continue
             after = _at(base)
-            if conv.stage == CLOSED_LOST and conv.followup_closed_at is not None:
+            revive = closed_by_sequence(conv)
+            if revive:
                 # **닫은 뒤의 연락은 전부 되살린다**(설계). 기준만 보면 고객 답장과 운영자의 허브스팟 화면
                 # 회신이 같은 회차에 들어올 때 운영자 회신이 새 기준이 되어 그 앞의 고객 답장이 안 보이고,
-                # 티켓은 Closed Lost 에 남는다 — 되살리는 길은 이 스윕 하나뿐이다(2026-09-28 검토에서 재현).
+                # 티켓은 종결에 남는다 — 되살리는 길은 이 스윕 하나뿐이다(2026-09-28 검토에서 재현).
                 after = min(after, _naive(conv.followup_closed_at))
             place = _reply_place(replies, conv.contact_id, conv.id, after)
             if place == "here":
                 _advance(conv.id, conv.contact_id)
+                if revive:
+                    _mark_revived(conv.id)
                 done["advanced"] += 1
                 acted += 1
                 continue
@@ -788,7 +873,9 @@ def run_followup_sequence_once(limit: int = PER_SWEEP) -> dict:
             step, due = next_step(base, reminders)
             if due is None or now < due:
                 continue
-            # 비상 스위치를 내렸는데 시계가 돌면, 한 통도 못 받은 고객이 Lost 가 된다.
+            if step == "close" and _closed_this_cycle(conv, reminders):
+                continue  # 사람이 자동 종결을 되돌려 다시 열었다 — 새 메일이 나가기 전엔 다시 안 닫는다
+            # 비상 스위치를 내렸는데 시계가 돌면, 한 통도 못 받은 고객의 문의가 종결된다.
             if not delivery_on or not window:
                 continue
             if (_base_mailbox(base) or "").lower() in dead:

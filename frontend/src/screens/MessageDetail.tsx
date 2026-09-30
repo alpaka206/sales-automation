@@ -1207,13 +1207,17 @@ const EVIDENCE_ISSUE_LABELS: Record<string, string> = {
 };
 
 type Followup = {
-  state: "send_1" | "send_2" | "close" | "sending" | "stalled" | "closed" | "revived";
+  state: "send_1" | "send_2" | "close" | "sending" | "stalled" | "closed" | "revived" | "reopened";
   due?: string | null; at?: string | null;
   /** 보내야 할 리마인더의 템플릿 키가 콘솔에 없다 — 스윕은 안 보내고 기다린다. */
   template_missing?: string | null;
   /** 우리 마지막 메일 뒤에 만든 사람 초안이 열려 있다 — 스윕이 그 초안 때문에 기다린다(메시지 id). */
   held_by_draft?: number | null;
   reminder_1_at?: string | null; reminder_2_at?: string | null;
+  /** 답이 없어 시퀀스가 끝나면 옮기는 단계의 **화면 이름**(지금은 Concluded). 서버가
+   *  `PIPELINE_STAGES` 에서 읽어 줍니다 — 여기 「Closed Lost」가 글자로 박혀 있어서, 닫는 단계를
+   *  바꾼 날(2026-09-30) 배너 두 줄이 옛 이름을 말했습니다. */
+  closes_to: string;
   /** 칩 한 장의 **완성된 글자** — `Pending` · `Reminder Sent 1` · `Reminder Sent 2`.
    *
    *  **화면이 이 글자를 짓지 않습니다** (2026-09-22 운영자 지시: 「리마인더 센트 기본적으로
@@ -1229,13 +1233,15 @@ function FollowupBanner({ followup: f }: { followup: Followup }) {
   const at = (value?: string | null) => kst(value, "md-hm");
   const text =
     f.state === "revived" ? `답이 없어 ${at(f.at)} 에 자동으로 닫았는데 고객이 다시 연락해 협의 중으로 되살렸습니다.`
-    : f.state === "closed" ? `답이 없어 ${at(f.at)} 에 자동으로 Closed Lost 로 닫았습니다. 고객이 연락하면 협의 중으로 되살립니다.`
+    : f.state === "closed" ? `답이 없어 ${at(f.at)} 에 자동으로 ${f.closes_to} 로 닫았습니다. 고객이 연락하면 협의 중으로 되살립니다.`
+    // 자동 종결 뒤 사람이 Contacted 로 되돌렸다 — 시퀀스는 그 회차를 다시 닫지 않는다(서버의 `_closed_this_cycle`).
+    : f.state === "reopened" ? `${at(f.at)} 에 자동으로 ${f.closes_to} 로 닫았던 티켓을 다시 열었습니다 — 새 메일을 보내면 리마인더를 처음부터 다시 셉니다. 그 전에는 다시 닫지 않습니다.`
     : f.template_missing ? `이메일 템플릿에 키 「${f.template_missing}」 가 없어 리마인더를 보내지 못합니다 — 이메일 템플릿 → 새로 만들기에서 그 키로 만드세요.`
     : f.held_by_draft ? "작성 중인 후속 초안이 있어 리마인더를 보류합니다 — 그 초안을 보내거나 없애면 다시 셉니다."
     : f.state === "send_1" ? `답이 없으면 ${at(f.due)} 이후 리마인더를 보냅니다.`
     // 「완료」는 아래 칩이 말합니다 — 시각만 남깁니다(같은 사실을 한 줄에 두 번 적지 않습니다).
     : f.state === "send_2" ? `${at(f.reminder_1_at)} 발송 · 답이 없으면 ${at(f.due)} 이후 마감 메일을 보냅니다.`
-    : f.state === "close" ? `마감 메일 발송 ${at(f.reminder_2_at)} · 답이 없으면 ${at(f.due)} 이후 Closed Lost 로 닫습니다.`
+    : f.state === "close" ? `마감 메일 발송 ${at(f.reminder_2_at)} · 답이 없으면 ${at(f.due)} 이후 ${f.closes_to} 로 닫습니다.`
     : f.state === "sending" ? "후속 리마인더를 보내는 중입니다."
     : "후속 리마인더 발송이 멈췄습니다 — 아래 기록에서 다시 보내거나 단계를 옮기세요.";
   const tone = f.state === "revived" ? " banner--danger"

@@ -1,7 +1,7 @@
 """Contacted 후속 리마인더 — 3일 · 5일 · 7일 (2026-09-17 운영자 지시).
 
-규칙이 틀리면 방금 답한 고객에게 「답이 없으셔서 닫겠습니다」가 나가거나, 답한 적 없는 고객이
-기계에 의해 Lost 가 된다. 그래서 「보낸다」보다 **「안 보낸다」** 쪽을 더 많이 고정한다.
+규칙이 틀리면 방금 답한 고객에게 「답이 없으셔서 닫겠습니다」가 나가거나, 답한 적 없는 고객의
+문의가 기계에 의해 종결된다(닫는 단계는 2026-09-30 부터 Concluded). 그래서 「보낸다」보다 **「안 보낸다」** 쪽을 더 많이 고정한다.
 설계: docs/후속-회신-시퀀스-설계.md
 """
 
@@ -238,7 +238,12 @@ def test_a_failed_translation_sends_nothing(db, monkeypatch):
     assert len(_outgoing(db, conv)) == 1
 
 
-def test_three_five_seven_and_then_closed_lost(db):
+def test_three_five_seven_and_then_concluded(db):
+    """리마인더 둘 뒤 7일 — **Concluded** 로 닫는다(2026-09-30 운영자 지시: 「리마인더 메일 다 끝나면
+    concluded로 가야하는데」). 09-17 에는 Closed Lost 였다 — 답이 없어 끝난 문의는 진 건이 아니다."""
+    from src.agents.stage_sync import LOCAL_STAGE_TO_SETTING
+    from src.api.routes import customer_ops
+
     conv = _ticket(db, sent_days_ago=30)
     fs.run_followup_sequence_once()
     first = _outgoing(db, conv)[1]
@@ -258,9 +263,12 @@ def test_three_five_seven_and_then_closed_lost(db):
 
     _mark_sent(db, second.id, days_ago=7.1)
     fs.run_followup_sequence_once()
-    assert _stage(db, conv) == "closed_lost"
+    assert _stage(db, conv) == "closed"
     with db() as session:
         assert session.get(Conversation, conv).followup_closed_at is not None
+    # 허브스팟 · 워크북도 같은 단계로 간다 — 그 키의 허브스팟 단계가 Concluded(1404814097)다.
+    assert customer_ops._sync_stage.await_args.args[1] == "closed"
+    assert LOCAL_STAGE_TO_SETTING["closed"] == "HUBSPOT_TICKET_STAGE_CLOSED"
 
 
 def test_a_reply_after_the_automatic_close_brings_the_ticket_back_red(db):
@@ -268,7 +276,7 @@ def test_a_reply_after_the_automatic_close_brings_the_ticket_back_red(db):
     conv = _ticket(db, sent_days_ago=30)
     with db() as session:
         c = session.get(Conversation, conv)
-        c.stage, c.followup_closed_at = "closed_lost", _now() - timedelta(days=1)
+        c.stage, c.followup_closed_at = "closed", _now() - timedelta(days=1)
         session.add(CustomerInteraction(contact_id=c.contact_id, conversation_id=conv, channel="email",
                                         direction="inbound", summary="sorry, back now",
                                         external_id="hubspot:conv:77", happened_at=_now()))
@@ -282,11 +290,11 @@ def test_a_reply_after_the_automatic_close_brings_the_ticket_back_red(db):
 
 def test_a_reply_after_the_close_revives_even_when_the_operator_answered_in_the_same_round(db):
     """고객 답장(10:01)과 운영자의 허브스팟 화면 회신(10:05)이 한 회차에 같이 들어왔다 — 기준만 보면
-    운영자 회신이 새 기준이 되어 고객 답장이 안 보이고 Closed Lost 에 남는다. 닫은 뒤의 연락은 되살린다."""
+    운영자 회신이 새 기준이 되어 고객 답장이 안 보이고 종결에 남는다. 닫은 뒤의 연락은 되살린다."""
     conv = _ticket(db, sent_days_ago=30)
     with db() as session:
         c = session.get(Conversation, conv)
-        c.stage, c.followup_closed_at = "closed_lost", _now() - timedelta(days=1)
+        c.stage, c.followup_closed_at = "closed", _now() - timedelta(days=1)
         session.add(CustomerInteraction(contact_id=c.contact_id, conversation_id=conv, channel="이메일",
                                         direction="inbound", summary="sorry, back now",
                                         external_id="hubspot:conv:77", happened_at=_now() - timedelta(minutes=9)))
@@ -298,16 +306,179 @@ def test_a_reply_after_the_close_revives_even_when_the_operator_answered_in_the_
     assert _stage(db, conv) == "negotiation"
 
 
-def test_a_ticket_a_person_closed_is_not_revived(db):
-    conv = _ticket(db, sent_days_ago=30, stage="closed_lost")
+@pytest.mark.parametrize("stage, auto_closed", [
+    ("closed_lost", False),  # 사람이 Closed Lost 로
+    ("closed", False),       # 사람이 Concluded 로 — 시퀀스가 닫은 것과 단계는 같다, 표시(`followup_closed_at`)가 가른다
+    ("closed_lost", True),   # 시퀀스가 종결한 뒤 사람이 Closed Lost 로 옮겼다 — 사람의 결정이다
+])
+def test_a_ticket_a_person_closed_is_not_revived(db, stage, auto_closed):
+    conv = _ticket(db, sent_days_ago=30, stage=stage)
     with db() as session:
         c = session.get(Conversation, conv)
+        if auto_closed:
+            c.followup_closed_at = _now() - timedelta(days=1)
         session.add(CustomerInteraction(contact_id=c.contact_id, conversation_id=conv, channel="email",
                                         direction="inbound", summary="hi", external_id="hubspot:conv:78",
                                         happened_at=_now()))
         session.commit()
     fs.run_followup_sequence_once()
-    assert _stage(db, conv) == "closed_lost"
+    assert _stage(db, conv) == stage
+
+
+# ---- 시퀀스는 한 번만 한다 — 닫기는 한 회차에 한 번, 되살리기는 닫은 한 번에 한 번 (2026-09-30) ----------
+
+def _auto_concluded(db) -> int:
+    """3·5·7 을 끝까지 돌린 티켓 — 시퀀스가 Concluded 로 닫았다."""
+    conv = _ticket(db, sent_days_ago=30)
+    fs.run_followup_sequence_once()
+    _mark_sent(db, _outgoing(db, conv)[1].id, days_ago=13)
+    fs.run_followup_sequence_once()
+    _mark_sent(db, _outgoing(db, conv)[2].id, days_ago=7.1)
+    fs.run_followup_sequence_once()
+    assert _stage(db, conv) == "closed"
+    return conv
+
+
+def _customer_writes(db, conv, external_id="hubspot:conv:back-1"):
+    with db() as session:
+        c = session.get(Conversation, conv)
+        session.add(CustomerInteraction(contact_id=c.contact_id, conversation_id=conv, channel="이메일",
+                                        direction="inbound", summary="sorry, back now",
+                                        external_id=external_id, happened_at=_now()))
+        session.commit()
+
+
+def test_a_revived_ticket_a_person_concludes_again_stays_concluded(db):
+    """닫고 → 고객이 답해 되살아나고 → 사람이 다시 Concluded 로 옮겼다. 그 뒤 스윕이 **옛 답장**으로 또 협의
+    중으로 돌리면, 사람이 옮길 때마다 허브스팟·워크북까지 되돌린다 — 새 연락이 없어도(2026-09-30 검증이 네
+    방향에서 따로 재현). 닫는 단계가 Concluded 가 되면서 그 구멍이 사람이 문의를 끝낼 때 쓰는 단계로 왔다."""
+    from src.api.routes import customer_ops
+    from src.api.routes.customer_ops import _set_conversation_stage
+
+    conv = _auto_concluded(db)
+    _customer_writes(db, conv)
+    fs.run_followup_sequence_once()
+    assert _stage(db, conv) == "negotiation"
+    with db() as session:
+        assert fs.view(session.get(Conversation, conv), _outgoing(db, conv))["state"] == "revived"
+
+    _set_conversation_stage(conv, "closed")  # 보드에서 Concluded 로 — 사람의 결정
+    customer_ops._sync_stage.reset_mock()
+    fs.run_followup_sequence_once()
+    fs.run_followup_sequence_once()
+    assert _stage(db, conv) == "closed"
+    assert customer_ops._sync_stage.await_count == 0, "허브스팟·워크북을 다시 되돌렸습니다"
+    with db() as session:
+        # 시퀀스는 이 티켓에서 손을 뗐다 — 「자동으로 닫았습니다」 배너도 안 선다.
+        assert fs.view(session.get(Conversation, conv), _outgoing(db, conv)) is None
+
+
+def test_a_reopened_ticket_is_not_closed_again_until_a_new_mail(db):
+    """자동 종결 뒤 사람이 Contacted 로 되돌렸다(다시 열었다). 기준도 리마인더도 그대로라 닫을 때가 지났다고
+    읽히지만, 다음 스윕이 10분 안에 다시 닫으면 사람의 결정을 기계가 되돌린다. 새 메일이 나가면 처음부터."""
+    from src.api.routes import customer_ops
+    from src.api.routes.customer_ops import _set_conversation_stage
+
+    conv = _auto_concluded(db)
+    _set_conversation_stage(conv, "meeting_link_sent")
+    customer_ops._sync_stage.reset_mock()
+    fs.run_followup_sequence_once()
+    assert _stage(db, conv) == "meeting_link_sent"
+    assert customer_ops._sync_stage.await_count == 0
+    with db() as session:
+        view = fs.view(session.get(Conversation, conv), _outgoing(db, conv))
+    assert view["state"] == "reopened" and view["reminder"] == "Reminder Sent 2"
+
+    with db() as session:  # 운영자가 다시 메일을 보냈다 — 그 메일이 새 기준이다
+        session.add(Message(conversation_id=conv, direction="outgoing", status="sent", body="one more idea",
+                            to_address="buyer@example.com", subject="RE: Custom quote", language="en",
+                            target_language="en", sent_at=_now()))
+        session.commit()
+    with db() as session:
+        view = fs.view(session.get(Conversation, conv), _outgoing(db, conv))
+    assert view["state"] == "send_1" and view["reminder"] == "Pending"
+
+
+def test_moving_an_auto_closed_ticket_to_negotiating_by_hand_is_not_a_revival(db):
+    """빨간 표시는 「닫았는데 고객이 돌아왔다」다. 사람이 손으로 협의 중에 옮긴 것까지 빨갛게 서면 그 표시가
+    아무것도 말하지 않는다."""
+    from src.api.routes.customer_ops import _set_conversation_stage
+
+    conv = _auto_concluded(db)
+    _set_conversation_stage(conv, "negotiation")
+    with db() as session:
+        c = session.get(Conversation, conv)
+        assert not fs.revived_by_sequence(c)
+        assert fs.view(c, _outgoing(db, conv)) is None
+
+
+def test_a_closed_card_keeps_its_count_after_the_operator_writes_again(db):
+    """닫힌 티켓에 운영자가 메일을 한 통 보내면 그 메일이 새 기준이 되어, 지금 기준으로 세는 칩이 닫힌 카드에
+    「Pending」을 그렸다. 닫힌 · 되살아난 티켓의 칩은 언제나 「두 번 재촉했다」다."""
+    conv = _auto_concluded(db)
+    with db() as session:
+        session.add(Message(conversation_id=conv, direction="outgoing", status="sent", body="one more idea",
+                            to_address="buyer@example.com", subject="RE: Custom quote", language="en",
+                            target_language="en", sent_at=_now()))
+        session.commit()
+    with db() as session:
+        view = fs.view(session.get(Conversation, conv), _outgoing(db, conv))
+    assert view["state"] == "closed" and view["reminder"] == "Reminder Sent 2"
+
+
+def test_a_ticket_a_person_moved_before_the_sweep_saw_the_reply_is_not_revived_later(db):
+    """자동 종결 → 고객이 답했는데 스윕보다 사람이 먼저 협의 중으로 옮겼다(서비스가 자는 동안이 그렇다) → 나중에
+    사람이 끝냈다. 되살렸다는 표시가 안 적혔으니 스윕이 그 옛 답장으로 또 되살렸다. 닫은 뒤 단계가 한 번이라도
+    움직였으면 시퀀스는 손을 뗀다(`followup_released_at`)."""
+    from src.api.routes import customer_ops
+    from src.api.routes.customer_ops import _set_conversation_stage
+
+    conv = _auto_concluded(db)
+    _customer_writes(db, conv)
+    _set_conversation_stage(conv, "negotiation")  # 스윕보다 먼저, 보드에서
+    _set_conversation_stage(conv, "closed")       # 이야기가 끝나 Concluded 로
+    customer_ops._sync_stage.reset_mock()
+    fs.run_followup_sequence_once()
+    assert _stage(db, conv) == "closed"
+    assert customer_ops._sync_stage.await_count == 0, "허브스팟·워크북을 다시 되돌렸습니다"
+
+
+def test_any_stage_write_after_the_automatic_close_counts_but_an_echo_does_not(db):
+    """단계를 쓰는 곳은 여럿이다(보드 · 허브스팟 동기화 · 워크북 · 백필 · 발송 워커). 보드 함수에만 달면 허브스팟
+    에서 옮긴 티켓이 빠진다 — 그래서 대입 자체에서 잡는다. 우리가 옮긴 것의 메아리(같은 값)는 움직임이 아니다."""
+    conv = _auto_concluded(db)
+    with db() as session:  # 허브스팟이 우리 이동을 되돌려 알린다 — 같은 값
+        session.get(Conversation, conv).stage = "closed"
+        session.commit()
+    with db() as session:
+        assert fs.closed_by_sequence(session.get(Conversation, conv))
+
+    with db() as session:  # 허브스팟 동기화처럼 행에 바로 쓴다 — 사람이 거기서 옮겼다
+        session.get(Conversation, conv).stage = "negotiation"
+        session.commit()
+    with db() as session:
+        c = session.get(Conversation, conv)
+        assert c.followup_released_at is not None and not fs.revived_by_sequence(c)
+        c.stage = "closed"
+        session.commit()
+    _customer_writes(db, conv)
+    fs.run_followup_sequence_once()
+    assert _stage(db, conv) == "closed"
+
+
+def test_a_second_automatic_close_counts_afresh(db):
+    """다시 열었다가 새 회차가 끝까지 가서 또 닫혔다 — 그 닫기는 새로 센다. 다시 연 기록이 남아 있으면 이번
+    닫기 뒤의 답장이 안 되살린다."""
+    from src.api.routes.customer_ops import _set_conversation_stage
+
+    conv = _auto_concluded(db)
+    _set_conversation_stage(conv, "meeting_link_sent")
+    fs._close(conv)
+    with db() as session:
+        assert fs.closed_by_sequence(session.get(Conversation, conv))
+    _customer_writes(db, conv)
+    fs.run_followup_sequence_once()
+    assert _stage(db, conv) == "negotiation"
 
 
 # ---- 상태는 행에서 읽는다 ------------------------------------------------------
@@ -527,11 +698,13 @@ def test_a_closed_ticket_still_says_it_was_chased_twice(db):
     fs.run_followup_sequence_once()
     _mark_sent(db, _outgoing(db, conv)[2].id, days_ago=7.1)
     fs.run_followup_sequence_once()
-    assert _stage(db, conv) == "closed_lost"
+    assert _stage(db, conv) == "closed"
     with db() as session:
         view = fs.view(session.get(Conversation, conv), _outgoing(db, conv))
     assert view["state"] == "closed"
     assert view["reminder"] == "Reminder Sent 2"
+    # 배너가 적는 이름은 파이프라인 이름표 한 곳에서 — 글자로 박지 않는다.
+    assert view["closes_to"] == "Concluded"
 
 
 # ---- 콘솔 밖에서 나간 회신도 시계를 돌린다 (2026-09-28 운영자 보고: 「contacted 에 온지 4일이
@@ -921,7 +1094,7 @@ def test_our_own_inbox_never_lands_in_the_reminder_copy(db, monkeypatch, hubspot
 
 def test_a_mail_the_last_check_brings_in_stops_the_automatic_close(db, monkeypatch):
     """닫을 차례에 보내기 직전 확인이 운영자가 방금 허브스팟 화면에서 보낸 메일을 가져왔다 — 우리가 방금
-    메일을 보낸 티켓을 Closed Lost 로 닫으면 안 된다."""
+    메일을 보낸 티켓을 종결로 닫으면 안 된다."""
     from src.agents import ticket_history
 
     conv = _ticket(db, sent_days_ago=30)

@@ -693,10 +693,10 @@ PERSO Inbound is a FastAPI workflow for inbound inquiry handling and customer op
   옮긴 단계가 다음 전체 동기화 때 시트의 옛 값으로 되돌아갔다. 티켓이 없는 행(워크북에서만
   사는 문의)은 여전히 시트가 원본이다. 새 행을 붙일 때도 단계를 `New` 로 박지 않는다 —
   몇 주째 협상 중인 문의가 New 로 들어가고 그 값이 되돌아왔다. 시트 표기는
-  `google_sheets._STAGE_VALUES` **한 곳**이고, 거기 말이 없는 단계(`reminder_sent` ·
-  `no_response` · `closed`)는 갱신을 건너뛰며 경고를 남긴다 — 그 열은 영업팀이 필터로 쓰는
-  값 목록이라 없는 말을 지어 넣으면 그 행이 어느 필터에도 안 걸린다. **넣을 말은 영업팀이
-  정할 일이다.**
+  `google_sheets._STAGE_VALUES` **한 곳**이고, 거기 말이 없는 단계는 갱신을 건너뛰며 경고를
+  남긴다 — 그 열은 영업팀이 필터로 쓰는 값 목록이라 없는 말을 지어 넣으면 그 행이 어느 필터에도
+  안 걸린다. **넣을 말은 영업팀이 정할 일이다.** `closed`(Concluded)는 2026-08-19 부터 「Concluded」
+  (세부 「Closed Lost」)를 적는다 — 후속 리마인더가 닫는 티켓도 그 값으로 간다.
 - **폴러는 한 회차에 여러 일을 하고, 단계 맞추기는 두 번째다.** 예전에는 `try` 하나가 일곱
   단계를 감싸서 앞 단계가 터지면 뒤 단계가 그 회차를 통째로 굶었다. 지금은 단계마다 따로
   잡는다. 그리고 페이지가 꽉 차면 워터마크를 `now` 로 밀지 않는다 — 정렬이 오름차순이라
@@ -871,9 +871,31 @@ PERSO Inbound is a FastAPI workflow for inbound inquiry handling and customer op
 - **Contacted 후속 리마인더 — 답이 없으면 3일 · 5일 · 7일** (2026-09-17 운영자 지시, `agents/followup_sequence`,
   설계 `docs/후속-회신-시퀀스-설계.md`). 허브스팟 워크플로 `4623059693` 이 하던 일이다 — **그 워크플로를
   끄고 켠다**(안 끄면 같은 고객이 리마인더를 두 통 받는다).
-  우리 회신 +3일 → 템플릿 `followup_reminder`, +5일 → `followup_closing`, +7일 → Closed Lost. 그 사이
+  우리 회신 +3일 → 템플릿 `followup_reminder`, +5일 → `followup_closing`, +7일 → **Concluded**(종결). 그 사이
   고객이 연락하면 Negotiating. **닫은 뒤에 연락이 와도** Negotiating 으로 되살리고 보드·티켓에 빨갛게
   선다(`conversations.followup_closed_at`, 이관 0121 — 사람이 닫은 건과 가르는 유일한 표시).
+  - **닫는 단계는 Concluded 다 — Closed Lost 가 아니다** (2026-09-30 운영자: 「리마인더 메일 다 끝나면
+    concluded로 가야하는데」). 09-17 지시가 「closed lost」였고 그대로 만들었었다. 답이 없어 끝난 문의는
+    진 건이 아니라 끝난 문의다(Concluded 는 옛 No Response 를 이관 0076 이 접어 넣은 단계). 키는
+    `followup_sequence.CLOSE_STAGE` 한 곳이고, 되살리기는 `followup_closed_at` + **그 단계**인 티켓만 본다 —
+    자동 종결 뒤 사람이 Closed Lost 로 옮긴 것은 사람의 결정이다. 배너가 적는 단계 이름은 `view()['closes_to']`
+    (`PIPELINE_STAGES` 에서) — 「Closed Lost」가 배너에 글자로 박혀 있었다.
+  - **시퀀스는 한 번만 한다 — 닫기는 한 회차에 한 번, 되살리기는 닫은 한 번에 한 번** (2026-09-30 검증).
+    닫고 → 고객이 답해 되살아나고 → 사람이 다시 Concluded 로 옮기면, 스윕이 **옛 답장**으로 또 협의 중으로
+    돌렸다 — 새 연락 없이, 사람이 옮길 때마다, 허브스팟·워크북까지(검증 워크플로가 네 방향에서 따로 재현.
+    Closed Lost 시절에도 있던 구멍인데 닫는 단계가 사람이 문의를 끝낼 때 쓰는 단계가 되면서 밟기 쉬워졌다).
+    「닫은 뒤 단계가 움직였다」를 적는 칸이 없었던 것이 원인이라 `conversations.followup_released_at`(이관 0129)을
+    두고, 되살리기는 그 칸이 닫은 때보다 이르거나 비어 있을 때만 돈다(`closed_by_sequence`). **그 칸을 적는 곳은
+    `models._stage_moved_after_followup_close` 하나다** — `Conversation.stage` 의 ORM 대입 이벤트라, 되살리기 ·
+    보드 · 허브스팟 동기화 · 워크북 · 백필 · 발송 워커 어느 길로 옮겨도 적힌다(스윕보다 먼저 사람이 협의 중에
+    옮겼다가 나중에 끝낸 티켓도 그래서 안 되살아난다). 같은 값의 대입(우리 이동의 허브스팟 메아리)은 안 센다.
+    **단계를 bulk `update()` 로 쓰는 길을 만들면 이 이벤트를 안 지난다** — 지금은 그런 길이 없다. 두 번째 회차의
+    닫기는 `_close` 가 그 칸을 비워 새로 센다. 빨간 표시는 따로 `followup_revived_at` 으로 가른다
+    (`revived_by_sequence`) — 사람이 손으로 협의 중에 옮긴 자동 종결 티켓은 되살아난 것이 아니다.
+    자동 종결 뒤 사람이 Contacted 로 되돌려 놓으면(다시 열었다) 같은 회차는 **다시 안 닫는다**
+    (`_closed_this_cycle`, 배너 「다시 열었습니다」) — 전에는 10분 안에 다시 닫았다. 새 메일을 보내면 기준이
+    바뀌어 처음부터 센다. 닫힌·되살아난 티켓의 칩은 언제나 「Reminder Sent 2」다(닫힌 티켓에 메일을 보내면
+    그 메일이 새 기준이 되어 닫힌 카드에 「Pending」이 섰다).
   - **새 표도 새 발송 경로도 없다.** 리마인더는 `messages` 행(`prompt_variant` =
     `followup_reminder_1/2`)이고 `approved` 로 세우면 발송 워커가 보낸다 — 관문·스레드·발신 주소·CC·서명·
     실패 사유가 사람이 누른 발송과 같다. 몇 번째를 보냈는지는 그 행들에서 읽는다(`sequence_state`).

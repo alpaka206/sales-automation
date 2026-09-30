@@ -257,7 +257,8 @@ export function Board({ stages, manualLogStages, dealDetails = {} }: {
                 {cards.map((card) => {
                   // 모서리 태그는 **한 장**이다 — 카드 본문 폭(약 200px)에 두 장과 「+」가 한 줄로 안 들어간다.
                   // 그 열에서 고를 것(Won Type · Lost Reason)이 있으면 그 태그가 서고, 없으면 후속 리마인더
-                  // 단계가 같은 자리에 선다. 시퀀스가 닫은 Lost 카드의 「Reminder Sent 2」는 티켓 배너에 있다.
+                  // 단계가 같은 자리에 선다. 시퀀스가 닫은 카드는 Concluded 열에 서므로(2026-09-30 부터 — 그 전
+                  // 설계는 Closed Lost 였다) 「Reminder Sent 2」가 그 카드의 태그다.
                   const reminder = !details && card.reminder ? card.reminder : null;
                   return (
                   <article
