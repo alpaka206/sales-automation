@@ -1,126 +1,281 @@
-# perso-agent — 로컬 데이터 에이전트
+# perso-export — 사용 데이터 가공기
 
-스냅샷 CSV(`perso-data-snapshot` clone)를 **그 PC 에서** DuckDB 로 읽어 집계만 내보내는 단일
-바이너리. 콘솔의 「데이터 분석」·「수주 고객」 화면이 `127.0.0.1` 로 직접 부른다. 원본도
-집계도 콘솔 서버로 가지 않는다.
+스냅샷 CSV(비공개 저장소 `perso-data-snapshot`)를 DuckDB 로 읽어 **집계만** JSON 파일로 내는 Go 프로그램.
+매일 09:15(KST) 회사 계정의 **비공개 가공 레포**에서 GitHub Actions 가 운영자가 고른 커밋(`EXPORTER_COMMIT`)의
+이것을 네트워크 · 권한 없이 돌려 그 레포의 `data` 브랜치에 올리고, 콘솔 브라우저가 그 파일을 GitHub 에서 직접
+받아 그린다. 콘솔 서버는 그 데이터를 받지도 저장하지도 중계하지도 않는다 — 건네는 것은 레포 이름과 읽기
+토큰뿐이다.
 
-- 설계·조사: `docs/데이터-에이전트-설계.md`, `docs/로컬-웹-연결-조사요청.md` (로컬 문서)
-- 데이터 실측: `docs/수주고객-사용현황-데이터검증-2026-09-15.md` (로컬 문서)
+2026-10-01 까지 이 폴더는 PC 마다 까는 로컬 에이전트(`127.0.0.1:43110` HTTP 서버 · 스냅샷 pull · 자동
+업데이트)였다. 설치·업데이트·스냅샷 받기가 PC 마다 따로 깨졌고 PC 마다 자기 clone 으로 계산해서 걷어냈다 — 왜와
+나머지 규칙은 `CLAUDE.md` 「사용 데이터(스냅샷)는 서버로 안 간다」. 폴더 이름 `agent/` 와 모듈 이름 `perso-agent`
+는 그대로다: 워크플로 견본이 `sparse-checkout: agent` 로 이 폴더를 받고 CI 와 테스트가 이 경로를 본다. 이름을
+바꾸면 가공 레포의 `export.yml` 도 같이 고쳐야 한다.
 
-## 빌드
+**가공 레포의 이름과 그 계정은 이 저장소 어디에도 적지 않는다** — 이 저장소는 공개다. 아래에서는
+`<owner>/<가공 레포>` 로 적는다.
 
-CGO 없음 — 한 대에서 세 타깃이 나온다. DuckDB CLI 는 zip 째로 `embed` 되어 첫 실행에 풀린다.
+## 하는 일 · 안 하는 일
 
-```sh
-# DuckDB CLI zip 두 개를 bin/ 에 (버전은 snapshot.go 의 duckdbVersion 과 같아야 한다)
-V=1.4.1
-curl -L -o bin/duckdb-windows-amd64.zip   https://github.com/duckdb/duckdb/releases/download/v$V/duckdb_cli-windows-amd64.zip
-curl -L -o bin/duckdb-darwin-universal.zip https://github.com/duckdb/duckdb/releases/download/v$V/duckdb_cli-osx-universal.zip
+하는 일:
 
-go test ./...
-GOOS=windows GOARCH=amd64 go build -ldflags="-s -w" -o dist/perso-agent.exe .
-GOOS=darwin  GOARCH=arm64 go build -ldflags="-s -w" -o dist/perso-agent-mac-arm64 .
-GOOS=darwin  GOARCH=amd64 go build -ldflags="-s -w" -o dist/perso-agent-mac-intel .
+- `--snapshot` 폴더의 `data/*.csv` 를 DuckDB CLI 로 읽어(별개 프로세스 — CGO 없음) 정해 둔 SQL 만 돌린다.
+- 결과를 파일마다 **쓰기 전에** 계약 검사에 건다(`checkContract`): 식별자성 이름(`seq` · `id` · `uuid` · `email`
+  · `token` · `key` · `url` · `path` · `name_raw` 로 끝나는 키)은 `space_seq` 하나만, 글자 한 칸 120자, 배열 하나
+  200,000줄. 「데이터 분석」의 전역 지표(`metrics.json`)는 거기에 더해 표 하나 2,000행 · 관측치 5 미만 그룹 제외 ·
+  선언한 컬럼과 실제 컬럼이 같아야 한다.
+- `<out>.tmp` 에 다 쓴 뒤 `<out>` 으로 한 번에 옮긴다. 중간에 실패하면 **아무것도 안 남는다** — 워크플로가
+  반쪽짜리를 `data` 에 올리는 일이 없다.
+
+안 하는 일:
+
+- **네트워크.** HTTP 클라이언트도 서버도 없고, git 으로 바깥에 닿지 않는다(`git` 은 스냅샷의 커밋 번호와 시각을
+  읽는 데만 쓴다). 스냅샷은 워크플로의 「스냅샷 받기」가 받아 주고, 결과는 워크플로의 마지막 단계가 민다. 워크플로는
+  그 위에 가공기를 커널로 가둔다(네트워크 · 로컬 데몬 소켓 · 권한 없이 — 아래 「방어」).
+  `tests/test_usage_data_stays_off_server.py` 가 둘 다 고정한다.
+- **계약을 모른다.** SQL 도 스페이스 목록도 바깥에서 안 받는다. 가공 범위 전부를 스페이스 하나씩 내고, 계약의
+  스페이스로 합치는 일은 브라우저가 한다(`frontend/src/screens/won/usageMerge.ts`).
+- **행을 안 낸다.** 사람 · 프로젝트 · 지급 묶음은 그 가공 안에서만 통하는 차례 번호(`u` · `p` · `b`)로만 나간다.
+  `u` 는 가공마다 새 소금으로 섞어 다른 날 파일과 이어 붙일 수 없다.
+- **로그에 데이터를 안 남긴다.** 개수 · 크기 · 시간뿐이다 — Actions 로그는 가공 레포를 볼 수 있는 사람 누구나
+  본다. DuckDB 오류는 첫 줄만, 따옴표 안을 지우고 200자까지 남긴다: CSV 파싱 오류는 문제가 된 값을 그대로 싣는다.
+
+## 쓰는 법
+
+```
+perso-export --snapshot <스냅샷 폴더> --out <새 폴더> [--duckdb <DuckDB CLI>]
+perso-export --version
 ```
 
-`.github/workflows/agent-release.yml` 이 `agent-v*` 태그에서 같은 일을 하고 Release 자산으로
-올린다. 콘솔의 내려받기 버튼은 `releases/latest/download/…` 를 가리킨다.
+| 플래그 | 뜻 |
+|---|---|
+| `--snapshot` | `data/manifest.json` 이 있는 폴더. git clone 이면 `manifest.json` 의 `snapshot_commit` 에 그 커밋이, zip 을 푼 폴더면 `(git 아님)` 이 들어간다. 경로에 작은따옴표가 있으면 거절한다(SQL 문자열에 그대로 들어간다) |
+| `--out` | **아직 없는** 폴더. 그 이름이나 `<out>.tmp` 가 이미 있으면 지우지 않고 거절한다 — 경로를 잘못 준 한 번이 남의 폴더를 지우면 안 된다 |
+| `--duckdb` | DuckDB CLI. 리눅스는 이것이나 `PATH` 의 `duckdb` 가 있어야 한다. 윈도우·맥 빌드는 비우면 함께 실린 것을 첫 실행에 사용자 캐시 폴더(`perso-agent/duckdb-<버전>`)에 풀어 쓴다 |
+| `--version` | `perso-export <버전>` — 빌드가 `-ldflags "-X main.version=…"` 로 박은 값(워크플로는 이 저장소의 짧은 커밋, 손 빌드는 `dev`). `manifest.json` 의 `exporter` 가 이 값이라 그날 데이터를 어느 코드가 만들었는지 남는다 |
 
-## 실행
+성공하면 0, 쓰는 법이 틀리면 2, 가공이 실패하면 1(「가공 실패 — 아무것도 쓰지 않았습니다: …」).
 
-스냅샷 폴더 **옆**에 두고 실행한다 — `perso-data-snapshot`(git clone) · `perso-data-snapshot-main`(GitHub zip,
-두 겹이어도 된다) 중 `data/manifest.json` 이 있는 첫 폴더를 찾는다. 다른 곳이면 `--repo`.
+## 손으로 빌드·실행 (시험할 때)
 
-**Mac 은 `perso-agent-mac.zip` 안의 `Perso Agent.app` 이다** (2026-09-17). 맨 실행 파일은 두 번 막혔다 —
-브라우저로 받으면 실행 권한이 빠져 텍스트 편집기로 열리고(「유니코드(UTF-8) 텍스트 인코딩이 적용되지
-않습니다」), 권한을 붙여도 공증과 무관하게 Finder 더블클릭이 거절된다(`spctl -t exec`: `the code is valid
-but does not seem to be an app`). 그래서 universal 실행 파일을 번들로 싸서 서명·공증·티켓 부착을 하고,
-릴리스 워크플로가 **받은 것처럼 격리 속성을 단 zip 에서 `spctl -t exec` 이 통과해야** 릴리스한다.
+Go 1.27(`go.mod`). DuckDB 버전은 `snapshot.go` 의 `duckdbVersion`(지금 1.4.1)이다.
 
-앱으로 뜨면 창이 없다. 스냅샷은 앱 옆 → 홈·다운로드·데스크톱·문서 폴더 순으로 찾고(맥이 받은 앱을 임시
-경로로 옮겨 실행해도 찾게), 못 찾으면 대화 상자로 알린다(`agent/app.go`). 다시 누르면 다음 포트에 하나 더 뜬다 — 떠 있는지 묻는
-요청을 보내지 않기 위해서다(`tests/test_agent_stays_local.py`).
-끄려면 활성 상태 보기에서 `perso-agent` 를 종료한다.
+윈도우·맥 빌드는 `bin/` 의 DuckDB zip 을 실행 파일에 싣는다(`duckdb_windows.go` · `duckdb_darwin.go` 의
+`go:embed`). 그 파일이 없으면 `go test` 도 컴파일되지 않는다. zip 은 저장소에 안 넣는다(`bin/.gitignore`).
 
-```
-perso-agent.exe                      # 실행 → pull → 43110 에 뜸 → 브라우저에 콘솔이 열림 (켜 둔 동안 한 시간마다 다시 pull)
-perso-agent.exe --console http://127.0.0.1:8010   # 로컬 콘솔로 시험할 때 (허용 출처 앞에 붙는다)
-perso-agent.exe --unregister         # persodata:// 등록 해제 (Windows)
-perso-agent.exe --no-update          # 켤 때 새 버전 확인을 건너뛴다
-```
-
-Windows 에서는 처음 실행에 `persodata://` 를 HKCU 에 등록한다(관리자 권한 불필요). 맥은 맨
-바이너리로는 URL 스킴 등록이 안 되므로(.app 번들·서명 필요) 파일을 직접 실행한다.
-
-## 스냅샷 받기 (2026-09-29 에 고침)
-
-켤 때 한 번, 켜 둔 동안 한 시간마다 받는다. `git pull --ff-only` 를 **안 쓴다** — 그것이 clone 한 사람에게도
-「안 된다」의 원인이었다(`snapshot.go` 의 `pull`):
-
-- **받기(fetch)와 맞추기(reset)를 나눴다.** 예전에는 pull 전체가 2분 상한이라, 며칠 밀려 받을 것이 많은 PC 는
-  2분에 끊기고 → git 은 받던 것을 버리고 → 다음 회차에 처음부터 → 또 끊겼다. 이제 받기는 30분까지 **뒤에서**
-  돌고(켤 때는 20초만 기다리고 받아 둔 데이터로 먼저 연다), 그동안 계산은 옛 데이터로 답한다. 새 데이터로
-  바꿔 끼우는 순간만 계산과 겹치지 않게 잠근다. 화면의 `pull:` 이 「진행 중」이면 끝날 때 저절로 다시 읽는다.
-- **`--depth=1`**: 필요한 것은 최신 한 벌뿐이다. 일주일 밀린 복제본 실측 17.8MB → 2.5MB.
-- **발행된 것과 똑같이 맞춘다**(`reset --hard`). 엑셀로 CSV 를 열어 저장했거나 끊긴 pull 이 반쯤 바꿔 둔
-  파일이 있으면 `--ff-only` 는 영영 멈췄다. 추적하지 않는 파일(사람이 옆에 둔 것)은 안 건드린다.
-- **끊긴 작업이 남긴 잠금**(`.git/index.lock` 등)은 10분 넘었으면 지운다. 남아 있으면 그 뒤 모든 pull 이
-  실패했다(재현됨).
-- **zip 으로 받은 폴더도 받는다.** 폴더 이름이 `perso-data-snapshot…` 이고 `.git` 이 없으면 그 자리에서
-  git 으로 바꾼다(`git init` + 원격 + 받기). 처음 한 번 GitHub 로그인이 필요하다 — 윈도우는 Git 이 띄우는
-  로그인 창, 맥은 아래. 이름이 다른 폴더(시험용)는 안 바꾼다.
-- **실패 사유는 할 일로 적는다**(`pullFailure`): 로그인 필요 · 네트워크 · git 없음 · 파일이 열려 있음 · 다른
-  git 작업 중. 숨은 터미널 프롬프트에서 멈추지 않게 `GIT_TERMINAL_PROMPT=0` 으로 돌린다(윈도우 로그인 창은
-  그 값과 무관하게 뜬다 — Git Credential Manager 코드로 확인). 윈도우의 260자 경로 한도는
-  `core.longpaths=true` 로 넘는다(깊은 폴더에서 실측).
-- **맥의 GitHub 로그인**: 맥의 기본 git 은 로그인 창이 없다. 터미널에서 한 번 —
-  `cd <스냅샷 폴더> && git pull` 을 하고 비밀번호 자리에 GitHub 토큰을 넣으면 키체인에 남는다. 또는
-  `brew install --cask git-credential-manager` 뒤 `git pull` 하면 브라우저로 로그인한다.
-
-시험: `pull_test.go` 가 이 PC 의 폴더를 원격으로(`file://`) 며칠 밀린 복제본 · 엑셀로 고친 파일 · 오래된/살아 있는
-잠금 · zip 폴더 전환 · 시험 폴더를 잰다. GitHub 에는 안 닿는다.
-
-## 버전과 업데이트
-
-`perso-agent --version` 이 찍는 값은 빌드가 박은 것이다(`-X main.version=…`). 릴리스 워크플로가
-태그 `agent-vX.Y.Z` 에서 떼어 넣고, 손으로 빌드하면 `dev` 다. 콘솔은 `/v1/status` 의 `version` 을
-`frontend/src/lib/agent.ts` 의 `AGENT_MIN_VERSION` 과 비교한다 — **에이전트 SQL 이 내는 키가 바뀌면
-그 상수를 같이 올린다.** 낡은 에이전트를 만난 화면은 「업데이트 필요」와 내려받기를 띄우고, 내려받은
-파일을 옛 파일 자리에 덮어쓰면 끝이다(설정 파일도 설치도 없다). `dev` 는 언제나 최신으로 본다.
-
-**1.5.0 부터는 스스로 올라간다** (2026-09-29, `update.go`). 켤 때 한 번 `releases/latest` 가 넘겨 주는 태그를
-보고(API 를 안 쓴다 — 사무실 IP 하나가 시간당 60회를 나눠 쓴다), 새 버전이면 자기 자산을 받아
-`SHA256SUMS.txt` 와 대조하고, 받은 실행 파일에 `--version` 을 물어 태그와 같은지 보고, 맥 앱은
-`codesign --verify --deep --strict` 와 **개발자 팀이 지금 앱과 같은지**까지 본 뒤 제 자리에 바꿔 넣는다 —
-지금 것을 `.old` 로 비키고(윈도우도 실행 중인 파일의 이름은 바뀐다) 새것을 그 이름에 두고, 같은 인자에
-`--just-updated` 를 붙여 다시 띄운다. `.old` 는 새 프로세스가 지운다. 켜 둔 동안은 안 본다(다시 뜨면 토큰이
-바뀌어 콘솔이 짝을 잃는다 — 사람이 켤 때 일어나야 하는 일이다).
-
-- **어느 단계든 실패하면 지금 버전 그대로 뜬다.** 사유는 `/v1/status` 의 `update` 한 줄에 남는다
-  (오프라인·사내망 · 체크섬 불일치 · 버전 불일치 · 서명 불일치 · 폴더에 쓸 수 없음).
-- 맥이 다운로드 폴더의 앱을 임시 위치로 옮겨 실행한 경우(App Translocation)는 못 바꾼다 — 「응용 프로그램」
-  폴더로 옮기면 그다음부터 올라간다.
-- 끄려면 `--no-update`. `--just-updated` 로 뜬 프로세스는 다시 보지 않는다 — 버전을 안 올린 빌드가
-  릴리스돼도 끝없이 다시 뜨지 않는다. 낮은 버전으로는 안 내려간다.
-- **바깥으로 요청을 보내는 곳은 이 파일 하나다.** GET 만, 본문 없이, 이 저장소의 릴리스 주소와 거기서
-  넘겨 주는 `*.githubusercontent.com` 만. 스냅샷·토큰에 닿는 이름이 그 파일에 없다
-  (`tests/test_agent_stays_local.py::test_the_updater_only_downloads_our_releases`).
-- 1.4.x 이하는 이 코드가 없으므로 **1.5.0 은 한 번 손으로 받아야 한다.**
-- 시험: `go build -ldflags "-X main.version=1.0.0 -X main.updateFrom=http://127.0.0.1:<port>/releases"` 로
-  옛것과 새것을 빌드해 가짜 릴리스 서버로 돌린다(`/releases/latest` → 302 `…/tag/agent-v1.0.1`,
-  `/releases/download/agent-v1.0.1/{SHA256SUMS.txt, perso-agent.exe}`). 윈도우에서 올림 · 이미 최신 ·
-  체크섬 목록 없음 · 체크섬 불일치 · 서버 불통 다섯 경우를 그렇게 쟀다(2026-09-29). **맥 경로(번들 교체 ·
-  서명 대조 · `open -n`)는 아직 실기로 못 쟀다.** 윈도우 사본은 `registerScheme` 을 빈 함수로 바꿔
-  빌드해야 HKCU 의 `persodata://` 를 안 건드린다.
-
-내는 법:
-```
-git tag agent-v1.2.0 && git push origin agent-v1.2.0     # Actions 가 세 파일을 빌드해 Release 에 올린다
+```powershell
+cd agent
+curl.exe -L -o bin/duckdb-windows-amd64.zip https://github.com/duckdb/duckdb/releases/download/v1.4.1/duckdb_cli-windows-amd64.zip
+go vet ./... ; go test ./...
+go build -o perso-export.exe .
+.\perso-export.exe --snapshot <스냅샷 폴더> --out $env:TEMP\usage-out
+# 실린 것 대신 따로 둔 DuckDB 를 쓰려면: --duckdb <duckdb.exe 경로>
 ```
 
-## 방어 (전부 실측으로 확인)
+맥은 같은 자리에 `bin/duckdb-darwin-universal.zip`(릴리스의 `duckdb_cli-osx-universal.zip`)을 둔다. 리눅스는
+싣지 않으므로 zip 이 필요 없고 `--duckdb` 를 준다. `-o` 없이 빌드하면 모듈 이름대로 `perso-agent(.exe)` 가
+나온다. 두 이름 다 `.gitignore` 에 있다 — 수십 MB 실행 파일이 공개 저장소 이력에 들어가면 영영 남는다.
 
-`127.0.0.1` 만 바인딩 · Host 검증(DNS rebinding) · Origin 허용목록(`*` 없음) · 프로세스마다
-새 베어러 토큰 · 쿠키 없음(CSRF 표면 없음) · 화면은 SQL 을 못 보내고 지표 이름만 보냄 ·
-나가는 결과는 계약 검사를 지난다(식별자 컬럼 거부 · 행 2,000 상한 · 셀 120자 상한 · 전사
-집계는 5건 미만 그룹 제외).
+**결과 폴더는 저장소 밖(위처럼 `%TEMP%`)에 둔다.** 고객 사용 집계라 이 공개 저장소에 들어오면 안 된다.
+
+`go test` 는 대부분 DuckDB 없이 돈다 — 계약 검사 · 묶음 배정 · 파일 조립 · manifest 칸 · SQL 틀 채우기 · SQL 이 내는
+이름 · 반쪽 쓰기 거절. 하나(가공 범위)만 DuckDB 가 있을 때 작은 가짜 CSV 로 SQL 을 돌린다 — 윈도우·맥 빌드는 실린
+것을 쓰고, CI(리눅스)에는 없어 건너뛴다. 나머지 SQL 이 맞는 값을 내는지는 스냅샷이 있는 PC 에서 돌려 봐야 안다
+(아래 「고칠 때」).
+
+## 결과 (`data` 브랜치)
+
+| 파일 | 내용 | 읽는 화면 |
+|---|---|---|
+| `manifest.json` | `format`(모양 번호 — 화면의 `FORMAT` 과 다르면 화면이 숫자 대신 그 사실을 적는다) · `snapshot_at`(스냅샷 `data/manifest.json` 의 `generated_at`, RFC3339 UTC) · `snapshot_commit` · `exported_at` · `exporter` · `spaces`(가공 범위 크기) · `groups`(묶음 파일 수) | 모든 화면의 「언제 것인가」 · 「데이터 분석」 상태 카드 |
+| `summary.json` | 가공 범위 전체의 요약 — `spaces[]` · `fail_rate_all` · `credits_from` · `jobs_from` | 수주 고객 목록의 두 열 · 상세의 사용 진단 |
+| `evidence.json` | 근거(지급 묶음 소진 시작 · 국내 카드 결제)가 하나라도 있는 스페이스만 | 자동 대조(`won/reconcile.ts`) |
+| `sales.json` | 제품 전체 집계 한 행 | 영업 인사이트(`/operations`) |
+| `metrics.json` | 전역 지표 셋(`metrics.go`) | 「데이터 분석」(`/app/data`) |
+| `facts/index.json` | `{"<space_seq>": "<묶음>"}` — 가공 범위의 모든 스페이스 | 상세가 받을 묶음을 고른다 |
+| `facts/<묶음>.json` | 그 묶음의 스페이스마다 재료 한 줄(`credits` · `jobs` · `usage`) — 활동이 없어도 한 줄 | 상세의 크레딧 · 작업 성능 · 영상 분석 |
+
+- **가공 범위** = 엔터프라이즈에 묶인 스페이스 ∪ 무료가 아닌 플랜을 구독한 스페이스 ∪ 엔터프라이즈 크레딧을 쓴
+  적이 있는 스페이스(`export.go` 의 `universeSQL`). 셋째는 계약이 끝나 플랜이 무료로 돌아간 B2B 스페이스다 — 없으면
+  그 계약의 화면과 지급 회차 자동 대조가 멈춘다. 밖의 번호는 화면이 목록에 「스냅샷에 없음」, 상세에 「가공
+  범위(엔터프라이즈·유료 스페이스)에 없습니다」로 적고, 계약의 번호 **일부만** 밖이면 목록과 상세 머리에 「일부
+  스냅샷에 없음」을 그 번호와 함께 단다(숫자는 범위 안의 스페이스만 합친 것이다).
+- **묶음** = 엔터프라이즈마다 하나(`e1`, `e2` … — `enterprise_seq` 순서의 차례이고 번호 자체는 안 나간다)와
+  나머지를 `space_seq % 16` 으로 나눈 `p00` ~ `p15`. 계약 하나가 대개 파일 하나로 끝난다.
+- **재료의 모양**은 옛 에이전트의 목록 SQL(`git show 092d34f:agent/spaces.go` 의 creditsSQL · jobsSQL ·
+  usageSQL)을 스페이스 하나짜리 목록으로 돌린 값이고, 합칠 수 있게 낸다 — 합은 반올림 전, 평균은 합과 개수,
+  상위 5 · 사람 수 · 동시 작업 피크는 원재료(종류 전부 · 시작/끝 사건 · 사람의 차례 번호). 화면이 쓰는 칸만
+  낸다. 정의는 `facts.go` 머리 주석, 합치는 규칙은 `usageMerge.ts`.
+- 크기(2026-09-14 스냅샷): 스페이스 2,094(엔터프라이즈 990 · 그 밖의 유료 1,101 · 엔터프라이즈 크레딧으로만
+  걸리는 3) · 묶음 135 · 합계 약 10MB · 가장 큰 묶음 0.6MB. 브라우저는 `raw` 로 받는다 — GitHub contents API 의
+  객체 모양은 1MB 까지, raw 는 100MB 까지다.
+- 브라우저는 파일을 **`data` 가 지금 가리키는 커밋 하나에서** 받는다(`commits/data` 로 커밋을 묻고 그 sha 로 받는다,
+  5분 기억). 브랜치 이름으로 받으면 가공이 올라온 직후 앞서 받아 둔 파일(어제)과 새로 받는 파일(오늘)이 한 계산에
+  섞인다 — 묶음 이름은 차례라 날마다 밀릴 수 있고 `b` · `p` · `u` 는 가공 하나 안에서만 통해서, 스페이스가 빠지거나
+  두 번 세지는데 오류는 안 난다.
+
+## 가공 레포 세우기 — 운영자 체크리스트
+
+1. **비공개 레포를 만든다** — 회사 계정 아래. 기본 브랜치(`main`)가 있어야 한다(README 하나로 만들면 된다):
+   예약 실행과 「Run workflow」는 기본 브랜치의 워크플로만 본다. 결과는 `data` 브랜치에 서므로 기본 브랜치를
+   `data` 로 바꾸지 않는다 — 거기에는 워크플로 파일이 없다.
+2. **토큰 A — 스냅샷 읽기.** 스냅샷 저장소를 읽을 수 있는 계정으로 **classic** 토큰을 만든다(Settings →
+   Developer settings → Personal access tokens → Tokens (classic), scope `repo`, 만료일을 정하고 적어 둔다).
+   classic 인 이유: **조직 저장소의 외부 협업자는 classic 토큰만 쓸 수 있다**(GitHub 문서). 그 조직의 멤버라면
+   그 저장소 하나의 Contents 읽기 전용 fine-grained 토큰이 더 좁다.
+   그 토큰은 **가공 레포의 Actions 시크릿 `SNAPSHOT_TOKEN` 으로만** 둔다(가공 레포 Settings → Secrets and
+   variables → Actions → New repository secret). Render · 이 저장소 · 메신저 어디에도 붙이지 않는다 — classic
+   `repo` 는 그 계정이 닿는 **모든** 비공개 저장소를 쓰기까지 여는 토큰이다. 워크플로는 그것을 「스냅샷 받기」
+   한 단계에서만, **받기에만** 쓴다 — 그 계정이 스냅샷 저장소에 쓰기 권한을 가져도 같다(아래 「방어」).
+3. **워크플로를 넣는다** — 이 저장소의 `agent/export/perso-usage-data.yml` 을 가공 레포의
+   `.github/workflows/export.yml` 로 복사해 `main` 에 올린다. 고칠 곳은 없다: 자기 레포는
+   `${{ github.repository }}`, 미는 토큰은 Actions 가 주는 `github.token` 이다.
+4. **돌릴 커밋을 고른다** — 이 저장소 `main` 의 커밋 중 CI(Actions 의 Tests)가 초록인 것을 골라 그 **40자 sha** 를
+   가공 레포 Settings → Secrets and variables → Actions → **Variables** → New repository variable 로
+   `EXPORTER_COMMIT` 에 넣는다. 가공 레포는 그 커밋의 `agent/` 만 돌린다 — 이 저장소 `main` 에 들어간 것이
+   저절로 스냅샷 옆에서 돌지 않게. 비었거나 sha 가 아니면 첫 단계에서 멈춘다(아래 「고칠 때」).
+5. **한 번 손으로 돌린다** — Actions → **Usage data export** → Run workflow. 초록이면 브랜치 `data` 가 서고 그
+   안에 `manifest.json` · `summary.json` · `evidence.json` · `sales.json` · `metrics.json` · `facts/` 가 있다.
+   「가공 (네트워크 · 권한 없이)」 단계의 끝 줄이 「끝: 파일 N개 · 합계 …MB」다. 마지막 단계(data 브랜치에
+   올리기)가 거절되면(`remote rejected` · `GH013` · `GH006`) 가공 레포의 Settings → Rules → Rulesets 와 Branches 의
+   보호 규칙이 `data` 를 막는지 본다 — 강제 푸시를 막는 규칙은 첫 실행(브랜치를 새로 만든다)은 지나가고 둘째 날부터
+   거절한다. Settings → Actions 의 Workflow permissions 기본값은 상관없다: 이 워크플로가 `permissions:` 를 직접 적는다.
+6. **토큰 B — 화면이 읽을 토큰.** **fine-grained** 토큰을 만든다: Resource owner = 가공 레포를 가진 회사 계정(그
+   계정이거나 그 조직의 멤버여야 고를 수 있고, 조직이 승인을 요구하면 승인될 때까지 pending 이다), Repository
+   access = Only select repositories → **가공 레포 하나**, Permissions → Repository → **Contents: Read-only**
+   (Metadata 읽기는 저절로 붙는다). 만료일을 적어 둔다. 이 토큰은 로그인한 콘솔 사용자의 브라우저로 간다 — 그래서
+   읽기 전용 · 레포 하나여야 한다.
+7. **Render 대시보드에 넣는다** — 서비스 → Environment: `USAGE_DATA_REPO` = `<owner>/<가공 레포>`,
+   `USAGE_DATA_TOKEN` = 토큰 B. `render.yaml` · `.env.example` 에는 값을 적지 않는다(이름만 있다 — 공개 저장소다).
+   값은 프로세스가 뜰 때 읽으므로 저장한 뒤 배포가 끝나기를 기다린다.
+8. **「데이터 분석」을 연다** — 콘솔의 `/app/data`(사이드바에는 없다). 스냅샷 시각 · 가공 시각 · 커밋 · 스페이스
+   수가 보이면 끝이다. 수주 고객 목록 제목 옆에는 「사용량 기준 …」이 선다.
+
+## 옛 에이전트 치우기 (각자 PC, 서두르지 않아도 된다)
+
+새 콘솔은 `127.0.0.1` 을 부르지 않으므로, 깔려 있는 옛 에이전트(1.x)는 켜져 있어도 아무 일도 안 한다 — 루프백에서만
+듣고, 켤 때 새 릴리스를 찾지만 릴리스 워크플로를 지웠으니 받을 것이 없다. 치우려면:
+
+- **윈도우**: 에이전트 창을 닫고, 그 exe 를 `perso-agent.exe --unregister` 로 **한 번** 돌린다 — 「에이전트 열기」
+  링크용으로 적어 둔 `HKCU\Software\Classes\persodata` 를 지우고 끝난다. 그다음 `perso-agent.exe`(옆에
+  `.old` 가 있으면 그것도), 스냅샷 폴더(`perso-data-snapshot…`), DuckDB 를 풀어 두던 `%LOCALAPPDATA%\perso-agent`
+  를 지운다.
+- **맥**: 창 없이 뒤에서 도니 활성 상태 보기에서 `perso-agent` 를 종료하고, `Perso Agent.app` 을 지운다 —
+  `persodata://` 는 그 앱의 Info.plist 가 등록한 것이라 앱과 같이 사라진다. 스냅샷 폴더와
+  `~/Library/Caches/perso-agent` 도 지운다.
+
+## 실패하면 무엇이 보이나
+
+| 무엇이 | 보이는 것 | 할 일 |
+|---|---|---|
+| `EXPORTER_COMMIT` 이 비었거나 40자 sha 가 아님 | 「돌릴 커밋 확인」 단계가 빨갛다. `data` 는 어제 것 그대로 | 체크리스트 4 |
+| 토큰 A 거절 · 만료 | 「스냅샷 받기」 단계가 빨갛다. `data` 는 어제 것 그대로 | 새 classic 토큰 → 시크릿 `SNAPSHOT_TOKEN` 교체 → Run workflow |
+| 가공 실패 (빌드 · DuckDB · 계약 검사) | 그 단계가 빨갛고 `data` 는 어제 것 그대로. 로그에 실패한 단계 이름과 DuckDB 오류 첫 줄(값은 지워짐) | 스냅샷이 있는 PC 에서 같은 가공을 손으로 돌려 본다. 고친 코드는 `main` 에 넣고 `EXPORTER_COMMIT` 을 그 커밋으로 올린 뒤 Run workflow |
+| 위의 것들이 이어지면 | 화면은 어제 숫자를 그대로 그리다가 스냅샷이 **36시간** 넘게 묵으면 목록에 「사용량 기준 … · 낡음」, 「데이터 분석」에 「낡은 데이터입니다」 | 빨간 단계를 고친다 |
+| 09:15 에 스냅샷이 아직 안 올라오기 시작함 | 어제 스냅샷을 한 번 더 가공한다(오류 아님) | 급하면 스냅샷이 선 뒤 Run workflow |
+| 스냅샷이 올라가는 중이거나 중간에 멈춤 | 「스냅샷이 다 올라왔나」 단계가 5분마다 다시 받아 **최대 45분 기다린다** — 그 안에 `manifest.json` 이 실린 마지막 커밋이 오면 그대로 가공한다. 45분이 지나도 큰 표만 새것이면 빨갛게 끝나고 가공하지 않는다. `data` 는 어제 것 그대로 | 스냅샷이 다 올라온 뒤(스냅샷 쪽이 실패했으면 그것부터) Run workflow |
+| data 브랜치에 올리기가 거절됨(`remote rejected`) | 마지막 단계가 빨갛고 `data` 는 어제 것 그대로 | 가공 레포의 Rulesets · 브랜치 보호가 `data` 의 강제 푸시를 막는지(체크리스트 5) |
+| 토큰 B 만료 · 폐기 | 목록에 「사용량 · 연결 실패」, 사유 「토큰이 틀렸거나 만료됐습니다 — Render 의 USAGE_DATA_TOKEN 을 새 토큰으로 바꿔야 합니다」(401) | 새 토큰 B → Render 교체 → 배포 |
+| 레포 이름 오타 · 토큰 B 가 그 레포를 안 가리킴 · `data` 가 아직 없음 | 「가공된 데이터를 못 찾았습니다 — 가공 레포의 Actions(export)가 한 번이라도 성공했는지 확인하세요」(404 — GitHub 는 볼 수 없는 비공개 레포를 「없다」고 답한다. `data` 가 없으면 커밋을 묻는 길이 422 로 답한다) | `USAGE_DATA_REPO` · 토큰의 Repository access · 첫 실행 |
+| 토큰 B 에 Contents 권한이 없음 | 「토큰에 이 레포를 읽을 권한이 없습니다 — …」(403) | 토큰의 Permissions |
+| 요청 한도 | 「GitHub 요청 한도에 걸렸습니다 — 잠시 뒤 다시 엽니다」(429, 또는 남은 횟수 0 인 403) | 기다린다. 토큰 하나를 콘솔 전원이 나눠 쓰지만 안 바뀐 파일은 304 라 한도에서 안 센다 |
+| 가공 데이터와 화면의 모양이 다름 | 숫자 대신 「가공 데이터 형식(N)이 이 화면(M)과 다릅니다 — …」 | 화면을 새로 고친다. 그래도 같으면 `EXPORTER_COMMIT` 을 배포된 커밋으로 올리고 Run workflow(아래 「고칠 때」) |
+| Render 에 값이 없음 | 목록에 「사용량 · 연결 안 됨」, 「데이터 분석」에 「관리자가 아직 연결하지 않았습니다 — Render 대시보드의 USAGE_DATA_REPO · USAGE_DATA_TOKEN」 | 체크리스트 7 |
+| Actions 실행 시간 한도 | 예약 실행이 안 돈다 → 「낡음」. 비공개 레포라 실행 시간이 그 계정의 월 포함 시간에서 나간다(무료 계정 2,000분 — 평소 몇 분이고, 스냅샷을 45분 기다리는 날이 매일이어도 1,500분 남짓) | 그 계정의 Billing |
+
+## 방어
+
+무엇이 무엇을 지키는지 갈라 적는다 — 「커널이 지킨다」와 「사람이 읽고 골랐다」는 다른 약속이다.
+
+- **고른 커밋만 돈다** — 가공 레포는 변수 `EXPORTER_COMMIT`(40자 sha)의 `agent/` 만 받는다. 비었거나 sha 가 아니면
+  첫 단계에서 멈춘다(비운 ref 를 checkout 은 기본 브랜치로 읽는다). 이 저장소는 공개라 `main` 에 커밋 하나가
+  들어가는 것(계정 탈취 · 잘못된 병합)은 막을 수 없다 — 그 커밋이 다음 날 아침 저절로 스냅샷 옆에서 돌지 않게
+  하는 것이 이것이고, 가공기가 **무엇을 쓰는지**(아래 result/ 의 JSON 내용)를 지키는 것도 결국 이 검토다.
+- **스냅샷이 디스크에 있는 동안 네트워크를 가진 저장소 코드가 없다** — 빌드를 스냅샷을 받기 전에 끝내고(`go build`
+  는 저장소 코드를 실행하지 않는다, cgo 도 끈다), `go vet` · `go test` 는 이 잡에서 안 돌린다: 테스트는 저장소 코드를
+  실행하고 이 잡은 시크릿을 쥐고 있다. 그 둘은 이 저장소 CI 의 `exporter` 잡이 `main` 에서 돌리고, `EXPORTER_COMMIT`
+  에는 그게 초록인 커밋만 적는다.
+- **가공기는 커널이 가둔다** — 루트로 이름공간을 만든 뒤 `setpriv` 로 내려와 돈다:
+  - `unshare --net` 새 네트워크 이름공간(루프백뿐). `--mount` 로 `/run` 을 빈 tmpfs 로 덮어 systemd-resolved · D-Bus ·
+    docker 같은 로컬 데몬의 소켓을 가린다 — 그 데몬들은 바깥 네트워크를 쥐고 있어서(DNS 조회에 데이터를 실어 보내기 등)
+    네트워크 이름공간만으로는 모자란다. `--pid` 라 가공기가 끝나면 그 안의 프로세스가 전부 같이 죽는다.
+  - `nobody` · 보조 그룹 없음(docker 그룹을 버린다) · `no_new_privs` — `sudo` 로 다시 root 가 될 수 없다. 러너 사용자가
+    아니므로 다음 단계가 실행하거나 읽는 러너의 파일(액션 코드 · 도구 · 환경 파일 · `~/.gitconfig`)에 쓰지 못한다.
+  - 스냅샷과 가공기는 `/mnt` 에 읽기 전용으로 붙고, 쓸 수 있는 곳은 `result/` 하나다.
+  커널이 지키는 것은 「밖으로 못 보낸다 · 다음 단계를 못 건드린다」까지다. `result/` 의 JSON 에 무엇을 싣는지는
+  같은 코드 안의 계약 검사와 위의 「고른 커밋」이 지킨다.
+- **미는 단계는 가공기가 쓴 폴더를 믿지 않는다** — 네트워크와 미는 토큰이 있는 단계라 원본(`snapshot/`)을 먼저 지우고,
+  정해 둔 이름의 보통 파일만(`manifest` · `summary` · `evidence` · `sales` · `metrics` · `facts/*.json`) 새 폴더로 옮겨
+  그것만 민다. 그 밖의 것(`.git` · 링크 · 다른 이름)이 있으면 멈춘다. git 은 전역·시스템 설정도 훅도 안 읽는다.
+- **반쯤 올라간 스냅샷을 가공하지 않는다** — 스냅샷은 큰 표를 하나씩 커밋하고 `manifest.json` 을 맨 마지막에 싣는다.
+  `data/` 를 건드린 마지막 커밋이 manifest 의 커밋이 아니면 멈춘다(최근 커밋 30개의 커밋·트리만 받는다, 지난 CSV 는
+  안 받는다).
+- **스냅샷 저장소에는 받기만 한다 — 쓰기 권한이 있어도** (2026-10-02 운영자: 「쓰기 권한이 있더라도 스냅샷 저장소에는
+  아무 문제 없도록」). classic `repo` 토큰은 계정이 쓸 수 있는 곳이면 쓰기까지 열므로, 「안 쓴다」를 토큰의 권한이 아니라
+  그 토큰을 쥔 「스냅샷 받기」 **한 단계**가 지키고 테스트가 그 단계를 글자로 묶는다:
+  - 토큰은 그 단계에만 있다 — 어떤 액션에도 안 넘기고(`actions/checkout` 대신 러너의 git), 머리글을 만든 뒤 변수를 지운다.
+    시크릿 표현식은 워크플로 전체에서 그 하나다 — 테스트는 줄이 아니라 읽어 들인 값에서 대소문자 없이 세므로
+    `secrets['…']` · `toJSON(SECRETS)` · `run` 안 셸 주석 줄의 `${{ }}`(GitHub 는 셸보다 먼저 푼다)도 잡힌다. 표현식의
+    끝은 GitHub 처럼 따옴표 밖의 `}}` 로 잰다 — `format('}}', toJSON(secrets))` 처럼 따옴표 안 `}}` 뒤에 숨긴 것도 잡힌다.
+  - 그 단계 자신은 스크립트보다 먼저 도는 것을 들지 않는다 — 열쇠는 `name` · `env`(토큰 하나) · `run` 뿐이다. `shell` 은
+    스크립트를 무엇으로 돌릴지 바꾸고, env 의 `BASH_ENV` · `BASH_FUNC_<이름>%%` 는 셸이 시작하며 실행한다 — 토큰이 아직
+    환경에 있을 때다(2026-10-02 로컬 실측, bash 5.3: 둘 다 스크립트 첫 줄보다 먼저 돌아 토큰을 봤다).
+  - 그 git 은 빈 환경(`env -i`) · 전역/시스템 설정 없이 `/usr/bin/git` 으로 돈다 — 앞 단계가 남긴 insteadOf · 프록시 ·
+    인증서 · `GIT_*` 가 토큰을 딴 데로 보내지 못한다. 토큰은 명령줄 `-c` 로만 가서 `.git` 에 안 남는다.
+  - 그 클론의 push 는 없는 주소로 막혀 있다(`pushurl` · `pushInsteadOf`) — 무엇이 거기서 push 해도 github.com 에 안
+    닿는다(2026-10-02 로컬 실측: 원격 · https · http 세 가지 push 가 전부 그 자리에서 실패).
+  - 부르는 git 은 init · remote add · config(push 막기) · fetch · log · checkout 뿐이고 원격은 스냅샷 저장소 하나다.
+    curl · gh · API · push · sudo 는 그 단계에 없다. 테스트에 위반 12가지를 넣어 12가지 다 잡히는 것을 확인했다.
+    2026-10-02 검토 뒤 단계 밖(잡 · 워크플로) · 시크릿 표현식 · 토큰 단계의 env/shell 쪽 위반 17가지를 더 넣었다 — 옛
+    테스트는 17가지 다 초록이었고 지금은 17가지 다 잡힌다. 같은 날 셋을 더 막았다 — 토큰을 만지기 전에 PATH 를 시스템
+    것으로 되돌리고(앞 단계가 끼운 가짜 `base64` · `env`), `snapshot/` 이 이미 있으면 멈추고(심어 둔 `.git` 설정),
+    git 에 주는 `-c` 는 토큰 머리글 하나 · 받는 곳은 `origin` 하나다(`url.*.insteadOf` · `http.proxy` · 주소 직접 적기로
+    토큰이 실린 요청을 딴 데로 못 돌린다). 위반 6가지를 넣어 6가지 다 잡힌다.
+  - 미는 단계의 열쇠는 그 잡의 `github.token` 이라 가공 레포 밖은 건드릴 수 없고, 거기에는 스냅샷 토큰이 없다.
+  - **GitHub 쪽에서 쓰기를 원천 차단하려면** 스냅샷 저장소 관리자가 읽기 전용 **배포 키**(deploy key, 「Allow write
+    access」 끔)를 달아 주는 길이 있다 — 그때는 「스냅샷 받기」를 SSH 로 바꾼다. 지금은 계정 권한이 읽기라 필요 없다.
+- **잡은 단계만 돈다**(테스트) — 워크플로와 잡에 단계 밖에서 도는 것이 없다: 재사용 워크플로(잡 단위 `uses` ·
+  `secrets: inherit`) · `container` · `services` · 워크플로/잡 단위 `env` · `defaults`. 테스트는 단계를 읽으므로 그런 것이
+  붙으면 단계를 아무리 묶어도 소용없다 — 토큰이 테스트가 안 읽는 코드로 가거나(`secrets: inherit`) 토큰을 쥔 단계의 셸에
+  스크립트보다 먼저 닿는다(`env` 의 `BASH_ENV` · `defaults` 의 `shell`). 첫 판 테스트는 단계만 봐서 `secrets: inherit` 를
+  단 잡을 초록으로 통과시켰다(2026-10-02 검토).
+- **남의 액션 없음 · 커밋 번호로 고정** — `actions/checkout` · `actions/setup-go` 뿐이고 둘 다 40자 커밋 번호로 적는다
+  (테스트). 태그(`@v4`)는 옮겨질 수 있고, 그 둘은 스냅샷 토큰을 쥔 단계보다 먼저 돌아 뒤 단계의 환경을 건드릴 수 있다.
+  올릴 때는 새 버전의 커밋 번호를 확인해 주석의 버전과 같이 바꾼다. 둘 다 시크릿을 받지 않는다(테스트).
+- **방아쇠는 예약과 손 실행뿐** — `pull_request` · `push` 처럼 남이 올린 코드로 도는 방아쇠를 달면 그 코드가 시크릿을
+  쥔다(테스트).
+- **자기 레포의 `data` 로만 민다**(테스트) — `--all` · `--mirror` · `--tags` 없이. 이 저장소는 공개라 여기로 밀면
+  그대로 공개다.
+- **고정한 DuckDB** — `duckdbVersion` 의 리눅스 zip 을 `duckdb-linux-amd64.sha256` 과 맞춘 뒤 쓴다. 확장 자동
+  설치·로딩을 끄고 `~/.duckdbrc` 를 안 읽는다(`-init` 에 빈 장치).
+- 워크플로의 위 넷(고른 커밋 · 빌드 순서 · 가두기 · 미는 단계)은 `tests/test_usage_data_stays_off_server.py` 가 고정한다.
+  그 테스트는 워크플로 **글자**를 본다 — 실제 러너에서 도는지는 가공 레포에서 손으로 한 번 돌려 확인한다(체크리스트 5).
+  토큰 단계 **앞**의 단계는 러너를 고칠 수 있다(`$GITHUB_ENV` 에 `BASH_ENV` 를 적기 · sudo) — 테스트는 그 단계들의 명령을
+  다 묶지 않으므로(2026-10-02: `$GITHUB_ENV` 에 `BASH_ENV` 를 적는 줄은 초록으로 지나간다) 견본을 복사할 때 그 앞을 읽는다.
+- **계약 검사 · 다 쓰거나 안 쓰거나 · 숫자만 남는 로그** — 위 「하는 일 · 안 하는 일」.
+- **겹치지 않는다** — 예약 실행과 손 실행이 겹치면 줄을 선다(`concurrency`). 둘이 동시에 강제로 밀면 늦게 끝난
+  쪽이 이기는데 그게 더 오래된 스냅샷일 수 있다.
+- **토큰처럼 생긴 글자가 이 저장소에 없다**(테스트) — `agent/` · `frontend/src` · `render.yaml` · `.env.example`.
+- 콘솔 쪽(라우트 · `no-store` · 모듈 경계)은 `CLAUDE.md` 의 그 절과 `tests/test_usage_source.py`.
+
+## 고칠 때
+
+- **가공에 내보내는 것은 사람이다.** 가공 레포는 변수 `EXPORTER_COMMIT` 의 커밋을 받아 빌드한다 — `agent/` 를 고쳐
+  `main` 에 넣고 CI 가 초록이면, 그 커밋의 `agent/` 를 읽어 본 뒤 변수를 그 sha 로 올린다. 다음 09:15 부터(급하면
+  Run workflow) 그 코드다. 안 올리면 옛 코드가 계속 돈다 — 그게 이 단계의 뜻이다(위 「방어」). 릴리스는 없다.
+- **재료의 모양을 바꾸면 `facts.go` · `usageMerge.ts` 와 양쪽 형식 번호(`export.go` 의 `dataFormat` ·
+  `frontend/src/lib/usageData.ts` 의 `FORMAT`)를 같은 커밋에서** 고친다. 화면은 Render 에 곧 배포되고 재료는
+  `EXPORTER_COMMIT` 을 올려 다시 가공해야 바뀌므로, 그 사이 화면은 숫자 대신 「가공 데이터 형식(N)이 이 화면(M)과
+  다릅니다」를 띄운다 — 번호를 안 올리면 그 사이 빈 칸이나 틀린 합이 조용히 선다. Render 배포가 끝나면
+  `EXPORTER_COMMIT` 을 그 커밋으로 올리고 Run workflow 를 누른다.
+  바꾼 뒤에는 옛 SQL 과 다시 맞댄다: 스냅샷이 있는 PC 에서 가공기를 돌리고, 계약 목록마다 옛 목록 SQL
+  (`git show 092d34f:agent/spaces.go`)을 DuckDB CLI 로 돌려, 같은 목록을 `usageMerge.ts`(타입만 지우면 노드에서
+  그대로 돈다)로 합친 값과 비교한다. 결과는 행 단위로 찍지 않는다 — 일치 수와 어긋난 칸 이름만.
+  2026-10-01 에 목록 103개 × 지표 셋 = 309/309 였다.
+- **DuckDB 버전을 올리면** `snapshot.go` 의 `duckdbVersion` · `duckdb-linux-amd64.sha256` · `bin/` 의 zip 을 같이
+  바꾼다. 체크섬을 안 고치면 워크플로가 `sha256sum -c` 에서 멈춘다 — 그게 맞다(무엇을 돌리는지 사람이 한 번 본다).
+- **결과에 나갈 이름은 `checkContract` 를 지나야 한다.** 식별자성 이름이 필요하면 SQL 이 아니라 그 검사의 허용
+  목록(`allowKeys`)을 고쳐야 하고, 그건 지금 `space_seq` 하나다.
+
+옛 설계 · 조사(로컬 에이전트 시절): `docs/데이터-에이전트-설계.md` · `docs/데이터-스냅샷-로컬-분석-설계.md` ·
+`docs/로컬-웹-연결-조사요청.md`. 데이터 실측: `docs/수주고객-사용현황-데이터검증-2026-09-15.md` (로컬 문서).

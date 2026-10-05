@@ -23,7 +23,7 @@ import asyncio
 from datetime import date
 from decimal import Decimal
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import StreamingResponse
 
 from ...common.sheet_values import qualification_for_plan
@@ -1719,3 +1719,32 @@ def _won_history(session, contact_id: int | None) -> dict:
         ],
         "stage_labels": {key: label for key, label, _ in PIPELINE_STAGES},
     }
+
+
+# --------------------------------------------------------------------------- #
+# 사용 데이터 — 열쇠만 건넵니다 (2026-10-01)
+# --------------------------------------------------------------------------- #
+
+
+@router.get("/api/ui/usage-source")
+def ui_usage_source(response: Response) -> dict:
+    """가공된 사용 데이터가 사는 비공개 레포와 그 읽기 토큰. **값만 건네고 데이터는 안 만집니다.**
+
+    수주 고객 사용 현황과 「데이터 분석」 화면이 이것을 받아 GitHub 에서 직접 받고, 계약의
+    스페이스로 합치는 일도 브라우저 안에서 합니다. 이 서버는 그 데이터를 받지도 저장하지도
+    중계하지도 않습니다 — `tests/test_usage_data_stays_off_server.py` 가 고정합니다(이 파일에
+    GitHub 주소가 적히는 순간 거기서 빨개집니다).
+
+    관문은 다른 `/api/ui` 와 같습니다(`security.WEB_UI_PREFIXES` — 로그인한 사람만). `no-store` 는
+    토큰이 든 응답을 브라우저 디스크 캐시와 중간 프록시에 남기지 않으려는 것이고, 값은 로그에도 안
+    남깁니다. 둘 중 하나라도 비면 둘 다 null 이라 화면이 「연결 안 됨」을 그립니다 — 반쪽 값으로
+    GitHub 를 두드리면 설정 문제가 「연결 실패」(401·404)로 보입니다.
+    """
+    from ...common.config import settings as app_settings
+
+    response.headers["Cache-Control"] = "no-store"
+    repo = app_settings.USAGE_DATA_REPO.strip()
+    token = app_settings.USAGE_DATA_TOKEN.strip()
+    if not (repo and token):
+        return {"repo": None, "token": None}
+    return {"repo": repo, "token": token}

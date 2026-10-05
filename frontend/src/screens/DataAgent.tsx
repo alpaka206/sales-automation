@@ -1,24 +1,24 @@
-import { useCallback, useEffect, useState } from "react";
 import { Icon } from "../ui/Icon";
-import { ActionButton } from "../ui/ActionButton";
 import { DataTable, type Column } from "../ui/DataTable";
-import { AGENT_DOWNLOADS, AGENT_MIN_VERSION, AGENT_RELEASES, agentFetch, useAgent, type AgentStatus, type AsOf } from "../lib/agent";
+import { stamp, useUsageFile, useUsageStatus } from "../lib/usageData";
+import { useUsageSource } from "../lib/usageSource";
 
-/** 스냅샷 데이터를 **로컬 에이전트**에서 가져와 그리는 화면.
+/** 가공된 스냅샷의 상태와 제품 전체 지표를 그리는 화면(「데이터 분석」).
  *
- *  이 화면은 우리 서버에서 오지만 **데이터는 우리 서버를 안 지납니다.** 브라우저가
- *  `http://127.0.0.1:<포트>` 를 직접 부르고, 집계만 받아 그립니다. 원본 CSV 도 계산도
- *  그 PC 안에서 끝납니다. 연결 방식과 브라우저별 제약은 `lib/agent.ts` 에 있습니다.
+ *  이 화면은 우리 서버에서 오지만 **데이터는 우리 서버를 안 지납니다.** 서버는 가공 레포의 이름과
+ *  읽기 토큰만 건네고(`lib/usageSource.ts`), 브라우저가 GitHub 에서 직접 받아 그립니다
+ *  (`lib/usageData.ts`). 2026-10-01 까지는 PC 마다 깐 로컬 에이전트가 이 자리였고, 내려받기 · 버전
+ *  확인 · 「지금 받기」는 그것과 함께 없어졌습니다 — 가공은 하루 한 번 저절로 돕니다.
  */
 
 type Metric = {
-  metric: string; label: string; as_of: AsOf;
+  metric: string; label: string;
   columns: string[]; rows: (string | number | null)[][];
-  suppressed_groups: number; computed_ms: number;
+  suppressed_groups: number;
 };
 
 function Table({ metric }: { metric: Metric }) {
-  // 표는 콘솔의 `DataTable` 하나입니다 — 열 정의만 넘깁니다. 에이전트가 준 열 이름이 곧 머리글.
+  // 표는 콘솔의 `DataTable` 하나입니다 — 열 정의만 넘깁니다. 가공기가 준 열 이름이 곧 머리글.
   type Cells = (string | number | null)[];
   const columns: Column<Cells>[] = metric.columns.map((name, j) => ({
     label: name,
@@ -33,7 +33,7 @@ function Table({ metric }: { metric: Metric }) {
           <div className="section-header__title">{metric.label}</div>
         </div>
         <div className="t-sm td-subtle tnum">
-          {metric.rows.length.toLocaleString()}행 · {metric.computed_ms}ms
+          {metric.rows.length.toLocaleString()}행
           {metric.suppressed_groups > 0 && ` · 작은 그룹 ${metric.suppressed_groups}개 제외`}
         </div>
       </div>
@@ -43,161 +43,70 @@ function Table({ metric }: { metric: Metric }) {
 }
 
 export function DataAgent() {
-  const agent = useAgent();
-  const [metrics, setMetrics] = useState<Metric[]>([]);
-  const [problem, setProblem] = useState<string | null>(null);
+  const usage = useUsageSource();
+  const status = useUsageStatus(usage.source);
+  const metrics = useUsageFile<{ metrics: Metric[] }>(usage.source, "metrics.json");
+  const manifest = status.manifest;
+  const problem = usage.problem ?? status.problem ?? metrics.problem;
 
-  const loadMetrics = useCallback(async () => {
-    if (!agent.pair || !agent.status) { setMetrics([]); return; }
-    const got: Metric[] = [];
-    for (const name of agent.status.metrics) {
-      try { got.push(await agentFetch<Metric>(agent.pair, `/v1/metrics/${name}`)); }
-      catch { /* 한 지표가 계약을 위반해도 나머지는 그린다 */ }
-    }
-    setMetrics(got);
-  }, [agent.pair, agent.status]);
+  const header = (
+    <div className="page-header">
+      <div>
+        <h1 className="page-title">데이터 분석</h1>
+        <div className="t-sm td-subtle" style={{ marginTop: 4 }}>
+          매일 09:15 에 가공 레포의 GitHub Actions 가 스냅샷을 가공해 올립니다 — 브라우저가 GitHub 에서 직접 받아
+          그리고, 우리 서버는 데이터를 거치지 않습니다.
+        </div>
+      </div>
+    </div>
+  );
 
-  useEffect(() => { void loadMetrics(); }, [loadMetrics]);
-
-  // 받기가 뒤에서 도는 동안(며칠 밀린 PC · 처음 GitHub 로그인) 끝났는지 **조용히** 본다 — 끝나면 한 번만
-  // 다시 연결한다. reconnect 로 돌면 화면이 「연결하는 중」으로 깜빡이고 지표를 전부 다시 계산한다.
-  const pulling = agent.status?.as_of.pull.startsWith("진행 중") ?? false;
-  const { pair, reconnect } = agent;
-  useEffect(() => {
-    if (!pulling || !pair) return;
-    const id = window.setInterval(() => {
-      agentFetch<AgentStatus>(pair, "/v1/status")
-        .then((s) => { if (!s.as_of.pull.startsWith("진행 중")) reconnect(); })
-        .catch(() => { /* 다음 회차에 다시 */ });
-    }, 10_000);
-    return () => window.clearInterval(id);
-  }, [pulling, pair, reconnect]);
-
-  const isSafari = /^((?!chrome|android|crios|fxios).)*safari/i.test(navigator.userAgent);
-  const isMac = /Mac/i.test(navigator.platform);
-  const status = agent.status;
-  const shown = problem ?? agent.problem;
-
-  if (agent.busy) {
-    return (
-      <>
-        <div className="page-header"><div><h1 className="page-title">데이터 분석</h1></div></div>
-        <div className="card">에이전트에 연결하는 중…</div>
-      </>
-    );
+  if (usage.busy || status.busy) {
+    return <>{header}<div className="card">사용 데이터를 불러오는 중…</div></>;
   }
 
   return (
     <>
-      <div className="row-between" style={{ marginBottom: 14 }}>
-        <div className="page-header" style={{ marginBottom: 0 }}>
-          <div><h1 className="page-title">데이터 분석</h1></div>
-        </div>
-        <div className="row" style={{ gap: 8 }}>
-          {/* 에이전트를 깨웁니다. **설치돼 있어야** 동작하고, 설치 여부는 안정적으로
-              알 수 없습니다(브라우저마다 감지 방법이 다르고 전부 우회 기법입니다).
-              그래서 안 열리면 아래 안내로 떨어집니다. */}
-          <a className="btn btn--sm" href="persodata://open">
-            <Icon name="play" size={14} /> 에이전트 열기
-          </a>
-          {agent.pair && (
-            <ActionButton className="btn btn--sm" pending="다시 받는 중"
-                          onClick={() => agentFetch(agent.pair!, "/v1/refresh", "POST")
-                            .then(() => agent.reconnect())
-                            .catch((e) => setProblem(e instanceof Error ? e.message : String(e)))}>
-              <Icon name="refresh" size={14} /> 지금 받기
-            </ActionButton>
-          )}
-        </div>
-      </div>
+      {header}
 
-      {/* **`as_of` 없이 그리는 숫자는 없습니다.** 낡은 값이 맞는 값처럼 보이는 것이
+      {/* **시각 없이 그리는 숫자는 없습니다.** 낡은 값이 맞는 값처럼 보이는 것이
           이 저장소가 여러 번 당한 사고입니다. */}
-      {status && (
-        <div className={`card mb-gap${status.as_of.stale ? " card--warn" : ""}`}>
+      {manifest && (
+        <div className={`card mb-gap${status.stale ? " card--warn" : ""}`}>
           <div className="row-between">
             <div>
-              데이터 기준 <strong>{status.snapshot_at?.slice(0, 16).replace("T", " ") ?? status.as_of.committed_at?.slice(0, 16).replace("T", " ") ?? "(알 수 없음)"}</strong>
-              {" · "}커밋 <code>{status.as_of.commit}</code>
-              {" · "}pull: {status.as_of.pull}
-              {" · "}에이전트 <code>{status.version ?? "1.0 이전"}</code>
-              {status.as_of.stale && <strong> · ⚠️ 낡은 데이터입니다</strong>}
+              스냅샷 시각 <strong>{stamp(manifest.snapshot_at)}</strong>
+              {" · "}가공 시각 <strong>{stamp(manifest.exported_at)}</strong>
+              {" · "}커밋 <code>{manifest.snapshot_commit}</code>
+              {status.stale && <strong> · ⚠️ 낡은 데이터입니다</strong>}
             </div>
-            <div className="t-sm td-subtle tnum">{status.folder_mb.toLocaleString()}MB</div>
+            <div className="t-sm td-subtle tnum">스페이스 {manifest.spaces.toLocaleString()}개</div>
           </div>
-          <div className="t-xs t-subtle" style={{ marginTop: 6 }}>
-            원본 CSV 와 계산은 이 PC 에서만 돕니다 — 집계만 이 화면으로 옵니다. 수주 고객 화면의
-            「마지막 작업」·「사용 상태」와 사용 현황 세 섹션도 같은 에이전트가 답합니다.
-          </div>
+          {status.stale && (
+            <div className="t-xs t-subtle" style={{ marginTop: 6 }}>
+              스냅샷이 36시간 넘게 묵었습니다 — 가공 레포의 Actions 를 확인하세요.
+            </div>
+          )}
         </div>
       )}
 
-      {agent.outdated && (
+      {usage.configured === false && (
         <div className="card card--warn mb-gap">
-          <strong>에이전트 업데이트가 필요합니다.</strong>
+          <strong>사용 데이터가 연결되지 않았습니다.</strong>
           <div className="t-sm td-subtle" style={{ marginTop: 6 }}>
-            지금 <code>{agent.status?.version ?? "1.0 이전"}</code>, 이 콘솔은 <code>{AGENT_MIN_VERSION}</code> 이상이 필요합니다 —
-            새 버전이 주는 값을 이 에이전트는 몰라 일부 화면이 빕니다. 내려받아 옛 파일 자리에 덮어쓰고 다시 열면 됩니다(설정은 없습니다). 1.5.0 부터는 켤 때 스스로 새 버전으로 올라가므로 이번 한 번이면 됩니다.
+            관리자가 아직 연결하지 않았습니다 — Render 대시보드의 <code>USAGE_DATA_REPO</code> · <code>USAGE_DATA_TOKEN</code>
           </div>
-          <Downloads isMac={isMac} />
         </div>
       )}
 
-      {!agent.pair && (
-        <div className="card mb-gap">
-          <strong>에이전트가 연결되지 않았습니다.</strong>
-          <div className="t-sm td-subtle" style={{ marginTop: 6 }}>
-            내려받은 <code>perso-agent</code> 를 스냅샷 폴더(<code>perso-data-snapshot</code>) 옆에서 실행하면,
-            그것이 이 화면을 다시 열면서 연결합니다. 위 「에이전트 열기」로도 깨울 수 있습니다(이미 설치돼 있을 때).
-          </div>
-          <Downloads isMac={isMac} />
-        </div>
-      )}
-
-      {shown && (
+      {problem && (
         <div className="card card--warn mb-gap">
-          <strong>에이전트를 부르지 못했습니다.</strong>
-          <div className="t-sm" style={{ marginTop: 6 }}>사유: {shown}</div>
-          <ul className="t-sm td-subtle" style={{ margin: "8px 0 0 18px" }}>
-            <li>에이전트가 켜져 있나요? 켜져 있어야 이 화면이 숫자를 받습니다.</li>
-            <li>Chrome·Edge 는 처음 한 번 <strong>「로컬 네트워크 접근 허용」</strong>을 묻습니다.
-                거부했다면 주소창 왼쪽 자물쇠에서 다시 허용할 수 있습니다.</li>
-            {isSafari && (
-              <li><strong>Safari 는 이 길을 막습니다</strong>(프롬프트도 없습니다).
-                  에이전트가 띄운 <code>http://127.0.0.1:{agent.pair?.port ?? 43110}</code> 을 직접 열면
-                  <strong> 같은 화면·같은 숫자</strong>를 봅니다.</li>
-            )}
-          </ul>
+          <strong>사용 데이터를 받지 못했습니다.</strong>
+          <div className="t-sm" style={{ marginTop: 6 }}>사유: {problem}</div>
         </div>
       )}
 
-      {agent.pair && status && !agent.outdated && <Downloads isMac={isMac} compact />}
-
-      {metrics.map((m) => <Table key={m.metric} metric={m} />)}
+      {metrics.data?.data.metrics.map((m) => <Table key={m.metric} metric={m} />)}
     </>
   );
-}
-
-/** 내려받기. 저장소가 공개라 GitHub Release 자산은 인증 없이 받아집니다 — 바이너리는 git 에
- *  넣지 않고(100MB 가 커밋마다 따라온다), Actions 가 태그마다 빌드해 Release 에 올립니다. */
-function Downloads({ isMac, compact }: { isMac: boolean; compact?: boolean }) {
-  const body = (
-    <>
-      <div className="row" style={{ gap: 8, flexWrap: "wrap", marginTop: compact ? 0 : 10 }}>
-        <a className={`btn btn--sm${!isMac ? " btn--primary" : ""}`} href={AGENT_DOWNLOADS.windows}>Windows (.exe)</a>
-        <a className={`btn btn--sm${isMac ? " btn--primary" : ""}`} href={AGENT_DOWNLOADS.mac}>Mac</a>
-        <a className="t-sm td-subtle" href={AGENT_RELEASES} target="_blank" rel="noreferrer">모든 버전</a>
-      </div>
-      <div className="t-xs t-subtle" style={{ marginTop: 8 }}>
-        스냅샷 저장소를 먼저 clone 해 두세요 (<code>git clone … perso-data-snapshot</code>) — 비공개 저장소라
-        각자의 GitHub 권한으로 받습니다. 에이전트에는 토큰이 없습니다.
-        {isMac && <> Mac 은 받은 zip 을 풀고 <strong>Perso Agent</strong> 앱을 더블클릭하세요 — 창 없이 뒤에서 돌고
-          브라우저가 열립니다. 스냅샷 폴더(<code>perso-data-snapshot</code> 또는 <code>perso-data-snapshot-main</code>)는
-          앱 옆이나 홈·다운로드·데스크톱·문서 폴더에 두면 찾습니다.</>}
-      </div>
-    </>
-  );
-  return compact
-    ? <div className="card mb-gap"><div className="row-between" style={{ alignItems: "flex-start" }}><div className="t-sm" style={{ marginRight: 12 }}><strong>다른 PC 에 설치</strong></div><div>{body}</div></div></div>
-    : body;
 }

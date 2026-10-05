@@ -8,14 +8,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/fs"
 	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
-	"sync"
 	"time"
 )
 
@@ -23,312 +21,100 @@ import (
 // 「금지 컬럼을 찾아 지운다」가 아니라 **나갈 수 있는 모양을 정한다**. 블랙리스트는
 // 이름을 바꾼 식별자·제목·파일명·오류 메시지 속 데이터를 놓친다.
 const (
-	maxRows      = 2000 // 집계가 이보다 많으면 그건 집계가 아니다
-	maxCellChars = 120  // 한 셀에 원문 수천 자를 담는 길을 막는다
-	minGroup     = 5    // 관측치가 이보다 적은 그룹은 뺀다
+	maxRows = 2000 // 지표(metrics.go) 한 장의 행 상한 — 이보다 많으면 그건 집계가 아니다
+	// 가공 파일 안 배열 하나의 상한. 예전 2,000 은 HTTP 응답 하나의 상한이었고, 이제 파일 하나가 스페이스
+	// 수백 개의 작업 기록·시작/끝 사건을 통째로 싣는다. 이 울타리가 막는 것은 「표 하나를 그대로 붓는」 사고다.
+	maxRowsExport = 200000
+	maxCellChars  = 120 // 한 셀에 원문 수천 자를 담는 길을 막는다
+	minGroup      = 5   // 관측치가 이보다 적은 그룹은 뺀다
 )
 
 var idLike = regexp.MustCompile(`(?i)(^|_)(seq|id|uuid|email|token|key|url|path|name_raw)$`)
 
-func utcNow() string { return time.Now().UTC().Format(time.RFC3339) }
-
-// Snapshot 하나 = 「검증된 정상 버전」. 계산 중에 파일이 바뀌면 안 된다.
-//
-// 48개 CSV 를 갱신하는 도중 계산하면 **어제 사용자 테이블과 오늘 결제 테이블이 섞인
-// 숫자**가 나온다. 오류 없이 틀린 값을 보여 주는 것이 갱신 실패보다 나쁘다. 그래서 계산
-// 전후로 커밋 sha 를 비교하고, 달라졌으면 그 결과를 버린다.
+// Snapshot 하나 = 가공할 스냅샷 한 벌. 받아 오는 일(pull)은 이제 Actions 의 checkout 이 하고, 이
+// 프로그램은 네트워크 없이(unshare -n) 읽기만 한다.
 type Snapshot struct {
 	Repo   string
 	Data   string
 	duckdb string
-	// pull 이 한 시간마다 뒤에서도 도니(main.go) 이 셋은 잠그고 읽고 쓴다.
-	mu       sync.Mutex
-	pullNote string
-	pulledAt string
-	running  chan struct{} // 도는 pull 이 끝나면 닫힌다. 없으면 nil
-	// 계산(읽기)과 새 데이터로 바꿔 끼우기(쓰기)가 겹치지 않게. 받기(fetch)는 작업 폴더를 안
-	// 건드려서 잠그지 않는다 — 몇 분이 걸려도 그동안 계산은 옛 데이터로 돈다.
-	data sync.RWMutex
 }
 
-func NewSnapshot(repo string) (*Snapshot, error) {
+func NewSnapshot(repo, duck string) (*Snapshot, error) {
 	abs, err := filepath.Abs(repo)
 	if err != nil {
 		return nil, err
 	}
 	data := filepath.Join(abs, "data")
 	if _, err := os.Stat(filepath.Join(data, "manifest.json")); err != nil {
-		return nil, fmt.Errorf("스냅샷 폴더를 못 찾았습니다: %s\n  `data/manifest.json` 이 있는 폴더를 --repo 로 주세요", data)
+		return nil, fmt.Errorf("스냅샷 폴더를 못 찾았습니다: %s\n  `data/manifest.json` 이 있는 폴더를 --snapshot 으로 주세요", data)
 	}
-	duck, err := ensureDuckDB()
-	if err != nil {
+	// 경로가 SQL 문자열 안에 그대로 들어간다(read_csv_auto('…')). 따옴표가 있으면 SQL 이 깨진다.
+	if strings.ContainsRune(data, '\'') {
+		return nil, errors.New("스냅샷 경로에 작은따옴표가 있습니다 — 다른 폴더로 옮겨 주세요")
+	}
+	if duck == "" {
+		if duck, err = ensureDuckDB(); err != nil {
+			return nil, err
+		}
+	} else if duck, err = filepath.Abs(duck); err != nil {
 		return nil, err
 	}
-	return &Snapshot{Repo: abs, Data: data, duckdb: duck, pullNote: "안 함"}, nil
+	return &Snapshot{Repo: abs, Data: data, duckdb: duck}, nil
 }
 
-// -- git ------------------------------------------------------------
+// -- git (읽기만) ----------------------------------------------------
 
-// zip 으로 받은 폴더를 git 으로 바꿀 때 붙이는 원격. 비공개라 각자 PC 의 GitHub 로그인으로 받는다 —
-// 바이너리에 토큰을 넣지 않는다(tests/test_agent_stays_local.py).
-const snapshotRemote = "https://github.com/est-perso/perso-data-snapshot.git"
-
-// 받기 상한. 예전에는 pull 전체가 2분이었고, 그러면 **며칠 밀린 PC 는 영영 못 받았다** — 2분에 끊기면
-// git 은 받던 것을 버리고 다음 회차에 처음부터 다시 받는다. 뒤에서 돌므로 길게 둔다.
-const fetchLimit = 30 * time.Minute
-
-func (s *Snapshot) git(args ...string) (int, string) {
-	return s.gitFor(2*time.Minute, args...)
-}
-
-func (s *Snapshot) gitFor(limit time.Duration, args ...string) (int, string) {
-	ctx, cancel := context.WithTimeout(context.Background(), limit)
+func (s *Snapshot) git(args ...string) (string, error) {
+	// zip 으로 받은 폴더는 git 이 아니다. 그때 `-C` 는 **위 폴더의 저장소**를 찾아가 엉뚱한 커밋을 댄다.
+	if _, err := os.Stat(filepath.Join(s.Repo, ".git")); err != nil {
+		return "", err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
-	// core.longpaths: 윈도우의 260자 경로 한도. 스냅샷을 깊은 폴더(OneDrive · 압축 두 겹)에 두면 받은 팩
-	// 파일 이름이 넘는다(「Filename too long」, 실측). 다른 OS 에서는 무시되는 설정이다.
-	cmd := exec.CommandContext(ctx, "git", append([]string{"-c", "core.longpaths=true", "-C", s.Repo}, args...)...)
-	// 보이지 않는 터미널 프롬프트에서 멈추지 않게. 윈도우의 로그인 창(Git Credential Manager)은 이
-	// 값과 무관하게 뜬다(GCM 은 이 값을 터미널 프롬프트에만 쓴다) — 그 창이 처음 한 번의 GitHub 로그인이다.
-	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
-	out, err := cmd.CombinedOutput()
-	text := strings.TrimSpace(string(out))
-	if err == nil {
-		return 0, text
-	}
-	if ctx.Err() != nil {
-		return 124, text
-	}
-	var ee *exec.ExitError
-	if errors.As(err, &ee) {
-		return ee.ExitCode(), text
-	}
-	return 127, err.Error()
+	out, err := exec.CommandContext(ctx, "git", append([]string{"-C", s.Repo}, args...)...).Output()
+	return strings.TrimSpace(string(out)), err
 }
 
 func (s *Snapshot) Commit() string {
-	if code, out := s.git("rev-parse", "--short", "HEAD"); code == 0 && out != "" {
+	if out, err := s.git("rev-parse", "--short", "HEAD"); err == nil && out != "" {
 		return strings.Fields(out)[0]
 	}
 	return "(git 아님)"
 }
 
 func (s *Snapshot) CommittedAt() string {
-	if code, out := s.git("log", "-1", "--format=%cI"); code == 0 && out != "" {
-		return out
-	}
-	return ""
+	out, _ := s.git("log", "-1", "--format=%cI")
+	return out
 }
 
-// PullWait — pull 을 시작하고(이미 돌고 있으면 그것을) 최대 `wait` 만큼 기다린다. 다 못 기다리면
-// pull 은 뒤에서 계속되고, 화면의 `pull:` 이 「진행 중」이라 적는다.
-func (s *Snapshot) PullWait(wait time.Duration) {
-	s.mu.Lock()
-	if s.running == nil {
-		done := make(chan struct{})
-		s.running = done
-		go func() {
-			s.pull()
-			s.mu.Lock()
-			s.running = nil
-			s.mu.Unlock()
-			close(done)
-		}()
-	}
-	done := s.running
-	s.mu.Unlock()
-	select {
-	case <-done:
-	case <-time.After(wait):
-	}
-}
-
-// pull 은 **실패해도 계속한다** — 이전 데이터로 서비스하고 사유를 남긴다.
+// snapshotAt — manifest 의 generated_at. 없으면 커밋 시각, 그것도 없으면 지금.
 //
-// `git pull --ff-only` 를 안 쓴다. 이 폴더는 발행된 스냅샷의 **사본**이라 여기서 바뀐 것은 전부
-// 사고다(엑셀로 연 CSV 를 저장, 끊긴 pull 이 반쯤 바꿔 둔 파일). pull 은 그런 폴더에서 영영
-// 「로컬 변경이 덮어써집니다」로 멈췄다. 대신 받아서(fetch) 발행된 것과 **똑같이 맞춘다**(reset).
-// 추적하지 않는 파일(사람이 옆에 둔 것)은 안 건드린다.
-func (s *Snapshot) pull() {
-	gitDir := filepath.Join(s.Repo, ".git")
-	if _, err := os.Stat(gitDir); err != nil {
-		if !strings.HasPrefix(strings.ToLower(filepath.Base(s.Repo)), "perso-data-snapshot") {
-			s.setPull("git 저장소가 아닙니다 (시험용 폴더)", false)
-			return
-		}
-		// GitHub 의 「Download ZIP」으로 받은 폴더 — 제자리에서 git 으로 바꾼다. 그래야 다음부터 받는다.
-		if code, out := s.git("init", "-q"); code != 0 {
-			s.setPull(pullFailure(code, out), true)
-			return
-		}
-		if code, out := s.git("remote", "add", "origin", snapshotRemote); code != 0 {
-			s.setPull(pullFailure(code, out), true)
-			return
-		}
-		log.Printf("zip 으로 받은 스냅샷을 git 으로 바꿉니다: %s", s.Repo)
+// 「지금」은 벽시계가 아니라 이 값이다. 스냅샷이 사흘 묵었으면 「최근 30일」도 그 시각 기준으로
+// 밀린다 — 안 그러면 스냅샷이 며칠 안 바뀐 날 「30일 무활동」이 저절로 생긴다.
+func (s *Snapshot) snapshotAt() time.Time {
+	var m struct {
+		GeneratedAt string `json:"generated_at"`
 	}
-	for _, lock := range clearStaleLocks(gitDir) {
-		log.Printf("끊긴 git 작업이 남긴 잠금을 지웠습니다: %s", lock)
-	}
-
-	branch := "main"
-	if code, out := s.git("rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"); code == 0 {
-		if _, b, ok := strings.Cut(out, "/"); ok && b != "" {
-			branch = b
-		}
-	}
-	s.setPull("진행 중 — 받는 중입니다 (GitHub 로그인 창이 떠 있으면 로그인하세요)", false)
-	// **--depth=1**: 필요한 것은 최신 한 벌뿐이다. 없으면 며칠 밀린 PC 가 그 사이의 모든 판본을 받는다.
-	code, out := s.gitFor(fetchLimit, "fetch", "--depth=1", "--no-tags", "origin", branch)
-	if code != 0 {
-		s.setPull(pullFailure(code, out), true)
-		return
-	}
-	_, head := s.git("rev-parse", "HEAD")
-	_, target := s.git("rev-parse", "FETCH_HEAD")
-	if head == target {
-		// 같은 판본이어도 파일이 어긋났으면(엑셀 저장 · 지난번에 다 못 바꾼 파일) 맞춘다.
-		if code, dirty := s.git("status", "--porcelain", "--untracked-files=no"); code == 0 && dirty == "" {
-			s.setPull("성공", true)
-			return
-		}
-	}
-	s.data.Lock()
-	code, out = s.gitFor(5*time.Minute, "reset", "--hard", "-q", "FETCH_HEAD")
-	s.data.Unlock()
-	if code != 0 {
-		s.setPull(pullFailure(code, out), true)
-		return
-	}
-	// **성공에는 사유를 안 붙인다.** 「어느 데이터를 보고 있나」는 옆의 커밋 sha 와 기준 시각이 말한다.
-	s.setPull("성공", true)
-}
-
-// clearStaleLocks — 끊긴 git 작업(창을 닫음 · 절전 · 상한)이 남긴 `*.lock`. 남아 있으면 그 뒤의 모든
-// pull 이 「index.lock: File exists」로 실패한다(재현됨). 10분 넘은 것만 지운다 — 살아 있는 git 작업은
-// 잠금을 몇 초만 쥔다.
-func clearStaleLocks(gitDir string) []string {
-	var removed []string
-	cutoff := time.Now().Add(-10 * time.Minute)
-	_ = filepath.WalkDir(gitDir, func(p string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return nil
-		}
-		if d.IsDir() {
-			if d.Name() == "objects" {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if !strings.HasSuffix(d.Name(), ".lock") {
-			return nil
-		}
-		if info, err := d.Info(); err == nil && info.ModTime().Before(cutoff) && os.Remove(p) == nil {
-			removed = append(removed, p)
-		}
-		return nil
-	})
-	return removed
-}
-
-// pullFailure — git 의 실패 문장을 **할 일**로 바꾼다. 원문 첫 줄은 괄호로 남긴다(무엇이었는지 짚을 수 있게).
-func pullFailure(code int, out string) string {
-	first := strings.TrimSpace(strings.SplitN(out, "\n", 2)[0])
-	if r := []rune(first); len(r) > 160 {
-		first = string(r[:160]) + "…"
-	}
-	low := strings.ToLower(out)
-	has := func(needles ...string) bool {
-		for _, n := range needles {
-			if strings.Contains(low, n) {
-				return true
+	if b, err := os.ReadFile(filepath.Join(s.Data, "manifest.json")); err == nil {
+		if json.Unmarshal(b, &m) == nil {
+			if t, err := time.Parse(time.RFC3339Nano, m.GeneratedAt); err == nil {
+				return t
 			}
 		}
-		return false
 	}
-	var todo string
-	switch {
-	case code == 127:
-		todo = "git 이 없습니다 — Windows 는 git-scm.com 에서 Git 을 설치하고, Mac 은 터미널에서 xcode-select --install"
-	case code == 124:
-		todo = "시간 안에 다 받지 못했습니다 — 네트워크·VPN 을 확인하세요. 다음 회차에 다시 받습니다"
-	case has("could not read username", "authentication failed", "terminal prompts disabled",
-		"repository not found", "saml", "error: 403", "invalid username or password",
-		"permission denied (publickey)", "logon failed"):
-		todo = "GitHub 로그인이 필요합니다 — 이 폴더에서 터미널로 git pull 을 한 번 하세요(로그인 창이 뜨면 로그인). " +
-			"est-perso 조직이 SSO 를 쓰면 토큰의 SSO 승인도 필요합니다"
-	case has("could not resolve host", "failed to connect", "timed out", "connection was reset",
-		"connection reset", "ssl", "schannel", "proxy"):
-		todo = "GitHub 에 닿지 못했습니다 — 네트워크·VPN·프록시를 확인하세요"
-	case has("unable to unlink", "permission denied", "invalid argument", "being used by another process"):
-		todo = "일부 파일을 못 바꿨습니다 — 엑셀 등으로 연 CSV 를 닫으면 다음 받기에서 마저 바뀝니다"
-	case has(".lock", "file exists"):
-		todo = "다른 git 작업이 이 폴더를 쓰고 있습니다 — 다음 받기에서 이어집니다"
-	default:
-		todo = fmt.Sprintf("실패(코드 %d)", code)
+	if t, err := time.Parse(time.RFC3339, s.CommittedAt()); err == nil {
+		return t
 	}
-	if first == "" {
-		return todo
-	}
-	return todo + " (" + first + ")"
-}
-
-func (s *Snapshot) setPull(note string, stamp bool) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.pullNote = note
-	if stamp {
-		s.pulledAt = utcNow()
-	}
-}
-
-func (s *Snapshot) pullState() (string, string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.pullNote, s.pulledAt
-}
-
-type asOf struct {
-	Commit      string `json:"commit"`
-	CommittedAt string `json:"committed_at"`
-	PulledAt    string `json:"pulled_at"`
-	Pull        string `json:"pull"`
-	Stale       bool   `json:"stale"`
-}
-
-func (s *Snapshot) AsOf() asOf {
-	committed := s.CommittedAt()
-	// 낡았는지는 **데이터의 시각**(manifest 의 generated_at)으로 잰다. 커밋 시각은 그 근사치이고
-	// git 저장소가 아닌 폴더에는 아예 없다 — 그때 「낡음」으로 떨어지면 시험 폴더가 늘 빨갛다.
-	stale := time.Since(s.snapshotAt()) > 36*time.Hour
-	note, pulled := s.pullState()
-	return asOf{Commit: s.Commit(), CommittedAt: committed, PulledAt: pulled,
-		Pull: note, Stale: stale}
-}
-
-func (s *Snapshot) FolderMB() int64 {
-	var total int64
-	_ = filepath.WalkDir(s.Repo, func(_ string, d fs.DirEntry, err error) error {
-		if err != nil || d.IsDir() {
-			return nil
-		}
-		if info, err := d.Info(); err == nil {
-			total += info.Size()
-		}
-		return nil
-	})
-	return total / (1024 * 1024)
+	return time.Now().UTC()
 }
 
 // -- 계산 -----------------------------------------------------------
 type metricResult struct {
-	Metric     string         `json:"metric"`
-	Label      string         `json:"label"`
-	Params     map[string]int `json:"params"`
-	AsOf       asOf           `json:"as_of"`
-	Columns    []string       `json:"columns"`
-	Rows       [][]any        `json:"rows"`
-	Suppressed int            `json:"suppressed_groups"`
-	ComputedMS int64          `json:"computed_ms"`
+	Metric     string   `json:"metric"`
+	Label      string   `json:"label"`
+	Columns    []string `json:"columns"`
+	Rows       [][]any  `json:"rows"`
+	Suppressed int      `json:"suppressed_groups"`
 }
 
 func (s *Snapshot) RunMetric(m *metric, months int) (*metricResult, error) {
@@ -341,52 +127,44 @@ func (s *Snapshot) RunMetric(m *metric, months int) (*metricResult, error) {
 			return nil, fmt.Errorf("식별자성 컬럼이 결과에 있습니다: %s", c)
 		}
 	}
-
-	before := s.Commit()
-	t0 := time.Now()
-
 	sql := strings.ReplaceAll(m.SQL, "{{d}}", filepath.ToSlash(s.Data))
 	sql = strings.ReplaceAll(sql, "{{months}}", fmt.Sprint(months))
 	raw, err := s.query(sql)
 	if err != nil {
 		return nil, err
 	}
-
-	if after := s.Commit(); before != after {
-		return nil, errors.New("계산 중에 스냅샷이 바뀌었습니다 — 결과를 버립니다. 다시 시도하세요")
-	}
-
 	rows, suppressed, err := applyContract(m.Cols, raw)
 	if err != nil {
 		return nil, err
 	}
-	params := map[string]int{}
-	if m.HasMonth {
-		params["months"] = months
-	}
-	return &metricResult{Metric: m.Name, Label: m.Label, Params: params, AsOf: s.AsOf(),
-		Columns: m.Cols, Rows: rows, Suppressed: suppressed,
-		ComputedMS: time.Since(t0).Milliseconds()}, nil
+	return &metricResult{Metric: m.Name, Label: m.Label, Columns: m.Cols, Rows: rows, Suppressed: suppressed}, nil
 }
 
+// quoted — DuckDB 오류 문구 속 따옴표 안. CSV 파싱·형변환 오류는 문제가 된 값을 그대로 싣는다 — 그것이 곧
+// 원본이고, 가공 로그는 Actions 화면에 남는다.
+var quoted = regexp.MustCompile(`'[^']*'|"[^"]*"`)
+
 // query 는 DuckDB CLI 를 **별개 프로세스**로 부른다. CGO 를 안 쓰므로 이 바이너리가
-// 윈도우·맥으로 그대로 크로스 컴파일된다.
+// 리눅스·윈도우·맥으로 그대로 크로스 컴파일된다.
 func (s *Snapshot) query(sql string) ([]map[string]json.RawMessage, error) {
 	// `~/.duckdbrc` 를 상속하지 않고(-init os.DevNull), 확장 자동 설치·로딩을 끈다 —
-	// DuckDB 는 파일·네트워크 접근과 확장 로딩 능력이 있다.
-	script := "SET autoinstall_known_extensions=false;\nSET autoload_known_extensions=false;\n" + sql + ";\n"
-	// 새 데이터로 바꿔 끼우는 동안에는 기다린다 — 반쯤 바뀐 CSV 를 읽지 않게.
-	s.data.RLock()
-	defer s.data.RUnlock()
+	// DuckDB 는 파일·네트워크 접근과 확장 로딩 능력이 있다. 진행 막대는 표준 출력(JSON)에 섞이지 않게 끈다.
+	script := "SET autoinstall_known_extensions=false;\nSET autoload_known_extensions=false;\n" +
+		"SET enable_progress_bar=false;\n" + sql + ";\n"
 	cmd := exec.Command(s.duckdb, "-json", "-init", os.DevNull, "-batch")
 	cmd.Stdin = strings.NewReader(script)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	if err := cmd.Run(); err != nil {
-		// **DuckDB 의 오류 문구를 화면으로 보내지 않는다.** CSV 파싱 오류는 문제가 된
-		// 행을 그대로 싣는다 — 그것이 곧 원본이다. 자세한 것은 이 PC 의 로그에만 남는다.
-		log.Printf("duckdb 실패: %v — %s", err, strings.TrimSpace(stderr.String()))
-		return nil, errors.New("계산에 실패했습니다 (자세한 사유는 에이전트 로그에 있습니다)")
+		// **오류 문구를 통째로 남기지 않는다** — 첫 줄만, 따옴표 안은 지우고. 무엇이 틀렸는지 자세히 보려면
+		// 스냅샷이 있는 PC 에서 같은 SQL 을 DuckDB 로 돌린다.
+		first, _, _ := strings.Cut(strings.TrimSpace(stderr.String()), "\n")
+		first = quoted.ReplaceAllString(first, "'…'")
+		if r := []rune(first); len(r) > 200 {
+			first = string(r[:200]) + "…"
+		}
+		log.Printf("duckdb 실패: %v — %s", err, first)
+		return nil, errors.New("계산에 실패했습니다 (사유는 바로 위 로그 한 줄)")
 	}
 	body := bytes.TrimSpace(stdout.Bytes())
 	if len(body) == 0 {
@@ -400,7 +178,7 @@ func (s *Snapshot) query(sql string) ([]map[string]json.RawMessage, error) {
 	return out, nil
 }
 
-// applyContract — **나갈 수 있는 모양인지 기계가 잰다.**
+// applyContract — **나갈 수 있는 모양인지 기계가 잰다.** (지표 한 장)
 func applyContract(cols []string, raw []map[string]json.RawMessage) ([][]any, int, error) {
 	if len(raw) > maxRows {
 		return nil, 0, fmt.Errorf("집계가 %d행입니다 (상한 %d) — 집계가 아닙니다", len(raw), maxRows)
@@ -488,12 +266,58 @@ func cell(v json.RawMessage) (any, error) {
 	return decoded, nil
 }
 
-// ── DuckDB CLI — 함께 실려 오고, 첫 실행에 풀린다 ────────────────────────
-// **받아오지 않는다.** 이 회사 망은 HTTPS 를 재서명하는 어플라이언스를 지나므로 첫 실행
-// 다운로드는 이미 한 번 깨졌다(pip 가 그 자리에서 죽었다). 그래서 zip 째로 안에 넣는다.
+// checkContract — 나갈 파일 하나를 통째로 걸으며 계약을 잰다. `allow` 에 있는 키만 식별자성
+// 이름을 쓸 수 있다(화면이 계약의 스페이스를 찾는 space_seq).
+func checkContract(data []byte, allow map[string]bool) error {
+	var v any
+	d := json.NewDecoder(bytes.NewReader(data))
+	d.UseNumber()
+	if err := d.Decode(&v); err != nil {
+		return errors.New("결과를 읽지 못했습니다")
+	}
+	return walkContract(v, allow)
+}
+
+func walkContract(v any, allow map[string]bool) error {
+	switch x := v.(type) {
+	case map[string]any:
+		for k, child := range x {
+			if !allow[k] && idLike.MatchString(k) {
+				return fmt.Errorf("식별자성 컬럼이 결과에 있습니다: %s", k)
+			}
+			if err := walkContract(child, allow); err != nil {
+				return err
+			}
+		}
+	case []any:
+		if len(x) > maxRowsExport {
+			return fmt.Errorf("배열이 %d줄입니다 (상한 %d) — 집계가 아닙니다", len(x), maxRowsExport)
+		}
+		for _, child := range x {
+			if err := walkContract(child, allow); err != nil {
+				return err
+			}
+		}
+	case string:
+		if len(x) > maxCellChars {
+			return fmt.Errorf("셀이 %d자입니다 (상한 %d) — 원문일 수 있습니다", len(x), maxCellChars)
+		}
+	}
+	return nil
+}
+
+// ── DuckDB CLI ───────────────────────────────────────────────────────────
+// 윈도우·맥 빌드는 zip 째로 싣고 첫 실행에 푼다(손으로 돌려 볼 때). 리눅스(가공 워크플로)는 싣지 않는다 —
+// 워크플로가 이 버전을 받아 체크섬(duckdb-linux-amd64.sha256)을 맞춘 뒤 --duckdb 로 넘긴다.
 const duckdbVersion = "1.4.1"
 
 func ensureDuckDB() (string, error) {
+	if len(duckdbZip) == 0 {
+		if p, err := exec.LookPath("duckdb"); err == nil {
+			return p, nil
+		}
+		return "", errors.New("DuckDB CLI 를 못 찾았습니다 — --duckdb 로 경로를 주거나 PATH 에 duckdb 를 두세요 (버전 " + duckdbVersion + ")")
+	}
 	cache, err := os.UserCacheDir()
 	if err != nil {
 		cache = os.TempDir()

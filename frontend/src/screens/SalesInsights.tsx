@@ -2,15 +2,16 @@ import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { getJSON } from "../lib/api";
-import { AGENT_DOWNLOADS, useAgent, useSalesInsight } from "../lib/agent";
+import { stamp, useSalesInsight } from "../lib/usageData";
+import { useUsageSource } from "../lib/usageSource";
 import { DataTable, type Column } from "../ui/DataTable";
 import { parseSpaceSeqs } from "./won/usage";
 import type { ListData } from "./won/shared";
 
-/** 영업 인사이트 — 이 PC 의 스냅샷(제품 전체)에서 **우리가 모르는 사람 중 눈에 띄는 스페이스**와
- *  제품 전체 흐름을 본다 (2026-09-15 운영자 요청). 값은 전부 에이전트가 이 PC 에서 세고, 서버로는
- *  한 바이트도 안 간다. 서버에서 오는 것은 우리 수주 고객의 space_seq 목록뿐 — 그것으로 「우리
- *  고객」을 걸러낸다.
+/** 영업 인사이트 — 스냅샷(제품 전체)에서 **우리가 모르는 사람 중 눈에 띄는 스페이스**와 제품 전체
+ *  흐름을 본다 (2026-09-15 운영자 요청). 값은 전부 매일 가공된 집계(`sales.json`)를 브라우저가 GitHub 에서
+ *  직접 받은 것이고, 서버로는 한 바이트도 안 간다. 서버에서 오는 것은 우리 수주 고객의 space_seq 목록과
+ *  그 집계를 받을 열쇠뿐 — space_seq 목록으로 「우리 고객」을 걸러낸다.
  *
  *  「고객 인사이트」(손이 가야 하는 리드 목록 · 갱신 임박)가 있던 자리다 — 운영자 지시로 전부 뺐다.
  */
@@ -121,8 +122,8 @@ function Kpi({ label, value, sub, accent }: { label: string; value: React.ReactN
 }
 
 export function SalesInsights() {
-  const agent = useAgent();
-  const sales = useSalesInsight<Sales>(agent.pair);
+  const usageSource = useUsageSource();
+  const sales = useSalesInsight<Sales>(usageSource.source);
   // 우리 수주 고객의 space_seq — 서버에서 오는 유일한 것. 이걸로 「우리 기록 없음」을 가른다.
   const { data: won } = useQuery({ queryKey: ["won-customers"], queryFn: () => getJSON<ListData>("/api/ui/won-customers") });
   const ours = useMemo(() => {
@@ -139,7 +140,6 @@ export function SalesInsights() {
   const [includeOurs, setIncludeOurs] = useState(false);
   const [limit, setLimit] = useState(60);
   const d = sales.data?.data;
-  const isMac = /Mac/i.test(navigator.platform);
 
   const rows = useMemo(() => {
     if (!d?.spaces) return [];
@@ -190,7 +190,7 @@ export function SalesInsights() {
         </span>) },
   ];
 
-  const stamp = sales.data?.snapshot_at?.slice(0, 16).replace("T", " ");
+  const asOf = sales.data && stamp(sales.data.snapshot_at);
   const tiers = (d?.tiers_30d ?? []).map((t) => ({ label: `${TIER[t.tier] ?? t.tier}${t.ent ? " (엔터프라이즈 연결)" : ""}`, n: t.spaces, sub: `내보내기 ${num(t.exports)} · 크레딧 ${num(t.credits)}` }));
   const creditsByMonth = useMemo(() => {
     const map = new Map<string, Record<string, number | string>>();
@@ -216,22 +216,22 @@ export function SalesInsights() {
           <h1 className="page-title">영업 인사이트</h1>
           <div className="t-sm td-subtle" style={{ marginTop: 4 }}>
             제품 전체 스냅샷에서 — 우리가 모르는 사람 중 눈에 띄는 스페이스와 전체 흐름.
-            {stamp && <> 데이터 기준 <strong>{stamp}</strong>.</>}
+            {asOf && <> 데이터 기준 <strong>{asOf}</strong>.</>}
           </div>
         </div>
       </div>
 
-      {!agent.busy && !agent.live && (
+      {(usageSource.configured === false || usageSource.problem) && (
         <div className="card card--warn mb-gap">
-          <strong>이 PC 에 데이터 에이전트가 없거나 꺼져 있습니다.</strong>
+          <strong>사용 데이터가 연결돼 있지 않습니다.</strong>
           <div className="t-sm td-subtle" style={{ marginTop: 6 }}>
-            이 화면의 값은 전부 이 PC 의 스냅샷에서 계산됩니다 — 서버는 그 데이터를 모릅니다.{" "}
-            <a href={isMac ? AGENT_DOWNLOADS.mac : AGENT_DOWNLOADS.windows}>에이전트 내려받기 ({isMac ? "Mac" : "Windows"})</a>
-            {agent.problem && <> · 사유: {agent.problem}</>}
+            이 화면의 값은 전부 매일 가공된 스냅샷을 브라우저가 GitHub 에서 직접 받아 그립니다 — 서버는 그 데이터를 모릅니다.{" "}
+            <Link to="/data">「데이터 분석」</Link> 화면을 보세요.
+            {usageSource.problem && <> · 사유: {usageSource.problem}</>}
           </div>
         </div>
       )}
-      {agent.live && sales.busy && <div className="card mb-gap">계산 중… (스냅샷 전체를 한 번 훑습니다)</div>}
+      {(usageSource.busy || sales.busy) && <div className="card mb-gap">불러오는 중…</div>}
       {sales.problem && <div className="card card--warn mb-gap">가져오지 못했습니다: {sales.problem}</div>}
 
       {d && (

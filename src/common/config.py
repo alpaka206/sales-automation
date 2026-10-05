@@ -195,6 +195,17 @@ class Settings(BaseSettings):
     # 과거 입금액은 이 값을 쓰지 않습니다(결제 행에 그날 환율이 박혀 있습니다).
     MRR_FX_RATE: float = 1380.0
 
+    # ----- 사용 데이터 (수주 고객 사용 현황 · 데이터 분석, 2026-10-01) -----
+    # 스냅샷을 가공한 JSON 이 사는 **비공개** 레포(`owner/name`)와, 그 레포 하나의 Contents 읽기
+    # 전용 fine-grained 토큰. 값은 Render 대시보드에만 둡니다 — 이 저장소는 공개라 여기·render.yaml·
+    # .env.example 에 적힌 값은 그대로 공개됩니다.
+    # **서버는 이 값으로 아무것도 받지 않습니다.** 로그인한 브라우저에 건네기만 하고
+    # (`/api/ui/usage-source`), 브라우저가 GitHub 에서 직접 받아 그립니다 — 데이터는 이 서버도 DB 도
+    # 안 지납니다. 대가로 로그인한 사람은 개발자 도구에서 토큰을 볼 수 있고, 운영자가 그것을
+    # 받아들였습니다(읽기 전용 · 그 레포 하나). 둘 중 하나라도 비면 화면은 「연결 안 됨」입니다.
+    USAGE_DATA_REPO: str = ""
+    USAGE_DATA_TOKEN: str = ""
+
     # ----- Approval -----
     SLACK_ENABLED: bool = False
     APPROVAL_CHANNEL: Literal["slack", "none"] = "none"

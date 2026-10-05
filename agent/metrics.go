@@ -1,11 +1,10 @@
 package main
 
-// **화면은 SQL 을 보내지 못한다.** 이름과 인자만 보내고, 무엇이 나갈지는 여기서 정한다.
-// 화면에 닿을 수 있는 누구든(권한을 받아낸 악성 페이지 · 같은 PC 의 다른 프로그램) SQL 을
-// 보낼 수 있으면 원본을 그대로 빼낼 수 있다.
+// 「데이터 분석」 화면의 전역 지표 셋 (metrics.json). **무엇이 나갈지는 여기서 정한다** — 이름·라벨·
+// 컬럼·SQL 이 한자리에 있다.
 //
 // `Cols` 를 **적어 두는** 이유: 나갈 컬럼이 코드에 보여야 식별자 검사가 눈으로도 읽힌다.
-// 적힌 것과 실제로 나온 것이 다르면 `runMetric` 이 거절한다 — SQL 만 고치고 이 줄을 안
+// 적힌 것과 실제로 나온 것이 다르면 `RunMetric` 이 거절한다 — SQL 만 고치고 이 줄을 안
 // 고치면 그 자리에서 걸린다.
 
 const (
@@ -52,21 +51,4 @@ var metrics = []metric{
 		      WHERE try_cast(start_date AS TIMESTAMP) >= (current_date - INTERVAL '{{months}} months')
 		      GROUP BY 1, 2 HAVING month IS NOT NULL ORDER BY 1 DESC, 3 DESC`,
 	},
-}
-
-func metricByName(name string) *metric {
-	for i := range metrics {
-		if metrics[i].Name == name {
-			return &metrics[i]
-		}
-	}
-	return nil
-}
-
-func metricNames() []string {
-	out := make([]string, 0, len(metrics))
-	for _, m := range metrics {
-		out = append(out, m.Name)
-	}
-	return out
 }

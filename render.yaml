@@ -143,6 +143,15 @@ services:
       - key: GOOGLE_TOKEN_ENCRYPTION_KEY # delegated refresh-token encryption; separate from session/API secrets
         generateValue: true
 
+      # ----- 사용 데이터 (수주 고객 사용 현황 · 데이터 분석, 2026-10-01) -----
+      # 가공 레포(비공개)와 그 레포 하나만 읽는 fine-grained 토큰(Contents: Read-only).
+      # **값은 대시보드에만** — 이 파일은 공개 저장소에 있습니다. 서버는 이 값으로 아무것도 받지
+      # 않고 로그인한 브라우저에 건네기만 합니다(`/api/ui/usage-source`). 비우면 화면이 「연결 안 됨」.
+      - key: USAGE_DATA_REPO           # owner/name
+        sync: false
+      - key: USAGE_DATA_TOKEN
+        sync: false
+
       # ----- Auto-generated on first deploy -----
       - key: INTERNAL_API_TOKEN
         generateValue: true

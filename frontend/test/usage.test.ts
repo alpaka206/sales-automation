@@ -307,3 +307,23 @@ describe("자동 대조 — 무엇을 완료 처리할지", () => {
     expect(plan.payments).toEqual([{ id: 20, paidOn: "2026-03-10", amount: 4_890_600, note: null }]);
   });
 });
+
+describe("가공 범위 밖의 번호", () => {
+  const index = (rows: SpaceSummary[]) => ({
+    bySpace: new Map(rows.map((s) => [s.space_seq, s])), failRateAll: null, creditsFrom: CREDITS_FROM,
+    snapshotAt: AS_OF, snapshotStamp: "", stale: false,
+  });
+  it("일부만 범위 밖이면 숫자는 범위 안의 것으로 내고, 빠진 번호를 들고 선다 — 조용히 줄지 않는다", async () => {
+    const { usageFor } = await import("../src/screens/won/useUsage");
+    const u = usageFor(contract({ space_seq: "1, 2" }), index([space({ space_seq: 1 })]));
+    expect(u.kind).toBe("ok");
+    expect(u.kind === "ok" && u.missing).toEqual([2]);
+    expect(u.kind === "ok" && u.spaces).toEqual([1, 2]);
+    const all = usageFor(contract({ space_seq: "1" }), index([space({ space_seq: 1 })]));
+    expect(all.kind === "ok" && all.missing).toEqual([]);
+  });
+  it("전부 범위 밖이면 「스냅샷에 없음」(unknown)", async () => {
+    const { usageFor } = await import("../src/screens/won/useUsage");
+    expect(usageFor(contract({ space_seq: "2" }), index([space({ space_seq: 1 })])).kind).toBe("unknown");
+  });
+});

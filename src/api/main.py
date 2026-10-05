@@ -349,6 +349,10 @@ async def conditional_get_middleware(request: Request, call_next):
     response = await call_next(request)
     if response.status_code != 200:
         return response
+    # 「저장하지 마라」고 한 답(`/api/ui/usage-source` 의 읽기 토큰)은 그대로 둔다 — 여기서 `no-cache` 를
+    # 덧붙이면 Cache-Control 이 두 줄이 되고, 어느 쪽이 이기는지는 받는 쪽 해석에 달린다.
+    if "no-store" in response.headers.get("cache-control", ""):
+        return response
 
     body = b"".join([chunk async for chunk in response.body_iterator])
     etag = '"%s"' % hashlib.sha256(body).hexdigest()[:32]

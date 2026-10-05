@@ -3,7 +3,8 @@ import { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { getJSON, postForm } from "../../lib/api";
-import { useAgent, useSpaceMetric } from "../../lib/agent";
+import { useSpaceMetric } from "../../lib/usageData";
+import { useUsageSource } from "../../lib/usageSource";
 import { ActionButton, SubmitButton, useAction } from "../../ui/ActionButton";
 // **타입 목록은 한 곳에서 옵니다** (2026-09-03 운영자 지시). 이 화면은 모달이 아니고
 // 「관련 계약」 칸이 따로 있어 폼 자체는 합치지 않지만, 고르개 목록까지 따로 들고 있으면
@@ -13,14 +14,14 @@ import { CHANNELS, InteractionForm } from "../../ui/InteractionForm";
 import { Modal } from "../../ui/Modal";
 import { DeleteDialog } from "../../ui/DeleteDialog";
 import { Confirm } from "./Confirm";
-import { StatusTags } from "./UsageBits";
+import { OutOfRange, StatusTags } from "./UsageBits";
 import { useAutoReconcile } from "./reconcile";
-import { useEvidence, usageFor, useUsageIndex } from "./useUsage";
+import { useEvidence, usageFor, useUsageIndex, type RowUsage } from "./useUsage";
 import { matchGrants, matchPayments, mergeEvidence, parseSpaceSeqs, type GrantEvidence, type PaymentEvidence } from "./usage";
 import { WonContractForm } from "./WonContractForm";
 import { ContractFields, DealTypeHint, PlanFields, scheduleLabel, useContractDraft } from "./ContractFields";
 import { validate } from "./contractDraft";
-import { CreditUsageSection, JobsSection, MixSection, UsageInsight, type CreditsData } from "./WonUsageSections";
+import { CreditUsageSection, JobsSection, MixSection, UsageInsight } from "./WonUsageSections";
 import {
   RETIRED,
   type Comm, type Contract, type Grant, type History, type ListData, type Options, type Payment, type Row,
@@ -29,8 +30,8 @@ import {
 
 /** 수주 고객 상세 — 목업(`수주관리목업_0806.html` 의 `detailHTML`)의 섹션 그대로. 목업의
  * 8개 중 「갱신 · 비고」가 빠져 일곱 개였고(이관 0073), 2026-09-15 에 사용 현황 셋이 붙어
- * 열 개입니다(`수주고객-사용현황-목업_26.html`). 그 셋은 **이 PC 의 데이터 에이전트**가
- * 답합니다 — 스냅샷 원본도 집계도 서버를 안 지납니다. 같은 날 상단 nav 가 앵커에서
+ * 열 개입니다(`수주고객-사용현황-목업_26.html`). 그 셋은 **가공된 스냅샷**이 답합니다(브라우저가
+ * GitHub 에서 직접 받습니다) — 스냅샷 원본도 집계도 서버를 안 지납니다. 같은 날 상단 nav 가 앵커에서
  * **탭**이 됐습니다 — 고른 섹션 하나만 그립니다.
  *
  * **계약 선택 드롭다운이 이 화면의 축입니다.** 고객은 하나이고 계약이 여럿이라, 2~6번
@@ -47,7 +48,7 @@ const SECTIONS: [string, string][] = [
   ["sec-pay", "결제 · MRR"],
   // 지급과 사용 현황은 한 탭입니다 — 목업의 「크레딧」(2026-09-15 운영자 지시). 순서도 목업대로:
   // 사용 진단 줄 → 지급 현황 카드 → 사용 현황 카드. 지급과 소진은 한 화면에서 맞대 봐야 합니다.
-  // 사용 쪽은 **이 PC 의 데이터 에이전트**가 답합니다(스냅샷 집계). 서버는 이 값을 모릅니다.
+  // 사용 쪽은 **가공된 스냅샷**이 답합니다(브라우저가 GitHub 에서 직접 받습니다). 서버는 이 값을 모릅니다.
   ["sec-credit", "크레딧"],
   ["sec-jobs", "작업 성능"],
   ["sec-mix", "영상 분석"],
@@ -86,8 +87,8 @@ export function WonCustomerDetail() {
   const [removing, setRemoving] = useState(false);
   const [retiring, setRetiring] = useState(false);
 
-  // 사용 현황은 이 PC 의 에이전트에서 옵니다. 지금 고른 계약의 Space ID 만 묻습니다.
-  const agent = useAgent();
+  // 사용 현황은 가공된 스냅샷에서 옵니다(`lib/usageData.ts`). 지금 고른 계약의 Space ID 만 고릅니다.
+  const usageSource = useUsageSource();
 
   // **상단 nav 는 탭입니다** (2026-09-15 운영자 지시 — 「이동이 아니라 그 요소만 보이도록」).
   // 한동안 열 섹션이 한 화면에 이어져 있었고 nav 는 거기로 내려가는 앵커였습니다. 이제 고른
@@ -114,20 +115,21 @@ export function WonCustomerDetail() {
 
   const refresh = () => queryClient.invalidateQueries();
 
-  // 훅은 early return 위에 있어야 합니다. 고른 계약이 아직 없으면 빈 목록이라 안 부릅니다.
+  // 훅은 early return 위에 있어야 합니다. 고른 계약이 아직 없으면 빈 목록이라 계약별 재료는 안 받습니다
+  // (요약은 가공 범위 전체가 파일 하나라 먼저 받아 둡니다).
   const currentForUsage = (data?.contracts ?? []).find((c) => c.seq === pickedSeq)
     ?? data?.active ?? (data?.contracts ?? [])[(data?.contracts ?? []).length - 1] ?? null;
-  const usageIndex = useUsageIndex(agent.pair, parseSpaceSeqs(currentForUsage?.space_seq));
+  const usageIndex = useUsageIndex(usageSource.source, parseSpaceSeqs(currentForUsage?.space_seq));
   // 크레딧 소진은 한 번만 받아 4번(지급 회차마다 소진이 시작됐나)과 5번이 같이 씁니다.
   const creditSpaces = usageIndex.index
     ? parseSpaceSeqs(currentForUsage?.space_seq).filter((s) => usageIndex.index!.bySpace.get(s)?.known)
     : [];
-  const credits = useSpaceMetric<CreditsData>(agent.pair, "credits", creditSpaces);
+  const credits = useSpaceMetric(usageSource.source, "credits", creditSpaces);
   // 이 고객의 **모든** 계약을 맞대어 자동 적용합니다(목록은 활성 계약만 봅니다).
   const allContractSpaces = useMemo(
     () => [...new Set((data?.contracts ?? []).flatMap((c) => parseSpaceSeqs(c.space_seq)))],
     [data?.contracts]);
-  const evidence = useEvidence(agent.pair, allContractSpaces);
+  const evidence = useEvidence(usageSource.source, allContractSpaces);
   useAutoReconcile(data?.contracts ?? [], evidence.index);
 
   if (!data) return <div className="won"><div className="page">불러오는 중…</div></div>;
@@ -137,7 +139,8 @@ export function WonCustomerDetail() {
   const current =
     contracts.find((c) => c.seq === pickedSeq) ?? data.active ?? contracts[contracts.length - 1] ?? null;
   const comms = data.comms ?? [];
-  const usage = usageFor(current, usageIndex.index);
+  // 받는 동안은 「받는 중」 — 그 사이 「연결돼 있지 않습니다」가 깜빡이면 끊긴 줄 압니다.
+  const usage: RowUsage = usageSource.busy || usageIndex.busy ? { kind: "loading" } : usageFor(current, usageIndex.index);
   // 지급 회차 ↔ 스냅샷 소진 묶음. **표시만** — 우리 기록에는 쓰지 않습니다.
   const grantEvidence = current && credits.data && usageIndex.index
     ? matchGrants(current.credit_grants, credits.data.data.buckets ?? [], usageIndex.index.snapshotAt)
@@ -181,6 +184,8 @@ export function WonCustomerDetail() {
           {data.setup_count > 0 && <Tag tone="st-setup">세팅중 계약 {data.setup_count}건</Tag>}
           {/* 사용 상태 — 목록의 열과 같은 배지(사용 수준 · 전망 · 품질). 조용하면 안 뜹니다. 규칙은 usage.ts 의 RULE. */}
           {usage.kind === "ok" && <StatusTags d={usage.diagnosis} />}
+          {/* 계약의 번호 일부가 가공 범위 밖이면 그 번호를 — 아래 세 카드의 숫자가 그만큼 빠진 것이다. */}
+          <OutOfRange usage={usage} />
         </div>
         <div className="secnav" role="tablist">
           {SECTIONS.map(([id, label]) => (
@@ -289,10 +294,10 @@ export function WonCustomerDetail() {
               </>
             )}
             {section === "sec-jobs" && (
-              <JobsSection pair={agent.pair} contract={current} usage={usage}
+              <JobsSection source={usageSource.source} contract={current} usage={usage}
                            failRateAll={usageIndex.index?.failRateAll ?? null} />
             )}
-            {section === "sec-mix" && <MixSection pair={agent.pair} contract={current} usage={usage} />}
+            {section === "sec-mix" && <MixSection source={usageSource.source} contract={current} usage={usage} />}
           </>
         ) : null}
 
@@ -845,7 +850,7 @@ function PlanSection({ contract }: { contract: Contract }) {
  *  「확인 불가」는 오류가 아니라 「증거 없음」이다. */
 function CreditSection({ contract, today, onDone, evidence }: {
   contract: Contract; today: string; onDone: () => void;
-  /** 회차별로 스냅샷에 소진 시작 기록이 있나. 에이전트가 없으면 null 이고 줄이 안 뜹니다. */
+  /** 회차별로 스냅샷에 소진 시작 기록이 있나. 사용 데이터가 연결돼 있지 않으면 null 이고 줄이 안 뜹니다. */
   evidence: Map<number, GrantEvidence> | null;
 }) {
   const grants = contract.credit_grants;
@@ -1161,7 +1166,7 @@ function TerminationSection({ contract, onDone }: { contract: Contract; onDone: 
  *  회차를 닫으며 비고에 적습니다(0120). */
 function PaySection({ contract, today, onDone, evidence }: {
   contract: Contract; today: string; onDone: () => void;
-  /** 회차별 국내 결제 근거(스냅샷). 에이전트가 없거나 원화 계약이 아니면 null. */
+  /** 회차별 국내 결제 근거(스냅샷). 사용 데이터가 연결돼 있지 않거나 원화 계약이 아니면 null. */
   evidence: Map<number, PaymentEvidence> | null;
 }) {
   const payments = contract.payments;

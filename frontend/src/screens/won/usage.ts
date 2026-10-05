@@ -1,6 +1,6 @@
-// 수주 고객의 **사용 진단** — 계약(우리 DB)과 스냅샷 집계(로컬 에이전트)를 브라우저 안에서
-// 맞대어 판정합니다. **순수 함수만 있습니다.** 서버를 부르지 않고, 결과를 어디로도 보내지
-// 않습니다 — 스냅샷 숫자는 이 PC 의 화면에서 끝납니다.
+// 수주 고객의 **사용 진단** — 계약(우리 DB)과 스냅샷 집계(가공 레포, `lib/usageData.ts`)를 브라우저
+// 안에서 맞대어 판정합니다. **순수 함수만 있습니다.** 서버를 부르지 않고, 결과를 어디로도 보내지
+// 않습니다 — 스냅샷 숫자는 이 브라우저의 화면에서 끝납니다.
 //
 // 임계값은 **전부 임시**입니다(요청 문서의 표현 그대로). 운영하며 조정할 값이라 한 곳에
 // 모아 두고, 판정 근거 팝오버가 이 값을 그대로 보여 줍니다.
@@ -16,7 +16,7 @@ export const RULE = {
   leadDays: 2,      // 자동 대조: 예정일 N일 전부터 본다(지난 것은 전부). 그보다 먼 회차는 안 본다 (2026-09-15 운영자)
 };
 
-/** 에이전트 `/v1/spaces/summary` 의 한 스페이스. */
+/** 가공 파일 `summary.json` 의 한 스페이스. */
 export type SpaceSummary = {
   space_seq: number; known: boolean;
   plan_name: string | null; sub_status: string | null;
@@ -208,7 +208,7 @@ export const langName = (code: string) => LANG[code] ?? LANG[code.split("-")[0]]
 export const pairName = (pair: string) => pair.split(" → ").map((c) => langName(c.trim())).join(" → ");
 
 // ── 기간 채우기 ───────────────────────────────────────────────────────────
-// 에이전트는 **소진이 있던 기간만** 돌려줍니다(GROUP BY). 화면은 빈 달을 0 으로 세워야
+// 가공 데이터에는 **소진이 있던 기간만** 있습니다(GROUP BY). 화면은 빈 달을 0 으로 세워야
 // 「6월에는 안 썼다」가 보입니다 — 막대가 없는 것과 0 인 것은 다른 이야기입니다.
 export type PeriodRow = { period: string; used: number };
 
@@ -230,7 +230,7 @@ export function fillMonths(rows: PeriodRow[], from: string | null, to: string): 
   return out;
 }
 
-/** 스냅샷 날짜가 속한 주(월요일 시작)까지 최근 `n` 주. 에이전트의 주 키도 월요일입니다(date_trunc('week')). */
+/** 스냅샷 날짜가 속한 주(월요일 시작)까지 최근 `n` 주. 가공 데이터의 주 키도 월요일입니다(date_trunc('week')). */
 export function fillWeeks(rows: PeriodRow[], to: string, n = 16): PeriodRow[] {
   const have = new Map(rows.map((r) => [r.period, r.used]));
   const d = new Date(Date.UTC(+to.slice(0, 4), +to.slice(5, 7) - 1, +to.slice(8, 10)));
@@ -258,7 +258,7 @@ export const LENGTH_BINS = ["5분 미만", "5–15분", "15–30분", "30분 이
 // 스냅샷에 지급 원장은 없다. 있는 것은 「어느 지급 묶음(credit_seq)에서 언제부터 얼마나
 // 썼나」다. 그래서 우리가 적어 둔 지급 회차마다 **그 날 이후로 엔터프라이즈 묶음의 소진이
 // 시작됐는지**를 본다 — 지급이 있었다는 증거이지 지급액은 아니다. **표시만 한다.** 우리
-// 기록(`contract_credit_grants`)에는 쓰지 않는다 — 로컬 데이터는 서버로 안 간다.
+// 기록(`contract_credit_grants`)에는 쓰지 않는다 — 스냅샷 데이터는 서버로 안 간다.
 export type BucketLite = { earn_type: string; first_use: string; consumed: number };
 export type GrantEvidence =
   | { kind: "future" }                                      // 지급 예정일이 스냅샷 뒤

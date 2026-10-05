@@ -2,10 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"errors"
-	"net/http"
-	"path/filepath"
-	"strings"
 	"time"
 )
 
@@ -22,7 +18,7 @@ import (
 //
 // 식별자는 space_seq 뿐이다(허브스팟 연락처의 「space seq」 칸으로 사람에게 이어진다). plan_name 은
 // 엔터프라이즈 티어에서 「<회사> Biz」 꼴이라 회사를 말하지만 그것이 이 화면의 목적이다 — 사람의
-// 이름·메일은 스냅샷에 없고, 값은 이 PC 를 안 떠난다.
+// 이름·메일은 스냅샷에 없고, 값은 비공개 가공 레포에만 산다.
 const salesSQL = `
 WITH nowat AS (SELECT CAST('{{asof}}' AS TIMESTAMP) AS t),
 ps AS (SELECT project_seq, space_seq FROM read_csv_auto('{{d}}/perso_video_translator.project_space.csv', union_by_name=true)),
@@ -133,47 +129,8 @@ SELECT
   (SELECT min(create_date) FROM cuh) AS credits_from
 `
 
-type salesResult struct {
-	AsOf       asOf            `json:"as_of"`
-	SnapshotAt string          `json:"snapshot_at"`
-	Data       json.RawMessage `json:"data"`
-	ComputedMS int64           `json:"computed_ms"`
-}
-
-// RunSales 는 스페이스 목록 없이 도는 한 질의 — 계약(식별자 없음 · 2,000행 · 120자)은 스페이스
-// 지표와 같고, space_seq 만 허용한다.
-func (s *Snapshot) RunSales() (*salesResult, error) {
-	before := s.Commit()
-	t0 := time.Now()
-	at := s.snapshotAt()
-	sql := strings.ReplaceAll(salesSQL, "{{d}}", filepath.ToSlash(s.Data))
-	sql = strings.ReplaceAll(sql, "{{asof}}", at.UTC().Format("2006-01-02 15:04:05"))
-	rows, err := s.query(sql)
-	if err != nil {
-		return nil, err
-	}
-	if after := s.Commit(); before != after {
-		return nil, errors.New("계산 중에 스냅샷이 바뀌었습니다 — 결과를 버립니다. 다시 시도하세요")
-	}
-	if len(rows) != 1 {
-		return nil, errors.New("결과가 한 행이어야 합니다")
-	}
-	data, err := json.Marshal(rows[0])
-	if err != nil {
-		return nil, errors.New("결과를 만들지 못했습니다")
-	}
-	if err := checkContract(data, map[string]bool{"space_seq": true}); err != nil {
-		return nil, err
-	}
-	return &salesResult{AsOf: s.AsOf(), SnapshotAt: at.UTC().Format(time.RFC3339), Data: data,
-		ComputedMS: time.Since(t0).Milliseconds()}, nil
-}
-
-func (a *agent) salesHandler(w http.ResponseWriter, _ *http.Request, origin string) {
-	result, err := a.snap.RunSales()
-	if err != nil {
-		send(w, http.StatusInternalServerError, errBody{Error: err.Error(), Metric: "sales"}, origin)
-		return
-	}
-	send(w, http.StatusOK, result, origin)
+// RunSales 는 스페이스 목록 없이 도는 한 질의 — 그 한 행이 그대로 sales.json 이다. 계약(식별자 없음 ·
+// 120자)은 다른 파일과 같고 space_seq 만 허용한다(export.go 의 encode 가 잰다).
+func (s *Snapshot) RunSales(at time.Time) (json.RawMessage, error) {
+	return s.runRow(salesSQL, nil, at)
 }

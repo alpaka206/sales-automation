@@ -1,62 +1,21 @@
 // 수주 고객 상세의 사용 현황 세 섹션 — 크레딧 사용 현황 · 작업 성능 · 영상 분석.
 //
-// 값은 전부 이 PC 의 에이전트(`/v1/spaces/*`)에서 오고 **서버로 가지 않습니다.** 계약 쪽
-// 숫자(계약 크레딧·플랜 기간·동시 처리 한도)는 화면이 이미 들고 있는 계약 행에서 읽어
-// 브라우저 안에서 맞댑니다.
+// 값은 전부 가공된 스냅샷을 브라우저가 GitHub 에서 직접 받아 계약의 스페이스로 합친 것이고
+// (`lib/usageData.ts` · `usageMerge.ts`) **서버로 가지 않습니다.** 계약 쪽 숫자(계약 크레딧·플랜
+// 기간·동시 처리 한도)는 화면이 이미 들고 있는 계약 행에서 읽어 브라우저 안에서 맞댑니다.
 //
 // 스냅샷이 답하지 **못하는** 것은 여기 없습니다(2026-09-15 실측): 결제 내역(B2B 는 Stripe
 // 가 아님), 지급액(지급 원장이 스냅샷에 없음). 그 둘은 4·6번 섹션의 우리 기록이 원본입니다.
 import { useState } from "react";
-import { useSpaceMetric, type Pair, type SpaceResult } from "../../lib/agent";
+import { useSpaceMetric, type SpaceResult } from "../../lib/usageData";
+import type { UsageSource } from "../../lib/usageSource";
 import type { Contract } from "./shared";
 import { fmt, num } from "./shared";
 import { TONE_COLOR, idleWord } from "./UsageBits";
 import type { RowUsage } from "./useUsage";
 import { LENGTH_BINS, fillMonths, fillWeeks, forecastTone, grantedPct, isCurrentPeriod, levelTone, pairName, type Diagnosis } from "./usage";
+import type { CreditRecord, CreditsData, Period } from "./usageMerge";
 
-// ── 에이전트 응답 모양 (spaces.go 의 SQL 과 1:1) ─────────────────────────
-type Period = { period: string; used: number };
-type Bucket = { no: number; earn_type: string; is_free: number; first_use: string; last_use: string; consumed: number; n: number };
-/** 1.3.0 — 작업 실행 한 건. 프로젝트는 번호가 아니라 차례(`project_no`, 첫 소진 순)다 — 식별자는 에이전트가 안 내보낸다.
- *  작업 상세(status·pair·minutes…)는 스냅샷의 작업 창(2026-03-14~) 안에서만 있고 그 앞은 null 이다. */
-export type CreditRecord = {
-  at: string; space_seq: number; project_no: number; action: "EXECUTE" | "ROLLBACK"; credits: number; steps: number;
-  tier: string | null; status: string | null; pair: string | null; minutes: number | null; lip_sync: boolean | null;
-  speed: string | null; speakers: number | null;
-};
-export type CreditsData = {
-  monthly: Period[] | null; weekly: Period[] | null; daily: Period[] | null; buckets: Bucket[] | null;
-  used_total: number | null; rolled_back: number | null; first_use: string | null; last_use: string | null;
-  /** 최신 500건. `records_total` 이 그보다 크면 그만큼만 보인다. */
-  records?: CreditRecord[] | null; records_total?: number | null;
-};
-type JobsData = {
-  status: { status: string; n: number }[] | null;
-  monthly: { period: string; ok: number; failed: number }[] | null;
-  reasons: { reason: string; n: number }[] | null;
-  errors: { code: string; n: number }[] | null;
-  /** 실패 종류 상위 5 — 엔진 오류 코드가 있으면 그것, 없으면 실패 사유. 나머지는 `fail_other`. */
-  fail_kinds: { kind: string; n: number }[] | null; fail_other: number;
-  processing: { n: number; avg: number | null; p50: number | null; p90: number | null; max: number | null; per_video_minute: number | null; avg_video_minutes: number | null };
-  wait: { n: number; avg: number | null; max: number | null };
-  speed: { green: number; red: number };
-  concurrency_peak: number | null; concurrency_peak_at: string | null;
-  /** 플랜 한도(스냅샷의 plan_option). 스페이스가 스냅샷에 없으면 둘 다 null. */
-  limits: { concurrent: number | null; queue: number | null };
-  jobs_from: string | null; last_job: string | null;
-};
-type UsageData = {
-  languages: { pair: string; n: number }[] | null; languages_other: number;
-  lengths: { bin: string; n: number }[] | null;
-  sources: { source: string; n: number }[] | null;
-  /** 1.2.0 — 콘텐츠 카테고리 상위 5(project_sensitive.project_category) · 보이스 클론(space_voice 의 살아 있는 줄). */
-  categories?: { category: string; n: number }[] | null; categories_other?: number;
-  voices?: { voices: number; members: number } | null;
-  seats: { seats: number; spaces_found: number; members: number; owners: number; left: number; active_30d: number; active_6m: number };
-  members: { rank: number; jobs: number }[] | null;
-  extras: { lip_sync: number; total: number; avg_speakers: number | null };
-  jobs_from: string | null;
-};
 const SOURCE: Record<string, string> = {
   FILE_UPLOAD: "파일 업로드", YOUTUBE: "YouTube", TIKTOK: "TikTok", GOOGLE_DRIVE: "Google Drive", "(미기록)": "미기록",
 };
@@ -119,15 +78,16 @@ function Empty({ text }: { text: string }) {
   return <div className="board-empty">{text}</div>;
 }
 
-/** 세 섹션이 같은 「에이전트 없음 / 미연결 / 스냅샷에 없음」을 그립니다. */
+/** 세 섹션이 같은 「연결 없음 / 받는 중 / 미연결 / 가공 범위에 없음」을 그립니다. */
 function Unavailable({ usage }: { usage: RowUsage }) {
-  if (usage.kind === "no-agent") {
-    return <Empty text="이 PC 의 데이터 에이전트가 연결돼 있지 않습니다 — 「데이터 분석」 화면에서 켭니다. 값은 서버가 아니라 이 PC 에서 계산합니다." />;
+  if (usage.kind === "no-data") {
+    return <Empty text="사용 데이터가 연결돼 있지 않습니다 — 「데이터 분석」 화면을 보세요." />;
   }
+  if (usage.kind === "loading") return <Empty text="불러오는 중…" />;
   if (usage.kind === "no-space") {
     return <Empty text="이 계약의 「Perso 계정 · 플랜」에 Space ID 가 없어 연결된 스페이스가 없습니다. 적으면 다음 스냅샷부터 채워집니다." />;
   }
-  return <Empty text={`Space ${usage.spaces.join(", ")} 이(가) 스냅샷에 없습니다 — 번호를 확인하세요.`} />;
+  return <Empty text={`Space ${usage.spaces.join(", ")} 이(가) 가공 범위(엔터프라이즈·유료 스페이스)에 없습니다 — 번호를 확인하세요.`} />;
 }
 
 // ── 5. 크레딧 사용 현황 ─────────────────────────────────────────────────
@@ -189,7 +149,7 @@ export function CreditUsageSection({ contract, usage, credits, snapshotAt, credi
                 회차 표의 상태 줄(소진 시작 날짜)과 자동 대조가 그대로 쓴다. */}
           </div>
 
-          {data && <CreditRecords rows={data.data.records ?? []} total={data.data.records_total ?? 0} spaces={usage.spaces} />}
+          {data && <CreditRecords rows={data.data.records ?? []} total={data.data.records_total} spaces={usage.spaces} />}
         </>
       )}
     </section>
@@ -200,7 +160,7 @@ const STATUS: Record<string, string> = { COMPLETED: "완료", FAILED: "실패", 
 const PAGE = 20;
 
 /** 작업별 소진 기록 (2026-09-17 운영자: 「크레딧을 사용한 기록들을 작업별로 … 어떤 space 인지 보기 편하게」).
- *  한 줄 = 한 작업 실행. 스페이스가 여럿이면 고르개로 좁힌다. 20건씩 펼친다 — 에이전트가 최신 500건까지 준다. */
+ *  한 줄 = 한 작업 실행. 스페이스가 여럿이면 고르개로 좁힌다. 20건씩 펼친다 — 계약의 최신 500건까지 온다. */
 function CreditRecords({ rows, total, spaces }: { rows: CreditRecord[]; total: number; spaces: number[] }) {
   const [space, setSpace] = useState<number | null>(null);
   const [shown, setShown] = useState(PAGE);
@@ -443,18 +403,18 @@ function Card({ id, title, hint, children }: { id?: string; title: string; hint?
 
 // ── 작업 성능 — 목업의 perf pane 그대로 (2026-09-15 운영자 지시 「100% 일치」) ────────────
 // 카드 셋: 작업 성공률(도넛 · 성공/실패 · 이 고객 vs 전체 평균 · 실패 사유 분포) / 작업 처리 시간
-// (대기 + 처리 타임라인) / 동시 처리(피크 vs 한도). 값은 전부 이 PC 의 에이전트가 스냅샷에서 센다.
+// (대기 + 처리 타임라인) / 동시 처리(피크 vs 한도). 값은 전부 가공된 스냅샷을 브라우저가 합친 것이다.
 // 목업이 지어낸 곳은 실제 값으로 바꿨다: 전체 평균은 94.1 고정이 아니라 전사 실패율에서, 실패
 // 사유는 지어낸 다섯 줄이 아니라 스냅샷의 엔진 오류 코드·실패 사유 상위 5, 「최장」은 ×4.5 가
 // 아니라 실제 최장 처리 시간, 동시 처리 한도는 스냅샷의 플랜(plan_option.concurrentJobs).
-export function JobsSection({ pair, contract, usage, failRateAll }: {
-  pair: Pair | null; contract: Contract; usage: RowUsage; failRateAll: number | null;
+export function JobsSection({ source, contract, usage, failRateAll }: {
+  source: UsageSource | null; contract: Contract; usage: RowUsage; failRateAll: number | null;
 }) {
   const spaces = usage.kind === "ok" ? usage.spaces : [];
-  const { data, problem, busy } = useSpaceMetric<JobsData>(pair, "jobs", spaces);
+  const { data, problem, busy } = useSpaceMetric(source, "jobs", spaces);
   const d = data?.data;
-  const ok = d?.status?.find((s) => s.status === "COMPLETED")?.n ?? 0;
-  const failed = d?.status?.find((s) => s.status === "FAILED")?.n ?? 0;
+  const ok = d?.ok ?? 0;
+  const failed = d?.failed ?? 0;
   const rate = ok + failed ? (ok / (ok + failed)) * 100 : null;
   const avgAll = failRateAll === null ? null : 100 - failRateAll;
   // 색의 기준은 **전체 평균**이다. 94 는 목업이 지어낸 평균 94.1 이 남은 값이라(위 주석의
@@ -478,7 +438,7 @@ export function JobsSection({ pair, contract, usage, failRateAll }: {
 
   // 동시 처리 — 한도는 스냅샷의 플랜이 먼저, 없으면 계약 폼의 Concurrent Jobs.
   const peak = d.concurrency_peak ?? 0;
-  const lim = d.limits?.concurrent ?? contract.concurrent_jobs;
+  const lim = d.limits.concurrent ?? contract.concurrent_jobs;
   const over = lim !== null && peak > lim;
   const cScale = Math.max(peak, lim ?? 0, 1) * 1.1;
   const cp = (v: number) => Math.max(0, Math.min(100, (v / cScale) * 100));
@@ -565,9 +525,9 @@ export function JobsSection({ pair, contract, usage, failRateAll }: {
 // 카테고리는 project_sensitive.project_category, 경로는 project_export_log.upload_source_type, 보이스는
 // space_voice — project.generation_type 은 아니다(그건 더빙/립싱크 같은 **프로젝트 종류**이고 보이스
 // 클론 343 개의 원본 프로젝트는 338 개가 DUBBING 이라 가를 것이 없다).
-export function MixSection({ pair, contract, usage }: { pair: Pair | null; contract: Contract; usage: RowUsage }) {
+export function MixSection({ source, contract, usage }: { source: UsageSource | null; contract: Contract; usage: RowUsage }) {
   const spaces = usage.kind === "ok" ? usage.spaces : [];
-  const { data, problem, busy } = useSpaceMetric<UsageData>(pair, "usage", spaces);
+  const { data, problem, busy } = useSpaceMetric(source, "usage", spaces);
   const d = data?.data;
   const gate = usage.kind !== "ok" ? <Unavailable usage={usage} />
     : busy ? <Empty text="계산 중…" />
@@ -585,12 +545,12 @@ export function MixSection({ pair, contract, usage }: { pair: Pair | null; contr
   const lensTotal = lens.reduce((a, l) => a + l.v, 0);
   const cats = [
     ...(d.categories ?? []).map((c) => ({ k: c.category, v: c.n })),
-    ...((d.categories_other ?? 0) > 0 ? [{ k: "기타", v: d.categories_other! }] : []),
+    ...(d.categories_other > 0 ? [{ k: "기타", v: d.categories_other }] : []),
   ];
   const sources = (d.sources ?? []).map((s) => ({ k: SOURCE[s.source] ?? s.source, v: s.n, hint: s.source }));
   // 계약 좌석 — 스냅샷의 space.seat 합이 먼저, 없으면 계약 폼의 Account Invitation Limit.
   const seatLimit = d.seats.seats || contract.invite_limit || 0;
-  const voices = d.voices ?? { voices: 0, members: 0 };
+  const voices = d.voices;
 
   return (
     <>

@@ -1,387 +1,46 @@
-// PERSO 데이터 에이전트.
+// PERSO 사용 데이터 가공기 (2026-10-01).
 //
-// **원본은 이 PC 를 안 떠난다.** 스냅샷 CSV 를 DuckDB 로 그 자리에서 읽어 **집계만**
-// 내보낸다. 계산도 원본도 이 프로세스 안에서 끝나고, 화면으로 나가는 것은 상한을 지난
-// 집계표뿐이다.
+// 스냅샷(비공개 저장소의 CSV)을 DuckDB 로 읽어 **집계만** JSON 파일로 낸다. 예전에는 운영자 PC 마다 로컬
+// 에이전트(127.0.0.1 HTTP 서버)를 띄워 화면이 그때그때 물었다 — 설치·업데이트·스냅샷 받기가 사람마다 따로
+// 깨졌다. 이제는 하루 한 번 비공개 가공 레포의 GitHub Actions 가 이 프로그램을 **네트워크 없이**(unshare -n)
+// 돌려 그 레포의 `data` 브랜치에 올리고(export/perso-usage-data.yml), 콘솔 화면이 GitHub 에서 직접 받는다.
+// 우리 서버는 그 데이터를 거치지 않는다.
 //
-// 돌리는 법: 스냅샷 clone 폴더 **옆에** 두고 실행한다. 폴더 이름이 다르면 --repo 로 준다.
+// 돌리는 법: perso-export --snapshot <스냅샷 폴더> --out <새 폴더> [--duckdb <DuckDB CLI>]
+// 이 프로그램에는 요청을 보내는 코드도 받는 코드도 없다(tests/test_usage_data_stays_off_server.py 가 고정한다).
 package main
 
 import (
-	"crypto/rand"
-	"crypto/subtle"
-	"encoding/base64"
-	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
-	"net"
-	"net/http"
 	"os"
-	"os/exec"
-	"runtime"
-	"strconv"
-	"strings"
-	"time"
 )
 
-// 빌드가 박는다: `go build -ldflags "-X main.version=1.2.3"`. 릴리스 워크플로가 태그
-// `agent-v1.2.3` 에서 떼어 넣고, 손으로 빌드하면 "dev" 다. 콘솔이 `/v1/status` 로 읽어 자기가
-// 요구하는 최소 버전(frontend/src/lib/agent.ts 의 AGENT_MIN_VERSION)과 비교한다 — SQL 이 내는
-// 키가 바뀌면 콘솔은 그 상수를 올리고, 낡은 에이전트를 만난 화면은 「업데이트 필요」를 띄운다.
+// 빌드가 박는다: `go build -ldflags "-X main.version=<sha>"`. 가공 워크플로가 공개 저장소의 짧은 커밋을
+// 넣고, manifest.json 의 exporter 가 이 값이다 — 그날 데이터가 어느 코드로 만들어졌는지 남는다.
 var version = "dev"
-
-// 포트를 하나로 박지 않는다. 다른 프로그램이 쓰고 있으면 그쪽으로 요청이 간다.
-var portCandidates = []int{43110, 43111, 43112, 43113, 43114, 43115, 43116, 43117, 43118, 43119}
-
-// 이 출처에서 온 요청만 받는다. `*` 는 절대 쓰지 않는다 — 아무 사이트나 로컬 데이터를 읽는다.
-var defaultOrigins = []string{
-	"https://sales-automation-4if2.onrender.com",
-	"http://127.0.0.1:8010", // 로컬에서 콘솔을 띄워 시험할 때
-}
-
-type agent struct {
-	snap    *Snapshot
-	token   string
-	port    int
-	origins []string
-}
-
-// ── 방어 ────────────────────────────────────────────────────────────────
-
-// hostOK — DNS rebinding 방어. 공격자 도메인이 루프백으로 해석돼도 Host 가 다르다.
-func (a *agent) hostOK(r *http.Request) bool {
-	host := strings.ToLower(strings.TrimSpace(r.Host))
-	p := strconv.Itoa(a.port)
-	return host == "127.0.0.1:"+p || host == "localhost:"+p || host == "[::1]:"+p
-}
-
-// originOK — 허용 출처면 그 값을, 출처가 없으면 빈 문자열을, 아니면 false.
-func (a *agent) originOK(r *http.Request) (string, bool) {
-	origin := strings.TrimSpace(r.Header.Get("Origin"))
-	if origin == "" {
-		return "", true // 같은 출처(자기 화면)나 브라우저 아닌 호출
-	}
-	if origin == fmt.Sprintf("http://127.0.0.1:%d", a.port) {
-		return origin, true
-	}
-	for _, allowed := range a.origins {
-		if origin == allowed {
-			return origin, true
-		}
-	}
-	return "", false
-}
-
-func (a *agent) authed(r *http.Request) bool {
-	got := strings.TrimSpace(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))
-	return subtle.ConstantTimeCompare([]byte(got), []byte(a.token)) == 1
-}
-
-func send(w http.ResponseWriter, code int, payload any, origin string) {
-	body, err := json.Marshal(payload)
-	if err != nil {
-		code, body = 500, []byte(`{"error":"응답을 만들지 못했습니다"}`)
-	}
-	h := w.Header()
-	h.Set("Content-Type", "application/json; charset=utf-8")
-	h.Set("Cache-Control", "no-store")
-	h.Set("X-Content-Type-Options", "nosniff")
-	if origin != "" {
-		h.Set("Access-Control-Allow-Origin", origin) // `*` 아님
-		h.Set("Vary", "Origin")
-		h.Set("Access-Control-Allow-Headers", "Authorization")
-		// 쿠키를 안 쓴다 → Allow-Credentials 없음 → CSRF 표면이 사라진다
-	}
-	w.WriteHeader(code)
-	_, _ = w.Write(body)
-}
-
-type errBody struct {
-	Error  string `json:"error"`
-	Metric string `json:"metric,omitempty"`
-}
-
-// gate — Host·Origin 을 먼저 본다. 둘 중 하나라도 아니면 아무것도 답하지 않는다.
-func (a *agent) gate(w http.ResponseWriter, r *http.Request) (string, bool) {
-	if !a.hostOK(r) {
-		send(w, http.StatusForbidden, errBody{Error: "Host 가 로컬이 아닙니다"}, "")
-		return "", false
-	}
-	origin, ok := a.originOK(r)
-	if !ok {
-		send(w, http.StatusForbidden, errBody{Error: "허용되지 않은 출처입니다"}, "")
-		return "", false
-	}
-	return origin, true
-}
-
-// ── 라우트 ──────────────────────────────────────────────────────────────
-
-func (a *agent) routes() *http.ServeMux {
-	mux := http.NewServeMux()
-
-	// 자기 화면 — **저장소 폴더를 웹 루트로 두지 않는다.** 이 한 페이지만 준다.
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		origin, ok := a.gate(w, r)
-		if !ok {
-			return
-		}
-		if r.URL.Path != "/" && r.URL.Path != "/index.html" {
-			send(w, http.StatusNotFound, errBody{Error: "없는 경로입니다"}, origin)
-			return
-		}
-		a.page(w)
-	})
-
-	// 살아 있나. 토큰 없이 답하되 **아무 데이터도 안 준다** (콘솔이 켜짐을 알아야 한다).
-	mux.HandleFunc("/v1/health", func(w http.ResponseWriter, r *http.Request) {
-		origin, ok := a.gate(w, r)
-		if !ok {
-			return
-		}
-		send(w, http.StatusOK, map[string]any{"ok": true, "agent": "perso-agent/" + version, "version": version, "port": a.port}, origin)
-	})
-
-	mux.HandleFunc("/v1/status", a.guarded(func(w http.ResponseWriter, _ *http.Request, origin string) {
-		send(w, http.StatusOK, map[string]any{
-			"as_of": a.snap.AsOf(), "repo": a.snap.Repo,
-			"snapshot_at": a.snap.snapshotAt().UTC().Format(time.RFC3339),
-			"folder_mb":   a.snap.FolderMB(), "metrics": metricNames(),
-			"space_metrics": []string{"summary", "credits", "jobs", "usage", "evidence"},
-			"version":       version,
-			"update":        updateState(),
-		}, origin)
-	}))
-
-	mux.HandleFunc("/v1/metrics", a.guarded(func(w http.ResponseWriter, _ *http.Request, origin string) {
-		list := make([]map[string]any, 0, len(metrics))
-		for _, m := range metrics {
-			params := map[string]string{}
-			if m.HasMonth {
-				params["months"] = "최근 몇 달 (기본 12)"
-			}
-			list = append(list, map[string]any{"name": m.Name, "label": m.Label, "params": params})
-		}
-		send(w, http.StatusOK, map[string]any{"metrics": list}, origin)
-	}))
-
-	mux.HandleFunc("/v1/metrics/", a.guarded(func(w http.ResponseWriter, r *http.Request, origin string) {
-		name := strings.TrimPrefix(r.URL.Path, "/v1/metrics/")
-		m := metricByName(name)
-		if m == nil {
-			send(w, http.StatusNotFound, errBody{Error: "모르는 지표입니다: " + name}, origin)
-			return
-		}
-		months, _ := strconv.Atoi(r.URL.Query().Get("months"))
-		result, err := a.snap.RunMetric(m, months)
-		if err != nil {
-			// **오류에 원문을 붙이지 않는다** — 계약 위반 사유만 적는다.
-			send(w, http.StatusInternalServerError, errBody{Error: err.Error(), Metric: name}, origin)
-			return
-		}
-		send(w, http.StatusOK, result, origin)
-	}))
-
-	// 수주 고객 화면용 — 스페이스 목록을 받아 그 안에서만 집계한다 (spaces.go).
-	for name := range spaceMetrics {
-		mux.HandleFunc("/v1/spaces/"+name, a.guarded(a.spacesHandler(name)))
-	}
-	// 영업 인사이트 — 스페이스 목록 없이 전체를 본다 (sales.go). 눈에 띄는 스페이스와 제품 전체 흐름.
-	mux.HandleFunc("/v1/sales", a.guarded(a.salesHandler))
-
-	// 상태를 바꾸는 것은 무인증 GET 으로 열지 않는다.
-	mux.HandleFunc("/v1/refresh", a.guarded(func(w http.ResponseWriter, r *http.Request, origin string) {
-		if r.Method != http.MethodPost {
-			send(w, http.StatusMethodNotAllowed, errBody{Error: "POST 로 부르세요"}, origin)
-			return
-		}
-		// 오래 걸리면 뒤에서 마저 받는다 — 화면의 버튼이 몇 분씩 돌지 않게. 그동안 as_of.pull 이 「진행 중」이다.
-		a.snap.PullWait(20 * time.Second)
-		send(w, http.StatusOK, map[string]any{"as_of": a.snap.AsOf()}, origin)
-	}))
-
-	return mux
-}
-
-// guarded — Host·Origin·프리플라이트·토큰을 한자리에서 지난다. 라우트마다 적으면
-// 다음에 붙는 라우트가 그 앞을 안 지난다.
-func (a *agent) guarded(h func(http.ResponseWriter, *http.Request, string)) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		origin, ok := a.gate(w, r)
-		if !ok {
-			return
-		}
-		if r.Method == http.MethodOptions {
-			if origin != "" {
-				hh := w.Header()
-				hh.Set("Access-Control-Allow-Origin", origin)
-				hh.Set("Access-Control-Allow-Headers", "Authorization")
-				hh.Set("Access-Control-Max-Age", "600")
-				hh.Set("Vary", "Origin")
-			}
-			w.WriteHeader(http.StatusNoContent)
-			return
-		}
-		if !a.authed(r) {
-			send(w, http.StatusUnauthorized, errBody{Error: "토큰이 필요합니다"}, origin)
-			return
-		}
-		h(w, r, origin)
-	}
-}
-
-func (a *agent) page(w http.ResponseWriter) {
-	html := strings.ReplaceAll(pageHTML, "__TOKEN__", a.token)
-	html = strings.ReplaceAll(html, "__PORT__", strconv.Itoa(a.port))
-	h := w.Header()
-	h.Set("Content-Type", "text/html; charset=utf-8")
-	// 자체 번들만 쓴다 — 외부 SDK·CDN 을 불러오면 전송 경로가 다시 생긴다.
-	h.Set("Content-Security-Policy",
-		"default-src 'none'; connect-src 'self'; style-src 'unsafe-inline'; "+
-			"script-src 'unsafe-inline'; base-uri 'none'; form-action 'none'")
-	h.Set("Cache-Control", "no-store")
-	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write([]byte(html))
-}
-
-// ── 실행 ────────────────────────────────────────────────────────────────
-
-// listen — 빈 포트를 찾아 **그 리스너를 그대로 쓴다.** 시험 삼아 열고 닫은 뒤 다시 열면
-// 그 사이에 다른 프로그램이 가져갈 수 있다.
-func listen() (net.Listener, int, error) {
-	for _, p := range portCandidates {
-		// **127.0.0.1 에만** 바인딩한다. 0.0.0.0 이면 같은 와이파이의 누구나 본다.
-		ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", p))
-		if err == nil {
-			return ln, p, nil
-		}
-	}
-	return nil, 0, fmt.Errorf("쓸 수 있는 포트가 없습니다 (%d~%d)",
-		portCandidates[0], portCandidates[len(portCandidates)-1])
-}
-
-func newToken() string {
-	b := make([]byte, 24)
-	if _, err := rand.Read(b); err != nil {
-		log.Fatalf("토큰을 만들지 못했습니다: %v", err)
-	}
-	return base64.RawURLEncoding.EncodeToString(b)
-}
-
-func openBrowser(url string) {
-	var cmd *exec.Cmd
-	switch runtime.GOOS {
-	case "windows":
-		cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", url)
-	case "darwin":
-		cmd = exec.Command("open", url)
-	default:
-		cmd = exec.Command("xdg-open", url)
-	}
-	if err := cmd.Start(); err != nil {
-		log.Printf("브라우저를 열지 못했습니다: %v", err)
-	}
-}
-
-type originList []string
-
-func (o *originList) String() string { return strings.Join(*o, ",") }
-func (o *originList) Set(v string) error {
-	*o = append(*o, strings.TrimRight(strings.TrimSpace(v), "/"))
-	return nil
-}
-
-// launchFlags — 이번에 사람이 준 플래그. URL 스킴 등록에 그대로 실려서, 링크로 열린
-// 에이전트가 손으로 실행한 것과 **같게** 뜬다.
-//
-// 빼는 것 둘: `persodata://…`(스킴이 붙여 주는 인자라 그대로 두면 겹쳐서 쌓인다)와
-// `--no-browser`(링크로 열렸는데 브라우저를 안 열면 아무 일도 안 일어난 것과 같다).
-func launchFlags() []string {
-	out := []string{}
-	for _, a := range os.Args[1:] {
-		if strings.HasPrefix(strings.ToLower(a), "persodata:") || a == "--no-browser" || a == "-no-browser" ||
-			a == justUpdatedFlag || a == "-just-updated" {
-			continue
-		}
-		out = append(out, a)
-	}
-	return out
-}
 
 func main() {
 	log.SetFlags(log.Ltime)
-	var extra originList
-	os.Args = withoutPSN(os.Args)
-	repo := flag.String("repo", defaultRepo(), "스냅샷 폴더 (기본: 실행 파일·앱 옆 → 홈·다운로드·데스크톱·문서)")
-	flag.Var(&extra, "console", "허용할 콘솔 출처 (여러 번 줄 수 있음, 준 것이 먼저)")
-	noBrowser := flag.Bool("no-browser", false, "브라우저를 열지 않는다")
-	unregister := flag.Bool("unregister", false, "persodata:// 등록만 지우고 끝낸다")
+	snapshot := flag.String("snapshot", "", "스냅샷 폴더 (data/manifest.json 이 있는 곳)")
+	out := flag.String("out", "", "결과를 쓸 폴더 — 아직 없어야 한다 (다 쓴 뒤 이 이름으로 옮긴다)")
+	duck := flag.String("duckdb", "", "DuckDB CLI 경로 (리눅스는 이것 또는 PATH 의 duckdb, 윈도우·맥은 비우면 실린 것)")
 	showVersion := flag.Bool("version", false, "버전만 찍고 끝낸다")
-	noUpdate := flag.Bool("no-update", false, "켤 때 새 버전을 확인하지 않는다")
-	justUpdated := flag.Bool(strings.TrimPrefix(justUpdatedFlag, "--"), false, "(내부용) 업데이트 뒤 다시 띄워졌다")
-	// **`persodata://open` 으로 열리면 그 URL 이 argv[1] 로 온다.** Go 의 flag 는 첫
-	// 비플래그에서 멈추므로 그대로 무해하게 무시된다 — 그 값으로 하는 일이 없다.
 	flag.Parse()
 	if *showVersion {
-		fmt.Println("perso-agent " + version)
+		fmt.Println("perso-export " + version)
 		return
 	}
-
-	if *unregister {
-		unregisterScheme()
-		return
+	if *snapshot == "" || *out == "" || flag.NArg() > 0 {
+		fmt.Fprintln(os.Stderr, "쓰는 법: perso-export --snapshot DIR --out DIR [--duckdb PATH]")
+		os.Exit(2)
 	}
-	// 켤 때 한 번 — 새 버전이 있으면 바꿔 넣고 새것을 띄운 뒤 이 프로세스는 끝난다 (update.go).
-	if !*noUpdate && autoUpdate(*justUpdated) {
-		return
-	}
-	registerScheme(launchFlags())
-
-	snap, err := NewSnapshot(*repo)
+	snap, err := NewSnapshot(*snapshot, *duck)
 	if err != nil {
-		if currentBundle() != "" {
-			err = fmt.Errorf("스냅샷 폴더를 못 찾았습니다.\n\n"+
-				"perso-data-snapshot(또는 perso-data-snapshot-main) 폴더를 이 앱 옆이나 홈·다운로드·데스크톱·문서 "+
-				"폴더에 두고 다시 여세요.\n\n%v", err)
-		}
-		fail(err)
-	}
-	fmt.Printf("perso-agent %s\n", version)
-	fmt.Printf("스냅샷: %s\n", snap.Repo)
-	fmt.Println("pull 확인 중…")
-	// 평소에는 몇 초면 끝난다. 며칠 밀렸거나 처음 로그인하는 중이면 기다리지 않고 받아 둔 데이터로 먼저
-	// 연다 — 받기는 뒤에서 계속되고, 끝나면 그다음 계산부터 새 데이터다.
-	snap.PullWait(20 * time.Second)
-	note, _ := snap.pullState()
-	fmt.Printf("  → %s\n", note)
-	// 켜 둔 채로 며칠이 가도 최신이게 — 스냅샷은 매일 새로 만들어지므로 한 시간마다 다시 받는다
-	// (새 것이 없으면 git 이 곧바로 끝난다). 바꿔 끼우는 순간은 계산과 겹치지 않는다(Snapshot.data).
-	go func() {
-		for range time.Tick(time.Hour) {
-			snap.PullWait(0)
-		}
-	}()
-
-	ln, port, err := listen()
-	if err != nil {
-		fail(err)
-	}
-	a := &agent{snap: snap, token: newToken(), port: port,
-		origins: append([]string(extra), defaultOrigins...)}
-
-	local := fmt.Sprintf("http://127.0.0.1:%d/", port)
-	console := fmt.Sprintf("%s/app/data#agent=%d&token=%s", a.origins[0], port, a.token)
-	fmt.Printf("\n  콘솔 화면 : %s\n", console)
-	fmt.Printf("  로컬 화면 : %s   (Safari 처럼 콘솔에서 못 붙는 브라우저용)\n", local)
-	fmt.Printf("  토큰      : %s… (프로세스마다 새로 만듭니다)\n", a.token[:8])
-	fmt.Print("\n  이 창을 닫으면 끝납니다.\n\n")
-
-	if !*noBrowser {
-		time.AfterFunc(500*time.Millisecond, func() { openBrowser(console) })
-	}
-	srv := &http.Server{Handler: a.routes(), ReadHeaderTimeout: 10 * time.Second}
-	if err := srv.Serve(ln); err != nil {
 		log.Fatal(err)
+	}
+	if err := export(snap, *out); err != nil {
+		log.Fatalf("가공 실패 — 아무것도 쓰지 않았습니다: %v", err)
 	}
 }

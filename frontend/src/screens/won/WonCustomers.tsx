@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useLocation, useNavigate } from "react-router-dom";
 import { getJSON } from "../../lib/api";
-import { AGENT_DOWNLOADS, AGENT_MIN_VERSION, useAgent } from "../../lib/agent";
+import { useUsageSource } from "../../lib/usageSource";
 import { MonthlyArea } from "./MonthlyArea";
 import { pendingContractPath } from "./pending";
 import { UsageCells, UsageStamp } from "./UsageBits";
@@ -91,17 +91,16 @@ export function WonCustomers() {
 
   const today = data?.today ?? new Date().toISOString().slice(0, 10);
 
-  // **사용량은 이 PC 의 에이전트에서 옵니다.** 목록의 모든 활성 계약이 가리키는 스페이스를
-  // 한 번(≤50씩)에 묻고, 행마다 그 답을 맞춰 붙입니다. 에이전트가 없으면 그 두 열만 비고
-  // 나머지는 예전 그대로입니다 — 서버는 이 값을 모릅니다.
-  const agent = useAgent();
-  const isMac = /Mac/i.test(navigator.platform);
+  // **사용량은 가공된 스냅샷에서 옵니다** — 브라우저가 GitHub 에서 직접 받습니다(`lib/usageData.ts`).
+  // 목록의 모든 활성 계약이 가리키는 스페이스를 요약 파일 하나에서 골라 행마다 붙입니다. 연결이
+  // 없으면 그 두 열만 비고 나머지는 예전 그대로입니다 — 서버는 이 값을 모릅니다.
+  const usageSource = useUsageSource();
   const allSpaces = useMemo(() => spacesOfRows(data?.rows), [data?.rows]);
-  const usage = useUsageIndex(agent.pair, allSpaces);
+  const usage = useUsageIndex(usageSource.source, allSpaces);
   const usages = useRowUsages(data?.rows, usage.index);
   // **자동 대조** — 스냅샷에 지급·결제 근거가 있으면 그 회차를 완료 처리합니다(운영자 결정,
   // `reconcile.ts`). 목록을 여는 것이 곧 그 방아쇠입니다.
-  const evidence = useEvidence(agent.pair, allSpaces);
+  const evidence = useEvidence(usageSource.source, allSpaces);
   const activeContracts = useMemo(() => contractsOfRows(data?.rows), [data?.rows]);
   useAutoReconcile(activeContracts, evidence.index);
 
@@ -190,9 +189,9 @@ export function WonCustomers() {
           <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
             <h1 className="page-title">수주 고객</h1>
             {/* 사용량 도장 — 목록의 「마지막 작업」·「사용 상태」가 **어느 시각의 스냅샷**인지.
-                이 두 열은 우리 서버가 아니라 이 PC 의 에이전트가 답한 값이라, 값 옆에 그
+                이 두 열은 우리 서버가 아니라 하루 한 번 가공된 스냅샷의 값이라, 값 옆에 그
                 시각이 없으면 낡은 숫자가 맞는 숫자처럼 보입니다. */}
-            <UsageStamp agent={agent} index={usage.index} problem={usage.problem} busy={usage.busy} />
+            <UsageStamp source={usageSource} index={usage.index} problem={usage.problem} busy={usage.busy} />
           </div>
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
             {/* **이 화면의 축입니다.** 아래 필터들과 달리 목록만 거르는 것이 아니라 위 카드
@@ -214,20 +213,6 @@ export function WonCustomers() {
                 </button>
               ))}
             </div>
-            {/* 이 PC 의 데이터 에이전트 — 사용 현황 열과 상세의 크레딧·작업·구성 탭이 이것으로
-                채워집니다. **여기서 바로 내려받습니다**(2026-09-15 운영자: 「app/data 는 노출도 안
-                되는데 굳이 거기로?」) — 이 PC 의 OS 에 맞는 파일 하나. 그 화면은 에이전트가 켜질 때
-                착지하는 곳이지 메뉴가 아닙니다. 에이전트가 **지금 답하면** 안 보이고(저장된 연결
-                정보가 있어도 꺼져 있으면 보인다) 왼쪽 「사용량」 꼬리표가 상태를 말합니다. 상태를
-                확인하는 동안(첫 요청)은 안 그린다 — 깜빡임이 그것이었다. */}
-            {!agent.busy && (!agent.live || agent.outdated) && (
-              <a className={`btn${agent.outdated ? " btn-primary" : ""}`} href={isMac ? AGENT_DOWNLOADS.mac : AGENT_DOWNLOADS.windows}
-                 title={agent.outdated
-                   ? `에이전트 ${agent.status?.version ?? "1.0"} — 이 화면은 ${AGENT_MIN_VERSION} 이상이 필요합니다. 내려받아 옛 파일 자리에 덮어쓰고 다시 여세요.`
-                   : "내려받은 파일을 스냅샷 폴더(perso-data-snapshot) 옆에서 실행하면 이 화면과 연결됩니다."}>
-                <G name="inbound" size={15} /> {agent.outdated ? "에이전트 업데이트" : "에이전트 내려받기"} ({isMac ? "Mac" : "Windows"})
-              </a>
-            )}
             {/* 브라우저의 다운로드가 기능 전부입니다 — fetch 로 돌리면 Save As 를 다시 짜게 됩니다. */}
             <a className="btn" href="/won-customers/export.csv">CSV 내보내기</a>
             <button className="btn btn-primary" type="button"
@@ -437,7 +422,7 @@ export function WonCustomers() {
                     부서와 무관하게 모든 행에 나옵니다 — 위 카드만 GTM 으로 거릅니다. */}
                 <th style={{ width: "10%" }} className="moneycell">이번달 MRR</th>
                 <th style={{ width: "12%" }}>계약 기간</th>
-                {/* 두 열은 스냅샷(이 PC 의 에이전트)이 답합니다 — 위 도장의 시각 기준입니다. */}
+                {/* 두 열은 가공된 스냅샷이 답합니다 — 위 도장의 시각 기준입니다. */}
                 <th style={{ width: "8%" }}>마지막 작업</th>
                 <th style={{ width: "11%" }}>사용 상태</th>
                 <th style={{ width: "11%" }}>다음 크레딧 지급</th>
@@ -447,7 +432,7 @@ export function WonCustomers() {
             <tbody>
               {rows.map((row, index) => (
                 <RowView key={row.client_id} row={row} rows={rows} index={index}
-                         today={today} usage={usages.get(row.client_id) ?? { kind: "no-agent" }}
+                         today={today} usage={usages.get(row.client_id) ?? { kind: "no-data" }}
                          onOpen={() => open(row.client_id)} />
               ))}
             </tbody>

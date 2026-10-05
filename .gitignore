@@ -80,8 +80,13 @@ docs/정책문서-구조-개편-설계*.md
 docs/정책문서-검토결과에-대한-반론-*.md
 docs/정책문서-4판-재검토-*.md
 
-# 로컬 에이전트 빌드 산출물 — Release 가 배포 경로다
+# 가공기(agent/)를 손으로 빌드·시험할 때 생기는 것 — 실행 파일(README 대로면 perso-export, -o 없이 빌드하면
+# perso-agent)과 워크플로를 따라 받은 DuckDB. 공개 저장소에 들어오면 수십 MB 가 이력에 영영 남는다.
+# dist/ 는 옛 로컬 에이전트 시절의 빌드 폴더다.
 agent/dist/
+agent/perso-*
+agent/duckdb
+agent/duckdb_cli-*.zip
 
 # 인수인계 문서 묶음은 저장소에 안 올린다 (2026-09-23 운영자: 「handover는 ignore 처리」 —
 # 압축해서 따로 전달한다). 운영 식별자·사고 이력이 촘촘하고 이 저장소는 공개 상태다.

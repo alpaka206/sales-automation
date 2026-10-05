@@ -1,7 +1,6 @@
-// 목록과 상세가 같이 쓰는 사용 현황 조각들 — 도장·두 열·배지. 값은 전부 이 PC 의
-// 에이전트에서 왔고, 여기서는 그리기만 합니다.
+// 목록과 상세가 같이 쓰는 사용 현황 조각들 — 도장·두 열·배지. 값은 전부 가공된 스냅샷(브라우저가
+// GitHub 에서 직접 받은 것)에서 왔고, 여기서는 그리기만 합니다.
 import { Link } from "react-router-dom";
-import type { useAgent } from "../../lib/agent";
 import { fmt } from "./shared";
 import type { RowUsage, UsageIndex } from "./useUsage";
 import { forecastTone, levelTone, type Diagnosis } from "./usage";
@@ -30,46 +29,50 @@ export function StatusTags({ d, emptyLabel }: { d: Diagnosis; emptyLabel?: strin
   return <>{tags}</>;
 }
 
-/** 「사용량 기준 2026-09-14 05:00」 — 연결이 없으면 그 사실을. */
-export function UsageStamp({ agent, index, problem, busy }: {
-  agent: ReturnType<typeof useAgent>; index: UsageIndex | null; problem: string | null; busy: boolean;
+/** 「사용량 기준 2026-09-14 09:15」 — 연결이 없으면 그 사실을. `source` 는 `useUsageSource()` 의 답입니다. */
+export function UsageStamp({ source, index, problem, busy }: {
+  source: { configured: boolean | null; problem: string | null; busy: boolean };
+  index: UsageIndex | null; problem: string | null; busy: boolean;
 }) {
-  if (!agent.pair) {
+  if (source.configured === false) {
     return (
-      <Link to="/data" className="tag neutral" title="사용량 두 열은 이 PC 의 데이터 에이전트가 답합니다. 켜져 있지 않습니다.">
-        사용량 · 에이전트 없음
+      <Link to="/data" className="tag neutral" title="사용량 두 열은 가공된 스냅샷에서 옵니다. 관리자가 아직 연결하지 않았습니다.">
+        사용량 · 연결 안 됨
       </Link>
     );
   }
-  if (agent.problem || problem) {
+  if (source.problem || problem) {
     return (
-      <Link to="/data" className="tag risk" title={agent.problem ?? problem ?? ""}>
+      <Link to="/data" className="tag risk" title={source.problem ?? problem ?? ""}>
         사용량 · 연결 실패
       </Link>
     );
   }
-  if (agent.outdated) {
-    return (
-      <Link to="/data" className="tag st-setup" title={`에이전트 ${agent.status?.version ?? "1.0"} — 이 콘솔은 더 새 버전이 필요합니다. 일부 값이 빕니다.`}>
-        사용량 · 에이전트 업데이트 필요
-      </Link>
-    );
-  }
-  if (busy || agent.busy || !index) return <span className="tag neutral">사용량 불러오는 중…</span>;
-  const stale = agent.status?.as_of.stale;
+  if (busy || source.busy || !index) return <span className="tag neutral">사용량 불러오는 중…</span>;
   return (
-    <span className={`tag ${stale ? "st-setup" : "neutral"}`}
-          title={stale ? "스냅샷이 36시간 넘게 묵었습니다 — 에이전트에서 「지금 받기」" : "이 PC 의 스냅샷 시각"}>
-      사용량 기준 <b style={{ marginLeft: 4 }}>{index.snapshotStamp}</b>{stale ? " · 낡음" : ""}
+    <span className={`tag ${index.stale ? "st-setup" : "neutral"}`}
+          title={index.stale ? "스냅샷이 36시간 넘게 묵었습니다 — 가공 레포의 Actions 를 확인하세요" : "가공된 스냅샷의 시각"}>
+      사용량 기준 <b style={{ marginLeft: 4 }}>{index.snapshotStamp}</b>{index.stale ? " · 낡음" : ""}
     </span>
   );
 }
 
 export const idleWord = (d: number) => (d === 0 ? "오늘" : d === 1 ? "어제" : `${d}일 전`);
 
+/** 계약의 번호 중 일부만 가공 범위에 있을 때 — 빠진 번호를 단다. 목록의 열과 상세 머리가 같이 쓴다: 숫자는
+ *  범위 안의 스페이스만 합친 것이라, 말하지 않으면 줄어든 숫자가 그 계약의 전부로 읽힌다. */
+export function OutOfRange({ usage }: { usage: RowUsage }) {
+  if (usage.kind !== "ok" || !usage.missing.length) return null;
+  return (
+    <Tone tone="warn" title={`Space ${usage.missing.join(", ")} 이(가) 가공 범위(엔터프라이즈·유료 스페이스)에 없어 사용량 숫자에 안 들어갔습니다 — 번호를 확인하세요`}>
+      일부 스냅샷에 없음
+    </Tone>
+  );
+}
+
 /** 목록의 두 열: 마지막 작업 · 사용 상태. */
 export function UsageCells({ usage }: { usage: RowUsage }) {
-  if (usage.kind === "no-agent") {
+  if (usage.kind === "no-data" || usage.kind === "loading") {
     return <><td className="muted">—</td><td className="muted">—</td></>;
   }
   if (usage.kind === "no-space") {
@@ -78,7 +81,7 @@ export function UsageCells({ usage }: { usage: RowUsage }) {
   }
   if (usage.kind === "unknown") {
     return <><td className="muted">—</td>
-      <td><Tone tone="warn" title={`Space ${usage.spaces.join(", ")} 이(가) 스냅샷에 없습니다 — 번호를 확인하세요`}>스냅샷에 없음</Tone></td></>;
+      <td><Tone tone="warn" title={`Space ${usage.spaces.join(", ")} 이(가) 가공 범위(엔터프라이즈·유료 스페이스)에 없습니다 — 번호를 확인하세요`}>스냅샷에 없음</Tone></td></>;
   }
   const d = usage.diagnosis;
   // 7일 이내 초록 · 30일 미만 주황 · 30일 이상 빨강 — 날짜와 「N일 전」이 같은 색 (2026-09-16 운영자).
@@ -91,6 +94,7 @@ export function UsageCells({ usage }: { usage: RowUsage }) {
       <td>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
           <StatusTags d={d} emptyLabel="정상" />
+          <OutOfRange usage={usage} />
         </div>
       </td>
     </>

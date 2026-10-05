@@ -1,0 +1,223 @@
+# 사용 데이터 가공 — 스냅샷을 집계해 이 레포의 `data` 브랜치에 올린다 (2026-10-01).
+#
+# **이 파일은 틀이다.** 공개 저장소(sales-automation)에 있고, 운영자가 회사 계정의 비공개 가공 레포에
+# `.github/workflows/export.yml` 로 복사해 쓴다. 그 레포의 이름은 공개 저장소 어디에도 적지 않는다 —
+# 이 파일도 자기 레포를 `${{ github.repository }}` 로만 가리킨다.
+#
+# 가공 레포에 필요한 것 (자세히는 공개 저장소 agent/README.md 「가공 레포 세우기」):
+#   - Secret `SNAPSHOT_TOKEN` — 스냅샷 저장소를 읽는 토큰. 그 조직의 외부 협업자 계정이면 classic(scope `repo`)만
+#     된다(GitHub 문서: 외부 협업자는 조직 저장소에 classic 토큰만 쓴다). 조직 멤버면 그 저장소 하나의 Contents
+#     읽기 전용 fine-grained 토큰이 더 좁다.
+#     **스냅샷 저장소에는 받기(fetch)만 한다 — 그 계정이 쓰기 권한을 가져도 같다.** classic `repo` 는 계정이 쓸 수
+#     있는 곳이면 쓰기까지 여는 열쇠라, 「안 쓴다」를 토큰의 권한이 아니라 이 워크플로가 지킨다(아래 「스냅샷 받기」).
+#   - Variable `EXPORTER_COMMIT` — 돌릴 가공 코드: 공개 저장소 main 에서 CI 가 초록인 커밋의 **40자 sha**.
+#
+# 콘솔은 로그인한 사람에게 이 레포의 이름과 읽기 전용 토큰을 넘기고(Render 의 USAGE_DATA_REPO ·
+# USAGE_DATA_TOKEN), 브라우저가 `data` 브랜치의 파일을 GitHub 에서 직접 받는다. 우리 서버는 데이터를 안 거친다.
+name: Usage data export
+
+on:
+  # 스냅샷은 매일 00:00 UTC(09:00 KST)에 새로 만들어진다 — 15분 뒤(09:15 KST)에 가공한다. GitHub 의 예약
+  # 실행은 몇 분~수십 분 늦을 수 있다. 그날 스냅샷이 아직 안 올라오기 시작했으면 어제 것을 한 번 더 가공하고,
+  # 올라가는 중이거나 중간에 멈췄으면 가공하지 않는다(아래 「스냅샷이 다 올라왔나」). 어느 쪽이든 data 는 어제
+  # 것 그대로이고, 콘솔은 스냅샷이 36시간 넘게 묵으면 「낡음」을 띄운다.
+  # 방아쇠는 이 둘뿐이다 — pull_request · push 처럼 남이 올린 코드로 도는 방아쇠를 달면 그 코드가 시크릿을 쥔다.
+  schedule:
+    - cron: "15 0 * * *"
+  workflow_dispatch: # 손으로 다시 돌릴 때(Actions → Run workflow)
+
+permissions:
+  contents: write # data 브랜치를 밀어 넣는 데만 쓴다
+
+# 예약 실행과 손 실행이 겹치면 줄을 세운다 — 둘이 동시에 data 를 강제로 밀면 늦게 끝난 쪽이 이기는데 그게
+# 더 오래된 스냅샷일 수 있다.
+concurrency:
+  group: usage-data-export
+  cancel-in-progress: false
+
+# 잡에는 단계(steps)만 둔다 — 재사용 워크플로(`uses` · `secrets: inherit`) · `container` · `services` · 워크플로/잡 단위
+# `env` · `defaults` 를 붙이면 스냅샷 토큰이 테스트가 안 읽는 코드에 닿는다(tests/test_usage_data_stays_off_server.py).
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    timeout-minutes: 70 # 스냅샷 기다림 45분 + 빌드·가공·올리기
+    steps:
+      # **돌릴 커밋은 사람이 고른다.** 공개 저장소 main 이 다음 날 아침 저절로 스냅샷 옆에서 돌면, 그 저장소에
+      # 커밋 하나가 들어가는 것(계정 탈취 · 잘못된 병합)만으로 스냅샷이 샌다. 비었거나 sha 가 아니면 멈춘다 —
+      # 비운 ref 를 checkout 은 기본 브랜치(main)로 읽는다.
+      - name: 돌릴 커밋 확인
+        env:
+          EXPORTER_COMMIT: ${{ vars.EXPORTER_COMMIT }}
+        run: |
+          if ! [[ "$EXPORTER_COMMIT" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::가공 레포 Settings → Secrets and variables → Actions → Variables 의 EXPORTER_COMMIT 에 공개 저장소 main 의 검토한 커밋 sha(40자)를 넣으세요"
+            exit 1
+          fi
+
+      # 가공 코드는 공개 저장소의 agent/ 하나뿐이다 — 가공 레포에 코드를 두지 않는다(고칠 곳이 한 군데).
+      # 스냅샷보다 **먼저** 받아 빌드까지 끝낸다: 스냅샷이 디스크에 있는 동안 네트워크를 가진 채 도는 공개 저장소
+      # 코드가 없어야 한다.
+      # 액션은 GitHub 의 것 둘뿐이고 **커밋 번호로 고정한다** — `@v4` 같은 태그는 옮겨질 수 있고, 이 잡에서 스냅샷
+      # 토큰보다 먼저 도는 코드라 바뀐 액션은 뒤 단계의 환경을 건드릴 수 있다. 올릴 때는 새 버전의 커밋 번호를 직접
+      # 확인해 바꾼다(주석의 버전도 같이).
+      - name: 가공 코드 받기 (공개 저장소의 agent/, 고른 커밋)
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          repository: alpaka206/sales-automation
+          ref: ${{ vars.EXPORTER_COMMIT }}
+          path: code
+          sparse-checkout: agent
+          persist-credentials: false
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: code/agent/go.mod
+          cache: false # 의존성이 없다 — 받을 것도 담아 둘 것도 없다
+
+      # DuckDB 버전은 snapshot.go 의 duckdbVersion 이 정하고, 받은 파일은 저장소에 적어 둔 체크섬과 맞아야
+      # 쓴다. 버전만 올리고 체크섬을 안 고치면 여기서 멈춘다 — 그게 맞다(무엇을 돌리는지 사람이 한 번 본다).
+      # 755 로 둔다 — 가공은 러너 사용자가 아닌 nobody 로 돈다(아래).
+      - name: DuckDB CLI
+        working-directory: code/agent
+        run: |
+          set -euo pipefail
+          V=$(grep -oE 'duckdbVersion = "[0-9.]+"' snapshot.go | grep -oE '[0-9.]+')
+          curl -fsSL -o duckdb_cli-linux-amd64.zip "https://github.com/duckdb/duckdb/releases/download/v$V/duckdb_cli-linux-amd64.zip"
+          sha256sum -c duckdb-linux-amd64.sha256
+          unzip -q -o duckdb_cli-linux-amd64.zip duckdb
+          chmod 755 duckdb
+          ./duckdb --version
+
+      # go vet · go test 는 여기서 돌리지 않는다 — 테스트는 저장소 코드를 **실행**하고, 이 잡은 시크릿을 쥐고
+      # 곧 스냅샷을 받는다. 공개 저장소 CI 의 exporter 잡이 main 에서 돌리고, EXPORTER_COMMIT 에는 그게 초록인
+      # 커밋만 적는다. go build 는 저장소 코드를 실행하지 않는다(cgo 도 끈다).
+      # 버전은 그 커밋의 짧은 sha — manifest.json 의 exporter 로 남아 어느 코드가 만든 데이터인지 보인다.
+      - name: 빌드
+        working-directory: code/agent
+        run: |
+          set -euo pipefail
+          CGO_ENABLED=0 go build -trimpath -ldflags "-X main.version=$(git rev-parse --short HEAD)" -o perso-export .
+
+      # **스냅샷 저장소에는 받기(fetch)만 한다 — 회사 계정이 그 저장소에 쓰기 권한을 가져도 같다.** 토큰의 권한이
+      # 아니라 이 단계가 지킨다:
+      #   - 토큰은 이 단계 하나에만 있다. 어떤 액션에도 넘기지 않는다 — actions/checkout 대신 러너의 git 으로 받는다.
+      #     이 단계에 shell · 다른 env 를 붙이지 않는다 — 셸이 스크립트 첫 줄보다 먼저 읽는다(BASH_ENV 등, 토큰이 환경에 있을 때).
+      #   - 그 git 은 빈 환경(`env -i`)에서 전역 · 시스템 설정 없이 돈다 — 앞 단계가 남긴 환경 · 설정(insteadOf ·
+      #     프록시 · 인증서 · GIT_*)이 토큰을 다른 곳으로 보내거나 다른 명령을 끼워 넣지 못한다.
+      #   - 토큰은 명령줄 -c 로만 준다 — .git 에 안 남아 뒤 단계(가공기 포함)가 못 쥐고, 토큰 변수는 바로 지운다.
+      #   - 이 클론은 push 가 막혀 있다(pushurl · pushInsteadOf 를 없는 주소로) — 무엇이 여기서 push 를 해도
+      #     github.com 에 안 닿는다.
+      #   - 쓰는 git 명령은 init · remote add · config(위 막기) · fetch · log · checkout 뿐이다 — 전부 이 러너 안의
+      #     일이고 저장소에 닿는 것은 fetch(그리고 checkout 이 모자란 파일을 받아 오는 fetch)뿐이다.
+      #     tests/test_usage_data_stays_off_server.py 가 이 단계의 명령을 글자로 고정한다.
+      # 판본 가르기에 최근 이력이 필요해 커밋 30개의 커밋 · 트리만 받고 지난 CSV 는 안 받는다(--filter=blob:none).
+      #
+      # 다 올라왔나: 스냅샷은 10MB 넘는 표를 하나씩 따로 커밋해 밀고 data/manifest.json 을 맨 마지막 커밋에 싣는다
+      # (스냅샷 저장소 HANDOFF.md 「증분 커밋 전환」: 「manifest가 항상 마지막」). data/ 를 건드린 마지막 커밋이 manifest 를
+      # 건드린 커밋이 아니면 올라가는 중이거나 중간에 멈춘 것이고, 그대로 가공하면 오늘 표와 어제 표가 섞인 숫자가 어제
+      # 시각을 달고 선다. 예약은 하루 한 번(09:15)인데 스냅샷은 09:00 에 만들기를 **시작**하므로, 5분마다 다시 받아 최대
+      # 45분 기다린다. 그래도 안 끝났으면 가공하지 않는다(data 는 어제 것 그대로).
+      - name: 스냅샷 받기 (받기만 · 최대 45분 기다림)
+        env:
+          SNAPSHOT_TOKEN: ${{ secrets.SNAPSHOT_TOKEN }}
+        run: |
+          set -euo pipefail
+          # 앞 단계가 PATH 에 끼운 디렉터리(GITHUB_PATH)의 가짜 base64 · env 가 토큰을 못 보게 — 토큰을 만지기 전에.
+          export PATH=/usr/bin:/bin
+          # 이 잡에서 처음 만드는 폴더다 — 이미 있으면 누군가 .git 설정을 심어 둔 것이라 그대로 쓰지 않고 멈춘다.
+          if [ -e snapshot ]; then echo "::error::snapshot/ 이 이미 있습니다 — 받지 않습니다"; exit 1; fi
+          auth="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$SNAPSHOT_TOKEN" | base64 -w0)"
+          echo "::add-mask::$auth"
+          unset SNAPSHOT_TOKEN
+          home="$RUNNER_TEMP/snapshot-git-home"
+          mkdir -p "$home"
+          git() {
+            env -i PATH=/usr/bin:/bin HOME="$home" LANG=C.UTF-8 \
+              GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null GIT_TERMINAL_PROMPT=0 /usr/bin/git "$@"
+          }
+          git init -q -b snapshot snapshot
+          git -C snapshot remote add origin https://github.com/est-perso/perso-data-snapshot.git
+          git -C snapshot config remote.origin.pushurl no-push://snapshot-is-read-only
+          git -C snapshot config --add url.no-push://snapshot-is-read-only/.pushInsteadOf https://
+          git -C snapshot config --add url.no-push://snapshot-is-read-only/.pushInsteadOf http://
+          complete() {
+            local last manifest
+            last=$(git -C snapshot log -1 --format=%H FETCH_HEAD -- data)
+            manifest=$(git -C snapshot log -1 --format=%H FETCH_HEAD -- data/manifest.json)
+            [ -n "$last" ] && [ "$last" = "$manifest" ]
+          }
+          for i in 0 1 2 3 4 5 6 7 8 9; do
+            if [ "$i" -gt 0 ]; then
+              echo "스냅샷이 아직 올라가는 중입니다 — 5분 뒤 다시 봅니다 ($i/9)"
+              sleep 300
+            fi
+            git -C snapshot -c http.extraheader="$auth" fetch -q --no-tags --depth=30 --filter=blob:none origin HEAD
+            if complete; then
+              git -C snapshot -c http.extraheader="$auth" checkout -q --detach FETCH_HEAD
+              exit 0
+            fi
+          done
+          echo "::error::45분을 기다려도 스냅샷이 다 올라오지 않았습니다 — 가공하지 않습니다. 다 올라온 뒤 Run workflow"
+          exit 1
+
+      # **네트워크도 권한도 없이 돈다** — 스냅샷을 읽는 프로세스가 무엇을 하든 밖으로 못 보내게:
+      #   - unshare --net: 새 네트워크 이름공간(루프백뿐, 그것도 꺼짐).
+      #   - unshare --mount + /run 에 빈 tmpfs: systemd-resolved · D-Bus · docker 같은 로컬 데몬의 소켓을 가린다 —
+      #     그 데몬들은 바깥 네트워크를 쥐고 있어서(예: DNS 조회에 데이터를 실어 보내기) 이름공간만으로는 모자란다.
+      #   - unshare --pid: 가공기가 끝나면 그 안의 프로세스가 전부 같이 죽는다 — 뒤 단계까지 살아남는 것이 없다.
+      #   - setpriv: nobody 로 내려와 보조 그룹(docker)을 버리고 no_new_privs — sudo 로 다시 root 가 될 수 없다.
+      #     러너 사용자가 아니므로 러너의 파일(액션 코드 · 도구 · 다음 단계가 읽는 환경 파일 · ~/.gitconfig)에
+      #     아무것도 못 쓴다.
+      #   - 읽는 것은 /mnt 에 읽기 전용으로 붙인 스냅샷과 가공기, 쓰는 것은 result/ 하나다.
+      # git 은 남의(러너의) 저장소라 safe.directory 를 이 프로세스에만 열어 준다 — 스냅샷의 커밋 번호를 읽는다.
+      - name: 가공 (네트워크 · 권한 없이)
+        run: |
+          set -euo pipefail
+          mkdir result
+          sudo chown nobody:nogroup result
+          sudo unshare --net --mount --pid --fork --mount-proc -- sh -euc '
+            mount -t tmpfs tmpfs /run
+            mount -t tmpfs tmpfs /mnt
+            mkdir /mnt/snapshot /mnt/agent /mnt/result
+            mount --bind -o ro snapshot /mnt/snapshot
+            mount --bind -o ro code/agent /mnt/agent
+            mount --bind result /mnt/result
+            cd /mnt/result
+            exec setpriv --reuid=nobody --regid=nogroup --clear-groups --no-new-privs -- \
+              env -i PATH=/usr/bin:/bin HOME=/tmp \
+                GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.directory GIT_CONFIG_VALUE_0=/mnt/snapshot \
+              /mnt/agent/perso-export --snapshot /mnt/snapshot --out /mnt/result/out --duckdb /mnt/agent/duckdb
+          '
+
+      # data 브랜치 = 그날 결과 **커밋 하나**(부모 없음)를 강제로 민다. 이력을 안 쌓는 이유: 지난 데이터가
+      # 레포에 남지 않고 크기도 안 자란다. main 은 이 워크플로만 들고 있다 — 결과를 main 에 올리면 매일
+      # 워크플로 파일과 데이터가 한 이력에 섞인다.
+      # 이 단계에는 네트워크와 미는 토큰이 있다. 그래서 원본을 먼저 지우고, 가공기가 쓴 폴더를 저장소로 쓰지 않는다:
+      # 정해 둔 이름의 보통 파일만 새 폴더로 옮겨 그것만 민다(그 밖의 것 — .git · 링크 · 다른 이름 — 이 있으면 멈춘다).
+      # git 은 전역·시스템 설정도 훅도 안 읽는다.
+      - name: data 브랜치에 올리기
+        env:
+          GIT_CONFIG_GLOBAL: /dev/null
+          GIT_CONFIG_NOSYSTEM: "1"
+        run: |
+          set -euo pipefail
+          rm -rf snapshot
+          out=result/out
+          extra=$(find "$out" -mindepth 1 -regextype posix-extended \
+            \( -type d -path "$out/facts" \) -o \
+            \( -type f -regex "$out/((manifest|summary|evidence|sales|metrics)|facts/[a-z0-9]+)\.json" \) -o -print)
+          if [ -n "$extra" ]; then
+            echo "::error::가공 결과에 정해 둔 파일 말고 다른 것이 있습니다 — 올리지 않습니다"
+            exit 1
+          fi
+          pub="$RUNNER_TEMP/data"
+          mkdir -p "$pub/facts"
+          cp "$out"/*.json "$pub"/
+          cp "$out"/facts/*.json "$pub"/facts/
+          cd "$pub"
+          git init -q -b data
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git -c core.hooksPath=/dev/null commit -q -m "usage data — snapshot $(jq -r .snapshot_at manifest.json)"
+          git -c core.hooksPath=/dev/null push -q -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" data

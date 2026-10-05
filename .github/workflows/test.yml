@@ -141,6 +141,23 @@ jobs:
       - name: Typecheck and build
         run: npm --prefix frontend run build
 
+  exporter:
+    # 가공 레포의 Actions 가 매일 09:15 에 운영자가 고른 커밋(EXPORTER_COMMIT)의 agent/ 를 빌드해 돌린다
+    # (2026-10-01). 그 잡은 스냅샷과 시크릿을 쥐어서 go vet · go test 를 돌리지 않는다 — 테스트는 여기서만 돌고,
+    # 여기가 빨간 커밋은 고르지 않는다(agent/README.md 「방어」).
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: agent
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: agent/go.mod
+          cache: false
+      - run: go vet ./... && go test ./...
+
   docker-build:
     runs-on: ubuntu-latest
     timeout-minutes: 15

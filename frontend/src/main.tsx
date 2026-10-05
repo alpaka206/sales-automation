@@ -73,8 +73,8 @@ function mountConsole() {
             <Route path="email-templates" element={<EmailTemplates />} />
             <Route path="policy-docs" element={<PolicyDocs />} />
             <Route path="operations" element={<SalesInsights />} />
-            {/* 스냅샷 데이터를 로컬 에이전트에서 가져와 그린다 — 데이터는 우리 서버를
-                안 지난다. 화면만 여기서 오고 숫자는 브라우저가 127.0.0.1 에서 받는다. */}
+            {/* 가공된 스냅샷을 그린다 — 데이터는 우리 서버를 안 지난다. 화면만 여기서 오고
+                숫자는 브라우저가 GitHub(비공개 가공 레포)에서 직접 받는다. */}
             <Route path="data" element={<DataAgent />} />
             <Route path="companies/:domain" element={<CompanyDetail />} />
             <Route path="settings/users" element={<SettingsUsers />} />
