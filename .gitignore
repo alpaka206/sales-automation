@@ -80,17 +80,19 @@ docs/정책문서-구조-개편-설계*.md
 docs/정책문서-검토결과에-대한-반론-*.md
 docs/정책문서-4판-재검토-*.md
 
-# 가공기(agent/)를 손으로 빌드·시험할 때 생기는 것 — 실행 파일(README 대로면 perso-export, -o 없이 빌드하면
-# perso-agent)과 워크플로를 따라 받은 DuckDB. 공개 저장소에 들어오면 수십 MB 가 이력에 영영 남는다.
-# dist/ 는 옛 로컬 에이전트 시절의 빌드 폴더다.
-agent/dist/
+# 가공기(agent/)를 손으로 빌드·시험할 때 생기는 것 — 실행 파일(perso-export)과 워크플로를 따라 받은 DuckDB.
+# 공개 저장소에 들어오면 수십 MB 가 이력에 영영 남는다.
 agent/perso-*
 agent/duckdb
+agent/duckdb.exe
 agent/duckdb_cli-*.zip
+# 옛 에이전트가 실행 파일에 싣던 DuckDB zip 자리(2026-10-06 에 걷었다) — 옛 clone 에는 남아 있을 수 있다.
+agent/bin/
 
 # 인수인계 문서 묶음은 저장소에 안 올린다 (2026-09-23 운영자: 「handover는 ignore 처리」 —
 # 압축해서 따로 전달한다). 운영 식별자·사고 이력이 촘촘하고 이 저장소는 공개 상태다.
 docs/handover/
+docs/handover*.zip
 # 제품 DB 스냅샷의 집계치가 들어 있다 — CLAUDE.md 에도 「로컬 문서」로 적혀 있다.
 docs/수주고객-사용현황-데이터검증-*.md
 # 작업 중에 찍은 화면 캡처

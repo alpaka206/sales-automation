@@ -7,14 +7,17 @@ import (
 
 // ── 영업 인사이트 ──────────────────────────────────────────────────────────
 // 수주 고객 화면과 반대 방향의 물음이다: 「우리가 아는 고객이 어떻게 쓰나」가 아니라 **「우리가
-// 모르는 사람 중 누가 눈에 띄나」**와 「제품 전체가 어디로 가나」. 스냅샷은 B2B 만이 아니라 전부를
-// 담고 있으니(스페이스 59만 · 사용자 59만) 셀프서브에서 크게 쓰는 스페이스가 곧 영업 대상이다.
+// 모르는 사람 중 누가 눈에 띄나」**. 스냅샷은 B2B 만이 아니라 전부를 담고 있으니(스페이스 59만 ·
+// 사용자 59만) 셀프서브에서 크게 쓰는 스페이스가 곧 영업 대상이다.
 //
-// 결과 두 갈래:
+// 결과는 「주목할 스페이스」 표가 읽는 것 셋뿐이다 (2026-10-06 운영자: 「주목할 스페이스 말고 아래에 있는거
+// 모두 다 삭제」) — 그 아래 있던 제품 전체 흐름(가입 · 구독 · 체크아웃 · 플랜별 크레딧 · 언어쌍 · 업로드 경로 ·
+// 로그인)은 화면과 함께 빠졌고, 그래서 사용자 · 체크아웃 · 구독 이력 표는 더 읽지도 않는다:
 //   - spaces — 눈에 띄는 스페이스 ≤ 300. 엔터프라이즈 연결(esa)이거나 30일 크레딧 1,500 이상이거나
 //     30일 내보내기 10건 이상이거나 사용자가 둘 이상. **어느 것이 우리 고객인지는 콘솔이 안다**
 //     (계약의 space_seq) — 여기서는 모른 채 고르고, 화면이 우리 고객을 뺀다.
-//   - 전체 흐름 — 가입·구독·체크아웃·크레딧·언어쌍. 관측치 5 미만 그룹은 낸다(minGroup).
+//   - spaces_active_6m — 6개월 안에 내보내기가 있는 스페이스 수(표 머리의 「N개 중」).
+//   - fail_rate_all — 전사 실패율(「실패가 잦다」 신호의 기준).
 //
 // 식별자는 space_seq 뿐이다(허브스팟 연락처의 「space seq」 칸으로 사람에게 이어진다). plan_name 은
 // 엔터프라이즈 티어에서 「<회사> Biz」 꼴이라 회사를 말하지만 그것이 이 화면의 목적이다 — 사람의
@@ -23,12 +26,12 @@ const salesSQL = `
 WITH nowat AS (SELECT CAST('{{asof}}' AS TIMESTAMP) AS t),
 ps AS (SELECT project_seq, space_seq FROM read_csv_auto('{{d}}/perso_video_translator.project_space.csv', union_by_name=true)),
 pel AS (
-  SELECT p.create_date, p.job_status, p.user_seq, p.source_language_code, p.target_language_code, p.upload_source_type, ps.space_seq
+  SELECT p.create_date, p.job_status, p.user_seq, p.source_language_code, p.target_language_code, ps.space_seq
   FROM read_csv_auto('{{d}}/perso_video_translator.project_export_log.csv', union_by_name=true) p
   JOIN ps USING (project_seq)
 ),
 cuh AS (
-  SELECT space_seq, create_date, plan_tier,
+  SELECT space_seq, create_date,
          CASE WHEN action_type = 'EXECUTE' THEN actual_used_quota ELSE -actual_used_quota END AS signed
   FROM read_csv_auto('{{d}}/perso_video_translator.credit_usage_history.csv', union_by_name=true)
 ),
@@ -43,9 +46,6 @@ sm AS (
   SELECT space_seq, count(*) AS members
   FROM read_csv_auto('{{d}}/perso.space_member.part*.csv', union_by_name=true) WHERE status = 'approval' GROUP BY 1
 ),
-u AS (SELECT create_date, last_login_date, login_provider FROM read_csv_auto('{{d}}/perso_user.user.part*.csv', union_by_name=true)),
-ch AS (SELECT create_date, is_expire, space_seq FROM read_csv_auto('{{d}}/perso_payment.checkout_history.csv', union_by_name=true)),
-sh AS (SELECT create_date, event_type, plan_name FROM read_csv_auto('{{d}}/perso_payment.subscription_history.csv', union_by_name=true)),
 act AS (
   SELECT space_seq,
          count(*) FILTER (WHERE create_date >= (SELECT t FROM nowat) - INTERVAL 30 DAY) AS exports_30d,
@@ -65,7 +65,8 @@ pairs AS (
   SELECT space_seq, coalesce(source_language_code, '?') || ' → ' || coalesce(target_language_code, '?') AS pair, count(*) AS n
   FROM pel GROUP BY 1, 2
 ),
-toppair AS (SELECT space_seq, arg_max(pair, n) AS top_pair FROM pairs GROUP BY 1),
+-- 동점이면 이름 순 — arg_max 는 같은 n 중 아무거나 골라서 같은 스냅샷인데 날마다 「주 언어쌍」이 바뀌었다.
+toppair AS (SELECT space_seq, first(pair ORDER BY n DESC, pair) AS top_pair FROM pairs GROUP BY 1),
 rows AS (
   SELECT a.space_seq, coalesce(sb.tier, '(구독 없음)') AS tier, sb.plan_name, sb.sub_status,
          (a.space_seq IN (SELECT space_seq FROM esa)) AS ent,
@@ -80,7 +81,7 @@ rows AS (
 picked AS (
   SELECT * FROM rows
   WHERE ent OR credits_30d >= 1500 OR exports_30d >= 10 OR users >= 2
-  ORDER BY ent DESC, credits_30d DESC, exports_30d DESC LIMIT 300
+  ORDER BY ent DESC, credits_30d DESC, exports_30d DESC, space_seq LIMIT 300
 )
 SELECT
   to_json((SELECT list(struct_pack(
@@ -88,45 +89,9 @@ SELECT
       credits_30d := credits_30d, credits_90d := credits_90d, exports_30d := exports_30d, exports_6m := exports_6m,
       failed_6m := failed_6m, users := users, members := members, seat := seat,
       first_job := first_job, last_job := last_job, top_pair := top_pair
-    ) ORDER BY credits_30d DESC, exports_30d DESC) FROM picked)) AS spaces,
+    ) ORDER BY credits_30d DESC, exports_30d DESC, space_seq) FROM picked)) AS spaces,
   (SELECT count(*) FROM rows) AS spaces_active_6m,
-  to_json((SELECT list(struct_pack(period := period, n := n) ORDER BY period) FROM (
-      SELECT strftime(date_trunc('month', create_date), '%Y-%m') AS period, count(*) AS n FROM u
-      WHERE create_date >= date_trunc('month', (SELECT t FROM nowat)) - INTERVAL 11 MONTH GROUP BY 1))) AS joins_monthly,
-  to_json((SELECT struct_pack(
-      total := count(*),
-      active_30d := count(*) FILTER (WHERE last_login_date >= (SELECT t FROM nowat) - INTERVAL 30 DAY),
-      active_90d := count(*) FILTER (WHERE last_login_date >= (SELECT t FROM nowat) - INTERVAL 90 DAY)
-    ) FROM u)) AS users_all,
-  to_json((SELECT list(struct_pack(provider := provider, n := n) ORDER BY n DESC) FROM (
-      SELECT coalesce(login_provider, '(없음)') AS provider, count(*) AS n FROM u GROUP BY 1 HAVING count(*) >= 5))) AS login,
-  to_json((SELECT list(struct_pack(period := period, created := created, deleted := deleted) ORDER BY period) FROM (
-      SELECT strftime(date_trunc('month', create_date), '%Y-%m') AS period,
-             count(*) FILTER (WHERE event_type = 'customer.subscription.created') AS created,
-             count(*) FILTER (WHERE event_type = 'customer.subscription.deleted') AS deleted
-      FROM sh WHERE create_date >= date_trunc('month', (SELECT t FROM nowat)) - INTERVAL 11 MONTH GROUP BY 1))) AS subs_monthly,
-  to_json((SELECT list(struct_pack(plan := plan, n := n) ORDER BY n DESC) FROM (
-      SELECT coalesce(plan_name, '(없음)') AS plan, count(*) AS n FROM sh
-      WHERE event_type = 'customer.subscription.created' AND create_date >= (SELECT t FROM nowat) - INTERVAL 6 MONTH
-      GROUP BY 1 HAVING count(*) >= 5))) AS subs_new_by_plan,
-  to_json((SELECT list(struct_pack(tier := tier, ent := ent, spaces := spaces, exports := exports, credits := credits) ORDER BY spaces DESC) FROM (
-      SELECT tier, ent, count(*) AS spaces, sum(exports_30d) AS exports, round(sum(credits_30d)) AS credits
-      FROM rows WHERE exports_30d > 0 GROUP BY 1, 2 HAVING count(*) >= 5))) AS tiers_30d,
-  to_json((SELECT list(struct_pack(period := period, tier := tier, credits := credits) ORDER BY period, tier) FROM (
-      SELECT strftime(date_trunc('month', create_date), '%Y-%m') AS period, coalesce(plan_tier, '(없음)') AS tier, round(sum(signed)) AS credits
-      FROM cuh GROUP BY 1, 2 HAVING count(*) >= 5))) AS credits_monthly,
-  to_json((SELECT list(struct_pack(period := period, sessions := sessions, expired := expired, spaces := spaces) ORDER BY period) FROM (
-      SELECT strftime(date_trunc('month', create_date), '%Y-%m') AS period, count(*) AS sessions,
-             count(*) FILTER (WHERE is_expire = 1) AS expired, count(DISTINCT space_seq) AS spaces
-      FROM ch GROUP BY 1))) AS checkouts_monthly,
-  to_json((SELECT list(struct_pack(pair := pair, n := n) ORDER BY n DESC) FROM (
-      SELECT coalesce(source_language_code, '?') || ' → ' || coalesce(target_language_code, '?') AS pair, count(*) AS n
-      FROM pel GROUP BY 1 HAVING count(*) >= 5 ORDER BY n DESC LIMIT 10))) AS pairs_6m,
-  to_json((SELECT list(struct_pack(source := source, n := n) ORDER BY n DESC) FROM (
-      SELECT coalesce(upload_source_type, '(미기록)') AS source, count(*) AS n FROM pel GROUP BY 1 HAVING count(*) >= 5))) AS sources_6m,
-  (SELECT round(100.0 * count(*) FILTER (WHERE job_status = 'FAILED') / nullif(count(*) FILTER (WHERE job_status IN ('COMPLETED', 'FAILED')), 0), 2) FROM pel) AS fail_rate_all,
-  (SELECT min(create_date) FROM pel) AS jobs_from,
-  (SELECT min(create_date) FROM cuh) AS credits_from
+  (SELECT round(100.0 * count(*) FILTER (WHERE job_status = 'FAILED') / nullif(count(*) FILTER (WHERE job_status IN ('COMPLETED', 'FAILED')), 0), 2) FROM pel) AS fail_rate_all
 `
 
 // RunSales 는 스페이스 목록 없이 도는 한 질의 — 그 한 행이 그대로 sales.json 이다. 계약(식별자 없음 ·

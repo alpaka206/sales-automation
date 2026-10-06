@@ -42,7 +42,7 @@ function Table({ metric }: { metric: Metric }) {
   );
 }
 
-export function DataAgent() {
+export function DataStatus() {
   const usage = useUsageSource();
   const status = useUsageStatus(usage.source);
   const metrics = useUsageFile<{ metrics: Metric[] }>(usage.source, "metrics.json");

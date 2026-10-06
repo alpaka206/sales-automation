@@ -14,11 +14,10 @@ const (
 )
 
 type metric struct {
-	Name     string
-	Label    string
-	Cols     []string
-	HasMonth bool
-	SQL      string
+	Name  string
+	Label string
+	Cols  []string
+	SQL   string
 }
 
 var metrics = []metric{
@@ -40,15 +39,14 @@ var metrics = []metric{
 		SQL:   `SELECT status, count(*) AS subscriptions FROM ` + subs + ` GROUP BY 1 ORDER BY 2 DESC`,
 	},
 	{
-		Name:     "monthly_events",
-		Label:    "월별 구독 이벤트",
-		Cols:     []string{"month", "event_type", "events"},
-		HasMonth: true,
+		Name:  "monthly_events",
+		Label: "월별 구독 이벤트",
+		Cols:  []string{"month", "event_type", "events"},
 		SQL: `SELECT strftime(try_cast(start_date AS TIMESTAMP), '%Y-%m') AS month,
 		             event_type                                          AS event_type,
 		             count(*)                                            AS events
 		      FROM ` + hist + `
-		      WHERE try_cast(start_date AS TIMESTAMP) >= (current_date - INTERVAL '{{months}} months')
+		      WHERE try_cast(start_date AS TIMESTAMP) >= CAST('{{asof}}' AS TIMESTAMP) - INTERVAL 12 MONTH
 		      GROUP BY 1, 2 HAVING month IS NOT NULL ORDER BY 1 DESC, 3 DESC`,
 	},
 }

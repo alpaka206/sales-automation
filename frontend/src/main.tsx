@@ -12,7 +12,7 @@ import { CustomerDetail } from "./screens/CustomerDetail";
 import { EmailTemplates } from "./screens/EmailTemplates";
 import { PolicyDocs } from "./screens/PolicyDocs";
 import { SalesInsights } from "./screens/SalesInsights";
-import { DataAgent } from "./screens/DataAgent";
+import { DataStatus } from "./screens/DataStatus";
 import { CompanyDetail } from "./screens/CompanyDetail";
 import { SettingsUsers } from "./screens/SettingsUsers";
 import { SettingsMailboxes } from "./screens/SettingsMailboxes";
@@ -75,7 +75,7 @@ function mountConsole() {
             <Route path="operations" element={<SalesInsights />} />
             {/* 가공된 스냅샷을 그린다 — 데이터는 우리 서버를 안 지난다. 화면만 여기서 오고
                 숫자는 브라우저가 GitHub(비공개 가공 레포)에서 직접 받는다. */}
-            <Route path="data" element={<DataAgent />} />
+            <Route path="data" element={<DataStatus />} />
             <Route path="companies/:domain" element={<CompanyDetail />} />
             <Route path="settings/users" element={<SettingsUsers />} />
             <Route path="settings/mailboxes" element={<SettingsMailboxes />} />

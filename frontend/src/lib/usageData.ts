@@ -40,7 +40,7 @@ export type Manifest = {
   /** 가공 범위의 스페이스 수(엔터프라이즈 · 유료) · 묶음 파일 수. */
   spaces: number; groups: number;
 };
-export type SpaceResult<T> = { metric: string; spaces: number[]; snapshot_at: string; data: T };
+export type SpaceResult<T> = { spaces: number[]; snapshot_at: string; data: T };
 export type Loaded<T> = { data: T | null; problem: string | null; busy: boolean };
 
 /** 이 레포의 GitHub API 하나를 부릅니다 — 받는 곳은 여기 한 곳입니다. */
@@ -196,7 +196,7 @@ export async function loadSpaceMetric<M extends keyof MetricData>(
   // 스페이스 순으로 — 합치기의 동률(같은 시각 · 같은 차례의 기록)이 받은 순서에 따라 흔들리지 않게.
   const facts = parts.flatMap((p) => p.spaces.filter((f) => want.has(f.space_seq)))
     .sort((a, b) => a.space_seq - b.space_seq);
-  return { metric, spaces: facts.map((f) => f.space_seq), snapshot_at: h.manifest.snapshot_at, data: MERGE[metric](facts) };
+  return { spaces: facts.map((f) => f.space_seq), snapshot_at: h.manifest.snapshot_at, data: MERGE[metric](facts) };
 }
 
 export function useSpaceMetric<M extends keyof MetricData>(source: UsageSource | null, metric: M, spaces: number[]) {

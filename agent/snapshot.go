@@ -1,13 +1,11 @@
 package main
 
 import (
-	"archive/zip"
 	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log"
 	"os"
 	"os/exec"
@@ -53,7 +51,7 @@ func NewSnapshot(repo, duck string) (*Snapshot, error) {
 		return nil, errors.New("스냅샷 경로에 작은따옴표가 있습니다 — 다른 폴더로 옮겨 주세요")
 	}
 	if duck == "" {
-		if duck, err = ensureDuckDB(); err != nil {
+		if duck, err = findDuckDB(); err != nil {
 			return nil, err
 		}
 	} else if duck, err = filepath.Abs(duck); err != nil {
@@ -117,19 +115,14 @@ type metricResult struct {
 	Suppressed int      `json:"suppressed_groups"`
 }
 
-func (s *Snapshot) RunMetric(m *metric, months int) (*metricResult, error) {
-	if months < 1 || months > 60 {
-		months = 12
-	}
+func (s *Snapshot) RunMetric(m *metric, at time.Time) (*metricResult, error) {
 	// 나갈 컬럼이 식별자성인지 **기계가 잰다.** 사람이 지키는 규칙으로 두지 않는다.
 	for _, c := range m.Cols {
 		if idLike.MatchString(c) {
 			return nil, fmt.Errorf("식별자성 컬럼이 결과에 있습니다: %s", c)
 		}
 	}
-	sql := strings.ReplaceAll(m.SQL, "{{d}}", filepath.ToSlash(s.Data))
-	sql = strings.ReplaceAll(sql, "{{months}}", fmt.Sprint(months))
-	raw, err := s.query(sql)
+	raw, err := s.query(fill(m.SQL, s.Data, nil, at, ""))
 	if err != nil {
 		return nil, err
 	}
@@ -307,63 +300,15 @@ func walkContract(v any, allow map[string]bool) error {
 }
 
 // ── DuckDB CLI ───────────────────────────────────────────────────────────
-// 윈도우·맥 빌드는 zip 째로 싣고 첫 실행에 푼다(손으로 돌려 볼 때). 리눅스(가공 워크플로)는 싣지 않는다 —
-// 워크플로가 이 버전을 받아 체크섬(duckdb-linux-amd64.sha256)을 맞춘 뒤 --duckdb 로 넘긴다.
+// 가공 워크플로가 이 버전의 리눅스 CLI 를 받아 체크섬(duckdb-linux-amd64.sha256)을 맞춘 뒤 --duckdb 로 넘긴다 —
+// 워크플로는 **이 파일의 이 줄**에서 버전을 읽는다(옮기면 그 워크플로가 버전을 못 찾는다). 손으로 돌릴 때는
+// --duckdb 로 주거나 PATH 에 둔다. 예전에는 윈도우·맥 빌드에 zip 째로 싣고 첫 실행에 사용자 캐시에 풀었다 —
+// PC 마다 실행 파일 하나로 나눠 주던 로컬 에이전트 시절의 일이라 2026-10-06 에 걷어냈다.
 const duckdbVersion = "1.4.1"
 
-func ensureDuckDB() (string, error) {
-	if len(duckdbZip) == 0 {
-		if p, err := exec.LookPath("duckdb"); err == nil {
-			return p, nil
-		}
-		return "", errors.New("DuckDB CLI 를 못 찾았습니다 — --duckdb 로 경로를 주거나 PATH 에 duckdb 를 두세요 (버전 " + duckdbVersion + ")")
+func findDuckDB() (string, error) {
+	if p, err := exec.LookPath("duckdb"); err == nil {
+		return p, nil
 	}
-	cache, err := os.UserCacheDir()
-	if err != nil {
-		cache = os.TempDir()
-	}
-	dir := filepath.Join(cache, "perso-agent", "duckdb-"+duckdbVersion)
-	exe := filepath.Join(dir, duckdbExeName)
-	if st, err := os.Stat(exe); err == nil && st.Size() > 0 {
-		return exe, nil
-	}
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return "", fmt.Errorf("DuckDB 를 풀 폴더를 못 만들었습니다: %w", err)
-	}
-	zr, err := zip.NewReader(bytes.NewReader(duckdbZip), int64(len(duckdbZip)))
-	if err != nil {
-		return "", fmt.Errorf("함께 실린 DuckDB 를 읽지 못했습니다: %w", err)
-	}
-	for _, f := range zr.File {
-		if f.FileInfo().IsDir() || filepath.Base(f.Name) != duckdbExeName {
-			continue
-		}
-		// 임시 이름으로 쓰고 rename 한다 — 중간에 죽으면 반쪽짜리가 남아 다음 실행이
-		// 그것을 「이미 있다」로 읽는다.
-		tmp := exe + ".part"
-		src, err := f.Open()
-		if err != nil {
-			return "", err
-		}
-		dst, err := os.OpenFile(tmp, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o700)
-		if err != nil {
-			src.Close()
-			return "", err
-		}
-		_, cerr := io.Copy(dst, src)
-		src.Close()
-		if err := dst.Close(); err != nil && cerr == nil {
-			cerr = err
-		}
-		if cerr != nil {
-			os.Remove(tmp)
-			return "", fmt.Errorf("DuckDB 를 풀지 못했습니다: %w", cerr)
-		}
-		if err := os.Rename(tmp, exe); err != nil {
-			return "", err
-		}
-		log.Printf("DuckDB %s 를 풀었습니다: %s", duckdbVersion, exe)
-		return exe, nil
-	}
-	return "", fmt.Errorf("함께 실린 zip 에 %s 가 없습니다", duckdbExeName)
+	return "", errors.New("DuckDB CLI 를 못 찾았습니다 — --duckdb 로 경로를 주거나 PATH 에 duckdb 를 두세요 (버전 " + duckdbVersion + ")")
 }

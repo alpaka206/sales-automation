@@ -8,9 +8,10 @@
 
 2026-10-01 까지 이 폴더는 PC 마다 까는 로컬 에이전트(`127.0.0.1:43110` HTTP 서버 · 스냅샷 pull · 자동
 업데이트)였다. 설치·업데이트·스냅샷 받기가 PC 마다 따로 깨졌고 PC 마다 자기 clone 으로 계산해서 걷어냈다 — 왜와
-나머지 규칙은 `CLAUDE.md` 「사용 데이터(스냅샷)는 서버로 안 간다」. 폴더 이름 `agent/` 와 모듈 이름 `perso-agent`
-는 그대로다: 워크플로 견본이 `sparse-checkout: agent` 로 이 폴더를 받고 CI 와 테스트가 이 경로를 본다. 이름을
-바꾸면 가공 레포의 `export.yml` 도 같이 고쳐야 한다.
+나머지 규칙은 `CLAUDE.md` 「사용 데이터(스냅샷)는 서버로 안 간다」. 에이전트 시절의 코드(HTTP 서버 · 자동 업데이트 ·
+맥 앱 · 실행 파일에 DuckDB 싣기)는 2026-10-06 에 다 걷어냈다. **폴더 이름 `agent/` 만 그대로다**: 가공 레포의
+`export.yml` 이 `sparse-checkout: agent` 로 이 폴더를 받아 `code/agent` 에서 빌드하고, CI 와 테스트도 이 경로를 본다 —
+이름을 바꾸면 가공 레포의 `export.yml` 도 같은 날 고쳐야 한다(안 고치면 다음 날 아침 가공이 빌드에서 멈춘다).
 
 **가공 레포의 이름과 그 계정은 이 저장소 어디에도 적지 않는다** — 이 저장소는 공개다. 아래에서는
 `<owner>/<가공 레포>` 로 적는다.
@@ -51,7 +52,7 @@ perso-export --version
 |---|---|
 | `--snapshot` | `data/manifest.json` 이 있는 폴더. git clone 이면 `manifest.json` 의 `snapshot_commit` 에 그 커밋이, zip 을 푼 폴더면 `(git 아님)` 이 들어간다. 경로에 작은따옴표가 있으면 거절한다(SQL 문자열에 그대로 들어간다) |
 | `--out` | **아직 없는** 폴더. 그 이름이나 `<out>.tmp` 가 이미 있으면 지우지 않고 거절한다 — 경로를 잘못 준 한 번이 남의 폴더를 지우면 안 된다 |
-| `--duckdb` | DuckDB CLI. 리눅스는 이것이나 `PATH` 의 `duckdb` 가 있어야 한다. 윈도우·맥 빌드는 비우면 함께 실린 것을 첫 실행에 사용자 캐시 폴더(`perso-agent/duckdb-<버전>`)에 풀어 쓴다 |
+| `--duckdb` | DuckDB CLI 경로. 비우면 `PATH` 의 `duckdb` 를 쓴다(없으면 실패). 가공 워크플로는 체크섬을 맞춘 리눅스 CLI 를 넘긴다 |
 | `--version` | `perso-export <버전>` — 빌드가 `-ldflags "-X main.version=…"` 로 박은 값(워크플로는 이 저장소의 짧은 커밋, 손 빌드는 `dev`). `manifest.json` 의 `exporter` 가 이 값이라 그날 데이터를 어느 코드가 만들었는지 남는다 |
 
 성공하면 0, 쓰는 법이 틀리면 2, 가공이 실패하면 1(「가공 실패 — 아무것도 쓰지 않았습니다: …」).
@@ -60,27 +61,26 @@ perso-export --version
 
 Go 1.27(`go.mod`). DuckDB 버전은 `snapshot.go` 의 `duckdbVersion`(지금 1.4.1)이다.
 
-윈도우·맥 빌드는 `bin/` 의 DuckDB zip 을 실행 파일에 싣는다(`duckdb_windows.go` · `duckdb_darwin.go` 의
-`go:embed`). 그 파일이 없으면 `go test` 도 컴파일되지 않는다. zip 은 저장소에 안 넣는다(`bin/.gitignore`).
+DuckDB CLI 는 따로 받아 `--duckdb` 로 주거나 `PATH` 에 둔다(DuckDB 릴리스의 `duckdb_cli-<OS>-<아키텍처>.zip` 을
+풀면 실행 파일 하나다). 예전에는 윈도우·맥 빌드가 zip 을 실행 파일에 싣고(`go:embed`) 첫 실행에 사용자 캐시에
+풀었다 — PC 마다 파일 하나로 나눠 주던 에이전트 시절의 일이라 걷어냈다.
 
 ```powershell
 cd agent
-curl.exe -L -o bin/duckdb-windows-amd64.zip https://github.com/duckdb/duckdb/releases/download/v1.4.1/duckdb_cli-windows-amd64.zip
 go vet ./... ; go test ./...
 go build -o perso-export.exe .
-.\perso-export.exe --snapshot <스냅샷 폴더> --out $env:TEMP\usage-out
-# 실린 것 대신 따로 둔 DuckDB 를 쓰려면: --duckdb <duckdb.exe 경로>
+.\perso-export.exe --snapshot <스냅샷 폴더> --out $env:TEMP\usage-out --duckdb <duckdb.exe 경로>
 ```
 
-맥은 같은 자리에 `bin/duckdb-darwin-universal.zip`(릴리스의 `duckdb_cli-osx-universal.zip`)을 둔다. 리눅스는
-싣지 않으므로 zip 이 필요 없고 `--duckdb` 를 준다. `-o` 없이 빌드하면 모듈 이름대로 `perso-agent(.exe)` 가
-나온다. 두 이름 다 `.gitignore` 에 있다 — 수십 MB 실행 파일이 공개 저장소 이력에 들어가면 영영 남는다.
+`-o` 없이 빌드해도 모듈 이름대로 `perso-export(.exe)` 가 나온다. 그 이름과 받은 DuckDB 는 `.gitignore` 에 있다 —
+수십 MB 실행 파일이 공개 저장소 이력에 들어가면 영영 남는다.
 
 **결과 폴더는 저장소 밖(위처럼 `%TEMP%`)에 둔다.** 고객 사용 집계라 이 공개 저장소에 들어오면 안 된다.
 
 `go test` 는 대부분 DuckDB 없이 돈다 — 계약 검사 · 묶음 배정 · 파일 조립 · manifest 칸 · SQL 틀 채우기 · SQL 이 내는
-이름 · 반쪽 쓰기 거절. 하나(가공 범위)만 DuckDB 가 있을 때 작은 가짜 CSV 로 SQL 을 돌린다 — 윈도우·맥 빌드는 실린
-것을 쓰고, CI(리눅스)에는 없어 건너뛴다. 나머지 SQL 이 맞는 값을 내는지는 스냅샷이 있는 PC 에서 돌려 봐야 안다
+이름 · 반쪽 쓰기 거절. 하나(가공 범위)만 `PATH` 에 duckdb 가 있을 때 작은 가짜 CSV 로 SQL 을 돌린다 — CI 의
+`exporter` 잡은 가공 워크플로와 같은 버전 · 체크섬의 DuckDB 를 받아 두고, 그 테스트가 **실제로 돌아 통과했는지**까지
+본다(건너뛰면 빨갛다). 나머지 SQL 이 맞는 값을 내는지는 스냅샷이 있는 PC 에서 돌려 봐야 안다
 (아래 「고칠 때」).
 
 ## 결과 (`data` 브랜치)
@@ -90,7 +90,7 @@ go build -o perso-export.exe .
 | `manifest.json` | `format`(모양 번호 — 화면의 `FORMAT` 과 다르면 화면이 숫자 대신 그 사실을 적는다) · `snapshot_at`(스냅샷 `data/manifest.json` 의 `generated_at`, RFC3339 UTC) · `snapshot_commit` · `exported_at` · `exporter` · `spaces`(가공 범위 크기) · `groups`(묶음 파일 수) | 모든 화면의 「언제 것인가」 · 「데이터 분석」 상태 카드 |
 | `summary.json` | 가공 범위 전체의 요약 — `spaces[]` · `fail_rate_all` · `credits_from` · `jobs_from` | 수주 고객 목록의 두 열 · 상세의 사용 진단 |
 | `evidence.json` | 근거(지급 묶음 소진 시작 · 국내 카드 결제)가 하나라도 있는 스페이스만 | 자동 대조(`won/reconcile.ts`) |
-| `sales.json` | 제품 전체 집계 한 행 | 영업 인사이트(`/operations`) |
+| `sales.json` | 제품 전체에서 눈에 띄는 스페이스(≤ 300) · 6개월 활성 스페이스 수 · 전사 실패율 — 「주목할 스페이스」 표가 읽는 것뿐이다(2026-10-06 에 그 아래 전체 흐름 카드와 함께 뺐다) | 영업 인사이트(`/operations`) |
 | `metrics.json` | 전역 지표 셋(`metrics.go`) | 「데이터 분석」(`/app/data`) |
 | `facts/index.json` | `{"<space_seq>": "<묶음>"}` — 가공 범위의 모든 스페이스 | 상세가 받을 묶음을 고른다 |
 | `facts/<묶음>.json` | 그 묶음의 스페이스마다 재료 한 줄(`credits` · `jobs` · `usage`) — 활동이 없어도 한 줄 | 상세의 크레딧 · 작업 성능 · 영상 분석 |
@@ -272,8 +272,8 @@ go build -o perso-export.exe .
   (`git show 092d34f:agent/spaces.go`)을 DuckDB CLI 로 돌려, 같은 목록을 `usageMerge.ts`(타입만 지우면 노드에서
   그대로 돈다)로 합친 값과 비교한다. 결과는 행 단위로 찍지 않는다 — 일치 수와 어긋난 칸 이름만.
   2026-10-01 에 목록 103개 × 지표 셋 = 309/309 였다.
-- **DuckDB 버전을 올리면** `snapshot.go` 의 `duckdbVersion` · `duckdb-linux-amd64.sha256` · `bin/` 의 zip 을 같이
-  바꾼다. 체크섬을 안 고치면 워크플로가 `sha256sum -c` 에서 멈춘다 — 그게 맞다(무엇을 돌리는지 사람이 한 번 본다).
+- **DuckDB 버전을 올리면** `snapshot.go` 의 `duckdbVersion` 과 `duckdb-linux-amd64.sha256` 을 같이 바꾼다. 체크섬을
+  안 고치면 CI 의 `exporter` 잡과 가공 워크플로가 `sha256sum -c` 에서 멈춘다 — 그게 맞다(무엇을 돌리는지 사람이 한 번 본다).
 - **결과에 나갈 이름은 `checkContract` 를 지나야 한다.** 식별자성 이름이 필요하면 SQL 이 아니라 그 검사의 허용
   목록(`allowKeys`)을 고쳐야 하고, 그건 지금 `space_seq` 하나다.
 

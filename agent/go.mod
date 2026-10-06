@@ -1,3 +1,3 @@
-module perso-agent
+module perso-export
 
 go 1.27

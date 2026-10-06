@@ -78,8 +78,8 @@ func TestEveryMetricDeclaresNonIdentifierColumns(t *testing.T) {
 		if !strings.Contains(m.SQL, "{{d}}") {
 			t.Errorf("%s 의 SQL 이 스냅샷 폴더를 안 씁니다", m.Name)
 		}
-		if strings.Contains(m.SQL, "{{months}}") != m.HasMonth {
-			t.Errorf("%s 의 months 인자 선언이 SQL 과 안 맞습니다", m.Name)
+		if strings.Contains(m.SQL, "current_date") {
+			t.Errorf("%s 의 SQL 이 벽시계를 씁니다 — 「지금」은 스냅샷 시각({{asof}})이다", m.Name)
 		}
 	}
 }

@@ -329,7 +329,7 @@ func export(snap *Snapshot, out string) error {
 		{"metrics", func() error {
 			list := make([]*metricResult, 0, len(metrics))
 			for i := range metrics {
-				r, err := snap.RunMetric(&metrics[i], 0)
+				r, err := snap.RunMetric(&metrics[i], at)
 				if err != nil {
 					return fmt.Errorf("%s: %w", metrics[i].Name, err)
 				}

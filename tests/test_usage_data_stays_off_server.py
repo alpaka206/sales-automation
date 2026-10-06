@@ -319,8 +319,7 @@ TEXT = {".go", ".mod", ".sum", ".md", ".yml", ".yaml", ".sha256", ".json", ".txt
 def test_no_token_is_written_into_the_public_repo():
     """토큰은 Render 대시보드(서버)와 가공 레포의 시크릿(Actions)에만 산다. 이 저장소는 공개다."""
     files = [ROOT / "render.yaml", ROOT / ".env.example"]
-    files += [path for path in AGENT.rglob("*")
-              if path.suffix in TEXT and not {"dist", "bin"} & set(path.relative_to(AGENT).parts)]
+    files += [path for path in AGENT.rglob("*") if path.suffix in TEXT]
     files += [path for path in FRONT.rglob("*") if path.suffix in TEXT]
     for path in files:
         text = path.read_text(encoding="utf-8", errors="ignore")

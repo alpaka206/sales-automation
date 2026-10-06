@@ -156,7 +156,18 @@ jobs:
         with:
           go-version-file: agent/go.mod
           cache: false
-      - run: go vet ./... && go test ./...
+      # 가공 워크플로와 같은 DuckDB(snapshot.go 의 버전 · 같은 체크섬)를 PATH 에 둔다 — 가공 범위 SQL 테스트는
+      # duckdb 가 있을 때만 돌고, 없으면 조용히 건너뛰어 초록으로 보인다.
+      - name: DuckDB CLI
+        run: |
+          set -euo pipefail
+          V=$(grep -oE 'duckdbVersion = "[0-9.]+"' snapshot.go | grep -oE '[0-9.]+')
+          curl -fsSL -o duckdb_cli-linux-amd64.zip "https://github.com/duckdb/duckdb/releases/download/v$V/duckdb_cli-linux-amd64.zip"
+          sha256sum -c duckdb-linux-amd64.sha256
+          mkdir -p "$RUNNER_TEMP/duckdb" && unzip -q -o duckdb_cli-linux-amd64.zip duckdb -d "$RUNNER_TEMP/duckdb"
+          echo "$RUNNER_TEMP/duckdb" >> "$GITHUB_PATH"
+      # tee — 건너뛰거나 실패했을 때 그 이유(「DuckDB 가 없습니다: …」)가 로그에 남는다. grep -q 로 바로 받으면 안 남는다.
+      - run: go vet ./... && go test -v -run TestUniverse ./... | tee "$RUNNER_TEMP/universe.log" && grep -q -- '--- PASS' "$RUNNER_TEMP/universe.log" && go test ./...
 
   docker-build:
     runs-on: ubuntu-latest

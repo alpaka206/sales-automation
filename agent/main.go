@@ -25,7 +25,7 @@ func main() {
 	log.SetFlags(log.Ltime)
 	snapshot := flag.String("snapshot", "", "스냅샷 폴더 (data/manifest.json 이 있는 곳)")
 	out := flag.String("out", "", "결과를 쓸 폴더 — 아직 없어야 한다 (다 쓴 뒤 이 이름으로 옮긴다)")
-	duck := flag.String("duckdb", "", "DuckDB CLI 경로 (리눅스는 이것 또는 PATH 의 duckdb, 윈도우·맥은 비우면 실린 것)")
+	duck := flag.String("duckdb", "", "DuckDB CLI 경로 (비우면 PATH 의 duckdb)")
 	showVersion := flag.Bool("version", false, "버전만 찍고 끝낸다")
 	flag.Parse()
 	if *showVersion {

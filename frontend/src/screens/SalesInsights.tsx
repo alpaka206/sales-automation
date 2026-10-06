@@ -8,12 +8,14 @@ import { DataTable, type Column } from "../ui/DataTable";
 import { parseSpaceSeqs } from "./won/usage";
 import type { ListData } from "./won/shared";
 
-/** 영업 인사이트 — 스냅샷(제품 전체)에서 **우리가 모르는 사람 중 눈에 띄는 스페이스**와 제품 전체
- *  흐름을 본다 (2026-09-15 운영자 요청). 값은 전부 매일 가공된 집계(`sales.json`)를 브라우저가 GitHub 에서
- *  직접 받은 것이고, 서버로는 한 바이트도 안 간다. 서버에서 오는 것은 우리 수주 고객의 space_seq 목록과
- *  그 집계를 받을 열쇠뿐 — space_seq 목록으로 「우리 고객」을 걸러낸다.
+/** 영업 인사이트 — 스냅샷(제품 전체)에서 **우리가 모르는 사람 중 눈에 띄는 스페이스**를 본다 (2026-09-15
+ *  운영자 요청). 값은 전부 매일 가공된 집계(`sales.json`)를 브라우저가 GitHub 에서 직접 받은 것이고, 서버로는
+ *  한 바이트도 안 간다. 서버에서 오는 것은 우리 수주 고객의 space_seq 목록과 그 집계를 받을 열쇠뿐 — space_seq
+ *  목록으로 「우리 고객」을 걸러낸다.
  *
- *  「고객 인사이트」(손이 가야 하는 리드 목록 · 갱신 임박)가 있던 자리다 — 운영자 지시로 전부 뺐다.
+ *  「주목할 스페이스」 하나만 남는다 (2026-10-06 운영자: 「주목할 스페이스 말고 아래에 있는거 모두 다 삭제」) —
+ *  그 아래의 제품 전체 흐름(가입 · 구독 · 체크아웃 · 플랜별 크레딧 · 언어쌍 · 업로드 경로 · 로그인)은 가공기도
+ *  더 안 낸다(`agent/sales.go`). 그 전에는 「고객 인사이트」(손이 가야 하는 리드 목록 · 갱신 임박)가 이 자리였다.
  */
 
 type Space = {
@@ -21,25 +23,11 @@ type Space = {
   credits_30d: number; credits_90d: number; exports_30d: number; exports_6m: number; failed_6m: number;
   users: number; members: number; seat: number; first_job: string | null; last_job: string | null; top_pair: string | null;
 };
-type Sales = {
-  spaces: Space[] | null; spaces_active_6m: number;
-  joins_monthly: { period: string; n: number }[] | null;
-  users_all: { total: number; active_30d: number; active_90d: number };
-  login: { provider: string; n: number }[] | null;
-  subs_monthly: { period: string; created: number; deleted: number }[] | null;
-  subs_new_by_plan: { plan: string; n: number }[] | null;
-  tiers_30d: { tier: string; ent: boolean; spaces: number; exports: number; credits: number }[] | null;
-  credits_monthly: { period: string; tier: string; credits: number }[] | null;
-  checkouts_monthly: { period: string; sessions: number; expired: number; spaces: number }[] | null;
-  pairs_6m: { pair: string; n: number }[] | null;
-  sources_6m: { source: string; n: number }[] | null;
-  fail_rate_all: number | null; jobs_from: string | null; credits_from: string | null;
-};
+type Sales = { spaces: Space[] | null; spaces_active_6m: number; fail_rate_all: number | null };
 
 const num = (v: number | null | undefined) => Number(v ?? 0).toLocaleString("en-US");
 const mins = (credits: number) => `${num(Math.round(credits / 60))}분`;
 const TIER: Record<string, string> = { free: "Free", starter: "Starter", creator: "Creator", pro: "Pro", team: "Team", business: "Business", flex: "Flex", enterprise: "Enterprise" };
-const SOURCE: Record<string, string> = { FILE_UPLOAD: "파일 업로드", YOUTUBE: "YouTube", TIKTOK: "TikTok", GOOGLE_DRIVE: "Google Drive", "(미기록)": "미기록" };
 const LANG: Record<string, string> = {
   ko: "한국어", en: "영어", ja: "일본어", zh: "중국어", es: "스페인어", pt: "포르투갈어", fr: "프랑스어", de: "독일어", it: "이탈리아어",
   ru: "러시아어", vi: "베트남어", th: "태국어", id: "인도네시아어", tr: "튀르키예어", ar: "아랍어", hi: "힌디어", nl: "네덜란드어", pl: "폴란드어",
@@ -79,46 +67,6 @@ type SignalKey = (typeof SIGNALS)[number]["key"];
 
 function Pill({ tone, children, title }: { tone: string; children: React.ReactNode; title?: string }) {
   return <span className={`pill pill--sm pill--${tone}`} title={title}>{children}</span>;
-}
-
-function Bars({ rows, unit = "" }: { rows: { label: string; n: number; sub?: string }[]; unit?: string }) {
-  const max = Math.max(1, ...rows.map((r) => r.n));
-  if (!rows.length) return <div className="t-sm td-subtle">해당 없음</div>;
-  return (
-    <div className="stack" style={{ gap: 8 }}>
-      {rows.map((r) => (
-        <div key={r.label} style={{ display: "grid", gridTemplateColumns: "minmax(90px,150px) 1fr 74px", alignItems: "center", gap: 10, fontSize: 12.5 }}>
-          <span className="td-subtle truncate" title={r.sub ?? r.label}>{r.label}</span>
-          <span style={{ height: 8, borderRadius: 99, background: "var(--surface-3)", overflow: "hidden" }}>
-            <span style={{ display: "block", height: "100%", width: `${(r.n / max) * 100}%`, background: "var(--accent)", borderRadius: 99 }} />
-          </span>
-          <span className="tnum" style={{ textAlign: "right", fontWeight: 600 }}>{num(r.n)}{unit}</span>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-/** 월별 몇 줄(예: 생성·해지)을 나란히 — 콘솔의 표 하나(`DataTable`)로. 열두 달이라 막대보다 숫자가 읽기 낫다. */
-function Months({ rows, cols }: { rows: Record<string, number | string>[]; cols: { key: string; label: string; tone?: string }[] }) {
-  const columns: Column<Record<string, number | string>>[] = [
-    { label: "월", width: "84px", className: "mono", cell: (r) => String(r.period) },
-    ...cols.map((c) => ({
-      label: c.label, width: `${Math.max(64, Math.floor(200 / cols.length))}px`, className: "tnum", headClassName: "th-right",
-      cell: (r: Record<string, number | string>) => <span style={{ display: "block", textAlign: "right", color: c.tone }}>{num(Number(r[c.key] ?? 0))}</span>,
-    })),
-  ];
-  return <DataTable columns={columns} rows={rows} rowKey={(r) => String(r.period)} empty="기록 없음" />;
-}
-
-function Kpi({ label, value, sub, accent }: { label: string; value: React.ReactNode; sub?: string; accent?: boolean }) {
-  return (
-    <div className={`card kpi${accent ? " kpi--accent" : ""}`}>
-      <div className="kpi__label">{label}</div>
-      <div className="kpi__row"><div className="kpi__value">{value}</div></div>
-      {sub && <div className="kpi__sub">{sub}</div>}
-    </div>
-  );
 }
 
 export function SalesInsights() {
@@ -191,33 +139,13 @@ export function SalesInsights() {
   ];
 
   const asOf = sales.data && stamp(sales.data.snapshot_at);
-  const tiers = (d?.tiers_30d ?? []).map((t) => ({ label: `${TIER[t.tier] ?? t.tier}${t.ent ? " (엔터프라이즈 연결)" : ""}`, n: t.spaces, sub: `내보내기 ${num(t.exports)} · 크레딧 ${num(t.credits)}` }));
-  const creditsByMonth = useMemo(() => {
-    const map = new Map<string, Record<string, number | string>>();
-    for (const r of d?.credits_monthly ?? []) {
-      const row = map.get(r.period) ?? { period: r.period };
-      row[r.tier] = (Number(row[r.tier] ?? 0)) + r.credits;
-      map.set(r.period, row);
-    }
-    return [...map.values()].sort((a, b) => String(a.period).localeCompare(String(b.period))).slice(-12);
-  }, [d]);
-  const creditTiers = useMemo(() => {
-    const seen = new Set<string>();
-    for (const r of d?.credits_monthly ?? []) seen.add(r.tier);
-    return ["enterprise", "pro", "creator", "starter", "team", "free"].filter((t) => seen.has(t));
-  }, [d]);
-  const lastSub = d?.subs_monthly?.at(-1);
-  const lastCheckout = d?.checkouts_monthly?.at(-1);
 
   return (
     <>
       <div className="page-header">
         <div>
           <h1 className="page-title">영업 인사이트</h1>
-          <div className="t-sm td-subtle" style={{ marginTop: 4 }}>
-            제품 전체 스냅샷에서 — 우리가 모르는 사람 중 눈에 띄는 스페이스와 전체 흐름.
-            {asOf && <> 데이터 기준 <strong>{asOf}</strong>.</>}
-          </div>
+          {asOf && <div className="t-sm td-subtle" style={{ marginTop: 4 }}>데이터 기준 <strong>{asOf}</strong></div>}
         </div>
       </div>
 
@@ -266,76 +194,6 @@ export function SalesInsights() {
               </div>
             )}
           </section>
-
-          <div className="grid grid-4 mb-gap">
-            <Kpi label="가입 사용자" value={num(d.users_all.total)} sub={`30일 로그인 ${num(d.users_all.active_30d)} · 90일 ${num(d.users_all.active_90d)}`} />
-            <Kpi label="6개월 활성 스페이스" value={num(d.spaces_active_6m)} sub="내보내기가 한 건이라도 있는 스페이스" />
-            <Kpi label={`구독 ${lastSub?.period ?? ""}`} value={lastSub ? `+${num(lastSub.created)} / −${num(lastSub.deleted)}` : "—"} sub="이번 달 생성 / 해지 (셀프서브)" accent />
-            <Kpi label="전사 실패율" value={d.fail_rate_all === null ? "—" : `${d.fail_rate_all}%`} sub="6개월 내보내기 기준" />
-          </div>
-
-          <div className="grid grid-2 mb-gap">
-            <section className="card">
-              <div className="section-header" style={{ marginBottom: 10 }}><div className="section-header__l"><div>
-                <div className="section-header__title">30일 활성 스페이스 — 플랜별</div>
-                <div className="section-header__sub">최근 30일에 내보내기가 있는 스페이스 수 · 그들의 내보내기 · 크레딧</div></div></div></div>
-              <Bars rows={tiers} unit="개" />
-            </section>
-            <section className="card">
-              <div className="section-header" style={{ marginBottom: 10 }}><div className="section-header__l"><div>
-                <div className="section-header__title">월별 크레딧 소진 — 플랜별</div>
-                <div className="section-header__sub">{d.credits_from ? `${d.credits_from.slice(0, 10)}부터` : ""} · 취소(ROLLBACK)는 뺀 값</div></div></div></div>
-              <Months rows={creditsByMonth} cols={creditTiers.map((t) => ({ key: t, label: TIER[t] ?? t }))} />
-            </section>
-          </div>
-
-          <div className="grid grid-3 mb-gap">
-            <section className="card">
-              <div className="section-header" style={{ marginBottom: 10 }}><div className="section-header__l"><div>
-                <div className="section-header__title">월별 가입</div>
-                <div className="section-header__sub">사용자 계정 생성</div></div></div></div>
-              <Months rows={(d.joins_monthly ?? []) as Record<string, number | string>[]} cols={[{ key: "n", label: "가입" }]} />
-            </section>
-            <section className="card">
-              <div className="section-header" style={{ marginBottom: 10 }}><div className="section-header__l"><div>
-                <div className="section-header__title">월별 구독 생성 · 해지</div>
-                <div className="section-header__sub">셀프서브(Stripe) 구독 이벤트</div></div></div></div>
-              <Months rows={(d.subs_monthly ?? []) as Record<string, number | string>[]}
-                      cols={[{ key: "created", label: "생성", tone: "var(--ok)" }, { key: "deleted", label: "해지", tone: "var(--danger)" }]} />
-            </section>
-            <section className="card">
-              <div className="section-header" style={{ marginBottom: 10 }}><div className="section-header__l"><div>
-                <div className="section-header__title">결제 체크아웃</div>
-                <div className="section-header__sub">
-                  결제창까지 간 세션과 그중 만료(안 낸) 수{lastCheckout ? ` — ${lastCheckout.period} 만료율 ${Math.round((lastCheckout.expired / Math.max(1, lastCheckout.sessions)) * 100)}%` : ""}
-                </div></div></div></div>
-              <Months rows={(d.checkouts_monthly ?? []) as Record<string, number | string>[]}
-                      cols={[{ key: "sessions", label: "세션" }, { key: "expired", label: "만료", tone: "var(--warn)" }, { key: "spaces", label: "스페이스" }]} />
-            </section>
-          </div>
-
-          <div className="grid grid-3 mb-gap">
-            <section className="card">
-              <div className="section-header" style={{ marginBottom: 10 }}><div className="section-header__l"><div>
-                <div className="section-header__title">언어쌍 Top 10</div>
-                <div className="section-header__sub">6개월 내보내기</div></div></div></div>
-              <Bars rows={(d.pairs_6m ?? []).map((p) => ({ label: pairName(p.pair), n: p.n, sub: p.pair }))} unit="편" />
-            </section>
-            <section className="card">
-              <div className="section-header" style={{ marginBottom: 10 }}><div className="section-header__l"><div>
-                <div className="section-header__title">새 구독 — 플랜별</div>
-                <div className="section-header__sub">최근 6개월에 생성된 구독</div></div></div></div>
-              <Bars rows={(d.subs_new_by_plan ?? []).map((p) => ({ label: p.plan, n: p.n }))} unit="건" />
-            </section>
-            <section className="card">
-              <div className="section-header" style={{ marginBottom: 10 }}><div className="section-header__l"><div>
-                <div className="section-header__title">업로드 경로 · 로그인</div>
-                <div className="section-header__sub">6개월 내보내기 · 전체 사용자</div></div></div></div>
-              <Bars rows={(d.sources_6m ?? []).map((s) => ({ label: SOURCE[s.source] ?? s.source, n: s.n }))} unit="편" />
-              <div style={{ height: 12 }} />
-              <Bars rows={(d.login ?? []).map((l) => ({ label: l.provider, n: l.n }))} unit="명" />
-            </section>
-          </div>
         </>
       )}
     </>

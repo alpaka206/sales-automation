@@ -34,10 +34,10 @@ func TestGroupsFollowEnterpriseOrderThenRemainder(t *testing.T) {
 }
 
 // 가공 범위에는 엔터프라이즈 크레딧을 쓴 스페이스도 든다 — 계약이 끝나 플랜이 무료로 돌아간 B2B 스페이스가
-// 빠지면 그 계약의 화면이 「가공 범위에 없음」으로 멈춘다. SQL 이라 DuckDB 가 있을 때만 돈다(윈도우·맥 빌드는
-// 실린 것, 리눅스는 PATH 의 duckdb — CI 에는 없어 건너뛴다). 재료는 작은 가짜 CSV 다.
+// 빠지면 그 계약의 화면이 「가공 범위에 없음」으로 멈춘다. SQL 이라 PATH 에 duckdb 가 있을 때만 돈다 — CI 의
+// exporter 잡은 가공 워크플로와 같은 버전 · 체크섬으로 받아 PATH 에 둔다. 재료는 작은 가짜 CSV 다.
 func TestUniverseKeepsSpacesThatUsedEnterpriseCredits(t *testing.T) {
-	duck, err := ensureDuckDB()
+	duck, err := findDuckDB()
 	if err != nil {
 		t.Skip("DuckDB 가 없습니다: ", err)
 	}
