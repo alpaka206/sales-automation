@@ -51,8 +51,9 @@ describe("usageFetch", () => {
     // 304 로 다시 묻는 길 — 안 바뀐 파일은 요청 한도를 안 쓴다.
     expect(init?.cache).toBe("no-cache");
 
-    // 403 은 남은 횟수 머리글로 한도와 권한 없음을 가른다. 422 는 「data 브랜치가 없다」(커밋을 묻는 길).
-    const cases = [[404, null, "Actions(export)"], [422, null, "Actions(export)"], [403, "0", "요청 한도"],
+    // 403 은 남은 횟수 머리글로 한도와 권한 없음을 가른다. 422 는 「data 브랜치가 없다」(커밋을 묻는 길),
+    // 409 는 「레포에 커밋이 하나도 없다」(가공 레포를 막 만든 때 — 2026-10-05 실측).
+    const cases = [[404, null, "Actions(export)"], [422, null, "Actions(export)"], [409, null, "Actions(export)"], [403, "0", "요청 한도"],
                    [403, "4999", "읽을 권한이 없습니다"], [429, null, "요청 한도"], [500, null, "GitHub 응답 500"]] as const;
     for (const [status, remaining, text] of cases) {
       const headers = remaining === null ? undefined : { "x-ratelimit-remaining": remaining };

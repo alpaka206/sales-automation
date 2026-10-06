@@ -64,10 +64,11 @@ export async function usageFetch<T>(source: UsageSource, path: string, ref: stri
 /** 상태 코드를 **고칠 사람이 할 일**로 옮깁니다 — 「401」만 적으면 무엇을 고쳐야 하는지 아무도 모릅니다.
  *  403 은 둘입니다: 한도(남은 횟수 0)와 권한 없음(토큰의 Repository access · Contents 가 이 레포를 안 가리킴).
  *  GitHub 가 그 머리글을 CORS 로 내보내 주어서(2026-10-01 실측) 브라우저가 둘을 가를 수 있습니다.
- *  422 는 커밋을 묻는 길(`commits/data`)이 「그런 브랜치가 없다」고 답하는 모양입니다. */
+ *  422 는 커밋을 묻는 길(`commits/data`)이 「그런 브랜치가 없다」고, 409 는 「레포에 커밋이 하나도 없다」고 답하는
+ *  모양입니다(가공 레포를 막 만들고 아직 아무것도 안 올렸을 때 — 2026-10-05 실측). */
 function failure(status: number, remaining: string | null): string {
   if (status === 401) return "토큰이 틀렸거나 만료됐습니다 — Render 의 USAGE_DATA_TOKEN 을 새 토큰으로 바꿔야 합니다";
-  if (status === 404 || status === 422) return "가공된 데이터를 못 찾았습니다 — 가공 레포의 Actions(export)가 한 번이라도 성공했는지 확인하세요";
+  if (status === 404 || status === 409 || status === 422) return "가공된 데이터를 못 찾았습니다 — 가공 레포의 Actions(export)가 한 번이라도 성공했는지 확인하세요";
   if (status === 429 || (status === 403 && remaining === "0")) return "GitHub 요청 한도에 걸렸습니다 — 잠시 뒤 다시 엽니다";
   if (status === 403) return "토큰에 이 레포를 읽을 권한이 없습니다 — 토큰의 Repository access 와 Contents(Read-only)를 확인하세요";
   return `GitHub 응답 ${status}`;
