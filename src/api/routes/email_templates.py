@@ -19,6 +19,7 @@ from ...db.email_templates import SIGNATURE_KEY_PREFIX, is_code_resolved
 from ...db.models import EmailTemplate
 from ...db.revisions import snapshot_template
 from ...db.session import SessionLocal
+from .policy_docs import schedule_reorganize
 
 logger = logging.getLogger(__name__)
 
@@ -115,6 +116,8 @@ async def email_templates_create(
         # 것」이고, 갓 만든 행에는 이전이 없습니다 — 남기면 첫 수정 때의 스냅샷과 같은
         # 버전·같은 본문이 두 줄로 섭니다.
         session.commit()
+    # 초안이 읽는 정리된 지식도 바로 따라옵니다 — 정책 문서 저장과 같은 기계입니다.
+    schedule_reorganize()
     return HTMLResponse(
         '<div class="text-green-600 text-sm font-medium">템플릿 생성 완료</div>'
         '<script>setTimeout(()=>location.href="/email-templates",500)</script>'
@@ -168,6 +171,7 @@ async def email_templates_update(
         # 만든 사람이 아니라 **마지막으로 저장한 사람**입니다 (0100).
         tpl.author = author
         session.commit()
+    schedule_reorganize()
     # 판 번호는 화면에 뜹니다 — 목록의 「v3」과 판본 기록의 정렬이 이 값입니다.
     return HTMLResponse('<div class="text-green-600 text-sm font-medium">저장 완료</div>')
 

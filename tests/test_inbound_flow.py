@@ -20,6 +20,10 @@ from src.db.models import Contact, Conversation, InboundJob, Message
 from src.db.models import PolicySource
 from src.integrations.hubspot import ContactDTO, EngagementDTO, DealDTO
 from src.llm import knowledge
+# 아래 픽스처가 `src.db.session.SessionLocal` 을 메모리 DB 로 바꾸기 **전에** 들여옵니다. 이 모듈은 들여올 때
+# SessionLocal 을 묶는데, 테스트 안에서 처음 들여오면 바뀐 쪽에 묶이고 — 메모리 DB 는 연결이 하나라 — 그
+# 세션이 닫히며 `_persist_placeholder` 의 아직 커밋 안 한 문의를 되돌립니다(이 파일만 돌릴 때만 났습니다).
+import src.db.email_templates  # noqa: E402,F401
 
 
 @pytest.fixture(autouse=True)
@@ -113,9 +117,10 @@ def test_inbound_handle_creates_db_rows(db_session) -> None:
     assert len(reply_msg) == 1
     assert reply_msg[0].status == "pending_approval"
     assert not any(m.prompt_variant == "auto_ack" for m in messages)
-    # Subject is built in code as "RE: <customer subject or localized generic>",
-    # never the raw model subject.
-    assert reply_msg[0].subject == "RE: Bulk dubbing quote"
+    # 제목은 코드가 고릅니다(`choose_reply_subject`). 이어지는 이메일 스레드가 없는 첫 회신은 새 스레드라
+    # 검사를 지난 모델 제안을 RE: 없이 씁니다 — 허브스팟 티켓 이름(「Bulk dubbing quote」)은 CS 가 붙인
+    # 내부 이름일 수 있어 후보가 아닙니다(2026-10-06).
+    assert reply_msg[0].subject == "Inquiry"
     # **초안은 나갈 언어로 씁니다.** 예전에는 늘 한국어였고 승인 때 번역했는데, 그러면
     # 정책 문서에 영어로 써 둔 완성 메일이 고객에게 그대로 갈 길이 없었습니다.
     assert reply_msg[0].language == "en"
@@ -460,11 +465,12 @@ def test_inbound_passes_knowledge_docs_to_draft(db_session) -> None:
             }
         )
 
+    # 고른 문서는 회사 문서와 함께 초안 호출의 system 으로 갑니다(정리된 지식, 2026-10-06).
     draft_call = next(c for c in llm.complete.call_args_list if "draft_reply" in c[0][0])
-    draft_vars = draft_call[0][1]
-    assert "knowledge_docs" in draft_vars
-    assert "Plans" in draft_vars["knowledge_docs"]
-    assert "Starter plan starts at 99k KRW." in draft_vars["knowledge_docs"]
+    knowledge_text = draft_call.kwargs["knowledge"]
+    assert "Plans" in knowledge_text
+    assert "Starter plan starts at 99k KRW." in knowledge_text
+    assert "knowledge_docs" not in draft_call[0][1]
 
 
 def test_a_spam_classification_still_gets_documents(db_session) -> None:
@@ -484,7 +490,7 @@ def test_a_spam_classification_still_gets_documents(db_session) -> None:
         if "classify" in prompt_name:
             return ClassifyResult(category="spam", reasoning="Junk")
         if "draft_reply" in prompt_name:
-            return DraftResult(subject="", body="", language="en")
+            return DraftResult(subject="", body="Thanks for reaching out.", language="en")
         return "ok"
 
     llm.complete = MagicMock(side_effect=side_effect)
@@ -502,4 +508,4 @@ def test_a_spam_classification_still_gets_documents(db_session) -> None:
         )
 
     draft_call = next(c for c in llm.complete.call_args_list if "draft_reply" in c[0][0])
-    assert "Always-on company info." in draft_call[0][1]["knowledge_docs"]
+    assert "Always-on company info." in draft_call.kwargs["knowledge"]

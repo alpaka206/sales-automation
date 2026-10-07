@@ -5,16 +5,40 @@ import { QueryClient } from "@tanstack/react-query";
 
 /** 상태 코드를 달고 던집니다. "권한 없음"과 "서버가 터졌다"를 화면이 구분할 수 있어야
  *  합니다 — 구분하지 못해서, 500 을 내던 접근 승인 화면이 관리자에게 권한이 없다고
- *  말하고 있었습니다. */
+ *  말하고 있었습니다.
+ *
+ *  **글은 서버가 적어 보낸 이유입니다**(`failure`). 상태 코드와 경로만 던지던 동안 승인이 왜
+ *  거절됐는지 — 채우지 않은 자리, 번역하기가 남음, 정책이 바뀜 — 가 화면에 「실패: Error: 400
+ *  /messages/12/send」로만 남았습니다. 이유가 없을 때만 예전 글입니다. */
 export class HttpError extends Error {
-  constructor(readonly status: number, path: string) {
-    super(`${status} ${path}`);
+  constructor(readonly status: number, path: string, reason = "") {
+    super(reason || `${status} ${path}`);
   }
+
+  /** 화면이 「실패: ${String(error)}」로 찍습니다 — 「Error:」 없이 이유만. */
+  toString() {
+    return this.message;
+  }
+}
+
+/** 실패한 응답 → 서버의 이유를 든 `HttpError`. 라우트마다 이유를 싣는 모양이 다릅니다 — JSON 의
+ *  `detail`·`error`, 또는 옛 폼이 받던 HTML 조각(`<div class="text-red-600 text-sm">…</div>`,
+ *  글자는 이스케이프돼 옵니다). 프록시의 오류 페이지처럼 긴 HTML 은 글자만 앞부분을 남깁니다. */
+export async function failure(response: Response, path: string): Promise<HttpError> {
+  const text = await response.text().catch(() => "");
+  let reason = "";
+  try {
+    const data = JSON.parse(text);
+    reason = [data?.detail, data?.error].find((value) => typeof value === "string") ?? "";
+  } catch {
+    reason = new DOMParser().parseFromString(text, "text/html").body.textContent ?? "";
+  }
+  return new HttpError(response.status, path, reason.replace(/\s+/g, " ").trim().slice(0, 300));
 }
 
 export async function getJSON<T>(path: string): Promise<T> {
   const response = await fetch(path, { credentials: "same-origin" });
-  if (!response.ok) throw new HttpError(response.status, path);
+  if (!response.ok) throw await failure(response, path);
   return response.json();
 }
 
@@ -27,7 +51,7 @@ export async function postForm(path: string, data: Record<string, string>) {
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams(data),
   });
-  if (!response.ok) throw new Error(`${response.status} ${path}`);
+  if (!response.ok) throw await failure(response, path);
   return response;
 }
 

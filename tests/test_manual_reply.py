@@ -86,7 +86,37 @@ def test_it_hands_the_draft_to_the_same_machine_that_writes_the_first_one(
     # 나갈 언어는 문의가 정합니다 — 자동 초안과 같은 규칙입니다. `language` 를 같은 값으로
     # 두면 그 언어로 쓰는 한 번역 관문이 안 뜨고, 한국어로 쓰면 뜹니다.
     assert msg.target_language == "en" and msg.language == "en"
-    assert msg.subject == "RE: Custom quote"
+    # 이어지는 이메일이 없으면 나갈 언어의 기본 제목 — 티켓 이름(「Custom quote」)은 CS 가 붙인 내부 이름일
+    # 수 있어 쓰지 않습니다(2026-10-06). 워커가 초안을 쓰면 모델 제안까지 넣어 다시 고릅니다.
+    assert msg.subject == "Your inquiry"
+
+
+def test_the_follow_up_continues_the_email_thread_and_starts_signed(ticket, db_session_factory):
+    """후속 회신은 고객 메일함의 그 스레드에 붙습니다 — 마지막으로 오간 이메일 제목에 RE: 하나. 그리고 첫
+    회신처럼 목록의 첫 서명으로 시작합니다(평가의 후속 초안 26건이 전부 서명 없이 섰습니다)."""
+    from datetime import datetime
+
+    from src.agents import inbound_worker
+    from src.db.models import CustomerInteraction
+
+    with db_session_factory() as session:
+        session.add(CustomerInteraction(
+            contact_id=session.get(Conversation, ticket).contact_id, conversation_id=ticket,
+            channel="이메일", direction="outgoing", summary="Here is the quote.", subject="Seu curso: orçamento",
+            external_id="hubspot:conv:sent-1", handler="sales@estsoft.com", happened_at=datetime(2026, 9, 1),
+        ))
+        session.commit()
+
+    with patch.object(inbound_worker, "enqueue_draft"), \
+            patch("src.api.routes.messages.default_signature_key", return_value="signature_sales"):
+        with _client() as client:
+            created = client.post(f"/tickets/{ticket}/reply")
+    assert created.status_code == 200, created.text
+
+    with db_session_factory() as session:
+        msg = session.get(Message, created.json()["message_id"])
+    assert msg.subject == "RE: Seu curso: orçamento"
+    assert msg.signature_key == "signature_sales"
 
 
 def test_a_second_press_opens_the_draft_that_is_already_open(ticket, db_session_factory):

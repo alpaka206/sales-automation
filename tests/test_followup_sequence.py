@@ -220,6 +220,19 @@ def test_after_three_days_one_reminder_copies_the_reply_it_follows(db):
     assert (reminder.language, reminder.target_language) == ("en", "en")
 
 
+def test_a_reminder_after_a_new_thread_first_reply_keeps_that_thread_with_one_re(db):
+    """첫 회신이 새 제목(RE: 없이 — 폼 · 채팅 문의는 이어 붙을 메일 스레드가 없다)으로 나갔으면 리마인더는 그
+    제목에 RE: 하나를 붙여 같은 스레드로 간다. 허브스팟 티켓 이름(「Custom quote」)으로 떨어지지 않는다."""
+    conv = _ticket(db, sent_days_ago=3.1)
+    with db() as session:
+        session.query(Message).filter_by(conversation_id=conv, direction="outgoing").one().subject = \
+            "Dubbing your 40 training videos"
+        session.commit()
+    fs.run_followup_sequence_once()
+    reminder = _outgoing(db, conv)[1]
+    assert reminder.subject == "RE: Dubbing your 40 training videos"
+
+
 def test_a_korean_customer_gets_the_english_template_translated(db, monkeypatch):
     monkeypatch.setattr("src.llm.translate.translate_to",
                         lambda text, target, llm=None: "안녕하세요, 지난 메일에 이어 연락드립니다.")
@@ -236,6 +249,21 @@ def test_a_failed_translation_sends_nothing(db, monkeypatch):
     conv = _ticket(db, sent_days_ago=4, language="ja")
     fs.run_followup_sequence_once()
     assert len(_outgoing(db, conv)) == 1
+
+
+def test_a_reminder_written_in_the_customers_language_goes_out_as_written(db, monkeypatch):
+    """그 언어로 쓴 행(`followup_reminder_ko`)이 있으면 번역하지 않고 쓴 그대로 나간다 — 2026-10-07 운영자:
+    「리마인더는 써있는거 그대로 보내져야한다」. 없는 언어만 영문 행을 번역한다(위 두 테스트)."""
+    def no_translation(text, target, llm=None):
+        raise AssertionError("the operator wrote this reminder in Korean — it must not be re-translated")
+
+    monkeypatch.setattr("src.llm.translate.translate_to", no_translation)
+    monkeypatch.setitem(TEMPLATES, "followup_reminder_ko", "안녕하세요,\n\n지난 메일에 이어 연락드립니다.\n\n감사합니다.")
+    conv = _ticket(db, sent_days_ago=4, language="ko")
+    fs.run_followup_sequence_once()
+    reminder = _outgoing(db, conv)[1]
+    assert reminder.body == TEMPLATES["followup_reminder_ko"]
+    assert (reminder.language, reminder.target_language) == ("ko", "ko")
 
 
 def test_three_five_seven_and_then_concluded(db):
@@ -582,6 +610,9 @@ def test_the_send_path_finds_the_two_templates_by_name():
     from src.db.email_templates import is_code_resolved
 
     assert all(is_code_resolved(key) for key in fs.TEMPLATE_KEYS.values())
+    # 언어별 행도 발송 경로가 이름으로 찾는다 — 지우면 그 언어 고객은 번역본을 받는다.
+    assert all(is_code_resolved(f"{key}_ko") for key in fs.TEMPLATE_KEYS.values())
+    assert not is_code_resolved("followup_reminder_old")
 
 
 def test_a_reminder_is_never_redrafted_by_the_model(db, monkeypatch):
@@ -855,6 +886,28 @@ def test_a_hand_written_record_is_not_a_reply_to_follow_up(db, hubspot_reply):
         session.commit()
     fs.run_followup_sequence_once()
     assert not _reminders_of(db, conv)
+
+
+def test_a_cs_mail_is_not_a_reply_to_follow_up(db, monkeypatch, hubspot_reply):
+    """CS 주소(`NON_SALES_SENDER_ADDRESSES`)의 안내는 영업이 「지난 메일에 이어」 재촉할 메일이 아니다 —
+    첫 회신 판정 · 답장 기준선과 같은 자(`history_view.is_sales_email`)로 잰다(2026-10-06)."""
+    monkeypatch.setattr(settings, "NON_SALES_SENDER_ADDRESSES", "support@perso.ai")
+    conv = _answered_outside(db, days_ago=4)
+    with db() as session:
+        session.query(CustomerInteraction).filter_by(conversation_id=conv).one().handler = "support@perso.ai"
+        session.commit()
+    fs.run_followup_sequence_once()
+    assert not _reminders_of(db, conv)
+    with db() as session:
+        assert fs.outside_replies(session, [conv]) == {}
+
+
+@pytest.mark.parametrize("channel", ["이메일", "email"])
+def test_both_spellings_of_the_email_channel_count(db, channel):
+    """채널 말의 두 철자 — 스레드 수집기는 「이메일」, CRM 가져오기는 `email`(열쇠는 같은 스레드 메시지 id)."""
+    conv = _answered_outside(db, days_ago=1, channel=channel)
+    with db() as session:
+        assert [r.external_id for r in fs.outside_replies(session, [conv])[conv]] == ["hubspot:conv:hs-ui-1"]
 
 
 def test_if_the_hubspot_reply_cannot_be_read_nothing_goes_out(db, monkeypatch, hubspot_reply):

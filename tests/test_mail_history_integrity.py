@@ -42,7 +42,7 @@ def db(monkeypatch):
     engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False},
                            poolclass=StaticPool)
     Base.metadata.create_all(engine)
-    factory = sessionmaker(bind=engine, expire_on_commit=False)
+    factory = sessionmaker(bind=engine, expire_on_commit=False, autoflush=False)  # 운영 SessionLocal 과 같게
     for module in (inbound, mailbox_sync, ticket_history, customer_ops, gmail, db_session_module):
         monkeypatch.setattr(module, "SessionLocal", factory)
     monkeypatch.setattr(settings, "GOOGLE_TOKEN_ENCRYPTION_KEY",

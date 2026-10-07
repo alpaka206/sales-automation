@@ -162,9 +162,9 @@ def test_a_document_cannot_name_the_mail_any_more() -> None:
     이긴 쪽을 지목할 수 없어 경고만 남겼습니다. ② 문서 제목은 운영자가 쓴 **고정 문장**
     이라 문의 언어와 무관하게 그 문서의 언어로 나갔습니다(한국어 문의에 영어 제목, msg 62).
 
-    이제 제목은 `common.subjects.reply_subject` 하나가 정합니다. **CODE GUARD 3 은
-    그대로입니다** — 없어진 것은 문서가 제목을 덮어쓰는 길이고, 모델이 제목을 쓰는 길이
-    열린 것이 아닙니다.
+    이제 제목은 `common.subjects.choose_reply_subject` 하나가 고릅니다(2026-10-06) — 이어지는 이메일
+    스레드의 제목, 없으면 **코드가 검사한** 모델 제안 · 고객이 폼에 쓴 제목 · 기본 제목. 문서가 제목을 덮어쓰는
+    길은 여전히 없습니다.
     """
     import pathlib
 
@@ -176,7 +176,7 @@ def test_a_document_cannot_name_the_mail_any_more() -> None:
     inbound = pathlib.Path("src/agents/inbound.py").read_text(encoding="utf-8")
     assert "doc_subject" not in inbound
     assert "_subject_in_inquiry_language(" not in inbound
-    assert "draft.subject = reply_subject(" in inbound
+    assert "draft.subject, subject_source = choose_reply_subject(" in inbound
 
 
 # ---- 사본 표는 없다 ----------------------------------------------------------------

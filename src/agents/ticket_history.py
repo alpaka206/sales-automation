@@ -320,26 +320,26 @@ def same_mail(
     return a_at.replace(microsecond=0) == b_at.replace(microsecond=0)
 
 
-def _merge_crm_twins(session, conversation_id: int, contact_id: int | None = None) -> int:
-    """같은 메일의 **CRM 쪽 줄**을 스레드 줄에 합칩니다. 합친 수를 돌려줍니다.
+def _merge_crm_twins(session, conversation_id: int, contact_id: int | None = None, *,
+                     folded: list | None = None) -> int:
+    """같은 메일의 **CRM 쪽 줄**(과 개인함 줄)을 스레드 줄에 합칩니다. 합친 수를 돌려줍니다.
 
     한 메일이 허브스팟에 객체 두 개로 삽니다(CRM 이메일 · Conversations 메시지). 이제
     `hs_email_message_id` 로 열쇠를 맞추므로 **앞으로는** 두 줄이 안 생기지만, 그 전에
     들어온 줄들은 이미 두 벌로 쌓여 있습니다 — 운영자가 본 「같은 메일이 세 번」의 한
     자리입니다.
 
-    **이관이 아니라 여기서 치웁니다.** 히스토리 수집기는 티켓을 끝없이 한 바퀴씩 돌므로
-    (`sync_pending_ticket_history`), 여기 두면 한 바퀴 안에 모든 티켓이 저절로 정리되고
-    그 뒤로도 계속 유지됩니다. 이관은 한 번 돌고 끝이라 그때 아직 안 들어와 있던 줄은
-    영영 못 만납니다.
+    **수집할 때마다 여기서 치웁니다.** 이미 도장이 찍힌 티켓은 웹훅 · 단계 이동 · 「다시 받기」가 있어야
+    다시 오므로(대기열은 순환이 아닙니다), 쌓여 있던 두 벌은 `fold_history_twins` 를 한 번 돌려 치웁니다.
 
-    짝을 찾는 열쇠는 **같은 티켓 · 같은 초 · 같은 방향**입니다. 옛 CRM 줄에는 스레드
-    id 가 없어서(그 칸을 안 물어보던 시절의 줄입니다) 이것 말고 이을 방법이 없습니다.
-    한 티켓에서 같은 초에 다른 메일이 둘 오갈 일은 없고, 틀려도 남는 쪽이 더 완전한
-    스레드 줄이라 잃는 내용이 없습니다.
+    짝을 찾는 열쇠는 **`same_mail`** 입니다 — 같은 방향 · 같은 본문 · 하루 안, 그중 시각이 가장 가까운 스레드 줄.
+    예전 열쇠는 「같은 초」였는데 CRM 과 스레드는 같은 메일을 다른 시각으로 적습니다(2026-10-06 운영 실측:
+    짝 190쌍의 차이 중앙값 약 7초, 같은 초는 0쌍) — 그 규칙으로는 한 쌍도 안 접혔습니다. 남는 쪽은 늘 더
+    완전한 스레드 줄이라 잃는 내용이 없습니다.
 
     한 줄 요약(`context`)은 **살려서 옮깁니다** — 백필이 이미 만들어 둔 것이라, 그냥
-    지우면 그 티켓만 다시 모델을 부르게 됩니다.
+    지우면 그 티켓만 다시 모델을 부르게 됩니다. 지운 줄은 묘비를 남깁니다 — 안 남기면 개인함 수집 ·
+    CRM 메일 가져오기가 같은 메일을 그대로 되살립니다. `folded` 를 주면 (지운 줄, 남은 줄) 열쇠 쌍을 담습니다.
     """
     rows = session.scalars(
         select(CustomerInteraction).where(
@@ -362,37 +362,65 @@ def _merge_crm_twins(session, conversation_id: int, contact_id: int | None = Non
             ).all()
             if r.id not in seen
         ]
-    twins: dict[tuple, CustomerInteraction] = {}
-    for row in thread_rows:
-        twins.setdefault((row.happened_at.replace(microsecond=0), _same_direction(row.direction)), row)
     merged = 0
     for row in rows:
-        if not row.happened_at:
-            continue
         ext = row.external_id or ""
-        twin = None
-        if ext.startswith("hubspot:email:"):
-            twin = twins.get((row.happened_at.replace(microsecond=0), _same_direction(row.direction)))
-        elif ext.startswith("gmail:"):
-            # **개인함 줄도 스레드 줄에 접습니다** (2026-09-15). 웹훅이 늦거나 유실돼 개인함 수집이
-            # 먼저 돌면 `gmail:` 줄이 먼저 서고, 허브스팟 줄은 그 뒤에 온다 — 그때 이 자리가 유일한
-            # 만남입니다. 열쇠는 `same_mail`(본문 · 방향 · 하루). 지운 줄은 묘비를 남깁니다 —
-            # 안 남기면 다음 회차의 개인함 수집이 같은 메일을 그대로 되살립니다.
-            twin = next((t for t in thread_rows if same_mail(
-                t.happened_at, t.direction, t.summary,
-                row.happened_at, row.direction, row.summary)), None)
-            if twin is not None:
-                session.merge(MailboxLinkDecision(
-                    external_id=ext, conversation_id=conversation_id, decided_by="merged",
-                    decided_at=datetime.now(timezone.utc).replace(tzinfo=None),
-                ))
-        if twin is None:
+        # **개인함 줄도 스레드 줄에 접습니다** (2026-09-15). 웹훅이 늦거나 유실돼 개인함 수집이 먼저 돌면
+        # `gmail:` 줄이 먼저 서고, 허브스팟 줄은 그 뒤에 온다 — 그때 이 자리가 유일한 만남입니다.
+        if not row.happened_at or not ext.startswith(("hubspot:email:", "gmail:")):
             continue
+        at = row.happened_at.replace(tzinfo=None)
+        matches = [t for t in thread_rows if same_mail(
+            t.happened_at, t.direction, t.summary, row.happened_at, row.direction, row.summary)]
+        if not matches:
+            continue
+        twin = min(matches, key=lambda t: abs(t.happened_at.replace(tzinfo=None) - at))
+        session.merge(MailboxLinkDecision(
+            external_id=ext, conversation_id=conversation_id, decided_by="merged",
+            decided_at=datetime.now(timezone.utc).replace(tzinfo=None),
+        ))
         if not twin.context and row.context:
             twin.context = row.context
+        if folded is not None:
+            folded.append((ext, twin.external_id))
         session.delete(row)
         merged += 1
     return merged
+
+
+def fold_history_twins(*, apply: bool = False) -> dict:
+    """**한 번 도는 정리** — 스레드 줄이 있는 모든 대화에서 CRM · 개인함 사본을 접습니다 (2026-10-06).
+
+    수집할 때의 접기(`_merge_crm_twins`)는 그 티켓이 **다시 수집될 때만** 돕니다 — 대기열은 순환이 아니라
+    웹훅 · 단계 이동 · 「다시 받기」가 와야 다시 오고, 열쇠가 「같은 초」였던 동안은 한 쌍도 안 접혔습니다.
+    그래서 수집이 끝난 대화 176건에 CRM 사본 190줄이 남아 같은 메일이 두 번 섰습니다(운영 실측). 규칙은
+    수집기와 **같은 함수**입니다.
+
+    기본은 세기만 합니다: 같은 세션에서 접고 내보낸 뒤(다음 대화가 지운 줄을 다시 세지 않게) 끝에
+    되돌립니다 — 세는 것과 지우는 것이 같은 길을 지납니다. `apply=True` 면 대화마다 커밋합니다. 돌려주는
+    값의 `folded` 는 (대화, 지운 줄, 남은 줄) 열쇠들입니다. 허브스팟에는 아무것도 안 씁니다.
+    """
+    with SessionLocal() as session:
+        targets = session.execute(
+            select(Conversation.id, Conversation.contact_id)
+            .where(Conversation.id.in_(
+                select(CustomerInteraction.conversation_id)
+                .where(CustomerInteraction.external_id.like("hubspot:conv:%"))
+            ))
+            .order_by(Conversation.id)
+        ).all()
+        folded: list[tuple[int, str, str]] = []
+        for conversation_id, contact_id in targets:
+            pairs: list[tuple[str, str]] = []
+            _merge_crm_twins(session, conversation_id, contact_id, folded=pairs)
+            folded += [(conversation_id, gone, kept) for gone, kept in pairs]
+            if apply:
+                session.commit()
+            else:
+                session.flush()
+        if not apply:
+            session.rollback()
+    return {"conversations": len(targets), "folded": folded, "applied": apply}
 
 
 def _settle_keyless_sends(session, conversation_id: int) -> int:
@@ -497,6 +525,12 @@ def _store(conversation_id: int, contact_id: int, rows: list[dict], started: dat
             known.add(row["external_id"])
             added += 1
         # 넣은 뒤에 합칩니다 — 방금 들어온 스레드 줄이 옛 CRM 줄의 짝일 수 있습니다.
+        #
+        # **먼저 내보냅니다.** 운영 세션은 autoflush=False(`db/session.py`)라, 안 내보내면 아래 두 조회가
+        # 방금 넣은 줄을 못 봅니다 — 접기와 「갔는지 모름」 발송 맞추기가 다음 수집(웹훅 · 「다시 받기」가 와야
+        # 오는)으로 밀렸습니다(2026-10-06 실측: 개인함 사본 2835 · 2871 이 스레드 줄 옆에 그대로 남았다).
+        # 테스트 세션은 기본이 autoflush=True 라 이 구멍을 못 봤습니다.
+        session.flush()
         merged = _merge_crm_twins(session, conversation_id, contact_id)
         settled = _settle_keyless_sends(session, conversation_id)
         conversation = session.get(Conversation, conversation_id)
@@ -562,6 +596,8 @@ async def advance_if_customer_replied(conversation_id: int) -> bool:
     기준(저장된 스레드 줄의 마지막 시각)은 수집기의 사정이지 대화의 사정이 아니라, 수집이
     회신 전에 돌았느냐 뒤에 돌았느냐에 따라 같은 답장이 「새것」이기도 「본 것」이기도 했다.
     **리마인더는 우리 말이 아니다** — 기준 회신 뒤 · 1차 리마인더 전에 온 답장도 답장이다.
+    **챗봇 답과 CS 안내도 아니다** (2026-10-06) — 기준은 우리 영업이 보낸 이메일(`role == "sales"`,
+    자는 `history_view.is_sales_email`)이다. 첫 회신 판정과 같은 자라야 「우리가 답했다」가 한 뜻이다.
 
     **기준선이 없으면 안 옮긴다.** 우리가 보이는 어느 길로도 쓴 적 없는 Contacted 티켓(영업이
     우리가 안 읽는 사서함에서 답했다 · 백필로 들어온 옛 티켓)은 몇 달 전 고객 메시지 하나로
@@ -585,7 +621,7 @@ async def advance_if_customer_replied(conversation_id: int) -> bool:
         logger.warning("문의 %s: 대화를 못 읽어 답장 판정을 건너뜁니다", conversation_id,
                        exc_info=True)
         return False
-    ours = [turn.at for turn in events if turn.direction == "outgoing" and not turn.reminder]
+    ours = [turn.at for turn in events if turn.role == "sales"]
     if last_outgoing_at is not None:
         ours.append(_naive(last_outgoing_at))
     if not ours:
@@ -778,6 +814,7 @@ __all__ = [
     "classify_direction",
     "run_pending_ticket_history",
     "collect_ticket_history",
+    "fold_history_twins",
     "mark_ticket_history_stale",
     "sync_one_ticket",
     "sync_pending_ticket_history",

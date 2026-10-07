@@ -47,6 +47,8 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import func, or_, select
 
 from ..common.config import settings
+from ..common.subjects import choose_reply_subject
+from ..db.history_view import EMAIL_CHANNELS, is_sales_email, non_sales_senders
 from ..db.models import Contact, Conversation, CustomerInteraction, MailboxAccount, Message
 from ..db.session import SessionLocal
 
@@ -83,9 +85,10 @@ AFTER_REMINDER_2 = timedelta(days=7)
 PER_SWEEP = 20
 _KST = timezone(timedelta(hours=9))
 # 콘솔 밖에서 나간 우리 메일의 두 출처 — 허브스팟 스레드 수집기(`ticket_history`)와 개인 사서함
-# 수집기(`mailbox_sync`)가 `customer_interactions` 에 이 앞머리로 남긴다. 둘 다 채널 말은 「이메일」.
+# 수집기(`mailbox_sync`)가 `customer_interactions` 에 이 앞머리로 남긴다. 리마인더가 「지난 메일」을 베끼려면
+# 그 메일을 다시 찾을 열쇠가 있어야 한다 — 「우리 영업 메일인가」(`history_view.is_sales_email`)에 이 시계만
+# 더 요구하는 조건이다. 채널 말은 공용 철자 묶음(`EMAIL_CHANNELS`)이다.
 _OUTSIDE_PREFIXES = ("hubspot:conv:", "gmail:")
-_EMAIL_CHANNEL = "이메일"
 _MAILBOX_SUFFIX = " 개인 메일함"  # `mailbox_sync` 가 `context` 에 적는 「<사서함> 개인 메일함」
 
 
@@ -159,13 +162,18 @@ def outside_replies(session, conversation_ids) -> dict[int, list[CustomerInterac
     허브스팟 사본을 가르는 그 자다. 시각 창(만든 뒤 10분)으로 재던 첫 판은 둘 다 틀렸다: 다시 보낸
     리마인더는 창 밖이라 사본이 새 기준이 됐고, 실패한 리마인더 몇 분 뒤 사람이 보낸 메일은 사본으로 버려졌다.
 
-    **이메일만 센다.** 채팅(봇 답 포함) · 폼 · 콘솔에 손으로 적은 기록은 기준이 아니다 — 그 뒤에
+    **우리 영업의 이메일만 센다** — 자는 `history_view.is_sales_email` 하나(첫 회신 판정 · 답장 기준선과
+    같다). 채팅(봇 답 포함) · 폼 · CS 주소의 안내(`NON_SALES_SENDER_ADDRESSES`)는 기준이 아니다 — 그 뒤에
     「지난 메일에 이어 연락드립니다」를 보내면 거짓이다(설계 §1 의 「전화 뒤 보드로 옮긴 건」과 같은 이유).
+    여기에 이 시계만 **열쇠**를 더 요구한다(`_OUTSIDE_PREFIXES`) — 콘솔에 손으로 적은 메일 기록은 리마인더가
+    베낄 받는 사람 · 발신 계정을 다시 찾을 길이 없다.
     """
     ids = list(conversation_ids)
     if not ids:
         return {}
     from .ticket_history import same_mail
+
+    non_sales = non_sales_senders()
 
     drawn: set[str] = set()
     unkeyed: list[tuple[int, datetime, str]] = []  # 나갔을 수 있는데 사본을 알아볼 열쇠가 없는 리마인더
@@ -192,13 +200,13 @@ def outside_replies(session, conversation_ids) -> dict[int, list[CustomerInterac
             CustomerInteraction.conversation_id.in_(ids),
             # `thread_events` 처럼 그 대화의 사람 것만 — 다른 연락처 줄이 붙어 있을 수 있다.
             CustomerInteraction.contact_id == Conversation.contact_id,
-            CustomerInteraction.direction == "outgoing",
-            CustomerInteraction.channel == _EMAIL_CHANNEL,
+            CustomerInteraction.direction.in_(("outgoing", "outbound")),
+            CustomerInteraction.channel.in_(EMAIL_CHANNELS),
             CustomerInteraction.happened_at.isnot(None),
             or_(*(CustomerInteraction.external_id.like(f"{p}%") for p in _OUTSIDE_PREFIXES)),
         )
     ).all():
-        if row.external_id in drawn:
+        if row.external_id in drawn or not is_sales_email(row, non_sales=non_sales):
             continue
         if any(c == row.conversation_id and same_mail(when, "outgoing", body, row.happened_at, "outgoing",
                                                       row.summary)
@@ -283,8 +291,9 @@ def sequence_state(messages, outside=()) -> tuple[Message | CustomerInteraction 
     """
     base = None
     for m in messages:
-        if (m.direction == "outgoing" and m.status == "sent" and m.sent_at is not None
-                and m.prompt_variant not in REMINDER_VARIANTS):
+        # 콘솔 회신도 같은 자(`is_sales_email` — 나간 영업 회신, 리마인더 · 옛 접수확인 아님)에, 시계가 읽을
+        # 나간 시각이 있는 것만.
+        if is_sales_email(m) and m.sent_at is not None:
             if base is None or _at(m) > _at(base):
                 base = m
     for row in outside:
@@ -483,7 +492,12 @@ def _reply_place(replies, contact_id: int, conversation_id: int, after: datetime
 
 
 def _reminder_body(variant: str, target: str) -> str | None:
-    """콘솔의 영문 템플릿을 고객 언어로. 못 만들면 None — **행을 만들기 전에** 가른다.
+    """콘솔 템플릿을 고객 언어로. 못 만들면 None — **행을 만들기 전에** 가른다.
+
+    그 언어로 쓴 행(`<키>_<언어>` — `followup_reminder_ko` · `followup_closing_ja`)이 있으면 **쓴 그대로**
+    나간다: 토큰만 채우고 번역하지 않는다(2026-10-07 운영자: 「리마인더는 써있는거 그대로 보내져야한다」 ·
+    「1번으로 해서 그 언어에 맞게 번역하도록」). 없으면 접미사 없는 영문 행이고, 고객 언어가 영어가 아니면
+    그것을 번역한다.
 
     한국어 본문이 영어 고객에게, 영문이 한국어 고객에게 가는 것을 여기서 막는다. 발송 경로의
     `enforce_send_language` 는 두 번째 그물이고, 거기서 걸리면 `send_failed` 가 되어 시퀀스가 멈춘다.
@@ -493,12 +507,13 @@ def _reminder_body(variant: str, target: str) -> str | None:
     from ..llm.translate import is_mostly_korean, translate_to
 
     key = TEMPLATE_KEYS[variant]
-    body = (get_email_template(key) or "").strip()
+    written = (get_email_template(f"{key}_{target.replace('-', '_')}") or "").strip()
+    body = written or (get_email_template(key) or "").strip()
     if not body:
         logger.warning("후속 리마인더 템플릿 「%s」 이 콘솔에 없어 보내지 않습니다.", key)
         return None
     body = apply_editable_tokens(body, target)
-    if not target.startswith("en"):
+    if not written and not target.startswith("en"):
         body = translate_to(body, target)
         if not body:
             logger.warning("후속 리마인더를 %s 로 번역하지 못해 이번 회차는 건너뜁니다.", target)
@@ -578,14 +593,14 @@ def _outside_copy(conv: Conversation, contact_email: str | None, base: CustomerI
     - **서명 카드는 안 붙인다**(NULL = 「서명 없음」). 허브스팟 화면 회신은 본문에 손으로 쓴 맺음말뿐
       이었다(424·425 실측) — 그대로 베낀 것이다. 콘솔의 기본 서명(목록의 첫 카드)은 다른 사람이나
       한국어 카드일 수 있어서, 남의 이름으로 재촉하는 것보다 카드 없이 나가는 쪽이 낫다.
-    - 제목은 그 회신 제목에 「RE:」 하나 — 고객의 메일함에서 같은 대화로 묶이게.
+    - 제목은 그 회신 제목에 「RE:」 하나 — 고객의 메일함에서 같은 대화로 묶이게. 제목을 못 찾으면 나갈 언어의
+      기본 제목이다 — 허브스팟 티켓 이름(`inquiry_subject`)은 CS 가 붙인 내부 이름일 수 있어 쓰지 않는다.
     - **받는 사람은 언제나 그 고객이다.** 수집기는 티켓 스레드의 모든 메시지를 그 고객 줄로 넣고 방향만
       보낸 주소로 가르므로, 허브스팟 화면에서 동료·파트너에게 **전달한** 메일도 「우리가 보낸 이메일」로
       선다. 그 메일의 TO 를 베끼면 「지난 메일에 이어」와 「닫겠습니다」가 그 사람에게 간다. 그래서 고객이
       TO·CC 어디에도 없는 메일이면 안 보내고, 고객 말고 TO 에 있던 사람은 참조로 옮겨 회신 전체의
       독자를 지킨다.
     """
-    from ..common.subjects import reply_subject
     from ..llm.language import detect_language
 
     text = (base.summary or "").strip()
@@ -602,7 +617,7 @@ def _outside_copy(conv: Conversation, contact_email: str | None, base: CustomerI
     target = target.strip().lower() or "en"
 
     def subject(found: str | None = None) -> str:
-        return reply_subject(found or base.subject or conv.inquiry_subject, target_code=target)
+        return choose_reply_subject(thread_subject=found or base.subject, target=target)[0]
 
     external_id = base.external_id or ""
     if external_id.startswith("gmail:"):
@@ -661,11 +676,14 @@ def _create_reminder(conversation_id: int, variant: str) -> int | None:
         contact = session.get(Contact, conv.contact_id) if conv.contact_id else None
         session.expunge_all()
     if isinstance(base, Message):
+        target = ((base.target_language or conv.inquiry_language or "en").strip().lower()) or "en"
         copy = {
             "to_address": base.to_address, "cc_addresses": base.cc_addresses,
-            "channel_account_id": base.channel_account_id, "subject": base.subject,
+            "channel_account_id": base.channel_account_id,
+            # 기준 회신의 제목에 RE: 하나 — 첫 회신이 새 제목(RE: 없이)으로 나갔어도 리마인더는 그 스레드에 붙습니다.
+            "subject": choose_reply_subject(thread_subject=base.subject, target=target)[0],
             "signature_key": base.signature_key,
-            "target": ((base.target_language or conv.inquiry_language or "en").strip().lower()) or "en",
+            "target": target,
         }
     else:
         # 허브스팟을 읽는 동안 세션을 안 붙든다 — 저쪽이 느린 날 연결이 그만큼 묶인다.
@@ -818,8 +836,9 @@ def run_followup_sequence_once(limit: int = PER_SWEEP) -> dict:
                 )
                 | Conversation.id.in_(
                     select(CustomerInteraction.conversation_id).where(
-                        CustomerInteraction.direction == "outgoing",
-                        CustomerInteraction.channel == _EMAIL_CHANNEL,
+                        # 후보만 고른다 — 「영업 메일인가」는 `outside_replies` 가 같은 자로 다시 잰다.
+                        CustomerInteraction.direction.in_(("outgoing", "outbound")),
+                        CustomerInteraction.channel.in_(EMAIL_CHANNELS),
                         CustomerInteraction.happened_at >= start,
                         or_(*(CustomerInteraction.external_id.like(f"{p}%") for p in _OUTSIDE_PREFIXES)),
                     )

@@ -297,8 +297,9 @@ async def _post_send_bookkeeping(session, msg, conv, message_id: int, *, moved: 
             await asyncio.to_thread(append_summary_line, msg.id)
 
 
-# `send()` 가 메시지에 채우는 것 — 나간 그대로의 본문과 발송 id 들.
-_DELIVERED_FIELDS = ("body", "hubspot_thread_id", "hubspot_message_id", "smtp_message_id", "in_reply_to")
+# `send()` 가 메시지에 채우는 것 — 발송 id 들. 본문은 없습니다: 발송은 본문을 바꾸지 않으므로
+# 승인한 글이 곧 나간 글이고, 그 글은 이미 행에 있습니다(2026-10-06).
+_DELIVERED_FIELDS = ("hubspot_thread_id", "hubspot_message_id", "smtp_message_id", "in_reply_to")
 
 
 def _record_delivery(session, message_id: int, carried: dict, delivered: bool):
@@ -413,8 +414,8 @@ async def _send_one(message_id: int) -> bool:
 
         if delivered is not None:
             # **여기서부터는 무엇이 실패해도 `send_failed` 가 아닙니다** — 메일은 이미 끝났습니다.
-            # 적다가 끊기면 새 세션으로 한 번 더 적습니다. `send()` 가 본문을 다듬고(링크·가격 가드)
-            # 발송 id 를 채웠으므로, 롤백이 지운 그 값을 들고 가서 다시 씁니다.
+            # 적다가 끊기면 새 세션으로 한 번 더 적습니다. `send()` 가 발송 id 를 채웠으므로,
+            # 롤백이 지운 그 값을 들고 가서 다시 씁니다.
             carried = {name: getattr(msg, name) for name in _DELIVERED_FIELDS}
             try:
                 conv, moved = _record_delivery(session, message_id, carried, delivered)

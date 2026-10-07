@@ -41,6 +41,24 @@ def translation_required(message: Message, body: str | None = None) -> bool:
     return current != target or is_mostly_korean(candidate)
 
 
+def prepare_reviewed_body(body: str | None, language: str | None) -> str:
+    """운영자가 쓴 본문을 **저장·번역·승인하기 전에** 한 번 다듬습니다 (2026-10-06).
+
+    초안이 지나는 것과 같은 단계입니다 — 토큰(``{{MEETING_LINK}}`` 등)을 채우고, 연락 링크를
+    나갈 언어에 맞추고(``canonicalize_contact_links``), 공백을 고릅니다(``text_wash``).
+    미리보기·저장·승인이 모두 이 함수를 지나므로 **미리본 글 = 저장된 글 = 나가는 글**입니다.
+    발송은 아무것도 다듬지 않습니다: 예전에는 다듬기를 승인 **뒤**인 발송 직전에 해서, 사람이
+    승인한 글자와 고객이 받은 글자가 달랐습니다.
+    """
+    from ..common.textwash import text_wash
+    from ..llm.prompts import apply_editable_tokens, canonicalize_contact_links
+
+    washed = text_wash(body)
+    if not washed:
+        return ""
+    return text_wash(canonicalize_contact_links(apply_editable_tokens(washed, language), language))
+
+
 # "안 넘겼다" 와 "없음으로 정했다" 를 가릅니다. 서명은 None 이 곧 「서명 없음」이라, 기본값을
 # None 으로 두면 그 둘이 같은 값이 되어 **운영자가 고른 「서명 없음」이 무시됐습니다** —
 # 초안이 만들어질 때 달린 기본 서명이 그대로 붙어 나갔습니다. 같은 폼의 `저장`·`번역하기`는
@@ -95,7 +113,12 @@ def approve(
 
     ``cc_addresses`` 도 같은 규칙입니다(이관 0112) — None 은 「참조 없음」이고, 그때
     발송 payload 는 이 칸이 생기기 전과 한 글자도 다르지 않습니다.
+
+    **승인하는 글은 다듬은 글입니다**(``prepare_reviewed_body`` — 미리보기와 같은 단계). 그 글에
+    채우지 않은 자리(``reply_flags``)가 있으면 승인하지 않고 그 줄을 알려 줍니다. 두 승인 입구(검토
+    화면의 발송, JSON ``/approve``)가 이 함수 하나를 지납니다.
     """
+    from .reply_flags import quote_lines, unfilled_slots
     from .reply_safety import approval_binding, validate_draft_context
 
     try:
@@ -120,15 +143,23 @@ def approve(
             raise ApprovalError(
                 f"Message {message_id} is {pending.status}, not pending_approval."
             )
-        candidate_body = edited_body if edited_body is not None else pending.body
+        candidate_body = prepare_reviewed_body(
+            edited_body if edited_body is not None else pending.body,
+            pending.target_language or pending.language,
+        )
         # **빈 글은 못 나갑니다.** 수동 후속 회신은 본문 없이 만들어지고(운영자가 검토
         # 화면에서 씁니다), 그 상태로 발송을 누르면 고객에게 빈 메일이 갑니다. 자동 초안은
         # 여기 걸릴 일이 없습니다.
-        if not (candidate_body or "").strip():
+        if not candidate_body.strip():
             raise ApprovalError("본문이 비어 있습니다.")
         if translation_required(pending, candidate_body):
             raise ApprovalError(
                 "외국어 문의는 번역하기를 완료하고 번역문을 검토한 뒤 발송할 수 있습니다."
+            )
+        slots = unfilled_slots(candidate_body, language=pending.target_language or pending.language)
+        if slots:
+            raise ApprovalError(
+                f"채우지 않은 자리가 있습니다 — {quote_lines(slots)}. 채운 뒤 다시 승인해 주세요."
             )
 
         values: dict[str, object] = {
@@ -136,8 +167,8 @@ def approve(
             "approved_by": approver,
             "approved_at": datetime.now(timezone.utc),
         }
-        if edited_body is not None:
-            values["body"] = edited_body
+        if edited_body is not None or candidate_body != pending.body:
+            values["body"] = candidate_body
         if edited_subject is not None:
             values["subject"] = edited_subject
         if signature_key is not _UNSET:
@@ -173,7 +204,8 @@ def approve(
                 message_id=message_id,
                 approver=approver,
                 action=action,
-                diff=edited_body if edited_body is not None else None,
+                # 승인한 글 그대로 — 저장되고 나가는 글과 같습니다.
+                diff=candidate_body if edited_body is not None else None,
             )
         )
         session.commit()

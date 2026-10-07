@@ -346,7 +346,7 @@ def test_the_old_crm_row_is_folded_into_the_thread_row():
         "sqlite:///:memory:", connect_args={"check_same_thread": False}, poolclass=StaticPool
     )
     Base.metadata.create_all(engine)
-    factory = sessionmaker(bind=engine, expire_on_commit=False)
+    factory = sessionmaker(bind=engine, expire_on_commit=False, autoflush=False)  # 운영 SessionLocal 과 같게
     at = datetime(2026, 9, 1, 2, 5, 38, 979000, tzinfo=timezone.utc)
     with factory() as session:
         contact = Contact(
@@ -407,7 +407,7 @@ def test_a_mailbox_copy_is_folded_into_the_thread_row_and_stays_gone():
         "sqlite:///:memory:", connect_args={"check_same_thread": False}, poolclass=StaticPool
     )
     Base.metadata.create_all(engine)
-    factory = sessionmaker(bind=engine, expire_on_commit=False)
+    factory = sessionmaker(bind=engine, expire_on_commit=False, autoflush=False)  # 운영 SessionLocal 과 같게
     sent = datetime(2026, 9, 15, 4, 10, 0)          # 지메일 Date
     ingested = sent + timedelta(seconds=41)          # 허브스팟 createdAt
     with factory() as session:
@@ -469,7 +469,7 @@ def _reply_db(monkeypatch):
     engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False},
                            poolclass=StaticPool)
     Base.metadata.create_all(engine)
-    factory = sessionmaker(bind=engine, expire_on_commit=False)
+    factory = sessionmaker(bind=engine, expire_on_commit=False, autoflush=False)  # 운영 SessionLocal 과 같게
     monkeypatch.setattr(ticket_history, "SessionLocal", factory)
     monkeypatch.setattr(inbound, "SessionLocal", factory)
     with factory() as session:
@@ -769,3 +769,134 @@ def test_refreshing_one_ticket_is_one_ticket_not_a_full_scan():
 
     screen = pathlib.Path("frontend/src/screens/MessageDetail.tsx").read_text(encoding="utf-8")
     assert "refresh-history" in screen, "티켓 화면에 버튼이 있습니다"
+
+
+# --------------------------------------------------------------------------- #
+# 같은 메일의 두 벌 — 열쇠는 「같은 초」가 아니라 본문 (2026-10-06)
+# --------------------------------------------------------------------------- #
+def _twin_db(monkeypatch):
+    """운영 `SessionLocal` 처럼 autoflush=False — 기본값(True)이면 「방금 넣은 줄이 안 보인다」를 못 잡는다."""
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from sqlalchemy.pool import StaticPool
+
+    from src.agents import ticket_history
+    from src.db.base import Base
+    from src.db.models import Contact, Conversation
+
+    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False},
+                           poolclass=StaticPool)
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine, expire_on_commit=False, autoflush=False)
+    monkeypatch.setattr(ticket_history, "SessionLocal", factory)
+    with factory() as session:
+        contact = Contact(normalized_email="buyer@acme.com", email="buyer@acme.com", full_name="Acme")
+        session.add(contact)
+        session.flush()
+        conv = Conversation(contact_id=contact.id, stage="negotiation", hubspot_ticket_id="T-7")
+        session.add(conv)
+        session.commit()
+        return factory, conv.id, contact.id
+
+
+def _crm_row(contact_id, conv_id, key, summary, at, direction="outgoing"):
+    from src.db.models import CustomerInteraction
+
+    return CustomerInteraction(contact_id=contact_id, conversation_id=conv_id, external_id=key,
+                               channel="email", direction=direction, summary=summary,
+                               context=f"{key} 요약", happened_at=at)
+
+
+def test_a_crm_copy_seconds_apart_is_folded_by_its_body(monkeypatch):
+    """CRM 과 스레드는 같은 메일을 다른 시각으로 적는다 — 운영 짝 190쌍의 차이 중앙값 약 7초, 같은 초 0쌍.
+    「같은 초」 열쇠로는 한 쌍도 안 접혔다. 본문이 다른 CRM 줄(같은 날 이어 보낸 다른 메일)은 남는다."""
+    from src.agents import ticket_history
+    from src.db.models import CustomerInteraction, MailboxLinkDecision
+
+    factory, conv_id, contact_id = _twin_db(monkeypatch)
+    sent = datetime(2026, 9, 1, 2, 5, 31)
+    with factory() as session:
+        session.add_all([
+            _crm_row(contact_id, conv_id, "hubspot:email:1", "Thanks for reaching out — here is the quote.",
+                     sent + timedelta(seconds=7)),
+            _crm_row(contact_id, conv_id, "hubspot:email:2", "One more thing: the PoC credits.",
+                     sent + timedelta(minutes=40)),
+        ])
+        session.commit()
+    thread_row = {"external_id": "hubspot:conv:t-1", "channel": "이메일", "direction": "outgoing",
+                  "subject": "RE: quote", "summary": "Thanks for reaching out — here is the quote.\n\nBest regards,\nUntae",
+                  "handler": "untae@estsoft.com", "happened_at": sent}
+
+    ticket_history._store(conv_id, contact_id, [thread_row])
+
+    with factory() as session:
+        rows = {r.external_id: r for r in session.query(CustomerInteraction).all()}
+        assert set(rows) == {"hubspot:conv:t-1", "hubspot:email:2"}
+        assert rows["hubspot:conv:t-1"].context == "hubspot:email:1 요약", "한 줄 요약은 옮겨 탄다"
+        stone = session.get(MailboxLinkDecision, "hubspot:email:1")
+        assert stone is not None and stone.decided_by == "merged", "CRM 가져오기가 되살리지 않게"
+
+
+def test_the_one_off_fold_counts_first_and_folds_only_on_apply(monkeypatch):
+    """이미 수집이 끝난 대화는 웹훅이 와야 다시 수집된다 — 쌓여 있던 두 벌은 이 정리로 한 번 치운다.
+    기본은 세기만 하고, 같은 길로 지우며 센다(되돌릴 뿐)."""
+    from src.agents import ticket_history
+    from src.db.models import CustomerInteraction
+
+    factory, conv_id, contact_id = _twin_db(monkeypatch)
+    sent = datetime(2026, 9, 3, 4, 0, 0)
+    with factory() as session:
+        session.add_all([
+            CustomerInteraction(contact_id=contact_id, conversation_id=conv_id, external_id="hubspot:conv:t-2",
+                                channel="이메일", direction="outgoing", summary="견적서 보내드립니다.",
+                                happened_at=sent),
+            _crm_row(contact_id, conv_id, "hubspot:email:9", "견적서 보내드립니다.", sent + timedelta(seconds=9)),
+            _crm_row(contact_id, conv_id, "hubspot:email:10", "고객이 쓴 다른 메일", sent, direction="incoming"),
+        ])
+        session.commit()
+
+    dry = ticket_history.fold_history_twins()
+    assert dry == {"conversations": 1, "applied": False,
+                   "folded": [(conv_id, "hubspot:email:9", "hubspot:conv:t-2")]}
+    with factory() as session:
+        assert session.query(CustomerInteraction).count() == 3, "세기만 할 때는 아무것도 안 지운다"
+
+    done = ticket_history.fold_history_twins(apply=True)
+    assert done["folded"] == dry["folded"] and done["applied"] is True
+    with factory() as session:
+        keys = sorted(r.external_id for r in session.query(CustomerInteraction).all())
+    assert keys == ["hubspot:conv:t-2", "hubspot:email:10"]
+    assert ticket_history.fold_history_twins(apply=True)["folded"] == [], "두 번 돌려도 같다"
+
+
+def test_a_bot_or_cs_line_is_not_the_reply_baseline(monkeypatch):
+    """「우리가 마지막으로 한 말」은 영업이 보낸 이메일이다 — 첫 회신 판정과 같은 자.
+
+    영업이 쓴 적 없이 봇 · CS 만 답한 Contacted 티켓은 몇 달 전 고객 말 하나로 협의 중이 되면 안 된다
+    (기준선이 없으면 안 옮긴다). 영업 메일이 있으면 그 뒤의 고객 답장이 답장이다 — 사이에 CS 줄이 있어도."""
+    from src.common.config import settings
+    from src.db.models import CustomerInteraction, Message
+
+    monkeypatch.setattr(settings, "NON_SALES_SENDER_ADDRESSES", "support@perso.ai")
+    factory, conv_id, contact_id = _reply_db(monkeypatch)
+    advanced = _watch_advance(monkeypatch)
+    with factory() as session:
+        session.query(Message).filter_by(conversation_id=conv_id).delete()  # 콘솔 회신 없음
+        session.commit()
+    with factory() as session:
+        session.add_all([
+            CustomerInteraction(contact_id=contact_id, conversation_id=conv_id, channel="채팅",
+                                direction="outgoing", summary="곧 담당자가 연락드립니다",
+                                external_id="hubspot:conv:bot", happened_at=_REPLY_AT),
+            CustomerInteraction(contact_id=contact_id, conversation_id=conv_id, channel="이메일",
+                                direction="outgoing", summary="영업팀에 전달했습니다", handler="support@perso.ai",
+                                external_id="hubspot:conv:cs", happened_at=_REPLY_AT + _HOUR),
+        ])
+        session.commit()
+    _customer_wrote(factory, conv_id, contact_id, _REPLY_AT + _HOUR * 2, external_id="hubspot:conv:q")
+    assert not _judge(conv_id) and advanced == []
+
+    _customer_wrote(factory, conv_id, contact_id, _REPLY_AT + _HOUR * 3, external_id="hubspot:conv:sales",
+                    direction="outgoing")  # 영업이 허브스팟 화면에서 메일로 답했다(보낸 주소 모름 = 영업)
+    _customer_wrote(factory, conv_id, contact_id, _REPLY_AT + _HOUR * 4, external_id="hubspot:conv:back")
+    assert _judge(conv_id) and advanced == [conv_id]

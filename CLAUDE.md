@@ -4,15 +4,15 @@ PERSO Inbound is a FastAPI workflow for inbound inquiry handling and customer op
 
 ## 2026-09-21 정책 응답·이전 이력 변경
 
-- 최신 사용자 지시로 이전 티켓의 **요약 전용 표시를 제거**했다. 리드 상세·티켓 이전 이력·수주 고객 이력은 `history_view.ticket_records`와 `TicketHistoryBox`의 실제 기록을 테두리로 구분한다(나간 회신의 기준은 `DELIVERED_STATUSES` 한 곳, 리마인더의 「N차 리마인더 완료」 줄은 거르지 않는다). AI 문맥에 쓰는 DB summary는 보존한다.
+- 최신 사용자 지시로 이전 티켓의 **요약 전용 표시를 제거**했다. 리드 상세·티켓 이전 이력·수주 고객 이력은 `history_view.ticket_records`와 `TicketHistoryBox`의 실제 기록을 테두리로 구분한다(나간 회신의 기준은 `DELIVERED_STATUSES` 한 곳, 리마인더의 「Reminder Sent N」 줄은 거르지 않는다 — 09-21 의 「N차 리마인더 완료」를 09-22 에 바꾼 글자, `followup_sequence.done_label`). AI 문맥에 쓰는 DB summary는 보존한다.
 - 초안은 `PolicySnapshot`과 최근 실제 대화를 사용하고 기존 Event에 근거 참조/hash를 남긴다. 조회 오류를 빈 정상 문맥으로 바꾸지 않는다. 승인 내용과 정책/대화를 발송 전에 재확인한다. legacy/동적 HTML 등 한계는 문서에 명시한다.
   - **「대화가 변경됐다」는 해시가 아니라 초안 뒤에 온 고객 메시지다** (`inbound.customer_turns_since`, 2026-09-22). 대화 전체 해시로 재면 스레드 수집이 넣는 최초 문의의 사본·운영자 「수신」 기록·개인함의 옛 메일이 전부 「변경」이 되어 **New 티켓마다 승인이 막히고** 빠져나갈 길은 다시 쓰기(운영자 편집이 사라진다)뿐이었다. 정책 쪽도 같은 자다 — 초안이 **본** 문서(규칙 전부 + 라우터가 고른 참고 문서)만 본다(`PolicySnapshot.evidence_changed`): 전체 해시로 재면 CS 가이드 오타 하나에 대기열 전부가 「정책 변경」으로 막힌다. 안 고른 참고 문서는 고쳐도 늘어도 안 센다; 규칙 문서는 추가·삭제도 변경이다.
   - **발송 관문은 워커의 잠금 상태(`sending:<pid>:<random>`)를 승인된 그대로로 본다.** `"sending"` 한 글자와 비교하던 첫 판은 사람이 승인한 회신 전부를 send_failed 로 떨어뜨렸을 것이다 — 안전 모드는 그 검사 앞에서 빠지므로 로컬·CI 로는 안 잡힌다. `tests/test_policy_context.py::test_the_workers_claim_passes_the_send_gate` 가 워커와 같은 길로 잡아 고정한다.
-- 리마인더 시퀀스와 설정을 유지한다. 리마인더·test_sent는 첫/후속 실질 답변의 기준이 아니다. 생성과 발송 가격 가드는 같은 실제 대화 판정을 사용한다.
+- 리마인더 시퀀스와 설정을 유지한다. 리마인더·test_sent는 첫/후속 실질 답변의 기준이 아니다. 본문의 금액을 지우거나 짚는 가드는 생성에도 발송에도 없다(2026-10-06) — 발송이 본문 글자로 막는 것은 채우지 않은 자리(`reply_flags.unfilled_slots`)와 나갈 언어(`senders.enforce_send_language`)이고, 문장이 무엇을 말하는지는 안 따진다(승인 그대로인가 · 정책 · 대화의 재확인은 따로 막는다).
 - 로컬 안전 검증: `python scripts/check_policy_response.py --result-dir tmp/policy-check tests -q -ra`. 임시 DB·mock·외부 네트워크 차단이며 live Gemini 평가가 아니다.
-- 설계와 변경 근거: [구조](docs/architecture/policy-response-system.md), [ADR](docs/adr/2026-09-21-policy-response-boundaries.md), [실행 결과](docs/verification/policy-response-result.json). 정책 의미 검증/운영 배포 완료로 과장하지 않는다.
-- 초안은 질문별 AnswerPoint를 코드에서 본문으로 조합한다. **근거 검사(원문 인용·숫자 기간·일부 허위 상태)는 표시만 하고 막지 않는다** (2026-09-22 운영자: 「미완성이라도 사람한테 뜨면 좋겠는데. 그래야 내용보고 후에 고도화를 하든 하지」): 재작성 1회 뒤에도 걸리면 초안은 `pending_approval` 로 서고 `reply_context` Event 의 `limited_evidence_checks` 가 `FAIL` + 걸린 항목을 들며, 티켓 화면이 「근거 검사에 걸린 초안입니다」 배너로 그것을 적는다(`ticket.evidence`). 그 전날(09-21)에는 `draft_failed` 로 죽였다 — 빈 카드는 아무것도 말해 주지 않았다. 기간 검사는 처리·환불·이내 같은 절차 문장에만 걸고 날짜와 미팅 길이는 안 본다. 검사 PASS는 의미 정확성 인증이 아니다.
-  - **`draft_failed` 가 되는 것**은 이제 이것뿐이다: 분류·라우팅·초안 모델 호출 실패(스키마를 두 번 못 맞춤 포함) · 정책/대화 조회 실패 · 생성 중 정책이 바뀜 · 생성 중 고객 메시지가 새로 옴(`customer_turns_since`) · `answer_points` 가 전부 비어 본문을 만들 수 없음(`DraftEvidenceError`, 이것만 durable job 도 재시도 없이 dead). 나머지는 백오프로 8회 재시도하고 그 사이 카드는 `draft_failed` 로 보인다. 그 상태에서 운영자가 할 수 있는 것은 「초안 다시 쓰기」와 「메일 발송」(새 수동 초안)이다. [실제 Gemini 개발셋 결과](docs/policy-response/runs/2026-09-21-live/results.md)와 [후속 ADR](docs/adr/2026-09-21-grounded-draft-composition.md)을 참조한다.
+- 설계와 변경 근거: [구조](docs/architecture/policy-response-system.md), [ADR](docs/adr/2026-09-21-policy-response-boundaries.md), [실행 결과](docs/verification/policy-response-result.json), 그리고 무엇을 쓸지를 콘솔 문서로 넘긴 [2026-10-06 ADR](docs/adr/2026-10-06-console-driven-drafting.md)(아래 10-06 절). 정책 의미 검증/운영 배포 완료로 과장하지 않는다.
+- 초안 본문은 모델이 쓴 메일이다(2026-10-06 — 코드가 AnswerPoint 를 이어 붙이던 `compose_answer` 는 없앴다). 코드는 조립하지 않고, 나갈 언어로 맞추고(`reply.ensure_language` — 한국어인지가 나갈 언어와 안 맞으면 번역한다) 승인과 같은 다듬기(`approval.prepare_reviewed_body`)만 한다. `answer_points`·`policy_quotes` 는 점검 기록이다. **근거 검사(원문 인용·숫자 기간·일부 허위 상태·답변 요소의 숫자)는 막지도 띄우지도 않는다**: 걸리면 재작성 1회, 그래도 남으면 초안은 `pending_approval` 로 서고 `reply_context` Event 의 `limited_evidence_checks` 가 `FAIL` + 걸린 코드를 들 뿐이다. 화면에도 운영 로그 탭에도 안 나온다 — 2026-10-06 운영자: 「답변 작성에 대한 경고문 이런건 필요없어」. 초안은 전부 사람이 읽고 고친다. 그래서 「근거 검사에 걸린 초안입니다」 배너(`ticket.evidence`, 09-22 ~ 10-06)를 지웠고, 같은 날 만들던 초안 품질 경고(첫 회신 금액 · 대외 비공개 용어 · 처리 완료 표현)와 승인 때의 「경고 확인」 단계도 넣지 않았다 — 되살리기 전에 이 지시부터 다시 물어라. 09-21 에는 걸린 초안을 `draft_failed` 로 죽였고(빈 카드는 아무것도 말해 주지 않았다), 09-22 부터 사람에게 간다(「미완성이라도 사람한테 뜨면 좋겠는데」). 기간 검사는 처리·환불·이내 같은 절차 문장에만 걸고 날짜와 미팅 길이는 안 본다. 검사 PASS는 의미 정확성 인증이 아니다.
+  - **`draft_failed` 가 되는 것**은 이제 이것뿐이다: 분류·초안 모델 호출 실패(스키마를 두 번 못 맞춤 포함) · 정책/대화 조회 실패 · 생성 중 정책이 바뀜 · 생성 중 고객 메시지가 새로 옴(`customer_turns_since`) · 초안 본문이 비어 있음(`DraftEvidenceError`, 이것만 durable job 도 재시도 없이 dead). 나머지는 백오프로 8회 재시도하고 그 사이 카드는 `draft_failed` 로 보인다. 그 상태에서 운영자가 할 수 있는 것은 「초안 다시 쓰기」와 「메일 발송」(새 수동 초안)이다. 곁가지의 실패는 초안을 안 죽인다 — 문서 라우터가 실패하면 후보 전부로(`knowledge.select_relevant_docs`), 정리기가 실패하면 문서 통째로(`render_rules`) 가고, 보내기 전 검토 · 선례가 실패하면 그것 없이 쓴다(아래 10-06 절). [실제 Gemini 개발셋 결과](docs/policy-response/runs/2026-09-21-live/results.md)와 [후속 ADR](docs/adr/2026-09-21-grounded-draft-composition.md)을 참조한다.
 
 ## 2026-09-23 Gemini 3 전환 (2.5 는 안 쓴다)
 
@@ -29,7 +29,8 @@ PERSO Inbound is a FastAPI workflow for inbound inquiry handling and customer op
   생각 토큰은 `LLMResult.thinking_tokens` 에 따로 적힌다(출력 단가로 청구된다).
 - **전환 때 드러난 지시문 버그**: `_PRICING_RULE_FIRST` 가 모든 첫 회신에 「스페셜 프로모션을 언급하고 미팅을
   제안하라」를 조건 없이 붙였다. 2.5 Pro 는 알아서 가격 문의에만 적용했고 3.5 Flash 는 글자 그대로 따라 SRT·환불
-  문의에도 영업 문장을 붙였다. **가격을 물었을 때만**으로 좁혔다(`tests/test_reply_style.py` 가 고정).
+  문의에도 영업 문장을 붙였다. **가격을 물었을 때만**으로 좁혔다. 2026-10-06 에 그 지시 자체를 코드에서 지웠다 —
+  무엇을 쓸지는 콘솔 문서가 정한다(아래 10-06 절, `test_no_sales_instruction_from_code_reaches_the_draft_prompt`).
 - **근거는 유료 블라인드 짝 비교다** (`scripts/evaluate_policy_response.py`, 합성 문의 14건 × 2회, 원자료
   `tmp/model-switch-2026-09-23/` — git 제외). 지시문 수정 뒤: 2.5 평균 4.07·실패 2 / 3.x MINIMAL 4.39·실패 0 /
   **3.x 초안 LOW 4.50·실패 0·지어낸 문장 0**. 합성 자료라 회사 정책 원문의 정확도를 증명하지는 않는다.
@@ -75,10 +76,202 @@ PERSO Inbound is a FastAPI workflow for inbound inquiry handling and customer op
   - **배포 뒤 확인은 `POST /internal/healthcheck`** — 두 자리를 실제 생각 단계로 두드리므로 모델·단계 짝 오류가 400 으로
     보인다(2026-09-30 전환 직후 전 항목 PASS). 한도에서 잘린 답은 로그에 「출력 한도에서 잘렸습니다」로 남는다.
 
+## 2026-10-06 무엇을 쓸지는 콘솔 문서가 정한다 — 정리기 · 상황 · 검토 · 선례
+
+- **운영자 지시**: 「핵심 내용은 다 이메일 템플릿 안에서 설정할수 있고 거기서 규칙이나 그런걸 작성하면 우리가
+  잘 따를수 있도록」 · 「사람이 저기다가 어떻게 쓰든 우리쪽에서 알아서 잘 정리한채로 가지고 있고 잘 찾아서
+  보내지도록」 · 「규칙이나 그런거 없이 잘 가져오고 잘 정리될수 있게」 · 「작성 규칙이나 이런건 우리쪽에 있는게
+  아니라 사이트에서 문서를 바꾸면(db에 수정이 되면) 우리 gemini가 참고하는 글(작성하면 자동 업데이트되게 좋은
+  형식으로)이 업데이트되어서 그에 맞춰서 변경되어야하는거야」. 그래서 **코드에는 영업 규칙이 없다.** 무엇을 어떻게
+  쓸지는 콘솔(정책 문서 · 이메일 템플릿)이 정하고, 코드는 그 글을 정리해 싣고(정리기) · 지금이 어떤 회신인지
+  사실로만 알리고(상황) · 같은 문서로 초안을 한 번 더 읽히고(검토) · 우리 팀이 실제로 보낸 메일을 보여 준다(선례).
+  근거 · 버린 대안 · 되돌리기는 [ADR](docs/adr/2026-10-06-console-driven-drafting.md).
+  - **지운 것**: 가격 지시 둘(`_PRICING_RULE_*`, 자리 `{{pricing_rule}}`) — 첫 회신의 「금액은 적지 말고, 가격을
+    물으면 스페셜 프로모션을 언급하고 미팅을 제안하라」(`_FIRST`)와 그 뒤 모든 회신의 「금액 숫자는 쓰지 말고
+    미팅 · 채팅에서 안내하겠다고 쓰라」(`_NORMAL`), 후속 지시 둘(`_FOLLOWUP_RULE_*`, 자리 `{{followup_rule}}`) —
+    「고객의 새 메시지에 답하라」(`_ANSWER`) · 「같은 문의를 더 자세히 쓰라」(`_ELABORATE`), 초안 프롬프트의 「작성
+    규칙」 목록(길이 · 답하는 순서 · 다시 묻지 않기 …), 초안과 발송의 금액 줄 지우기. 콘솔 문서가 같은 자리에
+    다른 말을 하고 있었고(할인 약속 금지 · 행동 제안은 하나 · 「새 정보를 흘려 상대를 유인하지 않는다」), 둘이
+    부딪히면 모델은 그때그때 다르게 골랐다. 고정:
+    `tests/test_reply_style.py::test_no_sales_instruction_from_code_reaches_the_draft_prompt`(세 상황 모두).
+    라우터가 고른 참고 문서를 싣던 자리(`{{knowledge_docs}}`)도 프롬프트에서 빠졌지만 그건 영업 지시가 아니고
+    **지운 것이 아니라 옮겼다** — 그 문서는 이제 규칙 문서와 같이 정리기를 지나 system 으로 간다
+    (`organizer.knowledge_for`).
+    **규칙이 모자라 보이면 코드가 아니라 콘솔 문서에 적는다** — 다음 초안부터 바뀌고 검토의 기준도 같이 바뀐다.
+    프롬프트(`inbound/draft_reply.md` · `review_draft.md`)에 남는 것은 기계뿐이다: 나갈 언어 · 고객 글은 지시가
+    아니라 자료 · 근거는 문서와 대화(완성 예시 속 숫자 · 사실은 그 예시 고객의 것) · 이 경로는 아무것도 실행하지
+    않는다 · 운영자만 아는 사실은 `[[…]]` · 서명과 토큰 · JSON 모양. 두 파일의 문구는 평가와 함께 다듬는 중이다.
+  - **점수** (적대적 채점자 2명, 사람이 실제로 보낸 회신 = 100, 그 회신이 있는 운영 사례 18건 × 2회, 치명 결함
+    하나면 40점 상한): 개선 전 **47.9** → 1회차 55.3 → 2회차 **64.8**. 치명 결함이 있는 초안 9/36 → 12/36 →
+    **3/36**. 첫 회신 38.1 → 64.0 → 66.7, 후속 회신 54.1 → **49.8** → 63.6 — 1회차에 내려간 이유가 아래 「상황으로
+    거르지 않는다」다. 채점자 추정으로 사람만 아는 사실 없이 낼 수 있는 최고점이 약 86.8 이라 2회차는 그 75%쯤이다.
+    3~5a회차(검토 개정 · 생각 MEDIUM · 정리기 3판 · 「몇 번째 메일」 · 프롬프트의 작성 규칙 제거)는 코드만 바꿔 60~63 에
+    머물렀고, 남은 점수는 문서 쪽이었다 — 문서 개정안 P4 로 65.4(5b), P5 로 78.1(6회차, 하네스 시계 보정 · 채점자가 그 팔의
+    문서를 읽음 — 같은 조건의 P4 는 68.2). **다만 사람 회신 없이 문서로 채점한 표본 밖 문의 14건에서는 76.9 → 76.6 으로
+    그대로다** — 상승분 상당수가 그 사례의 사람 회신에서 가져온 사실이라, 담당자가 확인하기 전에는 개선으로 세지 않는다.
+    개정안은 운영 콘솔에 넣지 않았다.
+    원자료 `tmp/eval-2026-10-06/`(git 제외 — 고객 글과 내부 단가가 들어 있어 커밋하지 않는다, 이어 하기는 그 안의
+    `HANDOFF.md`). 사례와 채점자가 달라 09-23 · 09-30 의 점수와 섞어 비교하지 않는다.
+- **콘솔 문서는 구간으로 나뉘어 실린다** (`llm/organizer.py`, 표 `policy_sections`, 이관 0130). 운영 정책 문서
+  일곱 편이 전부 「항상 적용」이라 초안마다 39~46천 자가 「Company rules (must follow)」 한 덩어리로 실렸다 —
+  템플릿도, 완성 예시도, 무응답 리마인드 골격도, 원가 · 이익률이 든 내부 단가표도 「반드시 따를 규칙」으로.
+  - **나누기는 코드다** (`split_sections`, 모델 없음). 경계는 마크다운 제목(`#`~`####`, 「# # 」 두 겹 포함) ·
+    「§1.」 · 「3단계.」 · 「4-1.」 줄이고, 코드 블록(완성 예시)과 표는 자르지 않는다. 그렇게 나눈 조각이 3,000자
+    (`_MAX_SECTION`)를 넘을 때만 빈 줄에서 1,200~2,500자씩 다시 묶는다 — 제목 없는 메모도 같다(3,000자 이하면 통째로
+    한 구간). **구간은 본문의 오프셋이라 글자를 안 바꾼다** — 초안의 인용 검사가 원문과 대조하므로 다시 쓴 요약은 매번 인용 실패가 되고, 「않는다」 하나가 빠져도
+    아무도 모른다. 이어 붙여 본문이 안 되면 본문 통째로 한 구간이다.
+  - **꼬리표는 문서마다 flash 한 번이다** (`policy/organize`, 한도 `LABEL_MAX_TOKENS` = 16,000 — 구간 50개면 JSON
+    만 4~5천 토큰이고 생각도 그 안이다). 종류(`rule` · `format` · `example` · `template` · `fact` · `public_price` ·
+    `internal_price` · `confidential` · `process` · `other`) · 한정한 회신(`applies_to`) · 주제 · 기밀 여부 · 고객
+    메일에 나가면 안 되는 문자열(`terms`). **한 구간이라도 꼬리표가 빠지면 그 문서 전체가 실패다** — 빠진 구간을
+    아무 종류로나 채우면 원가가 「기타」로 실린다. 「사람만 본다」 문서 · 서명 · 값만 든 템플릿 행(`meeting_link` ·
+    `whatsapp_link` · `sender_name`)은 꼬리표 모델에 안 간다. 이메일 템플릿도 정리하지만 초안에 실리는 템플릿은
+    서식 한 행뿐이다 — `reply_format`(영문 문의면 `reply_format_en` 먼저, `prompts.get_reply_format`)이 지금처럼
+    통째로 `{{reply_format}}` 에 간다. 리마인더 템플릿(`followup_reminder` · `followup_closing`) 같은 다른 행은 초안에
+    안 가고, 템플릿의 지도는 아래 금지 목록(`_vocabulary`)에만 쓰인다.
+  - **금지 목록이 꼬리표를 이긴다** (`_vocabulary`). 문서가 스스로 표시한 것 — 비공개 · ❌ · ⛔ · 내부 · 원가 ·
+    이익률 · 마진 · 승인 하한이 붙은 **마디**의 금액과 비율, 머리 칸이 원가 · 마진인 표의 그 **열**, 공급사 줄의
+    괄호 속 이름 — 은 코드가 뽑아 어느 구간에서든 「[비공개]」로 지운다(「사람만 본다」 문서에서 뽑은 것까지).
+    마디 단위인 이유: 줄 단위로 재면 개정 메모 한 줄의 「원가 각주」가 같은 줄의 공개 가격까지 금지로 만들었다
+    (운영 문서 실측). 모델이 적은 문자열은 이름이면 어디서나, **숫자면 그것을 적은 구간에서만** 지운다 — 단가
+    문서의 플랜 지도 구간이 적은 단가가 문서 전체에 걸리자 견적용 단가표의 같은 숫자까지 지워져 후속 회신이 견적을
+    쓸 길이 없어졌다(2026-10-06 실측). 공개 가격 · 완성 예시 · 템플릿에 그대로 있는 문자열은 모델의 착오로 보고
+    뺀다 — 우리가 고객에게 실제로 하는 말이다. 내부 단가 · 기밀 구간에 적힌 금액이 규칙 · 사실 구간에 되풀이돼
+    있으면 거기서도 지운다. **고객에게 안 나가야 할 숫자는 문서에 표시해 두는 것이 가장 확실하다** — 표시 없는
+    숫자는 모델의 꼬리표에 달렸다.
+  - **거르는 것은 기밀 하나다 — 상황으로 거르지 않는다** (`_fits`). 1회차에는 모델이 단 「쓰이는 상황」으로
+    걸렀더니 판정 문서의 규칙(「연 약정은 물량으로 정하지 않는다」 · 「분할을 먼저 제안하지 않는다」)이 「첫 회신」으로
+    달려 후속 회신에서 통째로 빠졌고, 후속 회신의 치명 결함이 전부 거기서 나왔다(후속 54.1 → 49.8). 꼬리표는 돌릴
+    때마다 조금씩 달라서, 거르면 어느 규칙이 초안에 닿을지가 그때그때 바뀐다. 거르기를 없애고 검토를 더한 2회차의
+    후속이 63.6 이다. **어느 회신에 어느 문서를 붙일지는 콘솔의 배치가 정한다**(`policy_docs.PLACEMENTS`, 아래).
+  - **「…에만 적용」은 문서가 스스로 한정한 구간에만 붙는다** (정리기 3판; 운영자: 「조건들 첫번째에만 걸려있는건지
+    아닌지도 정확히 판단해 / 두번째 응답부턴 정확한 금액 포함해도 되는것처럼」). 그 구간 머리에 「(첫 회신에만
+    적용)」이 서고, 글 머리말이 알린다 — 표시된 구간의 규칙 · 서식 · 예시는 그 회신에서만 따르고, 그 안에 적힌 제품
+    사실과 조건은 언제나 사실이다. 모든 회신에 맞는 규칙은 첫 회신에 주로 쓰여도 「모두」다 — 한정을 잘못 달면 그
+    규칙이 다른 회신에서 안 지켜진다. 넓은 구간 속 한 문장의 한정(「1차 회신에서는 …」)은 그 문장에 남기고 구간은
+    「모두」로 둔다 — 그래서 상황에 「몇 번째 이메일」이 있다(아래).
+  - **지도는 본문 해시와 `ORGANIZER_VERSION` 에 묶인다** (지금 3 — 2: 견적이 계산되는 단가 구간은 원가 · 경쟁사가
+    섞여 있어도 `internal_price`, 3: `applies_to` 는 문서가 한정한 회신만). 본문이 바뀌거나 판이 오르면 지도가
+    낡고, **다시 정리될 때까지 그 문서는 본문 통째로 간다**(금지 문자열은 지운 채 — `knowledge_for` 의 `full` ·
+    `mixed`). 지도는 `PolicyDocument` 에 안 들어가고 원본 행의 판 번호도 안 건드린다 — 지문이 바뀌면 정리가 끝날
+    때마다 대기 중인 초안이 전부 「정책이 변경되었습니다」로 막힌다.
+  - **저장이 곧 방아쇠다** (운영자 지시의 「작성하면 자동 업데이트되게」). 정책 문서를 저장하면 그 문서를
+    (`_publish` → `schedule_reorganize(source_id)`), 이메일 템플릿을 만들거나 고치면 낡은 문서 **전부**를
+    (`schedule_reorganize()`) 그 자리에서 뒤로 정리한다 — 요청은 모델을 안 기다린다(flash 한 번이 큰 문서에서 수십
+    초라 프록시가 끊는다). 받치는 것은 10분 폴러의 `knowledge_organizer` 단계(`organize_pending`)다: 회차마다 낡은
+    문서 한 편, 같은 본문에 세 번 실패하면 멈추고, 실패는 본문 없이 `Event(kind="policy_organize_failed")` 로 남는다.
+    다시 저장하면 그 횟수와 무관하게 다시 한다. 모델 자격(`GOOGLE_CREDENTIALS_JSON`)이 없는 곳(로컬 · 테스트)에서는
+    저장해도 아무것도 안 한다. 모델은 세션 밖에서 부르고, 쓰기 직전에 그 사이 본문이 안 바뀌었는지 본다.
+    「사람만 본다」가 바뀐 것은 해시로 못 잡아서 지도를 지우고(`organizer.forget`), 정책 문서를 지우면 지도도 같은
+    트랜잭션에서 지운다(템플릿은 다음 정리 회차가 치운다 — 그 사이에도 지워진 문서의 지도는 안 읽는다).
+    - 운영 문서 실측(정리기 2판): 11편 · 구간 101개 · 약 47초 · 실패 0. 폴러만 기다리면 열한 편에 두 시간 가까이
+      걸린다 — 판을 올린 배포 뒤에는 이메일 템플릿 하나를 저장하는 것이 「지금 전부 정리」다.
+    - 자물쇠는 프로세스 안의 것 하나다(`_LOCK`) — 워커가 여럿이 되면 유니크 인덱스가 늦게 온 쪽을 실패시킨다.
+  - **정리 상태를 그리는 화면은 없다** (`test_the_document_screen_carries_no_organizer_state`) — 정리 전에도 문서는
+    통째로 가서 운영자가 기다릴 것이 없다. 보려면 `policy_sections` 와 `policy_organize_failed` Event 를 본다. 초안이
+    무엇을 읽었는지는 `reply_context` 매니페스트의 `knowledge`(`mode` · `map_sha` · `section_ids`, 글은 안 적는다)다.
+  - **정리기가 통째로 실패하면 정리 전과 같은 글로 간다** (`inbound._company_knowledge`). 지도를 못 읽으면
+    `knowledge_for` 는 빈 문맥이 아니라 `PolicyContextError` 를 내고, 초안은 그것을 잡아 `render_rules` — 문서
+    통째, **가리기 없음** — 로 쓴다(매니페스트 `knowledge.mode='full'` + 예외 이름). 정리기 때문에 초안이 죽지는
+    않지만 그 회차는 금지 문자열도 안 지워진다.
+  - 이관 0130 은 표만 만든다 — 이관은 Render 빌드 중 옛 코드가 도는 동안 돌아서, 거기서 모델을 부르면 배포 성공이
+    Vertex 사정에 묶인다.
+- **상황은 사실로만 적는다** (`inbound._situation_text` — 초안 프롬프트의 「이번 회신의 상황」). 상황 이름
+  (`first_reply` · `answer_reply` · `nudge`)과 그 뜻 · **「이번 메일은 우리 영업이 이 대화에서 보내는 N번째
+  이메일입니다」** · 우리 영업의 마지막 이메일과 고객의 마지막 메시지가 며칠 전인지(날짜, UTC) · 챗봇 답이나 CS
+  주소의 안내가 있으면 「우리 영업의 답이 아닙니다」 · 우리 영업이 마지막으로 보낸 본문(2,000자, 「고객이 이미 받은
+  글」). **무엇을 쓰라는 말은 없다.** 몇 번째인지를 주는 이유: 문서가 회신을 차수로 센다(「1차 회신에서는 …」) —
+  그 숫자 없이는 첫 회신에만 걸린 조건을 모델이 가릴 수 없다(`test_the_situation_says_which_of_our_emails_this_is`).
+  - 상황은 우리 영업 이메일이 하나도 없으면 `first_reply`, 있고 그 마지막 뒤에 고객 메시지가 있으면
+    `answer_reply`, 없으면 `nudge` 다. **답할 글**(`_answered_turn`)은 후속이면 그 고객 메시지, 첫 회신이면 채팅 · 폼이
+    아닌 가장 최근 고객 줄이다 — 티켓의 문의이거나 그 뒤 고객이 더 쓴 말(메일 정정 · 추가 질문, 그리고 손으로 적은
+    전화 · 미팅 「수신」 기록도 여기 든다). 그런 줄이 없으면 티켓의 문의다. **채팅 줄과 폼 제출은 맥락이다**: 첫
+    회신의 기준선이 챗봇 답에서 안 끊기므로, 안 거르면 챗봇과 주고받은 마지막 한마디(「감사합니다」)에 답한다.
+  - 대화 맥락의 말머리는 **누가** 말했나다(`_ROLE_LABELS`: 고객 · 우리(영업) · 우리(CS 안내) · 챗봇 · 폼 · 기록 ·
+    우리(리마인더)). 「우리」 하나로 두면 모델이 챗봇 답과 CS 안내를 이미 보낸 우리 영업 회신으로 읽고 이어 쓴다.
+    허브스팟 CRM 메일 앞부분 목록은 「참고 — 허브스팟 CRM 메일 기록: 대화 기록이 아니며 …」로 머리를 달고, 가져온
+    메일 줄 — 스레드(`hubspot:conv:`) · 옛 CRM(`hubspot:email:`) · 개인함(`gmail:`) — 이 하나라도 대화에 들어온
+    티켓에서는 뺀다(`turn.origin`, 같은 메일이 한 번 더 실린다).
+- **「우리가 답했다」는 우리 영업이 보낸 이메일 하나다** (`history_view.turn_role` · `is_sales_email`). 방향만 보면
+  챗봇 답(채팅의 우리 쪽)과 CS 주소의 안내도 「우리가 보낸 것」이라, 2026-10-06 운영 재생에서 영업이 한 통도 안
+  보낸 티켓 42건이 「이미 답한 티켓」으로 읽혔다 — 첫 회신 문서 대신 후속 회신 문서를 받았고 고객 질문이 봇 답
+  뒤에 가려졌다. 역할(`customer` · `sales` · `cs` · `bot` · `form` · `note` · `reminder`)을 방향과 따로 잰다.
+  - `sales` 는 콘솔에서 실제로 나간(`sent`) 회신(리마인더 · 옛 접수확인 제외)과, 가져오거나 손으로 적은 이메일 발신
+    줄 중 보낸 주소가 `NON_SALES_SENDER_ADDRESSES`(기본 `support@perso.ai`, 쉼표 목록)에 없는 것이다. 채팅의 우리
+    쪽은 `bot` — 사람 상담원도 섞이지만 수집기가 액터를 안 남겨 못 가르고, 어느 쪽이든 영업 메일이 아니다.
+  - **거부 목록이다**: 주소를 모르는 줄(CRM 줄 · 손 기록)은 영업으로 센다. 허용 목록이면 새 영업 주소가 생길
+    때마다 그 사람의 회신이 조용히 안 세어진다. 새 CS 별칭(CS 인박스의 hs-inbox 전달 주소 같은)이 생기면 여기
+    더한다. 이 이름은 아직 `render.yaml` · `.env.example` 에 없다 — 기본값으로 돈다.
+  - 이 자를 쓰는 곳: 첫 회신 판정 · 지난 회신 앵커 · 「마지막 회신 뒤 고객 메시지」(`inbound`) · 답장 기준선
+    (`ticket_history.advance_if_customer_replied`) · 리마인더 시계(`followup_sequence`, 열쇠를 더 요구한다) · 선례.
+    예전에는 다섯이 각자 「나간 우리 줄」을 셌고 챗봇 · CS 줄을 세는 곳과 안 세는 곳이 갈렸다. 대가: 우리 쪽 줄이
+    챗봇 · CS 뿐이고 `last_outgoing_at` 도 없는 Contacted 티켓은 고객이 답해도 Negotiating 으로 안 간다(기준선이
+    없으면 안 옮긴다).
+- **초안은 보내기 전에 한 번 더 읽힌다** (`inbound._review_draft`, `inbound/review_draft.md`). 초안과 **같은 system
+  글**(정리된 회사 문서)과 같은 대화 · 상황 · 서식으로 pro 한 번(LOW, 한도 4,000) — 고칠 것만 적는다(구절 · 문제 ·
+  고칠 법). 근거 검사(`check_draft` · `answer_point_gaps`)나 검토가 무엇이든 찾으면 **재작성은 한 번**이고 직전
+  초안을 같이 준다(`draft_evidence.repair_instruction(…, previous=)`) — 안 주면 처음부터 다시 쓰다가 멀쩡하던 계산 ·
+  질문에서 새 실수를 낸다. 고친 글은 다시 검토하지 않는다(비용 · 지연의 상한). 검토가 실패하면 검토 없이 간다 —
+  초안은 그대로 쓸 수 있고 검토는 고칠 기회일 뿐이다. 매니페스트에는 찾은 수(`review_problems`)만.
+  - **왜**: 2026-10-06 평가의 치명 결함은 대부분 **콘솔 문서에 이미 적힌 규칙을 놓친 것**이었다 — 물량만 보고 연
+    약정을 단정 · 분할을 먼저 제안 · 고객이 답한 것을 다시 물음 · 하지 않은 처리를 했다고 씀. 그 규칙을 코드로
+    옮기지 않았다: 검토의 기준도 초안이 읽은 그 문서라, 운영자가 문서를 고치면 검토의 기준도 같이 바뀐다. 프롬프트가
+    정하는 것은 찾을 것의 **종류**뿐이다(규칙 위반 · 문서와 대화에 어긋나거나 근거 없는 단정 · 답할 수 있는데
+    빠뜨리거나 미룬 것 · 하지 않은 처리).
+  - **해 보고 뺀 것 둘**: ① 항목마다 근거를 적게 하는 대조표 — 모델이 완성 예시의 문장을 그 문장의 근거로 대며 전부
+    「맞음」으로 채웠고 찾는 것이 오히려 줄었다. 그래서 프롬프트가 완성 예시 속 숫자 · 사실은 그 예시 고객의 것이라
+    이번 고객의 근거가 아니라고 따로 짚는다. ② 쓰기 전에 답안 메모부터 쓰게 하기 — 모르는 칸마다 `[[…]]` 를 남겨 빈칸이 쏟아졌다. 되살리려면
+    같은 사례로 다시 재라(`tmp/eval-2026-10-06/review_exp/`).
+  - 제목은 대조하지 않는다 — 이어지는 스레드가 있으면 그 제목이 이기고, 시험에서 제목 줄의 말머리를 제목으로 읽은
+    오탐이 재작성을 불렀다. 검토가 받는 것은 문서 · 대화 · 상황 · 서식 · 본문이다(선례와 회사 분석은 안 받는다).
+- **선례 — 비슷한 상황에서 우리 팀이 실제로 보낸 메일** (`llm/precedents.py`, `inbound/select_precedents.md`).
+  콘솔 문서는 「무엇을 말해도 되나」를, 선례는 「우리 팀은 실제로 어떻게 썼나」를 말한다. 후보는 다른 고객(이 대화 ·
+  이 연락처 · 우리 도메인의 사내 테스트 연락처 제외)에게 최근 180일 안에 영업이 이메일로 실제로 보낸 회신, 최신
+  60건이다 — 본문이 실제 메일 글인 줄만(콘솔 발송 · 허브스팟 스레드 · 개인함. 손 기록은 「메일 보냄」 메모일 수
+  있고 옛 CRM 줄은 보낸 주소가 없어 CS 안내와 못 가른다), 같은 글(같은 템플릿을 여러 고객에게)은 한 번. 상황은
+  그 대화 안에서 재고(`first_reply` · `answer_reply` · `nudge`), 짝은 그 회신 직전의 고객 말이다.
+  - **남의 고객이라 가린다** (`mask`, 인덱스까지): 메일 · 링크 · 전화 · 그 연락처의 이름과 회사 · 인사말 속 이름 ·
+    금액 · 날짜 · 네 자리 이상의 수(1,000 이상)와 천 · 만 · k · M 같은 단위가 붙은 수(`_QUANTITY`). 인용된 이전
+    메일과 서명 블록은 뗀다(`_clean`). 30분 · 60 credits 같은 작은 수는 제품 사실이라 둔다. 초안에는 구조 · 톤은 따라 해도 되지만 예시 속 이름 · 금액 · 날짜 · 링크 · 약속은 **그 고객의
+    것**이라 다시 쓰지 않는다는 한 줄이 같이 간다(`precedents._INSTRUCTION`).
+  - flash 가 상황과 요청이 **둘 다** 맞는 것을 2건까지 고른다 — 안 맞으면 아무것도 안 고르는 것이 정답이다. 후보를
+    못 읽거나 고르기가 실패하면(모듈을 가져오다 깨져도) 선례 없이 쓴다. 매니페스트에는 고른 id 만 적는다 — 글은
+    다른 고객의 메일이라 안 적는다.
+  - **대화를 묶음으로 읽는다** (`inbound.threads_events`, 40개마다 쿼리 셋). 대화마다 읽던 첫 판은 초안 한 건에
+    Postgres 왕복이 수백 번이었다(`test_candidates_are_read_in_a_few_queries_not_one_round_trip_set_per_conversation`).
+  - 알고 두는 한계: 인덱스에 쓰는 한국어 한 줄 요약이 고객 이름을 한글로 옮겨 적었으면 가리기가 못 잡는다(초안에
+    싣는 예시 본문에는 해당 없음). 180일 창은 실제 오늘부터 센다.
+- **승인한 글자가 나간다 — 발송은 본문을 한 글자도 안 바꾼다** (`integrations/senders`). 예전에는 발송 직전에
+  공백을 고르고 · 연락 링크 줄을 통째로 다시 쓰고 · 첫 회신의 금액 줄을 지웠다. 전부 승인 **뒤**의 일이라 고객이
+  받은 글은 아무도 승인한 적 없는 글이었다(MSG#110 · #118). 이제 다듬기(토큰 → 연락 링크 → `text_wash`)는
+  `approval.prepare_reviewed_body` 하나이고 초안 · 저장 · 번역하기 · 미리보기 · 승인이 전부 그것을 지난다 — 미리본
+  글 = 저장된 글 = 나가는 글(`tests/test_approved_text_is_sent.py`). **후속 리마인더는 이 다듬기를 안 지난다**:
+  `followup_sequence._reminder_body` 가 토큰만 채우고(`apply_editable_tokens` — 그 언어로 쓴 템플릿 행이 없고 영어가
+  아닐 때만 번역) 연락 링크 정리 · `text_wash` 없이 템플릿에 쓴 모양 그대로 나간다 — 10-06 전에는 발송이 그 둘을 해 줬다(아래 리마인더 절).
+  발송에 남은 것은 막는 일뿐이다: 승인 그대로인가(손에 든 행과 DB 행 둘 다 — 다듬은 뒤라며 손에 든 행을 건너뛰던
+  `transformed` 는 없앴다) · 나갈 언어인가 · 채우지 않은 자리가 남았나. 다듬기도 고쳤다: 들여 쓴 다음 줄은 그 글머리 항목의 이어지는 줄이고(줄을 맞춘 항목 하나가
+  문단 셋으로 쪼개져 나갔다, MSG#110), 맺음 줄의 「—」는 글머리가 아니다(`text_wash` · `email_html._render_paragraph`).
+- **초안 글에서 막는 것은 셋뿐이다 — 채우지 않은 자리 · 나갈 언어 · 빈 본문. 문장이 무엇을 말하는지는 막지도
+  짚지도 않는다.** 나갈 언어는 번역하기가 남은 글(`approval.translation_required`, 발송은
+  `senders.enforce_send_language`)이고, 빈 본문은 승인이 거절한다(「본문이 비어 있습니다」). 승인 그대로인가 ·
+  정책 · 대화의 재확인(`reply_safety`)은 글의 내용이 아니라 근거를 보는 관문이다. 채우지 않은 자리
+  (`agents/reply_flags.unfilled_slots`)는 `[[…]]`(운영자가 채울 자리) · 치환 안 된 `{{TOKEN}}`(주소가 설정 안 된
+  링크 토큰 포함) · `{고객 이름}` · `[Name]`/`[이름]` 같은 빈칸 · 한국어가 아닌 메일 속 대괄호 한국어(쓰는
+  사람에게 남긴 지시)다. 고객에게 가면 되돌릴 수 없어서 경고가 아니라 관문이다 — 승인이 그 줄을 짚어 거절하고, 발송이 한 번 더 막는다(후속 리마인더는 코드가 승인하므로, 템플릿에
+  빈칸이 있으면 그 리마인더는 `send_failed` 로 멈춘다). 빈칸 낱말은 **목록으로 좁힌다**(콘솔 예시의 빈칸이 기준):
+  막는 검사가 「[안내]」 · 「[EN]」 · 「[Share Link]」 같은 멀쩡한 글자를 잡으면 운영자가 빠져나갈 길이 없다. 그 밖의
+  표시는 없다(위 09-21 절 — 「답변 작성에 대한 경고문 이런건 필요없어」). 거절 이유는 화면에 그대로 뜬다
+  (`frontend/src/lib/api.ts` 의 `failure` — 전에는 「실패: Error: 400 /messages/12/send」만 남았다).
+- **배포할 때** (아직 안 했다): 이관 0130. `NON_SALES_SENDER_ADDRESSES` 는 기본값으로 충분하다. 정리는 폴러가 하고
+  이메일 템플릿 하나를 저장하면 그 자리에서 전부 한다 — 그 전까지 문서는 통째로, 표시된 숫자만 지운 채 간다.
+  `scripts/fold_history_twins.py` 와 `scripts/cleanup_gmail_drafts.py` 는 세기만 먼저 돌려 읽어 본 뒤 `--apply`
+  (사내망은 DB 가 막혀 서버 셸에서). 평가가 찾은 문서발 실수와 고칠 문구의 제안은 담당자 확인 대기다
+  (`tmp/eval-2026-10-06/doc_change_proposals_draft.md`, git 제외) — 콘솔 문서는 코드 작업에서 고치지 않는다.
+
 ## Invariants
 
 - **External-write safety (대전제, top priority).** `LIVE_EXTERNAL_WRITES` defaults to `false` (SAFE). While safe: HubSpot writes, Google Sheets writes, and outbound email delivery are blocked. The application never substitutes an internal test recipient. Reads stay on. Enforced in `src/common/safe_mode.py`; guaranteed behavior is pinned by `tests/test_safe_mode.py`. Any new external-write/send path must use the same gate and add a safety test.
-- **Human-approved email delivery is live.** `EMAIL_SENDING_ENABLED = True`; only an operator-approved draft is claimable. Immediate inbound acknowledgements were removed structurally. A draft whose body is still Korean when the thread's target language is not cannot be approved or sent until the operator presses 번역하기 (`approval.translation_required`). Delivery replies on the ticket's existing HubSpot Conversations thread. The actor is `HUBSPOT_SENDER_ACTOR_ID`; the actual From address comes from the thread's email `channelAccountId` (or the same-Inbox fallback account for a form-only thread). SMTP and CRM email-activity logging are not delivery paths.
+- **Human-approved email delivery is live.** `EMAIL_SENDING_ENABLED = True`; only an operator-approved draft is claimable. Immediate inbound acknowledgements were removed structurally. A draft whose body is still Korean when the thread's target language is not cannot be approved or sent until the operator presses 번역하기 (`approval.translation_required`). A body that still holds an unfilled slot — `[[…]]`, an unreplaced `{{TOKEN}}`, a `[Name]`/`[이름]` blank — cannot be approved either, and `send()` refuses it again because follow-up reminders are approved by code, not by a person (`reply_flags.unfilled_slots`). Those two, plus an empty body (refused at approval), are the only checks on the draft text that block; nothing about what the text says blocks or warns (2026-10-06). Send never rewrites the body: tokens, contact links and whitespace are settled before a person approves — `approval.prepare_reviewed_body` is the one step the draft, save, translate, preview and approve all pass — so what the operator previewed is what is stored and what goes out (`tests/test_approved_text_is_sent.py`); the send path only refuses. (Follow-up reminders skip that step: `followup_sequence._reminder_body` fills the tokens and nothing else — a console row written in the customer's language, `followup_reminder_<lang>`, goes out as written; only without one is the English row machine-translated.) Delivery replies on the ticket's existing HubSpot Conversations thread — or, when the operator picks a connected personal mailbox (a `gmail:` account), goes out from that mailbox (`senders._send_from_mailbox`, 2026-09-08). The actor is `HUBSPOT_SENDER_ACTOR_ID`; the From address is the account the operator picked, else `HUBSPOT_PREFERRED_EMAIL_CHANNEL_ACCOUNT_ID`, else the thread's email `channelAccountId` (0105 — below). SMTP and CRM email-activity logging are not delivery paths.
   - **발송 payload 는 문서가 아니라 이 포털이 정한다** (2026-08-26, 첫 실전 발송 msg 62 가
     이것으로 실패했다). HubSpot 문서의 예시에는 수신자에
     `"actorId": "E-user@hubspot.com"` 이 있는데 **발송 엔드포인트가 그것을 거부한다** —
@@ -107,13 +300,12 @@ PERSO Inbound is a FastAPI workflow for inbound inquiry handling and customer op
       있는 이유도 같다: 붙여넣기 사고 하나가 고객 메일에 주소 수백 개를 노출하고 되돌릴 수
       없다. **받는 사람과 겹치는지는 발송 시점에** 본다(저장 때 걸러 두면 그 사이에 받는
       사람이 바뀐 초안에서 틀린다).
-    - **후보 목록은 서버가 만든다**(`ticket_history.list_cc_candidates`,
-      `GET /api/ui/messages/{id}/cc-candidates`). 그 티켓의 스레드에서 **보낸 사람과 받는
-      사람을 둘 다** 세는데, 보낸 사람만 세면 지금까지 조용히 참조로만 있던 사람이
-      목록에서 빠진다 — 그 사람이야말로 다음에도 참조에 있어야 할 사람이다. 읽기만 하므로
-      그 라우트로는 메일이 안 나가고, 못 가져오면 고르개가 안 뜰 뿐 손으로 적는 길은
-      그대로다. **칸이 글자 입력인 것도 그래서다**: 이 대화에 처음 들어오는 담당자를 넣어야
-      할 때가 반드시 온다.
+    - **후보 목록은 없다 — 칸은 글자 입력이다** (2026-09-08 `2c42949` 에 지웠다, 운영자: 「그거 때매
+      복잡한 일을 할 필요는 없어」). 한동안 서버가 그 티켓의 스레드에서 보낸 사람과 받는 사람을 세어 칩으로
+      보여 줬는데(`ticket_history.list_cc_candidates`, `GET /api/ui/messages/{id}/cc-candidates`), 그러려고
+      티켓을 **열 때마다** 모든 스레드 × 모든 메시지를 받아 주소 몇 개만 쓰고 버렸다. 참조에 넣을 사람은
+      운영자가 이미 알고 있어서 적는 편이 빠르고, 이 대화에 처음 들어오는 담당자는 어차피 적어야 한다. 철자는
+      위 `parse_cc_addresses` 한 곳이 다듬는다.
   - **HubSpot 400 의 이유는 `message` 가 아니라 `errors[]` 에 있다.** `message` 는 원인이
     무엇이든 언제나 `"Multiple errors validating request."` 한 문장이라, 그것만 로그에 남기면
     「무언가 틀렸다」까지만 말하고 무엇이 틀렸는지는 어디에도 안 남는다. `_lookup_error` 가
@@ -241,18 +433,29 @@ PERSO Inbound is a FastAPI workflow for inbound inquiry handling and customer op
     계정만 발신이 된다(1002 · active · authorized · 안 archived, `_email_channel_account`).
     개인 주소로 보내려면 **그 사서함을 먼저 연결**해야 하고, 고르개에 뜨려면 그 티켓
     스레드와 **같은 인박스**여야 한다.
-- **연락처 링크는 언어가 정하고, 정하는 곳은 `canonicalize_contact_links` 한 곳이다.**
-  국문 회신에는 WhatsApp 을 붙이지 않고 링크 글자는 「미팅 링크」, 영문에는 둘 다 붙이고
-  `Calendly` · `WhatsApp` 이다. **서식(`reply_format`)만 고치면 안 된다**: 0069 가 국문
-  서식에서 `{{WHATSAPP}}` 을 뺐는데도 국문 메일에 WhatsApp 이 계속 나갔다 — 이 함수가
-  모델이 쓴 링크 줄을 전부 지우고 푸터를 **다시 만드는데**, `language` 를 「어느 행에서 URL 을
-  읽을지」 고르는 데만 쓰고 「그 줄이 붙어야 하는지」는 보지 않았기 때문이다. 발송 경로가 이
-  함수를 마지막에 부르므로 **여기서 붙인 것이 곧 고객이 받는 것**이고, 서식·정책 문서에 무엇이
-  적혀 있든 이 함수가 이긴다.
+- **연락처 링크는 본문에 이미 있는 것만 고친다 — 붙이지도 지우지도 않는다** (2026-10-06,
+  `llm.prompts.canonicalize_contact_links`). 토큰(`{{MEETING_LINK}}` · `{{WHATSAPP}}`)은 그 자리에서
+  `[이름](설정된 주소)` 가 되고, 연락 링크(`[Calendly](…)` · `[미팅 링크](…)` · `[WhatsApp](…)`)는 설정된 주소와
+  **언어의 이름**을 받는다 — 국문은 「미팅 링크」, 그 밖은 `Calendly`. 운영자가 붙인 다른 이름은 글자를 지키고
+  주소만 바꾸며, 문장 속 맨 주소는 그 문장 안에서 이름 붙은 링크가 되고, 국문 서식의 토큰이 치환되며 생기는
+  `[미팅 링크]([Calendly](URL))` 는 링크 하나로 편다. 주소가 설정 안 된 토큰은 보이는 채로 남아 승인이 막는다
+  (`reply_flags.unfilled_slots`). **WhatsApp 줄을 붙일지는 서식이 정한다** — 영문 서식이 「다른 링크 토큰을
+  더하지 마세요」라고 적는다.
+  - **예전에는 이 함수가 연락 링크가 든 줄을 전부 지우고 정해진 링크 줄을 다시 만들었다.** 그래서 링크를 감싼
+    문장이 같이 사라졌고(로컬 재현: 링크 앞뒤로 안내 문장이 있던 한 줄이 링크 두 줄만 남았다), 한국어가 아닌
+    회신마다 아무도 안 쓴 WhatsApp 줄이 붙었다(2026-10-06 평가의 영문 초안 11건 중 11건). 그 전에는 0069 가
+    국문 서식에서 `{{WHATSAPP}}` 을 뺐는데도 국문 메일에 WhatsApp 이 계속 나갔다 — `language` 를 「어느
+    행에서 URL 을 읽을지」에만 쓰고 「그 줄이 붙어야 하는지」는 안 봤다. 두 사고 다 **서식 · 문서에 무엇이 적혀 있든
+    이 함수가 이겼기** 때문이다.
+  - **발송 경로에 없다.** 초안 · 저장 · 번역하기 · 미리보기 · 승인이 `approval.prepare_reviewed_body` 로 부르므로
+    운영자가 본 링크가 곧 나가는 링크다. 후속 리마인더는 이 함수를 안 지난다 — 토큰만 채운 템플릿 그대로 나간다
+    (`followup_sequence._reminder_body`). 고정: `tests/test_reply_style.py` 의
+    `test_the_sentence_around_a_contact_link_stays` · `test_whatsapp_is_never_added_to_a_reply_that_did_not_have_it` ·
+    `test_canonicalizing_twice_changes_nothing`.
 - **The CRM/workbook are LIVE.** `LIVE_EXTERNAL_WRITES=true` with `LIVE_HUBSPOT_WRITES` / `LIVE_SHEETS_WRITES` both on, so a stage moved in the console moves the HubSpot ticket and updates the Inbound DB row. Every screen write goes through the same routes the Jinja forms used, which is why that stayed true through the React port.
 - **Per-destination switches are subordinate.** `LIVE_HUBSPOT_WRITES` / `LIVE_SHEETS_WRITES` (both default `true`) select which destinations go live *after* the master is on; neither can permit a write while `LIVE_EXTERNAL_WRITES` is `false`. `guard_external_write("<channel>:<action>")` picks the gate from the label prefix, and an unregistered channel falls back to the master — so a new write path is blocked by default.
 - HubSpot tickets are accepted only from `HUBSPOT_TICKET_STAGE_NEW` when a ticket ID exists.
-- **파이프라인 단계는 키와 이름이 따로 움직인다.** HubSpot 에서 이름이 바뀌어도 stage id 는 그대로다 — Meeting link sent 는 **Qualified** 로, Closed 는 **Not a Fit** 으로 이름만 바뀌었다. 그래서 로컬 키(`meeting_link_sent` · `closed`)도 그대로 두고 `customer_ops.PIPELINE_STAGES` 의 표시 이름만 고친다: 키를 따라 바꾸면 `conversations.stage` 와 `customer_profiles.pipeline_stage` 두 열을 옮기는 마이그레이션이 필요하고, 다음에 이름이 또 바뀌면 그걸 또 한다. 이름의 출처는 그 튜플 **한 곳**이다(화면·칩·목록이 전부 거기를 읽는다). 새 이름을 `.env` 에 새 변수명으로 적어도 되게 옛 이름을 `AliasChoices` 에 남긴다 — 그리고 **새 별칭을 넣을 때마다 `tests/conftest.py` 의 blanking 목록에도 넣는다**: 한 철자만 비우면 개발자 `.env` 의 다른 철자가 pytest 로 실제 티켓을 옮길 수 있다(`tests/test_safe_mode.py` 가 잡는다).
+- **파이프라인 단계는 키와 이름이 따로 움직인다.** HubSpot 에서 이름이 바뀌어도 stage id 는 그대로다 — Meeting link sent 는 Qualified 를 거쳐 **Contacted** 로, Won · Lost 는 Closed Won · Closed Lost 로(셋 다 2026-09-07), Closed 는 Not a Fit 을 거쳐 **Concluded** 로(2026-08-19) 이름만 바뀌었다. 그래서 로컬 키(`meeting_link_sent` · `closed`)도 그대로 두고 `customer_ops.PIPELINE_STAGES` 의 표시 이름만 고친다: 키를 따라 바꾸면 `conversations.stage` 와 `customer_profiles.pipeline_stage` 두 열을 옮기는 마이그레이션이 필요하고, 다음에 이름이 또 바뀌면 그걸 또 한다. 이름의 출처는 그 튜플 **한 곳**이다(화면·칩·목록이 전부 거기를 읽는다). 새 이름을 `.env` 에 새 변수명으로 적어도 되게 옛 이름을 `AliasChoices` 에 남긴다 — 그리고 **새 별칭을 넣을 때마다 `tests/conftest.py` 의 blanking 목록에도 넣는다**: 한 철자만 비우면 개발자 `.env` 의 다른 철자가 pytest 로 실제 티켓을 옮길 수 있다(`tests/test_safe_mode.py` 가 잡는다).
   - **Deal Detail 은 Won 과 Lost 에만 있다** (`DEAL_DETAILS`). 왜 이겼나(PoC/Contract/Renewal)와 왜 졌나(여섯 가지)는 결말이 난 건에만 있는 정보라 다른 단계에는 채울 답이 없다. **열은 하나**(`conversations.deal_detail`)다 — 한 문의가 동시에 이기고 지지 않으므로 어느 목록의 값인지는 그때의 단계가 정하고, 단계가 바뀌면 값은 남되 화면에는 안 나온다(되돌아오면 다시 뜬다). 우리 DB 에만 쓴다: 그 파이프라인에 대응하는 HubSpot 속성이 있는지 확인되지 않았고, 없는 속성에 쓰면 요청마다 400 이다.
 - **서명은 사람이 고르는 것이고, 코드는 본문에 넣지 않는다.** 예전에는 두 벌이었다 — 회사 규칙 안의 `{{__signature__}}` 가 `signature_ko` 행을 프롬프트에 끼워 모델이 **본문에** 서명을 쓰게 했고, 그래서 발송 경로에는 운영자가 다른 서명을 고르면 그 텍스트를 도로 찾아 떼어내는 기계(`strip_known_signature`, 번역된 메일에서는 메일 주소를 앵커로 잘랐다)까지 있었다. 지금은 한 벌이다: 운영자가 초안에서 고르고 `발송` 을 누르면 그때 본문 아래로 붙는다(`messages.signature_key` → `branded_signature_html` → `to_html_email`). 되살리기 전에 왜 두 벌이면 안 되는지부터 읽어라 — 0061 의 docstring 에 적혀 있다.
   - **서명은 데이터다.** 접두사 `signature_` **하나**가 목록의 서명 묶음과 검토 화면 고르개를 가른다. 둘이 같은 집합을 가리켜야 한다 — 예전에 `signature_html_`(고르개)과 `signature_`(목록)로 갈라져 있었고, 그래서 화면에는 서명으로 보이는데 고를 수 없는 행이 있었다. 추가·수정·삭제 전부 콘솔에서 되고, 코드가 이름으로 찾는 서명은 하나도 없다. 글로 써도 되고 HTML 로 써도 된다.
@@ -267,11 +470,10 @@ PERSO Inbound is a FastAPI workflow for inbound inquiry handling and customer op
     삭제 확인 창(이름을 옮겨 적어야 한다)을 지나면 그 자리에서 없어진다. **7일 휴지통은
     없다**: `soft_delete` 모듈과 `purge_expired`, 되돌리기 버튼과 라우트가 다 나갔다.
     되살릴 재료는 히스토리에 있다.
-    - **그래서 「Gemini 는 안 본다」가 더 중요해진다.** 읽는 쪽 셋이 전부 이미
-      `status='active'` 만 본다 — 서명·링크 조회(`db/email_templates`), 항상 적용 규칙
-      (`llm/prompts._rules_from_db`), 문의별 참고 문서(`llm/knowledge._is_active`). 정책
-      문서를 지우면 초안이 읽는 **사본**도 같이 재운다(`_set_knowledge_status`). 그리고
-      `document_revisions` 는 `src/llm` · `src/agents` 어디에서도 **이름으로조차** 등장하지
+    - **그래서 「Gemini 는 안 본다」가 더 중요해진다.** 지운 행은 표에 없으므로 읽는 쪽(서명·링크 조회 ·
+      규칙 · 라우터)이 따로 거를 것이 없고(0101 — 상태 칸이 없다), 정리된 지도도 지운다(`organizer.forget`,
+      2026-10-06 — 정책 문서는 같은 트랜잭션에서, 템플릿은 다음 정리 회차에. 남겨 두면 번호를 다시 쓰는 SQLite
+      에서 다음 문서가 그 지도의 금지 문자열을 물려받는다). 그리고 `document_revisions` 는 `src/llm` · `src/agents` 어디에서도 **이름으로조차** 등장하지
       않는다 — `tests/test_email_template_form.py::test_the_revision_history_is_out_of_
       gemini_reach` 가 두 폴더를 훑어 고정한다.
   - **읽는 코드가 있는 칸만 남는다** (0101). `policy_sources` 에서 `order_index`(읽히기만
@@ -301,10 +503,11 @@ PERSO Inbound is a FastAPI workflow for inbound inquiry handling and customer op
     정책 문서는 이력이 아예 없었으며, 그 몫이라던 `knowledge_document_revisions` 는 0016 이
     만들고 아무도 쓰지 않았다(0095 가 지웠다). 남는 시점은 **고치기 직전**이라 맨 위 행은
     「지금 본문」이 아니라 「직전 본문」이고, **만들 때는 안 남긴다** — 갓 만든 행에는
-    이전이 없다(남기면 첫 수정 스냅샷과 같은 버전·같은 본문이 두 줄로 선다). 지운 문서는
-    7일 뒤 본문과 이력이 **같이** 사라진다(`soft_delete.purge_expired`) — 「7일 뒤
-    사라진다」가 사실이어야 하니까. 그 청소는 **종류별로** 고아를 세야 한다: 한 표에 둘이
-    사는데 템플릿 id 로만 재면 정책 문서 이력이 전부 고아로 잡혀 사라진다.
+    이전이 없다(남기면 첫 수정 스냅샷과 같은 버전·같은 본문이 두 줄로 선다). **지운 문서의
+    이력은 남는다** — 지우기 직전의 스냅샷(`change_note='deleted'`)이 그 문서의 마지막 줄이다. 처음에는 지운 문서의
+    본문과 이력을 7일 뒤 같이 치웠는데(`soft_delete.purge_expired`, 종류별로 고아를 세야 했다 — 템플릿 id 로만
+    재면 정책 문서 이력이 전부 고아로 잡혔다), 그 청소는 나갔고(위 「지운 것은 화면에서 바로 사라진다」) 지금은
+    행만 지운다(0100).
   - **LLM 사용량은 기록하지 않는다** (2026-08-27 운영자 지시, 이관 0095). `llm_usage` 는
     호출마다 한 줄씩 쌓였는데 읽는 곳은 `POST /run/report` 하나였고 콘솔에 버튼도 스케줄도
     없었다. 되살리기 전에 **어느 화면이 그것을 읽는지부터 정해라** — 그게 없어서 이렇게
@@ -467,8 +670,9 @@ PERSO Inbound is a FastAPI workflow for inbound inquiry handling and customer op
     - **한 계약의 두 MRR 은 같은 분모를 쓴다.** 상세의 「월간 MRR (공급가 기준)」이 화면에서
       `공급가 ÷ contract.months`(**계약** 개월수)로 나뉘고 있었고, 바로 옆의 「월간 MRR
       」은 서버가 **플랜** 개월수로 낸 값이었다 — 같은 계약을 두 기간으로 말했다.
-      이제 서버가 `won.monthly_supply_revenue` 로 낸다. 환율을 서버가 한 번만 환산하는 것과
-      같은 이유다: 화면이 다시 계산하면 같은 숫자가 화면마다 달라진다. **분모가 무엇이냐와
+      그 뒤로는 서버가 `won.monthly_supply_revenue` 로 냈다 — 환율을 서버가 한 번만 환산하는 것과
+      같은 이유다: 화면이 다시 계산하면 같은 숫자가 화면마다 달라진다. 2026-09-22 에는 공급가 기준 MRR 자체가
+      나갔다(이관 0127 — 위 「공급가와 부가세 해당 여부는 없다」). **분모가 무엇이냐와
       무관하게 남는 규칙**이고, 2026-09-21 부터 payload 의 `months` 와 `plan_months` 는 같은
       값이다(둘 다 계약 개월수) — 키를 남긴 것은 화면 두 곳과 고정된 테스트가 그 이름을 읽기
       때문이다.
@@ -683,9 +887,10 @@ PERSO Inbound is a FastAPI workflow for inbound inquiry handling and customer op
   - **판단은 `ticket_history.advance_if_customer_replied` 한 곳이고, 고객 메시지가 들어오는 세 길이
     전부 그것을 부른다** (2026-09-22): 허브스팟 스레드 수집(`sync_one_ticket`) · 개인 사서함 수집
     (`mailbox_sync.sync_mailboxes_once`, 회차 끝에) · 콘솔의 「수신」 기록(`customer_ops.interaction_add`).
-    기준은 **우리가 마지막으로 보낸 말**(`thread_events` 의 리마인더 아닌 outgoing turn 과
+    기준은 **우리가 마지막으로 보낸 말**(`thread_events` 의 영업 이메일 turn — `role == "sales"` — 과
     `last_outgoing_at` 중 늦은 쪽) 뒤에 고객 turn 이 있는가 — 기준이 하나도 없으면(어느 채널로도
-    우리가 쓴 적 없는 Contacted 티켓) 안 옮긴다. 리마인더는 기준을 안 움직인다.
+    우리가 쓴 적 없는 Contacted 티켓) 안 옮긴다. 리마인더도 챗봇 답 · CS 주소의 안내도 기준을 안 움직인다
+    (2026-10-06 — 첫 회신 판정과 같은 자 `history_view.is_sales_email` 이라야 「우리가 답했다」가 한 뜻이다).
     - **왜 바꿨나** (2026-09-22 운영자: 「수신은 왔는데 stage가 안넘어가졌어」). 그전에는 허브스팟
       수집 한 길만 판단했고(`reply_advances_stage` + `_seen_upto`), 개인 사서함으로 온 답장과 손으로
       적은 「수신」은 후속 리마인더 스윕만 봤는데 **그 스윕은 운영에서 `FOLLOWUP_SEQUENCE_SINCE`
@@ -721,7 +926,7 @@ PERSO Inbound is a FastAPI workflow for inbound inquiry handling and customer op
   안 맞는다: 이후 모든 스윕이 같은 자리에서 되돌아가 프로필을 못 고친다. 그리고 실제로
   어긋났다 — 발송 워커는 `conv.stage` 만, 고객 상세 폼은 프로필만 썼다. 그래서 허브스팟에서
   단계를 옮겨도 화면이 안 바뀌는 일이 생겼다. 지금은 ① 어긋남을 만들던 두 쓰기를 고쳤고
-  (고객 상세 폼이 대화도 옮기고, 발송 워커는 **앞으로만** 간다 — 협상·수주 건을 Qualified 로
+  (고객 상세 폼이 대화도 옮기고, 발송 워커는 **앞으로만** 간다 — 협상·수주 건을 Contacted 로
   되돌리지 않는다) ② 허브스팟 동기화가 둘 다 확인해 어느 쪽이 뒤처져 있어도 고친다.
   프로필은 그 연락처의 **최신 문의**일 때만 쓴다 — 연락처당 한 행이라 옛 티켓이 움직일
   때마다 화면 값이 그 옛 티켓으로 끌려갔다.
@@ -753,7 +958,7 @@ PERSO Inbound is a FastAPI workflow for inbound inquiry handling and customer op
   쓰다 만 수동 초안은 그 티켓 화면에서 이어 쓴다(그 자리에 편집기가 있다).
   `tests/test_messages_list.py::test_the_dashboard_number_and_the_list_below_it_agree`
   가 둘을 같이 고정한다.
-- **초안은 New 티켓에만 있다 — 단계가 넘어가면 종료된다.** 미팅 링크가 나갔거나 협상·수주·종료로 옮겨졌다는 것은 답이 이미 다른 경로로 나갔다는 뜻이고, 그 초안을 발송 대기에 두면 운영자에게 고객이 이미 받은 답을 한 번 더 보내라고 청하는 셈이다. 종료하는 곳은 `stage_sync._retire_superseded_drafts` **한 곳**이고, 단계를 옮기는 쪽(HubSpot 동기화 · 콘솔 보드 · 고객 상세 폼 · 워크북 · 백필)과 초안을 완성하는 쪽(`inbound._finalize_draft`)이 전부 여기를 지난다. 화면·집계·발송이 모두 `Message.status` 하나만 보므로, 여기서 한 번 `superseded` 로 닫으면 목록에서 빠지고 검토 화면이 읽기 전용이 되고 `approve()` 가 거부하는 것까지 따라온다 — 라우트마다 단계를 확인하지 않는 이유다.
+- **저절로 생기는 초안은 New 티켓에만 있다 — 단계가 넘어가면 나가지 않은 초안을 지운다.** 미팅 링크가 나갔거나 협상·수주·종료로 옮겨졌다는 것은 답이 이미 다른 경로로 나갔다는 뜻이고, 그 초안을 발송 대기에 두면 운영자에게 고객이 이미 받은 답을 한 번 더 보내라고 청하는 셈이다. 지우는 곳은 `stage_sync._retire_superseded_drafts` → `_delete_pending_drafts` **한 곳**이고, 단계를 옮기는 쪽(HubSpot 동기화 · 콘솔 보드 · 고객 상세 폼 · 워크북 · 백필)과 초안을 완성하는 쪽(`inbound._finalize_draft`)이 전부 여기를 지난다. 행이 없어지므로 목록·집계·발송에서 빠지고 `approve()` 가 찾지 못한다 — 라우트마다 단계를 확인하지 않는 이유다. **닫지 않고 지운다** (2026-08-19 운영자 지시): 예전에는 `superseded` 로 상태만 바꿔 남겼는데, 나가지도 않은 초안이 히스토리에 남아 나중에 읽는 사람이 「이 답변은 나갔다」로 셌다. 안 지우는 것 둘 — 운영자가 「메일 발송」으로 쓰는 수동 후속 초안(`prompt_variant='manual'`, 2026-08-31 — 쓰는 도중에 사라진다)과 티켓이 Contacted 인 동안의 리마인더 행(2026-09-17 — 지우면 시퀀스가 다시 만든다).
   - **`!= "new"` 가 아니라 매핑된 단계인지로 가른다**(`_PAST_NEW`). 모델 기본값 `initial` 이나 뜻을 모르는 값은 단계가 움직인 것이 아니라서, `!= "new"` 로 세면 아직 아무도 손대지 않은 티켓의 초안까지 지운다.
   - 과거 데이터의 `prompt_variant='auto_ack'`는 호환을 위해 일반 회신 집계와 발송 큐에서 제외한다. 새 자동 접수확인은 생성되지 않는다.
   - **단계가 안 바뀌어도 훑는 이유**: 초안 작성은 몇 분이 걸린다. 그 사이에 단계가 옮겨지면 그 대화에는 다시 아무 이벤트도 오지 않는다(10분 폴러의 stage reconcile 은 HubSpot 에서 **최근에 바뀐** 티켓만 훑는다). `tests/test_stage_sync.py` · `tests/test_inbound_flow.py` 가 고정한다.
@@ -822,8 +1027,20 @@ PERSO Inbound is a FastAPI workflow for inbound inquiry handling and customer op
       그 자리다).
   - **같은 메일이 허브스팟에 객체 두 개로 있다** — CRM 이메일과 Conversations 메시지. id 가
     달라 `external_id` 로는 서로를 못 알아보므로, 둘 다 넣으면 화면에 **모든 메일이 두 번**
-    뜬다. 스레드 쪽이 더 완전하므로(실측 265 대 97), 2분 연락처 스윕은 **이미 훑은 티켓의
-    메일을 건너뛴다**(`history_synced_at` 을 본다).
+    뜬다. 스레드 쪽이 더 완전하므로(실측 265 대 97) 스레드가 이긴다: CRM 메일 가져오기(과거 이관 라우트 ·
+    `scripts/sync_hubspot_history.py` — 2분 연락처 스윕은 2026-09-09 에 없앴다)는 짝이 있으면 스레드 메시지
+    id 로 적고(`hubspot:conv:`, `hubspot.conversation_message_id` — 0106 의 유니크가 나머지를 막는다), 그 전에
+    두 벌로 쌓인 줄은 수집할 때 `_merge_crm_twins` 가 스레드 줄에 접는다.
+    - **접는 열쇠는 `same_mail` 이다 — 「같은 초」가 아니다** (2026-10-06). CRM 과 스레드는 같은 메일을 다른
+      시각으로 적어서(운영 실측: 짝 190쌍의 차이 중앙값 약 7초, 같은 초 0쌍) 옛 열쇠로는 한 쌍도 안 접혔다.
+      짝이 여럿이면 시각이 가장 가까운 스레드 줄이고, 지운 줄은 묘비를 남긴다. 그리고 `_store` 가 **접기 전에
+      내보낸다**(`session.flush()`) — 운영 세션은 autoflush=False 라 방금 넣은 스레드 줄을 접기 · 「갔는지 모름」
+      맞추기가 못 보고 다음 수집으로 밀렸다(테스트 세션은 autoflush=True 라 못 봤다).
+    - 수집은 그 티켓이 다시 올 때만 접으므로(대기열은 순환이 아니다), 이미 쌓인 사본(대화 176건에 CRM 줄 190개)은
+      `scripts/fold_history_twins.py` 가 같은 함수로 한 번 치운다 — 기본은 세기만, `--apply` 로 접는다. 개인함
+      수집이 초안을 거르기 전(2026-09-22 배포 전)에 「보낸 메일」로 들여온 지메일 초안은
+      `scripts/cleanup_gmail_drafts.py` 가 줄마다 지메일 라벨을 다시 물어 치운다(역시 기본은 세기만, 404 는 사람이
+      본다). 둘 다 허브스팟에는 안 쓴다.
   - **`last_incoming_at` 은 건드리지 않는다.** 그 칸은 「마지막 연락 시각」처럼 보이지만
     실제로는 **워크북 append 대기열의 방아쇠**다 — `sheet_inbound_row IS NULL AND
     last_incoming_at IS NOT NULL`. 백필이 만든 300건 넘는 티켓은 그 칸이 일부러 NULL 이라,
@@ -844,7 +1061,11 @@ PERSO Inbound is a FastAPI workflow for inbound inquiry handling and customer op
     **폴러에 안 단다**: 허브스팟에 쓰는 동작이고, 그 연락처에 티켓이 **하나뿐일 때만**
     어느 대화인지 확신할 수 있다 — 여럿이면 붙이지 않고 이유를 돌려준다. 잘못 붙으면
     되돌리기 전까지 남고 아무도 눈치채지 못한다.
-- **자동 회신은 없다.** 첫 문의는 검토용 초안만 만들며, 고객에게 바로 나가는 메일은 없다. 그 대화에 이미 사람이 승인해 보낸 회신이 있으면 이후 고객 메시지는 기록만 되고 새 초안을 자동 생성하지 않는다.
+  - **그래도 개인 사서함에서 보내는 길은 있다** (2026-09-08 `92cc98c`). 운영자가 발신 주소로 연결된 사서함
+    (`gmail:` 계정)을 고르면 그 사서함이 보낸다(`senders._send_from_mailbox` — 원본 메일이 있으면 답장, 없으면 새
+    메일). 위 조사대로 허브스팟은 그 메일을 티켓에 남겨 주지 않으므로, 발송 뒤 처리가 그 티켓에 노트를 적는다
+    (`send_worker._note_mailbox_send` — 적기 전에 같은 메일이 이미 있는지 읽는다).
+- **자동 회신은 없다.** 첫 문의는 검토용 초안만 만들며, 고객에게 바로 나가는 메일은 없다. 그 대화에 우리 쪽 `messages` 행이 하나라도 있으면 — 보낸 회신만이 아니라 상태와 무관하게(초안 · 거절 · 발송 실패 포함, 옛 접수확인만 뺀다) — 이후 고객 메시지는 기록만 되고 새 초안을 자동 생성하지 않는다(`_persist_placeholder` 의 `prior_reply`).
   - **후속 회신도 초안이 쓰인다 — 다만 사람이 눌러야 시작한다** (2026-09-07 운영자 지시,
     설계는 `docs/후속-회신-자동생성-설계.md`). 「메일 발송」이 `drafting` 행 하나를 세우고
     같은 초안 기계에 넘긴다. **새 길을 내지 않았다**: 「초안 다시 쓰기」가 이미 단계 관문을
@@ -852,23 +1073,37 @@ PERSO Inbound is a FastAPI workflow for inbound inquiry handling and customer op
     부분(`inbound_worker.enqueue_draft`)만 둘이 같이 쓴다. **상태 관문은 부르는 쪽에 있다** —
     「다시 쓰기」는 실패한 초안만, 「메일 발송」은 갓 만든 빈 초안만 받아야 해서 한자리에
     두면 둘 중 하나가 반드시 틀린다. 저절로 생기는 초안은 **여전히 New 뿐이다.**
-    - **그 초안이 무엇에 답하는지가 이 기능의 전부다.** 두 갈래이고 갈림길은 「마지막 회신
-      뒤에 고객 메시지가 있나」다 — 있으면 그 메시지에 답하고(`_FOLLOWUP_RULE_ANSWER`),
-      없으면 같은 문의를 **더 자세히** 쓴다(`_FOLLOWUP_RULE_ELABORATE`, 지난 회신 본문을
-      프롬프트에 실어 「이미 적은 말을 되풀이하지 마라」가 지킬 수 있는 지시가 되게 한다).
-      `pricing_rule` 과 같은 방식이다 — 프롬프트 파일은 하나이고 코드가 변수를 갈아 끼운다.
+    - **그 초안이 무엇에 답하는지가 이 기능의 전부다.** 갈림길은 「우리 영업의 마지막 이메일 뒤에
+      고객 메시지가 있나」다 — 있으면 상황이 `answer_reply` 이고 그 메시지가 「가장 최근 문의」가 되며, 없으면
+      `nudge` 다. **코드는 그 사실만 적는다**(`inbound._situation_text`, 위 10-06 절의 「상황」). 예전에는 갈래마다
+      지시를 갈아 끼웠는데(그 메시지에 답하라는 `_FOLLOWUP_RULE_ANSWER` · 같은 문의를 더 자세히 쓰라는
+      `_FOLLOWUP_RULE_ELABORATE` · `pricing_rule`) 콘솔 문서와 겨루는 영업 지시라 2026-10-06 에 지웠다. 「이미 적은
+      말을 되풀이하지 마라」가 지킬 수 있는 일이 되게 하던 장치 — 지난 회신 본문을 싣는 것 — 는 상황 블록이
+      이어받았다(「고객이 이미 받은 글」, 2,000자).
     - **대화는 두 표를 합쳐 읽는다**(`inbound.thread_events`). `messages` 에는 이 콘솔이
       만든 것만 있다 — New 이후의 실제 대화(고객 답장 · 허브스팟 화면에서 사람이 보낸 회신 ·
       채팅 · 폼)는 `customer_interactions` 에 있다. 한쪽만 보면 **New 이후가 통째로 비고**,
-      그러면 후속 초안이 최초 문의에 다시 답한다. 「첫 회신인가」도 같은 눈으로 본다 —
-      `messages` 만 세던 동안 저쪽에서 답한 티켓이 「첫 회신」이 되어 금액 금지 가드가
-      엉뚱한 자리에 걸렸다. 우리 회신은 두 표에 다 있으므로 `messages.hubspot_message_id`
-      로 한 번만 센다(티켓 화면이 중복을 거를 때와 같은 규칙).
-    - **이어 쓰는 작업은 문의 행을 만들지 않는다**(`_persist_placeholder` 의
-      `resume_message_id`). 백필로 들여온 티켓 300여 건에는 `messages` 행이 하나도 없어
+      그러면 후속 초안이 최초 문의에 다시 답한다. 우리 회신은 두 표에 다 있으므로 사본은
+      `history_view.message_copies` 로 한 번만 센다(티켓 화면이 중복을 거를 때와 같은 자).
+    - **「첫 회신인가」는 우리 영업 이메일이 하나라도 나갔나다** (`_is_first_reply` → `last_sent_reply`, 자는
+      `history_view.is_sales_email`). `messages` 만 세던 동안(~2026-09-07)은 허브스팟 화면에서 답한 티켓이 「첫
+      회신」이 됐고, 방향만 세던 동안(~2026-10-06)은 챗봇 답 · CS 안내만 있는 티켓이 「이미 답함」이 됐다(운영 재생
+      42건 — 첫 회신 문서 대신 후속 회신 문서를 받았다). 그 판정이 바꾸는 것은 상황 · 붙일 문서(`first` ·
+      `followup`) · 새 제목의 금액 검사다 — 본문의 금액을 막는 가드는 없다.
+    - **이어 쓰는 작업은 문의 행을 만들지 않고, 「초안 다시 쓰기」 · 「메일 발송」은 워크북에도 안 싣는다**
+      (`_persist_placeholder` 의 `resume_message_id` · `handle()` 의 시트 관문 `event_type != "redraft" and not
+      follow_up` — 리스가 끊겨 돌아온 New 초안은 싣는다, 아래). 백필로 들여온 티켓 300여 건에는 `messages` 행이 하나도 없어
       언제나 「첫 문의」로 보이는데, 그때 문의 행이 서면 `conv.last_incoming_at` 이 차고
       그 칸은 **워크북 append 대기열의 방아쇠**다 — 누를 때마다 그 티켓이 영업팀 공용
-      시트로 실려 나간다.
+      시트로 실려 나간다. 같은 이유로 「초안 다시 쓰기」 · 「메일 발송」은 `_mirror_new_inbound_to_sheet` 를 안
+      부른다(2026-10-06 — 시트 행이 없는 티켓이면 그 자리에서 New · Inquiry 행이 섰다). 리스가 끊겨 돌아온 New
+      티켓의 첫 초안은 싣는다 — 앞 시도가 행을 못 남겼을 수 있다.
+    - **이어 쓰는 초안은 대화에 저장된 언어로 쓰고, 「메일 발송」의 후속 초안은 유형을 다시 분류하지 않는다**
+      (`_resumed_draft`, 2026-10-06). 언어를 다시 재면 후속 회신의 언어가 모델 한 번의 판별에 다시 걸리고, 분류는
+      어차피 최초 문의를 읽어 같은 답이거나 흔들린 답인데 그 답이 대화의 유형을 덮어썼다. 저장된 값이 없는 백필
+      티켓만 잰다. 저장된 유형을 쓰는 것은 수동 후속 초안(`prompt_variant='manual'` — 그것을 「초안 다시 쓰기」로
+      다시 써도)뿐이고, New 초안을 다시 쓰면 다시 분류한다(`follow_up and stored_category`). 「메일 발송」 초안은 목록의 첫 서명으로 시작한다 — 서명 없이 서던 동안 평가의 후속 초안 26건이
+      전부 그랬고, 못 보고 승인하면 이름 없는 메일이 나간다.
     - **참고 문서는 회신 단계로 갈린다**(`policy_sources.scope`, 이관 0108): `all`(기본) ·
       `first` · `followup`. 첫 회신에는 간단히 답하고 더 물어오면 깊은 문서를 붙인다.
       **`mode` 를 늘리지 않은 이유**: 읽는 자리가 `mode == 'knowledge'` 라, 값을 늘리면 한
@@ -890,26 +1125,43 @@ PERSO Inbound is a FastAPI workflow for inbound inquiry handling and customer op
   - **언어 라벨은 결과를 보고 붙인다.** 번역이 실패하면 본문은 한국어로 남는데 라벨만 `en`
     으로 찍으면 발송 관문이 통과시켜 한국어 메일이 영어 고객에게 간다. `_draft_reply` 가
     `is_mostly_korean(draft.body)` 로 다시 재고, `enforce_send_language` 가 한 번 더 막는다.
-  - **대역은 맨 마지막에 만든다.** 링크 치환·정규화와 금액 가드가 끝난 뒤라야 두 벌이 같은
+  - **대화 언어는 첫 문의가 한 번 정하고, 회신도 리마인더도 그것을 따른다.** 본문이 서너 낱말이 안 되면 티켓
+    이름을 같이 잰다(`inbound._language_sample`, 2026-10-07) — 「video」 한 낱말이 브라질 고객을 `en` 으로
+    저장했다(평가 R429, 티켓 이름 「estudo」). `[` 로 시작하거나 한글이 든 티켓 이름은 CS 가 붙인 내부 이름이라
+    안 쓴다.
+  - **대역은 맨 마지막에 만든다.** 링크 치환·정규화가 끝난 뒤라야 두 벌이 같은
     문장, 같은 링크를 들고 대조가 된다.
   - **`번역하기` 버튼은 남는다 — 다만 대개 안 보인다.** 모델이 지시를 어겼거나 운영자가 본문을
     한국어로 고쳐 놓았을 때만 뜬다(`approval.translation_required`).
-- **답변의 형식·톤 규칙은 콘솔에 한 벌만 둔다.** `policy_sources(mode='rules')` 의 「공통 원칙 및 가드레일」이 그 한 벌이고, `draft_reply.md` 는 그것을 따르라고 가리키기만 한다. 양쪽에 적으면 운영자가 콘솔에서 고친 쪽과 배포해야 바뀌는 파일이 조용히 어긋난다. `tests/test_reply_style.py::test_the_layout_rules_live_in_exactly_one_place` 가 고정한다.
-  - **가격은 문서와 코드가 같은 말을 해야 한다.** 문서의 가드레일이 "구체적 가격 숫자를 쓰지 않는다" 이므로 `_PRICING_RULE_NORMAL` 도 그렇게 말한다. 예전에는 정반대였고(코드는 "금액을 명시하라"), 그때 이기는 쪽은 코드였다. `enforce_first_reply_no_price` 는 첫 회신에만 도는 하드 가드로 남는다 — 모든 회신에 걸면 운영자가 일부러 적은 금액을 조용히 지운다.
-  - **어떤 문서를 쓸지는 모델이 고른다.** 매핑을 코드에 박으면 문서 이름이 바뀌거나 지워질 때마다 흔적 없이 끊긴다. 모델이 보는 것은 본문이 아니라 인덱스 한 줄(`slug·title·categories·tags·summary`)이고, `summary` 는 정책 문서의 **「언제 쓰는가」 칸**(0064)이다 — 비면 본문 앞 400자. 사본의 `categories` 는 `["all"]` 이어야 한다: 라우터가 실패해 유형 매칭으로 떨어질 때 후보가 0개가 되면 **문서 없이** 답을 쓴다.
+- **답변의 형식·톤 규칙은 콘솔에 한 벌만 둔다.** `policy_sources(mode='rules')` 의 「공통 원칙 및 가드레일」이 그 한 벌이고, `draft_reply.md` 는 그것을 따르라고 가리키기만 한다. 양쪽에 적으면 운영자가 콘솔에서 고친 쪽과 배포해야 바뀌는 파일이 조용히 어긋난다. `tests/test_reply_style.py::test_the_layout_rules_live_in_exactly_one_place` 가 고정한다. 보내기 전 검토(`review_draft.md`)도 같다 — 기준을 따로 정하지 않고 찾을 것의 종류만 적는다(2026-10-06, 위 10-06 절).
+  - **가격은 문서만 말한다** (2026-10-06). 코드에 있던 가격 지시(`_PRICING_RULE_*`)는 지웠다. 지우기 직전의 코드는 첫 회신에 「금액을 적지 마라」, 그 뒤 **모든** 회신에 「금액 숫자는 쓰지 말고 미팅 · 채팅에서 안내하겠다고 쓰라」였다 — 첫 회신에만 걸릴 조건을 코드가 모든 회신에 걸고 있었는데, 운영자는 조건마다 첫 회신에만 걸리는지를 정확히 가리라고 했다(「조건들 첫번째에만 걸려있는건지 아닌지도 정확히 판단해 / 두번째 응답부턴 정확한 금액 포함해도 되는것처럼」). 문서와 코드가 같은 자리에 다른 말을 하면 모델은 그때그때 다르게 골랐다(위 10-06 절). 2026-08-06 전에는 거꾸로 코드가 「금액을 명시하라」, 문서가 「구체적 가격 숫자를 쓰지 않는다」였고 그때 이긴 쪽도 코드였다. 첫 회신의 금액 줄을 지우던 가드(초안의 `strip_price_sentences` · 발송의 `enforce_first_reply_no_price`)도 지웠다: 줄을 맞춘 항목의 한 줄만 빠져 고아 줄이 남았고(MSG#110), 문서가 허용한 공개 가격까지 사라져 끊긴 문장이 나갔다(MSG#118). 지우는 대신 짚지도 않는다(위 2026-10-06 지시). 남은 가격 판정은 제목 하나다 — 첫 회신의 새 제목에 금액이 있으면 그 제목을 안 쓴다(`subjects.valid_subject`).
+  - **어떤 문서를 쓸지는 모델이 고른다.** 매핑을 코드에 박으면 문서 이름이 바뀌거나 지워질 때마다 흔적 없이 끊긴다. 모델이 보는 것은 본문이 아니라 인덱스 한 줄(`slug · title · summary`)이고, `summary` 는 정책 문서의 **「언제 쓰는가」 칸**(0064)이다 — 비면 본문 앞 400자. 라우터가 실패하거나 아무것도 못 고르면 후보 **전부**로 떨어진다(`select_relevant_docs` — 문서 없이 답을 쓰는 것보다 낫다). 후보는 `mode='knowledge'` 행뿐이라 고르개가 셋이 된 뒤로(2026-09-10) 옛 행만 남았고, 고른 문서도 규칙 문서와 같이 정리기를 지나 실린다(`organizer.knowledge_for`, 위 10-06 절).
     - **그 「언제 쓰는가」는 사람이 안 쓴다 — 본문을 보고 모델이 적는다** (2026-09-10 지시,
       `knowledge.usage_note_from_body`). 폼에서 칸을 뺐다: 운영자가 본문을 붙여넣고 이
       한 줄을 또 쓰는 일은 같은 것을 두 번 적는 것이고, 안 적으면 라우터가 보는 것이 본문
       앞 400자로 떨어졌다. 저장할 때 flash 한 번(`policy/usage_note`)으로 만들고 실패하면
       **빈 칸으로 둔다** — 그때는 예전처럼 본문 앞 400자다. 문서 저장이 모델 때문에 실패하면
       안 되고, 본문을 안 고친 수정에서는 다시 만들지도 않는다.
-    - **문서는 메일 제목을 정하지 않는다** (이관 0118). `policy_sources.subject` 가 있었고
-      `subject_from_docs` 가 그것으로 `draft.subject` 를 덮었다. 두 번 사고를 냈다 — 제목을
-      든 문서가 둘일 때 **가나다순**이 이겨서 참고 문서가 회신 서식을 제쳤고(2026-08-26),
-      그 고정 제목은 운영자가 쓴 문장이라 한국어 문의에 영어 제목이 나갔다(msg 62). 지금
-      제목은 `common.subjects.reply_subject` 하나가 정한다 — 「RE: <고객이 쓴 제목>」이라
-      **언제나 고객의 언어**이고, 그래서 제목을 번역하던 `_subject_in_inquiry_language` 도
-      같이 나갔다. 되살리려면 「어느 문서가 제목을 정하는가」를 코드가 알 방법부터 정해라.
+    - **제목은 `common.subjects.choose_reply_subject` 하나가 고른다** (2026-10-06). ① 이 대화에 이미 오간
+      이메일이 있으면 그 제목에 `RE:` 하나 — 검사하지 않는다, 고객이 이미 그 제목의 스레드를 들고 있다. 재료는
+      대화가 아니라 표에서 읽는다(`inbound.subject_sources` — 고객의 첫 메일 · 폼 사본은 대화에서 접수 행으로 접혀
+      그 제목이 거기 없다). 이메일로 온 문의의 첫 회신은 아직 스레드가 안 들어와 있어서 그 티켓에 붙은 CRM 메일의
+      제목을 쓴다(`crm_thread_subject`). ② 없으면 새 스레드라 `RE:` 없이, 검사(`valid_subject`)를 지난 첫 후보 —
+      모델이 제안한 제목, 고객이 폼에 쓴 제목. ③ 그것도 없으면 나갈 언어의 기본 제목. **허브스팟 티켓 이름은 후보가
+      아니다**: CS 가 붙이는 내부 이름(「[Form] … > 엔터프라이즈 전달」)과 챗봇 꼬리표(「[Chatbot] 문의 접수」)가
+      힌디어 · 영어 고객에게 그대로 나갔고(msg 72 · 110), 「메일 발송」 초안은 「RE: [Form]<메일 주소>」로
+      섰다(msg 82 · 83). 검사가 고치는 것은 둘뿐이다 — 줄바꿈을 한 칸으로 접고, 앞에 붙은 `RE:` · `Fwd:` 를 뗀다
+      (발송이 제목의 CR/LF 를 거절하고, 새 스레드의 제목에는 `RE:` 가 없어야 한다). 나머지 — 3~120자 · 주소(`@`) ·
+      URL · `{{` 없음 · 나갈 언어의 문자(한국어가 아닌 메일에 한글 제목은 거절) · 첫 회신이면 금액 없음 · `[…]`
+      꼬리표는 이 초안이 본 콘솔 글에 그대로 있는 것만 — 은 **고치지 않고 거절한다**: 고친 제목은 아무도 안 쓴
+      문장이다. 「메일 발송」 초안
+      (`messages._manual_reply_subject`, 모델 없이)과 후속 리마인더(기준 회신 제목에 `RE:` 하나)도 같은 고르개다.
+      매니페스트의 `subject_source` 가 출처를 적는다.
+      - **문서는 여전히 제목을 정하지 않는다** (이관 0118). `policy_sources.subject` 가 있었고 `subject_from_docs`
+        가 그것으로 `draft.subject` 를 덮었다. 두 번 사고를 냈다 — 제목을 든 문서가 둘일 때 **가나다순**이 이겨서
+        참고 문서가 회신 서식을 제쳤고(2026-08-26), 그 고정 제목은 운영자가 쓴 문장이라 한국어 문의에 영어 제목이
+        나갔다(msg 62). 그 뒤 10-06 까지는 「RE: <티켓 이름>」(`reply_subject`) 하나였고, 그 티켓 이름이 위의 내부
+        이름이었다. 문서가 제목을 정하게 되살리려면 「어느 문서가 제목을 정하는가」를 코드가 알 방법부터 정해라.
 - Every outbound reply requires human approval. `_finalize_draft` always writes `pending_approval`, and migration 0087 retires any legacy queued acknowledgement. **The one exception is the Contacted follow-up reminder** (below) — the operator's approval is writing the template in the console, and `FOLLOWUP_SEQUENCE_SINCE` turns it on.
 - **Contacted 후속 리마인더 — 답이 없으면 3일 · 5일 · 7일** (2026-09-17 운영자 지시, `agents/followup_sequence`,
   설계 `docs/후속-회신-시퀀스-설계.md`). 허브스팟 워크플로 `4623059693` 이 하던 일이다 — **그 워크플로를
@@ -952,15 +1204,28 @@ PERSO Inbound is a FastAPI workflow for inbound inquiry handling and customer op
       나흘이 지나도 리마인더가 없었고 칩도 안 섰다(운영자 보고 2026-09-28). 「고객 답장 → Negotiating」은
       이미 세 길을 `inbound.thread_events` 로 쟀는데 이 시계만 한 길을 봤다 — 감지를 여러 곳에 두면 하나가
       조용히 빠진다는 그 사고다.
-    - **세는 것은 이메일뿐**(`channel='이메일'`, `hubspot:conv:` · `gmail:`). 챗봇 답 · 채팅 · 폼 · 손으로
-      적은 기록 뒤에 「지난 메일에 이어」는 거짓이다. 우리 콘솔 발송과 리마인더의 **허브스팟 사본은 같은
-      열쇠(`hubspot_message_id` · `smtp_message_id`)로 한 번만** 센다 — 안 그러면 리마인더 사본이 새 기준이
-      되어 3일마다 1차가 다시 나간다(id 없는 `delivery_unknown` 리마인더의 사본은 10분 창으로 알아본다).
+    - **세는 것은 우리 영업의 이메일뿐**(`history_view.is_sales_email` — 첫 회신 판정 · 답장 기준선과 같은 자.
+      채널은 `이메일` · `email` 두 철자, 그중 열쇠 `hubspot:conv:` · `gmail:` 가 있는 줄만). 챗봇 답 · 채팅 · 폼 ·
+      CS 주소의 안내(`NON_SALES_SENDER_ADDRESSES`) · 손으로 적은 기록 뒤에 「지난 메일에 이어」는 거짓이다(손 기록은
+      리마인더가 베낄 받는 사람 · 발신 계정을 다시 찾을 길도 없다). 우리 콘솔 발송과 리마인더의 **허브스팟 사본은
+      같은 열쇠(`hubspot_message_id` · `smtp_message_id`)로 한 번만** 센다 — 안 그러면 리마인더 사본이 새 기준이
+      되어 3일마다 1차가 다시 나간다. id 없는 `delivery_unknown` 리마인더의 사본은 본문으로 알아본다(`same_mail` —
+      10분 창으로 재던 첫 판은 다시 보낸 리마인더도, 몇 분 뒤 사람이 보낸 메일도 틀리게 읽었다).
     - 화면(티켓 배너 · 보드 칩)도 같은 입력을 받는다 — `view(conv, messages, outside)`. 안 넘기면 스윕은
       보내는데 칩만 빈다.
-  - **본문은 영문 템플릿 두 행**이고 고객 언어가 영어가 아니면 보낼 때 번역한다. 번역이 비거나 언어가
+  - **본문은 콘솔 템플릿이고, 고객 언어로 쓴 행이 있으면 쓴 그대로 나간다** (2026-10-07 운영자: 「리마인더는
+    써있는거 그대로 보내져야한다」 · 「1번으로 해서 그 언어에 맞게 번역하도록」). 행 이름은 키 + `_` + 언어 코드다
+    (`followup_reminder_ko` · `followup_closing_ja`, `email_templates.is_code_resolved` 가 「발송 경로 사용」으로
+    짚는다). 그 언어의 행이 없으면 접미사 없는 영문 두 행을 쓰고, 고객 언어가 영어가 아니면 보낼 때 번역한다 —
+    운영자가 그 언어 행을 써 두면 그날부터 번역이 빠진다. 번역이 비거나 언어가
     안 맞으면 **행을 안 만든다**(발송 관문에서 걸리면 `send_failed` 로 시퀀스가 멈춘다). 서명·CC·
-    발신 계정(개인 사서함이면 그 사서함)·제목·받는 사람은 기준 회신을 베낀다.
+    발신 계정(개인 사서함이면 그 사서함)·받는 사람은 기준 회신을 베끼고, 제목은 기준 회신 제목에 `RE:` 하나다
+    (`choose_reply_subject` — 첫 회신이 새 제목으로 나갔어도 리마인더는 그 스레드에 붙는다). **본문은 토큰만
+    채운 템플릿 그대로다** (`_reminder_body` → `apply_editable_tokens`, 그 언어 행이 없고 영어가 아니면 번역). 사람 초안이 지나는
+    다듬기(`approval.prepare_reviewed_body` — 연락 링크 정리 · `text_wash`)를 안 지나고, 2026-10-06 부터는 발송도
+    다듬지 않는다(그 전에는 발송이 그 둘을 해 줬다) — 템플릿에 쓴 줄 · 링크 모양이 그대로 나간다. 발송은 막기만
+    하므로, 템플릿에 채우지 않은 자리가 있으면 그 리마인더는 `send_failed` 로 멈춘다
+    (`senders.enforce_no_unfilled_slots`).
     - **기준이 허브스팟 화면 회신이면** 수집기가 받는 사람·참조·발신 계정을 안 적어 두므로, 리마인더를
       만들기 직전에 그 메시지를 허브스팟에서 **읽어서** 베낀다(`_hubspot_reply`, 못 읽으면 이번 회차는 안
       보낸다). 언어는 **그 회신 본문의 언어**(`inquiry_language` 는 폼의 영어 칸 이름 때문에 포르투갈어
@@ -1005,9 +1270,9 @@ PERSO Inbound is a FastAPI workflow for inbound inquiry handling and customer op
     동안 `_delete_pending_drafts` 가 리마인더 행을 안 지운다(지우면 다시 만든다) · 복구 화면
     「재시도」(=다시 쓰기)와 「메일 발송」의 열린 초안 찾기가 리마인더를 안 건드린다 · 후속 초안의
     「지난 회신」 앵커가 리마인더를 건너뛴다.
-- **The inquiry category is stored and shown; which document answers it is NOT.** `Conversation.inquiry_category` (0049) is what the 회신 및 검토 list shows where 채널 used to be — channel was `email` on every row. `support` / `spam` / `recruiting` render as **UnQualified**, which means "not a sales lead", not "do not reply": those still get an answer, from the CS guide or the intro document. It also replaced the 검토 필요 flag (0047, dropped in 0049) — "CS 문의" says which one to open first far better than "확인이 필요합니다" did. `Conversation.inquiry_subject` (renamed from `topic` in 0041) still holds the customer's own subject line.
-  - **The category→document mapping is deliberately not in code.** The model reads the document index (title · summary · tags) and picks; the category and the inquiry language are hints in the prompt, not a lookup table. Policy changes and Notion titles change — a mapping frozen in Python breaks on both, with nothing on screen to show it broke. `spam` no longer short-circuits to "no documents" for the same reason.
-- HubSpot Conversations performs real delivery on an existing ticket thread. A ticket with no usable thread fails closed for manual handling.
+- **The inquiry category is stored and shown; which document answers it is NOT.** `Conversation.inquiry_category` (0049) is what the 회신 및 검토 list shows where 채널 used to be — channel was `email` on every row. `support` / `spam` / `recruiting` render as **UnQualified**, which means "not a sales lead", not "do not reply": those still get an answer, from the CS guide or the intro document. It also replaced the 검토 필요 flag (0047, dropped in 0049) — "CS 문의" says which one to open first far better than "확인이 필요합니다" did. `Conversation.inquiry_subject` (renamed from `topic` in 0041) holds the HubSpot ticket name — which CS renames (「[Form] … > 엔터프라이즈 전달」) and chat tickets label 「[Chatbot] …」 — so the lists show it but no reply takes it as a subject (2026-10-06, `subjects.choose_reply_subject`).
+  - **The category→document mapping is deliberately not in code.** The model reads the document index (`slug · title · summary` — `knowledge._build_index`) and picks; the category and the inquiry language are hints in the prompt, not a lookup table. Policy changes and document titles change — a mapping frozen in Python breaks on both, with nothing on screen to show it broke. `spam` no longer short-circuits to "no documents" for the same reason.
+- HubSpot Conversations performs real delivery on an existing ticket thread, unless the operator picked a connected personal mailbox (`gmail:` — then that mailbox sends, 2026-09-08). A HubSpot send with no usable thread fails closed for manual handling.
 - Slack approval notifications are emitted only after a detailed draft is ready.
 - `Message.direction` uses `inbound` for received messages and `outgoing` for our replies.
 - Personal email domains are never grouped as one company.
@@ -1033,22 +1298,29 @@ PERSO Inbound is a FastAPI workflow for inbound inquiry handling and customer op
       관계**가 있었고(숫자는 여기 안 적는다 — 그 문서에 있다),
       같은 세트의 `00_README` 기밀 등급표와 `02_금지어` §A·§D 가 그것을 전부 대외 금지로
       못박는데도 그랬다. **금액 가드는 첫 회신에만 돌아서**(`enforce_first_reply_no_price`
-      의 `if prior_sent: return`) 막지도 못했다.
+      의 `if prior_sent: return`) 막지도 못했다 — 그 가드는 2026-10-06 에 지웠다(위 「가격은 문서만 말한다」).
     - **`scope` 에 값을 더하지 않은 이유**: `router_docs` 가 **모르는 stage 를 받으면 scope
       필터를 통째로 생략**한다. `scope='never'` 로 막으면 그 경로에서 조용히 샌다.
     - **거는 자리가 넷이고 전부 쿼리다** — `_rules_from_db` · `router_docs` · 저장할 때
       「언제 쓰는가」 생성 · 문서 점검(예정). **코드 흐름으로 지키면 다음 호출자가 그 앞을
       안 지난다.** 저장 경로가 특히 그랬다: 쿼리 필터와 system 미주입으로는 못 막는다 —
       본문을 그대로 모델에 넘기기 때문이고, 그 호출은 `mode` 판정보다도 **먼저** 있었다.
+      **다섯째가 정리기다** (2026-10-06, `organizer._Source.people_only` — 쿼리가 아니라 행마다 묻는다).
+      「사람만 본다」 문서는 코드로 나누고 금지 문자열만 뽑을 뿐 꼬리표 모델에 안 가고(지도는 전부 기밀로 선다),
+      거기서 뽑은 금지 문자열은 다른 문서의 같은 숫자를 지우는 데 쓰인다(`_vocabulary`).
     - **기본값은 `customer_context` 다.** 새 문서를 사람용으로 두자는 제안이 있었지만,
       문서를 넣는 이유가 초안이 읽게 하려는 것이라 기본이 「안 읽음」이면 넣어 두고 왜
       반영이 안 되는지 찾게 된다 — 그 상태는 화면에 「저장됨」으로 보인다(0050·0097 이
       그 형태의 사고였다).
-    - **화면은 다섯 중 하나를 고른다**(`policy_docs.PLACEMENTS`): 모든 회신에 적용 · 첫
-      회신에만 · 그 이후 회신에 · 문의별 참고 · 사람만 본다. 저장되는 칸은 셋인데 뜻이
-      있는 조합은 다섯뿐이라, 셋을 따로 맞추게 하면 운영자가 조합을 틀린다. 매핑은 그
-      튜플 **한 곳**이고 목록의 섹션도 같은 값을 읽는다. 「사람만 본다」는 `mode`·`scope`
-      를 **보존한다** — 다시 고객용으로 돌릴 때 원래 어디에 붙던 것인지가 남아야 한다.
+    - **고르개는 셋이다**(`policy_docs.PLACEMENTS`): 모든 회신에 적용 · 첫 회신에만 · 그 이후 회신에. 저장되는
+      칸은 셋(`model_access` · `mode` · `scope`)인데 뜻이 있는 조합은 몇 개뿐이라, 따로 맞추게 하면 운영자가
+      조합을 틀린다. 매핑은 그 튜플 **한 곳**이다. 「문의별 참고」와 「사람만 본다」는 2026-09-10 운영자 지시로
+      고르개에서 뺐고 칸과 필터는 남는다 — 「사람만 본다」는 `mode`·`scope` 를 **보존한다**(다시 고객용으로 돌릴 때
+      원래 어디에 붙던 것인지가 남아야 한다). 그런 행은 목록의 제 묶음(「사람만 본다」 · 「분류 안 됨 — 옛 설정」)에
+      선다(`PolicyDocs.placementGroups`). **어느 묶음에도 안 들어가는 행이 없어야 한다** — 2026-10-06 까지 「사람만
+      본다」 문서는 목록 어디에도 안 떴고, 편집기가 첫 값으로 고르개에서 빠진 `knowledge` 를 들고 있어서 **새 문서를
+      아예 못 만들었다**(서버가 「모르는 값」으로 400). 이제 새 문서는 서버가 받는 첫 칸, 있는 문서는 지금 칸
+      그대로다(`initialPlacement`, `frontend/test/policy-docs.test.ts`).
     - **「언제 쓰는가」는 라우터가 읽는 문서에만 만든다.** 그 한 줄을 읽는 것은 라우터
       인덱스뿐이라(`_build_index`) 「항상 적용」 문서에 대해 부르면 저장할 때마다 flash 를
       한 번 태우고 아무도 그 값을 안 읽는다.
@@ -1072,8 +1344,10 @@ PERSO Inbound is a FastAPI workflow for inbound inquiry handling and customer op
   게 맞고, 안 바뀌었으면 그 문서에 왜 안 되는지가 실측과 함께 적혀 있다.
   - 본문 없는 등록은 만들 수 없다 — 문서를 만드는 화면이 본문을 같이 받는다. URL만 등록해
     두던 폼이 `body`가 영원히 빈 행을 만들었고, zip도 결과적으로 같은 일을 했다.
-  - 콘솔 편집은 `refresh_knowledge_copy`로 라우터가 읽는 사본까지 즉시 간다. 안 그러면
-    화면엔 새 내용, 회신은 옛 내용이 되고 눈치챌 방법이 없다.
+  - 콘솔 편집은 **다음 초안부터** 들어간다. 초안이 `policy_sources` 를 직접 읽고(0098 — 밀어 넣던 사본과
+    `refresh_knowledge_copy` 는 없다), 정리된 지도는 본문 해시로 저절로 낡아 다시 정리될 때까지 그 문서는 통째로
+    가며, 저장 직후 뒤에서 그 문서를 다시 정리한다(`policy_docs.schedule_reorganize`, 2026-10-06). 화면엔 새 내용,
+    회신은 옛 내용인 순간이 있으면 안 된다 — 그건 눈치챌 방법이 없다.
 
 - **개인함 메일은 붙을 자리가 있으면 수집하면서 바로 붙는다** (2026-09-09 운영자 지시:
   「최신 티켓이 있으면 무조건 거기다가 넣도록 / 티켓, 수주 등 아무거나 최신으로」).
@@ -1096,9 +1370,9 @@ PERSO Inbound is a FastAPI workflow for inbound inquiry handling and customer op
     곧 허브스팟 이메일 채널 계정이라 콘솔에서 나간 회신이 그 사서함에 남는다 — 안 거르면
     우리 답장이 티켓 기록에 **두 번** 서고, 나중에 읽는 사람은 「답을 두 번 보냈다」로
     센다(운영자 실측: `RE: Test Custom Quote`). `_hubspot_already_has_it` 로는 못 잡는다:
-    그쪽은 `customer_interactions` 만 보고 **같은 초**를 요구하는데 우리 회신은
-    `messages` 에 있고 지메일이 찍는 시각은 몇 초 어긋난다. 창을 ±10분으로 넉넉히 잡는
-    이유도 같다 — 한 고객에게 10분 안에 답장을 두 번 보내는 일은 없다.
+    그쪽은 `customer_interactions` 만 보는데(자는 2026-09-15 부터 `same_mail` — 그 전에는 **같은 초**였다) 우리
+    회신은 `messages` 에 있다. 지메일이 찍는 시각은 허브스팟이 보낸 시각과 몇 초 어긋나서 창을 ±10분으로
+    넉넉히 잡는다 — 한 고객에게 10분 안에 답장을 두 번 보내는 일은 없다.
   - **화면 · 초안 · 요약이 사본을 거르는 자는 `history_view.message_copies` 하나다** (2026-09-29 감사).
     티켓 화면 · 고객/리드/수주 기록(`ticket_records`) · 초안이 읽는 대화(`inbound.thread_events`) · 요약
     재생성(`summaries.rebuild_summary`)이 넷 다 각자 `hubspot_message_id` 로만 쟀고, **열쇠가 없는 행 — 첫 문의
@@ -1113,7 +1387,8 @@ PERSO Inbound is a FastAPI workflow for inbound inquiry handling and customer op
     메일이 접힌다(운영자 지적). 본문이 없으면 같은 초에만. 지메일 `Date`(보낸 쪽 시계)와 허브스팟
     `createdAt`(받아들인 시각)은 같은 초인 적이 없어, 예전의 「같은 초」 규칙은 한 번도 안 잡혔다.
     거는 자리는 셋이다 — 개인함 수집이 허브스팟 줄을 만나면 건너뛰고(`_hubspot_already_has_it`),
-    허브스팟 수집이 먼저 선 `gmail:` 줄을 만나면 접고 묘비를 남기며(`_merge_crm_twins`), 콘솔에서
+    허브스팟 수집이 먼저 선 `gmail:` 줄과 옛 CRM 줄(`hubspot:email:`)을 만나면 접고 묘비를 남기며
+    (`_merge_crm_twins` — CRM 줄도 2026-10-06 부터 이 자다, 위 「같은 메일이 허브스팟에 객체 두 개로」), 콘솔에서
     개인함으로 보낸 회신의 사본은 지메일 id(`messages.smtp_message_id`)로 거른다. 그리고 **우리가
     남긴 허브스팟 노트는 도로 안 읽는다**(`hubspot.is_our_note`, 첫머리로 알아본다).
   - **참조로만 온 메일은 안 가져온다** (2026-09-09 지시). 참조는 「알아 두라」이지 당사자
@@ -1496,13 +1771,13 @@ PERSO Inbound is a FastAPI workflow for inbound inquiry handling and customer op
 ## Stack
 
 - Python 3.11+, FastAPI, SQLAlchemy, React (Vite + TypeScript + React Query)
-- Gemini on Vertex AI (`flash` for routing/classification, `pro` for customer replies)
+- Gemini on Vertex AI (`flash` for routing/classification/document labelling/precedent picking, `pro` for customer replies and their one pre-send review — both slots are `gemini-3.8-flash` since 2026-09-30)
 - SQLite locally; PostgreSQL-compatible migrations
 - HubSpot Conversations delivery and CRM synchronization, optional Slack
 
 ## Data flow
 
-`HubSpot webhook / 10-minute poll → Gemini + policy docs → review queue + Slack → operator approval/translation → HubSpot Conversations reply → ticket stage`
+`HubSpot webhook / 10-minute poll → Gemini (organized console docs + situation facts + precedents, one pre-send review) → review queue + Slack → operator edit/approval/translation → HubSpot Conversations reply, or the operator-picked personal mailbox (the body exactly as approved) → ticket stage`
 
 Customer operations reuse the same Contact and Conversation records. `CustomerProfile`, `CustomerInteraction`, and `ContractRecord` add manual pipeline fields, cross-channel history, contracts, payments, and renewal insights without duplicating the inbound pipeline.
 

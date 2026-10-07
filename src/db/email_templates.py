@@ -7,6 +7,7 @@ the send path calls into.
 from __future__ import annotations
 
 import logging
+import re
 
 from .models import EmailTemplate
 from .session import SessionLocal
@@ -42,9 +43,14 @@ _CODE_RESOLVED_KEYS = frozenset(
 )
 
 def is_code_resolved(key: str) -> bool:
-    """그 행을 발송 경로가 이름으로 찾는가. 지울 때 무엇이 없어지는지가 여기서 나옵니다."""
+    """그 행을 발송 경로가 이름으로 찾는가. 지울 때 무엇이 없어지는지가 여기서 나옵니다.
+
+    후속 리마인더는 언어별 행(`followup_reminder_ko` 처럼 키 + `_` + 언어 코드)도 찾습니다 — 그 언어 고객에게는
+    번역 대신 그 글이 그대로 나갑니다(2026-10-07, `followup_sequence._reminder_body`).
+    """
     key = key or ""
-    return key in _CODE_RESOLVED_KEYS or key.startswith(SIGNATURE_KEY_PREFIX)
+    return (key in _CODE_RESOLVED_KEYS or key.startswith(SIGNATURE_KEY_PREFIX)
+            or re.fullmatch(r"followup_(reminder|closing)_[a-z]{2}(_[a-z0-9]{2,4})?", key) is not None)
 
 
 def list_signature_templates() -> list[dict]:

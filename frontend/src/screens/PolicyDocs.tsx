@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
-import { getJSON } from "../lib/api";
+import { failure, getJSON } from "../lib/api";
 import { Icon } from "../ui/Icon";
 import { DataTable, type Column } from "../ui/DataTable";
 import { RevisionHistoryButton } from "../ui/RevisionHistory";
@@ -18,7 +18,8 @@ type Row = {
   scope: string; scope_label: string;
   /** 다섯 칸 중 하나. `model_access`·`mode`·`scope` 셋을 합친 값이고 매핑은 서버
    *  (`policy_docs.PLACEMENTS`) 한 곳입니다 — 화면이 자기 사전을 들면 서버가 안 받는
-   *  값이 생깁니다. */
+   *  값이 생깁니다. 고르개에 없는 값이 둘 옵니다: `human_only`(사람만 본다)와 빈 문자열
+   *  (다섯으로 표현이 안 되는 옛 조합). */
   placement: string;
   body: string | null; chars: number;
   usage_note: string; updated_at: string;
@@ -34,10 +35,35 @@ async function send(path: string, method: string, fields: Record<string, string>
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams(fields),
   });
-  if (!response.ok) {
-    const detail = await response.json().catch(() => null);
-    throw new Error(detail?.detail ?? `${response.status}`);
-  }
+  if (!response.ok) throw await failure(response, path);
+}
+
+/** 고르개의 첫 값 (2026-10-06 고침).
+ *
+ *  **새 문서는 서버가 받는 첫 칸입니다.** 여기 `"knowledge"` 가 박혀 있었는데 그 값은 고르개에서
+ *  빠진 지 오래라(2026-09-10), 고르개를 안 건드리고 저장하면 서버가 「모르는 값입니다:
+ *  knowledge」로 400 을 냈습니다 — 새 문서를 아예 못 만들었습니다. **있는 문서는 지금 칸
+ *  그대로입니다** — 고르개에 없는 칸(옛 조합 · 사람만 본다)이어도. 같은 `"knowledge"` 가 그런
+ *  문서를 열자마자 「바뀜」으로 만들어, 제목만 고친 저장이 400 이거나 문서를 옮겼습니다. */
+export function initialPlacement(doc: Pick<Row, "placement"> | null, placements: Mode[]): string {
+  return doc ? doc.placement : placements[0]?.key ?? "";
+}
+
+export const HUMAN_ONLY = "human_only";
+
+/** 목록의 묶음 — 고르개의 칸들, 「사람만 본다」, 그리고 나머지 전부. **어느 묶음에도 안 들어가는
+ *  행이 없어야 합니다**: 화면에서 사라진 문서는 고칠 수도 옮길 수도 없습니다. 「사람만 본다」
+ *  문서가 그렇게 사라져 있었습니다 — 고르개에 없는 값이라 어느 칸과도, 「분류 안 됨」의 빈 값과도
+ *  안 맞았습니다. */
+export function placementGroups<R extends Pick<Row, "placement">>(placements: Mode[], rows: R[]) {
+  const named = [...placements, { key: HUMAN_ONLY, label: "사람만 본다 — 초안에 안 들어갑니다" }];
+  const known = new Set(named.map((group) => group.key));
+  return [...named, { key: "", label: "분류 안 됨 — 옛 설정" }]
+    .map((group) => ({
+      ...group,
+      rows: rows.filter((row) => (known.has(row.placement) ? row.placement : "") === group.key),
+    }))
+    .filter((group) => group.rows.length > 0);
 }
 
 /** 같은 columns 객체를 두 묶음이 씁니다 — 표 둘이 각자 폭을 재면 같은 열이 다른 자리에
@@ -70,10 +96,13 @@ function DocEditor({ doc, placements, onDone }: {
   onDone: () => void;
 }) {
   const [label, setLabel] = useState(doc?.title || doc?.label || "");
-  const [placement, setPlacement] = useState(doc?.placement || "knowledge");
+  const [placement, setPlacement] = useState(() => initialPlacement(doc, placements));
   const [body, setBody] = useState(doc?.body || "");
   const [note, setNote] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
+  // 고르개에 없는 지금 칸 — 옛 조합(빈 값)이나 「사람만 본다」. 그 값을 고르개에 남겨 두어야
+  // 고르개가 지금 칸을 그대로 보여 주고, 다른 칸을 눌러 봤다가 「그대로」로 돌아올 수 있습니다.
+  const keptPlacement = doc && !placements.some((p) => p.key === doc.placement) ? doc.placement : null;
 
   // 이메일 템플릿 편집기와 같은 규칙입니다 — 바꾼 것이 있을 때만 저장이 뜨고, 판 번호는
   // 화면에서만 앞서 보입니다. 실제로 올라가는 것은 저장을 눌렀을 때뿐입니다.
@@ -142,7 +171,11 @@ function DocEditor({ doc, placements, onDone }: {
                 바뀌고, 안 고르면 지금 범위가 그대로 남습니다. */}
             <select className="select" id="pd-placement" value={placement}
                     onChange={(e) => setPlacement(e.target.value)}>
-              {!placement && <option value="">— 지금 설정 유지 —</option>}
+              {keptPlacement !== null && (
+                <option value={keptPlacement}>
+                  {keptPlacement === HUMAN_ONLY ? "사람만 본다 (지금 설정)" : "— 지금 설정 유지 —"}
+                </option>
+              )}
               {placements.map((p) => <option key={p.key} value={p.key}>{p.label}</option>)}
             </select>
           </div>
@@ -260,13 +293,12 @@ export function PolicyDocs({ onBack }: { onBack?: () => void }) {
           **빈 칸은 안 그립니다.** 「0편」 한 줄을 위해 머리와 빈 표가 세 줄을 먹고,
           어느 칸이 비었는지는 고르개에서 이미 보입니다. 운영자 화면이 세로 695px 라
           안 쓰는 줄 하나가 곧 스크롤입니다. */}
-      {/* **고르개에 없는 조합은 「분류 안 됨」에 모입니다.** 안 그리면 그 문서가 목록
-          어디에도 안 뜨고, 화면에서 사라진 문서는 고칠 수도 옮길 수도 없습니다.
+      {/* **고르개에 없는 조합은 「분류 안 됨」에 모입니다**(`placementGroups`). 안 그리면 그
+          문서가 목록 어디에도 안 뜨고, 화면에서 사라진 문서는 고칠 수도 옮길 수도 없습니다.
           지금은 `mode='knowledge'` 행이 여기 옵니다 — 「문의별 참고」를 고르개에서
-          뺐기 때문입니다(라우터가 잠든 동안 그 칸은 「모든 회신에 적용」과 동작이 같습니다). */}
-      {[...data.placements, { key: "", label: "분류 안 됨 — 옛 설정" }].map((placement) => {
-        const rows = data.rows.filter((row) => (row.placement || "") === placement.key);
-        if (rows.length === 0) return null;
+          뺐기 때문입니다(라우터가 잠든 동안 그 칸은 「모든 회신에 적용」과 동작이 같습니다).
+          「사람만 본다」 문서는 제 묶음에 섭니다. */}
+      {placementGroups(data.placements, data.rows).map(({ rows, ...placement }) => {
         return (
           <section key={placement.key} className="mb-gap">
             <div className="section-header table-heading">

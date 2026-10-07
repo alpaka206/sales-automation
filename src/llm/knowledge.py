@@ -114,10 +114,10 @@ def usage_note_from_body(title: str, body: str, llm: object | None = None) -> st
 # 한국어 문의에 영어 제목이 나간 것이 그것이다(msg 62). 두 번째는 `_subject_in_inquiry_
 # language` 로 덧대었고, 그 함수도 같이 나갔습니다.
 #
-# 이제 제목은 `common.subjects.reply_subject` **하나**가 정합니다 — 「RE: <고객이 쓴
-# 제목>」이고 RE: 가 쌓이지 않으며 문의의 언어입니다. CODE GUARD 3(제목을 모델에게 묻지
-# 않는다)은 그대로입니다: 없어진 것은 **문서가 제목을 덮어쓰는 길**이고, 모델이 제목을
-# 쓰는 길이 열린 것이 아닙니다.
+# 이제 제목은 `common.subjects.choose_reply_subject` **하나**가 정합니다(2026-10-06) — 이어지는
+# 이메일 스레드가 있으면 그 제목에 RE: 하나, 없으면 검사를 지난 모델 제안 · 고객이 폼에 쓴 제목 ·
+# 기본 제목 순입니다. 허브스팟 티켓 이름은 후보가 아닙니다(CS 가 붙인 내부 이름이 고객에게 나갔다).
+# 문서가 제목을 덮어쓰는 길은 여전히 없습니다.
 
 
 def _format_docs(docs: list[PolicySource]) -> str:

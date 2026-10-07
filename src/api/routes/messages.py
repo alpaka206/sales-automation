@@ -12,19 +12,18 @@ from sqlalchemy import func as sa_func, select
 from starlette.concurrency import run_in_threadpool
 from sqlalchemy.orm import joinedload
 
-from ...agents.approval import ApprovalError, approve, reject
+from ...agents.approval import ApprovalError, approve, prepare_reviewed_body, reject
 from ...agents.followup_sequence import CONTACTED as FOLLOWUP_STAGE
 from ...agents.followup_sequence import REMINDER_VARIANTS, outside_replies
 from ...agents.followup_sequence import open_draft as followup_open_draft
 from ...agents.followup_sequence import sequence_state as followup_state
 from ...agents.followup_sequence import view as followup_view
-from ...agents.reply_safety import latest_trace
 from ...common.config import settings
-from ...common.subjects import reply_subject, strip_reply_prefixes
+from ...common.subjects import choose_reply_subject, strip_reply_prefixes
 from ...common.textwash import text_wash
 from ...db.conversation_history import ROUTINE_PROGRESS_KINDS, add_progress
 from ...common.inquiry import CATEGORY_LABELS, UNQUALIFIED, category_label, is_unqualified
-from ...db.email_templates import list_signature_templates
+from ...db.email_templates import default_signature_key, list_signature_templates
 from ...db.models import (
     Client,
     Contact,
@@ -113,16 +112,6 @@ def _clean_signature_key(value: str | None) -> str | None:
     """
     v = (value or "").strip()
     return v if v in {s["key"] for s in list_signature_templates()} else None
-
-
-def _evidence_verdict(session, msg) -> dict | None:
-    """``{"status", "issues"}`` from the draft's latest ``reply_context`` trace, else None."""
-    if msg is None:
-        return None
-    checks = (latest_trace(session, "reply_context", msg.id) or {}).get("limited_evidence_checks")
-    if not checks:
-        return None
-    return {"status": checks.get("status"), "issues": list(checks.get("issues") or [])}
 
 
 def _message_detail_context(
@@ -419,10 +408,6 @@ def _message_detail_context(
                     outside_replies(session, [conv.id]).get(conv.id, ())
                     if conv.stage == FOLLOWUP_STAGE or conv.followup_closed_at is not None else (),
                 ) if conv else None,
-                # 근거 검사 판정 (2026-09-22). 검사는 초안을 막지 않고 매니페스트에 표시만
-                # 남기므로(`inbound._draft_reply`), 여기서 안 실으면 그 판정은 아무 데도
-                # 안 보인다. 기록(`reply_context` Event)이 없는 수동 초안·문의 글은 `None`.
-                "evidence": _evidence_verdict(session, msg),
                 # 티켓이 만들어진 날. **허브스팟을 다시 부르지 않습니다** — 백필이 허브스팟의
                 # `createdate` 를 그대로 복사해 두었고(`hubspot_backfill`: `created_at=
                 # ticket.created_at`), 실시간으로 들어온 티켓만 우리가 받은 시각이라 몇 초
@@ -857,7 +842,8 @@ async def message_translate(
         # non-Korean target means there is something to translate.
         needs_tx = bool(target) and target != "ko" and is_mostly_korean(cur_body)
         if not needs_tx:
-            washed = text_wash(cur_body)
+            # 저장·승인과 같은 다듬기 — 미리본 글이 저장되는 글입니다(`prepare_reviewed_body`).
+            washed = prepare_reviewed_body(cur_body, target or msg.language)
             msg.body = washed
             korean_draft = msg.body_ko
             if cur_subject:
@@ -879,7 +865,12 @@ async def message_translate(
             )
 
         translated = await asyncio.to_thread(translate_to, cur_body, target)
-        final_body = text_wash(translated) if translated else text_wash(cur_body)
+        # 번역이 실패하면 본문은 한국어 그대로라 한국어 표기로 다듬습니다(승인은 번역 관문이 막습니다).
+        final_body = (
+            prepare_reviewed_body(translated, target)
+            if translated
+            else prepare_reviewed_body(cur_body, "ko")
+        )
         # 번역이 덮어쓰기 전의 한국어. **이 칸이 없던 동안 운영자는 「무엇을 승인했는지」를
         # 다시 읽을 방법이 없었습니다** — 번역이 뜻을 바꿨는지 확인하려면 원문이 있어야
         # 하고, 번역은 이 화면에서 한 번 누르면 되돌릴 수 없습니다. `body_ko` 는 「이 메일의
@@ -935,7 +926,9 @@ async def message_send(
         return HTMLResponse("<div class='text-red-600 text-sm'>제목이 너무 깁니다.</div>", status_code=400)
 
     try:
-        approve(
+        # 승인은 다듬기·근거 확인으로 DB 를 여러 번 오갑니다 — 이벤트 루프 밖에서.
+        await run_in_threadpool(
+            approve,
             message_id,
             approver=actor_name(request, fallback="web_ui"),
             edited_body=clean_body,
@@ -970,17 +963,34 @@ async def message_send(
 
 
 @router.post("/messages/preview")
-async def message_preview(body: str = Form(""), signature_key: str = Form("")):
+async def message_preview(body: str = Form(""), signature_key: str = Form(""), message_id: str = Form("")):
     """Render a draft body as the HTML email it will become — live approval preview.
 
     Stateless: takes the (possibly edited) textarea content + the chosen signature
     and returns the same styled HTML the send path attaches, so the approver sees
     the real look.
+
+    **그리는 것은 저장될 글입니다** (2026-10-06) — 저장·승인과 같은 다듬기
+    (``prepare_reviewed_body``)를 거친 본문입니다. 예전에는 textarea 를 그대로 그렸고, 발송이 그
+    뒤에 다듬어서 미리본 글과 나간 글이 달랐습니다. ``message_id`` 를 주면 그 초안의 언어로
+    다듬습니다 — 저장·승인과 같은 언어라야 링크 표기(「미팅 링크」/``Calendly``)가 같습니다.
     """
+    return HTMLResponse(await run_in_threadpool(_preview_html, body, signature_key, message_id))
+
+
+def _preview_html(body: str, signature_key: str, message_id: str) -> str:
     from ...integrations.email_html import branded_signature_html, to_html_email
 
+    language = None
+    if message_id.strip().isdigit():
+        with SessionLocal() as session:
+            row = session.get(Message, int(message_id))
+            if row is not None:
+                language = row.target_language or row.language
+    # 초안을 모르면 글자로 고릅니다 — 링크 표기는 한국어냐 아니냐 하나로 갈립니다.
+    prepared = prepare_reviewed_body(body, language or ("ko" if is_mostly_korean(body) else "en"))
     key = _clean_signature_key(signature_key)
-    return HTMLResponse(to_html_email(body, signature_html=branded_signature_html(key)))
+    return to_html_email(prepared, signature_html=branded_signature_html(key))
 
 
 @router.post("/messages/{message_id}/reject")
@@ -1053,7 +1063,8 @@ async def message_edit(
                 status_code=400,
             )
         if body.strip():
-            msg.body = body.strip()
+            # 미리보기·승인과 같은 다듬기 — 저장된 글이 곧 나갈 글입니다. 발송은 다시 다듬지 않습니다.
+            msg.body = prepare_reviewed_body(body, msg.target_language or msg.language)
         if subject.strip():
             msg.subject = subject.strip()
         msg.signature_key = _clean_signature_key(signature_key)
@@ -1074,6 +1085,26 @@ MANUAL_REPLY_VARIANT = "manual"
 # 아직 나가지 않은 회신. 하나라도 열려 있으면 새로 만들지 않고 그것을 엽니다 — 같은 티켓에
 # 초안이 둘이면 어느 것이 나갈지 화면만 봐서는 알 수 없습니다.
 _OPEN_DRAFT_STATUSES = ("drafting", "pending_approval", "approved", "send_failed")
+
+
+def _manual_reply_subject(conversation_id: int, target: str) -> str:
+    """「메일 발송」 초안의 첫 제목 — 자동 초안과 같은 고르개(``choose_reply_subject``), 모델 없이 DB 만.
+
+    이어지는 이메일 스레드가 있으면 그 제목에 RE: 하나, 없으면 고객이 폼에 쓴 제목, 그것도 없으면 기본 제목.
+    허브스팟 티켓 이름(``inquiry_subject``)은 안 씁니다 — CS 가 붙인 내부 이름일 수 있습니다(msg 82 · 83 이
+    「RE: [Form]<고객 메일 주소>」로 섰습니다). 워커가 초안을 쓰면 다시 고르고, 이 값이 남는 것은 큐에 못
+    올라가 운영자가 직접 쓸 때입니다.
+    """
+    from ...agents.inbound import subject_sources
+
+    try:
+        thread, form = subject_sources(conversation_id, factory=SessionLocal)
+    except Exception:
+        logger.warning("후속 초안 제목을 고르려고 대화를 읽다 실패해 기본 제목으로 둡니다 (conv=%s)",
+                       conversation_id, exc_info=True)
+        thread = form = None
+    # 첫 회신인지는 여기서 안 잽니다 — 그 답이 바꾸는 것은 폼 제목 속 금액 하나라, 모르면 엄격한 쪽(첫 회신)으로.
+    return choose_reply_subject(thread_subject=thread, customer_subject=form, target=target, first_reply=True)[0]
 
 
 @router.post("/tickets/{conversation_id}/reply")
@@ -1160,13 +1191,15 @@ async def start_manual_reply(
             direction="outgoing",
             channel="email",
             to_address=to_address,
-            subject=subject.strip()
-            or reply_subject(conv.inquiry_subject, target_code=target),
+            subject=subject.strip() or _manual_reply_subject(conv.id, target),
             body=written,
             language=target,
             target_language=target,
             status="pending_approval" if written else "drafting",
             prompt_variant=MANUAL_REPLY_VARIANT,
+            # 첫 회신과 같이 목록의 첫 서명으로 시작합니다 — 그 건에서 바꾸는 것은 검토 화면입니다. 예전에는
+            # 서명 없이 섰고, 운영자가 못 보고 승인하면 이름 없는 메일이 나갔습니다(평가의 후속 초안 26건 전부).
+            signature_key=default_signature_key(),
         )
         session.add(msg)
         session.commit()

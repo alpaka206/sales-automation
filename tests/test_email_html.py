@@ -55,6 +55,29 @@ def test_mixed_paragraph_and_bullets():
     assert html.count("<p ") == 2
 
 
+def test_an_indented_line_continues_the_list_item():
+    """줄을 맞춰 쓴 항목은 ``<li>`` 하나입니다 — ``<ul>`` 둘 사이의 ``<p>`` 가 아니라(MSG#110).
+
+    줄바꿈은 문단에서처럼 ``<br>`` 로 남습니다: 운영자가 끊은 자리입니다.
+    """
+    html = to_html_email(
+        "Direct answers first:\n"
+        "- A covers dubbing for\n"
+        "  up to 60 minutes per month.\n"
+        "- B is metered."
+    )
+    assert html.count("<ul") == 1
+    assert html.count("<li") == 2
+    assert html.count("<p ") == 1  # 머리 문장 하나뿐
+    assert "A covers dubbing for<br>up to 60 minutes per month.</li>" in html
+
+
+def test_a_dash_sign_off_is_a_line_not_a_list():
+    html = to_html_email("Thanks,\n— Untae")
+    assert "<ul" not in html
+    assert "Thanks,<br>— Untae" in html
+
+
 def test_the_mail_carries_no_card_or_page_background():
     """메일은 사람이 쓴 메일로 보여야 한다 — 발송 시스템이 만든 카드가 아니라.
 

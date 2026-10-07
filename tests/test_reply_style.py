@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
+import pytest
+
 from tests.conftest import legacy_policy_columns, legacy_template_columns
 from src.llm.prompts import load_prompt
 
@@ -18,16 +20,21 @@ def test_draft_prompt_requires_scannable_plain_text_layout() -> None:
             "category": "support",
             "last_message": "기능 두 가지를 문의합니다.",
             "conversation_context": "이전 문의가 있습니다.",
+            "situation": "- 상황: nudge — 사실 한 줄",
             "enrichment_context": "",
-            "knowledge_docs": "",
-            "pricing_rule": "확인된 정책만 사용합니다.",
+            "reply_format": "",
+            "precedents": "## 우리 팀이 비슷한 상황에서 실제로 보낸 메일 (참고용)",
             "reply_language": "English",
+            "evidence_feedback": "",
         },
         include_rules=False,
     )
 
     assert "이전 대화 맥락" in prompt
     assert "이전 문의가 있습니다." in prompt
+    # 상황은 사실로, 지난 메일 참고는 대화 맥락 뒤 · 출력 계약 앞에.
+    assert "- 상황: nudge — 사실 한 줄" in prompt
+    assert prompt.index("이전 문의가 있습니다.") < prompt.index("## 우리 팀이 비슷한") < prompt.index("엄격한 JSON")
     # 이 초안에만 해당하는 것은 여기 남습니다. 언어는 문의마다 다르므로 값으로 들어옵니다.
     assert "**English로만** 작성합니다" in prompt
 
@@ -240,7 +247,12 @@ def test_the_english_link_row_can_go_because_the_korean_one_answers_for_it():
     assert out == "[Calendly](https://calendar.example/abc123) · [WhatsApp](https://wa.me/1)"
 
 
-def test_contact_links_are_an_exact_two_line_footer_not_model_prose():
+def test_the_sentence_around_a_contact_link_stays():
+    """링크를 고르는 것이지 그 줄을 다시 쓰는 것이 아닙니다 (2026-10-06).
+
+    예전에는 연락 링크가 든 줄을 통째로 지우고 고정된 두 줄을 그 자리에 넣었습니다 — 운영자가 쓴
+    「If it's easier, grab a slot here: … or just reply to this email.」 이 맨 링크 두 줄로 나갔습니다.
+    """
     from src.llm.prompts import canonicalize_contact_links
 
     values = {
@@ -252,14 +264,88 @@ def test_contact_links_are_an_exact_two_line_footer_not_model_prose():
         "You can schedule a meeting at [Calendly](https://calendar.example/abc123) "
         "or contact us via [WhatsApp](https://wa.me/1)."
     )
+    bare = "If it's easier, grab a slot here: https://calendar.example/abc123 or just reply to this email."
+    with patch("src.db.email_templates.get_email_template", side_effect=values.get):
+        assert canonicalize_contact_links(body, "en") == body
+        # 문장 속 맨 예약 주소는 그 자리에서 글자를 단 링크가 됩니다 — 문장은 그대로입니다.
+        assert canonicalize_contact_links(bare, "en") == (
+            "If it's easier, grab a slot here: [Calendly](https://calendar.example/abc123) "
+            "or just reply to this email."
+        )
+
+
+def test_whatsapp_is_never_added_to_a_reply_that_did_not_have_it():
+    """영문 회신마다 WhatsApp 줄이 붙었습니다 — 아무도 안 썼는데(2026-10-06 평가 영문 초안 11건 중 11건).
+    붙일지는 서식(템플릿)이 정합니다: 영문 서식은 「다른 링크 토큰을 더하지 마세요」라고 합니다."""
+    from src.llm.prompts import canonicalize_contact_links
+
+    values = {
+        "meeting_link": "[Calendly](https://calendar.example/abc123)",
+        "whatsapp_link": "[WhatsApp](https://wa.me/1)",
+    }
+    body = "Happy to walk you through it.\n\n{{MEETING_LINK}}\n\nBest,"
     with patch("src.db.email_templates.get_email_template", side_effect=values.get):
         out = canonicalize_contact_links(body, "en")
 
-    assert out == (
-        "Thank you for your inquiry.\n\n"
-        "[Calendly](https://calendar.example/abc123)\n"
-        "[WhatsApp](https://wa.me/1)"
+    assert out == "Happy to walk you through it.\n\n[Calendly](https://calendar.example/abc123)\n\nBest,"
+    assert "wa.me" not in out
+
+
+def test_the_korean_skeleton_link_becomes_one_link():
+    """국문 서식은 ``[미팅 링크]({{MEETING_LINK}})`` 를 쓰라 하고, 행에는 ``[Calendly](주소)`` 가
+    들어 있습니다 — 토큰 치환 뒤에는 링크 안에 링크가 들어갑니다. 예전에는 그 줄을 통째로 다시 써서
+    가려졌습니다. 이제는 그 자리에서 링크 하나로 풉니다."""
+    from src.llm.prompts import apply_editable_tokens, canonicalize_contact_links
+
+    values = {"meeting_link": "[Calendly](https://calendar.example/abc123)"}
+    with patch("src.db.email_templates.get_email_template", side_effect=values.get):
+        filled = apply_editable_tokens("편하신 시간을 골라 주세요: [미팅 링크]({{MEETING_LINK}})", "ko")
+        out = canonicalize_contact_links(filled, "ko")
+
+    assert out == "편하신 시간을 골라 주세요: [미팅 링크](https://calendar.example/abc123)"
+
+
+def test_a_contact_link_gets_the_configured_url_and_the_languages_label():
+    """모델은 120자 예약 주소를 줄이고, 링크 글자는 언어가 정합니다 — 국문은 「미팅 링크」."""
+    from src.llm.prompts import canonicalize_contact_links
+
+    values = {"meeting_link": "https://calendar.example/abc123"}
+    with patch("src.db.email_templates.get_email_template", side_effect=values.get):
+        assert canonicalize_contact_links("예약: [Calendly](https://calendar.example/abc)", "ko") == (
+            "예약: [미팅 링크](https://calendar.example/abc123)"
+        )
+        assert canonicalize_contact_links("Book: [미팅 링크](https://calendar.example/abc)", "en") == (
+            "Book: [Calendly](https://calendar.example/abc123)"
+        )
+        # 운영자가 단 글자는 문장입니다 — 주소만 맞춥니다.
+        custom = "Book: [a 20-minute call](https://calendar.example/abc123)"
+        assert canonicalize_contact_links(custom, "en") == custom
+
+
+def test_canonicalizing_twice_changes_nothing():
+    """저장·미리보기·승인이 같은 다듬기를 거칩니다 — 두 번 지나도 같아야 승인한 글이 흔들리지 않습니다."""
+    from src.llm.prompts import canonicalize_contact_links
+
+    values = {
+        "meeting_link": "[Calendly](https://calendar.example/abc123)",
+        "whatsapp_link": "[WhatsApp](https://wa.me/1)",
+    }
+    body = (
+        "grab a slot here: https://calendar.example/abc123. Or {{WHATSAPP}}\n"
+        "[미팅 링크]([Calendly](https://calendar.example/abc123))"
     )
+    with patch("src.db.email_templates.get_email_template", side_effect=values.get):
+        for language in ("ko", "en"):
+            once = canonicalize_contact_links(body, language)
+            assert canonicalize_contact_links(once, language) == once
+
+
+def test_an_unset_link_token_stays_visible():
+    """주소가 없으면 토큰이 남습니다 — 그리고 승인이 그것을 막습니다(``reply_flags.unfilled_slots``)."""
+    from src.llm.prompts import canonicalize_contact_links
+
+    with patch("src.db.email_templates.get_email_template", return_value=None):
+        assert canonicalize_contact_links("Book: {{MEETING_LINK}}", "en") == "Book: {{MEETING_LINK}}"
 
 
 def test_a_korean_reply_gets_the_meeting_link_only_and_in_korean():
@@ -521,11 +607,73 @@ def test_the_link_replaces_the_line_it_found_and_does_not_move_to_the_end():
     assert "\n\n\n" not in out
 
 
-def test_the_first_reply_pitches_a_promotion_only_when_asked_about_price():
-    """2026-09-23 Gemini 3 전환 때 잡혔다: 조건 없는 「프로모션을 언급하고 미팅을 제안하세요」를
-    3.5 Flash 가 글자 그대로 따라 SRT·환불 문의에까지 영업 문장을 붙였다(유료 짝 비교 28건 중 13~15건).
-    가격을 물었을 때만이라는 조건이 이 문장에 남아 있어야 한다."""
-    from src.agents.inbound import _PRICING_RULE_FIRST
+# 코드가 하던 영업 지시의 낱말들. 콘솔 문서에 없으면 모델이 받는 글 어디에도 없어야 한다.
+_SALES_ADVICE = ("프로모션", "미팅", "할인", "추천", "promotion", "discount")
 
-    assert "물었을 때만" in _PRICING_RULE_FIRST
-    assert "프로모션이나 미팅 이야기를 꺼내지 말고" in _PRICING_RULE_FIRST
+
+@pytest.mark.parametrize("situation", ["first_reply", "nudge", "answer_reply"])
+def test_no_sales_instruction_from_code_reaches_the_draft_prompt(situation, db_session_factory, monkeypatch):
+    """코드는 영업 지시를 하지 않는다 (2026-10-06).
+
+    「가격을 물으면 스페셜 프로모션을 언급하고 미팅을 제안하라」(첫 회신) · 「금액은 미팅·채팅에서 안내하겠다고
+    쓰라」(후속) · 「더 자세히 쓰라 · 재촉하지 마라」(후속)가 코드 상수였고, 콘솔 문서가 같은 자리에 다른 말을
+    했다(할인 약속 금지 · 행동 제안은 하나 · 「새 정보를 흘려 상대를 유인하지 않는다」). 2026-09-23 에 그 문장
+    하나를 「가격을 물었을 때만」으로 좁혔지만 남은 것은 여전히 콘솔과 겨루는 코드 규칙이었다. 이제 코드가 싣는
+    것은 상황(사실)뿐이고, 무엇을 쓸지는 콘솔 문서가 정한다.
+    """
+    import sys
+    from datetime import datetime, timedelta
+    from unittest.mock import MagicMock
+
+    from src.agents import inbound
+    from src.db.models import Contact, Conversation, CustomerInteraction, Message, PolicySource
+
+    monkeypatch.setattr("src.db.session.SessionLocal", db_session_factory)
+    monkeypatch.setattr(inbound, "SessionLocal", db_session_factory)
+    monkeypatch.setitem(sys.modules, "src.llm.precedents", None)  # 지난 메일 참고 없이
+    now = datetime.utcnow()
+    with db_session_factory() as session:
+        session.add(PolicySource(label="응대", doc_key="rules", mode="rules", body="질문에 답한다."))
+        contact = Contact(normalized_email="c@example.test", email="c@example.test", full_name="고객")
+        session.add(contact)
+        session.flush()
+        conv = Conversation(contact_id=contact.id, stage="new")
+        session.add(conv)
+        session.flush()
+        session.add(Message(conversation_id=conv.id, direction="inbound", body="가격이 궁금합니다",
+                            status="received", created_at=now - timedelta(days=5)))
+        if situation != "first_reply":
+            session.add(Message(conversation_id=conv.id, direction="outgoing", body="안내드립니다", status="sent",
+                                created_at=now - timedelta(days=4), sent_at=now - timedelta(days=4)))
+        if situation == "answer_reply":
+            session.add(CustomerInteraction(contact_id=contact.id, conversation_id=conv.id, channel="이메일",
+                                            direction="incoming", summary="얼마인가요?",
+                                            external_id="hubspot:conv:reply", happened_at=now - timedelta(days=1)))
+        session.commit()
+        conv_id = conv.id
+    seen: dict = {}
+
+    def complete(name, fields, **kwargs):
+        if name == "inbound/draft_reply":
+            seen.update(prompt=load_prompt(name, fields), system=kwargs.get("knowledge") or "")
+        return inbound.DraftResult(body="안녕하세요. 답변드립니다.", language="ko")
+
+    agent = inbound.InboundAgent.__new__(inbound.InboundAgent)
+    agent.llm = MagicMock()
+    agent.llm.complete.side_effect = complete
+    info = {"full_name": "고객", "company": "", "country": "KR", "last_message": "가격이 궁금합니다", "subject": ""}
+    draft = agent._draft_reply(info, inbound.ClassifyResult(category="pricing_question", reasoning=""),
+                               conv_id, "ko")
+
+    assert draft._context_manifest["situation"] == situation
+    assert f"상황: {situation}" in seen["prompt"]
+    assert "질문에 답한다." in seen["system"], "회사 문서는 system 으로 간다"
+    for word in _SALES_ADVICE:
+        assert word not in (seen["prompt"] + seen["system"]).lower(), word
+    for name in ("_PRICING_RULE_FIRST", "_PRICING_RULE_NORMAL", "_FOLLOWUP_RULE_ANSWER", "_FOLLOWUP_RULE_ELABORATE"):
+        assert not hasattr(inbound, name), name
+    # 안 넘긴 자리표시는 글자 그대로 남는다(`load_prompt`) — 지운 칸이 프롬프트에 「{{pricing_rule}}」로 가면 안 된다.
+    leftover = seen["prompt"]
+    for token in ("{{MEETING_LINK}}", "{{WHATSAPP}}", "{{SENDER_NAME}}"):
+        leftover = leftover.replace(token, "")
+    assert "{{" not in leftover

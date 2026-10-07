@@ -2,8 +2,9 @@
 from __future__ import annotations
 
 import re
+import unicodedata
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 
 class PolicyQuote(BaseModel):
@@ -12,35 +13,39 @@ class PolicyQuote(BaseModel):
 
 
 class AnswerPoint(BaseModel):
-    """Short answer obligations, not verified facts or policy decisions."""
+    """질문별 점검 기록 — 본문이 아닙니다. 본문은 모델이 쓴 글 그대로 나갑니다(2026-10-06).
 
-    question: str
-    supported_answer: str = Field(min_length=1)
+    예전에는 이 목록을 코드가 이어 붙여 본문으로 썼습니다(`compose_answer`, 2026-09-21 ADR). 조건이 빠지는
+    길을 막으려던 것인데, 인사·링크·맺음이 엉뚱한 자리에 섰습니다(평가 F415a: 확인 문장이 「감사합니다.」와
+    미팅 링크 뒤에 붙었다). 이제 여기 적힌 숫자가 본문에서 빠졌는지만 봅니다(`answer_point_gaps`). 점검용이라
+    칸이 비어도 초안 전체가 스키마에서 떨어지지 않게 전부 기본값이 있습니다.
+    """
+
+    question: str = ""
+    supported_answer: str = ""
     verification_needed: str | None = None
 
 
-def compose_answer(points: list[AnswerPoint]) -> str:
-    """Preserve generated answers instead of asking a second rendering to omit them."""
-    paragraphs = []
-    for point in points:
-        for text in (point.supported_answer, point.verification_needed):
-            if text and text.strip() and text.strip() not in paragraphs:
-                paragraphs.append(text.strip())
-    if not paragraphs:
-        raise DraftEvidenceError("초안 답변 요소가 비어 있습니다.")
-    return "\n\n".join(paragraphs)
-
-
 class DraftEvidenceError(RuntimeError):
-    pass
+    """보여 줄 본문이 없는 초안 — 이것만 큐에서 재시도 없이 끝납니다(`inbound_worker`)."""
+
+
+# 인용 대조에서 빼는 것: 공백 · 마크다운 강조 · 표 구분자(| · 탭 · ---). 모델은 노션의 탭 표를 | 로, 굵은
+# 글씨를 ** 없이 옮겨 적습니다 — 맞는 인용이 표 모양 하나로 invalid 였습니다(평가 F415d 두 번).
+_QUOTE_NOISE = re.compile(r"-{3,}|[\s*_`|#>]+")
+_QUOTE_MARKS = str.maketrans("‘’“”", "''\"\"")
 
 
 def _plain(value: str) -> str:
-    return re.sub(r"\s+", "", value).lower()
+    text = unicodedata.normalize("NFKC", value or "").translate(_QUOTE_MARKS)
+    return _QUOTE_NOISE.sub("", text).lower()
 
 
+# 숫자 하나 — 천 단위 쉼표 포함. 「12,000 minutes」를 「000 minutes」로 읽던 것을 고쳤습니다.
+_NUM = r"(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?"
+_NUMBER = re.compile(rf"(?<![\d.,]){_NUM}")
 _DURATION = re.compile(
-    r"(?<![\d.])(\d+(?:\.\d+)?(?:\s*[~–-]\s*\d+(?:\.\d+)?)?)"
+    rf"(?<![\d.,])({_NUM}(?:\s*[~–-]\s*{_NUM})?)"
     r"\s*(?:영업일|business\s+days?|days?|weeks?|months?|hours?|minutes?|일|주|개월|시간|분)",
     re.IGNORECASE,
 )
@@ -71,9 +76,13 @@ _UNVERIFIED_NEGATIVE = re.compile(
 _EXPLICIT_UNKNOWN = re.compile(r"확인할\s*수\s*없|알\s*수\s*없|인지|여부|\bwhether\b|\bcannot\b", re.IGNORECASE)
 
 
+def _numbers(text: str | None) -> set[float]:
+    return {float(found.replace(",", "")) for found in _NUMBER.findall(text or "")}
+
+
 def _duration_key(value: str) -> tuple:
-    numbers = tuple(float(n) for n in re.findall(r"\d+(?:\.\d+)?", value))
-    unit = re.sub(r"[\d.\s~–-]", "", value).lower()
+    numbers = tuple(float(n.replace(",", "")) for n in re.findall(_NUM, value))
+    unit = re.sub(r"[\d.,\s~–-]", "", value).lower()
     if unit in {"일", "day", "days"}:
         return numbers, "day"
     if unit in {"주", "week", "weeks"}:
@@ -94,12 +103,16 @@ def check_draft(body: str, quotes: list[PolicyQuote], *, documents, customer_tex
     """Check quote membership, novel durations and unsupported execution claims.
 
     Matching quotes do not prove entailment or coverage. Customer-provided durations
-    may be restated, never promoted to verified facts by this check.
+    may be restated, never promoted to verified facts by this check. A quote counts when
+    its words are in **any** document the draft saw — the model cites a real sentence under
+    the neighbouring document's id often enough (evaluation R424) that the id is not evidence.
     """
     issues = []
     allowed = {doc.id: doc.body or "" for doc in documents}
+    plain_docs = [_plain(text) for text in allowed.values()]
     for quote in quotes:
-        if quote.source_id not in allowed or not quote.quote.strip() or _plain(quote.quote) not in _plain(allowed[quote.source_id]):
+        wanted = _plain(quote.quote)
+        if not wanted or not any(wanted in text for text in plain_docs):
             issues.append("invalid_policy_quote")
     source_text = _CALENDAR_DATE.sub(" ", "\n".join(allowed.values()) + "\n" + customer_text)
     supported = {_duration_key(match.group()) for match in _DURATION.finditer(source_text)}
@@ -124,11 +137,46 @@ def check_draft(body: str, quotes: list[PolicyQuote], *, documents, customer_tex
     return sorted(set(issues))
 
 
-def repair_instruction(issues: list[str]) -> str:
-    return (
-        "이전 생성 결과의 검증 실패: " + ", ".join(issues) + ". "
-        "같은 원문을 사용해 답변을 다시 작성하세요. 원문/고객 발화에 없는 기간이나 UI 절차를 만들지 마세요. "
-        "이 경로는 조회·환불·삭제·접수를 실행하지 않습니다. 진행 중/접수됨/완료됐다고 하지 말고 "
-        "확인이 필요한 사실과 일반 절차를 구분하세요. 확인이 필요해도 원문으로 답할 수 있는 부분은 답하세요. "
-        "인용은 제공된 source_id와 해당 원문의 정확한 연속 구절만 사용하세요."
-    )
+def answer_point_gaps(body: str, points: list[AnswerPoint]) -> list[str]:
+    """``answer_points`` 에 적은 숫자(금액 · 비율 · 기간 · 수량)가 본문에 없으면 ``answer_point_missing``.
+
+    모델이 질문별로 「이렇게 답했다」고 적은 것과 실제 본문을 숫자로만 맞대 봅니다 — 문장은 언어·표현이
+    달라 맞댈 수 없고, 빠지면 아픈 것은 「14일 이내」 같은 조건의 숫자입니다. 재작성 한 번을 부르고
+    매니페스트에 남을 뿐 본문은 안 고칩니다. 목록 번호(「1. 」)는 숫자로 안 셉니다.
+    """
+    have = _numbers(body)
+    for point in points:
+        text = re.sub(r"^\s*\d{1,2}[.)]\s+", "", point.supported_answer or "")
+        if _numbers(text) - have:
+            return ["answer_point_missing"]
+    return []
+
+
+def repair_instruction(issues: list[str], *, problems=(), previous: str = "") -> str:
+    """재작성 한 번에 실을 말 — 문자열 검사(``issues``)와 보내기 전 검토(``problems``)가 찾은 것.
+
+    ``previous`` 는 직전 초안입니다. 같이 주어야 모델이 지적된 곳만 고치고 나머지(맞게 쓴 계산 · 질문)를 살립니다 —
+    없으면 처음부터 다시 쓰다가 멀쩡하던 곳에서 새 실수를 냅니다.
+    """
+    parts: list[str] = []
+    if issues:
+        text = (
+            "이전 생성 결과의 검증 실패: " + ", ".join(issues) + ". "
+            "같은 원문을 사용해 답변을 다시 작성하세요. 원문/고객 발화에 없는 기간이나 UI 절차를 만들지 마세요. "
+            "이 경로는 조회·환불·삭제·접수를 실행하지 않습니다. 진행 중/접수됨/완료됐다고 하지 말고 "
+            "확인이 필요한 사실과 일반 절차를 구분하세요. 확인이 필요해도 원문으로 답할 수 있는 부분은 답하세요. "
+            "인용은 제공된 source_id와 해당 원문의 정확한 연속 구절만 사용하세요."
+        )
+        if "answer_point_missing" in issues:
+            text += " answer_points 에 적은 숫자·조건은 body 에도 그대로 들어가야 합니다."
+        parts.append(text)
+    if problems:
+        lines = [
+            (f"- 「{problem.quote}」: " if problem.quote else "- ") + problem.problem
+            + (f" → {problem.fix}" if problem.fix else "")
+            for problem in problems
+        ]
+        parts.append("보내기 전 검토에서 찾은 문제입니다. 회사 문서와 대화를 다시 확인해 고치세요:\n" + "\n".join(lines))
+    if previous:
+        parts.append(f'직전 초안입니다. 위의 문제만 고치고 나머지는 살립니다:\n"""\n{previous}\n"""')
+    return "\n\n".join(parts)

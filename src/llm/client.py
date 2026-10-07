@@ -131,6 +131,7 @@ class LLMClient:
         stage: str | None = None,
         policy_snapshot=None,
         thinking_level: str | None = None,
+        knowledge: str | None = None,
     ) -> str | T:
         """Render a prompt and call Gemini.
 
@@ -145,6 +146,10 @@ class LLMClient:
         **안 주면 규칙이 하나도 안 갑니다.** 분류·라우팅·요약·번역·언어 판별·회사 분석은
         회신 규칙이 필요 없는데, 그동안 55,000자짜리 규칙 블록을 매 호출 지고 다녔습니다.
         「필요한 곳에만 준다」가 기본값이라, 새 호출자가 아무것도 안 해도 안 실립니다.
+
+        ``knowledge`` 는 그 스냅샷의 문서를 이번 회신 상황에 맞게 정리한 글입니다
+        (``organizer.knowledge_for``, 2026-10-06) — 주면 ``policy_snapshot.rules`` 대신 그것이 system 이
+        됩니다. 스냅샷 없이는 받지 않습니다: 회사 문서가 실리는 문은 회신 호출 하나뿐이어야 합니다.
         """
         model = settings.gemini_model_for.get(tier, settings.GEMINI_MODEL)
         if thinking_level is None:
@@ -153,7 +158,9 @@ class LLMClient:
             if stage != policy_snapshot.stage:
                 raise ValueError("Policy snapshot and reply stage differ")
             policy_snapshot.assert_current()
-            system = policy_snapshot.rules
+            system = policy_snapshot.rules if knowledge is None else knowledge
+        elif knowledge is not None:
+            raise ValueError("Organized knowledge needs the policy snapshot it was built from")
         else:
             system = get_company_rules(stage) if stage is not None else ""
         prompt = load_prompt(prompt_name, variables, include_rules=False)

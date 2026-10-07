@@ -1,4 +1,11 @@
-"""Send reviewed inbound replies through HubSpot Conversations."""
+"""Send reviewed inbound replies through HubSpot Conversations.
+
+**발송은 본문을 한 글자도 바꾸지 않습니다** (2026-10-06). 사람이 승인한 글자가 그대로 나갑니다 —
+다듬기(공백·링크·토큰)는 승인 **전**에 끝납니다(``approval.prepare_reviewed_body``). 예전에는
+여기서 공백을 고르고, 연락 링크 줄을 통째로 다시 쓰고, 첫 회신의 금액 줄을 지웠습니다. 그건
+전부 승인 **뒤**의 일이라 고객이 받은 글은 아무도 승인한 적 없는 글이었습니다(MSG#110 · #118).
+여기 남은 것은 막는 일뿐입니다: 승인 그대로인가, 나갈 언어인가, 채우지 않은 자리가 남았나.
+"""
 
 from __future__ import annotations
 
@@ -7,7 +14,6 @@ import logging
 from email.utils import getaddresses
 from functools import partial
 
-from ...common.textwash import text_wash
 from ...db.models import Message
 from ..delivery import DeliveryPermanentError, SendingDisabled
 
@@ -18,37 +24,21 @@ class SendLanguageMismatch(RuntimeError):
     """Raised when an approved message has not completed operator-reviewed translation."""
 
 
-def _canonicalize_reply_links(message: Message, language: str) -> None:
-    if getattr(message, "prompt_variant", None) == "auto_ack":
-        return
-    if not isinstance(message.body, str):
-        return
-    from ...llm.prompts import canonicalize_contact_links
-
-    message.body = text_wash(canonicalize_contact_links(message.body, language))
-
-
 def enforce_send_language(message: Message) -> None:
     """Final guard: only an already reviewed target-language body may leave.
 
     The operator's hard rule is that a reply must go out in the inquiry's language.
     Our code sets ``message.language`` at every step (draft = the language it was
     actually written in, translate button = target), and ``message.target_language``
-    holds the language it MUST be sent in. So:
+    holds the language it MUST be sent in.
 
-    - every reply body is whitespace/format-normalized (text wash);
     Translation belongs to the explicit review-screen button. If an old API client or
     stale approved row bypasses the approval guard, fail closed instead of translating
-    unseen text during delivery.
+    unseen text during delivery. **It only refuses — it never rewrites the body.**
     """
-    if isinstance(message.body, str):
-        message.body = text_wash(message.body)
-
     target = message.target_language if isinstance(message.target_language, str) else ""
     target = target.lower()
     if not target:
-        language = getattr(message, "language", "")
-        _canonicalize_reply_links(message, language if isinstance(language, str) else "")
         return
     current = message.language if isinstance(message.language, str) else ""
     current = current.lower()
@@ -60,48 +50,24 @@ def enforce_send_language(message: Message) -> None:
             f"message {message.id} requires reviewed translation "
             f"(current={current or '?'}, target={target})"
         )
-    _canonicalize_reply_links(message, target)
 
 
-def enforce_first_reply_no_price(message: Message) -> None:
-    """Final code guard for the "no price in the FIRST reply" rule.
+def enforce_no_unfilled_slots(message: Message) -> None:
+    """채우지 않은 자리(``reply_flags``)가 남은 글은 보내지 않습니다. 본문은 안 바꿉니다.
 
-    The draft-time strip can be bypassed (operator types a price into the draft, or
-    the translate step re-renders one), so we re-strip prices here — the single send
-    chokepoint — when this is the first real reply in the thread. We skip the
-    auto-ack. Runs AFTER translation so a translated-in price is caught too.
+    승인이 이미 막습니다(``approval.approve``). 여기서 한 번 더 보는 것은 승인을 안 거치는 행이
+    있어서입니다 — 후속 리마인더는 코드가 ``approved`` 로 세웁니다(``followup_sequence``). 템플릿에
+    ``[Name]`` 이나 주소가 설정 안 된 ``{{MEETING_LINK}}`` 가 남아 있으면 그 리마인더는 ``send_failed``
+    로 멈춥니다 — 빈칸이 고객에게 가는 것보다 낫습니다.
     """
-    if not isinstance(message.target_language, str) or not message.target_language:
-        return
-    if getattr(message, "prompt_variant", None) == "auto_ack":
-        return
-    conv_id = getattr(message, "conversation_id", None)
-    if not isinstance(conv_id, int):
-        return
+    from ...agents.reply_flags import quote_lines, unfilled_slots
 
-    from ...agents.inbound import last_sent_reply, thread_events
-    from ...db.session import SessionLocal
-
-    try:
-        events = [turn for turn in thread_events(conv_id, factory=SessionLocal)
-                  if turn.source_ref != f"message:{message.id}"]
-        prior_sent = last_sent_reply(conv_id, events=events)
-    except Exception:
-        raise DeliveryPermanentError("첫 회신 여부를 확인하지 못했습니다. 다시 검토해 주세요.") from None
-    if prior_sent:
-        return  # not the first reply — later replies may quote KB prices
-
-    from ...common.pricing_guard import strip_price_sentences
-
-    cleaned, removed = strip_price_sentences(message.body)
-    if removed:
-        message.body = cleaned
-        logger.warning(
-            "Send guard: stripped %d price line(s) from the FIRST reply (msg %s)",
-            len(removed),
-            message.id,
-        )
-
+    language = next((value for value in (getattr(message, "target_language", None),
+                                         getattr(message, "language", None))
+                     if isinstance(value, str) and value), None)
+    slots = unfilled_slots(message.body if isinstance(message.body, str) else "", language=language)
+    if slots:
+        raise DeliveryPermanentError(f"채우지 않은 자리가 있어 보내지 않았습니다 — {quote_lines(slots)}")
 
 
 # 한 회신에 걸 수 있는 참조 수. 자동으로 채워지는 값이 아니라 사람이 고르는 값이라 상한이
@@ -150,11 +116,12 @@ def parse_cc_addresses(value: str | None, *, exclude: str = "") -> list[str]:
     return out
 
 
-def _validate_review(message: Message, *, transformed: bool = False) -> None:
+def _validate_review(message: Message) -> None:
+    """승인 그대로인가 — 손에 든 행과 DB 의 행 둘 다(``reply_safety.validate_approved_message``)."""
     from ...agents.reply_safety import validate_approved_message
 
     try:
-        validate_approved_message(message, transformed=transformed)
+        validate_approved_message(message)
     except RuntimeError as exc:
         raise DeliveryPermanentError(str(exc)) from exc
     except Exception:
@@ -173,10 +140,10 @@ async def send(message: Message) -> None:
 
     _validate_review(message)
 
-    # Code-enforced language + text wash, then the first-reply no-price rule.
+    # 막기만 합니다 — 본문은 승인한 그대로입니다(모듈 docstring).
     if message.direction == "outgoing":
         enforce_send_language(message)
-        enforce_first_reply_no_price(message)
+        enforce_no_unfilled_slots(message)
 
     if any(char in (message.subject or "") for char in ("\r", "\n")):
         raise DeliveryPermanentError("Email subject contains illegal CR/LF characters")
@@ -242,7 +209,7 @@ async def send(message: Message) -> None:
         async def send(context):
             # Context lookup may have awaited remote I/O. Recheck local changes
             # immediately before each POST, including the known-rejection fallback.
-            _validate_review(message, transformed=True)
+            _validate_review(message)
             return await dispatch(context)
 
         attempt = None if chosen else cross_inbox_attempt(context)
@@ -340,7 +307,7 @@ async def _send_from_mailbox(
                            exc_info=True)
 
     cc = parse_cc_addresses(getattr(message, "cc_addresses", None), exclude=recipient)
-    _validate_review(message, transformed=True)
+    _validate_review(message)
     sent_id = await asyncio.to_thread(
         partial(
             send_mail,

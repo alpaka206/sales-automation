@@ -105,6 +105,16 @@ class Settings(BaseSettings):
     # **개인 사서함은 이 목록과 무관합니다** — 그건 허브스팟 채널 계정이 아니라 우리가
     # 따로 연결한 것이고, 고르개에 서버가 따로 얹습니다(`ui_reply_senders`).
     HUBSPOT_REPLY_SENDER_ACCOUNT_IDS: str = "3114216464"
+    # **영업이 아닌 우리 주소** — 쉼표로 나열한 메일 주소 (2026-10-06). 이 주소에서 나간 메일은
+    # CS 안내이지 「우리(영업)의 회신」이 아닙니다: 첫 회신 판정 · 지난 회신 · 답장 기준선 · 후속
+    # 리마인더 시계가 그 메일을 안 셉니다(`db.history_view.is_sales_email`). 허브스팟 화면에서
+    # `support@perso.ai` 로 CS 가 먼저 안내한 티켓이 「이미 답한 티켓」으로 읽혀 후속 회신 문서를
+    # 받던 일이 이것으로 막힙니다(운영 실측 12건).
+    #
+    # **거부 목록입니다.** 주소를 모르는 줄(CRM 줄 · 손 기록 · 발신 주소 없는 수집 줄)은 영업으로
+    # 셉니다 — 허용 목록이면 새 영업 주소가 생길 때마다 그 사람의 회신이 조용히 안 세어집니다.
+    # 새 CS 별칭이 생기면 여기에 더합니다(코드에 박지 않는 이유는 위 두 칸과 같습니다).
+    NON_SALES_SENDER_ADDRESSES: str = "support@perso.ai"
     # ----- [B2B] AI Dubbing ticket pipeline stage ids -----
     # The env names below mirror the stage labels in HubSpot (New / Qualified /
     # Negotiating / Closed Won / Closed Lost / Concluded). Stages get

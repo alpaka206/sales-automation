@@ -163,9 +163,14 @@ def apply_editable_tokens(body: str, language: str | None = None) -> str:
 
 
 _LINK_URL_RE = re.compile(r"https?://[^\s)>\]]+")
-_CONTACT_LINK_MARKDOWN_RE = re.compile(
-    r"\[(?:Calendly|WhatsApp|미팅\s*링크)\]\([^\n]+?\)", re.IGNORECASE
-)
+# 연락 링크에 다는 글자(공백을 빼고 소문자로). 이 글자를 단 링크만 언어에 맞춰 글자를 바꿉니다 —
+# 운영자가 단 다른 글자(「book a call」)는 문장이라 안 건드립니다.
+_CONTACT_LABELS = {"calendly": "meeting", "미팅링크": "meeting", "whatsapp": "whatsapp"}
+_LINK_TOKENS = {"{{MEETING_LINK}}": "meeting", "{{WHATSAPP}}": "whatsapp"}
+_MARKDOWN_LINK_RE = re.compile(r"\[([^\[\]\n]+)\]\(([^()\s]+)\)")
+# `[미팅 링크]({{MEETING_LINK}})` 의 토큰 자리에 행 전체(`[Calendly](주소)`)가 들어가면 생기는 겹친 링크.
+_NESTED_LINK_RE = re.compile(r"\[([^\[\]\n]+)\]\(\s*\[[^\[\]\n]*\]\(([^()\s]+)\)\s*\)")
+_HELD_RE = re.compile("\x00(\\d+)\x00")
 
 
 def _url_from_template(value: str | None) -> str:
@@ -174,30 +179,38 @@ def _url_from_template(value: str | None) -> str:
 
 
 def canonicalize_contact_links(body: str, language: str | None = None) -> str:
-    """Put the contact links in an exact, deterministic block.
+    """Normalize the contact links the body **already uses** — and nothing else.
 
-    The model decides how the prose reads and WHERE the link belongs; it does not decide
-    what the link line says. Existing prose such as "schedule at Calendly or contact us
-    via WhatsApp" is removed as one line and the configured URLs take **that same spot**.
+    The model (or the operator) decides how the prose reads, WHERE a link goes and
+    WHETHER there is one; this decides only what a contact link points at and, for the
+    contact labels, what it is called:
 
-    **The block replaces the line it found, it is not appended to the end.** Appending is
-    what this did at first, and a Korean reply went out with the meeting link *below*
-    「감사합니다.」 — the closing came before the call to action (2026-08-26, msg 62). The
-    skeleton already tells the model to put ``{{MEETING_LINK}}`` above the sign-off, so
-    the placement was right until this function moved it.
+    - ``{{MEETING_LINK}}`` / ``{{WHATSAPP}}`` become ``[label](configured URL)`` in place.
+      With no URL configured the token stays visible — and approval refuses it
+      (``reply_flags.unfilled_slots``), so it never ships as a raw token.
+    - ``[Calendly](…)`` · ``[미팅 링크](…)`` · ``[WhatsApp](…)`` get the configured URL (a
+      model shortens a 120-char booking URL) and **the label follows the language**: a
+      Korean reply links the words 「미팅 링크」, any other language ``Calendly``.
+    - A link with the operator's own label keeps its words; only a configured URL is
+      swapped for the language's row.
+    - A bare configured URL in a sentence becomes a labeled link **inside that sentence**.
+    - ``[미팅 링크]([Calendly](URL))`` — the Korean skeleton's ``[미팅 링크]({{MEETING_LINK}})``
+      after token substitution put the whole row inside the parentheses — becomes one link.
 
-    **WhatsApp is an English-reply line only, and the label follows the language.**
-    0069 took ``{{WHATSAPP}}`` out of the Korean skeleton because there is no reason to
-    offer WhatsApp to a domestic customer — and then this footer put it back on every
-    Korean reply, because it read ``language`` only to pick WHICH row holds the URL,
-    never whether the line belongs at all. It hardcoded ``[Calendly]`` for the same
-    reason, so a Korean reply linked the word "Calendly" where 0069 had settled on
-    「미팅 링크」. Both decisions live here now, in one place: the send path calls this
-    function last, so whatever it appends is what the customer receives.
+    **It never adds a link and never removes a line** (2026-10-06). It used to delete every
+    line holding a contact link and write a fixed block in its place, which took the
+    operator's sentence with it ("If it's easier, grab a slot here: … or just reply to this
+    email." went out as two bare link lines), and it appended WhatsApp to every non-Korean
+    reply whether or not anyone wrote it (11 of 11 English drafts in the 2026-10-06
+    evaluation). Whether a WhatsApp line belongs is the template's decision: the English
+    skeleton says 「다른 링크 토큰을 더하지 마세요」.
 
-    The function is intentionally a no-op for messages with no contact link at all.
+    It is not on the send path any more: drafts and operator saves pass through it
+    (``approval.prepare_reviewed_body``), so what the operator approves is what goes out.
+    No contact link, or no configured URL → the body comes back unchanged.
     """
-    if not body:
+    # 토큰도 링크도 주소도 없는 글은 행을 읽을 것도 없습니다 — 저장·승인이 부르는 자리라 DB 왕복을 아낍니다.
+    if not body or not any(mark in body for mark in ("{{", "](", "http")):
         return body
     from ..db.email_templates import get_email_template
 
@@ -205,57 +218,49 @@ def canonicalize_contact_links(body: str, language: str | None = None) -> str:
     values: dict[str, str] = {}
     for key in ("meeting_link", "meeting_link_en", "whatsapp_link", "whatsapp_link_en"):
         try:
-            values[key] = (get_email_template(key) or "").strip()
+            values[key] = _url_from_template(get_email_template(key))
         except Exception:
             values[key] = ""
-    urls = {_url_from_template(value) for value in values.values()}
-    urls.discard("")
-    has_link = (
-        "{{MEETING_LINK}}" in body
-        or "{{WHATSAPP}}" in body
-        or bool(_CONTACT_LINK_MARKDOWN_RE.search(body))
-        or any(url in body for url in urls)
-    )
-    if not has_link:
+    order = ("_en", "") if english else ("", "_en")
+    url = {
+        kind: next((values[f"{kind}_link{suffix}"] for suffix in order if values[f"{kind}_link{suffix}"]), "")
+        for kind in ("meeting", "whatsapp")
+    }
+    if not url["meeting"] and not url["whatsapp"]:
         return body
+    known = {value: key.split("_")[0] for key, value in values.items() if value}  # 설정된 주소 → 종류
+    label = {"meeting": "Calendly" if english else "미팅 링크", "whatsapp": "WhatsApp"}
 
-    meeting_keys = ("meeting_link_en", "meeting_link") if english else (
-        "meeting_link", "meeting_link_en"
-    )
-    whatsapp_keys = ("whatsapp_link_en", "whatsapp_link") if english else (
-        "whatsapp_link", "whatsapp_link_en"
-    )
-    meeting_url = next((_url_from_template(values[key]) for key in meeting_keys if values[key]), "")
-    whatsapp_url = (
-        next((_url_from_template(values[key]) for key in whatsapp_keys if values[key]), "")
-        if english
-        else ""
-    )
-    if not meeting_url and not whatsapp_url:
-        return body
+    held: list[str] = []
 
-    markers = ["{{MEETING_LINK}}", "{{WHATSAPP}}", *urls]
-    kept: list[str] = []
-    slot: int | None = None  # 첫 링크 줄이 있던 자리. 블록은 거기로 돌아간다.
-    for line in body.splitlines():
-        if any(marker and marker in line for marker in markers) or _CONTACT_LINK_MARKDOWN_RE.search(
-            line
-        ):
-            if slot is None:
-                slot = len(kept)
-            continue
-        kept.append(line)
-    footer = []
-    if meeting_url:
-        footer.append(f"[{'Calendly' if english else '미팅 링크'}]({meeting_url})")
-    if whatsapp_url:
-        footer.append(f"[WhatsApp]({whatsapp_url})")
-    if slot is None:  # 링크 줄을 못 찾았다 — 그때만 끝에 붙인다.
-        slot = len(kept)
-    kept[slot:slot] = footer
-    # 링크 줄이 두 줄이었다가 한 줄이 되면(국문) 그 자리에 빈 줄이 하나 남는다. 세 줄 이상
-    # 이어지는 빈 줄만 두 줄로 줄인다 — 문단 사이의 빈 줄 하나는 그대로 둬야 한다.
-    return re.sub(r"\n{3,}", "\n\n", "\n".join(kept)).strip()
+    def _hold(text: str) -> str:
+        held.append(text)
+        return f"\x00{len(held) - 1}\x00"
+
+    def _markdown(match: re.Match[str]) -> str:
+        text, target = match.group(1), match.group(2)
+        contact_label = _CONTACT_LABELS.get(re.sub(r"\s+", "", text).lower())
+        kind = _LINK_TOKENS.get(target) or known.get(target) or contact_label
+        if kind is None:
+            return _hold(match.group(0))
+        new_url = url[kind] or ("" if target in _LINK_TOKENS else target)
+        if not new_url:  # 토큰인데 주소가 없다 — 보이게 둡니다.
+            return _hold(match.group(0))
+        return _hold(f"[{label[kind] if contact_label else text}]({new_url})")
+
+    out = _NESTED_LINK_RE.sub(lambda m: f"[{m.group(1)}]({m.group(2)})", body)
+    out = _MARKDOWN_LINK_RE.sub(_markdown, out)
+    for token, kind in _LINK_TOKENS.items():
+        if url[kind]:
+            out = out.replace(token, _hold(f"[{label[kind]}]({url[kind]})"))
+    # 문장 속 맨 주소. 뒤에 주소 글자가 더 이어지면 다른 주소라 안 건드립니다.
+    for configured, kind in sorted(known.items(), key=lambda item: -len(item[0])):
+        out = re.sub(
+            re.escape(configured) + r"(?=[.,;:!?)\]]*(?:\s|$))",
+            lambda _m, kind=kind: _hold(f"[{label[kind]}]({url[kind]})"),
+            out,
+        )
+    return _HELD_RE.sub(lambda m: held[int(m.group(1))], out)
 
 
 # Preserve the previous public API: callers (e.g. llm/knowledge.reset_cache) call

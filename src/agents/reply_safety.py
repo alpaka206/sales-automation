@@ -45,7 +45,15 @@ def validate_draft_context(message_id: int) -> None:
         raise RuntimeError("대화가 변경되었습니다. 초안을 다시 생성하고 검토해 주세요.")
 
 
-def validate_approved_message(message: Message, *, transformed: bool = False) -> None:
+def validate_approved_message(message: Message) -> None:
+    """승인한 그대로인가 — 손에 든 행도, DB 의 행도.
+
+    **두 쪽 다 언제나 같아야 합니다** (2026-10-06). 예전에는 발송이 본문을 다듬은 **뒤**의 두 번째
+    검사에서 손에 든 행을 건너뛰었습니다(``transformed``) — 그 구멍으로 승인 뒤에 바뀐 글이
+    나갔습니다. 발송은 이제 본문을 안 바꾸므로 건너뛸 이유가 없습니다.
+
+    승인 기록(``reply_approval``)이 없는 행(후속 리마인더 · 옛 행)은 이 대조를 건너뜁니다.
+    """
     from ..db.session import SessionLocal
 
     with SessionLocal() as session:
@@ -58,7 +66,7 @@ def validate_approved_message(message: Message, *, transformed: bool = False) ->
             # 로컬에서는 안 잡힙니다: 안전 모드는 이 검사 앞에서 SendingDisabled 로 빠집니다.
             claimed = (stored.status or "").startswith("sending:") if stored else False
             if (stored is None or (stored.status != "approved" and not claimed)
-                    or (not transformed and approval_binding(message) != trace["binding"])
+                    or approval_binding(message) != trace["binding"]
                     or approval_binding(stored) != trace["binding"]):
                 raise RuntimeError("승인 후 발송 내용 또는 수신 정보가 변경되었습니다.")
     validate_draft_context(message.id)

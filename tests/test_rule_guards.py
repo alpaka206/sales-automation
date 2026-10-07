@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import re
 from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
 
-from src.common.pricing_guard import contains_price, strip_price_sentences
+from src.common.pricing_guard import contains_price
 from src.common.subjects import (
     generic_inquiry_subject,
     reply_subject,
@@ -81,6 +82,40 @@ def test_text_wash_empty():
     assert text_wash(None) == ""
 
 
+def test_an_indented_line_after_a_bullet_continues_it():
+    """줄을 맞춰 쓴 항목은 한 항목입니다 — 그 사이에 빈 줄을 넣으면 문단 셋으로 쪼개져 나갔습니다(MSG#110)."""
+    wrapped = (
+        "Direct answers first:\n"
+        "\n"
+        "- A covers dubbing for\n"
+        "  up to 60 minutes\n"
+        "  per month.\n"
+        "- B is metered.\n"
+        "Thanks."
+    )
+    assert text_wash(wrapped) == (
+        "Direct answers first:\n"
+        "\n"
+        "- A covers dubbing for\n"
+        "  up to 60 minutes\n"
+        "  per month.\n"
+        "- B is metered.\n"
+        "\n"
+        "Thanks."
+    )
+
+
+def test_a_blank_line_ends_the_item_and_indented_prose_keeps_its_indent():
+    raw = "- item\n\n\n\n   an indented note\nprose"
+    assert text_wash(raw) == "- item\n\n   an indented note\nprose"
+
+
+def test_a_dash_sign_off_is_not_a_bullet():
+    """「— Untae」가 목록 한 칸(`<ul><li>`)이 되어 나갔습니다. 대시는 맺음·덧붙임을 여는 글자이기도 합니다."""
+    assert text_wash("Thanks,\n— Untae") == "Thanks,\n— Untae"
+    assert text_wash("– a note") == "– a note"
+
+
 # ---------- pricing guard ----------
 
 
@@ -98,19 +133,35 @@ def test_contains_price_negative():
     assert not contains_price("Launched in 2026")
 
 
-def test_strip_price_sentences_removes_price_lines():
-    body = "플랜을 안내드립니다.\n- Creator 플랜 $29/월\n미팅에서 안내드릴게요."
-    cleaned, removed = strip_price_sentences(body)
-    assert "$29" not in cleaned
-    assert "미팅" in cleaned
-    assert len(removed) == 1
+@pytest.mark.parametrize("line", [
+    # 범위를 묻는 질문 — 「per month」 하나로 금액이 됐고, 그 줄이 첫 회신에서 지워졌습니다(MSG#110).
+    "How many minutes per month do you expect to dub?",
+    "- The top tier and its hours per month. A monthly total comes later",
+    "1. Footage. About how many hours of video do you publish per month,",
+    "We usually bill per seat.",
+    "Upload limit is 60/mo",
+    "Credits refresh 1,000/month.",
+    "100/월 크레딧",
+    # 「동」(VND) 이 한국 주소에 걸렸습니다.
+    "제2동 사무실",
+    "3동 건물",
+    "cut the per-minute cost by as much as 35% compared with",
+])
+def test_a_quantity_is_not_a_price(line):
+    """금액은 숫자 옆의 통화(기호·코드·말)입니다. 기간이나 수량만으로는 아닙니다."""
+    assert not contains_price(line)
 
 
-def test_strip_price_sentences_noop_when_no_price():
-    body = "플랜을 안내드립니다.\n미팅에서 안내드릴게요."
-    cleaned, removed = strip_price_sentences(body)
-    assert cleaned == body
-    assert removed == []
+@pytest.mark.parametrize("line", [
+    "Starter is $19 a month and includes 30",
+    "minutes of dubbing. A top-up pack adds 60 minutes for $25.",
+    "Together that covers 90 minutes in one language for $44, with",
+    "29€ per seat",
+    "3만 원",
+    "10,000 VND",
+])
+def test_a_currency_next_to_a_number_is_a_price(line):
+    assert contains_price(line)
 
 
 # ---------- send-time language guard ----------
@@ -155,15 +206,24 @@ def test_send_guard_refuses_korean_body_with_stale_target_metadata():
         enforce_send_language(msg)
 
 
-def test_send_guard_noop_without_target():
+@pytest.mark.parametrize("target", [None, "en"])
+def test_the_send_guard_never_rewrites_the_body(target):
+    """발송은 막기만 합니다 — 승인한 글자를 공백 하나도 다듬지 않고, 링크 줄도 다시 쓰지 않습니다.
+
+    예전에는 여기서 공백을 고르고 연락 링크 줄을 통째로 다시 썼습니다. 승인 **뒤**의 일이라 고객이
+    받은 글은 아무도 승인한 적 없는 글이었습니다.
+    """
     from src.integrations.senders import enforce_send_language
 
-    msg = _msg(language="ko", target_language=None, body="안녕하세요.  ")
-    with patch("src.llm.translate.translate_to") as tx:
+    body = "Hello.  \n\nIf it's easier, grab a slot here: https://calendar.example/abc123 or reply."
+    msg = _msg(language="en", target_language=target, body=body)
+    links = {"meeting_link": "[Calendly](https://calendar.example/abc123)",
+             "whatsapp_link": "[WhatsApp](https://wa.me/1)"}
+    with (patch("src.llm.translate.translate_to") as tx,
+          patch("src.db.email_templates.get_email_template", side_effect=links.get)):
         enforce_send_language(msg)
     tx.assert_not_called()
-    # Still washed (trailing spaces trimmed).
-    assert msg.body == "안녕하세요."
+    assert msg.body == body
 
 
 def test_contains_price_english_words():
@@ -173,93 +233,41 @@ def test_contains_price_english_words():
     assert not contains_price("about 50 people")
 
 
-# ---------- send-path first-reply no-price guard (rule 8, enforced at send) ----------
+# ---------- send path: refuse an unfilled slot, never rewrite (2026-10-06) ----------
+#
+# 첫 회신의 금액은 예전에 발송이 **줄째 지웠습니다**(MSG#110 · #118). 이제 발송은 본문을 건드리지
+# 않고, 막는 것은 채우지 않은 자리 하나입니다 — 금액도 대화 기록도 안 봅니다(운영자: 「답변 작성에
+# 대한 경고문 이런건 필요없어」).
 
 
-def _seed_reply(db_session, body, *, prior_sent=False):
-    from src.db.models import Contact, Conversation, Message
-
-    c = Contact(normalized_email="x@acme.com", full_name="X", email="x@acme.com", domain="acme.com")
-    db_session.add(c)
-    db_session.flush()
-    conv = Conversation(contact_id=c.id, inquiry_subject="pricing")
-    db_session.add(conv)
-    db_session.flush()
-    if prior_sent:
-        db_session.add(
-            Message(
-                conversation_id=conv.id,
-                direction="outgoing",
-                body="이전 회신",
-                language="en",
-                status="sent",
-            )
-        )
-    msg = Message(
-        conversation_id=conv.id,
-        direction="outgoing",
-        body=body,
-        language="ko",
-        target_language="en",
-        status="approved",
-    )
-    db_session.add(msg)
-    db_session.commit()
-    return msg
-
-
-def test_first_reply_price_stripped_at_send(db_session, monkeypatch):
+def test_a_first_reply_price_goes_out_as_written_without_reading_the_history(monkeypatch):
     from src.integrations import senders
 
-    msg = _seed_reply(db_session, "플랜 안내드립니다.\n- Creator $29/월\n미팅에서 안내드릴게요.")
-    monkeypatch.setattr("src.db.session.SessionLocal", lambda: db_session)
-    senders.enforce_first_reply_no_price(msg)
-    assert "$29" not in msg.body
-    assert "미팅" in msg.body
+    def unavailable():
+        raise RuntimeError("unavailable")
+
+    monkeypatch.setattr("src.db.session.SessionLocal", unavailable)
+    body = "Thanks for asking.\n- Starter is $19 a month.\nHappy to walk you through it."
+    msg = _msg(language="en", target_language="en", body=body)
+    senders.enforce_no_unfilled_slots(msg)
+    assert msg.body == body
 
 
-def test_later_reply_keeps_price_at_send(db_session, monkeypatch):
-    from src.integrations import senders
-
-    msg = _seed_reply(db_session, "Creator 플랜은 $29/월 입니다.", prior_sent=True)
-    monkeypatch.setattr("src.db.session.SessionLocal", lambda: db_session)
-    senders.enforce_first_reply_no_price(msg)
-    # A later reply may quote prices — must be untouched.
-    assert "$29" in msg.body
-
-
-
-def test_send_price_guard_read_failure_blocks_delivery(db_session, monkeypatch):
+@pytest.mark.parametrize("language,target,body,refused", [
+    ("en", "en", "Hi [Name],\n\nFollowing up on my last note.", "Hi [Name],"),
+    ("en", "en", "Book a slot: {{MEETING_LINK}}", "Book a slot: {{MEETING_LINK}}"),
+    # 나갈 언어가 한국어가 아니면 대괄호 속 한국어는 쓰는 사람에게 남긴 지시입니다.
+    ("en", "en", "[가격을 먼저 안내했다면] One note first.", "[가격을 먼저 안내했다면] One note first."),
+    ("ko", None, "[안내] 결제 방법은 아래와 같습니다.", None),
+])
+def test_an_unfilled_slot_stops_delivery_and_the_body_stays(language, target, body, refused):
     from src.integrations import senders
     from src.integrations.delivery import DeliveryPermanentError
 
-    msg = _seed_reply(db_session, "검토한 본문")
-    def unavailable():
-        raise RuntimeError("unavailable")
-    monkeypatch.setattr("src.db.session.SessionLocal", unavailable)
-    with pytest.raises(DeliveryPermanentError, match="확인하지 못"):
-        senders.enforce_first_reply_no_price(msg)
-
-
-@pytest.mark.parametrize("prior_kind", ["reminder", "test_sent", "hubspot_reply"])
-def test_send_price_guard_uses_the_same_real_reply_history(db_session, monkeypatch, prior_kind):
-    from datetime import datetime
-    from src.agents.followup_sequence import REMINDER_VARIANTS
-    from src.db.models import Conversation, CustomerInteraction, Message
-    from src.integrations import senders
-
-    msg = _seed_reply(db_session, "플랜 안내드립니다.\n- Creator $29/월\n미팅에서 안내드릴게요.")
-    conv = db_session.get(Conversation, msg.conversation_id)
-    if prior_kind == "hubspot_reply":
-        db_session.add(CustomerInteraction(contact_id=conv.contact_id, conversation_id=conv.id,
-                                          channel="email", direction="outgoing",
-                                          summary="실제 이전 회신", happened_at=datetime(2020, 1, 1)))
+    msg = _msg(language=language, target_language=target, body=body)
+    if refused is None:
+        senders.enforce_no_unfilled_slots(msg)
     else:
-        db_session.add(Message(conversation_id=conv.id, direction="outgoing", body="이전 기록",
-                               status="sent" if prior_kind == "reminder" else "test_sent",
-                               prompt_variant=next(iter(REMINDER_VARIANTS)) if prior_kind == "reminder" else None,
-                               sent_at=datetime(2020, 1, 1)))
-    db_session.commit()
-    monkeypatch.setattr("src.db.session.SessionLocal", lambda: db_session)
-    senders.enforce_first_reply_no_price(msg)
-    assert ("$29" in msg.body) == (prior_kind == "hubspot_reply")
+        with pytest.raises(DeliveryPermanentError, match=re.escape(f"「{refused}」")):
+            senders.enforce_no_unfilled_slots(msg)
+    assert msg.body == body

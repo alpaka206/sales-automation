@@ -2,7 +2,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from src.agents.draft_evidence import AnswerPoint, PolicyQuote, check_draft, compose_answer
+from src.agents.draft_evidence import AnswerPoint, PolicyQuote, answer_point_gaps, check_draft
 
 
 DOCS = [SimpleNamespace(id=1, body="결제 후 14일 이내 신청 가능. 프로젝트 보관은 30일입니다.")]
@@ -62,29 +62,70 @@ def test_the_context_filter_still_catches_an_invented_processing_period():
     assert "unsupported_duration" in check_draft("환불 처리는 24시간 이내 완료됩니다.", [], documents=DOCS, customer_text="")
 
 
-def test_composition_cannot_drop_known_answer_when_internal_verification_is_needed():
-    points = [AnswerPoint(question="환불?", supported_answer="14일 이내라면 신청 대상입니다.",
-                          verification_needed="결제일과 다운로드 이력 확인이 필요합니다."),
-              AnswerPoint(question="자막?", supported_answer="SRT로 내보낼 수 있습니다.")]
-    assert compose_answer(points) == (
-        "14일 이내라면 신청 대상입니다.\n\n결제일과 다운로드 이력 확인이 필요합니다.\n\n"
-        "SRT로 내보낼 수 있습니다.")
+def test_the_model_writes_the_body_and_answer_points_are_an_optional_audit():
+    """본문은 모델이 쓴 이메일 전체다 (2026-10-06). 예전에는 answer_points 를 코드가 이어 붙여 본문으로
+    썼고 그래서 answer_points 가 하나도 없으면 스키마가 거절했다 — 이제는 점검용이라 없어도 받는다."""
+    from src.agents.inbound import DraftResult
+
+    draft = DraftResult.model_validate({"body": "Hi Ana,\n\nThanks for writing.", "language": "en"})
+    assert draft.body == "Hi Ana,\n\nThanks for writing."
+    assert draft.answer_points == [] and draft.placeholders == [] and draft.subject == ""
+    # 점검용 칸이 비어도 초안 전체가 스키마에서 떨어지지 않는다 — 그러면 JSON 재시도와 큐 재시도만 쌓인다.
+    partial = DraftResult.model_validate({"body": "b", "language": "en", "answer_points": [{"question": "q"}]})
+    assert partial.answer_points[0].supported_answer == ""
 
 
-def test_an_all_blank_composition_is_the_one_grounding_failure_that_still_raises():
-    """검사는 표시만 남기지만(2026-09-22) 보여 줄 본문이 없는 초안은 여전히 여기서 죽는다."""
-    from src.agents.draft_evidence import DraftEvidenceError
-
-    with pytest.raises(DraftEvidenceError):
-        compose_answer([AnswerPoint(question="?", supported_answer=" ", verification_needed="  ")])
-
-
-def test_grounded_schema_does_not_accept_a_body_without_answer_points():
+def test_a_draft_without_a_body_does_not_parse_as_one():
     from pydantic import ValidationError
-    from src.agents.inbound import GroundedDraftResult
+    from src.agents.inbound import DraftResult
 
     with pytest.raises(ValidationError):
-        GroundedDraftResult.model_validate({"body": "확인하겠습니다.", "language": "ko"})
+        DraftResult.model_validate({"answer_points": [{"question": "q", "supported_answer": "a"}], "language": "en"})
+
+
+_REFUND = AnswerPoint(question="refund?", supported_answer="Within 14 days of payment.")
+_PLAN = AnswerPoint(question="plan?", supported_answer="12,000 minutes, 20% off.")
+
+
+@pytest.mark.parametrize("body,point,gap", [
+    ("Refunds are possible within 14 days of payment.", _REFUND, False),
+    # ADR 2026-09-21 의 그 사고 — 조건의 숫자가 본문에서 빠졌다.
+    ("Refunds are possible within two weeks of payment.", _REFUND, True),
+    ("The 12,000-minute plan includes a 20% discount.", _PLAN, False),
+    ("The 12000-minute plan includes a 20 % discount.", _PLAN, False),
+    ("The plan includes a discount.", _PLAN, True),
+])
+def test_a_number_the_answer_points_promise_must_be_in_the_body(body, point, gap):
+    assert answer_point_gaps(body, [point]) == (["answer_point_missing"] if gap else [])
+
+
+def test_list_numbers_and_empty_points_are_not_promises():
+    assert answer_point_gaps("We support SRT.", [AnswerPoint(supported_answer="1. We support SRT."),
+                                                 AnswerPoint(question="?")]) == []
+
+
+def test_thousands_separators_are_one_number_not_a_new_duration():
+    """「12,000 minutes」를 「000 minutes」로 읽어 문서에 있는 분량이 지어낸 기간으로 걸렸다."""
+    docs = [SimpleNamespace(id=1, body="Processing of up to 12,000 minutes takes 3 business days.")]
+    body = "Processing of 12,000 minutes takes 3 business days."
+    assert check_draft(body, [], documents=docs, customer_text="") == []
+    assert "unsupported_duration" in check_draft("Processing of 13,000 minutes takes 3 business days.",
+                                                 [], documents=docs, customer_text="")
+
+
+def test_a_quote_survives_table_and_markdown_reformatting():
+    """노션의 탭 표를 | 표로, 굵은 글씨를 ** 없이 옮겨 적은 인용은 같은 문장이다(평가 F415d)."""
+    docs = [SimpleNamespace(id=1, body="플랜\t분량\t가격\n**Pro**\t180분\t공개 가격\n\n환불은 _14일_ 이내입니다.")]
+    quotes = [PolicyQuote(source_id=1, quote="| Pro | 180분 | 공개 가격 |"),
+              PolicyQuote(source_id=1, quote="환불은 14일 이내입니다.")]
+    assert check_draft("답변", quotes, documents=docs, customer_text="") == []
+
+
+def test_a_real_sentence_cited_under_the_neighbouring_id_is_still_a_real_quote():
+    """모델이 옆 문서의 id 로 인용한 진짜 문장(평가 R424)은 인용 실패가 아니다 — 지어낸 문장만 실패다."""
+    docs = [SimpleNamespace(id=17, body="응대 지침."), SimpleNamespace(id=18, body="보관 기간은 30일입니다.")]
+    assert check_draft("답변", [PolicyQuote(source_id=17, quote="보관 기간은 30일입니다.")],
+                       documents=docs, customer_text="") == []
 
 
 @pytest.mark.parametrize("quote", [PolicyQuote(source_id=2, quote="비밀"),

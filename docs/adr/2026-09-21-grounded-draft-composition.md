@@ -2,6 +2,8 @@
 
 상태: 로컬 구현, 실제 Vertex 개발셋 평가 완료 여부와 수치는 [평가 결과](../policy-response/runs/2026-09-21-live/results.md)에 기록한다. 운영 배포·발송 승인 아님.
 
+**2026-10-06 대체됨**: 「본문은 코드가 답변 요소를 이어 붙여 만든다」와 코드 상수의 가격·후속 지시는 [콘솔 주도 초안 ADR](2026-10-06-console-driven-drafting.md)로 대체됐다 — 본문은 모델이 쓴 메일이고 답변 요소는 점검 기록이다. 제한 근거 검사와 재작성 1회는 그대로 남았다(이제 보내기 전 검토와 같은 재작성 한 번을 나눠 쓴다).
+
 ## Context / 관측한 문제
 
 첫 로컬 개선 후 Gemini 2.5 Flash/Pro를 실제 호출했다. 동일 합성 정책·14개 문의·2반복에서 라우터/허용 문서 전체 분기를 비교했다. 가상 회사 정책이며 실제 회사 정책의 정확도 시험은 아니다. 원문에 없는 환불 처리 5~10일, 실행하지 않은 환불 접수·진행 상태, 존재가 확인되지 않은 화면 메뉴가 생성됐다. 원문 전체 주입도 이를 해결하지 못했다.
@@ -15,6 +17,7 @@
 - `PolicyQuote`는 생성에 실제 제공한 source_id와 원문 내 연속 구절인지 검사한다. 규칙과 지식 문서에 ID/version 표시를 추가한다. 인용 유효성과 답변의 논리적 타당성은 다르다.
 - `check_draft`는 입력 원문/고객 발화에 없는 숫자 기간과 일부 명백한 실행 상태 표현을 감지한다. 실패하면 같은 snapshot으로 **의미 검사 재작성 1회**만 허용한다. 재실패는 초안 오류이며 고객에 대한 자동 거절이 아니다. 기존 JSON 형식 재시도/통신 재시도까지 전체 API 호출이 2회라는 뜻은 아니다.
 - **2026-09-22 변경 — 검사는 표시하고 막지 않는다** (운영자 지시: 「미완성이라도 사람한테 뜨면 좋겠는데」). 재작성 1회 뒤에도 남는 문제와 변환 뒤 검사의 문제는 `DraftEvidenceError` 가 아니라 매니페스트의 `limited_evidence_checks.status = FAIL` + `issues` 로 남고, 초안은 그대로 `pending_approval` 로 검토 화면에 선다(편집기 위 경고 배너). 위·아래 문단의 「재실패는 초안 오류」·「pending 차단」은 그 날 이전의 동작이다. `DraftEvidenceError` 와 큐의 terminal 처리는 답변 요소가 전부 비어 보여 줄 본문이 없는 조합(`compose_answer`)에만 남는다. 고정 테스트: `test_policy_context.py::test_unsupported_duration_gets_one_repair_then_reaches_the_operator_flagged`, `test_draft_evidence.py::test_an_all_blank_composition_is_the_one_grounding_failure_that_still_raises`.
+- **2026-10-06 변경 — 표시도 하지 않는다** (운영자 지시: 「답변 작성에 대한 경고문 이런건 필요없어」). 편집기 위 경고 배너(`ticket.evidence`)를 지웠고, 검사 결과는 매니페스트에만 남는다. 같은 날 코드 조합(`compose_answer`)도 없앴다 — 본문은 모델이 쓴 메일이고 답변 요소는 점검 기록이다. `DraftEvidenceError` 는 본문이 빈 초안에만 남는다. 고정 테스트: `test_policy_context.py::test_unsupported_duration_gets_one_repair_then_still_reaches_the_operator`, `test_draft_generation.py::test_an_empty_body_is_the_one_draft_failure_that_stays_terminal`.
 - 실제 실행 근거가 없으므로 “아직 완료되지 않았다”도 확인된 상태로 취급하지 않는다. 주 비교 뒤 관측된 이 문장 계열을 추가 검사했다. durable inbound job은 `DraftEvidenceError`를 terminal로 처리해 이미 소진한 의미 재작성을 큐에서 8회 반복하지 않는다.
 - 언어·링크·기존 가격 처리 뒤에도 본문을 검사한다. Event에는 검사 상태/생성 횟수/인용 ID/답변 요소 개수만 추가한다. `semantic_validation=NOT_RUN`, `delivery_permission=DRAFT_ONLY`를 유지한다.
 - 기본 모델·추론 한도 128·리마인더·운영 설정은 유지한다. 명시적 호출별 thinking budget은 평가 adapter의 비교용으로만 사용했다. 새 DB 테이블, migration, 인덱스, 그래프, 별도 검증 모델은 없다.

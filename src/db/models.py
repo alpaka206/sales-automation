@@ -979,3 +979,49 @@ class PendingWon(Base):
     # pending / done / dismissed
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="pending")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+
+
+class PolicySection(Base):
+    """콘솔 문서(정책 문서 · 이메일 템플릿) 한 편을 나눈 구간 하나와 그 꼬리표 (이관 0130).
+
+    쓰는 곳은 ``llm/organizer`` 하나입니다. 구간은 **본문 오프셋**(``start_offset`` ·
+    ``end_offset``)이라 글자를 옮겨 적지 않습니다 — 초안의 인용 검사가 원문과 대조하므로,
+    다시 쓴 요약은 매번 인용 실패가 되고 「않는다」 하나가 빠져도 아무도 모릅니다.
+
+    **지도는 본문 해시와 정리기 판에 묶입니다** (``body_sha256`` · ``organizer_version``).
+    둘 중 하나라도 지금과 다르면 낡은 지도이고, 그 문서는 다시 정리될 때까지 예전처럼 본문
+    통째로 갑니다. 원본 행에 칸을 더하지 않은 이유: 정책 문서의 칸은 초안 지문
+    (``PolicyDocument``)에 들어가서, 정리가 끝날 때마다 대기 중인 초안이 전부 「정책이
+    변경되었습니다」로 막힙니다.
+
+    ``source_id`` 는 FK 가 아닙니다 — ``source_kind`` 에 따라 ``policy_sources`` 와
+    ``email_templates`` 두 표를 가리킵니다. 정책 문서를 지우면 그 라우트가 같은
+    트랜잭션에서 지우고, 템플릿은 정리기가 다음 회차에 고아를 치웁니다.
+    """
+
+    __tablename__ = "policy_sections"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    # policy | template
+    source_kind: Mapped[str] = mapped_column(String(16), nullable=False)
+    source_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    body_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    organizer_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    idx: Mapped[int] = mapped_column(Integer, nullable=False)
+    start_offset: Mapped[int] = mapped_column(Integer, nullable=False)
+    end_offset: Mapped[int] = mapped_column(Integer, nullable=False)
+    # 제목 경로 — 「§1. 실행 순서 › 4-1. 크레딧 환산」. 본문이 아니라 프롬프트의 이름표입니다.
+    heading: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # rule · format · example · template · fact · public_price · internal_price ·
+    # confidential · process · other (`organizer.KINDS`)
+    kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    applies_to: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    topics: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    confidential: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # 고객 메일에 나가면 안 되는 문자열 그대로(공급사·경쟁사 이름, 원가·마진·승인 하한 금액).
+    terms: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+
+    __table_args__ = (
+        Index("ux_policy_sections_source_idx", "source_kind", "source_id", "idx", unique=True),
+    )

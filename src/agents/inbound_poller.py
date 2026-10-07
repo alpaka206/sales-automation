@@ -274,6 +274,7 @@ def _poller_steps() -> list[tuple[str, object]]:
     """
     from functools import partial
 
+    from ..llm.organizer import organize_pending
     from .hubspot_backfill import process_requested_hubspot_backfill
     from .inbound import cache_korean_inquiries
     from .summaries import backfill_interaction_digests
@@ -300,6 +301,11 @@ def _poller_steps() -> list[tuple[str, object]]:
         # 저절로 멎습니다. 위 번역 백필과 같은 성격이라 나란히 둡니다: 기다리는 사람이
         # 없고, 한 회차가 실패해도 다음 회차가 이어서 합니다.
         ("interaction_digests", backfill_interaction_digests),
+        # 콘솔 문서(정책 문서 · 이메일 템플릿)를 구간으로 나누고 꼬리표를 답니다 (0130).
+        # 회차마다 지도가 없거나 낡은 문서 **한 편**이고, 다 정리돼 있으면 조회 두어 번으로
+        # 끝납니다. 저장 라우트가 모델을 안 기다리는 이유가 이 단계입니다 — 정리되기 전까지 그
+        # 문서는 예전처럼 본문 통째로 초안에 갑니다.
+        ("knowledge_organizer", organize_pending),
         # 티켓별 대화를 조금씩 받아옵니다. 한 바퀴를 다 돌면 가장 오래된 것부터 다시
         # 도므로, 지난 대화를 메우는 일과 새로 쌓인 대화를 따라잡는 일이 한 단계입니다.
         ("ticket_history", run_pending_ticket_history),

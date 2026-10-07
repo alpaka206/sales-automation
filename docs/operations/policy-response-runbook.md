@@ -13,7 +13,7 @@
 | 신호 | 로컬 동작 | 운영자가 확인할 것 |
 |---|---|---|
 | 정책/대화 읽기 오류 | 초안 실패, 빈 정상 맥락으로 대체 안 함 | DB 복구 후 재생성 |
-| 원문 인용/기간/실행 상태 검사 재실패 | 의미 재작성 1회 후 draft_failed; durable job은 dead로 끝내 자동 반복 생성 중단 | 근거와 실제 상태를 검토하고 수동 수정/재생성; 고객 거절로 바꾸지 않음 |
+| 원문 인용/기간/실행 상태 검사 재실패 | 의미 재작성 1회 후에도 막지 않음 — 초안은 pending_approval, 결과는 `limited_evidence_checks` 에 기록만(화면에 안 띄움, 2026-10-06) | 본문을 읽고 판단해 수정/재생성; 고객 거절로 바꾸지 않음 |
 | 생성 중 정책/대화 변경 | 이전 초안 저장 거절 | 최신 정책·정정으로 재생성 |
 | 승인 전 근거 변경 | pending 상태 유지, 승인 오류 | 초안 재생성·검토 |
 | 승인 후 본문/수신/상태/근거 변경 | DeliveryPermanentError, 기존 worker의 send_failed 처리 | 새 내용 재검토·재승인; 근거 변경은 재생성 |
@@ -39,9 +39,9 @@ human_only는 모델 선택 전 SQL 필터로 제외한다. 티켓 records는 co
 
 ## 배포 gate, migration, rollback
 
-스키마/migration 추가 없음. 기존 Event payload를 확장했으며 정책 release와 완전한 dispatch snapshot을 새 테이블로 만든 것이 아니다. 실제 migration 실행 없음. 새 trace가 없는 legacy/manual/template 경로는 기존 동작을 유지한다. 새로 사람 승인한 manual 초안에는 승인 binding이 남지만 과거 정책·대화 snapshot을 소급 생성하지 않는다.
+2026-09-21 의 경계 작업은 스키마/migration 을 더하지 않았다 — 2026-10-06 의 정리기가 표 `policy_sections` 하나를 더했다(이관 0130, 표만 만들고 모델은 안 부른다 · 옛 코드는 무시한다, [콘솔 주도 초안 ADR](../adr/2026-10-06-console-driven-drafting.md)). 기존 Event payload를 확장했으며 정책 release와 완전한 dispatch snapshot을 새 테이블로 만든 것이 아니다. 실제 migration 실행 없음. 새 trace가 없는 legacy/manual/template 경로는 기존 동작을 유지한다. 새로 사람 승인한 manual 초안에는 승인 binding이 남지만 과거 정책·대화 snapshot을 소급 생성하지 않는다.
 
-배포 책임자는 새 기능 적용 전 대기 중 legacy 초안을 재생성할 범위, Event 보존/삭제, 검토 담당자, 현재 모델 종료 대응을 결정해야 한다. 동적 서명 HTML·기본 발신 계정·링크 설정과 첨부 payload 전체는 아직 승인 hash에 고정하지 않는다(현재 sender에는 새 첨부 기능을 추가하지 않음). 외부 송신과 로컬 재확인 사이 경쟁 조건이 남는다.
+배포 책임자는 새 기능 적용 전 대기 중 legacy 초안을 재생성할 범위, Event 보존/삭제, 검토 담당자, 현재 모델 종료 대응을 결정해야 한다. 동적 서명 HTML·기본 발신 계정과 첨부 payload 전체는 아직 승인 hash에 고정하지 않는다(현재 sender에는 새 첨부 기능을 추가하지 않음). 연락 링크는 2026-10-06 부터 승인 전에 본문에 박혀 hash 안에 있다. 외부 송신과 로컬 재확인 사이 경쟁 조건이 남는다.
 
 코드/빌드 자산을 기준 버전으로 복구할 수 있으나 안전 검사가 함께 사라진다. Event 행을 삭제할 필요는 없다. 운영 rollback 전에 미발송 건 확인·외부 쓰기 gate 정책을 책임자가 승인해야 한다. 리마인더 설정을 자동으로 켜거나 끄는 migration/스크립트는 제공하지 않는다.
 

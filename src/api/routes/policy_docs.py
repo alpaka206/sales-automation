@@ -29,6 +29,7 @@ from fastapi.responses import RedirectResponse
 from ...db.models import PolicySource
 from ...db.revisions import snapshot_policy
 from ...db.session import SessionLocal
+from ...llm import organizer
 from ...llm.knowledge import usage_note_from_body
 from ..auth import actor_name, admin_required
 
@@ -286,6 +287,7 @@ async def policy_docs_update(
             raise HTTPException(status_code=404, detail="문서를 찾을 수 없습니다")
         # 고치기 **전** 상태를 먼저 남기고, 판 번호를 올린 뒤 적용합니다.
         snapshot_policy(session, source, change_note="edited", edited_by=actor_name(request, fallback="web") or "web")
+        access_before = source.model_access or "customer_context"
         source.version = (source.version or 1) + 1
         if label.strip():
             source.label = label.strip()
@@ -311,6 +313,16 @@ async def policy_docs_update(
             # 본문이 바뀌었는데 요약을 **안 만든** 경우(사람용이거나 라우터가 안 읽는
             # 문서), 옛 요약을 남겨 두면 새 본문 옆에 낡은 한 줄이 앉습니다. 비웁니다.
             source.usage_note = usage_note or None
+        # **정리된 지도는 여기서 만들지 않습니다** — flash 한 번이 큰 문서에서 수십 초라 이
+        # 요청이 기다리면 프록시가 끊습니다. 본문이 바뀌면 지도는 해시로 저절로 낡은 것이
+        # 되고, 저장 직후 뒤에서(`_publish`) 또는 10분 폴러가 다시 정리합니다(그동안 이
+        # 문서는 예전처럼 통째로 갑니다).
+        #
+        # 해시로 못 잡는 것이 하나 있습니다: 「사람만 본다」가 바뀐 것. 그 문서의 지도는
+        # 모델 없이 「전부 기밀」로 만든 것이라 본문이 같아도 다시 만들어야 합니다(반대
+        # 방향도 같습니다). 그래서 지웁니다.
+        if (source.model_access or "customer_context") != access_before:
+            organizer.forget(session, organizer.POLICY, source.id)
         session.commit()
 
     _publish(source_id)
@@ -318,7 +330,7 @@ async def policy_docs_update(
 
 
 def _publish(source_id: int) -> None:
-    """저장 직후 프롬프트 캐시를 비웁니다.
+    """저장 직후 — 프롬프트 캐시를 비우고, 그 문서를 바로 다시 정리합니다.
 
     예전에는 여기서 초안이 읽는 **사본**까지 밀어 넣었습니다(``refresh_knowledge_copy``).
     사본이 없어졌으므로(2026-08-27) 밀 것이 없습니다 — 라우터가 이 행을 직접 읽습니다.
@@ -329,6 +341,27 @@ def _publish(source_id: int) -> None:
         reset_cache()
     except Exception:
         logger.warning("Prompt cache reset failed for %s.", source_id, exc_info=True)
+    schedule_reorganize(source_id)
+
+
+def schedule_reorganize(source_id: int | None = None) -> None:
+    """콘솔에서 저장한 문서(``source_id`` 가 없으면 낡은 것 전부 — 템플릿 포함)를 **바로** 다시
+    정리합니다. 10분 폴러를 기다리지 않습니다 (2026-10-06 운영자: 「사이트에서 문서를 바꾸면
+    … 우리 gemini가 참고하는 글이 … 자동 업데이트되어서 그에 맞춰서 변경되어야」).
+
+    저장한 내용은 이 정리를 기다리지 않고 다음 초안부터 들어갑니다 — 지도가 낡은 문서는
+    ``organizer.knowledge_for`` 가 본문 통째로 싣습니다. 이것은 그 본문을 상황별 구간으로
+    다시 나누는 일이고, 본문이 안 바뀐 저장(배치만 바꿈)이면 지도가 그대로라 모델을 안 부릅니다.
+    모델 자격이 없는 곳(로컬·테스트)에서는 아무것도 안 합니다 — 폴러가 나중에 합니다.
+    """
+    from ...common.config import settings
+
+    if not settings.GOOGLE_CREDENTIALS_JSON:
+        return
+    try:
+        _schedule_organize(source_id)
+    except RuntimeError:  # 이벤트 루프 밖에서 불린 저장 — 폴러가 합니다
+        logger.debug("No running loop to organize %s now; the poller will.", source_id)
 
 
 @router.post("/policy-docs/{source_id}/delete")
@@ -348,9 +381,31 @@ async def policy_docs_delete(source_id: int):
         if source is not None:
             # 스냅샷이 **먼저**입니다 — 행이 사라진 뒤에는 남길 것이 없습니다.
             snapshot_policy(session, source, change_note="deleted", edited_by="web")
+            # 정리된 지도도 같은 트랜잭션에서 지웁니다. 남겨 두면 번호를 다시 쓰는 DB(SQLite)에서
+            # 다음 문서가 그 지도의 금지 문자열을 물려받습니다.
+            organizer.forget(session, organizer.POLICY, source_id)
             session.delete(source)
             session.commit()
     return RedirectResponse("/policy-docs", status_code=303)
+
+
+# 돌고 있는 정리 — 참조를 쥐고 있어야 끝나기 전에 수거되지 않습니다.
+_organize_tasks: set[asyncio.Task] = set()
+
+
+def _schedule_organize(source_id: int | None) -> None:
+    task = asyncio.get_running_loop().create_task(_organize_now(source_id))
+    _organize_tasks.add(task)
+    task.add_done_callback(_organize_tasks.discard)
+
+
+async def _organize_now(source_id: int | None) -> None:
+    # 낡은 지도만 — 본문이 안 바뀐 저장이면 지도가 그대로라 모델을 안 부릅니다.
+    try:
+        result = await asyncio.to_thread(organizer.backfill, source_id=source_id)
+        logger.info("정책 문서 정리: %s", result)
+    except Exception:
+        logger.warning("정책 문서 정리가 실패했습니다.", exc_info=True)
 
 
 # 「되돌리기」가 여기 있었습니다 — 이메일 템플릿과 같은 이유로 지웠습니다(2026-08-27).

@@ -29,7 +29,7 @@ def thread(monkeypatch):
         "sqlite:///:memory:", connect_args={"check_same_thread": False}, poolclass=StaticPool
     )
     Base.metadata.create_all(engine)
-    factory = sessionmaker(bind=engine, expire_on_commit=False)
+    factory = sessionmaker(bind=engine, expire_on_commit=False, autoflush=False)  # 운영 SessionLocal 과 같게
     monkeypatch.setattr(inbound_module, "SessionLocal", factory)
     with factory() as session:
         contact = Contact(
@@ -51,10 +51,10 @@ def thread(monkeypatch):
         yield factory, conv.id, contact.id
 
 
-def _interaction(factory, conv_id, contact_id, **kwargs):
+def _interaction(factory, conv_id, contact_id, channel="이메일", **kwargs):
     with factory() as session:
         session.add(CustomerInteraction(
-            contact_id=contact_id, conversation_id=conv_id, channel="이메일", **kwargs
+            contact_id=contact_id, conversation_id=conv_id, channel=channel, **kwargs
         ))
         session.commit()
 
@@ -166,12 +166,16 @@ def test_an_older_customer_message_does_not_count_as_a_new_one(thread):
     assert previous is not None and previous.body == "미팅으로 안내드리겠습니다"
 
 
-def test_the_two_branches_reach_the_prompt(thread, monkeypatch):
-    """지시문과 **답할 글**이 갈래마다 다릅니다.
+def test_the_situation_block_states_facts_and_the_message_to_answer(thread, monkeypatch):
+    """갈래마다 **사실**과 **답할 글**이 다릅니다 (2026-10-06 — 갈래별 지시문 대신 상황 블록).
 
-    답장이 없을 때 지난 회신 본문을 같이 싣는 것이 요점입니다 — 그게 없으면 「이미 적은 말을
-    되풀이하지 마라」가 지킬 수 없는 지시입니다.
+    ① 우리 영업 메일 뒤로 고객 답장이 없다(`nudge`) — 최초 문의를 그대로 들고, 마지막으로 보낸 메일 본문과
+    며칠 전인지를 싣습니다. 그 본문이 없으면 모델이 「이미 한 말」을 알 길이 없습니다.
+    ② 답장이 왔다(`answer_reply`) — 그 메시지가 「가장 최근 문의」가 됩니다.
+    어느 쪽에도 「더 자세히 써라」 · 「재촉하지 마라」 같은 코드의 영업 지시는 없습니다 — 그것은 콘솔 문서의 몫입니다.
     """
+    import sys
+
     factory, conv_id, contact_id = thread
     agent = inbound_module.InboundAgent.__new__(inbound_module.InboundAgent)
     seen: dict = {}
@@ -183,7 +187,7 @@ def test_the_two_branches_reach_the_prompt(thread, monkeypatch):
 
     agent.llm = _LLM()
     monkeypatch.setattr(inbound_module, "select_relevant_docs", lambda **kw: ("", None))
-    monkeypatch.setattr(inbound_module, "korean_reading", lambda *a, **k: "", raising=False)
+    monkeypatch.setitem(sys.modules, "src.llm.precedents", None)
     contact_info = {
         "full_name": "Acme Buyer", "company": "Acme", "country": "IN",
         "last_message": "크레딧 가격이 궁금합니다", "email": "buyer@acme.com",
@@ -191,19 +195,86 @@ def test_the_two_branches_reach_the_prompt(thread, monkeypatch):
     }
     classification = inbound_module.ClassifyResult(category="pricing_question", reasoning="")
 
-    # ① 답장이 없다 → 같은 문의를 더 자세히, 지난 회신을 실어서
-    agent._draft_reply(contact_info, classification, conv_id, "en")
-    assert "고객의 답장은 아직 없습니다" in seen["followup_rule"]
-    assert "미팅으로 안내드리겠습니다" in seen["followup_rule"]
+    # ① 답장이 없다
+    draft = agent._draft_reply(contact_info, classification, conv_id, "en")
+    assert draft._context_manifest["situation"] == "nudge"
+    assert "상황: nudge" in seen["situation"] and "고객의 답장이 아직 없습니다" in seen["situation"]
+    assert "미팅으로 안내드리겠습니다" in seen["situation"], "지난 영업 메일 본문 — 고객이 이미 받은 글"
+    assert "일 전(2026-09-01, UTC)" in seen["situation"]
     assert seen["last_message"] == "크레딧 가격이 궁금합니다"
+    for advice in ("더 자세히", "재촉", "되풀이"):
+        assert advice not in seen["situation"]
+    assert "followup_rule" not in seen
 
     # ② 답장이 왔다 → 그 메시지에 답한다
     _interaction(factory, conv_id, contact_id, external_id="hubspot:conv:c-9",
                  direction="incoming", summary="인도 루피로는 얼마인가요?",
                  happened_at=BASE + timedelta(hours=3))
-    agent._draft_reply(contact_info, classification, conv_id, "en")
-    assert "고객이 새로 보낸" in seen["followup_rule"]
+    draft = agent._draft_reply(contact_info, classification, conv_id, "en")
+    assert draft._context_manifest["situation"] == "answer_reply"
+    assert "상황: answer_reply" in seen["situation"]
     assert seen["last_message"] == "인도 루피로는 얼마인가요?"
+
+
+def test_the_situation_says_a_chatbot_or_cs_wrote_and_that_it_was_not_our_answer(no_console_reply, monkeypatch):
+    """첫 회신인데 대화에 챗봇 답 · CS 안내가 있다 — 그 사실을 적고, 답할 글은 티켓의 문의입니다.
+
+    챗봇과 주고받은 채팅 줄은 맥락이지 「가장 최근 문의」가 아닙니다 — 첫 회신의 기준선은 이제 봇 · CS 줄에서
+    안 끊기므로(`role`), 채팅의 마지막 한마디를 답할 글로 고르면 그 한마디에 답합니다.
+    """
+    import sys
+
+    factory, conv_id, contact_id = no_console_reply
+    _handoff(factory, conv_id, contact_id)
+    seen: dict = {}
+
+    class _LLM:
+        def complete(self, name, fields, **kwargs):
+            seen.update(fields)
+            return inbound_module.DraftResult(subject="s", body="b", language="ko")
+
+    agent = inbound_module.InboundAgent.__new__(inbound_module.InboundAgent)
+    agent.llm = _LLM()
+    monkeypatch.setattr(inbound_module, "select_relevant_docs", lambda **kw: ("", None))
+    monkeypatch.setitem(sys.modules, "src.llm.precedents", None)
+    contact_info = {"full_name": "Acme Buyer", "company": "Acme", "country": "KR",
+                    "last_message": "크레딧 가격이 궁금합니다", "subject": "[Chatbot] 문의 접수"}
+    draft = agent._draft_reply(contact_info, inbound_module.ClassifyResult(category="pricing_question",
+                                                                           reasoning=""), conv_id, "ko")
+
+    assert draft._context_manifest["situation"] == "first_reply"
+    assert "챗봇의 자동 답변이 있습니다 — 우리 영업의 답이 아닙니다" in seen["situation"]
+    assert "CS 주소가 보낸 안내 메일이 있습니다 — 우리 영업의 답이 아닙니다" in seen["situation"]
+    assert "마지막으로 보낸 이메일" not in seen["situation"], "우리 영업 메일이 없다"
+    assert seen["last_message"] == "크레딧 가격이 궁금합니다"
+    assert "엔터프라이즈 요금이 궁금해요" in seen["conversation_context"], "채팅 질문은 맥락으로 간다"
+
+
+def test_a_customer_email_after_the_inquiry_is_what_a_first_reply_answers(no_console_reply, monkeypatch):
+    """첫 회신이라도 고객이 문의 뒤에 메일로 정정하거나 더 물었으면 그 메일에 답합니다."""
+    import sys
+
+    factory, conv_id, contact_id = no_console_reply
+    _handoff(factory, conv_id, contact_id)
+    _interaction(factory, conv_id, contact_id, external_id="hubspot:conv:mail-2", direction="incoming",
+                 summary="정정: 100분이 아니라 300분입니다.", happened_at=BASE + timedelta(hours=1))
+    seen: dict = {}
+
+    class _LLM:
+        def complete(self, name, fields, **kwargs):
+            seen.update(fields)
+            return inbound_module.DraftResult(subject="s", body="b", language="ko")
+
+    agent = inbound_module.InboundAgent.__new__(inbound_module.InboundAgent)
+    agent.llm = _LLM()
+    monkeypatch.setattr(inbound_module, "select_relevant_docs", lambda **kw: ("", None))
+    monkeypatch.setitem(sys.modules, "src.llm.precedents", None)
+    contact_info = {"full_name": "Acme Buyer", "company": "Acme", "country": "KR",
+                    "last_message": "크레딧 가격이 궁금합니다", "subject": ""}
+    agent._draft_reply(contact_info, inbound_module.ClassifyResult(category="pricing_question", reasoning=""),
+                       conv_id, "ko")
+
+    assert seen["last_message"] == "정정: 100분이 아니라 300분입니다."
 
 
 def test_reminder_does_not_answer_a_customer_correction(thread):
@@ -249,3 +320,105 @@ def test_history_read_failure_is_not_an_empty_first_reply(monkeypatch):
     monkeypatch.setattr(inbound_module, "SessionLocal", unavailable)
     with pytest.raises(RuntimeError):
         inbound_module.thread_events(123)
+
+
+# --------------------------------------------------------------------------- #
+# 누가 말했나 — 챗봇 답 · CS 안내는 우리 영업 회신이 아니다 (2026-10-06)
+# --------------------------------------------------------------------------- #
+# 운영 재생: 영업이 한 통도 안 보낸 티켓 42건이 「이미 답함」으로 읽혔다 — 채팅 봇 줄 28 · support@perso.ai
+# 12 · CRM 2. 그 티켓의 첫 회신이 후속 회신 문서(단가표)를 받고 첫 회신 문서(모범 메일)를 잃었다(평가
+# R415cs · R425chat). 방향은 그대로 「우리 쪽」이고(`classify_direction` 은 고정돼 있다), 갈리는 것은 역할이다.
+@pytest.fixture()
+def no_console_reply(thread, monkeypatch):
+    """문의 하나뿐인 티켓 — 콘솔 회신을 지운다. CS 주소 목록은 개발자 `.env` 와 무관하게 기본값으로."""
+    from src.common.config import settings
+
+    monkeypatch.setattr(settings, "NON_SALES_SENDER_ADDRESSES", "support@perso.ai")
+    factory, conv_id, contact_id = thread
+    with factory() as session:
+        session.query(Message).filter(Message.direction == "outgoing").delete()
+        session.commit()
+    return factory, conv_id, contact_id
+
+
+def _handoff(factory, conv_id, contact_id):
+    """고객이 채팅으로 묻고 봇이 답하고, CS 가 support@perso.ai 로 영업에 넘긴다는 메일을 보냈다."""
+    _interaction(factory, conv_id, contact_id, external_id="hubspot:conv:chat-q", channel="채팅",
+                 direction="inbound", summary="엔터프라이즈 요금이 궁금해요",
+                 happened_at=BASE + timedelta(minutes=10))
+    _interaction(factory, conv_id, contact_id, external_id="hubspot:conv:chat-bot", channel="채팅",
+                 direction="outgoing", summary="담당자가 곧 연락드립니다!",
+                 happened_at=BASE + timedelta(minutes=11))
+    _interaction(factory, conv_id, contact_id, external_id="hubspot:conv:cs-1", handler="support@perso.ai",
+                 direction="outgoing", summary="영업팀에 전달했습니다. 곧 연락드리겠습니다.",
+                 happened_at=BASE + timedelta(minutes=30))
+
+
+def test_a_cs_handoff_and_chatbot_lines_are_not_our_first_reply(no_console_reply):
+    factory, conv_id, contact_id = no_console_reply
+    _handoff(factory, conv_id, contact_id)
+    agent = inbound_module.InboundAgent.__new__(inbound_module.InboundAgent)
+
+    events = inbound_module.thread_events(conv_id)
+    assert {t.source_ref.split(":")[0] for t in events if t.direction == "outgoing"} == {"interaction"}
+    assert agent._is_first_reply(conv_id) is True, "봇 · CS 줄로 「이미 답함」이 되면 첫 회신 문서를 잃는다"
+    assert inbound_module.last_sent_reply(conv_id) is None
+    # 봇 답 뒤에 고객 질문이 가려지지 않는다 — 가장 최근 고객 말은 채팅 질문이다.
+    latest = inbound_module.latest_customer_message(conv_id)
+    assert latest is not None and latest.body == "엔터프라이즈 요금이 궁금해요"
+    assert sorted(t.role for t in events) == ["bot", "cs", "customer", "customer"]
+
+
+@pytest.mark.parametrize("kind", ["console_sent", "hubspot_inbox_email", "logged_email_record"])
+def test_a_real_sales_email_makes_it_a_follow_up(no_console_reply, kind):
+    """영업이 실제로 보낸 이메일이면 어느 길로 왔든 후속 회신이다 — 콘솔 발송 · 허브스팟 화면에서 영업 주소로
+    보낸 회신 · 손으로 적은 메일 기록(`email`, 보낸 사람 모름 — 거부 목록이라 영업으로 센다)."""
+    factory, conv_id, contact_id = no_console_reply
+    _handoff(factory, conv_id, contact_id)
+    at = BASE + timedelta(hours=2)
+    if kind == "console_sent":
+        with factory() as session:
+            session.add(Message(conversation_id=conv_id, direction="outgoing", body="견적 안내드립니다",
+                                status="sent", created_at=at, sent_at=at, hubspot_message_id="m-9"))
+            session.commit()
+    elif kind == "hubspot_inbox_email":
+        _interaction(factory, conv_id, contact_id, external_id="hubspot:conv:sales-1",
+                     handler="untae@estsoft.com", direction="outgoing", summary="견적 안내드립니다",
+                     happened_at=at)
+    else:
+        _interaction(factory, conv_id, contact_id, channel="email", direction="outgoing",
+                     summary="전화 후 메일로 견적 보냄", happened_at=at)
+    agent = inbound_module.InboundAgent.__new__(inbound_module.InboundAgent)
+
+    assert agent._is_first_reply(conv_id) is False
+    previous = inbound_module.last_sent_reply(conv_id)
+    assert previous is not None and previous.role == "sales" and previous.at == at
+
+
+def test_the_cs_address_list_is_a_setting_not_code(no_console_reply, monkeypatch):
+    """CS 별칭이 하나 더 생기면 설정에 더한다 — 코드에 박으면 그 주소의 안내가 조용히 「영업 회신」이 된다."""
+    from src.common.config import settings
+
+    factory, conv_id, contact_id = no_console_reply
+    _interaction(factory, conv_id, contact_id, external_id="hubspot:conv:help-1", handler="Help <help@perso.ai>",
+                 direction="outgoing", summary="안내드립니다", happened_at=BASE + timedelta(hours=1))
+    agent = inbound_module.InboundAgent.__new__(inbound_module.InboundAgent)
+    assert agent._is_first_reply(conv_id) is False, "목록에 없는 우리 주소는 영업이다(거부 목록)"
+
+    monkeypatch.setattr(settings, "NON_SALES_SENDER_ADDRESSES", "support@perso.ai, HELP@perso.ai")
+    assert agent._is_first_reply(conv_id) is True
+
+
+def test_the_context_says_who_spoke(no_console_reply):
+    """모델이 보는 말머리 — 「우리」 하나면 챗봇 답과 CS 안내를 우리가 이미 보낸 영업 회신으로 읽는다."""
+    factory, conv_id, contact_id = no_console_reply
+    _handoff(factory, conv_id, contact_id)
+    _interaction(factory, conv_id, contact_id, external_id="hubspot:conv:sales-2", handler="untae@estsoft.com",
+                 direction="outgoing", summary="요금 안내드립니다", happened_at=BASE + timedelta(hours=3))
+    agent = inbound_module.InboundAgent.__new__(inbound_module.InboundAgent)
+
+    context = agent._build_conversation_context(conv_id, "다른 문의")
+    assert "우리(영업) [" in context and "요금 안내드립니다" in context
+    assert "우리(CS 안내) [" in context and "챗봇 [" in context
+    assert "고객 [" in context and "고객 주장·미검증" in context
+    assert "\n우리 [" not in context and not context.startswith("우리 [")

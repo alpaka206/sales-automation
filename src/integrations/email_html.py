@@ -229,10 +229,14 @@ def _render_paragraph(para: str) -> str:
     become a <p> with <br> between them. A paragraph can mix the two (e.g. a lead
     line followed by bullet rows), which is exactly the layout we want for the
     "기능 나열은 - 불릿, 들여쓰기" rule.
+
+    **들여 쓴 다음 줄은 그 항목의 이어지는 줄입니다** — 줄을 맞춰 쓴(hard-wrapped) 항목이
+    ``<ul>`` 둘 사이의 ``<p>`` 로 쪼개지지 않고 한 ``<li>`` 안에서 ``<br>`` 로 이어집니다.
+    문단의 줄바꿈과 같은 대접입니다. 들여 쓰지 않은 줄은 예전처럼 목록을 닫습니다.
     """
     blocks: list[str] = []
     text_buf: list[str] = []
-    bullet_buf: list[str] = []
+    bullet_buf: list[list[str]] = []  # 항목마다 줄들
 
     def flush_text() -> None:
         if text_buf:
@@ -243,7 +247,10 @@ def _render_paragraph(para: str) -> str:
     def flush_bullets() -> None:
         if bullet_buf:
             items = "".join(
-                f'<li style="margin:0 0 4px;">{_linkify(_html.escape(b))}</li>' for b in bullet_buf
+                '<li style="margin:0 0 4px;">'
+                + "<br>".join(_linkify(_html.escape(part)) for part in item)
+                + "</li>"
+                for item in bullet_buf
             )
             blocks.append(f'<ul style="margin:0 0 14px;padding-left:22px;">{items}</ul>')
             bullet_buf.clear()
@@ -252,7 +259,9 @@ def _render_paragraph(para: str) -> str:
         m = _BULLET_RE.match(line)
         if m:
             flush_text()
-            bullet_buf.append(m.group(1))
+            bullet_buf.append([m.group(1)])
+        elif bullet_buf and line[:1] in (" ", "\t") and line.strip():
+            bullet_buf[-1].append(line.strip())
         else:
             flush_bullets()
             text_buf.append(line)

@@ -107,7 +107,9 @@ def test_real_draft_path_uses_one_snapshot_and_persists_private_provenance(polic
     router = next(call for call in calls if call[0] == "inbound/select_docs")
     generator = next(call for call in calls if call[0] == "inbound/draft_reply")
     assert router[1]["conversation_context"] == generator[1]["conversation_context"]
-    assert "가상 문서" in generator[1]["knowledge_docs"]
+    # 고른 참고 문서는 규칙 문서와 함께 정리돼 초안 호출의 system 으로 갑니다(2026-10-06).
+    assert "가상 문서" in generator[2]["knowledge"]
+    assert "조건 충족 시 검토 가능" in generator[2]["knowledge"]
     assert "PRIVATE" not in str(calls)
     assert agent._finalize_draft(msg_id, INFO, CLASSIFICATION, draft, conv_id, "ko")
     with policy_db() as session:
@@ -124,9 +126,10 @@ def test_real_draft_path_uses_one_snapshot_and_persists_private_provenance(polic
 
 
 @pytest.mark.parametrize("repair_succeeds", [True, False])
-def test_unsupported_duration_gets_one_repair_then_reaches_the_operator_flagged(policy_db, repair_succeeds):
+def test_unsupported_duration_gets_one_repair_then_still_reaches_the_operator(policy_db, repair_succeeds):
     """검사에 걸린 초안도 사람에게 간다 (2026-09-22). 재작성 한 번 뒤 남는 문제는 죽이지 않고
-    매니페스트에 FAIL 로 적어 검토 화면이 보여 준다 — 예전에는 빈 카드와 dead 잡이 남았다."""
+    매니페스트에 FAIL 로 적는다 — 예전에는 빈 카드와 dead 잡이 남았다. 검토 화면에 경고로 띄우지는
+    않는다 (2026-10-06 운영자: 「답변 작성에 대한 경고문 이런건 필요없어」)."""
     conv_id, msg_id = _draft_setup(policy_db)
     agent, _ = _agent()
     feedback = []
@@ -153,20 +156,11 @@ def test_unsupported_duration_gets_one_repair_then_reaches_the_operator_flagged(
     else:
         assert trace["limited_evidence_checks"]["status"] == "FAIL"
         assert "unsupported_duration" in trace["limited_evidence_checks"]["issues"]
-        # 검토 화면이 읽는 자리 — 판정이 여기 안 실리면 아무 데도 안 보인다.
         from src.api.routes.messages import _message_detail_context
-        evidence = _message_detail_context(msg_id)["ticket"]["evidence"]
-        assert evidence["status"] == "FAIL"
-        assert "unsupported_duration" in evidence["issues"]
+        assert "evidence" not in _message_detail_context(msg_id)["ticket"]
     assert len(feedback) == 2
     assert feedback[0] == ""
     assert "unsupported_duration" in feedback[1]
-
-
-def test_a_manual_draft_without_a_trace_has_no_evidence_verdict(policy_db):
-    _, msg_id = _draft_setup(policy_db)
-    from src.api.routes.messages import _message_detail_context
-    assert _message_detail_context(msg_id)["ticket"]["evidence"] is None
 
 
 def test_new_customer_correction_prevents_finalizing_old_draft(policy_db):

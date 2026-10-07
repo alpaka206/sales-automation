@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from email.utils import parseaddr
 
 from sqlalchemy import select
 
@@ -65,6 +66,98 @@ def message_copies(messages, interactions) -> dict[int, object]:
 
 def _squash(text: str | None) -> str:
     return " ".join((text or "").split()).lower()
+
+
+# 이메일 채널의 두 철자 — 허브스팟 스레드 수집기 · 개인함은 「이메일」, CRM 수집기 · 콘솔의 손 기록은 `email`.
+EMAIL_CHANNELS = frozenset({"이메일", "email"})
+_FORM_CHANNELS = frozenset({"폼", "form"})
+_LEGACY_DIRECTIONS = {"incoming": "inbound", "outbound": "outgoing"}
+
+
+def non_sales_senders() -> frozenset[str]:
+    """영업이 아닌 우리 주소(`NON_SALES_SENDER_ADDRESSES`). 그 주소의 메일은 CS 안내이지 우리 회신이 아니다.
+
+    **거부 목록이다.** 주소를 모르는 줄(CRM 줄 · 손 기록 · 발신 주소 없는 수집 줄)은 영업으로 센다 —
+    허용 목록으로 두면 새 영업 주소가 생길 때마다 그 사람의 회신이 조용히 「아직 아무도 답 안 함」이 된다.
+    """
+    from ..common.config import settings
+
+    return frozenset(
+        address.strip().lower()
+        for address in (settings.NON_SALES_SENDER_ADDRESSES or "").split(",")
+        if address.strip()
+    )
+
+
+def turn_role(row, *, non_sales: frozenset[str] | None = None) -> str:
+    """그 줄을 **누가** 말했나 — `customer` · `sales` · `cs` · `bot` · `form` · `note` · `reminder`.
+
+    방향(`direction`)만으로는 모자랐다(2026-10-06 운영 재생): 챗봇 답(채팅 · `B-`)과 CS 주소
+    (`support@perso.ai`)의 안내도 수집기에는 「우리가 보낸 것」이라, 영업이 한 통도 안 보낸 티켓 42건이
+    「이미 답한 티켓」으로 읽혔다 — 첫 회신 문서 대신 후속 회신 문서를 받고, 고객 질문이 봇 답 뒤에
+    가려졌다. 방향은 그대로 두고(그건 「고객 말인가」의 답이다) 역할을 따로 잰다.
+
+    - 콘솔 행(`messages`): 문의는 고객 · 나간(`sent`) 회신은 영업 — 운영자가 이 화면에서 승인했다. 보낸
+      주소(폼 스레드 폴백의 support@perso.ai 같은)는 묻지 않는다. 리마인더는 `reminder`, 그 외(초안 ·
+      `test_sent` · 갔는지 모르는 것 · 옛 접수확인)는 고객이 받은 회신이 아니라 `note`.
+    - 가져온 줄 · 손 기록(`customer_interactions`): 채팅의 우리 쪽은 `bot`(사람 상담원도 섞이지만 수집기가
+      액터를 안 남겨 가를 수 없고, 어느 쪽이든 영업 메일이 아니다), 이메일은 보낸 주소가 거부 목록에
+      있으면 `cs` 아니면 `sales`, 그 밖의 우리 쪽 기록(전화 · 미팅 · 메모)은 `note`.
+    """
+    from ..agents.followup_sequence import REMINDER_NOTE_PREFIX, REMINDER_VARIANTS
+
+    if isinstance(row, Message):
+        if row.direction == "inbound":
+            return "form" if row.channel in _FORM_CHANNELS else "customer"
+        if row.prompt_variant in REMINDER_VARIANTS:
+            return "reminder"
+        if row.direction == "outgoing" and row.status == "sent" and row.prompt_variant != "auto_ack":
+            return "sales"
+        return "note"
+    if (row.external_id or "").startswith(REMINDER_NOTE_PREFIX):
+        return "reminder"
+    direction = _LEGACY_DIRECTIONS.get(row.direction or "", row.direction or "")
+    if direction == "inbound":
+        return "form" if row.channel in _FORM_CHANNELS else "customer"
+    if direction != "outgoing":
+        return "note"
+    if row.channel == "채팅":
+        return "bot"
+    if row.channel in EMAIL_CHANNELS:
+        sender = parseaddr(row.handler or "")[1].strip().lower()
+        denied = non_sales_senders() if non_sales is None else non_sales
+        return "cs" if sender in denied else "sales"
+    return "note"
+
+
+def turn_origin(row) -> str:
+    """그 줄이 어디서 왔나 — `console` · `hubspot`(스레드 수집) · `crm`(옛 CRM 메일 수집) · `gmail`(개인함) ·
+    `reminder_note` · `manual`(손 기록)."""
+    from ..agents.followup_sequence import REMINDER_NOTE_PREFIX
+
+    if isinstance(row, Message):
+        return "console"
+    ext = row.external_id or ""
+    for prefix, origin in (("hubspot:conv:", "hubspot"), ("hubspot:email:", "crm"), ("gmail:", "gmail"),
+                           (REMINDER_NOTE_PREFIX, "reminder_note")):
+        if ext.startswith(prefix):
+            return origin
+    return "manual" if not ext else "other"
+
+
+def is_sales_email(row, *, non_sales: frozenset[str] | None = None) -> bool:
+    """**우리 영업이 실제로 이메일로 보낸 회신**인가 — 「우리가 마지막으로 한 말」을 재는 자는 이것 하나다.
+
+    부르는 곳: 첫 회신 판정 · 지난 회신 앵커 · 「마지막 회신 뒤 고객 메시지」(`inbound.thread_events` 의
+    `role`), 답장 기준선(`ticket_history.advance_if_customer_replied`), 후속 리마인더 시계
+    (`followup_sequence` — 그쪽은 여기에 「열쇠가 있는 메일」을 더 요구한다). 예전에는 다섯이 각자 「나간
+    우리 줄」을 셌고, 챗봇 · CS 줄을 세는 곳과 안 세는 곳이 갈렸다.
+
+    조건: 이메일 · 우리가 보냄 · 고객에게 닿음(콘솔 `sent` / 가져온 메일 · 손으로 적은 메일 기록) · 리마인더 ·
+    접수확인 · 리마인더 기록 줄이 아님 · 보낸 주소가 거부 목록(`non_sales_senders`)에 없음. **사본은 부르는
+    쪽이 먼저 거른다** — 대화는 `message_copies`, 리마인더 시계는 자기 열쇠 묶음(`outside_replies`).
+    """
+    return turn_role(row, non_sales=non_sales) == "sales"
 
 
 def interaction_record(row: CustomerInteraction) -> dict:
