@@ -664,13 +664,19 @@ def test_the_reply_rule_fires_for_a_ticket_queued_again_by_the_webhook(monkeypat
         async def close(self):
             return None
 
-    async def _collect(client, ticket):
+    asked_for: list[str | None] = []
+
+    async def _collect(client, ticket, *, contact_email=None):
+        asked_for.append(contact_email)
         return [dict(row) for row in fetched]
 
     monkeypatch.setattr("src.integrations.hubspot.HubSpotClient", _Client)
     monkeypatch.setattr(ticket_history, "collect_ticket_history", _collect)
     asyncio.run(ticket_history.sync_one_ticket(conv_id))
     assert advanced == [conv_id]
+    # 수집기는 그 티켓 연락처의 주소를 받는다 — 우리끼리 오간 메일을 뺄 때 사내 테스트 연락처의 대화를 남기려고
+    # (`ticket_history._between_us`).
+    assert asked_for == ["c@example.com"]
 
     # 우리 회신이 어디에도 없는 Contacted 티켓에서는 여전히 안 옮긴다.
     with factory() as session:
@@ -904,3 +910,60 @@ def test_a_bot_or_cs_line_is_not_the_reply_baseline(monkeypatch):
                     direction="outgoing")  # 영업이 허브스팟 화면에서 메일로 답했다(보낸 주소 모름 = 영업)
     _customer_wrote(factory, conv_id, contact_id, _REPLY_AT + _HOUR * 4, external_id="hubspot:conv:back")
     assert _judge(conv_id) and advanced == [conv_id]
+
+
+def _mail(message_id: str, sender: str, *recipients: str, at: str = "2026-07-14T02:00:00Z") -> dict:
+    return {"type": "MESSAGE", "id": message_id, "text": message_id, "createdAt": at, "channelId": "1002",
+            **_sender(sender),
+            "recipients": [{"recipientField": "TO", "deliveryIdentifier": {"type": "HS_EMAIL_ADDRESS", "value": r}}
+                           for r in recipients]}
+
+
+@pytest.mark.asyncio
+async def test_mail_between_our_own_addresses_is_not_the_customers_conversation():
+    """허브스팟 받은편지함에서 동료에게 전달하거나 우리끼리 주고받은 메일이 티켓 스레드에 같이 선다(2026-10-08 실측:
+    최근 B2B 티켓 200건의 우리 발신 메일 198통 중 4통). 넣으면 보낸 주소만 보고 「우리 영업이 보낸 이메일」이 되어 —
+    첫 회신 라벨 · New 의 단계 이동(초안을 지운다) · 답장 기준선 · 리마인더 시계가 그것을 고객에게 한 답으로 읽는다.
+
+    고객의 다른 주소로 간 우리 답(같은 실측 2통)은 남는다 — 연락처 주소와 대조하지 않고, 받는 사람이 전부 우리
+    주소인 것만 뺀다.
+    """
+    threads = "/conversations/v3/conversations/threads"
+    client = _FakeClient({
+        f"{threads}|": {"results": [{"id": "t1"}]},
+        f"{threads}/t1/messages|": {"results": [
+            _mail("ask", "buyer@school.example", "perso.ai@estsoft.com"),
+            _mail("forward", "untae@estsoft.com", "colleague@estsoft.com", "perso.ai@estsoft.com"),
+            _mail("answer", "perso.ai@estsoft.com", "buyer@school.example", "untae@estsoft.com"),
+            _mail("to-their-other-address", "perso.ai@estsoft.com", "buyer.work@company.example"),
+        ]},
+    })
+
+    rows = await collect_ticket_history(client, "ticket-1", contact_email="Buyer@School.example")
+
+    assert [r["external_id"] for r in rows] == [
+        "hubspot:conv:ask", "hubspot:conv:answer", "hubspot:conv:to-their-other-address"]
+    # 연락처를 모르는 호출(개인 메일함이 「허브스팟에 이미 있나」를 볼 때)은 예전처럼 다 본다 — 사내 테스트 티켓인지
+    # 가를 수 없고, 못 찾으면 허브스팟에 노트를 한 번 더 쓴다.
+    assert len(await collect_ticket_history(client, "ticket-1")) == 4
+
+
+@pytest.mark.asyncio
+async def test_an_in_house_test_ticket_keeps_its_mail_and_a_staff_form_is_still_an_inquiry():
+    """연락처가 우리 주소인 사내 테스트 티켓은 그 주소가 끼어 있으면 남는다 — 안 그러면 대화가 통째로 빠진다. 우리
+    직원이 고객 대신 넣은 폼도 문의다(`test_a_form_submission_is_always_inbound`)."""
+    threads = "/conversations/v3/conversations/threads"
+    staff_form = {**_mail("form", "mina14@estsoft.com", "perso.ai@estsoft.com"), "channelId": "1003"}
+    client = _FakeClient({
+        f"{threads}|": {"results": [{"id": "t1"}]},
+        f"{threads}/t1/messages|": {"results": [
+            staff_form,
+            _mail("test-ask", "tester@estsoft.com", "perso.ai@estsoft.com"),
+            _mail("test-answer", "perso.ai@estsoft.com", "tester@estsoft.com"),
+        ]},
+    })
+
+    rows = await collect_ticket_history(client, "ticket-1", contact_email="tester@estsoft.com")
+
+    assert [r["external_id"] for r in rows] == [
+        "hubspot:conv:form", "hubspot:conv:test-ask", "hubspot:conv:test-answer"]

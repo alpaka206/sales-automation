@@ -111,6 +111,10 @@ class Conversation(Base):
     # 손을 뗐다(`followup_sequence.closed_by_sequence`) — 스윕보다 먼저 사람이 협의 중에 옮겼다가 나중에
     # 끝낸 티켓을, 스윕이 옛 답장으로 되살리던 구멍(2026-09-30).
     followup_released_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # **이 문의가 처음 New 를 떠난 때** (이관 0131). 누가 어느 길로 옮겼든 아래 `_stage_left_new` 가 적는다.
+    # 콘솔 밖에서 답한 New 를 옮기는 자동 이동(`ticket_history.advance_if_customer_replied`)은 이 칸이 빈 문의에만
+    # 돈다 — 사람이 New 로 되돌린 티켓을 10분마다 다시 옮기며 사람과 싸우지 않게(허브스팟 · 워크북까지 나간다).
+    left_new_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     hubspot_ticket_id: Mapped[str | None] = mapped_column(
         String(64), nullable=True, unique=True, index=True
     )
@@ -162,6 +166,19 @@ def _stage_moved_after_followup_close(target, value, oldvalue, _initiator) -> No
     if oldvalue is NO_VALUE or value == oldvalue or target.followup_closed_at is None:
         return
     target.followup_released_at = datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+# 아직 아무도 손대지 않은 단계 — `initial` 은 모델 기본값이라 화면도 New 로 본다.
+NEW_STAGES = ("new", "initial")
+
+
+@event.listens_for(Conversation.stage, "set")
+def _stage_left_new(target, value, _oldvalue, _initiator) -> None:
+    """New 가 아닌 단계가 처음 들어온 때 → `left_new_at`. 처음부터 다른 단계로 만든 문의(백필 · 주워 온 티켓)도
+    그때 적힌다 — New 였던 적이 없다. 단계를 쓰는 곳이 여럿이라 `_stage_moved_after_followup_close` 처럼 한 곳에서.
+    """
+    if value not in NEW_STAGES and target.left_new_at is None:
+        target.left_new_at = datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 class Message(Base):

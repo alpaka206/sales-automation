@@ -285,7 +285,7 @@ def _poller_steps() -> list[tuple[str, object]]:
     )
     from .followup_sequence import run_followup_sequence_once
     from .mailbox_sync import sync_mailboxes_once
-    from .ticket_history import run_pending_ticket_history
+    from .ticket_history import advance_answered_elsewhere_once, run_pending_ticket_history
     from .worker_heartbeat import record_worker_heartbeat
 
     return [
@@ -319,6 +319,9 @@ def _poller_steps() -> list[tuple[str, object]]:
         # `same_mail` 로 알아보고 건너뜁니다(2026-09-15).
         # 연결된 사서함이 없으면 아무 일도 안 합니다 — 조회조차 안 나갑니다.
         ("personal_mailboxes", sync_mailboxes_once),
+        # 콘솔 밖(허브스팟 받은편지함 · 개인 메일함)에서 첫 답이 나간 New 티켓을 Contacted · 협의 중으로 (2026-10-08).
+        # 두 수집기 뒤라 그 메일이 이미 들어와 있다. 후보(New + 나간 이메일 줄)가 없으면 조회 한 번이다.
+        ("answered_elsewhere", advance_answered_elsewhere_once),
         # Contacted 후속 리마인더 3·5·7일 (2026-09-17). **두 수집기 뒤에** 돕니다 — 허브스팟
         # 스레드와 개인 사서함이 다 들어온 뒤에 「답장이 왔나」를 봐야 합니다.
         # `FOLLOWUP_SEQUENCE_SINCE` 가 비면 조회조차 안 나갑니다.

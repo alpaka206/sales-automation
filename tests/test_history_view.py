@@ -48,11 +48,12 @@ def test_history_is_scoped_deduplicated_and_includes_real_records(db_session):
     assert records[one.id][1]["editable"] is False
 
 
-def test_the_reminder_completion_line_stays_next_to_the_reminder_mail(db_session):
-    """「1차 리마인더 완료」는 운영자 지시로 소통 히스토리에 남기는 줄입니다 (2026-09-21).
+def test_a_reminder_is_one_line_that_carries_its_reminder_sent_label(db_session):
+    """리마인더 하나는 한 줄입니다 (2026-10-08 운영자: 「이렇게 한번씩 더 나감 위에 요약본은 필요없어」).
 
-    리마인더 메일 행이 보인다고 그 줄을 「중복」으로 거르면, 티켓 화면에는 있는 줄이 고객
-    상세에서만 사라집니다 — 같은 행을 두고 두 화면이 다른 말을 합니다.
+    2026-09-21 ~ 10-08 에는 발송 뒤 정리가 「Reminder Sent N」 줄을 소통 히스토리에 따로 남겨, 리마인더 메일
+    행과 두 줄로 섰습니다. 이제 그 줄은 메일의 사본으로 접히고(`message_copies`) 「몇 차인가」는 메일 행의
+    `tag` 가 들고 갑니다 — 티켓 화면도 같은 자라 두 화면이 같은 말을 합니다.
     """
     from src.agents.followup_sequence import REMINDER_NOTE_PREFIX, done_label
 
@@ -74,6 +75,6 @@ def test_the_reminder_completion_line_stays_next_to_the_reminder_mail(db_session
         external_id=f"{REMINDER_NOTE_PREFIX}{mail.id}", happened_at=at,
     ))
     session.commit()
-    summaries = [r["summary"] for r in ticket_records(session, contact.id, [conv.id])[conv.id]]
-    assert "리마인더 본문" in summaries
-    assert done_label("followup_reminder_1") in summaries
+    records = ticket_records(session, contact.id, [conv.id])[conv.id]
+    assert [r["summary"] for r in records] == ["리마인더 본문"]
+    assert records[0]["tag"] == done_label("followup_reminder_1")

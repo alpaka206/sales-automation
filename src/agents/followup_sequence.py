@@ -113,9 +113,19 @@ def reminder_status(messages, outside=()) -> str:
     label = PENDING_LABEL
     for variant in REMINDER_VARIANTS:
         row = reminders.get(variant)
-        if row is not None and row.status == "sent" and row.sent_at is not None:
-            label = done_label(variant)
+        label = (sent_reminder_label(row) if row is not None else None) or label
     return label
+
+
+def sent_reminder_label(msg) -> str | None:
+    """**나간** 리마인더 메일 행의 말(`done_label`), 아니면 None — 리마인더 줄의 태그(소통 히스토리 · 티켓 화면).
+
+    「보냈다」는 위 칩과 같은 자다(`sent` + `sent_at`). 대기 · 실패 · `test_sent` 인 리마인더에 「Reminder Sent 1」을
+    달면 고객이 받은 것이 없는데 화면이 갔다고 말한다.
+    """
+    if msg.prompt_variant in REMINDER_VARIANTS and msg.status == "sent" and msg.sent_at is not None:
+        return done_label(msg.prompt_variant)
+    return None
 
 
 def _naive(value: datetime | None) -> datetime | None:
@@ -595,9 +605,10 @@ def _outside_copy(conv: Conversation, contact_email: str | None, base: CustomerI
       한국어 카드일 수 있어서, 남의 이름으로 재촉하는 것보다 카드 없이 나가는 쪽이 낫다.
     - 제목은 그 회신 제목에 「RE:」 하나 — 고객의 메일함에서 같은 대화로 묶이게. 제목을 못 찾으면 나갈 언어의
       기본 제목이다 — 허브스팟 티켓 이름(`inquiry_subject`)은 CS 가 붙인 내부 이름일 수 있어 쓰지 않는다.
-    - **받는 사람은 언제나 그 고객이다.** 수집기는 티켓 스레드의 모든 메시지를 그 고객 줄로 넣고 방향만
-      보낸 주소로 가르므로, 허브스팟 화면에서 동료·파트너에게 **전달한** 메일도 「우리가 보낸 이메일」로
-      선다. 그 메일의 TO 를 베끼면 「지난 메일에 이어」와 「닫겠습니다」가 그 사람에게 간다. 그래서 고객이
+    - **받는 사람은 언제나 그 고객이다.** 수집기는 티켓 스레드의 메시지를 그 고객 줄로 넣고 방향만
+      보낸 주소로 가르므로, 허브스팟 화면에서 파트너에게 **전달한** 메일도 「우리가 보낸 이메일」로
+      선다(동료에게 전달한 · 우리끼리 오간 메일은 2026-10-08 부터 수집기가 안 넣는다 — `ticket_history._between_us`).
+      그 메일의 TO 를 베끼면 「지난 메일에 이어」와 「닫겠습니다」가 그 사람에게 간다. 그래서 고객이
       TO·CC 어디에도 없는 메일이면 안 보내고, 고객 말고 TO 에 있던 사람은 참조로 옮겨 회신 전체의
       독자를 지킨다.
     """
@@ -640,9 +651,9 @@ def _outside_copy(conv: Conversation, contact_email: str | None, base: CustomerI
         return None
     customer = (contact_email or "").strip().lower()
     audience = found["to"] + found["cc"]
-    # ponytail: 전달 메일은 여기서만 알아본다 — 수집기가 받는 사람을 안 적어 두므로 `outside_replies` 는 그것을
-    # 기준으로 세고, 그 티켓은 다음에 고객에게 메일이 나갈 때까지 조용히 멈춘다(엉뚱한 사람을 재촉하는 것보다
-    # 낫다). 실제로 자주 나면 수집기가 받는 사람을 저장하게 하고 거기서 거른다.
+    # ponytail: 외부로 전달한 메일은 여기서만 알아본다 — 수집기는 우리끼리 오간 메일만 거르므로(`_between_us`)
+    # `outside_replies` 는 그것을 기준으로 세고, 그 티켓은 다음에 고객에게 메일이 나갈 때까지 조용히 멈춘다
+    # (엉뚱한 사람을 재촉하는 것보다 낫다). 2026-10-08 실측 200건에 0통 — 생기면 수집기가 거른다.
     if not customer or customer not in audience:
         logger.warning("문의 %s: 기준 회신이 고객에게 간 메일이 아니라(전달 등) 리마인더를 보내지 않습니다.",
                        conv.id)

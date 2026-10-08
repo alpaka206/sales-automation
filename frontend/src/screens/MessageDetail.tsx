@@ -28,6 +28,8 @@ type Bubble = {
   is_auto_ack: boolean;
   /** 후속 리마인더(자동). 사람이 쓴 회신과 같은 말풍선이면 「세 번 답했다」로 읽힙니다. */
   is_reminder?: boolean;
+  /** 리마인더면 「Reminder Sent 1」 — 따로 서던 소통 히스토리 줄의 말을 이 줄이 들고 갑니다(2026-10-08). */
+  reminder_label?: string | null;
   summary_line: string | null;
   language: string | null;
   created_at: string;
@@ -40,6 +42,9 @@ type Bubble = {
 
 type Detail = {
   thread: Bubble[];
+  /** 「문의 회신」인 줄 — `message:<id>` 또는 `interaction:<id>`. 콘솔에서 나갔든 허브스팟 받은편지함 · 개인
+   *  메일함에서 나갔든 이 문의 뒤 우리 영업의 첫 이메일이고, 고르는 것은 서버입니다(`inbound.first_sales_reply`). */
+  first_reply_key?: string | null;
   category: string | null;
   category_label: string;
   unqualified: boolean;
@@ -359,10 +364,12 @@ export function MessageDetail() {
   // **첫 번째로 나간 답변**이 어느 줄인지. 그 한 줄만 「문의 회신」이고, 그 뒤의 우리
   // 메일은 「이메일 발송」입니다 — 「문의 회신」은 이 티켓에서 한 번 일어나는 사건이라
   // 두 번 세 번 적히면 어느 것이 그 사건인지 알 수 없습니다 (2026-08-26 운영자 지시).
-  // **실제로 나간 것만 셉니다** (`sent_at`). 방향만 보면 검토 중인 초안·발송 실패한 줄도
-  // `outgoing` 이라, 나간 적 없는 줄이 「문의 회신」을 가져가고 진짜 첫 회신은 「이메일
-  // 발송」으로 밀립니다 — 그 티켓에서 그 사건이 어느 줄인지 화면에서 사라집니다.
-  const firstReplyId = data.thread.find((b) => SENT.has(b.direction) && !!b.sent_at)?.id;
+  // **어느 줄인지는 서버가 정합니다**(`first_reply_key`, 2026-10-08 운영자: 「다른곳에서 보냈어도 첫번째
+  // 답변이면 문의 회신으로 떠야해」). 여기서 콘솔 메일 중 첫째를 고르던 동안, 허브스팟 받은편지함에서 첫 답을
+  // 보낸 티켓은 그 뒤의 **후속 리마인더**가 「문의 회신」이 됐습니다 — 그 줄이 이 목록에서 처음 「나간」
+  // 콘솔 메일이었으니까요. 서버의 자(`inbound.first_sales_reply`)는 두 표를 합친 대화에서 이 문의 뒤 우리 영업의
+  // 첫 이메일이고(리마인더 · 챗봇 · CS 안내는 아니다), New 티켓의 단계도 같은 자로 옮깁니다.
+  const isFirstReply = (key: string) => !!data.first_reply_key && data.first_reply_key === key;
   // **문의가 접수되기 전에 오간 것**은 이 티켓의 이야기가 아니라 그 전부터 돌던 CS 대화
   // 입니다 (2026-09-07 운영자 지시). 이 티켓의 스레드에 그런 줄이 섞여 있는 이유는 간단
   // 합니다 — 이미 오가던 메일 스레드에 나중에 티켓이 붙습니다.
@@ -871,11 +878,12 @@ export function MessageDetail() {
                       </div>
                     ) : entry.bubble ? (
                       <MessageRow key={entry.key} bubble={entry.bubble}
-                                  isFirstReply={entry.bubble.id === firstReplyId} />
+                                  isFirstReply={isFirstReply(`message:${entry.bubble.id}`)} />
                     ) : (
                       <InteractionItem key={entry.key} item={entry.item as Interaction}
                                        hideSubject hideHandler onEdit={setEditing}
                                        onDelete={askDeleteInteraction}
+                                       firstReply={isFirstReply(`interaction:${(entry.item as Interaction).id}`)}
                                        preInquiry={isPreInquiry(entry.item as Interaction)} />
                     ),
                   )
@@ -1151,7 +1159,9 @@ function MessageRow({ bubble, isFirstReply = false }: {
                 {dir.label}
               </span>
               {bubble.is_auto_ack && <span className="tag">자동 접수확인</span>}
-              {bubble.is_reminder && <span className="tag">후속 리마인더 (자동)</span>}
+              {bubble.is_reminder && (
+                <span className="tag">{bubble.reminder_label ? `${bubble.reminder_label} (자동)` : "후속 리마인더 (자동)"}</span>
+              )}
               <time className="t-xs t-subtle tnum">
                 {kst(bubble.sent_at || bubble.created_at)}
               </time>

@@ -49,7 +49,7 @@ from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import func, or_, select
 
-from ..db.models import MailboxLinkDecision, Conversation, CustomerInteraction
+from ..db.models import NEW_STAGES, Contact, Conversation, CustomerInteraction, MailboxLinkDecision
 from ..integrations.hubspot import _BULK_PACE_SECONDS
 from ..db.session import SessionLocal
 
@@ -231,15 +231,43 @@ async def _live_thread_ids(client, ticket_id: str) -> list[str]:
             return ids
 
 
-async def collect_ticket_history(client, ticket_id: str) -> list[dict]:
-    """그 티켓의 모든 스레드 × 모든 메시지를, 접점 기록 한 줄씩으로.
+def _between_us(message: dict, contact_email: str | None) -> bool:
+    """보낸 사람도 받는 사람도 전부 우리 주소인 메일 — 고객이 보내지도 받지도 않았다.
+
+    허브스팟 받은편지함에서 동료에게 **전달**하거나 우리끼리 주고받은 메일이 티켓 스레드에 같이 선다(2026-10-08
+    실측: 최근 B2B 티켓 200건의 우리 발신 메일 198통 중 4통). 넣으면 「우리 영업이 보낸 이메일」로 세어져서 —
+    방향을 보낸 주소로 가르므로 — 첫 회신 라벨 · New 의 단계 이동(초안을 지운다) · 답장 기준선 · 리마인더 시계가
+    전부 그것을 우리 회신으로 읽는다. 개인 메일함 수집도 고객이 보낸 사람 · 받는 사람에 없는 메일은 안 가져온다.
+
+    ponytail: 우리 주소끼리만 거른다 — 외부(파트너)로 전달한 메일은 여전히 우리 회신이다(200건 실측 0). 「연락처
+    주소가 받는 사람에 없으면 전달」로 재면 고객의 다른 주소로 간 정상 회신(같은 실측 2통)이 걸린다. 생기면 그
+    티켓 스레드에서 고객이 쓴 주소들과 대조한다.
+
+    연락처가 우리 주소인 사내 테스트 티켓은 그 주소가 끼어 있으면 남긴다 — 안 그러면 그 티켓의 대화가 통째로 빠진다.
+    그래서 **연락처를 모르면 거르지 않는다** — 개인 메일함이 「허브스팟에 이미 있나」를 볼 때(`mailbox_sync.
+    _ticket_has_it`)는 예전처럼 다 본다(테스트 티켓의 메일을 못 찾으면 허브스팟에 노트를 한 번 더 쓴다).
+    이메일만 본다 — 우리 직원이 고객 대신 넣은 폼(`classify_direction`)은 우리 주소에서 와도 문의다.
+    """
+    if not contact_email or _channel_label(message) != "이메일":
+        return False
+    senders = _addresses(message.get("senders"))
+    recipients = _addresses(message.get("recipients"))
+    if not senders or not recipients or not all(is_our_address(a) for a in senders + recipients):
+        return False
+    return contact_email not in senders + recipients
+
+
+async def collect_ticket_history(client, ticket_id: str, *, contact_email: str | None = None) -> list[dict]:
+    """그 티켓의 모든 스레드 × 모든 메시지를, 접점 기록 한 줄씩으로. 연락처를 주면 우리끼리 오간 메일은 뺍니다
+    (`_between_us`).
 
     읽기만 합니다 — 이 함수로는 아무것도 나가지 않습니다.
     """
+    contact_email = (contact_email or "").strip().lower() or None
     rows: list[dict] = []
     for thread_id in await _live_thread_ids(client, ticket_id):
         for message in await _thread_messages(client, thread_id):
-            if message.get("type") != "MESSAGE":
+            if message.get("type") != "MESSAGE" or _between_us(message, contact_email):
                 continue
             message_id = str(message.get("id") or "")
             if not message_id:
@@ -571,16 +599,28 @@ def _stamp(conversation_id: int, at: datetime | None = None) -> None:
             session.commit()
 
 
-# 고객이 답장하면 이 단계에서만 협의 중으로 올라갑니다 (2026-09-07 운영자 지시).
+# 고객이 답장하면 이 단계에서 협의 중으로 올라갑니다 (2026-09-07 운영자 지시).
 #
-# **Contacted 하나뿐입니다.** New 에 온 답장은 우리가 아직 답을 안 한 것이라 여전히 New 이고
-# (그 티켓에는 검토할 초안이 대기 중입니다), 협의 중·수주·종료는 이미 지나간 자리라
-# 되돌리면 안 됩니다 — 발송 워커가 「앞으로만 간다」로 같은 사고를 이미 한 번 막았습니다.
+# 협의 중·수주·종료는 이미 지나간 자리라 되돌리면 안 됩니다 — 발송 워커가 「앞으로만 간다」로 같은
+# 사고를 이미 한 번 막았습니다.
 _REPLY_ADVANCES_FROM = "meeting_link_sent"
+# **New 도 움직입니다 — 우리가 콘솔 밖에서 이미 답했으면** (2026-10-08 운영자: 「문의 접수 후에 그 사이트에서
+# 안보냈더니 … 이메일 수신이 왔음에도 negotation 으로 안옮겨졌어」). New 를 Contacted 로 옮기는 것이 콘솔
+# 발송(`send_worker`)뿐이라, 허브스팟 받은편지함이나 개인 메일함에서 첫 답을 보낸 티켓은 New 에 남았고 그 뒤
+# 고객의 답장도 단계를 못 옮겼습니다. 우리 영업 메일이 아직 없는 New 는 그대로 New 입니다(검토할 초안이 대기
+# 중입니다). `initial` 은 모델 기본값이라 화면처럼 New 로 봅니다. **한 번만** 옮깁니다 — New 를 떠난 적이 있는
+# 문의(`conversations.left_new_at`)는 사람이 New 로 되돌린 것이라 다시 안 옮깁니다.
+_ANSWERED_ELSEWHERE_FROM = NEW_STAGES
+# 끝난 문의. 개인 메일함 메일이 이 연락처의 다른 문의 얘기일 수 있는지 볼 때 이 둘은 뺍니다.
+_ENDED_STAGES = ("closed", "closed_lost")
 
 
 async def advance_if_customer_replied(conversation_id: int) -> bool:
     """고객이 **우리 마지막 회신 뒤에** 쓴 것이 있으면 Contacted → 협의 중. 옮겼으면 True.
+
+    **New 는 우리가 콘솔 밖에서 이미 답했을 때 움직인다** (2026-10-08) — Contacted, 그 뒤 고객이 썼으면 협의 중
+    (`stage_answered_elsewhere`). 콘솔 발송만 New 를 옮기던 동안 허브스팟 받은편지함 · 개인 메일함으로 답한 티켓은
+    고객이 답해도 New 에 남았다.
 
     **판단은 이 한 곳이고, 고객 메시지가 들어오는 길 셋이 전부 여기를 부릅니다** — 허브스팟
     스레드 수집(`sync_one_ticket`) · 개인 사서함 수집(`mailbox_sync.sync_mailboxes_once`) ·
@@ -611,16 +651,41 @@ async def advance_if_customer_replied(conversation_id: int) -> bool:
 
     with SessionLocal() as session:
         conversation = session.get(Conversation, conversation_id)
-        if conversation is None or conversation.stage != _REPLY_ADVANCES_FROM:
+        if conversation is None or conversation.stage not in (_REPLY_ADVANCES_FROM, *_ANSWERED_ELSEWHERE_FROM):
             return False
+        stage = conversation.stage
         contact_id = conversation.contact_id
         last_outgoing_at = conversation.last_outgoing_at
+        created_at = conversation.created_at
+        if stage in _ANSWERED_ELSEWHERE_FROM:
+            if conversation.left_new_at is not None:
+                return False
+            # 워크북은 **이 문의의 행**만 — 연락처의 번호로 떨어지면 행이 하나뿐인 그 사람의 옛 문의 행에 이 단계가
+            # 적힌다. 행이 아직 없으면 나중에 붙일 때 그때의 단계로 선다.
+            own_sheet_id = conversation.sheet_client_id
+            # 개인 메일함 메일은 주제와 무관하게 가장 최근 문의에 붙는다(`mailbox_sync._newest_conversation`) — 이
+            # 연락처에 진행 중인 다른 문의가 있으면 그 메일이 이 문의의 답인지 모른다.
+            other_open = session.scalar(
+                select(Conversation.id).where(
+                    Conversation.contact_id == contact_id,
+                    Conversation.id != conversation_id,
+                    Conversation.stage.notin_(_ENDED_STAGES),
+                ).limit(1)
+            ) is not None
     try:
         events = thread_events(conversation_id)
     except Exception:
         logger.warning("문의 %s: 대화를 못 읽어 답장 판정을 건너뜁니다", conversation_id,
                        exc_info=True)
         return False
+    if stage in _ANSWERED_ELSEWHERE_FROM:
+        if other_open:
+            events = [turn for turn in events if turn.origin != "gmail"]
+        target = stage_answered_elsewhere(events, created_at)
+        if target is None:
+            return False
+        await _move_answered_elsewhere(conversation_id, contact_id, target, own_sheet_id)
+        return True
     # 자는 `inbound.unanswered_customer_turns` 하나다 — 「답변 대기」 목록이 같은 자로 잰다. 기준선이 없으면
     # 안 옮긴다(위 docstring — 몇 달 전 메시지 하나로 Contacted 티켓 수백 건이 옮겨지면 안 된다).
     baseline, replies = unanswered_customer_turns(events, last_outgoing_at)
@@ -628,6 +693,85 @@ async def advance_if_customer_replied(conversation_id: int) -> bool:
         return False
     await _advance_on_customer_reply(conversation_id, contact_id)
     return True
+
+
+def stage_answered_elsewhere(events, created_at) -> str | None:
+    """New 티켓의 다음 단계 — 이 문의에 우리 영업 메일이 이미 나갔으면 Contacted, 그 뒤 고객이 썼으면 협의 중.
+
+    「이미 나갔나」의 자는 `inbound.first_sales_reply` 하나다 — 티켓 화면의 「문의 회신」 라벨과 같은 자다. 부르는
+    쪽(`advance_if_customer_replied`)이 둘을 더 거른다: New 를 떠난 적이 있는 문의는 안 옮기고, 이 연락처에 진행 중인
+    다른 문의가 있으면 개인 메일함 메일을 빼고 잰다(그 메일이 어느 문의 얘기인지 모른다 — 라벨은 서도 단계는 사람이
+    옮긴다). 우리끼리 오간 메일(전달)은 수집기가 처음부터 안 넣는다(`_between_us`). 고객의 말은 **그 첫 답장 뒤**로 잰다(마지막
+    답장 뒤가 아니다): New 는 사람이 단계를 고친 적이 없는 자리라, 고객이 우리 첫 답 뒤에 한 번이라도 썼으면 협의
+    중이 맞다 — 그 사이 우리가 또 보냈어도. 첫 문의 행은 고객의 답장이 아니다(`inbound.first_inquiry_ref`).
+    아직 아무것도 안 나갔으면 None(그대로 New).
+    """
+    from .inbound import first_inquiry_ref, first_sales_reply
+
+    first = first_sales_reply(events, created_at)
+    if first is None:
+        return None
+    inquiry = first_inquiry_ref(events)
+    replied = any(turn.direction == "inbound" and turn.at > first.at and turn.source_ref != inquiry
+                  for turn in events)
+    return "negotiation" if replied else "meeting_link_sent"
+
+
+async def _move_answered_elsewhere(conversation_id: int, contact_id: int, stage: str,
+                                   sheet_client_id: int | None) -> None:
+    """New → Contacted(또는 협의 중). 허브스팟과 워크북까지 — 콘솔 발송이 옮길 때와 같은 두 함수다.
+
+    **이번에는 초안을 지웁니다**(`retire_drafts=True`). New 의 자동 초안은 「아직 아무도 답 안 했다」를 위해 쓴
+    글이고 답은 이미 다른 길로 나갔다 — 단계를 옮기는 다른 모든 길과 같은 규칙이다(사람이 「메일 발송」으로 쓰는
+    수동 초안은 그 규칙이 원래 안 지운다). 실패해도 수집은 성공이다 — 다음 회차의 폴러(`advance_answered_elsewhere_once`)가
+    다시 본다.
+
+    워크북은 **이 문의의 행**에만 쓴다(`sheet_client_id` 는 문의의 것 — 콘솔 보드처럼 연락처의 번호로 떨어지지
+    않는다). 연락처의 번호로 찾으면 행이 하나뿐인 그 사람의 옛 문의 행에 이 단계가 적힌다.
+    """
+    from ..api.routes.customer_ops import _set_conversation_stage, _sync_stage
+
+    try:
+        ticket_id, _contact, _contact_sheet_id = await asyncio.to_thread(
+            _set_conversation_stage, conversation_id, stage
+        )
+        await _sync_stage(ticket_id, stage, contact_id, sheet_client_id)
+        logger.info("문의 %s: 콘솔 밖에서 보낸 첫 답장이 있어 %s 로 옮겼습니다.", conversation_id, stage)
+    except Exception:
+        logger.warning("문의 %s: 단계 이동 실패", conversation_id, exc_info=True)
+
+
+def advance_answered_elsewhere_once() -> int:
+    """New 인데 우리 쪽 이메일 줄이 붙어 있는 티켓을 다시 판정합니다 — 옮긴 수 (10분 폴러, 2026-10-08).
+
+    수집기 셋(허브스팟 스레드 · 개인 메일함 · 손 기록)이 줄을 넣을 때마다 `advance_if_customer_replied` 를 부르지만,
+    그 판정이 New 를 보기 **전에** 들어온 줄(배포 전의 티켓)과 이동이 실패한 티켓은 다음 줄이 올 때까지 아무도 다시
+    안 본다. 후보는 New 를 떠난 적이 없고(`left_new_at`) 나간 이메일 줄이 하나라도 있는 대화뿐이라 평소에는 조회 한
+    번으로 끝난다 — 그 줄이 이 문의 전의 것인지 · 우리 영업 메일인지는 판정(`stage_answered_elsewhere`)이 가린다.
+    """
+    from ..db.history_view import EMAIL_CHANNELS
+
+    with SessionLocal() as session:
+        candidates = list(session.scalars(
+            select(Conversation.id)
+            .join(CustomerInteraction, CustomerInteraction.conversation_id == Conversation.id)
+            .where(
+                Conversation.stage.in_(_ANSWERED_ELSEWHERE_FROM),
+                Conversation.left_new_at.is_(None),
+                CustomerInteraction.direction.in_(("outgoing", "outbound")),
+                CustomerInteraction.channel.in_(EMAIL_CHANNELS),
+            )
+            .distinct()
+        ))
+    moved = 0
+    for conversation_id in sorted(candidates):
+        try:
+            moved += bool(asyncio.run(advance_if_customer_replied(conversation_id)))
+        except Exception:
+            logger.warning("문의 %s: 단계 판정 실패", conversation_id, exc_info=True)
+    if moved:
+        logger.info("콘솔 밖에서 답한 New 티켓 %d건을 옮겼습니다.", moved)
+    return moved
 
 
 async def sync_one_ticket(conversation_id: int) -> int:
@@ -645,6 +789,8 @@ async def sync_one_ticket(conversation_id: int) -> int:
             return 0
         ticket_id = (conversation.hubspot_ticket_id or "").strip()
         contact_id = conversation.contact_id
+        contact = session.get(Contact, contact_id) if contact_id else None
+        contact_email = contact.email if contact is not None else None
     if not ticket_id or not contact_id:
         # 티켓이나 연락처가 없으면 가져올 자리가 없습니다. 다시 고르지 않게 도장은 찍습니다.
         _stamp(conversation_id)
@@ -653,7 +799,7 @@ async def sync_one_ticket(conversation_id: int) -> int:
     started = datetime.now(timezone.utc)
     client = HubSpotClient()
     try:
-        rows = await collect_ticket_history(client, ticket_id)
+        rows = await collect_ticket_history(client, ticket_id, contact_email=contact_email)
     finally:
         await client.close()
     added = _store(conversation_id, contact_id, rows, started)
@@ -795,6 +941,7 @@ def mark_ticket_history_stale(conversation_id: int) -> None:
 
 
 __all__ = [
+    "advance_answered_elsewhere_once",
     "advance_if_customer_replied",
     "attach_personal_emails",
     "classify_direction",

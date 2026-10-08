@@ -27,7 +27,13 @@ def message_copies(messages, interactions) -> dict[int, object]:
     열쇠가 있으면 열쇠(허브스팟 id · 개인함 지메일 id), 없으면 본문 — `ticket_history.same_mail`, 개인함과
     허브스팟 사본을 가르는 그 자다. 폼 문의의 허브스팟 사본은 폼 칸을 늘어놓은 글(`Service: … Details: …`)
     이라 본문이 통째로 같지 않다 — 문의 본문을 **담고 있으면** 사본이다.
+
+    **후속 리마인더의 「Reminder Sent N」 줄(`followup:reminder:<메시지 id>`)도 그 리마인더 메일의 사본이다**
+    (2026-10-08 운영자: 「이렇게 한번씩 더 나감 위에 요약본은 필요없어」). 2026-09-21 ~ 10-08 에 발송 뒤 정리가
+    소통 히스토리에 따로 남기던 줄인데, 그 화면들이 리마인더 메일 행도 같이 그려서 리마인더마다 두 줄이 섰다.
+    「몇 차인가」는 메일 행이 들고 간다(`ticket_records` 의 `tag`, 티켓 화면의 `reminder_label`).
     """
+    from ..agents.followup_sequence import REMINDER_NOTE_PREFIX
     from ..agents.ticket_history import SAME_MAIL_WINDOW, same_mail
 
     keys: set[str] = set()
@@ -42,8 +48,14 @@ def message_copies(messages, interactions) -> dict[int, object]:
         if delivered and not (m.hubspot_message_id or m.smtp_message_id) and (m.sent_at or m.created_at):
             loose.append(m)
     copies: dict[int, object] = {}
+    by_id = {m.id: m for m in messages}
     for item in interactions:
         ext = item.external_id or ""
+        if ext.startswith(REMINDER_NOTE_PREFIX):
+            mail_id = ext[len(REMINDER_NOTE_PREFIX):]
+            if mail_id.isdigit() and int(mail_id) in by_id:
+                copies[item.id] = by_id[int(mail_id)]
+            continue
         if ext in keys:
             copies[item.id] = next(m for m in messages if ext in (
                 f"hubspot:conv:{m.hubspot_message_id}", f"gmail:{m.smtp_message_id}"))
@@ -186,13 +198,14 @@ def ticket_records(session, contact_id: int, conversation_ids: list[int]) -> dic
         (Message.direction == "inbound") | Message.status.in_(DELIVERED_STATUSES),
     )))
     # 같은 메일을 두 번 세지 않습니다 — 자는 `message_copies` 하나입니다(`inbound.thread_events` 와
-    # 같은 규칙). 리마인더의 「Reminder Sent N」 줄(`followup:reminder:<id>`)은 **거르지 않습니다**:
-    # 그 줄은 운영자 지시로 소통 히스토리에 남기는 것이고(2026-09-21), 티켓 화면이 그리는 것을
-    # 고객 상세가 숨기면 두 화면이 같은 행을 두고 다른 말을 합니다.
+    # 같은 규칙). 리마인더의 「Reminder Sent N」 줄(`followup:reminder:<id>`)도 그 메일의 사본입니다
+    # (2026-10-08) — 「몇 차인가」는 메일 행의 `tag` 가 들고, 티켓 화면도 같은 자로 한 줄만 그립니다.
     interactions = list(session.scalars(select(CustomerInteraction).where(
         CustomerInteraction.contact_id == contact_id, CustomerInteraction.conversation_id.in_(ids),
     )))
     drawn = message_copies(messages, interactions)
+    from ..agents.followup_sequence import sent_reminder_label
+
     for msg in messages:
         result[msg.conversation_id].append({
             "record_key": f"message:{msg.id}", "conversation_id": msg.conversation_id,
@@ -200,6 +213,8 @@ def ticket_records(session, contact_id: int, conversation_ids: list[int]) -> dic
             "subject": msg.subject, "summary": msg.body, "context": msg.summary_line,
             "happened_at": msg.sent_at or msg.created_at, "source": "message",
             "editable": False,
+            # 나간 후속 리마인더면 「Reminder Sent N」 — 따로 서던 소통 히스토리 줄의 말(위 `message_copies`).
+            "tag": sent_reminder_label(msg),
         })
     for item in interactions:
         if item.id not in drawn:

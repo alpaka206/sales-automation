@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, NamedTuple
 
 from pydantic import BaseModel, PrivateAttr
@@ -359,13 +359,40 @@ def unanswered_customer_turns(events: list[_Turn], last_outgoing_at) -> tuple[da
     if not ours:
         return None, [turn for turn in events if turn.direction == "inbound"]
     baseline = max(ours)
-    first_inquiry = min(
+    first_inquiry = first_inquiry_ref(events)
+    return baseline, [turn for turn in events
+                      if turn.direction == "inbound" and turn.at > baseline and turn.source_ref != first_inquiry]
+
+
+def first_inquiry_ref(events: list[_Turn]) -> str | None:
+    """접수가 만든 첫 문의 행(`message:<가장 작은 id>`). 그 시각은 고객이 쓴 때가 아니라 우리가 받아 적은 때라
+    「우리 회신 뒤에 온 고객 말」로 세지 않는다 — 위 `unanswered_customer_turns` 의 설명."""
+    return min(
         (turn.source_ref for turn in events
          if turn.direction == "inbound" and turn.source_ref.startswith("message:")),
         key=lambda ref: int(ref.split(":", 1)[1]), default=None,
     )
-    return baseline, [turn for turn in events
-                      if turn.direction == "inbound" and turn.at > baseline and turn.source_ref != first_inquiry]
+
+
+# 「이 문의 전에 오간 대화」의 선 — 티켓이 선 때에서 한 시간 앞. 티켓 화면의 빨간 「CS」 칩(`MessageDetail` 의
+# `isPreInquiry`)과 같은 선이다: 문의 자체가 티켓 행보다 몇 초~몇 분 이르다.
+INQUIRY_SLACK = timedelta(hours=1)
+
+
+def first_sales_reply(events: list[_Turn], created_at) -> _Turn | None:
+    """이 문의에 우리 영업이 **처음** 보낸 이메일 — 콘솔에서 나갔든 허브스팟 받은편지함 · 개인 메일함에서 나갔든.
+
+    2026-10-08 운영자: 「다른곳에서 보냈어도 첫번째 답변이면 문의 회신으로 떠야해」. 티켓 화면의 「문의 회신」
+    라벨(`routes.messages._message_detail_context` 의 `first_reply_key`)과 New 티켓의 단계
+    (`ticket_history.advance_if_customer_replied`)가 이 한 곳을 쓴다 — 화면은 콘솔에서 나간 메일만 세고 단계는
+    아무것도 안 세던 동안, 허브스팟에서 답한 티켓은 리마인더가 「문의 회신」으로 서고 고객이 답해도 New 에 남았다.
+
+    우리 영업 메일의 자는 `role == "sales"` 하나다(`history_view.is_sales_email`) — 리마인더 · 챗봇 답 · CS 안내는
+    아니다. 티켓이 서기 한 시간 전(`INQUIRY_SLACK`)보다 이른 메일은 이 문의 전부터 돌던 대화라 안 센다.
+    """
+    since = _naive(created_at) - INQUIRY_SLACK if created_at is not None else None
+    replies = [turn for turn in events if turn.role == "sales" and (since is None or turn.at >= since)]
+    return min(replies, key=lambda turn: (turn.at, turn.source_ref)) if replies else None
 
 
 def utcnow_naive() -> datetime:

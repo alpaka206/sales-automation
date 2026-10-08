@@ -166,6 +166,9 @@ export type Interaction = {
    *  에서 들여온 메일·채팅·폼은 일어난 일의 사본이라 고치면 화면이 저쪽과 다른 이야기를
    *  합니다. **서버가 정합니다** — 화면이 판단하면 그 규칙이 두 곳에 생깁니다. */
   editable?: boolean;
+  /** 줄에 붙는 짧은 표시 — 후속 리마인더 메일이면 「Reminder Sent 1」(`history_view.ticket_records`, 2026-10-08).
+   *  따로 서던 「Reminder Sent」 줄을 리마인더 메일 줄 하나로 합치면서 그 말을 이 줄이 들고 갑니다. */
+  tag?: string | null;
 };
 
 /** `datetime-local` 이 받는 모양(`YYYY-MM-DDTHH:mm`)으로. API 가 주는 것은 오프셋 없는
@@ -307,9 +310,13 @@ export function InteractionForm({
  *  제목은 **버려지지 않습니다**: 요약이 빈 기록에서는 아래 `body` 가 제목을 대신 씁니다.
  *  그 줄에는 제목이 가진 전부이기 때문입니다. */
 export function InteractionItem({
-  item, hideSubject = false, hideHandler = false, preInquiry = false, onEdit, onDelete,
+  item, hideSubject = false, hideHandler = false, preInquiry = false, firstReply = false, onEdit, onDelete,
 }: {
   item: Interaction;
+  /** 이 문의에 우리가 보낸 **첫** 답인가 — 그러면 「이메일 발송」이 아니라 「문의 회신」입니다 (2026-10-08 운영자:
+   *  「다른곳에서 보냈어도 첫번째 답변이면 문의 회신으로 떠야해」). 허브스팟 받은편지함 · 개인 메일함에서 나간 첫
+   *  답이 이 줄로 섭니다. **판단은 서버가 합니다**(`first_reply_key`) — 줄 혼자서는 그것이 첫째인지 모릅니다. */
+  firstReply?: boolean;
   /** 주면 고칠 수 있는 줄에 연필이 붙습니다 (2026-09-07 운영자 지시). **줄이 스스로
    *  고치지 않는 이유**: 고치는 폼은 모달이고 모달은 화면이 엽니다 — 그 자리를 이 줄이
    *  들면 목록을 그리는 곳마다 모달이 하나씩 생깁니다. 안 주면 예전 그대로입니다. */
@@ -341,7 +348,7 @@ export function InteractionItem({
    *  지우면 그 둘이 같이 사라집니다. */
   hideHandler?: boolean;
 }) {
-  const dir = interactionMark(item.channel, item.direction);
+  const dir = firstReply ? directionMark("outgoing") : interactionMark(item.channel, item.direction);
   // 제목을 안 그리는 자리에서는 본문 없는 줄이 통째로 빈칸이 됩니다 — 그때는 제목이
   // 그 기록의 전부라 본문 자리에 씁니다.
   // 인용된 지난 메일은 뺍니다 — 그 문의는 이 목록에 자기 줄로 이미 서 있습니다.
@@ -370,6 +377,7 @@ export function InteractionItem({
             그대로 씁니다(`pill--danger`) — 여기서만 쓰는 빨강을 새로 만들면 같은 뜻의
             빨강이 두 개가 됩니다. */}
         {preInquiry && <span className="pill pill--danger pill--sm">CS</span>}
+        {item.tag && <span className="tag">{item.tag}</span>}
         {!hideHandler && item.handler && <span className="tag">{item.handler}</span>}
         {/* **`kst()` 로 찍습니다.** API 가 주는 것은 오프셋 없는 UTC 라, 잘라서 그대로
             쓰면 한국 시각보다 9시간 이른 값이 찍힙니다 — 같은 목록의 메일 줄은 변환해서

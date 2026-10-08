@@ -303,7 +303,7 @@ def test_a_message_that_arrives_while_the_ticket_is_being_read_stays_queued(db, 
         async def close(self):
             return None
 
-    async def _collect(client, ticket):
+    async def _collect(client, ticket, **_):
         rows = [_thread_row("hubspot:conv:m-1", "inbound", "첫 메일", T0)]
         # 여기서 고객의 두 번째 메일이 도착하고 웹훅이 온다 — 이미 읽은 목록에는 없다.
         ticket_history.mark_ticket_history_stale(conv_id)

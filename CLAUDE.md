@@ -4,7 +4,7 @@ PERSO Inbound is a FastAPI workflow for inbound inquiry handling and customer op
 
 ## 2026-09-21 정책 응답·이전 이력 변경
 
-- 최신 사용자 지시로 이전 티켓의 **요약 전용 표시를 제거**했다. 리드 상세·티켓 이전 이력·수주 고객 이력은 `history_view.ticket_records`와 `TicketHistoryBox`의 실제 기록을 테두리로 구분한다(나간 회신의 기준은 `DELIVERED_STATUSES` 한 곳, 리마인더의 「Reminder Sent N」 줄은 거르지 않는다 — 09-21 의 「N차 리마인더 완료」를 09-22 에 바꾼 글자, `followup_sequence.done_label`). AI 문맥에 쓰는 DB summary는 보존한다.
+- 최신 사용자 지시로 이전 티켓의 **요약 전용 표시를 제거**했다. 리드 상세·티켓 이전 이력·수주 고객 이력은 `history_view.ticket_records`와 `TicketHistoryBox`의 실제 기록을 테두리로 구분한다(나간 회신의 기준은 `DELIVERED_STATUSES` 한 곳, 리마인더 하나는 한 줄이다 — 2026-10-08 운영자: 「이렇게 한번씩 더 나감 위에 요약본은 필요없어」. 09-21 ~ 10-08 에 따로 남기던 「Reminder Sent N」 줄(`followup:reminder:<id>`)은 `history_view.message_copies` 가 그 리마인더 메일의 사본으로 접고, 그 말은 메일 행의 `tag`(티켓 화면은 `reminder_label`)가 든다 — `followup_sequence.done_label`). 「문의 회신」은 이 문의 뒤 우리 영업의 첫 이메일이다 — 콘솔에서 나갔든 허브스팟 받은편지함 · 개인 메일함에서 나갔든(2026-10-08 운영자: 「다른곳에서 보냈어도 첫번째 답변이면 문의 회신으로 떠야해」). 고르는 것은 서버다(`inbound.first_sales_reply` → 티켓 화면의 `first_reply_key`) — 화면이 콘솔 메일 중 첫째를 고르던 동안 허브스팟에서 첫 답을 보낸 티켓은 후속 리마인더가 「문의 회신」으로 섰다. AI 문맥에 쓰는 DB summary는 보존한다.
 - 초안은 `PolicySnapshot`과 최근 실제 대화를 사용하고 기존 Event에 근거 참조/hash를 남긴다. 조회 오류를 빈 정상 문맥으로 바꾸지 않는다. 승인 내용과 정책/대화를 발송 전에 재확인한다. legacy/동적 HTML 등 한계는 문서에 명시한다.
   - **「대화가 변경됐다」는 해시가 아니라 초안 뒤에 온 고객 메시지다** (`inbound.customer_turns_since`, 2026-09-22). 대화 전체 해시로 재면 스레드 수집이 넣는 최초 문의의 사본·운영자 「수신」 기록·개인함의 옛 메일이 전부 「변경」이 되어 **New 티켓마다 승인이 막히고** 빠져나갈 길은 다시 쓰기(운영자 편집이 사라진다)뿐이었다. 정책 쪽도 같은 자다 — 초안이 **본** 문서(규칙 전부 + 라우터가 고른 참고 문서)만 본다(`PolicySnapshot.evidence_changed`): 전체 해시로 재면 CS 가이드 오타 하나에 대기열 전부가 「정책 변경」으로 막힌다. 안 고른 참고 문서는 고쳐도 늘어도 안 센다; 규칙 문서는 추가·삭제도 변경이다.
   - **발송 관문은 워커의 잠금 상태(`sending:<pid>:<random>`)를 승인된 그대로로 본다.** `"sending"` 한 글자와 비교하던 첫 판은 사람이 승인한 회신 전부를 send_failed 로 떨어뜨렸을 것이다 — 안전 모드는 그 검사 앞에서 빠지므로 로컬·CI 로는 안 잡힌다. `tests/test_policy_context.py::test_the_workers_claim_passes_the_send_gate` 가 워커와 같은 길로 잡아 고정한다.
@@ -916,9 +916,34 @@ PERSO Inbound is a FastAPI workflow for inbound inquiry handling and customer op
       대기열을 그 칸 `IS NULL` 하나로 합치면서 수집기가 도장 없는 티켓만 집게 됐고, 그러면 기준은
       언제나 None 이다. 테스트가 순수 함수만 봐서 초록이었다 — 지금은
       `test_the_reply_rule_fires_for_a_ticket_queued_again_by_the_webhook` 가 수집 경로째 고정한다.
-  - **올라가는 자리는 Contacted 하나뿐이다.** New 에 온 답장은 우리가 아직 답을 안 한
-    것이라 여전히 New 이고(검토할 초안이 대기 중이다), 협의 중·수주·종료는 이미 지나간
+  - **올라가는 자리는 Contacted 와, 콘솔 밖에서 이미 답한 New 다.** 협의 중·수주·종료는 이미 지나간
     자리라 되돌리면 안 된다 — 발송 워커가 「앞으로만 간다」로 같은 사고를 이미 막았다.
+    - **New 는 우리 영업 메일이 이미 나갔으면 움직인다** (2026-10-08 운영자: 「문의 접수 후에 그 사이트에서
+      안보냈더니 … 이메일 수신이 왔음에도 negotation 으로 안옮겨졌어」). New → Contacted 는 콘솔 발송
+      (`send_worker`)만 했어서, 허브스팟 받은편지함 · 개인 메일함으로 첫 답을 보낸 티켓은 New 에 남았고 그 뒤
+      고객의 답장도 단계를 못 옮겼다. 이제 `ticket_history.stage_answered_elsewhere` 가 「문의 회신」 라벨과
+      같은 자(`inbound.first_sales_reply` — 이 문의 뒤 우리 영업의 첫 이메일, 티켓이 서기 한 시간 전보다 이른
+      메일 · 리마인더 · 챗봇 · CS 안내는 아니다)로 보고, 있으면 Contacted, **그 첫 답 뒤에** 고객이 썼으면 협의
+      중이다(마지막 답 뒤로 재면 그 사이 우리가 또 쓴 것이 고객의 답장을 가린다 — 오늘 사례가 그 모양이었다. New 는
+      사람이 단계를 고친 적 없는 자리라 첫 답 뒤로 재도 된다). 첫 문의 행은 답장이 아니다(`first_inquiry_ref`).
+      이 이동은 **초안을 지운다**(`_move_answered_elsewhere`, `retire_drafts=True`) — New 의 자동 초안은 답이
+      이미 다른 길로 나간 글이다. 우리 영업 메일이 없는 New 는 고객이 몇 번을 써도 New 다.
+    - **초안을 지우고 허브스팟 · 워크북까지 쓰는 자동 이동이라 울타리가 셋이다** (같은 날 검토):
+      - **한 번만** — New 를 떠난 적이 있는 문의(`conversations.left_new_at`, 이관 0131)는 안 옮긴다. 그 칸은 단계를
+        쓰는 모든 길(보드 · 허브스팟 동기화 · 발송 워커 · 백필 · 이 이동)이 ORM 대입이라 `models._stage_left_new` 한
+        곳이 처음 떠난 때를 적는다. 없으면 사람이 New 로 되돌린 티켓을 폴러가 10분마다 다시 옮기며 사람과 싸운다.
+        이관은 이미 New 가 아닌 문의를 채우고 지금 New 인 문의는 비워 둔다.
+      - **개인 메일함 메일은 이 연락처에 진행 중인 다른 문의가 있으면 안 센다** — 개인함 줄은 주제와 무관하게 가장
+        최근 문의에 붙어서(`mailbox_sync._newest_conversation`) 수주 고객의 계정 관리 메일이 새 문의의 「첫 답」이 될
+        수 있다. 끝난 문의(Concluded · Closed Lost)는 「진행 중」이 아니다. 그때도 「문의 회신」 라벨은 선다 — 라벨은
+        보이는 것, 이동은 지우는 것이라 이동만 더 조심한다.
+      - **워크북은 이 문의의 행에만** — 보드처럼 연락처의 번호로 떨어지면(`_set_conversation_stage`) 행이 하나뿐인 그
+        사람의 옛 문의 행에 Contacted 가 적힌다. 이 문의의 행이 아직 없으면 안 쓰고, 나중에 붙일 때 그때의 단계로 선다.
+      - 넷째 — **동료에게 전달한 메일은 처음부터 대화에 안 들어온다**(아래 「우리끼리 오간 메일은 안 넣는다」).
+    - **부르는 곳**: 허브스팟 스레드 수집 · 개인 메일함 수집(이제 **우리가 그 메일함에서 보낸 메일**이 붙은 티켓도
+      다시 판정한다) · 콘솔 손 기록(이제 **방향과 무관하게** — 이메일이 아닌 기록은 판정이 역할로 거른다), 그리고
+      10분 폴러의 `answered_elsewhere` 단계(`advance_answered_elsewhere_once` — New 를 떠난 적이 없고 나간 이메일 줄이
+      있는 대화만, 배포 전에 들어온 줄과 이동이 실패한 티켓을 다시 본다). 10-06 운영 사본에는 New 티켓이 0건이었다.
   - **이 전환만 초안을 안 지운다**(`_set_conversation_stage(retire_drafts=False)`).
     초안을 지우는 규칙의 근거는 「단계가 넘어갔다는 것은 **답이 다른 경로로 나갔다**는
     뜻」인데 여기는 정반대다 — 우리가 답한 것이 아니라 **고객이 쓴 것**이다. 그리고 실제로
@@ -961,8 +986,8 @@ PERSO Inbound is a FastAPI workflow for inbound inquiry handling and customer op
   - **New 는 그대로다** — 초안이 `LIST_STATUS_BUCKETS["awaiting"]` 에 있는 New 티켓, 기간도 기준선도 없이(개인함 메일은
     그 사람의 가장 최근 티켓에 붙어서, 기준선으로 거르면 답 안 한 문의의 초안이 그 메일 하나로 사라졌다). 초안 없는 New
     행은 없다: New 화면은 초안을 읽고 보내는 화면이라(2026-08-20) 「이 티켓의 기록」도 「메일 발송」도 안 그려서, 그런 행은
-    열어도 할 일이 없다. 그래서 **콘솔 밖에서 답하고 단계를 New 로 둔 티켓은 그 뒤 고객 답장이 안 선다** — 단계를 옮기면
-    선다.
+    열어도 할 일이 없다. 콘솔 밖에서 답한 New 티켓은 이제 저절로 Contacted · 협의 중으로 옮겨져(아래 「고객이 답장하면
+    Contacted → Negotiating」의 New 문단) 그 뒤 고객 답장이 New 다음 단계의 규칙으로 선다.
   - **New 를 지나면 고객의 답장이다.** 「답장했나」의 자는 `inbound.unanswered_customer_turns` 하나이고 Contacted → 협의 중
     (`ticket_history.advance_if_customer_replied`)과 같이 쓴다. 고객의 그 말이 최근 30일(`AWAITING_REPLY_DAYS`) 안이어야
     한다 — 기간 없이 10-06 운영 사본으로 재면 이전 담당자 때 답 없이 끝난 Concluded · Closed Lost 36건(81~335일 전)이
@@ -1035,6 +1060,17 @@ PERSO Inbound is a FastAPI workflow for inbound inquiry handling and customer op
     `support@perso.ai` 발신 **60건**이 고객으로 뒤집히므로 `perso.ai`·`*.hs-inbox.com` 도
     우리 것이고, 발신 주소가 아예 없는 채팅·봇 **896건**은 actorId 로 가른다(`V-` 고객,
     `A-`·`B-` 우리).
+  - **우리끼리 오간 메일은 안 넣는다** (2026-10-08, `ticket_history._between_us`). 허브스팟 받은편지함에서 동료에게
+    **전달**하거나 우리끼리 주고받은 메일이 티켓 스레드에 같이 선다 — 실측: 최근 B2B 티켓 200건의 우리 발신 메일
+    198통 중 보낸 사람 · 받는 사람이 전부 우리 주소인 것이 4통(그중 하나는 제목이 Fwd:). 방향은 보낸 주소로 가르므로
+    넣으면 「우리 영업이 보낸 이메일」이 되어, 첫 회신 라벨 · New 의 자동 이동(초안을 지운다) · 답장 기준선(그 뒤로
+    고객의 답장이 가려진다 — 실측 한 건이 그 모양) · 리마인더 시계가 전부 그것을 고객에게 한 답으로 읽었다.
+    - **「연락처 주소가 받는 사람에 없으면 전달」로 재지 않는다** — 같은 실측에 고객의 다른 주소로 간 정상 회신이
+      2통 있었다. 외부(파트너)로 전달한 메일은 여전히 우리 회신으로 선다(같은 실측 0통 — 리마인더는
+      `followup_sequence._outside_copy` 가 받는 사람을 다시 읽어 한 번 더 막는다).
+    - 이메일만 본다 — 우리 직원이 고객 대신 넣은 폼은 우리 주소에서 와도 문의다. 연락처가 우리 주소인 사내 테스트
+      티켓은 그 주소가 끼어 있으면 남긴다(`sync_one_ticket` 이 연락처 주소를 넘긴다).
+    - **이미 들어온 줄은 그대로다** — 수집기는 있는 줄을 안 고친다. 옛 티켓의 그런 줄은 지금도 우리 회신으로 센다.
   - **중복 판정은 `external_id` 하나로 한다, 티켓으로 좁히지 않는다.** 유니크 인덱스가
     표 전체에 걸려 있어서, 같은 메시지가 다른 티켓 밑이나 티켓 없이 이미 있으면 티켓으로
     좁힌 조회에는 안 보이고 commit 에서 터진다 — 그러면 **그 티켓의 멀쩡한 행까지 같이
@@ -1265,8 +1301,8 @@ PERSO Inbound is a FastAPI workflow for inbound inquiry handling and customer op
     새 후속 회신을 보내면 그 메일부터 센다. 템플릿 키가 없거나 틀리면 스윕은 안 보내고 **티켓 배너가
     그 키를 적는다**(`view().template_missing`) — 로그에만 남기면 아무도 모른다.
   - **몇 차까지 갔는지 티켓에 적고 소통 히스토리에도 남긴다** (2026-09-21 운영자 지시).
-    말의 출처는 `followup_sequence.done_label` **한 곳**이고, 티켓 배너의 칩과 소통 히스토리
-    줄과 진행 기록이 같은 문자열을 쓴다 — 자리마다 지으면 한 화면에서 서로 다르게 읽힌다.
+    말의 출처는 `followup_sequence.done_label` **한 곳**이고, 티켓 배너의 칩과 리마인더 메일 줄의 태그와
+    진행 기록이 같은 문자열을 쓴다 — 자리마다 지으면 한 화면에서 서로 다르게 읽힌다.
     - **글자는 `Pending` · `Reminder Sent 1` · `Reminder Sent 2` 다** (2026-09-22 운영자 지시:
       「리마인더 센트 기본적으로 떠있게(Pending, Reminder Sent 1, Reminder Sent 2)」 — 그 전날의
       「1차 리마인더 완료」를 대신한다). 칩은 **언제나 하나**이고 시퀀스가 살아 있는 티켓에는 기본으로
@@ -1276,15 +1312,14 @@ PERSO Inbound is a FastAPI workflow for inbound inquiry handling and customer op
       그 날짜 뒤에 나간 우리 메일부터 시퀀스와 이 칩이 선다. 그 값을 비우는 것이 끄는 것이다. 「보냈다」의 기준은 `next_step` 과 같다(`sent` + `sent_at`): 메일
     스위치가 내려가 `test_sent` 로 남은 행을 「완료」로 적으면 고객은 한 통도 못 받았는데
     화면은 갔다고 말한다.
-    - **소통 히스토리 줄이 없으면 아무 데도 안 보인다.** 발송 뒤 정리가 남기던 진행 기록은
-      `kind='reply'` 라 `ROUTINE_PROGRESS_KINDS` 에 걸려 **읽을 때 걸러진다** — 티켓 화면도
-      고객 상세도 그 줄을 안 그린다. 그래서 `customer_interactions` 에 한 행을 넣는다.
-    - **그 행의 `direction` 은 `outgoing` 이어야 한다.** `_replies()` 가 그 연락처의 inbound
-      줄을 「고객이 답장했다」로 읽어 Negotiating 으로 옮기므로, inbound 로 넣으면 우리
-      리마인더가 고객 답장으로 보이고 시퀀스가 자기 자신을 멈춘다.
-    - `external_id = followup:reminder:<message id>` 로 유니크라 발송 뒤 정리가 재시도돼도
-      줄이 둘이 되지 않는다. `customer_ops.interaction_add` 로 돌리지 않는다 — 그쪽은 티켓
-      요약에 한 줄을 더하고 허브스팟 노트까지 만드는데, 그 메일은 이미 스레드에 있다.
+    - **소통 히스토리에는 리마인더 메일 줄 하나가 선다 — 「Reminder Sent N」은 그 줄의 태그다** (2026-10-08
+      운영자: 「이렇게 한번씩 더 나감 위에 요약본은 필요없어」). 09-21 ~ 10-08 에는 발송 뒤 정리가
+      `customer_interactions` 에 `followup:reminder:<message id>` 줄을 따로 남겼는데(진행 기록 `reply` 는 읽을 때
+      걸러져서), 티켓 화면과 고객 상세가 리마인더 메일 행도 같이 그려 리마인더마다 두 줄이 섰다 — 그 줄의 한 줄
+      요약에 모델 호출도 하나씩 들었다. 이제 그 줄을 안 쓰고(`send_worker`), 이미 쌓인 옛 줄은
+      `history_view.message_copies` 가 그 메일의 사본으로 접는다. 말은 `history_view.ticket_records` 의 `tag` ·
+      티켓 화면 말풍선의 `reminder_label` 이 든다 — **나간 리마인더에만**(`followup_sequence.sent_reminder_label`, 칩과
+      같은 `sent` + `sent_at`). 갔는지 모르는 것 · `test_sent` 는 화면에 서도 「후속 리마인더」다.
   - **안 보내는 조건이 보내는 조건보다 많다**: `FOLLOWUP_SEQUENCE_SINCE` 비었음 · 그 날짜 전 회신 ·
     메일 비상 스위치(`email_delivery_enabled`) · 평일 09~18시(KST) 밖 · 사람이 쓰는 초안 있음(**기준
     회신 뒤에 만든 것만** — 그 전의 초안은 버려진 것이라 안 막는다, `open_draft`; 막고 있으면 배너가

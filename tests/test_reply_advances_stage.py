@@ -98,14 +98,16 @@ def test_a_customer_mail_in_a_personal_mailbox_asks_the_stage_rule(monkeypatch):
     assert asked == [conv_id]
 
 
-def test_our_own_mail_in_a_personal_mailbox_does_not(monkeypatch):
-    """우리가 보낸 것은 Contacted 를 만든 사건이지 답장이 아니다 — 판단을 부를 이유가 없다."""
-    _db(monkeypatch)
+def test_our_own_mail_in_a_personal_mailbox_asks_too(monkeypatch):
+    """이 사서함에서 나간 우리 메일도 판단을 부른다 (2026-10-08) — New 티켓의 첫 답이 여기서 나갔을 수 있다
+    (운영자: 「문의 접수 후에 그 사이트에서 안보냈더니 … negotation 으로 안옮겨졌어」). 답장인지 · 첫 답인지는
+    `advance_if_customer_replied` 가 역할로 가린다(`tests/test_ticket_history.py`)."""
+    conv_id = _db(monkeypatch)
     asked = _watch(monkeypatch)
     _one_inbound_mail(monkeypatch, sender="untae@estsoft.com")
 
     assert mailbox_sync.sync_mailboxes_once() == {"added": 1}
-    assert asked == []
+    assert asked == [conv_id]
 
 
 def test_a_failing_stage_rule_does_not_lose_the_sweep(monkeypatch):

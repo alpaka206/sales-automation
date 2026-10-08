@@ -14,7 +14,7 @@ from sqlalchemy.orm import joinedload
 
 from ...agents.approval import ApprovalError, approve, prepare_reviewed_body, reject
 from ...agents.followup_sequence import CONTACTED as FOLLOWUP_STAGE
-from ...agents.followup_sequence import REMINDER_VARIANTS, outside_replies
+from ...agents.followup_sequence import REMINDER_VARIANTS, outside_replies, sent_reminder_label
 from ...agents.followup_sequence import open_draft as followup_open_draft
 from ...agents.followup_sequence import sequence_state as followup_state
 from ...agents.followup_sequence import view as followup_view
@@ -292,6 +292,18 @@ def _message_detail_context(
 
         drawn_by_thread = message_copies(thread_rows, interaction_rows)
 
+        # **「문의 회신」은 서버가 고릅니다** (2026-10-08 운영자: 「다른곳에서 보냈어도 첫번째 답변이면 문의 회신으로
+        # 떠야해」). 화면이 콘솔에서 나간 메일 중 첫째를 골랐더니, 허브스팟 받은편지함에서 첫 답을 보낸 티켓은
+        # 그 뒤의 **후속 리마인더**가 「문의 회신」으로 섰습니다. 자는 `inbound.first_sales_reply` 하나 — New 티켓의
+        # 단계 판정과 같은 자이고, 두 표를 합친 대화(`threads_events`)에서 이 문의 뒤 우리 영업의 첫 이메일입니다.
+        # 열쇠는 `message:<id>` · `interaction:<id>` — 화면이 줄마다 그 모양으로 맞춰 봅니다.
+        first_reply_key = None
+        if conv:
+            from ...agents.inbound import first_sales_reply, threads_events
+
+            first = first_sales_reply(threads_events(session, [conv.id]).get(conv.id, []), conv.created_at)
+            first_reply_key = first.source_ref if first else None
+
         # Customer-level history (CRM state, contract, cross-channel touchpoints)
         # surfaced inline so the operator sees who this customer is without leaving
         # the reply screen. Full editable view stays at /customers/{id}.
@@ -348,6 +360,9 @@ def _message_detail_context(
                 "is_manual": tm.prompt_variant == MANUAL_REPLY_VARIANT,
                 # 후속 리마인더(자동). 사람이 쓴 회신과 같은 말풍선이면 「세 번 답했다」로 읽힙니다.
                 "is_reminder": tm.prompt_variant in REMINDER_VARIANTS,
+                # 「Reminder Sent 1」 — 따로 서던 소통 히스토리 줄의 말을 메일 행이 들고 간다(2026-10-08,
+                # `history_view.message_copies` 가 그 줄을 이 메일의 사본으로 접는다). 나간 것에만.
+                "reminder_label": sent_reminder_label(tm),
                 # 한 줄 요약. New 를 지난 화면은 본문 대신 이것을 보여 주고,
                 # 「전체보기」를 눌렀을 때 본문이 나옵니다.
                 "summary_line": tm.summary_line,
@@ -367,6 +382,7 @@ def _message_detail_context(
 
         return {
             "thread": thread,
+            "first_reply_key": first_reply_key,
             # **진행 기록만.** 한동안 이 목록에 소통 기록(`interaction_rows`)을 같은
             # 모양으로 섞어 보냈는데, 그건 바로 아래 `ticket_interactions` 로도 나가는
             # **같은 행**입니다. 화면이 둘 다 그리면서 기록 하나가 두 번 보였고, 그중
@@ -703,7 +719,8 @@ def awaiting_conversations(now: datetime | None = None) -> list[dict]:
 
     - **New — 검토할 초안** (그대로다): 초안이 `LIST_STATUS_BUCKETS["awaiting"]` 에 있는 New 티켓, 기간도 기준선도
       없이. 초안 없는 New 행은 없다 — New 화면은 초안을 읽고 보내는 화면이라(2026-08-20) 「메일 발송」도 기록도 안
-      그린다. 그래서 콘솔 밖에서 답하고 단계를 New 로 둔 티켓은 그 뒤 고객 답장이 안 선다 — 단계를 옮기면 선다.
+      그린다. 콘솔 밖에서 답한 New 티켓은 저절로 Contacted · 협의 중으로 옮겨진다(`ticket_history.
+      stage_answered_elsewhere`, 2026-10-08) — 그 뒤 고객 답장은 아래 규칙으로 선다.
     - **New 를 지난 단계 — 고객의 답장**: 우리 영업의 마지막 이메일 뒤에 고객이 쓴 말이 최근 `AWAITING_REPLY_DAYS`
       안에 있는 대화. 자는 `inbound.unanswered_customer_turns` 하나다 — Contacted → 협의 중
       (`ticket_history.advance_if_customer_replied`)과 같은 자라, 협의 중으로 옮겨진 티켓은 여기에도 선다. 리마인더 ·

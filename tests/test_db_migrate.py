@@ -914,3 +914,32 @@ def test_no_migration_compares_a_boolean_to_an_integer():
         "boolean 을 정수와 비교합니다 — Postgres 가 거절합니다. `IS TRUE` / `IS FALSE` 로: "
         + ", ".join(offenders)
     )
+
+
+class TestLeftNew:
+    """0131 — `conversations.left_new_at`. 콘솔 밖에서 답한 New 의 자동 이동은 New 를 떠난 적이 없는 문의에만 돈다.
+
+    이미 New 가 아닌 문의는 채운다: 비워 두면 나중에 사람이 New 로 되돌렸을 때 자동 이동이 한 번 싸운다(허브스팟과
+    워크북까지). 지금 New 인 문의는 비워 둔다 — 떠난 적이 있는지 모르고, 비워야 콘솔 밖에서 답한 오늘의 티켓이 움직인다.
+    """
+
+    MODULE = "src.db.migrations.0131_a_ticket_leaves_new_once"
+
+    def test_fills_tickets_past_new_and_leaves_new_ones_empty(self, mem_engine):
+        with mem_engine.begin() as conn:
+            conn.execute(text("CREATE TABLE conversations (id INTEGER, stage TEXT)"))
+            conn.execute(text(
+                "INSERT INTO conversations (id, stage) VALUES "
+                "(1, 'new'), (2, 'initial'), (3, 'meeting_link_sent'), (4, 'closed')"
+            ))
+
+        importlib.import_module(self.MODULE).up(mem_engine)
+        importlib.import_module(self.MODULE).up(mem_engine)  # 두 번 돌려도 같다
+
+        with mem_engine.connect() as conn:
+            left = conn.execute(text("SELECT id, left_new_at IS NOT NULL FROM conversations ORDER BY id")).all()
+        assert [tuple(row) for row in left] == [(1, 0), (2, 0), (3, 1), (4, 1)]
+
+    def test_skips_when_the_table_does_not_exist(self, mem_engine):
+        importlib.import_module(self.MODULE).up(mem_engine)
+        assert "conversations" not in inspect(mem_engine).get_table_names()

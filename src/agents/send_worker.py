@@ -14,7 +14,7 @@ from sqlalchemy import func, select, update
 from ..common.config import settings
 from ..db.conversation_history import add_progress
 from .summaries import append_summary_line
-from ..db.models import Contact, Conversation, CustomerInteraction, CustomerProfile, Message
+from ..db.models import Contact, Conversation, CustomerProfile, Message
 from ..db.session import SessionLocal
 
 logger = logging.getLogger(__name__)
@@ -157,7 +157,7 @@ async def _post_send_bookkeeping(session, msg, conv, message_id: int, *, moved: 
     # 그 사이 영업이 허브스팟에서 Negotiating 으로 옮겼고 우리 쪽이 아직 모르면 되돌립니다. 워크북
     # 오류(`missing_client_id` 처럼 다시 해도 안 풀리는 것)가 있으면 몇 시간에 걸쳐 여덟 번까지
     # 그랬습니다. 그래서 첫 회차는 `_send_one` 이 본 사실(`moved`)을, 재시도는 **실패한 단계만** 본다.
-    from .followup_sequence import REMINDER_NOTE_PREFIX, REMINDER_VARIANTS, done_label
+    from .followup_sequence import REMINDER_VARIANTS, done_label
 
     reminder = msg.prompt_variant in REMINDER_VARIANTS
     previous_attempts = msg.post_send_sync_attempts
@@ -255,36 +255,12 @@ async def _post_send_bookkeeping(session, msg, conv, message_id: int, *, moved: 
                 # 지시). 티켓 배너 · 소통 히스토리 · 진행 기록이 같은 문장을 적어야 합니다.
                 label = done_label(msg.prompt_variant)
                 add_progress(conv.id, "reply", label, session=session)
-                # **소통 히스토리에도 한 줄 남깁니다.** 그 표가 티켓 화면과 고객 상세가 그리는
-                # 목록이고, 위의 진행 기록 `reply` 는 읽을 때 걸러집니다
-                # (`ROUTINE_PROGRESS_KINDS`) — 그것만으로는 운영자 눈에 아무것도 안 남습니다.
-                #
-                # `customer_ops.interaction_add` 는 안 씁니다: 그 헬퍼는 티켓 요약에 한 줄을
-                # 보태고 허브스팟 노트까지 남기는데, 메일 자체는 이미 Conversations 스레드에
-                # 있습니다(바로 위 「요약에 안 보탠다」와 같은 이유).
-                #
-                # **`direction` 은 `outgoing` 이어야 합니다.** `followup_sequence._replies` 가 이
-                # 연락처의 `inbound` 줄을 「고객이 답장했다」로 읽어 티켓을 Negotiating 으로 옮기고
-                # 시퀀스를 멈춥니다 — 우리 리마인더가 고객 답장으로 보이면 안 됩니다.
-                #
-                # `external_id` 가 유니크(0106)라 이미 있으면(옛 데이터) 넣지 않습니다 — 부딪히면 위의
-                # 횟수까지 같이 롤백됩니다.
-                external_id = f"{REMINDER_NOTE_PREFIX}{msg.id}"
-                if session.scalar(select(CustomerInteraction.id).where(
-                    CustomerInteraction.external_id == external_id
-                )) is None:
-                    session.add(CustomerInteraction(
-                        contact_id=conv.contact_id,
-                        conversation_id=conv.id,
-                        channel="이메일",
-                        direction="outgoing",
-                        # 열이 300자입니다. 제목은 「RE: <고객이 쓴 제목>」이라 길이를 우리가 정하지
-                        # 않습니다 — 안 자르면 긴 제목 하나가 배달된 메일의 기록을 통째로 날립니다.
-                        subject=(msg.subject or "")[:300] or None,
-                        summary=label,
-                        external_id=external_id,
-                        happened_at=msg.sent_at or now,
-                    ))
+                # **소통 히스토리에 따로 한 줄을 남기지 않습니다** (2026-10-08 운영자: 「이렇게 한번씩 더 나감 위에
+                # 요약본은 필요없어」). 2026-09-21 부터 여기서 `followup:reminder:<id>` 줄을 남겼는데, 티켓 화면과
+                # 고객 상세가 리마인더 메일 행도 같이 그려서 리마인더마다 두 줄이 섰습니다(그 줄의 한 줄 요약에 모델
+                # 호출도 하나씩 들었습니다). 「몇 차인가」는 메일 행이 들고 갑니다 — `history_view.ticket_records` 의
+                # `tag`, 티켓 화면의 `reminder_label`. 이미 쌓인 옛 줄은 `history_view.message_copies` 가 그 메일의
+                # 사본으로 접습니다.
             else:
                 add_progress(conv.id, "reply", f"답변 발송 완료: {msg.subject or '(제목 없음)'}"[:200],
                              session=session)

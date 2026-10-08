@@ -1287,10 +1287,11 @@ async def interaction_add(
         happened_at=_parse_form_time(happened_at) or datetime.now(timezone.utc),
     )
     # **「수신」이면 고객이 답장한 것이다 — Contacted → 협의 중** (2026-09-22 운영자 보고:
-    # 「수신은 왔는데 stage 가 안 넘어가졌어」). 이 기록은 허브스팟 스레드를 안 지나므로
-    # 그쪽 수집기가 영영 못 본다. 판단은 `ticket_history` 한 곳이고, 여기서는 기록이 저장된
-    # 뒤에 부르기만 한다 — 단계는 장부이지 기록의 조건이 아니라 실패해도 요청은 성공이다.
-    if linked_conversation_id is not None and direction.strip().lower() in ("incoming", "inbound"):
+    # 「수신은 왔는데 stage가 안 넘어가졌어」), **다른 곳에서 보낸 첫 메일을 「발신」으로 적었으면 New →
+    # Contacted** (2026-10-08). 이 기록은 허브스팟 스레드를 안 지나므로 그쪽 수집기가 영영 못 본다. 판단은
+    # `ticket_history` 한 곳이고(이메일이 아닌 기록 · 미팅은 단계를 안 움직인다 — 그 판정이 역할로 가린다),
+    # 여기서는 기록이 저장된 뒤에 부르기만 한다 — 단계는 장부이지 기록의 조건이 아니라 실패해도 요청은 성공이다.
+    if linked_conversation_id is not None:
         from ...agents.ticket_history import advance_if_customer_replied
 
         try:
