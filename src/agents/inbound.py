@@ -337,6 +337,37 @@ def customer_turns_since(events: list[_Turn], since: datetime, *, seen=()) -> li
             if turn.direction == "inbound" and turn.source_ref not in seen and turn.at > since]
 
 
+def unanswered_customer_turns(events: list[_Turn], last_outgoing_at) -> tuple[datetime | None, list[_Turn]]:
+    """(우리 영업의 마지막 이메일 시각, 그 뒤에 온 고객 turn) — 「고객이 답장했나」의 자는 이 한 곳입니다.
+
+    Contacted → 협의 중(`ticket_history.advance_if_customer_replied`)과 「답변 대기」 목록
+    (`routes.messages.awaiting_conversations`)이 같이 씁니다 — 둘이 다른 자를 쓰면 협의 중으로 옮겨진 티켓이
+    답변 대기에는 안 뜨거나 그 반대가 됩니다. 기준선은 영업 이메일 turn(`role == "sales"`)이고, 리마인더 · 챗봇
+    답 · CS 안내는 우리 말이 아닙니다. ``last_outgoing_at`` 은 영업 이메일이 하나도 안 보일 때만 씁니다 — 발송
+    워커가 **리마인더를 보낼 때도** 그 칸을 밀어서(`send_worker._record_delivery`), 늘 더하면 「기준 회신 뒤 · 1차
+    리마인더 전에 온 답장」이 늦게 들어왔을 때(죽은 사서함 토큰 · 손으로 적은 「수신」) 답장이 아니게 됐습니다.
+
+    기준선이 없으면(이 대화에서 우리 영업 이메일이 하나도 안 보이면) 고객 turn 전부를 돌려줍니다 — 그것을
+    답장으로 볼지는 부르는 쪽이 정합니다(백필 티켓은 우리가 안 읽는 사서함에서 답했을 수 있습니다).
+    기준선이 있으면 접수가 만든 첫 문의 행은 답장이 아닙니다(2026-09-28): 그 시각은 고객이 쓴 때가 아니라
+    우리가 받아 적은 때라, 허브스팟 화면에서 먼저 답하고 접수가 늦으면 고객이 한 마디도 안 했는데 「답장」이
+    됐습니다. 실제 제출 시각은 폼 줄(`hubspot:conv:`)이 들고 있습니다.
+    """
+    ours = [turn.at for turn in events if turn.role == "sales"]
+    if not ours and last_outgoing_at is not None:
+        ours = [_naive(last_outgoing_at)]
+    if not ours:
+        return None, [turn for turn in events if turn.direction == "inbound"]
+    baseline = max(ours)
+    first_inquiry = min(
+        (turn.source_ref for turn in events
+         if turn.direction == "inbound" and turn.source_ref.startswith("message:")),
+        key=lambda ref: int(ref.split(":", 1)[1]), default=None,
+    )
+    return baseline, [turn for turn in events
+                      if turn.direction == "inbound" and turn.at > baseline and turn.source_ref != first_inquiry]
+
+
 def utcnow_naive() -> datetime:
     """``customer_turns_since`` 의 자 — ``_naive`` 와 같은 시간대(UTC, tz 없음)입니다."""
     return datetime.now(timezone.utc).replace(tzinfo=None)

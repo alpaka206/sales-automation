@@ -1,7 +1,7 @@
 import { TicketHistoryBox, type HistoryRecord } from "../ui/TicketHistoryBox";
 import { useLayoutEffect, useState, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { getJSON, postForm } from "../lib/api";
 import { kst, stripQuotedReply } from "../lib/format";
 import { Icon } from "../ui/Icon";
@@ -130,6 +130,9 @@ export function MessageDetail() {
   // 없는 티켓(HubSpot 에서 들여온 것)도 엽니다. 질의 키가 둘을 가릅니다.
   const { id, conversationId } = useParams();
   const navigate = useNavigate();
+  // 답변 대기의 행은 온 자리를 들고 옵니다(`QueueTable`) — 초안 없는 행이 티켓 문으로 들어와도 「뒤로」는 그 목록입니다.
+  const cameFrom = (useLocation().state as { from?: string } | null)?.from;
+  const backTo = cameFrom ?? (conversationId ? "/" : "/messages");
   const key = conversationId ? ["ticket", conversationId] : ["message", id];
   const path = conversationId ? `/api/ui/tickets/${conversationId}` : `/api/ui/messages/${id}`;
   const queryClient = useQueryClient();
@@ -621,8 +624,8 @@ export function MessageDetail() {
           보드에서 티켓으로 들어오게 바뀌었으니, 고객 단위로 보고 싶을 때 갈 곳이
           여기 있어야 합니다. Deal Detail·소통 히스토리는 티켓의 값이라 이 화면이 먼저입니다. */}
       <div className="row-between" style={{ marginBottom: 14 }}>
-        <Link to={conversationId ? "/" : "/messages"} className="chip">
-          <Icon name="chevron" size={14} /> {conversationId ? "문의 대시보드" : "회신 및 검토 목록"}
+        <Link to={backTo} className="chip">
+          <Icon name="chevron" size={14} /> {backTo.startsWith("/messages") ? "회신 및 검토 목록" : "문의 대시보드"}
         </Link>
       </div>
 

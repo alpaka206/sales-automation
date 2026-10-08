@@ -617,9 +617,12 @@ def test_a_reply_the_operator_logged_by_hand_counts(monkeypatch):
 def test_our_reminders_do_not_move_the_baseline(monkeypatch):
     """**리마인더는 우리 말이 아니다.** 기준 회신 뒤 · 1차 리마인더 전에 온 답장도 답장이다 —
     리마인더로 기준선을 밀면 그 사이에 온 답장이 「이미 본 것」이 되어 티켓이 Contacted 에
-    남고, 리마인더는 계속 나간다."""
+    남고, 리마인더는 계속 나간다.
+
+    발송 워커는 리마인더를 보낼 때도 `last_outgoing_at` 을 민다(`send_worker._record_delivery`) — 운영과 같게
+    그 칸까지 리마인더 시각으로 둔다. 그 칸은 영업 이메일이 하나도 안 보일 때만 기준선이다."""
     from src.agents.followup_sequence import REMINDER_VARIANTS
-    from src.db.models import Message
+    from src.db.models import Conversation, Message
 
     factory, conv_id, contact_id = _reply_db(monkeypatch)
     advanced = _watch_advance(monkeypatch)
@@ -627,6 +630,7 @@ def test_our_reminders_do_not_move_the_baseline(monkeypatch):
         session.add(Message(conversation_id=conv_id, direction="outgoing", status="sent", channel="email",
                             subject="RE: 문의", body="혹시 확인하셨을까요?", prompt_variant=REMINDER_VARIANTS[0],
                             hubspot_message_id="hs-rem-1", sent_at=_REPLY_AT + _DAY * 3))
+        session.get(Conversation, conv_id).last_outgoing_at = _REPLY_AT + _DAY * 3
         session.commit()
 
     _customer_wrote(factory, conv_id, contact_id, _REPLY_AT + _DAY, external_id="hubspot:conv:between")

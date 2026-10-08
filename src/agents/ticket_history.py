@@ -607,7 +607,7 @@ async def advance_if_customer_replied(conversation_id: int) -> bool:
     대화를 못 읽으면 False 다(`thread_events` 는 조회 실패를 빈 대화로 바꾸지 않고 던진다).
     기록은 이미 들어갔고 단계는 다음 답장이나 사람이 맞춘다.
     """
-    from .inbound import _naive, thread_events
+    from .inbound import thread_events, unanswered_customer_turns
 
     with SessionLocal() as session:
         conversation = session.get(Conversation, conversation_id)
@@ -621,24 +621,10 @@ async def advance_if_customer_replied(conversation_id: int) -> bool:
         logger.warning("문의 %s: 대화를 못 읽어 답장 판정을 건너뜁니다", conversation_id,
                        exc_info=True)
         return False
-    ours = [turn.at for turn in events if turn.role == "sales"]
-    if last_outgoing_at is not None:
-        ours.append(_naive(last_outgoing_at))
-    if not ours:
-        return False
-    baseline = max(ours)
-    # **그 대화의 첫 문의 행은 답장이 아니다** (2026-09-28). `messages` 의 문의 행은 시각이 고객이 쓴
-    # 때가 아니라 우리가 접수한 때(`created_at`)라, 운영자가 허브스팟 화면에서 먼저 답하고 접수가 몇 분
-    # 늦으면(잠든 서버 · 놓친 웹훅을 폴러가 줍는 경우) 문의가 「우리 마지막 말 뒤의 고객 turn」이 되어
-    # 고객이 한 마디도 안 했는데 Negotiating 으로 갔다. 실제 제출 시각은 폼 줄(`hubspot:conv:`)이 들고 있다.
-    # 후속 리마인더의 답장 판정(`followup_sequence._replies`)도 같은 줄을 뺀다.
-    first_inquiry = min(
-        (turn.source_ref for turn in events
-         if turn.direction == "inbound" and turn.source_ref.startswith("message:")),
-        key=lambda ref: int(ref.split(":", 1)[1]), default=None,
-    )
-    if not any(turn.direction == "inbound" and turn.at > baseline and turn.source_ref != first_inquiry
-               for turn in events):
+    # 자는 `inbound.unanswered_customer_turns` 하나다 — 「답변 대기」 목록이 같은 자로 잰다. 기준선이 없으면
+    # 안 옮긴다(위 docstring — 몇 달 전 메시지 하나로 Contacted 티켓 수백 건이 옮겨지면 안 된다).
+    baseline, replies = unanswered_customer_turns(events, last_outgoing_at)
+    if baseline is None or not replies:
         return False
     await _advance_on_customer_reply(conversation_id, contact_id)
     return True

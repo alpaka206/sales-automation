@@ -16,8 +16,10 @@ type MessagesData = {
   now: string;
 };
 
+// 「답변 대기」는 초안이 아니라 대화다(2026-10-08) — 고객이 우리 마지막 영업 메일 뒤에 썼으면 어느 단계든 선다.
+// 대시보드의 「답변 대기」 숫자가 이 목록의 총계다.
 const STATUS_CHIPS = [
-  ["awaiting", "발송 대기"],
+  ["awaiting", "답변 대기"],
   ["sent", "발송 완료"],
 ] as const;
 const SORT_CHIPS = [
@@ -85,8 +87,8 @@ export function Messages() {
         </div>
       </div>
 
-      {/* Empty for 발송 대기: that bucket holds one stage, so 전체/New would be two chips
-          over the same rows. The server decides — this only renders what it sends. */}
+      {/* 단계 칩은 서버가 정한다 — 버킷에 단계가 하나뿐이면 비어서 온다(전체와 그 단계가 같은 행을 고른다).
+          This only renders what it sends. */}
       {data && data.stage_chips.length > 0 && (
         <div className="chip-row mb-gap">
           {data.stage_chips.map(([value, label]) => (

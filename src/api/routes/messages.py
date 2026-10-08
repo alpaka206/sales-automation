@@ -25,6 +25,7 @@ from ...db.conversation_history import ROUTINE_PROGRESS_KINDS, add_progress
 from ...common.inquiry import CATEGORY_LABELS, UNQUALIFIED, category_label, is_unqualified
 from ...db.email_templates import default_signature_key, list_signature_templates
 from ...db.models import (
+    Approval,
     Client,
     Contact,
     Conversation,
@@ -193,6 +194,25 @@ def _message_detail_context(
             # 조회와 **정확히 같은 답**을 내야 화면이 안 바뀝니다.
             if message_id is None and thread_rows:
                 msg = max(thread_rows, key=lambda row: row.id)
+                # **버려진 초안은 「현재」 글이 아닙니다** (2026-10-08). New 를 지난 티켓에서 우리 마지막 메일보다 먼저
+                # 쓰다 만 초안은 「메일 발송」이 밀린 것으로 닫는 글입니다(`start_manual_reply`, 2026-09-28 — 같은 자
+                # `followup_sequence.open_draft`). 그것을 편집기에 열면 「메일 발송」이 숨습니다 — 답변 대기의 「고객 회신
+                # 도착」이 이 문으로 들어와 몇 주 전 초안을 만났습니다(10-06 운영 사본에 그런 대화 2건).
+                def editable(row) -> bool:
+                    return (row.direction == "outgoing" and row.status in ("pending_approval", "send_failed")
+                            and row.prompt_variant not in REMINDER_VARIANTS)
+
+                if conv.stage not in ("new", "initial") and editable(msg):
+                    base, _ = followup_state(
+                        [row for row in thread_rows if row.direction == "outgoing"],
+                        outside_replies(session, [conv.id]).get(conv.id, ()),
+                    )
+                    if base is not None and followup_open_draft([msg], base) is None:
+                        msg = max(
+                            (row for row in thread_rows
+                             if not (editable(row) and followup_open_draft([row], base) is None)),
+                            key=lambda row: row.id, default=None,
+                        )
             # 처리 경과, oldest → newest. Filtered on READ, never deleted: progress rows
             # are append-only, and what the machine did to itself is still worth having
             # in the row when something has to be explained.
@@ -648,18 +668,18 @@ LIST_STATUS_BUCKETS: dict[str, tuple[str, ...]] = {
     # 0079 가 그 전에 쌓인 행도 치웠습니다.
     "sent": ("sent", "test_sent", "rejected"),
 }
-# Stage chips, per status bucket ("" = 전체). The two buckets sit at opposite ends of the
-# pipeline, so one shared chip row was wrong in both directions: a reply still waiting
-# belongs to a ticket nobody has answered (New) or one under negotiation, and nothing
-# else — while sending is exactly what moves a ticket PAST New, so 발송 완료 never has a
-# New row and does have the downstream stages. Chips are rendered in PIPELINE_STAGES
-# order; a stage that is not in the current bucket falls back to 전체 (see below), which
-# is what happens when the operator switches buckets with a stage chip active.
+# Stage chips, per status bucket ("" = 전체). Sending is exactly what moves a ticket PAST
+# New, so 발송 완료 never has a New row. Chips are rendered in PIPELINE_STAGES order; a stage
+# that is not in the current bucket falls back to 전체 (see below), which is what happens
+# when the operator switches buckets with a stage chip active.
 LIST_STAGES: dict[str, tuple[str, ...]] = {
-    # 발송 대기 is New only. Drafts are generated for New tickets and nothing else
-    # (InboundAgent.handle returns "skipped_not_new" for any other stage), so a
-    # Negotiating chip here could only ever return an empty table.
-    "awaiting": ("new",),
+    # 답변 대기 is every stage (2026-10-08 운영자: 「상대에게 답장이 왔으면 어떤 단계든 표시되도록」) — New holds
+    # the draft to review, every later stage a customer who wrote after our last sales email
+    # (`awaiting_conversations`).
+    "awaiting": (
+        "new", "meeting_link_sent", "negotiation",
+        "won", "closed_lost", "closed",
+    ),
     "sent": (
         "meeting_link_sent", "negotiation",
         "won", "closed_lost", "closed",
@@ -668,18 +688,158 @@ LIST_STAGES: dict[str, tuple[str, ...]] = {
 LIST_SORTS = ("oldest", "newest")
 
 
+# 「답변 대기」가 고객의 답장을 보는 기간. 기간 없이 2026-10-06 운영 사본으로 재면 36건이 섰는데 전부 Concluded ·
+# Closed Lost 의 81~335일 전 메시지 — 이전 담당자 때 답을 안 한 채 끝난 대화 — 였다. New 의 검토할 초안에는 안 건다
+# (옛 「발송 대기」에도 기간이 없었다).
+AWAITING_REPLY_DAYS = 30
+
+
+def awaiting_conversations(now: datetime | None = None) -> list[dict]:
+    """「답변 대기」의 행 — 사람이 답을 정해야 하는 대화. 둘 중 하나다.
+
+    2026-10-08 운영자: 「답변 대기중인 문의에 원래 new 에 해당하는 것만 왔는데 / 그게 아니라 이제 상대에게 답장이
+    왔으면 어떤 단계든 표시되도록 해줘」. 그전에는 New 의 초안만 섰다 — 협의 중 · 수주 고객이 답장해도 이 목록에 안
+    섰고, 그 단계에는 초안이 저절로 안 생기니 볼 길이 보드 카드뿐이었다.
+
+    - **New — 검토할 초안** (그대로다): 초안이 `LIST_STATUS_BUCKETS["awaiting"]` 에 있는 New 티켓, 기간도 기준선도
+      없이. 초안 없는 New 행은 없다 — New 화면은 초안을 읽고 보내는 화면이라(2026-08-20) 「메일 발송」도 기록도 안
+      그린다. 그래서 콘솔 밖에서 답하고 단계를 New 로 둔 티켓은 그 뒤 고객 답장이 안 선다 — 단계를 옮기면 선다.
+    - **New 를 지난 단계 — 고객의 답장**: 우리 영업의 마지막 이메일 뒤에 고객이 쓴 말이 최근 `AWAITING_REPLY_DAYS`
+      안에 있는 대화. 자는 `inbound.unanswered_customer_turns` 하나다 — Contacted → 협의 중
+      (`ticket_history.advance_if_customer_replied`)과 같은 자라, 협의 중으로 옮겨진 티켓은 여기에도 선다. 리마인더 ·
+      챗봇 답 · CS 안내는 우리 말이 아니다. 우리 영업 이메일이 안 보이는 대화(백필 — 어느 말이 답장인지 모른다)와
+      허브스팟 티켓이 없는 대화(「메일 발송」이 회신할 길이 없다)는 안 선다.
+
+    답장 쪽의 행은 우리 마지막 영업 이메일 뒤에 만든 초안(리마인더 · 옛 접수확인 제외)이다 — `/messages/<id>`. 그런 초안이
+    없으면 「고객 회신 도착」(`received`)으로 티켓 화면(`/tickets/<id>`)을 연다 — 거기 「메일 발송」이 있다. 회신이 나가는
+    중이면 안 서고, 사람이 정한 초안(거절 · 갔는지 모름 · 시험 발송)은 **정한 뒤로** 고객이 새로 쓴 말이 있을 때만 선다 —
+    거절이 곧 「이건 답하지 않는다」다(검토 화면: 「거절하면 … 빠집니다」).
+
+    읽는 대화는 열린 초안이 있거나 고객 쪽 줄이 그 기간 안에 있는 것뿐이다.
+    """
+    from ...agents.inbound import _naive, threads_events, unanswered_customer_turns
+    from .customer_ops import VALID_PIPELINE_STAGES
+
+    now = now or datetime.now(timezone.utc).replace(tzinfo=None)
+    cutoff = now - timedelta(days=AWAITING_REPLY_DAYS)
+    open_statuses = LIST_STATUS_BUCKETS["awaiting"]
+    with SessionLocal() as session:
+        candidates = set(session.scalars(
+            select(Message.conversation_id).where(
+                ((Message.direction == "inbound") & (Message.created_at >= cutoff))
+                | ((Message.direction == "outgoing") & Message.status.in_(open_statuses))
+            )
+        ))
+        candidates |= set(session.scalars(
+            select(CustomerInteraction.conversation_id).where(
+                CustomerInteraction.conversation_id.isnot(None),
+                CustomerInteraction.direction.in_(("inbound", "incoming")),
+                CustomerInteraction.happened_at >= cutoff,
+            )
+        ))
+        candidates.discard(None)
+        if not candidates:
+            return []
+        convs = {
+            conv.id: (conv, email)
+            for conv, email in session.execute(
+                select(Conversation, Contact.email)
+                .join(Contact, Conversation.contact_id == Contact.id)
+                .where(Conversation.id.in_(candidates))
+            )
+        }
+        events = threads_events(session, list(convs))
+        judged = {
+            conv_id: unanswered_customer_turns(events.get(conv_id, []), conv.last_outgoing_at)
+            for conv_id, (conv, _email) in convs.items()
+        }
+        stages = {
+            conv_id: conv.stage if conv.stage in VALID_PIPELINE_STAGES else "new"
+            for conv_id, (conv, _email) in convs.items()
+        }
+        # 이 행의 초안 — 우리 쪽 시도 중 가장 늦은 것. New 를 지나면 마지막 영업 이메일 뒤에 만든 것만이다. New 는 옛
+        # 「발송 대기」 그대로라 안 따진다 — 개인함 메일은 그 사람의 가장 최근 티켓에 붙어서(`mailbox_sync`) 답 안 한
+        # 문의의 초안이 그것 하나로 사라졌다(2026-10-08 리뷰).
+        attempts: dict[int, Message] = {}
+        for msg in session.scalars(
+            select(Message)
+            .where(
+                Message.conversation_id.in_(list(convs)),
+                Message.direction == "outgoing",
+                Message.status != "sent",
+                (Message.prompt_variant.is_(None))
+                | (Message.prompt_variant.not_in((*REMINDER_VARIANTS, "auto_ack"))),
+            )
+            .order_by(Message.id)
+        ):
+            baseline = judged[msg.conversation_id][0]
+            if stages[msg.conversation_id] == "new" or baseline is None or _naive(msg.created_at) > baseline:
+                attempts[msg.conversation_id] = msg
+        # 거절한 때 — 초안 행의 시각이 아니다(「초안 다시 쓰기」는 같은 행을 다시 쓴다).
+        rejected_at = dict(session.execute(
+            select(Approval.message_id, sa_func.max(Approval.created_at))
+            .where(Approval.message_id.in_([msg.id for msg in attempts.values()]), Approval.action == "reject")
+            .group_by(Approval.message_id)
+        ).all())
+        rows = []
+        for conv_id, (conv, email) in convs.items():
+            stage = stages[conv_id]
+            baseline, turns = judged[conv_id]
+            draft = attempts.get(conv_id)
+            if stage == "new":
+                if draft is None or draft.status not in open_statuses:
+                    continue
+                since = _naive(conv.created_at)  # 문의가 온 때 — 옛 목록의 접수 시간 그대로
+            else:
+                if baseline is None or not turns or max(turn.at for turn in turns) < cutoff:
+                    continue
+                if not (conv.hubspot_ticket_id or "").strip():
+                    continue
+                if draft is not None and draft.status not in open_statuses:
+                    status = draft.status or ""
+                    if status == "approved" or status.startswith("sending"):
+                        continue  # 나가는 중 — 나가면 그 회신이 기준선이 된다
+                    decided = max(
+                        _naive(at) for at in (draft.created_at, draft.approved_at, draft.sent_at,
+                                              rejected_at.get(draft.id)) if at
+                    )
+                    if max(turn.at for turn in turns) <= decided:
+                        continue
+                    draft = None
+                # 우리 마지막 이메일 뒤 고객의 첫 말 — 그 뒤에 또 썼어도 기다린 시간은 첫 말부터다.
+                since = min(turn.at for turn in turns)
+            rows.append({
+                "id": draft.id if draft else None,
+                "conversation_id": conv_id,
+                "href": f"/messages/{draft.id}" if draft else f"/tickets/{conv_id}",
+                "status": draft.status if draft else "received",
+                "stage": stage,
+                "subject": conv.inquiry_subject
+                or strip_reply_prefixes(draft.subject if draft else "")
+                or "(제목 없음)",
+                "category": conv.inquiry_category,
+                "email": email or "-",
+                "received_at": since,
+                "waiting_since": since,
+            })
+    return rows
+
+
 def _messages_list_context(
     status: str = "awaiting",
     stage: str = "",
     sort: str = "oldest",
 ) -> dict:
-    """The approval queue: outgoing drafts and finished replies, never inbound rows.
+    """회신 및 검토: 「답변 대기」(대화 — `awaiting_conversations`)와 「발송 완료」(나간 회신 · 거절한 초안).
 
     Every parameter is validated against a fixed set before it reaches SQL or the
     polling URL in the template — the same allow-list discipline as
     ``VALID_PIPELINE_STAGES``. Unvalidated values would be interpolated into the
     template's ``hx-get`` attribute, where an ``&`` survives escaping and appends a
     parameter to the 15-second poll.
+
+    ``total`` 은 자르기 전의 행 수다 — 대시보드의 「답변 대기」 숫자가 바로 이 값이다(`dashboard._dashboard_context`).
+    숫자와 그것이 여는 목록이 같은 계산에서 나와야 둘이 어긋나지 않는다(2026-09-03 운영자 지시, 그대로).
     """
     from .customer_ops import PIPELINE_STAGES, VALID_PIPELINE_STAGES
 
@@ -689,91 +849,81 @@ def _messages_list_context(
     stage = stage if stage in LIST_STAGES[status] else ""
     sort = sort if sort in LIST_SORTS else "oldest"
 
-    # Conversation is already joined, so stage / inquiry_subject / created_at /
-    # last_incoming_at are select-list additions. Only Contact is new, and
-    # Conversation.contact_id is NOT NULL so an inner join loses nothing.
-    q = (
-        select(
-            Message,
-            Conversation.stage,
-            Conversation.inquiry_subject,
-            Conversation.inquiry_category,
-            Conversation.created_at,
-            Conversation.last_incoming_at,
-            Contact.email,
+    if status == "awaiting":
+        rows = [row for row in awaiting_conversations() if not stage or row["stage"] == stage]
+        rows.sort(key=lambda row: row["received_at"], reverse=sort == "newest")
+        total, messages = len(rows), rows[:100]
+    else:
+        # Conversation is already joined, so stage / inquiry_subject / created_at /
+        # last_incoming_at are select-list additions. Only Contact is new, and
+        # Conversation.contact_id is NOT NULL so an inner join loses nothing.
+        q = (
+            select(
+                Message,
+                Conversation.stage,
+                Conversation.inquiry_subject,
+                Conversation.inquiry_category,
+                Conversation.created_at,
+                Conversation.last_incoming_at,
+                Contact.email,
+            )
+            .join(Conversation, Message.conversation_id == Conversation.id)
+            .join(Contact, Conversation.contact_id == Contact.id)
+            .where(Message.direction == "outgoing")
+            # Auto-ack (접수확인) replies are sent automatically and shown inside the
+            # thread — keep them out of the approval queue list so it isn't noisy.
+            .where((Message.prompt_variant.is_(None)) | (Message.prompt_variant != "auto_ack"))
+            .where(Message.status.in_(LIST_STATUS_BUCKETS[status]))
         )
-        .join(Conversation, Message.conversation_id == Conversation.id)
-        .join(Contact, Conversation.contact_id == Contact.id)
-        .where(Message.direction == "outgoing")
-        # Auto-ack (접수확인) replies are sent automatically and shown inside the
-        # thread — keep them out of the approval queue list so it isn't noisy.
-        .where((Message.prompt_variant.is_(None)) | (Message.prompt_variant != "auto_ack"))
-        .where(Message.status.in_(LIST_STATUS_BUCKETS[status]))
-    )
-    if stage:
-        q = q.where(Conversation.stage == stage)
-    elif status == "awaiting":
-        # **발송 대기는 New 만입니다. 예외 없습니다** (2026-09-03 운영자 지시).
-        #
-        # 자동 초안은 New 에서만 생기므로, 그 뒤 단계에 남은 대기 초안은 이미 늦은 것입니다 —
-        # 누군가 허브스팟에서 답한 사이에 우리 초안이 여기 앉아 있던 것이고, 그걸 보여 주면
-        # 고객이 이미 받은 답을 한 번 더 보내라고 청하는 셈입니다.
-        #
-        # **수동 후속 회신도 여기 안 옵니다.** 2026-08-31 에 한 번 예외를 뒀었습니다 —
-        # 「운영자가 협상 중인 티켓에 직접 쓴 회신은 늦은 것이 아니라 지금 하는 일이다」.
-        # 맞는 말이지만 그 예외가 이 목록을 「New 만」이 아니게 만들었고, 대시보드 카운터는
-        # New 만 세므로(`dashboard._awaiting_counters`) **숫자와 목록이 어긋났습니다.**
-        # 쓰다 만 수동 초안은 그 티켓 화면에서 이어 쓰면 됩니다 — 그 자리에 편집기가 있습니다.
-        q = q.where(Conversation.stage.in_(LIST_STAGES["awaiting"]))
-    # Sort by the column the 접수 시간 cell actually shows, not by our draft's
-    # created_at — otherwise "오래된 순" produces a visibly unsorted date column.
-    order_column = (
-        Conversation.last_incoming_at if stage == "negotiation" else Conversation.created_at
-    )
-    q = q.order_by(order_column.asc() if sort == "oldest" else order_column.desc()).limit(100)
+        if stage:
+            q = q.where(Conversation.stage == stage)
+        # Sort by the column the 접수 시간 cell actually shows, not by our draft's
+        # created_at — otherwise "오래된 순" produces a visibly unsorted date column.
+        order_column = (
+            Conversation.last_incoming_at if stage == "negotiation" else Conversation.created_at
+        )
+        q = q.order_by(order_column.asc() if sort == "oldest" else order_column.desc()).limit(100)
 
-    with SessionLocal() as session:
-        rows = session.execute(q).all()
-        messages = [
-            {
-                "id": msg.id,
-                "status": msg.status,
-                "stage": conv_stage if conv_stage in VALID_PIPELINE_STAGES else "new",
-                # The customer's own subject, shown exactly as HubSpot holds it. The
-                # fallback is our REPLY subject (drafting/draft_failed rows can predate
-                # the ticket subject), and that one is built as "RE: <original>" — this
-                # column is 문의 제목, so the prefix we added comes back off. A "RE:"
-                # the CUSTOMER wrote is part of their subject and stays.
-                "subject": inquiry_subject or strip_reply_prefixes(msg.subject) or "(제목 없음)",
-                # 채널 자리에 있던 값입니다. 전부 "email" 이라 아무 줄도 구분하지 못했고,
-                # 그 폭이 정작 궁금한 것 — 이게 무슨 문의인가 — 을 가리고 있었습니다.
-                "category": inquiry_category,
-                "email": email or "-",
-                # New chip → when the ticket arrived; Negotiating → when they last
-                # wrote back. Both already on the row, no extra query.
-                "received_at": (
-                    last_incoming_at if stage == "negotiation" and last_incoming_at else conv_created
-                ),
-                # Priority is measured from the customer's last message, not from our
-                # draft: it answers "how long have they been waiting?".
-                "waiting_since": last_incoming_at or conv_created,
-            }
-            for (
-                msg, conv_stage, inquiry_subject, inquiry_category,
-                conv_created, last_incoming_at, email,
-            ) in rows
-        ]
+        with SessionLocal() as session:
+            rows = session.execute(q).all()
+            messages = [
+                {
+                    "id": msg.id,
+                    "conversation_id": msg.conversation_id,
+                    "href": f"/messages/{msg.id}",
+                    "status": msg.status,
+                    "stage": conv_stage if conv_stage in VALID_PIPELINE_STAGES else "new",
+                    # The customer's own subject, shown exactly as HubSpot holds it. The
+                    # fallback is our REPLY subject (drafting/draft_failed rows can predate
+                    # the ticket subject), and that one is built as "RE: <original>" — this
+                    # column is 문의 제목, so the prefix we added comes back off. A "RE:"
+                    # the CUSTOMER wrote is part of their subject and stays.
+                    "subject": inquiry_subject or strip_reply_prefixes(msg.subject) or "(제목 없음)",
+                    # 채널 자리에 있던 값입니다. 전부 "email" 이라 아무 줄도 구분하지 못했고,
+                    # 그 폭이 정작 궁금한 것 — 이게 무슨 문의인가 — 을 가리고 있었습니다.
+                    "category": inquiry_category,
+                    "email": email or "-",
+                    # New chip → when the ticket arrived; Negotiating → when they last
+                    # wrote back. Both already on the row, no extra query.
+                    "received_at": (
+                        last_incoming_at if stage == "negotiation" and last_incoming_at else conv_created
+                    ),
+                    "waiting_since": last_incoming_at or conv_created,
+                }
+                for (
+                    msg, conv_stage, inquiry_subject, inquiry_category,
+                    conv_created, last_incoming_at, email,
+                ) in rows
+            ]
+        total = len(messages)
     return {
         "messages": messages,
+        "total": total,
         "filter_status": status,
         "filter_stage": stage,
         "filter_sort": sort,
         # Built here, not in the template: the labels come from PIPELINE_STAGES, which is
         # also what fixes their order and keeps a renamed stage from needing two edits.
-        #
-        # Empty when the bucket holds a single stage. 발송 대기 is New-only since the
-        # Negotiating chip was dropped, so its row had become 전체 and New — two chips
-        # selecting the same rows, and a filter that cannot filter is worse than none.
         "stage_chips": (
             [("", "전체")]
             + [(key, label) for key, label, _ in PIPELINE_STAGES if key in LIST_STAGES[status]]
@@ -1078,8 +1228,7 @@ _MAX_ROLE_DESC_LEN = 4000
 
 
 # 운영자가 직접 쓴 후속 회신. 자동 초안과 한 표에 살지만 출처가 다르고, 그 차이를 이 한
-# 글자가 나릅니다 — `stage_sync` 의 초안 청소가 이것만 비켜 가고, 아래 목록이 New 가 아닌
-# 티켓의 이것만 통과시킵니다.
+# 글자가 나릅니다 — `stage_sync` 의 초안 청소가 이것만 비켜 갑니다.
 MANUAL_REPLY_VARIANT = "manual"
 
 # 아직 나가지 않은 회신. 하나라도 열려 있으면 새로 만들지 않고 그것을 엽니다 — 같은 티켓에

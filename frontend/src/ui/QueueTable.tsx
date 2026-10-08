@@ -1,4 +1,4 @@
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { Icon } from "./Icon";
 import { kst } from "../lib/format";
 import { DataTable } from "./DataTable";
@@ -7,7 +7,11 @@ import { DataTable } from "./DataTable";
 // the same reason that file exists: the dashboard and 회신 및 검토 render the same rows
 // and drifted apart when each owned a copy.
 export type QueueRow = {
-  id: number;
+  /** 그 행의 초안(메시지) — 「답변 대기」에서 초안이 아직 없는 대화는 null 이다. */
+  id: number | null;
+  conversation_id: number;
+  /** 행이 여는 화면. 서버가 정한다 — 초안이 있으면 `/messages/<id>`, 없으면 티켓 `/tickets/<대화>`. */
+  href: string;
   status: string;
   stage: string;
   subject: string;
@@ -36,6 +40,8 @@ export const STATUS_LABELS: Record<string, string> = {
   delivery_unknown: "확인 필요",
 };
 const STATUS_TONE: Record<string, string> = {
+  // 「답변 대기」의 초안 없는 대화 — 고객이 답장했는데 우리 회신이 아직 없다.
+  received: "warn",
   pending_approval: "warn",
   drafting: "neutral",
   draft_failed: "danger",
@@ -68,6 +74,9 @@ export function QueueTable({
   emptyText: string;
 }) {
   const notALead = new Set(unqualified);
+  // 연 화면의 「뒤로」가 온 자리(대시보드, 또는 필터까지 그대로인 목록)로 돌아가게 — 초안 없는 행은 티켓 화면을 엽니다.
+  const location = useLocation();
+  const from = location.pathname + location.search;
   return (
     <DataTable
       columns={[
@@ -90,7 +99,7 @@ export function QueueTable({
           // 강조가 아니라 배경 무늬가 됩니다 — 제목이 길수록 파란 줄이 화면을 가로지릅니다.
           // 여는 방법은 표의 행 전체가 이미 알려 줍니다.
           cell: (row) => (
-            <Link to={`/messages/${row.id}`} className="truncate link--plain"
+            <Link to={row.href} state={{ from }} className="truncate link--plain"
                   style={{ display: "block" }}>
               {row.subject}
             </Link>
@@ -134,7 +143,7 @@ export function QueueTable({
           cell: (row) => kst(row.received_at, "md-hm") },
       ]}
       rows={rows}
-      rowKey={(row) => row.id}
+      rowKey={(row) => row.href}
       empty={emptyText}
       emptyIcon={<Icon name="messages" size={24} />}
     />

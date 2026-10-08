@@ -262,10 +262,11 @@ PERSO Inbound is a FastAPI workflow for inbound inquiry handling and customer op
   막는 검사가 「[안내]」 · 「[EN]」 · 「[Share Link]」 같은 멀쩡한 글자를 잡으면 운영자가 빠져나갈 길이 없다. 그 밖의
   표시는 없다(위 09-21 절 — 「답변 작성에 대한 경고문 이런건 필요없어」). 거절 이유는 화면에 그대로 뜬다
   (`frontend/src/lib/api.ts` 의 `failure` — 전에는 「실패: Error: 400 /messages/12/send」만 남았다).
-- **배포할 때** (아직 안 했다): 이관 0130. `NON_SALES_SENDER_ADDRESSES` 는 기본값으로 충분하다. 정리는 폴러가 하고
+- **배포했다** (2026-10-07 `bc27a17` — 이관 0130 은 빌드의 `scripts/init_db.py` 가 돌린다).
+  `NON_SALES_SENDER_ADDRESSES` 는 기본값으로 충분하다. 정리는 폴러가 하고
   이메일 템플릿 하나를 저장하면 그 자리에서 전부 한다 — 그 전까지 문서는 통째로, 표시된 숫자만 지운 채 간다.
-  `scripts/fold_history_twins.py` 와 `scripts/cleanup_gmail_drafts.py` 는 세기만 먼저 돌려 읽어 본 뒤 `--apply`
-  (사내망은 DB 가 막혀 서버 셸에서). 평가가 찾은 문서발 실수와 고칠 문구의 제안은 담당자 확인 대기다
+  남은 손일: `scripts/fold_history_twins.py` 와 `scripts/cleanup_gmail_drafts.py` 는 세기만 먼저 돌려 읽어 본 뒤
+  `--apply`(사내망은 DB 가 막혀 서버 셸에서). 평가가 찾은 문서발 실수와 고칠 문구의 제안은 담당자 확인 대기다
   (`tmp/eval-2026-10-06/doc_change_proposals_draft.md`, git 제외) — 콘솔 문서는 코드 작업에서 고치지 않는다.
 
 ## Invariants
@@ -887,10 +888,14 @@ PERSO Inbound is a FastAPI workflow for inbound inquiry handling and customer op
   - **판단은 `ticket_history.advance_if_customer_replied` 한 곳이고, 고객 메시지가 들어오는 세 길이
     전부 그것을 부른다** (2026-09-22): 허브스팟 스레드 수집(`sync_one_ticket`) · 개인 사서함 수집
     (`mailbox_sync.sync_mailboxes_once`, 회차 끝에) · 콘솔의 「수신」 기록(`customer_ops.interaction_add`).
-    기준은 **우리가 마지막으로 보낸 말**(`thread_events` 의 영업 이메일 turn — `role == "sales"` — 과
-    `last_outgoing_at` 중 늦은 쪽) 뒤에 고객 turn 이 있는가 — 기준이 하나도 없으면(어느 채널로도
+    기준은 **우리가 마지막으로 보낸 말**(`thread_events` 의 영업 이메일 turn — `role == "sales"`, 그것이 하나도
+    안 보일 때만 `last_outgoing_at`) 뒤에 고객 turn 이 있는가 — 기준이 하나도 없으면(어느 채널로도
     우리가 쓴 적 없는 Contacted 티켓) 안 옮긴다. 리마인더도 챗봇 답 · CS 주소의 안내도 기준을 안 움직인다
     (2026-10-06 — 첫 회신 판정과 같은 자 `history_view.is_sales_email` 이라야 「우리가 답했다」가 한 뜻이다).
+    자는 `inbound.unanswered_customer_turns` 이고 「답변 대기」 목록이 같이 쓴다(2026-10-08). `last_outgoing_at` 을 늘
+    더하던 동안(~2026-10-08)은 발송 워커가 **리마인더를 보낼 때도** 그 칸을 밀어서, 기준 회신 뒤 · 1차 리마인더 전에 쓴
+    답장이 늦게 들어오면(죽은 사서함 토큰 · 손으로 적은 「수신」) 답장이 아니었다 — 리마인더 시계(`followup_sequence`)는
+    같은 답장으로 협의 중에 옮겨서 둘이 갈렸다.
     - **왜 바꿨나** (2026-09-22 운영자: 「수신은 왔는데 stage가 안넘어가졌어」). 그전에는 허브스팟
       수집 한 길만 판단했고(`reply_advances_stage` + `_seen_upto`), 개인 사서함으로 온 답장과 손으로
       적은 「수신」은 후속 리마인더 스윕만 봤는데 **그 스윕은 운영에서 `FOLLOWUP_SEQUENCE_SINCE`
@@ -949,15 +954,36 @@ PERSO Inbound is a FastAPI workflow for inbound inquiry handling and customer op
   단계를 감싸서 앞 단계가 터지면 뒤 단계가 그 회차를 통째로 굶었다. 지금은 단계마다 따로
   잡는다. 그리고 페이지가 꽉 차면 워터마크를 `now` 로 밀지 않는다 — 정렬이 오름차순이라
   **안 읽은 쪽이 더 최신**이고, 밀어 버리면 그 티켓들은 다음 창 밖으로 나가 영영 안 돌아온다.
-- **「발송 대기」와 대시보드 「답변 대기중인 문의」는 New 만 뜬다 — 예외 없다**
-  (2026-09-03 운영자 지시). 목록은 `messages._messages_list_context`, 숫자는
-  `dashboard._awaiting_counters` 인데 **둘이 같은 것을 세야 한다**: 한 화면에 나란히 서
-  있어서 어긋나면 운영자가 없는 일감을 찾아 나선다. 2026-08-31 에 수동 후속 회신
-  (`prompt_variant='manual'`)을 목록에만 예외로 뒀다가 그 어긋남이 생겼다 — 카운터는
-  `LIST_STAGES["awaiting"]` 로 좁히는데 목록 쿼리에만 `| manual` 이 붙어 있었다.
-  쓰다 만 수동 초안은 그 티켓 화면에서 이어 쓴다(그 자리에 편집기가 있다).
-  `tests/test_messages_list.py::test_the_dashboard_number_and_the_list_below_it_agree`
-  가 둘을 같이 고정한다.
+- **「답변 대기」(회신 및 검토 탭 · 대시보드 「답변 대기중인 문의」)는 단계와 무관하다 — New 는 검토할 초안, 그 뒤
+  단계는 우리 마지막 영업 이메일 뒤에 쓴 고객** (2026-10-08 운영자: 「답변 대기중인 문의에 원래 new 에 해당하는 것만
+  왔는데 / 그게 아니라 이제 상대에게 답장이 왔으면 어떤 단계든 표시되도록 해줘」 — 2026-09-03 의 「New 만, 예외 없다」를
+  대신한다). 행은 대화 하나다(`messages.awaiting_conversations`). 「발송 완료」 탭은 그대로 메시지 단위다.
+  - **New 는 그대로다** — 초안이 `LIST_STATUS_BUCKETS["awaiting"]` 에 있는 New 티켓, 기간도 기준선도 없이(개인함 메일은
+    그 사람의 가장 최근 티켓에 붙어서, 기준선으로 거르면 답 안 한 문의의 초안이 그 메일 하나로 사라졌다). 초안 없는 New
+    행은 없다: New 화면은 초안을 읽고 보내는 화면이라(2026-08-20) 「이 티켓의 기록」도 「메일 발송」도 안 그려서, 그런 행은
+    열어도 할 일이 없다. 그래서 **콘솔 밖에서 답하고 단계를 New 로 둔 티켓은 그 뒤 고객 답장이 안 선다** — 단계를 옮기면
+    선다.
+  - **New 를 지나면 고객의 답장이다.** 「답장했나」의 자는 `inbound.unanswered_customer_turns` 하나이고 Contacted → 협의 중
+    (`ticket_history.advance_if_customer_replied`)과 같이 쓴다. 고객의 그 말이 최근 30일(`AWAITING_REPLY_DAYS`) 안이어야
+    한다 — 기간 없이 10-06 운영 사본으로 재면 이전 담당자 때 답 없이 끝난 Concluded · Closed Lost 36건(81~335일 전)이
+    섰다. 우리 영업 이메일이 안 보이는 대화(백필 — 어느 말이 답장인지 모른다)와 허브스팟 티켓이 없는 대화(「메일 발송」이
+    답할 길이 없다)는 안 선다.
+  - 행은 우리 마지막 영업 이메일 뒤에 만든 초안(리마인더 · 옛 접수확인 제외 — 실패한 리마인더를 걸면 막 답장한 고객에게
+    재촉 메일을 다시 보내라는 셈이다)이다. 없으면 「고객 회신 도착」으로 티켓 화면(`/tickets/<id>`)을 연다 — New 를 지난
+    그 화면에 「메일 발송」이 있다. 그 화면은 우리 마지막 메일보다 먼저 쓰다 만 초안을 「현재」 글로 열지 않는다
+    (`_message_detail_context` — 열면 편집기가 그 낡은 글을 열고 「메일 발송」이 숨었다. 자는 「메일 발송」이 그 초안을
+    밀린 것으로 닫는 `followup_sequence.open_draft` 와 같다). 나가는 중(`approved` · `sending:*`)이면 안 선다. **거절은 여전히 「목록에서
+    빼기」다** — 거절(· 갔는지 모름 · 시험 발송)한 초안은 **정한 뒤로** 고객이 새로 쓴 말이 있을 때만 다시 선다. 정한 때는
+    초안 행의 시각이 아니라 거절 기록(`approvals`)·승인·발송 시각이다 — 「초안 다시 쓰기」는 같은 행을 다시 쓴다. 답이
+    필요 없는 답장(「감사합니다」)을 내리는 길은 「메일 발송」 → 거절이다(내리기 버튼은 없다).
+  - **초안만으로는 안 선다** — 고객이 답하지 않은 대화의 수동 후속 초안은 그 티켓 화면에서 이어 쓴다. 옛 규칙의 걱정
+    (허브스팟에서 이미 답한 티켓의 초안이 남아 같은 답을 또 보내게 한다)은 기준선이 막는다 — 허브스팟 화면의 회신도
+    스레드 수집으로 영업 이메일이 된다.
+  - **숫자는 목록의 총계 그대로다**(`_messages_list_context(...)["total"]` — 대시보드는 같은 호출의 값을 쓴다). 숫자를
+    따로 세던 쿼리(`dashboard._awaiting_counters`, 지웠다)가 두 번 목록과 다른 말을 했다 — 2026-08-05 의 6 대 1, 그리고
+    2026-08-31 에 목록에만 붙은 수동 초안 예외(`prompt_variant='manual'`, 09-03 에 걷었다). 한 화면에 나란히 서 있어서
+    어긋나면 운영자가 없는 일감을 찾아 나선다. `tests/test_messages_list.py::test_the_dashboard_number_and_the_list_below_it_agree`
+    가 고정한다. 초안 없는 행이 티켓 화면을 열어도 「뒤로」는 온 목록이다(`QueueTable` 이 `state.from` 을 싣는다).
 - **저절로 생기는 초안은 New 티켓에만 있다 — 단계가 넘어가면 나가지 않은 초안을 지운다.** 미팅 링크가 나갔거나 협상·수주·종료로 옮겨졌다는 것은 답이 이미 다른 경로로 나갔다는 뜻이고, 그 초안을 발송 대기에 두면 운영자에게 고객이 이미 받은 답을 한 번 더 보내라고 청하는 셈이다. 지우는 곳은 `stage_sync._retire_superseded_drafts` → `_delete_pending_drafts` **한 곳**이고, 단계를 옮기는 쪽(HubSpot 동기화 · 콘솔 보드 · 고객 상세 폼 · 워크북 · 백필)과 초안을 완성하는 쪽(`inbound._finalize_draft`)이 전부 여기를 지난다. 행이 없어지므로 목록·집계·발송에서 빠지고 `approve()` 가 찾지 못한다 — 라우트마다 단계를 확인하지 않는 이유다. **닫지 않고 지운다** (2026-08-19 운영자 지시): 예전에는 `superseded` 로 상태만 바꿔 남겼는데, 나가지도 않은 초안이 히스토리에 남아 나중에 읽는 사람이 「이 답변은 나갔다」로 셌다. 안 지우는 것 둘 — 운영자가 「메일 발송」으로 쓰는 수동 후속 초안(`prompt_variant='manual'`, 2026-08-31 — 쓰는 도중에 사라진다)과 티켓이 Contacted 인 동안의 리마인더 행(2026-09-17 — 지우면 시퀀스가 다시 만든다).
   - **`!= "new"` 가 아니라 매핑된 단계인지로 가른다**(`_PAST_NEW`). 모델 기본값 `initial` 이나 뜻을 모르는 값은 단계가 움직인 것이 아니라서, `!= "new"` 로 세면 아직 아무도 손대지 않은 티켓의 초안까지 지운다.
   - 과거 데이터의 `prompt_variant='auto_ack'`는 호환을 위해 일반 회신 집계와 발송 큐에서 제외한다. 새 자동 접수확인은 생성되지 않는다.

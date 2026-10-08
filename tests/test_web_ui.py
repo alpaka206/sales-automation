@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import pathlib
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -268,47 +268,6 @@ def test_pipeline_columns_show_the_label_only():
         assert gloss not in board, gloss
 
 
-def test_the_all_counter_counts_the_rows_the_list_it_opens_holds(db_session_factory, monkeypatch):
-    """ALL said 6, 회신 및 검토 held 1.
-
-    The counter summed every stage while the list shows New only — the other five were
-    drafts on tickets somebody had already answered in HubSpot, which is exactly why the
-    list stopped showing them. A number that disagrees with the screen it links to sends
-    the operator looking for work that is not there, so it counts the same rows.
-    """
-    from src.api.routes import customer_ops, dashboard
-    from src.api.routes import messages as messages_route
-    from src.api.routes.dashboard import _awaiting_counters
-    from src.api.routes.messages import _messages_list_context
-
-    for module in (dashboard, messages_route, customer_ops):
-        monkeypatch.setattr(module, "SessionLocal", db_session_factory)
-
-    with db_session_factory() as session:
-        contact = Contact(normalized_email="c@example.com", email="c@example.com", full_name="C")
-        session.add(contact)
-        session.flush()
-        # One still New, one already moved on in HubSpot with our draft left behind.
-        for stage in ("new", "meeting_link_sent"):
-            conv = Conversation(contact_id=contact.id, stage=stage, inquiry_subject=stage)
-            session.add(conv)
-            session.flush()
-            session.add(
-                Message(
-                    conversation_id=conv.id,
-                    direction="outgoing",
-                    subject="RE: 문의",
-                    body="draft",
-                    status="pending_approval",
-                )
-            )
-        session.commit()
-
-    listed = _messages_list_context(status="awaiting", stage="", sort="oldest")["messages"]
-    assert len(listed) == 1
-    assert _awaiting_counters()["awaiting_total"] == len(listed)
-
-
 def test_dashboard_queue_is_the_five_oldest(db_session_factory, monkeypatch):
     """답변 대기중인 문의 is a peek at the front of the FIFO queue, not the queue.
 
@@ -322,6 +281,8 @@ def test_dashboard_queue_is_the_five_oldest(db_session_factory, monkeypatch):
     for module in (dashboard, messages_route, customer_ops):
         monkeypatch.setattr(module, "SessionLocal", db_session_factory)
 
+    # 답변 대기는 고객이 최근 30일 안에 쓴 말을 본다(`messages.AWAITING_REPLY_DAYS`) — 날짜는 오늘에서 센다.
+    today = datetime.now(timezone.utc).replace(tzinfo=None)
     with db_session_factory() as session:
         contact = Contact(normalized_email="q@example.com", email="q@example.com", full_name="Q")
         session.add(contact)
@@ -331,10 +292,11 @@ def test_dashboard_queue_is_the_five_oldest(db_session_factory, monkeypatch):
                 contact_id=contact.id,
                 stage="new",
                 inquiry_subject=f"문의-{day:02d}",
-                created_at=datetime(2026, 1, day, 9, 0),
             )
             session.add(conv)
             session.flush()
+            session.add(Message(conversation_id=conv.id, direction="inbound", body=f"문의 {day}",
+                                status="received", created_at=today - timedelta(days=10 - day)))
             session.add(
                 Message(
                     conversation_id=conv.id,
