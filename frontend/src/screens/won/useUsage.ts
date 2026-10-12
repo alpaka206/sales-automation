@@ -8,7 +8,10 @@ import { useMemo } from "react";
 import { isStale, spacesKey, stamp, useUsageFile } from "../../lib/usageData";
 import type { UsageSource } from "../../lib/usageSource";
 import type { Contract, Row } from "./shared";
-import { diagnose, mergeSummaries, parseSpaceSeqs, type Diagnosis, type SpaceEvidence, type SpaceSummary, type SummaryData } from "./usage";
+import {
+  diagnose, mergeSummaries, parseSpaceSeqs, spacesByPlan,
+  type Diagnosis, type PlanSpaces, type SpaceEvidence, type SpaceSummary, type SummaryData,
+} from "./usage";
 
 export type UsageIndex = {
   bySpace: Map<number, SpaceSummary>;
@@ -74,6 +77,14 @@ export function useRowUsages(rows: Row[] | undefined, index: UsageIndex | null) 
     for (const row of rows ?? []) map.set(row.client_id, usageFor(row.active, index));
     return map;
   }, [rows, index]);
+}
+
+/** 플랜 이름 → 그 플랜을 쓰는 스페이스들 (가공 범위 전체). 계약 폼의 「플랜명」 추천 목록과 space_seq 안내가
+ *  씁니다(`PlanSpaceHint.tsx`). 목록 · 상세가 이미 받은 `summary.json` 그대로라 새로 받는 것이 없습니다.
+ *  연결이 없거나 받는 중이면 null — 그때 폼은 예전 그대로입니다. */
+export function usePlanSpaces(source: UsageSource | null): Map<string, PlanSpaces> | null {
+  const file = useUsageFile<SummaryData>(source, "summary.json");
+  return useMemo(() => (file.data ? spacesByPlan(file.data.data.spaces ?? []) : null), [file.data]);
 }
 
 // ── 대조 근거 (지급 묶음 · 국내 결제) ───────────────────────────────────

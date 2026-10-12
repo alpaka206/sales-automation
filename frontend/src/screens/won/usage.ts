@@ -14,6 +14,7 @@ export const RULE = {
   failMult: 2,      // 품질: 실패율 ≥ 전사 평균 N배
   minJobs: 10,      // 실패율을 따질 최소 작업 수 — 다섯 건 중 하나가 실패해도 「품질」이 되면 안 된다
   leadDays: 2,      // 자동 대조: 예정일 N일 전부터 본다(지난 것은 전부). 그보다 먼 회차는 안 본다 (2026-09-15 운영자)
+  fillSpaces: 3,    // 플랜명 → space_seq 채우기: 그 플랜에 묶인 스페이스가 N개 이하일 때만 한 번에 채운다 (2026-10-12 운영자)
 };
 
 /** 가공 파일 `summary.json` 의 한 스페이스. */
@@ -40,6 +41,56 @@ export function parseSpaceSeqs(text: string | null | undefined): number[] {
     if (v > 0 && !out.includes(v)) out.push(v);
   }
   return out;
+}
+
+// ── 플랜 이름으로 스페이스 찾기 (2026-10-12) ─────────────────────────────
+// 운영자: 「플랜명 있네 … 근데 왜 space_seq는 안적혀? 연동을 따로 해야하는거야?」. 제품의 엔터프라이즈 플랜은
+// 이름이 「<고객> Biz」 꼴이라(가공기 `agent/spaces.go` 가 스페이스마다 싣는 `plan_name`), 계약의 「플랜명」과
+// 같은 이름의 플랜을 쓰는 스페이스가 곧 그 계약의 space_seq 후보입니다. **여기는 찾기까지만 합니다** — 칸에
+// 넣는 것은 사람이 [채우기]를 눌렀을 때이고(`PlanSpaceHint.tsx`), 저장은 그 뒤 사람이 따로 누릅니다.
+
+/** 플랜 이름의 열쇠 — 대소문자와 앞뒤 · 겹친 공백의 차이는 같은 이름으로 봅니다. */
+export const planKey = (name: string | null | undefined) =>
+  (name ?? "").trim().replace(/\s+/g, " ").toLowerCase();
+
+export type PlanSpaces = { name: string; spaces: number[] };
+
+/** `summary.json` 의 스페이스들을 플랜 이름으로 묶습니다. 열쇠는 `planKey`, 번호는 작은 것부터. */
+export function spacesByPlan(spaces: SpaceSummary[]): Map<string, PlanSpaces> {
+  const out = new Map<string, PlanSpaces>();
+  for (const s of spaces) {
+    const key = planKey(s.plan_name);
+    if (!s.known || !key) continue;
+    const hit = out.get(key);
+    if (hit) hit.spaces.push(s.space_seq);
+    else out.set(key, { name: (s.plan_name ?? "").trim(), spaces: [s.space_seq] });
+  }
+  for (const plan of out.values()) plan.spaces.sort((a, b) => a - b);
+  return out;
+}
+
+/** 계약 폼의 space_seq 칸 아래에 무엇을 적을까.
+ *
+ *  - `fill` — 그 플랜의 스페이스가 `RULE.fillSpaces` 개 이하: 번호와 [채우기].
+ *  - `shared` — 그보다 많다: 번호는 보여 주되 채우기는 없다. **여러 고객이 같이 쓰는 플랜일 수 있어서**입니다
+ *    (이름에 고객이 없는 공용 플랜 · 데모 플랜이 실제로 있습니다 — 2026-10-12 스냅샷 실측). 그대로 채우면 남의
+ *    사용량이 이 계약의 숫자에 섞이고, 그건 화면 어디에도 「틀렸다」로 안 보입니다. 개수로 재는 이유: 스페이스가
+ *    어느 고객의 것인지는 가공 데이터에 없습니다 — 그래서 한 고객이 수십 개를 쓰는 플랜도 여기로 옵니다.
+ *    그때는 번호를 보고 사람이 적습니다. (실제 플랜 이름 · 고객 이름 · 스페이스 번호는 코드 · 테스트 · 문서에
+ *    적지 않습니다 — 이 저장소는 공개입니다.)
+ *  - `none` — 플랜명이 비었거나, 그런 이름의 플랜이 가공 범위에 없거나(아직 안 만든 플랜 — 계약은 그래도
+ *    저장됩니다), **칸에 번호가 이미 있다**. 이 안내는 「미연결」을 푸는 자리이지 적힌 번호를 고치는 자리가
+ *    아닙니다 — 더빙 스페이스 하나만 일부러 적어 둔 계약에 「둘 다 적으라」고 계속 말하면 안 됩니다. */
+export type PlanHint =
+  | { kind: "none" }
+  | { kind: "fill" | "shared"; plan: string; spaces: number[] };
+
+export function planHint(planName: string | null | undefined, spaceSeq: string | null | undefined,
+                         byPlan: Map<string, PlanSpaces> | null): PlanHint {
+  if (!byPlan || parseSpaceSeqs(spaceSeq).length) return { kind: "none" };
+  const hit = byPlan.get(planKey(planName));
+  if (!hit || !hit.spaces.length) return { kind: "none" };
+  return { kind: hit.spaces.length <= RULE.fillSpaces ? "fill" : "shared", plan: hit.name, spaces: hit.spaces };
 }
 
 /** 스페이스 여럿을 계약 하나로 합칩니다 — 합은 더하고 시각은 최신을 고릅니다. */

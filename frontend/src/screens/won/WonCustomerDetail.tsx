@@ -4,7 +4,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { getJSON, postForm } from "../../lib/api";
 import { useSpaceMetric } from "../../lib/usageData";
-import { useUsageSource } from "../../lib/usageSource";
+import { useUsageSource, type UsageSource } from "../../lib/usageSource";
 import { ActionButton, SubmitButton, useAction } from "../../ui/ActionButton";
 // **타입 목록은 한 곳에서 옵니다** (2026-09-03 운영자 지시). 이 화면은 모달이 아니고
 // 「관련 계약」 칸이 따로 있어 폼 자체는 합치지 않지만, 고르개 목록까지 따로 들고 있으면
@@ -19,7 +19,8 @@ import { useAutoReconcile } from "./reconcile";
 import { useEvidence, usageFor, useUsageIndex, type RowUsage } from "./useUsage";
 import { matchGrants, matchPayments, mergeEvidence, parseSpaceSeqs, type GrantEvidence, type PaymentEvidence } from "./usage";
 import { WonContractForm } from "./WonContractForm";
-import { ContractFields, DealTypeHint, PlanFields, scheduleLabel, useContractDraft } from "./ContractFields";
+import { ContractFields, DealTypeHint, PlanFields, PlanPeriodHint, scheduleLabel, useContractDraft } from "./ContractFields";
+import { PlanSpaceAlert } from "./PlanSpaceHint";
 import { validate } from "./contractDraft";
 import { CreditUsageSection, JobsSection, MixSection, UsageInsight } from "./WonUsageSections";
 import {
@@ -272,7 +273,7 @@ export function WonCustomerDetail() {
               ) : (
                 <>
                   <ContractSection current={current} today={today} />
-                  <PlanSection contract={current} />
+                  <PlanSection contract={current} source={usageSource.source} onDone={refresh} />
                 </>
               )
             )}
@@ -467,8 +468,11 @@ function HistoryCard({ client, contracts, comms, history, onDone }: {
   );
 }
 
-function Section({ id, title, right, children, plain }: {
+function Section({ id, title, mark, right, children, plain }: {
   id: string; title: string;
+  /** 제목 **바로 옆**에 서는 작은 표시 — 「이 카드에 손이 갈 것이 있다」(space_seq 의 (!)). 오른쪽 끝의
+   *  `right` 는 그 카드의 동작(편집 · 추가)이라 자리가 다릅니다. */
+  mark?: React.ReactNode;
   right?: React.ReactNode; children: React.ReactNode;
   /** 내용이 스스로 패널을 여러 개 그리는 섹션(크레딧·결제). */
   plain?: boolean;
@@ -477,6 +481,7 @@ function Section({ id, title, right, children, plain }: {
     <section className="sec" id={id}>
       <div className="sec-head">
         <span className="sec-title">{title}</span>
+        {mark}
         {right && <div className="sec-actions">{right}</div>}
       </div>
       {plain ? children : <div className="panel">{children}</div>}
@@ -674,7 +679,8 @@ function ContractSection({ current, today }: { current: Contract; today: string 
           <KV k="Ticket ID" v={current.ticket_id
             ? <><Tag tone="blue">{current.ticket_id}</Tag> <span className="muted" style={{ fontSize: 12 }}>인바운드 연동</span></>
             : <span className="muted">연동 없음</span>} />
-          <KV k="계약기간" v={<span className="mono">
+          {/* 「플랜 시작일」 옆과 같은 (i) — 두 기간의 뜻과 계약 기간이 정하는 것(같은 날 운영자 지시). */}
+          <KV k={<>계약기간<PlanPeriodHint /></>} v={<span className="mono">
             {current.starts_on} – {current.ends_on} <span className="muted">({current.months}개월)</span>
           </span>} />
           <KV k="총 계약금액" v={<span className="mono">
@@ -814,9 +820,35 @@ function ContractEditor({ contract, options, onBusy, onDone }: {
   );
 }
 
-function PlanSection({ contract }: { contract: Contract }) {
+/** 「Perso 계정 및 플랜」 읽기 카드.
+ *
+ *  **제목 옆의 주황 (!)** (2026-10-12 운영자: 「지금은 … 편집을 눌러야만 "채우기"가 뜨는데, 만약 채우기가 있으면,
+ *  Perso 계정 및 플랜 오른쪽에 칩 형식으로 space_seq 채우기 버튼 추가해줘. 추가 버튼 클릭 후, 다른 부분과 같이
+ *  확인 메시지 창 뜨게 해주고」 → 「색이 상단 계약 토글이랑 겹쳐서 눈에 잘 안보여. 혹시 … (!) 같은 칩 추가하고,
+ *  그거 누르면 채우기 버튼 뜨는걸로 하는거 어때」). 칸이 비어 있고 「플랜명」과 같은 이름의 플랜이 제품에 있을
+ *  때만 섭니다(`PlanSpaceHint.tsx` — 여러 고객이 같이 쓸 수 있는 플랜에는 안 섭니다). (!) 를 누르면 말풍선이
+ *  무엇이 들어갈지와 [채우기]를 보여 주고, [채우기]를 누르면 이 화면의 다른 저장들과 같은 확인 창(`Confirm`)이
+ *  뜹니다. 그 창의 확인이 **`space_seq` 한 칸만** 보냅니다 — 계약 라우트는 폼에 온 칸만 건드리므로 다른 값은
+ *  그대로입니다(「중도 해지 정산」 박스와 같은 방식). `source` 는 사용 데이터의 열쇠라, 연결이 없으면 표시도 없습니다. */
+function PlanSection({ contract, source, onDone }: {
+  contract: Contract; source: UsageSource | null; onDone: () => void;
+}) {
+  // (!) 말풍선의 [채우기]가 건넨 번호. 있으면 확인 창이 뜨고, 그 창의 확인이 저장합니다.
+  const [filling, setFilling] = useState<string | null>(null);
   return (
-    <Section id="sec-plan" title="Perso 계정 및 플랜">
+    <Section id="sec-plan" title="Perso 계정 및 플랜"
+             mark={<PlanSpaceAlert source={source} planName={contract.plan_name ?? ""}
+                                   spaceSeq={contract.space_seq ?? ""} onFill={setFilling} />}>
+      {filling && (
+        <Confirm
+          title="space_seq 를 채웁니다"
+          rows={[["플랜명", contract.plan_name || "—"], ["space_seq", filling]]}
+          note="제품에서 이 플랜명과 같은 이름의 플랜을 쓰는 스페이스 번호입니다. 채우면 이 계약의 사용 현황이 이 스페이스로 연결됩니다 — 번호는 편집에서 언제든 고칠 수 있습니다."
+          okLabel="채우기"
+          onOk={() => postForm(`/won-customers/contracts/${contract.id}`, { space_seq: filling }).then(onDone)}
+          onClose={() => setFilling(null)}
+        />
+      )}
       <div className="field-grid">
         <KV k="플랜" v={contract.plan ? <Tag tone={`plan-${planTone(contract.plan)}`}>{contract.plan}</Tag> : "—"} />
         <KV k="플랜명" v={contract.plan_name} />
@@ -825,7 +857,8 @@ function PlanSection({ contract }: { contract: Contract }) {
           {contract.plan_days_left === null ? "—"
             : contract.plan_days_left > 0 ? `${contract.plan_days_left}일` : "만료"}
         </span>} />
-        <KV k="플랜 시작일" v={<span className="mono">{contract.plan_starts_on || "—"}</span>} />
+        {/* 편집 폼과 같은 (i) — 두 기간의 뜻과 계약 기간이 정하는 것. 읽기 화면에는 한동안 이 설명이 아예 없었습니다. */}
+        <KV k={<>플랜 시작일<PlanPeriodHint /></>} v={<span className="mono">{contract.plan_starts_on || "—"}</span>} />
         <KV k="플랜 만료일" v={<span className="mono">{contract.plan_ends_on || "—"}</span>} />
         <KV k="Account Invitation Limit" v={<span className="mono">{contract.invite_limit ?? "—"}</span>} />
         <KV k="Queue limit" v={<span className="mono">{contract.queue_limit ?? "—"}</span>} />

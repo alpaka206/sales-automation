@@ -510,6 +510,28 @@
 .won .idbox .big {font-size:22px;font-weight:700;letter-spacing:-.02em;color:var(--teal-700);font-variant-numeric:tabular-nums;}
 .won .form-grid {display:grid;grid-template-columns:1fr 1fr;gap:14px;}
 .won .note-box {margin-top:16px;font-size:12.5px;color:var(--muted);background:var(--bg-soft);border-radius:8px;padding:11px 13px;}
+/* 계약 폼 space_seq 칸 아래의 안내 줄 — 「플랜명」과 같은 이름의 플랜을 쓰는 스페이스 번호 (2026-10-12,
+   `won/PlanSpaceHint.tsx`). 번호는 길어질 수 있어 줄을 넘기고, 채우기를 막은 이유는 제 줄을 차지합니다. */
+.won .plan-hint {margin-top:6px;display:flex;flex-wrap:wrap;align-items:center;gap:6px 8px;font-size:12.5px;line-height:1.5;color:var(--muted);}
+.won .plan-hint b {color:var(--ink-2);font-weight:600;font-variant-numeric:tabular-nums;overflow-wrap:anywhere;}
+.won .plan-hint__why {flex-basis:100%;color:var(--amber-fg);}
+/* 카드 제목 옆의 (!) — 「space_seq 를 채울 수 있다」 (2026-10-12, `won/PlanSpaceHint.tsx` 의 `PlanSpaceAlertView`).
+   **주황입니다.** 처음의 회색 칩은 꺼진 버튼처럼 보였고, 청록 알약은 바로 위 계약 고르개(`.sel-pill`)와 같은
+   옷이라 묻혔습니다(운영자: 「색이 상단 계약 토글이랑 겹쳐서 눈에 잘 안보여」). 이 화면에서 주황은 「손이 가야
+   한다」이고 청록은 「고르는 것」입니다. `<details>` 라 누르면 열리고, 말풍선은 카드 밖으로 넘어가도 됩니다
+   (`.sec` 는 넘치는 것을 자르지 않습니다). */
+.won .plan-alert {position:relative;display:inline-flex;}
+.won .plan-alert__i {list-style:none;cursor:pointer;user-select:none;display:inline-flex;align-items:center;justify-content:center;
+    width:20px;height:20px;border-radius:50%;background:var(--amber-bg);color:var(--amber-fg);border:1px solid #FCD34D;
+    font-size:12.5px;font-weight:800;line-height:1;}
+.won .plan-alert__i::-webkit-details-marker {display:none;}
+.won .plan-alert__i:hover, .won .plan-alert[open] .plan-alert__i {background:#FDE68A;}
+.won .plan-alert__i:focus-visible {outline:none;box-shadow:0 0 0 3px rgba(217,119,6,.25);}
+.won .plan-alert__pop {position:absolute;top:calc(100% + 8px);left:0;z-index:20;width:max-content;max-width:340px;
+    display:flex;flex-direction:column;align-items:flex-start;gap:8px;padding:12px 14px;
+    background:#fff;border:1px solid var(--line);border-radius:10px;box-shadow:var(--shadow);
+    font-size:12.5px;font-weight:400;line-height:1.5;color:var(--muted);}
+.won .plan-alert__pop b {color:var(--ink-2);font-weight:600;font-variant-numeric:tabular-nums;}
 .won .confirm {position:fixed;top:50%;left:50%;transform:translate(-50%,-48%) scale(.98);opacity:0;pointer-events:none;
     width:400px;max-width:calc(100vw - 32px);background:#fff;border-radius:14px;box-shadow:var(--shadow);
     z-index:80;transition:opacity .16s, transform .16s;}

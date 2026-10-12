@@ -29,6 +29,16 @@
 회차의 완료 여부·날짜·근거 메모뿐이고, 부를 수 있는 경로와 보낼 수 있는 칸을 아래에서
 목록으로 고정한다(경로 둘 · 칸 다섯) — 그 밖의 것을 보내기 시작하면 빨개진다.
 
+**사람이 누르는 예외 하나**: `won/PlanSpaceHint.tsx` (2026-10-12 운영자: 「플랜명 있네 … 근데 왜 space_seq는
+안적혀? 연동을 따로 해야하는거야?」 → 안내 줄과 [채우기]를 만들라는 지시). 계약의 「플랜명」과 같은 이름의
+플랜을 쓰는 스페이스 **번호**를 가공 데이터에서 찾아 보여 주고, 사람이 누르면 계약의 space_seq 칸에 넣는다.
+길은 둘이고 둘 다 사람이 두 번 이상 누른다 — 편집 폼의 [채우기] → 저장, 읽기 카드 제목 옆 (!) → 말풍선의
+[채우기] → 확인 창의 [채우기](같은 날: 「칩 형식으로 space_seq 채우기 버튼 추가해줘 … 확인 메시지 창 뜨게
+해주고」 → 「(!) 같은 칩 추가하고, 그거 누르면 채우기 버튼 뜨는걸로」).
+서버로 가는 것은 그 칸 하나 — 지금까지 손으로 옮겨 적던 값이다. 자동 대조와 다른 점: **스스로 하는 것이
+없다.** 그 모듈은 데이터를 쥔 쪽이라 서버를 못 부르고, 밖으로 내는 것은 버튼을 눌렀을 때의 `onFill` 뿐이라는
+것을 아래에서 고정한다.
+
 여기서 걸리면 「어느 화면이나 서버 코드가 스냅샷 값을 서버로 끌어오기 시작했다」는 뜻이다.
 """
 
@@ -49,6 +59,7 @@ DATA_SIDE = (
     FRONT / "screens" / "won" / "useUsage.ts",
     FRONT / "screens" / "won" / "UsageBits.tsx",
     FRONT / "screens" / "won" / "WonUsageSections.tsx",
+    FRONT / "screens" / "won" / "PlanSpaceHint.tsx",
 )
 # 서버에서 열쇠만 받는 모듈 — `lib/api` 를 쓰는 대신 데이터를 손에 쥐지 않는다.
 SOURCE = FRONT / "lib" / "usageSource.ts"
@@ -326,7 +337,7 @@ def test_no_token_is_written_into_the_public_repo():
         assert not TOKEN_LIKE.search(text), f"토큰처럼 생긴 글자가 있습니다: {path.relative_to(ROOT)}"
 
 
-# 유일하게 허용된 건너감 — 경로 둘, 칸 다섯.
+# 스스로 건너가는 것은 이것 하나 — 경로 둘, 칸 다섯. (사람이 누르는 건너감은 아래 PLAN_HINT.)
 RECONCILE = FRONT / "screens" / "won" / "reconcile.ts"
 ALLOWED_ROUTES = ("/won-customers/credits/", "/won-customers/payments/")
 ALLOWED_FIELDS = {"done", "granted_by", "memo", "paid_on", "note"}
@@ -340,3 +351,45 @@ def test_reconcile_writes_only_completion_flags_to_two_routes():
         assert any(route.startswith(r) for r in ALLOWED_ROUTES), f"허용되지 않은 경로: {route}"
         fields = {part.split(":")[0].strip() for part in body.split(",") if part.strip()}
         assert fields <= ALLOWED_FIELDS, f"허용되지 않은 칸을 보냅니다: {fields - ALLOWED_FIELDS}"
+
+
+# 사람이 누르는 건너감 — 플랜명으로 찾은 스페이스 번호 (2026-10-12 운영자 지시).
+PLAN_HINT = FRONT / "screens" / "won" / "PlanSpaceHint.tsx"
+CONTRACT_FORM = FRONT / "screens" / "won" / "ContractFields.tsx"
+CONTRACT_DETAIL = FRONT / "screens" / "won" / "WonCustomerDetail.tsx"
+
+
+def test_plan_space_numbers_leave_the_data_side_only_when_a_person_presses_fill():
+    """플랜명으로 찾은 스페이스 번호는 **사람이 [채우기]를 눌렀을 때만** 계약 폼으로 넘어간다.
+
+    그 번호는 스냅샷에서 나온 값이라, 이 폼이 저장되면 서버에 닿는다 — 「사용 데이터는 서버로 안 간다」의
+    두 번째 예외다. 허락된 모양은 하나다: 사람이 그 번호를 눈으로 보고, 누르고, 그 뒤 저장을 따로 누른다.
+    플랜명 칸은 자유 입력이고 이름에 고객이 없는 공용 플랜처럼 여러 고객이 같이 쓰는 플랜이 있어서, 글자가 같다는 것만으로
+    번호가 조용히 붙으면 남의 사용량이 그 계약의 숫자에 섞이고 화면 어디에도 틀렸다고 안 뜬다.
+
+    그래서 그 모듈이 밖으로 내는 것을 글자로 묶는다 — `onFill` 호출은 전부 버튼의 `onClick` 안이고(편집 폼의
+    [채우기] · 읽기 카드 (!) 말풍선의 [채우기], 둘), 스스로 도는 것(효과 훅 · 타이머)이 없다 — (!) 는 `<details>`
+    라 여닫는 데도 코드가 없다. 받는 쪽도 둘뿐이다: 편집 폼은 그
+    값을 space_seq 칸에만 넣고(저장은 사람이 따로), 읽기 카드는 **확인 창을 띄울 뿐**이고 그 창의 확인이
+    `space_seq` 한 칸만 계약 라우트로 보낸다. 서버를 못 부른다는 것은 위 `DATA_SIDE` 가 지킨다.
+    """
+    assert PLAN_HINT in DATA_SIDE
+    jsx = ("//", "/*", "*", "{/*")
+    code = _code(PLAN_HINT.read_text(encoding="utf-8"), jsx)
+    pressed = re.findall(r"onClick=\{\(\)\s*=>\s*onFill\(\w+\)\}", code)
+    assert len(pressed) == 2, f"onFill 을 누르는 자리는 둘(폼의 채우기 · 카드 (!) 의 채우기)입니다: {len(pressed)}"
+    assert code.count("onFill(") == len(pressed), "onFill 이 버튼의 onClick 밖에서 불립니다"
+    for needle in ("useEffect", "useLayoutEffect", "setTimeout", "setInterval", "requestAnimationFrame"):
+        assert needle not in code, f"PlanSpaceHint.tsx 가 스스로 돕니다: {needle}"
+
+    form = _code(CONTRACT_FORM.read_text(encoding="utf-8"), jsx)
+    fills = re.findall(r"onFill=\{([^}]*)\}", form)
+    assert fills == ['(text) => set("space_seq", text)'], f"채운 값이 space_seq 칸 말고 다른 데로 갑니다: {fills}"
+
+    # 읽기 카드: (!) 말풍선의 [채우기]가 건네는 번호는 확인 창을 여는 상태(`filling`)로만 가고, 그 창의 확인이 한 칸만 보낸다.
+    detail = _code(CONTRACT_DETAIL.read_text(encoding="utf-8"), jsx)
+    assert re.findall(r"onFill=\{([^}]*)\}", detail) == ["setFilling"], "카드의 채우기가 확인 창을 거치지 않습니다"
+    sends = re.findall(r"postForm\(\s*`([^`]+)`\s*,\s*\{([^}]*)\}\s*\)", detail)
+    carrying = [(route, body.strip()) for route, body in sends if "filling" in body]
+    assert carrying == [("/won-customers/contracts/${contract.id}", "space_seq: filling")], carrying
+    assert re.search(r"\{filling && \(\s*<Confirm\b", detail), "채우기 저장이 확인 창(Confirm) 밖에 있습니다"

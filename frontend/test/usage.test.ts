@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { RULE, daysBetween, diagnose, grantedPct, mergeSummaries, pairName, parseSpaceSeqs, type SpaceSummary }
-  from "../src/screens/won/usage";
+import {
+  RULE, daysBetween, diagnose, grantedPct, mergeSummaries, pairName, parseSpaceSeqs, planHint, planKey, spacesByPlan,
+  type SpaceSummary,
+} from "../src/screens/won/usage";
 import type { Contract } from "../src/screens/won/shared";
 
 // 판정은 화면에 배지로 서는 값이라, 규칙 하나가 틀리면 멀쩡한 고객이 「미사용」이 된다.
@@ -325,5 +327,55 @@ describe("가공 범위 밖의 번호", () => {
   it("전부 범위 밖이면 「스냅샷에 없음」(unknown)", async () => {
     const { usageFor } = await import("../src/screens/won/useUsage");
     expect(usageFor(contract({ space_seq: "2" }), index([space({ space_seq: 1 })])).kind).toBe("unknown");
+  });
+});
+
+// 2026-10-12 운영자: 「플랜명 있네 … 근데 왜 space_seq는 안적혀?」. 플랜명까지 적어 둔 고객 셋이 「미연결」로
+// 서 있었다. 같은 이름의 플랜을 쓰는 스페이스를 찾아 주되, 틀리게 찾으면 남의 사용량이 그 계약에 섞이고
+// 그건 화면에 「틀렸다」로 안 보인다 — 그래서 무엇을 찾고 언제 [채우기]를 내는지를 여기서 고정한다.
+// **플랜 이름과 스페이스 번호는 전부 지어낸 것이다** — 이 저장소는 공개라 실제 고객의 것을 적지 않는다.
+describe("플랜 이름으로 스페이스 찾기 — 계약 폼의 space_seq 안내", () => {
+  const byPlan = spacesByPlan([
+    space({ space_seq: 1002, plan_name: "Acme Biz" }),                 // 한 고객의 더빙 · 스튜디오 두 스페이스
+    space({ space_seq: 1001, plan_name: "Acme Biz" }),
+    space({ space_seq: 2001, plan_name: "Solo Biz" }),
+    ...[3001, 3002, 3003, 3004, 3005].map((n) => space({ space_seq: n, plan_name: "Shared Plan" })),
+    space({ space_seq: 7, plan_name: null }),                          // 구독 행이 없는 스페이스
+    space({ space_seq: 8, plan_name: "Ghost Biz", known: false }),     // 가공 범위에서 못 찾은 줄
+  ]);
+
+  it("플랜 이름으로 묶고 번호는 작은 것부터 — 이름 없는 줄과 모르는 줄은 안 센다", () => {
+    expect(byPlan.get("acme biz")).toEqual({ name: "Acme Biz", spaces: [1001, 1002] });
+    expect(byPlan.get("solo biz")?.spaces).toEqual([2001]);
+    expect([...byPlan.keys()].sort()).toEqual(["acme biz", "shared plan", "solo biz"]);
+  });
+
+  it("대소문자와 앞뒤 · 겹친 공백이 달라도 같은 플랜이다 — 플랜명 칸은 사람이 손으로 적는다", () => {
+    expect(planKey("  acme   BIZ ")).toBe("acme biz");
+    expect(planHint("  acme   BIZ ", "", byPlan))
+      .toEqual({ kind: "fill", plan: "Acme Biz", spaces: [1001, 1002] });
+  });
+
+  it(`스페이스가 ${RULE.fillSpaces}개 이하면 채우기, 넘으면 번호만 — 여러 고객이 같이 쓰는 플랜일 수 있다`, () => {
+    expect(planHint("Solo Biz", "", byPlan).kind).toBe("fill");
+    expect(planHint("Shared Plan", "", byPlan))
+      .toEqual({ kind: "shared", plan: "Shared Plan", spaces: [3001, 3002, 3003, 3004, 3005] });
+    const three = spacesByPlan([1, 2, 3].map((n) => space({ space_seq: n, plan_name: "Three Biz" })));
+    const four = spacesByPlan([1, 2, 3, 4].map((n) => space({ space_seq: n, plan_name: "Four Biz" })));
+    expect(planHint("Three Biz", "", three).kind).toBe("fill");
+    expect(planHint("Four Biz", "", four).kind).toBe("shared");
+  });
+
+  it("칸에 번호가 이미 있으면 아무 말도 안 한다 — 적힌 번호를 고치라는 자리가 아니다", () => {
+    expect(planHint("Acme Biz", "1001", byPlan)).toEqual({ kind: "none" });   // 더빙만 일부러 적은 계약
+    expect(planHint("Acme Biz", "없음", byPlan).kind).toBe("fill");           // 숫자가 없으면 빈 칸이다
+  });
+
+  it("제품에 아직 없는 플랜명 · 빈 플랜명 · 연결 없음은 조용하다 — 계약은 그래도 저장된다", () => {
+    expect(planHint("아직 안 만든 플랜 Biz", "", byPlan)).toEqual({ kind: "none" });
+    expect(planHint("", "", byPlan)).toEqual({ kind: "none" });
+    expect(planHint(null, null, byPlan)).toEqual({ kind: "none" });
+    expect(planHint("Acme Biz", "", null)).toEqual({ kind: "none" });
+    expect(planHint("Ghost Biz", "", byPlan)).toEqual({ kind: "none" });
   });
 });

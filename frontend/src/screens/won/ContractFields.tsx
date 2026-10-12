@@ -1,5 +1,7 @@
 import { useState } from "react";
+import { useUsageSource } from "../../lib/usageSource";
 import { Field } from "./WonNew";
+import { PLAN_NAMES_ID, PlanNameOptions, PlanSpaceHint } from "./PlanSpaceHint";
 import { type Contract, type Options, addMonths, n } from "./shared";
 import {
   type Draft, derive, fromContract, planPreview, toBody,
@@ -114,6 +116,40 @@ export function DealTypeHint() {
   );
 }
 
+/** 「플랜 시작일」 옆의 작은 (i) — **두 기간이 어떻게 다른가, 그리고 계약 기간이 무엇을 정하는가.**
+ *
+ *  2026-10-12 운영자, 하루 동안의 네 마디가 이 자리로 모였습니다:
+ *  ① 「플랜 기간은 말 그대로 플랜이 활성중인 기간이고, 계약 기간은 해당 계약의 기간이야」 — 그전의 안내 상자는
+ *     「다를 수 있습니다 — 계약을 먼저 맺고 사용을 늦게 시작하는 경우」로 왜 다른가부터 말했고, 두 기간이 각각
+ *     무엇인지는 적지 않았습니다.
+ *  ② 「결론적으로 해당 설명 부분은 계약기간에 따라 플랜상태랑 MRR이 정해지고, 플랜기간이랑 계약기간이랑 다른점
+ *     이 두가지를 간단히 설명할거야」 — 그래서 세 줄이 그 둘만 말합니다. 「비우면 계약 기간과 같습니다」는 뺐습니다
+ *     (동작은 그대로입니다 — `PlanFields` 의 주석).
+ *  ③ (작은 글씨 두 줄로 옮긴 것을 보고) 「아 편집 눌렀을떄만 뜨네」 → 「그럼 방향을 바꿀게. 계약 및 결제 정보 속
+ *     매출 인식 (I)에 POC랑 차이 설명했듯이 플랜 시작일 옆에 (I) 추가해서 해당 내용 적절히 넣어」. 안내 상자도 작은
+ *     글씨도 **편집 폼에만** 있었습니다. (i) 는 `DealTypeHint` 처럼 폼과 읽기 카드가 한 벌을 같이 씁니다 — 두 곳에
+ *     따로 적으면 같은 세 줄이 언젠가 서로 다른 말을 합니다.
+ *
+ *  `preview` 는 **폼에서만** 줍니다: 이 계약이 저장하면 무엇이 되는지(`planPreview` — 계약 절의 시작일·종료일에서
+ *  나옵니다, 이 절의 플랜 날짜가 아닙니다). 한동안 절 맨 아래의 따로 선 상자였고, 그 자리는 원래 「저장 후 플랜
+ *  상태」 고르개가 있던 곳입니다 — 고르개를 두면 사람이 고른 값과 날짜가 말하는 값이 갈라지고 어느 쪽이 맞는지
+ *  아무도 모릅니다. 읽기 카드에는 저장할 것이 없고, 지금 상태는 페이지 머리의 꼬리표가 이미 말합니다.
+ *
+ *  옷은 `.won .ihint` 그대로입니다(hover · 키보드 포커스로 열림, 말풍선은 한 줄씩 — `white-space: nowrap`). */
+export function PlanPeriodHint({ preview }: { preview?: string }) {
+  return (
+    <span className="ihint" tabIndex={0} role="note" aria-label="플랜 기간과 계약 기간">
+      <span className="ihint__i" aria-hidden="true">i</span>
+      <span className="ihint__pop">
+        플랜 기간 — 플랜이 활성 중인 기간<br />
+        계약 기간 — 해당 계약의 기간<br />
+        플랜 상태 · MRR — 계약 기간으로 정해집니다
+        {preview && <><br />이 계약은 저장하면 <b>{preview}</b> 입니다</>}
+      </span>
+    </span>
+  );
+}
+
 /** 계약 · 금액 · 결제 · 크레딧 지급 · 매출 인식 · 기타. `f.draft` 가 있어야 그립니다. */
 export function ContractFields({ f, options }: { f: ContractDraftState; options: Options }) {
   const { draft, set } = f;
@@ -132,10 +168,17 @@ export function ContractFields({ f, options }: { f: ContractDraftState; options:
           </label>
           <Sel value={draft.deal_type} onChange={(v) => set("deal_type", v)} options={options.deal_types} />
         </div>
-        <Field label="계약 시작일" required>
+        <div>
+          {/* 「플랜 시작일」 옆과 같은 (i) 입니다 (2026-10-12 운영자: 「해당 사항 계약 기간 옆에도 (I)에 추가해줘」).
+              두 기간을 견주는 설명이라 양쪽 기간 옆에 다 섭니다 — 그리고 플랜 상태와 MRR 을 정하는 것은 **이 칸들**
+              이라, 「저장하면 무엇이 되는가」는 여기서 보는 것이 더 맞습니다. `Field` 는 글자 라벨만 받아서
+              「매출 인식」처럼 라벨을 직접 그립니다. */}
+          <label className="form-label">
+            계약 시작일<span className="req"> *</span><PlanPeriodHint preview={planPreview(draft)} />
+          </label>
           <input className="inp" type="date" value={draft.starts_on}
                  onChange={(e) => { set("starts_on", e.target.value); set("ends_on", addMonths(e.target.value, 12)); }} />
-        </Field>
+        </div>
         <Field label="계약 종료일" required>
           <input className="inp" type="date" value={draft.ends_on} onChange={(e) => set("ends_on", e.target.value)} />
         </Field>
@@ -297,15 +340,14 @@ export function PlanFields({ f, options, heading = true }: {
   f: ContractDraftState; options: Options; heading?: boolean;
 }) {
   const { draft, set } = f;
+  // 사용 데이터의 열쇠(레포 · 토큰)만 받습니다 — 플랜명 추천과 space_seq 안내가 그것으로 가공 데이터를 직접 읽고
+  // (`PlanSpaceHint.tsx`), 이 폼이 돌려받는 것은 사람이 [채우기]를 눌렀을 때의 번호 글자 하나입니다.
+  // 훅이라 아래의 이른 return 보다 앞에 둡니다.
+  const { source } = useUsageSource();
   if (!draft) return null;
   return (
     <>
       {heading && <div className="form-sec">Perso 계정 및 플랜</div>}
-      <div className="note-box">
-        플랜 기간은 계약 기간과 다를 수 있습니다 — 계약을 먼저 맺고 사용을 늦게 시작하는
-        경우입니다. <b>MRR 과 「사용중」은 계약 기간이 정합니다</b>(2026-09-21). 이 두 날짜는
-        크레딧 소진 속도(경과율·사용 전망)와 워크북에만 쓰이고, 비우면 계약 기간과 같습니다.
-      </div>
       <div className="form-grid3">
         {/* **플랜 기간은 계약 기간과 다른 것입니다** (2026-08-31 운영자 지시). 계약은
             먼저 맺고 실제 사용은 늦게 시작하는 일이 흔합니다.
@@ -314,10 +356,15 @@ export function PlanFields({ f, options, heading = true }: {
             계약 기간으로 돌아왔습니다(`won.plan_period`). 남은 독자는 크레딧 소진 속도
             (`usage.ts` 의 경과율·사용 전망)와 워크북 AE·AF 열입니다. 비워 두면 계약
             기간과 같습니다 — 대부분의 계약이 그렇고, 그때는 아무것도 안 적으면 됩니다. */}
-        <Field label="플랜 시작일">
+        <div>
+          {/* 두 기간의 뜻과 계약 기간이 정하는 것은 이 (i) 가 말합니다(`PlanPeriodHint`). 이 절의 안내 상자 둘은
+              2026-10-12 에 걷었습니다 — 편집 폼에만 있어서 읽기 화면에서는 아무도 못 봤습니다. */}
+          <label className="form-label">
+            플랜 시작일<PlanPeriodHint preview={planPreview(draft)} />
+          </label>
           <input className="inp" type="date" value={draft.plan_starts_on}
                  onChange={(e) => set("plan_starts_on", e.target.value)} />
-        </Field>
+        </div>
         <Field label="플랜 만료일">
           <input className="inp" type="date" value={draft.plan_ends_on}
                  onChange={(e) => set("plan_ends_on", e.target.value)} />
@@ -326,7 +373,12 @@ export function PlanFields({ f, options, heading = true }: {
           <Sel value={draft.plan} onChange={(v) => set("plan", v)} options={options.plans} />
         </Field>
         <Field label="플랜명">
-          <input className="inp" value={draft.plan_name} onChange={(e) => set("plan_name", e.target.value)} />
+          {/* 제품에 실제로 있는 플랜 이름을 추천합니다(2026-10-12) — **추천일 뿐 가두지 않습니다.** 고르개로
+              바꾸면 제품에 플랜을 만들기 전에는 계약을 추가할 수 없게 됩니다(운영자가 짚은 그 문제). 목록에 없는
+              이름도 그대로 적히고, 저장은 이 목록을 안 봅니다. */}
+          <input className="inp" list={PLAN_NAMES_ID} value={draft.plan_name}
+                 onChange={(e) => set("plan_name", e.target.value)} />
+          <PlanNameOptions source={source} />
         </Field>
         <Field label="Perso Email">
           <input className="inp" value={draft.perso_email} onChange={(e) => set("perso_email", e.target.value)} />
@@ -347,15 +399,12 @@ export function PlanFields({ f, options, heading = true }: {
           <label className="form-label">space_seq</label>
           <input className="inp" value={draft.space_seq} onChange={(e) => set("space_seq", e.target.value)}
                  placeholder="여러 개면 쉼표로" />
+          {/* 칸이 비어 있고 위 「플랜명」과 같은 이름의 플랜이 제품에 있으면, 그 플랜의 스페이스 번호를 적어 줍니다.
+              **채우는 것은 사람이 누를 때뿐이고 저장도 따로 누릅니다** — 이 폼이 스냅샷에서 받는 것은 그 번호
+              글자 하나입니다(`tests/test_usage_data_stays_off_server.py` 가 그 한 줄을 고정합니다). */}
+          <PlanSpaceHint source={source} planName={draft.plan_name} spaceSeq={draft.space_seq}
+                         onFill={(text) => set("space_seq", text)} />
         </div>
-      </div>
-      {/* 「저장 후 플랜 상태」 고르개가 여기 있었습니다. 플랜 상태는 계약 기간이 정합니다 —
-          **계약 절의 시작일·종료일**이 곧 그 값입니다(이 절의 플랜 날짜가 아닙니다).
-          고르개를 남겨 두면 사람이 고른 값과 날짜가 말하는 값이 갈라지고, 그때 어느 쪽이
-          맞는지 아무도 모릅니다. 아래 줄이 지금 무엇이 될지 미리 말해 줍니다. */}
-      <div className="note-box" style={{ marginTop: 14 }}>
-        플랜 상태는 계약 기간에서 정해집니다 — 이 계약은 저장하면{" "}
-        <b>{planPreview(draft)}</b> 입니다.
       </div>
     </>
   );
