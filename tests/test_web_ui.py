@@ -213,7 +213,7 @@ def test_a_queue_row_carries_the_id_its_link_is_built_from():
 
 
 def test_dashboard_queue_table_is_the_review_table():
-    """One component, rendered by the dashboard and by 회신 및 검토.
+    """One component, rendered by the dashboard and by 검토 및 회신.
 
     Each page used to carry its own copy of this markup and they drifted: the dashboard
     was missing 우선순위 / 소통 Email and headed its date column 시간 while /messages
@@ -271,7 +271,7 @@ def test_pipeline_columns_show_the_label_only():
 def test_dashboard_queue_is_the_five_oldest(db_session_factory, monkeypatch):
     """답변 대기중인 문의 is a peek at the front of the FIFO queue, not the queue.
 
-    Five rows, oldest first — the rest is one click away on 회신 및 검토. The counters
+    Five rows, oldest first — the rest is one click away on 검토 및 회신. The counters
     beside the heading still see every awaiting row.
     """
     from src.api.routes import customer_ops, dashboard
@@ -535,7 +535,7 @@ def test_the_queue_payload_carries_the_rows_the_screen_lists():
     r = _client().get("/api/ui/messages")
     assert r.status_code == 200
     assert "가격 문의" in [row["subject"] for row in r.json()["messages"]]
-    assert "회신 및 검토" in pathlib.Path(
+    assert "검토 및 회신" in pathlib.Path(
         "frontend/src/screens/Messages.tsx"
     ).read_text(encoding="utf-8")
 

@@ -158,8 +158,13 @@ def test_every_renamed_entry_lost_its_old_wording():
     for one screen. Each pair is (what it used to say, what it says now)."""
     for old, new in (
         ("인바운드 회신", "인바운드 리드"),
-        ("답변 검토", "회신 및 검토"),
-        ("답변 템플릿", "이메일 템플릿"),
+        ("답변 검토", "검토 및 회신"),
+        # 2026-10-12 운영자 지시: 「"회신 및 검토"를 "검토 및 회신"으로 다 바꿔줘」.
+        ("회신 및 검토", "검토 및 회신"),
+        ("답변 템플릿", "정책 · 템플릿"),
+        # 2026-10-12 운영자 지시: 「이메일 템플릿 탭 이름 정책·템플릿으로 바꿔줘」 → 같은 날
+        # 「정책·템플릿 -> 정책 · 템플릿 으로 변경해줘」(가운뎃점 양옆을 띄운다).
+        ("이메일 템플릿", "정책 · 템플릿"),
         ("업데이트 필요 고객", "고객 인사이트"),
         ("인바운드 고객 히스토리", "리드 히스토리"),
         ("아웃바운드 고객 히스토리", "수주 고객"),
@@ -172,6 +177,59 @@ def test_every_renamed_entry_lost_its_old_wording():
         "리드 추이", "전체 대시보드", "활용 툴", "견적 계산기", "견적서", "계약서",
     ):
         assert retired not in SHELL, retired
+
+
+def test_the_policy_and_templates_tab_has_one_name_wherever_it_is_named():
+    """그 탭의 이름은 「정책 · 템플릿」이고, 탭을 가리키는 자리 다섯이 전부 그렇게 부릅니다.
+
+    2026-10-12 운영자 지시: 「이메일 템플릿 탭 이름이, 해당 탭 내용을 포괄하지 못하는 것
+    같아서 바꾸고 싶어」 → 「정책·템플릿으로 바꿔줘」 → (미리보기를 본 뒤) 「정책·템플릿 ->
+    정책 · 템플릿 으로 변경해줘」. **가운뎃점 양옆을 띄웁니다** — 이 콘솔의 다른 이름들
+    (「결제 · MRR」 · 「Perso 계정 · 플랜」)과 같은 모양입니다. 그 탭에는 묶음이 셋 있는데(서명 ·
+    이메일 템플릿 · 정책 문서) 탭이 그중 가운데 묶음의 이름을 쓰고 있었습니다 — 정책 문서를
+    못 담았고, 「‹ 이메일 템플릿」 뒤로 가기 칩이 탭 맨 위로 가는지 그 묶음으로 가는지도
+    이름만으로는 알 수 없었습니다.
+
+    사이드바만 고치면 화면 제목과 뒤로 가기 칩이 옛 이름으로 남아 한 화면에 이름이 둘이
+    됩니다. 주소(`/email-templates`)는 그대로입니다 — 그게 공유된 링크의 앵커입니다."""
+    from src.api.routes.ui_api import TEMPLATE_KINDS
+
+    tab = "정책 · 템플릿"
+    screens = pathlib.Path("frontend/src/screens")
+    templates = (screens / "EmailTemplates.tsx").read_text(encoding="utf-8")
+    policy = (screens / "PolicyDocs.tsx").read_text(encoding="utf-8")
+    ticket = (screens / "MessageDetail.tsx").read_text(encoding="utf-8")
+
+    assert f'{{ to: "/email-templates", label: "{tab}"' in SHELL
+    assert f'<h1 className="page-title">{tab}</h1>' in templates
+    # 뒤로 가기 칩 둘 — 묶음 목록에서 탭 맨 위로, 정책 문서 목록에서 탭 맨 위로.
+    assert f'<Icon name="chevron" size={{14}} /> {tab}' in templates
+    assert f'<Icon name="chevron" size={{14}} /> {tab}' in policy
+    for source in (templates, policy):
+        assert '<Icon name="chevron" size={14} /> 이메일 템플릿' not in source
+    # 리마인더 템플릿이 없을 때 티켓 화면이 적는 길: 탭 → 묶음 → 새로 만들기.
+    assert f"{tab} → 이메일 템플릿 → 새로 만들기" in ticket
+
+    # 탭 이름은 안쪽 묶음 어느 것과도 같지 않습니다 — 같으면 위의 모호함이 돌아옵니다.
+    assert tab not in {label for _, label in TEMPLATE_KINDS}
+
+
+def test_the_review_tab_has_one_name_wherever_it_is_named():
+    """그 탭의 이름은 「검토 및 회신」이고, 화면에 보이는 자리 셋이 전부 그렇게 부릅니다.
+
+    2026-10-12 운영자 지시: 「인바운드 리드 중 "회신 및 검토"를 "검토 및 회신"으로 다 바꿔줘」.
+    사이드바만 고치면 목록 화면의 제목과 티켓 화면의 「‹ … 목록」 뒤로 가기 칩이 옛 순서로
+    남아, 같은 화면을 두 이름으로 부르게 됩니다. 주소(`/messages`)는 그대로입니다."""
+    tab, old = "검토 및 회신", "회신 및 검토"
+    screens = pathlib.Path("frontend/src/screens")
+    queue = (screens / "Messages.tsx").read_text(encoding="utf-8")
+    ticket = (screens / "MessageDetail.tsx").read_text(encoding="utf-8")
+
+    assert f'{{ to: "/messages", label: "{tab}"' in SHELL
+    assert f'<h1 className="page-title">{tab}</h1>' in queue
+    assert f'"{tab} 목록"' in ticket
+    for source in (SHELL, queue, ticket):
+        assert old not in source
 
 
 def test_the_sidebar_is_only_sections_now():

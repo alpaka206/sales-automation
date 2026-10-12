@@ -19,7 +19,7 @@ from .messages import _messages_list_context
 router = APIRouter(tags=["web"])
 
 # The queue panel is a peek, not a list: the five rows that have waited longest. The
-# full, filterable list is one click away on 회신 및 검토, so a longer table here only
+# full, filterable list is one click away on 검토 및 회신, so a longer table here only
 # pushed the pipeline board off the screen.
 _QUEUE_LIMIT = 5
 
@@ -43,7 +43,7 @@ def _dashboard_context() -> dict:
         _pipeline_rows,
     )
 
-    # The queue panel IS the 회신 및 검토 list — same query, same row shape, same table
+    # The queue panel IS the 검토 및 회신 list — same query, same row shape, same table
     # partial — sorted oldest-first and cut to _QUEUE_LIMIT. Building it here from a
     # second, near-identical query is what let the two tables drift apart before.
     queue = _messages_list_context(status="awaiting", stage="", sort="oldest")

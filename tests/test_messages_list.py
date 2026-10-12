@@ -1,4 +1,4 @@
-"""The 회신 및 검토 queue: which rows appear, in what order, and how they are labelled.
+"""The 검토 및 회신 queue: which rows appear, in what order, and how they are labelled.
 
 The list was rebuilt around two questions an operator actually asks — "what still
 needs me?" and "who has been waiting longest?" — so the chips are status buckets

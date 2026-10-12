@@ -393,7 +393,7 @@ def test_a_card_is_titled_with_the_ticket_name(log_db):
 
 def test_a_nameless_ticket_is_titled_from_its_own_mail(log_db):
     """Threads that predate the ticket-name column, and ones whose creating event
-    carried no subject, still have the mail. Same fallback as 회신 및 검토, RE: and all —
+    carried no subject, still have the mail. Same fallback as 검토 및 회신, RE: and all —
     two screens naming one ticket differently is two tickets to read."""
     factory, ids = log_db
     with factory() as session:

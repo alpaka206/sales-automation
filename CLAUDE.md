@@ -979,7 +979,7 @@ PERSO Inbound is a FastAPI workflow for inbound inquiry handling and customer op
   단계를 감싸서 앞 단계가 터지면 뒤 단계가 그 회차를 통째로 굶었다. 지금은 단계마다 따로
   잡는다. 그리고 페이지가 꽉 차면 워터마크를 `now` 로 밀지 않는다 — 정렬이 오름차순이라
   **안 읽은 쪽이 더 최신**이고, 밀어 버리면 그 티켓들은 다음 창 밖으로 나가 영영 안 돌아온다.
-- **「답변 대기」(회신 및 검토 탭 · 대시보드 「답변 대기중인 문의」)는 단계와 무관하다 — New 는 검토할 초안, 그 뒤
+- **「답변 대기」(검토 및 회신 탭 · 대시보드 「답변 대기중인 문의」)는 단계와 무관하다 — New 는 검토할 초안, 그 뒤
   단계는 우리 마지막 영업 이메일 뒤에 쓴 고객** (2026-10-08 운영자: 「답변 대기중인 문의에 원래 new 에 해당하는 것만
   왔는데 / 그게 아니라 이제 상대에게 답장이 왔으면 어떤 단계든 표시되도록 해줘」 — 2026-09-03 의 「New 만, 예외 없다」를
   대신한다). 행은 대화 하나다(`messages.awaiting_conversations`). 「발송 완료」 탭은 그대로 메시지 단위다.
@@ -1331,7 +1331,7 @@ PERSO Inbound is a FastAPI workflow for inbound inquiry handling and customer op
     동안 `_delete_pending_drafts` 가 리마인더 행을 안 지운다(지우면 다시 만든다) · 복구 화면
     「재시도」(=다시 쓰기)와 「메일 발송」의 열린 초안 찾기가 리마인더를 안 건드린다 · 후속 초안의
     「지난 회신」 앵커가 리마인더를 건너뛴다.
-- **The inquiry category is stored and shown; which document answers it is NOT.** `Conversation.inquiry_category` (0049) is what the 회신 및 검토 list shows where 채널 used to be — channel was `email` on every row. `support` / `spam` / `recruiting` render as **UnQualified**, which means "not a sales lead", not "do not reply": those still get an answer, from the CS guide or the intro document. It also replaced the 검토 필요 flag (0047, dropped in 0049) — "CS 문의" says which one to open first far better than "확인이 필요합니다" did. `Conversation.inquiry_subject` (renamed from `topic` in 0041) holds the HubSpot ticket name — which CS renames (「[Form] … > 엔터프라이즈 전달」) and chat tickets label 「[Chatbot] …」 — so the lists show it but no reply takes it as a subject (2026-10-06, `subjects.choose_reply_subject`).
+- **The inquiry category is stored and shown; which document answers it is NOT.** `Conversation.inquiry_category` (0049) is what the 검토 및 회신 list shows where 채널 used to be — channel was `email` on every row. `support` / `spam` / `recruiting` render as **UnQualified**, which means "not a sales lead", not "do not reply": those still get an answer, from the CS guide or the intro document. It also replaced the 검토 필요 flag (0047, dropped in 0049) — "CS 문의" says which one to open first far better than "확인이 필요합니다" did. `Conversation.inquiry_subject` (renamed from `topic` in 0041) holds the HubSpot ticket name — which CS renames (「[Form] … > 엔터프라이즈 전달」) and chat tickets label 「[Chatbot] …」 — so the lists show it but no reply takes it as a subject (2026-10-06, `subjects.choose_reply_subject`).
   - **The category→document mapping is deliberately not in code.** The model reads the document index (`slug · title · summary` — `knowledge._build_index`) and picks; the category and the inquiry language are hints in the prompt, not a lookup table. Policy changes and document titles change — a mapping frozen in Python breaks on both, with nothing on screen to show it broke. `spam` no longer short-circuits to "no documents" for the same reason.
 - HubSpot Conversations performs real delivery on an existing ticket thread, unless the operator picked a connected personal mailbox (`gmail:` — then that mailbox sends, 2026-09-08). A HubSpot send with no usable thread fails closed for manual handling.
 - Slack approval notifications are emitted only after a detailed draft is ready.
@@ -1392,7 +1392,7 @@ PERSO Inbound is a FastAPI workflow for inbound inquiry handling and customer op
     해시를 자기 안에서 계산한다 — 부르는 곳이 하나도 없었다. 그 문자열이 마지막으로 보이던
     자리는 정책 문서 목록의 제목 밑(`notion-61dd…`)이었고, 그것도 같이 나갔다.
 - **정책·지식 문서의 원본은 이 콘솔이다. 노션에서 받아오는 코드는 하나도 없다.**
-  `이메일 템플릿 → 정책 문서 → 직접 추가`(제목+본문), 어떤 문서든 `수정` 가능. 다섯 가지를
+  `정책 · 템플릿 → 정책 문서 → 직접 추가`(제목+본문), 어떤 문서든 `수정` 가능. 다섯 가지를
   시도했고 전부 막혔다 — 통합 토큰 발급 불가, 쿠키는 `file.notion.com`에서 403, 로컬
   스크립트는 사내망이 5432/6543을 막아 DB에 못 닿고, URL만 등록하면 본문이 영원히 비고,
   **Export zip은 부모 페이지 하나만 실어 온다**(정책 페이지가 가리키는 문서 여덟 개는
@@ -1868,6 +1868,23 @@ exempt from the auth gate, so React can draw it before a session exists).
   그리고 그 계산을 지키던 1,512행짜리 golden 코퍼스(`frontend/test/quote.golden.json`)까지
   전부입니다. 되살릴 일이 생기면 **git 이력에서 그 파일들을 그대로 꺼내라** — 특히 golden
   은 React 포팅 전 계산기가 실제로 뽑은 값을 캡처한 것이라 다시 만들 수 없습니다.
+- **사이드바의 `이메일 템플릿` 은 `정책 · 템플릿` 입니다** (2026-10-12, 운영자 지시: 「이메일 템플릿 탭
+  이름이, 해당 탭 내용을 포괄하지 못하는 것 같아서 바꾸고 싶어」 → 「정책·템플릿으로 바꿔줘」 → 로컬
+  미리보기를 본 뒤 같은 날 「정책·템플릿 -> 정책 · 템플릿 으로 변경해줘」 — **가운뎃점 양옆을 띄운다**).
+  그 화면에는 묶음이 셋 있는데(서명 · 이메일 템플릿 · 정책 문서) 탭이 가운데 묶음의 이름을 쓰고
+  있어서 정책 문서를 못 담았고, 뒤로 가기 칩 「‹ 이메일 템플릿」이 탭 맨 위로 가는지 그 묶음으로
+  가는지도 이름만으로는 알 수 없었습니다. **바뀐 것은 탭을 가리키는 글자 다섯 자리뿐입니다** —
+  사이드바 · 화면 제목 · 뒤로 가기 칩 둘 · 리마인더 템플릿이 없을 때 티켓 화면이 적는 길. 안쪽
+  묶음 「이메일 템플릿」(`ui_api.TEMPLATE_KINDS`), 판본 기록의 종류 이름, 주소(`/email-templates`),
+  표(`email_templates`)는 그대로입니다 — 이 문서에서 「이메일 템플릿」은 여전히 그 묶음과 그 표의
+  행을 가리킵니다(10-06 운영자 지시 원문의 「이메일 템플릿 안에서」는 이 탭을 가리킨 말입니다).
+  `tests/test_nav_and_tools.py::test_the_policy_and_templates_tab_has_one_name_wherever_it_is_named`
+  가 다섯 자리와 「탭 이름 ≠ 묶음 이름」을 고정합니다.
+- **사이드바의 `회신 및 검토` 는 `검토 및 회신` 입니다** (2026-10-12, 운영자 지시: 「인바운드 리드 중
+  "회신 및 검토"를 "검토 및 회신"으로 다 바꿔줘」). 낱말 순서만 바꿨고 주소(`/messages`)와 화면이
+  하는 일은 그대로입니다. 화면에 보이는 자리는 셋 — 사이드바 · 목록 화면의 제목 · 티켓 화면의
+  「‹ 검토 및 회신 목록」 칩 — 이고, 주석과 문서의 표기도 같이 옮겼습니다
+  (`tests/test_nav_and_tools.py::test_the_review_tab_has_one_name_wherever_it_is_named`).
 - **사이드바의 `협상중 고객` 은 지웠습니다** (2026-08-18, 운영자 지시 "완전히 삭제").
   `/customers?stage=negotiation` 이라 리드 히스토리와 **같은 화면**이었고, 쿼리 하나로 갈라진
   이름 둘이었습니다. 단계로 좁혀 보는 일은 그 화면의 `Stage` 열이 그대로 합니다. 같이 나간 것:

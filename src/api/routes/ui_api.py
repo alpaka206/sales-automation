@@ -221,7 +221,7 @@ def ui_dashboard(_request: Request):
 
 @router.get("/api/ui/messages")
 def ui_messages(status: str = "awaiting", stage: str = "", sort: str = "oldest"):
-    """회신 및 검토. Returned as built — the context is already plain dicts, and every
+    """검토 및 회신. Returned as built — the context is already plain dicts, and every
     filter value is allow-listed inside the builder, so nothing is validated twice."""
     from .messages import _messages_list_context
 

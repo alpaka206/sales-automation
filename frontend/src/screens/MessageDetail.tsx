@@ -130,7 +130,7 @@ function isMostlyKoreanText(text: string): boolean {
 }
 
 export function MessageDetail() {
-  // 같은 화면에 문이 둘입니다. `/messages/:id` 는 회신 및 검토 목록에서 **그 초안**을 열 때,
+  // 같은 화면에 문이 둘입니다. `/messages/:id` 는 검토 및 회신 목록에서 **그 초안**을 열 때,
   // `/tickets/:conversationId` 는 보드 카드에서 **티켓**을 열 때 — 뒤엣것은 메일이 하나도
   // 없는 티켓(HubSpot 에서 들여온 것)도 엽니다. 질의 키가 둘을 가릅니다.
   const { id, conversationId } = useParams();
@@ -632,7 +632,7 @@ export function MessageDetail() {
           여기 있어야 합니다. Deal Detail·소통 히스토리는 티켓의 값이라 이 화면이 먼저입니다. */}
       <div className="row-between" style={{ marginBottom: 14 }}>
         <Link to={backTo} className="chip">
-          <Icon name="chevron" size={14} /> {backTo.startsWith("/messages") ? "회신 및 검토 목록" : "문의 대시보드"}
+          <Icon name="chevron" size={14} /> {backTo.startsWith("/messages") ? "검토 및 회신 목록" : "문의 대시보드"}
         </Link>
       </div>
 
@@ -1224,7 +1224,7 @@ function FollowupBanner({ followup: f }: { followup: Followup }) {
     : f.state === "closed" ? `답이 없어 ${at(f.at)} 에 자동으로 ${f.closes_to} 로 닫았습니다. 고객이 연락하면 협의 중으로 되살립니다.`
     // 자동 종결 뒤 사람이 Contacted 로 되돌렸다 — 시퀀스는 그 회차를 다시 닫지 않는다(서버의 `_closed_this_cycle`).
     : f.state === "reopened" ? `${at(f.at)} 에 자동으로 ${f.closes_to} 로 닫았던 티켓을 다시 열었습니다 — 새 메일을 보내면 리마인더를 처음부터 다시 셉니다. 그 전에는 다시 닫지 않습니다.`
-    : f.template_missing ? `이메일 템플릿에 키 「${f.template_missing}」 가 없어 리마인더를 보내지 못합니다 — 이메일 템플릿 → 새로 만들기에서 그 키로 만드세요.`
+    : f.template_missing ? `이메일 템플릿에 키 「${f.template_missing}」 가 없어 리마인더를 보내지 못합니다 — 정책 · 템플릿 → 이메일 템플릿 → 새로 만들기에서 그 키로 만드세요.`
     : f.held_by_draft ? "작성 중인 후속 초안이 있어 리마인더를 보류합니다 — 그 초안을 보내거나 없애면 다시 셉니다."
     : f.state === "send_1" ? `답이 없으면 ${at(f.due)} 이후 리마인더를 보냅니다.`
     // 「완료」는 아래 칩이 말합니다 — 시각만 남깁니다(같은 사실을 한 줄에 두 번 적지 않습니다).

@@ -1,7 +1,7 @@
 Email-signature images (served publicly at /static/signatures/).
 
 WHICH images are needed is decided by the signature itself, not by this folder. The
-signature HTML lives in the database and is edited in the console (이메일 템플릿 → 서명),
+signature HTML lives in the database and is edited in the console (정책 · 템플릿 → 서명),
 so whatever <img src="/static/signatures/..."> that HTML references is what has to exist
 here. Change the signature, change the filenames — no code change either way.
 

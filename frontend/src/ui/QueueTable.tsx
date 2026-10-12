@@ -4,7 +4,7 @@ import { kst } from "../lib/format";
 import { DataTable } from "./DataTable";
 
 // The awaiting-reply table, defined ONCE — the port of partials/queue_table.html, for
-// the same reason that file exists: the dashboard and 회신 및 검토 render the same rows
+// the same reason that file exists: the dashboard and 검토 및 회신 render the same rows
 // and drifted apart when each owned a copy.
 export type QueueRow = {
   /** 그 행의 초안(메시지) — 「답변 대기」에서 초안이 아직 없는 대화는 null 이다. */

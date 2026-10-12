@@ -18,8 +18,14 @@ const SECTIONS: Section[] = [
     icon: "inbound",
     items: [
       { to: "/", label: "문의 대시보드", icon: "dashboard", end: true, mobileLabel: "인바운드" },
-      { to: "/messages", label: "회신 및 검토", icon: "messages" },
-      { to: "/email-templates", label: "이메일 템플릿", icon: "mail" },
+      // 낱말 순서만 바꿨다 (2026-10-12 운영자 지시: 「… "검토 및 회신"으로 다 바꿔줘」). 목록 화면의
+      // 제목과 티켓 화면의 뒤로 가기 칩이 같은 글자를 쓴다. 주소는 그대로다.
+      { to: "/messages", label: "검토 및 회신", icon: "messages" },
+      // 이름만 바꿨다 (2026-10-12 운영자 지시: 「탭 이름이, 해당 탭 내용을 포괄하지 못하는 것
+      // 같아서」 → 「정책·템플릿으로 바꿔줘」). 그 화면에는 묶음이 셋(서명 · 템플릿 · 정책 문서)인데
+      // 탭이 가운데 묶음의 이름을 쓰고 있었다. 주소는 그대로다 — 공유된 링크의 앵커라서.
+      // 가운뎃점 양옆은 띄운다 (같은 날, 미리보기를 본 뒤: 「정책 · 템플릿 으로 변경해줘」).
+      { to: "/email-templates", label: "정책 · 템플릿", icon: "mail" },
     ],
   },
   {

@@ -270,7 +270,7 @@ export function PolicyDocs({ onBack }: { onBack?: () => void }) {
       <div className="row-between" style={{ marginBottom: 14 }}>
         <button type="button" className="chip"
                 onClick={() => (onBack ? onBack() : setParams({}, { replace: true }))}>
-          <Icon name="chevron" size={14} /> 이메일 템플릿
+          <Icon name="chevron" size={14} /> 정책 · 템플릿
         </button>
         {/* 문서가 들어오는 유일한 길입니다. 노션에서 받아 오는 경로는 전부 없앴습니다 —
             토큰을 못 만들고, 쿠키는 403 이고, Export zip 은 부모 한 장만 실어 옵니다. */}

@@ -57,7 +57,7 @@ export function Messages() {
   return (
     <>
       <div className="page-header">
-        <div><h1 className="page-title">회신 및 검토</h1></div>
+        <div><h1 className="page-title">검토 및 회신</h1></div>
       </div>
 
       <div className="filter-bar mb-gap">

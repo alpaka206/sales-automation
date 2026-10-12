@@ -122,7 +122,7 @@ def _message_detail_context(
 
     두 가지 방법으로 부릅니다:
 
-    - ``message_id`` — 회신 및 검토 목록에서 그 초안을 열 때. 그 메일이 화면의 「현재」 글이
+    - ``message_id`` — 검토 및 회신 목록에서 그 초안을 열 때. 그 메일이 화면의 「현재」 글이
       되고, 검토 중이면 편집기가 그 자리에 그려집니다.
     - ``conversation_id`` — 보드 카드에서 티켓을 열 때. 그 대화의 마지막 메일이 현재 글이고,
       **메일이 하나도 없으면 그대로 없는 채로** 티켓 정보·Deal Detail·소통 히스토리만 그립니다.
@@ -847,7 +847,7 @@ def _messages_list_context(
     stage: str = "",
     sort: str = "oldest",
 ) -> dict:
-    """회신 및 검토: 「답변 대기」(대화 — `awaiting_conversations`)와 「발송 완료」(나간 회신 · 거절한 초안).
+    """검토 및 회신: 「답변 대기」(대화 — `awaiting_conversations`)와 「발송 완료」(나간 회신 · 거절한 초안).
 
     Every parameter is validated against a fixed set before it reaches SQL or the
     polling URL in the template — the same allow-list discipline as

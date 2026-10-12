@@ -618,7 +618,7 @@ CustomerProfile 조인도 같이 빠졌습니다 — 카드가 그 프로필에�
                 # ticket whose mail was never ingested); the card falls back to the
                 # customer page then.
                 "link_message_id": latest_message.get(conversation.id),
-                # 카드 제목. 회신 및 검토 목록과 같은 식으로 고릅니다 — 티켓 이름이 없으면
+                # 카드 제목. 검토 및 회신 목록과 같은 식으로 고릅니다 — 티켓 이름이 없으면
                 # 그 티켓의 마지막 메일 제목에서 우리가 붙인 "RE:" 를 떼어 씁니다. 두 화면이
                 # 같은 티켓을 다른 이름으로 부르면 같은 건인 줄 모릅니다. 시트에서 들여온
                 # 문의는 메일이 없어서 여기서도 비고, 그때만 "(제목 없음)" 이 뜹니다.

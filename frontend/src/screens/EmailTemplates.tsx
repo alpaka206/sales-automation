@@ -364,7 +364,12 @@ export function EmailTemplates() {
   if (!kind) {
     return (
       <>
-        <div className="page-header"><div><h1 className="page-title">이메일 템플릿</h1></div></div>
+        {/* 탭의 이름입니다 — 아래 묶음 셋(서명 · 이메일 템플릿 · 정책 문서)을 다 덮는 말이어야
+            합니다. 한동안 가운데 묶음과 같은 「이메일 템플릿」이었고, 그래서 정책 문서를 못
+            담았습니다(2026-10-12 운영자 지시로 바꿨습니다). 사이드바 · 아래 뒤로 가기 칩 ·
+            정책 문서 목록의 칩이 같은 글자를 씁니다
+            (`tests/test_nav_and_tools.py::test_the_policy_and_templates_tab_has_one_name_wherever_it_is_named`). */}
+        <div className="page-header"><div><h1 className="page-title">정책 · 템플릿</h1></div></div>
         <div className="stack" style={{ gap: 12 }}>
           {data.kinds.map((entry) => (
             // Pushed, not replaced: going INTO something has to leave the list behind in
@@ -462,7 +467,7 @@ export function EmailTemplates() {
           이 화면을 보는 노트북은 세로가 640px 남짓입니다. */}
       <div className="row-between" style={{ marginBottom: 14 }}>
         <button type="button" className="chip" onClick={() => setParams({}, { replace: true })}>
-          <Icon name="chevron" size={14} /> 이메일 템플릿
+          <Icon name="chevron" size={14} /> 정책 · 템플릿
         </button>
         {group?.can_create && (
           <button type="button" className="btn btn--primary btn--sm"
