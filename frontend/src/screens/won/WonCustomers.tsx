@@ -524,7 +524,16 @@ function RowView({ row, rows, index, today, usage, onOpen }: {
           </div>
         </td>
         <td><StatusTag status={row.plan_status} /></td>
-        <td><PlanTag plan={contract?.plan ?? null} /></td>
+        <td>
+          <PlanTag plan={contract?.plan ?? null} />
+          {/* **플랜명은 열이 아니라 플랜 꼬리표 아래 한 줄입니다** (2026-10-14 운영자: 「수주 고객 탭의 고객사
+              목록 … 여기에 플랜명도 추가하고 싶어」). 이 표는 이미 화면보다 넓어서(1366px 화면에서 오른쪽 두
+              열이 가로 스크롤 밖입니다) 열을 하나 더 세우면 「다음 크레딧 지급」·「다음 결제」가 그만큼 더
+              밀립니다. 위 꼬리표와 같은 계약(행에 실린 활성 계약)의 값이고, 비어 있으면 줄을 안 만듭니다. */}
+          {contract?.plan_name && (
+            <span className="plan-name" title={contract.plan_name}>{contract.plan_name}</span>
+          )}
+        </td>
         <td><DealTag deal={contract?.deal_type ?? null} /></td>
         {/* 통화는 안 섞습니다. 환산은 위 카드가 오늘 고시가로 한 번만 하고, 행마다 다시
             하면 같은 화면에 서로 다른 환율이 생깁니다. 두 통화를 다 쓰는 고객은 두 줄. */}

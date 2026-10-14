@@ -1688,6 +1688,53 @@ def test_the_list_screen_keeps_the_mockups_thresholds_and_wording():
     assert 'id="fxInput"' not in screen
 
 
+def test_the_list_shows_the_plan_name_under_the_plan_tag(factory):
+    """목록의 「플랜」 칸은 두 줄입니다 — 플랜 꼬리표와 그 계약의 플랜명 (2026-10-14 운영자 지시:
+    「수주 고객 탭의 고객사 목록 … 여기에 플랜명도 추가하고 싶어」).
+
+    **열이 아니라 줄입니다.** 이 표는 이미 화면보다 넓어서(1366px 화면에서 오른쪽 두 열이 가로
+    스크롤 밖입니다) 열을 하나 더 세우면 「다음 크레딧 지급」·「다음 결제」가 그만큼 더 밀립니다.
+
+    값은 꼬리표와 **같은 계약** — 행에 실린 활성 계약 — 의 것입니다. 지난 차수의 이름이 서면 한
+    칸의 두 줄이 서로 다른 계약을 말합니다.
+    """
+    import pathlib
+    from unittest.mock import patch
+
+    from src.api.routes.ui_api import ui_won_customers
+
+    year = date.today().year
+    with factory() as session:
+        session.add(Client(client_id=1001, company="Acme"))
+        session.add_all([
+            ClientContract(client_id=1001, seq=1, plan="Business Tier 1", plan_name="Acme Trial",
+                           starts_on=f"{year - 2}-01-01", ends_on=f"{year - 2}-12-31", fx_rate=1000),
+            ClientContract(client_id=1001, seq=2, plan="Enterprise", plan_name="Acme Biz",
+                           starts_on=f"{year}-01-01", ends_on=f"{year}-12-31", fx_rate=1000),
+        ])
+        session.commit()
+
+    with patch("src.db.session.SessionLocal", factory), \
+            patch("src.integrations.fx.usd_krw_today", return_value=None):
+        row = next(r for r in ui_won_customers()["rows"] if r["client_id"] == 1001)
+    assert (row["active"]["plan"], row["active"]["plan_name"]) == ("Enterprise", "Acme Biz")
+
+    screen = pathlib.Path("frontend/src/screens/won/WonCustomers.tsx").read_text(encoding="utf-8")
+    cell = screen[screen.index("<PlanTag plan={contract?.plan ?? null} />") :]
+    cell = cell[: cell.index("<DealTag deal={contract")]
+    assert 'className="plan-name"' in cell and "{contract.plan_name}</span>" in cell
+    # 비어 있으면 줄을 안 만듭니다 — 「—」 한 줄이 서면 빈 값이 값처럼 읽힙니다.
+    assert "{contract?.plan_name && (" in cell
+    # 열은 그대로 열 개입니다. 그룹 머리의 colSpan 이 그 수와 같아야 머리줄이 표 끝까지 갑니다.
+    head = _code(screen[screen.index("<thead>") : screen.index("</thead>")])
+    assert head.count("<th ") == 10 and "<td colSpan={10}>" in screen
+
+    # 플랜명은 120자까지 적히는 글자 칸입니다 — 긴 이름이 열을 밀면 안 됩니다.
+    css = pathlib.Path("src/api/static/won.css").read_text(encoding="utf-8")
+    rule = css[css.index(".won .plan-name {") :].split("}")[0]
+    assert "max-width:" in rule and "text-overflow:ellipsis" in rule
+
+
 def test_the_form_asks_for_one_amount_and_never_for_the_supply_price():
     """**금액 칸은 하나이고 VAT 포함입니다** (2026-09-21 운영자 지시).
 

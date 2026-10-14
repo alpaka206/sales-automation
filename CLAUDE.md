@@ -829,6 +829,12 @@ PERSO Inbound is a FastAPI workflow for inbound inquiry handling and customer op
     USER_ENTERED 로 나눠 보낸다 — 한 벌로 보내면 `+82 10-…` 이 수식이 되거나 날짜가 글자가
     된다. 부르는 곳은 `main.publish_changes_middleware` **한 곳**이다(쓰기 라우트가 열한 개다).
   - **화면은 운영자가 준 HTML 목업 그대로**다. `static/won.css` 는 그 목업의 스타일을 전부 `.won` 아래로 스코프해 옮긴 것이고, `:root` 변수도 `.won` 에 건다 — `:root` 에 두면 콘솔 전체 색이 바뀐다. 파일 끝의 되돌림 블록은 **목업이 값을 주지 않아 console.css 가 흘러 들어온 속성**만 다룬다.
+  - **목록의 「플랜」 칸은 두 줄이다 — 플랜 꼬리표와 그 계약의 플랜명** (2026-10-14 운영자: 「수주 고객 탭의 고객사
+    목록 있잖아, 여기에 플랜명도 추가하고 싶어」). 열을 새로 세우지 않았다: 이 표는 이미 화면보다 넓어서(1366px
+    화면에서 「다음 크레딧 지급」·「다음 결제」가 가로 스크롤 밖) 열이 늘면 그 둘이 더 밀린다. 값은 꼬리표와 같은
+    계약 — 행에 실린 활성 계약 — 의 것이고 목록 payload 에 이미 실려 있었다(서버는 안 바뀌었다). 비어 있으면 줄을
+    안 만들고, 긴 이름은 자르고 전체는 title 이 든다(`.won .plan-name`). 검색은 플랜명을 안 본다.
+    `tests/test_won_customers.py::test_the_list_shows_the_plan_name_under_the_plan_tag` 가 고정한다.
 - **MQL / PQL 은 구독 플랜이 정하고, 저장하지 않는다** (2026-09-02 운영자 지시).
   플랜 없음 · Free · N/A 는 MQL(아직 아무것도 안 샀다), 그 외 플랜은 PQL. 규칙은
   `sheet_values.qualification_for_plan` **한 곳**이고 「없음」의 철자는 `normalise_plan` 이
