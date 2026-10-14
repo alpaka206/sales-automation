@@ -670,7 +670,7 @@ def test_a_ticket_whose_contract_exists_stays_done_even_after_a_rollback(factory
 
 
 def test_a_retired_customer_leaves_the_active_count_but_keeps_its_row(factory):
-    """「내림」은 계약이 **없는** 고객에게만 뜻이 있습니다.
+    """「제외」(2026-10-14 까지 「내림」)는 계약이 **없는** 고객에게만 뜻이 있습니다.
 
     계약이 들어오면 그 순간 다시 장부에 올라오므로(`_add_contract`), 계약이 있는데 내려가
     있는 상태는 만들어지지 않습니다 — 그래도 `plan_status` 가 한 번 더 가릅니다.
@@ -727,7 +727,7 @@ def test_retiring_is_reversible_and_refused_on_a_contracted_customer(factory):
         assert session.get(Client, 1302).retired_on is None
 
     with patched, client:
-        # 끄는 것은 "0" 입니다 — 빈 폼 값은 httpx 가 아예 안 보내서 기본값(내리기)이
+        # 끄는 것은 "0" 입니다 — 빈 폼 값은 httpx 가 아예 안 보내서 기본값(제외)이
         # 걸립니다. 끄는 것은 끄는 값으로 말해야 합니다.
         assert client.post("/won-customers/1301/retire", data={"retire": "0"}).status_code == 200
     with factory() as session:
@@ -751,14 +751,80 @@ def test_the_list_hides_retired_customers_unless_the_filter_asks(factory):
     shared = pathlib.Path("frontend/src/screens/won/shared.ts").read_text(encoding="utf-8")
     assert f'export const RETIRED = "{won.RETIRED_PLAN_STATUS}";' in shared
 
-    # 상세에서 내리고 되돌릴 수 있어야 합니다 — 라우트만 있고 버튼이 없으면 없는 기능입니다.
+    # 상세에서 제외하고 되돌릴 수 있어야 합니다 — 라우트만 있고 버튼이 없으면 없는 기능입니다.
     detail = pathlib.Path(
         "frontend/src/screens/won/WonCustomerDetail.tsx"
     ).read_text(encoding="utf-8")
     assert "/retire`" in detail
-    assert "장부에서 내리기" in detail and "장부에 다시 올리기" in detail
+    assert '"목록에서 제외"' in detail and '"목록에 다시 포함"' in detail
 
     assert callable(ui_won_customers)
+
+
+def test_the_off_the_list_status_is_called_excluded_and_explains_itself():
+    """목록에서 뺀 고객의 이름은 **「제외」**이고, 플랜 상태 고르개를 펼치면 그 칸 옆의 (i) 가 뜻을 말합니다
+    (2026-10-14 운영자: 「"내림"을 다른 용어로 바꾸고 싶어」 → 「제외로 하는데, 옆에 설명 추가해줘 (i)로」 →
+    「플랜상태 전체 토글 눌렀을 때 뜨는 제외 칸 옆에 I를 달아줘. 그리고 지금 너무 길어서 아래로 바꿔줘」).
+
+    그전 이름 「내림」은 지운 것으로 읽혔습니다(「올렸다가 내린, 즉 삭제한거지?」). 지운 것이 아닙니다 —
+    번호와 행은 남고, 진짜 삭제는 따로 있습니다. 설명은 한 줄이고, 「삭제가 아니다」는 상세의 확인 창이 말합니다.
+
+    이름은 저장하는 값이 아니라 `won.plan_status` 가 그때그때 내는 말이라 옮길 행이 없습니다.
+
+    **고르개를 직접 그리는 이유가 이 (i) 입니다.** 브라우저의 `<select>` 는 항목 안에 글자밖에 못 넣습니다.
+    그래서 `<select>` 가 거저 주던 것 — 바깥을 누르면 닫힘 · Esc · ↑↓ · Enter — 을 손으로 하고, 여기서 그
+    뼈대를 묶습니다(실제 동작은 로컬 미리보기의 브라우저로 확인했습니다).
+    """
+    import pathlib
+
+    assert won.RETIRED_PLAN_STATUS == "제외"
+
+    screen = pathlib.Path("frontend/src/screens/won/WonCustomers.tsx").read_text(encoding="utf-8")
+    code = _code(screen)
+    # (i) 는 **플랜 상태** 고르개의 그 칸에 답니다 — 열쇠가 상수라 이름이 바뀌어도 그 칸을 따라갑니다.
+    toolbar = code[code.index('all="플랜 상태 전체"') : code.index('all="플랜 전체"')]
+    assert "hints={{ [RETIRED]: <RetiredHint /> }}" in toolbar
+    hint = code[code.index("function RetiredHint") : code.index("function RowView")]
+    # 옷은 계약 폼의 (i) 들과 같습니다 — hover · 키보드 포커스로 열립니다.
+    assert 'className="ihint" tabIndex={0} role="note"' in hint
+    # 낱말은 상수에서 옵니다. 따로 적으면 이름을 또 바꿀 때 설명만 옛 말을 합니다.
+    assert "{RETIRED} — 계약이 없어 목록 · 활성 고객 수에서 뺀 고객" in hint
+    assert "제외" not in hint and "내림" not in hint
+    # 한 줄입니다 — 네 줄이던 첫 판을 운영자가 「너무 길어서」로 줄였습니다.
+    assert "<br" not in hint
+
+    select = code[code.index("function Select(") : code.index("function RetiredHint")]
+    # 셋 다 같은 고르개입니다. 하나만 직접 그리면 나란히 선 자리에서 그것만 다르게 열립니다.
+    assert "<select" not in code and code.count("<Select ") == 3
+    assert 'role="listbox"' in select and 'role="option"' in select
+    assert 'aria-haspopup="listbox" aria-expanded={open}' in select
+    # 바깥을 누르면 · Esc 로 · 포커스가 나가면 닫힙니다.
+    assert 'document.addEventListener("mousedown", away)' in select
+    assert 'event.key === "Escape"' in select and "event.relatedTarget" in select
+    # ↑↓ 로 옮기고 Enter · Space 로 고릅니다.
+    assert '"ArrowDown"' in select and '"ArrowUp"' in select
+    assert 'event.key === "Enter" || event.key === " "' in select
+    # 목록이 mousedown 을 삼키지 않으면 칸을 누르는 순간 단추가 포커스를 잃어 목록이 먼저 닫힙니다.
+    assert "onMouseDown={(event) => event.preventDefault()}" in select
+    # (i) 를 누르는 것은 고르는 것이 아닙니다.
+    assert "<span onClick={(event) => event.stopPropagation()}>{hints[item.value]}</span>" in select
+    # 짚는 것은 enter 가 아니라 move 입니다 — 키보드로 펼쳤을 때 가만히 있던 마우스 밑의 칸으로 튀지 않게.
+    assert "onMouseMove=" in select and "onMouseEnter" not in select
+
+    css = pathlib.Path("src/api/static/won.css").read_text(encoding="utf-8")
+    # 닫힌 모양은 그전의 <select> 와 같은 치수입니다. `.fsel` 을 한 번 더 적어야 `.won button:not(…)` 을 이깁니다.
+    button = css[css.index(".won .fsel .fsel__btn {") :].split("}")[0]
+    assert "height:36px" in button and "font-size:13.5px" in button
+    # 목록은 넘치는 것을 자르지 않습니다 — (i) 의 말풍선이 목록 밖으로 나갑니다.
+    assert "overflow" not in css[css.index(".won .fsel__list {") :].split("}")[0]
+
+    detail = _code(pathlib.Path(
+        "frontend/src/screens/won/WonCustomerDetail.tsx"
+    ).read_text(encoding="utf-8"))
+    assert '"목록에 다시 포함"' in detail and "삭제가 아닙니다" in detail
+    # 옛 말이 화면 글자로 남으면 한 화면이 같은 상태를 두 이름으로 부릅니다.
+    for old in ("장부에서 내리", "장부에 다시 올리", "내림"):
+        assert old not in detail and old not in code, old
 
 
 def _console(factory):
@@ -1885,7 +1951,7 @@ def test_the_sheet_gets_the_same_status_the_screen_shows():
 
     source = pathlib.Path("src/agents/won_sheets.py").read_text(encoding="utf-8")
     assert "status = won.plan_status(client)" in source
-    # 내린 고객만 빈칸입니다 — 「내림」은 콘솔 안의 말이라 시트의 「플랜 상태」 드롭다운에
+    # 제외한 고객만 빈칸입니다 — 「제외」는 콘솔 안의 말이라 시트의 「플랜 상태」 드롭다운에
     # 없고, 없는 말을 쓰면 그 행이 영업팀의 어느 필터에도 안 걸립니다.
     assert '"J": "" if status == won.RETIRED_PLAN_STATUS else _text(status)' in source
     # 시트에서 거꾸로 읽어 오지도 않습니다 — 손으로 적힌 옛 값이 날짜를 이기면 안 됩니다.

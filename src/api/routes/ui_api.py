@@ -1580,7 +1580,7 @@ def ui_won_customers():
         "mrr_stripe_months": _series_floats(mrr_stripe_months),
         "options": {
             "plans": list(won.PLANS),
-            # 「내림」이 뒤에 붙습니다 — 내린 고객은 목록에서 숨기므로, 이 고르개가
+            # 「제외」가 뒤에 붙습니다 — 제외한 고객은 목록에서 숨기므로, 이 고르개가
             # 그들을 다시 보는 유일한 길입니다.
             "plan_statuses": [*won.PLAN_STATUSES, won.RETIRED_PLAN_STATUS],
             # 화면 이름은 「매출 인식」이고 값은 MRR·PoC 그대로입니다(won.DEAL_TYPES).

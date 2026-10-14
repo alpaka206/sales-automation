@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useLocation, useNavigate } from "react-router-dom";
 import { getJSON } from "../../lib/api";
@@ -110,8 +110,8 @@ export function WonCustomers() {
     const filtered = all.filter((row) => {
       // 담당부서는 화면 맨 위 고르개가 거릅니다 — 카드도 목록도 같은 값을 봅니다.
       if (dept !== "all" && row.department !== dept) return false;
-      // **내린 고객은 기본으로 숨깁니다.** 활성 고객이 아닌데 목록 맨 위(세팅중)에 앉아
-      // 있던 것이 이 상태가 생긴 이유입니다. 아래 플랜 상태 고르개에서 「내림」을 고르면
+      // **제외한 고객은 기본으로 숨깁니다.** 활성 고객이 아닌데 목록 맨 위(세팅중)에 앉아
+      // 있던 것이 이 상태가 생긴 이유입니다. 아래 플랜 상태 고르개에서 「제외」를 고르면
       // 그때만 보입니다 — 안 보이는 행을 다시 볼 길이 하나는 있어야 합니다.
       if (row.plan_status === RETIRED && status !== RETIRED) return false;
       if (view === "활성" && row.plan_status === "사용 중단") return false;
@@ -400,7 +400,9 @@ export function WonCustomers() {
             ))}
           </div>
           <div className="divider-v" />
-          <Select value={status} onChange={setStatus} all="플랜 상태 전체" options={data.options.plan_statuses} />
+          {/* (i) 는 펼친 목록의 「제외」 칸 옆에 섭니다 — 설명이 필요한 것은 그 한 칸입니다. */}
+          <Select value={status} onChange={setStatus} all="플랜 상태 전체" options={data.options.plan_statuses}
+                  hints={{ [RETIRED]: <RetiredHint /> }} />
           <Select value={plan} onChange={setPlan} all="플랜 전체" options={data.options.plans} />
           <Select value={type} onChange={setType} all="고객 종류 전체"
                   options={[...data.options.customer_types, "2025 Inbound"]} />
@@ -481,14 +483,109 @@ function Board({ title, count, risk, warn, icon, children, on, onToggle }: {
   );
 }
 
-function Select({ value, onChange, all, options }: {
+/** 도구 줄의 고르개 — 「플랜 상태 전체」·「플랜 전체」·「고객 종류 전체」.
+ *
+ *  2026-10-14 까지 브라우저의 `<select>` 였습니다. 직접 그리게 된 이유는 하나입니다: 운영자가 **펼친 목록의
+ *  「제외」 칸 옆에** (i) 를 달라고 했고(「플랜상태 전체 토글 눌렀을 때 뜨는 제외 칸 옆에 I를 달아줘」), `<option>`
+ *  안에는 글자밖에 못 넣습니다. 한 고르개만 바꾸면 셋이 나란히 선 자리에서 그것만 다르게 열리므로 셋 다 이것을
+ *  씁니다. 닫힌 모양은 그전과 같은 크기입니다 — 높이 36px, 폭은 가장 긴 항목(고른 값이 바뀌어도 옆 칸이 안
+ *  밀리게, 안 고른 이름들도 안 보이는 채로 같은 자리에 겹쳐 둡니다).
+ *
+ *  `<select>` 가 거저 주던 것을 손으로 합니다: 바깥을 누르거나 Esc · 포커스가 나가면 닫히고, ↑↓ 로 옮기고
+ *  Enter · Space 로 고릅니다. 포커스는 단추에 남고 짚은 칸은 `aria-activedescendant` 가 말합니다 — 그래서 목록은
+ *  mousedown 을 삼킵니다(안 삼키면 칸을 누르는 순간 단추가 포커스를 잃어 목록이 먼저 닫히고, 누름은 사라집니다).
+ *  (i) 를 누르는 것은 고르는 것이 아닙니다. */
+function Select({ value, onChange, all, options, hints }: {
   value: string; onChange: (value: string) => void; all: string; options: string[];
+  /** 칸 옆에 달 (i). 열쇠는 그 칸의 값입니다. */
+  hints?: Record<string, React.ReactNode>;
 }) {
+  const id = useId();
+  const root = useRef<HTMLDivElement>(null);
+  const [open, setOpen] = useState(false);
+  const [active, setActive] = useState(0);
+  const items = [{ value: "all", label: all }, ...options.map((option) => ({ value: option, label: option }))];
+  const current = Math.max(0, items.findIndex((item) => item.value === value));
+
+  useEffect(() => {
+    if (!open) return;
+    const away = (event: MouseEvent) => {
+      if (!root.current?.contains(event.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", away);
+    return () => document.removeEventListener("mousedown", away);
+  }, [open]);
+
+  const show = () => { setActive(current); setOpen(true); };
+  const pick = (index: number) => { onChange(items[index].value); setOpen(false); };
+
+  function onKey(event: React.KeyboardEvent<HTMLButtonElement>) {
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      if (!open) { show(); return; }
+      const step = event.key === "ArrowDown" ? 1 : -1;
+      setActive((at) => Math.min(items.length - 1, Math.max(0, at + step)));
+    } else if (open && (event.key === "Enter" || event.key === " ")) {
+      event.preventDefault();
+      pick(active);
+    }
+  }
+
   return (
-    <select className="select" value={value} onChange={(event) => onChange(event.target.value)}>
-      <option value="all">{all}</option>
-      {options.map((option) => <option key={option} value={option}>{option}</option>)}
-    </select>
+    <div className="fsel" ref={root}
+         onKeyDown={(event) => { if (open && event.key === "Escape") { event.stopPropagation(); setOpen(false); } }}
+         onBlur={(event) => { if (!root.current?.contains(event.relatedTarget as Node | null)) setOpen(false); }}>
+      <button type="button" className="fsel__btn" aria-haspopup="listbox" aria-expanded={open}
+              aria-activedescendant={open ? `${id}-${active}` : undefined}
+              onClick={() => (open ? setOpen(false) : show())} onKeyDown={onKey}>
+        <span className="fsel__labels">
+          {items.map((item, index) => (
+            <span key={item.value} className={index === current ? undefined : "is-ghost"}
+                  aria-hidden={index !== current}>{item.label}</span>
+          ))}
+        </span>
+        <svg width={12} height={12} viewBox="0 0 24 24" fill="none" stroke="currentColor"
+             strokeWidth={2.4} aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg>
+      </button>
+      {open && (
+        <ul className="fsel__list" role="listbox" aria-label={all}
+            onMouseDown={(event) => event.preventDefault()}>
+          {items.map((item, index) => (
+            <li key={item.value} id={`${id}-${index}`} role="option" aria-selected={index === current}
+                className={`fsel__opt${index === active ? " is-active" : ""}${index === current ? " is-on" : ""}`}
+                // 들어온 것(enter)이 아니라 **움직인 것**(move)으로 짚습니다. 키보드로 펼쳤을 때 가만히 있던 마우스
+                // 밑에 칸이 생기면 브라우저가 enter 를 쏘고, 그러면 ↑↓ 로 짚은 자리가 마우스 밑의 칸으로 튑니다.
+                onMouseMove={() => { if (index !== active) setActive(index); }} onClick={() => pick(index)}>
+              {item.label}
+              {hints?.[item.value] && (
+                <span onClick={(event) => event.stopPropagation()}>{hints[item.value]}</span>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+/** 플랜 상태 고르개를 펼쳤을 때 「제외」 칸 옆의 작은 (i) — **「제외」가 무엇인가.**
+ *
+ *  2026-10-14 운영자, 두 마디: ① 「제외로 하는데, 옆에 설명 추가해줘 (i)로」 — 처음에는 고르개 **밖** 오른쪽에
+ *  네 줄로 달았습니다(무엇인가 · 삭제가 아니다 · 어디서 보나 · 어떻게 되돌리나). ② 그것을 보고 「플랜상태 전체
+ *  토글 눌렀을 때 뜨는 제외 칸 옆에 I를 달아줘. 그리고 지금 너무 길어서 아래로 바꿔줘」 — 그래서 펼친 목록의 그
+ *  칸 안에 서고, 한 줄입니다. 「삭제가 아니다」는 상세의 확인 창이 말합니다.
+ *
+ *  이 칸만 설명이 필요합니다. 나머지 셋(사용중 · 세팅중 · 사용 중단)은 이름이 곧 뜻인데, 이것은 그전 이름
+ *  「내림」이 지운 것으로 읽혔습니다(「올렸다가 내린, 즉 삭제한거지?」).
+ *
+ *  옷은 계약 폼의 (i) 들과 같은 `.won .ihint` 입니다(hover · 키보드 포커스로 열림). 낱말은 `RETIRED` 에서
+ *  옵니다 — 여기 따로 적으면 이름을 또 바꿀 때 설명만 옛 말을 합니다. */
+function RetiredHint() {
+  return (
+    <span className="ihint" tabIndex={0} role="note" aria-label={`${RETIRED}란`}>
+      <span className="ihint__i" aria-hidden="true">i</span>
+      <span className="ihint__pop">{RETIRED} — 계약이 없어 목록 · 활성 고객 수에서 뺀 고객</span>
+    </span>
   );
 }
 

@@ -202,7 +202,7 @@ async def retire_client(client_id: int, retire: str = Form("1")):
         if client.contracts:
             raise HTTPException(
                 status_code=400,
-                detail=f"계약 {len(client.contracts)}건이 있는 고객은 내릴 수 없습니다",
+                detail=f"계약 {len(client.contracts)}건이 있는 고객은 목록에서 제외할 수 없습니다",
             )
         client.retired_on = date.today().isoformat() if _flag(retire) else None
         session.commit()

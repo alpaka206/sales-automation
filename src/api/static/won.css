@@ -232,6 +232,25 @@
 .won .divider-v {width:1px;height:22px;background:var(--line);}
 .won .select {border:1px solid var(--line);border-radius:8px;padding:8px 11px;background:#fff;font-size:13.5px;color:var(--ink-2);}
 .won .result-count {margin-left:auto;font-size:13.5px;color:var(--faint);font-variant-numeric:tabular-nums;}
+/* 도구 줄의 고르개 셋 — 직접 그린 드롭다운 (2026-10-14, `WonCustomers.tsx` 의 `Select`). 펼친 목록의 칸 옆에
+   (i) 를 달아야 해서 브라우저의 <select> 를 못 씁니다. 닫힌 모양은 그 <select> 와 같은 치수입니다(높이 36px ·
+   옆 여백 11px · 13.5px). `.fsel` 을 한 번 더 적는 것은 위의 `.won button:not(…)` (글자 크기 · 색을 물려받게
+   하는 규칙)보다 세야 해서입니다. 안 고른 이름들은 같은 자리에 안 보이게 겹쳐 폭을 잡습니다 — 고른 값이 바뀌어도
+   옆 칸이 안 밀립니다. 목록은 넘치는 것을 자르지 않습니다: (i) 의 말풍선이 목록 밖으로 나갑니다. */
+.won .fsel {position:relative;display:inline-flex;}
+.won .fsel .fsel__btn {display:inline-flex;align-items:center;gap:8px;height:36px;padding:0 11px;border:1px solid var(--line);
+    border-radius:8px;background:#fff;font-size:13.5px;color:var(--ink-2);}
+.won .fsel .fsel__btn:hover, .won .fsel .fsel__btn[aria-expanded="true"] {border-color:#D3DAD8;}
+.won .fsel__btn svg {flex:none;color:var(--muted);}
+.won .fsel__labels {display:grid;text-align:left;}
+.won .fsel__labels > span {grid-area:1 / 1;white-space:nowrap;}
+.won .fsel__labels > .is-ghost {visibility:hidden;}
+.won .fsel__list {position:absolute;top:calc(100% + 4px);left:0;z-index:30;min-width:100%;width:max-content;margin:0;padding:4px;
+    list-style:none;background:#fff;border:1px solid var(--line);border-radius:10px;box-shadow:var(--shadow);}
+.won .fsel__opt {display:flex;align-items:center;justify-content:space-between;gap:12px;padding:7px 9px;border-radius:6px;
+    font-size:13.5px;color:var(--ink-2);white-space:nowrap;cursor:pointer;}
+.won .fsel__opt.is-active {background:var(--teal-25);}
+.won .fsel__opt.is-on {color:var(--teal-700);font-weight:600;}
 /* Table */
 .won .table-wrap {overflow-x:auto;}
 .won table {width:100%;border-collapse:collapse;min-width:1240px;}

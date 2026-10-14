@@ -252,10 +252,13 @@ export function WonCustomerDetail() {
                   계약 정보 입력
                 </button>
                 {/* 둘 다 「계약 0건」일 때만 그려집니다. 하는 일이 다릅니다:
-                    내리기는 **번호를 남기고** 목록에서만 뺍니다(Won 에 잘못 올라갔던 건),
-                    삭제는 번호까지 걷어냅니다(같은 회사에 중복으로 발급된 번호). */}
+                    제외는 **번호를 남기고** 목록에서만 뺍니다(Won 에 잘못 올라갔던 건),
+                    삭제는 번호까지 걷어냅니다(같은 회사에 중복으로 발급된 번호).
+
+                    글자는 2026-10-14 까지 「장부에서 내리기」·「장부에 다시 올리기」였습니다 — 상태 이름이
+                    「내림」에서 「제외」로 바뀌면서 같은 말로 맞췄습니다(운영자: 「제외로 하는데」). */}
                 <button className="btn" type="button" onClick={() => setRetiring(true)}>
-                  {data.plan_status === RETIRED ? "장부에 다시 올리기" : "장부에서 내리기"}
+                  {data.plan_status === RETIRED ? "목록에 다시 포함" : "목록에서 제외"}
                 </button>
                 <button className="btn btn--danger" type="button" onClick={() => setRemoving(true)}>
                   이 고객 삭제
@@ -309,18 +312,18 @@ export function WonCustomerDetail() {
       {retiring && (
         <Confirm
           title={data.plan_status === RETIRED
-            ? "이 고객을 장부에 다시 올립니다" : "이 고객을 장부에서 내립니다"}
+            ? "이 고객을 목록에 다시 포함합니다" : "이 고객을 목록에서 제외합니다"}
           rows={[["고객사", data.company], ["Client ID", String(data.client_id)], ["계약", "0건"]]}
           note={
             data.plan_status === RETIRED
               ? "수주 고객 목록과 활성 고객 수에 다시 들어갑니다."
-              : "Client ID·고객 행·문의 연결은 그대로 두고 목록에서만 내립니다 — 그 번호를 "
+              : "삭제가 아닙니다 — Client ID·고객 행·문의 연결은 그대로 두고 목록에서만 제외합니다. 그 번호를 "
                 + "워크북의 계약·회차 탭과 Inbound DB 가 조회해 회사명을 가져오기 때문입니다. "
-                + "계약을 넣으면 저절로 다시 올라옵니다."
+                + "계약을 넣으면 저절로 다시 포함됩니다."
           }
-          okLabel={data.plan_status === RETIRED ? "다시 올리기" : "내리기"}
+          okLabel={data.plan_status === RETIRED ? "다시 포함" : "제외"}
           // 끄는 것은 "0" 입니다 — 빈 문자열은 중간에서 사라지면 「해제」가 조용히
-          // 「내리기」가 되기 때문입니다.
+          // 「제외」가 되기 때문입니다.
           onOk={() => postForm(`/won-customers/${data.client_id}/retire`, {
             retire: data.plan_status === RETIRED ? "0" : "1",
           }).then(() => queryClient.invalidateQueries())}
@@ -806,9 +809,9 @@ function ContractEditor({ contract, options, onBusy, onDone }: {
           ]}
           warning="이 계약에 딸린 결제 회차와 크레딧 지급 회차가 같이 사라집니다. 되돌릴 수 없습니다."
           note={
-            "마지막 차수였다면 그 고객은 장부에서 내려갑니다 — 번호와 행은 남으므로 "
+            "마지막 차수였다면 그 고객은 목록에서 제외됩니다 — 번호와 행은 남으므로 "
             + "워크북의 다른 탭이 조회해 가는 회사명은 그대로이고, 계약을 다시 넣으면 "
-            + "저절로 올라옵니다."
+            + "저절로 다시 포함됩니다."
           }
           // 옮겨 갈 곳이 없습니다 — `onDone` 이 편집을 내리고 다시 읽으면 부모의 `current` 가
           // 다음 계약으로 저절로 떨어집니다(`find(...) ?? data.active ?? 마지막`).

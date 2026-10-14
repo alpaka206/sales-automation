@@ -231,7 +231,7 @@ def _retire_empty_client(session, row, conversation_id: int) -> None:
         return
     client.retired_on = datetime.now(timezone.utc).date().isoformat()
     logger.info(
-        "계약이 없는 수주 고객 %s 를 장부에서 내렸습니다 (ticket=%s)", client_id, row.ticket_id
+        "계약이 없는 수주 고객 %s 를 목록에서 제외했습니다 (ticket=%s)", client_id, row.ticket_id
     )
 
 
