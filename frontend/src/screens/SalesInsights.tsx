@@ -42,17 +42,22 @@ const pairName = (pair: string | null) => (pair ?? "").split(" → ").map((c) =>
  *  열다섯은 전부 Pro 로 10,000~47,000 을 썼다. */
 const HEAVY_CREDITS_30D = 9_720;
 
-/** 눈에 띄는 이유 — 어느 것이 붙나로 목록을 거른다. */
+/** 「셀프서브 대량 사용」은 **플랜 등급이 Pro 인 스페이스에만** 붙는다 (2026-10-14 운영자). 값은 가공 결과의
+ *  `tier`(구독 플랜의 `priority_tier`, `agent/sales.go`) 글자 그대로다 — 그날 가공에서 소문자 `pro` 로 왔다. */
+const PRO_TIER = "pro";
+
+/** 눈에 띄는 이유 — 어느 것이 붙나로 목록을 거른다.
+ *
+ *  「여럿이 쓴다」(사용자 2명 이상 또는 멤버 3명 이상)는 지웠다 (2026-10-14 운영자: 「여럿이 쓴다 빼자」). 같은 날
+ *  Pro 플랜에만 붙게 좁혔더니 그날 가공 기준 0곳이었다 — 그 전에 붙던 25곳은 엔터프라이즈 24 · Team 1 이었다.
+ *  표의 「사용자 · 멤버 · 좌석」 열은 그대로 보여 준다. */
 const SIGNALS = [
   { key: "ent-unknown", label: "엔터프라이즈 · 우리 기록 없음", tone: "danger",
     hint: "제품에서는 엔터프라이즈로 묶여 있는데 수주 고객에 그 space_seq 가 없습니다 — 계약이 우리 밖에서 맺어졌거나 space_seq 를 안 적은 고객입니다.",
     test: (s: Space, ours: boolean) => s.ent && !ours },
   { key: "heavy", label: "셀프서브 대량 사용", tone: "accent",
-    hint: `엔터프라이즈가 아닌데 30일에 ${num(HEAVY_CREDITS_30D)} 크레딧 이상 — PRO 월 10,800 크레딧의 90%. 엔터프라이즈 제안 대상.`,
-    test: (s: Space) => !s.ent && s.credits_30d >= HEAVY_CREDITS_30D },
-  { key: "team", label: "여럿이 쓴다", tone: "info",
-    hint: "6개월 안에 내보내기를 한 사용자가 둘 이상이거나 멤버가 셋 이상 — 개인이 아니라 팀입니다.",
-    test: (s: Space) => s.users >= 2 || s.members >= 3 },
+    hint: `엔터프라이즈가 아닌 Pro 플랜인데 30일에 ${num(HEAVY_CREDITS_30D)} 크레딧 이상 — PRO 월 10,800 크레딧의 90%. 엔터프라이즈 제안 대상.`,
+    test: (s: Space) => !s.ent && s.tier === PRO_TIER && s.credits_30d >= HEAVY_CREDITS_30D },
   { key: "trial-heavy", label: "트라이얼인데 많이 쓴다", tone: "warn",
     hint: "구독 상태가 trialing 인데 30일 1,500 크레딧 이상 — 결제로 넘어갈 자리.",
     test: (s: Space) => s.sub_status === "trialing" && s.credits_30d >= 1500 },
