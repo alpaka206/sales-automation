@@ -26,7 +26,8 @@ type Space = {
 type Sales = { spaces: Space[] | null; spaces_active_6m: number; fail_rate_all: number | null };
 
 const num = (v: number | null | undefined) => Number(v ?? 0).toLocaleString("en-US");
-const mins = (credits: number) => `${num(Math.round(credits / 60))}분`;
+// 크레딧을 분으로 바꿔 적지 않는다 — 크레딧과 분의 비율은 더빙 모델마다 달라서 「60크레딧 = 1분」은 정확하지
+// 않다 (2026-10-14 운영자: 「분 환산은 더빙 모델마다 달라서 정확하지 않아」). 30일 크레딧 옆의 「N분」을 뺐다.
 const TIER: Record<string, string> = { free: "Free", starter: "Starter", creator: "Creator", pro: "Pro", team: "Team", business: "Business", flex: "Flex", enterprise: "Enterprise" };
 const LANG: Record<string, string> = {
   ko: "한국어", en: "영어", ja: "일본어", zh: "중국어", es: "스페인어", pt: "포르투갈어", fr: "프랑스어", de: "독일어", it: "이탈리아어",
@@ -36,16 +37,19 @@ const LANG: Record<string, string> = {
 };
 const pairName = (pair: string | null) => (pair ?? "").split(" → ").map((c) => LANG[c.split("-")[0]] ?? c).join(" → ");
 
-/** 눈에 띄는 이유 — 어느 것이 붙나로 목록을 거른다. 문턱은 2026-09-14 스냅샷의 실측에서 잡았다:
- *  셀프서브 스페이스 30일 크레딧의 상위 1% 가 3,285 (= 55분) 이고, 상위 열다섯은 전부 Pro 로
- *  10,000~47,000 (170~790분) 을 쓴다 — 엔터프라이즈 제안 대상이 곧 그들이다. */
+/** 「셀프서브 대량 사용」의 문턱 — 30일 크레딧이 PRO 월 10,800 크레딧(perso.ai/pricing)의 90% (2026-10-14 운영자).
+ *  그 전에는 3,000 이었다: 2026-09-14 스냅샷에서 셀프서브 스페이스 30일 크레딧의 상위 1% 가 3,285 였고, 상위
+ *  열다섯은 전부 Pro 로 10,000~47,000 을 썼다. */
+const HEAVY_CREDITS_30D = 9_720;
+
+/** 눈에 띄는 이유 — 어느 것이 붙나로 목록을 거른다. */
 const SIGNALS = [
   { key: "ent-unknown", label: "엔터프라이즈 · 우리 기록 없음", tone: "danger",
     hint: "제품에서는 엔터프라이즈로 묶여 있는데 수주 고객에 그 space_seq 가 없습니다 — 계약이 우리 밖에서 맺어졌거나 space_seq 를 안 적은 고객입니다.",
     test: (s: Space, ours: boolean) => s.ent && !ours },
   { key: "heavy", label: "셀프서브 대량 사용", tone: "accent",
-    hint: "엔터프라이즈가 아닌데 30일에 3,000 크레딧(50분) 이상 — 셀프서브 상위 1%. 엔터프라이즈 제안 대상.",
-    test: (s: Space) => !s.ent && s.credits_30d >= 3000 },
+    hint: `엔터프라이즈가 아닌데 30일에 ${num(HEAVY_CREDITS_30D)} 크레딧 이상 — PRO 월 10,800 크레딧의 90%. 엔터프라이즈 제안 대상.`,
+    test: (s: Space) => !s.ent && s.credits_30d >= HEAVY_CREDITS_30D },
   { key: "team", label: "여럿이 쓴다", tone: "info",
     hint: "6개월 안에 내보내기를 한 사용자가 둘 이상이거나 멤버가 셋 이상 — 개인이 아니라 팀입니다.",
     test: (s: Space) => s.users >= 2 || s.members >= 3 },
@@ -123,7 +127,7 @@ export function SalesInsights() {
           {s.sub_status && s.sub_status !== "active" && <span className="t-xs td-subtle">{s.sub_status}</span>}
         </span>) },
     { label: "30일 크레딧", width: "120px", className: "tnum", headClassName: "th-right", cell: (s) => (
-        <span style={{ display: "block", textAlign: "right" }}><strong>{num(s.credits_30d)}</strong> <span className="td-subtle t-xs">{mins(s.credits_30d)}</span></span>) },
+        <span style={{ display: "block", textAlign: "right" }}><strong>{num(s.credits_30d)}</strong></span>) },
     { label: "90일", width: "90px", className: "tnum", headClassName: "th-right", cell: (s) => <span style={{ display: "block", textAlign: "right" }}>{num(s.credits_90d)}</span> },
     { label: "내보내기 30일 / 6개월", width: "130px", className: "tnum", headClassName: "th-right", cell: (s) => (
         <span style={{ display: "block", textAlign: "right" }}>{num(s.exports_30d)} <span className="td-subtle">/ {num(s.exports_6m)}</span>
