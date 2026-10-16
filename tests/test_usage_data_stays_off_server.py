@@ -63,6 +63,9 @@ DATA_SIDE = (
 )
 # 서버에서 열쇠만 받는 모듈 — `lib/api` 를 쓰는 대신 데이터를 손에 쥐지 않는다.
 SOURCE = FRONT / "lib" / "usageSource.ts"
+# 서버와 말하는 모듈들 — 데이터 모듈을 import 하지 않고, 데이터 모듈도 이것들을 import 하지 않는다. 판정 기준
+# (`insightRules.ts`, 2026-10-15)은 사람이 적은 숫자라 서버에 살고, 화면이 받아서 판정 함수에 넘겨 준다.
+SERVER_SIDE = (SOURCE, FRONT / "lib" / "insightRules.ts")
 API = FRONT / "lib" / "api"
 GITHUB_API = "`https://api.github.com/repos/"
 
@@ -72,11 +75,17 @@ def _code(text: str, comments: tuple[str, ...] = ("//", "/*", "*")) -> str:
     return "\n".join(line for line in text.splitlines() if not line.lstrip().startswith(comments))
 
 
-def _imports(path: Path) -> set[Path]:
-    """그 파일이 import 하는 우리 모듈들(확장자 없이). `lib/` 안에서는 `./api` 로 적히므로 경로로 푼다."""
+def _imports(path: Path, *, types: bool = True) -> set[Path]:
+    """그 파일이 import 하는 우리 모듈들(확장자 없이). `lib/` 안에서는 `./api` 로 적히므로 경로로 푼다.
+
+    `types=False` 면 타입만 가져오는 줄(`import type { … }`)은 뺀다 — 빌드에서 사라지는 줄이라 실행되는 길이
+    아니다(데이터 모듈이 `UsageSource` 타입을 `usageSource.ts` 에서 가져오는 것이 그 예다)."""
+    code = _code(path.read_text(encoding="utf-8"))
+    if not types:
+        code = re.sub(r"^\s*import\s+type\b[^;]*;", "", code, flags=re.M)
     specs = re.findall(
         r"""(?:^\s*(?:import|export)\b[^;]*?\bfrom\s+|\bimport\(\s*)["']([^"']+)["']""",
-        _code(path.read_text(encoding="utf-8")),
+        code,
         flags=re.M,
     )
     return {
@@ -94,7 +103,11 @@ def test_data_side_modules_never_touch_our_api():
                        "sendBeacon(", "XMLHttpRequest", "WebSocket(", "EventSource("):
             assert needle not in code, f"{path.name} 가 서버 경로를 부릅니다: {needle}"
     data = {path.with_suffix("").resolve() for path in DATA_SIDE}
-    assert not data & _imports(SOURCE), "usageSource.ts 가 데이터 모듈을 import 합니다 — 열쇠와 데이터를 한 모듈이 쥡니다"
+    for path in SERVER_SIDE:
+        assert not data & _imports(path), f"{path.name} 가 데이터 모듈을 import 합니다 — 서버와 데이터를 한 모듈이 쥡니다"
+    server = {path.with_suffix("").resolve() for path in SERVER_SIDE}
+    for path in DATA_SIDE:
+        assert not server & _imports(path, types=False), f"{path.name} 가 서버와 말하는 모듈을 import 합니다"
     # 옛 루프백 클라이언트는 없어야 한다 — 남아 있으면 지켜지지 않는 길이 하나 남는다.
     assert not (FRONT / "lib" / "agent.ts").exists(), "lib/agent.ts 가 아직 있습니다"
 

@@ -2,12 +2,14 @@ import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useLocation, useNavigate } from "react-router-dom";
 import { getJSON } from "../../lib/api";
+import { useInsightRules } from "../../lib/insightRules";
 import { useUsageSource } from "../../lib/usageSource";
 import { MonthlyArea } from "./MonthlyArea";
 import { pendingContractPath } from "./pending";
 import { UsageCells, UsageStamp } from "./UsageBits";
 import { contractsOfRows, useAutoReconcile } from "./reconcile";
 import { spacesOfRows, useEvidence, useRowUsages, useUsageIndex, type RowUsage } from "./useUsage";
+import { rulesFrom } from "./usage";
 import { WonContractForm } from "./WonContractForm";
 import {
   type ListData, type Row,
@@ -97,7 +99,11 @@ export function WonCustomers() {
   const usageSource = useUsageSource();
   const allSpaces = useMemo(() => spacesOfRows(data?.rows), [data?.rows]);
   const usage = useUsageIndex(usageSource.source, allSpaces);
-  const usages = useRowUsages(data?.rows, usage.index);
+  // 판정 문턱(잔여 예상 · 부족 예상 · 과소/초과사용)은 서버에 저장된 값 — 영업 인사이트와 같이 씁니다.
+  // 못 받는 동안 사용 상태 칸은 「—」이고, 못 받았으면 도장이 그 이유를 말합니다(「불러오는 중」과 갈라야 합니다).
+  const ruleState = useInsightRules();
+  const rules = useMemo(() => rulesFrom(ruleState.list), [ruleState.list]);
+  const usages = useRowUsages(data?.rows, usage.index, rules);
   // **자동 대조** — 스냅샷에 지급·결제 근거가 있으면 그 회차를 완료 처리합니다(운영자 결정,
   // `reconcile.ts`). 목록을 여는 것이 곧 그 방아쇠입니다.
   const evidence = useEvidence(usageSource.source, allSpaces);
@@ -191,7 +197,8 @@ export function WonCustomers() {
             {/* 사용량 도장 — 목록의 「마지막 작업」·「사용 상태」가 **어느 시각의 스냅샷**인지.
                 이 두 열은 우리 서버가 아니라 하루 한 번 가공된 스냅샷의 값이라, 값 옆에 그
                 시각이 없으면 낡은 숫자가 맞는 숫자처럼 보입니다. */}
-            <UsageStamp source={usageSource} index={usage.index} problem={usage.problem} busy={usage.busy} />
+            <UsageStamp source={usageSource} index={usage.index} busy={usage.busy}
+                        problem={usage.problem ?? (ruleState.problem && `판정 기준을 못 읽었습니다: ${ruleState.problem}`)} />
           </div>
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
             {/* **이 화면의 축입니다.** 아래 필터들과 달리 목록만 거르는 것이 아니라 위 카드

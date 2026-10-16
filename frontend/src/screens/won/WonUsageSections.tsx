@@ -242,7 +242,8 @@ export function UsageInsight({ d }: { d: Diagnosis }) {
           d.lastActivity ? fmt(d.lastActivity) : "스냅샷에 소진·작업 기록이 없습니다")}
       </div>
       {/* 「판정 근거」 펼침은 뺐습니다(2026-09-15 운영자: 「굳이 따로 안 보여줘도 돼」). 규칙 자체는
-          `usage.ts` 의 RULE 과 그 테스트에 있습니다. */}
+          `usage.ts` 의 `diagnose` 와 그 테스트에, 문턱(85% · 115% · ±15%p)은 서버(`src/db/insights.py`)에 있습니다 —
+          영업 인사이트의 「기준 수정」이 고칩니다. */}
     </div>
   );
 }

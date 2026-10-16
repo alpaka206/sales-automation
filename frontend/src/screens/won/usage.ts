@@ -3,12 +3,11 @@
 // 않습니다 — 스냅샷 숫자는 이 브라우저의 화면에서 끝납니다.
 //
 // 임계값은 **전부 임시**입니다(요청 문서의 표현 그대로). 운영하며 조정할 값이라 한 곳에
-// 모아 두고, 판정 근거 팝오버가 이 값을 그대로 보여 줍니다.
+// 모아 둡니다. 사용 수준(±N%p)과 크레딧 사용 전망(85% · 115%)의 문턱은 여기 없습니다 — 영업 인사이트와
+// 같이 쓰는 값이라 **서버에 저장된 것**을 화면이 받아 넘겨 줍니다(아래 `Rules`, 2026-10-15).
 import type { Contract } from "./shared";
 
 export const RULE = {
-  gapPct: 15,       // 사용 수준: 누적 소진율 − 계약 경과율(소진율 미터의 세로선) ±N%p (2026-09-16 운영자)
-  forecastPct: 15,  // 크레딧 사용 전망: 예상 소진(누적 + 최근 30일 × 남은 달) vs 계약 크레딧 ±N%
   warnDays: 7,      // 마지막 작업: N일 초과면 주황
   idleDays: 30,     // 마지막 작업: N일 이상이면 빨강 · 미사용
   failMult: 2,      // 품질: 실패율 ≥ 전사 평균 N배
@@ -16,6 +15,47 @@ export const RULE = {
   leadDays: 2,      // 자동 대조: 예정일 N일 전부터 본다(지난 것은 전부). 그보다 먼 회차는 안 본다 (2026-09-15 운영자)
   fillSpaces: 3,    // 플랜명 → space_seq 채우기: 그 플랜에 묶인 스페이스가 N개 이하일 때만 한 번에 채운다 (2026-10-12 운영자)
 };
+
+/** 영업 인사이트와 수주 고객 「사용 진단」이 같이 쓰는 판정 기준 — **서버에 저장된 값**입니다
+ *  (`GET /api/ui/insight-rules`, 목록 · 기본값 · 범위는 서버의 `src/db/insights.py` RULES 한 곳, 2026-10-15
+ *  운영자: 「85%·115%·15%p는 수주 고객 화면과 값을 공유」 · 「기준값은 서버에 저장하고 화면에서 바꿀 수 있게」).
+ *
+ *  **여기에는 기본값이 없습니다.** 기본값이 화면에도 있으면 서버를 못 읽은 동안 두 화면이 서로 다른 문턱으로
+ *  같은 고객을 판정하고, 그건 화면 어디에도 안 보입니다. 못 받았으면 `rulesFrom` 이 null 이고, 그동안 화면은
+ *  사용 상태를 「—」로 둡니다. 받는 일은 서버와 말하는 쪽(`lib/insightRules.ts`)이 하고, 이 파일은 받은 값을
+ *  이름 붙여 꺼내기만 합니다 — 사용 데이터를 쥔 이 파일은 서버를 부르지 않습니다. */
+export type Rules = {
+  upsellCredits30d: number; // 업셀링: 30일 크레딧 N 이상
+  leftPct: number;          // 잔여 예상: 예상 소진이 계약 크레딧의 N% 이하 — 수주 고객과 같이 씀
+  churnIdleDays: number;    // 이탈 위험 높음: 무활동 N일 이상
+  renewalDays: number;      // 추가 계약: 계약 종료 N일 이내
+  shortPct: number;         // 부족 예상: 예상 소진이 계약 크레딧의 N% 이상 — 수주 고객과 같이 씀
+  gapPp: number;            // 과소 · 초과사용: 누적 소진율 − 계약 경과율이 −N%p 이하 · +N%p 이상 — 수주 고객과 같이 씀
+};
+/** 서버의 열쇠(`src/db/insights.py` RULES 의 key). */
+export const RULE_KEYS: Record<keyof Rules, string> = {
+  upsellCredits30d: "upsell_credits_30d",
+  leftPct: "forecast_left_pct",
+  churnIdleDays: "churn_idle_days",
+  renewalDays: "renewal_days",
+  shortPct: "forecast_short_pct",
+  gapPp: "level_gap_pp",
+};
+
+/** 서버가 준 목록 → 이름 붙인 기준. 하나라도 없으면 null — 일부만 서버 값인 판정은 하지 않습니다. */
+export function rulesFrom(list: { key: string; value: number }[] | null | undefined): Rules | null {
+  if (!list) return null;
+  const out = {} as Rules;
+  for (const [name, key] of Object.entries(RULE_KEYS) as [keyof Rules, string][]) {
+    const value = list.find((rule) => rule.key === key)?.value;
+    if (typeof value !== "number" || !Number.isFinite(value)) return null;
+    out[name] = value;
+  }
+  return out;
+}
+
+/** `diagnose` 가 쓰는 셋 — 수주 고객 화면과 영업 인사이트가 같은 값을 넘깁니다. */
+export type DiagnoseRules = Pick<Rules, "leftPct" | "shortPct" | "gapPp">;
 
 /** 가공 파일 `summary.json` 의 한 스페이스. */
 export type SpaceSummary = {
@@ -142,9 +182,10 @@ export type Diagnosis = {
 /**
  * 판정. `asOf` 는 **스냅샷 시각**(YYYY-MM-DD)입니다 — 벽시계가 아닙니다. 스냅샷이 사흘
  * 묵었으면 「3일 전」도 「30일 무활동」도 그 시각 기준이고, 화면은 그 시각을 도장으로 찍습니다.
+ * `rules` 는 서버에 저장된 문턱(`Rules`) — 수주 고객 화면과 영업 인사이트가 같은 값을 넘깁니다.
  */
 export function diagnose(contract: Contract, s: SpaceSummary, asOf: string, globalFailRate: number | null,
-                         creditsFrom: string | null): Diagnosis {
+                         creditsFrom: string | null, rules: DiagnoseRules): Diagnosis {
   const start = contract.plan_starts_on ?? contract.starts_on;
   const end = contract.plan_ends_on ?? contract.ends_on;
   const credits = contract.credits ?? null;
@@ -192,18 +233,19 @@ export function diagnose(contract: Contract, s: SpaceSummary, asOf: string, glob
     level = "판정 불가"; levelDetail = cannot;
   } else {
     const gap = usedPct! - pacePct!;
-    level = gap <= -RULE.gapPct ? "과소사용" : gap >= RULE.gapPct ? "초과사용" : "정상";
+    level = gap <= -rules.gapPp ? "과소사용" : gap >= rules.gapPp ? "초과사용" : "정상";
     levelDetail = `소진 ${usedPct}% / 경과 ${pacePct}% (${gap > 0 ? "+" : ""}${gap}%p)`;
   }
 
-  // 크레딧 사용 전망 — 누적 + 월평균 × 남은 달 이 계약 크레딧의 115% 를 넘으면 부족, 85% 에 못 미치면 잔여.
+  // 크레딧 사용 전망 — 누적 + 월평균 × 남은 달 이 계약 크레딧의 115%(`shortPct`) 이상이면 부족, 85%(`leftPct`)
+  // 이하면 잔여. 서버 범위가 잔여 ≤ 100 ≤ 부족이라 둘이 겹치는 것은 둘 다 100 일 때뿐이고, 그때는 부족이 먼저다.
   let forecast: Forecast; let forecastDetail: string; let projected: number | null = null;
   if (cannot) {
     forecast = "판정 불가"; forecastDetail = cannot;
   } else {
     projected = Math.round(s.used_total + avgMonthly * monthsLeft!);
     const pct = Math.round((projected / credits!) * 100);
-    forecast = pct >= 100 + RULE.forecastPct ? "부족 예상" : pct <= 100 - RULE.forecastPct ? "잔여 예상" : "정상";
+    forecast = pct >= rules.shortPct ? "부족 예상" : pct <= rules.leftPct ? "잔여 예상" : "정상";
     forecastDetail = `예상 소진 ${num(projected)} / 계약 ${num(credits!)} (${pct}%) · 월평균 ${num(Math.round(avgMonthly))} × ${monthsLeft!.toFixed(1)}개월 남음`;
   }
 

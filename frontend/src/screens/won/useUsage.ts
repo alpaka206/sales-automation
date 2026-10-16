@@ -10,7 +10,7 @@ import type { UsageSource } from "../../lib/usageSource";
 import type { Contract, Row } from "./shared";
 import {
   diagnose, mergeSummaries, parseSpaceSeqs, spacesByPlan,
-  type Diagnosis, type PlanSpaces, type SpaceEvidence, type SpaceSummary, type SummaryData,
+  type DiagnoseRules, type Diagnosis, type PlanSpaces, type SpaceEvidence, type SpaceSummary, type SummaryData,
 } from "./usage";
 
 export type UsageIndex = {
@@ -52,16 +52,19 @@ export type RowUsage =
   // 조용히 줄어든 숫자는 틀린 숫자로 읽힌다.
   | { kind: "ok"; summary: SpaceSummary; diagnosis: Diagnosis; spaces: number[]; missing: number[] };
 
-/** 계약 하나의 사용 상태. */
-export function usageFor(contract: Contract | null | undefined, index: UsageIndex | null): RowUsage {
+/** 계약 하나의 사용 상태. `rules` 는 서버에 저장된 판정 기준(`usage.ts` 의 `Rules`) — 아직 못 받았으면
+ *  판정하지 않고 「받는 중」입니다(화면은 「—」). 기본값으로 먼저 판정해 두면 받은 뒤 배지가 바뀌어 깜빡입니다. */
+export function usageFor(contract: Contract | null | undefined, index: UsageIndex | null,
+                         rules: DiagnoseRules | null): RowUsage {
   if (!index) return { kind: "no-data" };
   const spaces = parseSpaceSeqs(contract?.space_seq);
   if (!contract || !spaces.length) return { kind: "no-space" };
   const rows = spaces.map((s) => index.bySpace.get(s)).filter((s): s is SpaceSummary => !!s);
   const summary = mergeSummaries(rows);
   if (!summary) return { kind: "unknown", spaces };
+  if (!rules) return { kind: "loading" };
   return { kind: "ok", summary, spaces, missing: spaces.filter((s) => !index.bySpace.has(s)),
-    diagnosis: diagnose(contract, summary, index.snapshotAt, index.failRateAll, index.creditsFrom) };
+    diagnosis: diagnose(contract, summary, index.snapshotAt, index.failRateAll, index.creditsFrom, rules) };
 }
 
 /** 목록의 모든 활성 계약이 가리키는 스페이스. */
@@ -71,12 +74,12 @@ export function spacesOfRows(rows: Row[] | undefined): number[] {
   return [...out];
 }
 
-export function useRowUsages(rows: Row[] | undefined, index: UsageIndex | null) {
+export function useRowUsages(rows: Row[] | undefined, index: UsageIndex | null, rules: DiagnoseRules | null) {
   return useMemo(() => {
     const map = new Map<number, RowUsage>();
-    for (const row of rows ?? []) map.set(row.client_id, usageFor(row.active, index));
+    for (const row of rows ?? []) map.set(row.client_id, usageFor(row.active, index, rules));
     return map;
-  }, [rows, index]);
+  }, [rows, index, rules]);
 }
 
 /** 플랜 이름 → 그 플랜을 쓰는 스페이스들 (가공 범위 전체). 계약 폼의 「플랜명」 추천 목록과 space_seq 안내가

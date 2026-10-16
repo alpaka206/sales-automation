@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { getJSON, postForm } from "../../lib/api";
+import { useInsightRules } from "../../lib/insightRules";
 import { useSpaceMetric } from "../../lib/usageData";
 import { useUsageSource, type UsageSource } from "../../lib/usageSource";
 import { ActionButton, SubmitButton, useAction } from "../../ui/ActionButton";
@@ -17,7 +18,7 @@ import { Confirm } from "./Confirm";
 import { OutOfRange, StatusTags } from "./UsageBits";
 import { useAutoReconcile } from "./reconcile";
 import { useEvidence, usageFor, useUsageIndex, type RowUsage } from "./useUsage";
-import { matchGrants, matchPayments, mergeEvidence, parseSpaceSeqs, type GrantEvidence, type PaymentEvidence } from "./usage";
+import { matchGrants, matchPayments, mergeEvidence, parseSpaceSeqs, rulesFrom, type GrantEvidence, type PaymentEvidence } from "./usage";
 import { WonContractForm } from "./WonContractForm";
 import { ContractFields, DealTypeHint, PlanFields, PlanPeriodHint, scheduleLabel, useContractDraft } from "./ContractFields";
 import { PlanSpaceAlert } from "./PlanSpaceHint";
@@ -132,6 +133,9 @@ export function WonCustomerDetail() {
     [data?.contracts]);
   const evidence = useEvidence(usageSource.source, allContractSpaces);
   useAutoReconcile(data?.contracts ?? [], evidence.index);
+  // 판정 문턱은 서버에 저장된 값 — 목록 · 영업 인사이트와 같은 값입니다.
+  const ruleList = useInsightRules().list;
+  const rules = useMemo(() => rulesFrom(ruleList), [ruleList]);
 
   if (!data) return <div className="won"><div className="page">불러오는 중…</div></div>;
 
@@ -141,7 +145,7 @@ export function WonCustomerDetail() {
     contracts.find((c) => c.seq === pickedSeq) ?? data.active ?? contracts[contracts.length - 1] ?? null;
   const comms = data.comms ?? [];
   // 받는 동안은 「받는 중」 — 그 사이 「연결돼 있지 않습니다」가 깜빡이면 끊긴 줄 압니다.
-  const usage: RowUsage = usageSource.busy || usageIndex.busy ? { kind: "loading" } : usageFor(current, usageIndex.index);
+  const usage: RowUsage = usageSource.busy || usageIndex.busy ? { kind: "loading" } : usageFor(current, usageIndex.index, rules);
   // 지급 회차 ↔ 스냅샷 소진 묶음. **표시만** — 우리 기록에는 쓰지 않습니다.
   const grantEvidence = current && credits.data && usageIndex.index
     ? matchGrants(current.credit_grants, credits.data.data.buckets ?? [], usageIndex.index.snapshotAt)
@@ -183,7 +187,7 @@ export function WonCustomerDetail() {
           {current?.plan && <Tag tone={`plan-${planTone(current.plan)}`}>{current.plan}</Tag>}
           <Tag tone="neutral">{current ? current.label : "계약 없음"}</Tag>
           {data.setup_count > 0 && <Tag tone="st-setup">세팅중 계약 {data.setup_count}건</Tag>}
-          {/* 사용 상태 — 목록의 열과 같은 배지(사용 수준 · 전망 · 품질). 조용하면 안 뜹니다. 규칙은 usage.ts 의 RULE. */}
+          {/* 사용 상태 — 목록의 열과 같은 배지(사용 수준 · 전망 · 품질). 조용하면 안 뜹니다. 규칙은 usage.ts 의 diagnose, 문턱은 서버의 기준. */}
           {usage.kind === "ok" && <StatusTags d={usage.diagnosis} />}
           {/* 계약의 번호 일부가 가공 범위 밖이면 그 번호를 — 아래 세 카드의 숫자가 그만큼 빠진 것이다. */}
           <OutOfRange usage={usage} />
