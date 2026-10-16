@@ -1722,6 +1722,25 @@ def _won_history(session, contact_id: int | None) -> dict:
 
 
 # --------------------------------------------------------------------------- #
+# 영업 인사이트 — 판정 기준 (2026-10-15)
+# --------------------------------------------------------------------------- #
+
+
+@router.get("/api/ui/insight-rules")
+def ui_insight_rules() -> dict:
+    """영업 인사이트와 수주 고객 「사용 진단」이 같이 읽는 기준 여섯 개 — 값 · 누가 언제 · 이름 · 범위.
+
+    사람이 적은 숫자만 오갑니다. 판정 자체는 브라우저가 가공 데이터로 하고, 그 숫자는 이 서버로 안 옵니다.
+    저장은 ``POST /operations/insights/rules``(``routes/insights.py``).
+    """
+    from ...db.insights import rules_payload
+    from ...db.session import SessionLocal
+
+    with SessionLocal() as session:
+        return {"rules": rules_payload(session)}
+
+
+# --------------------------------------------------------------------------- #
 # 사용 데이터 — 열쇠만 건넵니다 (2026-10-01)
 # --------------------------------------------------------------------------- #
 

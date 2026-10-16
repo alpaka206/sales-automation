@@ -943,3 +943,34 @@ class TestLeftNew:
     def test_skips_when_the_table_does_not_exist(self, mem_engine):
         importlib.import_module(self.MODULE).up(mem_engine)
         assert "conversations" not in inspect(mem_engine).get_table_names()
+
+
+class TestInsightTables:
+    """0132 — 영업 인사이트의 기준(`insight_rules`)과 기록(`insight_log`). 값은 안 옮기고 씨앗도 없다(행이 없으면 기본값)."""
+
+    MODULE = "src.db.migrations.0132_the_insight_rules_live_on_the_server"
+
+    def test_creates_both_tables_like_the_models_and_runs_twice(self, mem_engine):
+        importlib.import_module(self.MODULE).up(mem_engine)
+        importlib.import_module(self.MODULE).up(mem_engine)  # 두 번 돌려도 같다
+
+        from src.db.models import InsightLog, InsightRule
+
+        insp = inspect(mem_engine)
+        # 새 DB 는 0001 의 create_all(모델)로, 옛 DB 는 이 이관으로 표가 선다 — 두 길의 칸이 같아야 한다.
+        for model in (InsightRule, InsightLog):
+            made = {c["name"] for c in insp.get_columns(model.__tablename__)}
+            assert made == {c.name for c in model.__table__.columns}, model.__tablename__
+        assert {ix["name"] for ix in insp.get_indexes("insight_log")} == {
+            ix.name for ix in InsightLog.__table__.indexes
+        }
+        with mem_engine.connect() as conn:
+            assert conn.execute(text("SELECT count(*) FROM insight_rules")).scalar() == 0
+
+    def test_leaves_tables_the_models_already_made(self, mem_engine):
+        from src.db.base import Base
+        from src.db.models import InsightLog, InsightRule
+
+        Base.metadata.create_all(mem_engine, tables=[InsightRule.__table__, InsightLog.__table__])
+        importlib.import_module(self.MODULE).up(mem_engine)
+        assert {"insight_rules", "insight_log"} <= set(inspect(mem_engine).get_table_names())

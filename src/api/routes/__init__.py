@@ -15,6 +15,7 @@ from . import (
     dashboard,
     email_templates,
     exports,
+    insights,
     legacy_redirects,
     logs,
     mailboxes,
@@ -41,6 +42,7 @@ for _module in (
     logs,
     mailboxes,
     won_customers,
+    insights,
     ui_api,
     legacy_redirects,
 ):

@@ -1042,3 +1042,53 @@ class PolicySection(Base):
     __table_args__ = (
         Index("ux_policy_sections_source_idx", "source_kind", "source_id", "idx", unique=True),
     )
+
+
+class InsightRule(Base):
+    """영업 인사이트의 판정 기준 하나 — 사람이 화면에서 고친 값만 행이 있습니다 (이관 0132).
+
+    기준의 목록 · 기본값 · 범위는 ``db/insights.RULES`` 한 곳입니다. **행이 없으면 기본값**이고,
+    처음 고칠 때 행이 생깁니다 — 그래서 ``updated_by`` 가 비어 있는 행은 없고, 화면은 행이 없는
+    기준을 「기본값」이라고 적습니다. ``RULES`` 에 없는 열쇠의 행은 읽지 않습니다.
+
+    값은 사람이 적은 숫자입니다(9,720 크레딧 · 85% …). 스냅샷 숫자는 여기 오지 않습니다 —
+    「사용 데이터는 서버로 안 간다」(2026-09-15)와 무관한 표입니다. 바꾼 기록은 ``insight_log`` 에
+    한 줄씩 남습니다(지우지 않습니다).
+    """
+
+    __tablename__ = "insight_rules"
+
+    key: Mapped[str] = mapped_column(String(48), primary_key=True)
+    value: Mapped[int] = mapped_column(Integer, nullable=False)
+    updated_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+
+
+class InsightLog(Base):
+    """영업 인사이트의 기록 — **덧붙이기만 합니다** (이관 0132).
+
+    한 줄 = 사람이 누른 것 하나: 기준 변경(``rule``) · 상태 변경(``status``) · 메모 저장(``memo``) ·
+    메일 초안 복사(``copy``). 시스템이 스스로 적는 줄은 없습니다.
+
+    무엇의 기록인지는 카드(``tab``)가 정합니다 — 업셀링(``up``)은 ``space_seq``, 이탈 방지(``churn``) ·
+    추가 계약(``grow``)은 ``contract_id`` 입니다. 기준 변경 줄은 둘 다 비어 있습니다. 둘 다 FK 가
+    아닙니다: 기록은 원본보다 오래 삽니다(``document_revisions`` 와 같은 이유).
+
+    **업셀링 줄의 ``space_seq`` 는 「사용 데이터는 서버로 안 간다」의 세 번째 예외입니다**
+    (2026-10-15 운영자가 개발자에게 물어 정한 A안). 사람이 버튼을 누를 때만, 번호와 그 일만
+    남습니다 — 크레딧 같은 사용량 숫자는 ``detail`` 에도 적지 않습니다.
+    """
+
+    __tablename__ = "insight_log"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    # up | churn | grow
+    tab: Mapped[str] = mapped_column(String(16), nullable=False)
+    space_seq: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    contract_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    # rule | status | memo | copy
+    action: Mapped[str] = mapped_column(String(16), nullable=False)
+    # 화면의 「기록」 칸에 그대로 서는 한 줄 — 「30일 크레딧 9,720 → 12,000 이상」 · 「상태 변경: 컨택 완료」.
+    detail: Mapped[str | None] = mapped_column(Text, nullable=True)
+    actor: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
