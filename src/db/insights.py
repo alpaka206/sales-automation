@@ -1,7 +1,8 @@
 """영업 인사이트 — 판정 기준과 그 기록 (2026-10-15 운영자 지시).
 
-화면(``frontend/src/screens/SalesInsights.tsx``)은 매일 가공된 스냅샷을 브라우저가 GitHub 에서 직접 받아
-판정합니다 — 이 서버는 그 숫자를 모릅니다. 여기 사는 것은 **사람이 적은 것**뿐입니다:
+화면(``frontend/src/screens/SalesInsights.tsx`` 와 그 안쪽 겹 ``screens/insights/``)은 매일 가공된 스냅샷을
+브라우저가 GitHub 에서 직접 받아 판정합니다 — 이 서버는 그 숫자를 모릅니다. 여기 사는 것은 **사람이 적은 것**
+뿐입니다:
 
 - **기준** — 「30일 크레딧 9,720 이상이면 업셀링 후보」 같은 문턱 여섯 개. 화면의 「기준 수정」 줄이
   ``POST /operations/insights/rules`` 로 바꾸고, ``GET /api/ui/insight-rules`` 로 모든 콘솔이 같은 값을

@@ -1,4 +1,4 @@
-"""영업 인사이트(`frontend/src/screens/SalesInsights.tsx`) — 신호의 문턱과 숫자의 표기.
+"""영업 인사이트(안쪽 겹 `frontend/src/screens/insights/SalesInsightsView.tsx`) — 신호의 문턱과 숫자의 표기.
 
 값은 화면이 브라우저에서 `sales.json` 으로 판정하므로(서버는 그 데이터를 모른다) 여기서는 화면 소스를 읽는다.
 """
@@ -7,7 +7,7 @@ from __future__ import annotations
 import pathlib
 import re
 
-SCREEN = pathlib.Path("frontend/src/screens/SalesInsights.tsx")
+SCREEN = pathlib.Path("frontend/src/screens/insights/SalesInsightsView.tsx")
 
 
 def _code() -> str:

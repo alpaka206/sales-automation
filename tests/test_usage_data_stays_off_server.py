@@ -51,6 +51,11 @@ ROOT = Path(__file__).resolve().parents[1]
 FRONT = ROOT / "frontend" / "src"
 AGENT = ROOT / "agent"
 
+# 영업 인사이트의 안쪽 겹 — 이 폴더의 파일은 **전부** 데이터 쪽이다(2026-10-15 운영자 조건 4: 「영업 인사이트 화면
+# 파일을 tests/test_usage_data_stays_off_server.py 검사 대상에 넣어줘」). 목록으로 적지 않고 폴더로 잡는다 — 새 파일이
+# 생겨도 저절로 검사 대상이 된다.
+INSIGHTS_DIR = FRONT / "screens" / "insights"
+INSIGHTS_SIDE = tuple(sorted(INSIGHTS_DIR.glob("*.ts*")))
 # 사용 데이터를 들고 있는 모듈들. 새로 생기면 여기 더한다.
 DATA_SIDE = (
     FRONT / "lib" / "usageData.ts",
@@ -60,6 +65,7 @@ DATA_SIDE = (
     FRONT / "screens" / "won" / "UsageBits.tsx",
     FRONT / "screens" / "won" / "WonUsageSections.tsx",
     FRONT / "screens" / "won" / "PlanSpaceHint.tsx",
+    *INSIGHTS_SIDE,
 )
 # 서버에서 열쇠만 받는 모듈 — `lib/api` 를 쓰는 대신 데이터를 손에 쥐지 않는다.
 SOURCE = FRONT / "lib" / "usageSource.ts"
@@ -406,3 +412,24 @@ def test_plan_space_numbers_leave_the_data_side_only_when_a_person_presses_fill(
     carrying = [(route, body.strip()) for route, body in sends if "filling" in body]
     assert carrying == [("/won-customers/contracts/${contract.id}", "space_seq: filling")], carrying
     assert re.search(r"\{filling && \(\s*<Confirm\b", detail), "채우기 저장이 확인 창(Confirm) 밖에 있습니다"
+
+
+# 영업 인사이트 — 바깥 겹(우리 서버와 말한다)과 안쪽 겹(스냅샷으로 판정하고 그린다) (2026-10-15).
+INSIGHTS = FRONT / "screens" / "SalesInsights.tsx"
+
+
+def test_the_sales_insights_screen_is_two_layers():
+    """영업 인사이트는 두 겹이다 — 바깥(`screens/SalesInsights.tsx`)은 우리 서버하고만 말하고, 안쪽(`screens/insights/`)은
+    매일 가공된 스냅샷으로 판정하고 그린다.
+
+    바깥은 사용 데이터 모듈 중 **안쪽 화면 하나만** import 한다 — 그래서 바깥은 스냅샷 숫자를 손에 쥘 수 없고, 바깥이
+    서버로 보내는 것은 안쪽이 넘겨 준 것뿐이다. 안쪽은 폴더째 `DATA_SIDE` 라 서버를 못 부른다(위 테스트들).
+    """
+    assert INSIGHTS_SIDE, "screens/insights/ 가 비었습니다"
+    assert INSIGHTS not in DATA_SIDE
+    data = {path.with_suffix("").resolve() for path in DATA_SIDE}
+    view = (INSIGHTS_DIR / "SalesInsightsView").resolve()
+    assert _imports(INSIGHTS, types=False) & data == {view}, "바깥 겹이 안쪽 화면 말고 사용 데이터 모듈을 import 합니다"
+    # 라우트는 바깥 겹을 그린다 — 안쪽을 바로 그리면 서버에서 받을 것을 받을 자리가 없다.
+    main = (FRONT / "main.tsx").read_text(encoding="utf-8")
+    assert 'import { SalesInsights } from "./screens/SalesInsights";' in main
