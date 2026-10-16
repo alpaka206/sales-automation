@@ -445,7 +445,8 @@ def test_the_sales_insights_screen_is_two_layers():
 
 
 # 바깥 겹이 서버로 보내는 곳 — 경로와 그 몸통. 단계마다 하나씩 늘어난다(기준 → 상태 · 메모 → 복사 기록).
-INSIGHT_ROUTES = ("/operations/insights/rules", "/operations/insights/marks", "/operations/insights/copies")
+INSIGHT_ROUTES = ("/operations/insights/rules", "/operations/insights/marks", "/operations/insights/copies",
+                  "/operations/insights/drafts")
 RULE_LINE = INSIGHTS_DIR / "RuleLine.tsx"
 # 스스로 도는 코드 — 사람이 누르지 않았는데 무언가를 보낼 수 있는 자리.
 SELF_RUNNING = ("useEffect", "useLayoutEffect", "setTimeout", "setInterval", "requestAnimationFrame")
@@ -541,3 +542,23 @@ def test_mail_drafts_are_copied_never_sent():
     outer = _code(INSIGHTS.read_text(encoding="utf-8"))
     routes = re.findall(r"postForm\(\s*[\"'`]([^\"'`]+)[\"'`]", outer)
     assert set(routes) == set(INSIGHT_ROUTES), routes
+
+
+DRAFT_EDITOR = INSIGHTS_DIR / "DraftEditor.tsx"
+
+
+def test_the_mail_wording_leaves_only_when_a_person_confirms_it():
+    """메일 초안의 기본 문구(2026-10-16 운영자: 「메일 초안 문구를 영업 인사이트 화면에서 고칠 수 있게」)는 사람이 칸에
+    적은 글이다 — 스냅샷 숫자가 아니다. 그래도 길은 하나로 묶는다: 저장을 부르는 곳은 `DraftEditor.tsx` 하나이고, 확인창의
+    [바꾸기] `onClick` 안이며, 그 파일에 스스로 도는 코드가 없다. 바깥 겹은 서버가 준 그 카드의 칸 이름으로만 몸통을 짓는다."""
+    callers = [path.name for path in INSIGHTS_SIDE if "onSaveDrafts(" in _code(path.read_text(encoding="utf-8"))]
+    assert callers == [DRAFT_EDITOR.name], f"기본 문구 저장을 부르는 곳은 DraftEditor.tsx 하나입니다: {callers}"
+    editor = _code(DRAFT_EDITOR.read_text(encoding="utf-8"))
+    calls = [text for text in editor.splitlines() if "onSaveDrafts(" in text]
+    assert calls and all("onClick={" in text for text in calls), calls
+    for needle in SELF_RUNNING:
+        assert needle not in editor, f"DraftEditor.tsx 가 스스로 돕니다: {needle}"
+    outer = _code(INSIGHTS.read_text(encoding="utf-8"))
+    assert "const body: Record<string, string> = { tab };" in outer
+    assert "if (p.tab === tab && key in values) body[key] = values[key];" in outer
+    assert 'postForm("/operations/insights/drafts", body)' in outer

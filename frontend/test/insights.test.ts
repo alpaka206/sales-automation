@@ -304,3 +304,27 @@ describe("메일 초안 — 서버 문구로 조립: 근거 문단 하나를 골
     expect(placeName(churnRow)).toBe("가나 스튜디오");
   });
 });
+
+// ── 기본 문구 편집 — 서버와 같은 말로 먼저 짚는다(서버가 마지막 관문, `tests/test_insight_drafts.py`) ──────────
+import { invalidDraft } from "../src/screens/insights/DraftEditor";
+
+describe("기본 문구 편집 창의 검사 — 서버와 같은 규칙 · 같은 말", () => {
+  const body = { lang: "ko", part: "body", label: "공통 문단" } as const;
+  const subject = { lang: "en", part: "subject", label: "제목" } as const;
+  const reason = { lang: "ko", part: "reason.idle", label: "근거 — 무활동" } as const;
+  it("공통 문단에는 {근거} 가 정확히 한 번", () => {
+    expect(invalidDraft(body, "안녕하세요 {고객명} 님\n{근거}\n감사합니다")).toBeNull();
+    expect(invalidDraft(body, "안녕하세요")).toBe("한국어 공통 문단: {근거} 는 공통 문단에 한 번 들어가야 합니다(지금 0번)");
+    expect(invalidDraft(body, "{근거} {근거}")).toContain("(지금 2번)");
+  });
+  it("모르는 자리표시는 쓸 수 있는 목록과 함께 거절", () => {
+    expect(invalidDraft(body, "{이름} 님 {근거}")).toBe("한국어 공통 문단: 모르는 자리표시 {이름} — 쓸 수 있는 것은 {고객명}, {근거} 입니다");
+  });
+  it("{근거} 는 공통 문단에만, 제목은 한 줄, 빈칸 · 길이", () => {
+    expect(invalidDraft(reason, "{근거}")).toContain("공통 문단에만");
+    expect(invalidDraft(subject, "first\nsecond")).toBe("English 제목: 제목은 한 줄이어야 합니다");
+    expect(invalidDraft(subject, "   ")).toBe("English 제목: 비어 있습니다");
+    expect(invalidDraft(subject, "가".repeat(201))).toBe("English 제목: 200자까지 적을 수 있습니다");
+    expect(invalidDraft(reason, "줄바꿈은\r\n괜찮다")).toBeNull();
+  });
+});

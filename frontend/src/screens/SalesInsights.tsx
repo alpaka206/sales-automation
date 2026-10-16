@@ -68,8 +68,20 @@ export function SalesInsights() {
     await queryClient.invalidateQueries({ queryKey: ["insight-marks"] });
   };
 
+  /** 「메일 초안」 창의 「기본 문구 수정」 저장 — 그 카드의 칸 이름(서버가 준 목록)만 골라 사람이 적은 글을 보냅니다.
+   *  저장은 서버의 따로 둔 표(`insight_drafts`)이고, 인바운드 답장 AI 는 그 표를 읽지 않습니다. */
+  const saveDrafts = async (tab: InsightTab, values: Record<string, string>) => {
+    const body: Record<string, string> = { tab };
+    for (const p of drafts.data?.parts ?? []) {
+      const key = `${p.lang}.${p.part}`;
+      if (p.tab === tab && key in values) body[key] = values[key];
+    }
+    await postForm("/operations/insights/drafts", body);
+    await queryClient.invalidateQueries({ queryKey: ["insight-drafts"] });
+  };
+
   return (
     <SalesInsightsView usage={usage} won={won ?? null} rules={rules} marks={marks} drafts={drafts}
-                       onSaveRules={saveRules} onMark={saveMark} onCopied={logCopy} />
+                       onSaveRules={saveRules} onMark={saveMark} onCopied={logCopy} onSaveDrafts={saveDrafts} />
   );
 }

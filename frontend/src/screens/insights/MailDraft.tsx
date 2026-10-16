@@ -10,9 +10,12 @@
 // 어느 곳의 일도 아닙니다(`tests/test_usage_data_stays_off_server.py`).
 //
 // 문구는 서버에 저장된 기본 문구(`templates`, 2026-10-16)로 `mail.ts` 가 조립합니다. 이 창에서 제목 · 본문을 고치면
-// **이번 복사에만** 쓰입니다.
+// **이번 복사에만** 쓰입니다. 「기본 문구 수정」을 누르면 같은 창이 편집 모드(`DraftEditor.tsx`)로 바뀌고, 거기서 고친
+// 문구는 이 탭의 모든 초안에 쓰입니다.
 import { useState } from "react";
+import type { InsightDrafts } from "../../lib/insightDrafts";
 import type { MarkTarget } from "../../lib/insightMarks";
+import { DraftEditor } from "./DraftEditor";
 import type { Rules } from "../won/usage";
 import type { ContractRow, Tab, UpRow } from "./judge";
 import { NAME_SLOT, draftFor, placeName, type Lang, type Templates } from "./mail";
@@ -37,12 +40,21 @@ async function copy(text: string): Promise<boolean> {
 
 const NO_ADDRESS = "받는 사람 이메일은 데이터에 없습니다. 복사한 뒤 직접 입력해 보내세요.";
 
-export function MailDraft({ mode, lang, rules, templates, onLang, onCopied, onSaid, onClose }: {
+export function MailDraft({ mode, tabName, lang, rules, templates, drafts, onLang, onCopied, onSaveDrafts, onReload, onSaid,
+                           onClose }: {
   mode: MailMode;
+  /** 「이탈 방지」 — 편집 모드의 제목과 확인창에 선다 */
+  tabName: string;
   lang: Lang;
   rules: Rules;
   /** 서버에 저장된 기본 문구(`GET /api/ui/insight-drafts`) — 바깥 겹이 받아 내려 준다. */
   templates: Templates;
+  /** 같은 것의 칸마다의 모양(이름 · 기본 문구 · 누가 언제)과 자리표시 안내 — 편집 모드가 쓴다. */
+  drafts: InsightDrafts;
+  /** 편집 모드의 저장 — 사람이 칸에 적은 글. 부르는 곳은 `DraftEditor.tsx` 하나. */
+  onSaveDrafts: (tab: Tab, values: Record<string, string>) => Promise<unknown>;
+  /** 기본 문구를 저장한 뒤 이 창을 새 문구로 다시 연다. */
+  onReload: () => void;
   onLang: (lang: Lang) => void;
   /** 「복사했다」 기록 — 그 줄의 열쇠와 초안의 제목만 간다. 메일은 안 보낸다. */
   onCopied: (target: MarkTarget, subject: string) => Promise<unknown>;
@@ -55,6 +67,7 @@ export function MailDraft({ mode, lang, rules, templates, onLang, onCopied, onSa
   const [body, setBody] = useState(start.body);
   const [copied, setCopied] = useState<Set<number>>(new Set());
   const [error, setError] = useState("");
+  const [editing, setEditing] = useState(false);
   const said = (message: string) => () => onSaid(message);
   const failedCopy = () => setError("클립보드에 넣지 못했습니다 — 제목과 본문을 직접 선택해 복사하세요.");
   const logged = (message: string) => [said(message), said(`${message} — 기록은 남기지 못했습니다`)] as const;
@@ -63,6 +76,19 @@ export function MailDraft({ mode, lang, rules, templates, onLang, onCopied, onSa
   const usesName = subject.includes(NAME_SLOT) || body.includes(NAME_SLOT);
   const named = (text: string, row: UpRow | ContractRow) => text.split(NAME_SLOT).join(placeName(row));
   const textFor = (row: UpRow | ContractRow) => `${named(subject, row)}\n\n${named(body, row)}`;
+
+  if (editing) {
+    // 편집 모드 — 바깥을 눌러도 · Esc 를 눌러도 닫히지 않는다(고친 글이 사라진다). 나가는 길은 「취소」 · 「저장」.
+    return (
+      <div className="imodal" role="dialog" aria-modal="true" aria-label={`기본 문구 수정 · ${tabName}`}
+           onKeyDown={(e) => { if (e.key === "Escape") e.stopPropagation(); }}>
+        <div className="mbox">
+          <DraftEditor tab={mode.tab} tabName={tabName} drafts={drafts} onSaveDrafts={onSaveDrafts}
+                       onDone={(saved) => { if (saved) { onSaid("기본 문구를 바꿨습니다"); onReload(); } else setEditing(false); }} />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="imodal" role="dialog" aria-modal="true" aria-label={title}
@@ -141,6 +167,8 @@ export function MailDraft({ mode, lang, rules, templates, onLang, onCopied, onSa
         <div className="mf">
           <small>초안은 복사해서 메일 프로그램에서 보냅니다. 시스템이 직접 보내지 않습니다.</small>
           <div style={{ display: "flex", gap: 8 }}>
+            <button type="button" className="ibtn" onClick={() => setEditing(true)}
+                    title="이 탭의 모든 초안에 쓰이는 문구(제목 · 공통 문단 · 근거 문단)를 고칩니다">기본 문구 수정</button>
             <button type="button" className="ibtn" onClick={onClose}>닫기</button>
           </div>
         </div>

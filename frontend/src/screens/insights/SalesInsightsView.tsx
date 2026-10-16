@@ -55,6 +55,8 @@ type Props = {
   onMark: (target: MarkTarget, change: MarkChange) => Promise<unknown>;
   /** 메일 초안을 복사했다는 기록 — 그 줄의 열쇠와 초안의 제목만. 메일은 보내지 않는다(복사만). */
   onCopied: (target: MarkTarget, subject: string) => Promise<unknown>;
+  /** 「메일 초안」 창의 「기본 문구 수정」 저장 — 사람이 적은 글. */
+  onSaveDrafts: (tab: Tab, values: Record<string, string>) => Promise<unknown>;
 };
 
 type Card = { name: string; desc: (r: Rules) => string; title: string; search: string; note: string };
@@ -74,7 +76,7 @@ const CARDS: Record<Tab, Card> = {
 const TABS: Tab[] = ["up", "churn", "grow"];
 type AnyRow = Listed<UpRow> | Listed<ChurnRow> | Listed<GrowRow>;
 
-export function SalesInsightsView({ usage, won, rules, marks, drafts, onSaveRules, onMark, onCopied }: Props) {
+export function SalesInsightsView({ usage, won, rules, marks, drafts, onSaveRules, onMark, onCopied, onSaveDrafts }: Props) {
   const sales = useSalesInsight<SalesData>(usage.source);
   // 수주 고객 목록이 쓰는 그 요약 색인 — 활성 계약의 스페이스만 고른다(`useUsageIndex`).
   const spaces = useMemo(() => spacesOfRows(won?.rows), [won?.rows]);
@@ -125,6 +127,8 @@ export function SalesInsightsView({ usage, won, rules, marks, drafts, onSaveRule
   // 메일 초안 창과 그 언어 — 언어는 창을 닫았다 열어도 남는다(목업).
   const [mail, setMail] = useState<MailMode | null>(null);
   const [lang, setLang] = useState<Lang>("ko");
+  // 기본 문구를 저장하면 창을 새 문구로 다시 연다 — 열쇠가 바뀌면 창이 처음부터 다시 그려진다.
+  const [mailVersion, setMailVersion] = useState(0);
   const say = (message: string) => { setToast(message); window.setTimeout(() => setToast(null), 1800); };
   // Esc 는 위에 뜬 것부터 닫는다 — 메일 초안 창, 그다음 상세 패널(목업). 그 두 파일에는 스스로 도는 코드를 두지
   // 않아서 여기서 듣는다.
@@ -363,10 +367,12 @@ export function SalesInsightsView({ usage, won, rules, marks, drafts, onSaveRule
                   onDraft={() => setMail({ kind: "row", tab, row: item.row, email: "space_seq" in item.row ? null : item.row.email })} />
         </>
       )}
-      {mail && ruleValues && templates && (
+      {mail && ruleValues && templates && drafts.data && (
         // 언어를 바꾸면 그 언어의 문구로 다시 연다(목업) — 고쳐 둔 글자는 그 언어의 것이라 같이 안 넘어간다.
-        <MailDraft key={`${lang}:${mail.kind}`} mode={mail} lang={lang} rules={ruleValues} templates={templates} onLang={setLang}
-                   onCopied={onCopied} onSaid={say} onClose={() => setMail(null)} />
+        <MailDraft key={`${lang}:${mail.kind}:${mailVersion}`} mode={mail} tabName={CARDS[mail.tab].name} lang={lang}
+                   rules={ruleValues} templates={templates} drafts={drafts.data} onLang={setLang}
+                   onCopied={onCopied} onSaveDrafts={onSaveDrafts} onReload={() => setMailVersion((v) => v + 1)}
+                   onSaid={say} onClose={() => setMail(null)} />
       )}
       {toast && <div className="toast" role="status">{toast}</div>}
     </div>
