@@ -39,6 +39,14 @@
 없다.** 그 모듈은 데이터를 쥔 쪽이라 서버를 못 부르고, 밖으로 내는 것은 버튼을 눌렀을 때의 `onFill` 뿐이라는
 것을 아래에서 고정한다.
 
+**사람이 누르는 예외 둘째 — 세 번째 예외**: 영업 인사이트 업셀링 줄의 상태 · 메모 (2026-10-15 운영자가 개발자에게 물어
+정한 A안 — 「컨택 완료」 같은 상태를 팀이 같이 보려면 그 줄의 space_seq 가 서버에 남아야 한다). 영업 인사이트는 두
+겹이다: 바깥(`screens/SalesInsights.tsx`)은 서버하고만 말하고, 안쪽(`screens/insights/`, 폴더째 `DATA_SIDE`)은 스냅샷으로
+판정하고 그린다. 안쪽에서 바깥으로 넘어오는 것은 **사람이 누른 것** 둘뿐이다 — 「기준 수정」에 적은 숫자(`RuleLine.tsx`)와
+상세 패널에서 고른 상태 · 적은 메모와 그 줄의 열쇠(`Drawer.tsx`). 서버로 가는 칸은 기준의 열쇠와 `tab` · `space_seq` ·
+`contract_id` · `status` · `memo` 뿐이고, 서버도 그 밖의 칸을 거절하며(`src/db/insights.save_mark`), 그 표에는 사용량
+숫자를 담을 칸이 없다 — 아래에서 고정한다.
+
 여기서 걸리면 「어느 화면이나 서버 코드가 스냅샷 값을 서버로 끌어오기 시작했다」는 뜻이다.
 """
 
@@ -71,7 +79,7 @@ DATA_SIDE = (
 SOURCE = FRONT / "lib" / "usageSource.ts"
 # 서버와 말하는 모듈들 — 데이터 모듈을 import 하지 않고, 데이터 모듈도 이것들을 import 하지 않는다. 판정 기준
 # (`insightRules.ts`, 2026-10-15)은 사람이 적은 숫자라 서버에 살고, 화면이 받아서 판정 함수에 넘겨 준다.
-SERVER_SIDE = (SOURCE, FRONT / "lib" / "insightRules.ts")
+SERVER_SIDE = (SOURCE, FRONT / "lib" / "insightRules.ts", FRONT / "lib" / "insightMarks.ts")
 API = FRONT / "lib" / "api"
 GITHUB_API = "`https://api.github.com/repos/"
 
@@ -436,7 +444,7 @@ def test_the_sales_insights_screen_is_two_layers():
 
 
 # 바깥 겹이 서버로 보내는 곳 — 경로와 그 몸통. 단계마다 하나씩 늘어난다(기준 → 상태 · 메모 → 복사 기록).
-INSIGHT_ROUTES = ("/operations/insights/rules",)
+INSIGHT_ROUTES = ("/operations/insights/rules", "/operations/insights/marks")
 RULE_LINE = INSIGHTS_DIR / "RuleLine.tsx"
 # 스스로 도는 코드 — 사람이 누르지 않았는데 무언가를 보낼 수 있는 자리.
 SELF_RUNNING = ("useEffect", "useLayoutEffect", "setTimeout", "setInterval", "requestAnimationFrame")
@@ -464,3 +472,38 @@ def test_the_insights_screen_sends_only_what_a_person_typed_into_the_rule_line()
     assert calls and all("onClick={" in text for text in calls), f"기준 저장이 버튼의 onClick 밖에서 불립니다: {calls}"
     for needle in SELF_RUNNING:
         assert needle not in line, f"RuleLine.tsx 가 스스로 돕니다: {needle}"
+
+
+DRAWER = INSIGHTS_DIR / "Drawer.tsx"
+# 세 번째 예외가 서버로 실어 보낼 수 있는 칸 — 줄의 열쇠와 사람이 고른 상태 · 적은 메모.
+MARK_FIELDS = {"tab", "space_seq", "contract_id", "status", "memo"}
+
+
+def test_upsell_marks_carry_only_the_row_key_status_and_memo():
+    """세 번째 예외의 울타리 (2026-10-15 A안). 업셀링 줄은 스냅샷에서 나온 줄이라 그 번호(space_seq)가 서버에 남는 것
+    자체가 예외다 — 그래서 **번호 · 상태 · 메모 말고는 아무것도** 같이 가지 않아야 한다.
+
+    - 바깥 겹이 짓는 몸통의 칸은 다섯뿐이다(`MARK_FIELDS`).
+    - 안쪽에서 그 저장을 부르는 곳은 `Drawer.tsx` 하나이고, 전부 사람의 손(`onClick` · `onChange`) 안이며, 그 파일에는
+      스스로 도는 코드가 없다.
+    - 서버의 표에는 사용량 숫자를 담을 칸이 없다 — 칸이 생기면 여기서 빨개진다(그 칸을 채우는 코드는 그다음이다).
+    """
+    outer = _code(INSIGHTS.read_text(encoding="utf-8"))
+    fields = set(re.findall(r"\bbody\.(\w+)\s*=", outer)) | set(re.findall(r"const body[^=]*=\s*\{\s*(\w+):", outer))
+    assert fields == MARK_FIELDS, f"상태 · 메모 몸통의 칸: {sorted(fields)}"
+    assert 'postForm("/operations/insights/marks", body)' in outer
+
+    callers = [path.name for path in INSIGHTS_SIDE if "onMark(" in _code(path.read_text(encoding="utf-8"))]
+    assert callers == [DRAWER.name], f"상태 · 메모 저장을 부르는 곳은 Drawer.tsx 하나입니다: {callers}"
+    drawer = _code(DRAWER.read_text(encoding="utf-8"))
+    calls = [text for text in drawer.splitlines() if "onMark(" in text]
+    assert calls and all(("onClick={" in text or "onChange={" in text) for text in calls), calls
+    for needle in SELF_RUNNING:
+        assert needle not in drawer, f"Drawer.tsx 가 스스로 돕니다: {needle}"
+
+    from src.db.models import InsightLog, InsightMark
+
+    assert {c.name for c in InsightMark.__table__.columns} == {
+        "id", "tab", "space_seq", "contract_id", "status", "memo", "updated_by", "updated_at"}
+    assert {c.name for c in InsightLog.__table__.columns} == {
+        "id", "tab", "space_seq", "contract_id", "action", "detail", "actor", "created_at"}

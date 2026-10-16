@@ -1,14 +1,17 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
+import type { InsightMarks, MarkChange, MarkTarget } from "../../lib/insightMarks";
 import type { InsightRule } from "../../lib/insightRules";
 import { stamp, useSalesInsight } from "../../lib/usageData";
 import type { UsageSource } from "../../lib/usageSource";
 import { parseSpaceSeqs, rulesFrom, type Rules } from "../won/usage";
 import { spacesOfRows, useUsageIndex } from "../won/useUsage";
 import type { ListData } from "../won/shared";
+import { ChurnWhy, GrowWhy, PlanTag, PriorityTag, RiskTag, Sg, TIER, num } from "./bits";
+import { Drawer, type DrawerItem } from "./Drawer";
 import {
-  contractRows, upsellMaybeCut, upsellRows, CANDIDATE_CAP,
-  type ChurnRow, type ContractRow, type GrowRow, type SalesData, type Tab, type UpRow,
+  contractRows, countByStatus, listChurn, listGrow, listUp, markId, upsellMaybeCut, upsellRows, CANDIDATE_CAP, TODO,
+  type ChurnRow, type GrowRow, type Listed, type SalesData, type Tab, type UpRow,
 } from "./judge";
 import { RuleLine } from "./RuleLine";
 
@@ -18,10 +21,14 @@ import { RuleLine } from "./RuleLine";
  *  크레딧이 남을 전망인 수주 고객) · 추가 계약 기회(계약 종료가 가깝거나 크레딧이 먼저 떨어질 수주 고객). 판정은
  *  `judge.ts` 이고, 수주 고객 쪽 판정은 수주 고객 「사용 진단」과 같은 함수 · 같은 기준(서버에 저장)입니다.
  *
+ *  줄마다 상태(미컨택 → 컨택 완료 → 전환 / 제외 …)와 메모가 붙고 팀이 같이 봅니다 — 서버에 사는 것은 사람이 누른
+ *  줄의 열쇠 · 상태 · 메모뿐입니다(업셀링 줄의 번호가 세 번째 예외, 2026-10-15 A안). 처리한 줄은 지금 기준에 안
+ *  맞아도 그 칸에 남고, 카드의 큰 숫자는 아직 손대지 않은 후보 수입니다.
+ *
  *  값은 전부 매일 가공된 스냅샷(`sales.json` · `summary.json`)을 브라우저가 GitHub 에서 직접 받은 것이고, 이 파일은
  *  서버를 못 부릅니다(`tests/test_usage_data_stays_off_server.py` 의 `DATA_SIDE` — 이 폴더 전체). 서버에서 오는
- *  것(수주 고객 목록 · 판정 기준 · 사용 데이터의 열쇠)은 바깥 겹(`screens/SalesInsights.tsx`)이 받아 내려 주고,
- *  서버로 가는 것은 사람이 「기준 수정」에서 적은 숫자뿐입니다(`RuleLine.tsx`).
+ *  것(수주 고객 목록 · 판정 기준 · 상태 · 사용 데이터의 열쇠)은 바깥 겹(`screens/SalesInsights.tsx`)이 받아 내려 주고,
+ *  서버로 가는 것은 사람이 「기준 수정」에 적은 숫자(`RuleLine.tsx`)와 상세 패널에서 누른 상태 · 메모(`Drawer.tsx`)뿐입니다.
  *
  *  크레딧을 분으로 바꿔 적지 않습니다 — 크레딧과 분의 비율은 더빙 모델마다 달라 「60크레딧 = 1분」은 정확하지
  *  않습니다(2026-10-14 운영자). 목업에 있던 주간 막대는 쓰이지 않는 그림이라 옮기지 않았습니다.
@@ -37,70 +44,36 @@ type Props = {
   won: ListData | null;
   /** `useInsightRules()` 의 답 그대로 — 판정 기준 여섯과 누가 언제. */
   rules: { list: InsightRule[] | null; problem: string | null; busy: boolean };
+  /** `useInsightMarks()` 의 답 그대로 — 줄마다의 상태 · 메모 · 기록과 카드마다의 상태 이름. */
+  marks: { data: InsightMarks | null; problem: string | null; busy: boolean };
   onSaveRules: (tab: Tab, values: Record<string, number>) => Promise<unknown>;
+  onMark: (target: MarkTarget, change: MarkChange) => Promise<unknown>;
 };
 
-type Card = { name: string; desc: (r: Rules) => string; title: string; search: string; todo: string; note: string };
+type Card = { name: string; desc: (r: Rules) => string; title: string; search: string; note: string };
 const CARDS: Record<Tab, Card> = {
-  up: {
-    name: "업셀링", desc: () => "PRO 플랜에서 B2B로 올릴 만한 스페이스", title: "업셀링 후보",
-    search: "Space 번호 검색", todo: "미컨택", note: "",
-  },
+  up: { name: "업셀링", desc: () => "PRO 플랜에서 B2B로 올릴 만한 스페이스", title: "업셀링 후보", search: "Space 번호 검색", note: "" },
   churn: {
-    name: "이탈 방지", desc: () => "계약 크레딧이 남을 전망인 수주 고객", title: "이탈 위험 고객",
-    search: "고객명 · Client ID 검색", todo: "미조치",
+    name: "이탈 방지", desc: () => "계약 크레딧이 남을 전망인 수주 고객", title: "이탈 위험 고객", search: "고객명 · Client ID 검색",
     note: "잔여 예상 기준은 수주 고객 화면의 사용 진단과 같이 바뀝니다.",
   },
   grow: {
     name: "추가 계약 기회", desc: (r) => `계약 종료가 ${r.renewalDays}일 안이거나 크레딧이 먼저 떨어질 수주 고객`,
-    title: "추가 계약 후보", search: "고객명 · Client ID 검색", todo: "미컨택",
+    title: "추가 계약 후보", search: "고객명 · Client ID 검색",
     // 초과사용 %p 한 값이 과소사용도 같이 정한다 — 이탈 방지 탭의 근거(과소사용)와 수주 고객 화면이 같이 바뀐다.
     note: "부족 예상 · 초과사용 기준은 수주 고객 화면의 사용 진단과 같이 바뀝니다. 초과사용 %p 는 과소사용도 같이 정해서 이탈 방지 탭의 근거도 바뀝니다.",
   },
 };
 const TABS: Tab[] = ["up", "churn", "grow"];
+type AnyRow = Listed<UpRow> | Listed<ChurnRow> | Listed<GrowRow>;
 
-const num = (v: number | null | undefined) => (v === null || v === undefined ? "—" : v.toLocaleString("en-US"));
-const TIER: Record<string, string> = { pro: "Pro", free: "Free", starter: "Starter", creator: "Creator", team: "Team", business: "Business", flex: "Flex", enterprise: "Enterprise" };
-
-function PlanTag({ plan }: { plan: string | null }) {
-  if (!plan) return <span className="mut">—</span>;
-  const tone = /^(enterprise|business)/i.test(plan) ? "ent" : plan.toLowerCase() === "pro" ? "pro" : "free";
-  return <span className={`plan ${tone}`}>{plan}</span>;
-}
-const Sg = ({ tone, children, title }: { tone?: string; children: React.ReactNode; title?: string }) =>
-  <span className={`sg${tone ? ` ${tone}` : ""}`} title={title}>{children}</span>;
-
-/** 이탈 방지의 근거 — 잔여 예상 · 무활동(또는 기록 없음) · 과소사용. */
-export function ChurnWhy({ row, idleDays }: { row: ContractRow; idleDays: number }) {
-  return (
-    <span className="sgs">
-      <Sg tone="warn" title={row.forecastDetail ?? undefined}>잔여 예상</Sg>
-      {(row.daysIdle === null || row.daysIdle >= idleDays) &&
-        <Sg tone="risk">무활동 {row.daysIdle === null ? "기록 없음" : `${row.daysIdle}일`}</Sg>}
-      {row.level === "과소사용" && <Sg tone="warn" title={row.levelDetail ?? undefined}>과소사용</Sg>}
-    </span>
-  );
-}
-/** 추가 계약의 근거 — 계약 종료 D-N · 부족 예상 · 초과사용. */
-export function GrowWhy({ row, renewalDays }: { row: ContractRow; renewalDays: number }) {
-  return (
-    <span className="sgs">
-      {row.daysLeft !== null && row.daysLeft >= 0 && row.daysLeft <= renewalDays && <Sg tone="up">계약 종료 D-{row.daysLeft}</Sg>}
-      {row.forecast === "부족 예상" && <Sg tone="up" title={row.forecastDetail ?? undefined}>부족 예상</Sg>}
-      {row.level === "초과사용" && <Sg tone="up" title={row.levelDetail ?? undefined}>초과사용</Sg>}
-    </span>
-  );
-}
-const RISK = { high: <Sg tone="risk">높음</Sg>, mid: <Sg tone="warn">주의</Sg> };
-const PRIORITY = { p1: <Sg tone="risk">높음</Sg>, p2: <Sg tone="up">보통</Sg>, p3: <Sg>낮음</Sg> };
-
-export function SalesInsightsView({ usage, won, rules, onSaveRules }: Props) {
+export function SalesInsightsView({ usage, won, rules, marks, onSaveRules, onMark }: Props) {
   const sales = useSalesInsight<SalesData>(usage.source);
   // 수주 고객 목록이 쓰는 그 요약 색인 — 활성 계약의 스페이스만 고른다(`useUsageIndex`).
   const spaces = useMemo(() => spacesOfRows(won?.rows), [won?.rows]);
   const summary = useUsageIndex(usage.source, spaces);
   const ruleValues = useMemo(() => rulesFrom(rules.list), [rules.list]);
+  const markList = marks.data?.marks ?? null;
   // 우리 수주 고객의 space_seq — 활성 계약만이 아니라 모든 계약. 업셀링 후보에서 뺀다.
   const ours = useMemo(() => {
     const set = new Set<number>();
@@ -111,49 +84,96 @@ export function SalesInsightsView({ usage, won, rules, onSaveRules }: Props) {
   }, [won]);
 
   const asOf = summary.index?.snapshotAt ?? sales.data?.snapshot_at.slice(0, 10) ?? null;
-  const up = useMemo<UpRow[] | null>(
-    () => (ruleValues && sales.data && asOf && won ? upsellRows(sales.data.data.spaces, ours, ruleValues, asOf) : null),
-    [ruleValues, sales.data, asOf, ours, won]);
+  const salesSpaces = sales.data?.data.spaces ?? null;
+  const upList = useMemo<Listed<UpRow>[] | null>(() => {
+    if (!ruleValues || !salesSpaces || !asOf || !won || !markList) return null;
+    return listUp(upsellRows(salesSpaces, ours, ruleValues, asOf), salesSpaces, markList, asOf);
+  }, [ruleValues, salesSpaces, asOf, ours, won, markList]);
   const judged = useMemo(
     () => (ruleValues && summary.index && won ? contractRows(won.rows, summary.index, ruleValues) : null),
     [ruleValues, summary.index, won]);
+  const churnList = useMemo<Listed<ChurnRow>[] | null>(
+    () => (judged && ruleValues && summary.index && markList
+      ? listChurn(judged.churn, won?.rows, summary.index, ruleValues, markList) : null),
+    [judged, ruleValues, summary.index, won, markList]);
+  const growList = useMemo<Listed<GrowRow>[] | null>(
+    () => (judged && ruleValues && summary.index && markList
+      ? listGrow(judged.grow, won?.rows, summary.index, ruleValues, markList) : null),
+    [judged, ruleValues, summary.index, won, markList]);
+  const lists: Record<Tab, AnyRow[] | null> = { up: upList, churn: churnList, grow: growList };
+  const counts = useMemo(() => ({
+    up: upList ? countByStatus(upList) : null,
+    churn: churnList ? countByStatus(churnList) : null,
+    grow: growList ? countByStatus(growList) : null,
+  }), [upList, churnList, growList]);
 
   const [tab, setTab] = useState<Tab>("up");
+  const [status, setStatus] = useState(TODO);
   const [query, setQuery] = useState("");
+  const [open, setOpen] = useState<number | null>(null);
+  const [selected, setSelected] = useState<Set<number>>(new Set());
   const [toast, setToast] = useState<string | null>(null);
   const say = (message: string) => { setToast(message); window.setTimeout(() => setToast(null), 1800); };
+  // 상세 패널은 Esc 로 닫힌다(목업). 패널 파일에는 스스로 도는 코드를 두지 않아서 여기서 듣는다.
+  useEffect(() => {
+    if (open === null) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(null); };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [open]);
 
-  const lists: Record<Tab, (UpRow | ChurnRow | GrowRow)[] | null> = {
-    up, churn: judged?.churn ?? null, grow: judged?.grow ?? null,
-  };
-  /** 기준을 이 값으로 바꾸면 그 카드에 몇 곳이 서나 — 확인 창의 「바꾼 뒤」. 이 브라우저에서만 센다. */
+  /** 기준을 이 값으로 바꾸면 그 카드에 아직 손대지 않은 후보가 몇 곳이 되나 — 확인 창의 「바꾼 뒤」. 이 브라우저에서만 센다. */
   const countWith = (which: Tab) => (values: Record<string, number>) => {
-    if (!ruleValues || !rules.list) return null;
+    if (!rules.list || !markList) return null;
     const next = rulesFrom(rules.list.map((r) => (r.key in values ? { ...r, value: values[r.key] } : r)));
     if (!next) return null;
-    if (which === "up") return sales.data && asOf && won ? upsellRows(sales.data.data.spaces, ours, next, asOf).length : null;
+    const handled = new Set(markList.filter((m) => m.tab === which && m.status !== TODO).map(markId));
+    if (which === "up") {
+      return salesSpaces && asOf && won ? upsellRows(salesSpaces, ours, next, asOf).filter((r) => !handled.has(r.key)).length : null;
+    }
     if (!summary.index || !won) return null;
     const after = contractRows(won.rows, summary.index, next);
-    return which === "churn" ? after.churn.length : after.grow.length;
+    return (which === "churn" ? after.churn : after.grow).filter((r) => !handled.has(r.key)).length;
   };
 
   const card = CARDS[tab];
+  const statuses = marks.data?.statuses[tab] ?? [];
   const list = lists[tab];
   const shown = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return list ?? [];
-    return (list ?? []).filter((row) => ("space_seq" in row
-      ? String(row.space_seq).includes(q)
-      : `${row.company} ${row.clientId}`.toLowerCase().includes(q)));
-  }, [list, query]);
+    return (list ?? []).filter((row) => row.status === status && (status !== TODO || row.candidate)
+      && (!q || ("space_seq" in row ? String(row.space_seq).includes(q) : `${row.company} ${row.clientId}`.toLowerCase().includes(q))));
+  }, [list, status, query]);
+  const shownKeys = shown.map((r) => r.key);
+  const picked = shownKeys.filter((k) => selected.has(k));
+
+  const choose = (next: Tab) => { setTab(next); setStatus(TODO); setQuery(""); setSelected(new Set()); setOpen(null); };
+  const toggle = (key: number) => {
+    const next = new Set(selected);
+    if (next.has(key)) next.delete(key); else next.add(key);
+    setSelected(next);
+  };
+
+  const item: DrawerItem | null = (() => {
+    const row = open === null ? undefined : list?.find((r) => r.key === open);
+    if (!row) return null;
+    return { tab, row } as DrawerItem;
+  })();
+  const itemLog = item && marks.data
+    ? marks.data.log.filter((line) => line.tab === tab && markId(line) === item.row.key) : [];
+  const itemMemo = item && markList
+    ? markList.find((m) => m.tab === tab && markId(m) === item.row.key)?.memo ?? null : null;
 
   const snapshot = sales.data?.snapshot_at ?? null;
   const notConnected = usage.configured === false || !!usage.problem;
-  const problem = sales.problem ?? summary.problem ?? (rules.problem && `판정 기준을 못 읽었습니다: ${rules.problem}`);
+  const problem = sales.problem ?? summary.problem
+    ?? (rules.problem && `판정 기준을 못 읽었습니다: ${rules.problem}`)
+    ?? (marks.problem && `상태를 못 읽었습니다: ${marks.problem}`);
   const blocked = notConnected || !!problem;
   const loading = !blocked && (!list || usage.busy);
   const creditsFrom = summary.index?.creditsFrom?.slice(0, 7) ?? null;
   const tabRules = (rules.list ?? []).filter((r) => r.tab === tab);
+  const cols = tab === "up" ? 5 : tab === "churn" ? 6 : 7;
 
   return (
     <div className="ins">
@@ -174,15 +194,15 @@ export function SalesInsightsView({ usage, won, rules, onSaveRules }: Props) {
       <section className="points" role="tablist" aria-label="영업 인사이트">
         {TABS.map((key) => {
           const c = CARDS[key];
-          const list = lists[key];
+          const todo = counts[key];
           return (
             <button key={key} type="button" role="tab" aria-selected={tab === key}
-                    className={`pt${tab === key ? " on" : ""}`}
-                    onClick={() => { setTab(key); setQuery(""); }}>
+                    className={`pt${tab === key ? " on" : ""}`} onClick={() => choose(key)}>
               <span className="lb">{c.name}</span>
               <span className="ds">{ruleValues ? c.desc(ruleValues) : " "}</span>
               <span className="ft">
-                <span className="v num">{list ? num(list.length) : "—"}<span className="unit">{c.todo}</span></span>
+                <span className="v num">{todo ? num(todo[TODO] ?? 0) : "—"}
+                  <span className="unit">{marks.data?.statuses[key][0]?.label ?? ""}</span></span>
               </span>
             </button>
           );
@@ -199,45 +219,84 @@ export function SalesInsightsView({ usage, won, rules, onSaveRules }: Props) {
         </div>
         {tabRules.length > 0 && (
           <RuleLine key={tab} tab={tab} title={card.title} rules={tabRules} note={card.note}
-                    count={lists[tab]?.length ?? null} countWith={countWith(tab)}
+                    count={counts[tab]?.[TODO] ?? (counts[tab] ? 0 : null)} countWith={countWith(tab)}
                     onSaveRules={onSaveRules} onSaved={say} />
+        )}
+        {statuses.length > 0 && (
+          <div className="pills">
+            {statuses.map((s) => (
+              <button key={s.key} type="button" className={`ipill${status === s.key ? " on" : ""}`}
+                      onClick={() => { setStatus(s.key); setSelected(new Set()); }}>
+                {s.label}<b className="num">{num(counts[tab]?.[s.key] ?? 0)}</b>
+              </button>
+            ))}
+          </div>
+        )}
+        {picked.length > 0 && (
+          <div className="selbar">
+            <span><b className="num">{picked.length}곳</b> 선택됨</span>
+            <div className="acts">
+              <button type="button" className="ibtn" onClick={() => setSelected(new Set())}>선택 해제</button>
+            </div>
+          </div>
         )}
         <div className="tbl-wrap">
           <table>
             <thead>
-              {tab === "up" && <tr><th>SPACE</th><th>플랜</th><th className="r">30일 크레딧</th><th>신호</th></tr>}
-              {tab === "churn" && <tr><th>고객</th><th>플랜</th><th>위험도</th><th>근거</th><th>마지막 활동</th></tr>}
-              {tab === "grow" && <tr><th>고객</th><th>플랜</th><th>우선도</th><th>근거</th><th className="r">잔여 크레딧</th><th>계약 종료</th></tr>}
+              <tr>
+                <th className="ck">
+                  <input type="checkbox" aria-label="전체 선택" disabled={!shown.length}
+                         checked={shown.length > 0 && picked.length === shown.length}
+                         ref={(el) => { if (el) el.indeterminate = picked.length > 0 && picked.length < shown.length; }}
+                         onChange={(e) => setSelected(e.target.checked ? new Set(shownKeys) : new Set())} />
+                </th>
+                {tab === "up" && <><th>SPACE</th><th>플랜</th><th className="r">30일 크레딧</th><th>신호</th></>}
+                {tab === "churn" && <><th>고객</th><th>플랜</th><th>위험도</th><th>근거</th><th>마지막 활동</th></>}
+                {tab === "grow" && <><th>고객</th><th>플랜</th><th>우선도</th><th>근거</th><th className="r">잔여 크레딧</th><th>계약 종료</th></>}
+              </tr>
             </thead>
             <tbody>
-              {blocked && <tr><td colSpan={6} className="iempty">데이터를 받지 못해 판정하지 않았습니다</td></tr>}
-              {loading && <tr><td colSpan={6} className="iempty">불러오는 중…</td></tr>}
-              {!blocked && !loading && !shown.length && <tr><td colSpan={6} className="iempty">해당하는 항목이 없습니다</td></tr>}
+              {blocked && <tr><td colSpan={cols} className="iempty">데이터를 받지 못해 판정하지 않았습니다</td></tr>}
+              {loading && <tr><td colSpan={cols} className="iempty">불러오는 중…</td></tr>}
+              {!blocked && !loading && !shown.length && <tr><td colSpan={cols} className="iempty">해당하는 항목이 없습니다</td></tr>}
               {!blocked && !loading && ruleValues && shown.map((row) => {
+                const pick = (
+                  <td className="ck" onClick={(e) => e.stopPropagation()}>
+                    <input type="checkbox" aria-label="선택" checked={selected.has(row.key)} onChange={() => toggle(row.key)} />
+                  </td>
+                );
+                const props = {
+                  tabIndex: 0, className: open === row.key ? "cur" : undefined,
+                  onClick: () => setOpen(row.key),
+                  onKeyDown: (e: React.KeyboardEvent) => { if (e.key === "Enter") setOpen(row.key); },
+                };
                 if ("space_seq" in row) {
                   return (
-                    <tr key={row.key}>
+                    <tr key={row.key} {...props}>
+                      {pick}
                       <td><span className="sp num" title="허브스팟 연락처의 「space seq」 칸으로 사람에게 이어집니다">{row.space_seq}</span>
                         {row.isNew && <span className="new" title="첫 작업이 30일 안인 스페이스">NEW</span>}</td>
-                      <td><PlanTag plan={TIER[row.tier] ?? row.tier} /></td>
+                      <td><PlanTag plan={row.tier ? TIER[row.tier] ?? row.tier : null} /></td>
                       <td className="r num"><span className="big">{num(row.credits30d)}</span></td>
-                      <td><Sg tone="up" title={`Pro 플랜인데 30일에 ${num(ruleValues.upsellCredits30d)} 크레딧 이상`}>셀프서브 대량 사용</Sg></td>
+                      <td>{row.candidate
+                        ? <Sg tone="up" title={`Pro 플랜인데 30일에 ${num(ruleValues.upsellCredits30d)} 크레딧 이상`}>셀프서브 대량 사용</Sg>
+                        : <span className="mut" title="처리해 둔 줄 — 지금 기준에는 안 맞습니다">{row.gone ? "오늘 가공 데이터에 없음" : "기준 밖"}</span>}</td>
                     </tr>
                   );
                 }
-                const who = <td><span className="cname">{row.company}</span><span className="cid num">{row.clientId}</span></td>;
+                const who = <td><span className="cname">{row.company}</span>{row.clientId > 0 && <span className="cid num">{row.clientId}</span>}</td>;
                 if ("risk" in row) {
                   return (
-                    <tr key={row.key}>
-                      {who}<td><PlanTag plan={row.plan} /></td><td>{RISK[row.risk]}</td>
+                    <tr key={row.key} {...props}>
+                      {pick}{who}<td><PlanTag plan={row.plan} /></td><td><RiskTag risk={row.risk} /></td>
                       <td><ChurnWhy row={row} idleDays={ruleValues.churnIdleDays} /></td>
                       <td className="num">{row.lastActivity ?? <span className="mut">없음</span>}</td>
                     </tr>
                   );
                 }
                 return (
-                  <tr key={row.key}>
-                    {who}<td><PlanTag plan={row.plan} /></td><td>{PRIORITY[row.priority]}</td>
+                  <tr key={row.key} {...props}>
+                    {pick}{who}<td><PlanTag plan={row.plan} /></td><td><PriorityTag priority={row.priority} /></td>
                     <td><GrowWhy row={row} renewalDays={ruleValues.renewalDays} /></td>
                     <td className="r num">{num(row.remaining)}<span className="unit">/ {num(row.credits)}</span></td>
                     <td className="num">{row.end ?? "—"}{row.daysLeft !== null && <span className="mut"> D-{row.daysLeft}</span>}</td>
@@ -249,7 +308,7 @@ export function SalesInsightsView({ usage, won, rules, onSaveRules }: Props) {
         </div>
         <div className="tfoot">
           <span>{list ? `${num(shown.length)}곳` : ""}</span>
-          {tab === "up" && ruleValues && upsellMaybeCut(sales.data?.data.spaces, ruleValues) && (
+          {tab === "up" && ruleValues && upsellMaybeCut(salesSpaces, ruleValues) && (
             <span className="warnline">
               가공 데이터가 후보를 {CANDIDATE_CAP}곳까지만 담습니다 — 지금 기준에서 30일 크레딧이 낮은 쪽 후보가 빠졌을 수 있습니다
             </span>
@@ -267,6 +326,13 @@ export function SalesInsightsView({ usage, won, rules, onSaveRules }: Props) {
         </div>
       </section>
 
+      {item && ruleValues && (
+        <>
+          <div className="scrim" onClick={() => setOpen(null)} />
+          <Drawer key={`${tab}:${item.row.key}`} item={item} statuses={statuses} memo={itemMemo} log={itemLog}
+                  rules={ruleValues} onMark={onMark} onSaved={say} onClose={() => setOpen(null)} />
+        </>
+      )}
       {toast && <div className="toast" role="status">{toast}</div>}
     </div>
   );

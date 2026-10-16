@@ -173,8 +173,9 @@ def test_the_write_is_a_form_post_under_a_registered_browser_prefix():
 
     assert [(route.path, sorted(route.methods)) for route in insights.router.routes] == [
         ("/operations/insights/rules", ["POST"]),
+        ("/operations/insights/marks", ["POST"]),
     ]
-    assert is_web_ui_path("/operations/insights/rules")
+    assert all(is_web_ui_path(route.path) for route in insights.router.routes)
     assert not [route.path for route in ui_api.router.routes if route.methods - {"GET", "HEAD"}]
 
 
@@ -195,3 +196,107 @@ def test_every_default_is_inside_its_own_range():
     for spec in RULES:
         assert spec.min <= spec.default <= spec.max, spec.key
         assert spec.tab in ("up", "churn", "grow"), spec.key
+
+
+# --------------------------------------------------------------------------- #
+# 상태 · 메모 — 업셀링 줄의 번호가 서버에 남는 것이 세 번째 예외다 (2026-10-15 A안)
+# --------------------------------------------------------------------------- #
+def _marks(console) -> dict:
+    answer = console.get("/api/ui/insight-marks")
+    assert answer.status_code == 200, answer.text
+    return answer.json()
+
+
+def _contract(factory, contract_id: int = 501) -> int:
+    from src.db.models import Client, ClientContract
+
+    with factory() as session:
+        session.add(Client(client_id=1101, company="가나 스튜디오"))
+        session.add(ClientContract(id=contract_id, client_id=1101, seq=1))
+        session.commit()
+    return contract_id
+
+
+def test_nothing_is_marked_until_a_person_presses_something(console):
+    data = _marks(console)
+    assert data["marks"] == [] and data["log"] == []
+    # 카드마다의 상태 이름 — 목업 그대로이고 화면은 이 목록을 그린다.
+    assert {tab: [s["label"] for s in pairs] for tab, pairs in data["statuses"].items()} == {
+        "up": ["미컨택", "컨택 완료", "전환", "제외"],
+        "churn": ["미조치", "조치 완료", "정상화", "제외"],
+        "grow": ["미컨택", "컨택 완료", "계약", "제외"],
+    }
+
+
+def test_an_upsell_row_keeps_its_status_memo_and_who_by_space_seq(console, factory):
+    assert console.post("/operations/insights/marks", data={
+        "tab": "up", "space_seq": "1001", "status": "done",
+    }).json() == {"ok": True, "changed": ["status"]}
+    assert console.post("/operations/insights/marks", data={
+        "tab": "up", "space_seq": "1001", "memo": "  담당자와 통화 — 다음 주 미팅  ",
+    }).json()["changed"] == ["memo"]
+    # 같은 상태를 또 눌러도 아무것도 안 바뀌고 기록도 없다.
+    assert console.post("/operations/insights/marks", data={
+        "tab": "up", "space_seq": "1001", "status": "done",
+    }).json()["changed"] == []
+
+    data = _marks(console)
+    [mark] = data["marks"]
+    assert (mark["tab"], mark["space_seq"], mark["contract_id"], mark["status"], mark["memo"], mark["updated_by"]) == (
+        "up", 1001, None, "done", "담당자와 통화 — 다음 주 미팅", "web")
+    assert [(line["action"], line["detail"], line["actor"]) for line in data["log"]] == [
+        ("memo", "메모 저장", "web"),
+        ("status", "상태 변경: 컨택 완료", "web"),
+    ]
+
+    console.post("/operations/insights/marks", data={"tab": "up", "space_seq": "1001", "memo": ""})
+    data = _marks(console)
+    assert data["marks"][0]["memo"] is None
+    assert data["log"][0]["detail"] == "메모 지움"
+
+
+def test_the_exception_carries_only_number_status_and_memo(console, factory):
+    """세 번째 예외의 울타리 — 받는 칸은 tab · space_seq/contract_id · status · memo 다섯뿐이다. 업셀링 줄은 스냅샷에서
+    나온 줄이라, 이 길로 사용량 숫자가 실려 오기 시작하면 「사용 데이터는 서버로 안 간다」가 조용히 깨진다."""
+    for extra in ({"credits_30d": "12000"}, {"exports_30d": "40"}, {"plan_name": "Pro"}):
+        answer = console.post("/operations/insights/marks", data={
+            "tab": "up", "space_seq": "1001", "status": "done", **extra,
+        })
+        assert answer.status_code == 400, extra
+        assert "모르는 칸" in answer.json()["detail"]
+    with factory() as session:
+        assert session.query(InsightLog).count() == 0
+
+
+@pytest.mark.parametrize(("data", "status"), [
+    ({"tab": "up", "space_seq": "1001", "status": "ok"}, 400),            # 정상화는 이탈 방지의 상태
+    ({"tab": "up", "space_seq": "0", "status": "done"}, 400),
+    ({"tab": "up", "space_seq": "abc", "status": "done"}, 400),
+    ({"tab": "up", "contract_id": "501", "status": "done"}, 400),          # 업셀링은 스페이스로 찾는다
+    ({"tab": "churn", "space_seq": "1001", "status": "done"}, 400),        # 이탈 방지는 계약으로 찾는다
+    ({"tab": "churn", "contract_id": "999", "status": "done"}, 404),       # 없는 계약
+    ({"tab": "other", "space_seq": "1001", "status": "done"}, 400),
+    ({"tab": "up", "space_seq": "1001"}, 400),                             # 바꿀 것이 없다
+    ({"tab": "up", "space_seq": "1001", "memo": "가" * 2001}, 400),
+])
+def test_a_wrong_mark_is_refused(console, factory, data, status):
+    _contract(factory)
+    assert console.post("/operations/insights/marks", data=data).status_code == status
+    with factory() as session:
+        assert session.query(InsightLog).count() == 0
+
+
+def test_churn_and_grow_keep_separate_states_for_the_same_contract(console, factory):
+    contract_id = _contract(factory)
+    console.post("/operations/insights/marks", data={"tab": "churn", "contract_id": str(contract_id), "status": "ok"})
+    console.post("/operations/insights/marks", data={"tab": "grow", "contract_id": str(contract_id), "status": "won"})
+    data = _marks(console)
+    assert sorted((m["tab"], m["contract_id"], m["status"], m["space_seq"]) for m in data["marks"]) == [
+        ("churn", 501, "ok", None), ("grow", 501, "won", None),
+    ]
+    assert sorted(line["detail"] for line in data["log"]) == ["상태 변경: 계약", "상태 변경: 정상화"]
+
+
+def test_rule_changes_stay_out_of_the_row_log(console):
+    console.post("/operations/insights/rules", data={"renewal_days": "45"})
+    assert _marks(console)["log"] == []

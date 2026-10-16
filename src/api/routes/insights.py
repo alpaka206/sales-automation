@@ -14,8 +14,9 @@ from __future__ import annotations
 import asyncio
 
 from fastapi import APIRouter, HTTPException, Request
+from sqlalchemy.exc import IntegrityError
 
-from ...db.insights import RuleError, save_rules
+from ...db.insights import RuleError, save_mark, save_rules
 from ...db.session import SessionLocal
 from ..auth import actor_name
 
@@ -43,3 +44,30 @@ async def save_insight_rules(request: Request):
     sent = {key: str(value) for key, value in form.items()}
     actor = actor_name(request, fallback="") or "web"
     return await asyncio.to_thread(_save_rules, sent, actor)
+
+
+def _save_mark(sent: dict[str, str], actor: str) -> dict:
+    with SessionLocal() as session:
+        try:
+            changed = save_mark(session, sent, actor)
+            session.commit()
+        except RuleError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from None
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from None
+        except IntegrityError:
+            # 같은 줄을 두 사람이 같은 순간 처음 저장했다 — 한쪽만 들어갔다. 다시 누르면 그 행을 고친다.
+            session.rollback()
+            raise HTTPException(status_code=409, detail="다른 사람이 방금 같은 줄을 저장했습니다 — 다시 눌러 주세요") from None
+    return {"ok": True, "changed": changed}
+
+
+@router.post("/operations/insights/marks")
+async def save_insight_mark(request: Request):
+    """상세 패널의 상태 버튼 · 「메모 저장」. 칸은 ``tab`` · ``space_seq``(업셀링) 또는 ``contract_id`` · ``status`` ·
+    ``memo`` 다섯뿐이고 그 밖의 칸은 거절합니다(``db/insights.save_mark``) — 업셀링 줄의 번호가 서버에 남는 것이
+    「사용 데이터는 서버로 안 간다」의 세 번째 예외이고, 그 예외는 번호 · 상태 · 메모까지입니다."""
+    form = await request.form()
+    sent = {key: str(value) for key, value in form.items()}
+    actor = actor_name(request, fallback="") or "web"
+    return await asyncio.to_thread(_save_mark, sent, actor)

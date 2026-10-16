@@ -8,6 +8,10 @@
   ``POST /operations/insights/rules`` 로 바꾸고, ``GET /api/ui/insight-rules`` 로 모든 콘솔이 같은 값을
   읽습니다. 그중 셋(``shared``)은 수주 고객 「사용 진단」이 같이 씁니다 — 두 화면이 같은 고객을 다르게
   부르면 안 되기 때문입니다.
+- **상태 · 메모** — 줄마다 「미컨택 → 컨택 완료 → 전환 / 제외」와 메모(``insight_marks``). 화면의 상세 패널이
+  ``POST /operations/insights/marks`` 로 바꾸고 ``GET /api/ui/insight-marks`` 로 팀 전체가 같은 상태를 봅니다.
+  업셀링 줄의 번호(space_seq)가 여기 남는 것이 「사용 데이터는 서버로 안 간다」의 세 번째 예외입니다(2026-10-15
+  A안) — 사람이 누를 때만, 번호 · 상태 · 메모 · 누가 언제만.
 - **기록** — 누가 언제 무엇을 바꿨나(``insight_log``, 덧붙이기만).
 
 **기준의 목록 · 기본값 · 범위는 ``RULES`` 한 곳입니다.** 화면은 이름 · 단위 · 범위를 여기서 받아
@@ -23,9 +27,21 @@ from typing import Mapping
 
 from sqlalchemy.orm import Session
 
-from .models import InsightLog, InsightRule
+from .models import ClientContract, InsightLog, InsightMark, InsightRule
 
 TABS = ("up", "churn", "grow")
+
+# 카드마다 줄이 갈 수 있는 상태 — 첫 칸(todo)이 행이 없을 때의 상태다. 이름은 목업(``영업인사이트.html`` 의
+# ``P.*.status``) 그대로이고, 화면은 이 목록을 받아 그린다(``GET /api/ui/insight-marks``). 기록 한 줄
+# (「상태 변경: 컨택 완료」)도 이 이름으로 서버가 적는다 — 화면이 보낸 글자를 기록에 넣지 않는다.
+STATUSES: dict[str, tuple[tuple[str, str], ...]] = {
+    "up": (("todo", "미컨택"), ("done", "컨택 완료"), ("won", "전환"), ("drop", "제외")),
+    "churn": (("todo", "미조치"), ("done", "조치 완료"), ("ok", "정상화"), ("drop", "제외")),
+    "grow": (("todo", "미컨택"), ("done", "컨택 완료"), ("won", "계약"), ("drop", "제외")),
+}
+MEMO_MAX = 2_000
+# 화면이 한 번에 받는 기록의 상한 — 사람이 누른 것만 쌓이는 표라 넉넉하다.
+LOG_LIMIT = 5_000
 
 
 @dataclass(frozen=True)
@@ -63,7 +79,7 @@ SPEC_BY_KEY: dict[str, RuleSpec] = {spec.key: spec for spec in RULES}
 
 
 class RuleError(ValueError):
-    """화면에 그대로 뜨는 거절 이유."""
+    """기준 · 상태 · 메모를 거절할 때 화면에 그대로 뜨는 이유."""
 
 
 def _num(value: int) -> str:
@@ -138,3 +154,105 @@ def save_rules(session: Session, sent: Mapping[str, str], actor: str) -> list[st
         ))
         changed.append(spec.key)
     return changed
+
+
+# --------------------------------------------------------------------------- #
+# 상태 · 메모 (2026-10-15)
+# --------------------------------------------------------------------------- #
+
+
+def _positive(raw: str | None, what: str) -> int:
+    text = (raw or "").strip()
+    if not text.isdigit() or int(text) <= 0:
+        raise RuleError(f"{what} 이(가) 올바르지 않습니다")
+    return int(text)
+
+
+def save_mark(session: Session, sent: Mapping[str, str], actor: str) -> list[str]:
+    """줄 하나의 상태 · 메모를 저장하고 바뀐 것마다 기록을 남깁니다. 바뀐 것(``status`` · ``memo``)을 돌려줍니다.
+
+    받는 칸은 다섯뿐입니다 — ``tab`` · 그 카드의 열쇠(업셀링 ``space_seq``, 나머지 ``contract_id``) · ``status`` ·
+    ``memo``. **그 밖의 칸은 거절합니다**: 업셀링 줄은 스냅샷에서 나온 줄이라, 이 길로 사용량 숫자가 실려 오기
+    시작하면 「사용 데이터는 서버로 안 간다」가 조용히 깨집니다(세 번째 예외는 번호 · 상태 · 메모까지다).
+    commit 은 부르는 쪽이 합니다.
+    """
+    allowed = {"tab", "space_seq", "contract_id", "status", "memo"}
+    unknown = sorted(key for key in sent if key not in allowed)
+    if unknown:
+        raise RuleError(f"모르는 칸입니다: {', '.join(unknown)}")
+    tab = (sent.get("tab") or "").strip()
+    if tab not in STATUSES:
+        raise RuleError("카드가 올바르지 않습니다")
+    if tab == "up":
+        if sent.get("contract_id"):
+            raise RuleError("업셀링 줄은 space_seq 로 찾습니다")
+        space_seq, contract_id = _positive(sent.get("space_seq"), "space_seq"), None
+    else:
+        if sent.get("space_seq"):
+            raise RuleError("이탈 방지 · 추가 계약 줄은 계약으로 찾습니다")
+        space_seq, contract_id = None, _positive(sent.get("contract_id"), "계약")
+        # 계약은 우리 표에 있다 — 없는 번호로 줄을 세우지 않는다(지워진 계약이면 그 상태도 더 바꿀 일이 없다).
+        if session.get(ClientContract, contract_id) is None:
+            raise LookupError("계약을 찾을 수 없습니다")
+
+    labels = dict(STATUSES[tab])
+    status = sent.get("status")
+    if status is not None and status not in labels:
+        raise RuleError("상태가 올바르지 않습니다")
+    memo = sent.get("memo")
+    if memo is not None:
+        memo = memo.strip()
+        if len(memo) > MEMO_MAX:
+            raise RuleError(f"메모는 {MEMO_MAX:,}자까지 적을 수 있습니다")
+    if status is None and memo is None:
+        raise RuleError("바꿀 것이 없습니다")
+
+    query = session.query(InsightMark).filter(InsightMark.tab == tab)
+    query = query.filter(InsightMark.space_seq == space_seq) if tab == "up" else query.filter(
+        InsightMark.contract_id == contract_id)
+    mark = query.one_or_none()
+    before_status = mark.status if mark else "todo"
+    before_memo = (mark.memo or "") if mark else ""
+    changed: list[str] = []
+    if status is not None and status != before_status:
+        changed.append("status")
+    if memo is not None and memo != before_memo:
+        changed.append("memo")
+    if not changed:
+        return []
+
+    now = datetime.now(timezone.utc)
+    if mark is None:
+        mark = InsightMark(tab=tab, space_seq=space_seq, contract_id=contract_id, status="todo")
+        session.add(mark)
+    if "status" in changed:
+        mark.status = status
+        session.add(InsightLog(tab=tab, space_seq=space_seq, contract_id=contract_id, action="status",
+                               detail=f"상태 변경: {labels[status]}", actor=actor, created_at=now))
+    if "memo" in changed:
+        mark.memo = memo or None
+        session.add(InsightLog(tab=tab, space_seq=space_seq, contract_id=contract_id, action="memo",
+                               detail="메모 저장" if memo else "메모 지움", actor=actor, created_at=now))
+    mark.updated_by = actor
+    mark.updated_at = now
+    return changed
+
+
+def marks_payload(session: Session) -> dict:
+    """카드마다의 상태 이름 · 모든 줄의 상태와 메모 · 줄의 기록(최근 것부터, 기준 변경은 뺀다)."""
+    marks = session.query(InsightMark).all()
+    log = (session.query(InsightLog).filter(InsightLog.action != "rule")
+           .order_by(InsightLog.created_at.desc(), InsightLog.id.desc()).limit(LOG_LIMIT).all())
+    return {
+        "statuses": {tab: [{"key": key, "label": label} for key, label in pairs] for tab, pairs in STATUSES.items()},
+        "marks": [
+            {"tab": m.tab, "space_seq": m.space_seq, "contract_id": m.contract_id, "status": m.status,
+             "memo": m.memo, "updated_by": m.updated_by, "updated_at": m.updated_at}
+            for m in marks
+        ],
+        "log": [
+            {"tab": line.tab, "space_seq": line.space_seq, "contract_id": line.contract_id, "action": line.action,
+             "detail": line.detail, "actor": line.actor, "created_at": line.created_at}
+            for line in log
+        ],
+    }

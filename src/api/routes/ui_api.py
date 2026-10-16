@@ -1740,6 +1740,18 @@ def ui_insight_rules() -> dict:
         return {"rules": rules_payload(session)}
 
 
+@router.get("/api/ui/insight-marks")
+def ui_insight_marks() -> dict:
+    """영업 인사이트 줄들의 상태 · 메모 · 기록, 그리고 카드마다의 상태 이름. 사람이 누른 것만 있습니다 — 줄 자체
+    (어느 스페이스 · 계약이 후보인가)는 브라우저가 가공 데이터로 정하고, 이 서버는 모릅니다.
+    저장은 ``POST /operations/insights/marks``(``routes/insights.py``)."""
+    from ...db.insights import marks_payload
+    from ...db.session import SessionLocal
+
+    with SessionLocal() as session:
+        return marks_payload(session)
+
+
 # --------------------------------------------------------------------------- #
 # 사용 데이터 — 열쇠만 건넵니다 (2026-10-01)
 # --------------------------------------------------------------------------- #

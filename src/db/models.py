@@ -1064,6 +1064,38 @@ class InsightRule(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
 
 
+class InsightMark(Base):
+    """영업 인사이트 한 줄의 상태와 메모 — **사람이 버튼을 누른 줄만** 행이 있습니다 (이관 0133).
+
+    행이 없으면 「미컨택 · 미조치」(``todo``)입니다. 무엇의 상태인지는 카드(``tab``)가 정합니다 — 업셀링(``up``)은
+    ``space_seq``, 이탈 방지(``churn``) · 추가 계약(``grow``)은 ``contract_id``(재계약하면 새 계약이라 처음부터)이고,
+    둘 중 하나만 찹니다. 같은 계약이라도 이탈 방지와 추가 계약의 상태는 따로입니다.
+
+    **업셀링 줄의 ``space_seq`` 는 「사용 데이터는 서버로 안 간다」의 세 번째 예외입니다** (2026-10-15 운영자가
+    개발자에게 물어 정한 A안). 사람이 상태 · 메모를 저장할 때만, 번호 · 상태 · 메모 · 누가 언제만 남습니다 —
+    크레딧 같은 사용량 숫자는 이 표에 칸이 없습니다(``tests/test_usage_data_stays_off_server.py``).
+    """
+
+    __tablename__ = "insight_marks"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    # up | churn | grow
+    tab: Mapped[str] = mapped_column(String(16), nullable=False)
+    space_seq: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    contract_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # todo · done · won · ok · drop — 카드마다 쓰는 넷이 다르다(``db/insights.STATUSES``)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="todo")
+    memo: Mapped[str | None] = mapped_column(Text, nullable=True)
+    updated_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+
+    # 줄 하나에 행 하나 — 비어 있는 쪽(NULL)은 유니크를 안 따지므로 두 인덱스가 각자 자기 카드의 줄을 지킨다.
+    __table_args__ = (
+        Index("ux_insight_marks_space", "tab", "space_seq", unique=True),
+        Index("ux_insight_marks_contract", "tab", "contract_id", unique=True),
+    )
+
+
 class InsightLog(Base):
     """영업 인사이트의 기록 — **덧붙이기만 합니다** (이관 0132).
 

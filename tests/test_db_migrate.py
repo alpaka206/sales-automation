@@ -974,3 +974,32 @@ class TestInsightTables:
         Base.metadata.create_all(mem_engine, tables=[InsightRule.__table__, InsightLog.__table__])
         importlib.import_module(self.MODULE).up(mem_engine)
         assert {"insight_rules", "insight_log"} <= set(inspect(mem_engine).get_table_names())
+
+
+class TestInsightMarks:
+    """0133 — 영업 인사이트 줄의 상태 · 메모(`insight_marks`). 줄 하나에 행 하나(카드 + 스페이스 / 카드 + 계약)."""
+
+    MODULE = "src.db.migrations.0133_an_insight_row_keeps_what_a_person_marked"
+
+    def test_creates_the_table_like_the_model_and_runs_twice(self, mem_engine):
+        importlib.import_module(self.MODULE).up(mem_engine)
+        importlib.import_module(self.MODULE).up(mem_engine)
+
+        from src.db.models import InsightMark
+
+        insp = inspect(mem_engine)
+        assert {c["name"] for c in insp.get_columns("insight_marks")} == {c.name for c in InsightMark.__table__.columns}
+        assert {(ix["name"], tuple(ix["column_names"]), bool(ix["unique"])) for ix in insp.get_indexes("insight_marks")} == {
+            ("ux_insight_marks_space", ("tab", "space_seq"), True),
+            ("ux_insight_marks_contract", ("tab", "contract_id"), True),
+        }
+        with mem_engine.begin() as conn:
+            now = datetime.now(timezone.utc)
+            conn.execute(text("INSERT INTO insight_marks (tab, space_seq, status, updated_at) VALUES ('up', 7, 'done', :t)"), {"t": now})
+            # 계약 줄 둘은 space_seq 가 둘 다 비어 있어도 서로 안 막는다(NULL 은 유니크를 안 따진다).
+            conn.execute(text("INSERT INTO insight_marks (tab, contract_id, status, updated_at) VALUES ('churn', 1, 'ok', :t)"), {"t": now})
+            conn.execute(text("INSERT INTO insight_marks (tab, contract_id, status, updated_at) VALUES ('churn', 2, 'ok', :t)"), {"t": now})
+        with pytest.raises(Exception):
+            with mem_engine.begin() as conn:
+                conn.execute(text("INSERT INTO insight_marks (tab, space_seq, status, updated_at) VALUES ('up', 7, 'drop', :t)"),
+                             {"t": datetime.now(timezone.utc)})

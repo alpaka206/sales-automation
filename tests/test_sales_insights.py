@@ -64,7 +64,7 @@ def test_contracts_are_judged_by_the_same_function_as_the_won_screen():
     조건 1. 이 폴더가 판정을 따로 세우기 시작하면(소진율 · 경과율을 스스로 나누면) 두 화면이 같은 고객을 다르게
     부른다."""
     judge = _code(JUDGE)
-    assert 'import { usageFor, type UsageIndex } from "../won/useUsage";' in judge
+    assert re.search(r'import \{ usageFor,[^}]*\} from "\.\./won/useUsage";', judge)
     assert "usageFor(c, index, rules)" in judge
     for own in ("used_total /", "monthsLeft", "30.4"):
         assert own not in _all_code(), f"이 폴더가 판정을 스스로 셉니다: {own}"

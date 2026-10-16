@@ -181,3 +181,69 @@ describe("판정 대상 · 판정 불가", () => {
     expect([out.undetermined, out.unknown, out.unlinked]).toEqual([1, 1, 0]);
   });
 });
+
+// ── 상태가 붙은 줄 ────────────────────────────────────────────────────────
+import { countByStatus, listChurn, listGrow, listUp } from "../src/screens/insights/judge";
+import { actsFor } from "../src/screens/insights/Drawer";
+
+describe("상태가 붙은 줄 — 처리한 줄은 지금 기준에 안 맞아도 그 칸에 남는다", () => {
+  const spaces = [
+    salesSpace({ space_seq: 1, credits_30d: 20_000 }),
+    salesSpace({ space_seq: 2, credits_30d: 15_000 }),
+    salesSpace({ space_seq: 3, credits_30d: 2_000 }),           // 기준 아래로 내려간 스페이스
+    salesSpace({ space_seq: 4, credits_30d: 30_000, ent: true }), // 전환되어 엔터프라이즈가 됐다
+  ];
+  const up = (seq: number, status: string) => ({ tab: "up" as const, space_seq: seq, contract_id: null, status });
+
+  it("후보에 상태가 붙고, 처리한 줄은 후보가 아니어도(가공 파일에 없어도) 남는다", () => {
+    const candidates = upsellRows(spaces, new Set(), RULES, AS_OF);
+    const list = listUp(candidates, spaces, [up(2, "done"), up(3, "drop"), up(4, "won"), up(99, "done"), up(5, "todo")], AS_OF);
+    expect(list.map((r) => [r.space_seq, r.status, r.candidate, r.gone])).toEqual([
+      [4, "won", false, false],   // 30일 크레딧 큰 순 — 처리한 줄도 같은 순서에 선다
+      [1, "todo", true, false],
+      [2, "done", true, false],
+      [3, "drop", false, false],
+      [99, "done", false, true],   // 오늘 가공 파일에 없다
+    ]);
+    // 「미컨택」으로 되돌린 줄이 후보가 아니면 서지 않는다 — 미컨택 칸은 후보만.
+    expect(list.find((r) => r.space_seq === 5)).toBeUndefined();
+    // 카드의 큰 숫자 = 아직 손대지 않은 후보.
+    expect(countByStatus(list)).toEqual({ won: 1, todo: 1, done: 2, drop: 1 });
+  });
+
+  it("이탈 방지 · 추가 계약도 같다 — 처리한 계약은 기준 밖이어도, 지워졌어도 남는다", () => {
+    const rows = [row({}, { id: 1 }), row({ client_id: 2, company: "다라 미디어" }, { id: 2, space_seq: "502" })];
+    const idx = index(summary({ used_total: 20_000 }), summary({ space_seq: 502 }));  // 1 = 잔여 예상, 2 = 정상
+    const judged = contractRows(rows, idx, RULES);
+    const marks = [
+      { tab: "churn" as const, space_seq: null, contract_id: 1, status: "done" },
+      { tab: "churn" as const, space_seq: null, contract_id: 2, status: "ok" },   // 지금은 기준 밖
+      { tab: "churn" as const, space_seq: null, contract_id: 77, status: "drop" }, // 지워진 계약
+      { tab: "grow" as const, space_seq: null, contract_id: 1, status: "won" },    // 다른 카드의 상태는 따로
+    ];
+    const churn = listChurn(judged.churn, rows, idx, RULES, marks);
+    expect(churn.map((r) => [r.contractId, r.status, r.candidate, r.risk, r.company])).toEqual([
+      [1, "done", true, "mid", "가나 스튜디오"],
+      // 기준 밖 줄은 맨 아래, 그 안에서는 이탈과 같은 순서(활동 기록 없음이 위)
+      [77, "drop", false, null, "지워진 계약"],
+      [2, "ok", false, null, "다라 미디어"],
+    ]);
+    const grow = listGrow(judged.grow, rows, idx, RULES, marks);
+    expect(grow.map((r) => [r.contractId, r.status, r.candidate, r.priority])).toEqual([[1, "won", false, null]]);
+  });
+});
+
+describe("상세 패널의 버튼 — 목업의 acts", () => {
+  const up = [{ key: "todo", label: "미컨택" }, { key: "done", label: "컨택 완료" }, { key: "won", label: "전환" }, { key: "drop", label: "제외" }];
+  const churn = [{ key: "todo", label: "미조치" }, { key: "done", label: "조치 완료" }, { key: "ok", label: "정상화" }, { key: "drop", label: "제외" }];
+  it("미컨택 → 제외 · 컨택 완료, 컨택 완료 → 제외 · 전환 처리, 전환 · 제외 → 되돌리기", () => {
+    expect(actsFor(up, "todo").map((a) => a.label)).toEqual(["제외", "컨택 완료"]);
+    expect(actsFor(up, "done").map((a) => [a.key, a.label])).toEqual([["drop", "제외"], ["won", "전환 처리"]]);
+    expect(actsFor(up, "won").map((a) => [a.key, a.label])).toEqual([["todo", "미컨택으로 되돌리기"]]);
+    expect(actsFor(up, "drop").map((a) => a.label)).toEqual(["미컨택으로 되돌리기"]);
+  });
+  it("받침이 없으면 「로」 — 미조치로 되돌리기", () => {
+    expect(actsFor(churn, "ok").map((a) => a.label)).toEqual(["미조치로 되돌리기"]);
+    expect(actsFor(churn, "done").map((a) => a.label)).toEqual(["제외", "정상화 처리"]);
+  });
+});
