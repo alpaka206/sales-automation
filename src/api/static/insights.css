@@ -63,6 +63,7 @@
 .ins .rule .meta {font-size:12px;color:var(--text-subtle);margin-left:8px}
 .ins .rule input {width:84px;border:1px solid var(--border);border-radius:var(--r-sm);padding:6px 9px;font:inherit;font-size:13px;text-align:right;background:var(--surface);color:var(--text)}
 .ins .rule .err {font-size:12px;color:var(--danger)}
+.ins .rule .shared {font-size:11px;font-weight:600;color:var(--info);background:var(--info-bg);border-radius:var(--r-xs);padding:1px 6px;margin-left:6px;white-space:nowrap;vertical-align:1px}
 .ins .rule .acts, .ins .selbar .acts {display:flex;gap:8px}
 .ins .rule-fields {display:flex;flex-wrap:wrap;gap:6px 14px;align-items:center}
 

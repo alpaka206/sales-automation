@@ -25,6 +25,14 @@ function invalid(rule: InsightRule, raw: string): string | null {
 const sentence = (rules: InsightRule[], values: Record<string, number>) =>
   rules.map((r) => `${num(values[r.key])} ${r.unit}`).join(" · ");
 
+/** 수주 고객 「사용 진단」이 같이 쓰는 기준(서버의 `shared` — 잔여 예상 · 부족 예상 · 초과사용) 옆의 표시. 확인창에만
+ *  적혀 있던 것을 줄에도 늘 보이게 했다(2026-10-16 운영자: 「잔여예상 기준 바꾸면 수주고객도 같이 바뀐다는거 명시하자」). */
+const SharedMark = () => (
+  <span className="shared" title="이 기준을 바꾸면 수주 고객 화면의 「사용 진단」(사용 상태 배지)도 같이 바뀝니다">
+    수주 고객 화면도 같이 바뀜
+  </span>
+);
+
 export function RuleLine({ tab, title, rules, count, countWith, note, onSaveRules, onSaved }: {
   tab: Tab;
   /** 확인 창의 「{title} 목록과 카드 숫자가 바로 바뀝니다」 */
@@ -80,6 +88,7 @@ export function RuleLine({ tab, title, rules, count, countWith, note, onSaveRule
                        onChange={(e) => setDraft({ ...draft, [rule.key]: e.target.value })}
                        onKeyDown={(e) => { if (e.key === "Enter") review(); if (e.key === "Escape") cancel(); }} />{" "}
                 {rule.unit}
+                {rule.shared && <SharedMark />}
               </span>
             ))}
             {error && <span className="err" role="alert">{error}</span>}
@@ -96,6 +105,7 @@ export function RuleLine({ tab, title, rules, count, countWith, note, onSaveRule
             {rules.map((rule, i) => (
               <span key={rule.key}>
                 {i > 0 && " · "}{rule.label} <b className="num">{num(rule.value)}</b> {rule.unit}
+                {rule.shared && <SharedMark />}
               </span>
             ))}
             <span className="meta">{count === null ? "" : `현재 ${num(count)}곳 · `}{stampLine}</span>

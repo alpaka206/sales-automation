@@ -70,6 +70,17 @@ def test_contracts_are_judged_by_the_same_function_as_the_won_screen():
         assert own not in _all_code(), f"이 폴더가 판정을 스스로 셉니다: {own}"
 
 
+def test_a_rule_shared_with_the_won_screen_says_so_on_the_rule_line():
+    """수주 고객 「사용 진단」이 같이 쓰는 기준(잔여 예상 · 부족 예상 · 초과사용 — 서버의 `shared`)은 「기준」 줄에 늘 그
+    사실을 적는다 — 보는 줄에도, 고치는 칸에도 (2026-10-16 운영자: 「잔여예상 기준 바꾸면 수주고객도 같이 바뀐다는거
+    명시하자」). 그 전에는 고친 뒤 뜨는 확인창에만 적혀 있었다. 무엇이 공유인지는 서버가 정한다(코드가 열쇠를 따로 안 든다)."""
+    line = _code(FOLDER / "RuleLine.tsx")
+    assert line.count("{rule.shared && <SharedMark />}") == 2, "보는 줄과 고치는 칸 둘 다에 붙어야 합니다"
+    assert "수주 고객 화면도 같이 바뀜" in line
+    for key in ("forecast_left_pct", "forecast_short_pct", "level_gap_pp"):
+        assert key not in line
+
+
 def test_the_screen_shows_credits_and_never_converts_them_to_minutes():
     """크레딧을 분으로 바꿔 적지 않는다 — 크레딧과 분의 비율은 더빙 모델마다 달라 「60크레딧 = 1분」은
     정확하지 않다 (2026-10-14 운영자: 「분 환산은 더빙 모델마다 달라서 정확하지 않아」)."""
