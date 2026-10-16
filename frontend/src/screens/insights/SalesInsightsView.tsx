@@ -191,7 +191,8 @@ export function SalesInsightsView({ usage, won, rules, marks, onSaveRules, onMar
   return (
     <div className="ins">
       <div className="head">
-        <h1>영업 인사이트</h1>
+        {/* 제목 글자는 다른 화면처럼 숨긴다(console.css 의 `.page-title`) — 왼쪽 메뉴의 강조와 같은 글자다. */}
+        <h1 className="page-title">영업 인사이트</h1>
         {snapshot && <div className="meta">데이터 기준 <b className="num">{stamp(snapshot)}</b> · 최근 6개월</div>}
       </div>
 

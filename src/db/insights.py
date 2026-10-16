@@ -29,8 +29,6 @@ from sqlalchemy.orm import Session
 
 from .models import ClientContract, InsightLog, InsightMark, InsightRule
 
-TABS = ("up", "churn", "grow")
-
 # 카드마다 줄이 갈 수 있는 상태 — 첫 칸(todo)이 행이 없을 때의 상태다. 이름은 목업(``영업인사이트.html`` 의
 # ``P.*.status``) 그대로이고, 화면은 이 목록을 받아 그린다(``GET /api/ui/insight-marks``). 기록 한 줄
 # (「상태 변경: 컨택 완료」)도 이 이름으로 서버가 적는다 — 화면이 보낸 글자를 기록에 넣지 않는다.

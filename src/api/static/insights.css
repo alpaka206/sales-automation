@@ -31,7 +31,6 @@
 .ins .num {font-variant-numeric:tabular-nums}
 
 .ins .head {display:flex;align-items:flex-end;justify-content:space-between;gap:12px;flex-wrap:wrap}
-.ins .head h1 {font-size:20px;margin:0;font-weight:700}
 .ins .head .meta {font-size:12px;color:var(--text-subtle)}
 .ins .head .meta b {color:var(--text);font-weight:600}
 .ins .notice {background:var(--warn-bg);color:var(--warn);border-radius:var(--r-md);padding:12px 16px;font-size:13px}
