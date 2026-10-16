@@ -175,6 +175,7 @@ def test_the_write_is_a_form_post_under_a_registered_browser_prefix():
         ("/operations/insights/rules", ["POST"]),
         ("/operations/insights/marks", ["POST"]),
         ("/operations/insights/copies", ["POST"]),
+        ("/operations/insights/drafts", ["POST"]),
     ]
     assert all(is_web_ui_path(route.path) for route in insights.router.routes)
     assert not [route.path for route in ui_api.router.routes if route.methods - {"GET", "HEAD"}]

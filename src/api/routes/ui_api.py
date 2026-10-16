@@ -1752,6 +1752,17 @@ def ui_insight_marks() -> dict:
         return marks_payload(session)
 
 
+@router.get("/api/ui/insight-drafts")
+def ui_insight_drafts() -> dict:
+    """영업 인사이트 메일 초안의 기본 문구 — 칸마다 지금 글 · 기본 문구 · 누가 언제, 그리고 자리표시 안내. 화면이 이것으로
+    초안을 만든다(복사만 — 메일은 안 보낸다). 저장은 ``POST /operations/insights/drafts``(``routes/insights.py``)."""
+    from ...db.insight_drafts import drafts_payload
+    from ...db.session import SessionLocal
+
+    with SessionLocal() as session:
+        return drafts_payload(session)
+
+
 # --------------------------------------------------------------------------- #
 # 사용 데이터 — 열쇠만 건넵니다 (2026-10-01)
 # --------------------------------------------------------------------------- #

@@ -1100,7 +1100,8 @@ class InsightLog(Base):
     """영업 인사이트의 기록 — **덧붙이기만 합니다** (이관 0132).
 
     한 줄 = 사람이 누른 것 하나: 기준 변경(``rule``) · 상태 변경(``status``) · 메모 저장(``memo``) ·
-    메일 초안 복사(``copy``). 시스템이 스스로 적는 줄은 없습니다.
+    메일 초안 복사(``copy``) · 메일 초안 기본 문구 변경(``draft`` — 바꾸기 전 글을 같이 남깁니다). 시스템이 스스로
+    적는 줄은 없습니다.
 
     무엇의 기록인지는 카드(``tab``)가 정합니다 — 업셀링(``up``)은 ``space_seq``, 이탈 방지(``churn``) ·
     추가 계약(``grow``)은 ``contract_id`` 입니다. 기준 변경 줄은 둘 다 비어 있습니다. 둘 다 FK 가
@@ -1118,9 +1119,34 @@ class InsightLog(Base):
     tab: Mapped[str] = mapped_column(String(16), nullable=False)
     space_seq: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     contract_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
-    # rule | status | memo | copy
+    # rule | status | memo | copy | draft
     action: Mapped[str] = mapped_column(String(16), nullable=False)
     # 화면의 「기록」 칸에 그대로 서는 한 줄 — 「30일 크레딧 9,720 → 12,000 이상」 · 「상태 변경: 컨택 완료」.
     detail: Mapped[str | None] = mapped_column(Text, nullable=True)
     actor: Mapped[str | None] = mapped_column(String(255), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+
+
+class InsightDraft(Base):
+    """영업 인사이트 메일 초안의 기본 문구 한 칸 — **사람이 고친 칸만** 행이 있습니다 (이관 0134).
+
+    칸 = 카드(``tab``) × 언어(``lang``: ko · en) × 부분(``part``: ``subject`` 제목 · ``body`` 공통 문단 ·
+    ``reason.<근거>`` 근거별 문단). 칸의 목록과 기본 문구는 ``db/insight_drafts.py`` 한 곳이고, 행이 없으면 그
+    기본 문구입니다 — 기본 문구와 같은 글로 저장하면 행을 지웁니다(「기본 문구」로 돌아간다).
+
+    **이메일 템플릿 표(``email_templates``)와 일부러 따로 둡니다** (2026-10-16 운영자: 「기존 이메일 템플릿 표와
+    분리해서 인바운드 답장 AI가 영업 초안을 읽지 않게」). 인바운드 답장의 문서 정리기는 그 표의 행을 전부
+    읽습니다(``llm/organizer``). 이 표는 ``src/llm`` · ``src/agents`` 가 이름조차 모릅니다(테스트가 고정).
+    """
+
+    __tablename__ = "insight_drafts"
+
+    # up | churn | grow
+    tab: Mapped[str] = mapped_column(String(16), primary_key=True)
+    # ko | en
+    lang: Mapped[str] = mapped_column(String(8), primary_key=True)
+    # subject | body | reason.<근거>
+    part: Mapped[str] = mapped_column(String(32), primary_key=True)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    updated_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)

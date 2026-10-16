@@ -248,7 +248,8 @@ def save_mark(session: Session, sent: Mapping[str, str], actor: str) -> list[str
 def marks_payload(session: Session) -> dict:
     """카드마다의 상태 이름 · 모든 줄의 상태와 메모 · 줄의 기록(최근 것부터, 기준 변경은 뺀다)."""
     marks = session.query(InsightMark).all()
-    log = (session.query(InsightLog).filter(InsightLog.action != "rule")
+    # 줄의 기록만 — 기준 변경 · 초안 문구 변경은 어느 줄의 일도 아니다(문구 변경 줄은 바꾸기 전 글까지 들고 있어 길다).
+    log = (session.query(InsightLog).filter(InsightLog.action.notin_(("rule", "draft")))
            .order_by(InsightLog.created_at.desc(), InsightLog.id.desc()).limit(LOG_LIMIT).all())
     return {
         "statuses": {tab: [{"key": key, "label": label} for key, label in pairs] for tab, pairs in STATUSES.items()},

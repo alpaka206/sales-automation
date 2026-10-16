@@ -16,6 +16,7 @@ import asyncio
 from fastapi import APIRouter, HTTPException, Request
 from sqlalchemy.exc import IntegrityError
 
+from ...db.insight_drafts import save_drafts
 from ...db.insights import RuleError, save_copy, save_mark, save_rules
 from ...db.session import SessionLocal
 from ..auth import actor_name
@@ -94,3 +95,24 @@ async def log_insight_copy(request: Request):
     sent = {key: str(value) for key, value in form.items()}
     actor = actor_name(request, fallback="") or "web"
     return await asyncio.to_thread(_save_copy, sent, actor)
+
+
+def _save_drafts(sent: dict[str, str], actor: str) -> dict:
+    with SessionLocal() as session:
+        try:
+            changed = save_drafts(session, sent, actor)
+            session.commit()
+        except RuleError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from None
+    return {"ok": True, "changed": changed}
+
+
+@router.post("/operations/insights/drafts")
+async def save_insight_drafts(request: Request):
+    """「메일 초안」 창의 「기본 문구 수정」 저장 — 한 카드의 제목 · 공통 문단 · 근거별 문단(한국어 · English).
+    칸 이름은 ``<언어>.<부분>``(``ko.subject`` · ``en.reason.idle``)이고 ``tab`` 이 카드다(``db/insight_drafts.save_drafts``).
+    **메일을 보내는 길이 아니다** — 문구만 저장하고, 초안은 사람이 복사해 자기 메일 프로그램에서 보낸다."""
+    form = await request.form()
+    sent = {key: str(value) for key, value in form.items()}
+    actor = actor_name(request, fallback="") or "web"
+    return await asyncio.to_thread(_save_drafts, sent, actor)

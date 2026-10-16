@@ -1003,3 +1003,26 @@ class TestInsightMarks:
             with mem_engine.begin() as conn:
                 conn.execute(text("INSERT INTO insight_marks (tab, space_seq, status, updated_at) VALUES ('up', 7, 'drop', :t)"),
                              {"t": datetime.now(timezone.utc)})
+
+
+class TestInsightDrafts:
+    """0134 — 영업 인사이트 메일 초안의 기본 문구(`insight_drafts`). 카드 × 언어 × 부분마다 한 행, 고친 칸만."""
+
+    MODULE = "src.db.migrations.0134_the_insight_mail_text_lives_on_the_server"
+
+    def test_creates_the_table_like_the_model_and_runs_twice(self, mem_engine):
+        importlib.import_module(self.MODULE).up(mem_engine)
+        importlib.import_module(self.MODULE).up(mem_engine)
+
+        from src.db.models import InsightDraft
+
+        insp = inspect(mem_engine)
+        assert {c["name"] for c in insp.get_columns("insight_drafts")} == {c.name for c in InsightDraft.__table__.columns}
+        assert insp.get_pk_constraint("insight_drafts")["constrained_columns"] == ["tab", "lang", "part"]
+        with mem_engine.begin() as conn:
+            conn.execute(text("INSERT INTO insight_drafts (tab, lang, part, content, updated_at) "
+                              "VALUES ('up', 'ko', 'subject', '제목', :t)"), {"t": datetime.now(timezone.utc)})
+        with pytest.raises(Exception):
+            with mem_engine.begin() as conn:
+                conn.execute(text("INSERT INTO insight_drafts (tab, lang, part, content, updated_at) "
+                                  "VALUES ('up', 'ko', 'subject', '다른 제목', :t)"), {"t": datetime.now(timezone.utc)})
