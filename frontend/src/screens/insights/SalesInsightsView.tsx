@@ -1,213 +1,273 @@
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
+import type { InsightRule } from "../../lib/insightRules";
 import { stamp, useSalesInsight } from "../../lib/usageData";
 import type { UsageSource } from "../../lib/usageSource";
-import { DataTable, type Column } from "../../ui/DataTable";
-import { parseSpaceSeqs } from "../won/usage";
+import { parseSpaceSeqs, rulesFrom, type Rules } from "../won/usage";
+import { spacesOfRows, useUsageIndex } from "../won/useUsage";
 import type { ListData } from "../won/shared";
+import {
+  contractRows, upsellMaybeCut, upsellRows, CANDIDATE_CAP,
+  type ChurnRow, type ContractRow, type GrowRow, type SalesData, type Tab, type UpRow,
+} from "./judge";
+import { RuleLine } from "./RuleLine";
 
-/** 영업 인사이트 — **안쪽 겹**. 스냅샷(제품 전체)에서 **우리가 모르는 사람 중 눈에 띄는 스페이스**를 본다
- *  (2026-09-15 운영자 요청). 값은 전부 매일 가공된 집계(`sales.json`)를 브라우저가 GitHub 에서 직접 받은 것이고,
- *  서버로는 한 바이트도 안 간다 — 이 파일은 서버를 못 부른다(`tests/test_usage_data_stays_off_server.py` 의
- *  `DATA_SIDE`). 서버에서 오는 것(우리 수주 고객 목록 · 집계를 받을 열쇠)은 바깥 겹(`screens/SalesInsights.tsx`)이
- *  받아 props 로 내려 준다 — 수주 고객의 space_seq 로 「우리 고객」을 걸러낸다.
+/** 영업 인사이트 — **안쪽 겹** (2026-10-15 운영자 지시: 목업 `영업인사이트.html` 대로 개편).
  *
- *  「주목할 스페이스」 하나만 남는다 (2026-10-06 운영자: 「주목할 스페이스 말고 아래에 있는거 모두 다 삭제」) —
- *  그 아래의 제품 전체 흐름(가입 · 구독 · 체크아웃 · 플랜별 크레딧 · 언어쌍 · 업로드 경로 · 로그인)은 가공기도
- *  더 안 낸다(`agent/sales.go`). 그 전에는 「고객 인사이트」(손이 가야 하는 리드 목록 · 갱신 임박)가 이 자리였다.
+ *  카드 셋이 곧 탭입니다 — 업셀링(우리 고객이 아닌 Pro 스페이스 중 30일 크레딧이 기준 이상) · 이탈 방지(계약
+ *  크레딧이 남을 전망인 수주 고객) · 추가 계약 기회(계약 종료가 가깝거나 크레딧이 먼저 떨어질 수주 고객). 판정은
+ *  `judge.ts` 이고, 수주 고객 쪽 판정은 수주 고객 「사용 진단」과 같은 함수 · 같은 기준(서버에 저장)입니다.
+ *
+ *  값은 전부 매일 가공된 스냅샷(`sales.json` · `summary.json`)을 브라우저가 GitHub 에서 직접 받은 것이고, 이 파일은
+ *  서버를 못 부릅니다(`tests/test_usage_data_stays_off_server.py` 의 `DATA_SIDE` — 이 폴더 전체). 서버에서 오는
+ *  것(수주 고객 목록 · 판정 기준 · 사용 데이터의 열쇠)은 바깥 겹(`screens/SalesInsights.tsx`)이 받아 내려 주고,
+ *  서버로 가는 것은 사람이 「기준 수정」에서 적은 숫자뿐입니다(`RuleLine.tsx`).
+ *
+ *  크레딧을 분으로 바꿔 적지 않습니다 — 크레딧과 분의 비율은 더빙 모델마다 달라 「60크레딧 = 1분」은 정확하지
+ *  않습니다(2026-10-14 운영자). 목업에 있던 주간 막대는 쓰이지 않는 그림이라 옮기지 않았습니다.
+ *
+ *  예전의 「주목할 스페이스」 표와 신호 다섯(엔터프라이즈 · 우리 기록 없음 · 트라이얼인데 많이 쓴다 · 구독 연체 ·
+ *  무료인데 활발 · 실패가 잦다)은 목업에 없어서 지웠습니다(2026-10-16 운영자 확인 ②). 「셀프서브 대량 사용」은
+ *  업셀링 카드가 되었고 그 문턱(9,720)은 이제 서버에 저장된 기준입니다.
  */
 
-type Space = {
-  space_seq: number; tier: string; plan_name: string | null; sub_status: string | null; ent: boolean;
-  credits_30d: number; credits_90d: number; exports_30d: number; exports_6m: number; failed_6m: number;
-  users: number; members: number; seat: number; first_job: string | null; last_job: string | null; top_pair: string | null;
-};
-type Sales = { spaces: Space[] | null; spaces_active_6m: number; fail_rate_all: number | null };
-
-const num = (v: number | null | undefined) => Number(v ?? 0).toLocaleString("en-US");
-// 크레딧을 분으로 바꿔 적지 않는다 — 크레딧과 분의 비율은 더빙 모델마다 달라서 「60크레딧 = 1분」은 정확하지
-// 않다 (2026-10-14 운영자: 「분 환산은 더빙 모델마다 달라서 정확하지 않아」). 30일 크레딧 옆의 「N분」을 뺐다.
-const TIER: Record<string, string> = { free: "Free", starter: "Starter", creator: "Creator", pro: "Pro", team: "Team", business: "Business", flex: "Flex", enterprise: "Enterprise" };
-const LANG: Record<string, string> = {
-  ko: "한국어", en: "영어", ja: "일본어", zh: "중국어", es: "스페인어", pt: "포르투갈어", fr: "프랑스어", de: "독일어", it: "이탈리아어",
-  ru: "러시아어", vi: "베트남어", th: "태국어", id: "인도네시아어", tr: "튀르키예어", ar: "아랍어", hi: "힌디어", nl: "네덜란드어", pl: "폴란드어",
-  sk: "슬로바키아어", sv: "스웨덴어", da: "덴마크어", fi: "핀란드어", no: "노르웨이어", cs: "체코어", hu: "헝가리어", el: "그리스어", uk: "우크라이나어",
-  ro: "루마니아어", ms: "말레이어", tl: "타갈로그어", he: "히브리어", fa: "페르시아어", bn: "벵골어", ta: "타밀어", ur: "우르두어",
-};
-const pairName = (pair: string | null) => (pair ?? "").split(" → ").map((c) => LANG[c.split("-")[0]] ?? c).join(" → ");
-
-/** 「셀프서브 대량 사용」의 문턱 — 30일 크레딧이 PRO 월 10,800 크레딧(perso.ai/pricing)의 90% (2026-10-14 운영자).
- *  그 전에는 3,000 이었다: 2026-09-14 스냅샷에서 셀프서브 스페이스 30일 크레딧의 상위 1% 가 3,285 였고, 상위
- *  열다섯은 전부 Pro 로 10,000~47,000 을 썼다. */
-const HEAVY_CREDITS_30D = 9_720;
-
-/** 「셀프서브 대량 사용」은 **플랜 등급이 Pro 인 스페이스에만** 붙는다 (2026-10-14 운영자). 값은 가공 결과의
- *  `tier`(구독 플랜의 `priority_tier`, `agent/sales.go`) 글자 그대로다 — 그날 가공에서 소문자 `pro` 로 왔다. */
-const PRO_TIER = "pro";
-
-/** 눈에 띄는 이유 — 어느 것이 붙나로 목록을 거른다.
- *
- *  「여럿이 쓴다」(사용자 2명 이상 또는 멤버 3명 이상)는 지웠다 (2026-10-14 운영자: 「여럿이 쓴다 빼자」). 같은 날
- *  Pro 플랜에만 붙게 좁혔더니 그날 가공 기준 0곳이었다 — 그 전에 붙던 25곳은 엔터프라이즈 24 · Team 1 이었다.
- *  표의 「사용자 · 멤버 · 좌석」 열은 그대로 보여 준다. */
-const SIGNALS = [
-  { key: "ent-unknown", label: "엔터프라이즈 · 우리 기록 없음", tone: "danger",
-    hint: "제품에서는 엔터프라이즈로 묶여 있는데 수주 고객에 그 space_seq 가 없습니다 — 계약이 우리 밖에서 맺어졌거나 space_seq 를 안 적은 고객입니다.",
-    test: (s: Space, ours: boolean) => s.ent && !ours },
-  { key: "heavy", label: "셀프서브 대량 사용", tone: "accent",
-    hint: `엔터프라이즈가 아닌 Pro 플랜인데 30일에 ${num(HEAVY_CREDITS_30D)} 크레딧 이상 — PRO 월 10,800 크레딧의 90%. 엔터프라이즈 제안 대상.`,
-    test: (s: Space) => !s.ent && s.tier === PRO_TIER && s.credits_30d >= HEAVY_CREDITS_30D },
-  { key: "trial-heavy", label: "트라이얼인데 많이 쓴다", tone: "warn",
-    hint: "구독 상태가 trialing 인데 30일 1,500 크레딧 이상 — 결제로 넘어갈 자리.",
-    test: (s: Space) => s.sub_status === "trialing" && s.credits_30d >= 1500 },
-  { key: "past-due", label: "구독 연체", tone: "danger",
-    hint: "구독 상태 past_due — 결제가 막힌 채 쓰고 있습니다.",
-    test: (s: Space) => s.sub_status === "past_due" },
-  { key: "free-active", label: "무료인데 활발", tone: "info",
-    hint: "Free 플랜인데 30일 내보내기 10건 이상.",
-    test: (s: Space) => s.tier === "free" && s.exports_30d >= 10 },
-  { key: "failing", label: "실패가 잦다", tone: "warn",
-    hint: "6개월 실패율이 전사 평균의 2배 이상(내보내기 10건 이상일 때) — 지원 연락의 명분.",
-    test: (s: Space, _o: boolean, failAll: number | null) =>
-      failAll !== null && s.exports_6m >= 10 && s.failed_6m / s.exports_6m >= (failAll / 100) * 2 },
-] as const;
-type SignalKey = (typeof SIGNALS)[number]["key"];
-
-function Pill({ tone, children, title }: { tone: string; children: React.ReactNode; title?: string }) {
-  return <span className={`pill pill--sm pill--${tone}`} title={title}>{children}</span>;
-}
-
-/** 바깥 겹이 서버에서 받아 내려 주는 것. `usage` 는 `useUsageSource()` 의 답 그대로다(열쇠와 그 상태). */
 type Props = {
+  /** `useUsageSource()` 의 답 그대로 — 열쇠와 그 상태. */
   usage: { source: UsageSource | null; configured: boolean | null; problem: string | null; busy: boolean };
   won: ListData | null;
+  /** `useInsightRules()` 의 답 그대로 — 판정 기준 여섯과 누가 언제. */
+  rules: { list: InsightRule[] | null; problem: string | null; busy: boolean };
+  onSaveRules: (tab: Tab, values: Record<string, number>) => Promise<unknown>;
 };
 
-export function SalesInsightsView({ usage: usageSource, won }: Props) {
-  const sales = useSalesInsight<Sales>(usageSource.source);
-  // 우리 수주 고객의 space_seq — 서버에서 오는 것. 이걸로 「우리 기록 없음」을 가른다.
+type Card = { name: string; desc: (r: Rules) => string; title: string; search: string; todo: string; note: string };
+const CARDS: Record<Tab, Card> = {
+  up: {
+    name: "업셀링", desc: () => "PRO 플랜에서 B2B로 올릴 만한 스페이스", title: "업셀링 후보",
+    search: "Space 번호 검색", todo: "미컨택", note: "",
+  },
+  churn: {
+    name: "이탈 방지", desc: () => "계약 크레딧이 남을 전망인 수주 고객", title: "이탈 위험 고객",
+    search: "고객명 · Client ID 검색", todo: "미조치",
+    note: "잔여 예상 기준은 수주 고객 화면의 사용 진단과 같이 바뀝니다.",
+  },
+  grow: {
+    name: "추가 계약 기회", desc: (r) => `계약 종료가 ${r.renewalDays}일 안이거나 크레딧이 먼저 떨어질 수주 고객`,
+    title: "추가 계약 후보", search: "고객명 · Client ID 검색", todo: "미컨택",
+    // 초과사용 %p 한 값이 과소사용도 같이 정한다 — 이탈 방지 탭의 근거(과소사용)와 수주 고객 화면이 같이 바뀐다.
+    note: "부족 예상 · 초과사용 기준은 수주 고객 화면의 사용 진단과 같이 바뀝니다. 초과사용 %p 는 과소사용도 같이 정해서 이탈 방지 탭의 근거도 바뀝니다.",
+  },
+};
+const TABS: Tab[] = ["up", "churn", "grow"];
+
+const num = (v: number | null | undefined) => (v === null || v === undefined ? "—" : v.toLocaleString("en-US"));
+const TIER: Record<string, string> = { pro: "Pro", free: "Free", starter: "Starter", creator: "Creator", team: "Team", business: "Business", flex: "Flex", enterprise: "Enterprise" };
+
+function PlanTag({ plan }: { plan: string | null }) {
+  if (!plan) return <span className="mut">—</span>;
+  const tone = /^(enterprise|business)/i.test(plan) ? "ent" : plan.toLowerCase() === "pro" ? "pro" : "free";
+  return <span className={`plan ${tone}`}>{plan}</span>;
+}
+const Sg = ({ tone, children, title }: { tone?: string; children: React.ReactNode; title?: string }) =>
+  <span className={`sg${tone ? ` ${tone}` : ""}`} title={title}>{children}</span>;
+
+/** 이탈 방지의 근거 — 잔여 예상 · 무활동(또는 기록 없음) · 과소사용. */
+export function ChurnWhy({ row, idleDays }: { row: ContractRow; idleDays: number }) {
+  return (
+    <span className="sgs">
+      <Sg tone="warn" title={row.forecastDetail ?? undefined}>잔여 예상</Sg>
+      {(row.daysIdle === null || row.daysIdle >= idleDays) &&
+        <Sg tone="risk">무활동 {row.daysIdle === null ? "기록 없음" : `${row.daysIdle}일`}</Sg>}
+      {row.level === "과소사용" && <Sg tone="warn" title={row.levelDetail ?? undefined}>과소사용</Sg>}
+    </span>
+  );
+}
+/** 추가 계약의 근거 — 계약 종료 D-N · 부족 예상 · 초과사용. */
+export function GrowWhy({ row, renewalDays }: { row: ContractRow; renewalDays: number }) {
+  return (
+    <span className="sgs">
+      {row.daysLeft !== null && row.daysLeft >= 0 && row.daysLeft <= renewalDays && <Sg tone="up">계약 종료 D-{row.daysLeft}</Sg>}
+      {row.forecast === "부족 예상" && <Sg tone="up" title={row.forecastDetail ?? undefined}>부족 예상</Sg>}
+      {row.level === "초과사용" && <Sg tone="up" title={row.levelDetail ?? undefined}>초과사용</Sg>}
+    </span>
+  );
+}
+const RISK = { high: <Sg tone="risk">높음</Sg>, mid: <Sg tone="warn">주의</Sg> };
+const PRIORITY = { p1: <Sg tone="risk">높음</Sg>, p2: <Sg tone="up">보통</Sg>, p3: <Sg>낮음</Sg> };
+
+export function SalesInsightsView({ usage, won, rules, onSaveRules }: Props) {
+  const sales = useSalesInsight<SalesData>(usage.source);
+  // 수주 고객 목록이 쓰는 그 요약 색인 — 활성 계약의 스페이스만 고른다(`useUsageIndex`).
+  const spaces = useMemo(() => spacesOfRows(won?.rows), [won?.rows]);
+  const summary = useUsageIndex(usage.source, spaces);
+  const ruleValues = useMemo(() => rulesFrom(rules.list), [rules.list]);
+  // 우리 수주 고객의 space_seq — 활성 계약만이 아니라 모든 계약. 업셀링 후보에서 뺀다.
   const ours = useMemo(() => {
-    const map = new Map<number, number>();
+    const set = new Set<number>();
     for (const row of won?.rows ?? []) {
-      for (const c of [row.active, ...(row.contracts ?? [])]) {
-        for (const s of parseSpaceSeqs(c?.space_seq)) map.set(s, row.client_id);
-      }
+      for (const c of [row.active, ...(row.contracts ?? [])]) for (const s of parseSpaceSeqs(c?.space_seq)) set.add(s);
     }
-    return map;
+    return set;
   }, [won]);
 
-  const [signal, setSignal] = useState<SignalKey | "all">("all");
-  const [includeOurs, setIncludeOurs] = useState(false);
-  const [limit, setLimit] = useState(60);
-  const d = sales.data?.data;
+  const asOf = summary.index?.snapshotAt ?? sales.data?.snapshot_at.slice(0, 10) ?? null;
+  const up = useMemo<UpRow[] | null>(
+    () => (ruleValues && sales.data && asOf && won ? upsellRows(sales.data.data.spaces, ours, ruleValues, asOf) : null),
+    [ruleValues, sales.data, asOf, ours, won]);
+  const judged = useMemo(
+    () => (ruleValues && summary.index && won ? contractRows(won.rows, summary.index, ruleValues) : null),
+    [ruleValues, summary.index, won]);
 
-  const rows = useMemo(() => {
-    if (!d?.spaces) return [];
-    const failAll = d.fail_rate_all;
-    return d.spaces
-      .map((s) => {
-        const mine = ours.has(s.space_seq);
-        const signals = SIGNALS.filter((g) => g.test(s, mine, failAll)).map((g) => g.key);
-        return { ...s, mine, signals };
-      })
-      .filter((s) => (includeOurs || !s.mine) && (signal === "all" ? s.signals.length > 0 : s.signals.includes(signal)));
-  }, [d, ours, signal, includeOurs]);
+  const [tab, setTab] = useState<Tab>("up");
+  const [query, setQuery] = useState("");
+  const [toast, setToast] = useState<string | null>(null);
+  const say = (message: string) => { setToast(message); window.setTimeout(() => setToast(null), 1800); };
 
-  const counts = useMemo(() => {
-    const out: Record<string, number> = {};
-    if (!d?.spaces) return out;
-    for (const s of d.spaces) {
-      const mine = ours.has(s.space_seq);
-      if (!includeOurs && mine) continue;
-      for (const g of SIGNALS) if (g.test(s, mine, d.fail_rate_all)) out[g.key] = (out[g.key] ?? 0) + 1;
-    }
-    return out;
-  }, [d, ours, includeOurs]);
+  const lists: Record<Tab, (UpRow | ChurnRow | GrowRow)[] | null> = {
+    up, churn: judged?.churn ?? null, grow: judged?.grow ?? null,
+  };
+  /** 기준을 이 값으로 바꾸면 그 카드에 몇 곳이 서나 — 확인 창의 「바꾼 뒤」. 이 브라우저에서만 센다. */
+  const countWith = (which: Tab) => (values: Record<string, number>) => {
+    if (!ruleValues || !rules.list) return null;
+    const next = rulesFrom(rules.list.map((r) => (r.key in values ? { ...r, value: values[r.key] } : r)));
+    if (!next) return null;
+    if (which === "up") return sales.data && asOf && won ? upsellRows(sales.data.data.spaces, ours, next, asOf).length : null;
+    if (!summary.index || !won) return null;
+    const after = contractRows(won.rows, summary.index, next);
+    return which === "churn" ? after.churn.length : after.grow.length;
+  };
 
-  const columns: Column<(typeof rows)[number]>[] = [
-    { label: "Space", width: "92px", className: "mono tnum", cell: (s) => s.mine
-        ? <Link to={`/won-customers/${ours.get(s.space_seq)}`} title="수주 고객">{s.space_seq}</Link>
-        : <span title="허브스팟 연락처의 「space seq」 칸으로 찾습니다">{s.space_seq}</span> },
-    { label: "플랜", width: "180px", cell: (s) => (
-        <span className="row" style={{ gap: 6 }}>
-          <Pill tone={s.ent ? "accent" : s.tier === "free" ? "info" : "ok"}>{TIER[s.tier] ?? s.tier}</Pill>
-          {s.plan_name && s.tier === "enterprise" && <span className="t-xs td-subtle truncate" title={s.plan_name}>{s.plan_name}</span>}
-          {s.sub_status && s.sub_status !== "active" && <span className="t-xs td-subtle">{s.sub_status}</span>}
-        </span>) },
-    { label: "30일 크레딧", width: "120px", className: "tnum", headClassName: "th-right", cell: (s) => (
-        <span style={{ display: "block", textAlign: "right" }}><strong>{num(s.credits_30d)}</strong></span>) },
-    { label: "90일", width: "90px", className: "tnum", headClassName: "th-right", cell: (s) => <span style={{ display: "block", textAlign: "right" }}>{num(s.credits_90d)}</span> },
-    { label: "내보내기 30일 / 6개월", width: "130px", className: "tnum", headClassName: "th-right", cell: (s) => (
-        <span style={{ display: "block", textAlign: "right" }}>{num(s.exports_30d)} <span className="td-subtle">/ {num(s.exports_6m)}</span>
-          {s.failed_6m > 0 && <span className="t-xs td-subtle"> · 실패 {s.failed_6m}</span>}</span>) },
-    { label: "사용자 · 멤버 · 좌석", width: "120px", className: "tnum", cell: (s) => `${s.users} · ${s.members} · ${s.seat}` },
-    { label: "마지막 작업", width: "110px", className: "mono nowrap", cell: (s) => s.last_job ?? "—" },
-    { label: "주 언어쌍", width: "150px", cell: (s) => <span title={s.top_pair ?? ""}>{pairName(s.top_pair)}</span> },
-    { label: "신호", cell: (s) => (
-        <span className="row" style={{ gap: 4, flexWrap: "wrap" }}>
-          {s.signals.map((k) => { const g = SIGNALS.find((x) => x.key === k)!; return <Pill key={k} tone={g.tone} title={g.hint}>{g.label}</Pill>; })}
-          {s.mine && <Pill tone="ok" title="수주 고객에 이 space_seq 가 적혀 있습니다">우리 고객</Pill>}
-        </span>) },
-  ];
+  const card = CARDS[tab];
+  const list = lists[tab];
+  const shown = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return list ?? [];
+    return (list ?? []).filter((row) => ("space_seq" in row
+      ? String(row.space_seq).includes(q)
+      : `${row.company} ${row.clientId}`.toLowerCase().includes(q)));
+  }, [list, query]);
 
-  const asOf = sales.data && stamp(sales.data.snapshot_at);
+  const snapshot = sales.data?.snapshot_at ?? null;
+  const notConnected = usage.configured === false || !!usage.problem;
+  const problem = sales.problem ?? summary.problem ?? (rules.problem && `판정 기준을 못 읽었습니다: ${rules.problem}`);
+  const blocked = notConnected || !!problem;
+  const loading = !blocked && (!list || usage.busy);
+  const creditsFrom = summary.index?.creditsFrom?.slice(0, 7) ?? null;
+  const tabRules = (rules.list ?? []).filter((r) => r.tab === tab);
 
   return (
-    <>
-      <div className="page-header">
-        <div>
-          <h1 className="page-title">영업 인사이트</h1>
-          {asOf && <div className="t-sm td-subtle" style={{ marginTop: 4 }}>데이터 기준 <strong>{asOf}</strong></div>}
-        </div>
+    <div className="ins">
+      <div className="head">
+        <h1>영업 인사이트</h1>
+        {snapshot && <div className="meta">데이터 기준 <b className="num">{stamp(snapshot)}</b> · 최근 6개월</div>}
       </div>
 
-      {(usageSource.configured === false || usageSource.problem) && (
-        <div className="card card--warn mb-gap">
-          <strong>사용 데이터가 연결돼 있지 않습니다.</strong>
-          <div className="t-sm td-subtle" style={{ marginTop: 6 }}>
-            이 화면의 값은 전부 매일 가공된 스냅샷을 브라우저가 GitHub 에서 직접 받아 그립니다 — 서버는 그 데이터를 모릅니다.{" "}
-            <Link to="/data">「데이터 분석」</Link> 화면을 보세요.
-            {usageSource.problem && <> · 사유: {usageSource.problem}</>}
-          </div>
+      {notConnected && (
+        <div className="notice">
+          <strong>사용 데이터가 연결돼 있지 않습니다.</strong> 이 화면의 값은 전부 매일 가공된 스냅샷을 브라우저가
+          GitHub 에서 직접 받아 그립니다 — 서버는 그 데이터를 모릅니다. <Link to="/data">「데이터 분석」</Link> 화면을 보세요.
+          {usage.problem && <> · 사유: {usage.problem}</>}
         </div>
       )}
-      {(usageSource.busy || sales.busy) && <div className="card mb-gap">불러오는 중…</div>}
-      {sales.problem && <div className="card card--warn mb-gap">가져오지 못했습니다: {sales.problem}</div>}
+      {problem && <div className="notice">가져오지 못했습니다: {problem}</div>}
 
-      {d && (
-        <>
-          <section className="card mb-gap">
-            <div className="section-header" style={{ marginBottom: 10 }}>
-              <div className="section-header__l">
-                <div>
-                  <div className="section-header__title">주목할 스페이스</div>
-                  <div className="section-header__sub">
-                    6개월 안에 내보내기가 있는 스페이스 {num(d.spaces_active_6m)}개 중 눈에 띄는 {num(d.spaces?.length ?? 0)}개 — 그중 우리 기록에 없는 것.
-                    Space 번호는 허브스팟 연락처의 「space seq」 칸으로 사람에게 이어집니다.
-                  </div>
-                </div>
-              </div>
-              <label className="row t-sm" style={{ gap: 6, cursor: "pointer" }}>
-                <input type="checkbox" checked={includeOurs} onChange={(e) => setIncludeOurs(e.target.checked)} /> 우리 고객도 보기
-              </label>
-            </div>
-            <div className="chip-row" style={{ marginBottom: 12 }}>
-              <button type="button" className={`chip${signal === "all" ? " is-active" : ""}`} onClick={() => setSignal("all")}>전체 {num(rows.length)}</button>
-              {SIGNALS.map((g) => (
-                <button key={g.key} type="button" className={`chip${signal === g.key ? " is-active" : ""}`} title={g.hint}
-                        onClick={() => setSignal(g.key)}>{g.label} {num(counts[g.key] ?? 0)}</button>
-              ))}
-            </div>
-            <DataTable columns={columns} rows={rows.slice(0, limit)} rowKey={(s) => s.space_seq}
-                       empty="해당하는 스페이스가 없습니다." />
-            {rows.length > limit && (
-              <div style={{ marginTop: 10 }}>
-                <button type="button" className="btn btn--sm" onClick={() => setLimit(limit + 60)}>더 보기 (남은 {num(rows.length - limit)})</button>
-              </div>
-            )}
-          </section>
-        </>
-      )}
-    </>
+      <section className="points" role="tablist" aria-label="영업 인사이트">
+        {TABS.map((key) => {
+          const c = CARDS[key];
+          const list = lists[key];
+          return (
+            <button key={key} type="button" role="tab" aria-selected={tab === key}
+                    className={`pt${tab === key ? " on" : ""}`}
+                    onClick={() => { setTab(key); setQuery(""); }}>
+              <span className="lb">{c.name}</span>
+              <span className="ds">{ruleValues ? c.desc(ruleValues) : " "}</span>
+              <span className="ft">
+                <span className="v num">{list ? num(list.length) : "—"}<span className="unit">{c.todo}</span></span>
+              </span>
+            </button>
+          );
+        })}
+      </section>
+
+      <section className="icard">
+        <div className="card-h">
+          <h2>{card.title}</h2>
+          <div className="tools">
+            <input className="isearch" type="search" aria-label="검색" placeholder={card.search}
+                   value={query} onChange={(e) => setQuery(e.target.value)} />
+          </div>
+        </div>
+        {tabRules.length > 0 && (
+          <RuleLine key={tab} tab={tab} title={card.title} rules={tabRules} note={card.note}
+                    count={lists[tab]?.length ?? null} countWith={countWith(tab)}
+                    onSaveRules={onSaveRules} onSaved={say} />
+        )}
+        <div className="tbl-wrap">
+          <table>
+            <thead>
+              {tab === "up" && <tr><th>SPACE</th><th>플랜</th><th className="r">30일 크레딧</th><th>신호</th></tr>}
+              {tab === "churn" && <tr><th>고객</th><th>플랜</th><th>위험도</th><th>근거</th><th>마지막 활동</th></tr>}
+              {tab === "grow" && <tr><th>고객</th><th>플랜</th><th>우선도</th><th>근거</th><th className="r">잔여 크레딧</th><th>계약 종료</th></tr>}
+            </thead>
+            <tbody>
+              {blocked && <tr><td colSpan={6} className="iempty">데이터를 받지 못해 판정하지 않았습니다</td></tr>}
+              {loading && <tr><td colSpan={6} className="iempty">불러오는 중…</td></tr>}
+              {!blocked && !loading && !shown.length && <tr><td colSpan={6} className="iempty">해당하는 항목이 없습니다</td></tr>}
+              {!blocked && !loading && ruleValues && shown.map((row) => {
+                if ("space_seq" in row) {
+                  return (
+                    <tr key={row.key}>
+                      <td><span className="sp num" title="허브스팟 연락처의 「space seq」 칸으로 사람에게 이어집니다">{row.space_seq}</span>
+                        {row.isNew && <span className="new" title="첫 작업이 30일 안인 스페이스">NEW</span>}</td>
+                      <td><PlanTag plan={TIER[row.tier] ?? row.tier} /></td>
+                      <td className="r num"><span className="big">{num(row.credits30d)}</span></td>
+                      <td><Sg tone="up" title={`Pro 플랜인데 30일에 ${num(ruleValues.upsellCredits30d)} 크레딧 이상`}>셀프서브 대량 사용</Sg></td>
+                    </tr>
+                  );
+                }
+                const who = <td><span className="cname">{row.company}</span><span className="cid num">{row.clientId}</span></td>;
+                if ("risk" in row) {
+                  return (
+                    <tr key={row.key}>
+                      {who}<td><PlanTag plan={row.plan} /></td><td>{RISK[row.risk]}</td>
+                      <td><ChurnWhy row={row} idleDays={ruleValues.churnIdleDays} /></td>
+                      <td className="num">{row.lastActivity ?? <span className="mut">없음</span>}</td>
+                    </tr>
+                  );
+                }
+                return (
+                  <tr key={row.key}>
+                    {who}<td><PlanTag plan={row.plan} /></td><td>{PRIORITY[row.priority]}</td>
+                    <td><GrowWhy row={row} renewalDays={ruleValues.renewalDays} /></td>
+                    <td className="r num">{num(row.remaining)}<span className="unit">/ {num(row.credits)}</span></td>
+                    <td className="num">{row.end ?? "—"}{row.daysLeft !== null && <span className="mut"> D-{row.daysLeft}</span>}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+        <div className="tfoot">
+          <span>{list ? `${num(shown.length)}곳` : ""}</span>
+          {tab === "up" && ruleValues && upsellMaybeCut(sales.data?.data.spaces, ruleValues) && (
+            <span className="warnline">
+              가공 데이터가 후보를 {CANDIDATE_CAP}곳까지만 담습니다 — 지금 기준에서 30일 크레딧이 낮은 쪽 후보가 빠졌을 수 있습니다
+            </span>
+          )}
+          {tab !== "up" && judged && (
+            <span>
+              {[
+                judged.undetermined > 0 &&
+                  `판정 불가 ${judged.undetermined}곳 · 계약 크레딧·기간 없음 또는 ${creditsFrom ?? "스냅샷 기록"} 이전 시작`,
+                judged.unlinked > 0 && `Space 미연결 ${judged.unlinked}곳`,
+                judged.unknown > 0 && `스냅샷에 없음 ${judged.unknown}곳`,
+              ].filter(Boolean).join(" · ")}
+            </span>
+          )}
+        </div>
+      </section>
+
+      {toast && <div className="toast" role="status">{toast}</div>}
+    </div>
   );
 }

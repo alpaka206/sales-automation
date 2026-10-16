@@ -615,6 +615,9 @@ def test_a_button_that_waits_says_so_on_itself():
     """
     import pathlib
 
+    # 두 겹으로 나뉜 화면은 한 화면으로 본다 — 쓰기(postForm)는 서버와 말하는 바깥 겹에, 누르는 버튼은 스냅샷으로
+    # 그리는 안쪽 겹에 있다(영업 인사이트, 2026-10-15 — `tests/test_usage_data_stays_off_server.py`).
+    layered = {"frontend/src/screens/SalesInsights.tsx": pathlib.Path("frontend/src/screens/insights")}
     silent: list[str] = []
     for path in sorted(pathlib.Path("frontend/src").rglob("*.tsx")):
         source = path.read_text(encoding="utf-8")
@@ -623,6 +626,9 @@ def test_a_button_that_waits_says_so_on_itself():
         )
         if not writes:
             continue
+        inner = layered.get(path.as_posix())
+        if inner is not None:
+            source += "".join(part.read_text(encoding="utf-8") for part in sorted(inner.glob("*.tsx")))
         if "ActionButton" in source or 'className="spinner"' in source:
             continue
         silent.append(path.as_posix())

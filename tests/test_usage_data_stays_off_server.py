@@ -433,3 +433,34 @@ def test_the_sales_insights_screen_is_two_layers():
     # 라우트는 바깥 겹을 그린다 — 안쪽을 바로 그리면 서버에서 받을 것을 받을 자리가 없다.
     main = (FRONT / "main.tsx").read_text(encoding="utf-8")
     assert 'import { SalesInsights } from "./screens/SalesInsights";' in main
+
+
+# 바깥 겹이 서버로 보내는 곳 — 경로와 그 몸통. 단계마다 하나씩 늘어난다(기준 → 상태 · 메모 → 복사 기록).
+INSIGHT_ROUTES = ("/operations/insights/rules",)
+RULE_LINE = INSIGHTS_DIR / "RuleLine.tsx"
+# 스스로 도는 코드 — 사람이 누르지 않았는데 무언가를 보낼 수 있는 자리.
+SELF_RUNNING = ("useEffect", "useLayoutEffect", "setTimeout", "setInterval", "requestAnimationFrame")
+
+
+def test_the_insights_screen_sends_only_what_a_person_typed_into_the_rule_line():
+    """영업 인사이트가 서버로 보내는 것은 **사람이 「기준 수정」 칸에 적은 숫자**다 (2026-10-15 운영자 조건 2 · 3:
+    「기준값은 서버에 저장하고 화면에서 바꿀 수 있게」 · 「스냅샷 숫자를 서버로 보내지 마」).
+
+    - 바깥 겹(`SalesInsights.tsx`)이 부르는 쓰기는 허락된 경로뿐이고, 기준의 몸통은 서버가 준 그 카드의 기준 열쇠로만
+      짓는다 — 안쪽이 다른 칸을 넘겨도 실리지 않는다.
+    - 안쪽에서 그 저장을 부르는 곳은 `RuleLine.tsx` 하나이고, 전부 버튼의 `onClick` 안이며, 그 파일에는 스스로 도는
+      코드가 없다. 확인 창의 「지금 N곳 → 바꾼 뒤 M곳」은 이 브라우저에서 센 값이라 어디로도 안 간다.
+    """
+    outer = _code(INSIGHTS.read_text(encoding="utf-8"))
+    routes = re.findall(r"postForm\(\s*[\"'`]([^\"'`]+)[\"'`]", outer)
+    assert routes and set(routes) <= set(INSIGHT_ROUTES), routes
+    assert "rule.tab === tab && rule.key in values" in outer, "기준의 몸통을 서버가 준 열쇠로 거르지 않습니다"
+    assert "getJSON(" in outer or "useInsightRules" in outer
+
+    callers = [path.name for path in INSIGHTS_SIDE if "onSaveRules(" in _code(path.read_text(encoding="utf-8"))]
+    assert callers == [RULE_LINE.name], f"기준 저장을 부르는 곳은 RuleLine.tsx 하나입니다: {callers}"
+    line = _code(RULE_LINE.read_text(encoding="utf-8"))
+    calls = [text for text in line.splitlines() if "onSaveRules(" in text]
+    assert calls and all("onClick={" in text for text in calls), f"기준 저장이 버튼의 onClick 밖에서 불립니다: {calls}"
+    for needle in SELF_RUNNING:
+        assert needle not in line, f"RuleLine.tsx 가 스스로 돕니다: {needle}"
