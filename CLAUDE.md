@@ -1732,9 +1732,10 @@ PERSO Inbound is a FastAPI workflow for inbound inquiry handling and customer op
   번호로 고정한 `actions/*` 뿐이고, 방아쇠는 예약 · 손 실행뿐이고, 원본을 지운 뒤 새 폴더에서 훅 없이 **자기 레포의
   `data`** 로만 민다 ⑥ 가공기 · 화면 · 배포 설정에 토큰처럼 생긴 글자가 없다 ⑦ 아래 자동 대조의 경로 둘 · 칸 다섯
   ⑧ 아래 영업 인사이트 — 안쪽 겹(`screens/insights/`)은 폴더째 데이터 쪽, 바깥 겹은 사용 데이터 모듈 중 안쪽 화면만
-  import, 서버와 말하는 모듈(`usageSource.ts` · `insightRules.ts` · `insightMarks.ts`)과 데이터 모듈은 서로를 (타입 말고는)
+  import, 서버와 말하는 모듈(`usageSource.ts` · `insightRules.ts` · `insightMarks.ts` · `insightDrafts.ts`)과 데이터 모듈은 서로를 (타입 말고는)
   import 하지 않고, 서버로 가는 것은 기준 숫자(`RuleLine.tsx`) · 줄의 열쇠와 상태 · 메모(`Drawer.tsx`) · 복사한 초안의
-  제목(`MailDraft.tsx`)뿐 — 각자 한 파일의 `onClick` · `onChange` 안, 그 파일에 스스로 도는 코드 없음, 몸통 칸 여섯,
+  제목(`MailDraft.tsx`) · 사람이 고친 메일 기본 문구(`DraftEditor.tsx`)뿐 — 각자 한 파일의 `onClick` · `onChange` 안, 그 파일에
+  스스로 도는 코드 없음, 몸통 칸 여섯(기본 문구는 서버가 준 칸 이름으로만),
   표에 사용량 칸 없음, `mailto:` 없음. `tests/test_usage_source.py` 가 라우트(비었으면
   null · 언제나 `no-store` 한 줄 · ETag 없음 · 로그인 관문 · 로그에 안 남음)를, CI 의 `exporter` 잡이 가공기를,
   `frontend/test/usageMerge.test.ts` · `usageData.test.ts` 가 합치기 규칙과 받기를 고정한다.
@@ -1867,9 +1868,35 @@ PERSO Inbound is a FastAPI workflow for inbound inquiry handling and customer op
   - **메일은 보내지 않는다 — 초안을 복사만 한다** (운영자 조건 3). 창(`MailDraft.tsx`)은 한 곳(상세 패널) · 카드 공통 ·
     고른 N곳(체크박스, {고객명}이 곳마다 바뀐다), 한국어 / English. 보내기 단추도 `mailto:` 도 없고 브라우저 클립보드로만
     넣는다. 복사하면 `POST /operations/insights/copies`(tab · 그 줄의 열쇠 · subject — 본문은 안 간다)가 기록 한 줄
-    「메일 초안 복사 · <제목>」을 남긴다(카드 공통은 기록 없음). 문구는 결정 ④대로 목업 그대로 코드(`insights/mail.ts`)에
-    있고 고치려면 배포가 필요하다 — 「정책 · 템플릿」에서 고치게 하는 것은 다음 일이다. 문구에 사용량 숫자는 없다(테스트).
+    「메일 초안 복사 · <제목>」을 남긴다(카드 공통은 기록 없음). 창에서 제목 · 본문을 고치면 **이번 복사에만** 쓰인다.
     **확인 못 한 것**: 업셀링 문구의 Business 플랜 혜택(월 크레딧이 더 크고 · 우선 처리 · 전담 매니저)이 지금 요금제와 맞는지.
+  - **문구는 「메일 초안」 창의 「기본 문구 수정」에서 고친다 — 서버의 따로 둔 표에 산다** (2026-10-16 운영자: 「메일 초안
+    문구를 영업 인사이트 화면에서 고칠 수 있게 바꿔줘 (어제 ④ 결정 변경)」 → 「「기준 수정」 옆 버튼 말고, 「메일 초안」 창
+    안에 「기본 문구 수정」 버튼을 두고 그 창이 편집 모드로 바뀌게. 확인창에 "이 탭의 모든 초안에 적용됩니다" 표시」).
+    - **칸** = 카드 × 언어(한국어 · English) × 부분 — 제목 · 공통 문단(인사 · `{근거}` · 맺음말의 틀) · 근거별 문단(업셀링
+      한 곳 near / 공통 gen, 이탈 방지 idle · under · gen, 추가 계약 short · renew · gen). 모두 28칸. 칸의 목록 · 이름 ·
+      기본 문구는 `src/db/insight_drafts.py` 한 곳이고, 고친 칸만 표 `insight_drafts`(이관 0134)에 산다 — 기본 문구와 같은
+      글로 저장하면 행을 지운다(「기본 문구로 되돌리기」). 읽기 `GET /api/ui/insight-drafts`, 쓰기
+      `POST /operations/insights/drafts`(폼 — 칸 이름 `ko.subject` · `en.reason.idle` …).
+    - **화면은 문구를 들고 있지 않다** — `insights/mail.ts` 는 근거 문단 하나를 골라(`reasonFor`) `{근거}` 자리에 넣고
+      `{고객명}`(이탈 방지 · 추가 계약은 회사 이름, 업셀링은 「Space 번호」, 카드 공통 · 여러 곳은 그대로 — 여러 곳은 복사할 때
+      곳마다)을 채우기만 한다. 화면 코드에 문구가 남으면 테스트가 빨개진다(`test_the_screen_holds_no_mail_wording_of_its_own`).
+    - **검사**(서버가 마지막 관문, 편집 창이 같은 말로 먼저): 공통 문단의 `{근거}` 는 정확히 한 번 · 자리표시는 `{고객명}` ·
+      `{근거}` 뿐(모르는 것은 쓸 수 있는 목록과 함께 거절 — 그 글자가 고객에게 복사된다) · `{근거}` 는 공통 문단에만 · 제목은
+      한 줄 · 빈칸 · 길이(제목 200 · 공통 문단 4,000 · 근거 2,000). 전부 검사한 뒤에 쓴다.
+    - **편집 모드**(`insights/DraftEditor.tsx`): 고칠 언어 · 「이 탭의 모든 초안이 이 문구로 만들어집니다 · 날짜 사람 수정」 ·
+      자리표시 안내 · 칸들 · 「기본 문구로 되돌리기」(채우기만) · 「취소」 · 「저장」 → 확인창 「이 탭의 모든 초안에
+      적용됩니다.」 + 바뀌는 칸 목록 → 「바꾸기」 → 창이 새 문구로 다시 열린다. 편집 중에는 바깥 누름 · Esc 로 안 닫힌다.
+      저장을 부르는 곳은 그 파일의 「바꾸기」 하나(안전 검사 테스트).
+    - **기록**: 바뀐 칸마다 `insight_log`(action `draft`)에 「초안 문구 변경: 이탈 방지 · 한국어 · 제목」과 **바꾸기 전 글** —
+      화면에는 안 보이고 실수를 되돌릴 때 DB 에서 찾는다. 상세 패널이 읽는 줄의 기록에는 안 섞인다.
+    - **이메일 템플릿 표와 따로인 이유**: 인바운드 답장의 문서 정리기는 `email_templates` 의 행을 전부 읽는다
+      (`src/llm/organizer.py`). `src/llm` · `src/agents` 는 영업 인사이트의 표 · 모듈을 이름으로조차 모른다
+      (`tests/test_insight_drafts.py::test_the_inbound_reply_ai_never_reads_the_sales_drafts`).
+    - **기본 문구** = 2026-10-15 목업 문구에서 회사 이름만 — 「[Perso AI]」 → 「[Perso Dubbing]」, 「Perso AI 더빙 팀」 · 「Perso
+      AI 팀」 → 「Perso Dubbing 팀」, 「Perso AI 더빙을」 → 「Perso Dubbing을」, 「Perso AI Dubbing」 → 「Perso Dubbing」, 「Perso AI
+      Team」 → 「Perso Dubbing Team」(16가지 조합 전부 옛 문구와 맞대 확인). 기본 문구에 사용량 숫자는 없다(테스트). 기본 문구
+      자체를 바꾸려면 여전히 배포가 필요하다 — 고친 문구는 배포 없이 바로 쓰인다.
   - 스타일은 `src/api/static/insights.css`(전부 `.ins` 아래, won.css 와 같은 방식). console.css 와 이름이 겹친 여섯은
     바꿨다(`btn` · `card` · `empty` · `modal` · `pill` · `search` → `ibtn` · `icard` · `iempty` · `imodal` · `ipill` ·
     `isearch`) — 겹친 채면 콘솔 카드의 안쪽 여백 같은 것이 흘러 들어온다. 다크 모드 값은 안 옮겼다(콘솔이 밝은 화면 하나).
@@ -1881,7 +1908,8 @@ PERSO Inbound is a FastAPI workflow for inbound inquiry handling and customer op
   - **알고 두는 한계**: 가공 파일은 후보를 300곳까지만 담는다(그날 265곳 안팎 — 닿으면 표 아래에 적는다, 가공기는 이번에
     안 고쳤다). 85% 기준에서 사용중 고객 대부분이 「잔여 예상」이라(2026-10-15 실측 15곳 중 12곳) 기준이 넓은지는 쓰면서
     봐야 한다. 자동 확인 브라우저(화면 없는 엣지)에는 클립보드 권한이 없어 복사는 가짜 클립보드로만 쟀다.
-  - 고정: `tests/test_insights.py`(기준 · 상태 · 메모 · 복사 기록의 서버 규칙) · `tests/test_sales_insights.py`(무엇을 후보로
+  - 고정: `tests/test_insights.py`(기준 · 상태 · 메모 · 복사 기록의 서버 규칙) · `tests/test_insight_drafts.py`(기본 문구 ·
+    검사 · 기록 · AI 와 분리) · `tests/test_sales_insights.py`(무엇을 후보로
     세우나) · `tests/test_usage_data_stays_off_server.py`(위 ⑧) · `tests/test_db_migrate.py` 의 `TestInsightTables` ·
     `TestInsightMarks` · `frontend/test/insights.test.ts`(판정 · 처리한 줄 · 버튼 · 문구).
 - **작업 성공률 100% 는 진짜다 — 틀린 것은 그 옆 패널이었다** (2026-09-21 운영자: 「작업
