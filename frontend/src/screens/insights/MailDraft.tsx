@@ -8,11 +8,14 @@
 // **이 파일이 「복사했다」를 밖으로 내보내는 유일한 자리입니다** — 「복사」 단추의 `onClick` 안의 `onCopied(…)` 이고
 // (그 줄의 열쇠와 초안의 제목만), 스스로 도는 것(효과 훅 · 타이머)이 없습니다. 카드 공통 초안은 기록하지 않습니다 —
 // 어느 곳의 일도 아닙니다(`tests/test_usage_data_stays_off_server.py`).
+//
+// 문구는 서버에 저장된 기본 문구(`templates`, 2026-10-16)로 `mail.ts` 가 조립합니다. 이 창에서 제목 · 본문을 고치면
+// **이번 복사에만** 쓰입니다.
 import { useState } from "react";
 import type { MarkTarget } from "../../lib/insightMarks";
 import type { Rules } from "../won/usage";
 import type { ContractRow, Tab, UpRow } from "./judge";
-import { NAME_SLOT, draftFor, placeName, type Lang } from "./mail";
+import { NAME_SLOT, draftFor, placeName, type Lang, type Templates } from "./mail";
 
 export type MailMode =
   | { kind: "row"; tab: Tab; row: UpRow | ContractRow; email: string | null }
@@ -34,17 +37,20 @@ async function copy(text: string): Promise<boolean> {
 
 const NO_ADDRESS = "받는 사람 이메일은 데이터에 없습니다. 복사한 뒤 직접 입력해 보내세요.";
 
-export function MailDraft({ mode, lang, rules, onLang, onCopied, onSaid, onClose }: {
+export function MailDraft({ mode, lang, rules, templates, onLang, onCopied, onSaid, onClose }: {
   mode: MailMode;
   lang: Lang;
   rules: Rules;
+  /** 서버에 저장된 기본 문구(`GET /api/ui/insight-drafts`) — 바깥 겹이 받아 내려 준다. */
+  templates: Templates;
   onLang: (lang: Lang) => void;
   /** 「복사했다」 기록 — 그 줄의 열쇠와 초안의 제목만 간다. 메일은 안 보낸다. */
   onCopied: (target: MarkTarget, subject: string) => Promise<unknown>;
   onSaid: (message: string) => void;
   onClose: () => void;
 }) {
-  const start = draftFor(mode.tab, mode.kind === "row" ? mode.row : null, lang, rules);
+  const start = draftFor(mode.tab, mode.kind === "row" ? mode.row : null, lang, rules, templates)
+    ?? { subject: "", body: "" };
   const [subject, setSubject] = useState(start.subject);
   const [body, setBody] = useState(start.body);
   const [copied, setCopied] = useState<Set<number>>(new Set());
@@ -54,8 +60,9 @@ export function MailDraft({ mode, lang, rules, onLang, onCopied, onSaid, onClose
   const logged = (message: string) => [said(message), said(`${message} — 기록은 남기지 못했습니다`)] as const;
   const title = mode.kind === "row" ? `메일 초안 · ${placeName(mode.row)}`
     : mode.kind === "tab" ? `메일 초안 · ${mode.title} 공통` : `메일 초안 · ${mode.rows.length}곳`;
-  const usesName = body.includes(NAME_SLOT);
-  const textFor = (row: UpRow | ContractRow) => `${subject}\n\n${body.split(NAME_SLOT).join(placeName(row))}`;
+  const usesName = subject.includes(NAME_SLOT) || body.includes(NAME_SLOT);
+  const named = (text: string, row: UpRow | ContractRow) => text.split(NAME_SLOT).join(placeName(row));
+  const textFor = (row: UpRow | ContractRow) => `${named(subject, row)}\n\n${named(body, row)}`;
 
   return (
     <div className="imodal" role="dialog" aria-modal="true" aria-label={title}
@@ -83,6 +90,7 @@ export function MailDraft({ mode, lang, rules, onLang, onCopied, onSaid, onClose
             <label htmlFor="ins-mail-body">본문</label>
             <div>
               <textarea id="ins-mail-body" value={body} onChange={(e) => setBody(e.target.value)} />
+              <div className="hint ok">여기서 고친 글은 이번 복사에만 쓰입니다.</div>
               {mode.kind === "row" && (
                 <div className="hint ok">
                   {mode.email ? `받는 사람: ${mode.email} — 수주 고객에 적힌 주소입니다. 복사한 뒤 메일 프로그램에서 직접 넣어 보내세요.` : NO_ADDRESS}
@@ -101,7 +109,7 @@ export function MailDraft({ mode, lang, rules, onLang, onCopied, onSaid, onClose
                     <div key={row.key} className="rli">
                       <span>{placeName(row)}</span>
                       <button type="button" className="ibtn" disabled={copied.has(row.key)}
-                              onClick={() => { void copy(textFor(row)).then((ok) => { if (!ok) return failedCopy(); setCopied(new Set(copied).add(row.key)); void onCopied(targetOf(mode.tab, row), subject).then(...logged(`${placeName(row)} 초안을 복사했습니다`)); }); }}>
+                              onClick={() => { void copy(textFor(row)).then((ok) => { if (!ok) return failedCopy(); setCopied(new Set(copied).add(row.key)); void onCopied(targetOf(mode.tab, row), named(subject, row)).then(...logged(`${placeName(row)} 초안을 복사했습니다`)); }); }}>
                         {copied.has(row.key) ? "복사됨" : "이 곳 초안 복사"}
                       </button>
                     </div>

@@ -248,51 +248,59 @@ describe("상세 패널의 버튼 — 목업의 acts", () => {
   });
 });
 
-// ── 메일 초안 (복사만) ────────────────────────────────────────────────────
-import { NAME_SLOT, draftFor, placeName } from "../src/screens/insights/mail";
+// ── 메일 초안 (복사만) — 서버에 저장된 기본 문구로 조립만 한다 (2026-10-16) ─────────────────
+// 문구 자체(기본 문구 · 회사 이름)는 서버 테스트(`tests/test_insight_drafts.py`)가 고정한다. 여기는 **어느 근거 문단을
+// 고르고 자리표시를 어떻게 채우나**만 본다 — 그래서 문구는 일부러 지어낸 짧은 글이다.
+import { NAME_SLOT, draftFor, placeName, reasonFor, templatesFrom } from "../src/screens/insights/mail";
 
-describe("메일 초안 — 목업 문구 그대로, 줄의 근거에 맞춰 고르고, 사용량 숫자는 안 넣는다", () => {
+describe("메일 초안 — 서버 문구로 조립: 근거 문단 하나를 골라 {근거} 자리에, 이름은 {고객명} 자리에", () => {
+  const T = templatesFrom((["up", "churn", "grow"] as const).flatMap((tab) => (["ko", "en"] as const).flatMap((lang) => [
+    { tab, lang, part: "subject", value: `${tab}-${lang} 제목 {고객명}` },
+    { tab, lang, part: "body", value: `안녕 {고객명}\n{근거}\n끝` },
+    ...["near", "gen", "idle", "under", "short", "renew"].map((reason) => ({ tab, lang, part: `reason.${reason}`, value: `<${reason}>` })),
+  ])));
   const upRow = upsellRows([salesSpace({ space_seq: 1001 })], new Set(), RULES, AS_OF)[0];
-  const base = contractRows([row({}, { ends_on: "2026-10-01", plan_ends_on: "2026-10-01" })],
-    index(summary({ used_total: 20_000 })), { ...RULES, renewalDays: 999 });
-  const churnRow = contractRows([row()], index(summary({ used_total: 20_000 })), RULES).churn[0];
+  const churnRow = contractRows([row()], index(summary({ used_total: 20_000 })), RULES).churn[0]; // 무활동 2일
+  const growRow = contractRows([row({}, { ends_on: "2026-10-01", plan_ends_on: "2026-10-01" })],
+    index(summary({ used_total: 60_000 })), { ...RULES, renewalDays: 999 }).grow[0];          // 종료만 가깝다
 
-  it("업셀링 — 줄이면 「PRO 한도에 가깝게」, 카드 공통이면 「활발히」", () => {
-    expect(draftFor("up", upRow, "ko", RULES).subject).toBe("[Perso AI] Business 플랜 안내드립니다");
-    expect(draftFor("up", upRow, "ko", RULES).body).toContain("PRO 플랜의 월 한도에 가깝게");
-    expect(draftFor("up", null, "ko", RULES).body).toContain("활발히 이용하고");
-    expect(draftFor("up", upRow, "en", RULES).subject).toBe("Getting more out of Perso AI Dubbing");
-    expect(draftFor("up", upRow, "en", RULES).body).toContain("close to the monthly limit of the PRO plan");
+  it("업셀링 — 한 곳이면 near, 카드 공통 · 여러 곳이면 gen. 이름은 「Space 번호」", () => {
+    expect(draftFor("up", upRow, "ko", RULES, T)).toEqual({ subject: "up-ko 제목 Space 1001", body: "안녕 Space 1001\n<near>\n끝" });
+    expect(draftFor("up", null, "en", RULES, T)).toEqual({ subject: "up-en 제목 {고객명}", body: "안녕 {고객명}\n<gen>\n끝" });
   });
 
-  it("이탈 방지 — 무활동이 기준 이상이면 「한 달 넘게 이용이 없으신」, 아니면 「크레딧 사용이 여유」 · 회사 이름이 들어간다", () => {
+  it("이탈 방지 — 무활동이 「위험 높음」 기준 이상(또는 기록 없음)이면 idle, 아니면 under", () => {
     expect(churnRow.daysIdle).toBe(2);
-    expect(draftFor("churn", churnRow, "ko", RULES).body).toContain("크레딧 사용이 여유 있으신");
-    expect(draftFor("churn", churnRow, "ko", RULES).body).toContain("안녕하세요, 가나 스튜디오 담당자님.");
-    // 「한 달」의 기준은 화면의 「위험 높음 = 무활동 N일」 기준과 같다 — 목업처럼 30을 박지 않는다.
-    expect(draftFor("churn", churnRow, "ko", { ...RULES, churnIdleDays: 2 }).body).toContain("한 달 넘게 더빙 이용이 없으신");
-    expect(draftFor("churn", churnRow, "en", RULES).body).toContain("Hi 가나 스튜디오 team,");
+    expect(reasonFor("churn", churnRow, RULES)).toBe("under");
+    expect(reasonFor("churn", churnRow, { ...RULES, churnIdleDays: 2 })).toBe("idle"); // 목업처럼 30을 박지 않는다
+    expect(reasonFor("churn", { ...churnRow, daysIdle: null }, RULES)).toBe("idle");
+    expect(draftFor("churn", churnRow, "ko", RULES, T)?.body).toBe("안녕 가나 스튜디오\n<under>\n끝");
   });
 
-  it("추가 계약 — 부족 예상 · 초과사용이면 「일찍 소진」, 종료만 가까우면 「갱신 조건」", () => {
-    expect(draftFor("grow", { ...base.grow[0], forecast: "부족 예상" }, "ko", RULES).body).toContain("예정보다 일찍 소진");
-    expect(draftFor("grow", base.grow[0], "ko", RULES).body).toContain("계약 종료일이 다가오고");
-    expect(draftFor("grow", null, "en", RULES).subject).toBe("[Perso AI] Additional credits and renewal options");
+  it("추가 계약 — 부족 예상 · 초과사용이면 short, 종료가 기준 이내면 renew, 아니면 gen", () => {
+    expect(reasonFor("grow", growRow, RULES)).toBe("renew");
+    expect(reasonFor("grow", { ...growRow, forecast: "부족 예상" }, RULES)).toBe("short");
+    expect(reasonFor("grow", { ...growRow, level: "초과사용" }, RULES)).toBe("short");
+    expect(reasonFor("grow", { ...growRow, daysLeft: 120 }, RULES)).toBe("gen");
+    expect(reasonFor("grow", null, RULES)).toBe("gen");
   });
 
-  it("여러 곳 초안은 이름 자리를 두고 복사할 때 곳마다 바꾼다", () => {
-    expect(draftFor("churn", null, "ko", RULES).body).toContain(`안녕하세요, ${NAME_SLOT} 담당자님.`);
-    expect(draftFor("up", null, "ko", RULES).body).not.toContain(NAME_SLOT); // 업셀링 문구에는 이름이 없다
+  it("근거 문단 안의 {고객명} 도 채운다 — 이름은 근거 문단을 넣은 뒤에 채운다", () => {
+    const named = { ...T!, "churn.ko.reason.under": "<{고객명} 님의 크레딧>" };
+    expect(draftFor("churn", churnRow, "ko", RULES, named)?.body).toBe("안녕 가나 스튜디오\n<가나 스튜디오 님의 크레딧>\n끝");
+  });
+
+  it("문구를 못 받았으면 초안을 만들지 않는다(null) — 빈 창을 열지 않는다", () => {
+    expect(templatesFrom(null)).toBeNull();
+    expect(templatesFrom([])).toBeNull();
+    expect(draftFor("up", upRow, "ko", RULES, null)).toBeNull();
+    const { ["grow.en.reason.renew"]: _gone, ...partial } = T!;
+    expect(draftFor("grow", growRow, "en", RULES, partial)).toBeNull();
+  });
+
+  it("여러 곳 초안의 곳 이름 — 업셀링은 「Space N」, 수주 고객은 회사 이름", () => {
+    expect(NAME_SLOT).toBe("{고객명}");
     expect(placeName(upRow)).toBe("Space 1001");
     expect(placeName(churnRow)).toBe("가나 스튜디오");
-  });
-
-  it("초안에 사용량 숫자가 없다 — 크레딧 · 소진율 · 남은 날을 말로만", () => {
-    const drafts = [
-      draftFor("up", upRow, "ko", RULES), draftFor("up", upRow, "en", RULES),
-      draftFor("churn", churnRow, "ko", RULES), draftFor("churn", churnRow, "en", RULES),
-      draftFor("grow", base.grow[0], "ko", RULES), draftFor("grow", base.grow[0], "en", RULES),
-    ];
-    for (const d of drafts) expect(`${d.subject}\n${d.body}`).not.toMatch(/\d/);
   });
 });

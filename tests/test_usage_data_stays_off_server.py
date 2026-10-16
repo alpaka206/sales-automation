@@ -79,7 +79,8 @@ DATA_SIDE = (
 SOURCE = FRONT / "lib" / "usageSource.ts"
 # 서버와 말하는 모듈들 — 데이터 모듈을 import 하지 않고, 데이터 모듈도 이것들을 import 하지 않는다. 판정 기준
 # (`insightRules.ts`, 2026-10-15)은 사람이 적은 숫자라 서버에 살고, 화면이 받아서 판정 함수에 넘겨 준다.
-SERVER_SIDE = (SOURCE, FRONT / "lib" / "insightRules.ts", FRONT / "lib" / "insightMarks.ts")
+SERVER_SIDE = (SOURCE, FRONT / "lib" / "insightRules.ts", FRONT / "lib" / "insightMarks.ts",
+               FRONT / "lib" / "insightDrafts.ts")
 API = FRONT / "lib" / "api"
 GITHUB_API = "`https://api.github.com/repos/"
 

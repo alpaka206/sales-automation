@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
+import type { InsightDrafts } from "../../lib/insightDrafts";
 import type { InsightMarks, MarkChange, MarkTarget } from "../../lib/insightMarks";
 import type { InsightRule } from "../../lib/insightRules";
 import { stamp, useSalesInsight } from "../../lib/usageData";
@@ -10,7 +11,7 @@ import type { ListData } from "../won/shared";
 import { ChurnWhy, GrowWhy, PlanTag, PriorityTag, RiskTag, Sg, TIER, num } from "./bits";
 import { Drawer, type DrawerItem } from "./Drawer";
 import { MailDraft, type MailMode } from "./MailDraft";
-import type { Lang } from "./mail";
+import { templatesFrom, type Lang } from "./mail";
 import {
   contractRows, countByStatus, listChurn, listGrow, listUp, markId, upsellMaybeCut, upsellRows, CANDIDATE_CAP, TODO,
   type ChurnRow, type GrowRow, type Listed, type SalesData, type Tab, type UpRow,
@@ -48,6 +49,8 @@ type Props = {
   rules: { list: InsightRule[] | null; problem: string | null; busy: boolean };
   /** `useInsightMarks()` 의 답 그대로 — 줄마다의 상태 · 메모 · 기록과 카드마다의 상태 이름. */
   marks: { data: InsightMarks | null; problem: string | null; busy: boolean };
+  /** `useInsightDrafts()` 의 답 그대로 — 메일 초안의 기본 문구(서버에 저장)와 자리표시 안내. */
+  drafts: { data: InsightDrafts | null; problem: string | null; busy: boolean };
   onSaveRules: (tab: Tab, values: Record<string, number>) => Promise<unknown>;
   onMark: (target: MarkTarget, change: MarkChange) => Promise<unknown>;
   /** 메일 초안을 복사했다는 기록 — 그 줄의 열쇠와 초안의 제목만. 메일은 보내지 않는다(복사만). */
@@ -71,12 +74,14 @@ const CARDS: Record<Tab, Card> = {
 const TABS: Tab[] = ["up", "churn", "grow"];
 type AnyRow = Listed<UpRow> | Listed<ChurnRow> | Listed<GrowRow>;
 
-export function SalesInsightsView({ usage, won, rules, marks, onSaveRules, onMark, onCopied }: Props) {
+export function SalesInsightsView({ usage, won, rules, marks, drafts, onSaveRules, onMark, onCopied }: Props) {
   const sales = useSalesInsight<SalesData>(usage.source);
   // 수주 고객 목록이 쓰는 그 요약 색인 — 활성 계약의 스페이스만 고른다(`useUsageIndex`).
   const spaces = useMemo(() => spacesOfRows(won?.rows), [won?.rows]);
   const summary = useUsageIndex(usage.source, spaces);
   const ruleValues = useMemo(() => rulesFrom(rules.list), [rules.list]);
+  // 메일 초안의 기본 문구 — 못 받았으면 null 이고, 그동안 「메일 초안」 단추가 잠긴다(문구 없이 빈 창을 열지 않는다).
+  const templates = useMemo(() => templatesFrom(drafts.data?.parts), [drafts.data]);
   const markList = marks.data?.marks ?? null;
   // 우리 수주 고객의 space_seq — 활성 계약만이 아니라 모든 계약. 업셀링 후보에서 뺀다.
   const ours = useMemo(() => {
@@ -181,7 +186,8 @@ export function SalesInsightsView({ usage, won, rules, marks, onSaveRules, onMar
   const notConnected = usage.configured === false || !!usage.problem;
   const problem = sales.problem ?? summary.problem
     ?? (rules.problem && `판정 기준을 못 읽었습니다: ${rules.problem}`)
-    ?? (marks.problem && `상태를 못 읽었습니다: ${marks.problem}`);
+    ?? (marks.problem && `상태를 못 읽었습니다: ${marks.problem}`)
+    ?? (drafts.problem && `메일 초안 문구를 못 읽었습니다: ${drafts.problem}`);
   const blocked = notConnected || !!problem;
   const loading = !blocked && (!list || usage.busy);
   const creditsFrom = summary.index?.creditsFrom?.slice(0, 7) ?? null;
@@ -218,7 +224,7 @@ export function SalesInsightsView({ usage, won, rules, marks, onSaveRules, onMar
               <span className="ft">
                 <span className="v num">{todo ? num(todo[TODO] ?? 0) : "—"}
                   <span className="unit">{marks.data?.statuses[key][0]?.label ?? ""}</span></span>
-                <button type="button" className="mbtn" disabled={!ruleValues}
+                <button type="button" className="mbtn" disabled={!ruleValues || !templates}
                         onClick={(e) => { e.stopPropagation(); setMail({ kind: "tab", tab: key, title: c.name }); }}>
                   메일 초안
                 </button>
@@ -256,7 +262,7 @@ export function SalesInsightsView({ usage, won, rules, marks, onSaveRules, onMar
             <span><b className="num">{picked.length}곳</b> 선택됨</span>
             <div className="acts">
               <button type="button" className="ibtn" onClick={() => setSelected(new Set())}>선택 해제</button>
-              <button type="button" className="ibtn pri"
+              <button type="button" className="ibtn pri" disabled={!templates}
                       onClick={() => setMail({ kind: "bulk", tab, rows: shown.filter((r) => selected.has(r.key)) })}>
                 선택한 {picked.length}곳 메일 초안
               </button>
@@ -353,13 +359,13 @@ export function SalesInsightsView({ usage, won, rules, marks, onSaveRules, onMar
         <>
           <div className="scrim" onClick={() => setOpen(null)} />
           <Drawer key={`${tab}:${item.row.key}`} item={item} statuses={statuses} memo={itemMemo} log={itemLog}
-                  rules={ruleValues} onMark={onMark} onSaved={say} onClose={() => setOpen(null)}
+                  rules={ruleValues} onMark={onMark} onSaved={say} onClose={() => setOpen(null)} draftReady={!!templates}
                   onDraft={() => setMail({ kind: "row", tab, row: item.row, email: "space_seq" in item.row ? null : item.row.email })} />
         </>
       )}
-      {mail && ruleValues && (
+      {mail && ruleValues && templates && (
         // 언어를 바꾸면 그 언어의 문구로 다시 연다(목업) — 고쳐 둔 글자는 그 언어의 것이라 같이 안 넘어간다.
-        <MailDraft key={`${lang}:${mail.kind}`} mode={mail} lang={lang} rules={ruleValues} onLang={setLang}
+        <MailDraft key={`${lang}:${mail.kind}`} mode={mail} lang={lang} rules={ruleValues} templates={templates} onLang={setLang}
                    onCopied={onCopied} onSaid={say} onClose={() => setMail(null)} />
       )}
       {toast && <div className="toast" role="status">{toast}</div>}

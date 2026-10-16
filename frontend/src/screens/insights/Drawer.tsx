@@ -36,7 +36,7 @@ export function actsFor(statuses: InsightStatus[], current: string): InsightStat
 
 export const nameOf = (item: DrawerItem) => (item.tab === "up" ? `Space ${item.row.space_seq}` : item.row.company);
 
-export function Drawer({ item, statuses, memo, log, rules, onMark, onSaved, onDraft, onClose }: {
+export function Drawer({ item, statuses, memo, log, rules, onMark, onSaved, onDraft, draftReady, onClose }: {
   item: DrawerItem;
   statuses: InsightStatus[];
   /** 저장된 메모 */
@@ -48,6 +48,8 @@ export function Drawer({ item, statuses, memo, log, rules, onMark, onSaved, onDr
   onSaved: (message: string) => void;
   /** 이 줄의 메일 초안 창을 연다 — 복사와 그 기록은 창(`MailDraft.tsx`)이 한다. */
   onDraft: () => void;
+  /** 메일 초안의 기본 문구를 받았나 — 못 받았으면 「메일 초안」이 잠긴다. */
+  draftReady: boolean;
   onClose: () => void;
 }) {
   const [draft, setDraft] = useState(memo ?? "");
@@ -159,7 +161,7 @@ export function Drawer({ item, statuses, memo, log, rules, onMark, onSaved, onDr
       </div>
 
       <div className="dr-f">
-        <button type="button" className="ibtn sp-l" onClick={onDraft}>메일 초안</button>
+        <button type="button" className="ibtn sp-l" onClick={onDraft} disabled={!draftReady}>메일 초안</button>
         {actsFor(statuses, row.status).map((act, i, all) => (
           <button key={act.key} type="button" className={`ibtn${i === all.length - 1 && all.length > 1 ? " pri" : ""}`} disabled={busy}
                   onClick={() => { setSaving(act.key); onMark(target, { status: act.key }).then(done(`상태를 ${label(act.key)}(으)로 바꿨습니다`), failed); }}>

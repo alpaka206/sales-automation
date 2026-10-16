@@ -211,3 +211,14 @@ def test_the_drafts_module_has_no_way_to_send_mail():
     code = (ROOT / "src" / "db" / "insight_drafts.py").read_text(encoding="utf-8").lower()
     for needle in ("senders", "smtp", "gmail", "hubspot", "integrations", "send_mail"):
         assert needle not in code, needle
+
+
+def test_the_screen_holds_no_mail_wording_of_its_own():
+    """문구는 서버 한 곳(기본 문구 `DEFAULTS` + 고친 칸 `insight_drafts`)에만 있다 — 화면 코드에 문구가 남아 있으면 「기본
+    문구 수정」으로 고쳐도 그 문구로 초안을 만드는 자리가 생긴다. 화면(`insights/mail.ts`)은 근거 문단을 고르고 자리표시를
+    채우기만 한다."""
+    folder = ROOT / "frontend" / "src" / "screens" / "insights"
+    for path in folder.glob("*.ts*"):
+        code = path.read_text(encoding="utf-8")
+        for needle in ("Perso", "담당자님", "Best regards", "팀 드림", "연락드립니다"):
+            assert needle not in code, f"{path.name} 에 메일 문구가 남아 있습니다: {needle}"

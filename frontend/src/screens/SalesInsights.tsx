@@ -1,5 +1,6 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { getJSON, postForm } from "../lib/api";
+import { useInsightDrafts } from "../lib/insightDrafts";
 import { useInsightMarks, type MarkChange, type MarkTarget } from "../lib/insightMarks";
 import { useInsightRules, type InsightTab } from "../lib/insightRules";
 import { useUsageSource } from "../lib/usageSource";
@@ -24,6 +25,7 @@ export function SalesInsights() {
   const usage = useUsageSource();
   const rules = useInsightRules();
   const marks = useInsightMarks();
+  const drafts = useInsightDrafts();
   const queryClient = useQueryClient();
   // 우리 수주 고객 — 「우리 고객」을 거르는 space_seq 와 이탈 방지 · 추가 계약의 계약. 서버에서 오는 쪽이라 안쪽으로
   // 내려 주기만 합니다.
@@ -67,7 +69,7 @@ export function SalesInsights() {
   };
 
   return (
-    <SalesInsightsView usage={usage} won={won ?? null} rules={rules} marks={marks}
+    <SalesInsightsView usage={usage} won={won ?? null} rules={rules} marks={marks} drafts={drafts}
                        onSaveRules={saveRules} onMark={saveMark} onCopied={logCopy} />
   );
 }
