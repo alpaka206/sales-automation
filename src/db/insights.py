@@ -40,6 +40,7 @@ STATUSES: dict[str, tuple[tuple[str, str], ...]] = {
     "grow": (("todo", "미컨택"), ("done", "컨택 완료"), ("won", "계약"), ("drop", "제외")),
 }
 MEMO_MAX = 2_000
+SUBJECT_MAX = 200
 # 화면이 한 번에 받는 기록의 상한 — 사람이 누른 것만 쌓이는 표라 넉넉하다.
 LOG_LIMIT = 5_000
 
@@ -168,15 +169,13 @@ def _positive(raw: str | None, what: str) -> int:
     return int(text)
 
 
-def save_mark(session: Session, sent: Mapping[str, str], actor: str) -> list[str]:
-    """줄 하나의 상태 · 메모를 저장하고 바뀐 것마다 기록을 남깁니다. 바뀐 것(``status`` · ``memo``)을 돌려줍니다.
+def _row_key(session: Session, sent: Mapping[str, str], extra: set[str]) -> tuple[str, int | None, int | None]:
+    """어느 카드의 어느 줄인가 — ``tab`` 과 그 카드의 열쇠(업셀링 ``space_seq``, 나머지 ``contract_id``).
 
-    받는 칸은 다섯뿐입니다 — ``tab`` · 그 카드의 열쇠(업셀링 ``space_seq``, 나머지 ``contract_id``) · ``status`` ·
-    ``memo``. **그 밖의 칸은 거절합니다**: 업셀링 줄은 스냅샷에서 나온 줄이라, 이 길로 사용량 숫자가 실려 오기
-    시작하면 「사용 데이터는 서버로 안 간다」가 조용히 깨집니다(세 번째 예외는 번호 · 상태 · 메모까지다).
-    commit 은 부르는 쪽이 합니다.
+    받는 칸은 그 셋과 ``extra`` 뿐이고 **그 밖의 칸은 거절합니다**: 업셀링 줄은 스냅샷에서 나온 줄이라, 이 길로
+    사용량 숫자가 실려 오기 시작하면 「사용 데이터는 서버로 안 간다」가 조용히 깨집니다.
     """
-    allowed = {"tab", "space_seq", "contract_id", "status", "memo"}
+    allowed = {"tab", "space_seq", "contract_id"} | extra
     unknown = sorted(key for key in sent if key not in allowed)
     if unknown:
         raise RuleError(f"모르는 칸입니다: {', '.join(unknown)}")
@@ -186,15 +185,25 @@ def save_mark(session: Session, sent: Mapping[str, str], actor: str) -> list[str
     if tab == "up":
         if sent.get("contract_id"):
             raise RuleError("업셀링 줄은 space_seq 로 찾습니다")
-        space_seq, contract_id = _positive(sent.get("space_seq"), "space_seq"), None
-    else:
-        if sent.get("space_seq"):
-            raise RuleError("이탈 방지 · 추가 계약 줄은 계약으로 찾습니다")
-        space_seq, contract_id = None, _positive(sent.get("contract_id"), "계약")
-        # 계약은 우리 표에 있다 — 없는 번호로 줄을 세우지 않는다(지워진 계약이면 그 상태도 더 바꿀 일이 없다).
-        if session.get(ClientContract, contract_id) is None:
-            raise LookupError("계약을 찾을 수 없습니다")
+        return tab, _positive(sent.get("space_seq"), "space_seq"), None
+    if sent.get("space_seq"):
+        raise RuleError("이탈 방지 · 추가 계약 줄은 계약으로 찾습니다")
+    contract_id = _positive(sent.get("contract_id"), "계약")
+    # 계약은 우리 표에 있다 — 없는 번호로 줄을 세우지 않는다(지워진 계약이면 그 줄에 더 할 일이 없다).
+    if session.get(ClientContract, contract_id) is None:
+        raise LookupError("계약을 찾을 수 없습니다")
+    return tab, None, contract_id
 
+
+def save_mark(session: Session, sent: Mapping[str, str], actor: str) -> list[str]:
+    """줄 하나의 상태 · 메모를 저장하고 바뀐 것마다 기록을 남깁니다. 바뀐 것(``status`` · ``memo``)을 돌려줍니다.
+
+    받는 칸은 다섯뿐입니다 — ``tab`` · 그 카드의 열쇠(업셀링 ``space_seq``, 나머지 ``contract_id``) · ``status`` ·
+    ``memo``. **그 밖의 칸은 거절합니다**: 업셀링 줄은 스냅샷에서 나온 줄이라, 이 길로 사용량 숫자가 실려 오기
+    시작하면 「사용 데이터는 서버로 안 간다」가 조용히 깨집니다(세 번째 예외는 번호 · 상태 · 메모까지다).
+    commit 은 부르는 쪽이 합니다.
+    """
+    tab, space_seq, contract_id = _row_key(session, sent, {"status", "memo"})
     labels = dict(STATUSES[tab])
     status = sent.get("status")
     if status is not None and status not in labels:
@@ -256,3 +265,18 @@ def marks_payload(session: Session) -> dict:
             for line in log
         ],
     }
+
+
+def save_copy(session: Session, sent: Mapping[str, str], actor: str) -> None:
+    """메일 초안을 복사했다는 기록 한 줄 — 「메일 초안 복사 · <제목>」. **메일은 보내지 않습니다** (운영자 조건 3:
+    「메일은 절대 보내지 마. 초안 만들고 복사만」) — 이 함수는 기록만 남기고, 받는 사람에게 가는 길은 사람이 복사해
+    자기 메일 프로그램에 붙여 넣는 것 하나입니다. 받는 칸은 ``tab`` · 그 줄의 열쇠 · ``subject``(초안의 제목) 넷뿐이고
+    본문은 받지 않습니다. 상태는 안 바꿉니다. commit 은 부르는 쪽이 합니다.
+    """
+    tab, space_seq, contract_id = _row_key(session, sent, {"subject"})
+    subject = " ".join((sent.get("subject") or "").split())
+    if not subject:
+        raise RuleError("초안의 제목이 없습니다")
+    session.add(InsightLog(tab=tab, space_seq=space_seq, contract_id=contract_id, action="copy",
+                           detail=f"메일 초안 복사 · {subject[:SUBJECT_MAX]}", actor=actor,
+                           created_at=datetime.now(timezone.utc)))

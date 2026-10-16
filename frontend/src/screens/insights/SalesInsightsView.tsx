@@ -9,6 +9,8 @@ import { spacesOfRows, useUsageIndex } from "../won/useUsage";
 import type { ListData } from "../won/shared";
 import { ChurnWhy, GrowWhy, PlanTag, PriorityTag, RiskTag, Sg, TIER, num } from "./bits";
 import { Drawer, type DrawerItem } from "./Drawer";
+import { MailDraft, type MailMode } from "./MailDraft";
+import type { Lang } from "./mail";
 import {
   contractRows, countByStatus, listChurn, listGrow, listUp, markId, upsellMaybeCut, upsellRows, CANDIDATE_CAP, TODO,
   type ChurnRow, type GrowRow, type Listed, type SalesData, type Tab, type UpRow,
@@ -48,6 +50,8 @@ type Props = {
   marks: { data: InsightMarks | null; problem: string | null; busy: boolean };
   onSaveRules: (tab: Tab, values: Record<string, number>) => Promise<unknown>;
   onMark: (target: MarkTarget, change: MarkChange) => Promise<unknown>;
+  /** 메일 초안을 복사했다는 기록 — 그 줄의 열쇠와 초안의 제목만. 메일은 보내지 않는다(복사만). */
+  onCopied: (target: MarkTarget, subject: string) => Promise<unknown>;
 };
 
 type Card = { name: string; desc: (r: Rules) => string; title: string; search: string; note: string };
@@ -67,7 +71,7 @@ const CARDS: Record<Tab, Card> = {
 const TABS: Tab[] = ["up", "churn", "grow"];
 type AnyRow = Listed<UpRow> | Listed<ChurnRow> | Listed<GrowRow>;
 
-export function SalesInsightsView({ usage, won, rules, marks, onSaveRules, onMark }: Props) {
+export function SalesInsightsView({ usage, won, rules, marks, onSaveRules, onMark, onCopied }: Props) {
   const sales = useSalesInsight<SalesData>(usage.source);
   // 수주 고객 목록이 쓰는 그 요약 색인 — 활성 계약의 스페이스만 고른다(`useUsageIndex`).
   const spaces = useMemo(() => spacesOfRows(won?.rows), [won?.rows]);
@@ -113,14 +117,21 @@ export function SalesInsightsView({ usage, won, rules, marks, onSaveRules, onMar
   const [open, setOpen] = useState<number | null>(null);
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [toast, setToast] = useState<string | null>(null);
+  // 메일 초안 창과 그 언어 — 언어는 창을 닫았다 열어도 남는다(목업).
+  const [mail, setMail] = useState<MailMode | null>(null);
+  const [lang, setLang] = useState<Lang>("ko");
   const say = (message: string) => { setToast(message); window.setTimeout(() => setToast(null), 1800); };
-  // 상세 패널은 Esc 로 닫힌다(목업). 패널 파일에는 스스로 도는 코드를 두지 않아서 여기서 듣는다.
+  // Esc 는 위에 뜬 것부터 닫는다 — 메일 초안 창, 그다음 상세 패널(목업). 그 두 파일에는 스스로 도는 코드를 두지
+  // 않아서 여기서 듣는다.
   useEffect(() => {
-    if (open === null) return;
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(null); };
+    if (open === null && mail === null) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      if (mail) setMail(null); else setOpen(null);
+    };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [open]);
+  }, [open, mail]);
 
   /** 기준을 이 값으로 바꾸면 그 카드에 아직 손대지 않은 후보가 몇 곳이 되나 — 확인 창의 「바꾼 뒤」. 이 브라우저에서만 센다. */
   const countWith = (which: Tab) => (values: Record<string, number>) => {
@@ -147,7 +158,9 @@ export function SalesInsightsView({ usage, won, rules, marks, onSaveRules, onMar
   const shownKeys = shown.map((r) => r.key);
   const picked = shownKeys.filter((k) => selected.has(k));
 
-  const choose = (next: Tab) => { setTab(next); setStatus(TODO); setQuery(""); setSelected(new Set()); setOpen(null); };
+  const choose = (next: Tab) => {
+    setTab(next); setStatus(TODO); setQuery(""); setSelected(new Set()); setOpen(null); setMail(null);
+  };
   const toggle = (key: number) => {
     const next = new Set(selected);
     if (next.has(key)) next.delete(key); else next.add(key);
@@ -196,15 +209,20 @@ export function SalesInsightsView({ usage, won, rules, marks, onSaveRules, onMar
           const c = CARDS[key];
           const todo = counts[key];
           return (
-            <button key={key} type="button" role="tab" aria-selected={tab === key}
-                    className={`pt${tab === key ? " on" : ""}`} onClick={() => choose(key)}>
+            <div key={key} role="tab" tabIndex={0} aria-selected={tab === key}
+                 className={`pt${tab === key ? " on" : ""}`} onClick={() => choose(key)}
+                 onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); choose(key); } }}>
               <span className="lb">{c.name}</span>
               <span className="ds">{ruleValues ? c.desc(ruleValues) : " "}</span>
               <span className="ft">
                 <span className="v num">{todo ? num(todo[TODO] ?? 0) : "—"}
                   <span className="unit">{marks.data?.statuses[key][0]?.label ?? ""}</span></span>
+                <button type="button" className="mbtn" disabled={!ruleValues}
+                        onClick={(e) => { e.stopPropagation(); setMail({ kind: "tab", tab: key, title: c.name }); }}>
+                  메일 초안
+                </button>
               </span>
-            </button>
+            </div>
           );
         })}
       </section>
@@ -237,6 +255,10 @@ export function SalesInsightsView({ usage, won, rules, marks, onSaveRules, onMar
             <span><b className="num">{picked.length}곳</b> 선택됨</span>
             <div className="acts">
               <button type="button" className="ibtn" onClick={() => setSelected(new Set())}>선택 해제</button>
+              <button type="button" className="ibtn pri"
+                      onClick={() => setMail({ kind: "bulk", tab, rows: shown.filter((r) => selected.has(r.key)) })}>
+                선택한 {picked.length}곳 메일 초안
+              </button>
             </div>
           </div>
         )}
@@ -330,8 +352,14 @@ export function SalesInsightsView({ usage, won, rules, marks, onSaveRules, onMar
         <>
           <div className="scrim" onClick={() => setOpen(null)} />
           <Drawer key={`${tab}:${item.row.key}`} item={item} statuses={statuses} memo={itemMemo} log={itemLog}
-                  rules={ruleValues} onMark={onMark} onSaved={say} onClose={() => setOpen(null)} />
+                  rules={ruleValues} onMark={onMark} onSaved={say} onClose={() => setOpen(null)}
+                  onDraft={() => setMail({ kind: "row", tab, row: item.row, email: "space_seq" in item.row ? null : item.row.email })} />
         </>
+      )}
+      {mail && ruleValues && (
+        // 언어를 바꾸면 그 언어의 문구로 다시 연다(목업) — 고쳐 둔 글자는 그 언어의 것이라 같이 안 넘어간다.
+        <MailDraft key={`${lang}:${mail.kind}`} mode={mail} lang={lang} rules={ruleValues} onLang={setLang}
+                   onCopied={onCopied} onSaid={say} onClose={() => setMail(null)} />
       )}
       {toast && <div className="toast" role="status">{toast}</div>}
     </div>

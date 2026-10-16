@@ -174,6 +174,7 @@ def test_the_write_is_a_form_post_under_a_registered_browser_prefix():
     assert [(route.path, sorted(route.methods)) for route in insights.router.routes] == [
         ("/operations/insights/rules", ["POST"]),
         ("/operations/insights/marks", ["POST"]),
+        ("/operations/insights/copies", ["POST"]),
     ]
     assert all(is_web_ui_path(route.path) for route in insights.router.routes)
     assert not [route.path for route in ui_api.router.routes if route.methods - {"GET", "HEAD"}]
@@ -300,3 +301,44 @@ def test_churn_and_grow_keep_separate_states_for_the_same_contract(console, fact
 def test_rule_changes_stay_out_of_the_row_log(console):
     console.post("/operations/insights/rules", data={"renewal_days": "45"})
     assert _marks(console)["log"] == []
+
+
+# --------------------------------------------------------------------------- #
+# 메일 초안 — 복사만, 보내지 않는다 (운영자 조건 3)
+# --------------------------------------------------------------------------- #
+def test_copying_a_draft_leaves_one_log_line_and_sends_nothing(console, factory):
+    """「복사」는 기록 한 줄이다 — 받는 칸은 tab · 그 줄의 열쇠 · subject 넷뿐(본문은 받지 않는다), 상태도 안 바꾼다."""
+    contract_id = _contract(factory)
+    assert console.post("/operations/insights/copies", data={
+        "tab": "up", "space_seq": "1001", "subject": "[Perso AI] Business 플랜 안내드립니다",
+    }).json() == {"ok": True}
+    assert console.post("/operations/insights/copies", data={
+        "tab": "grow", "contract_id": str(contract_id), "subject": "  [Perso AI]   크레딧 추가·계약 갱신 안내 ",
+    }).status_code == 200
+    data = _marks(console)
+    assert data["marks"] == []
+    assert sorted((line["tab"], line["action"], line["detail"]) for line in data["log"]) == [
+        ("grow", "copy", "메일 초안 복사 · [Perso AI] 크레딧 추가·계약 갱신 안내"),
+        ("up", "copy", "메일 초안 복사 · [Perso AI] Business 플랜 안내드립니다"),
+    ]
+
+
+@pytest.mark.parametrize("data", [
+    {"tab": "up", "space_seq": "1001", "subject": "제목", "body": "본문"},       # 본문은 받지 않는다
+    {"tab": "up", "space_seq": "1001", "subject": "제목", "credits_30d": "1"},  # 사용량 숫자는 실릴 칸이 없다
+    {"tab": "up", "space_seq": "1001", "subject": "   "},
+    {"tab": "up", "space_seq": "1001", "status": "done"},
+])
+def test_a_wrong_copy_log_is_refused(console, factory, data):
+    assert console.post("/operations/insights/copies", data=data).status_code == 400
+    with factory() as session:
+        assert session.query(InsightLog).count() == 0
+
+
+def test_the_insights_server_code_has_no_way_to_send_mail():
+    """영업 인사이트의 서버 코드는 메일을 보내는 어떤 것도 부르지 않는다 — 발송 경로(`integrations/senders`) ·
+    메일 함수 · 허브스팟을 import 하지 않는다. 메일은 사람이 복사해 자기 메일 프로그램에서 보낸다."""
+    for path in (ROOT / "src" / "db" / "insights.py", ROOT / "src" / "api" / "routes" / "insights.py"):
+        code = path.read_text(encoding="utf-8")
+        for needle in ("senders", "send_", "smtp", "gmail", "hubspot", "integrations"):
+            assert needle not in code.lower(), f"{path.name} 가 메일 · 외부 연동을 건드립니다: {needle}"

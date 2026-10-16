@@ -247,3 +247,52 @@ describe("상세 패널의 버튼 — 목업의 acts", () => {
     expect(actsFor(churn, "done").map((a) => a.label)).toEqual(["제외", "정상화 처리"]);
   });
 });
+
+// ── 메일 초안 (복사만) ────────────────────────────────────────────────────
+import { NAME_SLOT, draftFor, placeName } from "../src/screens/insights/mail";
+
+describe("메일 초안 — 목업 문구 그대로, 줄의 근거에 맞춰 고르고, 사용량 숫자는 안 넣는다", () => {
+  const upRow = upsellRows([salesSpace({ space_seq: 1001 })], new Set(), RULES, AS_OF)[0];
+  const base = contractRows([row({}, { ends_on: "2026-10-01", plan_ends_on: "2026-10-01" })],
+    index(summary({ used_total: 20_000 })), { ...RULES, renewalDays: 999 });
+  const churnRow = contractRows([row()], index(summary({ used_total: 20_000 })), RULES).churn[0];
+
+  it("업셀링 — 줄이면 「PRO 한도에 가깝게」, 카드 공통이면 「활발히」", () => {
+    expect(draftFor("up", upRow, "ko", RULES).subject).toBe("[Perso AI] Business 플랜 안내드립니다");
+    expect(draftFor("up", upRow, "ko", RULES).body).toContain("PRO 플랜의 월 한도에 가깝게");
+    expect(draftFor("up", null, "ko", RULES).body).toContain("활발히 이용하고");
+    expect(draftFor("up", upRow, "en", RULES).subject).toBe("Getting more out of Perso AI Dubbing");
+    expect(draftFor("up", upRow, "en", RULES).body).toContain("close to the monthly limit of the PRO plan");
+  });
+
+  it("이탈 방지 — 무활동이 기준 이상이면 「한 달 넘게 이용이 없으신」, 아니면 「크레딧 사용이 여유」 · 회사 이름이 들어간다", () => {
+    expect(churnRow.daysIdle).toBe(2);
+    expect(draftFor("churn", churnRow, "ko", RULES).body).toContain("크레딧 사용이 여유 있으신");
+    expect(draftFor("churn", churnRow, "ko", RULES).body).toContain("안녕하세요, 가나 스튜디오 담당자님.");
+    // 「한 달」의 기준은 화면의 「위험 높음 = 무활동 N일」 기준과 같다 — 목업처럼 30을 박지 않는다.
+    expect(draftFor("churn", churnRow, "ko", { ...RULES, churnIdleDays: 2 }).body).toContain("한 달 넘게 더빙 이용이 없으신");
+    expect(draftFor("churn", churnRow, "en", RULES).body).toContain("Hi 가나 스튜디오 team,");
+  });
+
+  it("추가 계약 — 부족 예상 · 초과사용이면 「일찍 소진」, 종료만 가까우면 「갱신 조건」", () => {
+    expect(draftFor("grow", { ...base.grow[0], forecast: "부족 예상" }, "ko", RULES).body).toContain("예정보다 일찍 소진");
+    expect(draftFor("grow", base.grow[0], "ko", RULES).body).toContain("계약 종료일이 다가오고");
+    expect(draftFor("grow", null, "en", RULES).subject).toBe("[Perso AI] Additional credits and renewal options");
+  });
+
+  it("여러 곳 초안은 이름 자리를 두고 복사할 때 곳마다 바꾼다", () => {
+    expect(draftFor("churn", null, "ko", RULES).body).toContain(`안녕하세요, ${NAME_SLOT} 담당자님.`);
+    expect(draftFor("up", null, "ko", RULES).body).not.toContain(NAME_SLOT); // 업셀링 문구에는 이름이 없다
+    expect(placeName(upRow)).toBe("Space 1001");
+    expect(placeName(churnRow)).toBe("가나 스튜디오");
+  });
+
+  it("초안에 사용량 숫자가 없다 — 크레딧 · 소진율 · 남은 날을 말로만", () => {
+    const drafts = [
+      draftFor("up", upRow, "ko", RULES), draftFor("up", upRow, "en", RULES),
+      draftFor("churn", churnRow, "ko", RULES), draftFor("churn", churnRow, "en", RULES),
+      draftFor("grow", base.grow[0], "ko", RULES), draftFor("grow", base.grow[0], "en", RULES),
+    ];
+    for (const d of drafts) expect(`${d.subject}\n${d.body}`).not.toMatch(/\d/);
+  });
+});

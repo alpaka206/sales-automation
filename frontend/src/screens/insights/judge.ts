@@ -91,6 +91,8 @@ export type ContractRow = {
   /** 잔여 크레딧 = 계약 크레딧 − 누적 소진. 계약이 스냅샷의 소진 기록(2025-12-01~)보다 먼저 시작했으면 누적이 덜
    *  잡혀 잔여가 부풀므로 null 입니다 — 수주 고객 「사용 진단」이 그 계약을 「판정 불가」로 두는 것과 같은 이유. */
   remaining: number | null; credits: number | null;
+  /** 수주 고객에 적힌 주소(연결된 연락처, 없으면 계약의 청구 메일) — 메일 초안 창이 「받는 사람」으로 보여 주기만 한다. */
+  email: string | null;
 };
 export type Risk = "high" | "mid";
 export type Priority = "p1" | "p2" | "p3";
@@ -145,6 +147,7 @@ export function contractRowOf(row: Row, c: Contract, index: UsageIndex, rules: R
     end, daysLeft: end ? daysBetween(asOf, end) : null,
     age: start ? daysBetween(start, asOf) : null,
     remaining: d && !d.partial ? d.remaining : null, credits: c.credits,
+    email: row.email || c.billing_email || null,
     usage,
   };
 }
@@ -240,7 +243,7 @@ const goneContract = (id: number): ContractRow => ({
   key: id, contractId: id, clientId: 0, company: "지워진 계약", plan: null,
   level: null, forecast: null, levelDetail: null, forecastDetail: null, usedPct: null, pacePct: null,
   credits30d: null, lastActivity: null, daysIdle: null, quality: false, end: null, daysLeft: null, age: null,
-  remaining: null, credits: null,
+  remaining: null, credits: null, email: null,
 });
 
 function keptContract(rows: Row[] | null | undefined, id: number, index: UsageIndex, rules: Rules): ContractRow {

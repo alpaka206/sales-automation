@@ -444,7 +444,7 @@ def test_the_sales_insights_screen_is_two_layers():
 
 
 # 바깥 겹이 서버로 보내는 곳 — 경로와 그 몸통. 단계마다 하나씩 늘어난다(기준 → 상태 · 메모 → 복사 기록).
-INSIGHT_ROUTES = ("/operations/insights/rules", "/operations/insights/marks")
+INSIGHT_ROUTES = ("/operations/insights/rules", "/operations/insights/marks", "/operations/insights/copies")
 RULE_LINE = INSIGHTS_DIR / "RuleLine.tsx"
 # 스스로 도는 코드 — 사람이 누르지 않았는데 무언가를 보낼 수 있는 자리.
 SELF_RUNNING = ("useEffect", "useLayoutEffect", "setTimeout", "setInterval", "requestAnimationFrame")
@@ -475,8 +475,9 @@ def test_the_insights_screen_sends_only_what_a_person_typed_into_the_rule_line()
 
 
 DRAWER = INSIGHTS_DIR / "Drawer.tsx"
-# 세 번째 예외가 서버로 실어 보낼 수 있는 칸 — 줄의 열쇠와 사람이 고른 상태 · 적은 메모.
-MARK_FIELDS = {"tab", "space_seq", "contract_id", "status", "memo"}
+# 세 번째 예외가 서버로 실어 보낼 수 있는 칸 — 줄의 열쇠와 사람이 고른 상태 · 적은 메모, 그리고 메일 초안을
+# 복사했다는 기록의 제목(본문은 안 간다).
+MARK_FIELDS = {"tab", "space_seq", "contract_id", "status", "memo", "subject"}
 
 
 def test_upsell_marks_carry_only_the_row_key_status_and_memo():
@@ -490,8 +491,9 @@ def test_upsell_marks_carry_only_the_row_key_status_and_memo():
     """
     outer = _code(INSIGHTS.read_text(encoding="utf-8"))
     fields = set(re.findall(r"\bbody\.(\w+)\s*=", outer)) | set(re.findall(r"const body[^=]*=\s*\{\s*(\w+):", outer))
-    assert fields == MARK_FIELDS, f"상태 · 메모 몸통의 칸: {sorted(fields)}"
+    assert fields == MARK_FIELDS, f"상태 · 메모 · 복사 기록 몸통의 칸: {sorted(fields)}"
     assert 'postForm("/operations/insights/marks", body)' in outer
+    assert 'postForm("/operations/insights/copies", body)' in outer
 
     callers = [path.name for path in INSIGHTS_SIDE if "onMark(" in _code(path.read_text(encoding="utf-8"))]
     assert callers == [DRAWER.name], f"상태 · 메모 저장을 부르는 곳은 Drawer.tsx 하나입니다: {callers}"
@@ -507,3 +509,34 @@ def test_upsell_marks_carry_only_the_row_key_status_and_memo():
         "id", "tab", "space_seq", "contract_id", "status", "memo", "updated_by", "updated_at"}
     assert {c.name for c in InsightLog.__table__.columns} == {
         "id", "tab", "space_seq", "contract_id", "action", "detail", "actor", "created_at"}
+
+
+MAIL_DRAFT = INSIGHTS_DIR / "MailDraft.tsx"
+
+
+def test_mail_drafts_are_copied_never_sent():
+    """메일은 보내지 않는다 — 초안을 만들고 복사만 한다 (2026-10-15 운영자 조건 3: 「메일은 절대 보내지 마. 초안 만들고
+    복사만」).
+
+    - 안쪽 겹 어디에도 메일 프로그램을 여는 링크(`mailto:`)나 새 창(`window.open`)이 없다 — 복사는 브라우저 클립보드
+      (`navigator.clipboard`)로만 한다.
+    - 「복사했다」 기록을 부르는 곳은 `MailDraft.tsx` 하나이고 전부 「복사」 단추의 `onClick` 안이며, 그 파일에 스스로
+      도는 코드가 없다. 바깥 겹이 그 기록에 싣는 것은 줄의 열쇠와 제목뿐이다(본문은 안 간다 — 위 테스트의 칸 목록).
+    - 바깥 겹이 부르는 쓰기는 영업 인사이트의 세 경로뿐이다 — 발송 경로(`/messages` · `/tickets`)는 없다.
+    """
+    everything = "\n".join(_code(path.read_text(encoding="utf-8")) for path in INSIGHTS_SIDE)
+    for needle in ("mailto:", "window.open(", "location.href"):
+        assert needle not in everything, f"영업 인사이트가 메일을 보내거나 메일 프로그램을 엽니다: {needle}"
+    assert "navigator.clipboard.writeText(" in _code(MAIL_DRAFT.read_text(encoding="utf-8"))
+
+    callers = [path.name for path in INSIGHTS_SIDE if "onCopied(" in _code(path.read_text(encoding="utf-8"))]
+    assert callers == [MAIL_DRAFT.name], f"복사 기록을 부르는 곳은 MailDraft.tsx 하나입니다: {callers}"
+    draft = _code(MAIL_DRAFT.read_text(encoding="utf-8"))
+    calls = [text for text in draft.splitlines() if "onCopied(" in text]
+    assert calls and all("onClick={" in text for text in calls), calls
+    for needle in SELF_RUNNING:
+        assert needle not in draft, f"MailDraft.tsx 가 스스로 돕니다: {needle}"
+
+    outer = _code(INSIGHTS.read_text(encoding="utf-8"))
+    routes = re.findall(r"postForm\(\s*[\"'`]([^\"'`]+)[\"'`]", outer)
+    assert set(routes) == set(INSIGHT_ROUTES), routes

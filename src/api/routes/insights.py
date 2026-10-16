@@ -16,7 +16,7 @@ import asyncio
 from fastapi import APIRouter, HTTPException, Request
 from sqlalchemy.exc import IntegrityError
 
-from ...db.insights import RuleError, save_mark, save_rules
+from ...db.insights import RuleError, save_copy, save_mark, save_rules
 from ...db.session import SessionLocal
 from ..auth import actor_name
 
@@ -71,3 +71,26 @@ async def save_insight_mark(request: Request):
     sent = {key: str(value) for key, value in form.items()}
     actor = actor_name(request, fallback="") or "web"
     return await asyncio.to_thread(_save_mark, sent, actor)
+
+
+def _save_copy(sent: dict[str, str], actor: str) -> dict:
+    with SessionLocal() as session:
+        try:
+            save_copy(session, sent, actor)
+            session.commit()
+        except RuleError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from None
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from None
+    return {"ok": True}
+
+
+@router.post("/operations/insights/copies")
+async def log_insight_copy(request: Request):
+    """메일 초안의 「복사」를 눌렀다는 기록. **메일을 보내는 길이 아닙니다** — 이 콘솔은 영업 인사이트에서 메일을 보내지
+    않고(운영자 조건 3), 초안은 사람이 복사해 자기 메일 프로그램에서 보냅니다. 칸은 ``tab`` · 그 줄의 열쇠 ·
+    ``subject`` 넷뿐입니다(``db/insights.save_copy``)."""
+    form = await request.form()
+    sent = {key: str(value) for key, value in form.items()}
+    actor = actor_name(request, fallback="") or "web"
+    return await asyncio.to_thread(_save_copy, sent, actor)

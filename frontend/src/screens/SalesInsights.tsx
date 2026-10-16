@@ -39,20 +39,35 @@ export function SalesInsights() {
     await queryClient.invalidateQueries({ queryKey: ["insight-rules"] });
   };
 
-  /** 상세 패널의 상태 · 메모 저장 — 그 줄의 열쇠(업셀링 space_seq · 나머지 계약)와 사람이 고른 상태 · 적은 메모뿐.
-   *  업셀링 줄의 번호가 서버에 남는 것이 「사용 데이터는 서버로 안 간다」의 세 번째 예외입니다(2026-10-15 A안). */
-  const saveMark = async (target: MarkTarget, change: MarkChange) => {
+  /** 줄의 열쇠 — 업셀링은 space_seq, 이탈 방지 · 추가 계약은 계약. */
+  const rowBody = (target: MarkTarget): Record<string, string> => {
     const body: Record<string, string> = { tab: target.tab };
     if (target.tab === "up") body.space_seq = String(target.space_seq);
     else body.contract_id = String(target.contract_id);
+    return body;
+  };
+
+  /** 상세 패널의 상태 · 메모 저장 — 그 줄의 열쇠와 사람이 고른 상태 · 적은 메모뿐.
+   *  업셀링 줄의 번호가 서버에 남는 것이 「사용 데이터는 서버로 안 간다」의 세 번째 예외입니다(2026-10-15 A안). */
+  const saveMark = async (target: MarkTarget, change: MarkChange) => {
+    const body = rowBody(target);
     if (change.status !== undefined) body.status = change.status;
     if (change.memo !== undefined) body.memo = change.memo;
     await postForm("/operations/insights/marks", body);
     await queryClient.invalidateQueries({ queryKey: ["insight-marks"] });
   };
 
+  /** 메일 초안을 복사했다는 기록 — 그 줄의 열쇠와 초안의 제목만(본문은 안 보낸다). **메일은 보내지 않습니다** —
+   *  초안은 사람이 복사해 자기 메일 프로그램에서 보냅니다(운영자 조건 3). */
+  const logCopy = async (target: MarkTarget, subject: string) => {
+    const body = rowBody(target);
+    body.subject = subject;
+    await postForm("/operations/insights/copies", body);
+    await queryClient.invalidateQueries({ queryKey: ["insight-marks"] });
+  };
+
   return (
     <SalesInsightsView usage={usage} won={won ?? null} rules={rules} marks={marks}
-                       onSaveRules={saveRules} onMark={saveMark} />
+                       onSaveRules={saveRules} onMark={saveMark} onCopied={logCopy} />
   );
 }
