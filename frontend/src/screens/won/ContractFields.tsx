@@ -86,11 +86,11 @@ export function useContractDraft(initial?: Contract) {
 }
 export type ContractDraftState = ReturnType<typeof useContractDraft>;
 
-export function Sel({ value, onChange, options }: {
-  value: string; onChange: (value: string) => void; options: string[];
+export function Sel({ value, onChange, options, className = "inp" }: {
+  value: string; onChange: (value: string) => void; options: string[]; className?: string;
 }) {
   return (
-    <select className="inp" value={value} onChange={(event) => onChange(event.target.value)}>
+    <select className={className} value={value} onChange={(event) => onChange(event.target.value)}>
       {options.map((option) => <option key={option} value={option}>{option || "—"}</option>)}
     </select>
   );
@@ -153,12 +153,20 @@ export function PlanPeriodHint({ preview }: { preview?: string }) {
   );
 }
 
+/** 자동으로 채운 칸의 옷 — 바탕색이 다릅니다(2026-11-02 운영자: 「자동으로 채워진거는 다른색으로」). 사람이 값을 고치면
+ *  그 값은 더 이상 자동이 아니라 원래 색으로 돌아갑니다. */
+function mailInput(f: ContractDraftState, name: keyof Draft) {
+  const cell = f.mailFields[name];
+  return cell && f.draft?.[name] === cell.value ? "inp is-mail" : "inp";
+}
+
 /** 메일에서 채운 칸 밑의 한 줄 — 어느 문장을 보고 채웠는지. 사람이 값을 고치면 그 값은 더 이상 메일의 것이 아니라
  *  사라집니다. 꼭 봐야 하는 칸은 주황이고(`MAIL_CHECKS`), 저장을 막지는 않습니다. */
 function MailNote({ f, name }: { f: ContractDraftState; name: keyof Draft }) {
   const cell = f.mailFields[name];
   if (!cell || f.draft?.[name] !== cell.value) return null;
   const check = MAIL_CHECKS[name];
+  if (!check && !cell.evidence) return null;
   return (
     <div className={`mail-note${check ? " is-check" : ""}`} title={cell.evidence || undefined}>
       {check && <b>{check}</b>}
@@ -184,7 +192,7 @@ export function ContractFields({ f, options }: { f: ContractDraftState; options:
           <label className="form-label">
             매출 인식<span className="req"> *</span><DealTypeHint />
           </label>
-          <Sel value={draft.deal_type} onChange={(v) => set("deal_type", v)} options={options.deal_types} />
+          <Sel className={mailInput(f, "deal_type")} value={draft.deal_type} onChange={(v) => set("deal_type", v)} options={options.deal_types} />
           <MailNote f={f} name="deal_type" />
         </div>
         <div>
@@ -195,12 +203,12 @@ export function ContractFields({ f, options }: { f: ContractDraftState; options:
           <label className="form-label">
             계약 시작일<span className="req"> *</span><PlanPeriodHint preview={planPreview(draft)} />
           </label>
-          <input className="inp" type="date" value={draft.starts_on}
+          <input className={mailInput(f, "starts_on")} type="date" value={draft.starts_on}
                  onChange={(e) => { set("starts_on", e.target.value); set("ends_on", addMonths(e.target.value, 12)); }} />
           <MailNote f={f} name="starts_on" />
         </div>
         <Field label="계약 종료일" required>
-          <input className="inp" type="date" value={draft.ends_on} onChange={(e) => set("ends_on", e.target.value)} />
+          <input className={mailInput(f, "ends_on")} type="date" value={draft.ends_on} onChange={(e) => set("ends_on", e.target.value)} />
           <MailNote f={f} name="ends_on" />
         </Field>
         {/* **중도 해지일.** 인식 기간은 계약 종료일과 이 날짜 중 빠른 쪽에서 끝납니다.
@@ -225,13 +233,13 @@ export function ContractFields({ f, options }: { f: ContractDraftState; options:
             덮여 사라졌고, 그것이 화면에서는 「담당자가 바뀌었다」와 같아 보였습니다.
             재계약이면 직전 계약에서 물려받습니다 — 대개 같은 사람입니다. */}
         <Field label="고객 담당자">
-          <input className="inp" value={draft.contact_name}
+          <input className={mailInput(f, "contact_name")} value={draft.contact_name}
                  onChange={(e) => set("contact_name", e.target.value)}
                  placeholder="예: 박지훈 팀장" />
           <MailNote f={f} name="contact_name" />
         </Field>
         <Field label="고객 연락처">
-          <input className="inp" value={draft.contact_info}
+          <input className={mailInput(f, "contact_info")} value={draft.contact_info}
                  onChange={(e) => set("contact_info", e.target.value)}
                  placeholder="이메일 또는 전화번호" />
           <MailNote f={f} name="contact_info" />
@@ -240,7 +248,7 @@ export function ContractFields({ f, options }: { f: ContractDraftState; options:
             분당 단가가 그 둘에서 나옵니다 — 한동안 반대로 두었는데, 그러면 반올림한
             단가로 계산한 크레딧이 계약서의 크레딧과 어긋났습니다. */}
         <Field label="계약 크레딧" required>
-          <input className="inp" type="number" value={draft.credits}
+          <input className={mailInput(f, "credits")} type="number" value={draft.credits}
                  onChange={(e) => set("credits", e.target.value)} placeholder="예: 64800" />
           <MailNote f={f} name="credits" />
         </Field>
@@ -254,7 +262,7 @@ export function ContractFields({ f, options }: { f: ContractDraftState; options:
           칸인데, 공급가 자체를 안 쓰게 되면서(2026-09-22 운영자 지시) 같이 나갔습니다. */}
       <div className="form-grid3">
         <Field label="통화">
-          <Sel value={draft.currency} onChange={(v) => set("currency", v)} options={options.currencies} />
+          <Sel className={mailInput(f, "currency")} value={draft.currency} onChange={(v) => set("currency", v)} options={options.currencies} />
           <MailNote f={f} name="currency" />
         </Field>
         {/* **통화와 무관하게 묻습니다** (2026-08-31 운영자 지시). 예전에는 원화 계약에
@@ -277,7 +285,7 @@ export function ContractFields({ f, options }: { f: ContractDraftState; options:
             라벨에 「(VAT 포함)」을 안 답니다 — 이제 모든 계약금액이 그렇습니다. */}
         <div style={{ gridColumn: "span 2" }}>
           <label className="form-label">계약금액 <span className="req">*</span></label>
-          <input className="inp" type="number" value={draft.amount_incl_vat}
+          <input className={mailInput(f, "amount_incl_vat")} type="number" value={draft.amount_incl_vat}
                  onChange={(e) => set("amount_incl_vat", e.target.value)}
                  placeholder="예: 11000000" />
           <MailNote f={f} name="amount_incl_vat" />
@@ -297,26 +305,26 @@ export function ContractFields({ f, options }: { f: ContractDraftState; options:
       <div className="form-sec">결제</div>
       <div className="form-grid3">
         <Field label="결제 수단">
-          <Sel value={draft.payment_method} onChange={(v) => set("payment_method", v)} options={options.payment_methods} />
+          <Sel className={mailInput(f, "payment_method")} value={draft.payment_method} onChange={(v) => set("payment_method", v)} options={options.payment_methods} />
           <MailNote f={f} name="payment_method" />
         </Field>
         <Field label="결제 방식">
-          <Sel value={draft.payment_type} onChange={(v) => set("payment_type", v)} options={options.payment_types} />
+          <Sel className={mailInput(f, "payment_type")} value={draft.payment_type} onChange={(v) => set("payment_type", v)} options={options.payment_types} />
           <MailNote f={f} name="payment_type" />
         </Field>
         <Field label="총 분납 횟수">
-          <input className="inp" type="number" min={1} value={draft.installments}
+          <input className={mailInput(f, "installments")} type="number" min={1} value={draft.installments}
                  disabled={draft.payment_type !== "할부"}
                  onChange={(e) => set("installments", e.target.value)} />
           <MailNote f={f} name="installments" />
         </Field>
         <Field label="최초 결제일">
-          <input className="inp" type="date" value={draft.first_payment_on}
+          <input className={mailInput(f, "first_payment_on")} type="date" value={draft.first_payment_on}
                  onChange={(e) => set("first_payment_on", e.target.value)} />
         </Field>
         <div style={{ gridColumn: "span 2" }}>
           <label className="form-label">Billing Email</label>
-          <input className="inp" value={draft.billing_email} placeholder="예: ap@company.com"
+          <input className={mailInput(f, "billing_email")} value={draft.billing_email} placeholder="예: ap@company.com"
                  onChange={(e) => set("billing_email", e.target.value)} />
           <MailNote f={f} name="billing_email" />
         </div>
@@ -329,7 +337,8 @@ export function ContractFields({ f, options }: { f: ContractDraftState; options:
                  onChange={(e) => f.setCreditRounds(e.target.value)} />
         </Field>
         <Field label="첫 지급 예정일">
-          <input className="inp" type="date" value={f.firstCreditOn}
+          <input className={f.mailFields.starts_on?.value === f.firstCreditOn ? "inp is-mail" : "inp"}
+                 type="date" value={f.firstCreditOn}
                  onChange={(e) => f.setFirstCreditOn(e.target.value)} />
         </Field>
         <div style={{ display: "flex", alignItems: "flex-end", fontSize: 12,
@@ -400,7 +409,7 @@ export function PlanFields({ f, options, heading = true }: {
                  onChange={(e) => set("plan_ends_on", e.target.value)} />
         </Field>
         <Field label="플랜">
-          <Sel value={draft.plan} onChange={(v) => set("plan", v)} options={options.plans} />
+          <Sel className={mailInput(f, "plan")} value={draft.plan} onChange={(v) => set("plan", v)} options={options.plans} />
           <MailNote f={f} name="plan" />
         </Field>
         <Field label="플랜명">
@@ -412,7 +421,7 @@ export function PlanFields({ f, options, heading = true }: {
           <PlanNameOptions source={source} />
         </Field>
         <Field label="Perso Email">
-          <input className="inp" value={draft.perso_email} onChange={(e) => set("perso_email", e.target.value)} />
+          <input className={mailInput(f, "perso_email")} value={draft.perso_email} onChange={(e) => set("perso_email", e.target.value)} />
           <MailNote f={f} name="perso_email" />
         </Field>
         <Field label="Account Invitation Limit">

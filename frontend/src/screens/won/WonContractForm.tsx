@@ -86,11 +86,11 @@ export function WonContractForm() {
         setDraft(next);
         f.setMailFields(filled);
         if (filled.starts_on && now.firstCreditOn === baseFirstCredit) f.setFirstCreditOn(filled.starts_on.value);
-        const count = Object.keys(filled).filter((name) => name !== "ends_on").length;
+        const count = Object.keys(filled).filter((name) => name !== "ends_on" && name !== "first_payment_on").length;
         if (found.status === "failed") setMailStatus({ tone: "none", text: "메일을 읽지 못했습니다. 직접 입력해 주세요." });
         else if (found.status === "no_mail") setMailStatus({ tone: "none", text: "이 티켓에는 읽을 메일이 없습니다. 직접 입력해 주세요." });
         else if (!count) setMailStatus({ tone: "none", text: "메일에서 채울 내용을 찾지 못했습니다. 직접 입력해 주세요." });
-        else setMailStatus({ tone: "ok", text: `메일에서 ${count}칸을 채웠습니다. 저장 전에 표시된 칸을 확인하세요. ${
+        else setMailStatus({ tone: "ok", text: `메일에서 ${count}칸을 채웠습니다. 저장 전에 파란 칸을 확인하세요. ${
           filled.starts_on
             ? "계약 종료일은 시작일의 12개월 뒤로, 최초 결제일은 시작일로 맞춘 값입니다."
             : "계약 시작일 · 종료일 · 최초 결제일은 메일에서 채우지 않은 기본값입니다."}` });

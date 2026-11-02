@@ -48,6 +48,7 @@ describe("applyMailFields", () => {
     expect(draft.first_payment_on).toBe("2026-12-01");
     // 종료일은 메일에서 온 값이 아니다 — 근거 문장 없이 확인 표시만 붙는다.
     expect(filled.ends_on).toEqual({ value: "2027-12-01", evidence: "" });
+    expect(filled.first_payment_on).toEqual({ value: "2026-12-01", evidence: "" });
   });
 
   it("사람이 고친 종료일 · 최초 결제일은 시작일을 따라가지 않는다", () => {
@@ -57,6 +58,7 @@ describe("applyMailFields", () => {
     expect(draft.ends_on).toBe("2027-06-30");
     expect(draft.first_payment_on).toBe("2026-12-15");
     expect(filled.ends_on).toBeUndefined();
+    expect(filled.first_payment_on).toBeUndefined();
   });
 
   it("회차 수는 할부일 때만 들어간다", () => {

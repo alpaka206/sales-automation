@@ -104,14 +104,11 @@ export type MailCell = { value: string; evidence: string };
 export type MailFields = Partial<Record<keyof Draft, MailCell>>;
 export type MailSuggestion = { status: "ok" | "no_mail" | "failed"; mails: number; fields: MailFields };
 
-/** 사람이 꼭 봐야 하는 칸과 그 이유. 저장을 막지는 않습니다 — 확인 단계가 늘수록 습관적으로 넘기게 됩니다. */
+/** 바탕색만으로는 안 보이는 사실 — 금액은 메일이 VAT 를 안 적기도 하고, 종료일은 메일에서 온 값이 아닙니다. 그냥
+ *  「확인하세요」 한 마디는 뺐습니다(2026-11-02 운영자) — 채운 칸은 바탕색이 말합니다(`mailInput`). 저장을 막지는 않습니다. */
 export const MAIL_CHECKS: Partial<Record<keyof Draft, string>> = {
   amount_incl_vat: "VAT 포함 금액인지 확인하세요",
-  starts_on: "날짜를 확인하세요",
   ends_on: "시작일의 12개월 뒤로 맞췄습니다. 계약 기간을 확인하세요",
-  payment_method: "확인하세요",
-  billing_email: "확인하세요",
-  contact_name: "확인하세요",
 };
 
 /** 메일에서 찾은 칸을 초안에 넣습니다 — **아직 기본값인 칸에만**.
@@ -140,7 +137,10 @@ export function applyMailFields(current: Draft, base: Draft, fields: MailFields)
       next.ends_on = addMonths(start, 12);
       filled.ends_on = { value: next.ends_on, evidence: "" };
     }
-    if (current.first_payment_on === base.first_payment_on) next.first_payment_on = start;
+    if (current.first_payment_on === base.first_payment_on) {
+      next.first_payment_on = start;
+      filled.first_payment_on = { value: start, evidence: "" };
+    }
   }
   return { draft: next, filled };
 }
