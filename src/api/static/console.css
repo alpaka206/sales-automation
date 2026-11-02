@@ -403,6 +403,9 @@ a.kpi:hover { border-color: var(--accent); }
   display: grid; grid-auto-flow: column; grid-auto-columns: minmax(248px,1fr); gap: 12px;
   margin: 0 -8px var(--gap); padding: 0 8px 12px; overflow-x: auto; scroll-snap-type: x proximity;
 }
+/* 돋보기로 찾은 결과 — 카드가 있는 열만 서므로 넓게 늘이지도, 빈 높이를 채우지도 않는다. */
+.kanban--found { grid-auto-columns: minmax(248px, 300px); justify-content: start; }
+.kanban--found .kanban-column { height: auto; max-height: calc(100dvh - 190px); min-height: 0; }
 /* Each column is a fixed-height box that scrolls its own cards. Before this the
    column grew with its contents, so one busy stage (157 cards here) made the whole
    page scroll for screens on end and dragged every other column out of view. */

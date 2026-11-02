@@ -1077,15 +1077,44 @@ def ui_document_revisions(kind: str, document_id: int):
         }
 
 
+# 돋보기에 한 번에 받는 글자 수. 이름 · 메일 주소보다 긴 글은 찾을 것이 없다.
+_BOARD_SEARCH_CHARS = 100
+
+
+@router.get("/api/ui/pipeline/search")
+def ui_pipeline_search(q: str = ""):
+    """보드 위 돋보기 — 이름 · 이메일의 일부로 모든 열에서 찾습니다. 모양은 대시보드의 ``stages`` 그대로입니다."""
+    from .customer_ops import PIPELINE_STAGES, _pipeline_rows
+
+    term = q.strip()[:_BOARD_SEARCH_CHARS]
+    rows, totals = _pipeline_rows(search=term) if term else ([], {})
+    reminders = _reminders(rows)
+    return {
+        "q": term,
+        "total": sum(totals.values()),
+        "stages": [
+            {
+                "key": stage,
+                "label": label,
+                "total": totals.get(stage, 0),
+                "cards": [_card(row, reminders.get(row["conversation"].id)) for row in rows if row["stage"] == stage],
+            }
+            for stage, label, _ in PIPELINE_STAGES
+        ],
+    }
+
+
 @router.get("/api/ui/pipeline/{stage}/cards")
-def ui_pipeline_page(stage: str, offset: int = 0):
+def ui_pipeline_page(stage: str, offset: int = 0, q: str = ""):
     """One more page of a column — the same paging the Jinja board scrolls into."""
     from .customer_ops import BOARD_CARDS_PER_STAGE, VALID_PIPELINE_STAGES, _pipeline_rows
 
     if stage not in VALID_PIPELINE_STAGES:
         raise HTTPException(status_code=404, detail="지원하지 않는 파이프라인 단계입니다")
     offset = max(offset, 0)
-    rows, totals = _pipeline_rows(stage=stage, limit=BOARD_CARDS_PER_STAGE, offset=offset)
+    rows, totals = _pipeline_rows(
+        stage=stage, limit=BOARD_CARDS_PER_STAGE, offset=offset, search=q[:_BOARD_SEARCH_CHARS]
+    )
     reminders = _reminders(rows)
     return {
         "cards": [_card(row, reminders.get(row["conversation"].id)) for row in rows],

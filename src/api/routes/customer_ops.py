@@ -12,7 +12,7 @@ from urllib.parse import quote
 
 from fastapi import APIRouter, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import delete, func, or_, select, update
 
 from ...agents.summaries import append_line, rebuild_summary
 # 「우리가 보낸 것인가」는 스레드 수집기와 **같은 규칙**을 씁니다 — 두 벌이면 같은 메일을
@@ -521,8 +521,13 @@ def _pipeline_rows(
     stage: str | None = None,
     limit: int = BOARD_CARDS_PER_STAGE,
     offset: int = 0,
+    search: str = "",
 ) -> tuple[list[dict], dict[str, int]]:
     """Board cards, newest first — one page of them — plus the true size of each column.
+
+    ``search`` 는 보드 위의 돋보기입니다 (2026-11-02 운영자) — 이름 · 이메일의 일부로 찾습니다. 서버에서 찾는 이유:
+    열마다 ``limit`` 장만 그리므로 화면에서 거르면 그 뒤의 티켓은 있어도 「없음」이 됩니다. 순위도 열의 수도 찾은 것
+    안에서 잽니다.
 
     Returns ``(rows, totals)``. ``totals`` is what the column header shows: paging the
     cards must not quietly change the number an operator reads off the board.
@@ -543,6 +548,13 @@ CustomerProfile 조인도 같이 빠졌습니다 — 카드가 그 프로필에�
 
     The window function needs SQLite >= 3.25 (2018) and any supported PostgreSQL.
     """
+    term = search.strip()
+    # 메일 주소에 흔한 `_` 와 `%` 는 글자 그대로 찾습니다(`autoescape`).
+    found = (
+        or_(Contact.email.icontains(term, autoescape=True), Contact.full_name.icontains(term, autoescape=True))
+        if term
+        else None
+    )
     query = (
         select(Conversation, Contact)
         .join(Contact, Conversation.contact_id == Contact.id)
@@ -554,18 +566,26 @@ CustomerProfile 조인도 같이 빠졌습니다 — 카드가 그 프로필에�
             func.row_number()
             .over(partition_by=Conversation.stage, order_by=_CARD_ORDER)
             .label("rank"),
-        ).subquery()
+        )
+        if found is not None:
+            numbered = numbered.join(Contact, Conversation.contact_id == Contact.id).where(found)
+        numbered = numbered.subquery()
         query = query.join(numbered, numbered.c.conversation_id == Conversation.id).where(
             numbered.c.rank <= limit
         )
     else:
-        query = query.where(Conversation.stage == stage).limit(limit).offset(offset)
+        query = query.where(Conversation.stage == stage)
+        if found is not None:
+            query = query.where(found)
+        query = query.limit(limit).offset(offset)
 
     with SessionLocal() as session:
         totals: dict[str, int] = {}
         counts = select(Conversation.stage, func.count()).group_by(Conversation.stage)
         if stage is not None:
             counts = counts.where(Conversation.stage == stage)
+        if found is not None:
+            counts = counts.join(Contact, Conversation.contact_id == Contact.id).where(found)
         for stage_key, count in session.execute(counts).all():
             key = stage_key if stage_key in VALID_PIPELINE_STAGES else "new"
             totals[key] = totals.get(key, 0) + count

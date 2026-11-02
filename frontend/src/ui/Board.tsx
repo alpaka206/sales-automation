@@ -89,9 +89,11 @@ function withCardMoved(stages: Stage[], card: Card, to: string): Stage[] {
   });
 }
 
-export function Board({ stages, manualLogStages, dealDetails = {} }: {
+export function Board({ stages, manualLogStages, dealDetails = {}, query = "" }: {
   stages: Stage[];
   manualLogStages: string[];
+  /** 돋보기에 적은 말. 있으면 찾은 카드가 있는 열만 그리고, 「더 보기」도 찾은 것 안에서 넘긴다. */
+  query?: string;
   /** 단계 → 고를 수 있는 Deal Detail. 서버가 줍니다 — 라우트가 거절하는 값이 고르개에
    *  들어 있는 상태가 생기지 않도록, 목록은 한 곳에만 있습니다. */
   dealDetails?: Record<string, string[]>;
@@ -174,7 +176,9 @@ export function Board({ stages, manualLogStages, dealDetails = {} }: {
   }
 
   async function loadMore(stage: Stage, loaded: number) {
-    const page = await getJSON<Page>(`/api/ui/pipeline/${stage.key}/cards?offset=${loaded}`);
+    const page = await getJSON<Page>(
+      `/api/ui/pipeline/${stage.key}/cards?offset=${loaded}&q=${encodeURIComponent(query)}`,
+    );
     setExtra((prev) => ({ ...prev, [stage.key]: [...(prev[stage.key] ?? []), ...page.cards] }));
   }
 
@@ -185,8 +189,9 @@ export function Board({ stages, manualLogStages, dealDetails = {} }: {
           옮겨져 보이는데 화면만 몇 초 얼어 있는 셈이라 앞뒤가 안 맞았습니다 — 기다릴 것이
           없으면 기다리는 표시도 없어야 합니다. HubSpot·워크북이 받았는지는 위 배너가
           늦게라도 말해 줍니다. */}
-      <div className="kanban">
-        {stages.map((stage) => {
+      {/* 찾는 동안은 카드가 있는 열만 그립니다. 빈 열까지 두면 맨 오른쪽 열의 결과가 화면 밖에 있어 없는 줄 압니다. */}
+      <div className={`kanban${query ? " kanban--found" : ""}`}>
+        {stages.filter((stage) => !query || stage.total > 0).map((stage) => {
           const cards = [...stage.cards, ...(extra[stage.key] ?? [])];
           const canLog = manualLogStages.includes(stage.key);
           // Won 과 Lost 에만 있습니다 — 왜 이겼나 / 왜 졌나는 결말이 난 건에만 있는
