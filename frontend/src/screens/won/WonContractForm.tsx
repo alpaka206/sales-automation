@@ -4,8 +4,8 @@ import { useLocation, useNavigate, useParams, useSearchParams } from "react-rout
 import { getJSON, postForm } from "../../lib/api";
 import { SubmitButton, useAction } from "../../ui/ActionButton";
 import { Modal } from "../../ui/Modal";
-import { ContractFields, PlanFields, useContractDraft } from "./ContractFields";
-import { type MailSuggestion, applyMailFields, carryOver, emptyCarry, emptyDraft, validate } from "./contractDraft";
+import { ContractFields, type ContractPart, PlanFields, useContractDraft } from "./ContractFields";
+import { type MailSuggestion, applyMailFields, carryOver, emptyCarry, emptyDraft, problemPart, validate } from "./contractDraft";
 import { type ListData, type Row, addMonths } from "./shared";
 
 /** 계약 정보 입력 — 새 계약은 이 모달, 있는 계약은 상세의 제자리 편집(`ContractCards`).
@@ -19,6 +19,14 @@ import { type ListData, type Row, addMonths } from "./shared";
  */
 // 제출 버튼이 모달 푸터에 있어서 폼을 id 로 가리킵니다.
 const FORM_ID = "won-contract-form";
+
+/** 입력 창의 쪽 (2026-11-02 운영자: 「스크롤 형식으로 내려가면서 하는게 아니라 … 화살표를 눌러 다음 페이지로」 ·
+ *  「계약 > 금액 + 결제 > 그외」). 값은 쪽을 넘겨도 `useContractDraft` 에 그대로 있습니다. 상세의 제자리 편집은 카드라 안 나눕니다. */
+const STEPS: { label: string; parts: ContractPart[]; plan?: boolean }[] = [
+  { label: "계약", parts: ["contract"] },
+  { label: "금액 및 결제", parts: ["money", "payment"] },
+  { label: "계정 및 플랜", parts: ["etc"], plan: true },
+];
 
 export function WonContractForm() {
   const { clientId, contractId } = useParams();
@@ -64,6 +72,21 @@ export function WonContractForm() {
   const [copyPrev, setCopyPrev] = useState(true);
   const [note, setNote] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
+  const [step, setStep] = useState(0);
+  const pageRef = useRef<HTMLDivElement>(null);
+  const moved = useRef(false);
+  const go = (index: number) => {
+    setStep(index);
+    setNote(null);
+    moved.current = true;
+  };
+  // 쪽을 넘기면 맨 위로, 포커스는 그 쪽의 첫 칸으로 — 누른 「다음」이 마지막 쪽에서 사라지면 포커스가 갈 곳을 잃습니다.
+  useEffect(() => {
+    if (!moved.current) return;
+    moved.current = false;
+    pageRef.current?.closest(".won")?.scrollTo({ top: 0 });
+    pageRef.current?.querySelector<HTMLElement>("input:not([disabled]), select, textarea")?.focus({ preventScroll: true });
+  }, [step]);
   // 메일로 칸 채우기 — 수주 전환 대기에서 온 새 계약만. 저장은 사람이 합니다.
   //
   // **질의가 아니라 한 번의 호출입니다.** 콘솔은 누가 무엇을 쓰든 캐시를 전부 다시 받으므로(`/api/ui/events`), 질의로
@@ -90,10 +113,7 @@ export function WonContractForm() {
         if (found.status === "failed") setMailStatus({ tone: "none", text: "메일을 읽지 못했습니다. 직접 입력해 주세요." });
         else if (found.status === "no_mail") setMailStatus({ tone: "none", text: "이 티켓에는 읽을 메일이 없습니다. 직접 입력해 주세요." });
         else if (!count) setMailStatus({ tone: "none", text: "메일에서 채울 내용을 찾지 못했습니다. 직접 입력해 주세요." });
-        else setMailStatus({ tone: "ok", text: `메일에서 ${count}칸을 채웠습니다. 저장 전에 파란 칸을 확인하세요. ${
-          filled.starts_on
-            ? "계약 종료일은 시작일의 12개월 뒤로, 최초 결제일은 시작일로 맞춘 값입니다."
-            : "계약 시작일 · 종료일 · 최초 결제일은 메일에서 채우지 않은 기본값입니다."}` });
+        else setMailStatus({ tone: "ok", text: `메일에서 ${count}칸을 채웠습니다.` });
       })
       .catch(() => setMailStatus({ tone: "none", text: "메일을 읽지 못했습니다. 직접 입력해 주세요." }));
   }, [draft, editing, pendingItem, f, setDraft]);
@@ -166,9 +186,16 @@ export function WonContractForm() {
   const [save, saving] = useAction(async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!draft) return;
+    // 마지막 쪽 전의 Enter 는 다음 쪽입니다. 있는 계약의 수정은 어느 쪽에서든 저장합니다.
+    if (!editing && step < STEPS.length - 1) { go(step + 1); return; }
     setNote(null);
     const problem = validate(draft);
-    if (problem) { setNote(problem); return; }
+    if (problem) {
+      const wrong = problemPart(draft);
+      go(STEPS.findIndex((item) => wrong !== null && item.parts.includes(wrong)));
+      setNote(problem);
+      return;
+    }
     const body = f.body()!;
     if (!editing && pendingId) body.pending_id = pendingId;
     try {
@@ -222,15 +249,6 @@ export function WonContractForm() {
     <Modal
       key="form"
       title={editing ? "계약 수정" : prev ? "계약 추가" : "계약 정보 입력"}
-      description={
-        editing
-          ? "이 계약의 정보를 고칩니다."
-          : prev
-            ? "기존 고객에 새 계약을 추가합니다. Client ID는 그대로 유지되고, 계약만 별도 히스토리로 쌓입니다."
-            : creating
-              ? "저장하면 고객과 첫 계약이 함께 등록됩니다."
-              : "이 고객의 첫 계약 정보를 입력합니다."
-      }
       wide
       onClose={back}
       actions={
@@ -243,52 +261,63 @@ export function WonContractForm() {
               {note}
             </span>
           )}
-          <SubmitButton busy={saving} pending="저장 중" form={FORM_ID}>
-            {editing ? "저장" : "계약 저장"}
-          </SubmitButton>
+          {step > 0 && (
+            <button type="button" className="btn btn--subtle" onClick={() => go(step - 1)}>← 이전</button>
+          )}
+          {step < STEPS.length - 1 && (
+            <button type="button" className={`btn ${editing ? "btn--subtle" : "btn--primary"}`}
+                    onClick={() => go(step + 1)}>다음 →</button>
+          )}
+          {(editing || step === STEPS.length - 1) && (
+            <SubmitButton busy={saving} pending="저장 중" form={FORM_ID}>
+              {editing ? "저장" : "계약 저장"}
+            </SubmitButton>
+          )}
         </>
       }
     >
       <div className="won">
         <form id={FORM_ID} onSubmit={save}>
-          <div className="idbox">
-            <div>
-              <div className="field-label">{editing ? "수정하는 계약" : "추가되는 계약"}</div>
-              <div className="big">{seq}차 계약</div>
-            </div>
-            <div style={{ fontSize: 12.5, color: "var(--muted)", borderLeft: "1px solid #CFE2DF", paddingLeft: 12 }}>
-              {company} · Client ID{" "}
-              <b>{creating ? (customer?.client_id || "저장할 때 발급") : data?.client_id}</b>
-              {creating ? "" : " (유지)"}<br />
-              {creating
-                ? "저장하면 고객과 첫 계약이 함께 등록됩니다"
-                : `기존 계약 ${contracts.length}건 · 저장 시 최신 계약으로 노출`}
-            </div>
+          <div className="cform-head">
+            {/* 회사명이 있어야 합니다 — 신규 고객은 이 창 뒤에 고객 화면이 없어 어느 회사의 계약인지 여기서만 보입니다. */}
+            <p className="seq-line">{company}의 {seq}차 계약{editing ? "을 수정합니다." : "이 추가됩니다."}</p>
+            {mailStatus && (
+              <div className={`mail-status mail-status--${mailStatus.tone}`} role="status">{mailStatus.text}</div>
+            )}
           </div>
 
-          {prev && !editing && (
-            <>
-              <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 13,
-                              marginBottom: 4, cursor: "pointer" }}>
-                <input type="checkbox" checked={copyPrev}
-                       onChange={(e) => {
-                         setCopyPrev(e.target.checked);
-                         setDraft((c) => c ? { ...c, ...(e.target.checked ? carryOver(prev) : emptyCarry()) } : c);
-                       }} />
-                이전 계약({prev.label})의 플랜 · 결제 · 계정 설정 불러오기
-              </label>
-              <div style={{ fontSize: 12, color: "var(--faint)", marginBottom: 6, paddingLeft: 22 }}>
-                금액 · 크레딧 · 기간은 새로 입력합니다.
-              </div>
-            </>
-          )}
+          <ol className="cform-steps" aria-label="입력 단계">
+            {STEPS.map((item, index) => (
+              <li key={item.label}>
+                <button type="button" className={`cform-step${index === step ? " is-on" : ""}`}
+                        aria-current={index === step ? "step" : undefined} onClick={() => go(index)}>
+                  <span className="cform-step__no">{index + 1}</span>{item.label}
+                </button>
+              </li>
+            ))}
+          </ol>
 
-          {mailStatus && (
-            <div className={`mail-status mail-status--${mailStatus.tone}`} role="status">{mailStatus.text}</div>
-          )}
+          <div className="cform-page" ref={pageRef}>
+            {step === 0 && prev && !editing && (
+              <>
+                <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 13,
+                                marginBottom: 4, cursor: "pointer" }}>
+                  <input type="checkbox" checked={copyPrev}
+                         onChange={(e) => {
+                           setCopyPrev(e.target.checked);
+                           setDraft((c) => c ? { ...c, ...(e.target.checked ? carryOver(prev) : emptyCarry()) } : c);
+                         }} />
+                  이전 계약({prev.label})의 플랜 · 결제 · 계정 설정 불러오기
+                </label>
+                <div style={{ fontSize: 12, color: "var(--faint)", marginBottom: 6, paddingLeft: 22 }}>
+                  금액 · 크레딧 · 기간은 새로 입력합니다.
+                </div>
+              </>
+            )}
 
-          <ContractFields f={f} options={options} />
-          <PlanFields f={f} options={options} />
+            {STEPS[step].plan && <PlanFields f={f} options={options} />}
+            <ContractFields f={f} options={options} askTermination={editing} parts={STEPS[step].parts} />
+          </div>
         </form>
       </div>
     </Modal>

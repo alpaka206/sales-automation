@@ -148,11 +148,20 @@ export function applyMailFields(current: Draft, base: Draft, fields: MailFields)
 /** 저장 전 검사. 계약금액과 계약 크레딧, 둘만 필수입니다 — 분당 단가는 그 둘에서 나오는
  *  계산값이라 받지 않습니다. 문제가 없으면 null. */
 export function validate(draft: Draft): string | null {
+  return firstProblem(draft)?.message ?? null;
+}
+
+/** 검사에 걸린 칸이 있는 절 — 입력 창은 그 쪽으로 데려갑니다. 칸이 다른 쪽에 있으면 안내만 봐서는 어디인지 모릅니다. */
+export function problemPart(draft: Draft): "contract" | "money" | null {
+  return firstProblem(draft)?.part ?? null;
+}
+
+function firstProblem(draft: Draft): { part: "contract" | "money"; message: string } | null {
   if (!draft.starts_on || !draft.ends_on || draft.ends_on <= draft.starts_on) {
-    return "계약 시작일과 종료일을 확인해 주세요.";
+    return { part: "contract", message: "계약 시작일과 종료일을 확인해 주세요." };
   }
-  if (!derive(draft).billing) return `계약금액을 입력해 주세요 (${draft.currency}).`;
-  if (!n(draft.credits)) return "계약 크레딧을 입력해 주세요 — 분당 단가가 여기서 나옵니다.";
+  if (!derive(draft).billing) return { part: "money", message: `계약금액을 입력해 주세요 (${draft.currency}).` };
+  if (!n(draft.credits)) return { part: "contract", message: "계약 크레딧을 입력해 주세요 — 분당 단가가 여기서 나옵니다." };
   return null;
 }
 

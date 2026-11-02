@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyMailFields, emptyDraft, type Draft, type MailFields } from "../src/screens/won/contractDraft";
+import { applyMailFields, emptyDraft, problemPart, validate, type Draft, type MailFields } from "../src/screens/won/contractDraft";
 
 // 메일에서 찾은 칸은 아직 기본값인 칸에만 들어간다 — 사람이 적은 값과 이전 계약에서 물려받은 값은 그대로다.
 
@@ -69,5 +69,22 @@ describe("applyMailFields", () => {
 
     const split = applyMailFields(base, base, { payment_type: cell("할부"), installments: cell("4") });
     expect(split.draft.installments).toBe("4");
+  });
+});
+
+// 입력 창은 쪽으로 나뉘어 있어서, 저장이 막히면 그 칸이 있는 쪽으로 데려가야 한다.
+describe("problemPart", () => {
+  const complete = opened({ amount_incl_vat: "12000", credits: "64800" });
+
+  it("빠진 칸이 없으면 쪽도 문구도 없다", () => {
+    expect(problemPart(complete)).toBeNull();
+    expect(validate(complete)).toBeNull();
+  });
+
+  it("날짜와 크레딧은 계약 쪽, 금액은 금액 쪽이다", () => {
+    expect(problemPart({ ...complete, ends_on: "2026-01-01" })).toBe("contract");
+    expect(problemPart({ ...complete, credits: "" })).toBe("contract");
+    expect(problemPart({ ...complete, amount_incl_vat: "" })).toBe("money");
+    expect(validate({ ...complete, amount_incl_vat: "" })).toContain("계약금액");
   });
 });

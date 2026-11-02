@@ -3335,3 +3335,36 @@ def test_the_mrr_split_looks_at_the_contract_not_the_payment():
     # Stripe 가 아닌 계약은 MRR 쪽도 0 입니다.
     other = SimpleNamespace(**{**contract.__dict__, "payment_method": "직접거래"})
     assert _mrr_cells(other, months, rate, stripe_only=True) == {}
+
+
+def test_only_an_existing_contract_asks_for_the_termination_date():
+    """새 계약은 해지일을 안 묻는다(2026-11-02) — 칸을 아예 지우면 실제 해지를 적을 곳이 사라지므로 편집에는 남는다."""
+    import pathlib
+
+    form = pathlib.Path("frontend/src/screens/won/WonContractForm.tsx").read_text(encoding="utf-8")
+    fields = pathlib.Path("frontend/src/screens/won/ContractFields.tsx").read_text(encoding="utf-8")
+    detail = pathlib.Path("frontend/src/screens/won/WonCustomerDetail.tsx").read_text(encoding="utf-8")
+
+    assert "askTermination={editing}" in form
+    assert "askTermination = true" in fields and "{askTermination && (" in fields
+    assert "<ContractFields f={f} options={options} />" in detail
+
+
+def test_the_contract_form_is_three_pages_and_the_detail_edit_is_not():
+    """계약 > 금액 및 결제 > 계정 및 플랜 (2026-11-02 운영자). 상세의 제자리 편집은 카드라 같은 칸을 안 나눈 채로 쓴다."""
+    import pathlib
+    import re
+
+    form = pathlib.Path("frontend/src/screens/won/WonContractForm.tsx").read_text(encoding="utf-8")
+    fields = pathlib.Path("frontend/src/screens/won/ContractFields.tsx").read_text(encoding="utf-8")
+    detail = pathlib.Path("frontend/src/screens/won/WonCustomerDetail.tsx").read_text(encoding="utf-8")
+
+    assert re.findall(r'label: "([^"]+)", parts', form) == ["계약", "금액 및 결제", "계정 및 플랜"]
+    assert "parts={STEPS[step].parts}" in form
+    assert "<ContractFields f={f} options={options} />" in detail
+
+    # 크레딧 지급은 절이 없어지고 계약 크레딧 옆에 온다.
+    assert 'form-sec">크레딧 지급' not in fields
+    contract = fields[fields.index('form-sec">계약</div>'):fields.index('form-sec">금액</div>')]
+    order = [contract.index('label="계약 크레딧"'), contract.index('label="총 지급 회차"'), contract.index('label="첫 지급 예정일"')]
+    assert order == sorted(order)

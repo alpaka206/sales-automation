@@ -410,12 +410,22 @@
 .won .inp {border:1px solid var(--line);border-radius:6px;padding:6px 8px;font-size:13px;width:100%;background:#fff;}
 .won .inp:focus {outline:none;border-color:var(--teal-500);box-shadow:0 0 0 3px rgba(42,157,143,.12);}
 .won .form-row {display:grid;grid-template-columns:repeat(4,1fr);gap:10px;}
+/* 계약 입력 창의 쪽 — 높이를 잡아 두어 쪽을 넘겨도 「다음」이 손 밑에서 안 움직인다. */
+.won .cform-steps {display:flex;flex-wrap:wrap;gap:6px;list-style:none;margin:0 0 12px;padding:0;}
+.won .cform-step {display:inline-flex;align-items:center;gap:7px;height:32px;padding:0 12px 0 8px;border:1px solid var(--border);border-radius:999px;background:#fff;font-size:12.5px;font-weight:600;color:var(--muted);}
+.won .cform-step__no {display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:50%;background:var(--bg-soft);font-size:11px;}
+.won .cform-step.is-on {border-color:#0f766e;background:rgba(15,118,110,.09);color:#0f766e;}
+.won .cform-step.is-on .cform-step__no {background:#0f766e;color:#fff;}
+.won .cform-page {min-height:400px;}
+.won .cform-page .form-grid3 {gap:10px 14px;}
+.won .cform-page .form-sec {margin-top:14px;padding-top:12px;margin-bottom:8px;}
+.won .cform-page .form-sec:first-child {margin-top:0;padding-top:0;}
 /* 메일로 칸 채우기 — 폼 위 상태 한 줄과 칸 밑의 근거. 주황은 이 화면에서 「손이 가야 한다」다. */
-.won .mail-status {margin:12px 0 4px;padding:9px 12px;border-radius:8px;font-size:12.5px;line-height:1.5;color:var(--muted);background:var(--bg-soft);}
+.won .mail-status {padding:4px 10px;border-radius:8px;font-size:12.5px;line-height:1.5;color:var(--muted);background:var(--bg-soft);}
 .won .mail-status--ok {color:#173ea5;background:#c9dcff;}
 /* 자동으로 채운 칸 — 사람이 값을 고치면 원래 색으로 돌아간다. */
 .won .inp.is-mail {background:#c9dcff;border-color:#3f6fe0;}
-.won .mail-note {margin-top:4px;font-size:11.5px;line-height:1.45;color:var(--muted);overflow:hidden;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;overflow-wrap:anywhere;}
+.won .mail-note {margin-top:4px;font-size:11.5px;line-height:1.45;color:var(--muted);overflow:hidden;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow-wrap:anywhere;}
 .won .mail-note.is-check b {color:#c2410c;font-weight:600;}
 .won .form-label {font-size:11.5px;color:var(--faint);display:block;margin-bottom:4px;}
 .won .req {color:#D9534F;}
@@ -536,8 +546,8 @@
 .won .type-name {font-weight:700;font-size:14px;}
 .won .type-range {font-size:12px;color:var(--teal-700);font-weight:600;margin-top:3px;font-variant-numeric:tabular-nums;}
 .won .type-note {font-size:11.5px;color:var(--faint);margin-top:5px;}
-.won .idbox {display:flex;align-items:center;gap:12px;border:1px dashed var(--teal-500);background:var(--teal-25);border-radius:10px;padding:13px 15px;margin-bottom:18px;}
-.won .idbox .big {font-size:22px;font-weight:700;letter-spacing:-.02em;color:var(--teal-700);font-variant-numeric:tabular-nums;}
+.won .seq-line {margin:0;font-size:14px;font-weight:600;color:var(--ink);}
+.won .cform-head {display:flex;flex-wrap:wrap;align-items:center;gap:6px 12px;margin-bottom:10px;}
 .won .form-grid {display:grid;grid-template-columns:1fr 1fr;gap:14px;}
 .won .note-box {margin-top:16px;font-size:12.5px;color:var(--muted);background:var(--bg-soft);border-radius:8px;padding:11px 13px;}
 /* 계약 폼 space_seq 칸 아래의 안내 줄 — 「플랜명」과 같은 이름의 플랜을 쓰는 스페이스 번호 (2026-10-12,
@@ -719,7 +729,7 @@
 .modal--wide:has(> .won) {
   width: 760px;
   max-width: calc(100vw - 32px);
-  max-height: 86vh;
+  max-height: calc(100dvh - 32px);
   padding: 0;
   overflow: hidden;
   display: flex;
