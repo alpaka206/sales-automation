@@ -1161,7 +1161,7 @@ async def ticket_create(
                 full_name=clean_name,
                 company=company.strip() or None,
                 # 개인 메일 도메인은 회사로 묶지 않습니다 — gmail 둘을 한 회사로 묶으면
-                # 남의 계약이 보입니다(CLAUDE.md).
+                # 남의 계약이 보입니다(`.claude/rules/수주고객.md`).
                 domain=None if is_personal_domain(domain) else domain,
             )
             session.add(contact)

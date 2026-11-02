@@ -64,7 +64,9 @@ src/api/static/app/
 # Generated guidebooks (scripts/build_guidebooks.py writes them on demand).
 output/
 frontend/tsconfig.tsbuildinfo
-.claude/
+# 규칙 파일만 저장소에 올린다 — CLAUDE.md 와 같이 다녀야 한다.
+.claude/*
+!.claude/rules/
 
 # Local task instructions supplied by the operator; not application policies.
 policy-response-final/

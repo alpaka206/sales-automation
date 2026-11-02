@@ -174,7 +174,7 @@ HubSpot 에 밉니다(`customer_ops.py:1197-1198`). 뒤집으면 메아리가 �
 3. HubSpot 이 propertyChange 를 되쏘고 → `sync_stage_from_hubspot` → `conv.stage` 는 이미 `"won"`
    → `:208` 에서 조기 반환 → **`_enqueue_pending_won` 까지 가지 못함**
 
-CLAUDE.md 의 "Won 감지는 `sync_stage_from_hubspot` 한 곳" 은 HubSpot 쪽에서 옮겼을 때의 이야기입니다.
+`.claude/rules/수주고객.md` 의 "Won 감지는 `sync_stage_from_hubspot` 한 곳" 은 HubSpot 쪽에서 옮겼을 때의 이야기입니다.
 콘솔 보드는 그 한 곳을 우회합니다. 증상: HubSpot 파이프라인에는 Won 인데 「수주 전환 대기」가
 비어 있고, 계약을 등록할 입구가 없습니다.
 

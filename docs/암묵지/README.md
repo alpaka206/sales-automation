@@ -196,7 +196,7 @@ UPDATE 로 시도 하나를 예약하고, `SLACK_NOTIFICATION_MAX_ATTEMPTS = 5` 
 `customer_ops.py:693`(`_linked_conversation`) · `:720`(`_log_interaction_to_hubspot`) ·
 `:766`(`interaction_add`). 03 은 HubSpot 쪽(`create_interaction_note` 는 note 한 종류만 쓴다)
 을, 07 은 `ui/InteractionForm.tsx` 를 세 화면이 공유한다는 것을 적었지만, **DB 쪽에서 그
-기록이 어느 대화·어느 계약 차수에 매달리는지**는 어느 문서에도 없습니다. CLAUDE.md 는
+기록이 어느 대화·어느 계약 차수에 매달리는지**는 어느 문서에도 없습니다. `.claude/rules/수주고객.md` 는
 "소통 히스토리만 예외로 고객 단위라 `contract_seq` 만 붙였다"(0065)까지만 말합니다. 가장 최근
 커밋(`528de3f` 「소통 히스토리가 HubSpot 타임라인과 양쪽으로 오간다」)이 이 영역을 바꿨는데 그
 양방향 규칙이 문서에 안 들어갔습니다.
