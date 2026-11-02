@@ -1064,6 +1064,30 @@ class InsightRule(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
 
 
+class DoneReply(Base):
+    """「답변 대기」에서 사람이 [완료]로 뺀 고객 회신 — 뺀 회신 **하나마다** 한 행입니다 (2026-11-02).
+
+    대화가 끝나 답이 필요 없는 회신을 내릴 길이 「메일 발송」으로 초안을 만들어 거절하는 것뿐이었습니다. 어느
+    회신인지는 ``inbound._Turn.source_ref``(``message:<id>`` · ``interaction:<id>``)입니다 — 시각으로 재지
+    않으므로 고객이 새로 쓴 말은 새 줄이라 저절로 다시 뜨고, 늦게 수집된 메일도 묻히지 않습니다. 같은 메일의 사본이
+    접히면 열쇠가 바뀌어 뺀 회신이 다시 뜰 수 있습니다 — 놓치는 쪽이 아니라 한 번 더 보이는 쪽이라 그대로 둡니다.
+    """
+
+    __tablename__ = "done_replies"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    conversation_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("conversations.id", ondelete="CASCADE"), nullable=False
+    )
+    source_ref: Mapped[str] = mapped_column(String(64), nullable=False)
+    done_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    done_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+
+    __table_args__ = (
+        Index("ux_done_replies_reply", "conversation_id", "source_ref", unique=True),
+    )
+
+
 class InsightMark(Base):
     """영업 인사이트 한 줄의 상태와 메모 — **사람이 버튼을 누른 줄만** 행이 있습니다 (이관 0133).
 

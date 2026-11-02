@@ -21,6 +21,7 @@ from ..db.models import (
     Conversation,
     CustomerInteraction,
     CustomerProfile,
+    DoneReply,
     Event,
     InboundJob,
     Message,
@@ -400,7 +401,15 @@ def utcnow_naive() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
-def _answered_turn(events: list[_Turn], first_reply: bool) -> _Turn | None:
+def done_reply_refs(conv_id: int | None, *, factory=None) -> set[str]:
+    """사람이 답변 대기에서 [완료]로 뺀 회신들(``source_ref``) — ``_answered_turn`` 이 그 회신에 답하지 않게."""
+    if not conv_id:
+        return set()
+    with (factory or SessionLocal)() as session:
+        return set(session.scalars(select(DoneReply.source_ref).where(DoneReply.conversation_id == conv_id)))
+
+
+def _answered_turn(events: list[_Turn], first_reply: bool, done: set[str] | frozenset[str] = frozenset()) -> _Turn | None:
     """이번 회신이 답할 고객 메시지. None 이면 티켓의 문의(``contact_info["last_message"]``)에 답합니다.
 
     - 후속 회신: 우리 영업의 마지막 이메일 뒤에 온 고객 메시지(``latest_customer_message``).
@@ -409,7 +418,17 @@ def _answered_turn(events: list[_Turn], first_reply: bool) -> _Turn | None:
       주고받은 마지막 한마디(「감사합니다」)가 「가장 최근 문의」가 되면 그 한마디에 답합니다.
     """
     if not first_reply:
-        return latest_customer_message(None, events=events)
+        latest = latest_customer_message(None, events=events)
+        if latest is None or latest.source_ref not in done:
+            return latest
+        # [완료]로 뺀 회신에는 답하지 않습니다 — 「감사합니다」만 빼고 앞의 질문을 남겼으면 그 질문에 답해야 합니다.
+        # 뺀 회신도 대화 맥락으로는 그대로 갑니다. 전부 뺐는데 사람이 메일을 쓰면 지금처럼 가장 최근 말입니다.
+        for turn in reversed(events):
+            if turn.role == "sales":
+                break
+            if turn.direction == "inbound" and turn.source_ref not in done:
+                return turn
+        return latest
     return next((turn for turn in reversed(events) if turn.role == "customer" and turn.channel != "채팅"), None)
 
 
@@ -1380,7 +1399,7 @@ class InboundAgent:
         policy = PolicySnapshot.capture(stage)
         # 답할 글. 허브스팟이 준 `last_message` 는 **티켓 본문** = 최초 문의라, 후속 회신에서 그대로 두면 처음
         # 문의에 다시 답합니다 — 우리 마지막 이메일 뒤에 고객이 쓴 말이 있으면 그것으로 갈아 끼웁니다.
-        answered = _answered_turn(events, first_reply)
+        answered = _answered_turn(events, first_reply, done_reply_refs(conv_id) if not first_reply else frozenset())
         last_message = (answered.body if answered is not None else "") or contact_info["last_message"]
         situation = FIRST_REPLY if first_reply else (ANSWER_REPLY if answered is not None else NUDGE)
 

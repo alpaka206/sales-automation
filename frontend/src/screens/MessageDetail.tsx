@@ -71,6 +71,8 @@ type Detail = {
     created_at: string | null;
     /** 후속 리마인더 한 줄(`followup_sequence.view`). 시퀀스 밖의 티켓은 `null`. */
     followup: Followup | null;
+    /** 답변 대기에서 [완료]로 뺀 회신. 우리가 그 뒤로 메일을 보내면 빠진다. */
+    done_replies: DoneReplyLine[];
   };
   ticket_interactions: Interaction[];
   /** 메일이 하나도 없는 티켓은 `null` 입니다 — HubSpot 에서 들여온 티켓이 그렇습니다. */
@@ -867,6 +869,9 @@ export function MessageDetail() {
                 </div>
               </div>
               <div className="history-list">
+                {!!data.ticket.done_replies?.length && ticket.id && (
+                  <DoneReplies ticketId={ticket.id} replies={data.ticket.done_replies} />
+                )}
                 {ticketLog.length === 0 ? (
                   <div className="empty"><div className="empty__text">아직 기록이 없습니다. 회신 이후의 연락은 여기에 남겨주세요.</div></div>
                 ) : (
@@ -1217,6 +1222,46 @@ type Followup = {
 
 /** 후속 리마인더 한 줄 (2026-09-17). 무엇을 언제 할지는 서버가 정하고(`followup_sequence.view`),
  *  화면은 말만 고릅니다. **닫았다가 고객이 돌아온 티켓은 빨갛게** — 운영자 지시입니다. */
+type DoneReplyLine = {
+  ref: string; at: string; text: string; korean: string | null;
+  done_by: string | null; done_at: string;
+};
+
+/** [완료]로 뺀 회신과 되돌리기. 전부 빼면 목록에서 행이 사라지므로 되돌리는 자리는 여기 하나다. */
+function DoneReplies({ ticketId, replies }: { ticketId: number; replies: DoneReplyLine[] }) {
+  const queryClient = useQueryClient();
+  const [error, setError] = useState("");
+  const undo = async (ref: string) => {
+    setError("");
+    try {
+      await postForm(`/tickets/${ticketId}/replies-done/undo`, { ref });
+      await queryClient.invalidateQueries();
+    } catch (failed) {
+      setError(`실패: ${String(failed)}`);
+    }
+  };
+  return (
+    <div className="done-replies">
+      <div className="t-sm" style={{ fontWeight: 600 }}>답변 대기에서 뺀 회신 {replies.length}건</div>
+      {replies.map((reply) => (
+        <div key={reply.ref} className="done-replies__row">
+          <div style={{ minWidth: 0 }}>
+            <div className="t-sm">{reply.korean || reply.text}</div>
+            <div className="t-xs t-subtle">
+              <span className="tnum">{kst(reply.at, "md-hm")}</span> 회신 · {reply.done_by || "알 수 없음"} ·{" "}
+              <span className="tnum">{kst(reply.done_at, "md-hm")}</span> 완료 처리
+            </div>
+          </div>
+          <ActionButton className="btn btn--subtle btn--sm" pending="되돌리는 중" onClick={() => undo(reply.ref)}>
+            되돌리기
+          </ActionButton>
+        </div>
+      ))}
+      {error && <div className="t-xs" role="alert" style={{ color: "var(--danger)" }}>{error}</div>}
+    </div>
+  );
+}
+
 function FollowupBanner({ followup: f }: { followup: Followup }) {
   const at = (value?: string | null) => kst(value, "md-hm");
   const text =

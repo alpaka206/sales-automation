@@ -35,6 +35,7 @@ from ...db.models import (
     ConversationProgress,
     CustomerInteraction,
     CustomerProfile,
+    DoneReply,
     Event,
     MailboxLinkDecision,
     Message,
@@ -1454,6 +1455,7 @@ async def contact_delete(contact_id: int):
                     ConversationProgress.conversation_id.in_(conv_ids)
                 )
             )
+            session.execute(delete(DoneReply).where(DoneReply.conversation_id.in_(conv_ids)))
             # 수주 전환 대기는 이 사람의 것이 아니라 **티켓**의 것입니다. 대화만 떼어 둡니다 —
             # 행까지 지우면 계약 정보를 아직 못 받은 Won 티켓이 대기 목록에서 사라집니다.
             session.execute(

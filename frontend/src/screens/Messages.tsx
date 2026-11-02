@@ -106,7 +106,7 @@ export function Messages() {
 
       <div className="card card--flush">
         {isPending || !data ? (
-          <Loading columns={7} />
+          <Loading columns={status === "awaiting" ? 8 : 7} />
         ) : (
           <Refreshing active={isFetching}>
             <QueueTable
@@ -116,6 +116,7 @@ export function Messages() {
               categoryLabels={data.category_labels}
               unqualified={data.unqualified}
               emptyText="조건에 맞는 답변이 없습니다."
+              doneColumn={status === "awaiting"}
             />
           </Refreshing>
         )}

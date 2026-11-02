@@ -210,12 +210,20 @@
   border: 1px solid transparent;
 }
 .pill--sm { padding: 2px 8px 2px 7px; font-size: 11.5px; }
+/* 표 맨 오른쪽의 버튼 칸. 고정 폭 표의 칸은 넘치면 말줄임표를 달아서 버튼 옆에 「…」가 선다. */
+.table td.td-action { padding-left: 0; padding-right: 12px; overflow: visible; text-align: right; }
+/* 답변 대기의 [완료] 창과 티켓 화면의 「뺀 회신」 — 회신 한 줄. */
+.done-pick { display: flex; flex-direction: column; gap: 8px; }
+.done-pick__row { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; }
+.done-replies { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; padding: 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-2); }
+.done-replies__row { display: flex; gap: 12px; align-items: center; justify-content: space-between; }
 .pill__dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; background: currentColor; }
 .pill__dot { background: var(--_dot); }
 .pill--ok      { background: var(--ok-soft);      color: var(--ok);      --_dot: var(--ok-dot); }
 .pill--warn    { background: var(--warn-soft);    color: var(--warn);    --_dot: var(--warn-dot); }
 .pill--danger  { background: var(--danger-soft);  color: var(--danger);  --_dot: var(--danger-dot); }
 .pill--info    { background: var(--info-soft);    color: var(--info);    --_dot: var(--info-dot); }
+.pill--orange  { background: var(--orange-soft);  color: var(--orange);  --_dot: var(--orange-dot); }
 .pill--reply   { background: var(--reply-soft);   color: var(--reply);   --_dot: var(--reply-dot); }
 .pill--accent  { background: var(--accent-soft);  color: var(--accent);  --_dot: var(--accent); }
 .pill--neutral { background: var(--neutral-soft); color: var(--neutral); --_dot: var(--neutral-dot); }

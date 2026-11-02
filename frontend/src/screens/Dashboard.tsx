@@ -83,6 +83,7 @@ export function Dashboard() {
           categoryLabels={data.category_labels}
           unqualified={data.unqualified}
           emptyText="답변을 기다리는 문의가 없습니다."
+          doneColumn
         />
       </section>
 

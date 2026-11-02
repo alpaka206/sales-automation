@@ -1026,3 +1026,21 @@ class TestInsightDrafts:
             with mem_engine.begin() as conn:
                 conn.execute(text("INSERT INTO insight_drafts (tab, lang, part, content, updated_at) "
                                   "VALUES ('up', 'ko', 'subject', '다른 제목', :t)"), {"t": datetime.now(timezone.utc)})
+
+
+class TestDoneReplies:
+    """0135 — 답변 대기에서 [완료]로 뺀 회신(`done_replies`). 회신 하나에 행 하나."""
+
+    MODULE = "src.db.migrations.0135_a_person_marks_a_reply_done"
+
+    def test_creates_the_table_like_the_model_and_runs_twice(self, mem_engine):
+        importlib.import_module(self.MODULE).up(mem_engine)
+        importlib.import_module(self.MODULE).up(mem_engine)
+
+        from src.db.models import DoneReply
+
+        insp = inspect(mem_engine)
+        assert {c["name"] for c in insp.get_columns("done_replies")} == {c.name for c in DoneReply.__table__.columns}
+        assert {(ix["name"], tuple(ix["column_names"]), bool(ix["unique"])) for ix in insp.get_indexes("done_replies")} == {
+            ("ux_done_replies_reply", ("conversation_id", "source_ref"), True),
+        }

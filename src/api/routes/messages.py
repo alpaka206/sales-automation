@@ -9,6 +9,7 @@ from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from sqlalchemy import func as sa_func, select
+from sqlalchemy.exc import IntegrityError
 from starlette.concurrency import run_in_threadpool
 from sqlalchemy.orm import joinedload
 
@@ -32,6 +33,7 @@ from ...db.models import (
     ConversationProgress,
     CustomerInteraction,
     CustomerProfile,
+    DoneReply,
     Message,
 )
 from ...db.session import SessionLocal
@@ -444,6 +446,8 @@ def _message_detail_context(
                     outside_replies(session, [conv.id]).get(conv.id, ())
                     if conv.stage == FOLLOWUP_STAGE or conv.followup_closed_at is not None else (),
                 ) if conv else None,
+                # 답변 대기에서 [완료]로 뺀 회신 — 누가 언제 뺐는지와 되돌리기.
+                "done_replies": _done_replies(session, conv) if conv else [],
                 # 티켓이 만들어진 날. **허브스팟을 다시 부르지 않습니다** — 백필이 허브스팟의
                 # `createdate` 를 그대로 복사해 두었고(`hubspot_backfill`: `created_at=
                 # ticket.created_at`), 실시간으로 들어온 티켓만 우리가 받은 시각이라 몇 초
@@ -708,6 +712,67 @@ LIST_SORTS = ("oldest", "newest")
 # Closed Lost 의 81~335일 전 메시지 — 이전 담당자 때 답을 안 한 채 끝난 대화 — 였다. New 의 검토할 초안에는 안 건다
 # (옛 「발송 대기」에도 기간이 없었다).
 AWAITING_REPLY_DAYS = 30
+# [완료] 창에 싣는 회신 앞부분.
+_REPLY_PREVIEW_CHARS = 240
+
+
+def _reply_lines(session, turns_by_conv: dict[int, list]) -> dict[int, list[dict]]:
+    """[완료] 창과 티켓 화면에 그릴 회신 줄 — 오래된 순.
+
+    원문은 언제나 보입니다. 한국어 요약은 한국어가 아닌 회신에만 곁들입니다 — 요약만 읽고 빼면 요약이 빠뜨린 질문을
+    놓칩니다.
+    """
+    ids: dict[str, list[int]] = {"interaction": [], "message": []}
+    for turns in turns_by_conv.values():
+        for turn in turns:
+            kind, _, raw = turn.source_ref.partition(":")
+            if kind in ids and raw.isdigit():
+                ids[kind].append(int(raw))
+    korean: dict[str, str | None] = {}
+    if ids["interaction"]:
+        for row_id, text in session.execute(
+            select(CustomerInteraction.id, CustomerInteraction.context).where(
+                CustomerInteraction.id.in_(ids["interaction"])
+            )
+        ):
+            korean[f"interaction:{row_id}"] = text
+    if ids["message"]:
+        for row_id, text in session.execute(
+            select(Message.id, Message.body_ko).where(Message.id.in_(ids["message"]))
+        ):
+            korean[f"message:{row_id}"] = text
+    lines: dict[int, list[dict]] = {}
+    for conv_id, turns in turns_by_conv.items():
+        lines[conv_id] = []
+        for turn in sorted(turns, key=lambda item: item.at):
+            body = " ".join((turn.body or "").split())
+            cut = body[:_REPLY_PREVIEW_CHARS] + ("…" if len(body) > _REPLY_PREVIEW_CHARS else "")
+            summary = (korean.get(turn.source_ref) or "").strip()
+            lines[conv_id].append({
+                "ref": turn.source_ref,
+                "at": turn.at,
+                "channel": turn.channel or "",
+                "text": cut,
+                "korean": summary if summary and not is_mostly_korean(body) else None,
+            })
+    return lines
+
+
+def _done_replies(session, conv) -> list[dict]:
+    """이 티켓에서 [완료]로 뺀 회신 중 아직 우리 마지막 영업 메일 뒤에 있는 것 — 티켓 화면이 그리고 되돌린다."""
+    marks = list(session.scalars(
+        select(DoneReply).where(DoneReply.conversation_id == conv.id).order_by(DoneReply.id)
+    ))
+    if not marks:
+        return []
+    from ...agents.inbound import threads_events, unanswered_customer_turns
+
+    events = threads_events(session, [conv.id]).get(conv.id, [])
+    _baseline, turns = unanswered_customer_turns(events, conv.last_outgoing_at)
+    by_ref = {turn.source_ref: turn for turn in turns}
+    live = {mark.source_ref: mark for mark in marks if mark.source_ref in by_ref}
+    lines = _reply_lines(session, {conv.id: [by_ref[ref] for ref in live]})[conv.id]
+    return [{**line, "done_by": live[line["ref"]].done_by, "done_at": live[line["ref"]].done_at} for line in lines]
 
 
 def awaiting_conversations(now: datetime | None = None) -> list[dict]:
@@ -798,17 +863,27 @@ def awaiting_conversations(now: datetime | None = None) -> list[dict]:
             .where(Approval.message_id.in_([msg.id for msg in attempts.values()]), Approval.action == "reject")
             .group_by(Approval.message_id)
         ).all())
+        # 사람이 [완료]로 뺀 회신. 열쇠가 그 회신이라 고객이 새로 쓴 말은 저절로 안 걸린다.
+        done: dict[int, set[str]] = {}
+        for conv_id, ref in session.execute(
+            select(DoneReply.conversation_id, DoneReply.source_ref)
+            .where(DoneReply.conversation_id.in_(list(convs)))
+        ):
+            done.setdefault(conv_id, set()).add(ref)
         rows = []
+        waiting_by_conv: dict[int, list] = {}
         for conv_id, (conv, email) in convs.items():
             stage = stages[conv_id]
             baseline, turns = judged[conv_id]
             draft = attempts.get(conv_id)
+            waiting: list = []
             if stage == "new":
                 if draft is None or draft.status not in open_statuses:
                     continue
                 since = _naive(conv.created_at)  # 문의가 온 때 — 옛 목록의 접수 시간 그대로
             else:
-                if baseline is None or not turns or max(turn.at for turn in turns) < cutoff:
+                waiting = [turn for turn in turns if turn.source_ref not in done.get(conv_id, ())]
+                if baseline is None or not waiting or max(turn.at for turn in waiting) < cutoff:
                     continue
                 if not (conv.hubspot_ticket_id or "").strip():
                     continue
@@ -820,11 +895,14 @@ def awaiting_conversations(now: datetime | None = None) -> list[dict]:
                         _naive(at) for at in (draft.created_at, draft.approved_at, draft.sent_at,
                                               rejected_at.get(draft.id)) if at
                     )
-                    if max(turn.at for turn in turns) <= decided:
+                    if max(turn.at for turn in waiting) <= decided:
                         continue
+                    # 거절은 그때까지의 회신을 정한 것이다 — 그 뒤에 쓴 말만 남는다.
+                    waiting = [turn for turn in waiting if turn.at > decided]
                     draft = None
-                # 우리 마지막 이메일 뒤 고객의 첫 말 — 그 뒤에 또 썼어도 기다린 시간은 첫 말부터다.
-                since = min(turn.at for turn in turns)
+                waiting_by_conv[conv_id] = waiting
+                # 남은 회신 중 첫 말 — 그 뒤에 또 썼어도 기다린 시간은 첫 말부터다.
+                since = min(turn.at for turn in waiting)
             rows.append({
                 "id": draft.id if draft else None,
                 "conversation_id": conv_id,
@@ -838,7 +916,13 @@ def awaiting_conversations(now: datetime | None = None) -> list[dict]:
                 "email": email or "-",
                 "received_at": since,
                 "waiting_since": since,
+                # 상태 칩의 `남은 수/전체 수`. New 는 검토할 초안이라 회신을 세지 않는다.
+                "reply_total": len(turns) if stage != "new" else 0,
+                "reply_open": len(waiting),
             })
+        lines = _reply_lines(session, waiting_by_conv)
+        for row in rows:
+            row["replies"] = lines.get(row["conversation_id"], [])
     return rows
 
 
@@ -1271,6 +1355,67 @@ def _manual_reply_subject(conversation_id: int, target: str) -> str:
         thread = form = None
     # 첫 회신인지는 여기서 안 잽니다 — 그 답이 바꾸는 것은 폼 제목 속 금액 하나라, 모르면 엄격한 쪽(첫 회신)으로.
     return choose_reply_subject(thread_subject=thread, customer_subject=form, target=target, first_reply=True)[0]
+
+
+@router.post("/tickets/{conversation_id}/replies-done")
+def replies_done(request: Request, conversation_id: int, refs: str = Form("")):
+    """답변 대기의 [완료] — 고른 회신만 목록에서 뺍니다(`DoneReply`). 단계 · 허브스팟 · 워크북 · 초안은 안 건드리고
+    고객에게 아무것도 안 나갑니다. 메일과 기록은 티켓에 그대로입니다.
+
+    받는 것은 지금 그 대화의 「우리 마지막 영업 메일 뒤 고객 말」뿐입니다. 창을 연 사이 답이 나갔으면 고를 회신이
+    없다고 돌려줍니다. New 는 아직 답한 적 없는 문의라 안 받습니다 — 그 행은 초안을 거절해서 뺍니다.
+    """
+    from ...agents.inbound import threads_events, unanswered_customer_turns
+    from .customer_ops import VALID_PIPELINE_STAGES
+
+    wanted = {ref.strip() for ref in refs.split(",") if ref.strip()}
+    if not wanted:
+        return JSONResponse({"error": "완료 처리할 회신을 고르세요."}, status_code=400)
+    actor = actor_name(request, fallback="web_ui")
+    with SessionLocal() as session:
+        conv = session.get(Conversation, conversation_id)
+        if conv is None:
+            return JSONResponse({"error": "티켓을 찾을 수 없습니다."}, status_code=404)
+        if conv.stage not in VALID_PIPELINE_STAGES or conv.stage == "new":
+            return JSONResponse({"error": "New 단계의 문의는 초안을 거절해서 뺍니다."}, status_code=400)
+        events = threads_events(session, [conv.id]).get(conv.id, [])
+        baseline, turns = unanswered_customer_turns(events, conv.last_outgoing_at)
+        targets = wanted & {turn.source_ref for turn in turns} if baseline is not None else set()
+        if not targets:
+            return JSONResponse({"error": "이미 답했거나 처리된 회신입니다. 화면을 새로 보세요."}, status_code=400)
+        already = set(session.scalars(
+            select(DoneReply.source_ref).where(
+                DoneReply.conversation_id == conv.id, DoneReply.source_ref.in_(targets)
+            )
+        ))
+        fresh = sorted(targets - already)
+        session.add_all(DoneReply(conversation_id=conv.id, source_ref=ref, done_by=actor) for ref in fresh)
+        if fresh:
+            add_progress(conv.id, "reply_done", f"답변 대기에서 회신 {len(fresh)}건을 완료 처리했습니다 — {actor}",
+                         actor=actor, session=session)
+        try:
+            session.commit()
+        except IntegrityError:  # 두 사람이 같은 회신을 동시에 눌렀다 — 결과는 같다.
+            session.rollback()
+    return JSONResponse({"done": len(fresh)})
+
+
+@router.post("/tickets/{conversation_id}/replies-done/undo")
+def replies_done_undo(request: Request, conversation_id: int, ref: str = Form("")):
+    """[완료]를 되돌립니다 — 그 회신이 답변 대기에 다시 뜹니다."""
+    from sqlalchemy import delete
+
+    actor = actor_name(request, fallback="web_ui")
+    with SessionLocal() as session:
+        removed = session.execute(
+            delete(DoneReply).where(DoneReply.conversation_id == conversation_id, DoneReply.source_ref == ref.strip())
+        )
+        if removed.rowcount != 1:
+            return JSONResponse({"error": "이미 되돌렸습니다."}, status_code=400)
+        add_progress(conversation_id, "reply_done", f"완료 처리한 회신을 답변 대기로 되돌렸습니다 — {actor}",
+                     actor=actor, session=session)
+        session.commit()
+    return JSONResponse({"undone": True})
 
 
 @router.post("/tickets/{conversation_id}/reply")

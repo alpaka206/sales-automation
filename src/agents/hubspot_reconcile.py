@@ -200,6 +200,7 @@ def delete_conversation(conversation_id: int, ticket_id: str) -> int:
         ContractRecord,
         ConversationProgress,
         CustomerInteraction,
+        DoneReply,
     )
 
     with SessionLocal() as session:
@@ -231,6 +232,7 @@ def delete_conversation(conversation_id: int, ticket_id: str) -> int:
                 ConversationProgress.conversation_id == conversation_id
             )
         )
+        session.execute(delete(DoneReply).where(DoneReply.conversation_id == conversation_id))
         # **승인 기록을 먼저 지웁니다.** 모델에는 `ondelete="CASCADE"` 라고 적혀 있지만
         # **운영 DB 의 제약에는 그것이 없습니다** — 그 표를 만든 옛 마이그레이션이 안 걸었고,
         # 모델의 선언은 이미 만들어진 제약을 바꾸지 않습니다. 그래서 승인을 한 번이라도 받은
