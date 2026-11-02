@@ -4,7 +4,7 @@ import { Field } from "./WonNew";
 import { PLAN_NAMES_ID, PlanNameOptions, PlanSpaceHint } from "./PlanSpaceHint";
 import { type Contract, type Options, addMonths, n } from "./shared";
 import {
-  type Draft, derive, fromContract, planPreview, toBody,
+  type Draft, MAIL_CHECKS, type MailFields, derive, fromContract, planPreview, toBody,
 } from "./contractDraft";
 
 /** 계약 폼의 **칸 한 벌** — 모달(새 계약)과 상세의 제자리 편집(있는 계약)이 같이 그립니다.
@@ -43,6 +43,9 @@ export function useContractDraft(initial?: Contract) {
   // (상세 카드의 「지급 일정 다시 깔기」 폼은 2026-09-15 에 뺐습니다).
   const [noGrants, setNoGrants] = useState(() => Boolean(initial && !(initial.credit_grants?.length)));
 
+  // 메일에서 채운 칸 — 표시와 근거 문장(`MailNote`). 칸의 값은 초안에 있고 이것은 그 출처입니다.
+  const [mailFields, setMailFields] = useState<MailFields>({});
+
   const set = (key: keyof Draft, value: string) =>
     setDraft((current) => (current ? { ...current, [key]: value } : current));
   /** 있는 계약으로 채웁니다 — 모달이 비동기로 불러온 뒤 부릅니다. 지급 일정 기준선도 같이. */
@@ -76,7 +79,7 @@ export function useContractDraft(initial?: Contract) {
   };
 
   return {
-    draft, setDraft, set,
+    draft, setDraft, set, mailFields, setMailFields,
     creditRounds, setCreditRounds, firstCreditOn, setFirstCreditOn,
     creditChanged, loadContract, body,
   };
@@ -150,6 +153,21 @@ export function PlanPeriodHint({ preview }: { preview?: string }) {
   );
 }
 
+/** 메일에서 채운 칸 밑의 한 줄 — 어느 문장을 보고 채웠는지. 사람이 값을 고치면 그 값은 더 이상 메일의 것이 아니라
+ *  사라집니다. 꼭 봐야 하는 칸은 주황이고(`MAIL_CHECKS`), 저장을 막지는 않습니다. */
+function MailNote({ f, name }: { f: ContractDraftState; name: keyof Draft }) {
+  const cell = f.mailFields[name];
+  if (!cell || f.draft?.[name] !== cell.value) return null;
+  const check = MAIL_CHECKS[name];
+  return (
+    <div className={`mail-note${check ? " is-check" : ""}`} title={cell.evidence || undefined}>
+      {check && <b>{check}</b>}
+      {check && cell.evidence && " · "}
+      {cell.evidence && <>메일: “{cell.evidence}”</>}
+    </div>
+  );
+}
+
 /** 계약 · 금액 · 결제 · 크레딧 지급 · 매출 인식 · 기타. `f.draft` 가 있어야 그립니다. */
 export function ContractFields({ f, options }: { f: ContractDraftState; options: Options }) {
   const { draft, set } = f;
@@ -167,6 +185,7 @@ export function ContractFields({ f, options }: { f: ContractDraftState; options:
             매출 인식<span className="req"> *</span><DealTypeHint />
           </label>
           <Sel value={draft.deal_type} onChange={(v) => set("deal_type", v)} options={options.deal_types} />
+          <MailNote f={f} name="deal_type" />
         </div>
         <div>
           {/* 「플랜 시작일」 옆과 같은 (i) 입니다 (2026-10-12 운영자: 「해당 사항 계약 기간 옆에도 (I)에 추가해줘」).
@@ -178,9 +197,11 @@ export function ContractFields({ f, options }: { f: ContractDraftState; options:
           </label>
           <input className="inp" type="date" value={draft.starts_on}
                  onChange={(e) => { set("starts_on", e.target.value); set("ends_on", addMonths(e.target.value, 12)); }} />
+          <MailNote f={f} name="starts_on" />
         </div>
         <Field label="계약 종료일" required>
           <input className="inp" type="date" value={draft.ends_on} onChange={(e) => set("ends_on", e.target.value)} />
+          <MailNote f={f} name="ends_on" />
         </Field>
         {/* **중도 해지일.** 인식 기간은 계약 종료일과 이 날짜 중 빠른 쪽에서 끝납니다.
             비어 있는 것이 보통이고, 적히는 순간 그 계약의 매출 인식이 거기서 멈춥니다.
@@ -207,11 +228,13 @@ export function ContractFields({ f, options }: { f: ContractDraftState; options:
           <input className="inp" value={draft.contact_name}
                  onChange={(e) => set("contact_name", e.target.value)}
                  placeholder="예: 박지훈 팀장" />
+          <MailNote f={f} name="contact_name" />
         </Field>
         <Field label="고객 연락처">
           <input className="inp" value={draft.contact_info}
                  onChange={(e) => set("contact_info", e.target.value)}
                  placeholder="이메일 또는 전화번호" />
+          <MailNote f={f} name="contact_info" />
         </Field>
         {/* 목업대로 손으로 적는 칸입니다. 계약서에 적히는 것이 금액과 크레딧이고,
             분당 단가가 그 둘에서 나옵니다 — 한동안 반대로 두었는데, 그러면 반올림한
@@ -219,6 +242,7 @@ export function ContractFields({ f, options }: { f: ContractDraftState; options:
         <Field label="계약 크레딧" required>
           <input className="inp" type="number" value={draft.credits}
                  onChange={(e) => set("credits", e.target.value)} placeholder="예: 64800" />
+          <MailNote f={f} name="credits" />
         </Field>
         {/* 「크레딧 사용량」이 여기 있었습니다 — 2026-09-21 에 「결제 · MRR」 탭의 「중도
             해지 정산」 박스로 옮겼습니다(운영자 지시). 묻는 자리가 곧 그 값이 무엇에
@@ -231,6 +255,7 @@ export function ContractFields({ f, options }: { f: ContractDraftState; options:
       <div className="form-grid3">
         <Field label="통화">
           <Sel value={draft.currency} onChange={(v) => set("currency", v)} options={options.currencies} />
+          <MailNote f={f} name="currency" />
         </Field>
         {/* **통화와 무관하게 묻습니다** (2026-08-31 운영자 지시). 예전에는 원화 계약에
             안 물었는데, 그건 한쪽 방향만 본 이야기였습니다: 예상 MRR 카드는 원화 계약을
@@ -255,6 +280,7 @@ export function ContractFields({ f, options }: { f: ContractDraftState; options:
           <input className="inp" type="number" value={draft.amount_incl_vat}
                  onChange={(e) => set("amount_incl_vat", e.target.value)}
                  placeholder="예: 11000000" />
+          <MailNote f={f} name="amount_incl_vat" />
         </div>
         {/* 계산값입니다 — 계약금액 ÷ (크레딧 ÷ 60). 소수점은 남깁니다: 반올림한 단가는
             되짚어 곱했을 때 금액이 안 맞습니다. 계약서가 다른 기준의 단가로 적힌 건이면
@@ -272,14 +298,17 @@ export function ContractFields({ f, options }: { f: ContractDraftState; options:
       <div className="form-grid3">
         <Field label="결제 수단">
           <Sel value={draft.payment_method} onChange={(v) => set("payment_method", v)} options={options.payment_methods} />
+          <MailNote f={f} name="payment_method" />
         </Field>
         <Field label="결제 방식">
           <Sel value={draft.payment_type} onChange={(v) => set("payment_type", v)} options={options.payment_types} />
+          <MailNote f={f} name="payment_type" />
         </Field>
         <Field label="총 분납 횟수">
           <input className="inp" type="number" min={1} value={draft.installments}
                  disabled={draft.payment_type !== "할부"}
                  onChange={(e) => set("installments", e.target.value)} />
+          <MailNote f={f} name="installments" />
         </Field>
         <Field label="최초 결제일">
           <input className="inp" type="date" value={draft.first_payment_on}
@@ -289,6 +318,7 @@ export function ContractFields({ f, options }: { f: ContractDraftState; options:
           <label className="form-label">Billing Email</label>
           <input className="inp" value={draft.billing_email} placeholder="예: ap@company.com"
                  onChange={(e) => set("billing_email", e.target.value)} />
+          <MailNote f={f} name="billing_email" />
         </div>
       </div>
 
@@ -371,6 +401,7 @@ export function PlanFields({ f, options, heading = true }: {
         </Field>
         <Field label="플랜">
           <Sel value={draft.plan} onChange={(v) => set("plan", v)} options={options.plans} />
+          <MailNote f={f} name="plan" />
         </Field>
         <Field label="플랜명">
           {/* 제품에 실제로 있는 플랜 이름을 추천합니다(2026-10-12) — **추천일 뿐 가두지 않습니다.** 고르개로
@@ -382,6 +413,7 @@ export function PlanFields({ f, options, heading = true }: {
         </Field>
         <Field label="Perso Email">
           <input className="inp" value={draft.perso_email} onChange={(e) => set("perso_email", e.target.value)} />
+          <MailNote f={f} name="perso_email" />
         </Field>
         <Field label="Account Invitation Limit">
           <input className="inp" type="number" value={draft.invite_limit} onChange={(e) => set("invite_limit", e.target.value)} />

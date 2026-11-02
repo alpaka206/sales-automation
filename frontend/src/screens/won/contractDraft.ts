@@ -4,7 +4,7 @@
 //
 // 여기 있는 것은 상태가 아니라 **계산**입니다. 어느 화면이든 `Draft` 를 자기 useState 로
 // 들고, 바뀔 때마다 이 함수들을 부릅니다.
-import { type Contract, n } from "./shared";
+import { type Contract, addMonths, n } from "./shared";
 
 export const emptyDraft = {
   deal_type: "MRR", starts_on: "", ends_on: "", plan_starts_on: "", plan_ends_on: "", ticket_id: "",
@@ -97,6 +97,52 @@ export function planPreview(draft: Draft, today = new Date().toISOString().slice
   if (end < today) return "사용 중단";
   if (start > today) return "세팅중";
   return "사용중";
+}
+
+/** 메일에서 찾은 칸 — 값과 그 근거 문장(`agents.contract_suggest`). */
+export type MailCell = { value: string; evidence: string };
+export type MailFields = Partial<Record<keyof Draft, MailCell>>;
+export type MailSuggestion = { status: "ok" | "no_mail" | "failed"; mails: number; fields: MailFields };
+
+/** 사람이 꼭 봐야 하는 칸과 그 이유. 저장을 막지는 않습니다 — 확인 단계가 늘수록 습관적으로 넘기게 됩니다. */
+export const MAIL_CHECKS: Partial<Record<keyof Draft, string>> = {
+  amount_incl_vat: "VAT 포함 금액인지 확인하세요",
+  starts_on: "날짜를 확인하세요",
+  ends_on: "시작일의 12개월 뒤로 맞췄습니다. 계약 기간을 확인하세요",
+  payment_method: "확인하세요",
+  billing_email: "확인하세요",
+  contact_name: "확인하세요",
+};
+
+/** 메일에서 찾은 칸을 초안에 넣습니다 — **아직 기본값인 칸에만**.
+ *
+ *  `base` 는 폼을 연 때의 초안입니다. 모델을 기다리는 동안 사람이 고친 칸(`current` ≠ `base`)과 재계약이 이전 계약에서
+ *  물려받은 칸(`base` ≠ 기본값)은 안 건드립니다. 시작일만 예외입니다 — 폼이 언제나 오늘(재계약이면 직전 종료일)을
+ *  넣어 두어 그 값이 곧 「아직 안 적음」입니다. 시작일이 바뀌면 종료일 · 최초 결제일 · 첫 지급일의 기본값도 그 날짜를
+ *  따라야 합니다(손으로 고칠 때의 규칙 그대로). 회차 수는 할부일 때만 뜻이 있습니다. */
+export function applyMailFields(current: Draft, base: Draft, fields: MailFields) {
+  const next: Draft = { ...current };
+  const filled: MailFields = {};
+  for (const name of Object.keys(fields) as (keyof Draft)[]) {
+    const cell = fields[name];
+    if (!cell?.value || current[name] !== base[name]) continue;
+    if (name !== "starts_on" && base[name] !== emptyDraft[name]) continue;
+    next[name] = cell.value;
+    filled[name] = cell;
+  }
+  if (next.payment_type !== "할부" && filled.installments) {
+    next.installments = current.installments;
+    delete filled.installments;
+  }
+  const start = filled.starts_on?.value;
+  if (start) {
+    if (current.ends_on === base.ends_on) {
+      next.ends_on = addMonths(start, 12);
+      filled.ends_on = { value: next.ends_on, evidence: "" };
+    }
+    if (current.first_payment_on === base.first_payment_on) next.first_payment_on = start;
+  }
+  return { draft: next, filled };
 }
 
 /** 저장 전 검사. 계약금액과 계약 크레딧, 둘만 필수입니다 — 분당 단가는 그 둘에서 나오는

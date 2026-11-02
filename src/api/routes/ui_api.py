@@ -19,6 +19,7 @@ routes the forms do, so the send guard, stage sync and safe-mode block stay in o
 
 from __future__ import annotations
 
+import logging
 import asyncio
 from datetime import date
 from decimal import Decimal
@@ -1624,6 +1625,24 @@ def ui_won_customers():
             "all_departments": won.ALL_DEPARTMENTS,
         },
     }
+
+
+@router.get("/api/ui/won-customers/pending/{pending_id}/suggest")
+def ui_won_contract_suggest(pending_id: int):
+    """수주 전환 대기 → 계약 폼: 그 티켓의 메일로 칸을 채웁니다(`agents.contract_suggest`). **저장하지 않습니다.**
+
+    GET 인 이유: 아무것도 안 바꾸므로 쓰기 알림(`publish_changes_middleware`)이 안 나가야 합니다. 모델이 실패해도 폼은
+    빈 칸으로 열려야 하므로 오류가 아니라 `failed` 로 답합니다. 예외의 글에는 메일이 들어 있을 수 있어 이름만 남깁니다.
+    """
+    from ...agents.contract_suggest import suggest_contract
+
+    try:
+        return suggest_contract(pending_id)
+    except LookupError:
+        raise HTTPException(status_code=404, detail="수주 전환 대기 건을 찾을 수 없습니다") from None
+    except Exception as exc:
+        logging.getLogger(__name__).warning("계약 칸 채우기 실패 (pending=%s): %s", pending_id, type(exc).__name__)
+        return {"status": "failed", "mails": 0, "fields": {}}
 
 
 @router.get("/api/ui/won-customers/{client_id}")

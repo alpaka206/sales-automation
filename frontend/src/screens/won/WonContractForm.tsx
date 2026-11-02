@@ -1,11 +1,11 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { getJSON, postForm } from "../../lib/api";
 import { SubmitButton, useAction } from "../../ui/ActionButton";
 import { Modal } from "../../ui/Modal";
 import { ContractFields, PlanFields, useContractDraft } from "./ContractFields";
-import { carryOver, emptyCarry, emptyDraft, validate } from "./contractDraft";
+import { type MailSuggestion, applyMailFields, carryOver, emptyCarry, emptyDraft, validate } from "./contractDraft";
 import { type ListData, type Row, addMonths } from "./shared";
 
 /** 계약 정보 입력 — 새 계약은 이 모달, 있는 계약은 상세의 제자리 편집(`ContractCards`).
@@ -64,6 +64,39 @@ export function WonContractForm() {
   const [copyPrev, setCopyPrev] = useState(true);
   const [note, setNote] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
+  // 메일로 칸 채우기 — 수주 전환 대기에서 온 새 계약만. 저장은 사람이 합니다.
+  //
+  // **질의가 아니라 한 번의 호출입니다.** 콘솔은 누가 무엇을 쓰든 캐시를 전부 다시 받으므로(`/api/ui/events`), 질의로
+  // 두면 폼을 연 동안 다른 사람의 저장마다 모델이 다시 불리고 비용이 듭니다.
+  const [mailStatus, setMailStatus] = useState<{ tone: "wait" | "ok" | "none"; text: string } | null>(null);
+  const mailAsked = useRef(false);
+  const latest = useRef({ draft, firstCreditOn: f.firstCreditOn });
+  latest.current = { draft, firstCreditOn: f.firstCreditOn };
+  useEffect(() => {
+    if (mailAsked.current || editing || !pendingItem || !draft) return;
+    mailAsked.current = true;
+    const base = draft;
+    const baseFirstCredit = f.firstCreditOn;
+    setMailStatus({ tone: "wait", text: "이 티켓의 메일을 읽어 계약 칸을 채우는 중입니다. 기다리는 동안 입력해도 됩니다." });
+    getJSON<MailSuggestion>(`/api/ui/won-customers/pending/${pendingItem.id}/suggest`)
+      .then((found) => {
+        const now = latest.current;
+        if (!now.draft) return;
+        const { draft: next, filled } = applyMailFields(now.draft, base, found.fields);
+        setDraft(next);
+        f.setMailFields(filled);
+        if (filled.starts_on && now.firstCreditOn === baseFirstCredit) f.setFirstCreditOn(filled.starts_on.value);
+        const count = Object.keys(filled).filter((name) => name !== "ends_on").length;
+        if (found.status === "failed") setMailStatus({ tone: "none", text: "메일을 읽지 못했습니다. 직접 입력해 주세요." });
+        else if (found.status === "no_mail") setMailStatus({ tone: "none", text: "이 티켓에는 읽을 메일이 없습니다. 직접 입력해 주세요." });
+        else if (!count) setMailStatus({ tone: "none", text: "메일에서 채울 내용을 찾지 못했습니다. 직접 입력해 주세요." });
+        else setMailStatus({ tone: "ok", text: `메일에서 ${count}칸을 채웠습니다. 저장 전에 표시된 칸을 확인하세요. ${
+          filled.starts_on
+            ? "계약 종료일은 시작일의 12개월 뒤로, 최초 결제일은 시작일로 맞춘 값입니다."
+            : "계약 시작일 · 종료일 · 최초 결제일은 메일에서 채우지 않은 기본값입니다."}` });
+      })
+      .catch(() => setMailStatus({ tone: "none", text: "메일을 읽지 못했습니다. 직접 입력해 주세요." }));
+  }, [draft, editing, pendingItem, f, setDraft]);
 
   // useCallback 인 이유: Modal 의 keydown 효과가 `[onClose]` 에 걸려 있어서, 매 렌더
   // 새 함수를 주면 리스너를 떼었다 붙이며 **포커스를 여는 버튼으로 되돌립니다**. 폼에
@@ -248,6 +281,10 @@ export function WonContractForm() {
                 금액 · 크레딧 · 기간은 새로 입력합니다.
               </div>
             </>
+          )}
+
+          {mailStatus && (
+            <div className={`mail-status mail-status--${mailStatus.tone}`} role="status">{mailStatus.text}</div>
           )}
 
           <ContractFields f={f} options={options} />

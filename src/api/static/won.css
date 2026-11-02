@@ -410,6 +410,11 @@
 .won .inp {border:1px solid var(--line);border-radius:6px;padding:6px 8px;font-size:13px;width:100%;background:#fff;}
 .won .inp:focus {outline:none;border-color:var(--teal-500);box-shadow:0 0 0 3px rgba(42,157,143,.12);}
 .won .form-row {display:grid;grid-template-columns:repeat(4,1fr);gap:10px;}
+/* 메일로 칸 채우기 — 폼 위 상태 한 줄과 칸 밑의 근거. 주황은 이 화면에서 「손이 가야 한다」다. */
+.won .mail-status {margin:12px 0 4px;padding:9px 12px;border-radius:8px;font-size:12.5px;line-height:1.5;color:var(--muted);background:var(--bg-soft);}
+.won .mail-status--ok {color:#0f766e;background:rgba(15,118,110,.09);}
+.won .mail-note {margin-top:4px;font-size:11.5px;line-height:1.45;color:var(--muted);overflow:hidden;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;overflow-wrap:anywhere;}
+.won .mail-note.is-check b {color:#c2410c;font-weight:600;}
 .won .form-label {font-size:11.5px;color:var(--faint);display:block;margin-bottom:4px;}
 .won .req {color:#D9534F;}
 .won .timeline {position:relative;padding-left:20px;}
