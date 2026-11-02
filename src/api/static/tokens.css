@@ -49,6 +49,8 @@
   --text-muted: #52615e;
   /* WCAG 2.1 AA (1.4.3): ≥4.5:1 on white/surface-2/surface-3 (was #8b90a6 ≈ 3.0:1). */
   --text-subtle: #65736f;
+  /* 입력칸 이름 — 콘솔의 모든 폼이 같이 쓴다(2026-11-02 운영자: 「다른 부분에서도 통일감」). */
+  --label: #374151;
   --shadow-sm: 0 1px 2px rgba(15,45,38,.05);
   --shadow-md: 0 2px 6px rgba(15,45,38,.06), 0 8px 24px rgba(15,45,38,.06);
   --shadow-lg: 0 12px 40px rgba(20,22,40,.12);

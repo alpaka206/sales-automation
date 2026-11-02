@@ -7,10 +7,7 @@ const pending = (overrides: Partial<ListData["pending"][number]> = {}) => ({
   ticket_id: "T-7",
   company: "JUPITER AND MERCURY",
   client_id: 1323,
-  won_type: "Renewal",
   next_seq: 2,
-  known: true,
-  won_on: "2026-08-24",
   ...overrides,
 });
 
@@ -32,7 +29,7 @@ describe("pendingContractPath", () => {
     vi.stubGlobal("fetch", fetch);
     const data = { rows: [] } as unknown as ListData;
 
-    expect(pendingContractPath(data, pending({ client_id: null, known: false }))).toBe(
+    expect(pendingContractPath(data, pending({ client_id: null }))).toBe(
       "/won-customers/new/contract?pending=7",
     );
     expect(fetch).not.toHaveBeenCalled();
@@ -43,7 +40,7 @@ describe("pendingContractPath", () => {
     vi.stubGlobal("fetch", fetch);
     const data = { rows: [{ client_id: 1108 }] } as ListData;
 
-    expect(pendingContractPath(data, pending({ client_id: 1160, known: false }))).toBe(
+    expect(pendingContractPath(data, pending({ client_id: 1160 }))).toBe(
       "/won-customers/new/contract?pending=7",
     );
     expect(fetch).not.toHaveBeenCalled();

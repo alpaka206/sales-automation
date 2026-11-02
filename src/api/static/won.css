@@ -207,17 +207,12 @@
 .won .intake {border:1px solid #FCE7B2;border-radius:12px;background:#FFFCF5;margin-top:14px;overflow:hidden;}
 .won .intake-head {display:flex;align-items:center;gap:9px;padding:14px 18px;border-bottom:1px solid #FCE7B2;}
 .won .intake-title {font-size:13.5px;font-weight:700;color:#7A4E0B;}
-.won .intake-sub {font-size:12px;color:#9A6A1B;}
 .won .intake-count {margin-left:auto;font-size:12px;font-weight:700;background:#FCE7B2;color:#7A4E0B;padding:2px 9px;border-radius:20px;}
 .won .intake-grid {display:grid;grid-template-columns:repeat(2,1fr);gap:12px;padding:14px 18px 18px;}
-.won .intake-card {background:#fff;border:1px solid var(--line);border-radius:10px;padding:14px 16px;display:flex;flex-direction:column;gap:9px;}
-.won .intake-date {font-size:12.5px;color:var(--faint);font-variant-numeric:tabular-nums;margin-left:auto;}
-.won .intake-co {font-size:15px;font-weight:700;letter-spacing:-.01em;}
-.won .intake-meta {display:flex;flex-wrap:wrap;gap:6px 14px;font-size:12.5px;color:var(--muted);}
-.won .intake-meta b {color:var(--ink-2);font-weight:600;}
-.won .intake-match {font-size:12.5px;padding:8px 11px;border-radius:8px;background:var(--teal-25);color:var(--teal-700);font-weight:500;}
-.won .intake-match.new {background:var(--bg-soft);color:var(--muted);font-weight:400;}
-.won .intake-actions {display:flex;gap:7px;margin-top:2px;}
+.won .intake-card {background:#fff;border:1px solid var(--line);border-radius:10px;padding:12px 16px;display:flex;align-items:center;justify-content:space-between;gap:12px;}
+.won .intake-who {min-width:0;}
+.won .intake-seq {margin-top:2px;font-size:12.5px;color:var(--muted);}
+.won .intake-co {font-size:15px;font-weight:700;letter-spacing:-.01em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 /* Toolbar */
 .won .toolbar {display:flex;align-items:center;gap:10px;margin-top:30px;flex-wrap:wrap;padding-bottom:14px;border-bottom:1px solid var(--line);}
 .won .search {position:relative;flex:1;min-width:240px;max-width:360px;}
@@ -341,7 +336,7 @@
 .won .sec > .table-wrap table {font-size:13px;}
 .won .field-grid {display:grid;grid-template-columns:repeat(4,1fr);gap:18px 24px;}
 .won .field-grid.c3 {grid-template-columns:repeat(3,1fr);}
-.won .field-label {font-size:12px;color:var(--faint);}
+.won .field-label {font-size:12.5px;font-weight:500;color:var(--label);}
 .won .field-value {margin-top:4px;font-size:14px;font-weight:500;word-break:break-all;}
 .won .field-value.mono {font-variant-numeric:tabular-nums;}
 .won .field-value .muted {color:var(--muted);font-weight:400;}
@@ -407,27 +402,27 @@
     font-size:13.5px;font-variant-numeric:tabular-nums;color:var(--ink);}
 .won .cell-inp:hover {border-color:var(--line);background:#fff;}
 .won .cell-inp:focus {outline:none;border-color:var(--teal-500);background:#fff;box-shadow:0 0 0 3px rgba(42,157,143,.12);}
-.won .inp {border:1px solid var(--line);border-radius:6px;padding:6px 8px;font-size:13px;width:100%;background:#fff;}
+.won .inp {border:1px solid var(--line);border-radius:6px;padding:6px 8px;font-size:14px;color:var(--ink);width:100%;background:#fff;}
+.won .inp::placeholder {color:var(--muted);}
 .won .inp:focus {outline:none;border-color:var(--teal-500);box-shadow:0 0 0 3px rgba(42,157,143,.12);}
 .won .form-row {display:grid;grid-template-columns:repeat(4,1fr);gap:10px;}
 /* 계약 입력 창의 쪽 — 높이를 잡아 두어 쪽을 넘겨도 「다음」이 손 밑에서 안 움직인다. */
 .won .cform-steps {display:flex;flex-wrap:wrap;gap:6px;list-style:none;margin:0 0 12px;padding:0;}
-.won .cform-step {display:inline-flex;align-items:center;gap:7px;height:32px;padding:0 12px 0 8px;border:1px solid var(--border);border-radius:999px;background:#fff;font-size:12.5px;font-weight:600;color:var(--muted);}
-.won .cform-step__no {display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:50%;background:var(--bg-soft);font-size:11px;}
-.won .cform-step.is-on {border-color:#0f766e;background:rgba(15,118,110,.09);color:#0f766e;}
-.won .cform-step.is-on .cform-step__no {background:#0f766e;color:#fff;}
+/* 연하게(2026-11-02 운영자: 「토글 너무 진해」). `.cform-steps` 를 한 번 더 적는 이유: 위의 `.won button:not(…)` 이 글자색을 이긴다. */
+.won .cform-steps .cform-step {display:inline-flex;align-items:center;gap:7px;height:30px;padding:0 12px 0 8px;border:1px solid var(--line);border-radius:999px;background:#fff;font-size:12.5px;font-weight:500;color:var(--muted);}
+.won .cform-step__no {display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:50%;background:var(--line-soft);font-size:11px;font-weight:600;color:var(--muted);}
+.won .cform-steps .cform-step.is-on {border-color:#BFDFDA;background:var(--teal-25);color:var(--teal-700);font-weight:600;}
+.won .cform-step.is-on .cform-step__no {background:var(--teal-50);color:var(--teal-700);}
 .won .cform-page {min-height:400px;}
 .won .cform-page .form-grid3 {gap:10px 14px;}
-.won .cform-page .form-sec {margin-top:14px;padding-top:12px;margin-bottom:8px;}
-.won .cform-page .form-sec:first-child {margin-top:0;padding-top:0;}
 /* 메일로 칸 채우기 — 폼 위 상태 한 줄과 칸 밑의 근거. 주황은 이 화면에서 「손이 가야 한다」다. */
 .won .mail-status {padding:4px 10px;border-radius:8px;font-size:12.5px;line-height:1.5;color:var(--muted);background:var(--bg-soft);}
-.won .mail-status--ok {color:#173ea5;background:#c9dcff;}
+.won .mail-status--ok {color:#173ea5;background:#ebf1ff;}
 /* 자동으로 채운 칸 — 사람이 값을 고치면 원래 색으로 돌아간다. */
-.won .inp.is-mail {background:#c9dcff;border-color:#3f6fe0;}
-.won .mail-note {margin-top:4px;font-size:11.5px;line-height:1.45;color:var(--muted);overflow:hidden;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow-wrap:anywhere;}
+.won .inp.is-mail {background:#ebf1ff;}
+.won .mail-note {margin-top:4px;font-size:11.5px;line-height:1.45;color:var(--muted);overflow:hidden;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:1;overflow-wrap:anywhere;}
 .won .mail-note.is-check b {color:#c2410c;font-weight:600;}
-.won .form-label {font-size:11.5px;color:var(--faint);display:block;margin-bottom:4px;}
+.won .form-label {font-size:12.5px;font-weight:500;color:var(--label);display:block;margin-bottom:4px;}
 .won .req {color:#D9534F;}
 .won .timeline {position:relative;padding-left:20px;}
 .won .timeline::before {content:"";position:absolute;left:4px;top:6px;bottom:6px;width:1px;background:var(--line);}
@@ -513,9 +508,10 @@
  * `.won` 안에서 열린 콘솔 모달을 그대로 물었습니다 — 공용 `Modal` 은 `is-open` 을
  * **배경**에 붙이므로 `.won .modal` 은 `.is-open` 없이 남아 `opacity:0` 이 됩니다.
  * DOM 에는 있는데 화면에는 없었습니다. 안 쓰는 구현이라 지웁니다. */
-.won .form-sec {font-size:11.5px;font-weight:700;color:var(--muted);letter-spacing:.04em;text-transform:uppercase;
-    margin:22px 0 10px;padding-top:16px;border-top:1px solid var(--line-soft);}
-.won .form-sec:first-child {margin-top:0;padding-top:0;border-top:none;}
+/* 폼의 구역은 테두리 상자다 — 작은 글자와 얇은 선으로는 구역이 안 나뉘어 보였다(2026-11-02 운영자). 색 띠는 별로라고 해서 뺐다. */
+.won .form-card {padding:12px 14px 14px;border:1px solid var(--line);border-radius:10px;background:#fff;}
+.won .form-card + .form-card {margin-top:12px;}
+.won .form-sec {margin:0 0 10px;color:var(--ink);font-size:13.5px;font-weight:700;}
 .won .form-grid3 {display:grid;grid-template-columns:repeat(3,1fr);gap:14px;}
 .won .modal-head {padding:20px 22px 14px;border-bottom:1px solid var(--line);}
 .won .modal-title {font-size:17px;font-weight:700;margin:0;letter-spacing:-.01em;}

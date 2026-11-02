@@ -97,7 +97,7 @@ export type ListData = {
   today: string;
   rows: Row[];
   pending: { id: number; ticket_id: string; company: string | null; client_id: number | null;
-             won_type: string; next_seq: number; known: boolean; won_on: string | null }[];
+             next_seq: number }[];
   boards: {
     credit: { client_id: number; company: string; on: string; amount: number | null;
               no: number | null; total: number | null }[];

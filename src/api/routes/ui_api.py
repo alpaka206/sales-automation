@@ -1521,10 +1521,7 @@ def ui_won_customers():
             .order_by(PendingWon.created_at.desc())
             .all()
         )
-        # Renewal 인지 Contract 인지는 **우리 장부가 압니다** — 그 Client ID 아래 계약이
-        # 이미 있으면 재계약이고, 없으면 첫 계약입니다. HubSpot 의 Won type 을 읽지 않는
-        # 이유가 이것입니다: 그 값은 담당자가 파이프라인에서 고른 것이라 틀릴 수 있고,
-        # 계약 수는 틀릴 수가 없습니다.
+        # 몇 차 계약인지는 **우리 장부가 압니다** — 그 Client ID 아래 계약 수에서 나옵니다. 틀릴 수가 없습니다.
         known = {client.client_id: client for client in clients}
         waiting = []
         for item in pending:
@@ -1536,10 +1533,7 @@ def ui_won_customers():
                 # 시점 값이라 그 뒤로 바뀌었을 수 있습니다.
                 "company": (client.company if client else None) or item.company,
                 "client_id": item.client_id,
-                "won_type": "Renewal" if seq > 1 else "Contract",
                 "next_seq": seq,
-                "known": client is not None,
-                "won_on": item.won_on,
             })
 
     # 액션 보드 둘. 목록을 한 번 더 도는 대신 위에서 만든 payload 를 그대로 씁니다.

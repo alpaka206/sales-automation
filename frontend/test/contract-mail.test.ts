@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyMailFields, emptyDraft, problemPart, validate, type Draft, type MailFields } from "../src/screens/won/contractDraft";
+import { applyMailFields, emptyDraft, problemPart, revenueMonth, toBody, validate, type Draft, type MailFields } from "../src/screens/won/contractDraft";
 
 // 메일에서 찾은 칸은 아직 기본값인 칸에만 들어간다 — 사람이 적은 값과 이전 계약에서 물려받은 값은 그대로다.
 
@@ -86,5 +86,23 @@ describe("problemPart", () => {
     expect(problemPart({ ...complete, credits: "" })).toBe("contract");
     expect(problemPart({ ...complete, amount_incl_vat: "" })).toBe("money");
     expect(validate({ ...complete, amount_incl_vat: "" })).toContain("계약금액");
+  });
+});
+
+// 칸에는 계약 시작월이 보이지만 그 값을 굳히지 않는다 — 굳히면 계약 날짜를 고쳐도 인식 시작이 옛 달에 남는다.
+describe("매출 인식 시작 월", () => {
+  it("따로 안 적었으면 계약 시작월을 보여 주고 저장은 안 한다", () => {
+    const draft = opened();
+    expect(revenueMonth(draft)).toBe("2026-11");
+    expect(toBody(draft, "1", "").revenue_from).toBe("");
+  });
+
+  it("시작일을 고치면 보이는 달도 따라간다", () => {
+    expect(revenueMonth(opened({ starts_on: "2027-02-10" }))).toBe("2027-02");
+  });
+
+  it("다른 달을 고르면 그 달을 저장하고, 시작월로 되돌리면 다시 비운다", () => {
+    expect(toBody(opened({ revenue_from: "2027-01" }), "1", "").revenue_from).toBe("2027-01");
+    expect(toBody(opened({ revenue_from: "2026-11" }), "1", "").revenue_from).toBe("");
   });
 });

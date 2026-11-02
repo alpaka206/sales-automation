@@ -4,7 +4,7 @@ import { Field } from "./WonNew";
 import { PLAN_NAMES_ID, PlanNameOptions, PlanSpaceHint } from "./PlanSpaceHint";
 import { type Contract, type Options, addMonths, n } from "./shared";
 import {
-  type Draft, MAIL_CHECKS, type MailFields, derive, fromContract, planPreview, toBody,
+  type Draft, MAIL_CHECKS, type MailFields, derive, fromContract, planPreview, revenueMonth, toBody,
 } from "./contractDraft";
 
 /** 계약 폼의 **칸 한 벌** — 모달(새 계약)과 상세의 제자리 편집(있는 계약)이 같이 그립니다.
@@ -31,7 +31,9 @@ export function useContractDraft(initial?: Contract) {
     String(c.credit_grants?.length || 1),
     c.credit_grants?.[0]?.grant_on || c.starts_on || "",
   ];
-  const [creditRounds, setCreditRounds] = useState(() => (initial ? schedule(initial)[0] : "12"));
+  // 있는 계약인가. 새 계약의 회차가 하나면 첫 지급일을 안 묻고 서버가 계약 시작일로 정합니다.
+  const [existing, setExisting] = useState(Boolean(initial));
+  const [creditRounds, setCreditRounds] = useState(() => (initial ? schedule(initial)[0] : "1"));
   const [firstCreditOn, setFirstCreditOn] = useState(() => (initial ? schedule(initial)[1] : ""));
   // 열었을 때의 지급 일정. 이 둘이 바뀌면 저장이 지급 예정 목록을 다시 깝니다 — 그래서
   // 화면이 미리 안내해야 하고, 안내하려면 「무엇이 바뀌었나」를 알아야 합니다. 매 렌더
@@ -50,6 +52,7 @@ export function useContractDraft(initial?: Contract) {
     setDraft((current) => (current ? { ...current, [key]: value } : current));
   /** 있는 계약으로 채웁니다 — 모달이 비동기로 불러온 뒤 부릅니다. 지급 일정 기준선도 같이. */
   const loadContract = (c: Contract) => {
+    setExisting(true);
     setDraft(fromContract(c));
     const [rounds, first] = schedule(c);
     setCreditRounds(rounds);
@@ -68,6 +71,10 @@ export function useContractDraft(initial?: Contract) {
       creditRounds !== creditBase[0] || firstCreditOn !== creditBase[1]
       || (draft?.credits ?? "") !== creditsBase || noGrants);
 
+  /** 첫 지급일을 묻나 — 회차가 둘 이상일 때(2026-11-02 운영자: 「총 지급 회차를 입력 했을 때 나타나게」). 있는 계약은
+   *  회차가 하나여도 그 날짜가 이미 있어서 계속 보입니다 — 숨기면 잘못 적힌 날짜를 고칠 길이 없습니다. */
+  const showFirstCredit = existing || n(creditRounds) >= 2;
+
   /** 서버로 보낼 몸통. **경고를 띄우는 조건이 곧 다시 까는 조건입니다** — 서버는 `credit_reseed`
    *  표가 있을 때만 회차를 다시 깝니다. 폼 값과 행을 비교해 스스로 알아내게 두면, 폼이 빈
    *  첫 지급일 자리에 계약 시작일을 넣어 보내는 것을 「바뀌었다」로 읽고 경고 없이 갈아엎습니다. */
@@ -75,12 +82,13 @@ export function useContractDraft(initial?: Contract) {
     if (!draft) return null;
     const out = toBody(draft, creditRounds, firstCreditOn);
     if (creditChanged) out.credit_reseed = "1";
+    if (!showFirstCredit) out.first_credit_on = "";
     return out;
   };
 
   return {
     draft, setDraft, set, mailFields, setMailFields,
-    creditRounds, setCreditRounds, firstCreditOn, setFirstCreditOn,
+    creditRounds, setCreditRounds, firstCreditOn, setFirstCreditOn, showFirstCredit, existing,
     creditChanged, loadContract, body,
   };
 }
@@ -195,191 +203,210 @@ export function ContractFields({ f, options, askTermination = true, parts }: {
   return (
     <>
       {show("contract") && <>
-        <div className="form-sec">계약</div>
-        <div className="form-grid3">
-          {/* 이름은 **매출 인식**입니다(2026-09-21 운영자 지시, 그 전에는 「수주 유형」).
-              저장하는 값은 MRR·PoC 그대로입니다 — 그 두 글자가 워크북 계약 탭 E열의 값이자
-              `sheet_to_db` 가 다시 읽는 값이라, 키를 따라 바꾸면 시트를 오가는 계약이 끊깁니다. */}
-          <div>
-            <label className="form-label">
-              매출 인식<span className="req"> *</span><DealTypeHint />
-            </label>
-            <Sel className={mailInput(f, "deal_type")} value={draft.deal_type} onChange={(v) => set("deal_type", v)} options={options.deal_types} />
-            <MailNote f={f} name="deal_type" />
-          </div>
-          <div>
-            {/* 「플랜 시작일」 옆과 같은 (i) 입니다 (2026-10-12 운영자: 「해당 사항 계약 기간 옆에도 (I)에 추가해줘」).
-                두 기간을 견주는 설명이라 양쪽 기간 옆에 다 섭니다 — 그리고 플랜 상태와 MRR 을 정하는 것은 **이 칸들**
-                이라, 「저장하면 무엇이 되는가」는 여기서 보는 것이 더 맞습니다. `Field` 는 글자 라벨만 받아서
-                「매출 인식」처럼 라벨을 직접 그립니다. */}
-            <label className="form-label">
-              계약 시작일<span className="req"> *</span><PlanPeriodHint preview={planPreview(draft)} />
-            </label>
-            <input className={mailInput(f, "starts_on")} type="date" value={draft.starts_on}
-                   onChange={(e) => { set("starts_on", e.target.value); set("ends_on", addMonths(e.target.value, 12)); }} />
-            <MailNote f={f} name="starts_on" />
-          </div>
-          <Field label="계약 종료일" required>
-            <input className={mailInput(f, "ends_on")} type="date" value={draft.ends_on} onChange={(e) => set("ends_on", e.target.value)} />
-            <MailNote f={f} name="ends_on" />
-          </Field>
-          <Field label="매출 인식 시작 월">
-            <input className="inp" type="month" value={draft.revenue_from}
-                   onChange={(e) => set("revenue_from", e.target.value)} />
-            <div style={{ fontSize: 11.5, color: "var(--faint)", marginTop: 4 }}>
-              비우면 계약 시작월부터 인식합니다. (MRR만 적용)
-            </div>
-          </Field>
-          {/* **중도 해지일.** 인식 기간은 계약 종료일과 이 날짜 중 빠른 쪽에서 끝납니다.
-              비어 있는 것이 보통이고, 적히는 순간 그 계약의 매출 인식이 거기서 멈춥니다.
-              환불 계산에 쓰는 크레딧 사용량은 「결제 · MRR」 탭의 「중도 해지 정산」에 있습니다. */}
-          {askTermination && (
-            <Field label="중도 해지일">
-              <input className="inp" type="date" value={draft.terminated_on}
-                     onChange={(e) => set("terminated_on", e.target.value)} />
+        <div className="form-card">
+          <div className="form-sec">고객 정보</div>
+          <div className="form-grid3">
+            {/* 수주 전환 대기에서 온 건은 티켓이 따라오고, **그 밖에는 손으로 적습니다**
+                (2026-08-19, 운영자 지시 — 고객은 Client ID 로 묶이지만 계약별로 티켓을
+                붙이고 싶은 건이 있습니다). 목업대로 읽기 전용이던 칸입니다. 서버는 예전부터
+                받고 있었고(`_CONTRACT_FIELDS`), 막고 있던 것은 이 칸 하나였습니다.
+                비우면 연동이 풀립니다 — 잘못 적은 값을 되돌릴 길이 있어야 합니다. */}
+            <Field label="Ticket ID">
+              <input className="inp" value={draft.ticket_id}
+                     onChange={(e) => set("ticket_id", e.target.value)}
+                     placeholder="인바운드 건은 자동 연동 · 그 외 직접 입력" />
             </Field>
-          )}
-          {/* 수주 전환 대기에서 온 건은 티켓이 따라오고, **그 밖에는 손으로 적습니다**
-              (2026-08-19, 운영자 지시 — 고객은 Client ID 로 묶이지만 계약별로 티켓을
-              붙이고 싶은 건이 있습니다). 목업대로 읽기 전용이던 칸입니다. 서버는 예전부터
-              받고 있었고(`_CONTRACT_FIELDS`), 막고 있던 것은 이 칸 하나였습니다.
-              비우면 연동이 풀립니다 — 잘못 적은 값을 되돌릴 길이 있어야 합니다. */}
-          <Field label="Ticket ID">
-            <input className="inp" value={draft.ticket_id}
-                   onChange={(e) => set("ticket_id", e.target.value)}
-                   placeholder="인바운드 건은 자동 연동 · 그 외 직접 입력" />
-          </Field>
-          {/* **고객마다가 아니라 계약마다입니다**(2026-08-31 운영자 지시). 고객 기본
-              정보에 한 벌만 있던 시절에는 두 번째 계약을 맺는 순간 첫 계약의 담당자가
-              덮여 사라졌고, 그것이 화면에서는 「담당자가 바뀌었다」와 같아 보였습니다.
-              재계약이면 직전 계약에서 물려받습니다 — 대개 같은 사람입니다. */}
-          <Field label="고객 담당자">
-            <input className={mailInput(f, "contact_name")} value={draft.contact_name}
-                   onChange={(e) => set("contact_name", e.target.value)}
-                   placeholder="예: 박지훈 팀장" />
-            <MailNote f={f} name="contact_name" />
-          </Field>
-          <Field label="고객 연락처">
-            <input className={mailInput(f, "contact_info")} value={draft.contact_info}
-                   onChange={(e) => set("contact_info", e.target.value)}
-                   placeholder="이메일 또는 전화번호" />
-            <MailNote f={f} name="contact_info" />
-          </Field>
-          {/* 「크레딧 사용량」이 여기 있었습니다 — 2026-09-21 에 「결제 · MRR」 탭의 「중도
-              해지 정산」 박스로 옮겼습니다(운영자 지시). 묻는 자리가 곧 그 값이 무엇에
-              쓰이는지를 말합니다. 「계약서 유형」은 같은 날 아예 없어졌습니다(이관 0125). */}
+            {/* **고객마다가 아니라 계약마다입니다**(2026-08-31 운영자 지시). 고객 기본
+                정보에 한 벌만 있던 시절에는 두 번째 계약을 맺는 순간 첫 계약의 담당자가
+                덮여 사라졌고, 그것이 화면에서는 「담당자가 바뀌었다」와 같아 보였습니다.
+                재계약이면 직전 계약에서 물려받습니다 — 대개 같은 사람입니다. */}
+            <Field label="고객 담당자">
+              <input className={mailInput(f, "contact_name")} value={draft.contact_name}
+                     onChange={(e) => set("contact_name", e.target.value)}
+                     placeholder="예: 박지훈 팀장" />
+              <MailNote f={f} name="contact_name" />
+            </Field>
+            <Field label="고객 연락처">
+              <input className={mailInput(f, "contact_info")} value={draft.contact_info}
+                     onChange={(e) => set("contact_info", e.target.value)}
+                     placeholder="이메일 또는 전화번호" />
+              <MailNote f={f} name="contact_info" />
+            </Field>
+          </div>
         </div>
-        <div className="form-grid3" style={{ marginTop: 14 }}>
-          {/* 목업대로 손으로 적는 칸입니다. 계약서에 적히는 것이 금액과 크레딧이고,
-              분당 단가가 그 둘에서 나옵니다 — 한동안 반대로 두었는데, 그러면 반올림한
-              단가로 계산한 크레딧이 계약서의 크레딧과 어긋났습니다. */}
-          <Field label="계약 크레딧" required>
-            <input className={mailInput(f, "credits")} type="number" value={draft.credits}
-                   onChange={(e) => set("credits", e.target.value)} placeholder="예: 64800" />
-            <MailNote f={f} name="credits" />
-          </Field>
-          <Field label="총 지급 회차">
-            <input className="inp" type="number" min={1} value={f.creditRounds}
-                   onChange={(e) => f.setCreditRounds(e.target.value)} />
-          </Field>
-          <Field label="첫 지급 예정일">
-            <input className={f.mailFields.starts_on?.value === f.firstCreditOn ? "inp is-mail" : "inp"}
-                   type="date" value={f.firstCreditOn}
-                   onChange={(e) => f.setFirstCreditOn(e.target.value)} />
-          </Field>
-          <div style={{ gridColumn: "1 / -1", fontSize: 12,
-                        color: f.creditChanged ? "var(--red-fg)" : "var(--faint)" }}>
-            {f.creditChanged
-              ? "저장하면 지급 예정 목록을 다시 깝니다 — 손으로 추가·수정한 회차와 지급 완료 표시가 모두 사라집니다."
-              : "회차별 크레딧은 균등 분배로 자동 생성됩니다."}
+        <div className="form-card">
+          <div className="form-sec">계약</div>
+          <div className="form-grid3">
+            {/* 이름은 **매출 인식**입니다(2026-09-21 운영자 지시, 그 전에는 「수주 유형」).
+                저장하는 값은 MRR·PoC 그대로입니다 — 그 두 글자가 워크북 계약 탭 E열의 값이자
+                `sheet_to_db` 가 다시 읽는 값이라, 키를 따라 바꾸면 시트를 오가는 계약이 끊깁니다. */}
+            <div>
+              <label className="form-label">
+                매출 인식<span className="req"> *</span><DealTypeHint />
+              </label>
+              <Sel className={mailInput(f, "deal_type")} value={draft.deal_type} onChange={(v) => set("deal_type", v)} options={options.deal_types} />
+              <MailNote f={f} name="deal_type" />
+            </div>
+            <div>
+              {/* 「플랜 시작일」 옆과 같은 (i) 입니다 (2026-10-12 운영자: 「해당 사항 계약 기간 옆에도 (I)에 추가해줘」).
+                  두 기간을 견주는 설명이라 양쪽 기간 옆에 다 섭니다 — 그리고 플랜 상태와 MRR 을 정하는 것은 **이 칸들**
+                  이라, 「저장하면 무엇이 되는가」는 여기서 보는 것이 더 맞습니다. `Field` 는 글자 라벨만 받아서
+                  「매출 인식」처럼 라벨을 직접 그립니다. */}
+              <label className="form-label">
+                계약 시작일<span className="req"> *</span><PlanPeriodHint preview={planPreview(draft)} />
+              </label>
+              <input className={mailInput(f, "starts_on")} type="date" value={draft.starts_on}
+                     onChange={(e) => {
+                       // 새 계약의 첫 지급일은 건드리지 않았으면 시작일을 따라갑니다 — 회차를 늘려 칸이 나타날 때 옛 날짜가 서 있으면 안 됩니다.
+                       if (!f.existing && f.firstCreditOn === draft.starts_on) f.setFirstCreditOn(e.target.value);
+                       set("starts_on", e.target.value);
+                       set("ends_on", addMonths(e.target.value, 12));
+                     }} />
+              <MailNote f={f} name="starts_on" />
+            </div>
+            <Field label="계약 종료일" required>
+              <input className={mailInput(f, "ends_on")} type="date" value={draft.ends_on} onChange={(e) => set("ends_on", e.target.value)} />
+              <MailNote f={f} name="ends_on" />
+            </Field>
+            <Field label="매출 인식 시작 월">
+              <input className="inp" type="month" value={revenueMonth(draft)}
+                     onChange={(e) => set("revenue_from", e.target.value)} />
+              <div style={{ fontSize: 11.5, color: "var(--faint)", marginTop: 4 }}>
+                MRR만 적용
+              </div>
+            </Field>
+            {/* **중도 해지일.** 인식 기간은 계약 종료일과 이 날짜 중 빠른 쪽에서 끝납니다.
+                비어 있는 것이 보통이고, 적히는 순간 그 계약의 매출 인식이 거기서 멈춥니다.
+                환불 계산에 쓰는 크레딧 사용량은 「결제 · MRR」 탭의 「중도 해지 정산」에 있습니다. */}
+            {askTermination && (
+              <Field label="중도 해지일">
+                <input className="inp" type="date" value={draft.terminated_on}
+                       onChange={(e) => set("terminated_on", e.target.value)} />
+              </Field>
+            )}
+            {/* 「크레딧 사용량」이 여기 있었습니다 — 2026-09-21 에 「결제 · MRR」 탭의 「중도
+                해지 정산」 박스로 옮겼습니다(운영자 지시). 묻는 자리가 곧 그 값이 무엇에
+                쓰이는지를 말합니다. 「계약서 유형」은 같은 날 아예 없어졌습니다(이관 0125). */}
+          </div>
+          <div className="form-grid3" style={{ marginTop: 14 }}>
+            {/* 목업대로 손으로 적는 칸입니다. 계약서에 적히는 것이 금액과 크레딧이고,
+                분당 단가가 그 둘에서 나옵니다 — 한동안 반대로 두었는데, 그러면 반올림한
+                단가로 계산한 크레딧이 계약서의 크레딧과 어긋났습니다. */}
+            <Field label="계약 크레딧" required>
+              <input className={mailInput(f, "credits")} type="number" value={draft.credits}
+                     onChange={(e) => set("credits", e.target.value)} placeholder="예: 64800" />
+              <MailNote f={f} name="credits" />
+            </Field>
+            <Field label="크레딧 지급 회차">
+              <input className="inp" type="number" min={1} value={f.creditRounds}
+                     onChange={(e) => f.setCreditRounds(e.target.value)} />
+            </Field>
+            {f.showFirstCredit && (
+              <Field label="크레딧 첫 지급일">
+                <input className={f.mailFields.starts_on?.value === f.firstCreditOn ? "inp is-mail" : "inp"}
+                       type="date" value={f.firstCreditOn}
+                       onChange={(e) => f.setFirstCreditOn(e.target.value)} />
+              </Field>
+            )}
+            {(n(f.creditRounds) >= 2 || f.creditChanged) && (
+              <div style={{ gridColumn: "1 / -1", fontSize: 12,
+                            color: f.creditChanged ? "var(--red-fg)" : "var(--faint)" }}>
+                {f.creditChanged
+                  ? "저장하면 지급 예정 목록을 다시 깝니다 — 손으로 추가·수정한 회차와 지급 완료 표시가 모두 사라집니다."
+                  : "회차별 크레딧은 균등 분배로 자동 생성됩니다."}
+              </div>
+            )}
           </div>
         </div>
       </>}
 
       {show("money") && <>
-        <div className="form-sec">금액</div>
-        {/* 「VAT 해당 여부」가 이 줄 맨 앞에 있었습니다 — 공급가가 있는 계약인지를 정하던
-            칸인데, 공급가 자체를 안 쓰게 되면서(2026-09-22 운영자 지시) 같이 나갔습니다. */}
-        <div className="form-grid3">
-          <Field label="통화">
-            <Sel className={mailInput(f, "currency")} value={draft.currency} onChange={(v) => set("currency", v)} options={options.currencies} />
-            <MailNote f={f} name="currency" />
-          </Field>
-          {/* **통화와 무관하게 묻습니다** (2026-08-31 운영자 지시). 예전에는 원화 계약에
-              안 물었는데, 그건 한쪽 방향만 본 이야기였습니다: 예상 MRR 카드는 원화 계약을
-              USD 로도 보여 주고, 계약에 환율이 없으면 그 환산이 매일 오늘 고시가로 다시
-              일어납니다 — 지난달 숫자가 오늘 환율에 따라 움직입니다.
+        <div className="form-card">
+          <div className="form-sec">금액</div>
+          {/* 「VAT 해당 여부」가 이 줄 맨 앞에 있었습니다 — 공급가가 있는 계약인지를 정하던
+              칸인데, 공급가 자체를 안 쓰게 되면서(2026-09-22 운영자 지시) 같이 나갔습니다. */}
+          <div className="form-grid3">
+            <Field label="통화">
+              <Sel className={mailInput(f, "currency")} value={draft.currency} onChange={(v) => set("currency", v)} options={options.currencies} />
+              <MailNote f={f} name="currency" />
+            </Field>
+            {/* **통화와 무관하게 묻습니다** (2026-08-31 운영자 지시). 예전에는 원화 계약에
+                안 물었는데, 그건 한쪽 방향만 본 이야기였습니다: 예상 MRR 카드는 원화 계약을
+                USD 로도 보여 주고, 계약에 환율이 없으면 그 환산이 매일 오늘 고시가로 다시
+                일어납니다 — 지난달 숫자가 오늘 환율에 따라 움직입니다.
 
-              비워 두면 저장할 때 계약일 고시가(없으면 오늘 고시가)를 조회해 계약 행에
-              박아 둡니다. 이 칸은 비어 있으면 안 되는 칸입니다. */}
-          <Field label="환율 (USD → KRW)">
-            <input className="inp" type="number" value={draft.fx_rate}
-                   onChange={(e) => set("fx_rate", e.target.value)}
-                   placeholder="비우면 계약일 고시가로 자동" />
-          </Field>
-          {/* **칸은 하나입니다** (2026-09-21 운영자 지시: 「계약금액은 모두 VAT 포함만으로」).
-              그전에는 칸이 둘이고 「분당단가 기준」 고르개가 어느 쪽을 기준으로 삼을지
-              정했습니다 — 모르면 분당 단가가 계약마다 10% 씩 달라졌기 때문입니다. 그 사실은
-              이제 **계약 비고**가 듭니다(이관 0123 이 옛 계약마다 한 줄 적어 두었습니다).
+                비워 두면 저장할 때 계약일 고시가(없으면 오늘 고시가)를 조회해 계약 행에
+                박아 둡니다. 이 칸은 비어 있으면 안 되는 칸입니다. */}
+            <Field label="환율 (USD → KRW)">
+              <input className="inp" type="number" value={draft.fx_rate}
+                     onChange={(e) => set("fx_rate", e.target.value)}
+                     placeholder="비우면 계약일 고시가로 자동" />
+            </Field>
+            {/* **칸은 하나입니다** (2026-09-21 운영자 지시: 「계약금액은 모두 VAT 포함만으로」).
+                그전에는 칸이 둘이고 「분당단가 기준」 고르개가 어느 쪽을 기준으로 삼을지
+                정했습니다 — 모르면 분당 단가가 계약마다 10% 씩 달라졌기 때문입니다. 그 사실은
+                이제 **계약 비고**가 듭니다(이관 0123 이 옛 계약마다 한 줄 적어 두었습니다).
 
-              라벨에 「(VAT 포함)」을 안 답니다 — 이제 모든 계약금액이 그렇습니다. */}
-          <div style={{ gridColumn: "span 2" }}>
-            <label className="form-label">계약금액 <span className="req">*</span></label>
-            <input className={mailInput(f, "amount_incl_vat")} type="number" value={draft.amount_incl_vat}
-                   onChange={(e) => set("amount_incl_vat", e.target.value)}
-                   placeholder="예: 11000000" />
-            <MailNote f={f} name="amount_incl_vat" />
-          </div>
-          {/* 계산값입니다 — 계약금액 ÷ (크레딧 ÷ 60). 소수점은 남깁니다: 반올림한 단가는
-              되짚어 곱했을 때 금액이 안 맞습니다. 계약서가 다른 기준의 단가로 적힌 건이면
-              그 숫자를 계약 비고에 적어 두십시오. */}
-          <Field label="분당 단가">
-            <div className="inp" aria-readonly="true"
-                 style={{ background: "var(--bg-soft)", fontVariantNumeric: "tabular-nums",
-                          color: unitPrice === null ? "var(--faint)" : "var(--ink)" }}>
-              {unitPrice === null ? "금액 · 크레딧 입력 시 계산" : `${unitPrice} ${draft.currency}`}
+                라벨에 「(VAT 포함)」을 안 답니다 — 이제 모든 계약금액이 그렇습니다. */}
+            <div style={{ gridColumn: "span 2" }}>
+              <label className="form-label">계약금액 <span className="req">*</span></label>
+              <input className={mailInput(f, "amount_incl_vat")} type="number" value={draft.amount_incl_vat}
+                     onChange={(e) => set("amount_incl_vat", e.target.value)}
+                     placeholder="예: 11000000" />
+              <MailNote f={f} name="amount_incl_vat" />
             </div>
-          </Field>
+            {/* 계산값입니다 — 계약금액 ÷ (크레딧 ÷ 60). 소수점은 남깁니다: 반올림한 단가는
+                되짚어 곱했을 때 금액이 안 맞습니다. 계약서가 다른 기준의 단가로 적힌 건이면
+                그 숫자를 계약 비고에 적어 두십시오. */}
+            <Field label="분당 단가">
+              <div className="inp" aria-readonly="true"
+                   style={{ background: "var(--bg-soft)", fontVariantNumeric: "tabular-nums",
+                            color: unitPrice === null ? "var(--faint)" : "var(--ink)" }}>
+                {unitPrice === null ? "금액 · 크레딧 입력 시 계산" : `${unitPrice} ${draft.currency}`}
+              </div>
+            </Field>
+          </div>
         </div>
       </>}
 
       {show("payment") && <>
-        <div className="form-sec">결제</div>
-        <div className="form-grid3">
-          <Field label="결제 수단">
-            <Sel className={mailInput(f, "payment_method")} value={draft.payment_method} onChange={(v) => set("payment_method", v)} options={options.payment_methods} />
-            <MailNote f={f} name="payment_method" />
-          </Field>
-          <Field label="결제 방식">
-            <Sel className={mailInput(f, "payment_type")} value={draft.payment_type} onChange={(v) => set("payment_type", v)} options={options.payment_types} />
-            <MailNote f={f} name="payment_type" />
-          </Field>
-          <Field label="총 분납 횟수">
-            <input className={mailInput(f, "installments")} type="number" min={1} value={draft.installments}
-                   disabled={draft.payment_type !== "할부"}
-                   onChange={(e) => set("installments", e.target.value)} />
-            <MailNote f={f} name="installments" />
-          </Field>
-          <Field label="최초 결제일">
-            <input className={mailInput(f, "first_payment_on")} type="date" value={draft.first_payment_on}
-                   onChange={(e) => set("first_payment_on", e.target.value)} />
-          </Field>
-          <div style={{ gridColumn: "span 2" }}>
-            <label className="form-label">Billing Email</label>
-            <input className={mailInput(f, "billing_email")} value={draft.billing_email} placeholder="예: ap@company.com"
-                   onChange={(e) => set("billing_email", e.target.value)} />
-            <MailNote f={f} name="billing_email" />
+        <div className="form-card">
+          <div className="form-sec">결제</div>
+          <div className="form-grid3">
+            <Field label="결제 수단">
+              <Sel className={mailInput(f, "payment_method")} value={draft.payment_method} onChange={(v) => set("payment_method", v)} options={options.payment_methods} />
+              <MailNote f={f} name="payment_method" />
+            </Field>
+            <Field label="결제 방식">
+              <Sel className={mailInput(f, "payment_type")} value={draft.payment_type} onChange={(v) => set("payment_type", v)} options={options.payment_types} />
+              <MailNote f={f} name="payment_type" />
+            </Field>
+            <Field label="총 분납 횟수">
+              <input className={mailInput(f, "installments")} type="number" min={1} value={draft.installments}
+                     disabled={draft.payment_type !== "할부"}
+                     onChange={(e) => set("installments", e.target.value)} />
+              <MailNote f={f} name="installments" />
+            </Field>
+            <Field label="최초 결제일">
+              <input className={mailInput(f, "first_payment_on")} type="date" value={draft.first_payment_on}
+                     onChange={(e) => set("first_payment_on", e.target.value)} />
+            </Field>
+            <div style={{ gridColumn: "span 2" }}>
+              <label className="form-label">Billing Email</label>
+              <input className={mailInput(f, "billing_email")} value={draft.billing_email} placeholder="예: ap@company.com"
+                     onChange={(e) => set("billing_email", e.target.value)} />
+              <MailNote f={f} name="billing_email" />
+            </div>
           </div>
         </div>
       </>}
 
       {show("etc") && <>
-        <div className="form-sec">기타</div>
-        <div>
-          <label className="form-label">계약 비고</label>
-          <textarea className="inp" rows={2} value={draft.note}
-                    onChange={(e) => set("note", e.target.value)}
-                    placeholder="갱신 조건, 협의 내용 등" />
+        <div className="form-card">
+          <div className="form-sec">계약 비고</div>
+          <textarea className="inp" rows={2} aria-label="계약 비고" value={draft.note}
+                      onChange={(e) => set("note", e.target.value)}
+                      placeholder="갱신 조건, 협의 내용 등" />
         </div>
       </>}
     </>
@@ -399,65 +426,67 @@ export function PlanFields({ f, options, heading = true }: {
   if (!draft) return null;
   return (
     <>
-      {heading && <div className="form-sec">Perso 계정 및 플랜</div>}
-      <div className="form-grid3">
-        {/* **플랜 기간은 계약 기간과 다른 것입니다** (2026-08-31 운영자 지시). 계약은
-            먼저 맺고 실제 사용은 늦게 시작하는 일이 흔합니다.
+      <div className={heading ? "form-card" : undefined}>
+        {heading && <div className="form-sec">Perso 계정 및 플랜</div>}
+        <div className="form-grid3">
+          {/* **플랜 기간은 계약 기간과 다른 것입니다** (2026-08-31 운영자 지시). 계약은
+              먼저 맺고 실제 사용은 늦게 시작하는 일이 흔합니다.
 
-            **2026-09-21 부터 MRR 과 플랜 상태는 이 날짜를 안 봅니다** — 운영자 지시로
-            계약 기간으로 돌아왔습니다(`won.plan_period`). 남은 독자는 크레딧 소진 속도
-            (`usage.ts` 의 경과율·사용 전망)와 워크북 AE·AF 열입니다. 비워 두면 계약
-            기간과 같습니다 — 대부분의 계약이 그렇고, 그때는 아무것도 안 적으면 됩니다. */}
-        <div>
-          {/* 두 기간의 뜻과 계약 기간이 정하는 것은 이 (i) 가 말합니다(`PlanPeriodHint`). 이 절의 안내 상자 둘은
-              2026-10-12 에 걷었습니다 — 편집 폼에만 있어서 읽기 화면에서는 아무도 못 봤습니다. */}
-          <label className="form-label">
-            플랜 시작일<PlanPeriodHint preview={planPreview(draft)} />
-          </label>
-          <input className="inp" type="date" value={draft.plan_starts_on}
-                 onChange={(e) => set("plan_starts_on", e.target.value)} />
-        </div>
-        <Field label="플랜 만료일">
-          <input className="inp" type="date" value={draft.plan_ends_on}
-                 onChange={(e) => set("plan_ends_on", e.target.value)} />
-        </Field>
-        <Field label="플랜">
-          <Sel className={mailInput(f, "plan")} value={draft.plan} onChange={(v) => set("plan", v)} options={options.plans} />
-          <MailNote f={f} name="plan" />
-        </Field>
-        <Field label="플랜명">
-          {/* 제품에 실제로 있는 플랜 이름을 추천합니다(2026-10-12) — **추천일 뿐 가두지 않습니다.** 고르개로
-              바꾸면 제품에 플랜을 만들기 전에는 계약을 추가할 수 없게 됩니다(운영자가 짚은 그 문제). 목록에 없는
-              이름도 그대로 적히고, 저장은 이 목록을 안 봅니다. */}
-          <input className="inp" list={PLAN_NAMES_ID} value={draft.plan_name}
-                 onChange={(e) => set("plan_name", e.target.value)} />
-          <PlanNameOptions source={source} />
-        </Field>
-        <Field label="Perso Email">
-          <input className={mailInput(f, "perso_email")} value={draft.perso_email} onChange={(e) => set("perso_email", e.target.value)} />
-          <MailNote f={f} name="perso_email" />
-        </Field>
-        <Field label="Account Invitation Limit">
-          <input className="inp" type="number" value={draft.invite_limit} onChange={(e) => set("invite_limit", e.target.value)} />
-        </Field>
-        <Field label="Queue limit">
-          <input className="inp" type="number" value={draft.queue_limit} onChange={(e) => set("queue_limit", e.target.value)} />
-        </Field>
-        <Field label="Concurrent Jobs">
-          <input className="inp" type="number" value={draft.concurrent_jobs} onChange={(e) => set("concurrent_jobs", e.target.value)} />
-        </Field>
-        <Field label="Space 개수">
-          <input className="inp" type="number" value={draft.space_count} onChange={(e) => set("space_count", e.target.value)} />
-        </Field>
-        <div style={{ gridColumn: "span 2" }}>
-          <label className="form-label">space_seq</label>
-          <input className="inp" value={draft.space_seq} onChange={(e) => set("space_seq", e.target.value)}
-                 placeholder="여러 개면 쉼표로" />
-          {/* 칸이 비어 있고 위 「플랜명」과 같은 이름의 플랜이 제품에 있으면, 그 플랜의 스페이스 번호를 적어 줍니다.
-              **채우는 것은 사람이 누를 때뿐이고 저장도 따로 누릅니다** — 이 폼이 스냅샷에서 받는 것은 그 번호
-              글자 하나입니다(`tests/test_usage_data_stays_off_server.py` 가 그 한 줄을 고정합니다). */}
-          <PlanSpaceHint source={source} planName={draft.plan_name} spaceSeq={draft.space_seq}
-                         onFill={(text) => set("space_seq", text)} />
+              **2026-09-21 부터 MRR 과 플랜 상태는 이 날짜를 안 봅니다** — 운영자 지시로
+              계약 기간으로 돌아왔습니다(`won.plan_period`). 남은 독자는 크레딧 소진 속도
+              (`usage.ts` 의 경과율·사용 전망)와 워크북 AE·AF 열입니다. 비워 두면 계약
+              기간과 같습니다 — 대부분의 계약이 그렇고, 그때는 아무것도 안 적으면 됩니다. */}
+          <div>
+            {/* 두 기간의 뜻과 계약 기간이 정하는 것은 이 (i) 가 말합니다(`PlanPeriodHint`). 이 절의 안내 상자 둘은
+                2026-10-12 에 걷었습니다 — 편집 폼에만 있어서 읽기 화면에서는 아무도 못 봤습니다. */}
+            <label className="form-label">
+              플랜 시작일<PlanPeriodHint preview={planPreview(draft)} />
+            </label>
+            <input className="inp" type="date" value={draft.plan_starts_on}
+                   onChange={(e) => set("plan_starts_on", e.target.value)} />
+          </div>
+          <Field label="플랜 만료일">
+            <input className="inp" type="date" value={draft.plan_ends_on}
+                   onChange={(e) => set("plan_ends_on", e.target.value)} />
+          </Field>
+          <Field label="플랜">
+            <Sel className={mailInput(f, "plan")} value={draft.plan} onChange={(v) => set("plan", v)} options={options.plans} />
+            <MailNote f={f} name="plan" />
+          </Field>
+          <Field label="플랜명">
+            {/* 제품에 실제로 있는 플랜 이름을 추천합니다(2026-10-12) — **추천일 뿐 가두지 않습니다.** 고르개로
+                바꾸면 제품에 플랜을 만들기 전에는 계약을 추가할 수 없게 됩니다(운영자가 짚은 그 문제). 목록에 없는
+                이름도 그대로 적히고, 저장은 이 목록을 안 봅니다. */}
+            <input className="inp" list={PLAN_NAMES_ID} value={draft.plan_name}
+                   onChange={(e) => set("plan_name", e.target.value)} />
+            <PlanNameOptions source={source} />
+          </Field>
+          <Field label="Perso Email">
+            <input className={mailInput(f, "perso_email")} value={draft.perso_email} onChange={(e) => set("perso_email", e.target.value)} />
+            <MailNote f={f} name="perso_email" />
+          </Field>
+          <Field label="Account Invitation Limit">
+            <input className="inp" type="number" value={draft.invite_limit} onChange={(e) => set("invite_limit", e.target.value)} />
+          </Field>
+          <Field label="Queue limit">
+            <input className="inp" type="number" value={draft.queue_limit} onChange={(e) => set("queue_limit", e.target.value)} />
+          </Field>
+          <Field label="Concurrent Jobs">
+            <input className="inp" type="number" value={draft.concurrent_jobs} onChange={(e) => set("concurrent_jobs", e.target.value)} />
+          </Field>
+          <Field label="Space 개수">
+            <input className="inp" type="number" value={draft.space_count} onChange={(e) => set("space_count", e.target.value)} />
+          </Field>
+          <div style={{ gridColumn: "span 2" }}>
+            <label className="form-label">space_seq</label>
+            <input className="inp" value={draft.space_seq} onChange={(e) => set("space_seq", e.target.value)}
+                   placeholder="여러 개면 쉼표로" />
+            {/* 칸이 비어 있고 위 「플랜명」과 같은 이름의 플랜이 제품에 있으면, 그 플랜의 스페이스 번호를 적어 줍니다.
+                **채우는 것은 사람이 누를 때뿐이고 저장도 따로 누릅니다** — 이 폼이 스냅샷에서 받는 것은 그 번호
+                글자 하나입니다(`tests/test_usage_data_stays_off_server.py` 가 그 한 줄을 고정합니다). */}
+            <PlanSpaceHint source={source} planName={draft.plan_name} spaceSeq={draft.space_seq}
+                           onFill={(text) => set("space_seq", text)} />
+          </div>
         </div>
       </div>
     </>

@@ -104,10 +104,9 @@ export type MailCell = { value: string; evidence: string };
 export type MailFields = Partial<Record<keyof Draft, MailCell>>;
 export type MailSuggestion = { status: "ok" | "no_mail" | "failed"; mails: number; fields: MailFields };
 
-/** 바탕색만으로는 안 보이는 사실 — 금액은 메일이 VAT 를 안 적기도 하고, 종료일은 메일에서 온 값이 아닙니다. 그냥
- *  「확인하세요」 한 마디는 뺐습니다(2026-11-02 운영자) — 채운 칸은 바탕색이 말합니다(`mailInput`). 저장을 막지는 않습니다. */
+/** 바탕색만으로는 안 보이는 사실 — 종료일은 메일에서 온 값이 아닙니다. 「확인하세요」 와 금액의 「VAT 포함 금액인지
+ *  확인하세요」는 뺐습니다(2026-11-02 운영자) — 채운 칸은 바탕색이 말합니다(`mailInput`). 저장을 막지는 않습니다. */
 export const MAIL_CHECKS: Partial<Record<keyof Draft, string>> = {
-  amount_incl_vat: "VAT 포함 금액인지 확인하세요",
   ends_on: "시작일의 12개월 뒤로 맞췄습니다. 계약 기간을 확인하세요",
 };
 
@@ -165,9 +164,19 @@ function firstProblem(draft: Draft): { part: "contract" | "money"; message: stri
   return null;
 }
 
-/** 서버로 보낼 몸통. */
+/** 칸에 보이는 매출 인식 시작 월 — 따로 안 적었으면 계약 시작월입니다(2026-11-02 운영자). */
+export function revenueMonth(draft: Draft) {
+  return draft.revenue_from || draft.starts_on.slice(0, 7);
+}
+
+/** 서버로 보낼 몸통.
+ *
+ *  **계약 시작월과 같은 매출 인식 시작 월은 저장하지 않습니다.** 저장하면 그 뒤로 계약 날짜를 고쳐도 인식 시작이 옛 달에
+ *  남습니다 — 파생값을 굳혀 조용히 어긋나는 것은 이 저장소가 세 번 겪은 자리입니다. 비어 있으면 서버가 계약 시작월로
+ *  읽습니다(`won.revenue_start_month`). */
 export function toBody(draft: Draft, creditRounds: string, firstCreditOn: string) {
   const body: Record<string, string> = { ...draft,
+    revenue_from: draft.revenue_from === draft.starts_on.slice(0, 7) ? "" : draft.revenue_from,
     credit_rounds: creditRounds, first_credit_on: firstCreditOn };
   return body;
 }

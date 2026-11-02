@@ -357,37 +357,21 @@ export function WonCustomers() {
           <div className="intake">
             <div className="intake-head">
               <G name="inbound" size={16} stroke="#B45309" />
-              <div>
-                <div className="intake-title">수주 전환 대기</div>
-                <div className="intake-sub">계약 정보를 입력해야 고객 목록에 등록됩니다.</div>
-              </div>
+              <div className="intake-title">수주 전환 대기</div>
               <span className="intake-count">{data.pending.length}</span>
             </div>
             <div className="intake-grid">
               {data.pending.map((item) => (
                 <div key={item.id} className="intake-card">
-                  <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
+                  {/* 기업명 · 몇 차 계약 · 버튼뿐입니다(2026-11-02 운영자: 「심플하게 재구성」). 이름은 서버가 회사명, 없으면
+                      리드 이름으로 채웁니다(`stage_sync`). 누르면 주소만 바뀝니다 — 고객은 계약을 저장할 때 만들어집니다. */}
+                  <div className="intake-who">
                     <div className="intake-co">{item.company || "고객사 미확인"}</div>
-                    {/* 그 고객 아래 계약이 이미 있으면 재계약입니다. 우리 장부가 아는
-                        사실이라 HubSpot 의 Won type 을 읽지 않습니다. */}
-                    <span className={`tag ${item.won_type === "Renewal" ? "blue" : "neutral"}`}>
-                      {item.won_type}
-                    </span>
-                    <span className="intake-date">Won {fmt(item.won_on)}</span>
+                    <div className="intake-seq">{item.next_seq}차 계약</div>
                   </div>
-                  <div className={`intake-match${item.known ? "" : " new"}`}>
-                    {item.client_id
-                      ? `${item.company || "고객사 미확인"} (ID ${item.client_id}) → ${item.next_seq}차 계약`
-                      : "Client ID 없음 → 새 고객으로 등록"}
-                  </div>
-                  <div className="intake-actions">
-                    {/* 평범한 버튼입니다 — 누르면 주소만 바뀝니다. 예전에는 여기서
-                        고객을 만드느라 요청이 나갔고, 그래서 「준비 중」이 필요했습니다. */}
-                    <button type="button" className="btn btn-sm btn-primary"
-                            onClick={() => openPending(item)}>
-                      계약 정보 입력
-                    </button>
-                  </div>
+                  <button type="button" className="btn btn-sm btn-primary" onClick={() => openPending(item)}>
+                    계약 정보 입력
+                  </button>
                 </div>
               ))}
             </div>

@@ -3366,5 +3366,54 @@ def test_the_contract_form_is_three_pages_and_the_detail_edit_is_not():
     # 크레딧 지급은 절이 없어지고 계약 크레딧 옆에 온다.
     assert 'form-sec">크레딧 지급' not in fields
     contract = fields[fields.index('form-sec">계약</div>'):fields.index('form-sec">금액</div>')]
-    order = [contract.index('label="계약 크레딧"'), contract.index('label="총 지급 회차"'), contract.index('label="첫 지급 예정일"')]
+    order = [contract.index('label="계약 크레딧"'), contract.index('label="크레딧 지급 회차"'), contract.index('label="크레딧 첫 지급일"')]
     assert order == sorted(order)
+
+    # 고객 정보가 계약 쪽 맨 위에 선다.
+    customer = fields[fields.index('form-sec">고객 정보</div>'):fields.index('form-sec">계약</div>')]
+    for label in ("Ticket ID", "고객 담당자", "고객 연락처"):
+        assert f'label="{label}"' in customer and f'label="{label}"' not in contract
+
+
+def test_a_waiting_card_says_only_who_which_contract_and_the_button():
+    """기업명(리드명) · 몇 차 계약 · 계약 정보 입력 (2026-11-02 운영자: 「아래만 두고 다 지워」)."""
+    import pathlib
+    import re
+
+    screen = pathlib.Path("frontend/src/screens/won/WonCustomers.tsx").read_text(encoding="utf-8")
+    card = screen[screen.index('className="intake-card"'):]
+    card = card[:card.index("))}")]
+    code = re.sub(r"\{/\*.*?\*/\}", "", card, flags=re.S)
+
+    assert set(re.findall(r"item\.(\w+)", code)) == {"company", "next_seq"}
+    assert "계약 정보 입력" in code and "차 계약" in code
+    for gone in ("won_type", "won_on", "client_id", "intake-match", "tag "):
+        assert gone not in code
+
+
+def test_a_new_contract_grants_once_unless_asked_and_the_date_appears_with_more_rounds():
+    """지급 회차 기본 1, 첫 지급일은 회차가 둘 이상일 때 (2026-11-02 운영자). 있는 계약에는 그 날짜가 이미 있어 계속 보인다."""
+    import pathlib
+
+    fields = pathlib.Path("frontend/src/screens/won/ContractFields.tsx").read_text(encoding="utf-8")
+    assert 'schedule(initial)[0] : "1"' in fields
+    assert "existing || n(creditRounds) >= 2" in fields
+    assert "{f.showFirstCredit && (" in fields
+    assert 'if (!showFirstCredit) out.first_credit_on = "";' in fields
+
+
+def test_an_empty_first_grant_date_falls_back_to_the_contract_start(factory):
+    """새 계약의 회차가 하나면 화면이 첫 지급일을 안 보낸다 — 그때 지급일은 계약 시작일이다."""
+    from src.api.routes.won_customers import _seed_schedules
+    from src.db.models import Client, ClientContract
+
+    with factory() as session:
+        session.add(Client(client_id=1999, company="Acme"))
+        session.flush()
+        contract = ClientContract(client_id=1999, seq=1, starts_on="2026-03-15", ends_on="2027-03-15", credits=1200)
+        session.add(contract)
+        session.flush()
+        _seed_schedules(session, contract, credit_rounds=1, first_credit_on="")
+        session.commit()
+        grants = list(contract.credit_grants)
+    assert [(grant.grant_on, grant.amount) for grant in grants] == [("2026-03-15", 1200)]
