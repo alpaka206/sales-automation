@@ -1,4 +1,4 @@
-"""Dashboard route — the awaiting-reply queue, its counters, and the pipeline board.
+"""Dashboard route — the awaiting-reply queue by tab, and the pipeline board.
 
 The board used to be its own page at /pipeline. It lives here now, below the queue,
 because both answer "what needs me next?" and the operator was navigating between them
@@ -7,13 +7,8 @@ constantly. /pipeline's POST actions kept their paths; only the page moved.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
-
 from fastapi import APIRouter
-from sqlalchemy import func, select
 
-from ...db.models import Message
-from ...db.session import SessionLocal
 from .messages import _messages_list_context
 
 router = APIRouter(tags=["web"])
@@ -24,19 +19,8 @@ router = APIRouter(tags=["web"])
 _QUEUE_LIMIT = 5
 
 
-def _kst_day_start() -> datetime:
-    """Midnight in KST, expressed as the naive UTC the DB columns store.
-
-    The counter is labelled 오늘 and the UI renders KST, so a UTC midnight would move
-    the boundary by nine hours — inquiries from 09:00 KST onward counted as yesterday.
-    """
-    kst_now = datetime.now(timezone.utc) + timedelta(hours=9)
-    kst_midnight = kst_now.replace(hour=0, minute=0, second=0, microsecond=0)
-    return (kst_midnight - timedelta(hours=9)).replace(tzinfo=None)
-
-
 def _dashboard_context() -> dict:
-    """Awaiting-reply rows, their counters, and the pipeline board."""
+    """Awaiting-reply rows by tab, and the pipeline board."""
     from .customer_ops import (
         MANUAL_LOG_STAGES,
         PIPELINE_STAGES,
@@ -44,20 +28,22 @@ def _dashboard_context() -> dict:
     )
 
     # The queue panel IS the 검토 및 회신 list — same query, same row shape, same table
-    # partial — sorted oldest-first and cut to _QUEUE_LIMIT. Building it here from a
-    # second, near-identical query is what let the two tables drift apart before.
-    queue = _messages_list_context(status="awaiting", stage="", sort="oldest")
-    recent_messages = queue["messages"][:_QUEUE_LIMIT]
-    # **「답변 대기」 숫자는 이 목록의 총계 그대로다** — 자르기 전의 행 수(`total`). 숫자를 따로 세던 쿼리가 두 번
-    # 목록과 다른 말을 했다(2026-08-05 의 6 대 1, 2026-08-31 에 목록에만 붙은 수동 초안 예외) — 화면이 여는 목록과
-    # 어긋난 숫자는 없는 일감을 찾게 만든다.
-    awaiting_total = queue["total"]
-    with SessionLocal() as session:
-        received_today = session.scalar(
-            select(func.count())
-            .select_from(Message)
-            .where(Message.direction == "inbound", Message.created_at >= _kst_day_start())
-        ) or 0
+    # partial — sorted oldest-first. Building it here from a second, near-identical query
+    # is what let the two tables drift apart before. Uncapped: each tab counts and cuts its own.
+    queue = _messages_list_context(status="awaiting", stage="", sort="oldest", limit=None)
+    waiting = queue["messages"]
+    # **탭은 `awaiting_conversations` 의 두 갈래 그대로다** (2026-11-05 운영자: 「고객 회신도착이랑 발송대기 이런거 다 같은
+    # 줄에 있어」 · 「신규 문의, 회신 도착, 전체 이렇게 나누자」). 상태 글자가 아니라 **그 줄이 선 이유**로 가른다 — 고객
+    # 답장에 쓰는 초안은 「발송 대기」로 보여도 새 문의가 아니다.
+    #
+    # **숫자는 그 탭 목록의 총계 그대로고, 줄은 탭마다 따로 자른다.** 전체의 앞 다섯 줄을 화면에서 거르면 오래된 New 가
+    # 많은 날 회신 도착이 실제로는 있는데 비어 보인다. 숫자를 따로 세던 쿼리가 두 번 목록과 다른 말을 했다(2026-08-05 의
+    # 6 대 1, 2026-08-31 에 목록에만 붙은 수동 초안 예외) — 화면이 여는 목록과 어긋난 숫자는 없는 일감을 찾게 만든다.
+    tabs = {
+        "new": [row for row in waiting if row["stage"] == "new"],
+        "reply": [row for row in waiting if row["stage"] != "new"],
+        "all": waiting,
+    }
 
     # Capped per column, with the true per-stage totals alongside — the header must not
     # start under-reporting just because the column stopped rendering every card.
@@ -67,15 +53,15 @@ def _dashboard_context() -> dict:
         by_stage.setdefault(row["stage"], []).append(row)
 
     return {
-        "recent_messages": recent_messages,
+        "queue": {
+            key: {"total": len(tab_rows), "rows": tab_rows[:_QUEUE_LIMIT]}
+            for key, tab_rows in tabs.items()
+        },
         # 목록과 같은 표를 그리므로 유형 이름도 같은 곳에서 옵니다.
         "category_labels": queue["category_labels"],
         "unqualified": queue["unqualified"],
         # The shared queue table dates the 우선순위 dot against "now".
         "now": queue["now"],
-        # 단계별 수는 헤더에 두지 않습니다 — 바로 아래 보드의 각 열 머리에 그대로 있습니다.
-        "awaiting_total": awaiting_total,
-        "received_today": received_today,
         "stages": [
             {
                 "key": stage,

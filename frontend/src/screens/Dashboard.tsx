@@ -1,19 +1,24 @@
 import { useEffect, useState } from "react";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { getJSON } from "../lib/api";
 import { Icon } from "../ui/Icon";
 import { QueueTable, type QueueRow } from "../ui/QueueTable";
 import { Board, type Stage } from "../ui/Board";
 import { LoadingBlock } from "../ui/Loading";
 
+// 어느 줄이 어느 탭인지는 서버가 정합니다(`dashboard._dashboard_context`). 맨 뒤의 「전체」가 기본입니다.
+const QUEUE_TABS = [
+  { key: "new", label: "신규 문의", empty: "새로 들어온 문의가 없습니다." },
+  { key: "reply", label: "회신 도착", empty: "도착한 회신이 없습니다." },
+  { key: "all", label: "전체", empty: "답변을 기다리는 문의가 없습니다." },
+] as const;
+const DEFAULT_TAB = QUEUE_TABS[2];
+
 type DashboardData = {
-  queue: QueueRow[];
+  /** 탭 → 그 탭의 총계와 오래 기다린 순 앞쪽 줄. 숫자와 줄이 같은 계산에서 나옵니다. */
+  queue: Record<(typeof QUEUE_TABS)[number]["key"], { total: number; rows: QueueRow[] }>;
   now: string;
-  counters: {
-    received_today: number;
-    awaiting_total: number;
-  };
   stage_labels: Record<string, string>;
   category_labels: Record<string, string>;
   unqualified: string[];
@@ -88,6 +93,9 @@ function Pipeline({ stages, manualLogStages, dealDetails }: {
 }
 
 export function Dashboard() {
+  // 고른 탭은 주소에 둡니다 — 줄을 열었다가 「뒤로」 오면(`QueueTable` 의 `from`) 같은 탭입니다.
+  const [params, setParams] = useSearchParams();
+  const tab = QUEUE_TABS.find(({ key }) => key === params.get("tab")) ?? DEFAULT_TAB;
   const { data, isPending, error } = useQuery({
     queryKey: ["dashboard"],
     queryFn: () => getJSON<DashboardData>("/api/ui/dashboard"),
@@ -99,22 +107,21 @@ export function Dashboard() {
   if (error) return <div className="banner banner--warn"><div><div className="banner__title">불러오지 못했습니다</div><div className="banner__body">{String(error)}</div></div></div>;
   if (isPending || !data) return <LoadingBlock />;
 
-  const c = data.counters;
-  // 보드가 그리는 그 열의 총계입니다 — 위 칩과 아래 열이 다른 수를 말할 수 없습니다.
-  const negotiating = data.stages.find((stage) => stage.key === "negotiation")?.total ?? 0;
   return (
     <>
-      {/* 숫자는 화면 맨 위, 제목 옆입니다(운영자 지시). 예전에는 「답변 대기중인 문의」 카드
-          머리에 붙어 있어서, 그 표에 대한 숫자로 읽혔습니다 — 그때 그 표는 New 만 보여서 협상중
-          숫자를 둘 자리가 없었습니다. 「협상중」은 그 표의 행 수가 아니라 보드 열의 총계입니다.
-
-          「협상중」은 아래 보드의 Negotiating 열 총계를 그대로 씁니다. 서버에 세는 곳을 하나
-          더 만들면 같은 화면의 두 숫자가 언젠가 어긋납니다. */}
+      {/* 제목 옆은 아래 표의 탭입니다 (2026-11-05 운영자 지시) — 고객 회신과 우리 초안이 한 표에 섞여 있어서 갈랐습니다.
+          숫자는 그 탭의 줄 수이고, 셋 다 이미 받아 둔 값이라 눌러도 다시 받지 않습니다. */}
       <div className="row wrap" style={{ gap: 10, marginBottom: "var(--gap)" }}>
         <h1 className="page-title page-title--lead">문의 대시보드</h1>
-        <span className="chip">오늘 접수 <b className="tnum">{c.received_today}</b></span>
-        <span className="chip">답변 대기 <b className="tnum">{c.awaiting_total}</b></span>
-        <span className="chip">협상중 <b className="tnum">{negotiating}</b></span>
+        <div className="chip-row" role="tablist" aria-label="답변 대기중인 문의 구분">
+          {QUEUE_TABS.map(({ key, label }) => (
+            <button key={key} type="button" role="tab" aria-selected={key === tab.key}
+                    className={`chip${key === tab.key ? " is-active" : ""}`}
+                    onClick={() => setParams(key === DEFAULT_TAB.key ? {} : { tab: key }, { replace: true })}>
+              {label} <b className="tnum">{data.queue[key].total}</b>
+            </button>
+          ))}
+        </div>
       </div>
 
       {!!data.broken_mailboxes?.length && (
@@ -140,12 +147,12 @@ export function Dashboard() {
           <Link to="/messages" className="chip">전체 보기</Link>
         </div>
         <QueueTable
-          rows={data.queue}
+          rows={data.queue[tab.key].rows}
           now={data.now}
           stageLabels={data.stage_labels}
           categoryLabels={data.category_labels}
           unqualified={data.unqualified}
-          emptyText="답변을 기다리는 문의가 없습니다."
+          emptyText={tab.empty}
           doneColumn
         />
       </section>

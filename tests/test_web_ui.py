@@ -37,22 +37,23 @@ def _client() -> TestClient:
 def _mock_dashboard_context():
     # Row shape is the /messages one — the dashboard queue renders the same partial
     # from the same context builder, so a row that works there works here.
+    row = {
+        "id": 1,
+        "status": "pending_approval",
+        "stage": "new",
+        "subject": "가격 문의",
+        "category": "pricing_question",
+        "email": "buyer@example.com",
+        "received_at": datetime(2026, 1, 1, 12, 0),
+        "waiting_since": datetime(2026, 1, 1, 12, 0),
+    }
     return {
-        "recent_messages": [
-            {
-                "id": 1,
-                "status": "pending_approval",
-                "stage": "new",
-                "subject": "가격 문의",
-                "category": "pricing_question",
-                "email": "buyer@example.com",
-                "received_at": datetime(2026, 1, 1, 12, 0),
-                "waiting_since": datetime(2026, 1, 1, 12, 0),
-            }
-        ],
+        "queue": {
+            "new": {"total": 7, "rows": [row]},
+            "reply": {"total": 0, "rows": []},
+            "all": {"total": 7, "rows": [row]},
+        },
         "now": datetime(2026, 1, 2, 12, 0),
-        "awaiting_total": 7,
-        "received_today": 4,
         # The board renders below the queue; an empty board is enough for these tests.
         # `total` is the column's real size, which the header shows even when the column
         # renders only its first page.
@@ -149,35 +150,28 @@ def test_the_shell_loads_the_korean_ui_font():
 
 
 @patch("src.api.routes.dashboard._dashboard_context", _mock_dashboard_context)
-def test_dashboard_shows_queue_counters():
-    """세 숫자가 화면 맨 위, 제목 옆에 섭니다 — 오늘 접수 · 답변 대기 · 협상중.
+def test_the_dashboard_heading_carries_the_three_queue_tabs():
+    """제목 옆은 숫자판이 아니라 아래 표의 탭입니다 — 신규 문의 · 회신 도착 · 전체.
 
-    예전에는 「답변 대기중인 문의」 카드 머리에 두 개(오늘 접수 · ALL)가 붙어 있었습니다.
-    거기 있으면 그 표에 대한 숫자로 읽히는데, 협상중은 그 표에 아예 안 나오는 단계라 넣을
-    자리가 없었습니다. 2026-08-18 에 운영자 지시로 위로 올리고 협상중을 더했습니다.
-
-    **협상중을 세는 곳을 서버에 만들지 않았습니다.** 아래 보드의 Negotiating 열 총계를 그대로
-    씁니다 — 같은 화면의 두 숫자가 서로 다른 질의에서 나오면 언젠가 어긋나고, 그때 어느 쪽이
-    맞는지 화면만 봐서는 알 수 없습니다. 그래서 payload 의 counters 는 그대로 둘입니다.
+    2026-11-05 운영자: 「상단에 오늘 접수, 답변대기, 협상중 빼고, 대신에 신규 문의, 회신 도착, 전체 이렇게
+    나누자」 · 「각각 탭을 누르면 해당 상태값의 문의만 보여 아래 "답변 대기중인 문의"에」. 무엇을 그리는지는
+    `frontend/test/dashboard-tabs.test.tsx`, 어느 줄이 어느 탭인지는 `tests/test_messages_list.py` 가 봅니다.
     """
-    counters = _client().get("/api/ui/dashboard").json()["counters"]
-    assert set(counters) == {"received_today", "awaiting_total"}
+    payload = _client().get("/api/ui/dashboard").json()
+    assert set(payload["queue"]) == {"new", "reply", "all"}
+    assert "counters" not in payload
     screen = pathlib.Path("frontend/src/screens/Dashboard.tsx").read_text(encoding="utf-8")
-    for label in ("답변 대기중인 문의", "오늘 접수", "협상중"):
-        assert label in screen, label
-    # 「답변 대기」만 찾으면 카드 제목 「답변 대기중인 문의」에 걸려 칩을 지워도 통과합니다.
-    assert "답변 대기 <b" in screen
-    # 협상중은 보드의 열 총계에서 옵니다. 서버에 세 번째 카운터를 만들면 안 됩니다.
-    assert 'stage.key === "negotiation"' in screen
-    assert "awaiting_negotiation" not in screen
-    # 카드 머리의 옛 카운터는 사라졌습니다 — 표에 대한 숫자로 읽히던 자리입니다.
+    assert "답변 대기중인 문의" in screen
+    for gone in ("오늘 접수", "협상중", "답변 대기 <b", "received_today", "awaiting_total"):
+        assert gone not in screen, gone
+    # 카드 머리의 옛 카운터도 돌아오면 안 됩니다 — 표에 대한 숫자로 읽히던 자리입니다.
     assert "queue-counters" not in screen
 
 
 @patch("src.api.routes.dashboard._dashboard_context", _mock_dashboard_context)
 def test_dashboard_json_carries_the_queue_rows():
     payload = _client().get("/api/ui/dashboard").json()
-    assert [row["subject"] for row in payload["queue"]] == ["가격 문의"]
+    assert [row["subject"] for row in payload["queue"]["all"]["rows"]] == ["가격 문의"]
 
 
 @patch("src.api.routes.dashboard._dashboard_context", _mock_dashboard_context)
@@ -209,7 +203,7 @@ def test_the_queue_shows_the_inquiry_type_where_the_channel_used_to_be():
 @patch("src.api.routes.dashboard._dashboard_context", _mock_dashboard_context)
 def test_a_queue_row_carries_the_id_its_link_is_built_from():
     payload = _client().get("/api/ui/dashboard").json()
-    assert payload["queue"][0]["id"] == 1
+    assert payload["queue"]["all"]["rows"][0]["id"] == 1
 
 
 def test_dashboard_queue_table_is_the_review_table():
@@ -271,14 +265,14 @@ def test_pipeline_columns_show_the_label_only():
 def test_dashboard_queue_is_the_five_oldest(db_session_factory, monkeypatch):
     """답변 대기중인 문의 is a peek at the front of the FIFO queue, not the queue.
 
-    Five rows, oldest first — the rest is one click away on 검토 및 회신. The counters
-    beside the heading still see every awaiting row.
+    Five rows, oldest first — the rest is one click away on 검토 및 회신. The tab
+    beside the heading still counts every awaiting row.
     """
-    from src.api.routes import customer_ops, dashboard
+    from src.api.routes import customer_ops
     from src.api.routes import messages as messages_route
     from src.api.routes.dashboard import _dashboard_context
 
-    for module in (dashboard, messages_route, customer_ops):
+    for module in (messages_route, customer_ops):
         monkeypatch.setattr(module, "SessionLocal", db_session_factory)
 
     # 답변 대기는 고객이 최근 30일 안에 쓴 말을 본다(`messages.AWAITING_REPLY_DAYS`) — 날짜는 오늘에서 센다.
@@ -308,15 +302,15 @@ def test_dashboard_queue_is_the_five_oldest(db_session_factory, monkeypatch):
             )
         session.commit()
 
-    ctx = _dashboard_context()
-    assert [row["subject"] for row in ctx["recent_messages"]] == [
+    tab = _dashboard_context()["queue"]["all"]
+    assert [row["subject"] for row in tab["rows"]] == [
         "문의-01",
         "문의-02",
         "문의-03",
         "문의-04",
         "문의-05",
     ]
-    assert ctx["awaiting_total"] == 7
+    assert tab["total"] == 7
 
 
 # ---------- Message detail ----------

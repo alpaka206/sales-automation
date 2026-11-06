@@ -190,12 +190,9 @@ def ui_dashboard(_request: Request):
         # 값 목록이 화면과 검증 두 곳에 따로 적히지 않습니다 — 라우트가 거절하는 값이
         # 고르개에 들어 있는 상태가 생기지 않습니다.
         "deal_details": {stage: list(values) for stage, values in DEAL_DETAILS.items()},
-        "queue": context["recent_messages"],
+        # 탭(new · reply · all)마다 그 탭의 총계와 앞쪽 줄. 셋을 한 번에 보내서 탭을 눌러도 다시 안 받는다.
+        "queue": context["queue"],
         "now": context["now"],
-        "counters": {
-            "received_today": context["received_today"],
-            "awaiting_total": context["awaiting_total"],
-        },
         "stage_labels": context["stage_labels"],
         "category_labels": context["category_labels"],
         "unqualified": context["unqualified"],

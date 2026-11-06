@@ -930,6 +930,7 @@ def _messages_list_context(
     status: str = "awaiting",
     stage: str = "",
     sort: str = "oldest",
+    limit: int | None = 100,
 ) -> dict:
     """검토 및 회신: 「답변 대기」(대화 — `awaiting_conversations`)와 「발송 완료」(나간 회신 · 거절한 초안).
 
@@ -939,8 +940,9 @@ def _messages_list_context(
     template's ``hx-get`` attribute, where an ``&`` survives escaping and appends a
     parameter to the 15-second poll.
 
-    ``total`` 은 자르기 전의 행 수다 — 대시보드의 「답변 대기」 숫자가 바로 이 값이다(`dashboard._dashboard_context`).
-    숫자와 그것이 여는 목록이 같은 계산에서 나와야 둘이 어긋나지 않는다(2026-09-03 운영자 지시, 그대로).
+    ``total`` 은 자르기 전의 행 수다 — 대시보드 「전체」 탭의 숫자와 같은 값이다(`dashboard._dashboard_context`).
+    숫자와 그것이 여는 목록이 같은 계산에서 나와야 둘이 어긋나지 않는다(2026-09-03 운영자 지시, 그대로). ``limit=None`` 은
+    대시보드가 쓴다 — 탭마다 따로 자르고 세므로, 여기서 100줄로 자르면 한쪽 탭의 숫자가 모자란다.
     """
     from .customer_ops import PIPELINE_STAGES, VALID_PIPELINE_STAGES
 
@@ -953,7 +955,7 @@ def _messages_list_context(
     if status == "awaiting":
         rows = [row for row in awaiting_conversations() if not stage or row["stage"] == stage]
         rows.sort(key=lambda row: row["received_at"], reverse=sort == "newest")
-        total, messages = len(rows), rows[:100]
+        total, messages = len(rows), rows[:limit]
     else:
         # Conversation is already joined, so stage / inquiry_subject / created_at /
         # last_incoming_at are select-list additions. Only Contact is new, and
@@ -983,7 +985,7 @@ def _messages_list_context(
         order_column = (
             Conversation.last_incoming_at if stage == "negotiation" else Conversation.created_at
         )
-        q = q.order_by(order_column.asc() if sort == "oldest" else order_column.desc()).limit(100)
+        q = q.order_by(order_column.asc() if sort == "oldest" else order_column.desc()).limit(limit)
 
         with SessionLocal() as session:
             rows = session.execute(q).all()

@@ -483,18 +483,61 @@ def test_a_draft_alone_does_not_put_a_ticket_in_the_queue(db_session_factory, mo
 
 
 def test_the_dashboard_number_and_the_list_below_it_agree(queue, monkeypatch):
-    """**「답변 대기」 숫자와 그 아래 목록은 같은 것을 세야 합니다** (2026-08-05 의 6 대 1 이후 그대로다).
+    """**「전체」 탭의 숫자와 검토 및 회신 목록은 같은 것을 세야 합니다** (2026-08-05 의 6 대 1 이후 그대로다).
 
-    한 화면에 나란히 서 있어서, 어긋나면 운영자가 없는 일감을 찾아 나섭니다. 둘이 갈린 길은 카운터와 목록이
-    각자의 쿼리를 들고 있던 것 — 이제 숫자는 목록의 총계(`_messages_list_context(...)["total"]`) 그대로입니다.
+    어긋나면 운영자가 없는 일감을 찾아 나섭니다. 둘이 갈린 길은 카운터와 목록이 각자의 쿼리를 들고 있던 것 — 이제
+    숫자는 목록을 만든 그 계산(`_messages_list_context`)의 줄 수입니다.
     """
     from src.api.routes import customer_ops
     from src.api.routes import dashboard as dashboard_route
 
-    for module in (dashboard_route, customer_ops):
-        monkeypatch.setattr(module, "SessionLocal", queue)
+    monkeypatch.setattr(customer_ops, "SessionLocal", queue)
     listed = _emails(status="awaiting")
-    counted = dashboard_route._dashboard_context()["awaiting_total"]
+    counted = dashboard_route._dashboard_context()["queue"]["all"]["total"]
 
     assert len(listed) == len(WAITING)
     assert counted == len(listed), "카운터와 목록이 같은 것을 세야 합니다"
+
+
+def test_each_dashboard_tab_holds_its_own_inquiries(queue, monkeypatch):
+    """신규 문의는 New 의 검토할 초안, 회신 도착은 New 를 지나 고객이 답장한 대화다 (2026-11-05 운영자: 「고객
+    회신도착이랑 발송대기 이런거 다 같은 줄에 있어」 · 「각각 탭을 누르면 해당 상태값의 문의만 보여」)."""
+    from src.api.routes import customer_ops
+    from src.api.routes import dashboard as dashboard_route
+
+    monkeypatch.setattr(customer_ops, "SessionLocal", queue)
+    tabs = dashboard_route._dashboard_context()["queue"]
+    fresh = {email for email in WAITING if email.startswith("new-")}
+    replied = WAITING - fresh
+
+    assert (tabs["new"]["total"], tabs["reply"]["total"], tabs["all"]["total"]) == (len(fresh), len(replied), len(WAITING))
+    assert {row["email"] for row in tabs["new"]["rows"]} <= fresh
+    assert len(tabs["new"]["rows"]) == 5  # 표는 탭마다 다섯 줄이고, 숫자는 전부를 센다
+    by_email = {row["email"]: row for row in tabs["reply"]["rows"]}
+    assert set(by_email) == replied
+    # 줄이 선 이유로 가른다 — 고객 답장에 쓰다 실패한 초안이 있어도 새 문의가 아니라 회신이다.
+    assert by_email["nego-replied@example.com"]["status"] == "send_failed"
+    assert by_email["won-replied@example.com"]["status"] == "received"
+
+
+def test_older_new_inquiries_do_not_push_replies_out_of_their_tab(db_session_factory, monkeypatch):
+    """탭마다 따로 세고 자른다 — 전체의 앞줄을 거르면 오래된 New 가 많은 날 회신 도착이 실제로는 있는데 비어 보이고,
+    검토 및 회신의 100줄 제한으로 세면 그 탭의 숫자가 모자란다."""
+    from src.api.routes import customer_ops
+    from src.api.routes import dashboard as dashboard_route
+
+    monkeypatch.setattr(customer_ops, "SessionLocal", db_session_factory)
+    rows = [{"subject": f"new-{index}", "stage": "new", "received_at": _naive_utc(days=100 - index / 10)}
+            for index in range(120)]
+    rows += [{"subject": f"reply-{index}", "stage": "negotiation", "received_at": _naive_utc(days=3 - index)}
+             for index in range(3)]
+    monkeypatch.setattr(messages_route, "awaiting_conversations", lambda: list(rows))
+
+    tabs = dashboard_route._dashboard_context()["queue"]
+
+    assert (tabs["new"]["total"], tabs["reply"]["total"], tabs["all"]["total"]) == (120, 3, 123)
+    assert [row["subject"] for row in tabs["reply"]["rows"]] == ["reply-0", "reply-1", "reply-2"]
+    assert [row["subject"] for row in tabs["all"]["rows"]] == [f"new-{index}" for index in range(5)]
+    # 검토 및 회신 표는 그대로 100줄이다 — 총계는 자르기 전의 수.
+    listed = _messages_list_context(status="awaiting")
+    assert (listed["total"], len(listed["messages"])) == (123, 100)

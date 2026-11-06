@@ -77,7 +77,6 @@ def log_db():
     with (
         patch("src.api.routes.customer_ops.SessionLocal", factory),
         patch("src.api.routes.messages.SessionLocal", factory),
-        patch("src.api.routes.dashboard.SessionLocal", factory),
     ):
         yield factory, ids
 
